@@ -79,7 +79,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
 
     -- ===== Intro group (header + enable + description) — matches the other feature
     -- pages (e.g. Pet Frames) so the toggle isn't floating loose under the banner. =====
-    AddSpace(12)
+    AddSpace(GUI.Space.section)
     local introGroup = GUI:CreateSettingsGroup(parent, 560)
     introGroup:AddWidget(GUI:CreateHeader(parent, L["Nickname Settings"]), 40)
 
@@ -104,7 +104,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- the end of this function), so a disabled page shows only the banner + the intro
     -- group (header + Enable + description).
     local gateStart = #pageRef.children + 1
-    AddSpace(12)  -- gap before the first group box
+    AddSpace(GUI.Space.section)  -- gap before the first group box
 
     -- ===== "Add a nickname" group box =====
     -- Bordered settings group (header inside) holding the add/edit row, the match
@@ -651,7 +651,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
     priorityNote:SetTextColor(0.6, 0.6, 0.6, 1)  -- C_TEXT_DIM, matches the page's other hints
     priorityNote:SetText(L["Rules are checked top to bottom — the first one that matches a name wins. Drag a row by its grip to change priority."])
     Add(priorityNote, 24, "both")
-    AddSpace(12)  -- gap before the Marker box
+    AddSpace(GUI.Space.section)  -- gap before the Marker box
 
     -- ===== Marker (decoration sub-feature) — placed after the list since adding/
     -- viewing nicknames is the primary task; the marker is secondary decoration. =====
@@ -720,7 +720,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
     end
     markGroup:AddWidget(markDDRow, 60)
     Add(markGroup, nil, "both")
-    AddSpace(12)  -- gap before the Sharing & Sync box
+    AddSpace(GUI.Space.section)  -- gap before the Sharing & Sync box
 
     -- ===== Sharing & Sync =====
     local shareGroup = GUI:CreateSettingsGroup(parent, 560)
@@ -785,7 +785,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
     Add(shareGroup, nil, "both")
 
     -- ===== Received nicknames (shared by others; separate from your list) =====
-    AddSpace(12)
+    AddSpace(GUI.Space.section)
     local recvTitle = GUI:CreateHeader(parent, L["Received Nicknames"])
     local recvCount = recvTitle:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     recvCount:SetPoint("LEFT", recvTitle.text, "RIGHT", 10, 0)
@@ -941,7 +941,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- frames; when both are active they fight. This mirrors the one-time conflict
     -- popup (Features/Nicknames.lua) so the choice can be changed here later.
     if C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("NorthernSkyRaidTools") then
-        AddSpace(12)  -- gap so the Received list box doesn't merge into this one
+        AddSpace(GUI.Space.section)  -- gap so the Received list box doesn't merge into this one
         local precGroup = GUI:CreateSettingsGroup(parent, 560)
         precGroup:AddWidget(GUI:CreateHeader(parent, L["Name Precedence"]), 40)
 

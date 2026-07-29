@@ -349,13 +349,11 @@ local function CreateAtlasBrowser()
     atlasFrame = CreateFrame("Frame", "DFAtlasBrowser", UIParent, "BackdropTemplate")
     atlasFrame:SetSize(frameWidth, frameHeight)
     atlasFrame:SetPoint("CENTER")
-    atlasFrame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
+    DF.GUI:CreateElementBackdrop(atlasFrame, {
         edgeSize = 2,
+        bgColor     = { C_BG.r, C_BG.g, C_BG.b, 0.95 },
+        borderColor = { C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1 },
     })
-    atlasFrame:SetBackdropColor(C_BG.r, C_BG.g, C_BG.b, 0.95)
-    atlasFrame:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
     atlasFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     atlasFrame:SetMovable(true)
     atlasFrame:EnableMouse(true)
@@ -391,13 +389,10 @@ local function CreateAtlasBrowser()
     local searchFrame = CreateFrame("Frame", nil, atlasFrame, "BackdropTemplate")
     searchFrame:SetSize(200, 24)
     searchFrame:SetPoint("TOPLEFT", 10, -35)
-    searchFrame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(searchFrame, {
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
     })
-    searchFrame:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    searchFrame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
     
     local searchLabel = searchFrame:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
     searchLabel:SetPoint("LEFT", 5, 0)
@@ -428,13 +423,10 @@ local function CreateAtlasBrowser()
         local btn = CreateFrame("Button", nil, atlasFrame, "BackdropTemplate")
         btn:SetSize(60, 22)
         btn:SetPoint("TOPRIGHT", xOffset, -35)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        DF.GUI:CreateElementBackdrop(btn, {
+            bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+            borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
         })
-        btn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        btn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
         
         local btnText = btn:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
         btnText:SetPoint("CENTER")
@@ -484,13 +476,10 @@ local function CreateAtlasBrowser()
         local icon = CreateFrame("Button", nil, iconContainer, "BackdropTemplate")
         icon:SetSize(ICON_SIZE, ICON_SIZE)
         icon:SetPoint("TOPLEFT", col * (ICON_SIZE + ICON_PADDING), -row * (ICON_SIZE + ICON_PADDING))
-        icon:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        DF.GUI:CreateElementBackdrop(icon, {
+            bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+            borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
         })
-        icon:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        icon:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
         
         local tex = icon:CreateTexture(nil, "ARTWORK")
         tex:SetPoint("TOPLEFT", 2, -2)
@@ -500,15 +489,15 @@ local function CreateAtlasBrowser()
         icon:SetScript("OnEnter", function(self)
             self:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
             if self.atlasName then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine(self.atlasName, 1, 1, 1)
-                GameTooltip:AddLine("Click to copy name", 0.7, 0.7, 0.7)
-                GameTooltip:Show()
+                DF.GUI:ShowTooltip(self, {
+                    title = self.atlasName,
+                    lines = { { text = "Click to copy name", hint = true } },
+                })
             end
         end)
         icon:SetScript("OnLeave", function(self)
             self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-            GameTooltip:Hide()
+            DF.GUI:HideTooltip()
         end)
         icon:SetScript("OnClick", function(self)
             if self.atlasName then
@@ -517,13 +506,10 @@ local function CreateAtlasBrowser()
                     local popup = CreateFrame("Frame", nil, atlasFrame, "BackdropTemplate")
                     popup:SetSize(300, 70)
                     popup:SetPoint("CENTER")
-                    popup:SetBackdrop({
-                        bgFile = "Interface\\Buttons\\WHITE8x8",
-                        edgeFile = "Interface\\Buttons\\WHITE8x8",
-                        edgeSize = 1,
+                    DF.GUI:CreateElementBackdrop(popup, {
+                        bgColor     = { C_BG.r, C_BG.g, C_BG.b, 1 },
+                        borderColor = { C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1 },
                     })
-                    popup:SetBackdropColor(C_BG.r, C_BG.g, C_BG.b, 1)
-                    popup:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
                     popup:SetFrameLevel(atlasFrame:GetFrameLevel() + 10)
                     
                     local label = popup:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
@@ -534,13 +520,10 @@ local function CreateAtlasBrowser()
                     local editBox = CreateFrame("EditBox", nil, popup, "BackdropTemplate")
                     editBox:SetSize(280, 22)
                     editBox:SetPoint("TOP", label, "BOTTOM", 0, -6)
-                    editBox:SetBackdrop({
-                        bgFile = "Interface\\Buttons\\WHITE8x8",
-                        edgeFile = "Interface\\Buttons\\WHITE8x8",
-                        edgeSize = 1,
+                    DF.GUI:CreateElementBackdrop(editBox, {
+                        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+                        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
                     })
-                    editBox:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-                    editBox:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
                     editBox:SetFontObject("DFFontNormalSmall")
                     editBox:SetTextColor(1, 1, 1)
                     editBox:SetAutoFocus(false)
@@ -552,13 +535,10 @@ local function CreateAtlasBrowser()
                     local closeBtn2 = CreateFrame("Button", nil, popup, "BackdropTemplate")
                     closeBtn2:SetSize(50, 18)
                     closeBtn2:SetPoint("BOTTOM", 0, 6)
-                    closeBtn2:SetBackdrop({
-                        bgFile = "Interface\\Buttons\\WHITE8x8",
-                        edgeFile = "Interface\\Buttons\\WHITE8x8",
-                        edgeSize = 1,
+                    DF.GUI:CreateElementBackdrop(closeBtn2, {
+                        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+                        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
                     })
-                    closeBtn2:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-                    closeBtn2:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
                     local closeBtnText2 = closeBtn2:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
                     closeBtnText2:SetPoint("CENTER")
                     closeBtnText2:SetText("Close")

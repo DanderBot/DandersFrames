@@ -8,6 +8,9 @@ ignore:
   - Tools
   - .github
   - .gitignore
+  # Contributor documentation. Tracked in git so it travels with pull requests,
+  # stripped here so it never reaches the packaged addon users download.
+  - docs
 
 manual-changelog:
   filename: CHANGELOG.md

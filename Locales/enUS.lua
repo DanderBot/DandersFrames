@@ -75,7 +75,10 @@ L["list debug commands (on/off toggles debug logging)"] = true
 L["lock/unlock party frames"] = true
 L["lock/unlock raid frames"] = true
 L["Mouseover resolution debug"] = true
+L["measure the open settings page against the pixel grid"] = true
+L["measure the spacing between rows on the open settings page"] = true
 L["open settings"] = true
+L["trace the left nav's hover state while you move the cursor"] = true
 L["open the debug console page"] = true
 L["Override key binding check"] = true
 L["performance profiling"] = true
@@ -118,17 +121,17 @@ L["Support DandersFrames on Patreon"] = true
 L["Reset ALL aura configurations to defaults?\n\nThis cannot be undone."] = true
 
 L["    Show Frame Glow"] = true
--- Designer Presets (Aura/Text Designer preset bar)
-L["Preset:"] = true
+-- Designer Templates (Aura/Text Designer template bar)
+L["Template:"] = true
 L["Inherit (Global)"] = true
 L["Duplicate"] = true
 L["Rename"] = true
-L["Name the new preset:"] = true
-L["Name the duplicated preset:"] = true
-L["Rename preset:"] = true
-L["Delete preset \"%s\"? Anything using it reverts to Default."] = true
-L["Pick an Aura Designer preset below for this layout. 'Inherit (Global)' follows your global one."] = true
-L["Pick a Text Designer preset below for this layout. 'Inherit (Global)' follows your global one."] = true
+L["Name the new template:"] = true
+L["Name the duplicated template:"] = true
+L["Rename template:"] = true
+L["Delete template \"%s\"? Anything using it reverts to Default."] = true
+L["Pick an Aura Designer template below for this layout. 'Inherit (Global)' follows your global one."] = true
+L["Pick a Text Designer template below for this layout. 'Inherit (Global)' follows your global one."] = true
 -- ClickCasting UI strings
 L["Higher priority wins"] = true
 L["A few things to know:\n\n- Party only — raid frames aren't supported.\n\n- If two members share the same class, role, race and sex, they can't be told apart and won't show an icon (you'll be warned by name).\n\n- This relies on Blizzard behaviour that isn't officially supported. Blizzard could change it at any time — if they do, the feature simply stops working and there's no fix. There's no guarantee it stays."] = true
@@ -143,13 +146,12 @@ L["Alert Below (seconds)"] = true
 L["Alert Text"] = true
 L["All"] = true
 L["Always"] = true
-L["and"] = true
+L["Any Buff"] = true
 L["Any Target"] = true
 L["Attack Ping"] = true
 L["Apply to Frames:"] = true
-L["is fixed and takes no filter selection."] = true
 L["Are you sure?"] = true
-L["Aura Designer Preset"] = true
+L["Aura Designer Template"] = true
 L["Auto-Create Profiles"] = true
 L["Auto-create profiles for loadouts"] = true
 L["Before you turn it on"] = true
@@ -232,9 +234,9 @@ L["Import All"] = true
 L["Import All (%d)"] = true
 L["Import Click Casting Profile"] = true
 L["Compatible (%d)"] = true
+L["In Any Buff"] = true
 L["In Combat Only"] = true
 L["In My Buffs"] = true
-L["In Other Buffs"] = true
 L["Incompatible Bindings"] = true
 L["Items"] = true
 L["LOADOUT ASSIGNMENTS"] = true
@@ -252,12 +254,12 @@ L["Mouseover → Target (Harmful)"] = true
 L["Focus → Mouseover → Target"] = true
 L["Name:"] = true
 L["New"] = true
+L["New Profile"] = true
 L["No default profile set"] = true
 L["Not Now"] = true
 L["Not Set"] = true
 L["Open the Profiles tab to manage profiles"] = true
 L["Or enter Icon ID:"] = true
-L["Other Buffs"] = true
 L["Other Frames"] = true
 L["Others Only"] = true
 L["Out of Combat Only"] = true
@@ -355,6 +357,7 @@ L["Enter a spell name above..."] = true
 L["General Import"] = true
 L["Import WoW Macros"] = true
 L["Left-click to add/edit binding"] = true
+L["Left-click to select"] = true
 L["Left-click: Bind"] = true
 L["New Binding"] = true
 L["No item equipped"] = true
@@ -363,6 +366,8 @@ L["No macros yet.\nClick '+ New' to create one or 'Import' to import from WoW."]
 L["Pattern:"] = true
 L["Preview:"] = true
 L["Quick Macro Builder"] = true
+L["Right-click to delete"] = true
+L["Right-click to save"] = true
 L["Right-click: Edit/View"] = true
 L["Selected: %d"] = true
 L["Spell:"] = true
@@ -370,7 +375,7 @@ L["USE"] = true
 -- End ClickCasting UI strings
 L["    Show ZZZ Icon"] = true
 L["%d - %d players"] = true
-L["%d of %d hidden"] = true
+L["%d of %d shown"] = true
 L["%d of %d tracked"] = true
 L["%d override"] = true
 L["%d overrides"] = true
@@ -388,8 +393,8 @@ L["(offline)"] = true
 L["(skipped)"] = true
 L["+ Add Option"] = true
 L["+ Add Step"] = true
-L["+ New Wizard"] = true
-L["0=Auto, Higher=On top of more elements"] = true
+L["+ New Buff Filter"] = true
+L["Higher numbers draw on top of lower ones. Every Frame Level in DandersFrames uses the same scale, counted up from the unit frame, so you can compare them directly."] = true
 L["1"] = true
 L["20 players (fixed)"] = true
 L["20 (Fixed)"] = true
@@ -398,7 +403,6 @@ L["A layout with this name already exists in %s"] = true
 L["A profile with this name already exists"] = true
 L["A to Z"] = true
 L["Abbreviate"] = true
-L["Abbreviate (K/M)"] = true
 L["Above Owner"] = true
 L["Above Party"] = true
 L["Above Raid"] = true
@@ -441,8 +445,8 @@ L["Alphabetical (within class/role)"] = true
 L["Order Applied"] = true
 L["Already added."] = true
 L["Already in this filter."] = true
+L["Already tracked in Any Buff."] = true
 L["Already tracked in My Buffs."] = true
-L["Already tracked in Other Buffs."] = true
 L["Always First"] = true
 L["Always Green"] = true
 L["Always Last"] = true
@@ -454,6 +458,7 @@ L["Anchor To Party Frames"] = true
 L["Anchor To Raid Frames"] = true
 L["Animated Border"] = true
 L["Any Dispel Type"] = true
+L["Any buff in the spell database, from any caster — including your own."] = true
 L["Auto layout \"%s\" is active. Unlock it from the Auto Layouts page to move its frames."] = true
 L["Appearance"] = true
 L["Members"] = true
@@ -477,12 +482,8 @@ L["Aura Designer is active alongside Buffs."] = true
 L["Want per-spell control? The Aura Designer lets you place any buff exactly where you want, with advanced indicators — expiry glyphs, duration bars, custom borders and sounds."] = true
 L["Aura Duration Update Rate"] = true
 L["Aura Filters"] = true
-L["The filters you enable here apply to the"] = true
 L["Auras"] = true
 L["Auras Alpha"] = true
-L["Other surfaces choose their own: the"] = true
-L["(per placed indicator) pick which filters to use on their own pages. The"] = true
-L["Auras shown by the Aura Designer are hidden from the buff bar so they don't appear twice. A buff that matches several buff filters can still show more than once."] = true
 L["Auto (Spec Default)"] = true
 L["Auto Layouts"] = true
 L["Auto Layouts is a Raid-only feature. Switch to Raid mode to configure automatic layout switching based on content type and group size."] = true
@@ -535,7 +536,6 @@ L["Border Blend Mode"] = true
 L["Blend Colors Smoothly"] = true
 L["Border Color"] = true
 L["Border Color Source"] = true
-L["Border Gradient"] = true
 L["Border Inset"] = true
 L["Border Offset X"] = true
 L["Border Offset Y"] = true
@@ -575,16 +575,16 @@ L["Bottom Left"] = true
 L["Bottom Right"] = true
 L["Bottom to Top"] = true
 L["Buff Bar"] = true
+L["Buff Filter Presets"] = true
 L["Buff Filters"] = true
 L["Buff Icon"] = true
 L["Buff Icons"] = true
-L["Buff Presets"] = true
 L["Buff Tooltips"] = true
 L["Buffs"] = true
 L["Buffs are disabled. Aura Designer is managing your auras."] = true
+L["Buffs from your own class, and only when you cast them."] = true
 L["Buffs to Check (Manual Mode)"] = true
 L["Built-in presets can't be renamed or deleted."] = true
-L["Built-in Wizards"] = true
 L["By Power Type"] = true
 L["Cancel Fade on Dispellable Debuff"] = true
 L["Cannot delete Default profile."] = true
@@ -602,9 +602,8 @@ L["Center"] = true
 L["Center (Horizontal)"] = true
 L["Center (Vertical)"] = true
 L["Center of Group"] = true
-L["Changed in WoW 12.1: hides auras shown by the Aura Designer from the buff bar. It can no longer hide Defensive Bar duplicates, and a buff matching several buff filters may still show more than once."] = true
-L["Choose which filters are active here. Buffs: full control — toggle individual spells or create your own filters in the"] = true
 L["Choose which groups to display."] = true
+L["Click-casting changes require a UI reload to take effect.\n\nReload now?"] = true
 L["Clamp Mode"] = true
 L["Class"] = true
 L["Class Color"] = true
@@ -625,7 +624,6 @@ L["Color"] = true
 L["Color by Dispel Type"] = true
 L["Color by Time"] = true
 L["Color Mode"] = true
-L["Color Name Text"] = true
 L["Color Picker"] = true
 L["Color shown when in combat to indicate the handle is locked."] = true
 L["Colorblind Mode is off, so the symbol will not appear in-game. Enable it in WoW's Accessibility settings."] = true
@@ -653,6 +651,7 @@ L["Copy %s Settings"] = true
 L["Copy %s settings to %s?"] = true
 L["Copy all settings between Party and Raid modes."] = true
 L["Copy Layout"] = true
+L["Copy Profile"] = true
 L["Copy Settings"] = true
 L["Copy To"] = true
 L["Copy to Clipboard"] = true
@@ -667,8 +666,6 @@ L["Create New Profile"] = true
 L["Create separate frame groups to pin specific players like tanks, healers, or key raid members, or to track NPC frames. Add players using the Members tab."] = true
 L["Created new profile: %s"] = true
 L["Crowd Control"] = true
-L["Current / Max"] = true
-L["Current Health"] = true
 L["Current HP"] = true
 L["Current Power"] = true
 L["Current Profile"] = true
@@ -677,9 +674,9 @@ L["Curse"] = true
 L["Cursor"] = true
 L["Cycle Next CC Profile"] = true
 L["Cycle Next Profile"] = true
+L["Custom Buff Filters"] = true
 L["Custom Color"] = true
 L["Custom Dead Background"] = true
-L["Custom Filters"] = true
 L["Custom Health Color"] = true
 L["Custom Power Color"] = true
 L["Custom Spell ID"] = true
@@ -699,7 +696,7 @@ L["Dead Background Color"] = true
 L["Dead/Offline Fading"] = true
 L["Death Knight"] = true
 L["Debuff Bar"] = true
-L["Debuff Blacklist"] = true
+L["Optional Debuffs"] = true
 L["Debuff Filters"] = true
 L["Debuff Icon"] = true
 L["Debuff Icons"] = true
@@ -708,7 +705,6 @@ L["Debuffs"] = true
 L["Debuffs applied by dungeon and raid bosses."] = true
 L["Debuffs Blizzard flags as high priority."] = true
 L["Debuffs Blizzard flags as important for your role."] = true
-L["Debuffs: you can only pick from Blizzard's fixed categories (boss, dispellable, crowd control, and so on) — no editing, no custom debuff filters, no per-spell filtering. The debuff Blacklist is the only per-spell control."] = true
 L["Debuffs that can be dispelled. Use the dropdown below to choose which dispels count."] = true
 L["Debug"] = true
 L["Debug Log Export (Filtered)"] = true
@@ -721,10 +717,14 @@ L["Defensive Filters"] = true
 L["Defensive Icon"] = true
 L["Defensive Icon Alpha"] = true
 L["Defensive Icon Tooltips"] = true
-L["Del"] = true
+L["Delete Binding"] = true
 L["Delete Current Profile"] = true
 L["Delete filter \"%s\"? It will also be removed from every profile that uses it."] = true
+L["Delete Filter"] = true
 L["Delete Layout"] = true
+L["Delete Macro"] = true
+L["Delete Profile"] = true
+L["Delete Template"] = true
 L["Delete layout \"%s\"?"] = true
 L["Deleted profile: %s"] = true
 L["Demon Hunter"] = true
@@ -762,21 +762,20 @@ L["Duration Color"] = true
 L["Duration Font"] = true
 L["Duration Format"] = true
 L["Duration in seconds for the Pull Timer quick action."] = true
-L["Duration Position"] = true
 L["Duration Scale"] = true
 L["Duration Text"] = true
 L["Echo to Chat"] = true
 L["Edge Glow (All Sides)"] = true
-L["Edit"] = true
+L["Edit Debuff Blacklist"] = true
 L["Edit Layout Range"] = true
 L["Edit Settings"] = true
-L["Edit debuff Blacklist"] = true
 L["Editing"] = true
 L["Editing:"] = true
+L["Edits apply there too."] = true
+L["Also used by: %s"] = true
+L["Templates can be used by Party, Raid, Auto Layouts and Pinned Frames."] = true
 L["Ellipsis"] = true
-L["Ellipsis (...)"] = true
 L["Enable AFK Icon"] = true
-L["Enable Alert When Expiring"] = true
 L["Enable Binding Tooltips"] = true
 L["Enable Buff Tooltips"] = true
 L["Enable Buffs"] = true
@@ -795,7 +794,6 @@ L["Enable Heal Prediction"] = true
 L["Enable Health Threshold Fade"] = true
 L["Enable Leader Icon"] = true
 L["Enable Missing Buff Icon"] = true
-L["Enable Missing Trigger"] = true
 L["Enable Offscreen Nameplates"] = true
 L["Enable Party Frames"] = true
 L["Enable Permanent Mover"] = true
@@ -811,7 +809,6 @@ L["Enable Resource Bar"] = true
 L["Enable Resurrection Icon"] = true
 L["Enable Resurrection Icon Tooltips"] = true
 L["Enable Spec Auto-Switch"] = true
-L["Enable Status Text"] = true
 L["Enable BG Carrier Icon"] = true
 L["Enable Summon Icon"] = true
 L["Enable Targeted Spells"] = true
@@ -836,7 +833,8 @@ L["Exclamation Mark"] = true
 L["Expiring Threshold (%)"] = true
 L["Expiring Threshold (seconds)"] = true
 L["Expiration"] = true
-L["Export Settings"] = true
+L["Export Failed"] = true
+L["Export Profile"] = true
 L["External"] = true
 L["External Defensives"] = true
 L["Externals First"] = true
@@ -848,6 +846,7 @@ L["Fade frames or elements when a unit's health is above the set threshold (e.g.
 L["Fading"] = true
 L["Fill Direction"] = true
 L["Filter Designer"] = true
+L["Filter Name"] = true
 L["First Unit"] = true
 L["Fixed at 20 players (Mythic)"] = true
 L["Flat Grid Settings"] = true
@@ -875,7 +874,6 @@ L["Frame Padding"] = true
 L["Frame Scale"] = true
 L["Frame Size"] = true
 L["Frame Spacing"] = true
-L["Frame Strata"] = true
 L["Frame Type"] = true
 L["Frame Tooltips"] = true
 L["Frame Width"] = true
@@ -910,9 +908,9 @@ L["Gradient Opacity"] = true
 L["Gradient Position"] = true
 L["Gradient Size"] = true
 L["Grid Alignment"] = true
-L["Grid Layout"] = true
 L["Grow"] = true
 L["Group"] = true
+L["Groups of debuffs picked by category — boss, crowd control, dispellable and so on — rather than one spell at a time."] = true
 L["Group 1"] = true
 L["Group Alignment"] = true
 L["Group casts are matched to their target by fingerprint, which cannot be done reliably in a raid, so these do nothing in raid mode."] = true
@@ -950,8 +948,6 @@ L["Health Bar"] = true
 L["Health Bar Alpha"] = true
 L["Health Bar Color"] = true
 L["Health Bar Texture"] = true
-L["Health Deficit"] = true
-L["Health Format"] = true
 L["Health Gradient"] = true
 L["Health Text"] = true
 L["Health Text Anchor"] = true
@@ -977,19 +973,24 @@ L["Hide Permanent Auras"] = true
 L["Hide buffs whose total duration is longer than the threshold - e.g. hour-long food and flask buffs. Buffs with no duration (permanent auras) are also hidden while this is on."] = true
 L["Hide buffs with no duration, such as auras that last until cancelled. Hide Long Buffs also hides these while it is on."] = true
 L["Hide Blizzard Player Frame"] = true
-L["Hide buffs from the buff bar when they are already displayed by the Defensive Bar or Aura Designer."] = true
+L["Hides buffs that are already shown elsewhere — by an Aura Designer indicator, or on the Defensive Bar — so they don't appear twice."] = true
 L["Hide Auras"] = true
 L["Hide Cooldown Swipe"] = true
 L["Hide from Main Frames"] = true
 L["Hide on Tanks"] = true
 L["Hide from Main Frames Tooltip"] = "Removes this set's pinned members from your main party/raid frames so they appear only in the pinned set. Applies out of combat. Your frame sorting setting is preserved."
+L["Aura Designer Tooltips"] = true
+L["Groups"] = true
+L["Filter Groups and Debuff Groups. Their icons come from a filter rather than being placed one by one, so a tooltip is the only way to see what each one is."] = true
+L["Icons and squares you placed yourself. You already chose these, so tooltips add less here."] = true
+L["The Aura Designer bar."] = true
 L["Hide Duplicate Buffs"] = true
+L["Hide Duplicate Debuffs"] = true
+L["Hides debuffs that an Aura Designer group is already showing, so they don't appear twice."] = true
 L["Hide Duration on Permanent Auras"] = true
 L["Hide in Combat"] = true
 L["Hide Status Icons"] = true
 L["Hide Casts Targeting You"] = true
-L["Hide Legacy Text"] = true
-L["Hide the built-in name / health / status text on unit frames so only Text Designer elements render. Used while testing — turn off to restore your existing text widgets."] = true
 L["Hide Out-of-Combat Casts"] = true
 L["Hide Raid Buffs from Buff Bar"] = true
 L["Hide Self from Party Frames"] = true
@@ -998,10 +999,8 @@ L["Hides and unregisters all events on the default Blizzard party frames so they
 L["Hides and unregisters all events on the default Blizzard raid frames so they consume no performance."] = true
 L["Hides the default Blizzard player portrait and health bar."] = true
 L["Hides the handle during combat. If disabled, the handle changes color to indicate it is locked."] = true
-L["High"] = true
 L["High Health (100%)"] = true
 L["High Threat (Yellow)"] = true
-L["Higher values render the bar above other elements. Frame border is at level 10."] = true
 L["Highest Threat (Orange)"] = true
 L["Highlight"] = true
 L["Highlight Color"] = true
@@ -1029,8 +1028,8 @@ L["Icons Alpha"] = true
 L["Icons Per Row"] = true
 L["Identity & Roster"] = true
 L["Import Current Text Settings"] = true
+L["Import Profile"] = true
 L["Import Selected"] = true
-L["Import Settings"] = true
 L["Import String"] = true
 L["Import/Export"] = true
 L["Important Spells"] = true
@@ -1040,7 +1039,6 @@ L["In Range Text"] = true
 L["In-Range / OOR Text"] = true
 L["Incoming Heal"] = true
 L["Inherited value: %s"] = true
-L["Incoming Heal From Me Only"] = true
 L["Indicators"] = true
 L["Info (All)"] = true
 L["Insanity"] = true
@@ -1056,6 +1054,7 @@ L["Join a raid group (2-5 players works best)"] = true
 L["Just Reload"] = true
 L["Keep important debuffs"] = true
 L["Keep when offline/left"] = true
+L["Key Already Bound"] = true
 L["Key Used Elsewhere"] = true
 L["Keep when offline/left Tooltip"] = "Players you add yourself (drag, the role buttons, or Add Offline Player) always stay pinned. This only affects members added automatically by role: leave it on to keep them after they go offline or leave the group, or off to drop them from the set."
 L["Language"] = true
@@ -1085,11 +1084,13 @@ L["Loading..."] = true
 L["Lock"] = true
 L["Lock Frames"] = true
 L["Locked by Auto Layout"] = true
+-- Export-page preset button, resolved dynamically via L[p.name]. Its three
+-- siblings (All / Layout / None) were declared; this one was not, so no locale
+-- could ever translate it.
+L["Look"] = true
 L["Live Log"] = true
-L["Live Testing"] = true
 L["Log entries: %d"] = true
 L["Logged Categories"] = true
-L["Low"] = true
 L["Low Health (0%)"] = true
 L["Lunar Power"] = true
 L["Maelstrom"] = true
@@ -1128,7 +1129,6 @@ L["Missing Health Alpha"] = true
 L["Missing Health Color"] = true
 L["Missing Health Only"] = true
 L["Missing Health Texture"] = true
-L["Missing Trigger"] = true
 L["Melee DPS"] = true
 L["Mode"] = true
 L["Modified"] = true
@@ -1144,7 +1144,6 @@ L["My Buffs"] = true
 L["My Group First"] = true
 L["My Heals"] = true
 L["My Heals Color"] = true
-L["My Wizards"] = true
 L["Mythic"] = true
 L["Mythic has fixed range"] = true
 L["Name already exists"] = true
@@ -1155,13 +1154,10 @@ L["Name the duplicated filter:"] = true
 L["Name the new filter:"] = true
 L["Name X Offset"] = true
 L["Name Y Offset"] = true
-L["New Filter"] = true
 L["Newest First"] = true
 L["No"] = true
 L["No auto-profile is currently active or being edited."] = true
-L["No built-in wizards available yet. Check back after updates!"] = true
 L["No changelog available."] = true
-L["No custom wizards yet. Click 'New Wizard' to create one!"] = true
 L["No data to export"] = true
 L["No layout set. Using global settings."] = true
 L["No matching text elements. Try a different filter or click '+ Add Text Element'."] = true
@@ -1175,18 +1171,7 @@ L["Normal (BLEND)"] = true
 L["Not Available on Raid Frames"] = true
 L["Not in a raid group"] = true
 L["Number"] = true
-L["settings disabled by the 12.1 aura system"] = true
--- 12.1 blocked-overlay wording (GUI:BlockedWording) — shared across every dead-setting page
-L["Blizzard limitation"] = true
-L["Not available for Debuffs. Use Layout Groups instead."] = true
-L["Not available on 12.1"] = true
-L["Not available with the 12.1 aura system"] = true
-L["Not available yet with the 12.1 aura system"] = true
 L["not in database"] = true
-L["These settings are being rebuilt on WoW's new 12.1 aura system and will return in a future update."] = true
-L["This is being rebuilt on WoW's new 12.1 aura system and will return in a future update."] = true
-L["WoW's new 12.1 aura system doesn't support these settings, so they can't be provided."] = true
-L["WoW's new 12.1 aura system doesn't support this setting."] = true
 -- 12.1 unsupported-version guard popup (Core.lua)
 L["Unsupported Game Version"] = true
 L["DandersFrames doesn't support this version of the game.\n\nThis build is made for World of Warcraft 12.1. Please install the version that matches your client from CurseForge or Wago."] = true
@@ -1229,7 +1214,7 @@ L["Others' Heals"] = true
 L["Others' Heals Color"] = true
 L["Out of Range"] = true
 L["Opacity"] = true
-L["Opt-in buff filters — you choose which buffs show. Enable or disable spells in the built-in presets, or create custom filters, then turn them on from the"] = true
+L["Buffs are opt-in: nothing shows until a filter containing it is turned on. Edit the built-in filters or build your own, then turn them on from"] = true
 L["Out of Range Text"] = true
 L["Outline"] = true
 L["Overlaps with \"%s\""] = true
@@ -1247,7 +1232,6 @@ L["Party frames are currently disabled. Changes here will apply after re-enablin
 L["Party frames are disabled. Enable them in General settings to use party test mode."] = true
 L["Party to Raid"] = true
 L["Party-only feature"] = true
-L["Percentage"] = true
 L["Performance"] = true
 L["Permanent Mover"] = true
 L["Persist (seconds)"] = true
@@ -1288,6 +1272,8 @@ L["Power Type String"] = true
 L["Power Word: Fortitude (Priest)"] = true
 L["Pre-configure players before they join the group"] = true
 L["Prefix"] = true
+L["Template Name"] = true
+L["Templates"] = true
 L["Presets are curated"] = true
 L["Press Ctrl+A to select all, then Ctrl+C to copy"] = true
 L["Press Ctrl+C to copy, then Escape to close"] = true
@@ -1334,11 +1320,12 @@ L["Ready Check"] = true
 L["Ready Check Icon"] = true
 L["Ready to copy"] = true
 L["Rebuild the element list from your current built-in name, health, and status text. This replaces all existing Text Designer elements for this mode."] = true
-L["Blizzard's debuff categories aren't complete: even with all of them enabled, some debuffs Blizzard doesn't tag are still missed. Only 'All Debuffs' shows every debuff, and the categories can't be changed (they're Blizzard-defined)."] = true
+L["Only All Debuffs shows every debuff: all the categories combined still miss some debuffs."] = true
 L["Recovered %d raid settings from interrupted auto layout editing session."] = true
 L["Red X"] = true
 L["Reduced Max Health"] = true
 L["Refresh"] = true
+L["Reload"] = true
 L["Reload & Disable Blizzard Party"] = true
 L["Reload & Disable Blizzard Raid"] = true
 L["Reload & Enable Blizzard Party"] = true
@@ -1348,8 +1335,11 @@ L["Reload Now"] = true
 L["Reload Required"] = true
 L["Reload UI"] = true
 L["Rendering"] = true
+L["Remove"] = true
 L["Remove Offline"] = true
+L["Remove Pinned Set"] = true
 L["Removes your player frame from the DandersFrames party display."] = true
+L["Rename Profile"] = true
 L["Rename filter:"] = true
 L["Renders text with signed-distance-field smoothing for sharper edges at any size. Applies to None and Outline styles only (not Monochrome, Thick, or Shadow)."] = true
 L["Replace Blizzard's color picker with the DandersFrames color picker for this addon."] = true
@@ -1360,6 +1350,8 @@ L["Reset %s settings to defaults?\n\n%s\n\nThis cannot be undone."] = true
 L["Reset %s settings to defaults?\n\nThis cannot be undone."] = true
 L["Reset %s settings to defaults?\n\nThis only affects %s settings on the current %s mode. This cannot be undone."] = true
 L["Reset: %s"] = true
+L["Restore this filter's spell list to its defaults. Other filters are not affected."] = true
+L["Restore every optional debuff to its default setting. Other filters are not affected."] = true
 L["Reset All to Default"] = true
 L["Reset Border to Inherited"] = true
 L["Reset Colors to Default"] = true
@@ -1398,7 +1390,6 @@ L["Role Priority"] = true
 L["Row Spacing"] = true
 L["Rows"] = true
 L["Rows Grow From"] = true
-L["Run"] = true
 L["Run Script"] = true
 L["Pain"] = true
 L["Power Type"] = true
@@ -1427,12 +1418,12 @@ L["Separate Pet Group"] = true
 L["Separator"] = true
 L["Set a font and outline style, then click Apply to update ALL text elements."] = true
 L["Set the per-dispel-type colours on the %s."] = true
+L["Set up separately for each specialization."] = true
 L["Settings"] = true
 L["Settings Font"] = true
 L["Settings Font Outline"] = true
 L["Settings Panel Appearance"] = true
 L["Settings on this page apply globally — changes persist across both the Party and Raid sections."] = true
-L["Setup Wizards"] = true
 L["Shadow"] = true
 L["Shadow Color"] = true
 L["Shadow offset and colour are controlled in General > Global Fonts."] = true
@@ -1440,6 +1431,7 @@ L["Shadow Settings"] = true
 L["Shadow X Offset"] = true
 L["Shadow Y Offset"] = true
 L["Shaman"] = true
+L["Shared across all your specializations."] = true
 L["Shields & Heals"] = true
 L["Shift+Left Click"] = true
 L["Shift+Right Click"] = true
@@ -1457,7 +1449,6 @@ L["Show DPS"] = true
 L["Show Duration"] = true
 L["Show every buff with no filtering."] = true
 L["Show every debuff with no filtering."] = true
-L["Show Expiring Tint"] = true
 L["Show Arrow Prefix"] = true
 L["Show Arrow Suffix"] = true
 L["Show Gradient"] = true
@@ -1544,7 +1535,6 @@ L["Starts at"] = true
 L["Icon Text Settings"] = true
 L["Status"] = true
 L["Status Text"] = true
-L["Status Text (Dead/Offline)"] = true
 L["Status Text Alpha"] = true
 L["Suffix"] = true
 L["Summon"] = true
@@ -1584,16 +1574,21 @@ L["Justify V"] = true
 L["Middle"] = true
 L["Text Colors:"] = true
 L["Text Designer"] = true
-L["Text Designer Preset"] = true
+L["Text Designer Template"] = true
 L["Text Designer is disabled"] = true
 L["Text Elements"] = true
 L["Text Format"] = true
+L["Duration Position"] = true
+L["Interrupt Text Position"] = true
+L["Show Text"] = true
+L["Spell Name Position"] = true
+L["Target Name Position"] = true
+L["Text Font"] = true
 L["Text Group"] = true
 L["Text Groups"] = true
 L["Text Position"] = true
 L["Texts"] = true
 L["Texture"] = true
-L["The reverse of the opt-in buff filters: instead of choosing what to show, you choose nuisance debuffs to hide from the debuff bar. Only debuffs Blizzard keeps non-secret can be hidden."] = true
 L["These defaults apply to all text elements that haven't been individually customized."] = true
 L["These indicators trigger no matter who casts the buff."] = true
 L["These settings apply when using 'Shadow' outline style. Use larger offsets for more dramatic shadows."] = true
@@ -1612,7 +1607,6 @@ L["Tier Set Auras"] = true
 L["Time Remaining"] = true
 L["Tint Color"] = true
 L["Tint Opacity"] = true
-L["Tip"] = true
 L["Tip: for the crispest result at this resolution, set your UI Scale to %.4f — type /console UIScale %.4f to apply it (it may be below the in-game slider's minimum)."] = true
 L["to customise\nthis profile's settings"] = true
 L["To reposition: Unlock frames (/df unlock) and drag the mover."] = true
@@ -1627,7 +1621,7 @@ L["Top to Bottom"] = true
 L["Total:"] = true
 L["Trinkets & Items"] = true
 L["Truncate Mode"] = true
-L["Truncation"] = true
+L["Turn on Others Only for an effect to ignore your own casts."] = true
 L["Type /dfarena again to disable"] = true
 L["UI Scale:"] = true
 L["under %d%%"] = true
@@ -1679,6 +1673,8 @@ L["Warning Sign"] = true
 L["Warnings + Errors"] = true
 L["Warrior"] = true
 L["Weight"] = true
+L["What to Export"] = true
+L["What to Import"] = true
 L["When auto-detect is OFF, select which raid buffs to monitor manually."] = true
 L["When enabled, shows incoming heals even if they would overheal."] = true
 L["When enabled, the group you are in will always be displayed first."] = true
@@ -1755,19 +1751,16 @@ L[" filter"] = true
 L[" filters"] = true
 L[" indicator"] = true
 L[" indicators"] = true
-L["+ Add Indicator"] = true
-L["+ Add Trigger"] = true
 L["+ Create Group"] = true
 L["+ Debuff Group"] = true
 L["+ Filter Group"] = true
 L["ACTIVE INDICATORS"] = true
 L["Active"] = true
 L["Add Filter"] = true
-L["Alert if anyone is missing the buff"] = true
-L["Alert only if nobody has the buff"] = true
 L["Ambience"] = true
 L["Aura Designer is disabled"] = true
 L["Auto (%s)"] = true
+L["Auto Layouts is disabled"] = true
 L["Auto (detect spec)"] = true
 L["Bar"] = true
 L["Bar Texture"] = true
@@ -1778,7 +1771,6 @@ L["COPY APPEARANCE FROM"] = true
 L["Categories shown here are hidden from the main debuff bar automatically."] = true
 L["Channel"] = true
 L["Click"] = true
-L["Combat Mode"] = true
 L["Copy Settings to %s"] = true
 L["Currently can't track: %s"] = true
 L["Custom Border"] = true
@@ -1787,7 +1779,6 @@ L["Customise"] = true
 L["Customise in Filter Designer"] = true
 L["DEBUFF GROUPS"] = true
 L["Default Frame Level"] = true
-L["Default Frame Strata"] = true
 L["Default Icon Size"] = true
 L["Default Scale"] = true
 L["Desaturate When Missing"] = true
@@ -1809,12 +1800,9 @@ L["Enable Buff-Dropped Sound"] = true
 L["Enable Stack-Gained Sound"] = true
 L["Needs the current game build — these sound triggers aren't available on this client yet."] = true
 L["Enable the checkbox above to use"] = true
-L["Expire Alert"] = true
-L["Expiring"] = true
 L["FRAME PREVIEW"] = true
 L["FRAME-LEVEL EFFECTS"] = true
 L["Fill Color"] = true
-L["Frame Alpha"] = true
 L["GROUP NAME"] = true
 L["GROWTH"] = true
 L["Gets its own independent border overlay. Multiple custom borders can be visible at the same time."] = true
@@ -1829,12 +1817,10 @@ L["Import Buffs Tab Defaults"] = true
 L["Import from Buffs Tab"] = true
 L["Import your existing Buffs tab settings as defaults for all auras. Compatible settings will be applied automatically."] = true
 L["Imported!"] = true
-L["Inherit (Frame)"] = true
 L["Keep Buffs"] = true
 L["LINKED FILTERS"] = true
 L["Layout Group"] = true
 L["Layout Groups"] = true
-L["Loop Interval (seconds)"] = true
 L["MEMBERS"] = true
 L["Match Frame Height"] = true
 L["Match Frame Width"] = true
@@ -1852,13 +1838,13 @@ L["No items yet"] = true
 L["No layout groups created yet.\nClick '+ Create Group' to get started."] = true
 L["No members yet"] = true
 L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."] = true
+L["Not available for Debuffs. Use Layout Groups instead."] = true
 L["PLACED ON FRAME"] = true
 L["PLACEMENT"] = true
 L["Per-aura overrides"] = true
 L["Percent"] = true
 L["Place %s at %s"] = true
 L["Placed"] = true
-L["Play Once"] = true
 L["Position & anchors"] = true
 L["Position managed by: %s"] = true
 L["Preview Scale"] = true
@@ -1871,8 +1857,6 @@ L["DF Proc"] = true
 L["DF Flash"] = true
 L["DF Pixel"] = true
 L["Hide Intro Flash"] = true
-L["State Overrides"] = true
-L["Icon Effects"] = true
 L["Animation Color"] = true
 L["Animation Frequency"] = true
 L["Animation Inset"] = true
@@ -1917,7 +1901,6 @@ L["Stack Text"] = true
 L["Stack Text Color"] = true
 L["Standard Buffs"] = true
 L["Standard buff visibility is managed on the Aura Filters page."] = true
-L["Start Delay (seconds)"] = true
 L["TRIGGERED BY"] = true
 L["Texture & Colors"] = true
 L["Threshold Mode"] = true
@@ -1925,7 +1908,6 @@ L["Timing"] = true
 L["Tint"] = true
 L["Tint Entire Bar"] = true
 L["Type"] = true
-L["Trigger Mode"] = true
 L["Uses a single border per frame. Highest priority wins."] = true
 L["Volume"] = true
 L["Would you like to keep standard buff icons alongside\nAura Designer, or let it fully replace them?"] = true
@@ -2058,6 +2040,8 @@ L["Y Position"] = true
 -- Grid layout dropdown
 L["Wrap"] = true
 -- Aura Filters page notes
+L["Choose which filters are active. Buff filters can be fully customised in the %s; debuff filters are limited to Blizzard's fixed categories, with the %s the only per-spell control."] = true
+L["These filters apply to the %s and %s only. The %s and %s pick their own (per indicator), and the %s takes no filter selection."] = true
 L["Enabled filters are combined \226\128\148 buffs matching any selected filter will be shown."] = true
 L["Enabled filters are combined \226\128\148 debuffs matching any selected filter will be shown."] = true
 -- Text Designer
@@ -2135,7 +2119,6 @@ L["Custom name, health and status text"] = true
 L["Customize role colors used by any border whose Color Source is set to Role. Applies to Tank, Healer, and Damager assignments."] = true
 L["Delete binding for %s?"] = true
 L["Disable this if you want to use the same profile"] = true
-L["Display Name"] = true
 L["Drag to move"] = true
 L["Equipment Slots"] = true
 L["Follow"] = true
@@ -2184,7 +2167,6 @@ L["Timer Text"] = true
 L["Tip: Check 'Create New Profile' to import without affecting your current settings."] = true
 L["Use "] = true
 L["WARNING: This will permanently overwrite settings in your '"] = true
-L["Warning:"] = true
 L["White"] = true
 L["Yellow"] = true
 L["[Char]"] = true
@@ -2213,5 +2195,174 @@ L["The expiry border and tint always step between colors."] = true
 -- Each segment tooltips its full name (L["Seconds"] / L["Percent"]).
 L["s"] = true
 L["%"] = true
+
+
+-- ============================================================
+-- COLOR PICKER (GUI/ColorPicker.lua)
+-- Class names in the Class tab are NOT here: they resolve from the
+-- client's own LOCALIZED_CLASS_NAMES_MALE. The R/G/B/A% channel letters
+-- stay untranslated (they are the standard colour-model abbreviations).
+-- ============================================================
+L["Circle"] = true
+L["Click 'Save' to add current color"] = true
+L["Color already saved"] = true
+L["Color deleted: %s"] = true
+L["Color picker debug %s"] = true
+L["Color picker hook installed"] = true
+L["Color picker hook removed"] = true
+L["Color saved: %s"] = true
+L["Colors appear here when you apply them"] = true
+L["Copy hex to clipboard"] = true
+L["DB not available"] = true
+L["DandersFrames Color Picker"] = true
+L["Failed to install hook (already hooked or API not available)"] = true
+L["Hex"] = true
+L["Maximum saved colors reached (%d)"] = true
+L["No recent colors yet"] = true
+L["No saved colors yet"] = true
+L["Okay"] = true
+L["Open a color picker to see debug output"] = true
+L["Press Ctrl+C to copy:"] = true
+L["Recent"] = true
+L["Saved"] = true
+L["Use %s or %s to toggle"] = true
+L["Use %s to show API info"] = true
+L["Use %s to toggle debug output"] = true
+
+-- ============================================================
+-- SETTING TOOLTIPS (the curated set — only where the label alone
+-- cannot carry the setting; see GUI:AttachTooltip). Long by design:
+-- a tooltip that restates the label is worse than none.
+-- ============================================================
+L["How fast the effect runs. On DF Dash this is how quickly the dashes march around the edge, and 0 holds them still. On the others it is the pulse rate, where 0 means the effect's own default speed."] = true
+L["How many separate lights travel around the border. More reads as busier and costs a little more to draw."] = true
+L["How long each moving segment is. Short values read as darting sparks, long ones as a sweeping tail."] = true
+L["How heavy the moving effect is. Separate from Border Thickness — the animation draws on its own layer, so it can be thicker or thinner than the border underneath."] = true
+L["Moves the effect in or out from the edge, independently of the border. Push it outward to make a glow spill past the frame."] = true
+L["These effects open with a one-off burst before settling into their loop. Turn this on to skip the burst and go straight to the loop."] = true
+L["How far the effect runs along each edge from the corner before stopping. Small values leave four short brackets instead of a full outline."] = true
+L["Where the border colour comes from. Static uses the colour below; Class and Role read it from the unit, so the border tells you who you are looking at without reading the name."] = true
+L["Pulls the border inward (positive) or pushes it outward (negative) from the edge. Thickness is how heavy the line is, Inset is how far in it sits, Offset slides the whole border sideways."] = true
+L["Slides the whole border sideways without resizing it. Use Inset instead to move all four edges evenly."] = true
+L["Slides the whole border up or down without resizing it. Use Inset instead to move all four edges evenly."] = true
+L["How the border colour mixes with whatever is behind it. Blend is normal. Add brightens and is what makes a colour glow. Modulate darkens. Disable ignores opacity entirely and draws the colour flat."] = true
+L["Which part of the element the text is pinned to. Offset X and Y then nudge it from there."] = true
+L["How the text sits inside its own box, once Anchor has decided where that box goes. Only visible on text wide enough to have slack — Anchor is what moves it around the element."] = true
+L["What the tooltip attaches to. Game Default hands it back to Blizzard's own placement; Cursor follows the mouse; Unit Frame pins it to the frame you are hovering."] = true
+L["Which point of the thing above the tooltip hangs from. Greyed out under Game Default, because Blizzard is placing it."] = true
+L["Attached puts each pet beside its owner's frame, so you read them together. Separate Pet Group collects every pet into one block you can place anywhere. The rest of this page changes to match your choice."] = true
+L["Which side of your party or raid frames the whole pet block sits on. Use the offsets below to nudge it from there."] = true
+L["Sizes each pet frame to its owner's, so the pair stays aligned when you resize the unit frames. The Width slider below greys out while this is on."] = true
+L["Sizes each pet frame to its owner's, so the pair stays aligned when you resize the unit frames. The Height slider below greys out while this is on."] = true
+L["Keeps the resource bar the same width as the health bar it sits under, so it stays lined up when you resize the frame. The Width slider below greys out while this is on."] = true
+L["Power Type gives each resource its own game colour — blue mana, yellow energy, red rage. Class colours every bar by the unit's class instead, and Custom uses one fixed colour for everyone."] = true
+L["Watches whichever raid buff your own class provides, and follows you when you change character. Turn it off to pick the buffs to watch by hand below."] = true
+L["Stops the raid buffs tracked here from also taking up a slot in the normal buff row, so the missing-buff icon is the only place they appear."] = true
+L["Only highlight threat while YOU are tanking. As a healer or damage dealer the highlight stays off entirely."] = true
+L["Skip the highlight on tanks in your group — they are supposed to have threat, so lighting them up is noise. Everyone else still shows."] = true
+L["Dispellable By Me only lights up debuffs your current spec can actually remove. All Dispellable lights up every removable debuff, including ones for someone else to handle."] = true
+L["Where the coloured wash sits on the frame. Full covers the whole bar; the edge options leave the middle clear so you can still read health and text underneath."] = true
+L["Keeps the wash inside the filled part of the health bar, so it shrinks as the unit takes damage instead of covering the empty section too."] = true
+L["Dims the frame underneath the wash so the dispel colour reads cleanly over a bright class colour or a busy health bar."] = true
+
+-- ============================================================
+-- SETTING TOOLTIPS (the curated set — only where the label alone
+-- cannot carry the setting; see GUI:AttachTooltip). Long by design:
+-- a tooltip that restates the label is worse than none.
+-- ============================================================
+L["How far inside the icon edge the reveal sits. Negative values push it outward, so it rings the icon rather than sitting on it."] = true
+L["How far the dispel-type ring sits inside the icon edge. Negative values push it outward into a halo around the icon instead."] = true
+L["How far inside the frame edge the highlight sits. Negative values push it outward, so it rings the frame instead of hugging it — useful when the highlight would otherwise sit under auras or text."] = true
+L["How far inside the frame edge the dispel border sits. Negative values push it outward, ringing the frame rather than hugging it."] = true
+
+-- ============================================================
+-- FILTER MEMBERSHIP
+-- No strings here, and that is the answer rather than an omission. A buff
+-- filter's spell rows spent four rounds hunting for a verb — Enable/Disable,
+-- Included/Excluded, Tracked/Untracked, and a checkbox on the row's left — and
+-- what they landed on was a checkbox in the row's RIGHT-hand control slot, which
+-- needs no verb at all.
+--   * Enable/Disable claimed authority the control lacks (the filter may be off).
+--   * Included/Excluded disagreed with the header count.
+--   * Tracked/Untracked was accurate but needed an 80px button on sixty rows.
+--   * Show/Hide and Show/Skip belong to the BLACKLIST, which keeps them.
+--   * On/Off is the FILTER switch's vocabulary, in the left list and status line.
+--   * A box on the LEFT put every heavy element on one side of the row.
+-- "tracked" survives once, as a noun, in the header count below.
+-- ============================================================
+
+-- Left-list row tooltips on the merged Filters page. The rows that carry these
+-- are tick-only (no spell list of their own), so the tooltip is where their
+-- explanation lives.
+L["Buffs that belong to none of the filters above."] = true
+L["Debuffs that can be dispelled. Which dispels count is set on the Debuffs page."] = true
+
+-- Merged Filters page: the status line above the spell list. It answers ONE
+-- question -- where does this filter apply -- with ONE polarity. "On" lists the
+-- places; "Off" means nowhere at all. The earlier phrasing put a negative and a
+-- positive in the same sentence ("Off · Party buff bar · also Defensive Icon")
+-- and read as though the filter were off in both. %s is a comma-joined list, so
+-- a translator must keep it as one slot.
+L["On · %s"] = true
+L["Off · not in use"] = true
+L["Buff bar (%s)"] = true
+L["Per mode: the blacklist you edit here applies to this mode only."] = true
+L["Selecting a filter in the list adds it to the buffs bar. Other pages, like the Defensive Icon, choose filters for themselves — so a filter can still be in use while it is unselected here."] = true
+
+-- Merged page banner + the section-header hints. Between them these say the whole
+-- model: the HEADERS say what the row switch does (drives that bar), the BANNER says
+-- the filters are a shared library other pages draw from. Two labels and one
+-- sentence, where the predecessor was two paragraphs and six links.
+--
+-- ⚠ "Selected", everywhere on this page. Both lists draw the same checkbox, so both
+-- read the same way: a filter is selected, a spell inside it is selected, and the
+-- blacklist banner says "unselect one to hide it". Never "ticked" — the box draws
+-- the shared filled square, not a tick glyph, so the word names a mark that is not
+-- on screen.
+--
+-- This overrides an earlier call that banned "selected" from the FILTER rows,
+-- because clicking a row there also selects that filter for editing in the right
+-- pane. That collision is real but harmless in practice: the sentence is about the
+-- checkbox column it sits above, and one word across the whole page beats a split
+-- vocabulary that has to be learned twice. Krathe's call, 2026-07-28.
+-- Own line under the section header, at DFFontNormalSmall. NOT appended to the
+-- header's own text with a colour code: that recolours but does not resize, so it
+-- rendered at full header weight and ran off a 240px panel.
+L["Selected filters show on the buffs bar"] = true
+L["Selected filters show on the debuffs bar"] = true
+
+-- Heads the filter list under the Buffs/Debuffs tabs. Bare "Filters" because the
+-- tab above already says which kind — "Buff Filters" on the Buffs tab would be
+-- saying it twice.
+L["Filters"] = true
+-- The Buffs tab's banner. Leads with what this tab lets you DO, because the buff half
+-- is the one place on the page where everything is yours to change — the exact
+-- opposite of the Debuffs banner below, which has to say almost nothing here is.
+--
+-- ⚠ "%s filter groups", not "the %s". A normal Aura Designer group holds spells you
+-- placed yourself and never touches these filters; only a Filter Group carries a
+-- filterSelection. An earlier version named the Aura Designer as a peer of the
+-- Defensive Icon, which is untrue of most of what the Aura Designer does.
+L["You have full control over buff filters. Edit the built-in ones or create your own — and use them on the %s and in %s filter groups too."] = true
+-- The Debuffs tab's banner — one string covering the whole tab, because the tab has
+-- exactly one selectable row (the Blacklist; the categories are switches, not
+-- selections). So it says both what the debuff filters are, and how the one editable
+-- thing works, including the unselect-to-hide polarity nobody can guess.
+L["Debuff filters are Blizzard's: the categories are fixed and can't be changed. Optional Debuffs are the few you can turn off — unselect one to hide it."] = true
+
+-- Buffs / Debuffs pages: the ordering + duration box that moved off Aura Filters.
+L["Order & Limits"] = true
+
+-- Status line + its hover tooltip. Three different scopes, which is why the line
+-- stays short and the explanation lives on hover: which filters are SELECTED is per
+-- MODE, a built-in
+-- filter's spells are per PROFILE (both modes), custom filter spells are per
+-- ACCOUNT (every profile). Mistaking one for another is what makes filters look
+-- broken after a Party/Raid switch.
+L["Always in force"] = true
+L["Where this applies"] = true
+L["Optional Debuffs are per mode: what you hide here applies to this mode only."] = true
+L["Which filters are selected is per mode, so Party and Raid keep separate choices — use Copy or Sync above to share them. What a filter CONTAINS is not per mode: editing its spells changes both."] = true
+L["Which filters are selected is per mode, so Party and Raid keep separate choices — use Copy or Sync above to share them. A custom filter's spells are shared by every profile on the account."] = true
 
 --@end-do-not-package@

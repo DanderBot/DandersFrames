@@ -437,6 +437,11 @@ function CC:RefreshProfilesPanel()
             child:Hide()
             child:SetParent(nil)
         end
+        -- StyleButton registers each row on the parent's ThemeListeners. This
+        -- content frame OUTLIVES its rows (a settings page throws its whole
+        -- child away and starts over), so without this the table would keep
+        -- growing a reference to every row we just discarded.
+        self.profileListContent.ThemeListeners = nil
     end
     
     -- Update auto-create checkbox state
@@ -472,27 +477,31 @@ function CC:RefreshProfilesPanel()
     local activeProfile = self:GetActiveProfileName()
     local yOffset = 0
     
+    -- Both row states ride the shared styler, so the hover is the same theme wash
+    -- as every other button in the addon. These rows used to hand-roll a flat
+    -- 0.15 grey in OnEnter and restate all three rest fills in OnLeave, which is
+    -- how they ended up as the one hover that ignored the theme entirely.
+    --   SELECTED (what Rename/Delete act on) -> SetActive's accent fill + border
+    --   ACTIVE   (the profile actually in use) -> green rest border + the dot
+    -- Two separate cues, so a row that is selected but NOT active still reads
+    -- apart from the active one. The green is the styler's own affirmative tone
+    -- (opts.tone = "success"), not a fourth colour invented here.
+    local ACTIVE_BORDER = { r = 0.4, g = 0.85, b = 0.5, a = 0.8 }
+
     -- Create profile items
     for _, profileName in ipairs(profiles) do
+        local isActive = (profileName == activeProfile)
+        local isSelected = (profileName == self.selectedProfileName)
+
         local item = CreateFrame("Button", nil, self.profileListContent, "BackdropTemplate")
         item:SetPoint("TOPLEFT", 0, -yOffset)
         item:SetPoint("RIGHT", 0, 0)
         item:SetHeight(28)
-        item:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
+        DF.GUI:StyleButton(item, {
+            restBorderColor = isActive and ACTIVE_BORDER or nil,
         })
-        
-        local isActive = (profileName == activeProfile)
-        local isSelected = (profileName == self.selectedProfileName)
-        
-        if isSelected then
-            item:SetBackdropColor(themeColor.r * 0.3, themeColor.g * 0.3, themeColor.b * 0.3, 1)
-        elseif isActive then
-            item:SetBackdropColor(0.15, 0.25, 0.15, 1)
-        else
-            item:SetBackdropColor(0.1, 0.1, 0.1, 1)
-        end
-        
+        item:SetActive(isSelected)
+
         -- Active indicator
         if isActive then
             local dot = item:CreateTexture(nil, "OVERLAY")
@@ -543,28 +552,22 @@ function CC:RefreshProfilesPanel()
             -- Double-click does the same as single-click
         end)
         
-        item:SetScript("OnEnter", function(self)
-            if not isSelected then
-                self:SetBackdropColor(0.15, 0.15, 0.15, 1)
-            end
+        -- Hooked, not Set: the styler owns OnEnter/OnLeave now, and overwriting
+        -- them would take the hover wash straight back out again.
+        item:HookScript("OnEnter", function(self)
             -- Show tooltip with full profile name
             if self.fullProfileName and #self.fullProfileName > 20 then
                 DF.GUI:ShowTooltip(self, { title = self.fullProfileName, anchor = "ANCHOR_RIGHT" })
             end
         end)
-        
-        item:SetScript("OnLeave", function(self)
-            if not isSelected then
-                if isActive then
-                    self:SetBackdropColor(0.15, 0.25, 0.15, 1)
-                else
-                    self:SetBackdropColor(0.1, 0.1, 0.1, 1)
-                end
-            end
+
+        item:HookScript("OnLeave", function(self)
             DF.GUI:HideTooltip()
         end)
-        
-        yOffset = yOffset + 30
+
+        -- 4px between rows: the rows carry a real border now, and at the old
+        -- 2px pitch two adjacent borders read as one thick divider.
+        yOffset = yOffset + 32
     end
     
     self.profileListContent:SetHeight(math.max(yOffset, 1))
@@ -654,8 +657,10 @@ function CC:RefreshLoadoutAssignments()
             specHeader:SetPoint("TOPLEFT", 0, -yOffset)
             specHeader:SetPoint("RIGHT", 0, 0)
             specHeader:SetHeight(24)
-            specHeader:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-            specHeader:SetBackdropColor(0.12, 0.12, 0.12, 1)
+            DF.GUI:CreateElementBackdrop(specHeader, {
+                outline = false,
+                bgColor     = { 0.12, 0.12, 0.12, 1 },
+            })
             
             local icon = specHeader:CreateTexture(nil, "ARTWORK")
             icon:SetSize(18, 18)
@@ -779,13 +784,11 @@ function CC:CreateLoadoutRow(parent, specIndex, configID, loadoutName, profiles,
             if assignedProfile then
                 DF.GUI:ShowTooltip(btn, {
                     title = format(L["Profile: %s"], assignedProfile),
-                    anchor = "ANCHOR_TOP",
                     lines = { L["Click to change assignment"] },
                 })
             elseif configID == 0 then
                 DF.GUI:ShowTooltip(btn, {
                     title = L["No default profile set"],
-                    anchor = "ANCHOR_TOP",
                     lines = {
                         L["Click to assign a profile that activates"],
                         L["when switching to this spec"],
@@ -794,7 +797,6 @@ function CC:CreateLoadoutRow(parent, specIndex, configID, loadoutName, profiles,
             else
                 DF.GUI:ShowTooltip(btn, {
                     title = L["Using spec default"],
-                    anchor = "ANCHOR_TOP",
                     lines = { L["Click to assign a specific profile"] },
                 })
             end
@@ -812,120 +814,72 @@ end
 -- PROFILE DIALOGS
 -- =========================================================================
 
--- Helper to show StaticPopup and raise it above our UI
-local function ShowPopupOnTop(popupName)
-    local dialog = StaticPopup_Show(popupName)
-    if dialog then
-        dialog:SetFrameStrata("FULLSCREEN_DIALOG")
-        dialog:Raise()
-    end
-    return dialog
-end
-
--- Export to CC namespace for use in other UI files
-CC.ShowPopupOnTop = ShowPopupOnTop
+-- These all used to be Blizzard StaticPopups raised above our UI by hand, because
+-- the settings window sits at FULLSCREEN_DIALOG and a StaticPopup opens behind it.
+-- DF's own popup lives at that strata already, so the raise helper is gone.
 
 function CC:ShowNewProfileDialog()
-    StaticPopupDialogs["DFCC_NEW_PROFILE"] = {
-        text = L["Enter new profile name:"],
-        button1 = L["Create"],
-        button2 = L["Cancel"],
-        hasEditBox = true,
-        editBoxWidth = 200,
-        OnAccept = function(self)
-            local name = self.EditBox:GetText()
-            if name and name ~= "" then
-                if CC:CreateProfile(name, CC:GetActiveProfileName()) then
-                    CC:RefreshProfilesPanel()
-                end
-            end
-        end,
-        OnShow = function(self)
-            self.EditBox:SetText("")
-            self.EditBox:SetFocus()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DFCC_NEW_PROFILE")
-end
-
-function CC:ShowCopyProfileDialog(sourceName)
-    StaticPopupDialogs["DFCC_COPY_PROFILE"] = {
-        text = format(L["Enter name for copy of '%s':"], sourceName),
-        button1 = L["Copy"],
-        button2 = L["Cancel"],
-        hasEditBox = true,
-        editBoxWidth = 200,
-        OnAccept = function(self)
-            local name = self.EditBox:GetText()
-            if name and name ~= "" then
-                if CC:CreateProfile(name, sourceName) then
-                    CC:RefreshProfilesPanel()
-                end
-            end
-        end,
-        OnShow = function(self)
-            self.EditBox:SetText(sourceName .. " Copy")
-            self.EditBox:SetFocus()
-            self.EditBox:HighlightText()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DFCC_COPY_PROFILE")
-end
-
-function CC:ShowRenameProfileDialog(oldName)
-    StaticPopupDialogs["DFCC_RENAME_PROFILE"] = {
-        text = format(L["Enter new name for '%s':"], oldName),
-        button1 = L["Rename"],
-        button2 = L["Cancel"],
-        hasEditBox = true,
-        editBoxWidth = 200,
-        OnAccept = function(self)
-            local name = self.EditBox:GetText()
-            if name and name ~= "" and name ~= oldName then
-                if CC:RenameProfile(oldName, name) then
-                    CC.selectedProfileName = name
-                    CC:RefreshProfilesPanel()
-                end
-            end
-        end,
-        OnShow = function(self)
-            self.EditBox:SetText(oldName)
-            self.EditBox:SetFocus()
-            self.EditBox:HighlightText()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DFCC_RENAME_PROFILE")
-end
-
-function CC:ShowDeleteProfileDialog(profileName)
-    StaticPopupDialogs["DFCC_DELETE_PROFILE"] = {
-        text = format(L["Delete profile '%s'?\n\nThis cannot be undone."], profileName),
-        button1 = L["Delete"],
-        button2 = L["Cancel"],
-        OnAccept = function()
-            if CC:DeleteProfile(profileName) then
-                CC.selectedProfileName = nil
+    DF.GUI:PromptName({
+        title       = L["New Profile"],
+        message     = L["Enter new profile name:"],
+        acceptLabel = L["Create"],
+        onAccept    = function(name)
+            if name == "" then return end
+            if CC:CreateProfile(name, CC:GetActiveProfileName()) then
                 CC:RefreshProfilesPanel()
             end
         end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DFCC_DELETE_PROFILE")
+    })
+end
+
+function CC:ShowCopyProfileDialog(sourceName)
+    DF.GUI:PromptName({
+        title       = L["Copy Profile"],
+        message     = format(L["Enter name for copy of '%s':"], sourceName),
+        default     = sourceName .. " Copy",
+        acceptLabel = L["Copy"],
+        onAccept    = function(name)
+            if name == "" then return end
+            if CC:CreateProfile(name, sourceName) then
+                CC:RefreshProfilesPanel()
+            end
+        end,
+    })
+end
+
+function CC:ShowRenameProfileDialog(oldName)
+    DF.GUI:PromptName({
+        title       = L["Rename Profile"],
+        message     = format(L["Enter new name for '%s':"], oldName),
+        default     = oldName,
+        acceptLabel = L["Rename"],
+        onAccept    = function(name)
+            if name == "" or name == oldName then return end
+            if CC:RenameProfile(oldName, name) then
+                CC.selectedProfileName = name
+                CC:RefreshProfilesPanel()
+            end
+        end,
+    })
+end
+
+function CC:ShowDeleteProfileDialog(profileName)
+    DF:ShowPopupAlert({
+        title   = L["Delete Profile"],
+        message = format(L["Delete profile '%s'?\n\nThis cannot be undone."], profileName),
+        buttons = {
+            {
+                label = L["Delete"],
+                onClick = function()
+                    if CC:DeleteProfile(profileName) then
+                        CC.selectedProfileName = nil
+                        CC:RefreshProfilesPanel()
+                    end
+                end,
+            },
+            { label = L["Cancel"] },
+        },
+    })
 end
 
 function CC:ShowClearAllConfirmation()
@@ -937,19 +891,15 @@ function CC:ShowClearAllConfirmation()
         return
     end
     
-    StaticPopupDialogs["DFCC_CLEAR_ALL_BINDINGS"] = {
-        text = format(L["Reset all bindings to defaults?\n\nThis will set:\n• Left Click = Target Unit\n• Right Click = Open Menu\n\n%sThis cannot be undone.%s"], "|c" .. DF.GUI:ToneHex("danger"), "|r"),
-        button1 = L["Reset to Defaults"],
-        button2 = L["Cancel"],
-        OnAccept = function()
-            CC:ResetBindingsToDefaults()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DFCC_CLEAR_ALL_BINDINGS")
+    DF:ShowPopupAlert({
+        title   = L["Reset to Defaults"],
+        message = format(L["Reset all bindings to defaults?\n\nThis will set:\n• Left Click = Target Unit\n• Right Click = Open Menu\n\n%sThis cannot be undone.%s"], "|c" .. DF.GUI:ToneHex("danger"), "|r"),
+        buttons = {
+            { label = L["Reset to Defaults"], onClick = function() CC:ResetBindingsToDefaults() end },
+            { label = L["Cancel"] },
+        },
+        buttonWidth = 130,
+    })
 end
 
 -- Reset bindings to Blizzard-style defaults (Target + Menu)
@@ -1006,68 +956,44 @@ function CC:ShowExportDialog()
     
     if not exportString or exportString == "" then
         -- Error message already printed by ExportProfile
-        StaticPopupDialogs["DFCC_EXPORT_ERROR"] = {
-            text = L["Export failed. Please try again or check for errors."],
-            button1 = L["OK"],
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true,
-            preferredIndex = 3,
-        }
-        ShowPopupOnTop("DFCC_EXPORT_ERROR")
+        DF:ShowPopupAlert({
+            title   = L["Export Failed"],
+            tone    = "danger",
+            message = L["Export failed. Please try again or check for errors."],
+            buttons = { { label = L["OK"] } },
+        })
         return
     end
-    
-    StaticPopupDialogs["DFCC_EXPORT_PROFILE"] = {
-        text = L["Copy this string to share your profile:"],
-        button1 = L["Done"],
-        hasEditBox = true,
-        editBoxWidth = 350,
-        OnShow = function(self)
-            self.EditBox:SetText(exportString)
-            self.EditBox:SetFocus()
-            self.EditBox:HighlightText()
-        end,
-        EditBoxOnEscapePressed = function(self)
-            self:GetParent():Hide()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DFCC_EXPORT_PROFILE")
+
+    -- readOnly: the string is there to be selected and copied, not edited. It
+    -- opens fully selected, so Ctrl+C alone is enough.
+    DF:ShowPopupInput({
+        title       = L["Export Profile"],
+        message     = L["Copy this string to share your profile:"],
+        text        = exportString,
+        multiline   = true,
+        readOnly    = true,
+        cancelLabel = L["Done"],
+    })
 end
 
 function CC:ShowImportDialog()
-    StaticPopupDialogs["DFCC_IMPORT_PROFILE"] = {
-        text = L["Paste a profile string to import:"],
-        button1 = L["Import"],
-        button2 = L["Cancel"],
-        hasEditBox = true,
-        editBoxWidth = 350,
-        OnAccept = function(self)
-            local importString = self.EditBox:GetText()
-            if importString and importString ~= "" then
-                local success, result = CC:ImportProfile(importString)
-                if success then
-                    print("|cff33cc33DandersFrames:|r Profile imported: " .. result)
-                    CC:RefreshProfilesPanel()
-                else
-                    print("|cffff0000DandersFrames:|r Import failed: " .. (result or "unknown error"))
-                end
+    DF:ShowPopupInput({
+        title       = L["Import Profile"],
+        message     = L["Paste a profile string to import:"],
+        multiline   = true,
+        acceptLabel = L["Import"],
+        onAccept    = function(importString)
+            if not importString or importString == "" then return end
+            local success, result = CC:ImportProfile(importString)
+            if success then
+                print("|cff33cc33DandersFrames:|r Profile imported: " .. result)
+                CC:RefreshProfilesPanel()
+            else
+                print("|cffff0000DandersFrames:|r Import failed: " .. (result or "unknown error"))
             end
         end,
-        OnShow = function(self)
-            self.EditBox:SetText("")
-            self.EditBox:SetFocus()
-        end,
-        timeout = 0,
-        whileDead = true,
-        hideOnEscape = true,
-        preferredIndex = 3,
-    }
-    ShowPopupOnTop("DFCC_IMPORT_PROFILE")
+    })
 end
 
 -- =========================================================================

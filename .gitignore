@@ -43,5 +43,10 @@ cache/
 !.gitnexus/wow-config.json
 !.gitnexus/wow-api.json
 
-# Working docs — local only, never published (plans, reviews, state-of-play).
-docs/
+# Working docs — local only (plans, reviews, state-of-play).
+# Same pattern as .gitnexus above: `docs/*` not `docs/`, so the ! exception works.
+# The exception is the conventions reference — it is written FOR contributors, so it
+# has to travel with the PR. It is kept OUT of the packaged addon by `.pkgmeta`
+# (ignore: docs), not by this file: tracked in git, never in the CurseForge zip.
+docs/*
+!docs/gui-conventions.md

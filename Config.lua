@@ -643,24 +643,6 @@ function DF:GetSoundPath(soundName)
     return nil
 end
 
--- Get font path by name (for SharedMedia compatibility)
-function DF:GetFont(name)
-    local LSM = GetLSM()
-    if LSM then
-        return LSM:Fetch("font", name) or name
-    end
-    -- Check if name is already a path
-    if DF.SharedFonts[name] then
-        return name
-    end
-    -- Try to find path by display name
-    for path, displayName in pairs(DF.SharedFonts) do
-        if displayName == name then
-            return path
-        end
-    end
-    return name
-end
 
 -- Default fallback font
 local FALLBACK_FONT = "Fonts\\FRIZQT__.TTF"
@@ -859,29 +841,6 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     return success
 end
 
--- Get texture path by name (for SharedMedia compatibility)
-function DF:GetTexture(name)
-    -- Special case for Solid - shouldn't reach here but safeguard
-    if name == "Solid" then
-        return nil
-    end
-    
-    local LSM = GetLSM()
-    if LSM then
-        return LSM:Fetch(LSM.MediaType.STATUSBAR, name) or name
-    end
-    -- Check if name is already a path
-    if DF.SharedTextures[name] then
-        return name
-    end
-    -- Try to find path by display name
-    for path, displayName in pairs(DF.SharedTextures) do
-        if displayName == name then
-            return path
-        end
-    end
-    return name
-end
 
 -- ============================================================
 -- GLOBAL (account-wide) DEFAULTS
@@ -1003,7 +962,7 @@ DF.PartyDefaults = {
     afkIconAlpha = 0.8,
     afkIconAnchor = "CENTER",
     afkIconEnabled = true,
-    afkIconFrameLevel = 0,
+    afkIconFrameLevel = 30,
     afkIconHideInCombat = true,
     afkIconScale = 0.7,
     afkIconShowText = false,
@@ -1179,6 +1138,7 @@ DF.PartyDefaults = {
 
     -- Direct Mode: Debuff Filters
     directDebuffShowAll = true,               -- Show all debuffs (DEFAULT ON — Blizzard's category tokens miss untagged debuffs even with all enabled, so "all" is the only complete option; category mode stays available)
+    debuffDeduplicateDesigner = true,         -- Hide debuffs an Aura Designer group already shows (was silent+unconditional pre-5.0; now a visible toggle, and it finally applies in Show All mode too)
     debuffFilterBoss = true,                  -- Boss debuffs (native isBossAura)
     debuffFilterRole = true,                  -- Role debuffs (native isRoleAura)
     debuffFilterPriority = true,              -- Priority debuffs (native isPriorityAura)
@@ -1218,14 +1178,6 @@ DF.PartyDefaults = {
     buffStackY = -2,
     buffWrap = 2,
     showBuffs = true,
-
-    -- Center Status Icon
-    centerStatusIconAnchor = "CENTER",
-    centerStatusIconEnabled = true,
-    centerStatusIconFrameLevel = 0,
-    centerStatusIconScale = 1,
-    centerStatusIconX = 0,
-    centerStatusIconY = 0,
 
     -- Class Color
     classColorAlpha = 1,
@@ -1395,7 +1347,7 @@ DF.PartyDefaults = {
     defensiveIconDurationY = 0,
     defensiveIconEnabled = true,
     defensiveIconDurationFormat = "NUMBER",   -- NUMBER / SHORT / PERCENT (icon-sized formats)
-    defensiveIconFrameLevel = 0,
+    defensiveIconFrameLevel = 65,
     defensiveIconHideSwipe = false,
     defensiveIconScale = 1,
     defensiveIconShowBorder = true,
@@ -1428,7 +1380,6 @@ DF.PartyDefaults = {
     dispelShowBorder = true,
     dispelShowGradient = true,
     dispelShowIcon = true,
-    dispelNameText = false,
 
     -- Unified dispel overlay (12.1 container-slot driven, Features/Dispel.lua)
     dispelOverlayEnabled = true,
@@ -1573,7 +1524,7 @@ DF.PartyDefaults = {
     leaderIconAlpha = 1,
     leaderIconAnchor = "TOPLEFT",
     leaderIconEnabled = true,
-    leaderIconFrameLevel = 0,
+    leaderIconFrameLevel = 30,
     leaderIconHideInCombat = true,
     leaderIconScale = 1,
     leaderIconX = 0,
@@ -1628,14 +1579,12 @@ DF.PartyDefaults = {
     missingBuffIconBorderStyle = "SOLID",
     missingBuffIconBorderTexture = "SOLID",
     missingBuffIconEnabled = true,
-    missingBuffIconFrameLevel = 0,
+    missingBuffIconFrameLevel = 35,
     missingBuffIconScale = 1.2000000476837,
     missingBuffIconShowBorder = true,
     missingBuffIconSize = 24,
     missingBuffIconX = 0,
     missingBuffIconY = 0,
-
-    -- My Buff Indicator (DEPRECATED — hidden from UI, force-disabled on load)
 
     -- Name Text
     nameColorClass = false,
@@ -1826,7 +1775,7 @@ DF.PartyDefaults = {
     phasedIconAlpha = 1,
     phasedIconAnchor = "CENTER",
     phasedIconEnabled = true,
-    phasedIconFrameLevel = 0,
+    phasedIconFrameLevel = 30,
     phasedIconHideInCombat = true,
     phasedIconScale = 1.5,
     phasedIconShowLFGEye = true,
@@ -1864,7 +1813,7 @@ DF.PartyDefaults = {
     raidRoleIconAlpha = 1,
     raidRoleIconAnchor = "BOTTOMLEFT",
     raidRoleIconEnabled = false,
-    raidRoleIconFrameLevel = 0,
+    raidRoleIconFrameLevel = 30,
     raidRoleIconHideInCombat = true,
     raidRoleIconScale = 1.400000095367432,
     raidRoleIconShowAssist = true,
@@ -1879,7 +1828,7 @@ DF.PartyDefaults = {
     raidTargetIconAlpha = 1,
     raidTargetIconAnchor = "TOP",
     raidTargetIconEnabled = true,
-    raidTargetIconFrameLevel = 0,
+    raidTargetIconFrameLevel = 30,
     raidTargetIconHideInCombat = false,
     raidTargetIconScale = 1.1000000238419,
     raidTargetIconX = 36,
@@ -1897,7 +1846,7 @@ DF.PartyDefaults = {
     readyCheckIconAlpha = 1,
     readyCheckIconAnchor = "CENTER",
     readyCheckIconEnabled = true,
-    readyCheckIconFrameLevel = 0,
+    readyCheckIconFrameLevel = 30,
     readyCheckIconHideInCombat = false,
     readyCheckIconPersist = 6,
     readyCheckIconScale = 1.6000000238419,
@@ -1971,7 +1920,7 @@ DF.PartyDefaults = {
     resurrectionIconAlpha = 1,
     resurrectionIconAnchor = "CENTER",
     resurrectionIconEnabled = true,
-    resurrectionIconFrameLevel = 0,
+    resurrectionIconFrameLevel = 30,
     resurrectionIconScale = 1.600000023841858,
     resurrectionIconShowText = false,
     resurrectionIconTextCasting = "Res...",
@@ -1982,7 +1931,7 @@ DF.PartyDefaults = {
     -- Role Icon
     roleIconAlpha = 1,
     roleIconAnchor = "TOPLEFT",
-    roleIconFrameLevel = 0,
+    roleIconFrameLevel = 30,
     roleIconExternalDPS = "",
     roleIconExternalHealer = "",
     roleIconExternalTank = "",
@@ -2047,7 +1996,7 @@ DF.PartyDefaults = {
     summonIconAlpha = 1,
     summonIconAnchor = "CENTER",
     summonIconEnabled = true,
-    summonIconFrameLevel = 0,
+    summonIconFrameLevel = 30,
     summonIconHideInCombat = false,
     summonIconScale = 1.5,
     summonIconShowText = false,
@@ -2062,7 +2011,7 @@ DF.PartyDefaults = {
     bgCarrierIconAlpha = 1,
     bgCarrierIconAnchor = "CENTER",
     bgCarrierIconEnabled = true,
-    bgCarrierIconFrameLevel = 0,
+    bgCarrierIconFrameLevel = 30,
     bgCarrierIconScale = 1,
     bgCarrierIconShowText = false,
     bgCarrierIconText = "FC",
@@ -2073,11 +2022,14 @@ DF.PartyDefaults = {
     combatIconAlpha = 1,
     combatIconAnchor = "TOP",
     combatIconEnabled = false,
-    combatIconFrameLevel = 0,
+    combatIconFrameLevel = 30,
     combatIconScale = 1.2,
     combatIconX = 0,
     combatIconY = 6,
 
+    -- ⚰ DEPRECATED-TARGETED-SPELLS — this whole block goes when the feature does
+    -- (there is a second stray key, targetedSpellWarnDuplicates, further down).
+    -- See the block comment at the top of Features\TargetedSpells.lua.
     -- Targeted Spells (on-frame)
     targetedSpellAlpha = 1,
     targetedSpellAnchor = "BOTTOM",
@@ -2144,7 +2096,7 @@ DF.PartyDefaults = {
     targetedSpellDurationX = 0,
     targetedSpellDurationY = 0,
     targetedSpellEnabled = false,
-    targetedSpellFrameLevel = 0,
+    targetedSpellFrameLevel = 30,
     targetedSpellGrowth = "CENTER_H",
     targetedSpellHideSwipe = false,
     targetedSpellHighlightColor = {r = 1, g = 0.8, b = 0},
@@ -2327,6 +2279,15 @@ DF.PartyDefaults = {
     tooltipResurrectionEnabled = false,
     tooltipDefensiveX = 0,
     tooltipDefensiveY = 0,
+    -- Aura Designer tooltips. All OFF: AD surfaces are things you built, so a
+    -- tooltip is opt-in rather than the sensible default the aura ROWS get.
+    -- Groups are the ones worth turning on — their contents come from a filter,
+    -- so you did not pick the individual icons. Indicators/Bars are exposed
+    -- anyway; there is no harm in someone wanting them, and withholding the
+    -- option is a judgement call we do not need to make for them.
+    tooltipADGroupsEnabled = false,       -- Filter Groups + Debuff Groups
+    tooltipADIndicatorsEnabled = false,   -- placed icon / square indicators
+    tooltipADBarsEnabled = false,         -- the Aura Designer bar
     tooltipBindingAnchor = "FRAME",
     tooltipBindingAnchorPos = "TOPRIGHT",
     tooltipBindingDisableInCombat = false,
@@ -2347,7 +2308,7 @@ DF.PartyDefaults = {
     vehicleIconAlpha = 1,
     vehicleIconAnchor = "BOTTOMRIGHT",
     vehicleIconEnabled = true,
-    vehicleIconFrameLevel = 0,
+    vehicleIconFrameLevel = 30,
     vehicleIconHideInCombat = false,
     vehicleIconScale = 1.5,
     vehicleIconShowText = true,
@@ -2443,7 +2404,14 @@ DF.PartyDefaults = {
             durationColor = {r = 1, g = 1, b = 1, a = 1},
             stackColor = {r = 1, g = 1, b = 1, a = 1},
             hideIcon = false,
-            indicatorFrameLevel = 30,
+            -- Global AD indicator z-order defaults. BOTH are no-ops at their shipped value,
+            -- deliberately: the render adds frameLevelOffset 40 + this, so 0 keeps an
+            -- indicator that has never had a level set exactly where it renders today (+40,
+            -- below the defensive row at +51). Was 30 — which the editor displayed as the
+            -- default while the render ignored it entirely, so wiring it up would have moved
+            -- every untouched indicator to +70 and above the defensive row. Baseline changed
+            -- rather than migrated: saved profiles keep whatever they hold.
+            indicatorFrameLevel = 40,
             indicatorFrameStrata = "INHERIT",
         },
         auras = {},

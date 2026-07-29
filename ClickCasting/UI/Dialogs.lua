@@ -11,9 +11,6 @@ local PROFILE_TEMPLATE = CC.PROFILE_TEMPLATE
 -- Local aliases for helper functions (defined in Profiles.lua)
 local GetPlayerClass = function() return CC.GetPlayerClass() end
 
--- Local alias for helper functions (defined in UI/ProfilesPanel.lua)
-local function ShowPopupOnTop(name) return CC.ShowPopupOnTop and CC.ShowPopupOnTop(name) or StaticPopup_Show(name) end
-
 -- IMPORT POPUP DIALOG
 -- ============================================================
 
@@ -21,25 +18,25 @@ local ImportPopupFrame = nil
 local pendingImportData = nil
 local pendingImportCallback = nil
 
--- Theme colors matching GUI/GUI.lua. Neutrals that match GUI.Colors exactly are
--- shared (same table references) so a palette change there flows through here too;
--- accent points at the ClickCasting green (CC.ACCENT) rather than the party purple.
--- The non-shared entries are intentionally distinct:
---   * background uses a = 0.97 (popups sit slightly more opaque than the panels)
---   * green/orange/red are popup-only status colours with no GUI.Colors equivalent.
-local GUIColors = DF.GUI.Colors
+-- The shared dialog palette (same tables as GUI.DialogColors, so a change there
+-- flows through), with two deliberate substitutions:
+--   * accent is the ClickCasting green (CC.ACCENT), not the party purple.
+--   * orange is a brighter warning than the dialog default -- it marks a
+--     "valid, but wrong spec" row and has to read apart from the green next to it.
+local GUIColors = DF.GUI.Colors          -- page neutrals, used directly further down
+local DialogColors = DF.GUI.DialogColors
 local POPUP_COLORS = {
-    background = {r = 0.08, g = 0.08, b = 0.08, a = 0.97},
-    panel = GUIColors.panel,
-    element = GUIColors.element,
-    border = GUIColors.border,
-    accent = CC.ACCENT,
-    hover = GUIColors.hover,
-    text = GUIColors.text,
-    textDim = GUIColors.textDim,
-    green = {r = 0.2, g = 0.9, b = 0.2},
-    orange = {r = 1.0, g = 0.6, b = 0.1},
-    red = {r = 0.9, g = 0.25, b = 0.25},
+    background = DialogColors.background,
+    panel      = DialogColors.panel,
+    element    = DialogColors.element,
+    border     = DialogColors.border,
+    accent     = CC.ACCENT,
+    hover      = DialogColors.hover,
+    text       = DialogColors.text,
+    textDim    = DialogColors.textDim,
+    green      = DialogColors.green,
+    red        = DialogColors.red,
+    orange     = {r = 1.0, g = 0.6, b = 0.1},
 }
 
 local function CreateStyledButton(parent, text, width, height)
@@ -82,10 +79,10 @@ local function CreateImportPopup()
     titleBar:SetPoint("TOPRIGHT", -2, -2)
     titleBar:SetHeight(32)
     if not titleBar.SetBackdrop then Mixin(titleBar, BackdropTemplateMixin) end
-    titleBar:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
+    DF.GUI:CreateElementBackdrop(titleBar, {
+        outline = false,
+        bgColor     = { POPUP_COLORS.panel.r, POPUP_COLORS.panel.g, POPUP_COLORS.panel.b, 1 },
     })
-    titleBar:SetBackdropColor(POPUP_COLORS.panel.r, POPUP_COLORS.panel.g, POPUP_COLORS.panel.b, 1)
     
     local title = titleBar:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
     title:SetPoint("CENTER")
@@ -753,13 +750,10 @@ function CC:ShowClickCastConflictPopup(conflicts, enableCheckbox)
     local ignoreBtn = CreateFrame("Button", nil, popup, "BackdropTemplate")
     ignoreBtn:SetSize(100, 26)
     ignoreBtn:SetPoint("TOP", warning, "BOTTOM", 0, -90)
-    ignoreBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(ignoreBtn, {
+        bgColor     = { 0.3, 0.2, 0.1, 1 },
+        borderColor = { 0.6, 0.4, 0.1, 1 },
     })
-    ignoreBtn:SetBackdropColor(0.3, 0.2, 0.1, 1)
-    ignoreBtn:SetBackdropBorderColor(0.6, 0.4, 0.1, 1)
     local ignoreText = ignoreBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     ignoreText:SetPoint("CENTER")
     ignoreText:SetText(L["Ignore"])
@@ -1059,13 +1053,10 @@ function CC:ShowMacroEditorDialog(existingMacro)
     local iconBtn = CreateFrame("Button", nil, macroEditorDialog, "BackdropTemplate")
     iconBtn:SetSize(48, 48)
     iconBtn:SetPoint("TOPLEFT", 12, -40)
-    iconBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(iconBtn, {
+        bgColor     = { 0, 0, 0, 0.5 },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
     })
-    iconBtn:SetBackdropColor(0, 0, 0, 0.5)
-    iconBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
     
     local iconTexture = iconBtn:CreateTexture(nil, "ARTWORK")
     iconTexture:SetSize(44, 44)
@@ -1136,35 +1127,17 @@ function CC:ShowMacroEditorDialog(existingMacro)
     charCount:SetPoint("TOPRIGHT", -12, -105)
     charCount:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
-    -- Body scroll frame
-    local bodyScroll = CreateFrame("ScrollFrame", nil, macroEditorDialog, "ScrollFrameTemplate")
-    bodyScroll:SetSize(370, 160)
-    bodyScroll:SetPoint("TOPLEFT", bodyLabel, "BOTTOMLEFT", 0, -4)
-    DF.GUI.StyleScrollBar(bodyScroll)
-
-    local bodyBg = CreateFrame("Frame", nil, bodyScroll, "BackdropTemplate")
-    bodyBg:SetAllPoints(bodyScroll)
-    bodyBg:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Body text area
+    local bodyArea = DF.GUI:CreateTextArea(macroEditorDialog, {
+        width = 370, height = 160,
+        fontSize = 11,
+        insets   = 6,
+        text     = existingMacro and existingMacro.body or "#showtooltip\n",
     })
-    bodyBg:SetBackdropColor(0, 0, 0, 0.5)
-    bodyBg:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-    bodyBg:SetFrameLevel(bodyScroll:GetFrameLevel() - 1)
-    
-    -- Body edit box
-    local bodyInput = CreateFrame("EditBox", nil, bodyScroll)
-    bodyInput:SetSize(360, 160)
-    DF.GUI:SetSettingsFont(bodyInput, 11, "")
-    bodyInput:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    bodyInput:SetMultiLine(true)
-    bodyInput:SetAutoFocus(false)
-    bodyInput:SetTextInsets(6, 6, 6, 6)
-    bodyInput:SetText(existingMacro and existingMacro.body or "#showtooltip\n")
+    bodyArea:SetPoint("TOPLEFT", bodyLabel, "BOTTOMLEFT", 0, -4)
+    local bodyInput = bodyArea.EditBox
     bodyInput:SetEnabled(not isImported)
-    bodyScroll:SetScrollChild(bodyInput)
-    
+
     local function UpdateCharCount()
         local text = bodyInput:GetText() or ""
         local len = #text
@@ -1194,21 +1167,21 @@ function CC:ShowMacroEditorDialog(existingMacro)
         deleteBtn:SetPoint("LEFT", cancelBtn, "RIGHT", 8, 0)
         DF.GUI:StyleButton(deleteBtn, { width = 80, height = 28, text = L["Delete"], tone = "danger" })
         deleteBtn:SetScript("OnClick", function()
-            StaticPopupDialogs["DF_CONFIRM_DELETE_MACRO"] = {
-                text = format(L["Delete macro '%s'?\nAny bindings using this macro will be removed."], existingMacro.name),
-                button1 = L["Delete"],
-                button2 = L["Cancel"],
-                OnAccept = function()
-                    CC:DeleteMacro(existingMacro.id)
-                    CC:RefreshSpellGrid()
-                    thisDialog:Hide()
-                    -- Macro deleted
-                end,
-                timeout = 0,
-                whileDead = true,
-                hideOnEscape = true,
-            }
-            ShowPopupOnTop("DF_CONFIRM_DELETE_MACRO")
+            DF:ShowPopupAlert({
+                title   = L["Delete Macro"],
+                message = format(L["Delete macro '%s'?\nAny bindings using this macro will be removed."], existingMacro.name),
+                buttons = {
+                    {
+                        label = L["Delete"],
+                        onClick = function()
+                            CC:DeleteMacro(existingMacro.id)
+                            CC:RefreshSpellGrid()
+                            thisDialog:Hide()
+                        end,
+                    },
+                    { label = L["Cancel"] },
+                },
+            })
         end)
     end
     
@@ -1219,21 +1192,21 @@ function CC:ShowMacroEditorDialog(existingMacro)
         deleteBtn:SetPoint("LEFT", cancelBtn, "RIGHT", 8, 0)
         DF.GUI:StyleButton(deleteBtn, { width = 80, height = 28, text = L["Delete"], tone = "danger" })
         deleteBtn:SetScript("OnClick", function()
-            StaticPopupDialogs["DF_CONFIRM_DELETE_IMPORTED_MACRO"] = {
-                text = format(L["Delete imported macro '%s'?\nAny bindings using this macro will be removed.\n\n(The original WoW macro will not be affected)"], existingMacro.name),
-                button1 = L["Delete"],
-                button2 = L["Cancel"],
-                OnAccept = function()
-                    CC:DeleteMacro(existingMacro.id)
-                    CC:RefreshSpellGrid()
-                    thisDialog:Hide()
-                    -- Macro deleted
-                end,
-                timeout = 0,
-                whileDead = true,
-                hideOnEscape = true,
-            }
-            ShowPopupOnTop("DF_CONFIRM_DELETE_IMPORTED_MACRO")
+            DF:ShowPopupAlert({
+                title   = L["Delete Macro"],
+                message = format(L["Delete imported macro '%s'?\nAny bindings using this macro will be removed.\n\n(The original WoW macro will not be affected)"], existingMacro.name),
+                buttons = {
+                    {
+                        label = L["Delete"],
+                        onClick = function()
+                            CC:DeleteMacro(existingMacro.id)
+                            CC:RefreshSpellGrid()
+                            thisDialog:Hide()
+                        end,
+                    },
+                    { label = L["Cancel"] },
+                },
+            })
         end)
 
         -- Sync button
@@ -1359,13 +1332,10 @@ function CC:ShowIconPickerDialog(onSelect)
         local iconBtn = CreateFrame("Button", nil, iconPickerDialog, "BackdropTemplate")
         iconBtn:SetSize(iconSize, iconSize)
         iconBtn:SetPoint("TOPLEFT", 12 + col * (iconSize + padding), startY - row * (iconSize + padding))
-        iconBtn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        DF.GUI:CreateElementBackdrop(iconBtn, {
+            bgColor     = { 0, 0, 0, 0.3 },
+            borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
         })
-        iconBtn:SetBackdropColor(0, 0, 0, 0.3)
-        iconBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
         
         local tex = iconBtn:CreateTexture(nil, "ARTWORK")
         tex:SetSize(iconSize - 4, iconSize - 4)
@@ -1540,10 +1510,10 @@ function CC:ShowImportMacroDialog()
             local row = CreateFrame("Button", nil, scrollContent, "BackdropTemplate")
             row:SetSize(scrollContent:GetWidth() - 8, 28)
             row:SetPoint("TOPLEFT", 4, -yOffset)
-            row:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8x8",
+            DF.GUI:CreateElementBackdrop(row, {
+                outline = false,
+                bgColor     = { 0, 0, 0, 0 },
             })
-            row:SetBackdropColor(0, 0, 0, 0)
             
             -- Checkbox
             local cb = CreateFrame("CheckButton", nil, row, "BackdropTemplate")
@@ -1581,16 +1551,13 @@ function CC:ShowImportMacroDialog()
             
             row:SetScript("OnEnter", function(self)
                 self:SetBackdropColor(1, 1, 1, 0.05)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine(macro.name, 1, 1, 1)
                 local bodyPreview = macro.body or ""
                 if #bodyPreview > 150 then bodyPreview = bodyPreview:sub(1, 150) .. "..." end
-                GameTooltip:AddLine(bodyPreview, 0.7, 0.7, 0.7, true)
-                GameTooltip:Show()
+                DF.GUI:ShowTooltip(self, { title = macro.name, lines = { bodyPreview } })
             end)
             row:SetScript("OnLeave", function(self)
                 self:SetBackdropColor(0, 0, 0, 0)
-                GameTooltip:Hide()
+                DF.GUI:HideTooltip()
             end)
             row:SetScript("OnClick", function()
                 cb:Click()
@@ -1802,10 +1769,10 @@ function CC:ShowQuickMacroDialog()
         local btn = CreateFrame("Button", nil, quickMacroDialog, "BackdropTemplate")
         btn:SetSize(390, 22)
         btn:SetPoint("TOPLEFT", 12, yOffset)
-        btn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
+        DF.GUI:CreateElementBackdrop(btn, {
+            outline = false,
+            bgColor     = { 0, 0, 0, 0 },
         })
-        btn:SetBackdropColor(0, 0, 0, 0)
         
         local radio = CreateFrame("Button", nil, btn, "BackdropTemplate")
         radio:SetPoint("LEFT", 4, 0)

@@ -2,6 +2,7 @@ local addonName, DF = ...
 
 -- Get module namespace
 local CC = DF.ClickCast
+local L = DF.L
 
 -- Local aliases for shared constants (defined in Constants.lua)
 local DEFAULT_BINDING = CC.DEFAULT_BINDING
@@ -1205,19 +1206,6 @@ function CC:FindKeyConflicts(newBinding, excludeIndex)
 end
 
 -- Enable/disable click-casting
--- Static popup for reload confirmation after toggling click-casting
-StaticPopupDialogs["DANDERSFRAMES_CLICKCAST_RELOAD"] = {
-    text = "Click-casting changes require a UI reload to take effect.\n\nReload now?",
-    button1 = "Reload",
-    button2 = "Later",
-    OnAccept = function()
-        ReloadUI()
-    end,
-    timeout = 0,
-    whileDead = true,
-    hideOnEscape = true,
-}
-
 function CC:SetEnabled(enabled)
     -- Track whether the state is actually changing (callers may set db.enabled
     -- before calling this, so compare against the profile copy which is the
@@ -1241,7 +1229,14 @@ function CC:SetEnabled(enabled)
     -- Prevents a spurious reload popup on every login when the user has
     -- ignored the conflict warning (Clicked coexistence).
     if enabled ~= wasEnabled then
-        StaticPopup_Show("DANDERSFRAMES_CLICKCAST_RELOAD")
+        DF:ShowPopupAlert({
+            title   = L["Reload Required"],
+            message = L["Click-casting changes require a UI reload to take effect.\n\nReload now?"],
+            buttons = {
+                { label = L["Reload"], onClick = function() ReloadUI() end },
+                { label = L["Later"] },
+            },
+        })
     end
 end
 

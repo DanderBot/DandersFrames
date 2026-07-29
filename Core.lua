@@ -559,65 +559,7 @@ function DF:LightweightUpdateBorder()
     IterateFramesInMode(mode, UpdateBorder)
 end
 
--- Update only text font size
-function DF:LightweightUpdateFontSize(textType)
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    local function UpdateFont(frame)
-        if not frame then return end
-        
-        if textType == "name" and frame.nameText then
-            local fontPath = db.nameFont or "Fonts\\FRIZQT__.TTF"
-            local fontOutline = db.nameTextOutline or "OUTLINE"
-            if fontOutline == "NONE" then fontOutline = "" end
-            local size = db.nameFontSize or 12
-            DF:SafeSetFont(frame.nameText, fontPath, size, fontOutline)
-        elseif textType == "health" and frame.healthText then
-            local fontPath = db.healthFont or "Fonts\\FRIZQT__.TTF"
-            local fontOutline = db.healthTextOutline or "OUTLINE"
-            if fontOutline == "NONE" then fontOutline = "" end
-            local size = db.healthFontSize or 11
-            DF:SafeSetFont(frame.healthText, fontPath, size, fontOutline)
-        elseif textType == "status" and frame.statusText then
-            local fontPath = db.statusTextFont or "Fonts\\FRIZQT__.TTF"
-            local fontOutline = db.statusTextOutline or "OUTLINE"
-            if fontOutline == "NONE" then fontOutline = "" end
-            local size = db.statusTextFontSize or 10
-            DF:SafeSetFont(frame.statusText, fontPath, size, fontOutline)
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateFont)
-end
 
--- Update text position
-function DF:LightweightUpdateTextPosition(textType)
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    local function UpdatePos(frame)
-        if not frame then return end
-        
-        if textType == "name" and frame.nameText then
-            frame.nameText:ClearAllPoints()
-            local anchor = db.nameTextAnchor or "TOP"
-            frame.nameText:SetPoint(anchor, frame, anchor, db.nameTextX or 0, db.nameTextY or 0)
-        elseif textType == "health" and frame.healthText then
-            frame.healthText:ClearAllPoints()
-            local anchor = db.healthTextAnchor or "CENTER"
-            frame.healthText:SetPoint(anchor, frame, anchor, db.healthTextX or 0, db.healthTextY or 0)
-        elseif textType == "status" and frame.statusText then
-            frame.statusText:ClearAllPoints()
-            local anchor = db.statusTextAnchor or "BOTTOM"
-            frame.statusText:SetPoint(anchor, frame, anchor, db.statusTextX or 0, db.statusTextY or 0)
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdatePos)
-end
 
 -- Update icon scale/position
 function DF:LightweightUpdateIconPosition(iconType)
@@ -647,12 +589,6 @@ function DF:LightweightUpdateIconPosition(iconType)
             x = db.readyCheckIconX or 0
             y = db.readyCheckIconY or 0
             anchor = db.readyCheckIconAnchor or "CENTER"
-        elseif iconType == "centerStatus" then
-            icon = frame.centerStatusIcon
-            scale = db.centerStatusIconScale or 1
-            x = db.centerStatusIconX or 0
-            y = db.centerStatusIconY or 0
-            anchor = db.centerStatusIconAnchor or "CENTER"
         elseif iconType == "leader" then
             icon = frame.leaderIcon
             scale = db.leaderIconScale or 1
@@ -1214,6 +1150,10 @@ function DF:LightweightUpdateFrameLevel(elementType)
         vehicle      = "vehicleIcon",
         raidRole     = "raidRoleIcon",
         summon       = "summonIcon",
+        -- These two had a slider and an export entry but no live consumer: their
+        -- Frame Level only ever applied in test mode. Wired here 2026-07-25.
+        bgCarrier    = "bgCarrierIcon",
+        combat       = "combatIcon",
     }
 
     local function UpdateLevel(frame)
@@ -1223,52 +1163,22 @@ function DF:LightweightUpdateFrameLevel(elementType)
         local frameBaseLevel = frame:GetFrameLevel()
         
         if elementType == "absorb" and frame.dfAbsorbBar then
-            local level = db.absorbBarFrameLevel or 10
-            frame.dfAbsorbBar:SetFrameLevel(level)
+            frame.dfAbsorbBar:SetFrameLevel(frame:GetFrameLevel() + (db.absorbBarFrameLevel or 11))
         elseif elementType == "role" and frame.roleIcon then
-            local level = db.roleIconFrameLevel or 0
-            if level > 0 then
-                frame.roleIcon:SetFrameLevel(frameBaseLevel + level)
-            else
-                frame.roleIcon:SetFrameLevel(baseLevel + 5)
-            end
+            frame.roleIcon:SetFrameLevel(frameBaseLevel + (db.roleIconFrameLevel or 30))
         elseif elementType == "leader" and frame.leaderIcon then
-            local level = db.leaderIconFrameLevel or 0
-            if level > 0 then
-                frame.leaderIcon:SetFrameLevel(frameBaseLevel + level)
-            else
-                frame.leaderIcon:SetFrameLevel(baseLevel + 5)
-            end
+            frame.leaderIcon:SetFrameLevel(frameBaseLevel + (db.leaderIconFrameLevel or 30))
         elseif elementType == "raidTarget" and frame.raidTargetIcon then
-            local level = db.raidTargetIconFrameLevel or 0
-            if level > 0 then
-                frame.raidTargetIcon:SetFrameLevel(frameBaseLevel + level)
-            else
-                frame.raidTargetIcon:SetFrameLevel(baseLevel + 5)
-            end
+            frame.raidTargetIcon:SetFrameLevel(frameBaseLevel + (db.raidTargetIconFrameLevel or 30))
         elseif elementType == "readyCheck" and frame.readyCheckIcon then
-            local level = db.readyCheckIconFrameLevel or 0
-            if level > 0 then
-                frame.readyCheckIcon:SetFrameLevel(frameBaseLevel + level)
-            else
-                frame.readyCheckIcon:SetFrameLevel(baseLevel + 5)
-            end
-        elseif elementType == "centerStatus" and frame.centerStatusIcon then
-            local level = db.centerStatusIconFrameLevel or 0
-            if level > 0 then
-                frame.centerStatusIcon:SetFrameLevel(frameBaseLevel + level)
-            else
-                frame.centerStatusIcon:SetFrameLevel(baseLevel + 5)
-            end
+            frame.readyCheckIcon:SetFrameLevel(frameBaseLevel + (db.readyCheckIconFrameLevel or 30))
         else
             -- resurrection / phased / afk / vehicle / raidRole / summon icons
             local field = SIMPLE_LEVEL_ICONS[elementType]
             local icon = field and frame[field]
             if icon then
-                local level = db[field .. "FrameLevel"] or 0
-                if level > 0 then
-                    icon:SetFrameLevel(icon:GetParent():GetParent():GetFrameLevel() + level)
-                end
+                local level = db[field .. "FrameLevel"] or 30
+                icon:SetFrameLevel(icon:GetParent():GetParent():GetFrameLevel() + level)
             end
         end
     end
@@ -1846,77 +1756,6 @@ function DF:LightweightUpdateBorderColor()
     IterateFramesInMode(mode, UpdateFrame)
 end
 
-function DF:LightweightUpdateTextColor(textType)
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    -- Check if we're in test mode
-    local inTestMode = (mode == "raid" and DF.raidTestMode) or (mode == "party" and DF.testMode)
-    
-    -- Map text type to correct color key and frame property
-    local colorKey, textKey
-    if textType == "name" then
-        -- Skip if using class color for names
-        if db.nameTextUseClassColor then return end
-        colorKey = "nameTextColor"
-        textKey = "nameText"
-    elseif textType == "health" then
-        -- Skip if using class color for health text
-        if db.healthTextUseClassColor then return end
-        colorKey = "healthTextColor"
-        textKey = "healthText"
-    elseif textType == "status" then
-        colorKey = "statusTextColor"
-        textKey = "statusText"
-    else
-        return
-    end
-    
-    local function UpdateFrame(frame, index)
-        if not frame or not frame[textKey] then return end
-        if not db[colorKey] then return end
-        
-        local c = db[colorKey]
-        local alpha = c.a or 1
-        
-        -- In test mode, respect OOR and dead fade alphas
-        if inTestMode then
-            local isRaid = frame.isRaidFrame
-            local testData = DF:GetTestUnitData(index, isRaid)
-            
-            if testData then
-                -- Check if OOR first (OOR takes priority over dead fade)
-                if db.testShowOutOfRange and testData.outOfRange then
-                    if textType == "name" then
-                        if db.oorEnabled then
-                            alpha = db.oorTextAlpha or 0.55
-                        else
-                            alpha = db.rangeFadeAlpha or 0.55
-                        end
-                    elseif textType == "health" then
-                        if db.oorEnabled then
-                            alpha = db.oorTextAlpha or 0.55
-                        else
-                            alpha = db.rangeFadeAlpha or 0.55
-                        end
-                    end
-                -- Dead fade only applies when in range
-                elseif testData.status and db.fadeDeadFrames then
-                    if textType == "name" then
-                        alpha = db.fadeDeadName or 1.0
-                    elseif textType == "status" then
-                        alpha = db.fadeDeadStatusText or 1.0
-                    end
-                end
-            end
-        end
-        
-        frame[textKey]:SetTextColor(c.r, c.g, c.b, alpha)
-    end
-    
-    IterateFramesInMode(mode, function(frame) UpdateFrame(frame, 0) end)
-end
 
 function DF:LightweightUpdateAbsorbBarColor()
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
@@ -2082,7 +1921,7 @@ function DF:LightweightUpdateResourceBarFrameLevel()
     local db = DF.db[mode]
     if not db then return end
     
-    local frameLevelOffset = db.resourceBarFrameLevel or 2
+    local frameLevelOffset = db.resourceBarFrameLevel or 20
     
     local function UpdateFrame(frame)
         if not frame or not frame.dfPowerBar then return end
@@ -2103,13 +1942,6 @@ end
 -- (DF:LightweightUpdateDispelColors was removed with the dispel Custom Colors
 -- mode, 2026-07-11 — its per-type picker callbacks were its only callers.)
 
--- Update debuff border colors directly (for test mode preview only)
--- Note: icon.debuffType is only set in test mode, so this only affects test frames
-function DF:LightweightUpdateDebuffBorderColors()
-    -- 12.1: the container rows own this styling; bump the layout version and
-    -- re-drive them so the change applies live (sig-gated, cheap when unchanged).
-    DF:InvalidateAuraLayout()
-end
 
 -- ============================================================
 -- UTF-8 STRING HELPERS
@@ -2955,6 +2787,115 @@ function DF:MigrateDeprecateRaidGroupOrder()
     end
 end
 
+
+-- One-time conversion to ABSOLUTE frame levels (v5.0.0-alpha.12).
+-- Before: 0 was a SENTINEL meaning "use my built-in default", and that default differed
+-- per element (status icons contentOverlay+5, missing buff contentOverlay+10, defensive 51),
+-- while the Aura Designer slider was an offset silently added to 40. Two sliders both
+-- reading 0 therefore rendered at different heights, and 0 was unreachable as a real value.
+-- After: the stored number IS the offset from the unit frame everywhere, so 50 sits above 40.
+-- Converts stored values so nothing MOVES; only the number shown changes. Per-profile
+-- guarded and idempotent.
+local ABS_LEVEL_SENTINEL_DEFAULT = {
+    roleIconFrameLevel = 30, leaderIconFrameLevel = 30, raidTargetIconFrameLevel = 30,
+    readyCheckIconFrameLevel = 30, centerStatusIconFrameLevel = 30, resurrectionIconFrameLevel = 30,
+    phasedIconFrameLevel = 30, afkIconFrameLevel = 30, vehicleIconFrameLevel = 30,
+    raidRoleIconFrameLevel = 30, summonIconFrameLevel = 30, bgCarrierIconFrameLevel = 30,
+    combatIconFrameLevel = 30, missingBuffIconFrameLevel = 35, defensiveIconFrameLevel = 65,
+}
+-- These were not sentinels: the render added a fixed base to whatever was stored, so EVERY
+-- value shifts by that base (including 0).
+local ABS_LEVEL_ADDEND = { targetedSpellFrameLevel = 30 }
+
+function DF:MigrateAbsoluteFrameLevels()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        if type(profile) == "table" and not profile._absoluteFrameLevelsV1 then
+            for _, mode in ipairs({ "party", "raid" }) do
+                local modeDb = profile[mode]
+                if type(modeDb) == "table" then
+                    for key, builtin in pairs(ABS_LEVEL_SENTINEL_DEFAULT) do
+                        -- Only 0 carried the sentinel meaning; a real value was already an
+                        -- offset from the unit frame and is left exactly as the user set it.
+                        if modeDb[key] == 0 or modeDb[key] == nil then modeDb[key] = builtin end
+                    end
+                    for key, addend in pairs(ABS_LEVEL_ADDEND) do
+                        modeDb[key] = (tonumber(modeDb[key]) or 0) + addend
+                    end
+                    -- Aura Designer global default: the render added 40 to it.
+                    local ad = modeDb.auraDesigner
+                    if type(ad) == "table" and type(ad.defaults) == "table" then
+                        ad.defaults.indicatorFrameLevel = (tonumber(ad.defaults.indicatorFrameLevel) or 0) + 40
+                    end
+                end
+            end
+            profile._absoluteFrameLevelsV1 = true
+        end
+
+        -- V2 (alpha-only correction). V1 wrote the defensive baseline as 51, the legacy
+        -- value. A /df zorder dump then showed 51 is BROKEN: an aura row is ~16 levels
+        -- thick, so the buff/debuff rows (base 40) reach 60 and draw over the defensive
+        -- button at 57. The baseline moved to 65, but a profile that already ran V1 has a
+        -- stored 51 that nothing would ever revisit -- Config defaults only fill MISSING
+        -- keys. Correct that one value in place.
+        --
+        -- Deliberately NOT folded into V1: V1 also shifts targetedSpell by +30 and the AD
+        -- default by +40, so re-running it under a new flag would double-shift both.
+        --
+        -- Only touches the exact broken value, and only on a profile V1 has stamped, so a
+        -- fresh install (already 65) and a deliberate non-51 choice are both left alone.
+        if type(profile) == "table" and profile._absoluteFrameLevelsV1
+           and not profile._defensiveBaselineV2 then
+            for _, mode in ipairs({ "party", "raid" }) do
+                local modeDb = profile[mode]
+                if type(modeDb) == "table" and modeDb.defensiveIconFrameLevel == 51 then
+                    modeDb.defensiveIconFrameLevel = 65
+                end
+            end
+            profile._defensiveBaselineV2 = true
+        end
+    end
+end
+
+-- A profile created from Config defaults is ALREADY in the current shape, so every
+-- one-time migration has to treat it as done. Most migrations here derive from a
+-- legacy value and are naturally no-ops on a fresh profile (the rule stated in the
+-- ADDON_LOADED block). The exceptions are the ones that write UNCONDITIONALLY behind
+-- a profile-stored flag -- and because that flag is not part of Config, a brand-new
+-- profile did not carry it and got shifted:
+--   * MigrateAbsoluteFrameLevels  -- targetedSpellFrameLevel 30 -> 60,
+--     auraDesigner.defaults.indicatorFrameLevel 40 -> 80 (both already ABSOLUTE in
+--     Config; the render's own `or 30` / `or 40` fallbacks prove it).
+--   * MigratePersonalContainerPosition -- personalTargetedSpellX 0 -> 92.
+-- On a fresh install the AD value was then folded into the Party/Raid designer
+-- preset on first login, making it permanent.
+--
+-- The flag cannot simply be added to PartyDefaults: the defaults backfill runs
+-- BEFORE MigratePersonalContainerPosition, so legacy profiles would be stamped as
+-- migrated before they actually migrated. Stamp at CREATION instead.
+--
+-- Any future migration that cannot derive its answer from a legacy value must list
+-- its flag here as well as writing it.
+local FRESH_PROFILE_MIGRATION_FLAGS = {
+    _absoluteFrameLevelsV1 = true,
+    _defensiveBaselineV2   = true,
+}
+local FRESH_PROFILE_PARTY_MIGRATION_FLAGS = {
+    _personalContainerCenterMigrated = true,
+}
+
+function DF:StampFreshProfileMigrations(profile)
+    if type(profile) ~= "table" then return end
+    for k, v in pairs(FRESH_PROFILE_MIGRATION_FLAGS) do
+        profile[k] = v
+    end
+    if type(profile.party) == "table" then
+        for k, v in pairs(FRESH_PROFILE_PARTY_MIGRATION_FLAGS) do
+            profile.party[k] = v
+        end
+    end
+end
+
 -- Transition shim (unreleased-only): an earlier iteration of the priority flip
 -- converted values to the new higher-wins scale and then stamped a COARSE flag —
 -- profile-level for Aura Designer, store-level for Click Casting. The replacement
@@ -3069,6 +3010,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 },
                 wizardConfigs = {},
             }
+            -- Born from current defaults => every one-time migration is already done.
+            DF:StampFreshProfileMigrations(DandersFramesDB_v2.profiles["Default"])
         end
         
         -- Initialize per-character saved variables
@@ -3200,9 +3143,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 linkedSections = {},
                 partyEnabled = true,
                 raidEnabled = true,
-                settingsFont = "Friz Quadrata TT",
+                -- Current default, not the pre-Roboto face: seeding Friz here made a
+                -- freshly created profile flip its settings font by itself on the
+                -- next reload (the _settingsFontRobotoDefaultV1 pass below).
+                settingsFont = "DF Roboto SemiBold",
                 settingsFontOutline = "NONE",
             }
+            -- Born from current defaults => every one-time migration is already done.
+            DF:StampFreshProfileMigrations(DandersFramesDB_v2.profiles["Default"])
         end
         
         -- Set current profile (per-character takes priority over account-wide)
@@ -3267,6 +3215,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- DF.db.roleColors so the global Colors settings page manages them.
         if DF.MigrateRoleBorderColors then
             DF:MigrateRoleBorderColors()
+        end
+        -- Frame Level sliders now store an ABSOLUTE offset from the unit frame
+        -- rather than 0-as-sentinel; convert stored values so nothing moves.
+        if DF.MigrateAbsoluteFrameLevels then
+            DF:MigrateAbsoluteFrameLevels()
         end
         
         -- Ensure classColors table exists (shared across party/raid)
@@ -3396,8 +3349,22 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         if ad.defaults.indicatorFrameStrata == nil then
                             ad.defaults.indicatorFrameStrata = "INHERIT"
                         end
+                        -- 40, matching the Config baseline. This value is ABSOLUTE:
+                        -- AuraDesigner/Factory.lua resolves it as
+                        --   level = (d and tonumber(d.indicatorFrameLevel)) or 40
+                        -- so nothing adds a base to it, and the `or 40` is only a
+                        -- fallback for a MISSING key. Seeding 0 therefore did not mean
+                        -- "baseline" — 0 is truthy in Lua, so it beat the fallback and
+                        -- dropped every untouched indicator from 40 to 0.
+                        --
+                        -- Reachable for any profile with an auraDesigner subtable but no
+                        -- defaults table: MigrateAbsoluteFrameLevels skips those (it
+                        -- requires defaults to already be a table), which leaves this
+                        -- seed as the only thing that ever fills the key.
+                        --
+                        -- Only ever SEEDS a missing key — a stored value is left alone.
                         if ad.defaults.indicatorFrameLevel == nil then
-                            ad.defaults.indicatorFrameLevel = 30
+                            ad.defaults.indicatorFrameLevel = 40
                         end
                     end
                 end
@@ -4326,13 +4293,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
             local popup = CreateFrame("Frame", "DFNephUIPopup", UIParent, "BackdropTemplate")
             popup:SetSize(420, 240)
             popup:SetPoint("CENTER")
-            popup:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8x8",
-                edgeFile = "Interface\\Buttons\\WHITE8x8",
-                edgeSize = 2,
+            DF.GUI:CreateElementBackdrop(popup, {
+                edgeSize    = 2,
+                bgColor     = { 0.1, 0.1, 0.1, 0.98 },
+                borderColor = { themeColor.r, themeColor.g, themeColor.b, 1 },
             })
-            popup:SetBackdropColor(0.1, 0.1, 0.1, 0.98)
-            popup:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
             popup:SetFrameStrata("FULLSCREEN_DIALOG")
             popup:SetFrameLevel(200)
             popup:EnableMouse(true)
@@ -4452,6 +4417,58 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 return
             end
 
+            -- "/df zorder" — dump the REAL resolved frame levels for every aura row on
+            -- the first shown frame. Static reading says defensive (+51) must draw over
+            -- debuffs (+40); when the screen disagrees, this says which link in the chain
+            -- (anchor frame -> CustomAuraContainer -> button -> DF art host) breaks it.
+            if msg == "zorder" then
+                -- unitFrameMap is the addon-wide unit -> frame index (Headers.lua);
+                -- prefer a frame that actually has a defensive row to report on.
+                local frame
+                for _, f in pairs(DF.unitFrameMap or {}) do
+                    if f and f:IsShown() then
+                        frame = frame or f
+                        if f.defensiveFactory then frame = f break end
+                    end
+                end
+                if not frame then
+                    print("|cffff9900DandersFrames:|r no shown frame — enable test mode first.")
+                    return
+                end
+                print(("|cff00ff00DF z-order|r  unit=%s  frame level=%d  strata=%s")
+                    :format(tostring(frame.unit), frame:GetFrameLevel(), tostring(frame:GetFrameStrata())))
+                local rows = {
+                    { "buff", frame.buffFactory }, { "debuff", frame.debuffFactory },
+                    { "defensive", frame.defensiveFactory },
+                }
+                for _, row in ipairs(rows) do
+                    local name, h = row[1], row[2]
+                    if not h then
+                        print(("  %-10s |cff888888(no handle)|r"):format(name))
+                    else
+                        local hf = h.GetFrame and h:GetFrame()
+                        local cont = h.backend and h.backend.container
+                        local btn = h.buttons and h.buttons[1]
+                        print(("  %-10s anchor=%s  container=%s  button1=%s  cfgOffset=%s  strata=%s")
+                            :format(name,
+                                hf and tostring(hf:GetFrameLevel()) or "-",
+                                cont and tostring(cont:GetFrameLevel()) or "-",
+                                btn and tostring(btn:GetFrameLevel()) or "-",
+                                tostring(h.config and h.config.frameLevelOffset or "nil(->40)"),
+                                hf and tostring(hf:GetFrameStrata()) or "-"))
+                        -- Any DF-owned art parented to the first button (border host etc.)
+                        if btn then
+                            for _, k in ipairs({ "dfBorderHost", "dfBorder", "dfCD", "dfBar" }) do
+                                local w = btn[k]
+                                if w and w.GetFrameLevel then
+                                    print(("      .%-14s level=%d"):format(k, w:GetFrameLevel()))
+                                end
+                            end
+                        end
+                    end
+                end
+                return
+            end
             if msg == "unlock" then
                 if DF.UnlockFrames then DF:UnlockFrames() end
             elseif msg == "lock" then
@@ -4492,6 +4509,35 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     DF.GUIFrame:Show()
                 end
                 print("|cff00ff00DandersFrames:|r " .. L["GUI reset to default size, scale, and position."])
+            elseif msg == "pixelcheck" then
+                -- Measures the open settings page against the device pixel grid.
+                -- Separates "border split across two rows" from "border cut off by
+                -- the scroll frame's clip edge" -- the two look the same on screen.
+                if DF.GUI and DF.GUI.PixelCheck then
+                    DF.GUI.PixelCheck()
+                else
+                    print("|cff00ff00DandersFrames:|r GUI module not loaded.")
+                end
+            elseif msg == "gapcheck" or msg == "gapcheck all" or msg == "gapcheck clear" then
+                -- Measures the vertical rhythm of the open page: how much slack
+                -- each row type carries below it, and the gap that actually lands
+                -- between stacked rows. RowHeight sets SLOTS, not gaps. Also
+                -- persists the raw rows to DandersFramesDebugDB for offline
+                -- analysis -- a hundred rows is not readable in the chat frame.
+                if DF.GUI and DF.GUI.GapCheck then
+                    DF.GUI.GapCheck(msg:match("^gapcheck%s+(%a+)$"))
+                else
+                    print("|cff00ff00DandersFrames:|r GUI module not loaded.")
+                end
+            elseif msg == "navprobe" or msg:match("^navprobe%s+%d+$") then
+                -- Traces the left nav's hover state to separate a stale plate /
+                -- focus thrash / a dead band between rows from a pure rendering
+                -- artefact. All four look the same on screen.
+                if DF.GUI and DF.GUI.NavProbe then
+                    DF.GUI.NavProbe(tonumber(msg:match("(%d+)$")))
+                else
+                    print("|cff00ff00DandersFrames:|r GUI module not loaded.")
+                end
             elseif msg == "overrides" then
                 if DF.AutoProfilesUI and DF.AutoProfilesUI.PrintOverrides then
                     DF.AutoProfilesUI:PrintOverrides()
@@ -4509,6 +4555,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 print("  |cff00ff00/df clearoverride <key|all>|r - " .. L["clear stuck auto-layout overrides"])
                 print("  |cff00ff00/df resetgui|r - " .. L["reset settings window size/position"])
                 print("  |cff00ff00/df reset|r - |cffff6060" .. L["reset party + raid profiles to defaults"] .. "|r")
+                print("  |cff00ff00/df pixelcheck|r - " .. L["measure the open settings page against the pixel grid"])
+                print("  |cff00ff00/df navprobe [secs]|r - " .. L["trace the left nav's hover state while you move the cursor"])
+                print("  |cff00ff00/df gapcheck [all|clear]|r - " .. L["measure the spacing between rows on the open settings page"])
                 print("  |cff00ff00/df console|r - " .. L["open the debug console page"])
                 print("  |cff00ff00/df debug|r - " .. L["list debug commands (on/off toggles debug logging)"])
             elseif msg == "test" then
@@ -4539,7 +4588,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- /df subcommand diagnostics (hand-listed — keep in sync with this handler)
                 print("  |cffffcc00" .. L["/df diagnostics"] .. ":|r")
                 print("    |cff00ff00/df exportaudit|r - " .. L["export category drift check"])
-                print("    |cff00ff00/df blocked|r - " .. L["settings disabled by the 12.1 aura system"])
                 print("    |cff00ff00/df overrides|r - " .. L["active auto-layout overrides"])
                 print("    |cff00ff00/df attached|r - " .. L["foreign frames anchored to ours"])
                 print("    |cff00ff00/df headers|r / |cff00ff00auras|r / |cff00ff00dispel|r - " .. L["subsystem state dumps"])
@@ -4788,12 +4836,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     DF.FilterRegistry:AuditSpellData()
                 else
                     print("|cffff0000DandersFrames:|r Filter Registry not available")
-                end
-            elseif msg == "blocked" then
-                -- Dev: inventory of settings disabled by the 12.1 aura system
-                -- (the running "what we've lost / restored" audit).
-                if DF.PrintBlockedSettings then
-                    DF:PrintBlockedSettings()
                 end
             elseif msg == "testids" then
                 -- Dev: audit the test pool's spell IDs against this client —
@@ -5220,30 +5262,20 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end)
 
-        -- Show the Targeted Spells opt-in setup wizard once per account.
-        -- The feature defaults OFF; this wizard explains what it does, its
-        -- limitations, and that it relies on unsupported Blizzard behaviour
-        -- before letting the user turn it on. Mark seen at schedule time so a
-        -- close/cancel still counts (no re-nag on the next login).
-        if DandersFramesDB_v2 and not DandersFramesDB_v2.targetedSpellWizardSeen then
-            DandersFramesDB_v2.targetedSpellWizardSeen = true
-            if DF.ShowTargetedSpellSetupWizard then
-                -- Delay so it doesn't fight the loading screen. Longer than the
-                -- Aura Setup wizard's 3s so the two don't collide on a brand-new
-                -- account that qualifies for both; if a popup is already showing
-                -- when we fire, wait a bit and retry once rather than stomp it.
-                local function ShowTSWizard(attempt)
-                    if DF.IsPopupShown and DF:IsPopupShown() then
-                        if attempt < 3 then
-                            C_Timer.After(5, function() ShowTSWizard(attempt + 1) end)
-                        end
-                        return
-                    end
-                    DF:ShowTargetedSpellSetupWizard()
-                end
-                C_Timer.After(5, function() ShowTSWizard(1) end)
-            end
-        end
+        -- ⚰ DEPRECATED-TARGETED-SPELLS — the once-per-account Targeted Spells
+        -- setup wizard used to fire here, 5s after login, offering to turn the
+        -- feature on. It cannot stay: the feature is force-disabled at load
+        -- (ForceDisableGroupTargetedSpellSettings) and its settings page is no
+        -- longer in the sidebar, so the wizard would sell a feature that can
+        -- neither run nor be configured, and its "Open settings" button would
+        -- land on a page with no nav row.
+        --
+        -- DF:ShowTargetedSpellSetupWizard itself is untouched in
+        -- Features\TargetedSpells.lua — only the auto-fire is gone. Restoring it
+        -- means putting this block back, with its 5s delay, its retry-if-a-popup-
+        -- is-up loop, and the mark-seen-at-schedule-time behaviour (so a cancel
+        -- still counts and doesn't re-nag next login). The saved flag
+        -- DandersFramesDB_v2.targetedSpellWizardSeen is deliberately left alone.
 
     elseif event == "GROUP_ROSTER_UPDATE" then
         if DF.RosterDebugEvent then DF:RosterDebugEvent("Core.lua:GROUP_ROSTER_UPDATE") end
@@ -5470,8 +5502,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 end
             end
             
+            -- Both mode flags are down now, so hand the shared engine state back:
+            -- the aura data provider and the pinned preview. This path clears the
+            -- flags inline rather than going through HideTestFrames, and skipping
+            -- the handback used to strand C_UnitAuras on the SAMPLE provider for
+            -- the rest of the session -- and the state driver below shows the LIVE
+            -- frames in combat, so they rendered fake auras.
+            DF:TeardownTestModeEngines()
+
             print("|cffff9900DandersFrames:|r " .. L["Test mode ended — entering combat."])
-            
+
             -- Switch from test mode state drivers ([combat] conditions) to group
             -- transition drivers ([group:raid] conditions) so frames stay visible
             -- when combat ends (avoids flicker before UpdateHeaderVisibility runs)

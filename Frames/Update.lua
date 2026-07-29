@@ -5,6 +5,10 @@ local addonName, DF = ...
 -- Contains frame update and layout functions
 -- ============================================================
 
+-- Core.lua sets DF.L and is listed well before this file in the .toc, so grabbing
+-- it at file scope is safe -- the same thing TextDesigner/Resolver.lua does.
+local L = DF.L
+
 -- Local caching of frequently used globals and WoW API for performance.
 -- Audit finding #3 (2026-04-06): UpdateHealthFast and UpdatePower are
 -- called once per unit per UNIT_HEALTH / UNIT_POWER event, and each
@@ -341,17 +345,6 @@ function DF:ApplyFrameLayout(frame)
     end
     
     -- ========================================
-    -- CENTER STATUS ICON
-    -- ========================================
-    if frame.centerStatusIcon then
-        local centerStatusSize = 16
-        if db.pixelPerfect then
-            centerStatusSize = DF:PixelPerfect(centerStatusSize)
-        end
-        frame.centerStatusIcon:SetSize(centerStatusSize, centerStatusSize)
-    end
-    
-    -- ========================================
     -- RESTED INDICATOR
     -- ========================================
     if frame.restedIndicator then
@@ -398,73 +391,6 @@ function DF:ApplyFrameLayout(frame)
         
         -- Delegate color to ElementAppearance for centralized handling
         DF:UpdateBackgroundAppearance(frame)
-        
-        --[[ TODO CLEANUP: Old background color code - now handled by ElementAppearance
-        local bgMode = db.backgroundColorMode or "CUSTOM"
-        
-        -- For BLACK/BLIZZARD mode, treat as CUSTOM with black color
-        -- This ensures identical code path to avoid any flickering differences
-        local effectiveBgMode = bgMode
-        local effectiveBgColor
-        if bgMode == "BLIZZARD" or bgMode == "BLACK" then
-            effectiveBgMode = "CUSTOM"
-            effectiveBgColor = {r = 0, g = 0, b = 0, a = 0.8}
-        end
-        
-        -- Apply texture (use Solid as fallback for ColorTexture behavior)
-        if bgTexture == "Solid" or bgTexture == "" then
-            -- Solid color mode - update cache and use key tracking to prevent flickering
-            frame.dfCurrentBgTexture = "Solid"
-            if effectiveBgMode == "CUSTOM" then
-                local c = effectiveBgColor or db.backgroundColor or {r = 0.1, g = 0.1, b = 0.1, a = 0.8}
-                local key = string.format("CUSTOM:%.2f:%.2f:%.2f:%.2f", c.r, c.g, c.b, c.a or 0.8)
-                if frame.dfCurrentBgKey ~= key then
-                    frame.background:SetColorTexture(c.r, c.g, c.b, c.a or 0.8)
-                    frame.dfCurrentBgKey = key
-                end
-            elseif effectiveBgMode == "CLASS" then
-                local unit = frame.unit
-                local classColor = {r = 0, g = 0, b = 0}
-                if unit and UnitExists(unit) then
-                    local _, class = UnitClass(unit)
-                    classColor = DF:GetClassColor(class)
-                end
-                local bgAlpha = db.backgroundClassAlpha or 0.3
-                local key = string.format("CLASS:%.2f:%.2f:%.2f:%.2f", classColor.r, classColor.g, classColor.b, bgAlpha)
-                if frame.dfCurrentBgKey ~= key then
-                    frame.background:SetColorTexture(classColor.r, classColor.g, classColor.b, bgAlpha)
-                    frame.dfCurrentBgKey = key
-                end
-            end
-        else
-            -- Textured background - only call SetTexture if texture path changed
-            if frame.dfCurrentBgTexture ~= bgTexture then
-                DF:SafeSetTexture(frame.background, bgTexture)
-                frame.background:SetHorizTile(false)
-                frame.background:SetVertTile(false)
-                frame.dfCurrentBgTexture = bgTexture
-                frame.dfCurrentBgKey = nil  -- Clear key when switching to textured
-            end
-            
-            -- Ensure SetAlpha is 1.0 for textured backgrounds (alpha controlled via vertex color)
-            frame.background:SetAlpha(1.0)
-            
-            -- Always update vertex color (includes alpha)
-            if effectiveBgMode == "CUSTOM" then
-                local c = effectiveBgColor or db.backgroundColor or {r = 0.1, g = 0.1, b = 0.1, a = 0.8}
-                frame.background:SetVertexColor(c.r, c.g, c.b, c.a or 0.8)
-            elseif effectiveBgMode == "CLASS" then
-                local unit = frame.unit
-                local classColor = {r = 0, g = 0, b = 0}
-                if unit and UnitExists(unit) then
-                    local _, class = UnitClass(unit)
-                    classColor = DF:GetClassColor(class)
-                end
-                local bgAlpha = db.backgroundClassAlpha or 0.3
-                frame.background:SetVertexColor(classColor.r, classColor.g, classColor.b, bgAlpha)
-            end
-        end
-        --]]
     end
     
 end
@@ -508,8 +434,6 @@ function DF:UpdateUnitFrame(frame, source)
             -- 1% health if the bar range was 0-100 from a prior SetHealthBarValue call.
             frame.healthBar:SetMinMaxValues(0, 100)
             frame.healthBar:SetValue(100)
-            -- TODO CLEANUP: Color now handled by ElementAppearance via ApplyDeadFade
-            -- frame.healthBar:SetStatusBarColor(0.5, 0.5, 0.5, 1)
         end
         if frame.nameText then
             if hideLegacyText then
@@ -527,15 +451,13 @@ function DF:UpdateUnitFrame(frame, source)
                 end
                 frame.nameText:SetText(name)
                 frame.nameText:Show()
-                -- TODO CLEANUP: Color now handled by ElementAppearance via ApplyDeadFade
-                -- frame.nameText:SetTextColor(0.5, 0.5, 0.5, 1)
             end
         end
         if frame.statusText then
             if hideLegacyText or db.statusTextEnabled == false then
                 frame.statusText:Hide()
             else
-                frame.statusText:SetText("Offline")
+                frame.statusText:SetText(L["Offline"])
                 frame.statusText:Show()
             end
         end
@@ -558,6 +480,14 @@ function DF:UpdateUnitFrame(frame, source)
         -- Apply dead fade for offline units
         DF:ApplyDeadFade(frame, "Offline")
         frame.dfLastKnownConnected = false
+        -- ☠ This branch RETURNS, so the Text Designer render and the
+        -- missing-buff visibility gate further down this function are never
+        -- reached. Without them the TD keeps painting the last ALIVE state
+        -- (a blank status) and the badge keeps claiming "missing" on a unit
+        -- that can no longer be buffed — the field-reported follower-dungeon
+        -- bug. Both are no-ops when nothing changed.
+        if DF.UpdateTextDesigner then DF:UpdateTextDesigner(frame, "all") end
+        if DF.RefreshMissingBuffVisibility then DF:RefreshMissingBuffVisibility(frame) end
         return
     end
 
@@ -571,8 +501,6 @@ function DF:UpdateUnitFrame(frame, source)
         if frame.healthBar then
             frame.healthBar:SetMinMaxValues(0, 100)
             frame.healthBar:SetValue(0)
-            -- TODO CLEANUP: Color now handled by ElementAppearance via ApplyDeadFade
-            -- frame.healthBar:SetStatusBarColor(0.3, 0.3, 0.3, 1)
         end
         if frame.nameText then
             if hideLegacyText then
@@ -590,15 +518,13 @@ function DF:UpdateUnitFrame(frame, source)
                 end
                 frame.nameText:SetText(name)
                 frame.nameText:Show()
-                -- TODO CLEANUP: Color now handled by ElementAppearance via ApplyDeadFade
-                -- frame.nameText:SetTextColor(0.5, 0.5, 0.5, 1)
             end
         end
         if frame.statusText then
             if hideLegacyText or db.statusTextEnabled == false then
                 frame.statusText:Hide()
             else
-                frame.statusText:SetText(isGhost and "Ghost" or "Dead")
+                frame.statusText:SetText(isGhost and L["Ghost"] or L["Dead"])
                 frame.statusText:Show()
             end
         end
@@ -624,9 +550,14 @@ function DF:UpdateUnitFrame(frame, source)
         DF:UpdateRaidTargetIcon(frame)
         -- Apply dead fade for dead/ghost units
         DF:ApplyDeadFade(frame, "Dead")
+        -- See the note on the offline branch above: this return skips the TD
+        -- render and the missing-buff gate, which is why "Dead" never appeared
+        -- while the Text Designer owned the text.
+        if DF.UpdateTextDesigner then DF:UpdateTextDesigner(frame, "all") end
+        if DF.RefreshMissingBuffVisibility then DF:RefreshMissingBuffVisibility(frame) end
         return
     end
-    
+
     -- Unit is alive and connected - reset dead fade if it was applied
     DF:ResetDeadFade(frame)
     frame.dfLastKnownConnected = true
@@ -649,41 +580,6 @@ function DF:UpdateUnitFrame(frame, source)
         -- Delegate color to ElementAppearance for centralized handling
         -- This prevents conflicts between multiple code paths trying to set color
         DF:UpdateHealthBarAppearance(frame)
-        
-        --[[ TODO CLEANUP: Old color code - now handled by ElementAppearance
-        -- Skip color setting if aggro color override is active
-        if not (frame.dfAggroActive and frame.dfAggroColor) then
-            -- Health color based on mode
-            local colorMode = db.healthColorMode or "CLASS"
-            local _, class = UnitClass(unit)
-            local classColor = DF:GetClassColor(class)
-            local alpha = db.classColorAlpha or 1.0
-            
-            if colorMode == "CLASS" then
-                frame.healthBar:SetStatusBarColor(classColor.r, classColor.g, classColor.b, alpha)
-            elseif colorMode == "PERCENT" then
-                -- Use UnitHealthPercent with a curve as 3rd arg - returns color directly
-                local curve = DF:GetCurveForUnit(unit, db)
-                if curve and UnitHealthPercent then
-                    local color = UnitHealthPercent(unit, true, curve)
-                    if color then
-                        local tex = frame.healthBar:GetStatusBarTexture()
-                        if tex then
-                            tex:SetVertexColor(color:GetRGB())
-                            tex:SetAlpha(alpha)
-                        end
-                    else
-                        frame.healthBar:SetStatusBarColor(classColor.r, classColor.g, classColor.b, alpha)
-                    end
-                else
-                    frame.healthBar:SetStatusBarColor(classColor.r, classColor.g, classColor.b, alpha)
-                end
-            elseif colorMode == "CUSTOM" then
-                local c = db.healthColor or {r = 0.2, g = 0.8, b = 0.2, a = 1}
-                frame.healthBar:SetStatusBarColor(c.r, c.g, c.b, c.a or 1)
-            end
-        end
-        --]]
     end
     
     -- ========================================
@@ -699,73 +595,7 @@ function DF:UpdateUnitFrame(frame, source)
     -- Delegate to ElementAppearance for centralized handling
     -- This prevents conflicts between Update.lua, Colors.lua, and Range.lua
     DF:UpdateBackgroundAppearance(frame)
-    
-    --[[ TODO CLEANUP: Old background color code - now handled by ElementAppearance
-    if frame.background then
-        local bgMode = db.backgroundColorMode or "CUSTOM"
-        local bgTexture = db.backgroundTexture or "Solid"
-        
-        -- For BLACK/BLIZZARD mode, treat as CUSTOM with black color
-        -- This ensures identical code path to avoid any flickering differences
-        local effectiveBgMode = bgMode
-        local effectiveBgColor
-        if bgMode == "BLIZZARD" or bgMode == "BLACK" then
-            effectiveBgMode = "CUSTOM"
-            effectiveBgColor = {r = 0, g = 0, b = 0, a = 0.8}
-        end
-        
-        -- Apply texture (use Solid as fallback for ColorTexture behavior)
-        if bgTexture == "Solid" or bgTexture == "" then
-            -- Solid color mode - only update if texture type changed
-            if frame.dfCurrentBgTexture ~= "Solid" then
-                frame.dfCurrentBgTexture = "Solid"
-            end
-            -- Use key tracking to prevent flickering from repeated SetColorTexture calls
-            if effectiveBgMode == "CUSTOM" then
-                local c = effectiveBgColor or db.backgroundColor or {r = 0.1, g = 0.1, b = 0.1, a = 0.8}
-                local key = string.format("CUSTOM:%.2f:%.2f:%.2f:%.2f", c.r, c.g, c.b, c.a or 0.8)
-                if frame.dfCurrentBgKey ~= key then
-                    frame.background:SetColorTexture(c.r, c.g, c.b, c.a or 0.8)
-                    frame.dfCurrentBgKey = key
-                end
-            elseif effectiveBgMode == "CLASS" then
-                local _, class = UnitClass(unit)
-                local classColor = DF:GetClassColor(class)
-                local bgAlpha = db.backgroundClassAlpha or 0.3
-                local key = string.format("CLASS:%.2f:%.2f:%.2f:%.2f", classColor.r, classColor.g, classColor.b, bgAlpha)
-                if frame.dfCurrentBgKey ~= key then
-                    frame.background:SetColorTexture(classColor.r, classColor.g, classColor.b, bgAlpha)
-                    frame.dfCurrentBgKey = key
-                end
-            end
-        else
-            -- Textured background - only call SetTexture if texture path changed
-            -- This prevents flickering on every health update
-            if frame.dfCurrentBgTexture ~= bgTexture then
-                DF:SafeSetTexture(frame.background, bgTexture)
-                frame.background:SetHorizTile(false)
-                frame.background:SetVertTile(false)
-                frame.dfCurrentBgTexture = bgTexture
-                frame.dfCurrentBgKey = nil  -- Clear key when switching to textured
-                -- Reset SetAlpha to 1.0 when texture changes so only vertex color controls alpha
-                frame.background:SetAlpha(1.0)
-            end
-            
-            -- Always update vertex color (this doesn't cause flicker)
-            -- Alpha is controlled entirely through vertex color for textured backgrounds
-            if effectiveBgMode == "CUSTOM" then
-                local c = effectiveBgColor or db.backgroundColor or {r = 0.1, g = 0.1, b = 0.1, a = 0.8}
-                frame.background:SetVertexColor(c.r, c.g, c.b, c.a or 0.8)
-            elseif effectiveBgMode == "CLASS" then
-                local _, class = UnitClass(unit)
-                local classColor = DF:GetClassColor(class)
-                local bgAlpha = db.backgroundClassAlpha or 0.3
-                frame.background:SetVertexColor(classColor.r, classColor.g, classColor.b, bgAlpha)
-            end
-        end
-    end
-    --]]
-    
+
     -- ========================================
     -- NAME
     -- ========================================
@@ -911,11 +741,6 @@ function DF:UpdateUnitFrame(frame, source)
     end
     
 
-    -- Update AD tint overlay if it's tracking current health
-    if DF.UpdateADTintHealth then
-        DF:UpdateADTintHealth(frame)
-    end
-
     -- ========================================
     -- RANGE CHECK
     -- ========================================
@@ -975,7 +800,7 @@ function DF:UpdateHealthFast(frame)
             if hideLegacyText or db.statusTextEnabled == false then
                 frame.statusText:Hide()
             else
-                frame.statusText:SetText("Offline")
+                frame.statusText:SetText(L["Offline"])
                 frame.statusText:Show()
             end
         end
@@ -997,6 +822,9 @@ function DF:UpdateHealthFast(frame)
         end
         DF:ApplyDeadFade(frame, "Offline")
         frame.dfLastKnownConnected = false
+        -- Same early-return gap as UpdateUnitFrame (see the note there).
+        if DF.UpdateTextDesigner then DF:UpdateTextDesigner(frame, "all") end
+        if DF.RefreshMissingBuffVisibility then DF:RefreshMissingBuffVisibility(frame) end
         return
     end
 
@@ -1015,7 +843,7 @@ function DF:UpdateHealthFast(frame)
             if hideLegacyText or db.statusTextEnabled == false then
                 frame.statusText:Hide()
             else
-                frame.statusText:SetText(isGhost and "Ghost" or "Dead")
+                frame.statusText:SetText(isGhost and L["Ghost"] or L["Dead"])
                 frame.statusText:Show()
             end
         end
@@ -1044,6 +872,12 @@ function DF:UpdateHealthFast(frame)
             frame.dfLastKnownDead = true
             if DF.UpdateAuras_Enhanced then DF:UpdateAuras_Enhanced(frame) end
         end
+        -- Same early-return gap as UpdateUnitFrame. Note the comment above: WoW
+        -- does not fire UNIT_AURA on death, which is exactly why the aura-driven
+        -- missing-buff gate never re-ran on its own. Both calls are no-ops when
+        -- the state is unchanged, so they are safe on this per-tick path.
+        if DF.UpdateTextDesigner then DF:UpdateTextDesigner(frame, "all") end
+        if DF.RefreshMissingBuffVisibility then DF:RefreshMissingBuffVisibility(frame) end
         return
     end
 
@@ -1170,11 +1004,6 @@ function DF:UpdateHealthFast(frame)
         DF:UpdateDispelGradientHealth(frame)
     end
     
-
-    -- Update AD tint overlay if it's tracking current health
-    if DF.UpdateADTintHealth then
-        DF:UpdateADTintHealth(frame)
-    end
     -- NOTE: the TextDesigner "health" refresh is driven from the central
     -- event dispatcher (Frames/Headers.lua), not here. UpdateHealthFast has
     -- fast-path early returns (e.g. lines ~1024/1071) that a tail hook would
@@ -1285,9 +1114,9 @@ function DF:UpdateHealth(frame)
             else
                 DF:StyleStatusText(frame)
                 if isOffline then
-                    frame.statusText:SetText("Offline")
+                    frame.statusText:SetText(L["Offline"])
                 elseif isDead then
-                    frame.statusText:SetText("Dead")
+                    frame.statusText:SetText(L["Dead"])
                 end
                 frame.statusText:Show()
                 frame.healthText:Hide()
@@ -1391,11 +1220,6 @@ function DF:UpdateHealth(frame)
     end
     
 
-    -- Update AD tint overlay if it's tracking current health
-    if DF.UpdateADTintHealth then
-        DF:UpdateADTintHealth(frame)
-    end
-
     -- Apply colors
     DF:ApplyHealthColors(frame)
 
@@ -1403,11 +1227,12 @@ function DF:UpdateHealth(frame)
 end
 
 -- ============================================================
--- Apply all visual styles to a frame (called when settings change)
--- Apply all visual styles to a frame (DEPRECATED - use ApplyFrameLayout instead)
+-- Apply all visual styles to a frame (called when settings change).
+-- A thin alias for ApplyFrameLayout, and the name most call sites use — 14 of them
+-- across Core, Init, PinnedFrames, TestFramePool and TestMode. It carried a
+-- "DEPRECATED - use ApplyFrameLayout instead" label that was simply untrue.
 function DF:ApplyFrameStyle(frame)
     if not frame then return end
-    -- Use unified layout function
     DF:ApplyFrameLayout(frame)
 end
 

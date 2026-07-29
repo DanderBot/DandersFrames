@@ -129,12 +129,6 @@ function DF:InitializeRaidFrames()
     end
 end
 
-function DF:CreateRaidFrame(unit, index)
-    local frame = DF:CreateUnitFrame(unit, index, true)
-    -- Apply initial layout
-    DF:ApplyFrameLayout(frame)
-    return frame
-end
 
 function DF:UpdateRaidLayout()
     local db = DF:GetRaidDB()
@@ -709,7 +703,9 @@ function DF:CreateRaidMoverFrame()
     -- Position over the container
     local mover = CreateFrame("Frame", "DandersRaidFramesMover", UIParent, "BackdropTemplate")
     mover:SetFrameStrata("MEDIUM")  -- Same strata as unit frames; SetFrameLevel(100) puts us above them
-    mover:SetFrameLevel(100)        -- Unit frame children are level 1-4; 100 renders above them
+                                    -- NOTE: an AuraDesigner indicator set to an explicit Frame Strata
+                                    -- escapes this band entirely and will draw over the mover.
+    mover:SetFrameLevel(100)        -- Unit frame children reach ~parent+70 (AD Frame Level max); 100 clears them
 
     -- Set initial size from container
     local cWidth, cHeight = DF.raidContainer:GetSize()
@@ -721,13 +717,14 @@ function DF:CreateRaidMoverFrame()
     mover:SetScale(raidMoverScale)
     mover:SetPoint("CENTER", UIParent, "CENTER", (raidDb.raidAnchorX or 0) / raidMoverScale, (raidDb.raidAnchorY or 0) / raidMoverScale)
     
-    mover:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 2,
+    -- Raid orange now comes from the theme. Keeps its own louder alphas (the
+    -- original "-- More visible"): the raid container is large, so the shared
+    -- 0.30/0.80 default reads too faint stretched across it.
+    DF.GUI:CreateMoverBackdrop(mover, {
+        isRaid      = true,
+        fillAlpha   = 0.4,
+        borderAlpha = 1.0,
     })
-    mover:SetBackdropColor(1.0, 0.5, 0.2, 0.4)  -- More visible
-    mover:SetBackdropBorderColor(1.0, 0.5, 0.2, 1.0)
     mover:EnableMouse(true)
     mover:SetMovable(true)
     mover:RegisterForDrag("LeftButton")
@@ -912,9 +909,13 @@ function DF:UnlockRaidFrames()
     local cWidth, cHeight = DF.raidContainer:GetWidth(), DF.raidContainer:GetHeight()
     if cWidth < 50 or cHeight < 50 then
         -- Use fallback size based on settings
-        local frameWidth = db.raidFrameWidth or 80
-        local frameHeight = db.raidFrameHeight or 40
-        local spacing = db.raidFrameSpacing or 2
+        -- frameWidth / frameHeight / frameSpacing are the real keys. The
+        -- raidFrame* spellings have no default anywhere in the addon, so these
+        -- three reads always yielded nil and the fallback container was sized
+        -- 80/40/2 regardless of the user's actual frame dimensions.
+        local frameWidth = db.frameWidth or 80
+        local frameHeight = db.frameHeight or 40
+        local spacing = db.frameSpacing or 2
         
         -- Default to 8 groups x 5 members layout
         DF.raidContainer:SetSize(
@@ -952,7 +953,7 @@ function DF:UnlockRaidFrames()
     DF.raidMoverFrame:ClearAllPoints()
     DF.raidMoverFrame:SetPoint("CENTER", UIParent, "CENTER", (db.raidAnchorX or 0) / scale, (db.raidAnchorY or 0) / scale)
     DF.raidMoverFrame:SetFrameStrata("MEDIUM")  -- Keeps mover below DIALOG settings GUI
-    DF.raidMoverFrame:SetFrameLevel(100)        -- Above unit frame children (level 1-4)
+    DF.raidMoverFrame:SetFrameLevel(100)        -- Above unit frame children (which reach ~parent+70)
     DF.raidMoverFrame:SetAlpha(1)
     DF.raidMoverFrame:Show()
 
@@ -1630,17 +1631,8 @@ function DF:UpdateAllFrames()
         end
     end
     
-    -- TODO: CLEANUP - Old sorting commented out
-    -- SecureSort now handles all party frame sorting/positioning
-    -- This was only used to determine iteration order for visibility setup,
-    -- which doesn't depend on sort order.
-    --[[
-    -- Apply sorting if enabled
-    if db.sortEnabled and DF.Sort then
-        visibleFrames = DF.Sort:SortFrameList(visibleFrames, db, DF.testMode)
-    end
-    --]]
-    
+    -- No sort pass here: SecureSort owns party sorting/positioning, and this list
+    -- only drives visibility setup, which does not depend on order.
     local frameCount = #visibleFrames
     
     -- Calculate sizes (use pixel-perfect values)
@@ -1704,52 +1696,6 @@ function DF:UpdateAllFrames()
             DF.partyGroupContainer:SetPoint("BOTTOM", DF.container, "BOTTOM", 0, 0)
         end
     end
-    
-    -- Position each frame within the party group container
-    -- TODO: CLEANUP - This old positioning code is commented out.
-    -- SecureSort now handles ALL party frame positioning via secure code.
-    -- Remove this block entirely once we confirm SecureSort works in all cases.
-    --[[
-    -- LEGACY POSITIONING CODE - COMMENTED OUT
-    local secureSortActive = DF.SecureSort and DF.SecureSort.initialized and DF.SecureSort.framesRegistered
-    
-    for idx, frameData in ipairs(visibleFrames) do
-        local frame = frameData.frame
-        local slotIndex = idx - 1  -- 0-based slot index
-        
-        -- Reparent to party group container
-        frame:SetParent(DF.partyGroupContainer)
-        
-        -- Only position frames if SecureSort is NOT active
-        -- SecureSort handles all positioning via TriggerSecureSort
-        if not secureSortActive then
-            frame:ClearAllPoints()
-            
-            -- Use SecureSort positioning functions (handles all growth modes: START/CENTER/END)
-            if DF.SecureSort and DF.SecureSort.CalculateSlotPosition then
-                local layoutParams = {
-                    frameWidth = ppFrameWidth,
-                    frameHeight = ppFrameHeight,
-                    spacing = ppSpacing,
-                    horizontal = horizontal,
-                    growthAnchor = growthAnchor,
-                }
-                local x, y = DF.SecureSort:CalculateSlotPosition(slotIndex, frameCount, layoutParams)
-                local anchor, relAnchor = DF.SecureSort:GetSlotAnchors(layoutParams)
-                frame:SetPoint(anchor, DF.partyGroupContainer, relAnchor, x, y)
-            else
-                -- Fallback: Simple START-only positioning (legacy behavior)
-                if horizontal then
-                    local x = slotIndex * (ppFrameWidth + ppSpacing)
-                    frame:SetPoint("LEFT", DF.partyGroupContainer, "LEFT", x, 0)
-                else
-                    local y = -slotIndex * (ppFrameHeight + ppSpacing)
-                    frame:SetPoint("TOP", DF.partyGroupContainer, "TOP", 0, y)
-                end
-            end
-        end
-    end
-    --]]
     
     -- SecureSort handles positioning - we just need to set up visibility and content
     for idx, frameData in ipairs(visibleFrames) do

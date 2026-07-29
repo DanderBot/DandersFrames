@@ -290,6 +290,7 @@ DF.ExportCategories = {
         "buffWrap",
         "debuffAlpha",
         "debuffAnchor",
+        "debuffBlacklist",
         "debuffBorderBlendMode",
         "debuffBorderColor",
         "debuffBorderColorBleed",
@@ -325,6 +326,7 @@ DF.ExportCategories = {
         "debuffDurationBarTexture",
         "debuffDurationColorByTime",
         "debuffDurationFont",
+        "debuffDeduplicateDesigner",
         "debuffDispelBorderInset",
         "debuffDispelSymbolAnchor",
         "debuffDispelSymbolColor",
@@ -404,7 +406,6 @@ DF.ExportCategories = {
         "dispelIconOffsetY",
         "dispelIconPosition",
         "dispelIconSize",
-        "dispelNameText",
         "dispelOverlayDispelType",
         "dispelOverlayEnabled",
         "dispelShowBorder",
@@ -467,8 +468,10 @@ DF.ExportCategories = {
         "defensiveBarMax",
         "defensiveBarSpacing",
         "defensiveBarWrap",
-        "defensiveBarX",
-        "defensiveBarY",
+        -- defensiveBarX / defensiveBarY removed: no such settings exist (only
+        -- Growth/Max/Spacing/Wrap do). Harmless at runtime because
+        -- ExtractCategorySettings nil-guards, but they made /df exportaudit
+        -- report two phantoms, so the audit never came back clean.
         "defensiveDurationBarBGColor",
         "defensiveDurationBarColor",
         "defensiveDurationBarEnabled",
@@ -533,6 +536,11 @@ DF.ExportCategories = {
         "defensiveSortOrder",
     },
     -- Targeted spells (incl. personal)
+    -- ⚰ DEPRECATED-TARGETED-SPELLS — ⚠ this category is MIXED: the
+    -- personalTargetedSpell* keys are live and stay, the targetedSpell* ones go
+    -- with the on-frame feature. Do not delete the category wholesale; the
+    -- personal display would silently stop exporting. See the block comment at
+    -- the top of Features\TargetedSpells.lua.
     targetedSpells = {
         "personalTargetedSpellAlpha",
         "personalTargetedSpellBorderAnimationColor",
@@ -888,12 +896,6 @@ DF.ExportCategories = {
         "bgCarrierIconTextColor",
         "bgCarrierIconX",
         "bgCarrierIconY",
-        "centerStatusIconAnchor",
-        "centerStatusIconEnabled",
-        "centerStatusIconFrameLevel",
-        "centerStatusIconScale",
-        "centerStatusIconX",
-        "centerStatusIconY",
         "combatIconAlpha",
         "combatIconAnchor",
         "combatIconEnabled",
@@ -1184,6 +1186,9 @@ DF.ExportCategories = {
         "tooltipDebuffEnabled",
         "tooltipDebuffX",
         "tooltipDebuffY",
+        "tooltipADGroupsEnabled",
+        "tooltipADIndicatorsEnabled",
+        "tooltipADBarsEnabled",
         "tooltipDefensiveAnchor",
         "tooltipDefensiveAnchorPos",
         "tooltipDefensiveDisableInCombat",
@@ -1329,24 +1334,7 @@ DF.ExportPresets = {
 -- HELPER FUNCTIONS
 -- ===========================================
 
--- Build a reverse lookup: setting key -> category
-function DF:BuildCategoryLookup()
-    if self._categoryLookup then return self._categoryLookup end
-    
-    self._categoryLookup = {}
-    for category, keys in pairs(self.ExportCategories) do
-        for _, key in ipairs(keys) do
-            self._categoryLookup[key] = category
-        end
-    end
-    return self._categoryLookup
-end
 
--- Get category for a setting key
-function DF:GetSettingCategory(key)
-    local lookup = self:BuildCategoryLookup()
-    return lookup[key]
-end
 
 -- Extract settings for specific categories from a profile
 function DF:ExtractCategorySettings(profile, categories, frameType)

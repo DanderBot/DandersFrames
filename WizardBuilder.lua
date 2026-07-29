@@ -71,23 +71,6 @@ end
 local LibSerialize = LibStub("LibSerialize", true)
 local LibDeflate = LibStub("LibDeflate", true)
 
-function WB:ExportWizard(name)
-    local configs = GetWizardConfigs()
-    local config = configs[name]
-    if not config then return nil, "Wizard not found" end
-    if not LibSerialize or not LibDeflate then return nil, "Missing libraries" end
-
-    local serialized = LibSerialize:Serialize(config)
-    if not serialized then return nil, "Serialization failed" end
-
-    local compressed = LibDeflate:CompressDeflate(serialized)
-    if not compressed then return nil, "Compression failed" end
-
-    local encoded = LibDeflate:EncodeForPrint(compressed)
-    if not encoded then return nil, "Encoding failed" end
-
-    return "!DFW1!" .. encoded
-end
 
 function WB:ImportWizard(str)
     if not str or str == "" then return nil, "Empty string" end
@@ -159,33 +142,22 @@ local builderWizardName = nil   -- Name key in SavedVariables
 local builderStepIndex = 1      -- Which step is currently shown
 local builderOnSave = nil       -- Callback when wizard is saved
 
--- Theme colors (matching Popup.lua)
-local BC = {
-    background = {r = 0.08, g = 0.08, b = 0.08, a = 0.97},
-    panel      = {r = 0.12, g = 0.12, b = 0.12, a = 1},
-    element    = {r = 0.18, g = 0.18, b = 0.18, a = 1},
-    border     = {r = 0.25, g = 0.25, b = 0.25, a = 1},
-    accent     = {r = 0.45, g = 0.45, b = 0.95, a = 1},
-    hover      = {r = 0.22, g = 0.22, b = 0.22, a = 1},
-    text       = {r = 0.9,  g = 0.9,  b = 0.9,  a = 1},
-    textDim    = {r = 0.6,  g = 0.6,  b = 0.6,  a = 1},
-    green      = {r = 0.2,  g = 0.9,  b = 0.2},
-    red        = {r = 0.9,  g = 0.25, b = 0.25},
-    orange     = {r = 0.85, g = 0.55, b = 0.1},
-}
+-- The shared dialog palette, same one Popup.lua uses. This was a complete
+-- private copy of all eleven colours, "matching Popup.lua" by hand -- so it
+-- matched only until either side moved.
+local BC = DF.GUI.DialogColors
 
 local BUILDER_WIDTH = 500
 local BUILDER_PADDING = 20
 
+-- Thin wrapper over the shared GUI backdrop so this file's positional call style
+-- keeps working. The look, and the pixel-grid snapping, come from the one place.
 local function ApplyBuilderBackdrop(frame, bgColor, borderColor, edgeSize)
-    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = edgeSize or 1,
+    DF.GUI:CreateElementBackdrop(frame, {
+        bgColor     = bgColor,
+        borderColor = borderColor,
+        edgeSize    = edgeSize,
     })
-    frame:SetBackdropColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a or 1)
-    frame:SetBackdropBorderColor(borderColor.r, borderColor.g, borderColor.b, borderColor.a or 1)
 end
 
 -- Create an edit box with dark theme styling
@@ -296,6 +268,7 @@ local function CreateBuilderFrame()
     if BuilderFrame then return BuilderFrame end
 
     local f = CreateFrame("Frame", "DFBuilderFrame", UIParent, "BackdropTemplate")
+    -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
     f:SetSize(BUILDER_WIDTH, 500)
     f:SetPoint("CENTER")
     f:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -792,35 +765,34 @@ local function CreateOptionRowFrame(parent, optIndex, step, onUpdate)
             end
         end
         if #linked > 0 then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(L["Linked Settings"], 1, 1, 1)
+            local lines = {}
             for _, line in ipairs(linked) do
-                GameTooltip:AddLine(line, BC.orange.r, BC.orange.g, BC.orange.b)
+                lines[#lines + 1] = { text = line, color = BC.orange }
             end
-            GameTooltip:Show()
+            DF.GUI:ShowTooltip(self, { title = L["Linked Settings"], lines = lines })
         end
     end)
     row.GearBtn:SetScript("OnLeave", function(self)
         ApplyBuilderBackdrop(self, BC.element, BC.border, 1)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
 
     -- Tooltip for branch
     row.BranchBtn:SetScript("OnEnter", function(self)
         self:SetBackdropColor(BC.hover.r, BC.hover.g, BC.hover.b, 1)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(L["Branch"], 1, 1, 1)
-        if branchTarget ~= "" then
-            GameTooltip:AddLine(format(L["Goes to: %s"], branchTarget), BC.accent.r, BC.accent.g, BC.accent.b)
-        else
-            GameTooltip:AddLine(L["Click to set branch target"], BC.textDim.r, BC.textDim.g, BC.textDim.b)
-        end
-        GameTooltip:AddLine(L["Click to cycle through steps"], BC.textDim.r, BC.textDim.g, BC.textDim.b)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = L["Branch"],
+            lines = {
+                branchTarget ~= ""
+                    and { text = format(L["Goes to: %s"], branchTarget), color = BC.accent }
+                    or  { text = L["Click to set branch target"], hint = true },
+                { text = L["Click to cycle through steps"], hint = true },
+            },
+        })
     end)
     row.BranchBtn:SetScript("OnLeave", function(self)
         ApplyBuilderBackdrop(self, BC.element, BC.border, 1)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
 
     row:Show()
@@ -1123,15 +1095,22 @@ WB.BuildWizardConfig = BuildWizardConfig
 
 -- Built-in wizard registry
 -- Each entry: { name, description, build = function() return wizard config end }
+--
+-- ⚠ CURRENTLY UNUSED, KEPT ON PURPOSE (reviewed 2026-07-25). Nothing anywhere calls
+-- RegisterBuiltinWizard, so this list is permanently empty and GetBuiltinWizards()
+-- always returns {} — which is why the Options > Wizards page always renders its
+-- "No built-in wizards available yet. Check back after updates!" placeholder. The
+-- rest of WizardBuilder is very much alive (user-created wizards, import/export,
+-- the /df commands); it is only the BUILT-IN half that has never been populated.
+--
+-- Krathe's call: keep the framework, we may yet use it. If a later pass finds we
+-- still have not shipped a single built-in wizard, delete this registry, the two
+-- accessors, and the placeholder branch on the Wizards page together — and drop the
+-- user-facing "check back after updates" promise with them, since it is the part
+-- that actually costs us something while it stays unkept.
 local builtinWizards = {}
 
-function WB:RegisterBuiltinWizard(entry)
-    tinsert(builtinWizards, entry)
-end
 
-function WB:GetBuiltinWizards()
-    return builtinWizards
-end
 
 -- Import wizard via slash command
 function WB:HandleImportCommand(str)

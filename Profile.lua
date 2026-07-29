@@ -304,9 +304,18 @@ function DF:SetProfile(name)
             linkedSections = {},
             partyEnabled = true,
             raidEnabled = true,
-            settingsFont = "Friz Quadrata TT",
+            -- Must match the CURRENT default (and the nil-backfill just below).
+            -- Seeding the pre-Roboto face here meant a freshly created profile kept
+            -- Friz -- the backfill skips a non-nil value -- until the
+            -- _settingsFontRobotoDefaultV1 migration flipped it on the next reload,
+            -- so the settings font appeared to change by itself.
+            settingsFont = "DF Roboto SemiBold",
             settingsFontOutline = "NONE",
         }
+        -- Born from current defaults => every one-time migration is already done.
+        -- Without this, the unconditional frame-level / container-position shifts
+        -- fired on the new profile and moved values that were already correct.
+        DF:StampFreshProfileMigrations(DandersFramesDB_v2.profiles[name])
         print("|cff00ff00DandersFrames:|r " .. format(L["Created new profile: %s"], name))
     end
 
@@ -653,6 +662,14 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         if DF.db.roleColors and next(DF.db.roleColors) then
             exportData.roleColors = DF:DeepCopy(DF.db.roleColors)
         end
+        -- Include dispel colours — same story as roleColors above. This is the
+        -- Colors page's dispel palette and the single source of truth for BOTH the
+        -- debuff-icon border and the dispel overlay, but it lives at the profile
+        -- root, so /df exportaudit (which only walks party/raid) could never see it
+        -- was missing: a shared profile arrived with stock dispel colours.
+        if DF.db.dispelColors and next(DF.db.dispelColors) then
+            exportData.dispelColors = DF:DeepCopy(DF.db.dispelColors)
+        end
         -- Include auto layout profiles
         if DF.db.raidAutoProfiles then
             exportData.raidAutoProfiles = DF:DeepCopy(DF.db.raidAutoProfiles)
@@ -969,6 +986,7 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             classColors = DF:DeepCopy(DF.db.classColors or {}),
             powerColors = DF:DeepCopy(DF.db.powerColors or {}),
             roleColors = DF:DeepCopy(DF.db.roleColors or {}),
+            dispelColors = DF:DeepCopy(DF.db.dispelColors or {}),
             auraBlacklist = DF:DeepCopy(DF.db.auraBlacklist or { buffs = {}, debuffs = {} }),
             filterPresetOverrides = DF:DeepCopy(DF.db.filterPresetOverrides or {}),
             -- Designer preset LIBRARIES (profile-root): the copied mode tables
@@ -1130,6 +1148,10 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         -- Import role colours if present
         if importData.roleColors then
             DF.db.roleColors = importData.roleColors
+        end
+        -- Import dispel colours if present (profile-root, like roleColors)
+        if importData.dispelColors then
+            DF.db.dispelColors = importData.dispelColors
         end
         -- Import auto layout profiles if present
         if importData.raidAutoProfiles then

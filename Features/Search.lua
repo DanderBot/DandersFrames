@@ -30,16 +30,14 @@ local function GetThemeColor()
 end
 
 local function CreateBackdrop(frame, bgAlpha)
-    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-        insets = {left = 1, right = 1, top = 1, bottom = 1}
+    -- Delegates to the shared GUI backdrop so search chrome follows the rest of
+    -- the addon (and inherits pixel-grid snapping). Only the alpha is local.
+    DF.GUI:CreateElementBackdrop(frame, {
+        inset       = 1,
+        bgColor     = { C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b,
+                        bgAlpha or C_BACKGROUND.a },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, C_BORDER.a },
     })
-    local a = bgAlpha or C_BACKGROUND.a
-    frame:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, a)
-    frame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, C_BORDER.a)
 end
 
 -- ============================================================
@@ -863,15 +861,20 @@ function Search:CreateSearchBar(parent)
     placeholder:SetText(L["Search..."])
     placeholder:SetTextColor(0.5, 0.5, 0.5)
     
-    local clearBtn = CreateFrame("Button", nil, frame)
-    clearBtn:SetSize(16, 16)
+    -- Clearing is destructive, so this one overrides the shared white hover with
+    -- the soft red every other destructive glyph in the GUI uses.
+    local clearBtn = DF.GUI:CreateGlyphButton(frame, {
+        texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+        size       = 16,
+        color      = { 0.5, 0.5, 0.5 },
+        hoverColor = { 1, 0.3, 0.3 },
+        onClick    = function()
+            editbox:SetText("")
+            editbox:ClearFocus()
+            Search:HideResults()
+        end,
+    })
     clearBtn:SetPoint("RIGHT", -4, 0)
-    local clearIcon = clearBtn:CreateTexture(nil, "OVERLAY")
-    clearIcon:SetAllPoints()
-    clearIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-    clearIcon:SetVertexColor(0.5, 0.5, 0.5)
-    clearBtn:SetScript("OnEnter", function() clearIcon:SetVertexColor(1, 0.3, 0.3) end)
-    clearBtn:SetScript("OnLeave", function() clearIcon:SetVertexColor(0.5, 0.5, 0.5) end)
     clearBtn:Hide()
     
     editbox:SetScript("OnEditFocusGained", function()
@@ -916,12 +919,6 @@ function Search:CreateSearchBar(parent)
     
     editbox:SetScript("OnEnterPressed", function(self)
         self:ClearFocus()
-    end)
-    
-    clearBtn:SetScript("OnClick", function()
-        editbox:SetText("")
-        editbox:ClearFocus()
-        Search:HideResults()
     end)
     
     frame.editbox = editbox

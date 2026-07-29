@@ -20,6 +20,10 @@ local addonName, DF = ...
 -- Now frames are managed by SecureGroupHeaderTemplate, so these use
 -- proxy tables that dynamically resolve via the header-based getters.
 -- This preserves the API for external addons using AllowAddOnTableAccess.
+-- (CreatePartyFrame / CreateRaidFrame themselves were deleted 2026-07-25 — by then
+--  they were thin wrappers over DF:CreateUnitFrame with no callers left. The three
+--  lines above are kept deliberately, as history: they are what the proxy tables
+--  below are standing in for.)
 DF.playerFrame = nil  -- Updated by Headers.lua OnAttributeChanged when unit=="player"
 DF.partyFrames = setmetatable({}, {
     __index = function(_, k)
@@ -299,42 +303,6 @@ function DF:PixelPerfectThickness(value)
     return result
 end
 
--- Adjust size and scale together to ensure pixel-perfect rendering with borders
--- The key insight: SetScale scales EVERYTHING including border thickness
--- So a 1px border at scale 1.15 becomes 1.15px which won't render cleanly
--- Solution: Calculate final size, set that directly, and use scale=1.0
--- Returns: finalSize (to use with SetSize), scale (always 1.0), adjustedBorder
-function DF:PixelPerfectSizeAndScaleForBorder(size, iconScale, borderThickness)
-    local pixelScale = self:GetPixelScale()
-    
-    -- Calculate the desired final rendered size (what the user expects to see)
-    local desiredFinalSize = size * iconScale
-    
-    -- Snap border to nearest pixel (minimum 1 pixel if > 0)
-    local borderPixels = math.floor(borderThickness / pixelScale + 0.5)
-    if borderThickness > 0 and borderPixels < 1 then
-        borderPixels = 1
-    end
-    local ppBorder = borderPixels * pixelScale
-    
-    -- Snap the final size to nearest pixel
-    local finalSizePixels = math.floor(desiredFinalSize / pixelScale + 0.5)
-    
-    -- Calculate content area (what's left after borders on both sides)
-    local contentPixels = finalSizePixels - (2 * borderPixels)
-    
-    -- If content would be less than 1 pixel, increase size
-    if contentPixels < 1 then
-        contentPixels = 1
-        finalSizePixels = contentPixels + (2 * borderPixels)
-    end
-    
-    local ppFinalSize = finalSizePixels * pixelScale
-    
-    -- Return: the pixel-perfect final size, scale=1.0 (no scaling), and border
-    -- By using scale=1.0, the border stays at exactly the specified pixel width
-    return ppFinalSize, 1.0, ppBorder
-end
 
 -- Nudge an already-anchored, SINGLE-point frame onto the physical pixel grid by
 -- shifting its anchor offset by the sub-pixel remainder (<=0.5px). A 1px DF.Border
@@ -484,29 +452,6 @@ function DF:FormatNumber(num)
     return tostring(num)
 end
 
--- Get duration text color based on remaining percentage (for test mode)
--- Returns r, g, b values matching the color curve used for live frames
--- 0% = red, 30% = orange, 50% = yellow, 100% = green
-function DF:GetDurationColorByPercent(percent)
-    if not percent then return 1, 1, 1 end
-    
-    -- Clamp to 0-1 range
-    percent = math.max(0, math.min(1, percent))
-    
-    if percent < 0.3 then
-        -- Red to Orange (0% to 30%)
-        local t = percent / 0.3
-        return 1, 0.5 * t, 0
-    elseif percent < 0.5 then
-        -- Orange to Yellow (30% to 50%)
-        local t = (percent - 0.3) / 0.2
-        return 1, 0.5 + 0.5 * t, 0
-    else
-        -- Yellow to Green (50% to 100%)
-        local t = (percent - 0.5) / 0.5
-        return 1 - t, 1, 0
-    end
-end
 
 -- ============================================================
 -- EXTERNAL ADDON API

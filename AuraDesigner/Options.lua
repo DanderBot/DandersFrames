@@ -59,7 +59,11 @@ local function RefreshLocaleStrings()
         { key = "background", label = L["Background Color"],  placed = false },
         { key = "nametext",   label = L["Name Text Color"],  placed = false },
         { key = "healthtext", label = L["Health Text Color"], placed = false },
-        { key = "framealpha", label = L["Frame Alpha"],      placed = false },
+        -- (framealpha removed 2026-07-25 — 12.1 casualty, see the Factory's CASUALTIES note.
+        --  Whole-frame alpha needs frame:SetAlpha gated on SECRET aura presence, and it also
+        --  fights the range / out-of-range alpha owners for the same property. It never had a
+        --  render path on the container engine — only the editor canvas applied it — so the
+        --  effect showed in the preview and did nothing in game.)
         { key = "sound",      label = L["Sound Alert"],      placed = false },
     }
 
@@ -72,11 +76,6 @@ local function RefreshLocaleStrings()
     OPTS.GROWTH_OPTIONS = {
         RIGHT = L["Right"], LEFT = L["Left"], UP = L["Up"], DOWN = L["Down"],
         _order = {"RIGHT", "LEFT", "UP", "DOWN"},
-    }
-
-    OPTS.FRAME_STRATA_OPTIONS = {
-        INHERIT = L["Inherit (Frame)"], BACKGROUND = L["Background"], LOW = L["Low"], MEDIUM = L["Medium"], HIGH = L["High"],
-        _order = {"INHERIT", "BACKGROUND", "LOW", "MEDIUM", "HIGH"},
     }
 
     OPTS.BORDER_STYLE_OPTIONS = {
@@ -118,7 +117,13 @@ local function MigrateToSpecScoped(adDB)
         if adDB.auras then
             local isFlat = false
             for _, val in pairs(adDB.auras) do
-                if type(val) == "table" and (val.priority ~= nil or val.indicators ~= nil) then
+                -- `border` counts too: an entry that only ever had its border
+                -- customised carries neither priority nor indicators, and reading it
+                -- as already-spec-scoped stamped _specScopedV1 without migrating —
+                -- those auras then rendered nothing, permanently. Core.lua's
+                -- equivalent probe has always included it; this copy had drifted.
+                if type(val) == "table"
+                    and (val.priority ~= nil or val.indicators ~= nil or val.border ~= nil) then
                     isFlat = true
                     break
                 end
@@ -127,15 +132,48 @@ local function MigrateToSpecScoped(adDB)
                 local oldAuras = adDB.auras
                 local newAuras = {}
                 local auraToSpecs = {}
-                local trackable = DF.AuraDesigner and DF.AuraDesigner.TrackableAuras
-                if trackable then
-                    for specKey, auraList in pairs(trackable) do
-                        for _, info in ipairs(auraList) do
-                            if not auraToSpecs[info.name] then auraToSpecs[info.name] = {} end
-                            tinsert(auraToSpecs[info.name], specKey)
+                -- Build the name→specs map from the FULL trackable set, not the
+                -- curated TrackableAuras table alone: the real set is curated PLUS
+                -- the SpellDB class pool (Adapter:GetTrackableAuras). Using only the
+                -- curated half meant every pool-sourced aura the user had configured
+                -- matched nothing — and the wholesale `adDB.auras = newAuras` below
+                -- then deleted it, with no read-back and no log.
+                local AD = DF.AuraDesigner
+                local adapter = AD and AD.Adapter
+                if adapter and adapter.GetTrackableAuras and AD.SpecInfo then
+                    for specKey in pairs(AD.SpecInfo) do
+                        local ok, list = pcall(adapter.GetTrackableAuras, adapter, specKey)
+                        if ok and type(list) == "table" then
+                            for _, info in ipairs(list) do
+                                if info.name then
+                                    if not auraToSpecs[info.name] then auraToSpecs[info.name] = {} end
+                                    tinsert(auraToSpecs[info.name], specKey)
+                                end
+                            end
                         end
                     end
                 end
+                -- Curated table as a fallback/supplement (also covers the case where
+                -- the adapter or the registry is not available at migration time).
+                local trackable = AD and AD.TrackableAuras
+                if trackable then
+                    for specKey, auraList in pairs(trackable) do
+                        for _, info in ipairs(auraList) do
+                            local seen = auraToSpecs[info.name]
+                            if not seen then
+                                auraToSpecs[info.name] = { specKey }
+                            else
+                                local dup = false
+                                for _, s in ipairs(seen) do
+                                    if s == specKey then dup = true; break end
+                                end
+                                if not dup then tinsert(seen, specKey) end
+                            end
+                        end
+                    end
+                end
+
+                local orphans, orphanCount = nil, 0
                 for auraName, auraCfg in pairs(oldAuras) do
                     local specs = auraToSpecs[auraName]
                     if specs then
@@ -143,6 +181,22 @@ local function MigrateToSpecScoped(adDB)
                             if not newAuras[specKey] then newAuras[specKey] = {} end
                             newAuras[specKey][auraName] = DF:DeepCopy(auraCfg)
                         end
+                    else
+                        -- NEVER drop it. Park unmatched configs where they can be
+                        -- recovered rather than replacing the table out from under
+                        -- them (a SpellDB regen that renames a spell would otherwise
+                        -- destroy that aura's config on the next load).
+                        orphans = orphans or {}
+                        orphans[auraName] = DF:DeepCopy(auraCfg)
+                        orphanCount = orphanCount + 1
+                    end
+                end
+                if orphans then
+                    adDB._unscopedAuras = orphans
+                    if DF.DebugWarn then
+                        DF:DebugWarn("AuraDesigner",
+                            "spec-scope migration: %d aura config(s) matched no spec; parked in _unscopedAuras",
+                            orphanCount)
                     end
                 end
                 adDB.auras = newAuras
@@ -505,6 +559,45 @@ local function MigratePrioritiesLazy(adDB)
 end
 DF.MigrateAuraDesignerPrioritiesLazy = MigratePrioritiesLazy
 
+-- Per-indicator Frame Level became an ABSOLUTE offset from the unit frame (the render used
+-- to add 40 to whatever was stored). Shifts every stored value by that same 40 so no
+-- indicator moves. Runs on the RESOLVED adDB -- presets, auto-layout overlays and the legacy
+-- inline config are all covered at point of use -- mirroring MigratePrioritiesLazy.
+local function ShiftIndicatorLevels(auraCfg)
+    if type(auraCfg) ~= "table" then return end
+    local inds = auraCfg.indicators
+    if type(inds) ~= "table" then return end
+    for _, ind in pairs(inds) do
+        if type(ind) == "table" and tonumber(ind.frameLevel) then
+            ind.frameLevel = tonumber(ind.frameLevel) + 40
+        end
+    end
+end
+local function MigrateAbsoluteLevelsLazy(adDB)
+    if type(adDB) ~= "table" or adDB._absoluteFrameLevelV1 then return end
+    local auras = adDB.auras
+    if type(auras) == "table" then
+        -- Shape detection off the first entry only, matching MigratePrioritiesLazy.
+        for _, val in pairs(auras) do
+            if type(val) == "table" then
+                if val.priority ~= nil or val.indicators ~= nil or val.icon ~= nil then
+                    for _, auraCfg in pairs(auras) do ShiftIndicatorLevels(auraCfg) end
+                else
+                    for _, specAuras in pairs(auras) do
+                        if type(specAuras) == "table" then
+                            for _, auraCfg in pairs(specAuras) do ShiftIndicatorLevels(auraCfg) end
+                        end
+                    end
+                end
+            end
+            break
+        end
+    end
+    adDB._absoluteFrameLevelV1 = true
+end
+DF.MigrateAuraDesignerAbsoluteLevelsLazy = MigrateAbsoluteLevelsLazy
+
+
 -- Lazy, flag-gated ONE-TIME refresh of the AD global text defaults to the Midnight
 -- baseline: DF Roboto SemiBold + drop shadow, 1.2 duration scale, stack count seated
 -- bottom-right (2,-2). Pre-12.1 the AD shipped Friz Quadrata / plain OUTLINE / 1.0 /
@@ -558,6 +651,11 @@ local function GetAuraDesignerDB()
     MigrateInstancesLazy(adDB)
     MigrateBorderKeysLazy(adDB)
     MigratePrioritiesLazy(adDB)
+    -- MUST match the render-path list in Factory.lua exactly. If the editor resolves an adDB
+    -- the render has not touched yet (a preset, or an auto-layout overlay not currently shown)
+    -- and skips a migration, the editor shows UN-migrated values -- and anything saved from that
+    -- state gets migrated a second time when the render finally runs.
+    MigrateAbsoluteLevelsLazy(adDB)
     MigrateDefaultRefreshLazy(adDB)
     return adDB
 end
@@ -566,20 +664,12 @@ local function GetThemeColor()
     return GUI.GetThemeColor()
 end
 
--- Shared backdrop info reused by every ApplyBackdrop call to avoid
--- per-card table allocation when the AD effects list rebuilds.
-local SHARED_BACKDROP_INFO = {
-    bgFile = "Interface\\Buttons\\WHITE8x8",
-    edgeFile = "Interface\\Buttons\\WHITE8x8",
-    edgeSize = 1,
-}
-
 local function ApplyBackdrop(frame, bgColor, borderColor)
-    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
-
-    -- Only call SetBackdrop once per frame — the info table never changes.
+    -- Build through the shared GUI backdrop once per frame, then push only
+    -- vertex colours below. SetBackdrop is a full rebuild, so keeping it off the
+    -- re-render path still matters when the AD effects list rebuilds.
     if not frame.dfAD_backdropApplied then
-        frame:SetBackdrop(SHARED_BACKDROP_INFO)
+        DF.GUI:CreateElementBackdrop(frame)
         frame.dfAD_backdropApplied = true
     end
 
@@ -600,6 +690,43 @@ local function ApplyBackdrop(frame, bgColor, borderColor)
             frame.dfAD_borderR, frame.dfAD_borderG, frame.dfAD_borderB, frame.dfAD_borderA = r, g, b, a
         end
     end
+end
+
+-- ============================================================
+-- COLLAPSIBLE CARD SHELL
+-- The effects list, the groups list and the debuff-category list each build the
+-- same thing: a card pinned to the parent's width, a 30px header button on top,
+-- and a chevron at its left edge that flips with the expanded state. Past that
+-- point the three diverge completely -- a spell icon and type badge, a group
+-- name and link count, a list of categories -- so this owns only the shell and
+-- hands back the chevron for the caller to anchor its own content to.
+--
+-- opts = { yPos, expanded, borderColor, chevronColor (default C_TEXT_DIM) }
+-- Returns card, header, chevron.
+-- ============================================================
+local CARD_HEADER_HEIGHT = 30
+local CHEVRON_EXPANDED = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more"
+local CHEVRON_COLLAPSED = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right"
+
+local function CreateCardShell(parent, opts)
+    local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    card:SetPoint("TOPLEFT", 8, opts.yPos)
+    card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+
+    local header = CreateFrame("Button", nil, card, "BackdropTemplate")
+    header:SetHeight(CARD_HEADER_HEIGHT)
+    header:SetPoint("TOPLEFT", 0, 0)
+    header:SetPoint("TOPRIGHT", 0, 0)
+    ApplyBackdrop(header, C_ELEMENT, opts.borderColor)
+
+    local chevron = header:CreateTexture(nil, "OVERLAY")
+    chevron:SetSize(12, 12)
+    chevron:SetPoint("LEFT", 8, 0)
+    chevron:SetTexture(opts.expanded and CHEVRON_EXPANDED or CHEVRON_COLLAPSED)
+    local cc = opts.chevronColor or C_TEXT_DIM
+    chevron:SetVertexColor(cc.r, cc.g, cc.b)
+
+    return card, header, chevron
 end
 
 -- ============================================================
@@ -1166,11 +1293,6 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 color = {r = 1, g = 1, b = 1, a = 1},
                 showWhenMissing = false,
             }
-        elseif typeKey == "framealpha" then
-            auraCfg[typeKey] = {
-                alpha = 0.5,
-                showWhenMissing = false,
-            }
         elseif typeKey == "sound" then
             auraCfg[typeKey] = {
                 enabled = false,
@@ -1295,7 +1417,7 @@ local TYPE_DEFAULTS = {
         durationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
         durationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
         durationBarReverseFill = false,
-        frameLevel = 30, frameStrata = "INHERIT",
+        frameLevel = 40, frameStrata = "INHERIT",
         showWhenMissing = false, missingDesaturate = false,
     },
     square = {
@@ -1372,7 +1494,7 @@ local TYPE_DEFAULTS = {
         durationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
         durationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
         durationBarReverseFill = false,
-        frameLevel = 30, frameStrata = "INHERIT",
+        frameLevel = 40, frameStrata = "INHERIT",
         showWhenMissing = false,
     },
     bar = {
@@ -1434,7 +1556,7 @@ local TYPE_DEFAULTS = {
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
         expiryAlertSize = 14,
-        frameLevel = 30, frameStrata = "INHERIT",
+        frameLevel = 40, frameStrata = "INHERIT",
     },
     -- Frame-level types: mirror the inline literals in EnsureTypeConfig so the
     -- colour-picker Default button (and any other consumer of __dfDefaults) can
@@ -1490,10 +1612,6 @@ local TYPE_DEFAULTS = {
     },
     healthtext = {
         color = {r = 1, g = 1, b = 1, a = 1},
-        showWhenMissing = false,
-    },
-    framealpha = {
-        alpha = 0.5,
         showWhenMissing = false,
     },
 }
@@ -2265,7 +2383,7 @@ local effectCardPool = {}   -- Reusable card frames
 -- the new Effects tab. Replaces the old per-aura view.
 -- ============================================================
 
-local FRAME_LEVEL_TYPE_KEYS = { "border", "healthbar", "background", "nametext", "healthtext", "framealpha", "sound" }
+local FRAME_LEVEL_TYPE_KEYS = { "border", "healthbar", "background", "nametext", "healthtext", "sound" }
 
 -- Remove an ad-hoc "#<id>" aura's config entry once it holds no effects at
 -- all (empty/absent indicators array AND no frame-level type keys). Ad-hoc
@@ -2299,7 +2417,6 @@ local function RefreshEffectLabels()
         background  = L["Background"],
         nametext   = L["Name Text"],
         healthtext = L["Health Text"],
-        framealpha = L["Frame Alpha"],
         sound      = L["Sound Alert"],
     }
 
@@ -2322,7 +2439,6 @@ local BADGE_COLORS = {
     background = { r = 0.40, g = 0.55, b = 0.65 },  -- Slate
     nametext   = { r = 0.72, g = 0.72, b = 0.94 },  -- Light blue
     healthtext = { r = 0.72, g = 0.72, b = 0.94 },  -- Light blue
-    framealpha = { r = 0.60, g = 0.60, b = 0.60 },  -- Grey
     sound      = { r = 0.94, g = 0.76, b = 0.24 },  -- Gold/yellow
 }
 
@@ -2448,12 +2564,10 @@ local function CreateDragGhost()
     dragGhost:Hide()
 
     if not dragGhost.SetBackdrop then Mixin(dragGhost, BackdropTemplateMixin) end
-    dragGhost:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
+    DF.GUI:CreateElementBackdrop(dragGhost, {
         edgeSize = 2,
+        bgColor     = { 0.05, 0.05, 0.05, 0.9 },
     })
-    dragGhost:SetBackdropColor(0.05, 0.05, 0.05, 0.9)
 
     -- Spell icon
     local icon = dragGhost:CreateTexture(nil, "ARTWORK")
@@ -2711,10 +2825,12 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         local rec = R and R.GetSpellByName and R:GetSpellByName(auraName)
         spellID = rec and rec.id
     end
-    -- Resolve the global colour-by-time default with the Factory's OWN resolver so the
-    -- canvas preview and the live render can never disagree on the fallback.
-    local defCBT = Factory.ResolveDefaultColorByTime and Factory.ResolveDefaultColorByTime(GetAuraDesignerDB())
-    local cfg, sig = Factory:BuildPreviewConfig(mockFrame, effectiveConfig, indicator.type or "icon", spellID, defCBT)
+    -- Resolve the global defaults with the Factory's OWN resolver so the canvas preview and
+    -- the live render can never disagree on the fallback chain. (Level/strata come along in
+    -- the table but the preview ignores them: the canvas is standalone, not layered over a
+    -- unit frame, so there is nothing for a z-order band to mean there.)
+    local defs = Factory.ResolveDefaults and Factory.ResolveDefaults(GetAuraDesignerDB())
+    local cfg, sig = Factory:BuildPreviewConfig(mockFrame, effectiveConfig, indicator.type or "icon", spellID, defs)
     if not (cfg.testEntries and cfg.testEntries[1]) then
         -- No resolvable spell ID: synthesize an entry from the configured art so
         -- the paint can never fall back to the generic curated pool.
@@ -3399,12 +3515,6 @@ local function RefreshPreviewEffects()
         framePreview.hpText:SetTextColor(clr.r, clr.g, clr.b, clr.a or 1)
     end
 
-    -- Frame alpha (first claim wins)
-    if not claimed.framealpha and auraCfg.framealpha and auraCfg.framealpha.enabled ~= false then
-        claimed.framealpha = true
-        mockFrame:SetAlpha(auraCfg.framealpha.alpha or 0.5)
-    end
-
     end  -- for _, entry in sortedAuras
 end
 
@@ -3551,7 +3661,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- can't (yet) drive, WITHOUT touching the trigger tags above (built into
     -- `parent` before this function runs — the working "which aura" layer).
     -- swmCheck is captured for the surgical Show-When-Missing block. See block pass below.
-    local builtGroups = {}
     local swmCheck, wholeBarCheck, swmGroup, durColorByTimeCtl
 
     local function AddWidget(widget, height)
@@ -3594,35 +3703,15 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             showSummary = showSummary or false,
         })
         group.padding = 10   -- match the main Options groups' inner padding (airier scale)
-        group:AddWidget(GUI:CreateHeader(parent, header), 25)
+        group:AddWidget(GUI:CreateHeader(parent, header), GUI.RowHeight.sectionHeader)
         buildFn(group)
         local h = group:LayoutChildren()
         AddWidget(group, h)
-        -- P4.7: track every effect-settings group so the 12.1 block pass can
-        -- frost them per-type. Tag the Expiring group for its own limitation block.
-        builtGroups[#builtGroups + 1] = group
+        -- Tag the Show-When-Missing group so the surgical 12.1 block can find it.
         if header == L["Show When Missing"] then swmGroup = group end
         return group
     end
 
-    -- Lightweight subheader for inline section dividers inside a
-    -- SettingsGroup.  Smaller and dimmer than GUI:CreateHeader (which is
-    -- for top-level group headers) — used in the Expiring section to
-    -- separate State Overrides from Icon Effects.  Returned as a Frame
-    -- so it composes with g:AddWidget like every other widget.
-    local function CreateInlineSubheader(text)
-        local frame = CreateFrame("Frame", nil, parent)
-        frame:SetHeight(18)
-        local label = frame:CreateFontString(nil, "OVERLAY")
-        if GUI.SetSettingsFont then
-            GUI:SetSettingsFont(label, 8, "")
-        end
-        label:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 2, 1)
-        label:SetText(text)
-        local c = GetThemeColor()
-        label:SetTextColor(c.r, c.g, c.b, 0.75)
-        return frame
-    end
 
     -- ── COPY FROM (placed indicators only: icon, square, bar) ──
     if indicatorID and (typeKey == "icon" or typeKey == "square" or typeKey == "bar") then
@@ -3778,13 +3867,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Size"], 8, 64, 1, proxy, "size"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 3.0, 0.05, proxy, "scale"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            local strataDD = g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
-            -- 12.1: indicator z-order is engine-managed (fixed per-family level
-            -- offsets; Frame Level above IS applied). Strata isn't wired on the
-            -- container path yet — planned with the z-order polish pass.
-            GUI:BlockControl12_1(strataDD, "roadmap", { id = "ad:framestrata", page = L["Aura Designer"],
-                when = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end })
+            g:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, proxy, "frameLevel")), 54)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], proxy, "hideSwipe"), 28)
             -- Text-only mode: the icon TEXTURE is hidden, so a border (static OR
             -- expiring) would frame nothing. Rebuild the page on toggle so the
@@ -3967,13 +4050,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Scale"], 0.5, 3.0, 0.05, proxy, "scale"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            local strataDD = g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
-            -- 12.1: indicator z-order is engine-managed (fixed per-family level
-            -- offsets; Frame Level above IS applied). Strata isn't wired on the
-            -- container path yet — planned with the z-order polish pass.
-            GUI:BlockControl12_1(strataDD, "roadmap", { id = "ad:framestrata", page = L["Aura Designer"],
-                when = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end })
+            g:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, proxy, "frameLevel")), 54)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], proxy, "hideSwipe"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Icon (Text Only)"], proxy, "hideIcon"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
@@ -4125,13 +4202,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             curveGated[texW] = true; curveGated[colW] = true
             g:AddWidget(GUI:CreateColorPicker(parent, L["Background Color"], proxy, "bgColor", true, RPL, RPL, true), 28)
             g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
-            g:AddWidget(GUI:CreateSlider(parent, L["Frame Level"], -10, 30, 1, proxy, "frameLevel"), 54)
-            local strataDD = g:AddWidget(GUI:CreateDropdown(parent, L["Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, proxy, "frameStrata"), 54)
-            -- 12.1: indicator z-order is engine-managed (fixed per-family level
-            -- offsets; Frame Level above IS applied). Strata isn't wired on the
-            -- container path yet — planned with the z-order polish pass.
-            GUI:BlockControl12_1(strataDD, "roadmap", { id = "ad:framestrata", page = L["Aura Designer"],
-                when = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end })
+            g:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, proxy, "frameLevel")), 54)
             UpdateColorModeGrey()   -- initial grey for the curve-gated Texture / Fill Color
         end)
         -- Border (Stage 5.3 — unified controls via CreateBorderControls).
@@ -4339,30 +4410,14 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- Appearance
         AddGroup(L["Appearance"], function(g)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
-            swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
-                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-            end)
-            g:AddWidget(swmCheck, 28)
         end)
 
     elseif typeKey == "healthtext" then
         -- Appearance
         AddGroup(L["Appearance"], function(g)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Color"], proxy, "color", true, RPL, RPL, true), 28)
-            swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
-                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-            end)
-            g:AddWidget(swmCheck, 28)
         end)
 
-    elseif typeKey == "framealpha" then
-        -- Appearance
-        AddGroup(L["Appearance"], function(g)
-            g:AddWidget(GUI:CreateSlider(parent, L["Alpha"], 0, 1, 0.05, proxy, "alpha"), 54)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
-                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-            end), 28)
-        end)
 
     elseif typeKey == "sound" then
         -- Enable checkbox
@@ -4523,12 +4578,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- ============================================================
     local ADgate = function(d) return DF:FactoryOwnsAD(d) end
 
-    local function BlockGroups(wording, idBase)
-        for _, g in ipairs(builtGroups) do
-            GUI:BlockControl12_1(g, wording, { id = idBase, page = L["Aura Designer"], when = ADgate })
-        end
-    end
-
     if typeKey == "icon" or typeKey == "square" then
         -- P4.3/P4.5 SHIPPED: icon/square render on the container engine (native icon / solid
         -- fill + cooldown + stacks + border + position), AND Show When Missing now renders via
@@ -4563,20 +4612,20 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- buff FADES" is remaining-time-driven. Both were permanently frosted, and Expire
         -- Alert's intent is now served natively by Buff Dropped (the Removed trigger), so
         -- the groups and their ten inert keys are gone rather than left as dead controls.
-    elseif typeKey == "framealpha" then
-        -- Permanent: whole-frame alpha needs frame:SetAlpha gated on secret presence
-        -- and collides with the range/OOR alpha owners — the whole effect is unavailable.
-        BlockGroups("limitation", "ad:framealpha")
     elseif typeKey == "nametext" or typeKey == "healthtext" then
         -- RECOVERED (colour-by-cover): the base Color works — the Text Designer keeps a
         -- glyph-identical coloured cover in sync with the real element (Render mirrors)
         -- and the aura slot's secret visibility shows it on presence. Two surgical blocks:
-        --   * Show When Missing — unsupported for text covers (drawing the cover in
-        --     present-mode would invert the intent; a text missing-window is future work).
-        if swmCheck then
-            GUI:BlockControl12_1(swmCheck, "limitation",
-                { id = "ad:" .. typeKey .. ":swm", page = L["Aura Designer"], when = ADgate })
-        end
+        --   * Show When Missing is not built for text covers at all - the checkbox is
+        --     simply never created for them. A cover is SetAllPoints onto the real
+        --     FontString, so its screen rect belongs to the text it mirrors; missing mode
+        --     hides by MOVING a badge, so parking/pushing could never change what shows.
+        --     (Same control SHIPPED for border/healthbar/background, whose art really does
+        --     live inside the window.) Candidate path if it is ever wanted:
+        --     SetAlphaFromBoolean(presence, 0, 255) on the mirror - on SimpleRegion as well
+        --     as SimpleFrame, AllowedWhenTainted, and taking both alphas makes inversion
+        --     free. Open question is sourcing `presence` as a SECRET BOOLEAN we can pass
+        --     through without reading: an unrun in-game probe.
         --   * Expiring -- REMOVED 2026-07-25. The whole group was remaining-time-driven,
         --     unreadable on the container path, so it is gone rather than frosted. The
         --     12.1-safe replacement is the DF.Expiration engine (the Expiry Alert group).
@@ -4671,7 +4720,7 @@ local function BuildGlobalView(parent)
     local function AddGroup(header, buildFn)
         local group = GUI:CreateSettingsGroup(parent, contentWidth - 10)
         group.padding = 10   -- match the main Options groups' inner padding (airier scale)
-        group:AddWidget(GUI:CreateHeader(parent, header), 25)
+        group:AddWidget(GUI:CreateHeader(parent, header), GUI.RowHeight.sectionHeader)
         buildFn(group)
         local h = group:LayoutChildren()
         AddWidget(group, h)
@@ -4681,15 +4730,13 @@ local function BuildGlobalView(parent)
     AddGroup(L["General"], function(g)
         g:AddWidget(GUI:CreateSlider(parent, L["Default Icon Size"], 8, 64, 1, defaults, "iconSize"), 50)
         g:AddWidget(GUI:CreateSlider(parent, L["Default Scale"], 0.5, 3.0, 0.05, defaults, "iconScale"), 50)
-        local defLevelSl = g:AddWidget(GUI:CreateSlider(parent, L["Default Frame Level"], -10, 30, 1, defaults, "indicatorFrameLevel"), 50)
-        local defStrataDD = g:AddWidget(GUI:CreateDropdown(parent, L["Default Frame Strata"], OPTS.FRAME_STRATA_OPTIONS, defaults, "indicatorFrameStrata"), 50)
-        -- 12.1: the container render reads only the PER-INDICATOR Frame Level
-        -- (tonumber(indicator.frameLevel) or 0) — these global defaults aren't
-        -- applied (the editor proxy displays them as fallbacks, live ignores
-        -- them) and strata isn't wired at all. Planned with the z-order polish.
-        local zGate = function() return DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() end
-        GUI:BlockControl12_1(defLevelSl, "roadmap", { id = "ad:defaultframelevel", page = L["Aura Designer"], when = zGate })
-        GUI:BlockControl12_1(defStrataDD, "roadmap", { id = "ad:defaultframestrata", page = L["Aura Designer"], when = zGate })
+        -- Both LIVE on the container path: Factory.ResolveDefaults bundles them into the
+        -- per-pass `defs` table, resolveLevel/resolveStrata walk instance -> global default
+        -- (the same chain GLOBAL_DEFAULT_MAP gives the editor proxy, so the two agree), and
+        -- AuraContainer's _applyZOrder sets level and strata from the resolved config.
+        -- Both ship as no-ops -- level 0, strata INHERIT -- so an untouched profile renders
+        -- exactly where it did before they were wired.
+        g:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Default Frame Level"], 0, 100, 1, defaults, "indicatorFrameLevel")), 50)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], defaults, "showDuration"), 24)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], defaults, "showStacks"), 24)
         g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], defaults, "hideSwipe"), 24)
@@ -4845,11 +4892,11 @@ local function BuildGlobalView(parent)
         g:AddWidget(descFrame, 24)
 
         local filtersBtn = GUI:CreateButton(parent, L["Aura Filters"], 140, 22, function()
-            if GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filters"] then
-                GUI.SelectTab("auras_filters")
+            if GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"] then
+                GUI.SelectTab("auras_filterdesigner")
             end
         end)
-        if not (GUI.Pages and GUI.Pages["auras_filters"]) then
+        if not (GUI.Pages and GUI.Pages["auras_filterdesigner"]) then
             filtersBtn:Disable()
             filtersBtn.Text:SetTextColor(0.4, 0.4, 0.4)
         end
@@ -5554,7 +5601,7 @@ end
 -- and every add path is blocked.
 local function ADCrossBlockText(rec)
     if IsCandidateCrossBlocked(rec.auraName, ResolveSpec()) then
-        return IsOtherTab() and L["In My Buffs"] or L["In Other Buffs"]
+        return IsOtherTab() and L["In My Buffs"] or L["In Any Buff"]
     end
     return nil
 end
@@ -5796,7 +5843,7 @@ local function ADAddByID(idNum, idText, picker, mode, typeKey, groupID)
         end
     end
     if crossBlocked then
-        picker:Echo(isOther and L["Already tracked in My Buffs."] or L["Already tracked in Other Buffs."])
+        picker:Echo(isOther and L["Already tracked in My Buffs."] or L["Already tracked in Any Buff."])
         return
     end
 
@@ -5966,28 +6013,12 @@ CreateEffectCard = function(parent, yPos, effect)
 
     local isExpanded = expandedCards[cardKey] or false
 
-    -- Card container
-    local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    card:SetPoint("TOPLEFT", 8, yPos)
-    card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-
-    -- ── HEADER ──
-    local header = CreateFrame("Button", nil, card, "BackdropTemplate")
-    header:SetHeight(30)
-    header:SetPoint("TOPLEFT", 0, 0)
-    header:SetPoint("TOPRIGHT", 0, 0)
-    ApplyBackdrop(header, C_ELEMENT, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
-
-    -- Chevron
-    local chevron = header:CreateTexture(nil, "OVERLAY")
-    chevron:SetSize(12, 12)
-    chevron:SetPoint("LEFT", 8, 0)
-    if isExpanded then
-        chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-    else
-        chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
-    end
-    chevron:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    -- ── CARD + HEADER ──
+    local card, header, chevron = CreateCardShell(parent, {
+        yPos        = yPos,
+        expanded    = isExpanded,
+        borderColor = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5},
+    })
 
     -- Spell icon (small, before type badge). Other-pool records resolve
     -- icon/identity spec-independently (nil spec → ad-hoc / SpellDB fallback).
@@ -6130,28 +6161,24 @@ CreateEffectCard = function(parent, yPos, effect)
     do
         local cfgTable = effect.config
         local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-        local eyeBtn = CreateFrame("Button", nil, header)
-        eyeBtn:SetSize(18, 18)
+        local eyeBtn = DF.GUI:CreateGlyphButton(header, { size = 18 })
         if delBtn then
             eyeBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
         else
             eyeBtn:SetPoint("RIGHT", header, "RIGHT", -6, 0)
         end
-        local eyeIcon = eyeBtn:CreateTexture(nil, "OVERLAY")
-        eyeIcon:SetAllPoints()
         local function shown() return not cfgTable or cfgTable.enabled ~= false end
+        -- SetGlyph makes the state colour the new REST colour, so OnLeave
+        -- restores the state; hover is suppressed while hidden.
         local function updateEyeIcon()
             if shown() then
-                eyeIcon:SetTexture(mediaPath .. "visibility")
-                eyeIcon:SetVertexColor(0.95, 0.95, 0.95)
+                eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
             else
-                eyeIcon:SetTexture(mediaPath .. "visibility_off")
-                eyeIcon:SetVertexColor(0.45, 0.45, 0.45)
+                eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
             end
+            eyeBtn:SetGlyphHover(shown())
         end
         updateEyeIcon()
-        eyeBtn:SetScript("OnEnter", function() if shown() then eyeIcon:SetVertexColor(1, 1, 1) end end)
-        eyeBtn:SetScript("OnLeave", function() updateEyeIcon() end)
         eyeBtn:RegisterForClicks("LeftButtonUp")
         eyeBtn:SetFrameLevel(header:GetFrameLevel() + 2)
         eyeBtn:SetScript("OnClick", function()
@@ -6585,41 +6612,47 @@ BuildEffectsTab = function()
         { label = L["Background Color"],  type = "background" },
         { label = L["Name Text Color"],   type = "nametext"   },
         { label = L["Health Text Color"], type = "healthtext" },
-        { label = L["Frame Alpha"],       type = "framealpha" },
         { label = L["Sound Alert"],       type = "sound"      },
     }
 
     local my = -4
+    local MENU_ROW_H = 24
 
-    -- Section: Placed on Frame
-    local placedHeader = menuFrame:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(placedHeader, 9, "")
-    placedHeader:SetPoint("TOPLEFT", 10, my)
-    placedHeader:SetText(L["PLACED ON FRAME"])
-    placedHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    my = my - 14
+    -- The menu is two identical sections -- a small dim heading, then one row
+    -- per entry coloured by its type badge -- and both were written out in
+    -- full. `my` is the running cursor, so these close over it.
+    local function AddMenuSection(heading, items, scope)
+        local hdr = menuFrame:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(hdr, 9, "")
+        hdr:SetPoint("TOPLEFT", 10, my)
+        hdr:SetText(heading)
+        hdr:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        my = my - 14
 
-    for _, item in ipairs(PLACED_ITEMS) do
-        local menuBtn = CreateFrame("Button", nil, menuFrame)
-        menuBtn:SetHeight(24)
-        menuBtn:SetPoint("TOPLEFT", 4, my)
-        menuBtn:SetPoint("RIGHT", menuFrame, "RIGHT", -4, 0)
-        local bc = BADGE_COLORS[item.type]
-        local lbl = menuBtn:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(lbl, 10, "")
-        lbl:SetPoint("LEFT", 8, 0)
-        lbl:SetText(item.label)
-        lbl:SetTextColor(bc.r, bc.g, bc.b)
-        local hl = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetAllPoints()
-        hl:SetColorTexture(1, 1, 1, 0.05)
-        local capturedType = item.type
-        menuBtn:SetScript("OnClick", function()
-            menuFrame:Hide()
-            OpenIndicatorPicker(capturedType, "placed")
-        end)
-        my = my - 24
+        for _, item in ipairs(items) do
+            local menuBtn = CreateFrame("Button", nil, menuFrame)
+            menuBtn:SetHeight(MENU_ROW_H)
+            menuBtn:SetPoint("TOPLEFT", 4, my)
+            menuBtn:SetPoint("RIGHT", menuFrame, "RIGHT", -4, 0)
+            local bc = BADGE_COLORS[item.type]
+            local lbl = menuBtn:CreateFontString(nil, "OVERLAY")
+            GUI:SetSettingsFont(lbl, 10, "")
+            lbl:SetPoint("LEFT", 8, 0)
+            lbl:SetText(item.label)
+            lbl:SetTextColor(bc.r, bc.g, bc.b)
+            local hl = menuBtn:CreateTexture(nil, "HIGHLIGHT")
+            hl:SetAllPoints()
+            hl:SetColorTexture(1, 1, 1, 0.05)
+            local capturedType = item.type
+            menuBtn:SetScript("OnClick", function()
+                menuFrame:Hide()
+                OpenIndicatorPicker(capturedType, scope)
+            end)
+            my = my - MENU_ROW_H
+        end
     end
+
+    AddMenuSection(L["PLACED ON FRAME"], PLACED_ITEMS, "placed")
 
     -- Divider
     my = my - 4
@@ -6630,35 +6663,7 @@ BuildEffectsTab = function()
     mdiv:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.6)
     my = my - 6
 
-    -- Section: Frame-level Effects
-    local frameHeader = menuFrame:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(frameHeader, 9, "")
-    frameHeader:SetPoint("TOPLEFT", 10, my)
-    frameHeader:SetText(L["FRAME-LEVEL EFFECTS"])
-    frameHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    my = my - 14
-
-    for _, item in ipairs(FRAME_ITEMS) do
-        local menuBtn = CreateFrame("Button", nil, menuFrame)
-        menuBtn:SetHeight(24)
-        menuBtn:SetPoint("TOPLEFT", 4, my)
-        menuBtn:SetPoint("RIGHT", menuFrame, "RIGHT", -4, 0)
-        local bc = BADGE_COLORS[item.type]
-        local lbl = menuBtn:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(lbl, 10, "")
-        lbl:SetPoint("LEFT", 8, 0)
-        lbl:SetText(item.label)
-        lbl:SetTextColor(bc.r, bc.g, bc.b)
-        local hl = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-        hl:SetAllPoints()
-        hl:SetColorTexture(1, 1, 1, 0.05)
-        local capturedType = item.type
-        menuBtn:SetScript("OnClick", function()
-            menuFrame:Hide()
-            OpenIndicatorPicker(capturedType, "frame")
-        end)
-        my = my - 24
-    end
+    AddMenuSection(L["FRAME-LEVEL EFFECTS"], FRAME_ITEMS, "frame")
 
     menuFrame:SetHeight(-my + 6)
 
@@ -6694,7 +6699,6 @@ BuildEffectsTab = function()
         { key = "healthbar",   label = L["Health"] },
         { key = "nametext",    label = L["Name"]   },
         { key = "healthtext",  label = L["HP"]     },
-        { key = "framealpha",  label = L["Alpha"]  },
     }
 
     local CHIP_H = 22
@@ -6913,7 +6917,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
             collapseKey = "adGroupStyle:" .. tostring(cardKey) .. ":" .. sectionKey,
         })
         g.padding = 10   -- match the main Options groups' inner padding (airier scale)
-        g:AddWidget(GUI:CreateHeader(body, header), 25)
+        g:AddWidget(GUI:CreateHeader(body, header), GUI.RowHeight.sectionHeader)
         buildFn(g)
         local h = g:LayoutChildren()   -- includes the group's own bottom margin
         g:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
@@ -7145,28 +7149,13 @@ BuildLayoutGroupsTab = function()
             local expandKey = GroupExpandKey(group.id)
             local isExpanded = expandedGroups[expandKey] or false
 
-            -- Card container
-            local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-            card:SetPoint("TOPLEFT", 8, yPos)
-            card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-
-            -- ── HEADER ──
-            local header = CreateFrame("Button", nil, card, "BackdropTemplate")
-            header:SetHeight(30)
-            header:SetPoint("TOPLEFT", 0, 0)
-            header:SetPoint("TOPRIGHT", 0, 0)
-            ApplyBackdrop(header, C_ELEMENT, {r = gc.r * 0.35, g = gc.g * 0.35, b = gc.b * 0.35, a = 0.5})
-
-            -- Chevron
-            local chevron = header:CreateTexture(nil, "OVERLAY")
-            chevron:SetSize(12, 12)
-            chevron:SetPoint("LEFT", 8, 0)
-            if isExpanded then
-                chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-            else
-                chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
-            end
-            chevron:SetVertexColor(gc.r, gc.g, gc.b)
+            -- ── CARD + HEADER ──
+            local card, header, chevron = CreateCardShell(parent, {
+                yPos          = yPos,
+                expanded      = isExpanded,
+                borderColor   = {r = gc.r * 0.35, g = gc.g * 0.35, b = gc.b * 0.35, a = 0.5},
+                chevronColor  = gc,
+            })
 
             -- Group name
             local nameText = header:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -7219,24 +7208,20 @@ BuildLayoutGroupsTab = function()
             -- group container and the buff-row dedup union changes.
             if isFilterGroup then
                 local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-                local eyeBtn = CreateFrame("Button", nil, header)
-                eyeBtn:SetSize(18, 18)
+                local eyeBtn = DF.GUI:CreateGlyphButton(header, { size = 18 })
                 eyeBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
-                local eyeIcon = eyeBtn:CreateTexture(nil, "OVERLAY")
-                eyeIcon:SetAllPoints()
                 local function shown() return group.enabled ~= false end
+                -- SetGlyph makes the state colour the new REST colour, so OnLeave
+                -- restores the state; hover is suppressed while hidden.
                 local function updateEyeIcon()
                     if shown() then
-                        eyeIcon:SetTexture(mediaPath .. "visibility")
-                        eyeIcon:SetVertexColor(0.95, 0.95, 0.95)
+                        eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
                     else
-                        eyeIcon:SetTexture(mediaPath .. "visibility_off")
-                        eyeIcon:SetVertexColor(0.45, 0.45, 0.45)
+                        eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
                     end
+                    eyeBtn:SetGlyphHover(shown())
                 end
                 updateEyeIcon()
-                eyeBtn:SetScript("OnEnter", function() if shown() then eyeIcon:SetVertexColor(1, 1, 1) end end)
-                eyeBtn:SetScript("OnLeave", function() updateEyeIcon() end)
                 eyeBtn:RegisterForClicks("LeftButtonUp")
                 eyeBtn:SetFrameLevel(header:GetFrameLevel() + 2)
                 eyeBtn:SetScript("OnClick", function()
@@ -7385,16 +7370,13 @@ BuildLayoutGroupsTab = function()
                             {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.3})
 
                         -- Remove ✕ (mirror the member-row remove idiom)
-                        local remBtn = CreateFrame("Button", nil, chipRow)
-                        remBtn:SetSize(18, 18)
+                        local remBtn = DF.GUI:CreateGlyphButton(chipRow, {
+                            size = 18, iconSize = 12,
+                            texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+                            color      = { 0.55, 0.30, 0.30 },
+                            hoverColor = { 1, 0.40, 0.40 },
+                        })
                         remBtn:SetPoint("RIGHT", -4, 0)
-                        local remIcon = remBtn:CreateTexture(nil, "OVERLAY")
-                        remIcon:SetSize(12, 12)
-                        remIcon:SetPoint("CENTER", 0, 0)
-                        remIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-                        remIcon:SetVertexColor(0.55, 0.30, 0.30, 1)
-                        remBtn:SetScript("OnEnter", function() remIcon:SetVertexColor(1, 0.40, 0.40, 1) end)
-                        remBtn:SetScript("OnLeave", function() remIcon:SetVertexColor(0.55, 0.30, 0.30, 1) end)
                         local capturedLink = link
                         remBtn:SetScript("OnClick", function()
                             if capturedLink.kind == "preset" then
@@ -7601,10 +7583,12 @@ BuildLayoutGroupsTab = function()
                         GUI.SelectTab("auras_filterdesigner")
                         -- Page content builds on first show (inside SelectTab), so
                         -- the button reference exists by now.
+                        -- The add action is a row inside the Filter Designer's
+                        -- scrolling left list, so the page scrolls it into view and
+                        -- pulses it itself rather than handing back a bare widget.
                         local fdPage = GUI.Pages["auras_filterdesigner"]
-                        local newFilterBtn = fdPage and fdPage._fdNewFilterBtn
-                        if newFilterBtn and DF.HighlightWidget then
-                            DF:HighlightWidget(newFilterBtn)
+                        if fdPage and fdPage._fdFocusNewFilter then
+                            fdPage._fdFocusNewFilter()
                         end
                     end
                 end)
@@ -7635,15 +7619,13 @@ BuildLayoutGroupsTab = function()
                         local capturedMi = mi
 
                         if canMoveUp then
-                            local upBtn = CreateFrame("Button", nil, memberRow)
-                            upBtn:SetSize(20, 16)
+                            -- One arrow texture serves both directions via rotation.
+                            local upBtn = DF.GUI:CreateGlyphButton(memberRow, {
+                                width = 20, height = 16, iconSize = 14,
+                                texture  = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
+                                rotation = math.rad(180),
+                            })
                             upBtn:SetPoint("TOPLEFT", 2, -1)
-                            local upIcon = upBtn:CreateTexture(nil, "OVERLAY")
-                            upIcon:SetSize(14, 14)
-                            upIcon:SetPoint("CENTER", 0, 0)
-                            upIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-                            upIcon:SetRotation(math.rad(180))  -- flip to point up
-                            upIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
                             upBtn:SetScript("OnClick", function()
                                 SwapGroupMembers(capturedGroupID, capturedMi, capturedMi - 1)
                                 SwitchTab("layout")
@@ -7651,18 +7633,13 @@ BuildLayoutGroupsTab = function()
                                 -- Positions moved (member index feeds the grid) — re-arrange live frames.
                                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
                             end)
-                            upBtn:SetScript("OnEnter", function() upIcon:SetVertexColor(1, 1, 1) end)
-                            upBtn:SetScript("OnLeave", function() upIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
                         end
                         if canMoveDown then
-                            local downBtn = CreateFrame("Button", nil, memberRow)
-                            downBtn:SetSize(20, 16)
+                            local downBtn = DF.GUI:CreateGlyphButton(memberRow, {
+                                width = 20, height = 16, iconSize = 14,
+                                texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more",
+                            })
                             downBtn:SetPoint("BOTTOMLEFT", 2, 1)
-                            local downIcon = downBtn:CreateTexture(nil, "OVERLAY")
-                            downIcon:SetSize(14, 14)
-                            downIcon:SetPoint("CENTER", 0, 0)
-                            downIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-                            downIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
                             downBtn:SetScript("OnClick", function()
                                 SwapGroupMembers(capturedGroupID, capturedMi, capturedMi + 1)
                                 SwitchTab("layout")
@@ -7670,8 +7647,6 @@ BuildLayoutGroupsTab = function()
                                 -- Positions moved (member index feeds the grid) — re-arrange live frames.
                                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
                             end)
-                            downBtn:SetScript("OnEnter", function() downIcon:SetVertexColor(1, 1, 1) end)
-                            downBtn:SetScript("OnLeave", function() downIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) end)
                         end
 
                         -- Spell icon (Other: nil spec — GetAuraIcon degrades to
@@ -7729,20 +7704,14 @@ BuildLayoutGroupsTab = function()
                         mBadge:SetWidth(max(mBadgeText:GetStringWidth() + 12, 32))
 
                         -- Remove button (using close icon)
-                        local remBtn = CreateFrame("Button", nil, memberRow)
-                        remBtn:SetSize(18, 18)
+                        -- Red at rest, brighter red on hover: an inline destructive remove.
+                        local remBtn = DF.GUI:CreateGlyphButton(memberRow, {
+                            size = 18, iconSize = 12,
+                            texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\close",
+                            color      = { 0.55, 0.30, 0.30 },
+                            hoverColor = { 1, 0.40, 0.40 },
+                        })
                         remBtn:SetPoint("RIGHT", -4, 0)
-                        local remIcon = remBtn:CreateTexture(nil, "OVERLAY")
-                        remIcon:SetSize(12, 12)
-                        remIcon:SetPoint("CENTER", 0, 0)
-                        remIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\close")
-                        remIcon:SetVertexColor(0.55, 0.30, 0.30, 1)
-                        remBtn:SetScript("OnEnter", function()
-                            remIcon:SetVertexColor(1, 0.40, 0.40, 1)
-                        end)
-                        remBtn:SetScript("OnLeave", function()
-                            remIcon:SetVertexColor(0.55, 0.30, 0.30, 1)
-                        end)
                         local capturedMember = member
                         remBtn:SetScript("OnClick", function()
                             RemoveGroupMember(capturedGroupID, capturedMember.auraName, capturedMember.indicatorID)
@@ -8116,28 +8085,13 @@ BuildDebuffGroupsTab = function()
             local isExpanded = expandedGroups[cardKey] or false
             local capturedGroupID = group.id
 
-            -- Card container
-            local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-            card:SetPoint("TOPLEFT", 8, yPos)
-            card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-
-            -- ── HEADER ──
-            local header = CreateFrame("Button", nil, card, "BackdropTemplate")
-            header:SetHeight(30)
-            header:SetPoint("TOPLEFT", 0, 0)
-            header:SetPoint("TOPRIGHT", 0, 0)
-            ApplyBackdrop(header, C_ELEMENT, {r = gc.r * 0.35, g = gc.g * 0.35, b = gc.b * 0.35, a = 0.5})
-
-            -- Chevron
-            local chevron = header:CreateTexture(nil, "OVERLAY")
-            chevron:SetSize(12, 12)
-            chevron:SetPoint("LEFT", 8, 0)
-            if isExpanded then
-                chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more")
-            else
-                chevron:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
-            end
-            chevron:SetVertexColor(gc.r, gc.g, gc.b)
+            -- ── CARD + HEADER ──
+            local card, header, chevron = CreateCardShell(parent, {
+                yPos          = yPos,
+                expanded      = isExpanded,
+                borderColor   = {r = gc.r * 0.35, g = gc.g * 0.35, b = gc.b * 0.35, a = 0.5},
+                chevronColor  = gc,
+            })
 
             -- Group name + collapsed summary: the selected category names
             -- (the A5 collapsed treatment, categories instead of link count).
@@ -8173,24 +8127,20 @@ BuildDebuffGroupsTab = function()
             -- group eye (A3/A5). Toggling is STRUCTURAL: the factory tears
             -- down / stands up the container and the claims union moves.
             local mediaPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-            local eyeBtn = CreateFrame("Button", nil, header)
-            eyeBtn:SetSize(18, 18)
+            local eyeBtn = DF.GUI:CreateGlyphButton(header, { size = 18 })
             eyeBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
-            local eyeIcon = eyeBtn:CreateTexture(nil, "OVERLAY")
-            eyeIcon:SetAllPoints()
             local function shown() return group.enabled ~= false end
+            -- SetGlyph makes the state colour the new REST colour, so OnLeave
+            -- restores the state; hover is suppressed while hidden.
             local function updateEyeIcon()
                 if shown() then
-                    eyeIcon:SetTexture(mediaPath .. "visibility")
-                    eyeIcon:SetVertexColor(0.95, 0.95, 0.95)
+                    eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
                 else
-                    eyeIcon:SetTexture(mediaPath .. "visibility_off")
-                    eyeIcon:SetVertexColor(0.45, 0.45, 0.45)
+                    eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
                 end
+                eyeBtn:SetGlyphHover(shown())
             end
             updateEyeIcon()
-            eyeBtn:SetScript("OnEnter", function() if shown() then eyeIcon:SetVertexColor(1, 1, 1) end end)
-            eyeBtn:SetScript("OnLeave", function() updateEyeIcon() end)
             eyeBtn:RegisterForClicks("LeftButtonUp")
             eyeBtn:SetFrameLevel(header:GetFrameLevel() + 2)
             eyeBtn:SetScript("OnClick", function()
@@ -8597,12 +8547,11 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     enableBanner:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
     enableBanner:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
 
-    if GUI.CreateCopyButton then
-        local copyBtn = GUI.CreateCopyButton(enableBanner, {"auraDesigner"}, L["Aura Designer"], "auras_auradesigner", true)
-        copyBtn:ClearAllPoints()
-        -- Row 1 centre is 16px above banner centre, so y = +16.
-        copyBtn:SetPoint("RIGHT", enableBanner, "RIGHT", -5, 16)
-    end
+    -- No Copy / Sync pair here (every other mode-specific page has one). The one
+    -- key this page owns is the template NAME, and the template bar below sets
+    -- it directly — so Copy was "pick that name in the other tab" and Sync was a
+    -- link that could only ever hold one name in step. Sharing is now stated and
+    -- undone on the bar itself; see GUI:CreateDesignerPresetBar.
 
     -- ========================================
     -- PRESET BAR (which named preset this mode uses + library management)
@@ -8651,10 +8600,24 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     buffTabBar:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
     buffTabBar:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
 
+    -- The three pools differ on two axes the labels can't carry — WHOSE casts
+    -- count, and whether the pool is per-spec — so each tab explains itself on
+    -- hover. (Any Buff is caster-agnostic by default; "Others Only" is the
+    -- per-effect opt-in that ignores your own casts.)
     local MAIN_TAB_DEFS = {
-        { key = "my",      label = L["My Buffs"]    },
-        { key = "debuffs", label = L["Debuffs"]     },
-        { key = "other",   label = L["Other Buffs"] },
+        { key = "my",      label = L["My Buffs"], tooltip = {
+            L["Buffs from your own class, and only when you cast them."],
+            L["Set up separately for each specialization."],
+        } },
+        { key = "debuffs", label = L["Debuffs"], tooltip = {
+            L["Groups of debuffs picked by category — boss, crowd control, dispellable and so on — rather than one spell at a time."],
+            L["Shared across all your specializations."],
+        } },
+        { key = "other",   label = L["Any Buff"], tooltip = {
+            L["Any buff in the spell database, from any caster — including your own."],
+            L["Turn on Others Only for an effect to ignore your own casts."],
+            L["Shared across all your specializations."],
+        } },
     }
     wipe(mainTabButtons)
     local prevMainBtn
@@ -8671,6 +8634,13 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         end
         local capturedKey = def.key
         btn:SetScript("OnClick", function() SetMainTab(capturedKey) end)
+        -- HookScript, not SetScript: StyleButton owns OnEnter/OnLeave for the
+        -- hover wash, and replacing them would leave the tab stuck lit.
+        local tipTitle, tipLines = def.label, def.tooltip
+        btn:HookScript("OnEnter", function(self)
+            GUI:ShowTooltip(self, { title = tipTitle, lines = tipLines })
+        end)
+        btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
         btn:SetActive(activeBuffTab == def.key)
         mainTabButtons[def.key] = btn
         prevMainBtn = btn
@@ -8922,25 +8892,12 @@ function DF:AuraDesigner_RefreshPage()
         local adEnabled = GetAuraDesignerDB().enabled
         if not adEnabled then
             if not mainFrame.disabledOverlay then
-                local overlay = CreateFrame("Frame", nil, mainFrame.splitContainer)
+                -- Shared with the Text Designer and Raid Auto Layouts; this page
+                -- only owns the extent (the whole split container) and the label.
+                local overlay = GUI:CreateDisabledOverlay(mainFrame.splitContainer, {
+                    label = L["Aura Designer is disabled"],
+                })
                 overlay:SetAllPoints()
-                overlay:SetFrameLevel(mainFrame.splitContainer:GetFrameLevel() + 50)
-                overlay:EnableMouse(true)
-
-                local bg = overlay:CreateTexture(nil, "BACKGROUND")
-                bg:SetAllPoints()
-                bg:SetColorTexture(0.08, 0.08, 0.08, 0.85)
-
-                local label = overlay:CreateFontString(nil, "OVERLAY", "DFFontNormal")
-                label:SetPoint("CENTER", 0, 10)
-                label:SetText(L["Aura Designer is disabled"])
-                label:SetTextColor(0.6, 0.6, 0.6, 1)
-
-                local sublabel = overlay:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                sublabel:SetPoint("TOP", label, "BOTTOM", 0, -4)
-                sublabel:SetText(L["Enable the checkbox above to use"])
-                sublabel:SetTextColor(0.45, 0.45, 0.45, 1)
-
                 mainFrame.disabledOverlay = overlay
             end
             mainFrame.disabledOverlay:Show()

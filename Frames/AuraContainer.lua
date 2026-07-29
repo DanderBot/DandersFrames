@@ -18,21 +18,28 @@ local addonName, DF = ...
 -- owns the POLICY (which filter, layout, config keys). The factory never reads
 -- aura data, never loops-and-draws — it configures and hands off.
 --
--- PUBLIC API:
+-- PUBLIC API:  († = provided, no internal consumer yet -- see the note below)
 --   DF.AuraContainer.IsSupported()       -- 12.1+ widget types exist (version gate)
---   DF.AuraContainer.HasSpellFilter()    -- PTR-4: per-Spell-ID filter available
---   DF.AuraContainer.HasSort()           -- PTR-4: sort rule/direction available
+--   DF.AuraContainer.HasSpellFilter() †  -- PTR-4: per-Spell-ID filter available
+--   DF.AuraContainer.HasSort()        †  -- PTR-4: sort rule/direction available
 --   local h = DF.AuraContainer:Create(parent, config)  -- nil if unsupported
 --   h:SetUnit(unit) / h:SetShown(b) / h:Enable() / h:Disable()
 --   h:ApplyStyle(style) -- in-place cosmetic restyle (no teardown)
 --   h:ApplyTuning(tuning) -- in-place max/sort/candidateFilters mutate (no teardown;
 --                            OOC-only, defers to regen in combat). REPLACES all three keys.
---   h:SetFilter(filter) -- structural (rebuild)
+--   h:SetFilter(filter) † -- structural (rebuild)
 --   h:Rebuild(config)      -- structural rebuild (max / region toggles / frozen opts); a
 --                             table REPLACES the config wholesale (callers pass complete configs)
 --   h:Refresh() -- force a re-scan (Hide/Show bounce; for dynamic-unit consumers)
 --   h:GetFrame() -- the plain positioning frame DF anchors (SetPoint/SetSize on it)
 --   h:Destroy()
+--
+-- † HasSpellFilter / HasSort / SetFilter have no internal caller. An earlier review
+--   deferred the question to container Wave 1; W1 has since shipped, and it used
+--   SetSort / _getConfig / _getAnchorFrame / _layoutSlots but not these three. They
+--   stay as published API — capability probes are the natural shape for a later wave
+--   to gate on, and they are one-liners over IsSupported(). Recorded here so the next
+--   dead-code sweep gets the answer instead of re-raising the question.
 --
 -- GOTCHAS baked in (12.1.0 @ 68569 — the PTR-4 API; validated in-game via DF_AuraLab):
 --   1. Addons NO LONGER create AuraButtons (AddAuraFrame/AddAuraFramesFromTemplate removed).
@@ -911,7 +918,11 @@ local function bindNative(slot, config)
     end
 
     if slot.dfDur and slot.SetDurationText and not slot._boundDur then
-        slot._boundDur = true
+        -- _boundDur is stamped AFTER the pcall below, not here: this is a
+        -- bind-once flag, so setting it up front meant a failed bind latched
+        -- permanently and the duration text stayed blank for the life of the slot
+        -- with no retry (and warnedCurve is one-shot per session, so the second
+        -- distinct failure was silent too).
         local durSpec = style.duration or {}
         -- 68914 RESHAPED the options: SetDurationText now only reads { binding |
         -- textFormat | textFormatter | textColor }; the flat formatter/expiredText/
@@ -956,7 +967,9 @@ local function bindNative(slot, config)
             opts.textColor = { curve = durSpec.colorCurve, property = durSpec.colorProperty }
         end
         local ok, err = pcall(function() slot:SetDurationText(slot.dfDur, opts) end)
-        if not ok and not warnedCurve then
+        if ok then
+            slot._boundDur = true
+        elseif not warnedCurve then
             warnedCurve = true
             DF:DebugWarn(DBG, "SetDurationText failed: %s", tostring(err))
         end
@@ -999,8 +1012,11 @@ local function bindNative(slot, config)
     if dispelSpec then
         if slot.dfAuraBorder and (slot.AddDispelTypeTexture or slot.SetAuraBorder)
             and (not slot._boundAuraBorder or slot._dfDispelCurveGen ~= DF.dispelCurveGen) then
-            slot._boundAuraBorder = true
-            slot._dfDispelCurveGen = DF.dispelCurveGen
+            -- Both stamps land AFTER the pcall below. Setting them up front meant a
+            -- failed bind marked the slot as bound AND as carrying the current
+            -- palette generation, so the ring stayed blank until an unrelated
+            -- rebuild -- the curve-gen bump that is supposed to force a re-bind had
+            -- already been consumed by the failure.
             -- Style resolution is SHARED with the dispel overlay (DF:ResolveDispelTextureStyle
             -- in Frames/Border.lua) — it carries the 68914 enum rename/renumber and the
             -- correct last-resort literals. Never resolve the enum locally.
@@ -1032,33 +1048,42 @@ local function bindNative(slot, config)
                     slot:SetAuraBorder(slot.dfAuraBorder, opts)
                 end
             end)
-            if not ok and not warnedNativeDispel then
+            if ok then
+                slot._boundAuraBorder = true
+                slot._dfDispelCurveGen = DF.dispelCurveGen
+            elseif not warnedNativeDispel then
                 warnedNativeDispel = true
                 DF:DebugWarn(DBG, "SetAuraBorder failed (build still ok): %s", tostring(err))
             end
         end
-        if slot.dfSymbol and slot.SetAuraSymbol and not slot._boundSymbol then
+        if slot.dfSymbol and (slot.SetDispelTypeText or slot.SetAuraSymbol) and not slot._boundSymbol then
             slot._boundSymbol = true
             local ok, err = pcall(function()
-                slot:SetAuraSymbol(slot.dfSymbol, {
+                local opts = {
                     showWhenHarmful = dispelSpec.showWhenHarmful ~= false,
                     showWhenHelpful = dispelSpec.showWhenHelpful == true,
-                })
+                }
+                -- 68914: SetAuraSymbol sits in the same "removed after 12.1" deprecation
+                -- block as SetAuraBorder, but unlike that one it is a PLAIN ALIAS —
+                -- `SetAuraSymbol = SetDispelTypeText`, same (fontString, options)
+                -- signature, no clear-then-add semantics to mirror. So this is a straight
+                -- rename: prefer the real name, keep the alias only for older builds.
+                -- Without the fallback the gate above would simply stop matching when the
+                -- aliases go, and the dispel symbol would vanish SILENTLY.
+                if slot.SetDispelTypeText then
+                    slot:SetDispelTypeText(slot.dfSymbol, opts)
+                else
+                    slot:SetAuraSymbol(slot.dfSymbol, opts)
+                end
             end)
             if not ok and not warnedNativeDispel then
                 warnedNativeDispel = true
-                DF:DebugWarn(DBG, "SetAuraSymbol failed (build still ok): %s", tostring(err))
+                DF:DebugWarn(DBG, "SetDispelTypeText failed (build still ok): %s", tostring(err))
             end
         end
     end
 end
 
--- Custom-path wrapper: regions then native bind, preserving the original order + behaviour.
--- (_build and ApplyStyle call this. Increment 2 calls the two halves separately per backend.)
-local function styleButton(slot, config)
-    styleButton_regions(slot, config)
-    bindNative(slot, config)
-end
 
 -- ============================================================
 -- LAYOUT  (row mode)
@@ -1683,7 +1708,13 @@ function NativeBackend:build()
     for i, rec in ipairs(filters) do
         local f = rec.f
         local cf = (not testMode) and recordCandidateFilters(rec, config) or nil
-        if cf and filterVulnerableToIdentityGate(f, cf) then
+        -- NOT gated on `cf`: filterVulnerableToIdentityGate's OTHER branch is the
+        -- spell-CATEGORY token case (BIG_DEFENSIVE / EXTERNAL_DEFENSIVE), which is
+        -- precisely the defensive row's empty-selection fallback -- and that config
+        -- carries NO candidateFilters. Requiring cf here made that branch dead, so a
+        -- cleared defensive selection went ungated and filled with ordinary buffs on
+        -- a cross-faction unit. The function is nil-safe on cf.
+        if filterVulnerableToIdentityGate(f, cf) then
             handle._idGateVulnerable = true
         end
         if filterSourceRelative(f, cf) then
@@ -1857,8 +1888,29 @@ function NativeBackend:applyGroupTuning()
     -- filter set is structural and unchanged on this path, so keys line up with
     -- self.groupKeys (rec.key or positional "df<i>").
     local cfByKey = {}
+    -- ★ RE-DERIVE THE IDENTITY-GATE VERDICT. include/excludeSpellIDs live in the
+    -- TUNING signature, not the struct one, so every setting that flips a pool's
+    -- gate exposure -- Show All Buffs, a filter-category selection, missing-buff
+    -- hide-from-bar, defensive dedupe -- lands HERE and never re-enters build().
+    -- The flag used to be written only in build(), and IdentityGateSweep only
+    -- visits handles already flagged, so a handle that BECAME vulnerable was never
+    -- reconsidered: on a cross-faction unit (UnitCanAssist false) the gate fails
+    -- open and an "only these spells" row renders every buff. Recompute from the
+    -- records this call is about to push, then re-apply.
+    local wasVulnerable = self.handle._idGateVulnerable
+    local wasSourceRel  = self.handle._idGateSourceRelative
+    self.handle._idGateVulnerable = nil
+    self.handle._idGateSourceRelative = nil
     for i, rec in ipairs(normalizeFilters(config.filter)) do
-        cfByKey[rec.key or ("df" .. i)] = recordCandidateFilters(rec, config)
+        local key = rec.key or ("df" .. i)
+        local cf = recordCandidateFilters(rec, config)
+        cfByKey[key] = cf
+        if filterVulnerableToIdentityGate(rec.f, cf) then
+            self.handle._idGateVulnerable = true
+        end
+        if filterSourceRelative(rec.f, cf) then
+            self.handle._idGateSourceRelative = true
+        end
     end
     for _, key in ipairs(self.groupKeys) do
         pcall(function() c:SetAuraGroupMaxFrameCount(key, maxCount) end)
@@ -1875,6 +1927,13 @@ function NativeBackend:applyGroupTuning()
     -- parse, same op class as enable).
     if not InCombatLockdown() then
         pcall(function() c:Hide(); c:Show() end)
+    end
+    -- Re-apply the gate whenever this call CHANGED the verdict. Cheap and
+    -- combat-safe (plain frame visibility), but skipped when nothing moved so a
+    -- routine tuning pass does not churn handle visibility.
+    if self.handle._idGateVulnerable ~= wasVulnerable
+        or self.handle._idGateSourceRelative ~= wasSourceRel then
+        pcall(function() self.handle:_applyIdentityGate() end)
     end
 end
 
@@ -1923,11 +1982,6 @@ end
 local Handle = {}
 Handle.__index = Handle
 
--- Backend contract (layout half): the backend calls these to hand produced slots in and
--- to lay them out. The handle owns positioning/styling/lifecycle; the backend owns the
--- source object + slot production.
-function Handle:_getConfig() return self.config end
-function Handle:_getAnchorFrame() return self.frame end
 function Handle:_slotCount()
     local mode = self.config.mode
     if mode == "overlay" or mode == "missing" then return 1 end
@@ -2151,7 +2205,17 @@ function Handle:_paintTestSlot(slot, index)
         if d > 0 then
             local u = self.config.unit
             local useed = (type(u) == "string" and tonumber(u:match("%d+"))) or 0
-            local offset = (index * 3 + useed * 5) % math.max(d - 1, 1)
+            -- ⚠ The whole-second term staggers the VALUE but NOT the phase. Every slot
+            -- paints in the same frame, so with d and the offset both integral every
+            -- expiry carries the same fractional part and all countdowns flip their
+            -- digit on the same tick — a raid of auras ticking in lockstep, which is
+            -- the one thing real auras never do. The sub-second term breaks that;
+            -- scheduleTestRearm then loops on (d - offset) so they stay out of phase.
+            -- 17 is coprime with the row/unit counts, so the phases don't collapse
+            -- back into groups. Bounded below d: the integer part is at most d-2
+            -- (d >= 2) or 0 (d == 1), and frac < 1.
+            local frac = ((index * 7 + useed * 13) % 17) / 17
+            local offset = (index * 3 + useed * 5) % math.max(d - 1, 1) + frac
             barFill = (d - offset) / d
             -- Invalidate any re-arm still pending from the previous paint.
             slot._dfTestGen = (slot._dfTestGen or 0) + 1
@@ -2455,15 +2519,6 @@ function Handle:_positionTestTip(tip, index)
     local x = (L.offsetX or 0) + (pAxis.x * col + sAxis.x * row) * (sx + spX) * scale
     local y = (L.offsetY or 0) + ((pAxis.y * col + sAxis.y * row) * strideY + vSign * inset) * scale
     tip:SetPoint(G.anchor, self.frame, G.anchor, x, y)
-end
-function Handle:_layoutSlots()
-    -- NATIVE row mode = the container's own flow layout anchors the buttons (wired via
-    -- applyContainerLayout at build; hot-applied via NativeBackend:applyLayout) — never
-    -- hand-anchor those (SetPoint would fight the secure flow layout). PLAIN slots
-    -- (a future non-native "slots" mode) would hand-anchor via layoutRow.
-    if self.config.mode == "overlay" then return end
-    if self.backend and self.backend:isNativeSlots() then return end
-    layoutRow(self)
 end
 
 -- Build the per-button styling callback Blizzard invokes (securecallfunction) for each
@@ -3088,7 +3143,51 @@ end
 -- sample data provider feeds them and initializeFrame paints the curated preview
 -- (see AuraContainer.SetTestMode). The backend owns the container + slot
 -- production; the handle owns styling/layout/lifecycle.
+
+-- Z-ORDER — frame level + frame strata, from self.config. Level: legacy renders host aura
+-- icons ABOVE contentOverlay (parent+25, name/health text). Raising self.frame raises the
+-- whole subtree — the native container + AuraButtons + their holders are all descendants with
+-- relative levels (Blizzard sets no fixed levels). Default +40 = legacy buff-icon level; the
+-- defensive row passes +51 (= contentOverlay+26). Strata picks the BAND; the level offset only
+-- orders WITHIN a band.
+--
+-- ★ Called from Create AND from every _build. It MUST run on rebuild: Rebuild() swaps
+-- self.config and calls _build WITHOUT recreating self.frame, so a config whose z-order keys
+-- changed would otherwise keep whatever Create stamped — which is why a struct-sig change to
+-- Frame Level did not take effect until a reload. Recomputing is a couple of setter calls, so
+-- an unconditional call per build costs nothing.
+--
+-- Strata is deliberately OPT-IN. Calling SetFrameStrata PINS a frame: it stops tracking the
+-- parent's band. Containers that never set frameStrata are therefore left untouched and keep
+-- inheriting, exactly as before. Only once an explicit strata has been applied do we re-assert
+-- the parent's band on the way back to Inherit (there is no "unset" to write) — tracked by
+-- _strataPinned so the restore happens once and never on a container that never opted in.
+-- Public form: pass the INCOMING config to apply a z-order that self.config does not carry yet.
+-- The buff/debuff/defensive row drivers need this. They keep frameLevelOffset out of their sigs
+-- on purpose (a level change is not structural and must not force a Rebuild), so a level-only
+-- change never reaches _build — the driver applies it directly against the new cfg instead.
+function Handle:ApplyZOrder(cfg)
+    local f = self.frame
+    cfg = cfg or self.config
+    if not f or not cfg then return end
+    local parent = f:GetParent()
+    if not parent then return end
+    f:SetFrameLevel(math.max(0, parent:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
+    if cfg.frameStrata then
+        f:SetFrameStrata(cfg.frameStrata)
+        self._strataPinned = true
+    elseif self._strataPinned then
+        f:SetFrameStrata(parent:GetFrameStrata())
+        self._strataPinned = nil
+    end
+end
+
+function Handle:_applyZOrder()
+    self:ApplyZOrder(self.config)
+end
+
 function Handle:_build()
+    self:_applyZOrder()        -- level/strata track config changes across Rebuild
     self:_ppPrepare()          -- pp flag + quantized layout BEFORE any geometry runs
     self.backend = NativeBackend.new(self)
     self.backend:build()
@@ -3280,11 +3379,7 @@ function AuraContainer:Create(parent, config)
             end)
         end
     end
-    -- Z-order: legacy renders host aura icons ABOVE contentOverlay (parent+25, name/health
-    -- text). Raising h.frame raises the whole subtree — the native container + AuraButtons +
-    -- their holders are all descendants with relative levels (Blizzard sets no fixed levels).
-    -- Default +40 = legacy buff-icon level; the defensive row passes +51 (= contentOverlay+26).
-    h.frame:SetFrameLevel(math.max(0, parent:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
+    h:_applyZOrder()   -- level + strata; also re-runs on every _build (see the method)
 
     if InCombatLockdown() then
         -- Can't safely stand up secure container state in combat; build on regen.

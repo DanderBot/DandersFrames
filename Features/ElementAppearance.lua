@@ -111,27 +111,7 @@ local function ApplyOORAlpha(element, inRange, inAlpha, oorAlpha)
     end
 end
 
--- Out-of-range fade for an AD border-type widget (the whole-frame border
--- indicator + per-aura custom borders). These hang off the FRAME, not a faded
--- element, so element-specific OOR mode has to dim them explicitly. Fading the
--- widget cascades to its edges, overlay effects and LCG glows (all children).
--- dfRangeAlpha is the numeric factor DF_PULSATE's per-frame tick multiplies into
--- its own SetAlpha; a secret inRange can't yield a numeric factor, so it's left
--- at 1 (SetAlphaFromBoolean still fades every non-DF_PULSATE effect).
-local function FadeADBorderWidget(b, inRange, oorAlpha, secretRange)
-    if not b then return end
-    b.dfRangeAlpha = secretRange and 1 or (inRange and 1.0 or oorAlpha)
-    ApplyOORAlpha(b, inRange, 1.0, oorAlpha)
-end
 
--- Frame-level mode: the frame cascade does the fade, so the widget stays at full
--- alpha and dfRangeAlpha resets to 1 (so a DF_PULSATE pulse isn't double-dimmed
--- after toggling out of element-specific OOR mode).
-local function ResetADBorderWidget(b)
-    if not b then return end
-    b.dfRangeAlpha = 1
-    b:SetAlpha(1.0)
-end
 
 -- Check if unit is dead or offline
 local function IsDeadOrOffline(frame)
@@ -812,31 +792,6 @@ function DF:UpdateReadyCheckIconAppearance(frame)
     end
 end
 
-function DF:UpdateCenterStatusIconAppearance(frame)
-    if not IsDandersFrame(frame) then return end
-    if not frame.centerStatusIcon then return end
-    
-    local db = GetDB(frame)
-    if not db then return end
-    
-    if DF.testMode or DF.raidTestMode then return end
-    
-    local deadOrOffline = IsDeadOrOffline(frame)
-    local inRange = GetInRange(frame)
-    
-    local alpha = 1.0
-    if deadOrOffline and db.fadeDeadFrames then
-        alpha = db.fadeDeadIcons or 1.0
-    end
-
-    if db.oorEnabled then
-        local oorAlpha = db.oorIconsAlpha or 0.5
-        ApplyOORAlpha(frame.centerStatusIcon, inRange, alpha, oorAlpha)
-    else
-        frame.centerStatusIcon:SetAlpha(alpha)
-    end
-end
-
 -- ============================================================
 -- DISPEL OVERLAY APPEARANCE
 -- ============================================================
@@ -1081,6 +1036,9 @@ end
 
 -- ============================================================
 -- TARGETED SPELL CONTAINER APPEARANCE
+-- ⚰ DEPRECATED-TARGETED-SPELLS — goes with the on-frame feature. This is the
+-- GROUP container only; Personal Targeted does not come through here. See the
+-- block comment at the top of Features\TargetedSpells.lua.
 -- ============================================================
 
 function DF:UpdateTargetedSpellAppearance(frame)
@@ -1243,7 +1201,6 @@ function DF:UpdateAllElementAppearances(frame)
     DF:UpdateLeaderIconAppearance(frame)
     DF:UpdateRaidTargetIconAppearance(frame)
     DF:UpdateReadyCheckIconAppearance(frame)
-    DF:UpdateCenterStatusIconAppearance(frame)
     DF:UpdateDispelOverlayAppearance(frame)
     DF:UpdateMissingBuffAppearance(frame)
     DF:UpdateAbsorbBarAppearance(frame)
@@ -1308,7 +1265,6 @@ DF.UpdateRoleIconAlpha = DF.UpdateRoleIconAppearance
 DF.UpdateLeaderIconAlpha = DF.UpdateLeaderIconAppearance
 DF.UpdateRaidTargetIconAlpha = DF.UpdateRaidTargetIconAppearance
 DF.UpdateReadyCheckIconAlpha = DF.UpdateReadyCheckIconAppearance
-DF.UpdateCenterStatusIconAlpha = DF.UpdateCenterStatusIconAppearance
 DF.UpdateDispelOverlayAlpha = DF.UpdateDispelOverlayAppearance
 DF.UpdateMissingBuffAlpha = DF.UpdateMissingBuffAppearance
 DF.UpdateDefensiveIconAlpha = DF.UpdateDefensiveIconAppearance

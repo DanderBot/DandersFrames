@@ -1461,14 +1461,14 @@ function SecureSort:CreateTestUI()
     local panel = CreateFrame("Frame", "DFSecureSortTestUI", UIParent, "BackdropTemplate")
     panel:SetSize(180, 520)  -- Increased height
     panel:SetPoint("CENTER", UIParent, "CENTER", 0, 0)  -- Center of screen
-    panel:SetBackdrop({
-        bgFile = "Interface/Tooltips/UI-Tooltip-Background",
-        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
-        edgeSize = 16,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 },
+    -- DF chrome rather than Blizzard's tooltip art, but the cyan border stays as a
+    -- per-consumer override so this still reads as the debug panel it is. The old
+    -- edgeSize 16 belonged to the bevelled tooltip texture; a flat 16px edge would
+    -- be a solid slab, so the thickness goes back to the shared default.
+    DF.GUI:CreateElementBackdrop(panel, {
+        bgColor     = { 0.1, 0.1, 0.15, 0.95 },
+        borderColor = { 0, 0.8, 1, 0.8 },
     })
-    panel:SetBackdropColor(0.1, 0.1, 0.15, 0.95)
-    panel:SetBackdropBorderColor(0, 0.8, 1, 0.8)
     
     -- Make it movable
     panel:SetMovable(true)
@@ -1492,10 +1492,9 @@ function SecureSort:CreateTestUI()
     -- Helper to create buttons
     local buttonY = -50
     local function CreateButton(text, onClick, color)
-        local btn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-        btn:SetSize(150, 22)
+        local btn = CreateFrame("Button", nil, panel, "BackdropTemplate")
+        DF.GUI:StyleButton(btn, { width = 150, height = 22, text = text })
         btn:SetPoint("TOP", panel, "TOP", 0, buttonY)
-        btn:SetText(text)
         btn:SetScript("OnClick", function()
             panel.statusText:SetText("|cff00ff00Running...|r")
             onClick()

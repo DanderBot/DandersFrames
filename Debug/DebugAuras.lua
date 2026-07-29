@@ -218,25 +218,30 @@ local function CreateDebugIcon(parent, index)
     icon:EnableMouse(true)
     icon:SetScript("OnEnter", function(self)
         if self.auraData and DA.showTooltip then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            -- Wrap in pcall in case values are secret
-            pcall(function()
-                if self.auraData.auraInstanceID then
-                    GameTooltip:SetUnitAura(self.unit, self.auraData.auraInstanceID)
-                elseif self.auraData.name then
-                    GameTooltip:SetText(self.auraData.name)
-                    if self.auraData.duration and self.auraData.duration > 0 then
-                        GameTooltip:AddLine(string.format("Duration: %.1fs", self.auraData.duration), 1, 1, 1)
-                    end
-                else
-                    GameTooltip:SetText("Aura (secret data)")
-                end
+            -- pcall around the reads, not the render: the fields may be secret,
+            -- and touching one throws. The helper pcalls SetUnitAura itself.
+            local ok, name, duration = pcall(function()
+                return self.auraData.name, self.auraData.duration
             end)
-            GameTooltip:Show()
+            if not ok then name, duration = nil, nil end
+            if self.auraData.auraInstanceID then
+                DF.GUI:ShowGameTooltip(self, {
+                    unit           = self.unit,
+                    auraInstanceID = self.auraData.auraInstanceID,
+                    fallbackTitle  = name or "Aura (secret data)",
+                })
+            else
+                DF.GUI:ShowTooltip(self, {
+                    title = name or "Aura (secret data)",
+                    lines = (duration and duration > 0)
+                        and { { text = string.format("Duration: %.1fs", duration), color = { 1, 1, 1 } } }
+                        or nil,
+                })
+            end
         end
     end)
     icon:SetScript("OnLeave", function()
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     return icon
@@ -255,13 +260,10 @@ function DA:CreateDebugBar(frame)
     bar:SetFrameLevel(frame:GetFrameLevel() + 100)
     
     -- Background
-    bar:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(bar, {
+        bgColor     = { 0, 0, 0, 0.7 },
+        borderColor = { 0, 0.7, 1, 0.8 },
     })
-    bar:SetBackdropColor(0, 0, 0, 0.7)
-    bar:SetBackdropBorderColor(0, 0.7, 1, 0.8)
     
     -- Label showing current filter
     bar.label = bar:CreateFontString(nil, "OVERLAY")
@@ -517,13 +519,11 @@ function DA:CreateOptionsPanel()
     local frame = CreateFrame("Frame", "DFDebugAurasOptions", UIParent, "BackdropTemplate")
     frame:SetSize(400, 580)
     frame:SetPoint("CENTER")
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
+    DF.GUI:CreateElementBackdrop(frame, {
         edgeSize = 2,
+        bgColor     = { 0.1, 0.1, 0.12, 0.95 },
+        borderColor = { 0, 0.7, 1, 1 },
     })
-    frame:SetBackdropColor(0.1, 0.1, 0.12, 0.95)
-    frame:SetBackdropBorderColor(0, 0.7, 1, 1)
     frame:SetMovable(true)
     frame:EnableMouse(true)
     frame:RegisterForDrag("LeftButton")
@@ -726,10 +726,9 @@ function DA:CreateOptionsPanel()
     yOffset = yOffset - 25
     
     -- Dump AuraFilters button
-    local dumpBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    dumpBtn:SetSize(160, 24)
+    local dumpBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    DF.GUI:StyleButton(dumpBtn, { width = 160, height = 24, text = "Dump AuraFilters" })
     dumpBtn:SetPoint("TOPLEFT", 20, yOffset)
-    dumpBtn:SetText("Dump AuraFilters")
     dumpBtn:SetScript("OnClick", function()
         print("|cff00ccff=== AuraUtil.AuraFilters ===|r")
         if AuraUtil and AuraUtil.AuraFilters then
@@ -752,20 +751,18 @@ function DA:CreateOptionsPanel()
     end)
     
     -- Test API button
-    local testBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    testBtn:SetSize(160, 24)
+    local testBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    DF.GUI:StyleButton(testBtn, { width = 160, height = 24, text = "Test APIs" })
     testBtn:SetPoint("TOPLEFT", 200, yOffset)
-    testBtn:SetText("Test APIs")
     testBtn:SetScript("OnClick", function()
         DA:TestAPIs()
     end)
     yOffset = yOffset - 30
     
     -- Refresh button
-    local refreshBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    refreshBtn:SetSize(160, 24)
+    local refreshBtn = CreateFrame("Button", nil, frame, "BackdropTemplate")
+    DF.GUI:StyleButton(refreshBtn, { width = 160, height = 24, text = "Refresh Bars" })
     refreshBtn:SetPoint("TOPLEFT", 20, yOffset)
-    refreshBtn:SetText("Refresh Bars")
     refreshBtn:SetScript("OnClick", function()
         -- Reset bars
         local frames = DA:GetAllFrames()

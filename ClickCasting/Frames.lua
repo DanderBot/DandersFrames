@@ -2362,12 +2362,21 @@ function CC:RefreshKeyboardBindings()
         end
     end
     
-    -- (No separate DandersFrames pass. There used to be a loop over
-    -- `DF.unitFrames` here, but that table is never assigned anywhere in the
-    -- addon -- it was a dead read that made this look like it covered our own
-    -- frames by a second route. It does cover them: RegisterAllFrames walks the
-    -- party/raid header children through RegisterFrame, so DF's own frames are
-    -- in registeredFrames above.)
+    -- Also sweep DF's own frames. The loop that used to be here read
+    -- `DF.unitFrames`, a table nothing in the addon assigns, so it silently did
+    -- nothing; DF:IterateAllFrames is the real accessor. Mostly redundant with
+    -- the registeredFrames pass above -- RegisterAllFrames walks the party,
+    -- separated-raid, flat-raid and pet headers -- but NOT redundant in arena:
+    -- it has no arena-header walk, while IterateAllFrames special-cases arena
+    -- (party/raid headers are hidden there). Idempotent and off the hot path,
+    -- so the overlap costs one extra pass over <=40 frames when bindings change.
+    if DF and DF.IterateAllFrames then
+        DF:IterateAllFrames(function(frame)
+            if frame and frame.dfKeyboardHandlersSetup then
+                self:UpdateFrameBindingAttributes(frame)
+            end
+        end)
+    end
 end
 
 -- ============================================================
@@ -2592,6 +2601,13 @@ function CC:RunBindingRepair(reason, force)
         for frame in pairs(self.registeredFrames) do
             scrub(frame)
         end
+    end
+    -- Same arena gap as in RefreshKeyboardBindings: registeredFrames has no
+    -- arena-header walk, so scrub DF's frames through the real accessor too.
+    if DF.IterateAllFrames then
+        DF:IterateAllFrames(function(frame)
+            if frame then scrub(frame) end
+        end)
     end
 
     -- 2b. Re-wrap the secure OnEnter/OnLeave/OnHide handlers on every frame

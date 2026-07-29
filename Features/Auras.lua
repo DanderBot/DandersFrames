@@ -54,8 +54,29 @@ local cachedDefensiveFilters = nil   -- mode-independent
 -- Build the filter string for buffs. One native group: category selection is
 -- expressed via candidateFilters spell-ID maps (see BuildAuraRowConfig), so the
 -- filterString only carries HELPFUL + Only Mine.
+--
+-- Defensive Bar dedup, HALF ONE — the CATEGORY case. When the defensive bar has
+-- no filter selection it falls back to Blizzard's BIG_DEFENSIVE category, whose
+-- contents are not spell IDs and cannot be enumerated. The expressible
+-- complement is the negated token: the grammar takes a "!" prefix on any
+-- AuraFilters component (AuraUtil.AuraFilterNegationPrefix), which is how the
+-- debuff row already keeps its groups disjoint. HALF TWO — the exact,
+-- spell-ID case — is in BuildAuraRowConfig.
+--
+-- Gated on the bar actually being ON: excluding the category while nothing else
+-- displays it would make those buffs invisible on every bar.
 local function BuildDirectBuffFilters(db)
-    return { db.directBuffOnlyMine and "HELPFUL|PLAYER" or "HELPFUL" }
+    local f = db.directBuffOnlyMine and "HELPFUL|PLAYER" or "HELPFUL"
+    if db.buffDeduplicateDefensives and db.defensiveIconEnabled
+        and AuraFilters.BigDefensive and DF.FilterRegistry then
+        local res = DF.FilterRegistry:ResolveSelection(db.defensiveFilterSelection, false)
+        -- Only the "all" fallback is category-driven; include/exclude modes are
+        -- spell-ID driven and handled exactly in HALF TWO.
+        if res.kind ~= "include" and res.kind ~= "exclude" then
+            f = f .. "|!" .. AuraFilters.BigDefensive
+        end
+    end
+    return { f }
 end
 
 -- Blizzard's AuraUtil.DispellableDebuffTypes verbatim — the map form of the
@@ -98,17 +119,55 @@ local DISPEL_TYPES = { Magic = true, Curse = true, Disease = true, Poison = true
 -- to show-all, so DriveDebuffFactory intercepts the empty list and parks the
 -- row instead of building a container from it.
 local function BuildDirectDebuffFilters(db, claimed)
+    -- One toggle owns EVERY claim path — the record-drop below AND the ALL-mode
+    -- subtraction. Pre-5.0 the claim was silent and unconditional, which meant
+    -- nobody could see why a category had vanished from their bar, and nobody
+    -- could keep the duplicate if they wanted it.
+    if db.debuffDeduplicateDesigner == false then claimed = nil end
+
     if db.directDebuffShowAll then
         -- ALL mode: no category filtering, but Hide Long Debuffs still applies as
         -- one native maxDuration record. Keep Important CANNOT be honoured here:
         -- exempting boss/role/priority needs a second un-capped record, and the
         -- ALL record can't negate those boolean flags — importants would render
-        -- twice. The GUI hides the toggle in ALL mode. Claims stay unconsulted
-        -- (ALL-mode rows show claimed categories too — accepted behavior).
+        -- twice. The GUI hides the toggle in ALL mode.
         local allMaxDur = db.debuffMaxDurationEnabled and (db.debuffMaxDurationMinutes or 0) > 0
             and (db.debuffMaxDurationMinutes or 0) * 60 or nil
-        if allMaxDur then
-            return { { filter = "HARMFUL", key = "all", candidateFilters = { maxDuration = allMaxDur } } }
+
+        -- Claims SUBTRACT here rather than dropping a record: ALL mode is one
+        -- blanket HARMFUL group, so there is no per-category record to remove.
+        -- Boolean-backed categories invert through candidateFilters (false =
+        -- "not this"; the group ANDs them, so several falses read as "none of
+        -- these"). Token-backed ones negate in the filter string, exactly as the
+        -- category-mode records already do.
+        -- ⚠ This is what the old "Show All short-circuits BEFORE claims" note
+        -- described: an AD group showing boss/role/priority rendered those
+        -- debuffs a second time on the bar. Show All is the DEFAULT, so that hit
+        -- most setups, not just category-mode ones.
+        local cf, filterStr = nil, "HARMFUL"
+        if claimed then
+            local function need() cf = cf or {}; return cf end
+            if claimed.boss and claimed.role then need().isBossOrRoleAura = false
+            elseif claimed.boss then need().isBossAura = false
+            elseif claimed.role then need().isRoleAura = false end
+            if claimed.priority then need().isPriorityAura = false end
+            if claimed.crowdControl and AuraFilters.CrowdControl then
+                filterStr = filterStr .. "|!" .. AuraFilters.CrowdControl
+            end
+            if claimed.raid then filterStr = filterStr .. "|!RAID" end
+            if claimed.dispellable then
+                -- Mirrors the category-mode split: the token when the build has
+                -- it, else the dispel-type map (same semantics, no token).
+                if AuraFilters.Dispellable then
+                    filterStr = filterStr .. "|!" .. AuraFilters.Dispellable
+                else
+                    need().excludeDispelTypes = DISPEL_TYPES
+                end
+            end
+        end
+        if allMaxDur then cf = cf or {}; cf.maxDuration = allMaxDur end
+        if cf or filterStr ~= "HARMFUL" then
+            return { { filter = filterStr, key = "all", candidateFilters = cf } }
         end
         return nil
     end
@@ -406,14 +465,6 @@ local function borderEscapeHex(width, height, hex, texture)
         .. ":0:" .. ts .. ":0:" .. ts .. ":" .. r .. ":" .. g .. ":" .. b .. "|t"
 end
 
--- Public: one tinted escape at `width` x `height` px (height defaults to width = square) /
--- `color` ({r,g,b} 0-1) / `thickness` (THIN/MEDIUM/THICK/FILL). The AD editor's canvas preview
--- uses this; the live formatter calls borderEscapeHex per band.
-function DF:GetExpiryBorderEscape(width, height, color, thickness)
-    local w = math.max(1, math.floor(tonumber(width) or 18))
-    local h = math.max(1, math.floor(tonumber(height) or tonumber(width) or 18))
-    return borderEscapeHex(w, h, colorToHex(color or { r = 1, g = 0.2, b = 0.2 }), borderTexture(thickness))
-end
 
 -- Account-wide colour-by-time breakpoints (editable on the Colours page). Resolve to a
 -- threshold-DESCENDING list of { threshold, hex } so the first match (highest threshold <=
@@ -962,13 +1013,6 @@ function DF:GetAuraDurationUpdateInterval()
     return c or nil
 end
 
--- Shared with the Aura Designer factory (P4.4): its placed icon/square/bar duration text
--- reuses the EXACT same secret-safe colour-by-time BUCKET formatter as the #205 buff/debuff
--- rows (|cRRGGBB escapes baked into the native NumericRuleFormatter bands, evaluated C-side).
--- Cached, so repeated SyncFrame calls return the same shared formatter object.
-function DF:GetFactoryDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertGlyphKey)
-    return GetDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertGlyphKey)
-end
 
 -- Percent renderer for the percent-family duration formats ("45%"): one band,
 -- rounding down, min 1 so a dying aura reads "1%" until it drops (mirrors the
@@ -1445,9 +1489,7 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         -- switch and spec change. UNIONED into (never replacing) the exclude
         -- map above, and folded into the row tuning signature via excludeSig, so a
         -- change in the tracked set re-applies the buff row's candidate filters in
-        -- place (see rowTuningSig / ApplyTuning). On 12.1 only
-        -- the AD half of the legacy toggle is expressible — the defensive row's contents
-        -- aren't enumerable as spell IDs read-free (category-filter driven).
+        -- place (see rowTuningSig / ApplyTuning).
         if db.buffDeduplicateDefensives and opts.frame and DF.GetADTrackedSpellIDs then
             local adIDs = DF:GetADTrackedSpellIDs(opts.frame, db)
             if adIDs then
@@ -1455,6 +1497,28 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
                 local map = candidateFilters.excludeSpellIDs or {}
                 candidateFilters.excludeSpellIDs = map
                 for id in pairs(adIDs) do map[id] = true end
+            end
+        end
+        -- Defensive Bar dedup, HALF TWO — the EXACT case. The defensive row runs
+        -- the SAME FilterRegistry resolution (DriveDefensiveFactory), so in
+        -- include-mode its contents already ARE a spell-ID map: union it and the
+        -- two bars agree exactly, with no category approximation. HALF ONE (the
+        -- "all" fallback, negated category) is in BuildDirectBuffFilters.
+        --
+        -- Exclude-mode is deliberately uncovered: the bar then shows "everything
+        -- helpful EXCEPT this map", an unbounded set with no expressible
+        -- complement here. Approximating it with !BIG_DEFENSIVE would hide the
+        -- whole Blizzard category from the buff bar while the defensive bar was
+        -- only showing part of it — buffs would vanish from both.
+        --
+        -- Gated on the bar being ON for the same reason.
+        if db.buffDeduplicateDefensives and db.defensiveIconEnabled and DF.FilterRegistry then
+            local dres = DF.FilterRegistry:ResolveSelection(db.defensiveFilterSelection, false)
+            if dres.kind == "include" and dres.map then
+                candidateFilters = candidateFilters or {}
+                local map = candidateFilters.excludeSpellIDs or {}
+                candidateFilters.excludeSpellIDs = map
+                for id in pairs(dres.map) do map[id] = true end
             end
         end
         -- FILTER REGISTRY: fold the category selection into this group's spec.
@@ -1616,33 +1680,6 @@ local function cfSig(cf)
     if cf.excludeDispelTypes then parts[#parts + 1] = "excDispel=" .. mapKeys(cf.excludeDispelTypes) end
     if cf.excludeSpellIDs then parts[#parts + 1] = "excSpell=" .. mapKeys(cf.excludeSpellIDs) end
     return table.concat(parts, "&")
-end
-
--- Serialize cfg.filter for the row signature. Handles the three shapes
--- normalizeFilters accepts: plain string, array of strings (buff row — MUST
--- produce the exact same sig as the old table.concat(f, ";") so upgrades
--- don't spuriously rebuild buff rows), and array of records
--- { filter, key, candidateFilters } (debuff row).
-local function filterListSig(f)
-    if type(f) ~= "table" then return f end
-    local parts = {}
-    for i = 1, #f do
-        local entry = f[i]
-        if type(entry) == "table" then
-            parts[i] = tostring(entry.filter) .. "#" .. tostring(entry.key) .. "#" .. cfSig(entry.candidateFilters)
-        else
-            parts[i] = entry
-        end
-    end
-    return table.concat(parts, ";")
-end
-
--- Public form of filterListSig for the AD debuff-group containers (C1): the
--- records DF:BuildDebuffFilterRecords returns are the exact record shape the
--- row folds into its own signature, so AD groups reuse the same serializer for
--- their structural sigs (a selection edit moves the records, the sig follows).
-function DF:DebuffFilterRecordsSig(records)
-    return filterListSig(records)
 end
 
 -- STRUCTURAL half of a filter list: token strings + record keys only — the parts
@@ -1811,8 +1848,9 @@ function DF:DriveBuffFactory(frame, db)
             frame = frame,   -- for the derived Aura Designer buff-bar dedup union
             filterList = BuildDirectBuffFilters(db),
         })
-        -- Re-apply the z-order level (buffs default to +40 = legacy parity). Not part of the sig.
-        h:GetFrame():SetFrameLevel(math.max(0, frame:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
+        -- Re-apply the z-order via the engine (buffs default to +40 = legacy parity). Frame Level
+        -- is deliberately NOT in the sig, so a level-only change never reaches _build.
+        h:ApplyZOrder(cfg)
         local structSig, tuningSig = rowStructSig(cfg), rowTuningSig(cfg)
         if frame.buffFactoryStructSig ~= structSig then
             frame.buffFactoryStructSig = structSig
@@ -1835,10 +1873,14 @@ end
 
 -- ============================================================
 -- DEBUFF FACTORY BRIDGE (P3) — mirror of the buff bridge with debuff keys.
--- Filter list = the native direct-debuff filters; dispel colouring = the native
--- SetAuraBorder Color style (Blizzard palette — custom per-type colours are not
--- expressible on 12.1; pickers frosted). Debuff rows get NO spell-ID candidate
--- filters: harmful spell-ID maps do nothing on friendly frames (Meorawr gate).
+-- Filter list = the native direct-debuff filters; dispel colouring binds through
+-- AddDispelTypeTexture (68914's replacement for the deprecated SetAuraBorder alias)
+-- in the Color style, carrying customDispelColorMap — so custom per-type colours ARE
+-- expressible and the account-wide Colors-page palette drives this row. (This comment
+-- previously said the opposite and named the pickers as frosted; both were true on
+-- 68824 and were fixed by the dispel round — the palette ships and the pickers are
+-- live.) Debuff rows get NO spell-ID candidate filters: harmful spell-ID maps do
+-- nothing on friendly frames (Meorawr gate).
 -- ============================================================
 
 -- Render gate (excludes test mode, which paints legacy icons directly).
@@ -1859,7 +1901,7 @@ end
 -- claimed-category set (DF:GetClaimedDebuffCategories — nil when AD is off /
 -- doesn't own AD / has no debuff groups), so categories an enabled AD debuff
 -- group displays are dropped from the row. Claims fold into the row signature
--- for free — they change the RECORDS, and filterListSig serializes the records
+-- for free — they change the RECORDS, and filterStructSig serializes the records
 -- — so a claim/unclaim (which rides an auraLayoutVersion bump from the AD GUI's
 -- structural refresh) re-enters the version gate below and rebuilds.
 --
@@ -1957,7 +1999,9 @@ function DF:DriveDebuffFactory(frame, db)
             unit = frame.unit,
             filterList = filterList,
         })
-        h:GetFrame():SetFrameLevel(math.max(0, frame:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
+        -- Re-apply the z-order via the engine. Frame Level is deliberately NOT in the sig,
+        -- so a level-only change never reaches _build.
+        h:ApplyZOrder(cfg)
         local structSig, tuningSig = rowStructSig(cfg), rowTuningSig(cfg)
         if frame.debuffFactoryStructSig ~= structSig then
             frame.debuffFactoryStructSig = structSig
@@ -2083,11 +2127,17 @@ function DF:BuildDefensiveRowConfig(db, unit)
         -- curated defensives instead (TestMode drives testMax per role).
         testPool = "defensives",
         tooltips = db.tooltipDefensiveEnabled ~= false,
-        -- Z-order: match the legacy defensive level — contentOverlay+26 = frame+51 when auto
-        -- (defensiveIconFrameLevel 0), else the user's own offset. Applied to the container's
-        -- anchor frame in AuraContainer:Create + on each layout-version re-apply.
-        frameLevelOffset = (db.defensiveIconFrameLevel and db.defensiveIconFrameLevel ~= 0)
-            and db.defensiveIconFrameLevel or 51,
+        -- Z-order: an ABSOLUTE offset from the unit frame. Highest of the aura surfaces, so a
+        -- defensive cue is never buried. Applied via h:ApplyZOrder(cfg) at Create + re-apply.
+        --
+        -- ★ 65, NOT the legacy 51 (fixed 2026-07-25 from a /df zorder dump). A row is not one
+        -- level thick: the anchor sits at +offset, Blizzard's container at +1, its buttons at
+        -- +2, and DF's own slot art stacks ON the button — border +10, duration text +13,
+        -- stack text +14. So ONE row occupies ~16 levels. At 51 the buff/debuff rows (40)
+        -- reached 60 while the defensive BUTTON sat at 57, so debuff borders and text drew
+        -- OVER the defensive icon wherever the rows overlapped. Any new row baseline must
+        -- clear the one below it by at least ~17.
+        frameLevelOffset = db.defensiveIconFrameLevel or 65,
         layout = {
             size     = db.defensiveIconSize or 24,
             scale    = db.defensiveIconScale or 1,
@@ -2167,9 +2217,9 @@ function DF:DriveDefensiveFactory(frame, db)
     if frame.dfDefFactoryVersion ~= ver and not InCombatLockdown() then
         frame.dfDefFactoryVersion = ver
         local cfg = DF:BuildDefensiveRowConfig(db, frame.unit)
-        -- Re-apply the z-order level (honors runtime defensiveIconFrameLevel changes; survives
-        -- Rebuild since the new container inherits relative to h.frame). Not part of the sig.
-        h:GetFrame():SetFrameLevel(math.max(0, frame:GetFrameLevel() + (cfg.frameLevelOffset or 40)))
+        -- Re-apply the z-order via the engine (honors runtime defensiveIconFrameLevel changes).
+        -- Frame Level is deliberately NOT in the sig, so a level-only change never reaches _build.
+        h:ApplyZOrder(cfg)
         local structSig, tuningSig = rowStructSig(cfg), rowTuningSig(cfg)
         if frame.defensiveFactoryStructSig ~= structSig then
             frame.defensiveFactoryStructSig = structSig
@@ -2389,18 +2439,63 @@ local function layoutMissingStrip(frame, db, strip, cellCount)
     strip:ClearAllPoints()
     strip:SetPoint(anchor, frame, anchor, db.missingBuffIconX or 0, db.missingBuffIconY or 0)
     DF:SnapPointToPixelGrid(strip, db.pixelPerfect)
-    local frameLevel = db.missingBuffIconFrameLevel or 0
-    if frameLevel == 0 and frame.contentOverlay then
-        strip:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 10)
-    else
-        strip:SetFrameLevel(math.max(0, frame:GetFrameLevel() + frameLevel))
-    end
+    strip:SetFrameLevel(math.max(0, frame:GetFrameLevel() + (db.missingBuffIconFrameLevel or 35)))
 end
 
 -- Drive the missing-buff strip for one frame. Mirrors the row drives: lazy create,
 -- hide the legacy icon (no double render), guard visibility on the NON-aura state
 -- (dead/offline/range/UnitCanAssist — the read-free mechanism only answers aura
 -- presence), keep cells on the frame's unit, re-apply on a layout-version bump.
+-- Non-aura visibility for the missing-buff strip: the badge must never claim
+-- "missing" on a corpse / offline / out-of-range / unassistable unit. All
+-- non-secret reads; range mirrors the legacy issecretvalue guard. DELIBERATE
+-- change vs legacy: no UnitIsPlayer — legacy excluded NPC group members because
+-- its aura SCAN couldn't check them, but raid buffs are castable on
+-- follower-dungeon NPCs (Krathe-verified) and the read-free widget works on any
+-- assistable unit. Pets stay excluded (pet frames don't run this feature).
+--
+-- ☠ SPLIT OUT of DriveMissingBuffFactory on purpose. The drive only runs from
+-- RefreshFactoryRows, which fires on an aura-LAYOUT bump (a settings change) and
+-- additionally bails in combat. Death is neither, so a companion dying mid-pull
+-- left the badge asserting "missing Fortitude" on a corpse until the next
+-- settings change or combat end — field-reported in a follower dungeon,
+-- confirmed via /dfdead (UnitIsDeadOrGhost was already true; nothing re-asked).
+-- Unit-state changes call THIS instead: non-secret reads plus one SetShown on a
+-- DF-owned strip, so it is combat-safe and a no-op when nothing changed.
+function DF:RefreshMissingBuffVisibility(frame)
+    if not frame then return end
+    local strip = frame.missingBuffStrip
+    if not strip then return end   -- feature never built on this frame
+
+    local unit = frame.unit
+    local visible
+    if DF.AuraContainer and DF.AuraContainer._testMode then
+        -- P5 preview: fabricated test units fail every unit API — visibility is
+        -- the test panel's toggle (UpdateTestMissingBuff gates on it before
+        -- calling). The badges show because missing containers stay DISABLED
+        -- for the test session (the provider bounce skips them), so every
+        -- group is empty and every badge sits parked in its window.
+        visible = true
+    else
+        visible = unit and UnitExists(unit)
+            and not UnitIsDeadOrGhost(unit) and UnitIsConnected(unit)
+            and not frame.isPetFrame and UnitCanAssist("player", unit)
+        if visible then
+            local inRange = frame.dfInRange
+            if issecretvalue and issecretvalue(inRange) then
+                visible = false
+            elseif inRange == false then
+                visible = false
+            end
+        end
+    end
+    visible = visible and true or false
+    if frame.dfMissingStripShown ~= visible then
+        frame.dfMissingStripShown = visible
+        strip:SetShown(visible)
+    end
+end
+
 function DF:DriveMissingBuffFactory(frame, db)
 
     local strip = frame.missingBuffStrip
@@ -2473,40 +2568,12 @@ function DF:DriveMissingBuffFactory(frame, db)
         layoutMissingStrip(frame, db, strip, #tracked)
     end
 
-    -- Non-aura visibility guards: the badge must never claim "missing" on a
-    -- corpse / offline / out-of-range / unassistable unit. All non-secret reads;
-    -- range mirrors the legacy issecretvalue guard. DELIBERATE change vs legacy:
-    -- no UnitIsPlayer — legacy excluded NPC group members because its aura SCAN
-    -- couldn't check them, but raid buffs are castable on follower-dungeon NPCs
-    -- (Krathe-verified) and the read-free widget works on any assistable unit.
-    -- Pets stay excluded (pet frames don't run this feature).
+    -- Non-aura visibility (corpse / offline / out-of-range / unassistable).
+    -- Owned by RefreshMissingBuffVisibility so unit-state changes can re-apply
+    -- it without coming through this drive — see the note on that function.
+    DF:RefreshMissingBuffVisibility(frame)
+
     local unit = frame.unit
-    local visible
-    if DF.AuraContainer and DF.AuraContainer._testMode then
-        -- P5 preview: fabricated test units fail every unit API — visibility is
-        -- the test panel's toggle (UpdateTestMissingBuff gates on it before
-        -- calling). The badges show because missing containers stay DISABLED
-        -- for the test session (the provider bounce skips them), so every
-        -- group is empty and every badge sits parked in its window.
-        visible = true
-    else
-        visible = unit and UnitExists(unit)
-            and not UnitIsDeadOrGhost(unit) and UnitIsConnected(unit)
-            and not frame.isPetFrame and UnitCanAssist("player", unit)
-        if visible then
-            local inRange = frame.dfInRange
-            if issecretvalue and issecretvalue(inRange) then
-                visible = false
-            elseif inRange == false then
-                visible = false
-            end
-        end
-    end
-    visible = visible and true or false
-    if frame.dfMissingStripShown ~= visible then
-        frame.dfMissingStripShown = visible
-        strip:SetShown(visible)
-    end
 
     -- Keep cells on the frame's unit (roster churn); refresh the border spec with
     -- the new unit's class/role colour. Combat: SetUnit self-defers in the factory.

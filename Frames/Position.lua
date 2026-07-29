@@ -244,14 +244,10 @@ function DF:CreateMoverFrame()
     local mover = CreateFrame("Frame", "DandersFramesMover", DF.container, "BackdropTemplate")
     mover:SetAllPoints(DF.container)
     mover:SetFrameStrata("MEDIUM")  -- Same strata as unit frames; level 100 renders above them
-    mover:SetFrameLevel(100)        -- Unit frame children are level 1-4; keeps us above them
-    mover:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 2,
-    })
-    mover:SetBackdropColor(0.2, 0.6, 1.0, 0.3)
-    mover:SetBackdropBorderColor(0.2, 0.6, 1.0, 0.8)
+    mover:SetFrameLevel(100)        -- Unit frame children reach ~parent+70 (AD Frame Level max); 100 clears them
+    -- This is the party container's mover (raid has its own in Frames/Init.lua),
+    -- so it pins the party pole rather than following the selected mode.
+    DF.GUI:CreateMoverBackdrop(mover, { isRaid = false })
     mover:EnableMouse(true)
     mover:SetMovable(true)
     mover:RegisterForDrag("LeftButton")
@@ -528,11 +524,8 @@ function DF:CreatePermanentMoverPopup()
             if not btn then
                 btn = CreateFrame("Button", nil, self, "BackdropTemplate")
                 btn:SetSize(btnWidth, btnHeight)
-                btn:SetBackdrop({
-                    bgFile = "Interface\\Buttons\\WHITE8x8",
-                    edgeFile = "Interface\\Buttons\\WHITE8x8",
-                    edgeSize = 1,
-                })
+                -- Selected/unselected colours are pushed below on every refresh.
+                DF.GUI:CreateElementBackdrop(btn)
                 btn.text = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
                 btn.text:SetPoint("LEFT", 8, 0)
                 btn.check = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -644,11 +637,10 @@ function DF:CreatePermanentMover(container, mode)
     handle:SetSize(db.permanentMoverWidth or 20, db.permanentMoverHeight or 20)
     handle:SetFrameStrata("MEDIUM")
     handle:SetFrameLevel(100)
-    handle:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
+    -- Chrome only, NOT CreateMoverBackdrop: this handle's colour is a user setting
+    -- (permanentMoverColor) with its own hover/in-combat lifecycle in
+    -- ApplyHandleColors below, so it must not take the theme hue.
+    DF.GUI:CreateElementBackdrop(handle, { edgeSize = 1 })
 
     -- Store colors on handle from DB
     local color = db.permanentMoverColor or {r = 0.45, g = 0.45, b = 0.95}
@@ -2410,7 +2402,7 @@ function DF:UnlockFrames()
     DF.moverFrame:ClearAllPoints()
     DF.moverFrame:SetAllPoints(DF.container)
     DF.moverFrame:SetFrameStrata("MEDIUM")  -- Keeps mover below DIALOG settings GUI
-    DF.moverFrame:SetFrameLevel(100)        -- Above unit frame children (level 1-4)
+    DF.moverFrame:SetFrameLevel(100)        -- Above unit frame children (which reach ~parent+70)
     DF.moverFrame:SetAlpha(1)
     DF.moverFrame:Show()
 

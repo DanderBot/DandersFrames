@@ -189,12 +189,6 @@ function DF:CreateStatusIcons(frame)
     -- texcoord alone, so this crop persists.
     frame.combatIcon.texture:SetTexture("Interface\\CharacterFrame\\UI-StateIcon")
     frame.combatIcon.texture:SetTexCoord(0.5, 1.0, 0, 0.49)
-
-    -- ========================================
-    -- CENTER STATUS ICON (DEPRECATED - backward compat)
-    -- ========================================
-    frame.centerStatusIcon = CreateStatusIcon(overlay, 16)
-    frame.centerStatusIcon:SetPoint("CENTER", frame, "CENTER", 0, 0)
 end
 
 -- ============================================================
@@ -294,16 +288,14 @@ local function ApplyIconSettings(icon, db, prefix)
     local x = db[prefix .. "X"] or 0
     local y = db[prefix .. "Y"] or 0
     local alpha = db[prefix .. "Alpha"] or 1
-    local frameLevel = db[prefix .. "FrameLevel"] or 0
+    local frameLevel = db[prefix .. "FrameLevel"] or 30
     
     icon:SetScale(scale)
     icon:ClearAllPoints()
     icon:SetPoint(anchor, icon:GetParent():GetParent(), anchor, x, y)
     icon:SetAlpha(alpha)
     
-    if frameLevel > 0 then
-        icon:SetFrameLevel(icon:GetParent():GetParent():GetFrameLevel() + frameLevel)
-    end
+    icon:SetFrameLevel(icon:GetParent():GetParent():GetFrameLevel() + frameLevel)
     
     -- Apply status icon font settings to text. Route through SafeSetFont so the
     -- shadow lands on the font-family's per-alphabet font objects — 12.0.7 no
@@ -859,14 +851,6 @@ function DF:UpdateAFKIcon(frame)
     end
 end
 
--- Clear AFK cache for a unit
-function DF:ClearAFKCache(unit)
-    if unit then
-        local key = GetAFKKey(unit)
-        afkStartTimes[key] = nil
-        afkStateCache[key] = nil
-    end
-end
 
 -- ============================================================
 -- UPDATE VEHICLE ICON

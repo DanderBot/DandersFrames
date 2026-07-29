@@ -578,11 +578,6 @@ function DF:UpdatePowerEventRegistration(frame)
             frame:RegisterEvent("UNIT_MAXPOWER")
             frame:RegisterEvent("UNIT_DISPLAYPOWER")
         end
-        --[[ OLD CODE - Remove after testing
-        frame:RegisterEvent("UNIT_POWER_UPDATE")
-        frame:RegisterEvent("UNIT_MAXPOWER")
-        frame:RegisterEvent("UNIT_DISPLAYPOWER")
-        --]]
         frame.dfPowerEventsRegistered = true
     else
         frame:UnregisterEvent("UNIT_POWER_UPDATE")
@@ -804,21 +799,7 @@ function DF:CreateFrameElementsExtended(frame, db)
     frame.readyCheckIcon.texture:SetDrawLayer("OVERLAY", 7)
     
     -- ========================================
-    -- CENTER STATUS ICON (DEPRECATED - kept for backward compatibility)
-    -- New individual icons created via CreateStatusIcons
-    -- ========================================
-    frame.centerStatusIcon = CreateFrame("Frame", nil, frame.contentOverlay)
-    frame.centerStatusIcon:SetSize(16, 16)
-    frame.centerStatusIcon:SetPoint("CENTER", frame, "CENTER", 0, 0)
-    frame.centerStatusIcon:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 5)
-    frame.centerStatusIcon:Hide()
-    
-    frame.centerStatusIcon.texture = frame.centerStatusIcon:CreateTexture(nil, "OVERLAY")
-    frame.centerStatusIcon.texture:SetAllPoints()
-    frame.centerStatusIcon.texture:SetDrawLayer("OVERLAY", 6)
-    
-    -- ========================================
-    -- NEW STATUS ICONS (Summon, Res, Phased, AFK, Vehicle, RaidRole)
+    -- STATUS ICONS (Summon, Res, Phased, AFK, Vehicle, RaidRole)
     -- ========================================
     DF:CreateStatusIcons(frame)
     
@@ -1183,21 +1164,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     frame.readyCheckIcon.texture:SetDrawLayer("OVERLAY", 7)
     
     -- ========================================
-    -- CENTER STATUS ICON (DEPRECATED - kept for backward compatibility)
-    -- New individual icons created via CreateStatusIcons
-    -- ========================================
-    frame.centerStatusIcon = CreateFrame("Frame", nil, frame.contentOverlay)
-    frame.centerStatusIcon:SetSize(16, 16)
-    frame.centerStatusIcon:SetPoint("CENTER", frame, "CENTER", 0, 0)
-    frame.centerStatusIcon:SetFrameLevel(frame.contentOverlay:GetFrameLevel() + 5)
-    frame.centerStatusIcon:Hide()
-    
-    frame.centerStatusIcon.texture = frame.centerStatusIcon:CreateTexture(nil, "OVERLAY")
-    frame.centerStatusIcon.texture:SetAllPoints()
-    frame.centerStatusIcon.texture:SetDrawLayer("OVERLAY", 6)
-    
-    -- ========================================
-    -- NEW STATUS ICONS (Summon, Res, Phased, AFK, Vehicle, RaidRole)
+    -- STATUS ICONS (Summon, Res, Phased, AFK, Vehicle, RaidRole)
     -- ========================================
     DF:CreateStatusIcons(frame)
     
@@ -1405,26 +1372,6 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     -- are all handled centrally by headerChildEventFrame in Headers.lua
     -- Do NOT register them per-frame or we'll get double processing!
     
-    --[[ OLD CODE - Remove after testing (was causing event flooding in cities)
-    frame:RegisterEvent("UNIT_HEALTH")
-    frame:RegisterEvent("UNIT_MAXHEALTH")
-    frame:RegisterEvent("UNIT_NAME_UPDATE")
-    frame:RegisterEvent("UNIT_AURA")
-    frame:RegisterEvent("GROUP_ROSTER_UPDATE")
-    -- Power events are registered conditionally below
-    frame:RegisterEvent("UNIT_ABSORB_AMOUNT_CHANGED")
-    frame:RegisterEvent("UNIT_HEAL_ABSORB_AMOUNT_CHANGED")
-    frame:RegisterEvent("UNIT_HEAL_PREDICTION")
-    frame:RegisterEvent("UNIT_CONNECTION")
-    frame:RegisterEvent("RAID_TARGET_UPDATE")
-    frame:RegisterEvent("READY_CHECK")
-    frame:RegisterEvent("READY_CHECK_CONFIRM")
-    frame:RegisterEvent("READY_CHECK_FINISHED")
-    frame:RegisterEvent("PARTY_LEADER_CHANGED")
-    frame:RegisterEvent("PLAYER_ROLES_ASSIGNED")
-    frame:RegisterEvent("INCOMING_SUMMON_CHANGED")
-    frame:RegisterEvent("INCOMING_RESURRECT_CHANGED")
-    --]]
     
     -- Conditionally register power events based on setting (optimization)
     -- UNIT_POWER_UPDATE fires very frequently, so skip if power bar disabled
@@ -1695,14 +1642,6 @@ function DF:CreateUnitFrame(unit, index, isRaid)
 end
 
 -- ============================================================
--- UNIFIED FRAME LAYOUT APPLICATION
--- ============================================================
-
-function DF:CreatePartyFrame(unit, index)
-    return DF:CreateUnitFrame(unit, index, false)
-end
-
--- ============================================================
 -- PING SYSTEM SUPPORT
 -- Makes frames pingable by using the PingableType_UnitFrameMixin
 -- ============================================================
@@ -1718,14 +1657,6 @@ function DF:RegisterFrameForPing(frame)
         -- Set the ping-receiver attribute
         frame:SetAttribute("ping-receiver", true)
         
-        -- Return the live GUID for the frame's current unit
-        -- No caching needed - UnitGUID is cheap and frame.unit is always current
-        function frame:GetTargetPingGUID()
-            if self.unit and UnitExists(self.unit) then
-                return UnitGUID(self.unit)
-            end
-            return nil
-        end
     end
 end
 

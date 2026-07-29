@@ -573,7 +573,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     
     local db = DF:GetFrameDB(frame)
     
-    -- Set dfInRange for test mode - this is used by ApplyAuraLayout and other systems
+    -- Set dfInRange for test mode - consumed by the range/alpha systems
     -- If testShowOutOfRange is enabled and this unit is marked as out of range, set false
     -- Otherwise set true (in range)
     local isTestOutOfRange = db.testShowOutOfRange and testData.outOfRange and not testData.status
@@ -1069,7 +1069,11 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     if testData.status then
         if db.statusTextEnabled ~= false then
             DF:StyleStatusText(frame)
-            frame.statusText:SetText(testData.status)
+            -- testData.status is a KEY, not display text -- it is compared against
+            -- "Dead"/"Offline" for colour and fade decisions elsewhere in this file,
+            -- so it stays raw in the roster and resolves only here, at display.
+            -- No fallback needed: both DF.L metatables return the key on a miss.
+            frame.statusText:SetText(L[testData.status])
             frame.statusText:Show()
             frame.healthText:Hide()
         end
@@ -1216,10 +1220,7 @@ function DF:UpdateTestIcons(frame, testData)
             frame.roleIcon:SetPoint(anchor, frame, anchor, x, y)
             
             -- Apply frame level
-            local frameLevel = db.roleIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.roleIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.roleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.roleIconFrameLevel or 30))
         else
             frame.roleIcon:Hide()
         end
@@ -1243,10 +1244,7 @@ function DF:UpdateTestIcons(frame, testData)
             frame.leaderIcon:SetPoint(anchor, frame, anchor, x, y)
             
             -- Apply frame level
-            local frameLevel = db.leaderIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + (db.leaderIconFrameLevel or 30))
         elseif testData.isAssist then
             frame.leaderIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-AssistantIcon")
             frame.leaderIcon.texture:SetTexCoord(0, 1, 0, 1)
@@ -1261,10 +1259,7 @@ function DF:UpdateTestIcons(frame, testData)
             frame.leaderIcon:SetPoint(anchor, frame, anchor, x, y)
             
             -- Apply frame level
-            local frameLevel = db.leaderIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + (db.leaderIconFrameLevel or 30))
         else
             frame.leaderIcon:Hide()
         end
@@ -1288,10 +1283,7 @@ function DF:UpdateTestIcons(frame, testData)
             frame.raidTargetIcon:Show()
             
             -- Apply frame level
-            local frameLevel = db.raidTargetIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.raidTargetIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.raidTargetIcon:SetFrameLevel(frame:GetFrameLevel() + (db.raidTargetIconFrameLevel or 30))
         else
             frame.raidTargetIcon:Hide()
         end
@@ -1314,50 +1306,9 @@ function DF:UpdateTestIcons(frame, testData)
             frame.readyCheckIcon:Show()
             
             -- Apply frame level
-            local frameLevel = db.readyCheckIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + (db.readyCheckIconFrameLevel or 30))
         else
             frame.readyCheckIcon:Hide()
-        end
-    end
-    
-    -- Center Status Icon (show if testData has centerStatus)
-    if frame.centerStatusIcon then
-        if not db.centerStatusIconEnabled or db.testShowStatusIcons == false then
-            frame.centerStatusIcon:Hide()
-        elseif testData.centerStatus then
-            local texture = nil
-            if testData.centerStatus == "resurrect" then
-                texture = "Interface\\RaidFrame\\Raid-Icon-Rez"
-            elseif testData.centerStatus == "summon" then
-                texture = "Interface\\RaidFrame\\Raid-Icon-SummonPending"
-            end
-            
-            if texture then
-                DF:SetUpgradedStatusIcon(frame.centerStatusIcon.texture, texture)
-                
-                local scale = db.centerStatusIconScale or 1.0
-                local anchor = db.centerStatusIconAnchor or "CENTER"
-                local x = db.centerStatusIconX or 0
-                local y = db.centerStatusIconY or 0
-                
-                frame.centerStatusIcon:SetScale(scale)
-                frame.centerStatusIcon:ClearAllPoints()
-                frame.centerStatusIcon:SetPoint(anchor, frame, anchor, x, y)
-                frame.centerStatusIcon:Show()
-                
-                -- Apply frame level
-                local frameLevel = db.centerStatusIconFrameLevel or 0
-                if frameLevel > 0 then
-                    frame.centerStatusIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-                end
-            else
-                frame.centerStatusIcon:Hide()
-            end
-        else
-            frame.centerStatusIcon:Hide()
         end
     end
     
@@ -1384,9 +1335,6 @@ function DF:UpdateTestIcons(frame, testData)
     end
     if frame.readyCheckIcon and frame.readyCheckIcon:IsShown() then
         frame.readyCheckIcon:SetAlpha(alpha)
-    end
-    if frame.centerStatusIcon and frame.centerStatusIcon:IsShown() then
-        frame.centerStatusIcon:SetAlpha(alpha)
     end
 end
 
@@ -1472,10 +1420,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.readyCheckIcon:Show()
             
             -- Apply frame level
-            local frameLevel = db.readyCheckIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + (db.readyCheckIconFrameLevel or 30))
         else
             frame.readyCheckIcon:Hide()
         end
@@ -1501,10 +1446,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             ShowTestIconAsText(frame.summonIcon, db.summonIconTextPending or "Summon", db.summonIconShowText, db, "summonIcon")
             frame.summonIcon:Show()
             
-            local frameLevel = db.summonIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.summonIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.summonIcon:SetFrameLevel(frame:GetFrameLevel() + (db.summonIconFrameLevel or 30))
         else
             frame.summonIcon:Hide()
         end
@@ -1529,10 +1471,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             ShowTestIconAsText(frame.bgCarrierIcon, db.bgCarrierIconText or "FC", db.bgCarrierIconShowText, db, "bgCarrierIcon")
             frame.bgCarrierIcon:Show()
 
-            local frameLevel = db.bgCarrierIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.bgCarrierIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.bgCarrierIcon:SetFrameLevel(frame:GetFrameLevel() + (db.bgCarrierIconFrameLevel or 30))
         else
             frame.bgCarrierIcon:Hide()
         end
@@ -1556,10 +1495,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.combatIcon:SetAlpha(db.combatIconAlpha or 1)
             frame.combatIcon:Show()
 
-            local frameLevel = db.combatIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.combatIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.combatIcon:SetFrameLevel(frame:GetFrameLevel() + (db.combatIconFrameLevel or 30))
         else
             frame.combatIcon:Hide()
         end
@@ -1586,10 +1522,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             ShowTestIconAsText(frame.resurrectionIcon, db.resurrectionIconTextCasting or "Res...", db.resurrectionIconShowText, db, "resurrectionIcon")
             frame.resurrectionIcon:Show()
             
-            local frameLevel = db.resurrectionIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.resurrectionIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.resurrectionIcon:SetFrameLevel(frame:GetFrameLevel() + (db.resurrectionIconFrameLevel or 30))
         else
             frame.resurrectionIcon:Hide()
         end
@@ -1615,10 +1548,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             ShowTestIconAsText(frame.phasedIcon, db.phasedIconText or "Phased", db.phasedIconShowText, db, "phasedIcon")
             frame.phasedIcon:Show()
             
-            local frameLevel = db.phasedIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.phasedIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.phasedIcon:SetFrameLevel(frame:GetFrameLevel() + (db.phasedIconFrameLevel or 30))
         else
             frame.phasedIcon:Hide()
         end
@@ -1679,10 +1609,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             end
             frame.afkIcon:Show()
             
-            local frameLevel = db.afkIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.afkIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.afkIcon:SetFrameLevel(frame:GetFrameLevel() + (db.afkIconFrameLevel or 30))
         else
             frame.afkIcon:Hide()
             if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
@@ -1711,10 +1638,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             ShowTestIconAsText(frame.vehicleIcon, db.vehicleIconText or "Vehicle", db.vehicleIconShowText, db, "vehicleIcon")
             frame.vehicleIcon:Show()
             
-            local frameLevel = db.vehicleIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.vehicleIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.vehicleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.vehicleIconFrameLevel or 30))
         else
             frame.vehicleIcon:Hide()
         end
@@ -1740,10 +1664,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             ShowTestIconAsText(frame.raidRoleIcon, db.raidRoleIconTextTank or "MT", db.raidRoleIconShowText, db, "raidRoleIcon")
             frame.raidRoleIcon:Show()
             
-            local frameLevel = db.raidRoleIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.raidRoleIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.raidRoleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.raidRoleIconFrameLevel or 30))
         elseif testData.isMainAssist and db.raidRoleIconShowAssist ~= false then
             DF:SetUpgradedStatusIcon(frame.raidRoleIcon.texture, "Interface\\GroupFrame\\UI-Group-MainAssistIcon")
             
@@ -1760,61 +1681,9 @@ function DF:UpdateTestStatusIcons(frame, testData)
             ShowTestIconAsText(frame.raidRoleIcon, db.raidRoleIconTextAssist or "MA", db.raidRoleIconShowText, db, "raidRoleIcon")
             frame.raidRoleIcon:Show()
             
-            local frameLevel = db.raidRoleIconFrameLevel or 0
-            if frameLevel > 0 then
-                frame.raidRoleIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-            end
+            frame.raidRoleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.raidRoleIconFrameLevel or 30))
         else
             frame.raidRoleIcon:Hide()
-        end
-    end
-    
-    -- Legacy Center Status Icon (for backward compatibility)
-    -- Only show if individual summon/res icons are disabled
-    if frame.centerStatusIcon then
-        local showCenterStatus = db.centerStatusIconEnabled and db.testShowStatusIcons ~= false
-        -- Don't show centerStatus for summon if summonIcon is enabled
-        if testData.centerStatus == "summon" and db.summonIconEnabled then
-            showCenterStatus = false
-        end
-        -- Don't show centerStatus for resurrect if resurrectionIcon is enabled
-        if testData.centerStatus == "resurrect" and db.resurrectionIconEnabled then
-            showCenterStatus = false
-        end
-        
-        if not showCenterStatus then
-            frame.centerStatusIcon:Hide()
-        elseif testData.centerStatus then
-            local texture = nil
-            if testData.centerStatus == "resurrect" then
-                texture = "Interface\\RaidFrame\\Raid-Icon-Rez"
-            elseif testData.centerStatus == "summon" then
-                texture = "Interface\\RaidFrame\\Raid-Icon-SummonPending"
-            end
-            
-            if texture then
-                DF:SetUpgradedStatusIcon(frame.centerStatusIcon.texture, texture)
-                
-                local scale = db.centerStatusIconScale or 1.0
-                local anchor = db.centerStatusIconAnchor or "CENTER"
-                local x = db.centerStatusIconX or 0
-                local y = db.centerStatusIconY or 0
-                
-                frame.centerStatusIcon:SetScale(scale)
-                frame.centerStatusIcon:ClearAllPoints()
-                frame.centerStatusIcon:SetPoint(anchor, frame, anchor, x, y)
-                frame.centerStatusIcon:Show()
-                
-                -- Apply frame level
-                local frameLevel = db.centerStatusIconFrameLevel or 0
-                if frameLevel > 0 then
-                    frame.centerStatusIcon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
-                end
-            else
-                frame.centerStatusIcon:Hide()
-            end
-        else
-            frame.centerStatusIcon:Hide()
         end
     end
     
@@ -1858,9 +1727,6 @@ function DF:UpdateTestStatusIcons(frame, testData)
     if frame.raidRoleIcon and frame.raidRoleIcon:IsShown() then
         local baseAlpha = db.raidRoleIconAlpha or 1
         frame.raidRoleIcon:SetAlpha(baseAlpha * alpha)
-    end
-    if frame.centerStatusIcon and frame.centerStatusIcon:IsShown() then
-        frame.centerStatusIcon:SetAlpha(alpha)
     end
 end
 
@@ -2212,12 +2078,6 @@ function DF:ApplyTestFrameLayout(frame)
         DF:ApplyFrameStyle(frame)
     end
     
-    -- Apply aura layouts (handles aura fonts, sizes, positions, swipe settings)
-    if DF.ApplyAuraLayout then
-        DF:ApplyAuraLayout(frame, "BUFF")
-        DF:ApplyAuraLayout(frame, "DEBUFF")
-    end
-    
     -- Apply power bar layout (delegate to shared function which handles
     -- match-width, role filtering, background, border, frame level, etc.)
     if DF.ApplyResourceBarLayout then
@@ -2300,13 +2160,49 @@ end
 -- Throttled layout refresh for slider changes (avoids flickering)
 DF.lastLayoutRefresh = 0
 
+-- Engine-side test-mode teardown: the state that is NOT owned by the test frames
+-- themselves -- the global aura data provider, and the pinned-frame preview.
+--
+-- HideTestFrames / HideRaidTestFrames do this inline, but two OTHER paths tear test
+-- mode down by clearing DF.testMode / DF.raidTestMode directly: combat entry
+-- (Core.lua, PLAYER_REGEN_DISABLED) and zone change (Frames/Headers.lua,
+-- PLAYER_ENTERING_WORLD). Both used to skip it, which left C_UnitAuras on the
+-- SAMPLE provider for the rest of the session -- the restore lives only in
+-- AuraContainer.SetTestMode's `else` branch. The [combat] state driver shows the
+-- LIVE frames the instant combat starts, so they then rendered fake auras, with the
+-- identity gate off, aura row caps stuck at the test slider value and missing-buff
+-- badges on corpses. The watchdog could not recover it either: ensureProviderWatch
+-- returns early while _ownsProviderSwitch is set, and only this path clears it.
+--
+-- Call AFTER the mode flags are cleared: the provider is shared between party and
+-- raid, so it goes back to real data only when NEITHER mode is left running.
+-- DF._testModeHandover covers the gap in a party<->raid SWAP. The GUI clears the
+-- outgoing mode's flag before it sets the incoming one, so for that instant neither
+-- is true and this would tear the engines down and immediately rebuild them — every
+-- aura container reconfigured to parse LIVE data that nothing ever renders, plus a
+-- full provider reset/switch round-trip. That intermediate state is invisible and
+-- pure cost; the swap sets the flag across the hand-over so we simply stay in test
+-- mode. The GUI clears it and calls this again, so a Show* that bails (raid frames
+-- disabled, combat) still settles correctly.
+function DF:TeardownTestModeEngines()
+    local stillTesting = (DF.testMode or DF.raidTestMode or DF._testModeHandover) and true or false
+    if DF.AuraContainer and DF.AuraContainer.SetTestMode then
+        DF.AuraContainer.SetTestMode(stillTesting)
+    end
+    -- Pinned previews are shared between the two modes exactly like the provider,
+    -- so only leave the preview once NEITHER mode is left running. ExitTestMode
+    -- carries its own combat guard (it defers via pendingExitTestMode).
+    if not stillTesting and DF.PinnedFrames and DF.PinnedFrames.testModeActive
+        and DF.PinnedFrames.ExitTestMode then
+        DF.PinnedFrames:ExitTestMode()
+    end
+end
+
 function DF:HideTestFrames(silent)
     DF.testMode = false
     -- Restore the real aura provider only when NEITHER test mode remains active
     -- (party + raid share the global data-provider switch).
-    if DF.AuraContainer and DF.AuraContainer.SetTestMode then
-        DF.AuraContainer.SetTestMode(DF.raidTestMode and true or false)
-    end
+    DF:TeardownTestModeEngines()
 
     -- Stop animation only if raid test mode isn't using it
     local raidDb = DF:GetRaidDB()
@@ -2552,9 +2448,7 @@ function DF:HideRaidTestFrames()
     DF.raidTestMode = false
     -- Restore the real aura provider only when NEITHER test mode remains active
     -- (party + raid share the global data-provider switch).
-    if DF.AuraContainer and DF.AuraContainer.SetTestMode then
-        DF.AuraContainer.SetTestMode(DF.testMode and true or false)
-    end
+    DF:TeardownTestModeEngines()
 
     -- Stop animation if party test mode isn't using it
     local partyDb = DF:GetDB()
@@ -2963,100 +2857,8 @@ function DF:LightweightPositionRaidTestFramesFlat(testFrameCount)
         return
     end
     
-    -- TODO: CLEANUP - Remove old positioning code below once SecureSort raid positioning is fully tested
-    --[[ OLD POSITIONING CODE - COMMENTED OUT
-    local frameWidth = db.frameWidth or 80
-    local frameHeight = db.frameHeight or 35
-    local playersPerRow = db.raidPlayersPerRow or 5
-    local hSpacing = db.raidFlatHorizontalSpacing or 2
-    local vSpacing = db.raidFlatVerticalSpacing or 2
-    local growDirection = db.growDirection or "HORIZONTAL"
-    local gridAnchor = db.raidFlatPlayerAnchor or "START"
-    local reverseFill = db.raidFlatReverseFillOrder
-    
-    -- Apply pixel-perfect adjustments
-    if db.pixelPerfect then
-        frameWidth = DF:PixelPerfect(frameWidth)
-        frameHeight = DF:PixelPerfect(frameHeight)
-        hSpacing = DF:PixelPerfect(hSpacing)
-        vSpacing = DF:PixelPerfect(vSpacing)
-    end
-    
-    local horizontal = (growDirection == "HORIZONTAL")
-    
-    -- Calculate grid dimensions for visible players
-    local numRows, numCols
-    if horizontal then
-        numCols = math.min(playersPerRow, testFrameCount)
-        numRows = math.ceil(testFrameCount / playersPerRow)
-    else
-        numRows = math.min(playersPerRow, testFrameCount)
-        numCols = math.ceil(testFrameCount / playersPerRow)
-    end
-    
-    -- Calculate MAX grid dimensions for full 40-player raid (for container sizing)
-    local maxNumRows, maxNumCols
-    if horizontal then
-        maxNumCols = playersPerRow
-        maxNumRows = math.ceil(40 / playersPerRow)
-    else
-        maxNumRows = playersPerRow
-        maxNumCols = math.ceil(40 / playersPerRow)
-    end
-    
-    -- Calculate sizes
-    local visibleWidth = numCols * frameWidth + (numCols - 1) * hSpacing
-    local visibleHeight = numRows * frameHeight + (numRows - 1) * vSpacing
-    local maxWidth = maxNumCols * frameWidth + (maxNumCols - 1) * hSpacing
-    local maxHeight = maxNumRows * frameHeight + (maxNumRows - 1) * vSpacing
-    
-    -- Size the container to full 40-player size
-    DF.raidContainer:SetSize(maxWidth, maxHeight)
-    
-    -- Position each visible frame
-    for i = 1, testFrameCount do
-        local frame = DF.raidFrames[i]
-        if frame and frame:IsShown() then
-            local pos = i - 1  -- 0-based position
-            
-            local row, col
-            if horizontal then
-                row = math.floor(pos / playersPerRow)
-                col = pos % playersPerRow
-                if reverseFill then
-                    col = (playersPerRow - 1) - col
-                end
-            else
-                col = math.floor(pos / playersPerRow)
-                row = pos % playersPerRow
-                if reverseFill then
-                    row = (playersPerRow - 1) - row
-                end
-            end
-            
-            frame:ClearAllPoints()
-            
-            -- Position based on anchor
-            if gridAnchor == "START" then
-                local x = col * (frameWidth + hSpacing)
-                local y = -row * (frameHeight + vSpacing)
-                frame:SetPoint("TOPLEFT", DF.raidContainer, "TOPLEFT", x, y)
-            elseif gridAnchor == "CENTER" then
-                local halfGridWidth = visibleWidth / 2
-                local halfGridHeight = visibleHeight / 2
-                local x = -halfGridWidth + col * (frameWidth + hSpacing) + frameWidth / 2
-                local y = halfGridHeight - row * (frameHeight + vSpacing) - frameHeight / 2
-                frame:SetPoint("CENTER", DF.raidContainer, "CENTER", x, y)
-            else  -- END
-                local x = -col * (frameWidth + hSpacing)
-                local y = row * (frameHeight + vSpacing)
-                frame:SetPoint("BOTTOMRIGHT", DF.raidContainer, "BOTTOMRIGHT", x, y)
-            end
-            
-            frame:SetSize(frameWidth, frameHeight)
-        end
-    end
-    --]] -- END OLD POSITIONING CODE
+    -- No fallback below: SecureSort owns flat raid test positioning. Without it there is
+    -- nothing to place the frames, which is the same behaviour this has always had.
 end
 
 -- Lightweight positioning for party test frames
@@ -3634,7 +3436,7 @@ function DF:UpdateTestTargetedSpell(frame, testData)
         local y = db.targetedSpellY or 0
         local growthDirection = db.targetedSpellGrowth or "DOWN"
         local spacing = db.targetedSpellSpacing or 2
-        local frameLevel = db.targetedSpellFrameLevel or 0
+        local frameLevel = db.targetedSpellFrameLevel or 30
         local highlightImportant = db.targetedSpellHighlightImportant ~= false
 
         if durationOutline == "NONE" then durationOutline = "" end
@@ -3852,7 +3654,7 @@ function DF:UpdateTestTargetedSpell(frame, testData)
                 icon:SetSize(scaledSize, scaledSize)
                 
                 -- Set frame level
-                icon:SetFrameLevel(frame:GetFrameLevel() + 30 + frameLevel + i)
+                icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel + i)
                 
                 icon.iconFrame:SetSize(scaledSize, scaledSize)
                 icon.iconFrame:ClearAllPoints()
@@ -4133,11 +3935,8 @@ function DF:CreateTestPanel()
     local badge = CreateFrame("Frame", nil, panel, "BackdropTemplate")
     badge:SetSize(40, 18)
     badge:SetPoint("LEFT", title, "RIGHT", 8, 0)
-    badge:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
+    -- Colours are pushed per mode (party/raid theme) when the panel refreshes.
+    DF.GUI:CreateElementBackdrop(badge)
     badge.text = badge:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     badge.text:SetPoint("CENTER", 0, 0)
     badge.text:SetText(L["Party"])
@@ -4366,13 +4165,10 @@ function DF:CreateTestPanel()
         -- Background track
         local track = CreateFrame("Frame", nil, container, "BackdropTemplate")
         track:SetAllPoints()
-        track:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        DF.GUI:CreateElementBackdrop(track, {
+            bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+            borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
         })
-        track:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        track:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
 
         -- Fill track (coloured portion)
         local fill = track:CreateTexture(nil, "ARTWORK")
@@ -4468,13 +4264,10 @@ function DF:CreateTestPanel()
         local header = CreateFrame("Button", nil, section, "BackdropTemplate")
         header:SetSize(CONTENT_WIDTH, 26)
         header:SetPoint("TOPLEFT", 0, 0)
-        header:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        DF.GUI:CreateElementBackdrop(header, {
+            bgColor     = { C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8 },
+            borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.3 },
         })
-        header:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8)
-        header:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.3)
         section.header = header
 
         -- Chevron (starts collapsed)
@@ -4912,9 +4705,13 @@ function DF:CreateTestPanel()
     end)
     -- The (new fingerprint) Targeted Spells icons + the Personal Targeted display.
     -- UpdateAllTestTargetedSpell drives BOTH previews, so both share it.
+    -- ⚰ DEPRECATED-TARGETED-SPELLS: the jump-to-page link is gone with the
+    -- sidebar row (it would have opened a page you can't navigate back to). The
+    -- checkbox stays because it drives the Personal Targeted preview too — it
+    -- goes when the feature does.
     panel.showTargetedSpellCheck = secIndicators:AddCheckbox(L["Targeted Spells"], "testShowTargetedSpell", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedSpell() end
-    end, "indicators_targetedspells")
+    end)
     panel.showPersonalTargetedCheck = secIndicators:AddCheckbox(L["Personal Targeted"], "testShowPersonalTargeted", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedSpell() end
     end, "indicators_personal_targeted")

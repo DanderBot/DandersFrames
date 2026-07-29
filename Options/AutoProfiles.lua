@@ -14,6 +14,58 @@ local format = string.format
 local C_RAID = {r = 1.0, g = 0.5, b = 0.2, a = 1}
 local C_WARNING = {r = 1.0, g = 0.67, b = 0.0, a = 1}
 
+-- ============================================================
+-- OVERRIDE KEY LABELS
+-- The override tooltip and /df overrides both list which settings a layout has
+-- overridden. They used to print the RAW saved key -- "auraDesignerPreset",
+-- "buffBorderSize" -- so users were shown internal camelCase identifiers. Noise at
+-- best, and actively misleading where a key's wording no longer matches the UI:
+-- the designer keys still say "preset" ON PURPOSE (they are exported, so renaming
+-- them would cost a saved-profile migration to change a name nobody should have
+-- been seeing) while the UI now calls those Templates.
+--
+-- Derived labels can't be translated -- they come from an identifier, not a string
+-- table -- but that is no worse than the raw key they replace, and the cases where
+-- the wording actually matters are pinned to real locale keys below.
+-- ============================================================
+
+-- Prettifying these would be WRONG, not merely ugly.
+local KEY_LABEL_OVERRIDES = {
+    auraDesignerPreset = "Aura Designer Template",
+    textDesignerPreset = "Text Designer Template",
+}
+
+-- Initialisms that must not be title-cased into nonsense ("Oor", "Bg", "Dps").
+local KEY_ACRONYMS = {
+    oor = "OOR", bg = "BG", pvp = "PvP", ui = "UI", hp = "HP",
+    dps = "DPS", afk = "AFK", cc = "CC", ad = "AD", td = "TD",
+}
+
+local keyLabelCache = {}
+
+local function KeyLabel(key)
+    if type(key) ~= "string" then return tostring(key) end
+    local cached = keyLabelCache[key]
+    if cached then return cached end
+
+    local out
+    local override = KEY_LABEL_OVERRIDES[key]
+    if override then
+        out = L[override] or override
+    else
+        -- camelCase -> spaced, digits split off, then title-case each word.
+        local spaced = key:gsub("(%l)(%u)", "%1 %2"):gsub("(%a)(%d)", "%1 %2")
+        local words = {}
+        for w in spaced:gmatch("%S+") do
+            words[#words + 1] = KEY_ACRONYMS[w:lower()] or (w:sub(1, 1):upper() .. w:sub(2))
+        end
+        out = table.concat(words, " ")
+    end
+
+    keyLabelCache[key] = out
+    return out
+end
+
 -- Deep-copy a value (recursive for nested tables)
 local function DeepCopyValue(value)
     if type(value) ~= "table" then return value end
@@ -196,6 +248,10 @@ local function RefreshOverrideTabMap()
     -- Indicators (specific before generic)
     {"personalTargeted",    "indicators_personal_targeted", L["Personal Targeted"]},
     {"targetedList",        "indicators_targetedlist", L["Targeted List"]},
+    -- ⚰ DEPRECATED-TARGETED-SPELLS — kept on purpose for now: this row is what
+    -- labels an existing profile's stale targetedSpell* overrides. Dropping it
+    -- would leave those overrides unattributed rather than making them go away.
+    -- It goes when the keys do. See Features\TargetedSpells.lua.
     {"targetedSpell",       "indicators_targetedspells", L["Targeted Spells"]},
     {"roleIcon",            "indicators_icons",     L["Icons"]},
     {"leaderIcon",          "indicators_icons",     L["Icons"]},
@@ -769,6 +825,10 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     
     -- Only show for Raid mode
     if GUI.SelectedMode ~= "raid" then
+        -- The disabled overlay survives page rebuilds (see the bottom of this
+        -- function), so a raid -> party switch has to put it away explicitly or
+        -- it hangs over the Raid-only message anchored to a discarded section.
+        if pageFrame.autoDisabledOverlay then pageFrame.autoDisabledOverlay:Hide() end
         Add(GUI:CreateHeader(pageFrame.child, L["Raid Auto Layouts"]), 40, "both")
         Add(GUI:CreateLabel(pageFrame.child,
             L["Auto Layouts is a Raid-only feature. Switch to Raid mode to configure automatic layout switching based on content type and group size."],
@@ -796,19 +856,20 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
 
     AddSpace(5, "both")
 
-    -- Grey-when-disabled. When "Enable Raid Auto-Switching Layouts" is OFF, the
-    -- page stays VISIBLE but dependent content greys in place. The toggle's
-    -- callback runs pageFrame:Refresh() (a full rebuild), so reading autoDb.enabled
-    -- at build time is self-refreshing — no disableOn/RefreshStates wiring needed
-    -- for these raw frames (they have no SetEnabled, so the page gate loop skips
-    -- them anyway).
+    -- When "Enable Raid Auto-Switching Layouts" is OFF the page stays VISIBLE,
+    -- but the layout MANAGEMENT sections are covered by the shared disabled
+    -- overlay (built at the bottom of this function) — the same treatment the
+    -- Aura and Text Designers get. The toggle's callback runs pageFrame:Refresh()
+    -- (a full rebuild), so reading autoDb.enabled at build time is
+    -- self-refreshing — no disableOn/RefreshStates wiring needed for these raw
+    -- frames (they have no SetEnabled, so the page gate loop skips them anyway).
     --
-    -- CONFIGURE-WHILE-OFF: the layout MANAGEMENT controls (the content-type
-    -- sections: add / edit / delete / rename / copy / range layouts) stay fully
-    -- interactive while off — users routinely build their layouts before switching
-    -- auto-switching on. Only the runtime auto-switch *behaviour* indicator (the
-    -- Current Status box) is greyed; the header and the "How it works"
-    -- documentation also stay full-colour/readable so the page is still usable.
+    -- ⚠ This REVERSES an earlier "configure-while-off" decision, which left add /
+    -- edit / delete / rename / copy fully live on the theory that people build
+    -- layouts before switching auto-switching on. In practice that read as though
+    -- the feature were already running: you could build a whole set of layouts
+    -- that would never fire, with nothing on the page saying so. Krathe called it
+    -- 2026-07-27. Turning it back on is the one line at the bottom.
     local autoOff = not autoDb.enabled
 
     -- =============================================
@@ -902,13 +963,10 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     
     local infoContainer = CreateFrame("Frame", nil, pageFrame.child, "BackdropTemplate")
     infoContainer:SetSize(500, infoHeaderHeight + (infoCollapsed and 0 or infoBodyHeight))
-    infoContainer:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(infoContainer, {
+        bgColor     = { 0.15, 0.1, 0.05, 0.5 },
+        borderColor = { 0.4, 0.25, 0.1, 0.5 },
     })
-    infoContainer:SetBackdropColor(0.15, 0.1, 0.05, 0.5)
-    infoContainer:SetBackdropBorderColor(0.4, 0.25, 0.1, 0.5)
     
     -- Clickable header
     local infoHeader = CreateFrame("Button", nil, infoContainer)
@@ -1042,16 +1100,53 @@ function AutoProfilesUI:BuildPage(GUI, pageFrame, db, Add, AddSpace)
     
     Add(infoContainer, infoHeaderHeight + (infoCollapsed and 0 or infoBodyHeight), "both")
     
-    AddSpace(10, "both")
+    AddSpace(GUI.Space.section, "both")
     
     -- =============================================
     -- Content Type Sections (dynamic height via layoutHeight)
     -- =============================================
+    local firstSection
     for _, ct in ipairs(CONTENT_TYPES) do
         local section = self:CreateContentTypeSection(GUI, pageFrame, ct)
+        firstSection = firstSection or section
         -- Add section with its current height
         Add(section, section.totalHeight, "both")
         AddSpace(8, "both")
+    end
+
+    -- =============================================
+    -- Disabled overlay (see the note by `autoOff` above)
+    -- =============================================
+    -- Covers the layout sections ONLY. Everything above it — the enable
+    -- checkbox, the Current Status box, the "How it works" documentation — stays
+    -- readable, because the person looking at this scrim is exactly the one who
+    -- still needs to read it. That is the one deliberate difference from the
+    -- Designers, which have no explaining content to preserve.
+    --
+    -- Kept on pageFrame and re-anchored rather than rebuilt: it is NOT in
+    -- self.children (the flow must not reserve height for it), so a page rebuild
+    -- would otherwise leave the old one behind and stack a new one on top.
+    -- firstSection is a fresh frame every build, hence the re-anchor.
+    if firstSection then
+        if not pageFrame.autoDisabledOverlay then
+            pageFrame.autoDisabledOverlay = GUI:CreateDisabledOverlay(pageFrame.child, {
+                label = L["Auto Layouts is disabled"],
+            })
+            -- Re-anchored to the TOP rather than the helper's centre: this scrim
+            -- can span three expanded sections, and a centred message on a tall
+            -- one lands below the fold — the user would see a dead grey slab and
+            -- have to scroll to find out why. The Designers don't need this;
+            -- their overlay is a fixed viewport-sized panel.
+            pageFrame.autoDisabledOverlay.Label:ClearAllPoints()
+            pageFrame.autoDisabledOverlay.Label:SetPoint("TOP", 0, -40)
+        end
+        local overlay = pageFrame.autoDisabledOverlay
+        overlay:ClearAllPoints()
+        overlay:SetPoint("TOPLEFT", firstSection, "TOPLEFT", 0, 0)
+        overlay:SetPoint("BOTTOMRIGHT", pageFrame.child, "BOTTOMRIGHT", 0, 0)
+        overlay:SetShown(autoOff)
+    elseif pageFrame.autoDisabledOverlay then
+        pageFrame.autoDisabledOverlay:Hide()
     end
 end
 
@@ -1080,13 +1175,10 @@ function AutoProfilesUI:CreateContentTypeSection(GUI, pageFrame, contentType)
     
     local section = CreateFrame("Frame", nil, pageFrame.child, "BackdropTemplate")
     section:SetSize(500, headerHeight)
-    section:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(section, {
+        bgColor     = { 0.12, 0.12, 0.12, 1 },
+        borderColor = { 0.25, 0.25, 0.25, 1 },
     })
-    section:SetBackdropColor(0.12, 0.12, 0.12, 1)
-    section:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
     section.expanded = true
     section.contentKey = contentType.key
     section.totalHeight = headerHeight + (section.expanded and bodyHeight or 0)
@@ -1185,10 +1277,10 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
     
     local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     row:SetHeight(28)
-    row:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
+    DF.GUI:CreateElementBackdrop(row, {
+        outline = false,
+        bgColor     = { 0.08, 0.08, 0.08, 1 },
     })
-    row:SetBackdropColor(0.08, 0.08, 0.08, 1)
     
     -- Profile name
     local nameText = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -1201,13 +1293,10 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
     local rangeBadge = CreateFrame("Button", nil, row, "BackdropTemplate")
     rangeBadge:SetSize(65, 18)
     rangeBadge:SetPoint("LEFT", 115, 0)
-    rangeBadge:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(rangeBadge, {
+        bgColor     = { 0.18, 0.18, 0.18, 1 },
+        borderColor = { 0.3, 0.3, 0.3, 1 },
     })
-    rangeBadge:SetBackdropColor(0.18, 0.18, 0.18, 1)
-    rangeBadge:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
     
     local rangeText = rangeBadge:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     rangeText:SetPoint("CENTER")
@@ -1259,10 +1348,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
 
         overrideBtn:SetScript("OnEnter", function(self)
             overrideText:SetTextColor(1, 0.8, 0.2)
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(L["Override Details"], 1, 0.67, 0)
-            GameTooltip:AddLine(" ")
-
+            local lines = { " " }
             local groups, unknownKeys = GroupOverridesByTab(profile.overrides)
             local tabOrder = {}
             for tabId in pairs(groups) do tinsert(tabOrder, tabId) end
@@ -1292,9 +1378,12 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
             local function emitTT(indent, label, val)
                 if not canEmit() then return end
                 if val == nil then
-                    GameTooltip:AddLine(indent .. label, 0.6, 0.6, 0.6)
+                    lines[#lines + 1] = { text = indent .. label, color = { 0.6, 0.6, 0.6 } }
                 else
-                    GameTooltip:AddLine(indent .. label .. "  |cffffffff" .. val .. "|r", 0.8, 0.8, 0.8)
+                    lines[#lines + 1] = {
+                        text  = indent .. label .. "  |cffffffff" .. val .. "|r",
+                        color = { 0.8, 0.8, 0.8 },
+                    }
                 end
             end
             -- Render one override key: scalars shown directly; a table-valued override
@@ -1303,7 +1392,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
                 local value = profile.overrides[key]
                 if type(value) == "table" and not (value.r and value.g and value.b) then
                     if not canEmit() then return end
-                    GameTooltip:AddLine("  " .. key .. ":", lr, lg, lb)
+                    lines[#lines + 1] = { text = "  " .. KeyLabel(key) .. ":", color = { lr, lg, lb } }
                     WalkOverrideDiff(value, realRaid and realRaid[key], "", "    ", 1, 8, budget, emitTT)
                 else
                     if not canEmit() then return end
@@ -1315,14 +1404,17 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
                     else
                         displayVal = tostring(value)
                     end
-                    GameTooltip:AddDoubleLine("  " .. key, displayVal, lr, lg, lb, 1, 1, 1)
+                    lines[#lines + 1] = { left = "  " .. KeyLabel(key), right = displayVal, color = { lr, lg, lb } }
                 end
             end
 
             for _, tabId in ipairs(tabOrder) do
                 if not canEmit() then break end
                 local group = groups[tabId]
-                GameTooltip:AddLine(group.tabLabel .. " (" .. #group.keys .. ")", 1, 0.67, 0)
+                lines[#lines + 1] = {
+                    text  = group.tabLabel .. " (" .. #group.keys .. ")",
+                    color = { 1, 0.67, 0 },
+                }
                 table.sort(group.keys)
                 for _, key in ipairs(group.keys) do
                     renderKey(key, 0.8, 0.8, 0.8)
@@ -1332,7 +1424,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
             end
 
             if #unknownKeys > 0 and not truncated and canEmit() then
-                GameTooltip:AddLine(format(L["Other (%d)"], #unknownKeys), 0.5, 0.5, 0.5)
+                lines[#lines + 1] = { text = format(L["Other (%d)"], #unknownKeys), color = { 0.5, 0.5, 0.5 } }
                 table.sort(unknownKeys)
                 for _, key in ipairs(unknownKeys) do
                     renderKey(key, 0.5, 0.5, 0.5)
@@ -1340,19 +1432,27 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
                 end
             end
 
-            GameTooltip:AddLine(" ")
+            lines[#lines + 1] = " "
             if truncated then
-                GameTooltip:AddLine(L["Too many to show here."], 1, 0.6, 0.2)
+                lines[#lines + 1] = { text = L["Too many to show here."], color = { 1, 0.6, 0.2 } }
             end
             -- /df overrides reports on the active layout (or one being edited), not
             -- whichever row is hovered — so note that inactive layouts need Edit first.
-            GameTooltip:AddLine(L["Use /df overrides for the full list — active layout, or Edit one to inspect it."], 0.4, 0.4, 0.4)
-            GameTooltip:Show()
+            lines[#lines + 1] = {
+                text  = L["Use /df overrides for the full list — active layout, or Edit one to inspect it."],
+                color = { 0.4, 0.4, 0.4 },
+            }
+
+            GUI:ShowTooltip(self, {
+                title = L["Override Details"],
+                tone  = "caution",   -- gold, matching the override text this hangs off
+                lines = lines,
+            })
         end)
 
         overrideBtn:SetScript("OnLeave", function()
             overrideText:SetTextColor(1, 0.67, 0)
-            GameTooltip:Hide()
+            GUI:HideTooltip()
         end)
     end
 
@@ -1505,20 +1605,20 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
         GUI:HideTooltip()
     end)
     deleteBtn:SetScript("OnClick", function()
-        -- Confirm deletion
-        StaticPopupDialogs["DANDERSFRAMES_DELETE_AUTOPROFILE"] = {
-            text = format(L["Delete layout \"%s\"?"], profile.name),
-            button1 = L["Delete"],
-            button2 = L["Cancel"],
-            OnAccept = function()
-                AutoProfilesUI:DeleteProfile(contentType.key, index)
-                if pageFrame.Refresh then pageFrame:Refresh() end
-            end,
-            timeout = 0,
-            whileDead = true,
-            hideOnEscape = true,
-        }
-        StaticPopup_Show("DANDERSFRAMES_DELETE_AUTOPROFILE")
+        DF:ShowPopupAlert({
+            title   = L["Delete Layout"],
+            message = format(L["Delete layout \"%s\"?"], profile.name),
+            buttons = {
+                {
+                    label = L["Delete"],
+                    onClick = function()
+                        AutoProfilesUI:DeleteProfile(contentType.key, index)
+                        if pageFrame.Refresh then pageFrame:Refresh() end
+                    end,
+                },
+                { label = L["Cancel"] },
+            },
+        })
     end)
     
     return row
@@ -2791,13 +2891,10 @@ function AutoProfilesUI:CreateEditingBanner(parent)
     
     local banner = CreateFrame("Frame", "DandersAutoProfilesEditingBanner", parent, "BackdropTemplate")
     banner:SetHeight(50)
-    banner:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(banner, {
+        bgColor     = { 0.15, 0.08, 0.03, 1 },
+        borderColor = { 1, 0.5, 0.2, 1 },
     })
-    banner:SetBackdropColor(0.15, 0.08, 0.03, 1)
-    banner:SetBackdropBorderColor(1, 0.5, 0.2, 1)
     banner:SetFrameLevel(parent:GetFrameLevel() + 50)  -- Ensure banner is above page content
     banner:Hide()
     
@@ -2858,9 +2955,9 @@ function AutoProfilesUI:UpdateEditingBanner()
         local GUI = DF.GUI
         local pageName = GUI and GUI.CurrentPageName
         if pageName == "auras_auradesigner" then
-            editingBanner.infoText:SetText(info.rangeText .. " · |cffffcc66" .. L["Pick an Aura Designer preset below for this layout. 'Inherit (Global)' follows your global one."] .. "|r")
+            editingBanner.infoText:SetText(info.rangeText .. " · |cffffcc66" .. L["Pick an Aura Designer template below for this layout. 'Inherit (Global)' follows your global one."] .. "|r")
         elseif pageName == "text_designer" then
-            editingBanner.infoText:SetText(info.rangeText .. " · |cffffcc66" .. L["Pick a Text Designer preset below for this layout. 'Inherit (Global)' follows your global one."] .. "|r")
+            editingBanner.infoText:SetText(info.rangeText .. " · |cffffcc66" .. L["Pick a Text Designer template below for this layout. 'Inherit (Global)' follows your global one."] .. "|r")
         else
             editingBanner.infoText:SetText(info.rangeText .. " · " .. L["Only changed settings will be saved"])
         end
@@ -2968,11 +3065,10 @@ function AutoProfilesUI:SetupEditingBanner()
     -- =============================================
     local sidebarHint = CreateFrame("Frame", nil, GUI.tabFrame, "BackdropTemplate")
     sidebarHint:SetAllPoints(GUI.tabFrame)
-    sidebarHint:SetBackdrop({
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(sidebarHint, {
+        fill = false,
+        borderColor = { 1, 0.5, 0.2, 0.8 },
     })
-    sidebarHint:SetBackdropBorderColor(1, 0.5, 0.2, 0.8)
     sidebarHint:SetFrameLevel(GUI.tabFrame:GetFrameLevel() + 10)
     sidebarHint:EnableMouse(false)  -- Don't block clicks on tabs underneath
     sidebarHint:Hide()
@@ -2982,10 +3078,10 @@ function AutoProfilesUI:SetupEditingBanner()
     hintBg:SetPoint("TOPLEFT", sidebarHint, "TOPLEFT", 1, -1)
     hintBg:SetPoint("TOPRIGHT", sidebarHint, "TOPRIGHT", -1, -1)
     hintBg:SetHeight(32)
-    hintBg:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
+    DF.GUI:CreateElementBackdrop(hintBg, {
+        outline = false,
+        bgColor     = { 0.12, 0.06, 0.02, 0.95 },
     })
-    hintBg:SetBackdropColor(0.12, 0.06, 0.02, 0.95)
     hintBg:EnableMouse(false)
 
     local hintText = hintBg:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -3848,10 +3944,18 @@ function AutoProfilesUI:PrintOverrides()
             print(indent .. label .. " = |cffffffff" .. val .. "|r")
         end
     end
+    -- Chat is the DIAGNOSTIC surface -- people paste it for support -- so it shows
+    -- the readable label AND the raw saved key, unlike the tooltip which shows the
+    -- label alone.
+    local function chatKey(key)
+        local label = KeyLabel(key)
+        if label == key then return key end
+        return label .. " |cff808080(" .. key .. ")|r"
+    end
     local function printKey(key, indentBase)
         local value = profile.overrides[key]
         if type(value) == "table" and not (value.r and value.g and value.b) then
-            print(indentBase .. key .. ":")
+            print(indentBase .. chatKey(key) .. ":")
             WalkOverrideDiff(value, realRaid and realRaid[key], "", indentBase .. "  ", 1, 8, budget, emitChat)
         else
             local displayValue
@@ -3862,7 +3966,7 @@ function AutoProfilesUI:PrintOverrides()
             else
                 displayValue = "|cffffffff" .. tostring(value) .. "|r"
             end
-            print(indentBase .. key .. " = " .. displayValue)
+            print(indentBase .. chatKey(key) .. " = " .. displayValue)
         end
     end
 

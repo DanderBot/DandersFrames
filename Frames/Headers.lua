@@ -157,7 +157,8 @@ local unitLeaderCache = nil -- tracks current leader unit (single value, not tab
 -- DandersFrames never displays the same unit in two frames simultaneously,
 -- so this is a simple 1:1 mapping (no set-based multi-frame tracking needed).
 --
--- Pet frames are NOT indexed here (separate InitializePetHeaderChild path).
+-- Pet frames are NOT indexed here — they come up through the pet header's own
+-- child-init path rather than this one.
 -- ============================================================
 local unitFrameMap = {}    -- "raid17" => frame, "party2" => frame, etc.
 DF.unitFrameMap = unitFrameMap  -- Expose for cross-file access (e.g., Auras.lua hook)
@@ -365,19 +366,6 @@ local function HasRosterMembershipChanged()
     return false
 end
 
--- Check if unit's GUID has changed (change-detection pattern)
-local function HasUnitChanged(unit)
-    if not unit then return false end
-    local newGuid = UnitGUID(unit)
-    -- Secret values (Midnight 12.0) can't be compared safely — treat as changed
-    if issecretvalue(newGuid) then return true end
-    local oldGuid = unitGuidCache[unit]
-    if newGuid ~= oldGuid then
-        unitGuidCache[unit] = newGuid
-        return true
-    end
-    return false
-end
 
 -- Clear GUID cache for a unit (when unit is removed)
 local function ClearUnitCache(unit)
@@ -420,21 +408,36 @@ local function SetHeaderAttribute(header, attr, value)
         return false
     end
     
-    -- Value changed, update cache and set attribute
-    cache[attr] = value
+    -- Value changed: SET FIRST, then record. Recording first meant a write that
+    -- was blocked or otherwise failed still poisoned the cache into reporting
+    -- success, and every later attempt to set the same value was then skipped.
     header:SetAttribute(attr, value)
+    cache[attr] = value
     if DF and DF.RosterDebugCount then
         DF:RosterDebugCount("SetHeaderAttribute-CHANGED")
     end
     return true
 end
 
--- Clear cache for a header (use when header is destroyed/recreated)
+-- Clear cache for a header (use when header is destroyed/recreated, OR when
+-- anything writes the header's attributes WITHOUT going through
+-- SetHeaderAttribute -- otherwise the cache still describes the old values and
+-- the next matching write is skipped as redundant).
 local function ClearHeaderAttributeCache(header)
     if header then
         local headerName = header:GetName() or tostring(header)
         headerAttributeCache[headerName] = nil
     end
+end
+
+-- Exposed because the bypassing writers live in another file: Features/FrameSort.lua
+-- nils nameList/sortMethod directly when the user turns the external sorter off, and
+-- DF:SetPartySorting writes them raw. Neither went through SetHeaderAttribute, so the
+-- cache kept claiming the old values were live and the re-apply that should have
+-- restored DF's own sorting was skipped -- party frames stayed in template order
+-- until a roster change happened to alter the nameList string.
+function DF:ClearHeaderAttributeCache(header)
+    ClearHeaderAttributeCache(header)
 end
 
 -- ============================================================
@@ -992,23 +995,6 @@ function DF:InitializeHeaderChild(frame)
     end
 end
 
-function DF:InitializePetHeaderChild(frame)
-    if not frame then return end
-    if frame.dfInitialized then return end
-    
-    frame.dfIsDandersFrame = true
-    frame.dfIsHeaderChild = true
-    frame.dfIsPetFrame = true
-    
-    -- Pet frames use simpler elements (implemented in Phase 6)
-    -- For now, create basic elements
-    DF:CreateFrameElements(frame)
-    
-    frame:RegisterForClicks("AnyUp")
-    frame.dfInitialized = true
-    
-    DF:RegisterFrameWithClickCast(frame)
-end
 
 -- ============================================================
 -- CONTAINER CREATION
@@ -3279,195 +3265,6 @@ function DF:UpdateRaidGroupOrderAttributes()
     end
 end
 
--- Create a header just for the player in raid (for FIRST/LAST modes in player's group)
-function DF:CreateRaidPlayerHeader()
-    if DF.raidPlayerHeader then return end
-    
-    local db = DF:GetRaidDB()
-    local frameWidth = db.frameWidth or 80
-    local frameHeight = db.frameHeight or 40
-    local spacing = db.frameSpacing or 2
-    local groupSpacing = db.raidGroupSpacing or 10
-    
-    DF.raidPlayerHeader = CreateFrame("Frame", "DandersRaidPlayerHeader", DF.raidContainer, "SecureGroupHeaderTemplate")
-    
-    -- Shows the player when in raid
-    DF.raidPlayerHeader:SetAttribute("showPlayer", true)
-    DF.raidPlayerHeader:SetAttribute("showParty", false)
-    DF.raidPlayerHeader:SetAttribute("showRaid", true)  -- Must be true to show player in raid
-    DF.raidPlayerHeader:SetAttribute("showSolo", false)
-    
-    -- Template and layout
-    DF.raidPlayerHeader:SetAttribute("template", "DandersUnitButtonTemplate")
-    DF.raidPlayerHeader:SetAttribute("point", "TOP")
-    DF.raidPlayerHeader:SetAttribute("xOffset", 0)
-    DF.raidPlayerHeader:SetAttribute("yOffset", -spacing)
-    
-    -- CRITICAL: Limit to 1 frame only
-    DF.raidPlayerHeader:SetAttribute("maxColumns", 1)
-    DF.raidPlayerHeader:SetAttribute("unitsPerColumn", 1)
-    
-    -- Store layout values for secure positioning
-    DF.raidPlayerHeader:SetAttribute("frameWidth", frameWidth)
-    DF.raidPlayerHeader:SetAttribute("frameHeight", frameHeight)
-    DF.raidPlayerHeader:SetAttribute("spacing", spacing)
-    DF.raidPlayerHeader:SetAttribute("groupSpacing", groupSpacing)
-    
-    -- Positioning attributes (will be set by ApplyRaidGroupSorting)
-    DF.raidPlayerHeader:SetAttribute("selfPosition", "FIRST")
-    DF.raidPlayerHeader:SetAttribute("growFrom", "START")
-    DF.raidPlayerHeader:SetAttribute("playerGroup", 1)
-    DF.raidPlayerHeader:SetAttribute("groupChildCount", 0)
-    
-    -- Store reference to container for secure code
-    SecureHandlerSetFrameRef(DF.raidPlayerHeader, "container", DF.raidContainer)
-    
-    -- Store references to all 8 group headers (will be set after headers are created)
-    -- This allows secure code to reference the correct group header dynamically
-    
-    -- Secure positioning snippet - runs when triggerposition changes
-    -- Detects player's actual group and reconfigures headers if player moved
-    local positionSnippet = [[
-        local header = self
-        local container = header:GetFrameRef("container")
-        if not container then return end
-        
-        local selfPosition = header:GetAttribute("selfPosition")
-        if selfPosition == "SORTED" then return end -- No positioning needed for SORTED
-        
-        local growFrom = header:GetAttribute("growFrom")
-        local frameWidth = header:GetAttribute("frameWidth") or 80
-        local frameHeight = header:GetAttribute("frameHeight") or 40
-        local spacing = header:GetAttribute("spacing") or 2
-        local groupSpacing = header:GetAttribute("groupSpacing") or 10
-        local storedPlayerGroup = header:GetAttribute("playerGroup")
-        
-        -- Detect player's ACTUAL group by scanning all group headers
-        local actualPlayerGroup = nil
-        for g = 1, 8 do
-            local gh = header:GetFrameRef("groupHeader" .. g)
-            if gh then
-                for i = 1, 5 do
-                    local child = gh:GetAttribute("child" .. i)
-                    if child and child:IsShown() then
-                        local unit = child:GetAttribute("unit")
-                        if unit and UnitIsUnit(unit, "player") then
-                            actualPlayerGroup = g
-                            break
-                        end
-                    end
-                end
-                if actualPlayerGroup then break end
-            end
-        end
-        
-        -- Use actual group if found, otherwise use stored
-        local playerGroup = actualPlayerGroup or storedPlayerGroup
-        if not playerGroup then return end
-        
-        -- If player moved to a different group, reconfigure the headers
-        if actualPlayerGroup and actualPlayerGroup ~= storedPlayerGroup then
-            -- Update stored playerGroup
-            header:SetAttribute("playerGroup", actualPlayerGroup)
-            
-            -- Reconfigure headers:
-            -- OLD player group (storedPlayerGroup): switch back to showRaid=true
-            -- NEW player group (actualPlayerGroup): switch to showParty=true
-            if storedPlayerGroup then
-                local oldHeader = header:GetFrameRef("groupHeader" .. storedPlayerGroup)
-                if oldHeader then
-                    oldHeader:SetAttribute("showParty", false)
-                    oldHeader:SetAttribute("showRaid", true)
-                    oldHeader:SetAttribute("groupFilter", tostring(storedPlayerGroup))
-                end
-            end
-            
-            local newHeader = header:GetFrameRef("groupHeader" .. actualPlayerGroup)
-            if newHeader then
-                newHeader:SetAttribute("showRaid", false)
-                newHeader:SetAttribute("showParty", true)
-                newHeader:SetAttribute("groupFilter", nil)
-            end
-        end
-        
-        local groupHeader = header:GetFrameRef("groupHeader" .. playerGroup)
-        if not groupHeader then return end
-        
-        -- Count visible children in the player's group header
-        local groupChildCount = 0
-        for i = 1, 5 do
-            local child = groupHeader:GetAttribute("child" .. i)
-            if child and child:IsShown() then
-                -- Don't count player (in case header hasn't updated yet)
-                local unit = child:GetAttribute("unit")
-                if not unit or not UnitIsUnit(unit, "player") then
-                    groupChildCount = groupChildCount + 1
-                end
-            end
-        end
-        
-        -- Fallback to Lua-set attribute if dynamic count is 0
-        if groupChildCount == 0 then
-            groupChildCount = header:GetAttribute("groupChildCount") or 0
-        end
-        
-        -- Reset ALL group headers to normal position first
-        for g = 1, 8 do
-            local gh = header:GetFrameRef("groupHeader" .. g)
-            if gh then
-                local gX = (g - 1) * (frameWidth + groupSpacing)
-                gh:ClearAllPoints()
-                if growFrom == "END" then
-                    gh:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", gX, 0)
-                else
-                    gh:SetPoint("TOPLEFT", container, "TOPLEFT", gX, 0)
-                end
-            end
-        end
-        
-        -- Calculate X position for player's group
-        local groupX = (playerGroup - 1) * (frameWidth + groupSpacing)
-        
-        -- Position raidPlayerHeader based on FIRST/LAST mode
-        header:ClearAllPoints()
-        
-        if selfPosition == "FIRST" then
-            -- FIRST: Player at start, group header offset
-            if growFrom == "END" then
-                header:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", groupX, 0)
-                groupHeader:ClearAllPoints()
-                groupHeader:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", groupX, frameHeight + spacing)
-            else
-                header:SetPoint("TOPLEFT", container, "TOPLEFT", groupX, 0)
-                groupHeader:ClearAllPoints()
-                groupHeader:SetPoint("TOPLEFT", container, "TOPLEFT", groupX, -(frameHeight + spacing))
-            end
-        elseif selfPosition == "LAST" then
-            -- LAST: Group at normal position (already set above), player after visible children
-            local groupHeight = groupChildCount * frameHeight + math.max(0, groupChildCount - 1) * spacing
-            
-            if growFrom == "END" then
-                header:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", groupX, groupHeight + spacing)
-            else
-                header:SetPoint("TOPLEFT", container, "TOPLEFT", groupX, -(groupHeight + spacing))
-            end
-        end
-    ]]
-    
-    -- Use SecureHandlerWrapScript to handle attribute changes
-    SecureHandlerWrapScript(DF.raidPlayerHeader, "OnAttributeChanged", DF.raidPlayerHeader, [[
-        if name == "triggerposition" then
-            ]] .. positionSnippet .. [[
-        end
-    ]])
-    
-    -- Initially hidden - will be shown/positioned by ApplyRaidGroupSorting
-    DF.raidPlayerHeader:Hide()
-    
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Created raid player header with secure positioning, size", frameWidth, "x", frameHeight)
-    end
-end
 
 -- ============================================================
 -- RAID ROSTER CACHE
@@ -4436,82 +4233,6 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
     return result
 end
 
--- ============================================================
--- FLAT RAID NAMELIST SORTING
--- Builds a nameList for ALL raid members (flat layout mode)
--- ============================================================
-function DF:BuildRaidFlatNameList(selfPosition)
-    local db = DF:GetRaidDB()
-    local members = {}
-    local playerName = UnitName("player")
-    local playerFound = false
-    
-    -- Collect all raid members using GetRaidRosterInfo (includes realm for cross-realm)
-    if IsInRaid() then
-        for i = 1, GetNumGroupMembers() do
-            local name, _, subgroup = GetRaidRosterInfo(i)
-            if name then
-                -- Check if this is the player by comparing names (same as group-based version)
-                local isPlayer = (name == playerName)
-                if isPlayer then
-                    playerFound = true
-                end
-                table.insert(members, {
-                    unit = isPlayer and "player" or ("raid" .. i),
-                    name = name,
-                    isPlayer = isPlayer
-                })
-            end
-        end
-    elseif IsInGroup() then
-        -- Party mode (shouldn't happen in flat raid mode, but handle gracefully)
-        if UnitExists("player") then
-            table.insert(members, {
-                unit = "player",
-                name = playerName,
-                isPlayer = true
-            })
-            playerFound = true
-        end
-        for i = 1, 4 do
-            local unit = "party" .. i
-            if UnitExists(unit) then
-                local name, realm = UnitName(unit)
-                local fullName = name
-                if realm and realm ~= "" then
-                    fullName = name .. "-" .. realm
-                end
-                if name then
-                    table.insert(members, {
-                        unit = unit,
-                        name = fullName,
-                        isPlayer = false
-                    })
-                end
-            end
-        end
-    else
-        -- Solo
-        if UnitExists("player") then
-            table.insert(members, {
-                unit = "player",
-                name = playerName,
-                isPlayer = true
-            })
-            playerFound = true
-        end
-    end
-    
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r BuildRaidFlatNameList: found", #members, "members, selfPosition=", selfPosition, "playerFound=", tostring(playerFound))
-        for _, m in ipairs(members) do
-            print("|cFF00FF00[DF Headers]|r   -", m.name, m.isPlayer and "(PLAYER)" or "")
-        end
-    end
-    
-    -- Use the unified sorting function
-    return DF:BuildSortedNameList(members, db, selfPosition, playerFound)
-end
 
 -- Apply sorting to flat raid layout (uses FlatRaidFrames)
 function DF:ApplyRaidFlatSorting()
@@ -4662,45 +4383,6 @@ function DF:GetRaidFrame(index)
     return nil
 end
 
--- Get all raid frames from headers (replacement for iterating DF.raidFrames)
--- Use this instead of: for _, frame in pairs(DF.raidFrames) do
-function DF:GetAllRaidFrames()
-    local frames = {}
-    local db = DF:GetRaidDB()
-    
-    -- Include raidPlayerHeader child if it exists (for FIRST/LAST modes)
-    if DF.raidPlayerHeader then
-        local child = DF.raidPlayerHeader:GetAttribute("child1")
-        if child then
-            table.insert(frames, child)
-        end
-    end
-    
-    if db.raidUseGroups and DF.raidSeparatedHeaders then
-        -- Separated mode: get children from all group headers
-        for g = 1, 8 do
-            local header = DF.raidSeparatedHeaders[g]
-            if header then
-                for i = 1, 5 do
-                    local child = header:GetAttribute("child" .. i)
-                    if child then
-                        table.insert(frames, child)
-                    end
-                end
-            end
-        end
-    elseif DF.FlatRaidFrames and DF.FlatRaidFrames.header then
-        -- Flat mode: get children from FlatRaidFrames header
-        for i = 1, 40 do
-            local child = DF.FlatRaidFrames.header:GetAttribute("child" .. i)
-            if child then
-                table.insert(frames, child)
-            end
-        end
-    end
-    
-    return frames
-end
 
 function DF:IteratePartyFrames(callback)
     -- Player frame
@@ -5540,7 +5222,11 @@ function DF:SetPartySorting(sortMethod, groupBy, groupingOrder)
         if sortMethod then
             DF.partyHeader:SetAttribute("sortMethod", sortMethod)
         end
-        
+        -- Written raw (this function predates SetHeaderAttribute), so drop the
+        -- cache -- otherwise it keeps describing the values this call just
+        -- replaced and silently skips the next matching write.
+        ClearHeaderAttributeCache(DF.partyHeader)
+
         -- Force relayout
         for i = 1, 5 do
             local child = DF.partyHeader:GetAttribute("child" .. i)
@@ -7078,11 +6764,6 @@ function DF:RefreshAllHeaderChildFrames()
             DF:UpdateHealAbsorb(frame)
         end
         
-        -- Incoming heals
-        if DF.UpdateIncomingHeals then
-            DF:UpdateIncomingHeals(frame)
-        end
-        
         -- Raid target icon
         if DF.UpdateRaidTargetIcon then
             DF:UpdateRaidTargetIcon(frame)
@@ -7413,6 +7094,12 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
                 DF:StopTestAnimation()
                 if DF.testRaidContainer then DF.testRaidContainer:Hide() end
             end
+            -- Both mode flags are down now, so hand the shared engine state back:
+            -- the aura data provider and the pinned preview. This path clears the
+            -- flags inline rather than going through HideTestFrames, and skipping
+            -- the handback used to strand C_UnitAuras on the SAMPLE provider for
+            -- the rest of the session (live frames then rendered fake auras).
+            if DF.TeardownTestModeEngines then DF:TeardownTestModeEngines() end
             -- Clear state drivers if not in combat (can't unregister in combat)
             if not InCombatLockdown() and DF.testModeStateDriversActive then
                 DF:ClearTestModeStateDrivers()
@@ -8695,9 +8382,6 @@ SlashCmdList["DFHEADERS"] = function(msg)
     if cmd == "debug" then
         DF.debugHeaders = not DF.debugHeaders
         print("|cFF00FF00[DF Headers]|r Debug:", DF.debugHeaders and "ON" or "OFF")
-    
-    elseif cmd == "enable" then
-        DF:EnableHeaderMode()
     
     elseif cmd == "init" then
         DF:CreateHeaderFrames()

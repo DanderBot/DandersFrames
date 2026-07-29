@@ -35,26 +35,142 @@ GUI.Colors = {
     warning    = C_WARNING,  -- soft red for behaviour-change / caution notes
 }
 
+-- Dialog chrome. Popup.lua and WizardBuilder.lua are standalone dialogs rather
+-- than settings pages, and both wanted the same handful of extras on top of the
+-- shared neutrals — so both had grown a private copy of the WHOLE palette, one
+-- of them complete (11 hardcoded colours) and matching today only by luck.
+-- One owner: the neutrals below are the SAME tables as GUI.Colors, so they
+-- theme-track in lockstep, and only what genuinely differs is declared here.
+-- Read-only by convention — these tables are shared, so nothing may mutate them.
+GUI.DialogColors = {
+    -- Dialogs use the SAME ground as the pages. This was a bespoke 0.97 in three
+    -- separate copies, a shade denser than the pages' 0.95 for no reason anyone
+    -- could point at; consolidating the copies made the difference visible and
+    -- it went. Chrome now reads identically whether it's a page or a dialog.
+    background = C_BACKGROUND,
+    panel      = C_PANEL,
+    element    = C_ELEMENT,
+    border     = C_BORDER,
+    accent     = C_ACCENT,     -- fallback only; live dialogs read GetThemeColor()
+    hover      = C_HOVER,
+    text       = C_TEXT,
+    textDim    = C_TEXT_DIM,
+    selected   = {r = 0.28, g = 0.28, b = 0.45, a = 1},
+    -- Status pair for dialog content (valid/invalid rows, ok/error dots).
+    green      = {r = 0.2,  g = 0.9,  b = 0.2},
+    red        = {r = 0.9,  g = 0.25, b = 0.25},
+    orange     = {r = 0.85, g = 0.55, b = 0.1},
+}
+
 -- Canonical row heights (the "airier" scale). A fixed-height widget factory stamps its own slot
 -- height onto the widget (widget.preferredHeight + widget.fixedRowHeight), so the layout uses THAT
 -- and a call-site number can't make the same widget type render at a different height on a different
 -- page. New callers can omit the height entirely; legacy call-site numbers on fixed widgets are
 -- ignored (harmless, strippable later). Variable widgets (labels, headers, spacers) are NOT stamped
 -- and keep whatever height they are given. One place to retune the whole GUI's vertical rhythm.
+-- THE vertical rhythm of the whole GUI.
+--
+-- These are SLOT heights, not gaps -- LayoutChildren stacks rows flush
+-- (y = y - height), so the gap the eye sees between two rows is:
+--
+--     (slot - content) of the row above  +  (content's top inset) of the row below
+--
+-- which means a row whose content is short inside a tall slot silently gets a big
+-- gap. That is how the GUI ended up with a 4x spread. /df gapcheck measured it
+-- across four pages (267 rows), and the content heights came back IDENTICAL on
+-- every page, so the slots can be derived rather than guessed:
+--
+--     kind          content   old slot   old gap      new slot   new gap
+--     slider          32.0       55        23.0          46        14
+--     dropdown        39.8       55        15.2          54        14
+--     editbox         39.0       55        16.0          53        14
+--     colorpicker     23.9       30         6.1          38        14
+--     checkbox        18.2       30        11.8*         35        14*
+--     header          11.9    34 / 40   11.0 / 17.0      37        14
+--
+-- So: ONE gap, and every slot is content + RowGap. 14 is not arbitrary -- it is
+-- what the dropdown rows already had (15.2), the one spacing Krathe confirmed
+-- reads correctly. Sliders lose 9px of slack, colour pickers gain 8.
+--
+-- * the checkbox's content sits 2.9px below its slot top, so a row landing ON a
+--   checkbox reads 14 + 2.9. Zeroing that would mean re-anchoring the checkbox
+--   art itself, which moves the tick 3px for 3px -- not worth it.
+--
+-- A header keeps its 11.1px top inset, so the gap ABOVE a header is 14 + 11.1.
+-- That is deliberate: a section title wants air above it and to sit close to
+-- what it labels.
+GUI.RowGap = 14
+
+-- ...with ONE exception: a RUN of the same COMPACT row type closes up.
+--
+-- A uniform gap everywhere is right between DIFFERENT kinds -- that is the
+-- boundary the eye uses to tell one control apart from the next. But eight
+-- checkboxes in a column are one list, not eight things, and 14 between each of
+-- them reads as a stack of unrelated rows. So consecutive rows of the same
+-- compact kind get RowGapTight, and the first row of a different kind after them
+-- gets the full RowGap back. Same spacing between TYPES, tighter within a type.
+--
+-- Compact means the label sits INLINE with the control (a checkbox's text is
+-- beside its tick). Slider, dropdown and edit box are deliberately NOT compact:
+-- their label sits ABOVE the control, so tightening the gap there would push the
+-- next row's label into the control above it -- the same reasoning already
+-- recorded on labelPad, and the reason a stack of sliders needs real air even
+-- though a stack of checkboxes does not.
+GUI.RowGapTight = 8
+GUI.RowCompact = {
+    checkbox    = true,
+    toggle      = true,
+    colorpicker = true,
+}
+
+-- PAGE-level spacing, a different axis from the row rhythm above: AddSpace
+-- inserts a spacer into the page's COLUMN flow, between groups, not between rows
+-- inside one. Groups already carry a 10px margin of their own, so these stack ON
+-- TOP of that -- a `section` break reads as 20 between two groups, a `block` as
+-- 30.
+--
+-- The audit found 58 AddSpace calls passing 9 different numbers, which looked
+-- worse than it was: classified by INTENT rather than by value, two idioms cover
+-- 42 of them and both were already internally consistent --
+--
+--   section break (after `currentSection = nil`, or a bare gap after a group)
+--       19/19 at 10, plus 7 more following an Add(<group>)
+--   before the See-Also links at the foot of a page
+--       15/16 at 20, one stray 15
+--
+-- The real inconsistency was three files each picking their own number for the
+-- SAME intent (NicknamesPage used 12 throughout), not 9 competing rhythms.
+GUI.Space = {
+    section = 10,   -- between logical sections in a page column
+    block   = 20,   -- before a distinct trailing block (the See-Also links)
+    footer  = 12,   -- below the See-Also bar when it is parked at the viewport bottom
+}
+
 GUI.RowHeight = {
-    checkbox    = 30,
-    slider      = 55,
-    dropdown    = 55,
-    colorpicker = 30,   -- match the checkbox row (both ~24px of content) so the rhythm reads even
-    editbox     = 55,
-    toggle      = 30,   -- two-state switch; same ~24px of content as a checkbox, same row
+    checkbox    = 35,   -- 2.9 top inset + 18.2 content + RowGap
+    slider      = 46,   -- 32.0 content + RowGap  (was 55: a slot sized for the dropdown)
+    dropdown    = 54,   -- 39.8 content + RowGap
+    colorpicker = 38,   -- 23.9 content + RowGap
+    editbox     = 53,   -- 39.0 content + RowGap (box at -15, h24)
+    toggle      = 35,   -- two-state switch; same content as a checkbox, same row
     -- Labels are VARIABLE height (they wrap), so they have no fixed row — but they do
     -- have fixed CHROME, which CreateLabel adds to the measured text height: the 5px top
-    -- inset its FontString sits at, plus 13px below. That 13 IS the whole visible gap to
-    -- the next row — LayoutChildren stacks rows flush (y = y - height) and a labelled
-    -- control (dropdown/slider/editbox) puts its own label at TOPLEFT 0,0 — so a smaller
-    -- pad reads as a blurb crowding the control it describes.
-    labelPad    = 18,
+    -- inset its FontString sits at, plus the gap below. That gap IS the whole visible
+    -- space to the next row — LayoutChildren stacks rows flush (y = y - height) and a
+    -- labelled control (dropdown/slider/editbox) puts its own label at TOPLEFT 0,0 — so a
+    -- smaller pad reads as a blurb crowding the control it describes.
+    labelPad    = 5 + GUI.RowGap,
+    -- EVERY section header, collapsible or not. CreateHeader's container is 25
+    -- tall with its text pinned to the BOTTOM, so its 11.1px of internal padding
+    -- all sits ABOVE the text and this slot minus 25 is the entire visible gap
+    -- below it -- at exactly 25 there is none.
+    --
+    -- The old split was never designed: collapsible groups were handed 25 (no
+    -- gap) and plain ones 40, across both files, for the same construct. Rather
+    -- than sweep ~200 call sites, CreateHeader now marks itself fixedRowHeight,
+    -- so ResolveRowHeight IGNORES the literal a call site passes and every header
+    -- lands here. That is the same rule the other factory rows already follow.
+    sectionHeader = 11.1 + 11.9 + GUI.RowGap,   -- top inset + text + the gap
 }
 
 -- Resolve the layout slot height for a widget being added to a group/page. Fixed-height widgets
@@ -159,237 +275,6 @@ end
 
 DF.SectionRegistry = DF.SectionRegistry or {}
 
--- ============================================================
--- BLOCKED / DISABLED-ON-12.1 OVERLAY SYSTEM
--- Marks settings that no longer function under WoW 12.1's Blizzard-driven aura
--- widgets. Two surfaces:
---   GUI:SetPageBlocked(page, ...) — whole dead page: renders one banner instead
---     of the controls (reuses DoBuild's disabled-mode branch via GUI.BlockedPages).
---   GUI:SetBlocked(target, ...)   — a single control OR a whole settings-group:
---     composes the block into the existing grey-out seam (widget.disableOn for
---     controls, group.disableChildrenOn for groups) + a frosted overlay + tooltip.
--- A metadata registry (DF.BlockedSettings) drives `/df blocked`, the running
--- "what we've lost / what we've restored" audit.
---
--- EVERY marker gates on DF.AuraContainer.IsSupported() (via a `when` predicate) so
--- NOTHING blocks on live 12.0.x, where the legacy render still works — the overlays
--- only appear once the 12.1 aura system is active. Apply-side helpers below build
--- the right `when` per target (whole-page vs buff-row-owned vs any-12.1).
--- Wording: "not yet available…" for roadmap ports; "Blizzard limitation" for
--- genuine permanent limits.
--- ============================================================
-
-DF.BlockedSettings = DF.BlockedSettings or {}   -- [id] = { id, page, reason, tooltip, wording }
-GUI.BlockedPages   = GUI.BlockedPages   or {}   -- [tabName] = { reason, tooltip, tone, when }
-
--- True once the 12.1 Blizzard aura widgets are live. The base gate for every
--- blocked marker; on 12.0.x this is false so all overlays stay hidden and no
--- control is greyed.
-function GUI:IsAuraFactoryActive()
-    return (DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported()) and true or false
-end
-
--- Register/refresh a metadata entry, keyed by a stable id so page rebuilds
--- overwrite rather than leak or double-count (widget-keyed registries stale on
--- every mode switch). Pure data — never holds a widget reference.
-function GUI:RegisterBlockedMeta(id, info)
-    if not id then return end
-    DF.BlockedSettings[id] = {
-        id      = id,
-        page    = info.page,
-        reason  = info.reason,
-        tooltip = info.tooltip,
-        wording = info.wording,   -- "roadmap" | "limitation"
-    }
-end
-
--- Toggle a frosted overlay's visibility from its owner's current block state.
--- Called from BOTH standard refresh passes (page RefreshStates + group
--- RefreshChildStates). No-op unless the frame carries an overlay.
-function GUI:RefreshBlockedOverlay(frame, db)
-    local ov = frame and frame.blockedOverlay
-    if not ov then return end
-    local blocked = (not ov.when) or (db and ov.when(db)) or false
-    ov:SetShown(blocked and true or false)
-end
-
--- Internal: build the frosted veil + centred reason label + hover tooltip over a
--- target frame. It's a CHILD of the target so it rides the target's frame level,
--- hides/moves with it, and gets trashed on rebuild (no leak). frameLevel +10 (a
--- mere +1 renders under nested interactive children). EnableMouse only — NEVER
--- EnableMouseWheel, which would eat the page ScrollFrame's wheel when the cursor
--- sits on a blocked row. SetIgnoreParentAlpha keeps the veil + label bright while
--- the greyed control underneath dims to 0.4.
-local function BuildFrostOverlay(target, reason, tooltip, whenFn)
-    local ov = CreateFrame("Frame", nil, target)
-    ov:SetAllPoints(target)
-    ov:SetFrameLevel(target:GetFrameLevel() + 10)
-    ov:SetIgnoreParentAlpha(true)
-    ov:EnableMouse(true)
-
-    local bg = GUI.Colors.background
-    local veil = ov:CreateTexture(nil, "BACKGROUND")
-    veil:SetAllPoints()
-    veil:SetColorTexture(bg.r, bg.g, bg.b, 0.55)
-
-    local lbl = ov:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    lbl:SetPoint("LEFT", ov, "LEFT", 6, 0)
-    lbl:SetPoint("RIGHT", ov, "RIGHT", -6, 0)
-    lbl:SetJustifyH("CENTER")
-    lbl:SetWordWrap(true)
-    lbl:SetText("|c" .. GUI:ToneHex("caution") .. (reason or "") .. "|r")
-
-    ov.when    = whenFn
-    ov.reason  = reason
-    ov.tooltip = tooltip
-    ov:SetScript("OnEnter", function(self)
-        GUI:ShowTooltip(self, {
-            title = reason,
-            tone  = "caution",
-            lines = tooltip and { { text = tooltip } } or nil,
-        })
-    end)
-    ov:SetScript("OnLeave", function() GUI:HideTooltip() end)
-    ov:Hide()   -- RefreshBlockedOverlay shows it when the block is active
-    return ov
-end
-
--- Mark a single widget OR a whole settings-group as blocked. Composes `when` into
--- the existing grey seam (widget.disableOn / group.disableChildrenOn — a
--- SettingsGroup has no SetEnabled, so disableOn on a group would frost but grey
--- nothing), attaches a frosted overlay, and registers metadata.
---   opts = { reason, tooltip, when, id, page, wording }
---   when(db) -> true when blocked. Omit for always-blocked (still gate via `when`
---   at the call site so 12.0.x stays clear).
-function GUI:SetBlocked(target, opts)
-    if not target then return end
-    opts = opts or {}
-    local whenFn = opts.when   -- nil => always blocked (caller is responsible for the 12.1 gate)
-
-    local id = opts.id or ((opts.page or "?") .. ":" .. (opts.reason or tostring(target)))
-    GUI:RegisterBlockedMeta(id, opts)
-
-    if target.isSettingsGroup then
-        local prev = target.disableChildrenOn
-        target.disableChildrenOn = function(d)
-            return (((not whenFn) or whenFn(d)) or (prev and prev(d))) and true or false
-        end
-    else
-        local prev = target.disableOn
-        target.disableOn = function(d)
-            return (((not whenFn) or whenFn(d)) or (prev and prev(d))) and true or false
-        end
-    end
-
-    target.blockedOverlay = BuildFrostOverlay(target, opts.reason, opts.tooltip, whenFn)
-    GUI:RefreshBlockedOverlay(target, DF.db and DF.db[GUI.SelectedMode])
-    return target
-end
-
--- Mark a whole page dead: renders a single banner instead of the page's controls
--- (via GUI.BlockedPages, consumed by DoBuild). `when(db)` lets a page un-block
--- itself later — e.g. the Defensive Icon banner lifts automatically once the
--- factory pilot serves that row, with no GUI surgery.
---   opts = { reason, tooltip, tone, when, wording, page }
-function GUI:SetPageBlocked(page, opts)
-    if not page or not page.tabName then return end
-    opts = opts or {}
-    GUI.BlockedPages[page.tabName] = {
-        reason  = opts.reason,
-        tooltip = opts.tooltip,
-        tone    = opts.tone or "caution",
-        when    = opts.when,
-    }
-    GUI:RegisterBlockedMeta("page:" .. page.tabName, {
-        page    = opts.page or page.tabLabel or page.tabName,
-        reason  = opts.reason,
-        tooltip = opts.tooltip,
-        wording = opts.wording,
-    })
-    if page.Invalidate then page:Invalidate() end
-end
-
--- Is this page currently blocked for the active mode's db? (Used by DoBuild /
--- RefreshCached; the cache key tracks it so a `when` flip rebuilds the page.)
-function GUI:IsTabBlockedForCurrentMode(tabName, db)
-    local info = GUI.BlockedPages[tabName]
-    if not info then return false end
-    if info.when then return (info.when(db) and true) or false end
-    return true
-end
-
--- Shared 12.1 blocked wording, resolved at call time (never at file scope — L
--- freezes on enUS if baked into a file-scope table). scope = "page" | "group";
--- wording = "roadmap" (returns/rebuilt later) | "limitation" (permanent).
--- Returns reason (short headline / on-frost label), tooltip (detail).
-function GUI:BlockedWording(scope, wording)
-    local L = DF.L
-    if scope == "page" then
-        if wording == "limitation" then
-            return L["Not available with the 12.1 aura system"],
-                   L["WoW's new 12.1 aura system doesn't support these settings, so they can't be provided."]
-        end
-        return L["Not available yet with the 12.1 aura system"],
-               L["These settings are being rebuilt on WoW's new 12.1 aura system and will return in a future update."]
-    else
-        if wording == "limitation" then
-            return L["Blizzard limitation"],
-                   L["WoW's new 12.1 aura system doesn't support this setting."]
-        end
-        return L["Not available on 12.1"],
-               L["This is being rebuilt on WoW's new 12.1 aura system and will return in a future update."]
-    end
-end
-
--- Convenience: block a whole page with the shared wording. `when` defaults to the
--- base 12.1 gate (so nothing blocks on 12.0.x); pass a stricter predicate to let
--- the page un-block once a port lands (e.g. the Defensive Icon pilot).
-function GUI:BlockPage12_1(page, wording, when)
-    if not page then return end
-    local r, t = GUI:BlockedWording("page", wording)
-    GUI:SetPageBlocked(page, {
-        reason  = r,
-        tooltip = t,
-        wording = wording or "roadmap",
-        page    = page.tabLabel or page.tabName,
-        when    = when or function() return GUI:IsAuraFactoryActive() end,
-    })
-end
-
--- Convenience: block a single control OR a settings-group with the shared wording.
---   opts = { id, page, when }  (when defaults to the base 12.1 gate)
-function GUI:BlockControl12_1(target, wording, opts)
-    if not target then return end
-    opts = opts or {}
-    local r, t = GUI:BlockedWording("group", wording)
-    GUI:SetBlocked(target, {
-        reason  = r,
-        tooltip = t,
-        wording = wording or "roadmap",
-        id      = opts.id,
-        page    = opts.page,
-        when    = opts.when or function() return GUI:IsAuraFactoryActive() end,
-    })
-end
-
--- `/df blocked` — dump the metadata registry: the running inventory of settings
--- disabled by the 12.1 aura system, tagged [port] (roadmap) vs [limit] (permanent).
--- Dev diagnostic; output intentionally not localized.
-function DF:PrintBlockedSettings()
-    local list = {}
-    for _, e in pairs(DF.BlockedSettings) do list[#list + 1] = e end
-    table.sort(list, function(a, b)
-        return ((a.page or "") .. "\1" .. (a.id or "")) < ((b.page or "") .. "\1" .. (b.id or ""))
-    end)
-    local active = GUI:IsAuraFactoryActive()
-    print(string.format("|cffffcc00DandersFrames — settings blocked by the 12.1 aura system|r (%d entries, factory %s):",
-        #list, active and "|cff00ff00ACTIVE|r" or "|cff808080inactive (12.0.x)|r"))
-    for _, e in ipairs(list) do
-        local tag = (e.wording == "limitation") and "|cffff6666[limit]|r" or "|cffffcc00[port] |r"
-        print(string.format("  %s |cffffffff%s|r — %s", tag, tostring(e.page or e.id), tostring(e.reason or "")))
-    end
-    print("  |cff808080(group/widget entries register when their page is first opened this session)|r")
-end
 
 -- Track selected mode
 GUI.SelectedMode = "party"
@@ -513,38 +398,1224 @@ local function CloseOpenDropdown()
 end
 
 -- Helper to get current theme color
+-- The theme colour for an EXPLICIT mode. Use this for any surface that belongs to
+-- a mode rather than to whatever page the options window happens to be showing --
+-- movers, pinned containers -- so a raid surface stays orange while the window is
+-- on a party page. GetThemeColor() below is the follow-the-window variant.
+local function GetThemeColorFor(isRaid)
+    if isRaid then return C_RAID else return C_ACCENT end
+end
+GUI.GetThemeColorFor = GetThemeColorFor
+
 local function GetThemeColor()
-    if GUI.SelectedMode == "raid" then return C_RAID else return C_ACCENT end
+    return GetThemeColorFor(GUI.SelectedMode == "raid")
 end
 GUI.GetThemeColor = GetThemeColor
 
--- Helper to create element backdrop (for dropdowns, sliders, inputs)
-local function CreateElementBackdrop(frame)
-    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    frame:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, C_ELEMENT.a)
-    frame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+-- Physical pixels per UI unit, measured from the frame's OWN effective scale.
+-- The GUI window carries a user scale (guiScale) on top of UIParent's and is
+-- freely resizable, so this is almost never 1 and cannot be read from the
+-- addon-wide DF:GetPixelScale (which is relative to UIParent).
+local function PixelsPerUnit(frame)
+    local eff = frame and frame.GetEffectiveScale and frame:GetEffectiveScale()
+    local _, physH = GetPhysicalScreenSize()
+    if not (eff and eff > 0 and physH and physH > 0) then return nil end
+    return eff * physH / 768
 end
 
--- Helper to create panel backdrop (for main panels)
-local function CreatePanelBackdrop(frame)
-    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    frame:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, C_BACKGROUND.a)
-    frame:SetBackdropBorderColor(0, 0, 0, 1)
+-- ⚠ THERE IS NO RUNTIME GEOMETRY CORRECTION, AND THERE SHOULD NOT BE ONE.
+--
+-- This GUI used to carry a registry that nudged every bordered box onto the
+-- pixel grid after the layout had placed it. It is gone, and the reason is
+-- structural rather than a bug in the implementation: Lua-side snapping can only
+-- correct a frame at REST, and the symptom it was chasing -- a thin border going
+-- soft -- is at its worst while the content is MOVING, during a scroll.
+-- Correcting mid-scroll does not fix that, it adds a half-pixel jump on top of
+-- it, which reads as flicker. It also cost us the button-row drift, where an
+-- unordered sweep corrected chained anchors in a different order each pass.
+--
+-- Three things replaced it, and between them they are enough:
+--   * the LAYOUT picks whole-pixel numbers in the first place (SnapLen below, at
+--     the point an offset, width or height is chosen). No runtime cost, nothing
+--     to drift, nothing to flicker -- it just picks better numbers.
+--   * the CLIP SURFACES are snapped (page viewport insets, the content panel,
+--     the nav chain). Those were real bugs: a box clipped by a fractional edge
+--     loses part of its border no matter how well the box itself is placed.
+--   * the BORDER is drawn as two device pixels of our own texture rather than a
+--     one-unit backdrop edge, so it cannot land badly in the first place. See
+--     PIXEL BORDER further down -- that is the part that actually solved it.
+
+-- Round a LENGTH or OFFSET (in UI units) to a whole number of device pixels at
+-- the scale `frame` is drawn at. This is the layout-side half of the pixel-grid
+-- work, and the half that was missing.
+--
+-- A box lands on the grid only if the numbers it was GIVEN were whole pixels.
+-- They usually are not: a group's inner width is (its width - 2 * padding), and
+-- its padding is 10 UI units, which is a whole number of device pixels only when
+-- the GUI is at exactly 1:1 scale. Everywhere else the box's right and bottom
+-- edges fall mid-pixel, and anything clipped by them loses part of itself.
+--
+-- Snapping at the point the number is CHOSEN fixes that by construction, for
+-- everything a layout places, with no per-widget opt-in for anyone to forget.
+local function SnapLen(frame, v)
+    if not v then return v end
+    local ppu = PixelsPerUnit(frame)
+    if not ppu then return v end
+    return math.floor(v * ppu + 0.5) / ppu
 end
-GUI.CreatePanelBackdrop = CreatePanelBackdrop
+GUI.SnapLen = SnapLen
+
+-- SnapLen rounds to the NEAREST device pixel, which can round a width DOWN and
+-- clip the text it was measured from. This rounds up instead: for anything whose
+-- length comes from a measurement (a button sized to its own label), the width
+-- has to be at least what was asked for, and on the grid.
+local function SnapLenUp(frame, v)
+    if not v then return v end
+    local ppu = PixelsPerUnit(frame)
+    if not ppu then return v end
+    return math.ceil(v * ppu) / ppu
+end
+GUI.SnapLenUp = SnapLenUp
+
+-- Round a HEIGHT to an EVEN number of device pixels (minimum two).
+--
+-- Rows of controls are chained with centre-aligning anchors -- SetPoint("RIGHT",
+-- prev, "LEFT", gap, 0) aligns the two frames' vertical CENTRES, and the toolbar
+-- does the same with LEFT/RIGHT. A frame's centre is bottom + height/2, so if the
+-- height is an ODD number of device pixels the centre falls on a half pixel, and
+-- every frame chained off it inherits that half-pixel offset no matter how well
+-- its own edges are snapped. Even heights make the whole row land together.
+--
+-- Used for control heights, which the factories set once at construction. Widths
+-- do not need this: nothing centre-anchors horizontally off a control.
+local function SnapHeightEven(frame, v)
+    if not v then return v end
+    local ppu = PixelsPerUnit(frame)
+    if not ppu then return v end
+    return math.max(2, math.floor(v * ppu / 2 + 0.5) * 2) / ppu
+end
+GUI.SnapHeightEven = SnapHeightEven
+
+-- ============================================================
+-- Stamped once when this file loads, so it identifies THIS session (and therefore
+-- this build) for the pixelcheck and gapcheck captures. Declared HERE, above the
+-- first function that reads it: a local declared further down the file is not an
+-- upvalue for a function defined above it -- the read would silently resolve to a
+-- nil global and every capture would look like a new session.
+local GAP_SESSION = date and date("%Y-%m-%d %H:%M:%S") or "?"
+
+-- /df pixelcheck -- measure, don't guess
+--
+-- The "top border of a box goes missing until you scroll" bug has now been
+-- diagnosed twice from reasoning about the layout and fixed twice, and it is
+-- still here. The two remaining explanations look IDENTICAL in a screenshot:
+--
+--   (a) sub-pixel  -- the box's top edge lands between two device rows, so the
+--                     1px line is filtered across both at half intensity;
+--   (b) clipping   -- the box's top edge sits within a pixel of the ScrollFrame's
+--                     own clip boundary, so the line is simply cut off.
+--
+-- Scrolling "fixes" both, which is exactly why the screenshot can't separate
+-- them. This reports the numbers for the open page so the next change is aimed.
+-- Debug output: deliberately raw, like the other /df dumps.
+-- ============================================================
+
+-- Signed distance from `v` (UI units) to the nearest whole device pixel.
+local function PixelOffsetOf(v, ppu)
+    if not v or not ppu then return nil end
+    local px = v * ppu
+    return px - math.floor(px + 0.5)
+end
+
+local function DescribeFrame(f)
+    -- Prefer a human label so the output names the card, not "Frame".
+    for _, key in ipairs({ "label", "title", "titleText", "Text", "header" }) do
+        local o = f[key]
+        if type(o) == "table" and o.GetText then
+            local t = o:GetText()
+            if t and t ~= "" then return t end
+        end
+    end
+    if f.GetRegions then
+        for _, r in ipairs({ f:GetRegions() }) do
+            if r.GetObjectType and r:GetObjectType() == "FontString" then
+                local t = r:GetText()
+                if t and t ~= "" then return t end
+            end
+        end
+    end
+    return (f.GetObjectType and f:GetObjectType()) or "Frame"
+end
+
+-- Every SHOWN descendant carrying a border -- the only frames that can exhibit
+-- this bug (a fill-only surface has no edge to lose).
+--
+-- Both mechanisms, deliberately. Testing edgeFile alone was right when that was
+-- the only way a border got drawn; now that most surfaces own their four
+-- textures instead, an edgeFile-only sweep would report a converted page as
+-- having no bordered frames at all and the probe would quietly stop being able
+-- to see the thing it exists to measure.
+local function CollectBorderedFrames(root, out, depth)
+    if not root or depth > 10 then return out end
+    for _, child in ipairs({ root:GetChildren() }) do
+        if child:IsShown() then
+            local bd = child.GetBackdrop and child:GetBackdrop()
+            if (bd and bd.edgeFile) or child._pxBorder then out[#out + 1] = child end
+            CollectBorderedFrames(child, out, depth + 1)
+        end
+    end
+    return out
+end
+
+-- What sits ON the box's top border row.
+--
+-- Geometry came back perfect on BOTH a broken and a working page (BOX 0/n,
+-- top+0.00, edge=1.00px, nothing near the clip edge), so the difference is not
+-- anything the box itself measures. The one thing that tracked the symptom was
+-- how far the first box sits from the top: 62.7px on a page that loses its
+-- border vs 76.8px on one that doesn't -- 14.1px apart, which at 1.4062 px/unit
+-- is exactly the 10-unit group padding. A box that starts hard against whatever
+-- is above it loses the line; one with a gap keeps it. That is the signature of
+-- the row above covering it, so: find any sibling whose rect spans the box's top
+-- border row, and report it with its frame level.
+local function FindTopRowOverlaps(box)
+    local out = {}
+    local top, bL, bR = box:GetTop(), box:GetLeft(), box:GetRight()
+    local parent = box:GetParent()
+    if not (top and bL and bR and parent) then return out end
+    -- ~1.5 device px expressed in UI units: the border row plus a hair.
+    local band = 1.5 / (PixelsPerUnit(box) or 1)
+    for _, sib in ipairs({ parent:GetChildren() }) do
+        if sib ~= box and sib.IsShown and sib:IsShown() then
+            local sT, sB, sL, sR = sib:GetTop(), sib:GetBottom(), sib:GetLeft(), sib:GetRight()
+            if sT and sB and sL and sR
+                and sB <= top + band and sT >= top - band   -- spans the border row
+                and sR > bL and sL < bR then                -- and overlaps horizontally
+                out[#out + 1] = ("%s(lvl%d)"):format(
+                    DescribeFrame(sib):sub(1, 16), sib:GetFrameLevel() or 0)
+            end
+        end
+    end
+    return out
+end
+
+function GUI.PixelCheck()
+    local page, pageName
+    for name, p in pairs(GUI.Pages or {}) do
+        if p.IsShown and p:IsShown() then page, pageName = p, name; break end
+    end
+    if not page then
+        print("|cff7373f2DandersFrames|r pixelcheck: no settings page is open.")
+        return
+    end
+
+    local ppu = PixelsPerUnit(page)
+    if not ppu then
+        print("|cff7373f2DandersFrames|r pixelcheck: scale unresolved (is the window shown?).")
+        return
+    end
+
+    local scroll = page.GetVerticalScroll and page:GetVerticalScroll() or 0
+    local scrollOff = PixelOffsetOf(scroll, ppu)
+    local clipTop = page:GetTop()
+
+    print(("|cff7373f2DandersFrames|r pixelcheck  page=|cffffffff%s|r  scale=%.4f  px/unit=%.4f")
+        :format(tostring(pageName), page:GetEffectiveScale() or 0, ppu))
+    -- Reported, not judged. This used to print a red NOT SNAPPED when the offset
+    -- was off-grid, back when the scroll offset was quantised and being off-grid
+    -- meant something had gone wrong. Nothing quantises it now -- a 2px border
+    -- draws the same ink at any offset -- so an off-grid figure here is the
+    -- normal state of a scrolled page, and flagging it as a fault sends the next
+    -- person reading this output after a bug that is not there.
+    print(("  scroll offset = %.3f  (%.2f px off grid -- expected; nothing quantises this)")
+        :format(scroll, scrollOff or 0))
+
+    -- THE CLIP BOUNDARY ITSELF. Earlier runs measured each box's DISTANCE to this
+    -- edge but never whether the edge is on-grid. A ScrollFrame clips to its own
+    -- rect, so if that rect's top sits on a fractional device row the cut takes a
+    -- partial row off whatever is nearest it -- which is exactly the reported
+    -- pattern: pages whose boxes start at the top lose the border, pages with a
+    -- gap do not. The scroll child is included because content is positioned
+    -- against it, so its phase is what every box inherits.
+    local dPageTop = PixelOffsetOf(page:GetTop(), ppu)
+    local dPageBot = PixelOffsetOf(page:GetBottom(), ppu)
+    local dPageH   = PixelOffsetOf(page:GetHeight(), ppu)
+    -- Flag EITHER edge. This used to test only the top, so it printed
+    -- "bot-0.38" on every run for weeks and never once marked it -- and an
+    -- unflagged number in a wall of numbers is an invisible one. The bottom
+    -- edge clips whatever rests against it just as hard as the top does, which
+    -- is the entire See-Also footer bug.
+    local badTop = dPageTop and math.abs(dPageTop) > 0.05
+    local badBot = dPageBot and math.abs(dPageBot) > 0.05
+    print(("  viewport (the clip edge): top%+.2f bot%+.2f h%+.2f%s")
+        :format(dPageTop or 0, dPageBot or 0, dPageH or 0,
+            (badTop or badBot)
+                and (" |cffff6060<-- CLIP EDGE OFF-GRID (%s)|r"):format(
+                    badTop and (badBot and "top+bottom" or "top") or "bottom")
+                or ""))
+    local kid = page.child or (page.GetScrollChild and page:GetScrollChild())
+    if kid then
+        local kppu = PixelsPerUnit(kid) or ppu
+        print(("  scroll child:             top%+.2f w%+.2f%s")
+            :format(PixelOffsetOf(kid:GetTop(), kppu) or 0,
+                    PixelOffsetOf(kid:GetWidth(), kppu) or 0,
+                    (math.abs(PixelOffsetOf(kid:GetTop(), kppu) or 0) > 0.05)
+                        and " |cffff6060<-- CHILD OFF-GRID|r" or ""))
+    end
+
+    -- "Is it the section BOXES or the controls inside them?" is the question the
+    -- first version of this could not answer -- it ranked worst-first and the top
+    -- of the list was all controls, so the groups never showed. Classify, and
+    -- report the boxes separately no matter where they rank.
+    local function KindOf(f)
+        if f.LayoutChildren then return "BOX" end        -- CreateSettingsGroup
+        if f.slider then return "slider" end
+        return (f.GetObjectType and f:GetObjectType()) or "frame"
+    end
+
+    local frames = CollectBorderedFrames(page.child or page, {}, 0)
+    local rows, offGrid, nearClip = {}, 0, 0
+    local byKind = {}
+    for _, f in ipairs(frames) do
+        local top, bottom, h = f:GetTop(), f:GetBottom(), f:GetHeight()
+        local fppu = PixelsPerUnit(f) or ppu
+        local dTop = PixelOffsetOf(top, fppu)
+        local dBot = PixelOffsetOf(bottom, fppu)
+        local dH   = PixelOffsetOf(h, fppu)
+        -- Distance from the scroll viewport's top clip edge, in device pixels.
+        local clipGap = (top and clipTop) and ((clipTop - top) * fppu) or nil
+        if dTop and math.abs(dTop) > 0.05 then offGrid = offGrid + 1 end
+        if clipGap and clipGap > -1.5 and clipGap < 1.5 then nearClip = nearClip + 1 end
+        -- Edge THICKNESS, which is the leg two earlier revisions of this probe
+        -- did not capture and the one that turned out to matter. A box can
+        -- measure a perfect 0.00 on every edge and still lose its border if the
+        -- edge is drawn a fractional number of device pixels wide: it bleeds
+        -- into the next row at partial intensity, and a settings-group edge is
+        -- only ~8% alpha over a 3% fill, so both halves can land under the
+        -- visibility floor. Alpha is reported alongside because it sets that
+        -- floor.
+        --
+        -- A pixel border reports its own thickness instead: it is authored in
+        -- device pixels, so it is a whole number by construction and edgeFrac
+        -- is 0 -- which is exactly the point of it, and worth being able to SEE
+        -- next to a surface still on the old edge.
+        local bdInfo = f.GetBackdrop and f:GetBackdrop()
+        local edgeUnits = bdInfo and bdInfo.edgeSize or nil
+        -- f._pxDevicePx, not a recomputation from PX_BORDER_THICKNESS: that
+        -- constant is declared several hundred lines below this probe, so
+        -- naming it here would resolve to a nil GLOBAL, silently. Reading what
+        -- LayoutPixelBorder actually drew is both safer and more truthful.
+        local edgePx = edgeUnits and (edgeUnits * fppu) or f._pxDevicePx or nil
+        local edgeFrac = edgePx and (edgePx - math.floor(edgePx + 0.5)) or nil
+        -- NOT `local _,_,_,a = (f:GetBackdropBorderColor())` -- the parentheses
+        -- truncate a multi-return to ONE value, so alpha came back nil every time
+        -- and every row printed "a=n/a". Alpha is the whole point here: a
+        -- settings-group edge is ~8% over a 3% fill, so it has almost no margin.
+        local borderA
+        if f.GetBackdropBorderColor then
+            local _, _, _, a = f:GetBackdropBorderColor()
+            borderA = a
+        end
+        local kind = KindOf(f)
+        local bad = (dTop and math.abs(dTop) > 0.05) or false
+        local k = byKind[kind]
+        if not k then k = { n = 0, bad = 0 }; byKind[kind] = k end
+        k.n = k.n + 1
+        if bad then k.bad = k.bad + 1 end
+        rows[#rows + 1] = {
+            label = DescribeFrame(f), kind = kind, bad = bad,
+            frame = f, level = f.GetFrameLevel and f:GetFrameLevel() or nil,
+            dTop = dTop or 0, dBot = dBot or 0,
+            dH = dH or 0, clipGap = clipGap,
+            edgePx = edgePx, edgeFrac = edgeFrac, alpha = borderA,
+            score = math.max(math.abs(dTop or 0),
+                             (clipGap and math.abs(clipGap) < 1.5) and 1 or 0),
+        }
+    end
+
+    table.sort(rows, function(a, b) return a.score > b.score end)
+    print(("  %d bordered frames | %d with an OFF-GRID top | %d within 1px of the clip edge")
+        :format(#rows, offGrid, nearClip))
+
+    -- Per-kind tally: this is the line that says whether fixing controls would
+    -- also fix the section boxes, or whether they are a separate problem.
+    local kindLine = {}
+    for kind, k in pairs(byKind) do
+        kindLine[#kindLine + 1] = ("%s %d/%d"):format(kind, k.bad, k.n)
+    end
+    table.sort(kindLine)
+    print("  off-grid by kind (bad/total): " .. table.concat(kindLine, "  "))
+
+    local function emit(r)
+        local flag = ""
+        if r.bad then flag = " |cffff6060OFF-GRID|r" end
+        if r.clipGap and math.abs(r.clipGap) < 1.5 then flag = flag .. " |cffffaa00AT-CLIP|r" end
+        -- A fractional edge width is the failure a perfect 0.00 box can still have.
+        if r.edgeFrac and math.abs(r.edgeFrac) > 0.05 then flag = flag .. " |cffff6060SOFT-EDGE|r" end
+        if r.alpha and r.alpha < 0.15 then flag = flag .. " |cffffaa00FAINT|r" end
+        print(("    [%s] %-22s top%+.2f bot%+.2f h%+.2f edge=%s a=%s clip=%s%s"):format(
+            r.kind:sub(1, 6), r.label:sub(1, 22), r.dTop, r.dBot, r.dH,
+            r.edgePx and ("%.2fpx"):format(r.edgePx) or "n/a",
+            r.alpha and ("%.2f"):format(r.alpha) or "n/a",
+            r.clipGap and ("%.1f"):format(r.clipGap) or "n/a", flag))
+    end
+
+    -- The section boxes ALWAYS get listed, however they rank -- they are the ones
+    -- you can actually see, and ranking buried them last time.
+    local boxes = 0
+    for _, r in ipairs(rows) do if r.kind == "BOX" then boxes = boxes + 1 end end
+    if boxes > 0 then
+        print(("  section boxes (%d) -- these are the outlines around each section:"):format(boxes))
+        local shown = 0
+        for _, r in ipairs(rows) do
+            if r.kind == "BOX" and shown < 10 then
+                emit(r)
+                -- Anything sitting ON this box's top border row is the prime
+                -- suspect now that the box's own geometry measures clean.
+                local over = r.frame and FindTopRowOverlaps(r.frame) or {}
+                if #over > 0 then
+                    print(("           |cffff6060^ COVERED BY:|r %s  (box is lvl%s)")
+                        :format(table.concat(over, ", "), tostring(r.level)))
+                end
+                shown = shown + 1
+            end
+        end
+    else
+        print("  |cffffaa00no section boxes found on this page|r")
+    end
+
+    print("  worst overall -- topOff/botOff/heightOff are px from the grid; clip is px below the viewport top:")
+    for i = 1, math.min(#rows, 10) do emit(rows[i]) end
+    print("  |cff808080Read: OFF-GRID = geometry. SOFT-EDGE = the edge is a fractional number of device px wide, so it bleeds into the next row -- a box can be a perfect 0.00 and still lose its border this way. FAINT = so little alpha that any split is invisible.|r")
+    print("  |cff808080Nothing is corrected at runtime any more. Every widget gets its whole-pixel numbers from its FACTORY at construction (nudging them afterwards is what made chained button rows drift), so an off-grid row after a scale change is expected and is not a bug. What still matters here is SOFT-EDGE and FAINT.|r")
+
+    -- Persist, for the same reason gapcheck does: transcribing a screenful of
+    -- numbers out of the chat frame is not practical remotely, and every reading
+    -- of this symptom that came from eyeballing rather than the file has been
+    -- wrong. Same session stamp, so a capture never mixes two builds.
+    DandersFramesDebugDB = DandersFramesDebugDB or {}
+    if DandersFramesDebugDB.pixelSession ~= GAP_SESSION then
+        DandersFramesDebugDB.pixelcheck = nil
+        DandersFramesDebugDB.pixelSession = GAP_SESSION
+    end
+    DandersFramesDebugDB.pixelcheck = DandersFramesDebugDB.pixelcheck or {}
+    local pdump = {
+        when = date("%Y-%m-%d %H:%M:%S"),
+        ppu = ppu, scroll = scroll,
+        viewTop = dPageTop, viewBot = dPageBot, viewH = dPageH,
+        rows = {},
+    }
+    for i, r in ipairs(rows) do
+        pdump.rows[i] = {
+            label = tostring(r.label):sub(1, 40), kind = r.kind,
+            dTop = r.dTop, dBot = r.dBot, dH = r.dH,
+            edgePx = r.edgePx, alpha = r.alpha, clipGap = r.clipGap,
+            level = r.level,
+            -- Raw geometry too: the deltas alone cannot distinguish "off-grid"
+            -- from "the right size but drawn somewhere unexpected".
+            top = r.frame and r.frame:GetTop() or nil,
+            bottom = r.frame and r.frame:GetBottom() or nil,
+            height = r.frame and r.frame:GetHeight() or nil,
+            width = r.frame and r.frame:GetWidth() or nil,
+            points = r.frame and r.frame:GetNumPoints() or nil,
+        }
+    end
+    -- Never overwrite an earlier run of the SAME page: the whole point of running
+    -- this twice is to compare a broken state against a working one, and keying
+    -- purely by page silently threw the first away. Numbered within the session.
+    local key, n = tostring(pageName), 1
+    while DandersFramesDebugDB.pixelcheck[key] do
+        n = n + 1
+        key = ("%s #%d"):format(tostring(pageName), n)
+    end
+    DandersFramesDebugDB.pixelcheck[key] = pdump
+    print(("  |cff00ff00saved|r %d rows to DandersFramesDebugDB.pixelcheck[\"%s\"] -- |cffffcc00/reload to flush.|r")
+        :format(#rows, key))
+end
+
+-- ============================================================
+-- /df navprobe -- catch the left-nav hover flash in the act
+--
+-- The symptom: sweeping the cursor down the nav list shows a "ghost" -- of the
+-- row's text, or of the bottom part of the hover plate. It happens at moderate
+-- speed, not just fast, and it survived snapping the row geometry.
+--
+-- Four causes would produce that, and they are INDISTINGUISHABLE in a
+-- screenshot, which is why this measures instead of reasoning:
+--
+--   (a) two rows lit at once -- the previous row's OnLeave never ran, so two
+--       plates are visible together for a frame or two;
+--   (b) focus thrash -- the cursor sits still over one row but mouse focus
+--       alternates between it and something else (the scroll frame, a sibling,
+--       an overlapping rect), so the plate flickers on and off in place;
+--   (c) geometry -- rows overlap, or leave a dead band between them where
+--       NOTHING is lit, so crossing it reads as the plate breaking up;
+--   (d) none of the above -- a pure rendering artefact, in which case the trace
+--       shows exactly one clean enter/leave per row and the answer is elsewhere.
+--
+-- Static geometry first (overlaps and dead bands are visible without moving the
+-- mouse), then a live trace of every change in focus and in each row's plate
+-- alpha, stamped with the frame number. (a) and (b) show up as repeated
+-- transitions within a single crossing; (c) as a run of frames with nothing lit.
+local navTrace
+function GUI.NavProbe(seconds)
+    local container = GUI.tabContainer
+    if not (container and container:IsVisible()) then
+        print("|cff7373f2DandersFrames|r navprobe: the settings window is not open.")
+        return
+    end
+    local ppu = PixelsPerUnit(container) or 1
+
+    -- Rows in LAYOUT order (top to bottom), which is what makes the neighbour
+    -- comparison below meaningful -- GetChildren order is creation order.
+    local rows = {}
+    for _, catName in ipairs(GUI.CategoryOrder or {}) do
+        local cat = GUI.Categories and GUI.Categories[catName]
+        if cat and cat:IsShown() then
+            rows[#rows + 1] = { f = cat, label = "[" .. tostring(catName) .. "]" }
+            for _, btn in ipairs(cat.children or {}) do
+                if btn:IsShown() then
+                    rows[#rows + 1] = { f = btn, label = DescribeFrame(btn) }
+                end
+            end
+        end
+    end
+
+    print(("|cff7373f2DandersFrames|r navprobe  %d visible rows  px/unit=%.4f"):format(#rows, ppu))
+
+    -- The ANCESTOR CHAIN, because a row cannot be on the grid if the frame it
+    -- hangs off is not: every ancestor here is two-corner anchored, so nothing
+    -- corrects them after the fact and a fraction anywhere propagates to all 42
+    -- rows identically. If the rows read a uniform offset, this line says which
+    -- link introduced it -- that is how the 4-unit nav inset (0.375px) was found
+    -- after the rows themselves measured clean on height.
+    local chain, node = {}, container
+    while node and #chain < 6 do
+        local t = node:GetTop()
+        chain[#chain + 1] = ("%s top%+.2f"):format(
+            (node.GetObjectType and node:GetObjectType() or "?"):sub(1, 6),
+            PixelOffsetOf(t, PixelsPerUnit(node) or ppu) or 0)
+        node = node:GetParent()
+    end
+    print("  chain (row -> window): " .. table.concat(chain, " | "))
+
+    -- Geometry: the gap to the row above, in DEVICE pixels. Negative = the rows
+    -- overlap (both can claim the cursor); more than ~1px positive = a dead band
+    -- with no row under the cursor at all. Either one produces a visible break.
+    local overlaps, bands = 0, 0
+    for i, r in ipairs(rows) do
+        local f = r.f
+        local top, bot, h = f:GetTop(), f:GetBottom(), f:GetHeight()
+        local dTop = PixelOffsetOf(top, ppu) or 0
+        local dH = PixelOffsetOf(h, ppu) or 0
+        local gap
+        if i > 1 then
+            local prevBot = rows[i - 1].f:GetBottom()
+            if prevBot and top then gap = (prevBot - top) * ppu end
+        end
+        local flag = ""
+        if gap and gap < -0.05 then flag = " |cffff6060OVERLAPS ABOVE|r"; overlaps = overlaps + 1
+        elseif gap and gap > 1.05 then flag = " |cffffaa00DEAD BAND|r"; bands = bands + 1 end
+        if math.abs(dTop) > 0.05 or math.abs(dH) > 0.05 then
+            flag = flag .. " |cffffaa00OFF-GRID|r"
+        end
+        print(("    %-24s top%+.2f h%+.2f gap=%s lvl%d%s"):format(
+            r.label:sub(1, 24), dTop, dH,
+            gap and ("%.2fpx"):format(gap) or "n/a",
+            f:GetFrameLevel() or 0, flag))
+    end
+    print(("  %d overlapping rows, %d dead bands between rows"):format(overlaps, bands))
+
+    -- Live trace.
+    navTrace = navTrace or CreateFrame("Frame")
+    navTrace:SetScript("OnUpdate", nil)
+    local dur = tonumber(seconds) or 8
+    local elapsed, frames, events = 0, 0, 0
+    local lastLit, lastFocus = nil, nil
+    print(("  |cff00ff00tracing for %ds|r -- sweep the cursor across the nav list now."):format(dur))
+
+    navTrace:SetScript("OnUpdate", function(_, dt)
+        elapsed = elapsed + dt
+        frames = frames + 1
+
+        -- Which row the shared plate is parked on. There is only one plate now, so
+        -- "TWO LIT" is structurally impossible -- that is the point of the change,
+        -- and this still checks for it in case the plate is ever reintroduced
+        -- per-row. No parentheses around the colour call: they would truncate the
+        -- multi-return to one value and alpha would read nil every frame -- the
+        -- exact mistake that cost three rounds on the border bug.
+        local lit = {}
+        local hl = GUI.navHover
+        if hl and hl:IsShown() and hl.owner then
+            local _, _, _, a = hl:GetBackdropColor()
+            if a and a > 0.01 then
+                for _, r in ipairs(rows) do
+                    if r.f == hl.owner then lit[#lit + 1] = r.label:sub(1, 18) break end
+                end
+            end
+        end
+        local litKey = table.concat(lit, "+")
+
+        -- What actually owns the mouse. If this is NOT the lit row, the plate and
+        -- the focus disagree, which is cause (b).
+        local focus = "-"
+        local foci = GetMouseFoci and GetMouseFoci()
+        local top = (foci and foci[1]) or (GetMouseFocus and GetMouseFocus())
+        if top then
+            for _, r in ipairs(rows) do if r.f == top then focus = r.label:sub(1, 18) break end end
+            if focus == "-" then
+                focus = "<" .. ((top.GetObjectType and top:GetObjectType()) or "?") .. ">"
+            end
+        end
+
+        if litKey ~= lastLit or focus ~= lastFocus then
+            events = events + 1
+            if events <= 120 then
+                print(("    f%-5d t=%.3f  lit=%-24s focus=%s%s"):format(
+                    frames, elapsed,
+                    (litKey ~= "" and litKey or "(none)"),
+                    focus,
+                    (#lit > 1) and " |cffff6060TWO LIT|r"
+                        or ((litKey == "" and focus ~= "-") and " |cffffaa00FOCUS BUT UNLIT|r" or "")))
+            end
+            lastLit, lastFocus = litKey, focus
+        end
+
+        if elapsed >= dur then
+            navTrace:SetScript("OnUpdate", nil)
+            print(("  |cff00ff00navprobe done|r -- %d frames, %d state changes%s"):format(
+                frames, events, events > 120 and " (first 120 shown)" or ""))
+            print("  |cff808080Read: one enter + one leave per row = clean, look elsewhere. Repeated flips inside one crossing = focus thrash. TWO LIT = a stale plate. lit=(none) with focus on a row = the handler did not fire.|r")
+        end
+    end)
+end
+
+-- ============================================================
+-- /df gapcheck -- measure the vertical rhythm, don't eyeball it
+--
+-- The question this answers: "which rows are too far apart, and which are too
+-- close?" It cannot be answered from GUI.RowHeight alone, because those numbers
+-- are SLOT heights, not gaps. LayoutChildren stacks rows flush (y = y - height),
+-- so the visible gap between two rows is:
+--
+--     (slot height - content bottom) of the row above
+--   + (slot top - content top)      of the row below
+--
+-- A row whose content is short inside a tall slot gets a big gap and nothing
+-- flags it. The slider is the worst case by construction: it shares the 55 slot
+-- with the dropdown and edit box, whose openers reach ~40, while a slider only
+-- draws to ~32 (label, an 8px track, a 20px value box) -- so it carries ~23px of
+-- slack against their ~15.
+--
+-- Measured, not derived, for a reason: labels WRAP, override markers hang off
+-- rows, banners re-measure themselves after construction, and hideOn rows drop
+-- out. Only the live rects know the real content extent, which is exactly the
+-- lesson from the border bug -- the arithmetic looked right there too.
+--
+-- Rows are compared only against their SIBLINGS IN THE SAME GROUP. That is where
+-- the rhythm actually reads, and it sidesteps having to reconstruct which column
+-- a widget landed in.
+local function ContentExtent(f)
+    local top, bottom
+    local function acc(o)
+        if not o or not o.IsShown or not o:IsShown() then return end
+        -- Skip things that draw NOTHING: an empty label or a fully transparent
+        -- placeholder still has a rect, and counting it would inflate the content
+        -- and hide the very slack we are looking for.
+        --
+        -- FontStrings ONLY. An EditBox also answers GetText, and an empty one
+        -- would have been skipped here even though its box is plainly drawn --
+        -- which would have under-measured every blank input on the page.
+        if o.GetObjectType and o:GetObjectType() == "FontString" then
+            local s = o:GetText()
+            if s == nil or s == "" then return end
+        end
+        if o.GetAlpha and (o:GetAlpha() or 1) <= 0.01 then return end
+        local t, b = o:GetTop(), o:GetBottom()
+        if t and b then
+            top = (top and math.max(top, t)) or t
+            bottom = (bottom and math.min(bottom, b)) or b
+        end
+    end
+    if f.GetRegions then for _, r in ipairs({ f:GetRegions() }) do acc(r) end end
+    if f.GetChildren then for _, c in ipairs({ f:GetChildren() }) do acc(c) end end
+    return top, bottom
+end
+
+-- Every SHOWN SettingsGroup under the page, at any depth (the Aura Designer nests
+-- its groups inside cards).
+local function CollectGroups(root, out, depth)
+    if not root or (depth or 0) > 8 then return out end
+    if root.groupChildren and root.IsShown and root:IsShown() then out[#out + 1] = root end
+    if root.GetChildren then
+        for _, c in ipairs({ root:GetChildren() }) do
+            if c.IsShown and c:IsShown() then CollectGroups(c, out, (depth or 0) + 1) end
+        end
+    end
+    return out
+end
+
+function GUI.GapCheck(mode)
+    if mode == "clear" then
+        DandersFramesDebugDB = DandersFramesDebugDB or {}
+        DandersFramesDebugDB.gapcheck = nil
+        print("|cff7373f2DandersFrames|r gapcheck: saved capture cleared (/reload to flush).")
+        return
+    end
+
+    local page, pageName
+    for name, p in pairs(GUI.Pages or {}) do
+        if p.IsShown and p:IsShown() then page, pageName = p, name break end
+    end
+    if not page then
+        print("|cff7373f2DandersFrames|r gapcheck: no settings page is open.")
+        return
+    end
+
+    local groups = CollectGroups(page.child or page, {}, 0)
+    local rows, byKind, pairs_, nRows = {}, {}, {}, 0
+
+    for _, group in ipairs(groups) do
+        local prev
+        for _, entry in ipairs(group.groupChildren or {}) do
+            local w = entry.widget
+            if w and w.IsShown and w:IsShown() and entry.height then
+                local slotTop = w:GetTop()
+                local cTop, cBot = ContentExtent(w)
+                if slotTop and cTop and cBot then
+                    -- The slot is entry.height from the widget's TOP -- NOT the
+                    -- widget's own rect. LayoutChildren only sets TOPLEFT (and
+                    -- width), so a container constructed at 50 sitting in a 55
+                    -- slot would under-report by 5 if we used GetBottom().
+                    local slotBot = slotTop - entry.height
+                    local kind = w.rowKind or (w.LayoutChildren and "group")
+                        or (w.GetObjectType and w:GetObjectType()) or "?"
+                    local r = {
+                        kind    = kind,
+                        label   = (w.GetText and w:GetText()) or (w.Text and w.Text.GetText and w.Text:GetText()) or kind,
+                        slot    = entry.height,
+                        content = cTop - cBot,
+                        padTop  = slotTop - cTop,
+                        padBot  = cBot - slotBot,
+                        -- Absolute edges, because the gap has to be measured from
+                        -- where the rows LANDED, not from entry.height. The layout
+                        -- can shorten a row after the fact (the compact-run
+                        -- tightening does exactly that), and slot arithmetic
+                        -- cannot see it -- the first version of this reported the
+                        -- untightened number and made the feature look inert.
+                        cTop    = cTop,
+                        cBot    = cBot,
+                        -- The slot's own top, so the height the layout ACTUALLY
+                        -- used is derivable offline (prev.slotTop - this.slotTop)
+                        -- and can be compared against entry.height.
+                        slotTop  = slotTop,
+                        tight    = w._rowTightened or false,
+                        nextKind = w._rowNextKind,
+                    }
+                    nRows = nRows + 1
+                    rows[#rows + 1] = r
+
+                    local k = byKind[kind]
+                    if not k then k = { n = 0, slot = 0, content = 0, padTop = 0, padBot = 0 } byKind[kind] = k end
+                    k.n, k.slot, k.content = k.n + 1, k.slot + r.slot, k.content + r.content
+                    k.padTop, k.padBot = k.padTop + r.padTop, k.padBot + r.padBot
+
+                    -- The gap the eye actually sees: the distance between where
+                    -- the previous row's content ENDED and this one's STARTS,
+                    -- straight off the resolved rects.
+                    if prev then
+                        local gap = prev.cBot - r.cTop
+                        local key = ("%s -> %s"):format(prev.kind, kind)
+                        local p = pairs_[key]
+                        if not p then p = { n = 0, sum = 0, min = gap, max = gap } pairs_[key] = p end
+                        p.n, p.sum = p.n + 1, p.sum + gap
+                        p.min, p.max = math.min(p.min, gap), math.max(p.max, gap)
+                    end
+                    prev = r
+                end
+            end
+        end
+    end
+
+    if nRows == 0 then
+        print(("|cff7373f2DandersFrames|r gapcheck  page=|cffffffff%s|r -- no measurable rows (all collapsed?)")
+            :format(tostring(pageName)))
+        return
+    end
+
+    print(("|cff7373f2DandersFrames|r gapcheck  page=|cffffffff%s|r  %d groups  %d rows  (UI units)")
+        :format(tostring(pageName), #groups, nRows))
+
+    print("  per kind -- slot is what RowHeight hands out, content is what it actually draws:")
+    local kinds = {}
+    for kind in pairs(byKind) do kinds[#kinds + 1] = kind end
+    table.sort(kinds, function(a, b) return (byKind[a].padBot / byKind[a].n) > (byKind[b].padBot / byKind[b].n) end)
+    for _, kind in ipairs(kinds) do
+        local k = byKind[kind]
+        print(("    %-12s n=%-3d slot %5.1f  content %5.1f  padTop %4.1f  |cffffcc00padBottom %4.1f|r")
+            :format(kind, k.n, k.slot / k.n, k.content / k.n, k.padTop / k.n, k.padBot / k.n))
+    end
+
+    -- Did the compact-run tightening actually fire? The gap alone cannot say --
+    -- it only shows the result -- and reading the source said it should while the
+    -- measurement said it had not. So count the decision directly, and when a run
+    -- did NOT close up, name the kind that broke it.
+    local tightened, compactRows, breakers = 0, 0, {}
+    for _, r in ipairs(rows) do
+        if GUI.RowCompact[r.kind] then
+            compactRows = compactRows + 1
+            if r.tight then
+                tightened = tightened + 1
+            elseif r.nextKind then
+                breakers[r.nextKind] = (breakers[r.nextKind] or 0) + 1
+            end
+        end
+    end
+    if compactRows > 0 then
+        local why = {}
+        for k, n in pairs(breakers) do why[#why + 1] = ("%s x%d"):format(k, n) end
+        table.sort(why)
+        print(("  compact-run tightening: |cffffcc00%d/%d|r compact rows closed up%s")
+            :format(tightened, compactRows,
+                #why > 0 and ("  |cff808080(run broken by: %s)|r"):format(table.concat(why, ", ")) or ""))
+    end
+
+    print("  gaps between stacked rows (padBottom above + padTop below) -- widest first:")
+    local keys = {}
+    for key in pairs(pairs_) do keys[#keys + 1] = key end
+    table.sort(keys, function(a, b) return (pairs_[a].sum / pairs_[a].n) > (pairs_[b].sum / pairs_[b].n) end)
+    for _, key in ipairs(keys) do
+        local p = pairs_[key]
+        local avg = p.sum / p.n
+        -- A pair whose min and max differ is NOT a spacing constant -- something
+        -- (a wrapped label, a hand-rolled AddSpace) is varying it, and averaging
+        -- would hide exactly that.
+        local spread = (p.max - p.min > 0.5)
+            and ("  |cffff6060varies %.1f..%.1f|r"):format(p.min, p.max) or ""
+        print(("    %6.1f  %-26s x%d%s"):format(avg, key, p.n, spread))
+    end
+
+    if mode == "all" then
+        print("  every row, in layout order:")
+        for _, r in ipairs(rows) do
+            print(("    %-12s %-22s slot %5.1f  content %5.1f  padTop %4.1f  padBottom %4.1f")
+                :format(r.kind, tostring(r.label):sub(1, 22), r.slot, r.content, r.padTop, r.padBot))
+        end
+    end
+
+    -- Persist the RAW rows to SavedVariables. Reading a hundred rows out of the
+    -- chat frame is not practical, and transcribing them by hand would introduce
+    -- exactly the kind of error this probe exists to avoid.
+    --
+    -- Keyed BY PAGE so visiting several pages accumulates one dataset instead of
+    -- each run overwriting the last -- walk the pages you care about, then
+    -- /reload ONCE. SavedVariables are only flushed on logout or reload, so a run
+    -- that is never followed by one is never written.
+    --
+    -- Its own saved variable, not a corner of DandersFramesDB_v2: diagnostics
+    -- must not sit inside the profile DB, where they would ride along with every
+    -- export and show up in the export audit.
+    DandersFramesDebugDB = DandersFramesDebugDB or {}
+    DandersFramesDebugDB.gapcheck = DandersFramesDebugDB.gapcheck or {}
+    -- Drop everything from a PREVIOUS session first. Accumulating by page is what
+    -- makes a multi-page capture possible, but it also means a page you did not
+    -- revisit after a code change keeps its stale rows -- and mixing two builds
+    -- invents variance that is not in either of them. (It already cost one wrong
+    -- diagnosis: three stale pages made the row heights look like they had not
+    -- applied at all.) One /reload = one dataset.
+    if DandersFramesDebugDB.gapSession ~= GAP_SESSION then
+        wipe(DandersFramesDebugDB.gapcheck)
+        DandersFramesDebugDB.gapSession = GAP_SESSION
+    end
+    local dump = { when = date("%Y-%m-%d %H:%M:%S"), rows = {} }
+    if page.GetEffectiveScale then dump.scale = page:GetEffectiveScale() end
+    for i, r in ipairs(rows) do
+        dump.rows[i] = {
+            kind = r.kind, label = tostring(r.label):sub(1, 40),
+            slot = r.slot, content = r.content,
+            padTop = r.padTop, padBot = r.padBot,
+            cTop = r.cTop, cBot = r.cBot,   -- so gaps can be re-derived offline
+            slotTop = r.slotTop, tight = r.tight, nextKind = r.nextKind,
+        }
+    end
+    DandersFramesDebugDB.gapcheck[tostring(pageName)] = dump
+
+    local nPages = 0
+    for _ in pairs(DandersFramesDebugDB.gapcheck) do nPages = nPages + 1 end
+    print(("  |cff00ff00saved|r %d rows to DandersFramesDebugDB.gapcheck[\"%s\"] -- %d page(s) captured. |cffffcc00Visit the pages you care about, then /reload to flush.|r")
+        :format(#rows, tostring(pageName), nPages))
+    print("  |cff808080Read: padBottom is the slack under a row -- the knob is GUI.RowHeight[kind], and slot - content IS that slack. A kind sorting to the top of the first list is over-spaced; one near zero is cramped. In the second list, 'varies' means the gap is not coming from RowHeight alone. Add 'all' for every row, 'clear' to wipe the saved capture.|r")
+end
+GUI.GapCheckAll = function() GUI.GapCheck("all") end
+
+-- Every frame that carries a 1px backdrop edge, so the sweep below can find them
+-- without any page needing to know what it contains. Weak keys: a retired page's
+-- widgets are reparented to the trash frame rather than destroyed, and this must
+-- not be what keeps them reachable.
+
+-- Re-derive the BORDER THICKNESS of everything currently on screen. Since the
+-- geometry correction was removed this no longer moves or resizes anything, so
+-- the only thing it can change is how many device pixels an edge is drawn at --
+-- which only matters when the SCALE changes. That is why its callers are the
+-- scale slider and the window drag/resize handlers, not anything per-frame.
+--
+-- IsVisible (not IsShown) keeps it cheap: a widget on a page that is not open
+-- has a hidden ancestor and is skipped, so the work stays proportional to what
+-- is displayed rather than to everything the registry has accumulated. Safe to
+-- call repeatedly -- it writes only when the computed edge width actually
+-- differs, so a second call in the same state does nothing at all.
+
+-- ============================================================
+-- PIXEL BORDER -- how every outlined GUI surface draws its edge.
+--
+-- Four textures we own, instead of a backdrop's edgeFile, because a backdrop
+-- edge is drawn one UI unit wide and we cannot control how that lands on the
+-- physical pixel grid. At the scales people play at, one unit is about one
+-- device pixel, and a one-device-pixel line has exactly two states: [1.0, 0]
+-- when it lands on the grid and [0.5, 0.5] when it does not. Identical ink,
+-- completely different appearance -- so an edge that crosses the grid while the
+-- page scrolls appears to flicker, and at the low alphas this GUI uses, both
+-- halves of the split can fall under the visibility floor and the border simply
+-- is not there.
+--
+-- The long way round to this was trying to place that 1px line perfectly. It
+-- cannot be done. Lua-side snapping runs at discrete moments -- build,
+-- scroll-settle, show -- but the line crosses the grid on EVERY frame of a
+-- scroll: correcting at moment N does nothing for the next thirty frames, and
+-- correcting mid-motion adds a visible jump on top of the softness. Handing it
+-- to the renderer (SetSnapToPixelGrid) is worse still: it rounds the two edges
+-- of a thin texture independently, so a 1px line can round to zero height and
+-- vanish outright.
+--
+-- The answer is to stop placing a thin line accurately and draw one that does
+-- not care where it lands. See PX_BORDER_THICKNESS below.
+local pixelBordered = setmetatable({}, { __mode = "k" })
+local PX_SIDES = { "top", "bottom", "left", "right" }
+
+-- THE dial. Border thickness in DEVICE PIXELS, before any per-surface weight.
+--
+-- The floor is what matters, not the exact value: anything above 1 always covers
+-- at least one FULL pixel row plus a partial, so the line can never vanish and
+-- never changes its total ink as the content moves. Only 1.0 has the two-state
+-- failure ([1.0, 0] when it lands on the grid, [0.5, 0.5] when it does not --
+-- identical ink, completely different appearance), which is the flicker that
+-- started this.
+--
+-- Back to 2, and the alpha carries the weight instead. THICKNESS and WEIGHT are
+-- separate dials and conflating them was the mistake:
+--
+--   * thickness decides how UNIFORM the line looks. At 1.5 the rows come out
+--     [0.25, 1.0, 0.25] or [0.5, 1.0] depending on where the box lands, so
+--     neighbouring boxes render visibly different widths -- Krathe's "one
+--     thinner, one thicker". The bigger the base, the smaller that proportion,
+--     so 2 is noticeably more even than 1.5.
+--   * alpha decides how HEAVY it looks, and does not vary with position at all.
+--
+-- So: hold thickness at the value that renders evenly, and take the weight out
+-- of the alpha. 2px at 0.7 alpha is about the same total ink as 1.5px at full,
+-- but without the width wobble.
+--
+-- The floor still matters if this is ever tuned down: anything above 1 always
+-- covers a full row plus a partial, so it cannot vanish. Only 1.0 has the
+-- two-state failure -- [1.0, 0] on the grid, [0.5, 0.5] off it, identical ink
+-- and completely different appearance -- which was the original flicker.
+local PX_BORDER_THICKNESS = 2
+
+-- Applied to every pixel border's alpha. The authored colours were all chosen
+-- for a 1px hairline; drawing them at 2px would read heavier than intended, and
+-- this puts that correction in ONE place rather than re-tuning six call sites
+-- (and whatever opts in later) by hand.
+local PX_BORDER_ALPHA = 0.7
+
+-- Thickness and anchors, re-derived whenever the scale changes.
+-- frame._pxWeight is the caller's edgeSize (1 = the standard hairline), so a
+-- surface that asked for a heavier outline keeps its relative weight.
+local function LayoutPixelBorder(frame)
+    local b = frame._pxBorder
+    if not b then return end
+    local ppu = PixelsPerUnit(frame)
+    if not ppu then return end
+    -- TWO device pixels, not one, and this is the whole finding.
+    --
+    -- A 1px line cannot be drawn reliably at a fractional offset. With vertex
+    -- snapping ON, the top and bottom of a 1px-tall texture can round to the SAME
+    -- pixel row -- height zero, line GONE. That is what the red diagnostic showed:
+    -- verticals solid (X is stable), horizontals absent at certain scroll
+    -- positions (Y carries the scroll's fractional phase). The old backdrop edge
+    -- did it too, so this is not specific to either mechanism.
+    --
+    -- With snapping OFF at 2px the rows come out [partial, full, partial] --
+    -- roughly 0.5 / 1.0 / 0.5 -- for ANY offset. The total ink is constant and
+    -- there is always at least one fully-lit row, so the line can neither vanish
+    -- nor visibly change weight as the page scrolls. A 1px line has only the two
+    -- states [1.0, 0] and [0.5, 0.5]: same ink, completely different appearance,
+    -- which IS the flicker.
+    --
+    -- So: stop trying to place a 1px line perfectly, and draw one that does not
+    -- care where it lands.
+    local devicePx = PX_BORDER_THICKNESS * (frame._pxWeight or 1)
+    local px = devicePx / ppu
+    frame._pxDevicePx = devicePx   -- what /df pixelcheck reports for this surface
+    frame._pxPpu = ppu             -- the scale this thickness was derived at
+
+    b.top:ClearAllPoints()
+    b.top:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    b.top:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+    b.top:SetHeight(px)
+
+    b.bottom:ClearAllPoints()
+    b.bottom:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+    b.bottom:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    b.bottom:SetHeight(px)
+
+    b.left:ClearAllPoints()
+    b.left:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    b.left:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+    b.left:SetWidth(px)
+
+    b.right:ClearAllPoints()
+    b.right:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
+    b.right:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+    b.right:SetWidth(px)
+end
+
+-- THE SHIM, and the reason buttons could not adopt this until now.
+--
+-- A pixel border has no backdrop edgeFile, so SetBackdropBorderColor -- which is
+-- how ~150 call sites across the addon drive hover, active and disabled states
+-- -- would silently do nothing. Converting those by hand meant finding all of
+-- them, and missing one meant a button whose hover just stops working, with
+-- nothing to see in a log.
+--
+-- So the frame gets its own method that shadows the mixin's. Every existing
+-- caller keeps working unchanged, and there is no list to be exhaustive about.
+-- Assigning onto the frame table is enough: SetBackdropBorderColor is not a
+-- native widget method, it arrives via BackdropTemplateMixin, so it is already
+-- a plain table entry and ours simply takes its place.
+local function SetPixelBorderColor(self, r, g, b, a)
+    local bd = self._pxBorder
+    if not bd then return end
+    a = a or 1
+    -- Mutated, not replaced. This is the hover path for every button, dropdown
+    -- and swatch in the GUI -- OnEnter and OnLeave both land here -- so a fresh
+    -- table per call would be pure garbage.
+    local c = self._pxColor
+    if c then c[1], c[2], c[3], c[4] = r, g, b, a
+    else      self._pxColor = { r, g, b, a } end
+    -- Alpha scaled once, here, so the authored colours stay the values a reader
+    -- would expect to see (8%, 50%, 80%) rather than pre-compensated numbers.
+    local drawn = a * PX_BORDER_ALPHA
+    for _, side in ipairs(PX_SIDES) do
+        bd[side]:SetColorTexture(r, g, b, drawn)
+    end
+end
+
+-- Returns the AUTHORED colour, not the drawn one. PX_BORDER_ALPHA is a
+-- rendering correction, so a caller that reads a colour back and writes it again
+-- must not end up with it applied twice.
+local function GetPixelBorderColor(self)
+    local c = self._pxColor
+    if not c then return end
+    return c[1], c[2], c[3], c[4]
+end
+
+-- Re-derive on show, so a surface built at one UI scale and opened after a scale
+-- change comes up at the right thickness. Self-registering on purpose: this
+-- used to be an explicit call that six floating windows each had to remember to
+-- make, and a bordered frame maintaining its own border cannot be forgotten.
+--
+-- Guarded on the scale it was last laid out at, because this fires for every
+-- widget on every page open. In the ordinary case -- nothing has changed since
+-- the widget was built -- it costs one float compare and returns.
+local function RelayoutPixelBorderOnShow(self)
+    if PixelsPerUnit(self) ~= self._pxPpu then LayoutPixelBorder(self) end
+end
+
+-- color = {r, g, b, a}; weight mirrors backdrop edgeSize (1 = standard hairline)
+function GUI:ApplyPixelBorder(frame, color, weight)
+    frame._pxWeight = weight or frame._pxWeight or 1
+    local b = frame._pxBorder
+    if not b then
+        b = {}
+        for _, side in ipairs(PX_SIDES) do
+            -- ARTWORK at the top sublevel, not BORDER. The colour picker is
+            -- what forces it up: its hue square lays a full-size ARTWORK
+            -- gradient over the frame, which would cover a BORDER-layer edge
+            -- completely -- and that is a trap, because the border would
+            -- disappear for a reason nothing about the border explains.
+            --
+            -- Not OVERLAY, though. Every label, icon, check mark, grip and
+            -- slider thumb in this GUI is OVERLAY, and those belong above the
+            -- edge they sit inside. Sublevel 7 of ARTWORK clears the interior
+            -- fills and gradients and nothing else.
+            local tex = frame:CreateTexture(nil, "ARTWORK", nil, 7)
+            -- Snapping OFF, deliberately, and this is a reversal of what this
+            -- started out as. Vertex snapping is what COLLAPSES a thin line:
+            -- rounding a 2px texture's edges independently gives a height of 1,
+            -- 2 or 3 px depending on where it lands, so the border would
+            -- visibly change weight as you scroll. Left un-snapped it is always
+            -- exactly 2px of ink, wherever it falls -- constant, which is what
+            -- the eye actually wants. Crispness was never the goal; STABILITY
+            -- was.
+            if tex.SetSnapToPixelGrid then tex:SetSnapToPixelGrid(false) end
+            -- No half-texel offset, so the 2px spans the rows we asked for.
+            if tex.SetTexelSnappingBias then tex:SetTexelSnappingBias(0) end
+            b[side] = tex
+        end
+        frame._pxBorder = b
+        pixelBordered[frame] = true
+        if frame.HookScript then
+            frame:HookScript("OnShow", RelayoutPixelBorderOnShow)
+        end
+    end
+    -- Outside the create block on purpose: the textures are kept when a surface
+    -- is re-issued, so keying the shim off their creation would leave a
+    -- re-adopted frame with the real methods still in place and its recolours
+    -- going nowhere. Assigning every time is idempotent and cannot get this
+    -- wrong.
+    frame.SetPixelBorderColor    = SetPixelBorderColor
+    frame.SetBackdropBorderColor = SetPixelBorderColor
+    frame.GetBackdropBorderColor = GetPixelBorderColor
+    local c = color or { 1, 1, 1, 0.08 }
+    SetPixelBorderColor(frame, c[1], c[2], c[3], c[4] or 1)
+    -- Re-shown because a surface can be re-issued as fill-only and back again
+    -- (FlashWidget does this on every pulse).
+    for _, side in ipairs(PX_SIDES) do b[side]:Show() end
+    LayoutPixelBorder(frame)
+    return frame
+end
+
+-- Hand the frame its own methods back, and take the textures down. Needed by the
+-- one path that leaves the pixel border behind: a surface re-issued with
+-- opts.backdropEdge after it had one. Nothing does that today, but if the shim
+-- were left installed the backdrop recolour that follows would go nowhere at
+-- all -- a hover that silently stops working, which is precisely the failure
+-- this system exists to make impossible.
+local function RevertPixelBorder(frame)
+    if not frame or not frame._pxBorder then return end
+    GUI:HidePixelBorder(frame)
+    frame.SetPixelBorderColor    = nil
+    frame.SetBackdropBorderColor = BackdropTemplateMixin.SetBackdropBorderColor
+    frame.GetBackdropBorderColor = BackdropTemplateMixin.GetBackdropBorderColor
+end
+
+-- Take the border down without discarding it. The textures are ours, so unlike a
+-- backdrop edge nothing else will remove them when the surface is re-issued
+-- without an outline.
+function GUI:HidePixelBorder(frame)
+    local b = frame and frame._pxBorder
+    if not b then return end
+    for _, side in ipairs(PX_SIDES) do b[side]:Hide() end
+end
+
+-- Re-derive thickness on a scale change. Rides the same sweep that already
+-- re-derives backdrop edge widths, so there is no new per-frame work.
+function GUI:RefreshPixelBorders()
+    for frame in pairs(pixelBordered) do
+        if frame:IsVisible() then LayoutPixelBorder(frame) end
+    end
+end
+
+-- THE element backdrop. Every bordered/filled GUI surface goes through here, so
+-- a change to the look lands everywhere at once. Three shapes, one code path:
+--
+--   (default)          fill + 1px outline -- dropdowns, edit boxes, buttons
+--   opts.fill=false    outline only -- for a surface whose interior is drawn by
+--                      something else (the colour picker's hue/alpha gradients
+--                      and checkerboards), where a fill would paint over it
+--   opts.outline=false fill only -- flat chips, segment buttons, label plates
+--
+-- opts.bgColor / opts.borderColor take {r,g,b[,a]} or {[1],[2],[3][,4]} and
+-- override the C_ELEMENT / C_BORDER defaults. opts.edgeSize thickens the outline
+-- (the popup and wizard chrome use 2). opts.inset (a
+-- single number, applied to all four sides) pulls the fill in from the edge so it
+-- does not underlap a translucent border -- default 0, i.e. the fill runs to the
+-- frame edge. opts.backdropEdge draws the outline the old way, as a backdrop
+-- edgeFile; see below for why nothing should want that.
+local function CreateElementBackdrop(frame, opts)
+    opts = opts or {}
+    local fill, outline = opts.fill ~= false, opts.outline ~= false
+    -- The outline is drawn as our own textures, not a backdrop edgeFile. See
+    -- ApplyPixelBorder -- a 1px backdrop edge cannot be drawn reliably at a
+    -- fractional offset, which is the whole missing-border story.
+    --
+    -- This was an opt-in while the hover states were still a problem: a pixel
+    -- border is not repainted by SetBackdropBorderColor, so converting buttons
+    -- blind would have silently killed every hover in the GUI. The shim in
+    -- ApplyPixelBorder settles that -- the frame gets its own
+    -- SetBackdropBorderColor -- so it is now the default for everything that
+    -- comes through here, and opts.backdropEdge is the escape hatch for a
+    -- surface that genuinely needs the old edgeFile.
+    local usePixel = outline and not opts.backdropEdge
+    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
+    local inset = opts.inset
+    frame:SetBackdrop({
+        bgFile   = fill and "Interface\\Buttons\\WHITE8x8" or nil,
+        edgeFile = (outline and not usePixel) and "Interface\\Buttons\\WHITE8x8" or nil,
+        edgeSize = (outline and not usePixel) and (opts.edgeSize or 1) or nil,
+        insets   = inset and { left = inset, right = inset,
+                               top = inset, bottom = inset } or nil,
+    })
+    if fill then
+        local c = opts.bgColor
+        if c then frame:SetBackdropColor(c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1)
+        else      frame:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, C_ELEMENT.a) end
+    end
+    if outline then
+        local c = opts.borderColor
+        if usePixel then
+            GUI:ApplyPixelBorder(frame,
+                c and { c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1 }
+                  or { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
+                opts.edgeSize)
+        else
+            RevertPixelBorder(frame)
+            if c then
+                frame:SetBackdropBorderColor(c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1)
+            else
+                frame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+            end
+        end
+    else
+        -- A backdrop edge disappears on its own when the backdrop is re-issued
+        -- without one; our textures do not, so an outlined surface re-issued as
+        -- fill-only has to be told. FlashWidget does exactly this: it re-runs
+        -- this factory on every pulse, with outline true or false depending on
+        -- how the caller wants that pulse to read.
+        GUI:HidePixelBorder(frame)
+    end
+    return frame
+end
+
+-- The window chrome: the settings window itself, the changelog overlay and the
+-- dropdown menu panel. Distinct from the public GUI:CreatePanelBackdrop further
+-- down (dialogs and floating panels, colour-configurable) -- this one is always
+-- the dark background behind a hard black edge.
+--
+-- Routed through the factory rather than issuing its own backdrop, which is what
+-- it used to do. It was the last thing in the GUI still drawing a border as an
+-- edgeFile, and a black 1px line is the case where that reads least badly -- it
+-- has enough contrast that a split across two device rows softens it instead of
+-- losing it. Still worth converting: softening on every scroll is what the whole
+-- pixel border exists to stop, and while this was the last holdout the entire
+-- snap-registry existed to serve three call sites.
+local function CreatePanelBackdrop(frame)
+    return CreateElementBackdrop(frame, {
+        bgColor     = C_BACKGROUND,
+        borderColor = { 0, 0, 0, 1 },
+    })
+end
 
 -- Style a ScrollFrameTemplate scrollbar to use the pill-shaped thumb
 -- All scroll frames must use ScrollFrameTemplate (not UIPanelScrollFrameTemplate)
+--
+-- This used to also quantise the scroll offset to whole device pixels, on the
+-- reasoning that Blizzard's scrollbar drives the offset as a fraction of the
+-- range and so parks the content on an arbitrary sub-pixel row. That was true,
+-- and it did not help: a thin border is soft at SOME offsets no matter which
+-- offsets you allow, and quantising only changed which ones. The border being
+-- two device pixels wide is what made the question stop mattering -- it draws
+-- the same amount of ink wherever it lands. Do not add it back.
 local function StyleScrollBar(scrollFrame)
     local sb = scrollFrame.ScrollBar
     if not sb then return end
@@ -588,7 +1659,15 @@ function GUI:CreateHeader(parent, text)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(200, 25)
     container:Show()
-    
+    container.rowKind = "header"
+    -- Factory-owned slot, and fixed so ResolveRowHeight ignores whatever the call
+    -- site passes. Headers were handed 25 in collapsible groups and 40 in plain
+    -- ones -- the same widget, two rhythms, across ~200 sites. Owning it here
+    -- unifies them without touching any of those call sites, which is exactly the
+    -- rule the other factory rows already follow (see GUI.RowHeight).
+    container.preferredHeight = GUI.RowHeight.sectionHeader
+    container.fixedRowHeight = true
+
     local h = container:CreateFontString(nil, "OVERLAY", "DFFontNormal")
     h:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", 0, 2)
     h:SetText(text)
@@ -638,16 +1717,14 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
     section.GetText = function(self) return self.sectionTitleText end
     section.paddingAfter = 8  -- Padding space after header before first child
     
-    -- Header bar with background
-    if not section.SetBackdrop then Mixin(section, BackdropTemplateMixin) end
-    section:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- Header bar with background. Same look as before, via the shared backdrop
+    -- helper rather than a private copy of it, so it picks up the pixel border
+    -- (and anything else that lands there) without its own wiring.
+    GUI:CreateElementBackdrop(section, {
+        bgColor     = { r = C_PANEL.r,  g = C_PANEL.g,  b = C_PANEL.b,  a = 0.8 },
+        borderColor = { r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5 },
     })
-    section:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.8)
-    section:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-    
+
     -- Click area
     local clickArea = CreateFrame("Button", nil, section)
     clickArea:SetAllPoints()
@@ -861,14 +1938,16 @@ function GUI:CreateSettingsGroup(parent, width, opts)
     group.padding = padding
     group.margin = margin
 
-    if not group.SetBackdrop then Mixin(group, BackdropTemplateMixin) end
-    group:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- 8%, and worth knowing why it is not 16%: it was, for a while, because an
+    -- 8% edge that split across two device rows left 4% on each and neither was
+    -- visible. Doubling it made the surviving half readable at the cost of the
+    -- whole border reading too heavy when it did NOT split. The border no longer
+    -- has to survive being split, because it no longer splits -- so the alpha
+    -- went back to the value that was right in the first place.
+    CreateElementBackdrop(group, {
+        bgColor     = { 1, 1, 1, 0.03 },   -- very subtle white background (3%)
+        borderColor = { 1, 1, 1, 0.08 },   -- subtle white border (8%)
     })
-    group:SetBackdropColor(1, 1, 1, 0.03)  -- Very subtle white background (3% opacity)
-    group:SetBackdropBorderColor(1, 1, 1, 0.08)  -- Subtle white border (8% opacity)
 
     -- Bottom collapse bar (only for collapsible groups, shown when expanded)
     if group.collapsible then
@@ -1008,7 +2087,11 @@ function GUI:CreateSettingsGroup(parent, width, opts)
 
     -- Calculate total height based on visible children and layout them
     group.LayoutChildren = function(self)
-        local y = -self.padding  -- Start with top padding
+        -- Snapped padding: every child's left edge and first row start from it, so
+        -- if it is a fractional number of device pixels the whole column inherits
+        -- that offset. See SnapLen.
+        local padding = SnapLen(self, self.padding)
+        local y = -padding  -- Start with top padding
         local visibleCount = 0
         -- Width for child widgets. A group whose width is not resolved yet (created but
         -- not laid out, or anchors cleared) yields a non-positive innerWidth. Do NOT
@@ -1017,12 +2100,51 @@ function GUI:CreateSettingsGroup(parent, width, opts)
         -- content width), so guessing squeezes those children and truncates their text.
         -- Skip the sizing instead and let the next pass, with a real width, do it. That
         -- matches the old behaviour, where a negative SetWidth was silently a no-op.
-        local innerWidth = (self:GetWidth() or 0) - (self.padding * 2)
+        local innerWidth = SnapLen(self, (self:GetWidth() or 0) - (padding * 2))
         local canSize = innerWidth > 0
+
+        -- Will this entry be laid out on this pass? Factored out of the loop below
+        -- so the run look-ahead cannot drift from the loop's own visibility test:
+        -- a hidden row must not break a run, or toggling one row's hideOn would
+        -- silently change the spacing of the rows around it.
+        local layoutDB = DF.db[GUI.SelectedMode]
+        local function entryVisible(entry, index)
+            if self.collapsed and index > 1 then return false end
+            local w = entry and entry.widget
+            if not w then return false end
+            if w.hideOn and layoutDB and w.hideOn(layoutDB) then return false end
+            return true
+        end
 
         for i, entry in ipairs(self.groupChildren) do
             local widget = entry.widget
             local height = entry.height
+
+            -- Close up a RUN of the same compact kind (see GUI.RowGapTight). The
+            -- reduction is taken off THIS row's slot, so it only ever affects the
+            -- gap to the row below -- and only when that row is the same compact
+            -- kind, which is what keeps the boundary between different kinds at
+            -- the full RowGap.
+            local kind = widget.rowKind
+            widget._rowTightened, widget._rowNextKind = false, nil
+            if kind and GUI.RowCompact[kind] then
+                for j = i + 1, #self.groupChildren do
+                    if entryVisible(self.groupChildren[j], j) then
+                        -- Recorded even when it does NOT match, so /df gapcheck can
+                        -- say WHY a run did not close up: a row with no rowKind
+                        -- sitting between two checkboxes breaks the run for the
+                        -- layout while being invisible to the report (a widget
+                        -- that draws nothing is skipped there), which would look
+                        -- like the tightening was simply inert.
+                        widget._rowNextKind = self.groupChildren[j].widget.rowKind or "<none>"
+                        if self.groupChildren[j].widget.rowKind == kind then
+                            height = height - (GUI.RowGap - GUI.RowGapTight)
+                            widget._rowTightened = true
+                        end
+                        break   -- only the NEXT visible row decides
+                    end
+                end
+            end
 
             -- If collapsed, only show the header (first widget)
             if self.collapsed and i > 1 then
@@ -1039,7 +2161,9 @@ function GUI:CreateSettingsGroup(parent, width, opts)
 
                 if shouldShow then
                     widget:ClearAllPoints()
-                    widget:SetPoint("TOPLEFT", self, "TOPLEFT", self.padding, y)
+                    -- Snap y at USE, not as it accumulates: rounding each row height
+                    -- in turn would let the error compound down a long column.
+                    widget:SetPoint("TOPLEFT", self, "TOPLEFT", padding, SnapLen(self, y))
                     -- Set width to fit within group padding (only once the group has one)
                     if canSize then widget:SetWidth(innerWidth) end
                     widget:Show()
@@ -1080,7 +2204,7 @@ function GUI:CreateSettingsGroup(parent, width, opts)
                     local summaryText = table.concat(labels, "  \194\183  ")  -- separated by  ·
                     self.collapseSummary:SetText(summaryText)
                     self.collapseSummary:ClearAllPoints()
-                    self.collapseSummary:SetPoint("TOPLEFT", self, "TOPLEFT", self.padding, y)
+                    self.collapseSummary:SetPoint("TOPLEFT", self, "TOPLEFT", padding, SnapLen(self, y))
                     self.collapseSummary:SetWidth(innerWidth)
                     self.collapseSummary:Show()
                     -- Measure actual wrapped height
@@ -1101,7 +2225,11 @@ function GUI:CreateSettingsGroup(parent, width, opts)
         end
 
         -- Update group height (add padding at bottom)
-        local totalHeight = math.abs(y) + self.padding
+        -- The group's own height, snapped for the same reason its children's
+        -- widths are: this is what puts its TOP border on the grid. Since the
+        -- runtime geometry correction was removed, this IS the only thing that
+        -- does -- there is no after-the-fact pass to fall back on.
+        local totalHeight = SnapLen(self, math.abs(y) + padding)
         if totalHeight < 1 then totalHeight = 1 end
         self:SetHeight(totalHeight)
         -- Add margin to calculated height for spacing between groups
@@ -1124,33 +2252,19 @@ function GUI:CreateSettingsGroup(parent, width, opts)
         local hasGroupGate = self.disableChildrenOn ~= nil
         local groupOff = hasGroupGate and self.disableChildrenOn(db) or false
 
-        -- When the whole group is blocked on 12.1, grey EVERYTHING — including the
-        -- header and the feature's own Enable toggle (keepEnabled) — since the
-        -- feature can't function at all under the new aura system.
-        local groupBlocked = false
-        if self.blockedOverlay then
-            groupBlocked = ((not self.blockedOverlay.when) or self.blockedOverlay.when(db)) and true or false
-        end
-
         for i, entry in ipairs(self.groupChildren) do
             local widget = entry.widget
             if widget.SetEnabled and (widget.disableOn or hasGroupGate) then
                 local shouldDisable = (widget.disableOn and widget.disableOn(db)) or false
-                if groupBlocked then
-                    shouldDisable = true
-                elseif groupOff and i > 1 and not widget.keepEnabled then
+                if groupOff and i > 1 and not widget.keepEnabled then
                     shouldDisable = true
                 end
                 widget:SetEnabled(not shouldDisable)
             end
-            if widget.blockedOverlay then GUI:RefreshBlockedOverlay(widget, db) end
             if widget.refreshContent and widget:IsShown() then
                 widget:refreshContent(db)
             end
         end
-
-        -- Toggle the group's own frost (whole-group blocked case).
-        GUI:RefreshBlockedOverlay(self, db)
     end
 
     return group
@@ -1286,147 +2400,6 @@ function GUI:LinkHoverColor(c)
     return { r = c.r + (1 - c.r) * t, g = c.g + (1 - c.g) * t, b = c.b + (1 - c.b) * t }
 end
 
--- Segmented button group: a row of mutually-exclusive buttons, one selected at
--- a time. Each option shows a primary label and an optional subtitle on a
--- second line. Selected button gets a themed border + tinted fill; unselected
--- buttons use the standard element backdrop.
---
---   options: ordered array of { value=, label=, subtitle= }
---   dbTable/dbKey: reads/writes the selected value
---   callback: called after a selection change
---   totalWidth: total container width (buttons divide it evenly with small gaps)
-function GUI:CreateSegmentedButtonGroup(parent, options, dbTable, dbKey, callback, totalWidth, minBtnWidthOpt)
-    local container = CreateFrame("Frame", nil, parent)
-    totalWidth = totalWidth or 560
-    local btnHeight = 38  -- compact modern height: label + subtitle fit snugly
-    local gap = 4
-    -- minBtnWidth governs when buttons wrap. The default suits 2-3 segment
-    -- groups with full-word labels in the standard ~560px settings panels;
-    -- caller can pass a smaller value when packing more / shorter segments
-    -- into a narrower group (e.g. a 260px border-controls column).
-    local minBtnWidth = minBtnWidthOpt or 110
-    container:SetSize(totalWidth, btnHeight)
-
-    local n = #options
-
-    local buttons = {}
-    container.buttons = buttons
-
-    -- Reposition buttons to fill the container's current width. Wraps to
-    -- additional rows when per-button width would drop below minBtnWidth.
-    -- Called on creation and on OnSizeChanged so buttons reflow when the
-    -- page stretches or shrinks the container.
-    local function Relayout()
-        -- Re-entry guard: OnSizeChanged can fire again when we SetHeight
-        -- below, and we might also be called during a deferred RefreshStates.
-        -- Without this guard the widget rebuild chain loops infinitely and
-        -- drops the framerate to single digits.
-        if container._relayouting then return end
-        container._relayouting = true
-
-        local w = container:GetWidth() or totalWidth
-        if w <= 0 then w = totalWidth end
-
-        local perRow = math.max(1, math.min(n, math.floor((w + gap) / (minBtnWidth + gap))))
-        local rows = math.ceil(n / perRow)
-        local bw = math.floor((w - gap * (perRow - 1)) / perRow)
-
-        for i, btn in ipairs(buttons) do
-            local rowIdx = math.ceil(i / perRow) - 1
-            local colIdx = (i - 1) % perRow
-            btn:SetWidth(bw)
-            btn:ClearAllPoints()
-            btn:SetPoint("TOPLEFT", colIdx * (bw + gap), -(rowIdx * (btnHeight + gap)))
-        end
-
-        local newHeight = rows * btnHeight + (rows - 1) * gap
-        if math.abs((container:GetHeight() or 0) - newHeight) > 0.5 then
-            container:SetHeight(newHeight)
-        end
-
-        -- If the row count changed the required layout space, bump
-        -- layoutHeight so the page reserves the right amount on the next
-        -- layout pass, and defer a layout-only refresh (NOT page:Refresh()
-        -- which would rebuild all widgets and re-enter this path forever).
-        local desiredLayoutH = newHeight + 4
-        if container.layoutHeight ~= desiredLayoutH then
-            container.layoutHeight = desiredLayoutH
-            if not container._relayoutPending then
-                container._relayoutPending = true
-                C_Timer.After(0, function()
-                    container._relayoutPending = false
-                    if parent and parent.RefreshStates then
-                        parent:RefreshStates()
-                    end
-                end)
-            end
-        end
-
-        container._relayouting = false
-    end
-    container:SetScript("OnSizeChanged", function() Relayout() end)
-
-    local function Refresh()
-        local currentVal = dbTable and dbTable[dbKey]
-        for _, btn in ipairs(buttons) do
-            local selected = (btn.value == currentVal)
-            btn.selected = selected
-            btn:SetActive(selected)  -- shared toggle look (accent border + fill)
-        end
-    end
-    container.Refresh = Refresh
-    -- refreshContent hook used by the page layout so external changes to the
-    -- db value (e.g. profile switches) re-sync the selected button.
-    container.refreshContent = function(self) Refresh() end
-
-    for i, opt in ipairs(options) do
-        local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
-        btn:SetHeight(btnHeight)
-        -- Width and position set by Relayout() below (called at end of setup
-        -- and on every OnSizeChanged).
-        -- Shared button styling: hover wash + SetActive() selection state.
-        GUI:StyleButton(btn)
-
-        btn.value = opt.value
-
-        btn.Label = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        btn.Label:SetPoint("TOP", 0, -5)
-        btn.Label:SetText(opt.label or "")
-        btn.Label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-        if opt.subtitle and opt.subtitle ~= "" then
-            btn.Subtitle = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            btn.Subtitle:SetPoint("BOTTOM", 0, 5)
-            btn.Subtitle:SetText(opt.subtitle)
-            btn.Subtitle:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            -- Nudge subtitle down by ~1 pt for a clearer visual hierarchy.
-            local fPath, fSize, fFlags = btn.Subtitle:GetFont()
-            if fPath and fSize and fSize > 9 then
-                btn.Subtitle:SetFont(fPath, fSize - 1, fFlags or "")
-            end
-        end
-
-        btn:SetScript("OnClick", function(self)
-            if dbTable[dbKey] == self.value then return end
-            dbTable[dbKey] = self.value
-            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-            Refresh()
-            if callback then callback() end
-        end)
-
-        buttons[i] = btn
-    end
-
-    Relayout()
-    Refresh()
-
-    container.UpdateTheme = function() Refresh() end
-    if not parent.ThemeListeners then parent.ThemeListeners = {} end
-    table.insert(parent.ThemeListeners, container)
-
-    return container
-end
-
 -- ============================================================
 -- CreateInfoBanner
 -- ------------------------------------------------------------
@@ -1504,6 +2477,14 @@ INFO_BANNER_TONES.warning = INFO_BANNER_TONES.caution
 -- info/caution/danger/success language as the banners instead of an ad-hoc colour.
 -- Uses the tone's dedicated inline `accent` (NOT the banner iconColor, which is
 -- tuned to sit on the banner's own bg and would make danger paler than caution).
+-- The {r, g, b} behind a tone name, for callers that set a colour directly
+-- rather than embedding inline markup. Same resolution order as ToneHex, so a
+-- toned title and toned inline text always match.
+function GUI:GetToneColor(toneName)
+    local t = INFO_BANNER_TONES[toneName] or INFO_BANNER_TONES.caution
+    return t.accent or t.iconColor or t.textColor or {1, 1, 1}
+end
+
 function GUI:ToneHex(toneName)
     local t = INFO_BANNER_TONES[toneName] or INFO_BANNER_TONES.caution
     local c = t.accent or t.iconColor or t.textColor or {1, 1, 1}
@@ -1592,16 +2573,61 @@ local function FlowSpaceWidth(tmpl, sizePx)
     return sp
 end
 
+-- ============================================================
+-- DISABLED OVERLAY — the "this feature is switched off" scrim.
+--
+-- A dimming plate over the part of a page you cannot act on yet, carrying the
+-- feature's name and a pointer at the toggle that turns it on. EnableMouse is
+-- the working half: greying a control says "not now", but a page of buttons
+-- that still FUNCTION while the feature is off reads as though it were on, and
+-- the user builds a thing that silently does nothing.
+--
+-- The caller anchors it, because the extent is a per-page judgement — cover
+-- what can be acted on, not necessarily everything below the toggle. Explaining
+-- content (a "how it works" box) is worth leaving readable; a user staring at
+-- the scrim is exactly the one who still needs it.
+--
+--   opts.label     the big line, e.g. L["Aura Designer is disabled"]
+--   opts.sublabel  the small line (defaults to the shared "Enable the checkbox
+--                  above to use")
+--   opts.level     frame-level bump over the parent (default 50)
+--
+-- Returns the frame; drive it with :SetShown(not enabled) from wherever the
+-- flag changes.
+-- ============================================================
+function GUI:CreateDisabledOverlay(parent, opts)
+    opts = opts or {}
+    local overlay = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    overlay:SetFrameLevel((parent:GetFrameLevel() or 0) + (opts.level or 50))
+    overlay:EnableMouse(true)
+
+    local bg = overlay:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetColorTexture(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.85)
+
+    local label = overlay:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    label:SetPoint("CENTER", 0, 10)
+    label:SetText(opts.label or "")
+    label:SetTextColor(0.6, 0.6, 0.6, 1)
+    overlay.Label = label
+
+    local sub = overlay:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    sub:SetPoint("TOP", label, "BOTTOM", 0, -4)
+    sub:SetText(opts.sublabel or L["Enable the checkbox above to use"])
+    sub:SetTextColor(0.45, 0.45, 0.45, 1)
+    overlay.SubLabel = sub
+
+    return overlay
+end
+
 function GUI:CreateInfoBanner(parent, opts)
     opts = opts or {}
 
     local banner = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    if not banner.SetBackdrop then Mixin(banner, BackdropTemplateMixin) end
-    banner:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
+    -- SetTone overwrites both colours, and opts.tone is applied at the bottom of
+    -- this function -- so these defaults only show on a tone-less banner, which
+    -- previously drew an untinted (white) box because nothing coloured it.
+    CreateElementBackdrop(banner)
     -- Give the banner a defined initial height so child frames have valid positions
     -- from the very first frame (before DoRecomputeHeight has run).
     banner:SetHeight(opts.minHeight or 34)
@@ -1683,7 +2709,13 @@ function GUI:CreateInfoBanner(parent, opts)
         end
         local h = math.ceil(MeasureContent())
         -- Chrome: 13 px top (icon at -10, text nudged -3) + 9 px bottom = 22 px.
-        local newH = math.max(opts.minHeight or 28, h + 22)
+        -- Snapped to whole device pixels so the banner's TOP border lands on the
+        -- grid. Done HERE rather than by opting into the generic size snapper,
+        -- because this function owns the height and is the thing the cascade
+        -- documented above runs through -- snapping the number before cachedH
+        -- sees it keeps the existing "did it actually change?" guard authoritative
+        -- instead of adding a second writer behind its back.
+        local newH = SnapLen(banner, math.max(opts.minHeight or 28, h + 22))
         if cachedH ~= newH then
             cachedH = newH
             recomputing = true
@@ -1739,7 +2771,12 @@ function GUI:CreateInfoBanner(parent, opts)
             lastMeasuredWidth = w
             RecomputeHeight()
         end)
-        banner:SetScript("OnShow", function()
+        -- HookScript, not SetScript: CreateElementBackdrop already hooked OnShow,
+        -- to re-derive this frame's border thickness if the UI scale changed
+        -- while it was hidden, and a SetScript here would throw that hook away.
+        -- Nothing else would re-derive it -- a banner that appears late is
+        -- exactly the case that hook exists for.
+        banner:HookScript("OnShow", function()
             if deferredWhileHidden then
                 deferredWhileHidden = false
                 cachedH = nil
@@ -2135,7 +3172,6 @@ function GUI:FlashWidget(widget, opts)
     if not hl then
         local host = widget:GetParent() or widget
         hl = CreateFrame("Frame", nil, host, "BackdropTemplate")
-        if not hl.SetBackdrop then Mixin(hl, BackdropTemplateMixin) end
         hl:SetPoint("TOPLEFT", widget, "TOPLEFT", -3, 3)
         hl:SetPoint("BOTTOMRIGHT", widget, "BOTTOMRIGHT", 3, -3)
         local wl = (widget.GetFrameLevel and widget:GetFrameLevel())
@@ -2144,13 +3180,14 @@ function GUI:FlashWidget(widget, opts)
         widget._dfFlashHL = hl
     end
     local c = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
-    hl:SetBackdrop({
-        bgFile   = doFill and "Interface\\Buttons\\WHITE8x8" or nil,
-        edgeFile = doBorder and "Interface\\Buttons\\WHITE8x8" or nil,
-        edgeSize = doBorder and (opts.borderSize or 2) or nil,
+    -- Re-issued per call so the pulse picks up the current theme colour.
+    CreateElementBackdrop(hl, {
+        fill        = doFill,
+        outline     = doBorder,
+        edgeSize    = opts.borderSize or 2,
+        bgColor     = { c.r, c.g, c.b, opts.alpha or 0.35 },
+        borderColor = { c.r, c.g, c.b, 1 },
     })
-    hl:SetBackdropColor(c.r, c.g, c.b, doFill and (opts.alpha or 0.35) or 0)
-    if doBorder then hl:SetBackdropBorderColor(c.r, c.g, c.b, 1) end
 
     -- Gentle alpha pulse (mirrors the live "show me" highlight): a few soft
     -- fade in/out cycles then a slow fade to nothing — a calm breathe rather
@@ -2279,11 +3316,19 @@ end
 -- GUI TOOLTIP  (settings-UI tooltips only — NOT unit-frame/aura tooltips)
 -- Single source for our own widget tooltips. Call from OnEnter — use HookScript
 -- on StyleButton'd widgets so it composes with the hover wash; SetScript on
--- plain frames. Pair with OnLeave -> GameTooltip:Hide().
+-- plain frames. Pair with OnLeave -> GUI:HideTooltip().
 --   opts.title  (string)   white by default, or tone-coloured
 --   opts.tone   nil | "warning" (gold) | "danger" (red)
---   opts.anchor "ANCHOR_RIGHT" (default; edge-safe — avoid ANCHOR_TOP which
---               clamps over the owner near the frame top)
+--   opts.anchor  default: at the CURSOR, lifted clear of it (see CURSOR_LIFT).
+--               Krathe's call, 2026-07-27: a settings tooltip should appear where
+--               you are pointing, not pinned to a widget edge whose size you are
+--               not thinking about — but sitting ON the cursor buried the control
+--               you were reading about, so it is offset upward.
+--               ⚠ Do NOT pass one per call site. The whole point of the default
+--               living here is that every tooltip in the settings UI behaves the
+--               same; a page that sets its own is the disjointedness we just
+--               removed. ANCHOR_TOP in particular clamps over the owner near the
+--               top of the frame — it was in use 14 times and is now gone.
 --   opts.lines  array; each element is one of:
 --       "text"                     -> body grey (0.7), wrapped
 --       " "                        -> blank spacer
@@ -2291,9 +3336,65 @@ end
 --       { text = , accent = true } -> mode/context accent colour, wrapped
 --       { text = , color = {r,g,b} } -> explicit colour, wrapped
 -- ============================================================
+-- The line grammar, shared by ShowTooltip and ShowGameTooltip so a DF line
+-- appended under a spell tooltip reads exactly like one under a plain title.
+local function AddTooltipLines(lines)
+    if not lines then return end
+    local acc
+    for _, line in ipairs(lines) do
+        if line == " " or line == "" then
+            GameTooltip:AddLine(" ")
+        elseif type(line) == "string" then
+            GameTooltip:AddLine(line, 0.7, 0.7, 0.7, true)
+        elseif type(line) == "table" and (line.text or line.left) then
+            local r, g, b = 0.7, 0.7, 0.7
+            if line.hint then
+                r, g, b = 0.55, 0.55, 0.55
+            elseif line.accent then
+                acc = acc or GetThemeColor()
+                r, g, b = acc.r, acc.g, acc.b
+            elseif line.color then
+                -- Accept {r=,g=,b=} or {r,g,b}: the palette uses the first, most
+                -- call sites building a colour inline reach for the second.
+                local c = line.color
+                r, g, b = c.r or c[1], c.g or c[2], c.b or c[3]
+            end
+            if line.left then
+                -- Two-column form (label … value), for key/value dumps. Never
+                -- wraps -- AddDoubleLine has no wrap argument.
+                GameTooltip:AddDoubleLine(line.left, line.right, r, g, b, 1, 1, 1)
+            else
+                GameTooltip:AddLine(line.text, r, g, b, true)
+            end
+        end
+    end
+end
+
+-- How far the cursor-anchored tooltip is nudged off the pointer. ONE dial.
+--
+-- Small on purpose. This started at 24 while the tooltip could still appear over
+-- a slider or dropdown, where it had to clear the whole control. Now that the
+-- hover lives on the LABEL only (see GUI:AttachTooltip) there is nothing
+-- underneath worth clearing — the lift just has to keep the tooltip off the
+-- words you are reading, so a nudge does it.
+--
+-- ⚠ ANCHOR_CURSOR_RIGHT, not ANCHOR_CURSOR — plain ANCHOR_CURSOR DISCARDS the
+-- offsets. Verified against the client's own code rather than assumed:
+-- Blizzard_AuraContainer/Blizzard_AuraButton.lua asserts the signature
+-- SetOwner(point, offsetX, offsetY) with both offsets optional numbers, and
+-- Blizzard's own callers only ever pass offsets alongside the _RIGHT / _LEFT
+-- variants (QuestDataProvider "ANCHOR_CURSOR_RIGHT", 5, 2 — never with the plain
+-- cursor anchor). Positive Y is up in WoW, so this lifts regardless of which
+-- edge the anchor pins.
+local CURSOR_LIFT_X, CURSOR_LIFT_Y = 0, 8
+
 function GUI:ShowTooltip(owner, opts)
     if not owner or not opts or not opts.title then return end
-    GameTooltip:SetOwner(owner, opts.anchor or "ANCHOR_RIGHT")
+    if opts.anchor then
+        GameTooltip:SetOwner(owner, opts.anchor)
+    else
+        GameTooltip:SetOwner(owner, "ANCHOR_CURSOR_RIGHT", CURSOR_LIFT_X, CURSOR_LIFT_Y)
+    end
     -- Title colour is single-sourced from the tone's inline accent so a tooltip
     -- title reads the same as inline ToneHex text of the same tone. Untoned = white.
     local toneDef = opts.tone and INFO_BANNER_TONES[opts.tone]
@@ -2303,28 +3404,97 @@ function GUI:ShowTooltip(owner, opts)
     else
         GameTooltip:SetText(opts.title, 1, 1, 1)
     end
-    if opts.lines then
-        local acc
-        for _, line in ipairs(opts.lines) do
-            if line == " " or line == "" then
-                GameTooltip:AddLine(" ")
-            elseif type(line) == "string" then
-                GameTooltip:AddLine(line, 0.7, 0.7, 0.7, true)
-            elseif type(line) == "table" and line.text then
-                local r, g, b = 0.7, 0.7, 0.7
-                if line.hint then
-                    r, g, b = 0.55, 0.55, 0.55
-                elseif line.accent then
-                    acc = acc or GetThemeColor()
-                    r, g, b = acc.r, acc.g, acc.b
-                elseif line.color then
-                    r, g, b = line.color.r, line.color.g, line.color.b
-                end
-                GameTooltip:AddLine(line.text, r, g, b, true)
+    AddTooltipLines(opts.lines)
+    GameTooltip:Show()
+end
+
+-- ============================================================
+-- GAME-DATA TOOLTIP  (a spell / item / equipped item / aura, plus our own lines)
+-- The shape ShowTooltip cannot express: the game writes the header, we append
+-- underneath. Six settings-UI surfaces hand-rolled it — the whole binding editor
+-- plus the spell picker — and only the picker handled the case that actually
+-- bites: GameTooltip:SetSpellByID renders NOTHING when the client has not loaded
+-- that spell's data yet, so a bare call leaves an empty tooltip. Everywhere else
+-- silently showed nothing on a cold cache.
+--
+-- opts (pick ONE source):
+--   spellID                    a spell — gets the load-on-demand retry below
+--   itemID                     an item by id
+--   inventorySlot [+ unit]     an equipped item ("player" unless unit is given)
+--   unit + auraInstanceID      a live aura
+-- plus:
+--   fallbackTitle   shown when the game has no data at all, so a hover is never
+--                   blank (for a spell, the id is added under it)
+--   isCurrent(owner, spellID)  is this owner STILL showing this spell? Guards the
+--                   async re-render on pooled / rebindable rows. Omit for a row
+--                   that only ever shows one thing.
+--   anchor, lines   exactly as ShowTooltip
+-- ============================================================
+
+-- Fill from the game. Returns whether it actually produced content.
+local function SeedGameTooltip(opts)
+    local ok
+    if opts.spellID then
+        -- pcall: SetSpellByID errors outright on ids the client considers
+        -- invalid (possible for stale DB entries) — treat that as "no data".
+        ok = pcall(GameTooltip.SetSpellByID, GameTooltip, opts.spellID)
+    elseif opts.itemID then
+        ok = pcall(GameTooltip.SetItemByID, GameTooltip, opts.itemID)
+    elseif opts.inventorySlot then
+        ok = pcall(GameTooltip.SetInventoryItem, GameTooltip, opts.unit or "player", opts.inventorySlot)
+    elseif opts.unit and opts.auraInstanceID then
+        ok = pcall(GameTooltip.SetUnitAura, GameTooltip, opts.unit, opts.auraInstanceID)
+    else
+        return false
+    end
+    return ok and GameTooltip:NumLines() > 0
+end
+
+function GUI:ShowGameTooltip(owner, opts)
+    if not owner or not opts then return end
+
+    -- Render the whole thing: game data (or the fallback), then our lines. Used
+    -- for the first paint AND the re-paint after a late spell load, so the
+    -- appended lines survive the reload instead of vanishing with it.
+    local function Fill()
+        local seeded = SeedGameTooltip(opts)
+        if not seeded then
+            if opts.fallbackTitle and opts.fallbackTitle ~= "" then
+                GameTooltip:AddLine(opts.fallbackTitle, 1, 1, 1)
+            end
+            if opts.spellID then
+                GameTooltip:AddLine(format(L["Spell IDs: %s"], tostring(opts.spellID)), 0.5, 0.5, 0.5)
             end
         end
+        AddTooltipLines(opts.lines)
+        GameTooltip:Show()
+        return seeded
     end
-    GameTooltip:Show()
+
+    -- Same cursor default as ShowTooltip — a spell tooltip on a settings row has
+    -- to behave like every other tooltip in the window, and this one was still on
+    -- the old ANCHOR_RIGHT.
+    if opts.anchor then
+        GameTooltip:SetOwner(owner, opts.anchor)
+    else
+        GameTooltip:SetOwner(owner, "ANCHOR_CURSOR_RIGHT", CURSOR_LIFT_X, CURSOR_LIFT_Y)
+    end
+    if Fill() or not opts.spellID then return end
+
+    -- Nothing rendered. If the data exists server-side but is not loaded yet,
+    -- this both requests the load and re-renders when it arrives. A cached spell
+    -- never reaches here (SetSpellByID already had its chance), so the callback
+    -- cannot double-add the fallback.
+    local spell = Spell and Spell.CreateFromSpellID and Spell:CreateFromSpellID(opts.spellID)
+    if not spell or spell:IsSpellEmpty() or spell:IsSpellDataCached() then return end
+    local spellID, isCurrent = opts.spellID, opts.isCurrent
+    spell:ContinueOnSpellLoad(function()
+        if GameTooltip:IsShown() and GameTooltip:IsOwned(owner) and owner:IsMouseOver()
+            and (not isCurrent or isCurrent(owner, spellID)) then
+            GameTooltip:ClearLines()
+            Fill()
+        end
+    end)
 end
 
 -- Counterpart to ShowTooltip: hide the shared GameTooltip. Wrapped so callers
@@ -2333,10 +3503,111 @@ function GUI:HideTooltip()
     GameTooltip:Hide()
 end
 
+-- ============================================================
+-- ATTACHING a tooltip to a settings widget — ONE way, for every factory.
+--
+-- Three factories used to each have their own idea, and on one page the same
+-- gesture did three different things:
+--     checkbox   .tooltip       hover the container   ANCHOR_CURSOR
+--     dropdown   .tooltip       hover the BUTTON      ANCHOR_CURSOR
+--     slider     .tooltipText   hover the SLIDER      ANCHOR_RIGHT
+-- Worse, on a dropdown and a slider the LABEL sits above the control, outside
+-- its hit rect, so hovering the words never did anything — while on a checkbox
+-- (label beside the box, inside the container) it did. Five more factories —
+-- colour picker, font / texture dropdown, input, growth control — had no
+-- tooltip support at all, so ~136 controls could not carry one.
+--
+-- The rule now: THE HIT AREA IS THE LABEL, and only the label.
+--
+-- ⚠ This is deliberately NOT the whole widget. The first version of this hovered
+-- the control too, which is the obvious reading of "make the label work" — but a
+-- cursor-anchored tooltip then sits on top of the slider or dropdown you are
+-- trying to read and operate, and no amount of offsetting it fully solves that,
+-- because the thing you point at IS the thing being covered. Krathe's call,
+-- 2026-07-27, after trying both. Reading and adjusting are separate gestures:
+-- point at the words to find out what it does, point at the control to use it.
+--
+-- The label is a FontString and cannot take mouse input, so each widget gets one
+-- invisible frame sized to the label's own rect. That also handles a label wider
+-- than its container for free (the checkbox case) — the frame follows the TEXT,
+-- not the box, so there is no hit-rect arithmetic to keep in sync.
+--
+-- The anchor is whatever ShowTooltip defaults to — set in ONE place so no page
+-- can drift. Nothing here passes an anchor, deliberately.
+--
+-- The spec is read AT HOVER TIME, not when it is attached — every call site
+-- sets it after creation, on the container the factory returned:
+--     widget.tooltip = "body"                  title = the widget's own label
+--     widget.tooltip = { title=, lines=, tone= }   the full ShowTooltip shape
+--     widget.tooltipText / .tooltipSubText     legacy pair, still honoured
+-- ============================================================
+local function ResolveTooltipSpec(widget, label)
+    local t = widget.tooltip
+    if type(t) == "table" then
+        -- Full spec from the caller. Default the title to the label so the
+        -- common case only has to say what the setting DOES.
+        if t.title == nil then t.title = label end
+        return t
+    end
+    if type(t) == "string" and t ~= "" then
+        return { title = label, lines = { t } }
+    end
+    -- Legacy pair. Deliberately NOT re-titled from the label: these read as
+    -- title-then-subtitle by design (the Frame Level explainer, the override
+    -- markers), and re-titling them would change tooltips that are already
+    -- correct. New code should use .tooltip.
+    if widget.tooltipText then
+        return {
+            title = widget.tooltipText,
+            lines = widget.tooltipSubText and { widget.tooltipSubText } or nil,
+        }
+    end
+    return nil
+end
+
+--   widget       the frame the caller holds and sets .tooltip on (the container)
+--   label        the default title
+--   labelRegion  the label FontString — the hit frame is built over ITS rect
+function GUI:AttachTooltip(widget, label, labelRegion)
+    if not labelRegion then return end
+
+    local hit = CreateFrame("Frame", nil, widget)
+    -- Two-corner anchored to the FontString, so it tracks the text if the label
+    -- is ever re-set or re-fonted. The 2px vertical bleed makes a single line of
+    -- small text comfortable to hit without reaching the control below it.
+    hit:SetPoint("TOPLEFT", labelRegion, "TOPLEFT", 0, 2)
+    hit:SetPoint("BOTTOMRIGHT", labelRegion, "BOTTOMRIGHT", 0, -2)
+    hit:EnableMouse(true)
+    -- Above the widget's own children so the label area wins the mouse, but it
+    -- only ever covers the TEXT, so nothing clickable is behind it.
+    hit:SetFrameLevel((widget:GetFrameLevel() or 0) + 5)
+
+    hit:SetScript("OnEnter", function()
+        local spec = ResolveTooltipSpec(widget, label)
+        if spec then GUI:ShowTooltip(hit, spec) end
+    end)
+    hit:SetScript("OnLeave", function() GUI:HideTooltip() end)
+
+    widget.dfTooltipHit = hit   -- exposed for a caller that needs to re-anchor it
+    return hit
+end
+
 function GUI:StyleButton(btn, opts)
     opts = opts or {}
     if opts.width or opts.height then
         btn:SetSize(opts.width or btn:GetWidth(), opts.height or btn:GetHeight())
+    end
+    -- Land the height on an EVEN number of device pixels, whether it came from
+    -- opts or the caller sized the button itself. Buttons are chained with
+    -- centre-aligning anchors (Copy <- Sync <- Reset, Clicks <- Test <- Unlock),
+    -- so an odd height puts the whole row on a half pixel -- and since nothing
+    -- corrects a control's position at runtime, getting the size right at
+    -- construction is the only thing that keeps their edges crisp.
+    -- Construction-time and once, so it cannot drive an OnSizeChanged cascade.
+    local bh = btn:GetHeight()
+    if bh and bh > 0 then
+        local sh = SnapHeightEven(btn, bh)
+        if sh and math.abs(sh - bh) > 1e-4 then btn:SetHeight(sh) end
     end
     CreateElementBackdrop(btn)  -- mixes in BackdropTemplate if needed
 
@@ -2362,7 +3633,15 @@ function GUI:StyleButton(btn, opts)
         or (opts.tone == "success" and { 0.4, 0.85, 0.5 }) or nil
 
     if opts.text ~= nil then
-        btn.Text = btn.Text or btn:CreateFontString(nil, "OVERLAY", opts.font or "DFFontHighlightSmall")
+        if not btn.Text then
+            btn.Text = btn:CreateFontString(nil, "OVERLAY", opts.font or "DFFontHighlightSmall")
+            -- Register it as the button's font string so the NATIVE Button:SetText
+            -- / GetText keep working. Without this, a caller that relabels later
+            -- (a Start/Stop or Pause/Resume toggle) silently no-ops and the button
+            -- freezes on its first label -- an easy regression when converting a
+            -- Blizzard-template button, which always had one.
+            if btn.SetFontString then btn:SetFontString(btn.Text) end
+        end
         btn.Text:SetText(opts.text)
         if toneLabel then
             btn.Text:SetTextColor(toneLabel[1], toneLabel[2], toneLabel[3])
@@ -2445,6 +3724,19 @@ function GUI:StyleButton(btn, opts)
     -- being a neutral button with an accent hover. For role quick-add buttons etc.
     -- where the colour IS the button's identity. Pass a fixed opts.accent.
     local tinted = opts.tinted
+    -- Neutral hover (opts.hoverTone = "neutral"): the wash is the plain C_HOVER
+    -- grey and the border does NOT go accent. For surfaces that are a PLACE
+    -- rather than an action -- a card header, a list row -- where an accent
+    -- hover would read as "this is a call to action". Card headers and dropdown
+    -- rows previously hand-rolled this as an OnEnter/OnLeave SetBackdropColor
+    -- swap, which duplicated the rest colours at every site.
+    local neutralHover = opts.hoverTone == "neutral"
+    -- opts.restBorderColor: let a consumer keep its OWN border identity at rest --
+    -- e.g. an Aura/Text group card header tinted by that group's colour -- while
+    -- fill, hover, selection and disabled all stay shared. Applies ONLY to the
+    -- neutral rest branch; active / primary / tinted keep their accent-derived
+    -- borders, so the override can't fight a state the button is in.
+    local restBorder = opts.restBorderColor
     local hl = btn:GetHighlightTexture() or btn:CreateTexture(nil, "HIGHLIGHT")
     hl:SetTexture("Interface\\Buttons\\WHITE8x8")
     hl:SetAllPoints(btn)
@@ -2511,12 +3803,35 @@ function GUI:StyleButton(btn, opts)
             self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
         else
             self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-            self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+            if restBorder then
+                self:SetBackdropBorderColor(restBorder.r or restBorder[1],
+                                            restBorder.g or restBorder[2],
+                                            restBorder.b or restBorder[3],
+                                            restBorder.a or restBorder[4] or 1)
+            else
+                self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+            end
+        end
+    end
+
+    -- The hover wash's colour, factored out so it can be re-resolved at HOVER time
+    -- rather than only at build time. The theme listener registered below lands on
+    -- the button's PARENT, and a button parented into a scroll child -- every row
+    -- in the Filter Designer, the spell list, the binding editor -- hangs it on a
+    -- frame no theme walk ever visits. Its wash then stays frozen at whatever the
+    -- accent was when the page was built, so a raid-mode hover drew an orange
+    -- border (computed live in OnEnter) over a party-blue fill. The border was
+    -- always right; the wash simply wasn't asking again.
+    local function applyWash(c)
+        if neutralHover then
+            hl:SetVertexColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.55)
+        else
+            hl:SetVertexColor(c.r, c.g, c.b, (isTabStyle or ghost) and 0.15 or 0.30)
         end
     end
 
     btn.ApplyThemeColor = function(c)
-        hl:SetVertexColor(c.r, c.g, c.b, (isTabStyle or ghost) and 0.15 or 0.30)
+        applyWash(c)
         if isTabStyle then
             restBackdrop(btn, c)  -- keep the tab transparent (no fill/border)
             -- refresh the stripe colour + the active label to the new accent
@@ -2624,8 +3939,46 @@ function GUI:StyleButton(btn, opts)
         end
     end
 
-    btn:SetScript("OnEnter", function(self)
-        if isTabStyle or ghost then return end  -- tab/ghost: only the auto wash, no border
+    -- WHAT HOVERED LOOKS LIKE — the single implementation, so the mouse and a
+    -- proxying owner cannot drift apart. OnEnter/OnLeave below are thin wrappers.
+    --
+    -- ⚠ NO CURRENT CONSUMER. The Filter Designer's membership button was the one
+    -- caller and went with the filters merge (FilterRegistry/Options.lua says so).
+    -- Kept because the pattern recurs and the Lock/UnlockHighlight subtlety below
+    -- is not obvious enough to want rediscovered.
+    --
+    -- Call btn:SetHovered(true/false) when something ELSE owns the hit area and
+    -- forwards the click: a list row whose OnClick fires this button's action.
+    -- The row lighting its button says "this is what clicking the row does", and
+    -- it separates the button from the row's highlight by HUE, which is far more
+    -- robust than the couple of hundredths of grey that sit between C_HOVER and
+    -- C_ELEMENT (the Filter Designer's spell rows are exactly that case).
+    --
+    -- ⚠ Only wire this where the owner's click REALLY performs this button's
+    -- action. A control the owner does not fire must not light up with it —
+    -- priming a destructive button that the row will not actually trigger is
+    -- worse than the legibility problem it would be solving.
+    --
+    -- The wash lives on the HIGHLIGHT layer, which the client shows only for the
+    -- frame under the mouse, so a proxied hover needs Lock/UnlockHighlight — it
+    -- cannot just Show() the texture. The real mouseover is unaffected either
+    -- way: locking an already-hovered button is a no-op, and unlocking one still
+    -- under the mouse leaves the client's own highlight up.
+    local function applyHoverState(self, hovered)
+        if not hovered then
+            if isTabStyle or ghost then return end
+            if self:IsEnabled() and not self.dfDisabled then
+                restBackdrop(self, accent or GetThemeColor())
+            end
+            return
+        end
+        -- Re-resolve the wash against the CURRENT theme, exactly as the border does
+        -- below (see applyWash). Skipped when the caller pinned a fixed accent, and
+        -- while disabled -- SetDisabled parks the wash at alpha 0 and it must stay
+        -- parked, or a disabled button would light up under the mouse.
+        if not accent and not self.dfDisabled then applyWash(GetThemeColor()) end
+        -- tab/ghost/neutral: only the auto wash, no accent border
+        if isTabStyle or ghost or neutralHover then return end
         if self:IsEnabled() and not self.dfDisabled then
             local a = accent or GetThemeColor()
             if tinted then
@@ -2642,13 +3995,24 @@ function GUI:StyleButton(btn, opts)
                 self:SetBackdropBorderColor(a.r * 0.4, a.g * 0.4, a.b * 0.4, 1)
             end
         end
-    end)
-    btn:SetScript("OnLeave", function(self)
-        if isTabStyle or ghost then return end
-        if self:IsEnabled() and not self.dfDisabled then
-            restBackdrop(self, accent or GetThemeColor())
+    end
+
+    -- The proxied entry point. Lock/Unlock is HERE and not in applyHoverState so
+    -- a real mouseover never locks: a pooled button hidden mid-hover (a list
+    -- refreshing under a stationary mouse) would miss its OnLeave and come back
+    -- lit. An owner calling SetHovered accepts that responsibility instead and
+    -- must clear it when it rebinds the row.
+    function btn:SetHovered(hovered)
+        -- Lock/UnlockHighlight are Button-only, and StyleButton is applied to a
+        -- few plain Frames too; those still get the border half of the state.
+        if self.LockHighlight then
+            if hovered then self:LockHighlight() else self:UnlockHighlight() end
         end
-    end)
+        applyHoverState(self, hovered)
+    end
+
+    btn:SetScript("OnEnter", function(self) applyHoverState(self, true) end)
+    btn:SetScript("OnLeave", function(self) applyHoverState(self, false) end)
     return btn
 end
 
@@ -2698,9 +4062,85 @@ function GUI:CreateCloseButton(parent, opts)
     end)
     if opts.tooltip then
         btn:HookScript("OnEnter", function(self)
-            GUI:ShowTooltip(self, { title = opts.tooltip, anchor = "ANCHOR_TOP" })
+            GUI:ShowTooltip(self, { title = opts.tooltip})
         end)
         btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+    end
+    return btn
+end
+
+-- A bare clickable GLYPH: an icon with a hover cue and NO chrome. This is the
+-- small affordance that lives inside a row or a card header -- reorder arrows, an
+-- eye visibility toggle, a clear-search "x" -- where a button box would be
+-- heavier than the thing it acts on.
+--
+-- Deliberately its own helper: StyleButton always draws chrome, and
+-- CreateCloseButton is specifically the chromed "x". Before this existed, ~16
+-- sites hand-rolled the same three lines (create texture, tint it dim, brighten
+-- it in OnEnter and restore in OnLeave).
+--
+-- NOT this: a labelled row that merely CONTAINS an icon (a collapsible section
+-- header with a title + chevron, a collapse bar). There the click target is the
+-- whole row, not the glyph.
+--
+-- opts:
+--   texture     icon path            tooltip / onClick
+--   size        both dims (16)       width / height  -- button box, when the hit
+--                                    area is deliberately bigger than the art
+--   iconSize    art size (= size)    rotation  -- radians, so one arrow texture
+--                                    can serve both directions
+--   color       rest tint (C_TEXT_DIM)          hoverColor (white)
+--
+-- Returns the button with .Icon plus:
+--   :SetGlyph(texture, color)  re-point the art for a state change. The colour
+--       passed becomes the new REST colour, so a later OnLeave restores the
+--       state rather than snapping back to the original default.
+--   :SetGlyphHover(bool)  suppress the hover brighten -- an "off" state should
+--       not light up under the mouse.
+function GUI:CreateGlyphButton(parent, opts)
+    opts = opts or {}
+    local size = opts.size or 16
+    local iconSize = opts.iconSize or size
+
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(opts.width or size, opts.height or size)
+
+    local icon = btn:CreateTexture(nil, "OVERLAY")
+    icon:SetSize(iconSize, iconSize)
+    icon:SetPoint("CENTER", 0, 0)
+    if opts.texture then icon:SetTexture(opts.texture) end
+    if opts.rotation then icon:SetRotation(opts.rotation) end
+    btn.Icon = icon
+
+    local function unpackColor(c, dr, dg, db)
+        if not c then return dr, dg, db end
+        return c.r or c[1], c.g or c[2], c.b or c[3]
+    end
+    local hr, hg, hb = unpackColor(opts.hoverColor, 1, 1, 1)
+    btn._glyphHover = true
+    btn._glyphRest = { unpackColor(opts.color, C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b) }
+    icon:SetVertexColor(unpack(btn._glyphRest))
+
+    function btn:SetGlyph(texture, color)
+        if texture then self.Icon:SetTexture(texture) end
+        if color then self._glyphRest = { unpackColor(color) } end
+        self.Icon:SetVertexColor(unpack(self._glyphRest))
+    end
+
+    function btn:SetGlyphHover(enabled)
+        self._glyphHover = enabled and true or false
+    end
+
+    btn:SetScript("OnEnter", function(self)
+        if self._glyphHover then self.Icon:SetVertexColor(hr, hg, hb) end
+        if opts.tooltip then GUI:ShowTooltip(self, { title = opts.tooltip }) end
+    end)
+    btn:SetScript("OnLeave", function(self)
+        self.Icon:SetVertexColor(unpack(self._glyphRest))
+        if opts.tooltip then GUI:HideTooltip() end
+    end)
+    if opts.onClick then
+        btn:SetScript("OnClick", function(self) opts.onClick(self) end)
     end
     return btn
 end
@@ -2711,114 +4151,137 @@ end
 -- or {r,g,b,a array} }.
 function GUI:CreatePanelBackdrop(frame, opts)
     opts = opts or {}
-    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
-    -- Choose the edge with an explicit branch, NOT `cond and nil or X` — in Lua
-    -- that idiom always yields X (the `and nil` falls through the `or`), so
-    -- border=false would still draw an (untinted, i.e. WHITE) edge.
-    local edgeFile = "Interface\\Buttons\\WHITE8x8"
-    if opts.border == false then edgeFile = nil end
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = edgeFile,
-        edgeSize = 1,
-    })
     local bg = opts.bgColor or C_PANEL
-    frame:SetBackdropColor(bg.r or bg[1], bg.g or bg[2], bg.b or bg[3], opts.bgAlpha or bg.a or 0.95)
-    if opts.border ~= false then
-        local bc = opts.borderColor
-        if bc then
-            frame:SetBackdropBorderColor(bc.r or bc[1], bc.g or bc[2], bc.b or bc[3], bc.a or bc[4] or 1)
-        else
-            frame:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-        end
+    -- A panel's border is a full-strength 1px line, where the element default is
+    -- half-alpha, so the border colour is always passed explicitly rather than
+    -- left to CreateElementBackdrop's default.
+    local bc = opts.borderColor
+    return CreateElementBackdrop(frame, {
+        outline     = opts.border ~= false,
+        bgColor     = { bg.r or bg[1], bg.g or bg[2], bg.b or bg[3],
+                        opts.bgAlpha or bg.a or 0.95 },
+        borderColor = bc and { bc.r or bc[1], bc.g or bc[2], bc.b or bc[3],
+                               bc.a or bc[4] or 1 }
+                          or { C_BORDER.r, C_BORDER.g, C_BORDER.b, 1 },
+    })
+end
+
+-- Mover chrome: the translucent tinted plate a drag surface wears while the frames
+-- are unlocked. This is a SEPARATE helper from CreateElementBackdrop, not a flag on
+-- it, because a mover has the opposite job from settings chrome -- it is meant to
+-- shout. Giving movers the neutral element look would be a bug, not consistency.
+--
+-- The hue comes from the GUI theme constants (C_ACCENT party purple-blue / C_RAID
+-- raid orange) instead of a hardcoded literal, so retheming moves the movers too.
+--
+-- ⚠ Which POLE is the caller's choice, not GUI.SelectedMode's, because a mover
+-- belongs to the thing it moves: the raid mover must stay orange even while the
+-- options window happens to be showing a party page. Pass isRaid where the site
+-- knows; omit it only where the mover genuinely has no mode, and it will follow
+-- the selected mode.
+--
+-- opts:
+--   isRaid       true/false pins the pole; omit to follow GUI.SelectedMode
+--   color        {r,g,b} or {[1],[2],[3]} -- explicit override, for a mover whose
+--                colour is a user setting rather than the theme
+--   fillAlpha    default 0.30      borderAlpha  default 0.80
+--   fill = false outline only      edgeSize     default 2
+--
+-- The returned frame gains :RefreshMoverTint(), which re-resolves the hue against
+-- the theme as it stands now -- call it if the mode changes while a mover is shown.
+function GUI:CreateMoverBackdrop(frame, opts)
+    opts = opts or {}
+    local c = opts.color
+    if not c then
+        if opts.isRaid ~= nil then c = GetThemeColorFor(opts.isRaid)
+        else                       c = GetThemeColor() end
+    end
+    local r, g, b = c.r or c[1], c.g or c[2], c.b or c[3]
+    CreateElementBackdrop(frame, {
+        fill        = opts.fill,
+        edgeSize    = opts.edgeSize or 2,
+        bgColor     = { r, g, b, opts.fillAlpha or 0.30 },
+        borderColor = { r, g, b, opts.borderAlpha or 0.80 },
+    })
+    frame.RefreshMoverTint = function(self, newOpts)
+        return GUI:CreateMoverBackdrop(self, newOpts or opts)
     end
     return frame
 end
 
--- Element backdrop as a GUI method (the file-local CreateElementBackdrop is used
--- internally by the stylers; this exposes it to consumer files). Base look =
--- C_ELEMENT fill + C_BORDER border. opts = { bgColor, borderColor } ({r,g,b[,a]})
--- override either when an element panel wants a darker/custom fill or accent edge.
+-- The element backdrop, exposed to consumer files (the stylers in this file use
+-- the local directly). Nothing outside should be calling SetBackdrop itself --
+-- route it through here so the look, and the border mechanism, stay in one
+-- place. See the local for the opts contract: fill, outline, bgColor,
+-- borderColor, backdropEdge.
 function GUI:CreateElementBackdrop(frame, opts)
-    CreateElementBackdrop(frame)
-    if opts then
-        if opts.bgColor then
-            local c = opts.bgColor
-            frame:SetBackdropColor(c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1)
-        end
-        if opts.borderColor then
-            local c = opts.borderColor
-            frame:SetBackdropBorderColor(c.r or c[1], c.g or c[2], c.b or c[3], c.a or c[4] or 1)
-        end
-    end
-    return frame
+    return CreateElementBackdrop(frame, opts)
 end
 
 -- ============================================================
--- DESIGNER PRESET BAR (shared by the Aura / Text Designer editors)
--- Compact row: "Preset: [dropdown ▾]  [New][Duplicate][Rename][Delete]".
--- Picking a preset assigns it to the mode (opts.getMode()) AND retargets the
+-- DESIGNER TEMPLATE BAR (shared by the Aura / Text Designer editors)
+-- Compact row: "Template: [dropdown ▾]  [New][Duplicate][Rename][Delete]".
+-- NOTE: the saved keys are still auraDesignerPreset(s) / textDesignerPreset(s) --
+-- only the LABELS became "template". The keys are persisted and exported, so
+-- renaming them would cost a profile migration for nothing a user can see.
+-- "Preset" now means only the built-in filter sets (FilterRegistry) and the
+-- export/test quick-picks.
+-- Picking a template assigns it to the mode (opts.getMode()) AND retargets the
 -- editor; the buttons manage the library. After any change the bar calls
 -- opts.onChange() so the host page can rebuild + refresh live frames.
 -- opts = { kind = "aura"|"text", getMode = fn->mode, onChange = fn }.
 -- Returns the bar frame; call bar:Refresh() to resync.
 -- ============================================================
 
--- One reusable name-input popup (callback + default passed via `data`).
--- Structural dialog definitions; per-call handlers are assigned in the launchers
--- below (closures capturing default/callback) — the StaticPopup `data` field and
--- the editbox field name both vary across client versions, so we avoid relying
--- on them. The editbox is `self.EditBox` on current retail (12.0 GameDialog).
-StaticPopupDialogs["DANDERSFRAMES_PRESET_NAME"] = {
-    text = "%s",
-    button1 = ACCEPT or "Accept",
-    button2 = CANCEL or "Cancel",
-    hasEditBox = true,
-    editBoxWidth = 220,
-    maxLetters = 40,
-    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-}
+-- The addon's ONE name prompt. This was hand-rolled twice against Blizzard's
+-- StaticPopup edit box — here and in the Filter Designer — each copy carrying
+-- the same `self.EditBox or self.editBox or self:GetEditBox()` fallback for a
+-- field name that moves between client versions. Both now come through here and
+-- get DF chrome, so there is nothing left to keep in step.
+-- opts = { title, message, default, acceptLabel, maxLetters, onAccept(text) }
+function GUI:PromptName(opts)
+    opts = opts or {}
+    DF:ShowPopupInput({
+        title       = opts.title,
+        message     = opts.message,
+        text        = opts.default or "",
+        acceptLabel = opts.acceptLabel,
+        maxLetters  = opts.maxLetters or 40,
+        onAccept    = function(text)
+            -- Trim here so every caller's uniqueness check and empty-name
+            -- fallback sees the same thing.
+            if opts.onAccept then opts.onAccept(strtrim(text or "")) end
+        end,
+    })
+end
 
-StaticPopupDialogs["DANDERSFRAMES_PRESET_DELETE"] = {
-    text = "%s",
-    button1 = DELETE or "Delete",
-    button2 = CANCEL or "Cancel",
-    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-}
-
-local function PromptPresetName(titleText, default, callback)
-    local dialog = StaticPopupDialogs["DANDERSFRAMES_PRESET_NAME"]
-    dialog.OnShow = function(self)
-        local eb = self.EditBox or self.editBox or (self.GetEditBox and self:GetEditBox())
-        if eb then
-            eb:SetText(default or "")
-            eb:HighlightText()
-            eb:SetFocus()
-        end
-    end
-    dialog.OnAccept = function(self)
-        local eb = self.EditBox or self.editBox or (self.GetEditBox and self:GetEditBox())
-        if callback and eb then callback(eb:GetText()) end
-    end
-    dialog.EditBoxOnEnterPressed = function(self)
-        if callback then callback(self:GetText()) end
-        local p = self:GetParent()
-        if p then p:Hide() end
-    end
-    StaticPopup_Show("DANDERSFRAMES_PRESET_NAME", titleText)
+local function PromptPresetName(message, default, acceptLabel, callback)
+    GUI:PromptName({
+        title       = L["Template Name"],
+        message     = message,
+        default     = default,
+        acceptLabel = acceptLabel,
+        onAccept    = callback,
+    })
 end
 
 local function ConfirmDeletePreset(kind, name, onDone)
-    local dialog = StaticPopupDialogs["DANDERSFRAMES_PRESET_DELETE"]
-    dialog.OnAccept = function()
-        if DF.DeleteDesignerPreset then
-            DF:DeleteDesignerPreset(kind, name)
-            if onDone then onDone() end
-        end
-    end
-    StaticPopup_Show("DANDERSFRAMES_PRESET_DELETE",
-        format(L["Delete preset \"%s\"? Anything using it reverts to Default."], name))
+    DF:ShowPopupAlert({
+        title   = L["Delete Template"],
+        message = format(L["Delete template \"%s\"? Anything using it reverts to Default."], name),
+        buttons = {
+            {
+                label = L["Delete"],
+                onClick = function()
+                    if DF.DeleteDesignerPreset then
+                        DF:DeleteDesignerPreset(kind, name)
+                        if onDone then onDone() end
+                    end
+                end,
+            },
+            { label = L["Cancel"] },
+        },
+    })
 end
 
 function GUI:CreateDesignerPresetBar(parent, opts)
@@ -2832,7 +4295,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
 
     local label = bar:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     label:SetPoint("LEFT", 0, 0)
-    label:SetText(L["Preset:"])
+    label:SetText(L["Template:"])
     label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
     local function CurrentName()
@@ -2934,6 +4397,55 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         if menu:IsShown() then menu:Hide() else BuildMenu(); menu:Show() end
     end)
 
+    -- SHARING MARKER. A template can be pointed at by the other mode, a pinned
+    -- set or an auto layout, and editing it then changes every one of them —
+    -- which nothing on this bar used to say. The dropdown is a fixed 150px, so
+    -- the FACT rides as a glyph and the NAMES go in the tooltip, which is free.
+    --
+    -- Deliberately NOT clickable. Splitting a shared template off for this mode
+    -- is exactly what Duplicate does, two buttons to the right, and Duplicate
+    -- also lets you name the copy.
+    local shareIcon = ddBtn:CreateTexture(nil, "OVERLAY")
+    shareIcon:SetSize(12, 12)
+    shareIcon:SetPoint("RIGHT", arrow, "LEFT", -3, 0)
+    shareIcon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\sync")
+    shareIcon:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    shareIcon:Hide()
+
+    -- Read off the REFS, not the party/raid sync flag: sharing by hand (picking
+    -- the other mode's preset from this dropdown) counts exactly the same, and a
+    -- ref can't fall out of step with itself.
+    local function SharedWith()
+        if IsEditingLayout() and DF.IsLayoutDesignerInheriting and DF:IsLayoutDesignerInheriting(kind) then
+            return {}   -- inheriting: this bar isn't sitting on a preset of its own
+        end
+        return (DF.ListDesignerPresetUsers and DF:ListDesignerPresetUsers(kind, CurrentName(), getMode())) or {}
+    end
+
+    -- The consumers (Party/Raid, Auto Layouts, Pinned Frames) are spread across
+    -- three other pages, so naming them is the one thing this tooltip has to do
+    -- — the bar itself already shows what a template is. "can" holds for all
+    -- four: Auto Layouts and Pinned Frames may inherit their mode's instead
+    -- (a nil ref), and Party/Raid resolve to a default when nothing is set.
+    -- Names match their page titles so they are findable.
+    ddBtn:SetScript("OnEnter", function(self)
+        local lines = {
+            L["Templates can be used by Party, Raid, Auto Layouts and Pinned Frames."],
+        }
+        local shared = SharedWith()
+        if #shared > 0 then
+            lines[#lines + 1] = " "
+            lines[#lines + 1] = { text = format(L["Also used by: %s"], table.concat(shared, ", ")), accent = true }
+            -- "there" points back at the list above, so the consequence needs no
+            -- nouns of its own. It has to be said: a shared template's edits
+            -- reach a screen you are not looking at, and naming the users is
+            -- only the fact, not the warning.
+            lines[#lines + 1] = L["Edits apply there too."]
+        end
+        GUI:ShowTooltip(self, { title = L["Templates"], lines = lines })
+    end)
+    ddBtn:SetScript("OnLeave", function() GUI:HideTooltip() end)
+
     -- When editing a raid auto-layout, default the NEW preset name to the
     -- layout's name (e.g. editing "31-40" → prefill "31-40") so making a
     -- per-layout preset is one click + Enter. nil (blank) otherwise. (Duplicate
@@ -2966,7 +4478,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
                 PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
             end)
             b:HookScript("OnEnter", function(self)
-                GUI:ShowTooltip(self, { title = labelText, anchor = "ANCHOR_TOP" })
+                GUI:ShowTooltip(self, { title = labelText})
             end)
             b:HookScript("OnLeave", function() GUI:HideTooltip() end)
             return b
@@ -2975,7 +4487,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     end
 
     local newBtn = CreateAction(L["New"], "add", 48, function()
-        PromptPresetName(L["Name the new preset:"], EditingLayoutName() or "", function(text)
+        PromptPresetName(L["Name the new template:"], EditingLayoutName() or "", L["Create"], function(text)
             local n = DF:CreateDesignerPreset(kind, text)
             if n then
                 DF:SetModeDesignerPreset(kind, getMode(), n)
@@ -2989,7 +4501,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
         local cur = CurrentName()
         -- Duplicate defaults to "<source> copy" (New uses the layout name, but a
         -- duplicate is of a specific preset, so name it after the source).
-        PromptPresetName(L["Name the duplicated preset:"], cur .. " copy", function(text)
+        PromptPresetName(L["Name the duplicated template:"], cur .. " copy", L["Duplicate"], function(text)
             local n = DF:DuplicateDesignerPreset(kind, cur, text)
             if n then
                 DF:SetModeDesignerPreset(kind, getMode(), n)
@@ -3002,7 +4514,7 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     local renameBtn = CreateAction(L["Rename"], "edit", 62, function()
         local cur = CurrentName()
         if cur == DF.DEFAULT_PRESET then return end
-        PromptPresetName(L["Rename preset:"], cur, function(text)
+        PromptPresetName(L["Rename template:"], cur, L["Rename"], function(text)
             DF:RenameDesignerPreset(kind, cur, text)
             bar:Refresh(); onChange()
         end)
@@ -3031,6 +4543,13 @@ function GUI:CreateDesignerPresetBar(parent, opts)
 
     function bar:Refresh()
         ddBtn.text:SetText(CurrentLabel())
+        -- Make room for the share glyph only while it's up, so an unshared
+        -- preset keeps the full label width.
+        local isShared = #SharedWith() > 0
+        shareIcon:SetShown(isShared)
+        ddBtn.text:ClearAllPoints()
+        ddBtn.text:SetPoint("LEFT", 6, 0)
+        ddBtn.text:SetPoint("RIGHT", isShared and -30 or -16, 0)
         -- Rename/Delete act on the resolved preset; disable for the non-editable
         -- Default and while a layout is inheriting (you're following the global,
         -- not sitting on a layout-specific preset).
@@ -3042,7 +4561,22 @@ function GUI:CreateDesignerPresetBar(parent, opts)
     end
 
     bar:Refresh()
+    -- The sharing glyph reflects OTHER refs (the other mode, a pinned set, an
+    -- auto layout), which can change without changing THIS mode's — and both
+    -- designer pages early-return their rebuild when their own preset is
+    -- unchanged, so the glyph would sit stale. Register the live bar so the
+    -- shared page refresh can reach it. One slot per kind: a rebuilt page
+    -- overwrites its own entry, and a torn-down bar is hidden, so nothing
+    -- accumulates.
+    GUI._designerPresetBars = GUI._designerPresetBars or {}
+    GUI._designerPresetBars[kind] = bar
     return bar
+end
+
+function GUI:RefreshDesignerPresetBars()
+    for _, bar in pairs(GUI._designerPresetBars or {}) do
+        if bar.Refresh and bar:IsShown() then bar:Refresh() end
+    end
 end
 
 -- Creates a button with an icon and text
@@ -3075,13 +4609,14 @@ end
 function GUI:CreateSeeAlso(parent, links)
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     container:SetHeight(32)
-    container:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    -- The page's own footer: pinned to the bottom of the viewport on a SHORT
+    -- page instead of floating wherever the content happened to end. See the
+    -- footer block in the page layout.
+    container.isPageFooter = true
+    CreateElementBackdrop(container, {
+        bgColor     = { 0.1, 0.1, 0.1, 0.5 },
+        borderColor = { 0.3, 0.3, 0.3, 0.8 },
     })
-    container:SetBackdropColor(0.1, 0.1, 0.1, 0.5)
-    container:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.8)
     
     local label = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     label:SetPoint("TOPLEFT", 8, -10)
@@ -3194,8 +4729,16 @@ function GUI:CreateSeeAlso(parent, links)
             end
         end
         
-        -- Adjust container height based on rows
-        local newHeight = 10 + (rowCount * lineHeight)
+        -- Adjust container height based on rows.
+        --
+        -- Snapped HERE, where the number is computed, because this widget
+        -- MEASURES ITSELF: LayoutLinks runs from OnSizeChanged and from a
+        -- C_Timer.After(0), i.e. a frame AFTER the page layout has run.
+        -- Correcting the height after the fact cannot win -- whatever sets a
+        -- grid-aligned height, this function overwrites it on the next frame,
+        -- and the bar's bottom edge ends up split across two device rows.
+        -- Measured: 28 units at 1.40625 px/unit is 39.375px, 0.375 off.
+        local newHeight = SnapLen(container, 10 + (rowCount * lineHeight))
         container:SetHeight(newHeight)
         container.layoutHeight = newHeight + 5
     end
@@ -3300,6 +4843,76 @@ function GUI:CreateOverrideMarker(parent, size)
     end)
     btn:SetScript("OnLeave", function() GUI:HideTooltip() end)
     btn:Hide()
+    return btn
+end
+
+-- A bare checkbox sized for a LIST ROW — no label, no db binding, no settings-row
+-- geometry. GUI:CreateCheckbox is a whole 30px settings row with its own label and
+-- hit rect, which is the wrong shape entirely inside a 22px pooled list row that
+-- already owns its own text, count and selection accent.
+--
+-- The caller drives it: :SetChecked(bool) to paint, opts.onClick to react. It does
+-- NOT read or write the db itself, because a list row's meaning changes per bind
+-- (a pooled row is a different filter every refresh) and a captured dbKey would go
+-- stale the moment the pool rebinds.
+--
+-- ⚠ Clicks deliberately do NOT propagate. The override marker above lets them fall
+-- through because it is a passive marker; this is a control, and on a clickable row
+-- the two gestures must stay separate — tick the box to switch the filter on, click
+-- anywhere else to select it. Nothing here calls SetPropagateMouseClicks, which is
+-- PROTECTED on 12.1 anyway (see the note in CreateOverrideMarker).
+--
+-- ⚠ The BOX ITSELF is GUI:StyleCheckButton, the addon's one checkbox look — do not
+-- hand-roll it again. This was hand-rolled once and drifted four ways: it drew the
+-- Media\Icons\check GLYPH where every other checkbox in the addon draws a filled
+-- WHITE8x8 square (a different SYMBOL, not a different style), it skipped PixelUtil
+-- so it alone was unsnapped, it had no hover wash, and it recoloured its BORDER when
+-- checked, which nothing else does. CreateDebugCategoryRow is the precedent for this
+-- exact case — a list row with a checkbox — at the same size.
+--
+-- manualCheck because this is a plain Button, not a CheckButton: SetChecked below
+-- drives the mark. A real CheckButton would draw its checked mark through the native
+-- checked state, which has no disabled-checked texture here — so a greyed-but-ticked
+-- row (every filter row while All Buffs is on) would lose its tick entirely.
+--
+-- opts: { size = 16, checkSize = 9, onClick = function(checked) end,
+--         tooltip = title, tooltipDesc = line }
+function GUI:CreateRowToggle(parent, opts)
+    opts = opts or {}
+    local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    GUI:StyleCheckButton(btn, {
+        size        = opts.size or 16,
+        checkSize   = opts.checkSize or 9,
+        manualCheck = true,
+    })
+
+    btn.checked = false
+    function btn:SetChecked(on)
+        self.checked = on and true or false
+        -- Re-tint on every paint. StyleCheckButton registers its theme listener on
+        -- this button's PARENT, which for a pooled list row is a frame inside a
+        -- scroll child that the page's theme walk never visits (same trap as
+        -- StyleButton's wash). The list rebinds every row on refresh, and a refresh
+        -- is what a mode switch produces, so painting the accent here is what
+        -- actually carries party purple -> raid orange.
+        self.ApplyThemeColor(GetThemeColor())
+        self.Check:SetShown(self.checked)
+    end
+
+    btn:SetScript("OnClick", function(s)
+        if s.onClick then s.onClick(not s.checked) end
+    end)
+    btn:SetScript("OnEnter", function(s)
+        if s.tooltipText then
+            GUI:ShowTooltip(s, { title = s.tooltipText, lines = s.tooltipDesc and { s.tooltipDesc } or nil })
+        end
+    end)
+    btn:SetScript("OnLeave", function() GUI:HideTooltip() end)
+
+    btn.onClick = opts.onClick
+    btn.tooltipText = opts.tooltip
+    btn.tooltipDesc = opts.tooltipDesc
+    btn:SetChecked(false)
     return btn
 end
 
@@ -3662,6 +5275,7 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(220, 24)
     container.preferredHeight = GUI.RowHeight.checkbox   -- factory-owned slot height (see GUI.RowHeight)
+    container.rowKind = "checkbox"       -- /df gapcheck groups the spacing report by this
     container.fixedRowHeight = true
 
     local cb = CreateFrame("CheckButton", nil, container, "BackdropTemplate")
@@ -3766,14 +5380,11 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
         end
     end
 
-    -- Tooltip support: show container.tooltip on hover
-    container:EnableMouse(true)
-    container:SetScript("OnEnter", function(self)
-        if self.tooltip then
-            GUI:ShowTooltip(self, { title = label, anchor = "ANCHOR_CURSOR", lines = { self.tooltip } })
-        end
-    end)
-    container:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    -- Tooltip: shared attach on the LABEL only (see GUI:AttachTooltip). The
+    -- earlier hit-rect arithmetic here is gone with it — the hit frame is anchored
+    -- to the FontString, so a label overflowing the fixed 220 container is covered
+    -- for free rather than by widening the container's hit rect to match.
+    GUI:AttachTooltip(container, label, txt)
 
     UpdateState()
     
@@ -3805,6 +5416,10 @@ end
 --   opts.segmentWidth (26) / opts.height (18)
 --   opts.fallbackValue : treated as selected when the stored value matches
 --              no segment, so an unset key still lights the right button
+--   opts.customGet / opts.customSet : same convention as CreateCheckbox /
+--              CreateSlider / CreateDropdown — for a toggle over TRANSIENT UI
+--              state (or one with its own save path) rather than a db key. Pass
+--              dbTable/dbKey as nil when using these.
 -- Returns the container with :Refresh(), :refreshContent() and :SetEnabled().
 -- ============================================================
 function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opts)
@@ -3816,6 +5431,19 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     container:SetSize(segW * #segments + pad * 2, h + pad * 2)
     CreateElementBackdrop(container)   -- the recessed track behind every segment
+
+    -- One read/write pair for both pathways, so the click handler and Refresh
+    -- can't drift apart. Explicit ifs, not `a and b or c` — a stored value of
+    -- false/nil is legitimate.
+    local function GetValue()
+        if opts.customGet then return opts.customGet() end
+        if dbTable and dbKey then return dbTable[dbKey] end
+    end
+    local function SetValue(v)
+        if opts.customSet then opts.customSet(v) return true end
+        if dbTable and dbKey then dbTable[dbKey] = v return true end
+        return false
+    end
 
     local buttons = {}
     for i, seg in ipairs(segments) do
@@ -3831,9 +5459,8 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
             btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
         end
         btn:SetScript("OnClick", function(self)
-            if not (dbTable and dbKey) then return end
-            if dbTable[dbKey] == self.value then return end
-            dbTable[dbKey] = self.value
+            if GetValue() == self.value then return end
+            if not SetValue(self.value) then return end
             container:Refresh()
             if callback then callback(self.value) end
         end)
@@ -3844,7 +5471,7 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
     -- label so the state still reads at a glance in a themed accent that is close
     -- to the resting border colour.
     function container:Refresh()
-        local cur = dbTable and dbKey and dbTable[dbKey]
+        local cur = GetValue()
         local matched = false
         for _, b in ipairs(buttons) do if b.value == cur then matched = true end end
         if not matched then cur = opts.fallbackValue end
@@ -3872,189 +5499,6 @@ function GUI:CreateSegmentToggle(parent, segments, dbTable, dbKey, callback, opt
     return container
 end
 
--- ============================================================
--- TOGGLE SWITCH
--- A two-state toggle for mutually exclusive options. Two labels
--- flank a pill-shaped track with a sliding thumb. The active
--- label is bright, the inactive label is dimmed.
---
--- API: GUI:CreateToggleSwitch(parent, labelA, labelB, dbTable,
---        dbKey, valueA, valueB, callback)
---   labelA / labelB : display text for each state
---   valueA / valueB : the db values those states map to
--- ============================================================
-function GUI:CreateToggleSwitch(parent, labelA, labelB, dbTable, dbKey, valueA, valueB, callback)
-    local container = CreateFrame("Frame", nil, parent)
-    container:SetSize(260, 24)
-    container.preferredHeight = GUI.RowHeight.toggle   -- factory-owned slot height (see GUI.RowHeight)
-    container.fixedRowHeight = true
-
-    -- Left label
-    local txtA = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    txtA:SetPoint("LEFT", 0, 0)
-    txtA:SetText(labelA)
-
-    -- Track (pill shape, fixed width)
-    local trackWidth, trackHeight = 36, 18
-    local track = CreateFrame("Frame", nil, container, "BackdropTemplate")
-    track:SetSize(trackWidth, trackHeight)
-    track:SetPoint("LEFT", txtA, "RIGHT", 8, 0)
-
-    -- Right label (anchored to track)
-    local txtB = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    txtB:SetPoint("LEFT", track, "RIGHT", 8, 0)
-    txtB:SetText(labelB)
-    track:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    track:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    track:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-
-    -- Thumb
-    local thumbSize = trackHeight - 4
-    local thumb = track:CreateTexture(nil, "OVERLAY")
-    thumb:SetSize(thumbSize, thumbSize)
-    thumb:SetTexture("Interface\\Buttons\\WHITE8x8")
-
-    -- Fill highlight spanning the full track interior
-    local fill = track:CreateTexture(nil, "ARTWORK")
-    fill:SetTexture("Interface\\Buttons\\WHITE8x8")
-    fill:SetPoint("TOPLEFT", 2, -2)
-    fill:SetPoint("BOTTOMRIGHT", -2, 2)
-
-    -- Override indicator support
-    local effectiveOverrideKey = dbKey
-    if effectiveOverrideKey and type(effectiveOverrideKey) == "string" then
-        local function onReset()
-            if DF.AutoProfilesUI then
-                DF.AutoProfilesUI:ResetProfileSetting(effectiveOverrideKey)
-                local globalVal = DF.AutoProfilesUI:GetGlobalValue(effectiveOverrideKey)
-                if dbTable and dbKey then
-                    dbTable[dbKey] = globalVal
-                end
-                if container.UpdateOverrideIndicators then
-                    container:UpdateOverrideIndicators(globalVal)
-                end
-                DF:UpdateAll()
-                if callback then callback() end
-            end
-        end
-        AddOverrideIndicators(container, txtB, effectiveOverrideKey, onReset, nil, nil, dbTable)
-    end
-
-    -- Visual refresh
-    local function UpdateVisuals()
-        local val
-        if dbTable and dbKey then val = dbTable[dbKey] end
-        local isB = (val == valueB)
-
-        local tc = GetThemeColor()
-        thumb:ClearAllPoints()
-        if isB then
-            thumb:SetPoint("RIGHT", track, "RIGHT", -2, 0)
-        else
-            thumb:SetPoint("LEFT", track, "LEFT", 2, 0)
-        end
-
-        thumb:SetVertexColor(tc.r, tc.g, tc.b, 1)
-        fill:SetVertexColor(tc.r, tc.g, tc.b, 0.25)
-
-        -- Label colors
-        if isB then
-            txtA:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            txtB:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        else
-            txtA:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            txtB:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        end
-
-        if container.UpdateOverrideIndicators then
-            container:UpdateOverrideIndicators(val)
-        end
-    end
-
-    -- Click handler (shared by track and both labels)
-    local function Toggle()
-        local current = dbTable and dbKey and dbTable[dbKey]
-        local newVal = (current == valueB) and valueA or valueB
-
-        -- Runtime override protection
-        if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-           and DF.AutoProfilesUI:HandleRuntimeWrite(effectiveOverrideKey, newVal) then
-            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(newVal) end
-            return
-        end
-
-        if dbTable and dbKey then dbTable[dbKey] = newVal end
-
-        -- Profile editing
-        if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() and effectiveOverrideKey then
-            DF.AutoProfilesUI:SetProfileSetting(effectiveOverrideKey, newVal)
-        end
-
-        UpdateVisuals()
-
-        if callback then callback() end
-        if parent.RefreshStates then parent:RefreshStates() end
-        DF:UpdateAll()
-    end
-
-    track:EnableMouse(true)
-    track:SetScript("OnMouseUp", function() Toggle() end)
-    txtA:SetParent(container)
-    txtB:SetParent(container)
-    -- Make labels clickable via the container
-    container:EnableMouse(true)
-    container:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" then Toggle() end
-    end)
-
-    -- Theme support
-    track.UpdateTheme = function()
-        UpdateVisuals()
-    end
-    if not parent.ThemeListeners then parent.ThemeListeners = {} end
-    table.insert(parent.ThemeListeners, track)
-
-    container:SetScript("OnShow", UpdateVisuals)
-
-    -- Tooltip support
-    container:SetScript("OnEnter", function(self)
-        if self.tooltip then
-            GUI:ShowTooltip(self, { title = labelA .. " / " .. labelB, anchor = "ANCHOR_CURSOR", lines = { self.tooltip } })
-        end
-        -- Hover highlight on track
-        track:SetBackdropBorderColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
-    end)
-    container:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-        track:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 1)
-    end)
-
-    -- Enable/disable
-    container.SetEnabled = function(self, enabled)
-        track:EnableMouse(enabled)
-        self:EnableMouse(enabled)
-        if enabled then
-            UpdateVisuals()
-        else
-            txtA:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            txtB:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-            thumb:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.5)
-            fill:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.1)
-        end
-    end
-
-    -- Search registration
-    if DF.Search and dbKey and type(dbKey) == "string" then
-        container.searchEntry = DF.Search:RegisterCheckbox(labelA .. " / " .. labelB, dbKey, nil, false, callback)
-    end
-
-    UpdateVisuals()
-    return container
-end
 
 -- ============================================================
 -- DEBUG CATEGORY ROW
@@ -4135,7 +5579,7 @@ function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width)
     end)
     row:SetScript("OnLeave", function(self)
         self.hoverBg:Hide()
-        GameTooltip:Hide()
+        GUI:HideTooltip()
     end)
 
     row:SetScript("OnShow", row.RefreshState)
@@ -4144,20 +5588,23 @@ function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width)
     return row
 end
 
+-- The one input "well": translucent-black fill + dim edge. Shared by StyleEditBox
+-- (the single-line field) and CreateTextArea (the scrolling multi-line container)
+-- so a text area and a text field read as the same control at two sizes. Passed
+-- straight to CreateElementBackdrop, which only reads them.
+local INPUT_FILL = { 0, 0, 0, 0.5 }
+local INPUT_EDGE = { 0.3, 0.3, 0.3, 1 }
+
 -- StyleEditBox: normalize a bare (label-less) EditBox to the standard input
 -- chrome used by CreateInput/CreateEditBox — translucent-black fill + dim border
 -- + standard font/insets. The caller still owns size/position/scripts. Pass
 -- opts.skipFont to keep a custom font (e.g. multi-line / monospace inputs).
 function GUI:StyleEditBox(eb, opts)
     opts = opts or {}
-    if not eb.SetBackdrop then Mixin(eb, BackdropTemplateMixin) end
-    eb:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    CreateElementBackdrop(eb, {
+        bgColor     = INPUT_FILL,
+        borderColor = INPUT_EDGE,
     })
-    eb:SetBackdropColor(0, 0, 0, 0.5)
-    eb:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
     if not opts.skipFont then
         eb:SetFontObject(DFFontHighlightSmall)
         eb:SetTextInsets(5, 5, opts.multiline and 5 or 0, opts.multiline and 5 or 0)
@@ -4182,19 +5629,14 @@ function GUI:CreateInput(parent, label, width)
     lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
     local editbox = CreateFrame("EditBox", nil, frame)
-    editbox:SetPoint("TOPLEFT", 0, -15)
-    editbox:SetPoint("TOPRIGHT", 0, -15)
-    editbox:SetHeight(24)
-    if not editbox.SetBackdrop then Mixin(editbox, BackdropTemplateMixin) end
-    editbox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    editbox:SetBackdropColor(0, 0, 0, 0.5)
-    editbox:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-    editbox:SetFontObject(DFFontHighlightSmall)
-    editbox:SetTextInsets(5, 5, 0, 0)
+    -- Two-corner anchored, so the offset and the height are the ONLY levers --
+    -- Nothing corrects a frame's position at runtime, and controls are not
+    -- position-corrected at all any more. Snap both and all four edges land.
+    local ebY = SnapLen(editbox, -15) or -15
+    editbox:SetPoint("TOPLEFT", 0, ebY)
+    editbox:SetPoint("TOPRIGHT", 0, ebY)
+    editbox:SetHeight(SnapLen(editbox, 24) or 24)
+    GUI:StyleEditBox(editbox)   -- shared input chrome: fill, border, font, insets
     editbox:SetAutoFocus(false)
     editbox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     editbox:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
@@ -4212,6 +5654,12 @@ function GUI:CreateInput(parent, label, width)
     end
 
     frame.EditBox = editbox
+    -- Tooltip: shared attach on the LABEL only. This factory carried no tooltip
+    -- support at all, so a caller that set .tooltip on it got silence —
+    -- Options.lua's custom range-spell input did exactly that, and its
+    -- explanation never appeared. Keeping it off the edit box also means it can't
+    -- cover what you are typing.
+    GUI:AttachTooltip(frame, label, lbl)
     return frame
 end
 
@@ -4220,6 +5668,7 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
     local frame = CreateFrame("Frame", nil, parent)
     frame:SetSize(width or 180, 44)
     frame.preferredHeight = GUI.RowHeight.editbox   -- factory-owned slot height (see GUI.RowHeight)
+    frame.rowKind = "editbox"
     frame.fixedRowHeight = true
     
     local lbl = frame:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -4250,21 +5699,16 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
     end
     
     local editbox = CreateFrame("EditBox", nil, frame)
-    editbox:SetPoint("TOPLEFT", 0, -15)
-    editbox:SetPoint("TOPRIGHT", 0, -15)
-    editbox:SetHeight(24)
-    if not editbox.SetBackdrop then Mixin(editbox, BackdropTemplateMixin) end
-    editbox:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    editbox:SetBackdropColor(0, 0, 0, 0.5)
-    editbox:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
-    editbox:SetFontObject(DFFontHighlightSmall)
-    editbox:SetTextInsets(5, 5, 0, 0)
+    -- Two-corner anchored, so the offset and the height are the ONLY levers --
+    -- Nothing corrects a frame's position at runtime, and controls are not
+    -- position-corrected at all any more. Snap both and all four edges land.
+    local ebY = SnapLen(editbox, -15) or -15
+    editbox:SetPoint("TOPLEFT", 0, ebY)
+    editbox:SetPoint("TOPRIGHT", 0, ebY)
+    editbox:SetHeight(SnapLen(editbox, 24) or 24)
+    GUI:StyleEditBox(editbox)   -- shared input chrome: fill, border, font, insets
     editbox:SetAutoFocus(false)
-    
+
     -- Set initial value from db
     if dbTable and dbKey then
         editbox:SetText(dbTable[dbKey] or "")
@@ -4311,6 +5755,9 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
         local function UpdatePlaceholder()
             ph:SetShown(not editbox:HasFocus() and editbox:GetText() == "")
         end
+        -- Exposed so a caller that puts something INSIDE the box (see
+        -- GUI:AddEditBoxIcon) can move the placeholder clear of it.
+        editbox.Placeholder = ph
         editbox.UpdatePlaceholder = UpdatePlaceholder
         editbox:HookScript("OnTextChanged", UpdatePlaceholder)
         editbox:HookScript("OnEditFocusGained", UpdatePlaceholder)
@@ -4346,6 +5793,173 @@ function GUI:CreateEditBox(parent, label, dbTable, dbKey, callback, width, place
     return frame
 end
 
+-- ============================================================
+-- LEADING ICON INSIDE AN EDIT BOX
+-- The search-bar look from the main addon search (Features/Search.lua), made
+-- available to any CreateEditBox rather than re-rolled per search field: the
+-- glyph, the same 0.72 grey, and — the part that is easy to forget — the text
+-- inset AND the placeholder both moved clear of it, so neither the typed text
+-- nor the "Search..." hint runs underneath the icon.
+--
+-- Pass frame.EditBox, not the frame.
+-- ============================================================
+function GUI:AddEditBoxIcon(editbox, texture, size)
+    if not editbox or not texture then return end
+    size = size or 14
+    local icon = editbox:CreateTexture(nil, "OVERLAY")
+    icon:SetSize(size, size)
+    icon:SetPoint("LEFT", 6, 0)
+    icon:SetTexture(texture)
+    icon:SetVertexColor(0.72, 0.72, 0.72)
+    editbox.Icon = icon
+
+    local left = 6 + size + 5
+    local _, right, top, bottom = editbox:GetTextInsets()
+    editbox:SetTextInsets(left, right, top, bottom)
+    if editbox.Placeholder then
+        editbox.Placeholder:SetPoint("LEFT", left, 0)
+    end
+    return icon
+end
+
+-- ============================================================
+-- TEXT AREA — the multi-line cousin of CreateEditBox
+-- A bordered well holding a scrolling multi-line EditBox. Eight surfaces built
+-- this same container + ScrollFrame + EditBox stack by hand (export/import blobs,
+-- the debug log viewer and script runner, the macro body, the popup's input mode,
+-- the changelog), each picking its own well colour and three of them forgetting
+-- the click-to-focus, so clicking the empty space below the text did nothing.
+-- One owner, and the same well as every single-line input.
+--
+-- opts:
+--   width, height        size the well; omit and anchor it yourself
+--   text                 initial contents
+--   fontObject           default DFFontHighlightSmall
+--   fontSize, fontFlags  use the settings font at a size instead of a font object
+--   maxLetters
+--   readOnly             show-and-copy (export strings, the changelog): user
+--                        edits bounce back, but it stays selectable + copyable
+--   autoFocus            take focus and select all on creation (copy-me popups)
+--   onTextChanged(text, userInput)
+--   onEscape(editBox)    default: clear focus
+--   bgColor, borderColor override the standard input well
+--   plain                skip the well entirely — for a text area that fills a
+--                        surface which already has its own panel (the changelog)
+--   insets               text insets, default 4
+-- Returns the well, with .EditBox / .ScrollFrame and SetText / GetText /
+-- HighlightText / SetFocus / ClearFocus / SetEnabled forwarded to the field.
+-- ============================================================
+local TEXTAREA_PAD    = 4    -- gap between the well's edge and the scroll frame
+local TEXTAREA_GUTTER = 18   -- room right of the scroll for the themed scrollbar
+
+function GUI:CreateTextArea(parent, opts)
+    opts = opts or {}
+
+    local well = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    if opts.width and opts.height then well:SetSize(opts.width, opts.height) end
+    local pad = opts.plain and 0 or TEXTAREA_PAD
+    if not opts.plain then
+        CreateElementBackdrop(well, {
+            bgColor     = opts.bgColor or INPUT_FILL,
+            borderColor = opts.borderColor or INPUT_EDGE,
+        })
+    end
+
+    local scroll = CreateFrame("ScrollFrame", nil, well, "ScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", pad, -pad)
+    scroll:SetPoint("BOTTOMRIGHT", -(pad + TEXTAREA_GUTTER), pad)
+    StyleScrollBar(scroll)
+
+    local eb = CreateFrame("EditBox", nil, scroll)
+    eb:SetMultiLine(true)
+    eb:SetAutoFocus(false)
+    if opts.fontSize then
+        GUI:SetSettingsFont(eb, opts.fontSize, opts.fontFlags or "")
+    else
+        eb:SetFontObject(opts.fontObject or DFFontHighlightSmall)
+    end
+    eb:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local inset = opts.insets or (opts.plain and 0 or TEXTAREA_PAD)
+    eb:SetTextInsets(inset, inset, inset, inset)
+    if opts.maxLetters then eb:SetMaxLetters(opts.maxLetters) end
+    eb:SetScript("OnEscapePressed", opts.onEscape or function(s) s:ClearFocus() end)
+    scroll:SetScrollChild(eb)
+
+    -- A scroll child has to be told its size, and that is only known once the
+    -- well has been sized or its anchors have resolved — which for an anchored
+    -- (rather than SetSize'd) well is not this frame. So do it here AND on every
+    -- resize, which is also what lets a text area sit in a resizable window
+    -- without the caller re-setting the width by hand on every show.
+    --
+    -- Height is seeded ONCE and then left alone: after that the field owns it,
+    -- growing its own rect as text is added, which is what makes the scroll
+    -- frame scroll. Re-seeding on resize would clamp a grown field back down.
+    local heightSeeded = false
+    local function SyncSize(w, h)
+        if w and w > 0 then eb:SetWidth(w) end
+        if h and h > 0 and not heightSeeded then
+            heightSeeded = true
+            eb:SetHeight(h)
+        end
+    end
+    scroll:SetScript("OnSizeChanged", function(_, w, h) SyncSize(w, h) end)
+    SyncSize(scroll:GetWidth(), scroll:GetHeight())
+
+    -- Clicking anywhere in the well lands in the field, not just on the text
+    -- itself — the contents rarely fill the box.
+    well:EnableMouse(true)
+    well:SetScript("OnMouseDown", function() eb:SetFocus() end)
+    scroll:EnableMouse(true)
+    scroll:SetScript("OnMouseDown", function() eb:SetFocus() end)
+
+    well.EditBox, well.ScrollFrame = eb, scroll
+    well.GetText       = function(_) return eb:GetText() end
+    well.HighlightText = function(_, ...) eb:HighlightText(...) end
+    well.SetFocus      = function(_) eb:SetFocus() end
+    well.ClearFocus    = function(_) eb:ClearFocus() end
+    well.SetText       = function(_, text)
+        eb:SetText(text or "")
+        eb:SetCursorPosition(0)   -- long blobs open at the top, not the tail
+    end
+
+    -- Grey-when-disabled, per the GUI conventions: dim the whole widget AND stop
+    -- it accepting edits.
+    well.SetEnabled = function(self, enabled)
+        self:SetAlpha(enabled and 1 or 0.4)
+        eb:SetEnabled(enabled)
+    end
+
+    -- WoW has no read-only EditBox. Bouncing the text back on any USER change
+    -- keeps Ctrl+A / Ctrl+C working, which EnableKeyboard(false) would not.
+    if opts.readOnly then
+        local locked = opts.text or ""
+        eb:SetScript("OnTextChanged", function(s, user)
+            if user and s:GetText() ~= locked then
+                s:SetText(locked)
+                s:HighlightText()
+            end
+        end)
+        well.SetText = function(_, text)
+            locked = text or ""
+            eb:SetText(locked)
+            eb:SetCursorPosition(0)
+        end
+    elseif opts.onTextChanged then
+        eb:SetScript("OnTextChanged", function(s, user)
+            opts.onTextChanged(s:GetText(), user)
+        end)
+    end
+
+    if opts.text then well:SetText(opts.text) end
+    if opts.autoFocus then
+        eb:SetAutoFocus(true)
+        eb:SetFocus()
+        eb:HighlightText()
+    end
+
+    return well
+end
+
 -- customGet / customSet (optional, matches CreateDropdown's pattern): when
 -- provided, the slider routes its reads and writes through these functions
 -- instead of dbTable[dbKey] directly. Used by widgets whose underlying value
@@ -4356,10 +5970,12 @@ end
 -- top level of dbTable.
 -- accentColor (optional {r,g,b}): fixed thumb/fill colour instead of the mode
 -- theme — for ClickCasting (green) / Search (blue) which keep their identity.
+
 function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, callback, lightweightUpdate, usePreviewMode, customGet, customSet, accentColor)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 50)
     container.preferredHeight = GUI.RowHeight.slider   -- factory-owned slot height (see GUI.RowHeight)
+    container.rowKind = "slider"
     container.fixedRowHeight = true
     
     -- Label
@@ -4390,10 +6006,16 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
         AddOverrideIndicators(container, lbl, dbKey, onReset, 6, nil, dbTable)
     end
 
-    -- Background track
+    -- Background track.
+    -- Left edge and height here; the RIGHT edge is pinned to the value box further
+    -- down, once that exists. The track used to be a fixed 180px while a dropdown
+    -- anchors TOPLEFT+TOPRIGHT and fills its container, so on any panel wider than
+    -- the 260 default the two controls ended at visibly different x positions --
+    -- and drifted further apart the wider the panel got. Both are container-driven
+    -- now, so they line up at any width instead of at one magic number.
     local track = CreateFrame("Frame", nil, container, "BackdropTemplate")
-    track:SetPoint("TOPLEFT", 0, -18)
-    track:SetSize(180, 8)
+    track:SetPoint("TOPLEFT", 0, SnapLen(track, -18) or -18)
+    track:SetHeight(SnapLen(track, 8) or 8)
     CreateElementBackdrop(track)
     
     -- Fill track (colored portion)
@@ -4405,8 +6027,10 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     
     -- Slider
     local slider = CreateFrame("Slider", nil, container)
-    slider:SetPoint("TOPLEFT", 0, -18)
-    slider:SetSize(180, 8)
+    -- Same snapped offset/height as the track it sits on, or the invisible hit
+    -- area drifts off the visible bar by a fraction of a pixel.
+    slider:SetPoint("TOPLEFT", 0, SnapLen(slider, -18) or -18)
+    slider:SetHeight(SnapLen(slider, 8) or 8)   -- right edge pinned to the value box, same as the track
     slider:SetOrientation("HORIZONTAL")
     slider:SetMinMaxValues(minVal, maxVal)
     slider:SetValueStep(step)
@@ -4428,8 +6052,13 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     
     -- Value input
     local input = CreateFrame("EditBox", nil, container, "BackdropTemplate")
-    input:SetPoint("LEFT", track, "RIGHT", 8, 0)
     input:SetSize(50, 20)
+    -- Pinned to the container's RIGHT edge -- the same edge a dropdown's opener
+    -- ends on -- and the track/slider then stretch from the left to meet it.
+    -- y = -12 keeps the 20px box centred on the 8px track at -18.
+    input:SetPoint("TOPRIGHT", 0, -12)
+    track:SetPoint("RIGHT", input, "LEFT", -8, 0)
+    slider:SetPoint("RIGHT", input, "LEFT", -8, 0)
     CreateElementBackdrop(input)
     input:SetFontObject(DFFontHighlightSmall)
     input:SetJustifyH("CENTER")
@@ -4439,8 +6068,17 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     local function UpdateFill()
         local val = slider:GetValue()
         local pct = (val - minVal) / (maxVal - minVal)
-        fill:SetWidth(math.max(1, pct * 178))
+        -- Measured off the LIVE track, not the old hardcoded 178 (= the fixed 180
+        -- track minus the fill's 1px inset each side). The track stretches now, so
+        -- a constant here would under-fill on any panel wider than the default.
+        local usable = (track:GetWidth() or 0) - 2
+        if usable < 1 then usable = 1 end
+        fill:SetWidth(math.max(1, pct * usable))
     end
+    -- The track's width is only known once the page layout has resolved its
+    -- anchors, and changes again if the panel is resized -- so repaint the fill
+    -- whenever it does, or the bar renders at its pre-layout width.
+    track:SetScript("OnSizeChanged", function() UpdateFill() end)
     
     container.SetEnabled = function(self, enabled)
         slider:SetEnabled(enabled)
@@ -4659,12 +6297,30 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     -- Expose label for dynamic updates
     container.label = lbl
 
+    -- Tooltip: shared attach on the LABEL only (see GUI:AttachTooltip). Keeping it
+    -- off the bar matters most here — a tooltip over a slider you are dragging is
+    -- the worst case of the problem. Both .tooltip (title from the label) and the
+    -- legacy .tooltipText/.tooltipSubText pair are honoured.
+    GUI:AttachTooltip(container, label, lbl)
+
     return container
+end
+
+-- Stamp the shared Frame Level explanation onto a slider. One helper rather than the same
+-- two strings at 21 call sites, and it keeps the wording in ONE place -- the old per-page
+-- label went stale the moment the scale changed (it still read "0=Auto" afterwards).
+-- Takes the CONTAINER that CreateSlider returns, which is what every call site has.
+function GUI:SetFrameLevelTooltip(container)
+    if not container then return end
+    container.tooltipText    = L["Frame Level"]
+    container.tooltipSubText = L["Higher numbers draw on top of lower ones. Every Frame Level in DandersFrames uses the same scale, counted up from the unit frame, so you can compare them directly."]
+    return container   -- chainable, so it wraps a CreateSlider call in place
 end
 
 -- Dual-handle range slider: two draggable handles select a [lo, hi] sub-range of
 -- [minRange, maxRange]. Self-contained — the caller anchors the returned track
--- frame and reads values via :GetValues() / the onChange callback. Drag is
+-- frame and reads values via the onChange callback. (:GetValues() also exists and
+-- completes the SetValues pair, but no current consumer polls it.) Drag is
 -- tracked on the track's own OnUpdate (no dependence on parent scripts), and a
 -- mouse-button check releases the drag even if the cursor leaves the handle.
 -- opts:
@@ -4683,13 +6339,10 @@ function GUI:CreateRangeSlider(parent, opts)
 
     local track = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     track:SetSize(width, 12)
-    track:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    CreateElementBackdrop(track, {
+        bgColor     = { 0.03, 0.03, 0.03, 1 },
+        borderColor = { 0.2, 0.2, 0.2, 1 },
     })
-    track:SetBackdropColor(0.03, 0.03, 0.03, 1)
-    track:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
 
     track.minRange = opts.minRange or 1
     track.maxRange = opts.maxRange or 40
@@ -4817,15 +6470,16 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, 28)
     container.preferredHeight = GUI.RowHeight.colorpicker   -- factory-owned slot height (see GUI.RowHeight)
+    container.rowKind = "colorpicker"
     container.fixedRowHeight = true
     
     -- Button - use relative anchoring so it resizes with container
     local btn = CreateFrame("Button", nil, container, "BackdropTemplate")
     btn:SetPoint("TOPLEFT", 0, 0)
     btn:SetPoint("TOPRIGHT", 0, 0)
-    btn:SetHeight(24)
+    btn:SetHeight(SnapLen(btn, 24) or 24)
     CreateElementBackdrop(btn)
-    
+
     -- Label
     local txt = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     txt:SetPoint("LEFT", 8, 0)
@@ -4880,7 +6534,12 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     btn:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
     end)
-    
+
+    -- Tooltip: shared attach on the LABEL only. This factory carried none, across
+    -- 87 colour pickers. The btn keeps its own hover scripts untouched — the hit
+    -- frame is over the text, not the swatch.
+    GUI:AttachTooltip(container, label, txt)
+
     btn:SetScript("OnClick", function()
         if not dbTable then return end
         local c = dbTable[dbKey]
@@ -4965,10 +6624,6 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         if useLightweight and lightweightCallback then
             -- We need to run full update when picker is closed via OK
             local oldSetup = ColorPickerFrame.SetupColorPickerAndShow
-            local function OnPickerClosed()
-                DF:UpdateAll()
-                if callback then callback() end
-            end
             -- Use a frame to detect when color picker closes
             if not container.colorPickerWatcher then
                 container.colorPickerWatcher = CreateFrame("Frame")
@@ -5065,6 +6720,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     -- form owns a fixed slot height; inline keeps whatever height its host passes.
     if not opts.inline then
         container.preferredHeight = GUI.RowHeight.dropdown   -- factory-owned slot (see GUI.RowHeight)
+        container.rowKind = "dropdown"
         container.fixedRowHeight = true
     end
 
@@ -5107,9 +6763,10 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
         -- size the container to match the surrounding row, e.g. 140x18 / 110x16).
         btn:SetAllPoints(container)
     else
-        btn:SetPoint("TOPLEFT", 0, -16)
-        btn:SetPoint("TOPRIGHT", 0, -16)
-        btn:SetHeight(24)
+        local dY = SnapLen(btn, -16) or -16
+        btn:SetPoint("TOPLEFT", 0, dY)
+        btn:SetPoint("TOPRIGHT", 0, dY)
+        btn:SetHeight(SnapLen(btn, 24) or 24)
     end
     CreateElementBackdrop(btn)
 
@@ -5524,18 +7181,10 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
         end
     end
     
-    -- Tooltip support: show container.tooltip on hover (assign after creation,
-    -- same idiom as CreateCheckbox). Hover on the BUTTON so the tooltip also
-    -- shows when the label area is covered by other widgets; HookScript keeps
-    -- the button's own handlers (menu open) intact.
-    btn:HookScript("OnEnter", function()
-        if container.tooltip then
-            GUI:ShowTooltip(container, { title = label, anchor = "ANCHOR_CURSOR", lines = { container.tooltip } })
-        end
-    end)
-    btn:HookScript("OnLeave", function()
-        if container.tooltip then GUI:HideTooltip() end
-    end)
+    -- Tooltip: shared attach on the LABEL only (see GUI:AttachTooltip). The label
+    -- sits at the container's TOPLEFT, above the opener, so it is well clear of
+    -- the menu you are about to click.
+    GUI:AttachTooltip(container, label, lbl)
 
     -- SEARCH: Register this setting
     if DF.Search and dbKey and type(dbKey) == "string" then
@@ -5599,10 +7248,18 @@ end
 --   lightColors  = callback for live colour-picker preview
 --   refreshStates = optional hook fired when Show/Gradient/Shadow toggles
 --                   change visibility of other widgets
+--   disableWhen  = optional predicate fn(db) → bool. When true, EVERY widget
+--                  (including the Show toggle itself) GREYS OUT in place. This
+--                  is what a consumer whose border sits under a feature toggle
+--                  wants — the addon-wide rule is that a deactivated control
+--                  greys where it is, so the page doesn't reflow and you can
+--                  still see what turning the feature on would give you.
 --   hideWhen     = optional predicate fn(db) → bool. When true, EVERY widget
---                  (including the Show toggle itself) hides — used by
---                  consumers whose border section sits inside a parent panel
---                  with its own enable toggle (e.g. defensiveIconEnabled).
+--                  (including the Show toggle itself) HIDES. Reserve this for a
+--                  gate that changes WHAT the page offers — a variant switch
+--                  like Pinned Frames' per-set border override, where the
+--                  controls belong to a mode you are not in. A plain on/off
+--                  feature toggle is disableWhen, not this.
 --   sizeMin / sizeMax / sizeStep      = slider range overrides
 --   offsetMin / offsetMax / offsetStep
 -- }
@@ -5754,21 +7411,28 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         0, 4, 0.05, dbTable, aKey("Frequency"),
         fullUpdate, lightUpdate, true), 55)
     w.animationFrequency.hideOn = hideUnless(hasFrequency)
+    -- ⚠ This slider genuinely means different things per effect (see the comment
+    -- above), which is exactly why it needs saying out loud — nobody discovers
+    -- "0 = hold still" by dragging.
+    w.animationFrequency.tooltip = L["How fast the effect runs. On DF Dash this is how quickly the dashes march around the edge, and 0 holds them still. On the others it is the pulse rate, where 0 means the effect's own default speed."]
 
     w.animationParticles = group:AddWidget(GUI:CreateSlider(parent, L["Animation Particles"],
         1, 16, 1, dbTable, aKey("Particles"),
         fullUpdate, lightUpdate, true), 55)
     w.animationParticles.hideOn = hideUnless(hasParticles)
+    w.animationParticles.tooltip = L["How many separate lights travel around the border. More reads as busier and costs a little more to draw."]
 
     w.animationLength = group:AddWidget(GUI:CreateSlider(parent, L["Animation Length"],
         1, 30, 1, dbTable, aKey("Length"),
         fullUpdate, lightUpdate, true), 55)
     w.animationLength.hideOn = hideUnless(hasLength)
+    w.animationLength.tooltip = L["How long each moving segment is. Short values read as darting sparks, long ones as a sweeping tail."]
 
     w.animationThickness = group:AddWidget(GUI:CreateSlider(parent, L["Animation Thickness"],
         1, 12, 1, dbTable, aKey("Thickness"),
         fullUpdate, lightUpdate, true), 55)
     w.animationThickness.hideOn = hideUnless(hasThickness)
+    w.animationThickness.tooltip = L["How heavy the moving effect is. Separate from Border Thickness — the animation draws on its own layer, so it can be thicker or thinner than the border underneath."]
 
     w.animationScale = group:AddWidget(GUI:CreateSlider(parent, L["Animation Scale"],
         0.5, 3, 0.05, dbTable, aKey("Scale"),
@@ -5779,6 +7443,7 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
         -50, 50, 1, dbTable, aKey("Inset"),
         fullUpdate, lightUpdate, true), 55)
     w.animationInset.hideOn = hideUnless(hasPositioning)
+    w.animationInset.tooltip = L["Moves the effect in or out from the edge, independently of the border. Push it outward to make a glow spill past the frame."]
 
     w.animationOffsetX = group:AddWidget(GUI:CreateSlider(parent, L["Animation Offset X"],
         -50, 50, 1, dbTable, aKey("OffsetX"),
@@ -5794,11 +7459,13 @@ function GUI:CreateAnimationControls(group, dbTable, animPrefix, opts)
     w.animationHideIntro = group:AddWidget(GUI:CreateCheckbox(parent, L["Hide Intro Flash"],
         dbTable, aKey("ProcStart"), fullUpdate), 30)
     w.animationHideIntro.hideOn = hideUnless({ DF_FLASH = 1, DF_PROC = 1 })
+    w.animationHideIntro.tooltip = L["These effects open with a one-off burst before settling into their loop. Turn this on to skip the burst and go straight to the loop."]
 
     w.animationCornerLength = group:AddWidget(GUI:CreateSlider(parent, L["Corner Length"],
         2, 40, 1, dbTable, aKey("CornerLength"),
         fullUpdate, lightUpdate, true), 55)
     w.animationCornerLength.hideOn = hideUnless(cornersOnly)
+    w.animationCornerLength.tooltip = L["How far the effect runs along each edge from the corner before stopping. Small values leave four short brackets instead of a full outline."]
 
     return w
 end
@@ -5813,6 +7480,7 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
     local lightColors  = opts.lightColors
     local refreshStates = opts.refreshStates
     local hideWhen     = opts.hideWhen
+    local disableWhen  = opts.disableWhen
 
     local sizeMin, sizeMax, sizeStep = opts.sizeMin or 0, opts.sizeMax or 8, opts.sizeStep or 1
     local offMin, offMax, offStep    = opts.offsetMin or -50, opts.offsetMax or 50, opts.offsetStep or 1
@@ -5955,6 +7623,7 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
                 fullUpdate()
             end), 55)
         w.colorSource.hideOn = function() return hideOff() or isGradient() end
+        w.colorSource.tooltip = L["Where the border colour comes from. Static uses the colour below; Class and Role read it from the unit, so the border tells you who you are looking at without reading the name."]
     end
 
     -- Static colour picker — only visible when source is STATIC (or when the
@@ -6012,6 +7681,10 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
         w.inset = group:AddWidget(GUI:CreateSlider(parent, L["Border Inset"], -20, 20, 1,
             dbTable, key("BorderInset"), fullUpdate, lightUpdate, true), 55)
         w.inset.hideOn = hideOff
+        -- Thickness / Inset / Offset are three similar-sounding sliders that do
+        -- different things; the tooltip lives here because Inset is the one
+        -- nobody guesses.
+        w.inset.tooltip = L["Pulls the border inward (positive) or pushes it outward (negative) from the edge. Thickness is how heavy the line is, Inset is how far in it sits, Offset slides the whole border sideways."]
     end
 
     if include.offset then
@@ -6021,6 +7694,13 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
         w.offsetY = group:AddWidget(GUI:CreateSlider(parent, L["Border Offset Y"], offMin, offMax, offStep,
             dbTable, key("BorderOffsetY"), fullUpdate, lightUpdate, true), 55)
         w.offsetY.hideOn = hideOff
+        -- No tooltip on Offset X/Y, deliberately, and the same goes for every
+        -- other Offset slider in the addon (~60 of them): an offset is a well
+        -- understood control and a tooltip restating it is noise. Inset is the
+        -- one that needs explaining, so the Thickness / Inset / Offset
+        -- distinction is spelled out THERE, once. Krathe's call, 2026-07-27 —
+        -- these two briefly had tooltips and Border Shadow's offsets did not,
+        -- which is the inconsistency that prompted it.
     end
 
     if include.blendMode then
@@ -6028,6 +7708,7 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
             { BLEND = L["Blend"], ADD = L["Add"], MOD = L["Modulate"], DISABLE = L["Disable"] },
             dbTable, key("BorderBlendMode"), fullUpdate), 55)
         w.blendMode.hideOn = hideOff
+        w.blendMode.tooltip = L["How the border colour mixes with whatever is behind it. Blend is normal. Add brightens and is what makes a colour glow. Modulate darkens. Disable ignores opacity entirely and draws the colour flat."]
     end
 
     if include.shadow then
@@ -6111,16 +7792,25 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
         w.colorByType.hideOn = hideOff
     end
 
-    -- Grey (don't hide) every border control when "Show Border" is OFF, so the panel
-    -- still previews the controls. Composes with each control's own disableOn (e.g.
-    -- the shadow sub-controls) and leaves the variant/parent hideOn untouched. Skips
-    -- the "Show Border" checkbox itself so it stays clickable. RefreshChildStates
-    -- applies disableOn to group children, and CreateCheckbox auto-refreshes on
-    -- toggle, so the grey updates live.
+    -- Two independent greys, both composed on top of whatever disableOn a control
+    -- already carries (e.g. the shadow sub-controls), and both leaving the
+    -- variant hideOn untouched:
+    --   disableWhen — the CONSUMER's gate: the feature this border belongs to is
+    --     switched off. Applies to EVERY widget including the Show Border
+    --     checkbox, since with the feature off there is nothing for it to show.
+    --   borderOff   — Show Border itself is off. Applies to everything EXCEPT the
+    --     Show Border checkbox, which has to stay clickable to turn it back on.
+    -- RefreshChildStates applies disableOn to group children, and CreateCheckbox
+    -- auto-refreshes on toggle, so both greys update live.
     for k, widget in pairs(w) do
-        if k ~= "show" and type(widget) == "table" and widget.SetEnabled then
+        if type(widget) == "table" and widget.SetEnabled then
             local prev = widget.disableOn
-            widget.disableOn = function(d) return borderOff() or (prev and prev(d)) end
+            local isShow = (k == "show")
+            widget.disableOn = function(d)
+                if disableWhen and disableWhen(dbTable) then return true end
+                if not isShow and borderOff() then return true end
+                return (prev and prev(d)) or false
+            end
         end
     end
 
@@ -6191,6 +7881,9 @@ function GUI:CreateTextControls(group, dbTable, prefix, opts)
             TOPLEFT = L["Top Left"], TOPRIGHT = L["Top Right"], BOTTOMLEFT = L["Bottom Left"], BOTTOMRIGHT = L["Bottom Right"],
         }
         widgets.anchor = gate(group:AddWidget(GUI:CreateDropdown(parent, L["Anchor"], anchorOptions, dbTable, key("Anchor"), onChange), 55))
+        -- Anchor vs Justify is the pair people get wrong: one places the text,
+        -- the other arranges it within its own box. Both say so, from their side.
+        widgets.anchor.tooltip = L["Which part of the element the text is pinned to. Offset X and Y then nudge it from there."]
     end
 
     if include.offsets ~= false then
@@ -6206,7 +7899,9 @@ function GUI:CreateTextControls(group, dbTable, prefix, opts)
         local justifyHOptions = { [""] = L["Default"], LEFT = L["Left"], CENTER = L["Center"], RIGHT = L["Right"] }
         local justifyVOptions = { [""] = L["Default"], TOP = L["Top"], MIDDLE = L["Middle"], BOTTOM = L["Bottom"] }
         widgets.justifyH = gate(group:AddWidget(GUI:CreateDropdown(parent, L["Justify H"], justifyHOptions, dbTable, key("JustifyH"), onChange), 55))
+        widgets.justifyH.tooltip = L["How the text sits inside its own box, once Anchor has decided where that box goes. Only visible on text wide enough to have slack — Anchor is what moves it around the element."]
         widgets.justifyV = gate(group:AddWidget(GUI:CreateDropdown(parent, L["Justify V"], justifyVOptions, dbTable, key("JustifyV"), onChange), 55))
+        widgets.justifyV.tooltip = L["How the text sits inside its own box, once Anchor has decided where that box goes. Only visible on text wide enough to have slack — Anchor is what moves it around the element."]
     end
 
     return widgets
@@ -6401,6 +8096,7 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
     -- ── Placement: Inset (a frame/tint's fit off the icon edge), Anchor (Text/Glyph), Offsets.
     w.inset = group:AddWidget(GUI:CreateSlider(parent, L["Inset"], -10, 10, 1, dbTable, "expiryAlertBorderInset"), 54)
     w.inset.hideOn = hideNonFrame
+    w.inset.tooltip = L["How far inside the icon edge the reveal sits. Negative values push it outward, so it rings the icon rather than sitting on it."]
 
     -- Anchor: Text/Glyph only — a frame/tint always centres (the engine forces CENTER), so
     -- hide it in those modes rather than let a stale anchor de-centre the overlay.
@@ -6779,8 +8475,11 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
             end
         end)
 
-        -- Expose btn for external enable/disable
+        -- Expose btn for external enable/disable, and the label so the tooltip
+        -- attach at the bottom of this factory has a real region to sit on — lbl
+        -- is local to THIS builder, so reaching for it out there is a nil global.
         frame.btn = btn
+        frame.Label = lbl
         frame:Rebuild(options)
         return frame
     end
@@ -6831,6 +8530,16 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
         wrapDD:Rebuild(WRAP_OPTIONS[curOrientation])
         dirDD:Rebuild(DIR_OPTIONS[curOrientation])
     end
+
+    -- Tooltip: shared attach. This widget has no label of its own — it is three
+    -- stacked mini dropdowns (Orientation / Wrap / Grow), each built by the local
+    -- BuildMiniDropdown rather than CreateDropdown, so none of them carries an
+    -- attach either. The top row's label stands in for the group.
+    --
+    -- ⚠ NOT `lbl`: that name IS in this file, but it is local to
+    -- BuildMiniDropdown, so reading it here is a nil global — legal Lua, parses
+    -- clean, and would have silently left this control with no tooltip at all.
+    GUI:AttachTooltip(container, L["Growth Direction"], orientDD.Label)
 
     return container
 end
@@ -7142,7 +8851,11 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
         local currentOptions = customOptions or DF:GetTextureList()
         container.searchEntry = DF.Search:RegisterDropdown(label, dbKey, currentOptions, nil, callback)
     end
-    
+
+    -- Tooltip: shared attach on the LABEL only. Hand-rolled preview dropdown, so
+    -- it never picked up CreateDropdown's tooltip support.
+    GUI:AttachTooltip(container, label or L["Texture"], lbl)
+
     return container
 end
 
@@ -7455,7 +9168,11 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     if DF.Search and dbKey and type(dbKey) == "string" then
         container.searchEntry = DF.Search:RegisterDropdown(label, dbKey, DF:GetFontList(), nil, callback)
     end
-    
+
+    -- Tooltip: shared attach on the LABEL only. Hand-rolled preview dropdown, so
+    -- it never picked up CreateDropdown's tooltip support.
+    GUI:AttachTooltip(container, label or L["Font"], lbl)
+
     return container
 end
 
@@ -7684,7 +9401,12 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
     }
     
     local roleItems = {}
-    local ITEM_HEIGHT = 30
+    -- Snapped stride + gap: a raw 30-unit stride is 42.19 device px, so every
+    -- row would sit on a different sub-pixel phase and the error would
+    -- ACCUMULATE down the list (row 3 off by twice row 2). Rows are anchored
+    -- by two corners, so nothing corrects them after the fact.
+    local ITEM_HEIGHT = SnapLen(parent, 30) or 30
+    local ITEM_GAP = SnapLen(parent, 2) or 2
     local draggingItem = nil
     local dragOffsetY = 0
     
@@ -7780,7 +9502,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         local order = GetCurrentOrder()
         local numRoles = #order
         
-        container:SetHeight(numRoles * ITEM_HEIGHT + 5)
+        container:SetHeight(numRoles * ITEM_HEIGHT + (SnapLen(container, 5) or 5))
         
         for _, item in pairs(roleItems) do
             item:Hide()
@@ -7793,9 +9515,13 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
                 item.posIndex = i
                 item.numText:SetText(i .. ".")
                 if item ~= draggingItem then
+                    -- Anchored to BOTH sides: the container is created at a placeholder
+                    -- width and only stretched to its real one by the settings group's
+                    -- LayoutChildren, so a width captured here would be stale. Deriving it
+                    -- from the anchors keeps the rows correct at every layout.
                     item:ClearAllPoints()
                     item:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -((i - 1) * ITEM_HEIGHT))
-                    item:SetWidth(container:GetWidth() > 0 and container:GetWidth() or 220)
+                    item:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -((i - 1) * ITEM_HEIGHT))
                 end
             end
         end
@@ -7825,15 +9551,12 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         if not info then return nil end
         
         local item = CreateFrame("Frame", nil, container, "BackdropTemplate")
-        item:SetHeight(ITEM_HEIGHT - 2)
+        item:SetHeight(ITEM_HEIGHT - ITEM_GAP)
         item:EnableMouse(true)
-        item:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        CreateElementBackdrop(item, {
+            bgColor     = { 0.12, 0.12, 0.12, 0.9 },
+            borderColor = { 0.3, 0.3, 0.3, 1 },
         })
-        item:SetBackdropColor(0.12, 0.12, 0.12, 0.9)
-        item:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
         
         -- Grip texture
         local grip = CreateGripTexture(item)
@@ -7923,7 +9646,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
             
             self:ClearAllPoints()
             self:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -offsetFromTop)
-            self:SetWidth(container:GetWidth())
+            self:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -offsetFromTop)
             
             -- Update other items based on where this would drop
             local dropIndex = GetIndexFromY(cursorY)
@@ -7942,7 +9665,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
                 if otherItem and otherItem ~= self then
                     otherItem:ClearAllPoints()
                     otherItem:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -((i - 1) * ITEM_HEIGHT))
-                    otherItem:SetWidth(container:GetWidth())
+                    otherItem:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -((i - 1) * ITEM_HEIGHT))
                     otherItem.numText:SetText(i .. ".")
                 end
             end
@@ -8042,7 +9765,9 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
     }
     
     local classItems = {}
-    local ITEM_HEIGHT = 24  -- Slightly smaller to fit all classes
+    -- Snapped; see CreateRoleOrderList.
+    local ITEM_HEIGHT = SnapLen(parent, 24) or 24   -- smaller, to fit all classes
+    local ITEM_GAP = SnapLen(parent, 2) or 2
     local draggingItem = nil
     local dragOffsetY = 0
     
@@ -8101,7 +9826,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         local order = GetCurrentOrder()
         local numClasses = #order
         
-        container:SetHeight(numClasses * ITEM_HEIGHT + 5)
+        container:SetHeight(numClasses * ITEM_HEIGHT + (SnapLen(container, 5) or 5))
         
         for _, item in pairs(classItems) do
             item:Hide()
@@ -8114,9 +9839,13 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
                 item.posIndex = i
                 item.numText:SetText(i .. ".")
                 if item ~= draggingItem then
+                    -- Anchored to BOTH sides: the container is created at a placeholder
+                    -- width and only stretched to its real one by the settings group's
+                    -- LayoutChildren, so a width captured here would be stale. Deriving it
+                    -- from the anchors keeps the rows correct at every layout.
                     item:ClearAllPoints()
                     item:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -((i - 1) * ITEM_HEIGHT))
-                    item:SetWidth(container:GetWidth() > 0 and container:GetWidth() or 220)
+                    item:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -((i - 1) * ITEM_HEIGHT))
                 end
             end
         end
@@ -8146,15 +9875,12 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         if not info then return nil end
         
         local item = CreateFrame("Frame", nil, container, "BackdropTemplate")
-        item:SetHeight(ITEM_HEIGHT - 2)
+        item:SetHeight(ITEM_HEIGHT - ITEM_GAP)
         item:EnableMouse(true)
-        item:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        CreateElementBackdrop(item, {
+            bgColor     = { 0.12, 0.12, 0.12, 0.9 },
+            borderColor = { 0.3, 0.3, 0.3, 1 },
         })
-        item:SetBackdropColor(0.12, 0.12, 0.12, 0.9)
-        item:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
         
         -- Grip texture
         local grip = CreateGripTexture(item)
@@ -8243,7 +9969,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
             
             self:ClearAllPoints()
             self:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -offsetFromTop)
-            self:SetWidth(container:GetWidth())
+            self:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -offsetFromTop)
             
             -- Update other items based on where this would drop
             local dropIndex = GetIndexFromY(cursorY)
@@ -8262,7 +9988,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
                 if otherItem and otherItem ~= self then
                     otherItem:ClearAllPoints()
                     otherItem:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -((i - 1) * ITEM_HEIGHT))
-                    otherItem:SetWidth(container:GetWidth())
+                    otherItem:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -((i - 1) * ITEM_HEIGHT))
                     otherItem.numText:SetText(i .. ".")
                 end
             end
@@ -8348,7 +10074,9 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
     }
     
     local groupItems = {}
-    local ITEM_HEIGHT = 28
+    -- Snapped; see CreateRoleOrderList.
+    local ITEM_HEIGHT = SnapLen(parent, 28) or 28
+    local ITEM_GAP = SnapLen(parent, 2) or 2
     local draggingItem = nil
     local dragOffsetY = 0
     
@@ -8416,9 +10144,13 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
                 item.displayPos = displayPos
                 item.numText:SetText(displayPos .. ".")
                 if item ~= draggingItem then
+                    -- Anchored to BOTH sides: the container is created at a placeholder
+                    -- width and only stretched to its real one by the settings group's
+                    -- LayoutChildren, so a width captured here would be stale. Deriving it
+                    -- from the anchors keeps the rows correct at every layout.
                     item:ClearAllPoints()
                     item:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -((displayPos - 1) * ITEM_HEIGHT))
-                    item:SetWidth(container:GetWidth() > 0 and container:GetWidth() or 180)
+                    item:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -((displayPos - 1) * ITEM_HEIGHT))
                 end
             end
         end
@@ -8447,15 +10179,12 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         local color = GROUP_COLORS[groupNum]
         
         local item = CreateFrame("Frame", nil, container, "BackdropTemplate")
-        item:SetHeight(ITEM_HEIGHT - 2)
+        item:SetHeight(ITEM_HEIGHT - ITEM_GAP)
         item:EnableMouse(true)
-        item:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        CreateElementBackdrop(item, {
+            bgColor     = { 0.12, 0.12, 0.12, 0.9 },
+            borderColor = { 0.3, 0.3, 0.3, 1 },
         })
-        item:SetBackdropColor(0.12, 0.12, 0.12, 0.9)
-        item:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
         
         -- Grip texture
         local grip = CreateGripTexture(item)
@@ -8544,7 +10273,7 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
             
             self:ClearAllPoints()
             self:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -offsetFromTop)
-            self:SetWidth(container:GetWidth())
+            self:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -offsetFromTop)
             
             -- Update other items based on where this would drop
             local dropIndex = GetIndexFromY(cursorY)
@@ -8565,7 +10294,7 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
                 if otherItem and otherItem ~= self then
                     otherItem:ClearAllPoints()
                     otherItem:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -((i - 1) * ITEM_HEIGHT))
-                    otherItem:SetWidth(container:GetWidth())
+                    otherItem:SetPoint("TOPRIGHT", container, "TOPRIGHT", 0, -((i - 1) * ITEM_HEIGHT))
                     otherItem.numText:SetText(i .. ".")
                 end
             end
@@ -8643,7 +10372,9 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(460, 340)
     
-    local ITEM_HEIGHT = 26
+    -- Snapped; see CreateRoleOrderList.
+    local ITEM_HEIGHT = SnapLen(parent, 26) or 26
+    local ITEM_GAP = SnapLen(parent, 2) or 2
     local COL_WIDTH = 224  -- Wider columns
     local COL_GAP = 12     -- Smaller gap between columns
     
@@ -8855,13 +10586,12 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     -- ========== ROSTER ITEM (Left Column) ==========
     local function CreateRosterItem(playerData, index)
         local item = CreateFrame("Frame", nil, leftContent, "BackdropTemplate")
-        item:SetHeight(ITEM_HEIGHT - 2)
+        item:SetHeight(ITEM_HEIGHT - ITEM_GAP)
         item:SetPoint("TOPLEFT", 0, -((index - 1) * ITEM_HEIGHT))
         item:SetPoint("TOPRIGHT", 0, -((index - 1) * ITEM_HEIGHT))
-        item:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-        })
-        item:SetBackdropColor(0, 0, 0, 0)
+        -- Transparent plate: the hover/selected states tint it, so it needs a fill
+        -- to colour but no outline of its own.
+        CreateElementBackdrop(item, { outline = false, bgColor = { 0, 0, 0, 0 } })
         
         item.playerData = playerData
         
@@ -8895,12 +10625,10 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         local addBtn = CreateFrame("Button", nil, item, "BackdropTemplate")
         addBtn:SetSize(26, 20)
         addBtn:SetPoint("RIGHT", -4, 0)
-        addBtn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
-        })
-        
+        -- UpdateAddButton (called below, and on every state change) owns both
+        -- colours, so this only supplies the chrome.
+        CreateElementBackdrop(addBtn)
+
         local themeColor = GetThemeColor()
         
         -- Icon for button
@@ -8959,17 +10687,14 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
     -- ========== HIGHLIGHT ITEM (Right Column - Draggable) ==========
     local function CreateHighlightItem(fullName, index, totalCount)
         local item = CreateFrame("Frame", nil, rightContent, "BackdropTemplate")
-        item:SetHeight(ITEM_HEIGHT - 2)
+        item:SetHeight(ITEM_HEIGHT - ITEM_GAP)
         item:SetPoint("TOPLEFT", 0, -((index - 1) * ITEM_HEIGHT))
         item:SetPoint("TOPRIGHT", 0, -((index - 1) * ITEM_HEIGHT))
         item:EnableMouse(true)
-        item:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        CreateElementBackdrop(item, {
+            bgColor     = { 0.12, 0.12, 0.12, 0.9 },
+            borderColor = { 0.25, 0.25, 0.25, 1 },
         })
-        item:SetBackdropColor(0.12, 0.12, 0.12, 0.9)
-        item:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
         
         item.fullName = fullName
         item.index = index
@@ -9025,13 +10750,10 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         local removeBtn = CreateFrame("Button", nil, item, "BackdropTemplate")
         removeBtn:SetSize(26, 20)
         removeBtn:SetPoint("RIGHT", -4, 0)
-        removeBtn:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8x8",
-            edgeFile = "Interface\\Buttons\\WHITE8x8",
-            edgeSize = 1,
+        CreateElementBackdrop(removeBtn, {
+            bgColor     = { 0.5, 0.15, 0.15, 0.5 },
+            borderColor = { 0.6, 0.25, 0.25, 0.8 },
         })
-        removeBtn:SetBackdropColor(0.5, 0.15, 0.15, 0.5)
-        removeBtn:SetBackdropBorderColor(0.6, 0.25, 0.25, 0.8)
         
         -- X icon for remove button
         removeBtn.icon = removeBtn:CreateTexture(nil, "OVERLAY")
@@ -9525,10 +11247,8 @@ function DF:ToggleGUI()
         -- Auto-show changelog on first open after update
         if DandersFramesDB_v2 and DandersFramesDB_v2.lastSeenVersion ~= DF.VERSION then
             DandersFramesDB_v2.lastSeenVersion = DF.VERSION
-            if GUI.changelogOverlay and GUI.changelogContent and GUI.changelogScroll then
-                GUI.changelogContent:SetWidth(GUI.changelogScroll:GetWidth())
-                GUI.changelogContent:SetText(GUI.FormatChangelog(DF.CHANGELOG_TEXT))
-                GUI.changelogContent:SetCursorPosition(0)
+            if GUI.changelogOverlay and GUI.changelogArea then
+                GUI.changelogArea:SetText(GUI.FormatChangelog(DF.CHANGELOG_TEXT))
                 GUI.changelogOverlay:Show()
             end
         end
@@ -9703,34 +11423,25 @@ function DF:CreateGUI()
         return table.concat(lines, "\n")
     end
 
-    local changelogScroll = CreateFrame("ScrollFrame", nil, changelogOverlay, "ScrollFrameTemplate")
-    changelogScroll:SetPoint("TOPLEFT", 8, -38)
-    changelogScroll:SetPoint("BOTTOMRIGHT", -26, 8)
-
-    local changelogContent = CreateFrame("EditBox", nil, changelogScroll)
-    changelogContent:SetMultiLine(true)
-    changelogContent:SetAutoFocus(false)
-    changelogContent:SetFontObject(DFFontHighlightSmall)
-    changelogContent:SetWidth(changelogScroll:GetWidth() or 500)
-    changelogContent:SetText(FormatChangelog(DF.CHANGELOG_TEXT))
-    changelogContent:SetCursorPosition(0)
-    changelogContent:EnableMouse(true)
-    changelogContent:EnableKeyboard(false)
-    changelogContent:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    changelogContent:SetScript("OnEditFocusGained", function(self) self:HighlightText(0, 0) end)
-    changelogScroll:SetScrollChild(changelogContent)
-    StyleScrollBar(changelogScroll)
+    -- plain: the overlay already IS the panel, so the text area contributes only
+    -- the scrolling field. readOnly rather than EnableKeyboard(false) — the
+    -- changelog stays uneditable but becomes selectable and copyable.
+    local changelogArea = GUI:CreateTextArea(changelogOverlay, {
+        plain    = true,
+        readOnly = true,
+        text     = FormatChangelog(DF.CHANGELOG_TEXT),
+    })
+    changelogArea:SetPoint("TOPLEFT", 8, -38)
+    changelogArea:SetPoint("BOTTOMRIGHT", -8, 8)
     GUI.FormatChangelog = FormatChangelog
-    GUI.changelogContent = changelogContent
-    GUI.changelogScroll = changelogScroll
+    GUI.changelogArea = changelogArea   -- .EditBox for the field itself
 
     infoBtn:SetScript("OnClick", function()
         if changelogOverlay:IsShown() then
             changelogOverlay:Hide()
         else
-            changelogContent:SetWidth(changelogScroll:GetWidth())
-            changelogContent:SetText(FormatChangelog(DF.CHANGELOG_TEXT))
-            changelogContent:SetCursorPosition(0)
+            -- No width fix-up needed: the text area re-syncs its own scroll child.
+            changelogArea:SetText(FormatChangelog(DF.CHANGELOG_TEXT))
             changelogOverlay:Show()
         end
     end)
@@ -9767,19 +11478,21 @@ function DF:CreateGUI()
     
     -- Party/Raid mode toggle buttons
     local btnParty = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    btnParty:SetPoint("TOPLEFT", 12, -32)
+    -- Head of the toolbar chain (Party <- Raid <- Clicks <- Test <- Unlock), so
+    -- this offset is what every button along it inherits.
+    btnParty:SetPoint("TOPLEFT", SnapLen(frame, 12), SnapLen(frame, -32))
     -- Shared underline-tab style; SetActive (in UpdateThemeColors) drives it.
     GUI:StyleButton(btnParty, { tab = true, text = L["PARTY"], accent = C_ACCENT, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.PartyButton = btnParty  -- Store for external access
     
     local btnRaid = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    btnRaid:SetPoint("LEFT", btnParty, "RIGHT", 4, 0)
+    btnRaid:SetPoint("LEFT", btnParty, "RIGHT", SnapLen(btnRaid, 4), 0)
     GUI:StyleButton(btnRaid, { tab = true, text = L["RAID"], accent = C_RAID, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.RaidButton = btnRaid  -- Store for external access
     
     -- Click Casting tab button
     local btnClicks = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    btnClicks:SetPoint("LEFT", btnRaid, "RIGHT", 4, 0)
+    btnClicks:SetPoint("LEFT", btnRaid, "RIGHT", SnapLen(btnClicks, 4), 0)
     GUI:StyleButton(btnClicks, { tab = true, text = L["BINDS"], accent = { r = 0.2, g = 0.8, b = 0.4 }, width = 70, height = 24, font = "DFFontHighlight" })
     GUI.ClicksButton = btnClicks
 
@@ -9787,7 +11500,11 @@ function DF:CreateGUI()
     -- TEST MODE BUTTON (next to CLICKS tab)
     -- =========================================================================
     local btnTest = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    btnTest:SetPoint("LEFT", btnClicks, "RIGHT", 12, 0)
+    -- Snapped gap + snapped width below: the toolbar is a CHAIN (Clicks <- Test
+    -- <- Unlock <- override marker) and controls are not position-corrected after
+    -- the fact, so every offset and width in the chain has to be a whole number
+    -- of device pixels or the fraction accumulates rightwards.
+    btnTest:SetPoint("LEFT", btnClicks, "RIGHT", SnapLen(btnTest, 12), 0)
     GUI:StyleButton(btnTest, {
         width = 75, height = 24,
         icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\preview_off", size = 18, color = C_TEXT_DIM },
@@ -9796,14 +11513,14 @@ function DF:CreateGUI()
     GUI:SetSettingsFont(btnTest.Text, 11, "")  -- 11px (between Small 10 and Highlight 12)
     btnTest.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     -- Content-fit width (less dead space)
-    btnTest:SetWidth(math.ceil(btnTest.Text:GetStringWidth()) + 38)
+    btnTest:SetWidth(SnapLenUp(btnTest, math.ceil(btnTest.Text:GetStringWidth()) + 38))
     GUI.TestButton = btnTest
     
     -- =========================================================================
     -- LOCK/UNLOCK BUTTON (next to Test button)
     -- =========================================================================
     local btnLock = CreateFrame("Button", nil, frame, "BackdropTemplate")
-    btnLock:SetPoint("LEFT", btnTest, "RIGHT", 4, 0)
+    btnLock:SetPoint("LEFT", btnTest, "RIGHT", SnapLen(btnLock, 4), 0)
     GUI:StyleButton(btnLock, {
         width = 80, height = 24,
         icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\lock", size = 18, color = C_TEXT_DIM },
@@ -9813,14 +11530,14 @@ function DF:CreateGUI()
     btnLock.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     -- Size to the wider "Unlock" label so toggling Lock/Unlock doesn't resize the
     -- button (real label set in UpdateLockButtonState).
-    btnLock:SetWidth(math.ceil(btnLock.Text:GetStringWidth()) + 38)
+    btnLock:SetWidth(SnapLenUp(btnLock, math.ceil(btnLock.Text:GetStringWidth()) + 38))
     GUI.LockButton = btnLock
     
     -- Position override marker (shown next to the lock button when the frame
     -- position is overridden in the layout being edited). Shared marker helper →
     -- dot + hover tooltip, one colour with every other override marker.
     local positionOverrideStar = GUI:CreateOverrideMarker(frame, 14)
-    positionOverrideStar:SetPoint("LEFT", btnLock, "RIGHT", 4, 0)
+    positionOverrideStar:SetPoint("LEFT", btnLock, "RIGHT", SnapLen(positionOverrideStar, 4), 0)
     positionOverrideStar.tooltipText = L["Override active"]
     positionOverrideStar.tooltipSubText = L["The frame position is overridden in this layout."]
     GUI.PositionOverrideStar = positionOverrideStar
@@ -9922,7 +11639,7 @@ function DF:CreateGUI()
             })
         end
     end)
-    btnLock:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    btnLock:HookScript("OnLeave", function() GUI:HideTooltip() end)
 
     btnLock:SetScript("OnClick", function()
         if btnLock.dfDisabled then
@@ -10022,8 +11739,13 @@ function DF:CreateGUI()
         if DF.TestPanel then
             DF.TestPanel:SetScale(value)
         end
+        -- A new scale changes how many device pixels a UI unit covers, so
+        -- every border on screen has to be re-derived at the new thickness.
+        -- This is the ONLY action that does: nothing else in the GUI writes
+        -- guiScale, and moving or resizing the window leaves it alone.
+        GUI:RefreshPixelBorders()
     end)
-    
+
     GUI.ScaleSlider = scaleSlider
     GUI.ScaleContainer = scaleContainer
     -- =========================================================================
@@ -10152,6 +11874,10 @@ function DF:CreateGUI()
             -- Disable raid test mode if active
             if DF.raidTestMode then
                 carryTest = true
+                -- Hand-over: stay in container/pinned test mode across the swap rather
+                -- than tearing every aura container down for live data we never show
+                -- and rebuilding it a moment later. Cleared below.
+                DF._testModeHandover = true
                 DF:HideRaidTestFrames(true)  -- silent
             end
         end
@@ -10176,6 +11902,14 @@ function DF:CreateGUI()
                 DF.TestPanel:UpdateStateNoCallback()
             end
         end
+        if carryTest then
+            -- End the hand-over and settle: ShowTestFrames can bail (combat, party
+            -- frames disabled), which would otherwise leave the engines parked in
+            -- test mode with nothing testing. Teardown re-reads the real flags, so
+            -- it is a no-op when the incoming mode did start.
+            DF._testModeHandover = nil
+            if DF.TeardownTestModeEngines then DF:TeardownTestModeEngines() end
+        end
     end)
     btnRaid:SetScript("OnClick", function()
         DF:SyncLinkedSections()
@@ -10197,6 +11931,8 @@ function DF:CreateGUI()
             -- Disable party test mode if active
             if DF.testMode then
                 carryTest = true
+                -- Hand-over: see the raid->party handler above.
+                DF._testModeHandover = true
                 DF:HideTestFrames(true)  -- silent
             end
         end
@@ -10214,6 +11950,11 @@ function DF:CreateGUI()
         -- Keep test mode active when switching modes (just switch which mode it runs in)
         if carryTest and DF.ShowRaidTestFrames then
             DF:ShowRaidTestFrames()
+        end
+        if carryTest then
+            -- End the hand-over and settle; see the raid->party handler above.
+            DF._testModeHandover = nil
+            if DF.TeardownTestModeEngines then DF:TeardownTestModeEngines() end
         end
     end)
     
@@ -10245,10 +11986,20 @@ function DF:CreateGUI()
     end)
     
     -- Tab container (left side) - with scrolling
+    -- ★ Every offset in the nav chain is SNAPPED, for the same structural reason
+    -- the page viewport is: these frames are anchored by two corners, nothing
+    -- nudges them afterwards, and the numbers going in are the only
+    -- lever. Unsnapped, the whole list inherits the fraction -- /df navprobe
+    -- measured every one of 42 rows at top+0.38, which is the 4-unit inset below
+    -- (5.625 device px at 1.4062 px/unit) propagated down the chain. A row that
+    -- starts on a fractional device row draws its hover plate's top and bottom
+    -- edges across two rows each at partial intensity, and its label on a
+    -- fractional baseline -- which is what is left of the nav ghost now that the
+    -- dead band between rows is gone.
     local tabFrame = CreateFrame("Frame", nil, frame, "BackdropTemplate")
-    tabFrame:SetPoint("TOPLEFT", 12, -64)
-    tabFrame:SetPoint("BOTTOMLEFT", 12, 36)
-    tabFrame:SetWidth(155)
+    tabFrame:SetPoint("TOPLEFT", SnapLen(frame, 12), SnapLen(frame, -64))
+    tabFrame:SetPoint("BOTTOMLEFT", SnapLen(frame, 12), SnapLen(frame, 36))
+    tabFrame:SetWidth(SnapLen(frame, 155))
     CreateElementBackdrop(tabFrame)
     tabFrame:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.5)
     
@@ -10256,37 +12007,110 @@ function DF:CreateGUI()
     -- SEARCH BAR
     -- =========================================================================
     local searchBar = nil
-    local tabScrollStartY = -4
+    local navPad = SnapLen(tabFrame, 4) or 4
+    local navRight = SnapLen(tabFrame, -14) or -14
+    local tabScrollStartY = -navPad
     if DF.Search then
         searchBar = DF.Search:CreateSearchBar(tabFrame)
-        searchBar:SetPoint("TOPLEFT", 4, -4)
-        searchBar:SetPoint("TOPRIGHT", -14, -4)
-        tabScrollStartY = -36
+        searchBar:SetPoint("TOPLEFT", navPad, -navPad)
+        searchBar:SetPoint("TOPRIGHT", navRight, -navPad)
+        tabScrollStartY = SnapLen(tabFrame, -36) or -36
     end
-    
+
     local tabScroll = CreateFrame("ScrollFrame", nil, tabFrame, "ScrollFrameTemplate")
-    tabScroll:SetPoint("TOPLEFT", 4, tabScrollStartY)
-    tabScroll:SetPoint("BOTTOMRIGHT", -14, 4)
-    
+    tabScroll:SetPoint("TOPLEFT", navPad, tabScrollStartY)
+    tabScroll:SetPoint("BOTTOMRIGHT", navRight, navPad)
+
     StyleScrollBar(tabScroll)
     -- Custom positioning for tab scrollbar
     if tabScroll.ScrollBar then
         tabScroll.ScrollBar:ClearAllPoints()
-        tabScroll.ScrollBar:SetPoint("TOPRIGHT", tabFrame, "TOPRIGHT", -4, tabScrollStartY)
-        tabScroll.ScrollBar:SetPoint("BOTTOMRIGHT", tabFrame, "BOTTOMRIGHT", -4, 4)
+        tabScroll.ScrollBar:SetPoint("TOPRIGHT", tabFrame, "TOPRIGHT", -navPad, tabScrollStartY)
+        tabScroll.ScrollBar:SetPoint("BOTTOMRIGHT", tabFrame, "BOTTOMRIGHT", -navPad, navPad)
     end
-    
+
     local tabContainer = CreateFrame("Frame", nil, tabScroll)
-    tabContainer:SetWidth(130)
+    tabContainer:SetWidth(SnapLen(tabScroll, 130) or 130)
     tabContainer:SetHeight(600) -- Will be updated dynamically
     tabScroll:SetScrollChild(tabContainer)
     GUI.tabContainer = tabContainer
     GUI.tabScroll = tabScroll
-    
+
+    -- ONE hover plate for the whole nav, MOVED to the row under the cursor --
+    -- rather than 42 plates that each switch themselves off and on.
+    --
+    -- Why, after the geometry was already proven clean: navprobe showed no dead
+    -- band, no overlap, no stale plate, no focus thrash, and every row at
+    -- top-0.00. Two facts then rule out layout entirely -- the ghost is on LIVE
+    -- too, which shares none of this branch's GUI work, and its severity varies
+    -- across identical crossings. Geometry is deterministic; the same path would
+    -- give the same result every time. Something that varies run to run is
+    -- timing: the frame in which one row's colour change lands relative to the
+    -- next row's, which Lua cannot observe and cannot control.
+    --
+    -- So stop relying on the two changes landing in the same frame. With a single
+    -- plate there is no pair to synchronise: the texture is already on screen and
+    -- only its anchors move, so no frame can ever show two plates or none.
+    local navHover = CreateFrame("Frame", nil, tabContainer, "BackdropTemplate")
+    navHover:EnableMouse(false)   -- must never take focus from the row beneath it
+    -- Container level, i.e. strictly below the rows (children default to +1), so
+    -- the plate stays behind every label and accent bar.
+    navHover:SetFrameLevel(math.max(0, tabContainer:GetFrameLevel() or 1))
+    CreateElementBackdrop(navHover, { outline = false, bgColor = { 0, 0, 0, 0 } })
+    navHover:Hide()
+    GUI.navHover = navHover
+
+    local function NavHoverShow(row, alpha)
+        navHover.owner = row
+        navHover:ClearAllPoints()
+        navHover:SetAllPoints(row)
+        navHover:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, alpha)
+        navHover:Show()
+    end
+
+    -- Deferred by one frame ON PURPOSE. The rows tile, so leaving one and
+    -- entering the next happens in the same frame and WoW does not guarantee
+    -- which handler runs first. Hiding immediately would put back exactly the
+    -- dark frame this exists to remove; instead the hide only lands if no row
+    -- claimed the plate in the meantime.
+    local function NavHoverHide(row)
+        if navHover.owner ~= row then return end
+        C_Timer.After(0, function()
+            if navHover.owner == row then
+                navHover:Hide()
+                navHover.owner = nil
+            end
+        end)
+    end
+    GUI.HideNavHover = function()
+        navHover:Hide()
+        navHover.owner = nil
+    end
+
+
     -- Content area (right side) - no BackdropTemplate in CreateFrame
+    -- ★ THE content panel, and therefore the ancestor of every page viewport --
+    -- so its edges are the surface every page is clipped against. Snapped for
+    -- the same structural reason the nav chain is: it is anchored by two corners,
+    -- Nothing nudges it afterwards, and the offsets going in are the only
+    -- lever.
+    --
+    -- The BOTTOM one is what mattered. A raw 36 is 50.625 device px at 1.4062
+    -- px/unit, i.e. 0.625 above a grid line -- and /df pixelcheck reported
+    -- exactly that on every page it was ever run on: "viewport top+0.00
+    -- bot-0.375". The page's own inset was already snapped, but a snapped inset
+    -- off a fractional PARENT edge is still fractional, so the viewport's bottom
+    -- clip boundary sat between two device rows. Anything resting against it --
+    -- now the See-Also bar, since it was made a footer -- loses part of its
+    -- border to the cut.
+    --
+    -- Same shape as the original bug at the TOP of the page: the box measures
+    -- perfect and the surface it is clipped against is what is wrong. Krathe
+    -- spotted the symmetry before the numbers did.
     local content = CreateFrame("Frame", nil, frame)
-    content:SetPoint("TOPLEFT", tabFrame, "TOPRIGHT", 8, 0)
-    content:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 36)
+    content:SetPoint("TOPLEFT", tabFrame, "TOPRIGHT", SnapLen(frame, 8), 0)
+    content:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT",
+        SnapLen(frame, -12), SnapLen(frame, 36))
     CreateElementBackdrop(content)
     content:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.3)
     GUI.contentFrame = content
@@ -10302,7 +12126,7 @@ function DF:CreateGUI()
     clickCastPanel:SetBackdropColor(C_PANEL.r, C_PANEL.g, C_PANEL.b, 0.3)
     clickCastPanel:Hide()
     GUI.clickCastPanel = clickCastPanel
-    
+
     -- =========================================================================
     -- FOOTER BAR (Discord & Donation links + bottom drag handle)
     -- =========================================================================
@@ -10643,6 +12467,9 @@ function DF:CreateGUI()
         end
         -- Refresh override indicators
         RefreshAllOverrideIndicators()
+        -- A designer preset bar can need re-reading even when its page skipped
+        -- the rebuild (the sharing glyph tracks the OTHER mode's preset).
+        if GUI.RefreshDesignerPresetBars then GUI:RefreshDesignerPresetBars() end
     end
 
     -- Invalidate EVERY page's build cache so the next time each tab is shown it
@@ -10668,9 +12495,13 @@ function DF:CreateGUI()
         local cat = CreateFrame("Button", nil, tabContainer, "BackdropTemplate")
         cat:SetPoint("TOPLEFT", 4, categoryY)
         cat:SetPoint("TOPRIGHT", -4, categoryY)
-        cat:SetHeight(28)
-        cat:SetBackdrop({bgFile = "Interface\\Buttons\\WHITE8x8"})
-        cat:SetBackdropColor(0, 0, 0, 0)
+        -- Placeholder only: UpdateTabLayout owns the real height and sets it to
+        -- the row STRIDE so the rows tile with no dead band between them (see the
+        -- comment there -- that band was the hover flash). Matched here so the
+        -- row is never briefly the wrong size before the first layout pass.
+        cat:SetHeight(SnapLen(cat, 30) or 30)
+        -- Hover plate only: transparent at rest, tinted by OnEnter/OnLeave.
+        CreateElementBackdrop(cat, { outline = false, bgColor = { 0, 0, 0, 0 } })
         cat.name = name
         cat.children = {}
         
@@ -10697,12 +12528,11 @@ function DF:CreateGUI()
         catNewBadge:Hide()
         cat.newBadge = catNewBadge
 
-        cat:SetScript("OnEnter", function(self)
-            self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.3)
-        end)
-        cat:SetScript("OnLeave", function(self)
-            self:SetBackdropColor(0, 0, 0, 0)
-        end)
+        -- Hover is the SHARED moving plate, not this row's own backdrop -- see
+        -- navHover. The row's backdrop stays permanently transparent (SelectTab
+        -- still resets it, harmlessly).
+        cat:SetScript("OnEnter", function(self) NavHoverShow(self, 0.3) end)
+        cat:SetScript("OnLeave", function(self) NavHoverHide(self) end)
         cat:SetScript("OnClick", function(self)
             self.expanded = not self.expanded
             self.arrow:SetText(self.expanded and "-" or "+")
@@ -10730,14 +12560,19 @@ function DF:CreateGUI()
         return cat
     end
     
-    local function CreateSubTab(categoryName, name, label)
+    -- `hidden`: build and register the page exactly as normal, but keep its row
+    -- OUT of the sidebar. For a page that is DEPRECATED but not yet deleted --
+    -- the code stays whole and greppable, GUI.Pages/GUI.Tabs still resolve so
+    -- nothing that walks them has to special-case it, and deleting one word at
+    -- the call site puts the page back. See DEPRECATED-TARGETED-SPELLS.
+    local function CreateSubTab(categoryName, name, label, hidden)
         local cat = GUI.Categories[categoryName]
         if not cat then return end
         
         local btn = CreateFrame("Button", nil, tabContainer, "BackdropTemplate")
-        btn:SetHeight(26)
-        btn:SetBackdrop({bgFile = "Interface\\Buttons\\WHITE8x8"})
-        btn:SetBackdropColor(0, 0, 0, 0)
+        btn:SetHeight(SnapLen(btn, 28) or 28)   -- placeholder; see CreateCategory
+        -- Hover/selected plate only: the accent bar carries the selected state.
+        CreateElementBackdrop(btn, { outline = false, bgColor = { 0, 0, 0, 0 } })
         btn.isTab = true
         btn.tabName = name
         btn.categoryName = categoryName
@@ -10771,16 +12606,13 @@ function DF:CreateGUI()
             end
         end
 
+        -- Shared moving plate (see navHover). The active tab still shows no hover
+        -- tint -- its accent bar and label colour are its state -- so crossing it
+        -- parks the plate rather than moving it.
         btn:SetScript("OnEnter", function(self)
-            if not self.isActive then
-                self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.5)
-            end
+            if not self.isActive then NavHoverShow(self, 0.5) end
         end)
-        btn:SetScript("OnLeave", function(self)
-            if not self.isActive then
-                self:SetBackdropColor(0, 0, 0, 0)
-            end
-        end)
+        btn:SetScript("OnLeave", function(self) NavHoverHide(self) end)
         btn:SetScript("OnClick", function(self)
             if self.disabled then return end
             SelectTab(name)
@@ -10789,13 +12621,32 @@ function DF:CreateGUI()
         
         -- Create the page
         local page = CreateFrame("ScrollFrame", nil, content, "ScrollFrameTemplate")
-        page:SetPoint("TOPLEFT", 8, -8)
-        page:SetPoint("BOTTOMRIGHT", -8, 8)
-        
+        -- ★ The insets are SNAPPED, and this is the frame the whole pixel grid
+        -- was hanging off. A ScrollFrame clips to its own rect, so its top edge is
+        -- the boundary every box near the top of a page is cut against -- and a
+        -- raw 8-unit inset is 11.25 DEVICE PIXELS at 0.75 scale, i.e. a quarter
+        -- pixel off the grid. /df pixelcheck measured exactly that: viewport
+        -- top-0.25, scroll child top-0.25 (it inherits the phase), while every
+        -- box inside reported a flawless top+0.00. The boxes were never the
+        -- problem; the surface they are clipped against was.
+        --
+        -- Nothing corrects it afterwards -- this frame is anchored by TWO
+        -- corners, so even the geometry correction that used to exist skipped it
+        -- (nudging a two-corner frame resizes it rather than moving it). The one
+        -- surface every page is measured against was the one it could not touch.
+        -- Snapping the OFFSETS is the fix that works for a two-corner frame:
+        -- correct the numbers going in, since the box itself can't be nudged.
+        local inset = SnapLen(content, 8) or 8
+        page:SetPoint("TOPLEFT", inset, -inset)
+        page:SetPoint("BOTTOMRIGHT", -inset, inset)
+
         StyleScrollBar(page)
 
         local child = CreateFrame("Frame", nil, page)
-        child:SetSize(content:GetWidth() - 30, 1)
+        -- Snapped for the same reason: content is positioned against this child,
+        -- so a fractional width put every right edge inside it off-grid too
+        -- (pixelcheck reported w-0.16).
+        child:SetSize(SnapLen(page, (content:GetWidth() or 0) - 30) or 1, 1)
         page:SetScrollChild(child)
         page.child = child
         page.tabName = name
@@ -10805,23 +12656,61 @@ function DF:CreateGUI()
         
         GUI.Tabs[name] = btn
         GUI.Pages[name] = page
-        table.insert(cat.children, btn)
-        
+        if hidden then
+            -- Staying out of cat.children is what actually hides it: UpdateTabLayout
+            -- only ever anchors and sizes that list, so this row is never given a
+            -- position. Hidden explicitly too, so nothing rests on that detail.
+            btn:Hide()
+        else
+            table.insert(cat.children, btn)
+        end
+
         return page
     end
     
     -- Update tab positions based on expanded/collapsed state
     function GUI:UpdateTabLayout()
-        local y = -8
-        
+        -- Every number here is snapped, and the running `y` is built ONLY out of
+        -- snapped steps, so each row lands on the pixel grid rather than each one
+        -- picking up a different sub-pixel phase down the list. The nav rows are
+        -- two-corner anchored, so nothing downstream could correct
+        -- them (and would not anyway -- they are not structural boxes): the
+        -- offsets going in are the only lever, same as the page viewport.
+        --
+        -- The rows TILE: each one's height IS the stride to the next, so there is
+        -- no strip between them where the cursor is over nothing.
+        --
+        -- They used to be 28 tall on a 30 stride (and 26 on 28), leaving a 2-unit
+        -- dead band -- about 3 device pixels -- between every pair. /df navprobe
+        -- caught what that costs: crossing the band puts mouse focus on the plain
+        -- container Frame behind the list for a single frame, with NO row lit, so
+        -- the hover plate blinks off and back on mid-sweep. That one dark frame is
+        -- the "ghost" -- and because whether you land in the band depends on how
+        -- fast you are moving, the same crossing sometimes flashed and sometimes
+        -- did not, which is why it looked like a render hitch rather than layout.
+        --
+        -- Tiling costs nothing visually: only one row is ever lit, so the plates
+        -- have no neighbour to sit flush against. The height is taken FROM the
+        -- stride rather than snapped separately, so they cannot disagree by a
+        -- pixel and reopen a hairline gap.
+        -- Park the shared hover plate: expanding or collapsing can hide the row it
+        -- is anchored to, and a plate anchored to a hidden frame is a stray.
+        if GUI.HideNavHover then GUI.HideNavHover() end
+
+        local container = GUI.tabContainer
+        local y = SnapLen(container, -8) or -8
+        local catStride = SnapLen(container, 30) or 30
+        local tabStride = SnapLen(container, 28) or 28
+
         for _, catName in ipairs(GUI.CategoryOrder) do
             local cat = GUI.Categories[catName]
             if cat then
                 cat:ClearAllPoints()
                 cat:SetPoint("TOPLEFT", 0, y)
                 cat:SetPoint("TOPRIGHT", 0, y)
-                y = y - 30
-                
+                cat:SetHeight(catStride)
+                y = y - catStride
+
                 if cat.expanded then
                     for _, btn in ipairs(cat.children) do
                         -- Party-only tabs are hidden entirely in raid mode.
@@ -10832,7 +12721,8 @@ function DF:CreateGUI()
                             btn:ClearAllPoints()
                             btn:SetPoint("TOPLEFT", 0, y)
                             btn:SetPoint("TOPRIGHT", 0, y)
-                            y = y - 28
+                            btn:SetHeight(tabStride)
+                            y = y - tabStride
                         end
                     end
                 else
@@ -10896,6 +12786,40 @@ function DF:CreateGUI()
             self.child.RefreshStates = function() self:RefreshStates() end
             local parent = self.child
 
+            -- col = 1, 2, or "both". THE PAGE LAYOUT STANDARD lives here, because
+            -- this is the call that decides it and the only thing every page has
+            -- in common:
+            --
+            --   column 1 -- structure and geometry, in this order:
+            --               Settings -> [Layout] -> [Size] -> Position
+            --   column 2 -- styling, in this order:
+            --               Appearance -> Border -> element extras (text, bars)
+            --   "both"   -- ONLY on a page that genuinely needs the width
+            --               (Pinned Frames, Nicknames). It is also a sync point:
+            --               it takes the lower of the two columns and drops both
+            --               to it, whether or not you wanted that.
+            --
+            -- Columns rather than a flat order, because a page is read as two
+            -- columns and not as a sequence -- putting Appearance third and
+            -- Border fifth still separates them on screen if they land on
+            -- opposite sides. Grouping by column keeps the two natural pairs
+            -- (Layout+Position, Appearance+Border) together where the eye is.
+            --
+            -- ⚠ The split only MEANS anything where both categories are present.
+            -- A surface holding nothing but geometry (an aura page's Layout
+            -- section) or nothing but styling (its Appearance section) has no
+            -- left/right distinction to preserve, so its boxes fill both columns
+            -- for balance and reading order instead. Forcing the rule there
+            -- empties one column, which is worse than the inconsistency it was
+            -- meant to fix.
+            --
+            -- Sections (GUI:CreateCollapsibleSection) hold a page's boxes when
+            -- the page needs a second level -- either PARALLEL SUB-FEATURES
+            -- (Icons, Highlights, Health Bar) or broad CATEGORIES whose box
+            -- names only make sense inside them (the aura pages, where Layout
+            -- and Duration Bar each contain their own "Settings" box). The rule
+            -- above then applies within each section rather than across the
+            -- page. A page that needs neither stays as plain boxes.
             local function Add(widget, height, col)
                 table.insert(self.children, widget)
                 widget:SetParent(parent)
@@ -10917,30 +12841,6 @@ function DF:CreateGUI()
                 banner.layoutCol = "both"
                 self.builtForMode = GUI.SelectedMode
                 self.builtForDisabled = true
-                -- Track the REAL block state even while mode-disabled: RefreshCached
-                -- recomputes isBlocked independent of disabled state, so hardcoding false
-                -- here would miss the cache on every revisit of a page that is BOTH
-                -- disabled and blocked (all five aura sub-tabs on 12.1 with a mode off).
-                self.builtForBlocked = GUI:IsTabBlockedForCurrentMode(self.tabName, db)
-                self.cacheValid = true
-                self:RefreshStates()
-                return
-            end
-
-            -- Blocked-page handling: a page marked dead on 12.1 (GUI.BlockedPages)
-            -- renders one banner instead of its controls. `when(db)` lets it un-block
-            -- later (e.g. once a factory port lands); RefreshCached tracks
-            -- builtForBlocked so the flip forces a rebuild.
-            local blockInfo = GUI.BlockedPages[self.tabName]
-            if blockInfo and ((not blockInfo.when) or blockInfo.when(db)) then
-                local banner = GUI:CreateInfoBanner(parent, { tone = blockInfo.tone or "caution" })
-                banner:SetText((blockInfo.reason or "")
-                    .. (blockInfo.tooltip and ("\n\n" .. blockInfo.tooltip) or ""))
-                table.insert(self.children, banner)
-                banner.layoutCol = "both"
-                self.builtForMode = GUI.SelectedMode
-                self.builtForDisabled = false
-                self.builtForBlocked = true
                 self.cacheValid = true
                 self:RefreshStates()
                 return
@@ -10968,7 +12868,6 @@ function DF:CreateGUI()
             builderFunc(self, db, Add, AddSpace, AddSyncPoint)
             self.builtForMode = GUI.SelectedMode
             self.builtForDisabled = false
-            self.builtForBlocked = false
             self.cacheValid = true
             self:RefreshStates()
         end
@@ -10989,11 +12888,9 @@ function DF:CreateGUI()
             if not db then return end
 
             local isDisabled = GUI:IsTabDisabledForCurrentMode(self.tabName)
-            local isBlocked = GUI:IsTabBlockedForCurrentMode(self.tabName, db)
             if self.cacheValid
                and self.builtForMode == GUI.SelectedMode
-               and self.builtForDisabled == isDisabled
-               and self.builtForBlocked == isBlocked then
+               and self.builtForDisabled == isDisabled then
                 self:RefreshStates()
                 return
             end
@@ -11032,7 +12929,6 @@ function DF:CreateGUI()
             -- Second pass: handle regular widgets and group visibility
             for _, widget in ipairs(self.children) do
                 -- Keep any blocked-overlay (top-level widget or group) in sync.
-                if widget.blockedOverlay then GUI:RefreshBlockedOverlay(widget, db) end
                 -- Skip SettingsGroup children - they're handled by their parent group
                 if widget.settingsGroup then
                     -- Already handled by group's LayoutChildren
@@ -11118,22 +13014,41 @@ function DF:CreateGUI()
             for _, widget in ipairs(self.children) do
                 if widget.rightAlign and widget:IsShown() then
                     widget:ClearAllPoints()
-                    widget:SetPoint("TOPRIGHT", self.child, "TOPRIGHT", -10, -5 - bannerOffset)
+                    -- Both offsets snapped: this widget is the HEAD of the
+                    -- Reset/Sync/Copy chain, so a fraction here is inherited by
+                    -- every button to its left, and the buttons are no longer
+                    -- nudged back onto the grid individually.
+                    widget:SetPoint("TOPRIGHT", self.child, "TOPRIGHT",
+                        SnapLen(self.child, -10), SnapLen(self.child, -5 - bannerOffset))
                 end
             end
             
-            -- Reserve space below right-aligned elements
-            local hasRightAligned = false
+            -- Reserve space below the right-aligned row (Reset Page / Sync / Copy).
+            --
+            -- This used to subtract a flat 40 with the comment "button height ~26 +
+            -- 14 padding" -- a GUESS, not a measurement. Any page whose row is not
+            -- exactly 26 tall got a different gap under it, so the first box sat at
+            -- a different height on every page and the row appeared to shift.
+            -- Measure the row instead and add a fixed pad, so the gap below the
+            -- buttons is identical everywhere by construction.
+            --
+            -- The scan is ALSO gated on IsShown() now, matching the positioning loop
+            -- above. It was not, so a page carrying a HIDDEN right-aligned widget
+            -- still reserved the 40 and opened with an empty band above its first
+            -- box -- the pages Krathe saw "starting further down" with nothing there.
+            local RIGHT_ROW_PAD = 14
+            local rightRowH = 0
             for _, widget in ipairs(self.children) do
-                if widget.rightAlign then
-                    hasRightAligned = true
-                    break
+                if widget.rightAlign and widget:IsShown() then
+                    rightRowH = math.max(rightRowH, widget:GetHeight() or 0)
                 end
             end
-            if hasRightAligned then
-                -- Add padding below the copy button (button height ~26 + 14 padding)
-                y1 = y1 - 40
-                y2 = y2 - 40
+            if rightRowH > 0 then
+                -- Snapped for the same reason every other layout number is: an
+                -- unsnapped offset puts everything below it off the pixel grid.
+                local reserve = SnapLen(self.child, rightRowH + RIGHT_ROW_PAD)
+                y1 = y1 - reserve
+                y2 = y2 - reserve
             end
             
             for _, widget in ipairs(self.children) do
@@ -11155,7 +13070,7 @@ function DF:CreateGUI()
                     end
                     
                     widget:ClearAllPoints()
-                    
+
                     -- Set height for frame-based widgets (like header containers)
                     if widget.text and widget.SetHeight and h > 0 then
                         widget:SetHeight(h)
@@ -11172,28 +13087,36 @@ function DF:CreateGUI()
                         end
                     end
                     
+                    -- Snap the offsets and widths this loop hands out, for the same
+                    -- reason CreateSettingsGroup:LayoutChildren does: a widget placed
+                    -- straight onto the page (a banner, a full-width note, a
+                    -- collapsible section) never passes through a group, so this is
+                    -- the only place its geometry can be put on the grid. See SnapLen.
+                    local snapX = SnapLen(widget, x1 + indentOffset)
+
                     if widget.layoutCol == "both" then
                         local startY = math.min(y1, y2)
-                        widget:SetPoint("TOPLEFT", x1 + indentOffset, startY)
+                        widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, startY))
                         -- Set width to span both columns (with scrollbar padding)
-                        widget:SetWidth(usableWidth - indentOffset)
+                        widget:SetWidth(SnapLen(widget, usableWidth - indentOffset))
                         y1 = startY - h
                         y2 = startY - h
                     elseif widget.layoutCol == 2 and usesTwoColumns then
-                        widget:SetPoint("TOPLEFT", col2X + indentOffset, y2)
+                        widget:SetPoint("TOPLEFT", SnapLen(widget, col2X + indentOffset),
+                                        SnapLen(widget, y2))
                         -- Reduce width for indented widgets to maintain alignment
                         if indentOffset > 0 and widget.SetWidth then
                             local defaultColWidth = math.floor((usableWidth - 20) / 2)
-                            widget:SetWidth(defaultColWidth - indentOffset)
+                            widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
                         end
                         y2 = y2 - h
                     else
                         -- Column 1, or column 2 when in single-column mode
-                        widget:SetPoint("TOPLEFT", x1 + indentOffset, y1)
+                        widget:SetPoint("TOPLEFT", snapX, SnapLen(widget, y1))
                         -- Reduce width for indented widgets to maintain alignment
                         if indentOffset > 0 and widget.SetWidth then
                             local defaultColWidth = math.floor((usableWidth - 20) / 2)
-                            widget:SetWidth(defaultColWidth - indentOffset)
+                            widget:SetWidth(SnapLen(widget, defaultColWidth - indentOffset))
                         end
                         y1 = y1 - h
                     end
@@ -11202,8 +13125,37 @@ function DF:CreateGUI()
                     if math.abs(currentBottom) > maxY then maxY = math.abs(currentBottom) end
                 end
             end
-            self.child:SetHeight(maxY + 40 + bannerOffset)
-            
+            local contentH = maxY + 40 + bannerOffset
+
+            -- FOOTER: the See-Also bar is designed as one, so on a page whose
+            -- content does not fill the viewport it should sit at the BOTTOM
+            -- rather than floating halfway down with dead space under it. On a
+            -- page that does fill (or overflow) the viewport it already lands at
+            -- the end of the flow, which reads correctly -- so this only moves it
+            -- when there is spare room, and the long-page case is untouched.
+            --
+            -- Done by stretching the scroll child to the viewport height and
+            -- anchoring the footer to the child's BOTTOM: the child is what the
+            -- flow is measured against, so this keeps the footer inside the
+            -- scrolled content (it still scrolls with a long page) instead of
+            -- floating over it.
+            local footer
+            for _, w in ipairs(self.children) do
+                if w.isPageFooter and w:IsShown() then footer = w break end
+            end
+            if footer then
+                local viewH = self:GetHeight() or 0
+                if viewH > contentH then
+                    contentH = viewH
+                    footer:ClearAllPoints()
+                    footer:SetPoint("BOTTOMLEFT", self.child, "BOTTOMLEFT",
+                        SnapLen(self.child, x1), SnapLen(self.child, GUI.Space.footer))
+                    footer:SetWidth(SnapLen(footer, usableWidth))
+                end
+            end
+
+            self.child:SetHeight(contentH)
+
             -- Update scroll child width to match content area
             if self.child and GUI.contentFrame then
                 self.child:SetWidth(GUI.contentFrame:GetWidth() - 30)

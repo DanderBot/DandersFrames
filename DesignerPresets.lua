@@ -724,6 +724,49 @@ function DF:SetModeDesignerPreset(kind, mode, name)
     end
 end
 
+-- Everything OTHER than `excludeMode` that points at `name` right now, as an
+-- array of display labels (the other mode, pinned set names, auto-layout names).
+-- Presentation-only: a preset with users is a SHARED preset, and editing it
+-- changes all of them — which nothing in the UI used to say. Reads the refs
+-- themselves rather than the party/raid sync flag, so it is equally right when
+-- someone shares a preset by hand instead of by syncing.
+function DF:ListDesignerPresetUsers(kind, name, excludeMode)
+    local refKey = DESIGNER_KINDS[kind] and DESIGNER_KINDS[kind].ref
+    if not refKey or not name then return {} end
+    local L = DF.L
+    local prof = DF._realProfile or DF.db
+    -- Labels come straight out of the locale table, so bail rather than build a
+    -- list of nils if this is somehow reached before the locale is up.
+    if not prof or not L then return {} end
+    local users = {}
+
+    local function visitMode(mode, modeDB, label)
+        if not modeDB then return end
+        if mode ~= excludeMode and (modeDB[refKey] or DefaultPresetNameForMode(mode)) == name then
+            users[#users + 1] = label
+        end
+        -- A pinned set's nil ref means "inherit the mode's preset" — that is not
+        -- a reference to this preset, so only explicit matches count.
+        local pf = modeDB.pinnedFrames
+        if pf and pf.sets then
+            for i, set in pairs(pf.sets) do
+                if type(set) == "table" and set[refKey] == name then
+                    users[#users + 1] = set.name or format("%s %s", L["Pinned Frames"], tostring(i))
+                end
+            end
+        end
+    end
+
+    visitMode("party", prof.party, L["Party"])
+    visitMode("raid", DF._realRaidDB or prof.raid, L["Raid"])
+    ForEachRaidLayoutOverride(prof, function(layout)
+        if layout.overrides[refKey] == name then
+            users[#users + 1] = layout.name or L["Auto Layouts"]
+        end
+    end)
+    return users
+end
+
 -- While editing a raid auto-layout: is the layout currently INHERITING the
 -- global designer preset? True when the layout has NO stored preset override —
 -- based on override presence, NOT name equality, so explicitly picking a preset

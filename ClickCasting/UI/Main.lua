@@ -197,7 +197,6 @@ function CC:CreateClickCastUI(parent)
         self.Icon:SetVertexColor(themeColor.r, themeColor.g, themeColor.b)
         DF.GUI:ShowTooltip(self, {
             title = L["Profile Settings"],
-            anchor = "ANCHOR_BOTTOM",
             lines = { L["Open the Profiles tab to manage profiles"] },
         })
     end)
@@ -300,7 +299,6 @@ function CC:CreateClickCastUI(parent)
     quickBindCb:SetScript("OnEnter", function(self)
         DF.GUI:ShowTooltip(self, {
             title = L["Quick Bind Mode"],
-            anchor = "ANCHOR_TOP",
             lines = {
                 L["When enabled: Click spell, press key to bind instantly."],
                 L["When disabled: Click spell to open Binding Editor."],
@@ -456,13 +454,10 @@ function CC:CreateClickCastUI(parent)
     local collapseBtn = CreateFrame("Button", nil, bindingsHeader, "BackdropTemplate")
     collapseBtn:SetPoint("LEFT", 4, 0)
     collapseBtn:SetSize(20, 20)
-    collapseBtn:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(collapseBtn, {
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+        borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
     })
-    collapseBtn:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-    collapseBtn:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
     
     local collapseIcon = collapseBtn:CreateTexture(nil, "OVERLAY")
     collapseIcon:SetPoint("CENTER")
@@ -513,7 +508,6 @@ function CC:CreateClickCastUI(parent)
     clearAllBtn:HookScript("OnEnter", function(self)
         DF.GUI:ShowTooltip(self, {
             title = L["Clear All Bindings"],
-            anchor = "ANCHOR_TOP",
             tone = "danger",
             lines = { L["Remove all bindings from the current profile."] },
         })
@@ -714,7 +708,7 @@ function CC:CreateClickCastUI(parent)
         -- Tooltip rides on top of the styler's own hover scripts.
         if tooltip then
             btn:HookScript("OnEnter", function(self)
-                DF.GUI:ShowTooltip(self, { title = tooltip, anchor = "ANCHOR_TOP" })
+                DF.GUI:ShowTooltip(self, { title = tooltip })
             end)
             btn:HookScript("OnLeave", function()
                 DF.GUI:HideTooltip()
@@ -823,7 +817,6 @@ function CC:CreateClickCastUI(parent)
     quickMacroBtn:HookScript("OnEnter", function(self)
         DF.GUI:ShowTooltip(self, {
             title = L["Quick Macro"],
-            anchor = "ANCHOR_TOP",
             lines = { L["Create a simple macro without opening the full editor."] },
         })
     end)
@@ -1212,13 +1205,10 @@ function CC:CreateCollapsedBindingRow(parent, binding, index)
     
     local row = CreateFrame("Button", nil, parent, "BackdropTemplate")
     row:SetHeight(58)
-    row:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(row, {
+        bgColor     = { C.element.r, C.element.g, C.element.b, 0.8 },
+        borderColor = { C.border.r, C.border.g, C.border.b, 0.5 },
     })
-    row:SetBackdropColor(C.element.r, C.element.g, C.element.b, 0.8)
-    row:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
     
     -- Icon (centered, larger)
     local icon = row:CreateTexture(nil, "ARTWORK")
@@ -1282,17 +1272,19 @@ function CC:CreateCollapsedBindingRow(parent, binding, index)
     row:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C.element.r + 0.08, C.element.g + 0.08, C.element.b + 0.08, 1)
         self:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 0.8)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:AddLine(displayName, 1, 1, 1)
-        GameTooltip:AddLine(bindText, themeColor.r, themeColor.g, themeColor.b)
-        GameTooltip:AddLine(" ")
-        GameTooltip:AddLine(L["Click to edit"], 0.5, 0.5, 0.5)
-        GameTooltip:Show()
+        DF.GUI:ShowTooltip(self, {
+            title = displayName,
+            lines = {
+                { text = bindText, color = themeColor },
+                " ",
+                { text = L["Click to edit"], hint = true },
+            },
+        })
     end)
     row:SetScript("OnLeave", function(self)
         self:SetBackdropColor(C.element.r, C.element.g, C.element.b, 0.8)
         self:SetBackdropBorderColor(C.border.r, C.border.g, C.border.b, 0.5)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     
     -- Click to edit
@@ -1402,13 +1394,11 @@ function CC:CreateKeybindPopup()
     popup:SetSize(280, popupHeight)
     popup:SetFrameStrata("FULLSCREEN_DIALOG")
     popup:SetFrameLevel(captureFrame:GetFrameLevel() + 10)
-    popup:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
+    DF.GUI:CreateElementBackdrop(popup, {
         edgeSize = 2,
+        bgColor     = { C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.98 },
+        borderColor = { themeColor.r, themeColor.g, themeColor.b, 1 },
     })
-    popup:SetBackdropColor(C_BACKGROUND.r, C_BACKGROUND.g, C_BACKGROUND.b, 0.98)
-    popup:SetBackdropBorderColor(themeColor.r, themeColor.g, themeColor.b, 1)
     popup:Hide()
     
     -- Title

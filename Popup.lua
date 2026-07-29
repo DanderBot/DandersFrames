@@ -24,24 +24,11 @@ local Mixin = Mixin
 -- THEME COLORS (matching GUI/GUI.lua)
 -- ============================================================
 
--- Neutral tones are shared with the main GUI palette (GUI.lua loads first) so
--- they theme-track in lockstep and aren't re-declared here. Only colours that
--- differ from GUI.Colors stay private: `background` (higher 0.97 dialog alpha),
--- `accent` (kept as a fallback for GetThemeColor below), `selected`, `green`, `red`.
-local GUIColors = DF.GUI.Colors
-local C = {
-    background = {r = 0.08, g = 0.08, b = 0.08, a = 0.97},
-    panel      = GUIColors.panel,
-    element    = GUIColors.element,
-    border     = GUIColors.border,
-    accent     = {r = 0.45, g = 0.45, b = 0.95, a = 1},
-    hover      = GUIColors.hover,
-    selected   = {r = 0.28, g = 0.28, b = 0.45, a = 1},
-    text       = GUIColors.text,
-    textDim    = GUIColors.textDim,
-    green      = {r = 0.2,  g = 0.9,  b = 0.2},
-    red        = {r = 0.9,  g = 0.25, b = 0.25},
-}
+-- The shared dialog palette (GUI.lua loads first). Neutrals are the same tables
+-- as GUI.Colors so they theme-track in lockstep; the dialog-specific tones
+-- (denser background, selected, green, red) live there too, alongside the ones
+-- the wizard builder needs, so there is exactly one copy in the addon.
+local C = DF.GUI.DialogColors
 
 -- Live theme accent (party purple / raid orange). The popup is a standalone
 -- dialog outside the settings page tree, so GUI ThemeListeners never reach it;
@@ -56,15 +43,14 @@ end
 -- BACKDROP HELPERS
 -- ============================================================
 
+-- Thin wrapper over the shared GUI backdrop so this file's positional call style
+-- keeps working. The look, and the pixel-grid snapping, come from the one place.
 local function ApplyBackdrop(frame, bgColor, borderColor, edgeSize)
-    if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = edgeSize or 1,
+    DF.GUI:CreateElementBackdrop(frame, {
+        bgColor     = bgColor,
+        borderColor = borderColor,
+        edgeSize    = edgeSize,
     })
-    frame:SetBackdropColor(bgColor.r, bgColor.g, bgColor.b, bgColor.a or 1)
-    frame:SetBackdropBorderColor(borderColor.r, borderColor.g, borderColor.b, borderColor.a or 1)
 end
 
 -- ============================================================
@@ -274,7 +260,7 @@ local alertConfig = nil
 local alertButtons = {}
 
 -- Mode tracking
-local popupMode = nil  -- "wizard" or "alert"
+local popupMode = nil  -- "wizard", "alert" or "input"
 
 local function CancelAutoAdvance()
     if wizardAutoAdvanceTimer then
@@ -509,18 +495,16 @@ local function CreatePickerOverlay(widget, tabName, dbKey, controlType, callback
     overlay.border:SetPoint("TOPLEFT", -2, 2)
     overlay.border:SetPoint("BOTTOMRIGHT", 2, -2)
     if not overlay.border.SetBackdrop then Mixin(overlay.border, BackdropTemplateMixin) end
-    overlay.border:SetBackdrop({
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(overlay.border, {
+        fill = false,
+        borderColor = { PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0 },
     })
-    overlay.border:SetBackdropBorderColor(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0)
 
     overlay:SetScript("OnEnter", function()
         overlay.bg:SetColorTexture(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0.15)
         overlay.border:SetBackdropBorderColor(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0.8)
         DF.GUI:ShowTooltip(overlay, {
             title = L["Click to select this setting"],
-            anchor = "ANCHOR_CURSOR",
             lines = {
                 { text = dbKey, color = PICKER_COLOR },
             },
@@ -529,10 +513,10 @@ local function CreatePickerOverlay(widget, tabName, dbKey, controlType, callback
     overlay:SetScript("OnLeave", function()
         overlay.bg:SetColorTexture(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0)
         overlay.border:SetBackdropBorderColor(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0)
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
     end)
     overlay:SetScript("OnClick", function()
-        GameTooltip:Hide()
+        DF.GUI:HideTooltip()
         callback(tabName, dbKey, controlType)
     end)
 
@@ -548,13 +532,10 @@ local function CreatePickerBanner()
     banner:SetFrameStrata("DIALOG")
     banner:SetFrameLevel(300)
     if not banner.SetBackdrop then Mixin(banner, BackdropTemplateMixin) end
-    banner:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
+    DF.GUI:CreateElementBackdrop(banner, {
+        bgColor     = { PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0.9 },
+        borderColor = { PICKER_COLOR.r * 0.7, PICKER_COLOR.g * 0.7, PICKER_COLOR.b * 0.7, 1 },
     })
-    banner:SetBackdropColor(PICKER_COLOR.r, PICKER_COLOR.g, PICKER_COLOR.b, 0.9)
-    banner:SetBackdropBorderColor(PICKER_COLOR.r * 0.7, PICKER_COLOR.g * 0.7, PICKER_COLOR.b * 0.7, 1)
 
     banner.text = banner:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
     banner.text:SetPoint("LEFT", 16, 0)
@@ -891,10 +872,19 @@ end
 -- Forward declarations
 local RenderWizardStep, RenderSummary, UpdateNavButtons, UpdateProgressDots
 
+-- The popup frame is a singleton, so every mode must park the widgets it does
+-- not use or they bleed into the next one. Input mode's field is created lazily
+-- (see EnsureInputWidgets), hence the nil guards.
+local function HideInputWidgets(f)
+    if f.InputBox then f.InputBox:Hide() end
+    if f.InputAreaBox then f.InputAreaBox:Hide() end
+end
+
 local function CreatePopupFrame()
     if PopupFrame then return PopupFrame end
 
     local f = CreateFrame("Frame", "DFPopupFrame", UIParent, "BackdropTemplate")
+    -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
     f:SetSize(FRAME_WIDTH, 300)
     f:SetPoint("CENTER")
     f:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -914,8 +904,10 @@ local function CreatePopupFrame()
     titleBar:SetPoint("TOPRIGHT", -2, -2)
     titleBar:SetHeight(32)
     if not titleBar.SetBackdrop then Mixin(titleBar, BackdropTemplateMixin) end
-    titleBar:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-    titleBar:SetBackdropColor(C.panel.r, C.panel.g, C.panel.b, 1)
+    DF.GUI:CreateElementBackdrop(titleBar, {
+        outline = false,
+        bgColor     = { C.panel.r, C.panel.g, C.panel.b, 1 },
+    })
     titleBar:RegisterForDrag("LeftButton")
     titleBar:SetScript("OnDragStart", function() f:StartMoving() end)
     titleBar:SetScript("OnDragStop", function() f:StopMovingOrSizing() end)
@@ -1066,8 +1058,10 @@ local function CreatePopupFrame()
     buttonBar:SetPoint("BOTTOMRIGHT", -2, 2)
     buttonBar:SetHeight(36)
     if not buttonBar.SetBackdrop then Mixin(buttonBar, BackdropTemplateMixin) end
-    buttonBar:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8" })
-    buttonBar:SetBackdropColor(C.panel.r, C.panel.g, C.panel.b, 1)
+    DF.GUI:CreateElementBackdrop(buttonBar, {
+        outline = false,
+        bgColor     = { C.panel.r, C.panel.g, C.panel.b, 1 },
+    })
     f.ButtonBar = buttonBar
 
     -- Now anchor content bottom to button bar top (content needs height to render children)
@@ -1772,6 +1766,7 @@ local function ConfigureForWizard(config)
     f.QuestionText:Show()
     f.MessageText:Hide()
     f.AlertIcon:Hide()
+    HideInputWidgets(f)
     for _, btn in ipairs(f.alertButtonFrames) do
         btn:Hide()
     end
@@ -1810,12 +1805,25 @@ local function ConfigureForAlert(config)
 
     -- Set title
     f.TitleText:SetText(config.title or L["Notice"])
+    -- config.tone tints the TITLE, matching how a toned line reads inline and in
+    -- GUI:ShowTooltip. Warnings that used to open with a coloured lead line in
+    -- the body put that emphasis in the header instead. Reset every time: the
+    -- frame is a singleton, so an untoned alert must not inherit the last tint.
+    if config.tone and DF.GUI and DF.GUI.GetToneColor then
+        local c = DF.GUI:GetToneColor(config.tone)
+        f.TitleText:SetTextColor(c[1], c[2], c[3])
+    else
+        f.TitleText:SetTextColor(C.text.r, C.text.g, C.text.b)
+    end
 
     -- Set frame width
     local width = config.width or FRAME_WIDTH
     f:SetWidth(width)
 
-    -- Hide wizard elements
+    -- Hide wizard elements. Input mode re-shows its own field immediately after
+    -- calling this, so parking it here is safe and keeps a stale field from
+    -- surviving into a plain alert.
+    HideInputWidgets(f)
     f.QuestionText:Hide()
     f.DescText:Hide()
     f.OptionsContainer:Hide()
@@ -1904,7 +1912,9 @@ local function ConfigureForAlert(config)
     -- Resize frame
     local messageHeight = f.MessageText:GetStringHeight() or 18
     local iconHeight = config.icon and 32 or 0
-    local contentHeight = max(messageHeight, iconHeight)
+    -- extraContentHeight: room for something anchored BELOW the message that the
+    -- alert layout doesn't know about. Input mode uses it for its field.
+    local contentHeight = max(messageHeight, iconHeight) + (config.extraContentHeight or 0)
     -- Account for dynamically-sized ButtonBar (36 default, more when buttons are taller)
     local barHeight = (f.ButtonBar and f.ButtonBar:GetHeight()) or 36
     local totalHeight = 34 + CONTENT_PADDING + contentHeight + CONTENT_PADDING + (barHeight + 2)
@@ -1986,6 +1996,137 @@ function DF:ShowPopupAlert(config)
     ConfigureForAlert(config)
 end
 
+-- ============================================================
+-- INPUT MODE
+-- The one dialog shape this popup lacked, and the only reason ~8 surfaces were
+-- still on Blizzard's StaticPopup: a prompt with a text field. Built on the
+-- alert layout, so the frame, title bar, theme stripe, button bar and button
+-- styling are literally the same widgets — only the field is new, and that is
+-- the addon's standard edit box chrome (GUI:StyleEditBox).
+-- ============================================================
+
+local INPUT_WIDTH      = 380   -- short prompts: a name, a label
+local INPUT_WIDTH_WIDE = 500   -- blobs: export / import strings
+local INPUT_FIELD_H    = 24
+local INPUT_AREA_H     = 96
+
+local inputConfig = nil
+local inputResolved = false
+
+local function EnsureInputWidgets(f)
+    if f.InputBox then return end
+
+    -- Single line.
+    local eb = CreateFrame("EditBox", nil, f.Content)
+    eb:SetHeight(INPUT_FIELD_H)
+    eb:SetAutoFocus(false)
+    DF.GUI:StyleEditBox(eb)
+    eb:Hide()
+    f.InputBox = eb
+
+    -- Multi line: the shared text area, so a settings blob reads the same in a
+    -- dialog as it does on the Profiles page. Read-only mode is NOT set here —
+    -- this is a singleton reconfigured per call, so ShowPopupInput installs it.
+    local box = DF.GUI:CreateTextArea(f.Content)
+    box:Hide()
+    f.InputArea, f.InputAreaBox = box.EditBox, box
+
+    -- Escape closes via UISpecialFrames, which just HIDES the frame — no button
+    -- handler runs. Without this, dismissing with Escape would silently skip
+    -- onCancel. Guarded on input mode so alerts and wizards are unaffected.
+    f:HookScript("OnHide", function()
+        if popupMode == "input" and not inputResolved then
+            inputResolved = true
+            if inputConfig and inputConfig.onCancel then inputConfig.onCancel() end
+        end
+    end)
+end
+
+-- config:
+--   title, message           header + prompt line (message optional)
+--   text                     initial contents
+--   acceptLabel/cancelLabel  default OK / Cancel (Close when readOnly)
+--   maxLetters               single line only
+--   multiline                tall scrolling field instead of one line
+--   readOnly                 show-and-copy (export): no accept button, no edits
+--   width                    override; defaults 380, or 500 when multiline
+--   onAccept(text), onCancel()
+function DF:ShowPopupInput(config)
+    if not config then
+        DF:DebugError("ShowPopupInput: config is required")
+        return
+    end
+    local f = CreatePopupFrame()
+    EnsureInputWidgets(f)
+
+    local multiline = config.multiline and true or false
+    local width = config.width or (multiline and INPUT_WIDTH_WIDE or INPUT_WIDTH)
+    local fieldH = multiline and INPUT_AREA_H or INPUT_FIELD_H
+    local eb = multiline and f.InputArea or f.InputBox
+    local widget = multiline and f.InputAreaBox or f.InputBox
+
+    inputConfig, inputResolved = config, false
+
+    local function Accept()
+        inputResolved = true
+        if config.onAccept then config.onAccept(eb:GetText()) end
+    end
+    local function Cancel()
+        inputResolved = true
+        if config.onCancel then config.onCancel() end
+    end
+
+    local buttons = {}
+    if not config.readOnly then
+        buttons[#buttons + 1] = { label = config.acceptLabel or L["OK"], onClick = Accept }
+    end
+    buttons[#buttons + 1] = {
+        label = config.cancelLabel or (config.readOnly and L["Close"] or L["Cancel"]),
+        onClick = Cancel,
+    }
+
+    ConfigureForAlert({
+        title              = config.title,
+        message            = config.message,
+        width              = width,
+        buttons            = buttons,
+        extraContentHeight = fieldH + 10,
+    })
+    popupMode = "input"
+
+    -- Park the shape we're not using, then hang the live one under the message.
+    ;(multiline and f.InputBox or f.InputAreaBox):Hide()
+    widget:ClearAllPoints()
+    widget:SetPoint("TOPLEFT", f.MessageText, "BOTTOMLEFT", 0, -10)
+    widget:SetPoint("TOPRIGHT", f.MessageText, "BOTTOMRIGHT", 0, -10)
+    widget:SetHeight(fieldH)
+    widget:Show()
+
+    -- The multi-line shape needs nothing here: the text area sizes its own
+    -- scroll child off the well we just anchored. Only the single line does.
+    if not multiline then
+        f.InputBox:SetMaxLetters(config.maxLetters or 0)
+        f.InputBox:SetScript("OnEnterPressed", function()
+            if not config.readOnly then Accept() end
+            f:Hide()
+        end)
+        f.InputBox:SetScript("OnEscapePressed", function() f:Hide() end)
+    end
+
+    local initial = config.text or ""
+    eb:SetText(initial)
+    -- WoW has no read-only EditBox: let the caret and Ctrl+A work, but put the
+    -- text back the moment a keystroke changes it.
+    eb:SetScript("OnTextChanged", config.readOnly and function(s, user)
+        if user and s:GetText() ~= initial then
+            s:SetText(initial)
+            s:HighlightText()
+        end
+    end or nil)
+    eb:HighlightText()
+    eb:SetFocus()
+end
+
 -- Launch a sub-wizard from within a running wizard.
 -- When the sub-wizard completes, answers are merged and the parent wizard resumes.
 -- config.id is required for answer namespacing.
@@ -2049,7 +2190,12 @@ function DF:ShowSubWizard(config)
     ConfigureForWizard(config)
 end
 
--- Check if popup is currently showing
+-- Check if popup is currently showing.
+-- ⚠ Currently has NO callers: its one caller was the Targeted Spells wizard
+-- auto-fire in Core.lua, removed under DEPRECATED-TARGETED-SPELLS. Kept because
+-- restoring that block needs it back, and because "don't stomp a popup that's
+-- already up" is the right check for any future scheduled popup. A dead-code
+-- sweep should skip this one rather than report it.
 function DF:IsPopupShown()
     return PopupFrame and PopupFrame:IsShown()
 end
