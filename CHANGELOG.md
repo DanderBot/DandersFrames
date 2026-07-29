@@ -8,6 +8,7 @@
 * (Click Casting) Fixed keyboard binds going dead on every frame for a whole fight when combat interrupted a binding refresh — typically zoning into a raid and a pull starting seconds later. (by Krathe)
 * (Click Casting) Fixed hover keybinds dying for the rest of the session on some frames after visiting player housing. (by Krathe)
 * (Click Casting) Fixed cast-on-down silently switching itself off on Blizzard's own raid and party frames after every roster change. (by Krathe)
+* (Pet Frames) Fixed pet frames never appearing in arena (2v2, 3v3 and Solo Shuffle). Arena counts as a raid to the game, so pet frames were being looked for on the raid frames — which arena does not use. They now build alongside the arena frames, and follow your Party pet settings. (by Krathe)
 
 ### Improvements
 

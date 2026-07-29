@@ -5528,7 +5528,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
     elseif event == "PLAYER_REGEN_ENABLED" then
         -- Track combat state
         DF.playerInCombat = false
-        
+
+        -- Arena pet frames deferred by the combat guard in UpdateArenaPetFrames.
+        -- Forced, because UpdateAllRaidPetFrames throttles to one run per frame and
+        -- something else may already have consumed this frame's slot.
+        if DF.pendingArenaPetUpdate then
+            DF.pendingArenaPetUpdate = nil
+            if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
+        end
+
         -- Clean up after test mode was interrupted by combat
         if DF.testModeInterruptedByCombat then
             DF.testModeInterruptedByCombat = false
