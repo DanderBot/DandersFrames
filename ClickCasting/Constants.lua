@@ -306,7 +306,8 @@ local DEFAULT_BINDING = {
         alwaysCast = false,
     },
     -- Load conditions
-    loadSpec = nil, -- nil = all specs, or table of spec IDs
+    -- (loadSpec, the per-binding spec gate, was retired: no UI ever wrote it
+    --  and per-spec click casting is done via loadout-assigned profiles)
     loadCombat = nil, -- nil = always, "combat" = in combat only, "nocombat" = out of combat only
 }
 CC.DEFAULT_BINDING = DEFAULT_BINDING
@@ -522,5 +523,26 @@ local BLIZZARD_ARENA_FRAMES = {
     "ArenaEnemyFrame5",
 }
 CC.BLIZZARD_ARENA_FRAMES = BLIZZARD_ARENA_FRAMES
+
+-- Modifier prefixes whose type1/type2 attributes get blanked to "" to suppress
+-- Blizzard's own click-casting on a frame we have taken over
+-- (ClearBlizzardClickCastFromFrame), and back to nil when the frame is handed
+-- back (RestoreBlizzardDefaults). Shared so the two sides cannot drift: they
+-- must name EXACTLY the same attributes, or the suppression outlives the
+-- takeover and modified clicks on that frame stay dead until a reload.
+--
+-- Note the ordering. For the multi-modifier entries this is NOT WoW's canonical
+-- attribute order (canonical is alt-ctrl-shift-meta -- see MODIFIER_COMBOS in
+-- Bindings.lua), so SecureActionButtonTemplate almost certainly never looks
+-- those names up and they are inert. They are still written today, so the
+-- restore side has to name them to be sure it undoes everything. Deliberately
+-- not "corrected" here: making them canonical would START suppressing
+-- multi-modifier Blizzard click-casting that is not suppressed today, which is
+-- a behaviour change and not this change's business.
+local BLIZZARD_SUPPRESSED_MODIFIERS = {
+    "shift-", "ctrl-", "alt-",
+    "shift-ctrl-", "shift-alt-", "ctrl-alt-", "shift-ctrl-alt-",
+}
+CC.BLIZZARD_SUPPRESSED_MODIFIERS = BLIZZARD_SUPPRESSED_MODIFIERS
 
 -- ============================================================
