@@ -578,6 +578,27 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         Add(defTooltipGroup, nil, 1)
 
+        -- Aura Designer Tooltips (Column 2). Lives HERE rather than on the Aura
+        -- Designer page: this setting only ever gets touched by someone who
+        -- wants a tooltip and hasn't got one, or has one and doesn't want it —
+        -- and both of those people go looking for "tooltip". The AD page links
+        -- across via its See Also row.
+        --
+        -- Split by AD surface rather than one blanket toggle, because the value
+        -- differs sharply. GROUPS render whatever matches a filter, so you never
+        -- chose those icons — that is the case worth having. Indicators and Bars
+        -- are spells you placed and named yourself, so they gain little, but
+        -- there's no harm in offering them.
+        local adTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
+        adTooltipGroup:AddWidget(GUI:CreateHeader(self.child, L["Aura Designer Tooltips"]), 40)
+        local adGroupsTip = adTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Groups"], db, "tooltipADGroupsEnabled", RefreshAuraTooltips), 30)
+        adGroupsTip.tooltip = L["Filter Groups and Debuff Groups. Their icons come from a filter rather than being placed one by one, so a tooltip is the only way to see what each one is."]
+        local adIndTip = adTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Indicators"], db, "tooltipADIndicatorsEnabled", RefreshAuraTooltips), 30)
+        adIndTip.tooltip = L["Icons and squares you placed yourself. You already chose these, so tooltips add less here."]
+        local adBarTip = adTooltipGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Bars"], db, "tooltipADBarsEnabled", RefreshAuraTooltips), 30)
+        adBarTip.tooltip = L["The Aura Designer bar."]
+        Add(adTooltipGroup, nil, 2)
+
         -- Resurrection Icon Tooltips (Column 2) — the one short box, kept last so
         -- the leftover space lands at the foot of a column.
         local resTooltipGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -594,9 +615,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             {pageId = "auras_buffs", label = L["Buffs"]},
             {pageId = "auras_debuffs", label = L["Debuffs"]},
             {pageId = "auras_defensiveicon", label = L["Defensive Icon"]},
+            {pageId = "auras_auradesigner", label = L["Aura Designer"]},
         }), 30, "both")
     end)
-    
+
     -- Display > Fading (moved from Indicators > Out of Range + Dead/Offline fading)
     local pageFading = CreateSubTab("display", "display_fading", L["Fading"])
     BuildPage(pageFading, function(self, db, Add, AddSpace, AddSyncPoint)

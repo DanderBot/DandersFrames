@@ -2279,6 +2279,15 @@ DF.PartyDefaults = {
     tooltipResurrectionEnabled = false,
     tooltipDefensiveX = 0,
     tooltipDefensiveY = 0,
+    -- Aura Designer tooltips. All OFF: AD surfaces are things you built, so a
+    -- tooltip is opt-in rather than the sensible default the aura ROWS get.
+    -- Groups are the ones worth turning on — their contents come from a filter,
+    -- so you did not pick the individual icons. Indicators/Bars are exposed
+    -- anyway; there is no harm in someone wanting them, and withholding the
+    -- option is a judgement call we do not need to make for them.
+    tooltipADGroupsEnabled = false,       -- Filter Groups + Debuff Groups
+    tooltipADIndicatorsEnabled = false,   -- placed icon / square indicators
+    tooltipADBarsEnabled = false,         -- the Aura Designer bar
     tooltipBindingAnchor = "FRAME",
     tooltipBindingAnchorPos = "TOPRIGHT",
     tooltipBindingDisableInCombat = false,

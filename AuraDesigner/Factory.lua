@@ -1168,7 +1168,24 @@ local function resolveDefs(adDB)
 end
 Factory.ResolveDefaults = resolveDefs   -- editor preview passes this into BuildPreviewConfig
 
-local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec, defs, mine)
+-- Aura Designer tooltips (Tooltips page). Every AD surface shipped with
+-- `tooltips = false` hardcoded; these three keys make it a choice.
+--
+-- The one worth turning on is GROUPS: a filter/debuff group renders whatever
+-- matches its filter, so you never picked those icons individually. Indicators
+-- and Bars are spells you placed yourself and named, so they gain little — but
+-- they are exposed anyway rather than us deciding for the user.
+--
+-- The alert companion is deliberately NOT exposed: it is an overlay pinned to
+-- another indicator, so a tooltip there would compete with that indicator's own
+-- on the same hover area. That is an interaction problem, not a taste call.
+local function adTooltipsOn(frame, key)
+    if not frame then return false end
+    local db = DF.GetFrameDB and DF:GetFrameDB(frame)
+    return (db and db[key]) and true or false
+end
+
+local function buildPlacedConfig(frame, unit, map, indicator, isSquare, borderSpec, defs, mine)
     return {
         unit = unit,
         mode = "row",
@@ -1177,7 +1194,7 @@ local function buildPlacedConfig(unit, map, indicator, isSquare, borderSpec, def
         candidateFilters = { includeSpellIDs = map },
         testEntries = testEntryForMap(map),
         enabled = true,
-        tooltips = false,
+        tooltips = adTooltipsOn(frame, "tooltipADIndicatorsEnabled"),
         -- adBorderAnim: opt this ROW container into the DF-owned border animations (edge-alpha
         -- / DF_DASH / Wipe / Ripple) the shared allowlist otherwise reserves to overlay mode.
         -- The #205 buff/debuff rows never set it, so they still strip. Safe: the animation runs
@@ -1432,7 +1449,7 @@ local function buildBarConfig(frame, unit, map, indicator, borderSpec, defs, min
         candidateFilters = { includeSpellIDs = map },
         testEntries = testEntryForMap(map),
         enabled = true,
-        tooltips = false,
+        tooltips = adTooltipsOn(frame, "tooltipADBarsEnabled"),
         adBorderAnim = true,   -- opt into DF-owned border animations (see buildPlacedConfig)
         frameLevelOffset = resolveLevel(indicator, defs.level),
         frameStrata = resolveStrata(indicator, defs.strata),
@@ -1485,7 +1502,7 @@ local function buildAlertCompanionConfig(unit, map, indicator, layout, mine, geo
         candidateFilters = { includeSpellIDs = map },
         testEntries = testEntryForMap(map),
         enabled = true,
-        tooltips = false,
+        tooltips = false,   -- companion overlay: see adTooltipsOn (would fight its own indicator)
         -- One level above the indicator's own container band so the alert text
         -- draws over the icon / a bar's fill (the companion subtree carries
         -- nothing but the text, so nothing of the indicator is covered).
@@ -1891,7 +1908,7 @@ local function buildFilterGroupConfig(frame, map, group, mine)
         candidateFilters = { includeSpellIDs = map },
         testEntries = filterGroupTestEntries(map),
         enabled = true,
-        tooltips = false,
+        tooltips = adTooltipsOn(frame, "tooltipADGroupsEnabled"),
         adBorderAnim = borderSpec and true or nil,
         frameLevelOffset = 40,
         layout = buildFilterGroupLayout(group),
@@ -2021,7 +2038,7 @@ local function buildDebuffGroupConfig(frame, records, group)
         filter = records,
         sort = groupSort(group, "TIME"),
         enabled = true,
-        tooltips = false,
+        tooltips = adTooltipsOn(frame, "tooltipADGroupsEnabled"),
         adBorderAnim = borderSpec and true or nil,
         frameLevelOffset = 40,
         layout = buildFilterGroupLayout(group, 4),
@@ -2771,7 +2788,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         if not entry then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             local handle = DF.AuraContainer:Create(frame,
-                                buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec, defs, mine))
+                                buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
                                 placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
@@ -2779,7 +2796,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             entry.structSig, entry.coSig = structSig, coSig
-                            entry.handle:Rebuild(buildPlacedConfig(frame.unit, map, eff, isSquare, borderSpec, defs, mine))
+                            entry.handle:Rebuild(buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine))
                             applyPlacedAlpha(entry.handle, alpha)
                         elseif entry.coSig ~= coSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
