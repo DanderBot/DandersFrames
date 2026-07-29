@@ -119,17 +119,55 @@ local DISPEL_TYPES = { Magic = true, Curse = true, Disease = true, Poison = true
 -- to show-all, so DriveDebuffFactory intercepts the empty list and parks the
 -- row instead of building a container from it.
 local function BuildDirectDebuffFilters(db, claimed)
+    -- One toggle owns EVERY claim path — the record-drop below AND the ALL-mode
+    -- subtraction. Pre-5.0 the claim was silent and unconditional, which meant
+    -- nobody could see why a category had vanished from their bar, and nobody
+    -- could keep the duplicate if they wanted it.
+    if db.debuffDeduplicateDesigner == false then claimed = nil end
+
     if db.directDebuffShowAll then
         -- ALL mode: no category filtering, but Hide Long Debuffs still applies as
         -- one native maxDuration record. Keep Important CANNOT be honoured here:
         -- exempting boss/role/priority needs a second un-capped record, and the
         -- ALL record can't negate those boolean flags — importants would render
-        -- twice. The GUI hides the toggle in ALL mode. Claims stay unconsulted
-        -- (ALL-mode rows show claimed categories too — accepted behavior).
+        -- twice. The GUI hides the toggle in ALL mode.
         local allMaxDur = db.debuffMaxDurationEnabled and (db.debuffMaxDurationMinutes or 0) > 0
             and (db.debuffMaxDurationMinutes or 0) * 60 or nil
-        if allMaxDur then
-            return { { filter = "HARMFUL", key = "all", candidateFilters = { maxDuration = allMaxDur } } }
+
+        -- Claims SUBTRACT here rather than dropping a record: ALL mode is one
+        -- blanket HARMFUL group, so there is no per-category record to remove.
+        -- Boolean-backed categories invert through candidateFilters (false =
+        -- "not this"; the group ANDs them, so several falses read as "none of
+        -- these"). Token-backed ones negate in the filter string, exactly as the
+        -- category-mode records already do.
+        -- ⚠ This is what the old "Show All short-circuits BEFORE claims" note
+        -- described: an AD group showing boss/role/priority rendered those
+        -- debuffs a second time on the bar. Show All is the DEFAULT, so that hit
+        -- most setups, not just category-mode ones.
+        local cf, filterStr = nil, "HARMFUL"
+        if claimed then
+            local function need() cf = cf or {}; return cf end
+            if claimed.boss and claimed.role then need().isBossOrRoleAura = false
+            elseif claimed.boss then need().isBossAura = false
+            elseif claimed.role then need().isRoleAura = false end
+            if claimed.priority then need().isPriorityAura = false end
+            if claimed.crowdControl and AuraFilters.CrowdControl then
+                filterStr = filterStr .. "|!" .. AuraFilters.CrowdControl
+            end
+            if claimed.raid then filterStr = filterStr .. "|!RAID" end
+            if claimed.dispellable then
+                -- Mirrors the category-mode split: the token when the build has
+                -- it, else the dispel-type map (same semantics, no token).
+                if AuraFilters.Dispellable then
+                    filterStr = filterStr .. "|!" .. AuraFilters.Dispellable
+                else
+                    need().excludeDispelTypes = DISPEL_TYPES
+                end
+            end
+        end
+        if allMaxDur then cf = cf or {}; cf.maxDuration = allMaxDur end
+        if cf or filterStr ~= "HARMFUL" then
+            return { { filter = filterStr, key = "all", candidateFilters = cf } }
         end
         return nil
     end

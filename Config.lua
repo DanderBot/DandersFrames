@@ -1138,6 +1138,7 @@ DF.PartyDefaults = {
 
     -- Direct Mode: Debuff Filters
     directDebuffShowAll = true,               -- Show all debuffs (DEFAULT ON — Blizzard's category tokens miss untagged debuffs even with all enabled, so "all" is the only complete option; category mode stays available)
+    debuffDeduplicateDesigner = true,         -- Hide debuffs an Aura Designer group already shows (was silent+unconditional pre-5.0; now a visible toggle, and it finally applies in Show All mode too)
     debuffFilterBoss = true,                  -- Boss debuffs (native isBossAura)
     debuffFilterRole = true,                  -- Role debuffs (native isRoleAura)
     debuffFilterPriority = true,              -- Priority debuffs (native isPriorityAura)

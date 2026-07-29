@@ -6013,6 +6013,24 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
         }
 
+        -- ===== DEDUPLICATION =====
+        -- Same section, same position as the Buffs page: its own box at the top
+        -- of column 1, ahead of Settings. The two pages' dedupe toggles must be
+        -- findable in the same place.
+        local dedupGroup = GUI:CreateSettingsGroup(self.child, 280)
+        dedupGroup:AddWidget(GUI:CreateHeader(self.child, L["Deduplication"]), 40)
+        -- Inlined rather than reusing DebuffOrderChanged: that local is declared
+        -- with the Order & Limits box FURTHER DOWN this function, so naming it
+        -- here would read as a nil global — legal Lua, parses clean, and the
+        -- checkbox would just silently do nothing.
+        local dfDedup = GUI:CreateCheckbox(self.child, L["Hide Duplicate Debuffs"], db, "debuffDeduplicateDesigner", function()
+            if DF.RebuildDirectFilterStrings then DF:RebuildDirectFilterStrings() end
+            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+        end)
+        dfDedup.tooltip = L["Hides debuffs that an Aura Designer group is already showing, so they don't appear twice."]
+        dedupGroup:AddWidget(dfDedup, 30)
+        Add(dedupGroup, nil, 1)
+
         -- Settings Group (col1)
         local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
         settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)

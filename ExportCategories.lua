@@ -326,6 +326,7 @@ DF.ExportCategories = {
         "debuffDurationBarTexture",
         "debuffDurationColorByTime",
         "debuffDurationFont",
+        "debuffDeduplicateDesigner",
         "debuffDispelBorderInset",
         "debuffDispelSymbolAnchor",
         "debuffDispelSymbolColor",
