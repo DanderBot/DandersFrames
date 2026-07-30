@@ -26,6 +26,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Aura Designer) Open dropdown menus now close when switching tabs instead of lingering over the new tab.
 * (Auras) "Hide Long Debuffs" now also works while "All Debuffs" is enabled. "Keep important debuffs" still requires the category filters.
 * (Aura Designer) Fix cooldown swipes on indicators and groups draining in the opposite direction from the buff and debuff bars.
+* (Aura Designer) Fix error spam from the health bar overlay, most noticeable in follower dungeons and other content where players join and leave often.
 * (Interface) Fix spells with hidden tooltips (like Strength of the Black Ox) showing an empty box in the Aura Filters spell list — they now show their name and spell ID.
 * (Aura Designer) One spell picker everywhere — adding indicators, group spells and triggers all use the same spell database picker as Aura Filters, with search, class and category filters, and add-by-ID.
 * (Aura Designer) Every indicator has a show/hide eye — turn one off without deleting it.

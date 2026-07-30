@@ -124,7 +124,39 @@ DF.SetHealthBarValue = SetHealthBarValue
 local function MirrorHealthValue(bar, unit, frame)
     if not bar then return end
 
-    bar:SetMinMaxValues(0, 100)
+    -- The mirror is NOT ours: it is a StatusBar child of the secret aura button
+    -- (AuraContainer's slot), handed back through the container's onBar callback and
+    -- stashed on the frame. Children of that button are access-constrained, and the
+    -- client can turn this one forbidden underneath us — a slot reclaimed or
+    -- re-initialised without the addon observing it leaves the stash pointing at an
+    -- object we may no longer touch. Every health event then throws, which is bug
+    -- #1004: 999x "SetMinMaxValues on bad self (forbidden object)" in a follower
+    -- dungeon, where roster churn rebuilds containers constantly.
+    --
+    -- Probed with the first render call rather than IsForbidden(): this bar lives
+    -- inside the secret container, so IsForbidden can itself hand back a SECRET on a
+    -- perfectly healthy bar, and the codebase's guard idiom treats a secret result as
+    -- "skip" (ClickCasting/Frames.lua:1157). That would silently kill the feature for
+    -- everyone. Probing the real call cannot false-positive: if it succeeds the bar is
+    -- drivable, and SetValue below goes to the same object on the same tick.
+    if not pcall(bar.SetMinMaxValues, bar, 0, 100) then
+        -- One-shot per frame: a persistently forbidden bar must not trade a 999x
+        -- error spam for a 999x debug spam. The stash is deliberately NOT cleared —
+        -- Factory owns that reference and nils it on its own teardown paths, and
+        -- dropping it here would fight the container over a bar that may just be
+        -- transiently unavailable.
+        if frame and not frame.dfMirrorForbiddenLogged then
+            frame.dfMirrorForbiddenLogged = true
+            DF:DebugWarn("AURACONTAINER",
+                "MirrorHealthValue: health mirror bar forbidden, skipping its updates on %s",
+                tostring(unit))
+        end
+        return
+    end
+    if frame and frame.dfMirrorForbiddenLogged then
+        frame.dfMirrorForbiddenLogged = nil   -- recovered; allow one log if it happens again
+    end
+
     local pct = GetSafeHealthPercent(unit)
 
     local db
