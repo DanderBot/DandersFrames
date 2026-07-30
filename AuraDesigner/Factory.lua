@@ -1057,11 +1057,16 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec, defs)
     if isSquare then
         -- Solid-colour box (legacy SetColorTexture). hideIcon = no fill (text-only). The
         -- fill insets by the border thickness so the ring frames it (legacy parity).
-        if not hideIcon then
-            local r, g, b = readADColor(indicator.color)
-            local inset = borderSpec and borderArtInset(borderSpec) or 0
-            style.square = { color = { r, g, b, 1 }, inset = inset }
-        end
+        --
+        -- ⚠ ALWAYS emit style.square, even when hidden — its PRESENCE is what tells
+        -- AuraContainer "this slot is a square, do not run the icon path". Omitting the
+        -- table on hideIcon left both style.square and style.icon nil, and the container's
+        -- `if not squareSpec and (iconSpec == nil ...)` then fell through and bound the
+        -- spell icon: ticking Hide Icon on a square turned it INTO an icon. Mirrors the
+        -- icon branch below, which has always used a `show` flag for the same reason.
+        local r, g, b = readADColor(indicator.color)
+        local inset = borderSpec and borderArtInset(borderSpec) or 0
+        style.square = { show = not hideIcon, color = { r, g, b, 1 }, inset = inset }
     else
         -- Spell icon. hideIcon = text-only: skip the icon texture, keep cooldown/border/
         -- stacks. Art inset matches the border thickness so the ring frames the art.

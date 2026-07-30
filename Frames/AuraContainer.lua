@@ -576,16 +576,27 @@ local function styleButton_regions(slot, config)
         -- art). A square NEVER binds SetIcon (no dfIcon created), so the icon path is
         -- skipped whenever a square fill is configured. Both are read-free; the slot's
         -- secret show/hide drives their visibility (attach-and-inherit).
+        -- ⚠ squareSpec's PRESENCE means "this slot is a square"; squareSpec.show says
+        -- whether its fill is painted. The two are deliberately separate: a text-only
+        -- square (AD "Hide Icon") must still suppress the icon path below, or it renders
+        -- as the spell icon instead. Keep the icon guard on presence, not on show.
         local squareSpec = style.square
         if squareSpec then
-            if not slot.dfSquare then
-                slot.dfSquare = slot:CreateTexture(nil, "BACKGROUND")
+            if squareSpec.show == false then
+                -- Text-only square: no fill, but the slot stays a square. Hide rather than
+                -- paint transparent so a slot recycled from a visible square clears.
+                if slot.dfSquare then slot.dfSquare:Hide() end
+            else
+                if not slot.dfSquare then
+                    slot.dfSquare = slot:CreateTexture(nil, "BACKGROUND")
+                end
+                local inset = squareSpec.inset or 0
+                slot.dfSquare:ClearAllPoints()
+                slot.dfSquare:SetPoint("TOPLEFT", inset, -inset)
+                slot.dfSquare:SetPoint("BOTTOMRIGHT", -inset, inset)
+                slot.dfSquare:SetColorTexture(readColor(squareSpec.color))
+                slot.dfSquare:Show()
             end
-            local inset = squareSpec.inset or 0
-            slot.dfSquare:ClearAllPoints()
-            slot.dfSquare:SetPoint("TOPLEFT", inset, -inset)
-            slot.dfSquare:SetPoint("BOTTOMRIGHT", -inset, inset)
-            slot.dfSquare:SetColorTexture(readColor(squareSpec.color))
         end
         local iconSpec = style.icon
         if not squareSpec and (iconSpec == nil or iconSpec.show ~= false) then
@@ -671,9 +682,28 @@ local function styleButton_regions(slot, config)
             slot.dfCD = CreateFrame("Cooldown", nil, slot, "CooldownFrameTemplate")
         end
         slot.dfCD:SetAllPoints(slot.dfIcon or slot.dfSquare or slot)
-        if slot.dfCD.SetDrawEdge then slot.dfCD:SetDrawEdge(cdSpec == nil or cdSpec.edge ~= false) end
         -- Swipe on by default; cdSpec.swipe=false hides it (AD "Hide Cooldown Swipe").
-        if slot.dfCD.SetDrawSwipe then slot.dfCD:SetDrawSwipe(cdSpec == nil or cdSpec.swipe ~= false) end
+        local wantSwipe = (cdSpec == nil or cdSpec.swipe ~= false)
+
+        -- EDGE and BLING are ornaments OF the swipe: the edge is the bright leading line
+        -- that sweeps round with it, bling the flash when it completes. They must follow
+        -- the swipe by default, or "Hide Cooldown Swipe" removes the dark fill and leaves
+        -- a yellow line still sweeping the icon — which is exactly how this was reported.
+        -- Edge used to default to ON regardless (`cdSpec.edge ~= false` with no producer
+        -- ever emitting `edge`), and bling was never set at all, so it sat at whatever
+        -- CooldownFrameTemplate ships with. An explicit cdSpec.edge / cdSpec.bling still wins.
+        --
+        -- ⚠ Written as if/else on purpose. The `x == nil and a or b` idiom is WRONG here:
+        -- when the key is nil and the fallback is false it yields b, silently re-enabling
+        -- the thing we are trying to turn off.
+        local cdEdge, cdBling = cdSpec and cdSpec.edge, cdSpec and cdSpec.bling
+        local wantEdge, wantBling
+        if cdEdge == nil then wantEdge = wantSwipe else wantEdge = (cdEdge ~= false) end
+        if cdBling == nil then wantBling = wantSwipe else wantBling = (cdBling ~= false) end
+
+        if slot.dfCD.SetDrawSwipe then slot.dfCD:SetDrawSwipe(wantSwipe) end
+        if slot.dfCD.SetDrawEdge then slot.dfCD:SetDrawEdge(wantEdge) end
+        if slot.dfCD.SetDrawBling then slot.dfCD:SetDrawBling(wantBling) end
         if slot.dfCD.SetReverse then slot.dfCD:SetReverse(cdSpec ~= nil and cdSpec.reverse == true) end
         if slot.dfCD.SetHideCountdownNumbers then
             slot.dfCD:SetHideCountdownNumbers(not (cdSpec and cdSpec.numbers))
