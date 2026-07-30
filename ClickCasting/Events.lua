@@ -30,8 +30,16 @@ function CC:RegisterEvents()
     eventFrame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
     eventFrame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 
-    -- Spell data arrival — resolves a provisional (cold-start) binding map
+    -- Spell data arrival — one of the triggers that re-runs a cold-start
+    -- profile check (see CC:ResolveColdStartProfile)
     eventFrame:RegisterEvent("SPELLS_CHANGED")
+
+    -- Player housing can invalidate secure wraps on unit frames
+    -- (field case 2026-07-20: hover keybinds dead after a housing session,
+    -- wraps no longer executing). The repair re-wraps, so run it on every
+    -- editor-mode change. pcall'd: the event only exists on clients with
+    -- housing.
+    pcall(function() eventFrame:RegisterEvent("HOUSE_EDITOR_MODE_CHANGED") end)
     
     eventFrame:SetScript("OnEvent", function(_, event, ...)
         if event == "PLAYER_REGEN_ENABLED" then
@@ -42,42 +50,38 @@ function CC:RegisterEvents()
         elseif event == "PLAYER_SPECIALIZATION_CHANGED" or event == "ACTIVE_PLAYER_SPECIALIZATION_CHANGED" then
             -- Spec changed - check for profile switch
             CC:OnSpecChanged()
-            -- Cold-start resolve: a map built before GetSpecialization()
-            -- resolved dropped every spec-scoped binding — rebuild it now
-            CC:ResolveProvisionalMap("spec-resolved")
+            -- Cold-start resolve: a loadout check that ran before
+            -- GetSpecialization() resolved could not pick a profile — run it now
+            CC:ResolveColdStartProfile("spec-resolved")
         elseif event == "SPELLS_CHANGED" then
-            -- Spell data arrived/changed — no-op unless the map is provisional
-            CC:ResolveProvisionalMap("spells-changed")
+            -- Spell data arrived/changed — no-op unless a check is outstanding
+            CC:ResolveColdStartProfile("spells-changed")
         elseif event == "TRAIT_CONFIG_UPDATED" or event == "TRAIT_CONFIG_CREATED" or event == "ACTIVE_COMBAT_CONFIG_CHANGED" then
             -- Loadout/talent changed - check for profile switch and reapply bindings (with debounce)
             if not InCombatLockdown() then
                 -- Debounce: wait before checking to ensure API data is ready
-                if CC.loadoutCheckTimer then
-                    CC.loadoutCheckTimer:Cancel()
-                end
-                CC.loadoutCheckTimer = C_Timer.NewTimer(0.5, function()
-                    CC.loadoutCheckTimer = nil
+                CC:DeferAfter("loadoutCheck", 0.5, function()
                     CC:CheckLoadoutProfileSwitch()
                     -- Reapply bindings to pick up spell overrides from talent changes
                     CC:ApplyBindings()
                     -- Also refresh UI in case talents changed
-                    C_Timer.After(0.3, function()
+                    CC:DeferAfter("uiRefresh", 0.3, function()
                         CC:RefreshClickCastingUI()
                     end)
                 end)
             else
-                CC.pendingLoadoutCheck = true
-                CC.needsBindingRefresh = true
+                CC:Defer("loadoutCheck")
+                CC:Defer("bindingRefresh")
             end
         elseif event == "PLAYER_LEVEL_UP" then
             -- Level up - may have learned new spells, reapply bindings
             if not InCombatLockdown() then
                 CC:ApplyBindings()
-                C_Timer.After(0.2, function()
+                CC:DeferAfter("uiRefresh", 0.2, function()
                     CC:RefreshClickCastingUI()
                 end)
             else
-                CC.needsBindingRefresh = true
+                CC:Defer("bindingRefresh")
             end
         elseif event == "PLAYER_EQUIPMENT_CHANGED" then
             -- Equipment changed - refresh items tab if visible
@@ -85,8 +89,9 @@ function CC:RegisterEvents()
                 CC:RefreshSpellGrid()
             end
         elseif event == "PLAYER_ENTERING_WORLD" then
-            -- Initial load or reload
-            C_Timer.After(0.5, function()
+            -- Initial load or reload. Keyed: back-to-back loading screens
+            -- would otherwise stack several settle passes over each other.
+            CC:DeferAfter("zoneSettle", 0.5, function()
                 -- Run one-time migration to convert bindings to root spells
                 CC:MigrateBindingsToRootSpells()
                 
@@ -105,26 +110,33 @@ function CC:RegisterEvents()
                 -- so a broken hover-bind state never survives a zone change
                 CC:RunBindingRepair("zone-in", true)
 
-                -- Cold-start resolve: if the login build ran before spec data
-                -- was available, the map is provisional — rebuild it on the
-                -- first loading screen so it is correct BEFORE the first
-                -- arena/dungeon of the session, not only after a /reload
-                CC:ResolveProvisionalMap("zone-in")
+                -- Cold-start resolve: if the login check ran before spec data
+                -- was available, no profile could be picked — re-run it on the
+                -- first loading screen so the right profile is active BEFORE
+                -- the first arena/dungeon of the session, not only after a
+                -- /reload
+                CC:ResolveColdStartProfile("zone-in")
 
-                -- Check for loadout-based profile on initial load. No combat
-                -- guard here: CheckLoadoutProfileSwitch defers itself via
-                -- pendingLoadoutCheck in lockdown — the old call-site guard
-                -- silently DROPPED the check when zone-in+1s landed in combat
-                -- (the arena-load race), leaving the previous spec's profile
-                -- active for the whole match.
-                C_Timer.After(1, function()
+                -- Check for loadout-based profile on initial load. Keyed so
+                -- back-to-back loading screens reuse one pending pass, and
+                -- called unconditionally: CheckLoadoutProfileSwitch defers
+                -- itself onto the "loadoutCheck" queue job in lockdown, so a
+                -- guard here would only duplicate that one decision point.
+                -- (The original call-site guard DROPPED the check outright
+                -- when zone-in+1s landed in combat — the arena-load race.)
+                --
+                -- Distinct timer key from the TRAIT_CONFIG_UPDATED settle above:
+                -- that callback also runs ApplyBindings and a UI refresh, so
+                -- sharing a key let a loading screen cancel a pending talent
+                -- reapply and strand every frame on the old loadout's macros.
+                CC:DeferAfter("zoneLoadoutCheck", 1, function()
                     CC:CheckLoadoutProfileSwitch()
                 end)
             end)
         elseif event == "ARENA_PREP_OPPONENT_SPECIALIZATIONS" then
             -- Arena frames should now exist
-            -- Belt: never enter an arena on a provisional (cold-start) map
-            CC:ResolveProvisionalMap("arena-prep")
+            -- Belt: never enter an arena on an unresolved cold-start profile
+            CC:ResolveColdStartProfile("arena-prep")
             CC:OnArenaPrep()
         elseif event == "INSTANCE_ENCOUNTER_ENGAGE_UNIT" then
             -- Boss frames should now exist
@@ -137,84 +149,263 @@ function CC:RegisterEvents()
             -- A nameplate was removed
             local unitToken = ...
             CC:OnNamePlateRemoved(unitToken)
+        elseif event == "HOUSE_EDITOR_MODE_CHANGED" then
+            -- Housing mode transitions can kill secure wraps; the repair
+            -- re-wraps every frame (self-defers in combat, cooldown-limited)
+            CC:RequestBindingRepair("housing-mode")
         end
     end)
 end
 
-function CC:OnCombatEnd()
-    local needsUIRefresh = false
-    
-    -- Process pending profile switch first
-    if self.pendingProfileSwitch then
-        local profileName = self.pendingProfileSwitch
-        self.pendingProfileSwitch = nil
-        if self:SetActiveProfile(profileName) then
+-- ============================================================
+-- DEFERRED WORK QUEUE
+-- ============================================================
+-- Click casting cannot touch secure state in combat, so work blocked by
+-- combat lockdown has to be replayed afterwards. This used to be ten
+-- separate self.needsX / self.pendingX flags, each with its own set-site and
+-- its own hand-written drain line in OnCombatEnd. Adding a deferral meant
+-- remembering to add a matching drain; forgetting silently dropped the work
+-- for the rest of the session (that is how the arena cold-start bug and the
+-- keyboard-refresh drop both happened).
+--
+-- Now there is one queue. Register the job here, call CC:Defer("job"), and
+-- the drain is automatic and ordered. Three job kinds:
+--   flag  - "do this thing later", no payload, dedupes to a single run
+--   value - carries one value (a profile name, a repair reason); policy
+--           "first" keeps the earliest, "last" keeps the most recent
+--   set   - accumulates a set of items (frames) and runs once over all
+--
+-- A job's run() returns true to request a UI refresh once the drain settles.
+-- DRAIN_ORDER is load-bearing: it reproduces the exact sequence the old
+-- OnCombatEnd used. Do not reorder without checking that dependency chain
+-- (profile switch must precede binding work; registration must precede the
+-- binding refresh that walks registered frames).
+
+local DRAIN_ORDER = {
+    "profileSwitch",
+    "loadoutCheck",
+    "register",
+    "unregister",
+    "fullRegistration",
+    "reassert",
+    "bindingRepair",
+    "bindingRefresh",
+    "blizzardRegister",
+    "blizzardUnregister",
+    "keyboardRefresh",
+}
+
+local DEFERRED_JOBS = {
+    profileSwitch = {
+        kind = "value", policy = "last",
+        run = function(self, profileName)
+            if self:SetActiveProfile(profileName) then
+                self:ApplyBindings()
+                return true
+            end
+        end,
+    },
+    loadoutCheck = {
+        kind = "flag",
+        run = function(self)
+            self:CheckLoadoutProfileSwitch()
+            return true
+        end,
+    },
+    register = {
+        kind = "set",
+        run = function(self, frames)
+            for frame in pairs(frames) do
+                self:RegisterFrame(frame)
+            end
+        end,
+    },
+    unregister = {
+        kind = "set",
+        run = function(self, frames)
+            for frame in pairs(frames) do
+                self:UnregisterFrame(frame)
+            end
+        end,
+    },
+    reassert = {
+        -- Blizzard's SecureUnitButton_OnLoad reset these frames' click
+        -- registration (see the hook in InitializeSecureFrames) — it runs on
+        -- every CompactUnitFrame_SetUnit roster shuffle and stomps
+        -- RegisterForClicks back to AnyUp plus the wildcard click actions.
+        -- Re-apply our bindings on exactly the frames that were touched.
+        kind = "set",
+        run = function(self, frames)
+            for frame in pairs(frames) do
+                if self.registeredFrames and self.registeredFrames[frame] then
+                    self:ApplyBindingsToFrameUnified(frame)
+                end
+            end
+        end,
+    },
+    fullRegistration = {
+        kind = "flag",
+        run = function(self) self:RegisterAllFrames() end,
+    },
+    bindingRepair = {
+        -- first-write-wins: the earliest reason is the one that diagnosed the
+        -- breakage; later requeues during the same combat are the same repair
+        kind = "value", policy = "first",
+        -- forced: CombatGuard cannot carry RunBindingRepair's `force` argument
+        -- into the queue, so a repair that was explicitly unconditional (the
+        -- zone-in self-heal passes force=true) came back through the drain as a
+        -- cooldown-gated one and could be dropped by any repair that happened to
+        -- run in the 5s before combat ended. This job runs at most once per
+        -- drain, so the cooldown buys nothing here and only loses repairs.
+        run = function(self, reason) self:RunBindingRepair(reason, true) end,
+    },
+    bindingRefresh = {
+        kind = "flag",
+        run = function(self)
             self:ApplyBindings()
-            needsUIRefresh = true
-        end
-    end
-    
-    -- Check for pending loadout-based profile switch
-    if self.pendingLoadoutCheck then
-        self.pendingLoadoutCheck = nil
-        self:CheckLoadoutProfileSwitch()
-        needsUIRefresh = true
-    end
-    
-    -- Process pending registrations
-    if self.pendingRegistrations then
-        for frame in pairs(self.pendingRegistrations) do
-            self:RegisterFrame(frame)
-        end
-        self.pendingRegistrations = nil
-    end
-    
-    -- Process pending unregistrations
-    if self.pendingUnregistrations then
-        for frame in pairs(self.pendingUnregistrations) do
-            self:UnregisterFrame(frame)
-        end
-        self.pendingUnregistrations = nil
-    end
-    
-    -- Full registration if needed
-    if self.needsFullRegistration then
-        self:RegisterAllFrames()
-        self.needsFullRegistration = nil
-    end
-    
-    -- Self-heal repair queued during combat (bug #976)
-    if self.pendingBindingRepair then
-        local reason = self.pendingBindingRepair
-        self.pendingBindingRepair = nil
-        self:RunBindingRepair(reason)
+            return true
+        end,
+    },
+    blizzardRegister = {
+        kind = "flag",
+        run = function(self) self:RegisterBlizzardFrames() end,
+    },
+    blizzardUnregister = {
+        kind = "flag",
+        run = function(self) self:UnregisterBlizzardFrames() end,
+    },
+    keyboardRefresh = {
+        kind = "flag",
+        run = function(self) self:RefreshKeyboardBindings() end,
+    },
+}
+
+-- Queue work for the next time we are out of combat.
+-- Safe to call repeatedly: flags dedupe, values follow their policy, sets accumulate.
+-- Returns true when the job was queued. CombatGuard relies on that: a typo'd
+-- job name must not read as "queued", or the caller aborts and the work is lost
+-- with only an INFO line to show for it -- and INFO is exactly what the log's
+-- eviction policy discards first.
+function CC:Defer(job, payload)
+    local def = DEFERRED_JOBS[job]
+    if not def then
+        DF:DebugError("CLICK", "Defer: unknown job '%s' — work dropped", tostring(job))
+        return false
     end
 
-    -- Refresh bindings if needed
-    if self.needsBindingRefresh then
-        self:ApplyBindings()
-        self.needsBindingRefresh = nil
-        needsUIRefresh = true
+    self.deferred = self.deferred or {}
+
+    if def.kind == "set" then
+        local set = self.deferred[job]
+        if type(set) ~= "table" then
+            set = {}
+            self.deferred[job] = set
+        end
+        if payload ~= nil then set[payload] = true end
+    elseif def.kind == "value" then
+        if def.policy == "first" and self.deferred[job] ~= nil then
+            return true  -- keep the earliest value; still queued
+        end
+        self.deferred[job] = payload
+    else
+        self.deferred[job] = true
     end
-    
-    -- Blizzard frame registration if needed
-    if self.needsBlizzardRegistration then
-        self:RegisterBlizzardFrames()
-        self.needsBlizzardRegistration = nil
+
+    return true
+end
+
+-- Run queued work. Pass a job name to drain only that job (used at init, where
+-- only frame registration is safe to replay); omit it to drain everything.
+function CC:DrainDeferred(onlyJob)
+    if InCombatLockdown() then return end
+
+    local queue = self.deferred
+    if not queue then return end
+
+    local needsUIRefresh = false
+    local ran  -- diagnostic: which jobs actually ran this drain
+
+    for _, job in ipairs(DRAIN_ORDER) do
+        if not onlyJob or onlyJob == job then
+            local payload = queue[job]
+            if payload ~= nil then
+                -- clear before running: a job that re-defers itself (a repair
+                -- that finds more work) must queue for the NEXT drain, not be
+                -- wiped by this one
+                queue[job] = nil
+                ran = ran and (ran .. "," .. job) or job
+                -- pcall'd: the payload is already gone, so an error inside one
+                -- job must not (a) abandon it silently -- the old flag drains
+                -- cleared AFTER the work, so a failure retried next combat end
+                -- -- or (b) skip every job after it in DRAIN_ORDER. Report it
+                -- and carry on; the queue keeps draining.
+                local ok, wantsRefresh = pcall(DEFERRED_JOBS[job].run, self, payload)
+                if not ok then
+                    DF:DebugError("CLICK", "Deferred job '%s' errored during drain: %s",
+                        job, tostring(wantsRefresh))
+                elseif wantsRefresh then
+                    needsUIRefresh = true
+                end
+            end
+        end
     end
-    
-    -- Blizzard frame unregistration if needed
-    if self.needsBlizzardUnregistration then
-        self:UnregisterBlizzardFrames()
-        self.needsBlizzardUnregistration = nil
+
+    -- Surface what recovered at combat end / init. Previously silent, so a log
+    -- showed "queued for combat end" with no confirmation the work ever ran.
+    if ran then
+        DF:Debug("CLICK", "DrainDeferred ran: %s", ran)
     end
-    
+
+    if next(queue) == nil then
+        self.deferred = nil
+    end
+
     -- Refresh UI if needed (after a short delay for everything to settle)
     if needsUIRefresh then
-        C_Timer.After(0.2, function()
-            self:RefreshClickCastingUI()
+        self:DeferAfter("uiRefresh", 0.2, function()
+            CC:RefreshClickCastingUI()
         end)
     end
+end
+
+-- ============================================================
+-- KEYED SETTLE TIMERS
+-- ============================================================
+-- Click casting settles state after events (loading screens, spec changes,
+-- arena prep) using short timers. Several of those events fire in bursts, and
+-- with bare C_Timer.After each burst stacked another timer -- so a callback
+-- could run with state captured before the previous one had finished, and
+-- retry chains could fork into several concurrent chains.
+--
+-- DeferAfter keys each timer: scheduling the same key again cancels the
+-- pending one, so there is always at most one run in flight per key.
+
+function CC:DeferAfter(key, delay, fn)
+    self.timers = self.timers or {}
+    local existing = self.timers[key]
+    if existing then existing:Cancel() end
+    self.timers[key] = C_Timer.NewTimer(delay, function()
+        if CC.timers then CC.timers[key] = nil end
+        fn()
+    end)
+end
+
+-- Guard for functions that must not touch secure state in combat.
+-- Returns true if the caller should abort; the work is queued as `job` so it
+-- cannot be silently lost. Defer at the point of blocking rather than trusting
+-- a caller further up the stack to have set a flag.
+function CC:CombatGuard(job, payload)
+    if not InCombatLockdown() then return false end
+    -- Always abort in combat, even if Defer rejected the job name. "Fail loudly"
+    -- on a bad name would mean letting the caller go on to touch secure state
+    -- during lockdown, which errors -- strictly worse than dropping the work.
+    -- Defer already logs an unknown job as an error, so it is not silent.
+    self:Defer(job, payload)
+    return true
+end
+
+function CC:OnCombatEnd()
+    self:DrainDeferred()
 end
 
 function CC:OnSpecChanged()
@@ -223,23 +414,23 @@ function CC:OnSpecChanged()
         self:CheckLoadoutProfileSwitch()
         self:ApplyBindings()
         -- Refresh UI after a short delay to ensure spell data is ready
-        C_Timer.After(0.3, function()
-            self:RefreshClickCastingUI()
+        self:DeferAfter("uiRefresh", 0.3, function()
+            CC:RefreshClickCastingUI()
         end)
     else
-        self.pendingLoadoutCheck = true
-        self.needsBindingRefresh = true
+        self:Defer("loadoutCheck")
+        self:Defer("bindingRefresh")
     end
 end
 
 function CC:OnArenaPrep()
     if self.db.options.globalEnabled then
-        -- Arena frames should now exist, try to register
-        C_Timer.After(0.1, function()
-            if not InCombatLockdown() then
-                self:RegisterBlizzardFrames()
-            else
-                self.needsBlizzardRegistration = true
+        -- Arena frames should now exist, try to register.
+        -- Keyed: ARENA_PREP fires once per opponent, so this would otherwise
+        -- schedule several identical registration passes.
+        self:DeferAfter("dynamicFrameRegister", 0.1, function()
+            if not CC:CombatGuard("blizzardRegister") then
+                CC:RegisterBlizzardFrames()
             end
         end)
     end
@@ -247,12 +438,12 @@ end
 
 function CC:OnBossEngage()
     if self.db.options.globalEnabled then
-        -- Boss frames should now exist
-        C_Timer.After(0.1, function()
-            if not InCombatLockdown() then
-                self:RegisterBlizzardFrames()
-            else
-                self.needsBlizzardRegistration = true
+        -- Boss frames should now exist.
+        -- Keyed: INSTANCE_ENCOUNTER_ENGAGE_UNIT fires repeatedly during an
+        -- encounter, so this would otherwise stack a timer per fire.
+        self:DeferAfter("dynamicFrameRegister", 0.1, function()
+            if not CC:CombatGuard("blizzardRegister") then
+                CC:RegisterBlizzardFrames()
             end
         end)
     end
@@ -303,8 +494,7 @@ function CC:OnNamePlateAdded(unitToken)
             end
         else
             -- Queue for after combat
-            self.pendingRegistrations = self.pendingRegistrations or {}
-            self.pendingRegistrations[clickableFrame] = true
+            self:Defer("register", clickableFrame)
         end
     else
         if self.db.options.debugBindings then
@@ -327,8 +517,7 @@ function CC:OnNamePlateRemoved(unitToken)
             self:UnregisterFrame(frame)
         else
             -- Queue for after combat
-            self.pendingUnregistrations = self.pendingUnregistrations or {}
-            self.pendingUnregistrations[frame] = true
+            self:Defer("unregister", frame)
         end
         
         self.registeredNameplates[unitToken] = nil

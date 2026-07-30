@@ -260,7 +260,7 @@ function CC:CreateProfilesPanelContent()
         if not InCombatLockdown() then
             CC:ApplyBindings()
         else
-            CC.needsBindingRefresh = true
+            CC:Defer("bindingRefresh")
         end
     end)
 
@@ -319,7 +319,7 @@ function CC:CreateProfilesPanelContent()
         if not InCombatLockdown() then
             CC:ApplyBindings()
         else
-            CC.needsBindingRefresh = true
+            CC:Defer("bindingRefresh")
         end
     end)
 
@@ -369,7 +369,7 @@ function CC:CreateProfilesPanelContent()
         if not InCombatLockdown() then
             CC:ApplyBindings()
         else
-            CC.needsBindingRefresh = true
+            CC:Defer("bindingRefresh")
         end
     end)
 
@@ -585,18 +585,26 @@ function CC:RefreshProfilesPanel()
     
     -- Update auto-link info
     if self.autoLinkInfo then
-        local specIndex = GetSpecialization() or 1
+        -- No `or 1` mask: with spec unresolved, GetProfileForLoadout(1, ...) would
+        -- return SPEC 1's assignment and this label would claim "[Linked]" or name
+        -- an "[Override]" profile that isn't yours. Report nothing instead.
+        local specIndex = GetSpecialization()
         local loadoutID = 0
         if C_ClassTalents and C_ClassTalents.GetActiveConfigID then
             loadoutID = C_ClassTalents.GetActiveConfigID() or 0
         end
-        local assignedProfile, isSpecific = self:GetProfileForLoadout(specIndex, loadoutID)
-        
+        local assignedProfile, isSpecific
+        if specIndex then
+            assignedProfile, isSpecific = self:GetProfileForLoadout(specIndex, loadoutID)
+        end
+
         -- Check auto-create setting
         local autoCreate = self.db and self.db.global and self.db.global.autoCreateProfiles
         if autoCreate == nil then autoCreate = true end
-        
-        if isSpecific and assignedProfile and assignedProfile == activeProfile then
+
+        if not specIndex then
+            self.autoLinkInfo:SetText("|cff888888" .. L["[Unassigned]"] .. "|r " .. L["No loadout detected"])
+        elseif isSpecific and assignedProfile and assignedProfile == activeProfile then
             self.autoLinkInfo:SetText("|cff33cc33" .. L["[Linked]"] .. "|r " .. L["Profile matched to loadout"])
         elseif isSpecific and assignedProfile then
             self.autoLinkInfo:SetText("|cffff9900" .. L["[Override]"] .. "|r " .. format(L["Loadout expects: %s"], assignedProfile))
@@ -980,7 +988,7 @@ function CC:ResetBindingsToDefaults()
     })
     
     -- Rebuild secure bindings
-    self:BuildKeyboardBindingSnippets()
+    self:RefreshKeyboardBindings()
     
     -- Re-apply to all frames
     if not InCombatLockdown() then

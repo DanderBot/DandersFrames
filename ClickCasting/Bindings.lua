@@ -49,6 +49,8 @@ end
 -- targeting keeps working at any range. Returns nil if we're in combat.
 function CC:EnsureClickProxy(frame)
     if frame.dfClickProxy then return frame.dfClickProxy end
+    -- Returns nil by contract (caller falls back to the @mouseover path);
+    -- the proxy is created on the next out-of-combat binding pass.
     if InCombatLockdown() then return nil end
     local proxy = CreateFrame("Button", nil, frame, "SecureActionButtonTemplate")
     proxy:EnableMouse(false)              -- only ever clicked programmatically
@@ -70,8 +72,13 @@ function CC:RouteProxyAction(frame, typeAttr, clickbuttonAttr, realAction, comba
     if not proxy then
         -- In combat the proxy can't be created. Emit the (gated) direct action
         -- as a fallback; the whole binding set is reapplied after combat, which
-        -- installs the proxy and replaces this.
+        -- installs the proxy and replaces this. Record the write in the
+        -- manifest so the next clear removes it (the apply loop is combat-
+        -- guarded so this leg should be unreachable, but if it ever runs the
+        -- attribute must not escape the bookkeeping).
         frame:SetAttribute(typeAttr, realAction)
+        frame.dfWrittenAttrs = frame.dfWrittenAttrs or {}
+        frame.dfWrittenAttrs[typeAttr] = "type"
         if combatCond then AddCombatConditional(frame, typeAttr, realAction, combatCond) end
         return
     end
@@ -321,30 +328,43 @@ end
 
 -- Check if a binding should be active based on load conditions
 function CC:ShouldBindingLoad(binding)
-    if not binding.enabled then return false end
-    
-    -- Check spec condition
-    if binding.loadSpec then
-        local currentSpec = GetSpecialization()
-        local specMatch = false
-        for _, specId in ipairs(binding.loadSpec) do
-            if specId == currentSpec then
-                specMatch = true
-                break
-            end
-        end
-        if not specMatch then return false end
-    end
-    
-    -- Combat conditions are checked dynamically via state drivers
-    -- For now, we apply all bindings and let the macro conditionals handle combat
-    
-    return true
+    -- Per-spec click casting is done via loadout-assigned profiles. The old
+    -- per-binding loadSpec field was config no UI ever wrote (import-only),
+    -- and reading GetSpecialization() here made the binding list silently
+    -- wrong whenever spec data was not resolved yet (cold login) -- retired
+    -- in favor of the profile system.
+    --
+    -- Combat conditions are checked dynamically via state drivers / macro
+    -- conditionals, not here.
+    return not not binding.enabled
 end
 
+-- Every modifier prefix combination we ever write, in SecureActionButtonTemplate
+-- canonical order (alt-ctrl-shift-meta). Shared by the clear paths; the apply
+-- path derives prefixes per binding via BuildModifierPrefix.
+local MODIFIER_COMBOS = {
+    "alt-", "ctrl-", "shift-", "meta-",
+    "alt-ctrl-", "alt-shift-", "alt-meta-", "ctrl-shift-", "ctrl-meta-", "shift-meta-",
+    "alt-ctrl-shift-", "alt-ctrl-meta-", "alt-shift-meta-", "ctrl-shift-meta-",
+    "alt-ctrl-shift-meta-",
+}
+
 -- Clear all click-cast bindings from a frame
-function CC:ClearBindingsFromFrame(frame)
+-- preserveSnippet: keep the frame's existing dfBindingSnippet instead of
+-- wiping it. Batched applies (ApplyBindings) pass their skipKeyboardUpdate
+-- through here: the batch rebuilds every snippet in one RefreshKeyboardBindings
+-- at the end, so wiping per-frame up front only created a window where combat
+-- could interrupt the batch and strand EVERY processed frame with an empty
+-- snippet — keyboard binds dead for the whole fight (field case 2026-07-20,
+-- LFR: a roster-driven reapply was cut off by a pull; ~40 raid frames sat
+-- snippet-less until combat end). Keeping the previous snippet is safe: it is
+-- either identical (rescan/roster reapply, the common case) or one refresh
+-- behind (profile switch), and the batch-end rebuild — deferred to combat end
+-- if interrupted — overwrites it either way.
+function CC:ClearBindingsFromFrame(frame, preserveSnippet)
     if not frame then return end
+    -- Combat-safe by contract: only reached from ApplyBindingsToFrameUnified,
+    -- which defers "bindingRefresh". Do not add a bare return here without one.
     if InCombatLockdown() then return end
 
     -- Check if this frame is currently being hovered
@@ -357,14 +377,10 @@ function CC:ClearBindingsFromFrame(frame)
     else
         DF:Debug("CLICK", "ClearBindings %s", frameName)
     end
-    
-    -- Check if this is a Blizzard frame - we need to preserve default behavior for these
-    local isBlizzardFrame = frame.dfIsBlizzardFrame == true
-    local isDandersFrame = frame.dfIsDandersFrame == true
-    
+
     -- Clear the binding snippet used by secure handlers
     -- BUT: if frame is currently hovered, DON'T clear - we want to preserve bindings
-    if not isCurrentlyHovered then
+    if not isCurrentlyHovered and not preserveSnippet then
         frame:SetAttribute("dfBindingSnippet", "")
     end
     
@@ -374,50 +390,24 @@ function CC:ClearBindingsFromFrame(frame)
         pcall(function() frame:ClearBindings() end)
     end
     
-    -- Clear applied bindings
-    if frame.dfAppliedBindings then
-        for _, attrs in pairs(frame.dfAppliedBindings) do
-            if attrs.typeAttr then frame:SetAttribute(attrs.typeAttr, "") end
-            if attrs.spellAttr then frame:SetAttribute(attrs.spellAttr, nil) end
-            if attrs.macroAttr then frame:SetAttribute(attrs.macroAttr, nil) end
-            if attrs.helpbuttonAttr then frame:SetAttribute(attrs.helpbuttonAttr, nil) end
-            if attrs.harmbuttonAttr then frame:SetAttribute(attrs.harmbuttonAttr, nil) end
+    -- Clear exactly the attributes the last apply wrote (see WriteAttr).
+    -- type attributes are cleared to "": a nil type lets the click fall
+    -- through to wildcard *type<N> attributes or Blizzard's native
+    -- interaction bindings, while an empty string suppresses both. Everything
+    -- else clears to nil. The caller (ApplyBindingsToFrameUnified) rewrites
+    -- current bindings right after, and its uncovered-base-button pass
+    -- restores target/togglemenu defaults on non-DandersFrames.
+    if frame.dfWrittenAttrs then
+        for attr, kind in pairs(frame.dfWrittenAttrs) do
+            if kind == "type" then
+                frame:SetAttribute(attr, "")
+            else
+                frame:SetAttribute(attr, nil)
+            end
         end
-        frame.dfAppliedBindings = nil
+        frame.dfWrittenAttrs = nil
     end
-    
-    -- Clear virtual button attributes (6-50 for keyboard bindings)
-    for btn = 6, 50 do
-        frame:SetAttribute("type" .. btn, "")
-        frame:SetAttribute("spell" .. btn, nil)
-        frame:SetAttribute("macro" .. btn, nil)
-        frame:SetAttribute("macrotext" .. btn, nil)
-    end
-    
-    -- Clear modifier combinations for mouse buttons (1-5)
-    -- Order must be: alt-ctrl-shift-meta (per WoW SecureActionButtonTemplate)
-    -- Only DandersFrames should have base type1/type2 cleared.
-    -- Blizzard frames AND third-party addon frames (QUI, ElvUI, etc.) must preserve
-    -- their base type1/type2 so click-to-target continues to work.
-    local modifiers
-    if isDandersFrame then
-        -- For DandersFrames, clear everything including base bindings
-        modifiers = {"alt-", "ctrl-", "shift-", "meta-", "alt-ctrl-", "alt-shift-", "alt-meta-", "ctrl-shift-", "ctrl-meta-", "shift-meta-", "alt-ctrl-shift-", "alt-ctrl-meta-", "alt-shift-meta-", "ctrl-shift-meta-", "alt-ctrl-shift-meta-", ""}
-    else
-        -- For Blizzard and third-party frames, only clear modifier combinations, not base button bindings
-        modifiers = {"alt-", "ctrl-", "shift-", "meta-", "alt-ctrl-", "alt-shift-", "alt-meta-", "ctrl-shift-", "ctrl-meta-", "shift-meta-", "alt-ctrl-shift-", "alt-ctrl-meta-", "alt-shift-meta-", "ctrl-shift-meta-", "alt-ctrl-shift-meta-"}
-    end
-    local buttons = {"1", "2", "3", "4", "5"}
-    
-    for _, mod in ipairs(modifiers) do
-        for _, btn in ipairs(buttons) do
-            frame:SetAttribute(mod .. "type" .. btn, "")
-            frame:SetAttribute(mod .. "spell" .. btn, nil)
-            frame:SetAttribute(mod .. "macro" .. btn, nil)
-            frame:SetAttribute(mod .. "macrotext" .. btn, nil)
-        end
-    end
-    
+
     -- BUG #10 / #860 FIX: Unregister any combat-conditional attribute drivers.
     if frame.dfAttrDriverList then
         for _, attr in ipairs(frame.dfAttrDriverList) do
@@ -435,66 +425,126 @@ function CC:ClearBindingsFromFrame(frame)
     end
 end
 
--- Restore Blizzard default click behavior to a frame
-function CC:RestoreBlizzardDefaults(frame)
-    if not frame then return end
-    if InCombatLockdown() then return end
-    
-    -- Clear any custom bindings tracking first
-    frame.dfAppliedBindings = nil
-
-    -- 12.0.7 gate workaround: drop any proxy click-action routes too.
-    self:ClearClickProxyRoutes(frame)
-
-    -- Clear ALL modifier combinations we may have set (but NOT the base type1/type2)
-    -- Order must be: alt-ctrl-shift-meta (per WoW SecureActionButtonTemplate)
-    local modifiers = {"alt-", "ctrl-", "shift-", "meta-", "alt-ctrl-", "alt-shift-", "alt-meta-", "ctrl-shift-", "ctrl-meta-", "shift-meta-", "alt-ctrl-shift-", "alt-ctrl-meta-", "alt-shift-meta-", "ctrl-shift-meta-", "alt-ctrl-shift-meta-"}
-    local buttons = {"1", "2", "3", "4", "5"}
-    
-    for _, mod in ipairs(modifiers) do
-        for _, btn in ipairs(buttons) do
+-- Last-resort full attribute scrub. The normal clear paths walk the
+-- dfWrittenAttrs manifest; this sweeps every modifier/button combination we
+-- could ever have written, for recovery when the manifest is suspected wrong
+-- (it is plain Lua bookkeeping, so that means a code bug -- but binding state
+-- has burned us enough times to keep the escape hatch). Reached only from
+-- /dfccglobal scrub; NOT from the automatic repair path, because a scrub
+-- without an immediate reapply strips every mouse binding on the frame.
+function CC:ScrubAllClickAttributes(frame)
+    if not frame or InCombatLockdown() then return end
+    local combos = { "" }
+    for _, m in ipairs(MODIFIER_COMBOS) do combos[#combos + 1] = m end
+    for _, mod in ipairs(combos) do
+        for btn = 1, 5 do
             frame:SetAttribute(mod .. "type" .. btn, nil)
             frame:SetAttribute(mod .. "spell" .. btn, nil)
             frame:SetAttribute(mod .. "macro" .. btn, nil)
             frame:SetAttribute(mod .. "macrotext" .. btn, nil)
+            frame:SetAttribute(mod .. "unit" .. btn, nil)
+            frame:SetAttribute(mod .. "clickbutton" .. btn, nil)
         end
     end
-    
-    -- Clear non-modified buttons 3, 4, 5 (but not 1 and 2 which we'll set to defaults)
-    for _, btn in ipairs({"3", "4", "5"}) do
-        frame:SetAttribute("type" .. btn, nil)
-        frame:SetAttribute("spell" .. btn, nil)
-        frame:SetAttribute("macro" .. btn, nil)
-        frame:SetAttribute("macrotext" .. btn, nil)
+    -- The numeric sweep above only reaches <mod>type1..5 style mouse slots.
+    -- Keyboard and scroll binds live in NAMED slots (type-<vbtn>,
+    -- macrotext-<vbtn>, unit-<vbtn>, clickbutton-<vbtn>) whose names cannot be
+    -- enumerated, so the manifest is the only record of them. Clearing it before
+    -- discarding it matters: dropping the manifest first ORPHANED those
+    -- attributes, leaving them set with no record for any later clear to find --
+    -- precisely the state this last-resort escape hatch exists to undo.
+    if frame.dfWrittenAttrs then
+        for attr in pairs(frame.dfWrittenAttrs) do
+            frame:SetAttribute(attr, nil)
+        end
     end
-    
-    -- Also clear spell/macro for buttons 1 and 2
-    frame:SetAttribute("spell1", nil)
-    frame:SetAttribute("spell2", nil)
-    frame:SetAttribute("macro1", nil)
-    frame:SetAttribute("macro2", nil)
-    frame:SetAttribute("macrotext1", nil)
-    frame:SetAttribute("macrotext2", nil)
-    
-    -- Clear virtual button attributes (6-50 for keyboard bindings)
-    for btn = 6, 50 do
-        frame:SetAttribute("type" .. btn, nil)
-        frame:SetAttribute("spell" .. btn, nil)
-        frame:SetAttribute("macro" .. btn, nil)
-        frame:SetAttribute("macrotext" .. btn, nil)
+    frame.dfWrittenAttrs = nil
+    -- And the hover-key snippet, which is where keyboard binds are actually
+    -- applied from; leaving it set meant the next hover re-applied them.
+    frame:SetAttribute("dfBindingSnippet", "")
+    if frame.dfAttrDriverList then
+        for _, attr in ipairs(frame.dfAttrDriverList) do
+            UnregisterAttributeDriver(frame, attr)
+        end
+        frame.dfAttrDriverList = nil
     end
+    self:ClearClickProxyRoutes(frame)
+    pcall(ClearOverrideBindings, frame)
+end
+
+-- Restore Blizzard default click behavior to a frame
+function CC:RestoreBlizzardDefaults(frame)
+    if not frame then return end
+    -- Combat-safe by contract: callers (ApplyBindingsToFrameUnified,
+    -- UnregisterFrame) defer on our behalf.
+    if InCombatLockdown() then return end
     
+    -- 12.0.7 gate workaround: drop any proxy click-action routes too.
+    self:ClearClickProxyRoutes(frame)
+
+    -- Clear exactly the attributes the last apply wrote (see WriteAttr).
+    -- nil semantics here (not ""): the base type1/type2 defaults are written
+    -- right below, and everything else should fall back to Blizzard behavior.
+    if frame.dfWrittenAttrs then
+        -- The recorded kind is irrelevant here: handing the frame back means
+        -- everything we wrote goes to nil, so the frame's own behaviour
+        -- (restored below) and Blizzard's wildcards apply again.
+        for attr in pairs(frame.dfWrittenAttrs) do
+            frame:SetAttribute(attr, nil)
+        end
+        frame.dfWrittenAttrs = nil
+    end
+
+    -- Unregister any frame-side combat-conditional drivers. The old sweep
+    -- missed these (only ClearBindingsFromFrame handled them), so a driver
+    -- could rewrite its type attribute on the next combat transition after
+    -- the frame was restored.
+    if frame.dfAttrDriverList then
+        for _, attr in ipairs(frame.dfAttrDriverList) do
+            UnregisterAttributeDriver(frame, attr)
+        end
+        frame.dfAttrDriverList = nil
+    end
+
     -- Clear override bindings
     ClearOverrideBindings(frame)
     
     -- Clear the binding snippet so OnEnter won't apply any bindings
     frame:SetAttribute("dfBindingSnippet", "")
     
-    -- Set standard Blizzard unit frame behavior
-    -- type1 = left click = target
-    -- type2 = right click = togglemenu
-    frame:SetAttribute("type1", "target")
-    frame:SetAttribute("type2", "togglemenu")
+    -- Undo the modified-click suppression from ClearBlizzardClickCastFromFrame.
+    -- Those writes are deliberately NOT in the manifest (they belong to the
+    -- Blizzard-click-cast lifecycle, not to a binding apply, and manifesting
+    -- them would let a routine apply drop the suppression mid-session), so the
+    -- manifest walk above cannot reach them. Without this, every
+    -- <modifier>-type1/type2 stayed "" after unregistering and modified clicks
+    -- on Blizzard's frames kept doing nothing -- no fall-through to the
+    -- wildcard *type attributes or to Blizzard's own click-casting -- until a
+    -- reload.
+    for _, mod in ipairs(CC.BLIZZARD_SUPPRESSED_MODIFIERS) do
+        frame:SetAttribute(mod .. "type1", nil)
+        frame:SetAttribute(mod .. "type2", nil)
+    end
+
+    -- Put back what the frame actually had, not what we assume it had.
+    -- ClearBlizzardClickCastFromFrame captures type1/type2/*type1/*type2 once
+    -- before the first takeover; a table means the capture succeeded, `false`
+    -- means the client returned secret values and we fall back to Blizzard's
+    -- stock behaviour. Restoring the capture matters for third-party unit frames,
+    -- which may intentionally have no left-click target -- hardcoding
+    -- target/togglemenu rewrote their click behaviour permanently after one
+    -- register/unregister cycle.
+    local orig = frame.dfOriginalClickBindings
+    if type(orig) == "table" then
+        frame:SetAttribute("type1", orig.type1)
+        frame:SetAttribute("type2", orig.type2)
+        frame:SetAttribute("*type1", orig.starType1)
+        frame:SetAttribute("*type2", orig.starType2)
+    else
+        -- type1 = left click = target, type2 = right click = togglemenu
+        frame:SetAttribute("type1", "target")
+        frame:SetAttribute("type2", "togglemenu")
+    end
     
     -- Reset to standard click registration (AnyUp is default)
     if frame.RegisterForClicks then
@@ -530,7 +580,7 @@ end
 -- and highlight headers pre-create up to 40 frames each (80 total).
 function CC:ApplyBindings()
     if InCombatLockdown() then
-        self.needsBindingRefresh = true
+        self:Defer("bindingRefresh")
         return
     end
 
@@ -580,10 +630,12 @@ function CC:ApplyBindings()
     -- With ElvUI or other addons, 100-150+ frames can be registered. Each frame requires
     -- ~300+ SetAttribute calls, so processing them all synchronously exceeds Lua's time limit.
     -- Frames are processed in batches of 10 with a yield between each batch.
-    if self.registeredFrames then
+    do
         local allFrames = {}
-        for frame in pairs(self.registeredFrames) do
-            allFrames[#allFrames + 1] = frame
+        if self.registeredFrames then
+            for frame in pairs(self.registeredFrames) do
+                allFrames[#allFrames + 1] = frame
+            end
         end
 
         if #allFrames > 0 then
@@ -593,7 +645,7 @@ function CC:ApplyBindings()
             local function ProcessNextBatch()
                 if InCombatLockdown() then
                     -- Combat started during batch - flag for retry after combat
-                    CC.needsBindingRefresh = true
+                    CC:Defer("bindingRefresh")
                     CC.batchBindingTimer = nil
                     return
                 end
@@ -614,11 +666,22 @@ function CC:ApplyBindings()
                     -- All frames processed - refresh keyboard bindings once for all frames
                     CC.batchBindingTimer = nil
                     CC:RefreshKeyboardBindings()
+                    -- The header wipe above kills a live hover; put it straight back.
+                    CC:ReassertHoverBinds()
                 end
             end
 
             -- Process first batch immediately (synchronous), defer the rest
             ProcessNextBatch()
+        else
+            -- Nothing registered, so there are no per-frame snippets to rewrite.
+            -- The map has still just been rebuilt though, and RefreshKeyboardBindings
+            -- is what makes a rebuilt map visible; with the only call site at the
+            -- tail of the batch walker, this path did nothing at all. Cheap here
+            -- (it iterates an empty registry) and keeps "ApplyBindings always
+            -- leaves keyboard state consistent with the map" true on every path.
+            self:RefreshKeyboardBindings()
+            self:ReassertHoverBinds()
         end
     end
 
@@ -632,8 +695,6 @@ end
 -- ============================================================
 
 -- Pool of secure action buttons for global bindings
-CC.globalBindingButtons = CC.globalBindingButtons or {}
-CC.globalBindingCount = CC.globalBindingCount or 0
 
 -- ============================================================
 
@@ -644,12 +705,12 @@ CC.globalBindingCount = CC.globalBindingCount or 0
 function CC:CreateHovercastButton()
     if self.hovercastButton then return end
     
-    -- Don't create during combat
+    -- Don't create during combat. Keep retrying while combat lasts: the old
+    -- single 1s retry gave up silently if combat was still active, leaving
+    -- the hovercast button uncreated for the rest of the session.
     if InCombatLockdown() then
-        C_Timer.After(1, function()
-            if not InCombatLockdown() then
-                self:CreateHovercastButton()
-            end
+        CC:DeferAfter("createHovercastButton", 1, function()
+            CC:CreateHovercastButton()
         end)
         return
     end
@@ -704,6 +765,7 @@ end
 -- This is called after bindings are built so the hovercast button can handle redirected clicks
 function CC:SetupHovercastButtonAttributes()
     if not self.hovercastButton then return end
+    -- Combat-safe by contract: only reached from ApplyBindings, which defers.
     if InCombatLockdown() then return end
     
     local btn = self.hovercastButton
@@ -908,7 +970,9 @@ end
 -- Apply global keybindings (for "onhover" and "targetcast" scopes)
 -- Uses exact Clique-style approach: Execute() to set both attributes and bindings
 function CC:ApplyGlobalBindings()
-    if InCombatLockdown() then return end
+    -- Reached unguarded from PLAYER_ENTERING_WORLD, so defer rather than drop:
+    -- ApplyBindings() re-runs this as part of the refresh.
+    if self:CombatGuard("bindingRefresh") then return end
     
     if not self.db or not self.db.enabled then 
         self:ClearGlobalBindings()
@@ -978,6 +1042,7 @@ end
 
 -- Clear all global bindings
 function CC:ClearGlobalBindings()
+    -- Combat-safe by contract: only reached from ApplyGlobalBindings, which defers.
     if InCombatLockdown() then return end
     
     -- Clear using the hovercast button's Execute
@@ -987,14 +1052,6 @@ function CC:ClearGlobalBindings()
         end)
     end
     
-    -- Also clear legacy global binding buttons
-    for i, button in ipairs(self.globalBindingButtons) do
-        if button and button.isActive then
-            ClearOverrideBindings(button)
-            button.isActive = false
-            button.bindingKey = nil
-        end
-    end
 end
 
 -- Encode a captured key name into an ASCII-only token for use inside derived
@@ -2408,20 +2465,23 @@ end
 
 -- Process all bindings and build unified macro map
 -- Returns: { [keyString] = { macroText = "...", templateBinding = binding } }
--- Re-resolve click-casting state once cold-start data becomes available. Two
--- things can be built before GetSpecialization() resolves at the first login
--- of a session, and both used to stay wrong all day until a /reload:
---   * loadoutCheckUnresolved (CheckLoadoutProfileSwitch): the spec→profile
---     auto-switch could not run (or, before the guard, ran with the `or 1`
---     spec fallback and switched to the WRONG spec's profile) — the field
---     report: "none of my binds work in my first arena of the day"
---   * macroMapUnresolved (BuildUnifiedMacroMap): loadSpec-scoped bindings
---     were dropped from the map (legacy/import-only config; belt)
--- Debounced; each resolver clears its own flag on success and self-defers in
--- combat (pendingLoadoutCheck / needsBindingRefresh). No-op in steady state,
--- so the extra triggers cost nothing.
-function CC:ResolveProvisionalMap(reason)
-    if not (self.macroMapUnresolved or self.loadoutCheckUnresolved) then return end
+-- Re-resolve click-casting state once cold-start data becomes available.
+-- CheckLoadoutProfileSwitch can run before GetSpecialization() resolves at the
+-- first login of a session. Picking a profile off an unknown spec sent spec-2+
+-- players to spec 1's profile, and it stayed wrong all day until a /reload
+-- ("none of my binds work in my first arena of the day"). The check now records
+-- loadoutCheckUnresolved instead of guessing, and this resolver re-runs it once
+-- real spec data arrives.
+--
+-- Debounced; the resolver clears its own flag on success and self-defers in
+-- combat via the deferred-work queue. No-op in steady state, so the extra
+-- triggers (spec/spell events, loading screens, arena prep) cost nothing.
+--
+-- The binding map itself is no longer spec-dependent: retiring the per-binding
+-- loadSpec field removed the only path by which a cold-start build could drop
+-- bindings, so there is no provisional-map half to resolve any more.
+function CC:ResolveColdStartProfile(reason)
+    if not self.loadoutCheckUnresolved then return end
     if not (self.db and self.db.enabled) then return end
     if self.provisionalResolveTimer then self.provisionalResolveTimer:Cancel() end
     self.provisionalResolveTimer = C_Timer.NewTimer(0.5, function()
@@ -2430,33 +2490,22 @@ function CC:ResolveProvisionalMap(reason)
             DF:Debug("CLICK", "Re-running deferred loadout profile check (%s)", tostring(reason))
             CC:CheckLoadoutProfileSwitch()
         end
-        if CC.macroMapUnresolved then
-            DF:Debug("CLICK", "Rebuilding provisional binding map (%s)", tostring(reason))
-            CC:ApplyBindings()
-        end
     end)
 end
 
 function CC:BuildUnifiedMacroMap()
     local macroMap = {}
 
-    -- Cold-start guard: ShouldBindingLoad drops every loadSpec-scoped binding
-    -- while GetSpecialization() is still nil (first login of a session, before
-    -- spec data resolves). The map is built once and cached, so a map built in
-    -- that window silently loses those bindings — and an all-spec-scoped setup
-    -- comes up EMPTY, which downstream disables clicks on our frames entirely
-    -- ("none of my binds work in my first arena of the day until I reload").
-    -- Record the condition on the module; the resolve watchers (SPELLS_CHANGED /
-    -- PLAYER_SPECIALIZATION_CHANGED / arena prep) rebuild when data arrives, and
-    -- ApplyBindingsToFrameUnified refuses to wipe a frame off a suspect map.
-    local specKnown = GetSpecialization() ~= nil
-    local anySpecScoped = false
+    -- No cold-start guard needed here any more: the map used to be spec-
+    -- dependent because ShouldBindingLoad dropped loadSpec-scoped bindings while
+    -- GetSpecialization() was still nil, so a map built and cached in that window
+    -- silently lost them. Retiring the per-binding loadSpec field removed that
+    -- dependency entirely -- this build reads no spec state at all.
 
     -- Group all bindings by their key string
     local keyGroups = {}
     for i, binding in ipairs(self.db.bindings) do
         if binding.enabled ~= false then
-            if binding.loadSpec then anySpecScoped = true end
             local keyString = self:GetBindingKeyString(binding)
             if keyString then
                 if not keyGroups[keyString] then
@@ -2467,11 +2516,6 @@ function CC:BuildUnifiedMacroMap()
         end
     end
 
-    self.macroMapUnresolved = (anySpecScoped and not specKnown) or nil
-    if self.macroMapUnresolved then
-        DF:DebugWarn("CLICK", "BuildUnifiedMacroMap: spec unknown with spec-scoped bindings — map is provisional")
-    end
-    
     -- Build macro for each key group
     for keyString, group in pairs(keyGroups) do
         -- Check if this group contains any special actions or items (these don't combine)
@@ -2553,11 +2597,133 @@ end
 -- SIMPLIFIED BINDING APPLICATION
 -- ============================================================
 
+-- Manifest-tracked attribute writer. Every attribute the binding loop writes
+-- on a frame is recorded in frame.dfWrittenAttrs, so ClearBindingsFromFrame /
+-- RestoreBlizzardDefaults can clear exactly what was written instead of
+-- sweeping every combination that could ever exist (~500 SetAttribute calls
+-- per frame per clear). The proxy path keeps its own dfProxyRoutes
+-- bookkeeping and combat drivers keep dfAttrDriverList; this manifest covers
+-- only direct frame attributes.
+-- The manifest records HOW each attribute must be cleared, not just that it was
+-- written: type attributes clear to "" (a nil type falls through to the wildcard
+-- *type attributes and to Blizzard's own interaction bindings, which we do not
+-- want), everything else clears to nil. Recording the kind at write time replaces
+-- inferring it later from `attr:find("type")`, which was a substring test over
+-- attribute names that include a caller-supplied virtual button name.
+local function WriteAttr(frame, attr, value)
+    frame:SetAttribute(attr, value)
+    frame.dfWrittenAttrs = frame.dfWrittenAttrs or {}
+    -- do not downgrade an existing "type" marker
+    if frame.dfWrittenAttrs[attr] == nil then
+        frame.dfWrittenAttrs[attr] = true
+    end
+end
+
+local function WriteTypeAttr(frame, attr, value)
+    frame:SetAttribute(attr, value)
+    frame.dfWrittenAttrs = frame.dfWrittenAttrs or {}
+    frame.dfWrittenAttrs[attr] = "type"
+end
+
+-- An attribute slot: where one action lands on a frame. Mouse slots spell
+-- their attributes "shift-macrotext2" style (prefix..name..button); virtual
+-- slots (keyboard, scroll, meta-mouse, third-party copies) use the named
+-- "macrotext-<vbtn>" style.
+-- Slot descriptors are filled into ONE reusable table rather than allocated per
+-- binding per frame. ApplyBindingsToFrameUnified runs over every registered frame
+-- (100-150+ with other unit-frame addons loaded) times every binding, and it is
+-- already batched specifically because it hits Lua's time limit -- so allocating
+-- a table per binding was the wrong direction.
+--
+-- The load-bearing property is NON-RE-ENTRANCY, which is what a future caller
+-- could break silently. Safe today because: ApplyActionToSlot only reads fields
+-- off the descriptor and never stores it; the two calls in the mouse branch are
+-- strictly sequential; and RouteProxyAction copies typeAttr/clickbuttonAttr into
+-- locals at call time, so a later mutation cannot reach back into an in-flight
+-- route. Anything that makes this walk re-entrant -- a coroutine yield, a
+-- callback that re-enters ApplyBindingsToFrameUnified -- must give itself its own
+-- descriptor rather than reuse these.
+local slotScratch = {}
+local ctxScratch = {}
+
+-- Blizzard's stock behaviour for the unmodified mouse buttons. Constant, so it is
+-- not rebuilt once per frame inside the same batched walk.
+local BASE_BUTTON_DEFAULTS = { [1] = "target", [2] = "togglemenu" }
+
+local function MouseSlot(modPrefix, buttonNum)
+    local s = slotScratch
+    s.typeAttr  = modPrefix .. "type" .. buttonNum
+    s.macroAttr = modPrefix .. "macrotext" .. buttonNum
+    s.unitAttr  = modPrefix .. "unit" .. buttonNum
+    s.clickAttr = modPrefix .. "clickbutton" .. buttonNum
+    s.isVirtual = nil
+    return s
+end
+
+local function VirtualSlot(virtualBtn)
+    local s = slotScratch
+    s.typeAttr  = "type-" .. virtualBtn
+    s.macroAttr = "macrotext-" .. virtualBtn
+    s.unitAttr  = "unit-" .. virtualBtn
+    s.clickAttr = "clickbutton-" .. virtualBtn
+    s.isVirtual = true
+    return s
+end
+
+-- Write one resolved action into one slot. Single dispatch replacing four
+-- near-identical copies (mouse/key x special/macro, each with proxy / direct /
+-- combat-conditional variants). Behavior preserved from the originals:
+--   * menu/target route through the 12.0.7 gate proxy when useProxy, EXCEPT
+--     plain unmodified left-click target on the mouse slot (passes the gate
+--     natively, stays direct).
+--   * direct target sets unit="mouseover" on virtual slots only. The old
+--     mouse-path variant gated it on dfIsBlizzardFrame, but Blizzard frames
+--     always take the proxy route since the gate workaround shipped, so that
+--     leg was unreachable and is not reproduced.
+--   * focus/assist are never gated and never proxied; no combat drivers.
+--   * spell/macro actions carry combat conditionals inside the macro text;
+--     menu/target use attribute drivers (AddCombatConditional).
+function CC:ApplyActionToSlot(frame, slot, ctx)
+    local actionType = ctx.actionType
+    if not ctx.isSpecialAction then
+        WriteTypeAttr(frame, slot.typeAttr, "macro")
+        WriteAttr(frame, slot.macroAttr, ctx.macroText)
+        return
+    end
+
+    if actionType == "menu" or actionType == self.ACTION_TYPES.MENU then
+        if ctx.useProxy then
+            self:RouteProxyAction(frame, slot.typeAttr, slot.clickAttr, "togglemenu", ctx.combatCond)
+        else
+            WriteTypeAttr(frame, slot.typeAttr, "togglemenu")
+            if ctx.combatCond then
+                AddCombatConditional(frame, slot.typeAttr, "togglemenu", ctx.combatCond)
+            end
+        end
+    elseif actionType == "target" then
+        if ctx.useProxy and not (ctx.plainLeftClick and not slot.isVirtual) then
+            self:RouteProxyAction(frame, slot.typeAttr, slot.clickAttr, "target", ctx.combatCond)
+        else
+            WriteTypeAttr(frame, slot.typeAttr, "target")
+            if slot.isVirtual then
+                WriteAttr(frame, slot.unitAttr, "mouseover")
+            end
+            if ctx.combatCond then
+                AddCombatConditional(frame, slot.typeAttr, "target", ctx.combatCond)
+            end
+        end
+    elseif actionType == "focus" or actionType == self.ACTION_TYPES.FOCUS then
+        WriteTypeAttr(frame, slot.typeAttr, "focus")
+    elseif actionType == "assist" or actionType == self.ACTION_TYPES.ASSIST then
+        WriteTypeAttr(frame, slot.typeAttr, "assist")
+    end
+end
+
 -- Apply all bindings to a frame using unified macro approach
 -- skipKeyboardUpdate: when true, skip UpdateFrameBindingAttributes (caller will batch it)
 function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
     if not frame then return end
-    if InCombatLockdown() then return end
+    if self:CombatGuard("bindingRefresh") then return end
     
     -- If click-casting is disabled, restore Blizzard defaults
     if not self.db.enabled then
@@ -2609,17 +2775,12 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
         end
     end
 
-    -- If no bindings apply to this frame
+    -- If no bindings apply to this frame, clean it up. (There used to be a
+    -- provisional-map bailout here for a map built while spec data was still
+    -- unresolved; retiring the per-binding loadSpec field removed the only way
+    -- the map could be spec-dependent, so an empty map now always means the
+    -- user's config, never a cold-start drop.)
     if not hasAnyBindings then
-        -- Provisional map (spec not yet resolved at build time): the emptiness
-        -- is almost certainly the cold-start drop, not the user's config. Do
-        -- NOT clear/disable anything — leave the frame exactly as it is; the
-        -- resolve watchers rebuild and re-apply once spec data arrives.
-        if self.macroMapUnresolved then
-            DF:Debug("CLICK", "ApplyBindings %s deferred — provisional map (spec unresolved)", frameName)
-            return
-        end
-        -- Genuinely no bindings for this frame: clean it up.
         self:ClearBindingsFromFrame(frame)
         if isDandersFrame then
             -- For DandersFrames, completely disable clicks when no bindings apply
@@ -2636,9 +2797,17 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
         return
     end
 
-    -- Clear existing bindings first (moved below the applicability check so a
-    -- provisional-map bailout above never strips a frame's working state)
-    self:ClearBindingsFromFrame(frame)
+    -- Clear existing bindings first. Deliberately below the applicability check
+    -- so a frame that turns out to have no bindings is never stripped by this
+    -- destructive pass before we know that.
+    --
+    -- In a batched apply (skipKeyboardUpdate) the keyboard snippet is preserved:
+    -- the batch-end RefreshKeyboardBindings rewrites every registered frame's
+    -- snippet anyway, and wiping it here opened the combat-interrupt window that
+    -- left frames snippet-less for a whole fight (see ClearBindingsFromFrame).
+    -- The no-bindings leg above must NOT preserve it -- nothing rewrites the
+    -- snippet on a frame with no bindings, so there it has to be cleared.
+    self:ClearBindingsFromFrame(frame, skipKeyboardUpdate)
 
     -- Register for clicks based on castOnDown option
     if frame.RegisterForClicks then
@@ -2660,14 +2829,15 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
     local coveredBaseButtons = {}
 
     -- Apply each macro binding (these will override defaults where bindings exist)
+    local isThirdPartyFrame = not frame.dfIsDandersFrame and not frame.dfIsBlizzardFrame
     for keyString, data in pairs(self.unifiedMacroMap) do
         local binding = data.templateBinding
-        
+
         -- Check if this binding should apply to this frame
         if self:ShouldBindingApplyToFrame(binding, frame) then
             local bindType = binding.bindType or "mouse"
             local actionType = binding.actionType or self.ACTION_TYPES.SPELL
-            
+
             -- Check if this should be treated as a special action
             -- If macroMap has macroText for target (smart res), treat it like a spell macro
             local isSpecialAction = data.isSpecialAction
@@ -2675,19 +2845,23 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
                 -- Fallback for backwards compatibility
                 isSpecialAction = (actionType == "menu" or actionType == "target" or
                                    actionType == "focus" or actionType == "assist" or
-                                   actionType == self.ACTION_TYPES.MENU or 
+                                   actionType == self.ACTION_TYPES.MENU or
                                    actionType == self.ACTION_TYPES.FOCUS or
                                    actionType == self.ACTION_TYPES.ASSIST)
             end
-            
-            -- Check if this is a third-party frame (not DandersFrames or Blizzard)
-            local isThirdPartyFrame = not frame.dfIsDandersFrame and not frame.dfIsBlizzardFrame
-            
-            -- Check if this is a third-party frame that needs virtual button approach
-            local needsVirtualBtn = isThirdPartyFrame
-            
+
+            -- Reused, like the slot descriptors above: one table for the whole
+            -- walk instead of one per binding per frame. plainLeftClick is reset
+            -- here because only the mouse branch sets it.
+            local ctx = ctxScratch
+            ctx.actionType = actionType
+            ctx.isSpecialAction = isSpecialAction
+            ctx.macroText = data.macroText
+            ctx.combatCond = GetCombatCondition(binding)
+            ctx.useProxy = useProxy
+            ctx.plainLeftClick = nil
+
             if bindType == "mouse" then
-                -- Mouse binding: use frame attributes
                 local buttonNum = GetButtonNumber(binding.button)
                 local modPrefix = BuildModifierPrefix(binding.modifiers)
 
@@ -2695,179 +2869,38 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
                 if modPrefix == "" then
                     coveredBaseButtons[buttonNum] = true
                 end
+                ctx.plainLeftClick = (buttonNum == 1 and modPrefix == "")
 
-                local typeAttr = modPrefix .. "type" .. buttonNum
-                local spellAttr = modPrefix .. "spell" .. buttonNum
-                local macroAttr = modPrefix .. "macrotext" .. buttonNum
-                
-                -- Check if this is a third-party frame that needs virtual button approach
-                local needsVirtualBtn = isThirdPartyFrame
-                
-                -- Also need virtual button for META bindings (Mac Command key)
-                -- because meta- frame attributes don't work properly on Mac
+                self:ApplyActionToSlot(frame, MouseSlot(modPrefix, buttonNum), ctx)
+
+                -- Named-attribute copy of the same action:
+                --  * meta- (Mac Command) bindings always need one, because meta-
+                --    frame attributes do not work on Mac;
+                --  * third-party frames need one on the DIRECT paths. When
+                --    menu/target go through the gate proxy, only the meta copy
+                --    is made (matching the pre-refactor behavior).
                 local hasMetaMod = binding.modifiers and binding.modifiers:lower():find("meta")
-                local needsMetaVirtualBtn = hasMetaMod
-                
-                if isSpecialAction then
-                    -- Use direct attribute types for special actions
-                    if actionType == "menu" or actionType == self.ACTION_TYPES.MENU then
-                        if useProxy then
-                            -- 12.0.7 gate workaround: route menu through the ungated proxy
-                            local combatCond = GetCombatCondition(binding)
-                            self:RouteProxyAction(frame, typeAttr, modPrefix .. "clickbutton" .. buttonNum, "togglemenu", combatCond)
-                            if needsMetaVirtualBtn then
-                                local vBtn = self:GetVirtualButtonName(binding)
-                                self:RouteProxyAction(frame, "type-" .. vBtn, "clickbutton-" .. vBtn, "togglemenu", combatCond)
-                            end
-                        else
-                            frame:SetAttribute(typeAttr, "togglemenu")
-                            local vBtn
-                            if needsVirtualBtn or needsMetaVirtualBtn then
-                                vBtn = self:GetVirtualButtonName(binding)
-                                frame:SetAttribute("type-" .. vBtn, "togglemenu")
-                            end
-                            -- BUG #10 FIX: state-driver-based combat conditional
-                            local combatCond = GetCombatCondition(binding)
-                            if combatCond then
-                                AddCombatConditional(frame, typeAttr, "togglemenu", combatCond)
-                                if vBtn then
-                                    AddCombatConditional(frame, "type-" .. vBtn, "togglemenu", combatCond)
-                                end
-                            end
-                        end
-                    elseif actionType == "target" then
-                        if useProxy then
-                            -- 12.0.7 gate workaround: route target through the ungated proxy.
-                            -- The proxy inherits the frame's unit token via useparent-unit,
-                            -- so targeting still works at any range (no /target name limit).
-                            -- Plain unmodified left-click passes the gate natively (it has a
-                            -- default interaction binding), so leave it direct and only proxy
-                            -- the rebound cases.
-                            local combatCond = GetCombatCondition(binding)
-                            if buttonNum == 1 and modPrefix == "" then
-                                frame:SetAttribute(typeAttr, "target")
-                                if combatCond then
-                                    AddCombatConditional(frame, typeAttr, "target", combatCond)
-                                end
-                            else
-                                self:RouteProxyAction(frame, typeAttr, modPrefix .. "clickbutton" .. buttonNum, "target", combatCond)
-                            end
-                            if needsMetaVirtualBtn then
-                                local vBtn = self:GetVirtualButtonName(binding)
-                                self:RouteProxyAction(frame, "type-" .. vBtn, "clickbutton-" .. vBtn, "target", combatCond)
-                            end
-                        else
-                            frame:SetAttribute(typeAttr, "target")
-                            -- For Blizzard frames, also set unit="mouseover" to ensure targeting works.
-                            -- Native type="target" uses the frame's unit attribute, but some frames
-                            -- may not have it properly accessible.
-                            if frame.dfIsBlizzardFrame then
-                                local unitAttr = modPrefix .. "unit" .. buttonNum
-                                frame:SetAttribute(unitAttr, "mouseover")
-                            end
-                            local vBtn
-                            if needsVirtualBtn or needsMetaVirtualBtn then
-                                vBtn = self:GetVirtualButtonName(binding)
-                                frame:SetAttribute("type-" .. vBtn, "target")
-                                frame:SetAttribute("unit-" .. vBtn, "mouseover")
-                            end
-                            -- BUG #860 FIX: state-driver-based combat conditional
-                            local combatCond = GetCombatCondition(binding)
-                            if combatCond then
-                                AddCombatConditional(frame, typeAttr, "target", combatCond)
-                                if vBtn then
-                                    AddCombatConditional(frame, "type-" .. vBtn, "target", combatCond)
-                                end
-                            end
-                        end
-                    elseif actionType == "focus" or actionType == self.ACTION_TYPES.FOCUS then
-                        frame:SetAttribute(typeAttr, "focus")
-                        if needsVirtualBtn or needsMetaVirtualBtn then
-                            local virtualBtn = self:GetVirtualButtonName(binding)
-                            frame:SetAttribute("type-" .. virtualBtn, "focus")
-                        end
-                    elseif actionType == "assist" or actionType == self.ACTION_TYPES.ASSIST then
-                        frame:SetAttribute(typeAttr, "assist")
-                        if needsVirtualBtn or needsMetaVirtualBtn then
-                            local virtualBtn = self:GetVirtualButtonName(binding)
-                            frame:SetAttribute("type-" .. virtualBtn, "assist")
-                        end
-                    end
-                else
-                    -- Use macro for all spell/macro/target bindings
-                    -- This supports smart res, combat conditionals, fallbacks, etc.
-                    frame:SetAttribute(typeAttr, "macro")
-                    frame:SetAttribute(macroAttr, data.macroText)
-                    
-                    -- For third-party frames OR META bindings, also set virtual button attributes
-                    -- META bindings need this because meta- frame attributes don't work on Mac
-                    if needsVirtualBtn or needsMetaVirtualBtn then
-                        local virtualBtn = self:GetVirtualButtonName(binding)
-                        frame:SetAttribute("type-" .. virtualBtn, "macro")
-                        frame:SetAttribute("macrotext-" .. virtualBtn, data.macroText)
-                    end
+                local specialViaProxy = isSpecialAction and useProxy and
+                    (actionType == "target" or actionType == "menu" or actionType == self.ACTION_TYPES.MENU)
+                local wantVirtual = hasMetaMod or (not specialViaProxy and isThirdPartyFrame)
+                if wantVirtual then
+                    self:ApplyActionToSlot(frame, VirtualSlot(self:GetVirtualButtonName(binding)), ctx)
                 end
-                
+
             elseif bindType == "key" or bindType == "scroll" then
-                -- Keyboard/scroll: use virtual button approach
-                local virtualBtn = self:GetVirtualButtonName(binding)
-                
-                if isSpecialAction then
-                    if actionType == "menu" or actionType == self.ACTION_TYPES.MENU then
-                        local typeAttr = "type-" .. virtualBtn
-                        if useProxy then
-                            -- 12.0.7 gate workaround: route menu through the ungated proxy
-                            self:RouteProxyAction(frame, typeAttr, "clickbutton-" .. virtualBtn, "togglemenu", GetCombatCondition(binding))
-                        else
-                            frame:SetAttribute(typeAttr, "togglemenu")
-                            -- BUG #10 FIX: state-driver-based combat conditional
-                            local combatCond = GetCombatCondition(binding)
-                            if combatCond then
-                                AddCombatConditional(frame, typeAttr, "togglemenu", combatCond)
-                            end
-                        end
-                    elseif actionType == "target" then
-                        local typeAttr = "type-" .. virtualBtn
-                        if useProxy then
-                            -- 12.0.7 gate workaround: route target through the ungated proxy.
-                            -- The proxy inherits the frame's real unit token (party1,
-                            -- raid3, etc.) via useparent-unit, so targeting works at any
-                            -- range (no /target name-based out-of-range limitation).
-                            self:RouteProxyAction(frame, typeAttr, "clickbutton-" .. virtualBtn, "target", GetCombatCondition(binding))
-                        else
-                            frame:SetAttribute(typeAttr, "target")
-                            -- Mirror the mouse path: set unit="mouseover" on Blizzard /
-                            -- third-party frames, where the frame's main "unit" attribute
-                            -- may not be reliably exposed.
-                            frame:SetAttribute("unit-" .. virtualBtn, "mouseover")
-                            -- BUG #860 FIX: state-driver-based combat conditional
-                            local combatCond = GetCombatCondition(binding)
-                            if combatCond then
-                                AddCombatConditional(frame, typeAttr, "target", combatCond)
-                            end
-                        end
-                    elseif actionType == "focus" or actionType == self.ACTION_TYPES.FOCUS then
-                        frame:SetAttribute("type-" .. virtualBtn, "focus")
-                    elseif actionType == "assist" or actionType == self.ACTION_TYPES.ASSIST then
-                        frame:SetAttribute("type-" .. virtualBtn, "assist")
-                    end
-                else
-                    -- Use macro for all spell/macro bindings
-                    frame:SetAttribute("type-" .. virtualBtn, "macro")
-                    frame:SetAttribute("macrotext-" .. virtualBtn, data.macroText)
-                end
+                -- Keyboard/scroll: the virtual named slot is the primary
+                self:ApplyActionToSlot(frame, VirtualSlot(self:GetVirtualButtonName(binding)), ctx)
             end
         end
     end
-    
+
     -- For non-DandersFrames, restore default behavior for any base mouse buttons
     -- that weren't covered by a binding on this frame. ClearBlizzardClickCastFromFrame
     -- wipes type1/type2 to "" when ANY binding targets other frames, but individual
     -- bindings may be DandersFrames-only. Without this, right-click menu (or left-click
     -- target) breaks on Blizzard frames when the binding doesn't apply to them.
     if not isDandersFrame then
-        local defaults = { [1] = "target", [2] = "togglemenu" }
-        for btn, defaultType in pairs(defaults) do
+        for btn, defaultType in pairs(BASE_BUTTON_DEFAULTS) do
             if not coveredBaseButtons[btn] then
                 local currentType = frame:GetAttribute("type" .. btn)
                 if not currentType or currentType == "" then
@@ -2876,9 +2909,6 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
             end
         end
     end
-
-    -- Mark this frame as having had bindings applied (for optimization in ClearBindingsFromFrame)
-    frame.dfBindingsEverApplied = true
 
     -- Debug: confirm final attribute state after apply
     local finalType1 = frame:GetAttribute("type1")
