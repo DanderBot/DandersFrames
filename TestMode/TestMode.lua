@@ -3227,6 +3227,30 @@ function DF:UpdateTestMissingBuff(frame)
 
 end
 
+-- The buff/debuff sibling of UpdateAllTestMissingBuff / UpdateAllTestDefensiveBar /
+-- UpdateAllTestAuraDesigner. Its ABSENCE is why aura settings did not live-update in
+-- test mode: every OTHER container surface had one of these and was wired to it, but
+-- the buff and debuff rows had no "refresh every test frame" entry point at all. So a
+-- slider drag saved the value, re-drove the LIVE frames, and left the preview stale —
+-- and Aura Designer appeared to be the only thing that worked.
+--
+-- The per-frame drive (UpdateTestAuras) already existed and already reads every
+-- setting; nothing was missing but the loop over the frames.
+function DF:UpdateAllTestAuras()
+    if DF.testMode and DF.testPartyFrames then
+        for i = 0, 4 do
+            local frame = DF.testPartyFrames[i]
+            if frame then DF:UpdateTestAuras(frame) end
+        end
+    end
+    if DF.raidTestMode and DF.testRaidFrames then
+        for i = 1, 40 do
+            local frame = DF.testRaidFrames[i]
+            if frame then DF:UpdateTestAuras(frame) end
+        end
+    end
+end
+
 function DF:UpdateAllTestMissingBuff()
     local function UpdateFrame(frame)
         if not frame then return end

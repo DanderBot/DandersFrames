@@ -553,6 +553,20 @@ function DF:InvalidateAuraLayout()
     -- update cycle (next UNIT_AURA), so without an immediate re-drive a GUI layout
     -- change applies "one aura event late". Drive them now (OOC; no-op pre-12.1).
     if DF.RefreshFactoryRows then DF:RefreshFactoryRows() end
+
+    -- ⚠ TEST MODE NEEDS ITS OWN PASS. RefreshFactoryRows goes through
+    -- driveFactoryRowsNow -> UseFactoryFor{Buffs,Debuffs,Defensive,MissingBuff}, and
+    -- ALL FOUR of those predicates contain `not (DF.testMode or DF.raidTestMode)` —
+    -- deliberately, because the test drives call the factories themselves. The effect
+    -- was that every container setting re-drove live frames and skipped the preview:
+    -- change a buff/debuff/defensive setting while previewing and nothing moved until
+    -- test mode was reopened. Aura Designer looked like the only thing that worked
+    -- because it is the one surface whose "update every test frame" helper was wired up.
+    --
+    -- Each helper below self-guards on test mode, so this is inert on the live path.
+    if DF.UpdateAllTestAuras then DF:UpdateAllTestAuras() end
+    if DF.UpdateAllTestMissingBuff then DF:UpdateAllTestMissingBuff() end
+    if DF.UpdateAllTestDefensiveBar then DF:UpdateAllTestDefensiveBar() end
 end
 
 -- ============================================================
