@@ -57,18 +57,38 @@ function R:RenameCustomFilter(id, name)
     if f then f.name = name end
 end
 
+-- ref: a custom id (copies its stored sets) or a preset key (FLATTENS the preset
+-- to its currently-ENABLED records). Returns two FRESH tables, so callers own
+-- them outright and can hand them straight to a filter without aliasing the
+-- store. Returns nil for a ref that is neither (e.g. the debuff blacklist, which
+-- is a per-mode db set rather than a registry filter).
+--
+-- Shared by DuplicateFilter and BuildFilterPayload so "what a filter reference
+-- resolves to" has exactly one definition — duplicate and export must not drift.
+function R:ResolveFilterContent(ref)
+    local spells, rawIDs = {}, {}
+    local src = self:GetCustomFilter(ref)
+    if src then
+        for sid in pairs(src.spells) do spells[sid] = true end
+        for rid in pairs(src.rawIDs) do rawIDs[rid] = true end
+        return spells, rawIDs
+    end
+    if R.ByCategory[ref] then
+        for _, rec in ipairs(R.ByCategory[ref]) do
+            if self:IsSpellEnabled(ref, rec) then spells[rec.id] = true end
+        end
+        return spells, rawIDs
+    end
+    return nil
+end
+
 -- srcRef: a preset key (copies its currently-ENABLED spells) or a custom id
 function R:DuplicateFilter(srcRef, name)
     local id = self:CreateCustomFilter(name)
     local dst = self:GetCustomFilter(id)
-    local src = self:GetCustomFilter(srcRef)
-    if src then
-        for sid in pairs(src.spells) do dst.spells[sid] = true end
-        for rid in pairs(src.rawIDs) do dst.rawIDs[rid] = true end
-    elseif R.ByCategory[srcRef] then
-        for _, rec in ipairs(R.ByCategory[srcRef]) do
-            if self:IsSpellEnabled(srcRef, rec) then dst.spells[rec.id] = true end
-        end
+    local spells, rawIDs = self:ResolveFilterContent(srcRef)
+    if spells then
+        dst.spells, dst.rawIDs = spells, rawIDs
     end
     return id
 end
@@ -131,6 +151,41 @@ local function cfIdLess(a, b)
     return tostring(a) < tostring(b)
 end
 
+-- Content-based reuse needs actual content: setsEqual({}, {}) is true and ids
+-- are "cf1", "cf2", ... on every account, so without the hasContent guard any
+-- imported EMPTY filter silently became any local empty filter — and spells
+-- added to "it" later changed the other selection's meaning. Empty filters only
+-- reuse an empty filter with the SAME name.
+--
+-- nil-safe on `other` so callers can pass a possibly-absent store entry.
+local function contentMatches(other, def, hasContent)
+    if not other then return false end
+    if not sameContent(other, def) then return false end
+    if hasContent then return true end
+    return (other.name or "") == (def.name or "")
+end
+
+local function defHasContent(def)
+    return next(def.spells or {}) ~= nil or next(def.rawIDs or {}) ~= nil
+end
+
+-- The id of a content-equal local filter, or nil. Single-filter import uses this
+-- to DETECT a collision and ask the user, rather than silently reusing the way
+-- profile import does — see ImportFilterPayload.
+function R:FindContentMatch(def)
+    local store = self:GetStore()
+    local hasContent = defHasContent(def)
+    local ids = {}
+    for cfId in pairs(store.customFilters) do ids[#ids + 1] = cfId end
+    table.sort(ids, cfIdLess)
+    for _, otherId in ipairs(ids) do
+        if contentMatches(store.customFilters[otherId], def, hasContent) then
+            return otherId
+        end
+    end
+    return nil
+end
+
 function R:ImportCustomFilters(imported)
     local store = self:GetStore()
     local remap = {}
@@ -142,24 +197,13 @@ function R:ImportCustomFilters(imported)
 
     for _, cfId in ipairs(importIds) do
         local def = imported[cfId]
-        -- Content-based reuse needs actual content: setsEqual({}, {}) is true
-        -- and ids are "cf1", "cf2", ... on every account, so without this any
-        -- imported EMPTY filter silently became any local empty filter — and
-        -- spells added to "it" later changed the other selection's meaning.
-        -- Empty filters only reuse an empty filter with the SAME name.
-        local hasContent = next(def.spells or {}) ~= nil or next(def.rawIDs or {}) ~= nil
-        local function canReuse(other)
-            if not sameContent(other, def) then return false end
-            if hasContent then return true end
-            return (other.name or "") == (def.name or "")
-        end
-        local existing = store.customFilters[cfId]
-        if existing and canReuse(existing) then
+        local hasContent = defHasContent(def)
+        if contentMatches(store.customFilters[cfId], def, hasContent) then
             remap[cfId] = cfId
         else
             local reuse
             for _, otherId in ipairs(storeIds) do
-                if canReuse(store.customFilters[otherId]) then
+                if contentMatches(store.customFilters[otherId], def, hasContent) then
                     reuse = otherId
                     break
                 end
@@ -179,6 +223,165 @@ function R:ImportCustomFilters(imported)
         end
     end
     return remap
+end
+
+-- ------------------------------------------------------------
+-- SINGLE-FILTER EXPORT / IMPORT
+-- Shares ONE filter as a string, without dragging a whole profile along.
+-- Same encode chain as the profile and click-casting exports:
+--   LibSerialize -> CompressDeflate -> EncodeForPrint, behind a prefix.
+--
+-- Payload v1: { v, name, spells = {[id]=true}, rawIDs = {[id]=true} }
+-- ------------------------------------------------------------
+local FILTER_PREFIX  = "!DFF1!"          -- DandersFrames Filter v1
+local FILTER_VERSION = 1
+local MAX_IMPORT_IDS = 2000              -- sanity bound on a pasted payload
+local MAX_NAME_LEN   = 40                -- matches GUI:PromptName's maxLetters
+
+-- A string carrying one of these is a valid export of the WRONG kind. Worth
+-- naming precisely — "that isn't a filter string" sends someone hunting for a
+-- corruption that isn't there when they simply pasted into the wrong box.
+local FOREIGN_PREFIXES = {
+    ["!DFP1!"] = "profile",
+    ["!DF1!"]  = "profile",
+    ["!DF2!"]  = "profile",
+    ["!DF3!"]  = "profile",
+    ["!DFC1!"] = "clickcasting",
+    ["!DFW1!"] = "wizard",
+}
+
+local function trim(s)
+    return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+-- An imported name is untrusted text that lands in a list row. Strip colour
+-- escapes and control characters so it can't inject formatting, then clamp to
+-- the same length the rename prompt enforces.
+local function sanitizeName(name)
+    name = tostring(name or "")
+    name = name:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("||", ""):gsub("|", "")
+    name = name:gsub("%c", "")
+    name = trim(name)
+    if #name > MAX_NAME_LEN then name = name:sub(1, MAX_NAME_LEN) end
+    return name
+end
+
+local function getLibs()
+    local LibSerialize = LibStub and LibStub("LibSerialize", true)
+    local LibDeflate = LibStub and LibStub("LibDeflate", true)
+    if not LibSerialize or not LibDeflate then return nil end
+    return LibSerialize, LibDeflate
+end
+
+-- Re-derive the spells/rawIDs split against THIS client's spell database.
+--
+-- The split is relative to whoever exported: AddSpellToCustom files an id under
+-- spells when R.ByID resolves it and under rawIDs when it doesn't, so two users
+-- on different addon versions bucket the same id differently. Trusting the
+-- sender's split would leave an id we DO know sitting in rawIDs, skipping the
+-- canonical-id snap (rec.id) — the filter would quietly match differently for
+-- the receiver than it did for the sender. Profile import doesn't need this
+-- (same account, same build); cross-user sharing does.
+function R:BucketIDs(ids)
+    local spells, rawIDs = {}, {}
+    for id in pairs(ids) do
+        local rec = R.ByID[id]
+        if rec then spells[rec.id] = true else rawIDs[id] = true end
+    end
+    return spells, rawIDs
+end
+
+-- ref: a custom id or a preset key. name: the display name to travel with the
+-- payload (the caller owns localisation — presets are named by locale key).
+function R:BuildFilterPayload(ref, name)
+    local spells, rawIDs = self:ResolveFilterContent(ref)
+    if not spells then return nil end
+    return { v = FILTER_VERSION, name = sanitizeName(name), spells = spells, rawIDs = rawIDs }
+end
+
+-- Returns the export string, or nil + an error key.
+function R:ExportFilter(ref, name)
+    local payload = self:BuildFilterPayload(ref, name)
+    if not payload then return nil, "noSelection" end
+    local LibSerialize, LibDeflate = getLibs()
+    if not LibSerialize then return nil, "libs" end
+    local ok, serialized = pcall(LibSerialize.Serialize, LibSerialize, payload)
+    if not ok or not serialized then return nil, "encode" end
+    local compressed = LibDeflate:CompressDeflate(serialized)
+    if not compressed then return nil, "encode" end
+    local encoded = LibDeflate:EncodeForPrint(compressed)
+    if not encoded then return nil, "encode" end
+    return FILTER_PREFIX .. encoded
+end
+
+-- Returns a def ({name, spells, rawIDs}) already re-bucketed for THIS client,
+-- or nil + an error key. Everything here is untrusted: the string was pasted
+-- from Discord.
+function R:DecodeFilterString(str)
+    if type(str) ~= "string" then return nil, "notFilter" end
+    str = trim(str)
+    if str == "" then return nil, "notFilter" end
+
+    if str:sub(1, #FILTER_PREFIX) ~= FILTER_PREFIX then
+        for prefix, kind in pairs(FOREIGN_PREFIXES) do
+            if str:sub(1, #prefix) == prefix then return nil, kind end
+        end
+        return nil, "notFilter"
+    end
+
+    local LibSerialize, LibDeflate = getLibs()
+    if not LibSerialize then return nil, "libs" end
+
+    local compressed = LibDeflate:DecodeForPrint(str:sub(#FILTER_PREFIX + 1))
+    if not compressed then return nil, "corrupt" end
+    local serialized = LibDeflate:DecompressDeflate(compressed)
+    if not serialized then return nil, "corrupt" end
+    local ok, payload = LibSerialize:Deserialize(serialized)
+    if not ok or type(payload) ~= "table" then return nil, "corrupt" end
+
+    -- Forward compat: a v2 payload may carry fields that change what the filter
+    -- MEANS, so importing it as v1 would silently build the wrong filter.
+    local v = tonumber(payload.v) or 1
+    if v > FILTER_VERSION then return nil, "newer" end
+
+    if payload.spells ~= nil and type(payload.spells) ~= "table" then return nil, "corrupt" end
+    if payload.rawIDs ~= nil and type(payload.rawIDs) ~= "table" then return nil, "corrupt" end
+
+    -- Flatten both buckets into one id set — the sender's split is discarded
+    -- (see BucketIDs). Non-numeric keys are skipped rather than fatal: one bad
+    -- key shouldn't cost the user the other 40 spells.
+    local ids, count = {}, 0
+    local function collect(t)
+        if type(t) ~= "table" then return true end
+        for k in pairs(t) do
+            local n = tonumber(k)
+            if n and not ids[n] then
+                count = count + 1
+                if count > MAX_IMPORT_IDS then return false end
+                ids[n] = true
+            end
+        end
+        return true
+    end
+    if not collect(payload.spells) then return nil, "tooLarge" end
+    if not collect(payload.rawIDs) then return nil, "tooLarge" end
+
+    local name = sanitizeName(payload.name)
+    if name == "" then return nil, "corrupt" end
+
+    local spells, rawIDs = self:BucketIDs(ids)
+    return { name = name, spells = spells, rawIDs = rawIDs }
+end
+
+-- ALWAYS creates. Collision handling is the caller's call — a deliberate share
+-- should surface "you already have this" and let the user choose, where profile
+-- import silently reuses (ImportCustomFilters).
+function R:ImportFilterPayload(def)
+    local id = self:CreateCustomFilter(def.name)
+    local dst = self:GetCustomFilter(id)
+    for sid in pairs(def.spells or {}) do dst.spells[sid] = true end
+    for rid in pairs(def.rawIDs or {}) do dst.rawIDs[rid] = true end
+    return id
 end
 
 -- ------------------------------------------------------------

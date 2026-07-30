@@ -72,6 +72,50 @@ local function ConfirmDeleteFilter(displayName, onAccept)
     })
 end
 
+-- Error keys from R:DecodeFilterString / R:ExportFilter -> user-facing text.
+-- A string carrying another DandersFrames prefix is a valid export of the WRONG
+-- kind, and is called out as such: "that isn't a filter string" would send
+-- someone hunting for corruption when they simply pasted into the wrong box.
+local function FilterStringError(errKey)
+    if errKey == "profile" then
+        return L["That's a profile string. Import it from the Profiles page instead."]
+    elseif errKey == "clickcasting" then
+        return L["That's a click casting string. Import it from the Click Casting page instead."]
+    elseif errKey == "wizard" then
+        return L["That's a setup wizard string, not a filter."]
+    elseif errKey == "newer" then
+        return L["This filter was exported by a newer version of DandersFrames."]
+    elseif errKey == "tooLarge" then
+        return L["That filter string is too large."]
+    elseif errKey == "corrupt" then
+        return L["That filter string is corrupt or incomplete."]
+    end
+    -- "libs", "encode", "noSelection" and anything unrecognised: nothing the
+    -- user can act on beyond retrying.
+    return L["That doesn't look like a filter string."]
+end
+
+-- The popup frame is a SINGLETON, and an alert button's handler runs
+-- btnConfig.onClick() and THEN f:Hide(). So opening a second popup from inside
+-- the first one's callback reconfigures the shared frame and then has it hidden
+-- out from under it — the new popup flashes and vanishes. Defer a frame so the
+-- first one finishes closing before the next opens.
+local function ChainPopup(fn)
+    C_Timer.After(0, fn)
+end
+
+local function ShowFilterStringError(title, errKey)
+    local message = FilterStringError(errKey)
+    ChainPopup(function()
+        DF:ShowPopupAlert({
+            title   = title,
+            tone    = "danger",
+            message = message,
+            buttons = { { label = L["OK"] } },
+        })
+    end)
+end
+
 -- Deleting a custom filter must also unhook it from every profile's
 -- per-mode selections (both the buff and defensive rows) AND from every
 -- Aura Designer filter group's filterSelection (A5 — the AD preset
@@ -628,12 +672,12 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
     local leftScroll = CreateFrame("ScrollFrame", nil, leftPanel, "ScrollFrameTemplate")
     leftScroll:SetPoint("TOPLEFT", 4, -32) -- clears the Buffs/Debuffs tab strip (4 + TAB_H + 4)
-    -- Clears the action strip at the foot of the panel: two 20px rows, a 4px gutter,
-    -- a 6px margin under them and the rule + gap above (6 + 20 + 4 + 20 + 6 = 56, +6
-    -- of air). It briefly went to 6 while those buttons lived on the right-hand
-    -- header; they came back down here because that header row could not fit them
-    -- and a variable-width filter name at every window width.
-    leftScroll:SetPoint("BOTTOMRIGHT", -24, 62)
+    -- Clears the action strip at the foot of the panel: three 20px rows, 4px gutters,
+    -- a 6px margin under them and the rule + gap above (6 + 20 + 4 + 20 + 4 + 20 + 6
+    -- = 80, +6 of air). It briefly went to 6 while those buttons lived on the
+    -- right-hand header; they came back down here because that header row could not
+    -- fit them and a variable-width filter name at every window width.
+    leftScroll:SetPoint("BOTTOMRIGHT", -24, 86)
     DF.GUI.StyleScrollBar(leftScroll)
 
     local leftContent = CreateFrame("Frame", nil, leftScroll)
@@ -1243,6 +1287,67 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         if DF.HighlightWidget then DF:HighlightWidget(addRow) end
     end
 
+    -- Import sits next to New rather than in the action strip below, for the same
+    -- reason New does: it CREATES a filter, where every button in that strip acts
+    -- on the current selection. Down there it would read as "import into the
+    -- selected filter", which is not what it does.
+    local importRow = CreateFrame("Button", nil, leftContent, "BackdropTemplate")
+    importRow:SetHeight(LEFT_ROW_H - 2)
+    GUI:StyleButton(importRow, {
+        tinted  = true,
+        text    = L["+ Import Filter"],
+        align   = "left",
+        leftPad = 10,
+        font    = "DFFontHighlightSmall",
+    })
+    importRow:SetScript("OnClick", function()
+        DF:ShowPopupInput({
+            title       = L["Import Filter"],
+            message     = L["Paste a filter string to import:"],
+            multiline   = true,
+            acceptLabel = L["Import"],
+            onAccept    = function(text)
+                if not text or Trim(text) == "" then return end
+                local def, err = R:DecodeFilterString(text)
+                if not def then
+                    ShowFilterStringError(L["Import Filter"], err)
+                    return
+                end
+                -- A newly imported filter is not in any selection yet
+                -- (IsCustomOn defaults false), so nothing on screen changes
+                -- until the user ticks it — no DirectFilterChangedProxy here,
+                -- matching the New and Duplicate paths.
+                local match = R:FindContentMatch(def)
+                if not match then
+                    SelectFilter("custom", R:ImportFilterPayload(def))
+                    return
+                end
+                -- Content-equal filter already present. Profile import silently
+                -- reuses it, which is right there; here it would mean pasting a
+                -- string and watching nothing happen. Ask instead.
+                local existing = R:GetCustomFilter(match)
+                local message = format(
+                    L["You already have a filter with these spells: \"%s\". Import a separate copy anyway?"],
+                    (existing and existing.name) or match)
+                ChainPopup(function()
+                    DF:ShowPopupAlert({
+                        title   = L["Import Filter"],
+                        message = message,
+                        buttons = {
+                            { label = L["Import as Copy"], onClick = function()
+                                SelectFilter("custom", R:ImportFilterPayload(def))
+                            end },
+                            { label = L["Use Existing"], onClick = function()
+                                SelectFilter("custom", match)
+                            end },
+                            { label = L["Cancel"] },
+                        },
+                    })
+                end)
+            end,
+        })
+    end)
+
     local dupBtn = GUI:CreateButton(leftPanel, L["Duplicate"], ACT_BTN_W, 20, function(self)
         if self.dfDisabled or not selKey then return end
         local src = selKey -- capture: selection may move before the prompt closes
@@ -1284,29 +1389,58 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             RefreshAll()
         end)
     end)
-    -- Anchored only now that all four exist. Each takes its own corner of the panel
+    -- Export flattens a preset to its currently-enabled spells (ResolveFilterContent),
+    -- so it works on presets as well as customs — unlike Rename/Delete, which need a
+    -- store entry. The blacklist is the exception: it is a per-mode db set, not a
+    -- registry filter, so there is nothing to resolve.
+    local exportBtn = GUI:CreateButton(leftPanel, L["Export"], ACT_BTN_W, 20, function(self)
+        if self.dfDisabled or not selKey or selKind == "blacklist" then return end
+        local str, err = R:ExportFilter(selKey, CurrentDisplayName())
+        if not str then
+            ShowFilterStringError(L["Export Failed"], err)
+            return
+        end
+        -- readOnly: the string is there to be selected and copied, not edited. It
+        -- opens fully selected, so Ctrl+C alone is enough.
+        DF:ShowPopupInput({
+            title       = L["Export Filter"],
+            -- Presets land on the other end as a custom filter carrying a snapshot
+            -- of what was enabled at export time. Say so rather than let it surprise.
+            message     = (selKind == "preset")
+                and L["Copy this string to share this filter. It will import as a custom filter."]
+                or L["Copy this string to share this filter:"],
+            text        = str,
+            multiline   = true,
+            readOnly    = true,
+            cancelLabel = L["Done"],
+        })
+    end)
+
+    -- Anchored only now that all five exist. Each takes its own corner of the panel
     -- rather than chaining off a neighbour, so Reset hiding (it only shows for a
-    -- modified preset or the blacklist) leaves the other three exactly where they
-    -- were:
+    -- modified preset or the blacklist) leaves the others exactly where they were:
     --
     --     [ Duplicate ] [ Rename ]
-    --     [ Reset     ] [ Delete ]
+    --     [ Export    ] [ Delete ]
+    --     [ Reset     ]
     --
-    -- The two that destroy something share the right-hand column, away from the two
-    -- that don't.
+    -- The two that destroy something share the right-hand column, away from the ones
+    -- that don't. Reset keeps the bottom-left corner it already had, so its show/hide
+    -- still moves nothing.
     resetBtn:SetSize(ACT_BTN_W, 20)
-    dupBtn:SetPoint("BOTTOMLEFT", leftPanel, "BOTTOMLEFT", 6, 30)
-    renameBtn:SetPoint("BOTTOMRIGHT", leftPanel, "BOTTOMRIGHT", -6, 30)
+    dupBtn:SetPoint("BOTTOMLEFT", leftPanel, "BOTTOMLEFT", 6, 54)
+    renameBtn:SetPoint("BOTTOMRIGHT", leftPanel, "BOTTOMRIGHT", -6, 54)
+    exportBtn:SetPoint("BOTTOMLEFT", leftPanel, "BOTTOMLEFT", 6, 30)
+    delBtn:SetPoint("BOTTOMRIGHT", leftPanel, "BOTTOMRIGHT", -6, 30)
     resetBtn:SetPoint("BOTTOMLEFT", leftPanel, "BOTTOMLEFT", 6, 6)
-    delBtn:SetPoint("BOTTOMRIGHT", leftPanel, "BOTTOMRIGHT", -6, 6)
 
-    -- Rule above the strip: without it the buttons read as two more rows of the list
+    -- Rule above the strip: without it the buttons read as more rows of the list
     -- they sit under, rather than as a toolbar acting on that list's selection.
     local actRule = leftPanel:CreateTexture(nil, "ARTWORK")
     actRule:SetHeight(1)
     actRule:SetColorTexture(0.22, 0.22, 0.22, 1)
-    actRule:SetPoint("BOTTOMLEFT", leftPanel, "BOTTOMLEFT", 6, 56)
-    actRule:SetPoint("BOTTOMRIGHT", leftPanel, "BOTTOMRIGHT", -6, 56)
+    actRule:SetPoint("BOTTOMLEFT", leftPanel, "BOTTOMLEFT", 6, 80)
+    actRule:SetPoint("BOTTOMRIGHT", leftPanel, "BOTTOMRIGHT", -6, 80)
 
     -- ========== DATABASE FRESHNESS NOTE ==========
     -- Static by design: the stamp and the client build can't change
@@ -1395,6 +1529,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         dupBtn:SetDisabled(selKey == nil or isBlacklist)
         renameBtn:SetDisabled(not isCustom)
         delBtn:SetDisabled(not isCustom)
+        -- Same gate as Duplicate: both resolve a ref to content, and both can do
+        -- that for a preset but not for the blacklist.
+        exportBtn:SetDisabled(selKey == nil or isBlacklist)
         addBox:SetEnabled(isCustom)
         addBtn:SetDisabled(not isCustom)
         dbBtn:SetDisabled(not isCustom)
@@ -1933,6 +2070,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         addRowY = y
         y = y + LEFT_ROW_H
 
+        -- Import directly under New: the two create-a-filter actions read as a
+        -- pair, and both stay above the list they create into.
+        importRow:ClearAllPoints()
+        importRow:SetPoint("TOPLEFT", 0, -y)
+        importRow:SetPoint("TOPRIGHT", 0, -y)
+        y = y + LEFT_ROW_H
+
         for _, cfId in ipairs(SortedCustomIDs()) do
             local f = R:GetCustomFilter(cfId)
             used = used + 1
@@ -2017,11 +2161,12 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
         end -- leftTab
 
-        -- The custom-filter add row belongs to the Buffs tab only. Pooled ROWS get
-        -- hidden by the sweep below, but this one is a standing frame -- it would
-        -- otherwise float over the debuff list at whatever y the last buff refresh
-        -- left it at.
+        -- The custom-filter add and import rows belong to the Buffs tab only. Pooled
+        -- ROWS get hidden by the sweep below, but these are standing frames -- they
+        -- would otherwise float over the debuff list at whatever y the last buff
+        -- refresh left them at.
         addRow:SetShown(leftTab == "buffs")
+        importRow:SetShown(leftTab == "buffs")
 
         -- Hide pooled rows beyond this refresh's needs
         for j = used + 1, #leftRows do
