@@ -298,7 +298,6 @@ DF.ExportCategories = {
         "debuffBorderColorCurse",
         "debuffBorderColorDisease",
         "debuffBorderColorMagic",
-        "debuffBorderColorNone",
         "debuffBorderColorPoison",
         "debuffBorderGradientDirection",
         "debuffBorderGradientEndColor",
@@ -579,11 +578,7 @@ DF.ExportCategories = {
         "personalTargetedSpellDurationY",
         "personalTargetedSpellEnabled",
         "personalTargetedSpellGrowth",
-        "personalTargetedSpellHighlightColor",
         "personalTargetedSpellHighlightImportant",
-        "personalTargetedSpellHighlightInset",
-        "personalTargetedSpellHighlightSize",
-        "personalTargetedSpellHighlightStyle",
         "personalTargetedSpellImportantBorderAnimationColor",
         "personalTargetedSpellImportantBorderAnimationCornerLength",
         "personalTargetedSpellImportantBorderAnimationFrequency",
@@ -974,7 +969,6 @@ DF.ExportCategories = {
         "oorMissingBuffAlpha",
         "oorMissingHealthAlpha",
         "oorPowerBarAlpha",
-        "oorTargetedSpellAlpha",
         "oorTextAlpha",
         "petAnchor",
         "petBackgroundColor",
@@ -1063,13 +1057,7 @@ DF.ExportCategories = {
         "testShowSelection",
         "testShowStatusIcons",
         "testShowTargetedList",
-        "testShowTargetedSpell",
         "testShowTextDesigner",
-        "tooltipAuraAnchor",
-        "tooltipAuraDisableInCombat",
-        "tooltipAuraEnabled",
-        "tooltipAuraX",
-        "tooltipAuraY",
         "tooltipBindingAnchor",
         "tooltipBindingAnchorPos",
         "tooltipBindingDisableInCombat",
@@ -1336,15 +1324,14 @@ DF.ExportLocalOnly = {
     minimapIcon = true,                                 -- minimap button state
     useSecureHeaders = true,                            -- internal escape hatch (no GUI)
 
-    -- Dead legacy keys: still present in Config defaults on this branch but no
-    -- longer read anywhere; their defaults are deleted outright in the pending
-    -- cleanup / aura-source-removal PRs. Declared local-only so the audit is
-    -- clean regardless of which of those PRs has landed.
-    frameBorderAlpha = true,             -- alpha rides frameBorderColor.a
-    auraSourceMode = true,               -- Direct is the only aura source
-    defensiveIconShowSwipe = true,
-    highlightFrames = true,
-    resurrectionIconHideInCombat = true,
+    -- (Removed) five dead-legacy declarations: frameBorderAlpha, auraSourceMode,
+    -- defensiveIconShowSwipe, highlightFrames, resurrectionIconHideInCombat. They
+    -- hedged against cleanup PRs that had not landed yet — "still present in Config
+    -- defaults on this branch but no longer read anywhere". Those PRs have landed:
+    -- none of the five is a Config key any more, and only frameBorderAlpha still
+    -- exists as a name anywhere (as a signature FIELD derived from
+    -- frameBorderColor.a in Frames/Bars.lua — an unrelated symbol). With no default
+    -- to suppress, the entries suppressed nothing.
 }
 
 -- Keys that legitimately appear in category lists WITHOUT a Config default
@@ -1355,8 +1342,11 @@ DF.ExportLocalOnly = {
 local EXPORT_KEYS_WITHOUT_DEFAULTS = {
     afkIconTimerFont = true, afkIconTimerOutline = true,
     auraDesignerPreset = true, textDesignerPreset = true,
-    auraDesigner = true, textDesigner = true,           -- legacy inline tables
-    defensiveIconBorderColorSource = true, missingBuffIconBorderColorSource = true,
+    textDesigner = true,                                -- legacy inline table
+    -- (Removed) auraDesigner, defensiveIconBorderColorSource and
+    -- missingBuffIconBorderColorSource. All three now HAVE Config defaults, so the
+    -- allowlist no longer suppressed anything for them — they resolve as normal
+    -- exported keys with defaults. textDesigner stays: it genuinely has none.
     raidPlayerGroupFirst = true,
     raidAutoProfiles = true,                            -- top-level key, special-cased in Profile.lua
     -- Config.lua lists this as `= nil` (documentation only — a nil assignment

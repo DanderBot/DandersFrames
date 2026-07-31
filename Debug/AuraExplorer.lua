@@ -63,7 +63,8 @@ local function rowPitch() return AE.iconSize + 4 end
 -- tokens and the row then silently renders empty, which is exactly the failure
 -- this tool exists to make visible.
 
-AE.CATEGORIES = { "HELPFUL", "HARMFUL" }
+-- (Removed) AE.CATEGORIES = { "HELPFUL", "HARMFUL" } — never read; the category
+-- toggle names both strings inline.
 
 -- Tokens that combine with a category. RAID is context-dependent (castable buffs
 -- vs dispellable debuffs) and is the single most useful one to eyeball.
@@ -281,14 +282,9 @@ end
 -- recreated (filterString is immutable once the group exists); anything else can
 -- ride a live setter. Kept deliberately coarse — this is a dev tool and a full
 -- rebuild on any edit is honest and cheap enough at 25 containers.
-function AE:RowSig(row)
-    if not row.enabled then return "off" end
-    local cf = self:CandidateFilters(row)
-    local n = 0
-    if cf then for _ in pairs(cf) do n = n + 1 end end
-    return self:FilterString(row) .. "#" .. n .. "#" .. tostring(row.dfPreset)
-        .. "#" .. tostring(row.dfCustom) .. "#" .. tostring(row.maxDuration)
-end
+-- (Removed) AE:RowSig. It decided whether a row change needed a rebuild, but
+-- AE:Rebuild calls TeardownAll() unconditionally now, so the caller it was written
+-- for is gone. CandidateFilters / FilterString keep their other callers.
 
 -- ============================================================
 -- THE STRIPS
@@ -708,14 +704,11 @@ local function buildRowCard(parent, i, y)
         warn:SetText("|c" .. toneHex("caution") .. "gated|r")
     end
 
-    card.spec, card.summ, card.cb = spec, summ, cb
     return card
 end
 
-function AE:RefreshPanel()
-    if not self.panel then return end
-    self.panel:Rebuild()
-end
+-- (Removed) AE:RefreshPanel — a one-line wrapper with no callers; the real callers
+-- all use self.panel:Rebuild() directly.
 
 function AE:CreatePanel()
     if self.panel then return self.panel end
@@ -998,25 +991,9 @@ function AE:ShowRowEditor(index)
     ed:Show()
 end
 
--- ============================================================
--- DF FILTER PICKER  (preset / custom, one per row)
--- ============================================================
-
-function AE:SetRowDFPreset(index, key)
-    local row = self.rows[index]
-    if not row then return end
-    row.dfPreset = key
-    row.dfCustom = nil
-    self:Rebuild()
-end
-
-function AE:SetRowDFCustom(index, id)
-    local row = self.rows[index]
-    if not row then return end
-    row.dfCustom = id
-    row.dfPreset = nil
-    self:Rebuild()
-end
+-- (Removed) DF FILTER PICKER — AE:SetRowDFPreset and AE:SetRowDFCustom. Neither had
+-- a caller: the row editor sets row.dfPreset / row.dfCustom inline and calls
+-- Rebuild itself. This section banner headed nothing else.
 
 -- ============================================================
 -- EVENTS

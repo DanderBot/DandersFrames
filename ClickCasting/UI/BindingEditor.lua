@@ -89,7 +89,6 @@ end
 -- ADD/EDIT BINDING DIALOG
 -- ============================================================
 
-local addBindingDialog = nil
 
 -- ============================================================
 
@@ -344,7 +343,6 @@ function CC:CreateEditBindingPanel()
     
     local themeColor = CC.ACCENT
     -- Shared palette (same r/g/b as the GUI.lua locals; alpha is supplied per call site).
-    local C_BACKGROUND = DF.GUI.Colors.background
     local C_ELEMENT = DF.GUI.Colors.element
     local C_BORDER = DF.GUI.Colors.border
     local C_TEXT = DF.GUI.Colors.text

@@ -297,7 +297,6 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
     
     -- Snap thickness to whole screen pixels so every +1 step is visible
     local scale = ch:GetEffectiveScale()
-    local minThickness = 1 / scale
     local px = thickness * scale              -- desired thickness in pixels
     px = math.max(1, math.ceil(px - 0.01))    -- round up (with tiny epsilon for exact integers)
     thickness = px / scale

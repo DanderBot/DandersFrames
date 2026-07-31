@@ -4434,9 +4434,10 @@ function DF:UpdateHeaderVisibility(skipRaidReposition)
         tostring(contentType), tostring(inRaid), tostring(inParty), tostring(skipRaidReposition),
         debugstack(2, 1, 0) or "?")
 
-    -- ARENA DEBUG: Log the visibility decision
-    local inInst, instType = IsInInstance()
-    
+    -- (Removed) an IsInInstance() call whose BOTH return values were unused — the
+    -- "ARENA DEBUG" trace it fed is long gone, so the call did nothing but cost an
+    -- API round trip on every visibility evaluation.
+
     -- Solo mode check
     local showSolo = db.soloMode and not inParty and not inRaid and not inArena
     
@@ -6889,7 +6890,6 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
     if event == "ARENA_PREP_OPPONENT_SPECIALIZATIONS" then
         if not DF.headersInitialized then return end
         local contentType = DF:GetContentType()
-        local arenaShown = DF.arenaHeader and DF.arenaHeader:IsShown()
         if contentType == "arena" and DF.arenaHeader and not DF.arenaHeader:IsShown() then
             if not InCombatLockdown() then
                 DF:UpdateHeaderVisibility()
@@ -7173,7 +7173,6 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         local function ArenaDetectionRetry()
             if not DF.headersInitialized then return end
             local ct = DF:GetContentType()
-            local arenaShown = DF.arenaHeader and DF.arenaHeader:IsShown()
             if ct == "arena" and DF.arenaHeader and not DF.arenaHeader:IsShown() then
                 if not InCombatLockdown() then
                     DF:UpdateHeaderVisibility()

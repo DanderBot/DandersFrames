@@ -20,7 +20,6 @@ local addonName, DF = ...
 
 local ipairs = ipairs
 local format = string.format
-local strfind = string.find
 local tconcat = table.concat
 local CreateFrame = CreateFrame
 local mmax = math.max

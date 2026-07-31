@@ -11,8 +11,6 @@ local L = DF.L
 local format = string.format
 
 -- Local references
-local C_RAID = {r = 1.0, g = 0.5, b = 0.2, a = 1}
-local C_WARNING = {r = 1.0, g = 0.67, b = 0.0, a = 1}
 
 -- ============================================================
 -- OVERRIDE KEY LABELS

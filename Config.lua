@@ -1210,7 +1210,6 @@ DF.PartyDefaults = {
     debuffBorderColorCurse = {r = 0.6, g = 0, b = 1},
     debuffBorderColorDisease = {r = 0.6, g = 0.4, b = 0},
     debuffBorderColorMagic = {r = 0.2, g = 0.6, b = 1},
-    debuffBorderColorNone = {r = 0, g = 0, b = 0, a = 1},
     debuffBorderColorPoison = {r = 0, g = 0.6, b = 0},
     debuffShowBorder = true,
     debuffDispelBorderInset = 0,    -- native dispel ring: + inward / - outward halo
@@ -1616,7 +1615,6 @@ DF.PartyDefaults = {
     -- alike). MigrateOORTextAlpha folds the old name value, then strips both.
     oorTextAlpha = 0.55,
     oorPowerBarAlpha = 0.20000000298023,
-    oorTargetedSpellAlpha = 0.5,
     oorAuraDesignerAlpha = 0.20000000298023,
 
     -- Personal Targeted Spells (Nameplate)
@@ -1657,11 +1655,7 @@ DF.PartyDefaults = {
     personalTargetedSpellDurationY = 0,
     personalTargetedSpellEnabled = false,
     personalTargetedSpellGrowth = "RIGHT",
-    personalTargetedSpellHighlightColor = {r = 1, g = 0.8, b = 0},
     personalTargetedSpellHighlightImportant = true,
-    personalTargetedSpellHighlightInset = 3,
-    personalTargetedSpellHighlightSize = 3,
-    personalTargetedSpellHighlightStyle = "glow",
     personalTargetedSpellImportantBorderAnimationColor = {r = 1, g = 0.8, b = 0, a = 1},
     personalTargetedSpellImportantBorderAnimationCornerLength = 10,
     personalTargetedSpellImportantBorderAnimationFrequency = 1,
@@ -2150,17 +2144,11 @@ DF.PartyDefaults = {
     testShowReducedMaxHealth = false,
     testShowSelection = false,
     testShowStatusIcons = true,
-    testShowTargetedSpell = true,
     testShowPersonalTargeted = true,
     testShowAuraDesigner = true,
     testShowTextDesigner = true,
 
     -- Tooltip settings
-    tooltipAuraAnchor = "DEFAULT",
-    tooltipAuraDisableInCombat = false,
-    tooltipAuraEnabled = true,
-    tooltipAuraX = 0,
-    tooltipAuraY = 0,
     tooltipBuffAnchor = "FRAME",
     tooltipBuffAnchorPos = "BOTTOMRIGHT",
     tooltipBuffDisableInCombat = true,

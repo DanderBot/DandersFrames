@@ -4576,7 +4576,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- alone. "roadmap" = temporary (delete the single call site when the port
     -- lands); "limitation" = permanent (secret-value casualty).
     -- ============================================================
-    local ADgate = function(d) return DF:FactoryOwnsAD(d) end
 
     if typeKey == "icon" or typeKey == "square" then
         -- P4.3/P4.5 SHIPPED: icon/square render on the container engine (native icon / solid
@@ -5187,8 +5186,6 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
 
     -- Outer container with label
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    local INSTR_COUNT = 3  -- number of instruction rows
-    local INSTR_ROW_H = 18
     local rightInset = rightPanelRef and (rightPanelRef:GetWidth() + 6) or 0
     container:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
     container:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -rightInset, yOffset)
@@ -7066,11 +7063,8 @@ BuildLayoutGroupsTab = function()
     local yPos = -10
     local tc = GetThemeColor()
 
-    -- Grow direction options
-    local GROW_DIRECTIONS = {
-        RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down",
-        _order = { "RIGHT", "LEFT", "UP", "DOWN" },
-    }
+    -- (Removed) a GROW_DIRECTIONS option map — never read. Also note its labels were
+    -- raw English, so wiring it up as-is would have been a localisation regression.
 
     -- "+ Create Group" / "+ Filter Group" buttons (prominent, theme-colored).
     -- Left = classic member-arranger group; right = registry-linked filter group.

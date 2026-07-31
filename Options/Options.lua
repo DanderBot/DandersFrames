@@ -814,8 +814,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local oorDefensive = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Defensive Icon Alpha"], 0.0, 1.0, 0.05, db, "oorDefensiveIconAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
         oorDefensive.disableOn = HideOOROptions
         
-        local oorTargetedSpell = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Targeted Spell Alpha"], 0.0, 1.0, 0.05, db, "oorTargetedSpellAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        oorTargetedSpell.disableOn = HideOOROptions
+        -- (Removed) the Targeted Spell Alpha slider on oorTargetedSpellAlpha. Its only
+        -- consumer was DF:UpdateTargetedSpellAppearance, which faded the group-frame
+        -- container and went with that display. Personal Targeted is a screen overlay
+        -- that never ran through ElementAppearance's out-of-range path, and the
+        -- Targeted List has its own container and colours — so the slider was moving
+        -- a value nothing read.
 
         local oorAuraDesigner = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Aura Designer Alpha"], 0.0, 1.0, 0.05, db, "oorAuraDesignerAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
         oorAuraDesigner.disableOn = HideOOROptions
@@ -887,7 +891,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 55)
         hfThreshold.tooltip = L["Units at or above this health percent are faded."]
 
-        local hfCancelDispel = hfGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Cancel Fade on Dispellable Debuff"], db, "hfCancelOnDispel", function()
+        hfGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Cancel Fade on Dispellable Debuff"], db, "hfCancelOnDispel", function()
             DF:UpdateAllFrames()
             DF:RefreshAllVisibleFrames()
         end), 30)
@@ -1724,7 +1728,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         raidModeGroup:AddWidget(GUI:CreateHeader(self.child, L["Raid Layout Mode"]), 40)
         raidModeGroup.hideOn = function() return GUI.SelectedMode ~= "raid" end
         
-        local useGroupsCheck = raidModeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Group-Based Layout"], db, "raidUseGroups", function()
+        raidModeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Group-Based Layout"], db, "raidUseGroups", function()
             UpdateFrames()
             if DF.SecureSort then
                 DF.SecureSort:PushRaidGroupLayoutConfig()
@@ -3323,7 +3327,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Pinned frames now lock/unlock together with the main frames (global
         -- lock), so there is no per-set Lock Position toggle. Show Label is always
         -- editable; the "Drag to Move" handle only appears while globally unlocked.
-        local showLabelCheck = settingsGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Show Label"], "showLabel", function()
+        settingsGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Show Label"], "showLabel", function()
             if not DF.PinnedFrames then return end
             if IsEditingActiveMode() then
                 DF.PinnedFrames:SetShowLabel(activeHighlightTab, GetCurrentSet().showLabel)
@@ -3353,8 +3357,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
             RefreshTestModeIfActive()
         end
-        local hideAurasCheck = settingsGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Hide Auras"], "hideAuras", RefreshPinnedDisplay), 28)
-        local hideIconsCheck = settingsGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Hide Status Icons"], "hideIcons", RefreshPinnedDisplay), 28)
+        settingsGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Hide Auras"], "hideAuras", RefreshPinnedDisplay), 28)
+        settingsGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Hide Status Icons"], "hideIcons", RefreshPinnedDisplay), 28)
 
         -- Hide from Main Frames (#78): when on, this set's members are filtered out
         -- of the main party/raid frames so they only appear in the pinned set. Re-
@@ -5860,7 +5864,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Duration Text Group (col2)
         local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
         durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration"]), 40)
-        local durShow = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "buffShowDuration", function()
+        durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "buffShowDuration", function()
             self:RefreshStates()
             DF:UpdateAllFrames()
         end), 30)
@@ -6195,7 +6199,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Duration Text Group (col2)
         local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
         durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration"]), 40)
-        local durShow = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "debuffShowDuration", function()
+        durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "debuffShowDuration", function()
             self:RefreshStates()
             DF:UpdateAllFrames()
         end), 30)
@@ -6500,7 +6504,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Skipped: colour-by-time / colour-by-type (no aura-state context here).
         local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        local mbBorderW = GUI:CreateBorderControls(borderGroup, db, "missingBuffIcon", {
+        GUI:CreateBorderControls(borderGroup, db, "missingBuffIcon", {
             parent       = self.child,
             include      = { alpha = true, inset = true, offset = true, blendMode = true,
                              gradient = true, shadow = true, animate = true,
@@ -6660,7 +6664,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- the border edges inward (positive) or outward (negative) relative
         -- to the icon's bounds — independent of borderSize (thickness) and
         -- independent of the artwork's own inset.
-        local defBorderW = GUI:CreateBorderControls(borderGroup, db, "defensiveIcon", {
+        GUI:CreateBorderControls(borderGroup, db, "defensiveIcon", {
             parent       = self.child,
             -- Class/Role colour makes sense here: at a glance, the border
             -- communicates WHO is using the defensive cooldown (their class

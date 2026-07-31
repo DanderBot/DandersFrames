@@ -7,7 +7,6 @@ local addonName, DF = ...
 
 -- Local caching of frequently used globals and WoW API for performance
 local pairs, ipairs, type, pcall, wipe = pairs, ipairs, type, pcall, wipe
-local tinsert, tremove = table.insert, table.remove
 local C_UnitAuras = C_UnitAuras
 local UnitIsUnit = UnitIsUnit
 local GetTime = GetTime
@@ -21,13 +20,11 @@ local issecretvalue = issecretvalue
 local strsplit = strsplit
 local C_CurveUtil = C_CurveUtil
 local GetAuraDataByAuraInstanceID = C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID
-local IsAuraFilteredOut = C_UnitAuras and C_UnitAuras.IsAuraFilteredOutByInstanceID
-local strfind = string.find
 
--- Table pool to reduce garbage collection
--- PERFORMANCE FIX 2025-01-20: Reuse aura entry tables instead of creating new ones
-local tablePool = {}
-local poolSize = 0
+-- (Removed) the 2025-01-20 aura-entry table pool (tablePool / poolSize) and the
+-- cached IsAuraFilteredOutByInstanceID / strfind / tinsert / tremove. All were
+-- infrastructure for the old scan-and-cache pipeline; the 12.1 container port made
+-- the pool unreachable and left the rest as unused upvalues.
 
 -- Forward declarations: these helpers are defined later in the file but used
 -- by code above their definitions (the ClassifyAura defensive/dispel filter

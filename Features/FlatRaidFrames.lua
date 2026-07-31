@@ -124,32 +124,10 @@ local function GetGrowthAnchorPoint(db)
     end
 end
 
--- Get current group roster as a lookup table
--- Returns: { [name] = true, ... }
-local function GetGroupRoster()
-    local roster = {}
-    local numMembers = GetNumGroupMembers()
-    
-    if numMembers == 0 then
-        -- Solo
-        local name = UnitName("player")
-        if name then
-            roster[name] = true
-        end
-        return roster
-    end
-    
-    local isRaid = IsInRaid()
-    for i = 1, numMembers do
-        local unit = isRaid and ("raid" .. i) or (i == 1 and "player" or "party" .. (i - 1))
-        local name = UnitName(unit)
-        if name then
-            roster[name] = true
-        end
-    end
-    
-    return roster
-end
+-- (Removed) GetGroupRoster — built a { [name] = true } lookup of the current group.
+-- No callers: flat-raid layout works from unit tokens and the header's own child
+-- list, never from a set of names. (Names are also a poor key under 12.1, where
+-- UnitName can return a secret value.)
 
 
 -- ============================================================

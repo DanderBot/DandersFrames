@@ -7,7 +7,6 @@ local addonName, DF = ...
 
 -- Local caching of frequently used globals and WoW API for performance
 local pairs, ipairs, type, wipe = pairs, ipairs, type, wipe
-local tinsert = table.insert
 local floor = math.floor
 local strsplit = strsplit
 local UnitBuff, UnitDebuff = UnitBuff, UnitDebuff
@@ -26,8 +25,6 @@ local issecretvalue = issecretvalue or function() return false end
 -- PERFORMANCE FIX: Default colors for UpdateDefensiveBar fallbacks
 -- Avoids creating tables on every call when db values are nil
 -- ============================================================
-local DEFAULT_DEFENSIVE_BORDER_COLOR = {r = 0, g = 0.8, b = 0, a = 1}
-local DEFAULT_DEFENSIVE_DURATION_COLOR = {r = 1, g = 1, b = 1}
 
 -- (Removed) DF:GetRaidBuffIcons + DF.RaidBuffIconCache — a spellID -> icon-texture
 -- set built "for fallback filtering (when spellId is secret)". That fallback was

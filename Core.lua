@@ -64,8 +64,9 @@ end
 -- — which is per-category, so a single global boolean could not express the
 -- question anyway. Three comments in the addon still record "was gated on
 -- DF.debugEnabled". A flag that is maintained but never consulted is worse than
--- no flag: it reads as a live gate. Use DF.DebugConsole:IsEnabled() for the
--- master switch and DF:DebugActive(cat) for anything per-category.
+-- no flag: it reads as a live gate. Ask DF:DebugActive(cat) — there is no global
+-- accessor, because no consumer ever wanted one (DebugConsole:IsEnabled() was
+-- added for that and removed unused).
 DF.demoMode = false
 DF.demoPercent = 1
 DF.initialized = false  -- Set to true after frames are created and ready
@@ -188,17 +189,10 @@ function DF:CmdPath(word)
     return (DF.EVERYDAY_COMMANDS[word] and "/df " or "/df debug ") .. word
 end
 
---- Is `word` a diagnostic (as opposed to an everyday command or an unknown word)?
---- Reads BOTH registries, so a command added to either is covered without a second
---- edit here — the drift that let ~45 commands go unlisted in the first place.
-function DF:IsDebugCommand(word)
-    if DF.EVERYDAY_COMMANDS[word] then return false end
-    if DF.DebugSlashBySub[word] then return true end
-    for _, e in ipairs(DF.DebugSubCommands) do
-        if e.cmd == word then return true end
-    end
-    return false
-end
+-- (Removed) DF:IsDebugCommand. Written so "the listing, the Siblings footer and the
+-- help text can never disagree", but each of those was subsequently rewritten to
+-- read what it needs directly — the listing walks the two registries itself and
+-- Out:Siblings uses DF:CmdPath — leaving it with zero callers.
 
 -- ============================================================
 -- /df SUBCOMMAND REGISTRY
@@ -3220,9 +3214,14 @@ local ABS_LEVEL_SENTINEL_DEFAULT = {
     raidRoleIconFrameLevel = 30, summonIconFrameLevel = 30, bgCarrierIconFrameLevel = 30,
     combatIconFrameLevel = 30, missingBuffIconFrameLevel = 35, defensiveIconFrameLevel = 65,
 }
--- These were not sentinels: the render added a fixed base to whatever was stored, so EVERY
--- value shifts by that base (including 0).
-local ABS_LEVEL_ADDEND = { targetedSpellFrameLevel = 30 }
+-- (Removed) ABS_LEVEL_ADDEND = { targetedSpellFrameLevel = 30 }. Its only key belonged
+-- to the group-frame display and has no readers left.
+--
+-- ☠ It was not merely inert. The loop applied `(tonumber(modeDb[key]) or 0) + addend`
+-- UNCONDITIONALLY, so for any profile without the migration flag it CREATED
+-- targetedSpellFrameLevel = 30 in both the party and raid tables — including profiles
+-- that never had the key. A migration that invents a key nothing reads is not covered
+-- by change-the-baseline: that rule preserves what the user set.
 
 function DF:MigrateAbsoluteFrameLevels()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
@@ -3235,9 +3234,6 @@ function DF:MigrateAbsoluteFrameLevels()
                         -- Only 0 carried the sentinel meaning; a real value was already an
                         -- offset from the unit frame and is left exactly as the user set it.
                         if modeDb[key] == 0 or modeDb[key] == nil then modeDb[key] = builtin end
-                    end
-                    for key, addend in pairs(ABS_LEVEL_ADDEND) do
-                        modeDb[key] = (tonumber(modeDb[key]) or 0) + addend
                     end
                     -- Aura Designer global default: the render added 40 to it.
                     local ad = modeDb.auraDesigner
@@ -3280,9 +3276,10 @@ end
 -- ADDON_LOADED block). The exceptions are the ones that write UNCONDITIONALLY behind
 -- a profile-stored flag -- and because that flag is not part of Config, a brand-new
 -- profile did not carry it and got shifted:
---   * MigrateAbsoluteFrameLevels  -- targetedSpellFrameLevel 30 -> 60,
---     auraDesigner.defaults.indicatorFrameLevel 40 -> 80 (both already ABSOLUTE in
---     Config; the render's own `or 30` / `or 40` fallbacks prove it).
+--   * MigrateAbsoluteFrameLevels  -- auraDesigner.defaults.indicatorFrameLevel
+--     40 -> 80 (already ABSOLUTE in Config; the render's own `or 40` fallback proves
+--     it). It also shifted targetedSpellFrameLevel until that key's reader went with
+--     the group display and the addend was removed.
 --   * MigratePersonalContainerPosition -- personalTargetedSpellX 0 -> 92.
 -- On a fresh install the AD value was then folded into the Party/Raid designer
 -- preset on first login, making it permanent.
@@ -3390,14 +3387,13 @@ function DF:MigrateTargetedSpellImportantBorder()
         if type(profile) == "table" then
             -- Group/party Targeted Spells. Guarded independently from personal so a
             -- profile already through this step still receives the personal one.
-            if not profile._tsImportantBorderV1 then
-                for _, modeKey in ipairs({ "party", "raid" }) do
-                    local m = profile[modeKey]
-                    if type(m) == "table" then mapHighlight(m, "targetedSpell") end
-                end
-                profile._tsImportantBorderV1 = true
-            end
-            -- Personal Targeted Spell.
+            -- (Removed) the group half, mapHighlight(m, "targetedSpell"). It mapped the
+            -- old highlight keys onto targetedSpellImportantBorder*, which has no
+            -- readers now the group display is gone. Conditional on the legacy key, so
+            -- unlike the frame-level addend it only touched old profiles — but it still
+            -- wrote keys nothing will read. The _tsImportantBorderV1 flag is left on
+            -- profiles that already have it; it is never read again.
+            -- Personal Targeted Spell — LIVE, do not touch.
             if not profile._personalTsImportantBorderV1 then
                 for _, modeKey in ipairs({ "party", "raid" }) do
                     local m = profile[modeKey]
@@ -5775,11 +5771,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
 
         -- ⚰ DEPRECATED-TARGETED-SPELLS — the once-per-account Targeted Spells
         -- setup wizard used to fire here, 5s after login, offering to turn the
-        -- feature on. It cannot stay: the feature is force-disabled at load
-        -- (ForceDisableGroupTargetedSpellSettings) and its settings page is no
-        -- longer in the sidebar, so the wizard would sell a feature that can
-        -- neither run nor be configured, and its "Open settings" button would
-        -- land on a page with no nav row.
+        -- feature on. It could not stay: the feature was force-disabled at load and
+        -- its settings page had left the sidebar, so the wizard would have sold a
+        -- feature that could neither run nor be configured, and its "Open settings"
+        -- button would have landed on a page with no nav row.
         --
         -- 2026-07-30: DF:ShowTargetedSpellSetupWizard is now gone too, with the rest
         -- of the group-frame feature, so there is nothing left to restore here. The

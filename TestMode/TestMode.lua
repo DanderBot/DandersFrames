@@ -746,7 +746,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     local iconsAlpha = 1.0
     local powerBarAlpha = 1.0
     local dispelAlpha = 1.0
-    local targetedSpellAlpha = 1.0
     -- Border stays 1.0 in whole-frame mode (the frame's SetAlpha cascade fades
     -- it); only element-specific mode needs its own border alpha.
     local borderAlpha = 1.0
@@ -762,7 +761,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             iconsAlpha = db.oorIconsAlpha or 0.55
             powerBarAlpha = db.oorPowerBarAlpha or 0.55
             dispelAlpha = db.oorDispelOverlayAlpha or 0.55
-            targetedSpellAlpha = db.oorTargetedSpellAlpha or 0.5
             borderAlpha = db.oorBorderAlpha or 0.55
         else
             -- Simple frame-level alpha mode
@@ -775,16 +773,14 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             iconsAlpha = alpha
             powerBarAlpha = alpha
             dispelAlpha = alpha
-            targetedSpellAlpha = alpha
         end
     end
-    
+
     -- Store alpha values for use by UpdateTestIcons and UpdateTestPowerBar
     frame.dfTestOORAlphas = {
         icons = iconsAlpha,
         power = powerBarAlpha,
         dispel = dispelAlpha,
-        targetedSpell = targetedSpellAlpha,
     }
     
     -- Check if this is a dead/offline unit for dead fade handling
@@ -823,12 +819,10 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         iconsAlpha = hfAlpha
         powerBarAlpha = hfAlpha
         dispelAlpha = hfAlpha
-        targetedSpellAlpha = hfAlpha
         frame.dfTestHealthFadeAlphas = {
             icons = iconsAlpha,
             power = powerBarAlpha,
             dispel = dispelAlpha,
-            targetedSpell = targetedSpellAlpha,
         }
     else
         frame.dfTestHealthFadeAlphas = nil
@@ -3034,7 +3028,7 @@ local TEST_TOGGLE_KEYS = {
     "testShowAuras", "testShowDispelGlow", "testShowMissingBuff", "testShowAuraDesigner",
     -- Indicators & Icons
     "testShowExternalDef", "testShowTargetedList", "testAnimateTargetedList",
-    "testShowTargetedSpell", "testShowPersonalTargeted", "testShowStatusIcons",
+    "testShowPersonalTargeted", "testShowStatusIcons",
     -- Highlights
     "testShowSelection", "testShowAggro",
 }
@@ -3043,15 +3037,10 @@ local TEST_TOGGLE_KEYS = {
 --   Targeted List: party-only outright (its keys are stripped from RaidDefaults
 --     by PARTY_ONLY_KEYS in Config.lua, so writing them here would create keys
 --     that are meant not to exist in the raid db).
---   Targeted Spells: the group cast detection is fingerprint-based and "Raid is
---     intentionally unsupported (collisions are near-total)" — the key does live
---     in the raid db, but the feature never renders there, so a raid preset has
---     no business flipping it. The panel greys all three in raid to match.
 -- Personal Targeted has no raid gate and is NOT listed here.
 local TEST_PARTY_ONLY_KEYS = {
     testShowTargetedList    = true,
     testAnimateTargetedList = true,
-    testShowTargetedSpell   = true,
 }
 
 local TEST_PRESETS = {
@@ -3065,7 +3054,6 @@ local TEST_PRESETS = {
         testShowAuraDesigner     = true,
         testShowTargetedList     = true,
         testAnimateTargetedList  = true,
-        testShowTargetedSpell    = true,
         testShowPersonalTargeted = true,
         testShowStatusIcons      = true,
     },
@@ -3079,7 +3067,6 @@ local TEST_PRESETS = {
         testShowAuraDesigner     = true,
         testShowTargetedList     = true,
         testAnimateTargetedList  = true,
-        testShowTargetedSpell    = true,
         testShowPersonalTargeted = true,
         testShowStatusIcons      = true,
         testShowAggro            = true,
@@ -3098,7 +3085,6 @@ local TEST_PRESETS = {
         testShowExternalDef      = true,
         testShowTargetedList     = true,
         testAnimateTargetedList  = true,
-        testShowTargetedSpell    = true,
         testShowPersonalTargeted = true,
         testShowStatusIcons      = true,
     },
@@ -3279,12 +3265,9 @@ function DF:UpdateAllTestMissingBuff()
 end
 
 -- Test defensive spell textures (variety for multi-icon display)
-local TEST_DEFENSIVE_SPELLS = {
-    135936,   -- Pain Suppression
-    102342,   -- Ironbark
-    6940,     -- Blessing of Sacrifice
-    116849,   -- Life Cocoon
-}
+-- (Removed) TEST_DEFENSIVE_SPELLS — a four-ID list (Pain Suppression, Ironbark,
+-- Blessing of Sacrifice, Life Cocoon) with no readers. The defensive preview drives
+-- the real 12.1 container and takes its spell from testData instead.
 
 -- Test defensive preview: drive the real 12.1 defensive container.
 function DF:UpdateTestDefensiveBar(frame, testData)
@@ -4317,7 +4300,6 @@ function DF:CreateTestPanel()
         -- letting them read as available. Personal Targeted has no raid gate and
         -- stays enabled.
         local groupTargetingAvailable = not isRaidMode
-        if panel.showTargetedSpellCheck then panel.showTargetedSpellCheck:SetEnabled(groupTargetingAvailable) end
         if panel.showTargetedListCheck  then panel.showTargetedListCheck:SetEnabled(groupTargetingAvailable) end
         if panel.animTargetedListCheck  then panel.animTargetedListCheck:SetEnabled(groupTargetingAvailable) end
     end
@@ -4338,25 +4320,23 @@ function DF:CreateTestPanel()
     panel.animTargetedListCheck = secIndicators:AddCheckbox(L["Animate Targeted List"], "testAnimateTargetedList", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedList() end
     end)
-    -- The (new fingerprint) Targeted Spells icons + the Personal Targeted display.
-    -- UpdateAllTestTargetedSpell drives BOTH previews, so both share it.
-    -- ⚰ DEPRECATED-TARGETED-SPELLS: the jump-to-page link is gone with the
-    -- sidebar row (it would have opened a page you can't navigate back to). The
-    -- checkbox stays because it drives the Personal Targeted preview too — it
-    -- goes when the feature does.
-    panel.showTargetedSpellCheck = secIndicators:AddCheckbox(L["Targeted Spells"], "testShowTargetedSpell", function()
-        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedSpell() end
-    end)
+    -- (Removed) the "Targeted Spells" checkbox on testShowTargetedSpell. Its painter
+    -- DF:UpdateTestTargetedSpell went with the group-frame display, and
+    -- DF:UpdateAllTestTargetedSpell — which survives — never reads that key: it
+    -- gates on personalTargetedSpellEnabled + testShowPersonalTargeted and delegates
+    -- the list to testShowTargetedList. So the box persisted a value nothing
+    -- consumed. The comment here used to justify keeping it "because it drives the
+    -- Personal Targeted preview too"; that was wrong — Personal has its own box
+    -- immediately below, which is the one that actually drives the preview.
     panel.showPersonalTargetedCheck = secIndicators:AddCheckbox(L["Personal Targeted"], "testShowPersonalTargeted", function()
         if DF.testMode or DF.raidTestMode then DF:UpdateAllTestTargetedSpell() end
     end, "indicators_personal_targeted")
 
-    -- These three are greyed in raid (see RefreshDependentEnabled) — say why on hover
+    -- Both are greyed in raid (see RefreshDependentEnabled) — say why on hover
     -- instead of leaving a dead-looking control. Personal Targeted is NOT listed: it
     -- has no raid gate and works fine there.
     do
-        local tipLines = { L["Group casts are matched to their target by fingerprint, which cannot be done reliably in a raid, so these do nothing in raid mode."] }
-        if panel.showTargetedSpellCheck then panel.showTargetedSpellCheck:SetDisabledTooltip(L["Party-only feature"], tipLines) end
+        local tipLines = { L["The Targeted List is a party-only feature, so it does nothing in raid mode."] }
         if panel.showTargetedListCheck  then panel.showTargetedListCheck:SetDisabledTooltip(L["Party-only feature"], tipLines) end
         if panel.animTargetedListCheck  then panel.animTargetedListCheck:SetDisabledTooltip(L["Party-only feature"], tipLines) end
     end
@@ -4497,14 +4477,12 @@ function DF:CreateTestPanel()
         self.showMissingBuffCheck:SetChecked(db.testShowMissingBuff)
         self.showADCheck:SetChecked(db.testShowAuraDesigner)
         self.showExternalDefCheck:SetChecked(db.testShowExternalDef)
-        -- Group Targeted Spells / Targeted List are party-only features, so they can
-        -- never be "on" in raid — show them unchecked there regardless of what the
-        -- raid profile stores. (testShowTargetedSpell defaults to true in the raid db,
-        -- and an older build's preset wrote testShowTargetedList into it too, so both
-        -- would otherwise read as checked-but-greyed.)
+        -- The Targeted List is party-only, so it can never be "on" in raid — show it
+        -- unchecked there regardless of what the raid profile stores (an older
+        -- build's preset wrote testShowTargetedList into the raid db, so it would
+        -- otherwise read as checked-but-greyed).
         self.showTargetedListCheck:SetChecked(not isRaidMode and db.testShowTargetedList)
         self.animTargetedListCheck:SetChecked(not isRaidMode and db.testAnimateTargetedList)
-        self.showTargetedSpellCheck:SetChecked(not isRaidMode and db.testShowTargetedSpell ~= false)
         self.showPersonalTargetedCheck:SetChecked(db.testShowPersonalTargeted ~= false)
         self.showStatusIconsCheck:SetChecked(db.testShowStatusIcons ~= false)
         self.showSelectionCheck:SetChecked(db.testShowSelection)

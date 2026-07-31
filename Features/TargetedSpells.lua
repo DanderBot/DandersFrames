@@ -25,9 +25,10 @@ local addonName, DF = ...
 -- write-only DF.targetedSpellsEnabled flag, and the group branches inside
 -- ProcessCastInternal / HandleCastStop / OnEvent / NeedsCastEvents.
 --
--- WHAT IS DOOMED: the GROUP-FRAME (on-frame) targeted-spell icons — the
--- `targetedSpell*` saved keys, the Indicators > Targeted Spells page, and the
--- icon pool / cast tracking / roster-fingerprint machinery that feeds them.
+-- WHAT WENT: the GROUP-FRAME (on-frame) targeted-spell icons — the Indicators >
+-- Targeted Spells page, and the icon pool / cast tracking / roster-fingerprint
+-- machinery that fed them. Saved `targetedSpell*` keys were deliberately left on
+-- existing profiles (see the note at the end of this block).
 --
 -- WHAT IS NOT: the PERSONAL display (`personalTargetedSpell*`, Indicators >
 -- Personal Targeted) and the Targeted List. Both are live, both are supported,
@@ -42,13 +43,16 @@ local addonName, DF = ...
 -- unconditionally at load ever since — every setting on its page configured
 -- something that could not render.
 --
--- STATUS 2026-07-27: page pulled from the sidebar; the code stays put. Two more
--- PTR builds could still restore the API — unlikely, but cheap to wait for.
--- REVERSE IT: delete the `true` 4th arg on the CreateSubTab call in
--- Options\Options.lua, restore the three See Also links and the Core.lua wizard
--- auto-fire (all marked), and re-check ForceDisableGroupTargetedSpellSettings.
+-- STATUS: the page was pulled from the sidebar 2026-07-27, and the group code was
+-- DELETED 2026-07-29/30. This is no longer reversible by flipping a flag — the API
+-- never came back across the remaining PTR builds. Restoring the feature means
+-- restoring it from history, and it would still need an answer to UnitIsUnit.
 --
--- DELETION CHECKLIST — everything that goes when the call is made:
+-- The checklist below is kept as a RECORD, not a plan: it is what the removal
+-- worked from, and the four places it was wrong are listed at the top of this
+-- block. Read those before trusting any similar list.
+--
+-- DELETION CHECKLIST — what the removal covered:
 --   Features\TargetedSpells.lua   the group half of this file: activeCasters,
 --                                 the icon pool, PositionIcons,
 --                                 Show/HideTargetedSpellIcon, the roster
@@ -138,22 +142,17 @@ local activeCasters = {}
 -- the per-frame icon use case (see _Reference/targeted-list-mockup.html).
 -- ============================================================
 
--- Permanent in-memory flag — not persisted, not detected, just on.
-DF.GroupTargetedSpellsAPIBlocked = true
-
--- The party path uses fingerprinting (live), not the dead relay. This
--- flag stays false so the party group-frame display is enabled.
-DF.GroupTargetedSpellsAPIBlockedParty = false
-
--- Force-disables the group-frame targetedSpellEnabled setting on both
--- party and raid profiles for the current profile. Called from Init,
--- so the GUI reflects the disabled state on every load.
-local function ForceDisableGroupTargetedSpellSettings()
-    if not DF.db then return end
-    -- Raid group-frame display is permanently API-blocked (relay is dead).
-    if DF.db.raid then DF.db.raid.targetedSpellEnabled = false end
-    -- party.targetedSpellEnabled is now user-controlled (fingerprint path).
-end
+-- (Removed) DF.GroupTargetedSpellsAPIBlocked and
+-- DF.GroupTargetedSpellsAPIBlockedParty. Both were write-only: their last reader
+-- was the Options page that went with the group display.
+--
+-- (Removed) ForceDisableGroupTargetedSpellSettings, which wrote
+-- DF.db.raid.targetedSpellEnabled = false on every Init so "the GUI reflects the
+-- disabled state". There is no GUI left to reflect it and the key has ZERO readers
+-- addon-wide, so this was worse than dead: it CREATED a key nothing reads in every
+-- raid profile, on every login. Removing a write is not covered by the
+-- change-the-baseline rule — that rule preserves user data, and this manufactured
+-- data no user set.
 
 -- Personal display variables (declared early for HandleTargetChange access)
 local personalContainer = nil
@@ -176,33 +175,10 @@ eventFrame:Hide()
 -- HELPER FUNCTIONS
 -- ============================================================
 
--- Get all party/raid units to check
-local function GetGroupUnits()
-    local units = {}
-    
-    -- Always include player
-    table.insert(units, "player")
-    
-    if IsInRaid() then
-        for i = 1, 40 do
-            local unit = "raid" .. i
-            -- Note: "raidN" tokens never equal "player" string, so simple ~= check is safe
-            -- (avoids potential secret value issues with UnitIsUnit)
-            if UnitExists(unit) and unit ~= "player" then
-                table.insert(units, unit)
-            end
-        end
-    else
-        for i = 1, 4 do
-            local unit = "party" .. i
-            if UnitExists(unit) then
-                table.insert(units, unit)
-            end
-        end
-    end
-    
-    return units
-end
+-- (Removed) GetGroupUnits — enumerated the player plus every party/raid member so the
+-- group display could ask "is this cast aimed at any of them". Its callers were the
+-- on-frame group loop and the roster resolver. Personal only ever looks at "player",
+-- and the Targeted List walks the party itself, so it has no callers left.
 
 -- Get current content type
 -- Returns: "openworld", "dungeon", "raid", "arena", "battleground"
@@ -720,9 +696,10 @@ local function RegisterTargetedSpellEvents()
     eventFrame:RegisterEvent("UPDATE_INSTANCE_INFO")
     -- CVAR changes that affect nameplate visibility.
     eventFrame:RegisterEvent("CVAR_UPDATE")
-    -- Roster composition changes: rebuild fingerprint cache.
-    eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
-    eventFrame:RegisterEvent("PLAYER_ROLES_ASSIGNED")
+    -- (Removed) GROUP_ROSTER_UPDATE and PLAYER_ROLES_ASSIGNED. They were registered
+    -- to "rebuild the fingerprint cache", which went with the group display — OnEvent
+    -- has no branch for either, so both woke the handler and fell through every
+    -- chain. Neither Personal nor the Targeted List asks about roster composition.
     eventFrame:Show()
 end
 
@@ -767,10 +744,13 @@ end
 -- checking: DF:UpdateTargetedSpellEventRegistration is still called by the personal
 -- toggle, the Targeted List toggle, and DF:InitTargetedSpells.
 
--- Export scan function for unified roster handler
-function DF:ScanAllEnemyCasts()
-    ScanAllEnemyCasts()
-end
+-- (Removed) DF:ScanAllEnemyCasts — a one-line export "for unified roster handler".
+-- That handler was the GROUP_ROSTER_UPDATE branch cut from OnEvent, so the wrapper
+-- has no callers.
+--
+-- ⚠ The file-local ScanAllEnemyCasts of the same name is LIVE — OnEvent's
+-- PLAYER_TARGET_CHANGED / PLAYER_FOCUS_CHANGED branch calls it. Only the DF: export
+-- is gone.
 
 -- (Removed) SETUP WIZARD — DF:ShowTargetedSpellSetupWizard. It existed to opt the
 -- user in to the group-frame display, which is gone. This was also the ONLY caller
@@ -1032,7 +1012,8 @@ end
 
 -- Apply settings to a personal icon
 local function ApplyPersonalIconSettings(icon, db, spellID)
-    local borderColor = db.personalTargetedSpellBorderColor or {r = 1, g = 0.3, b = 0}
+    -- No borderColor read here: the colour comes from DF.Border:BuildSpec via the
+    -- canonical personalTargetedSpell* keys, so a second local read went unused.
     local borderSize = db.personalTargetedSpellBorderSize or 2
     local showBorder = db.personalTargetedSpellShowBorder ~= false
     local showSwipe = db.personalTargetedSpellShowSwipe ~= false
@@ -1664,7 +1645,10 @@ function DF:UpdateTestPersonalTargetedSpells()
     -- Update if mover is shown OR if in test mode with personal enabled
     local db = GetPersonalDB()
     local moverShown = DF.personalTargetedSpellsMover and DF.personalTargetedSpellsMover:IsShown()
-    -- Show personal targeted spells in test mode if personal is enabled (don't require testShowTargetedSpell)
+    -- Show personal targeted spells in test mode whenever personal is enabled. This
+    -- deliberately does NOT consult a test-panel toggle: the group feature's
+    -- testShowTargetedSpell key is gone, and Personal's own testShowPersonalTargeted
+    -- is checked by DF:UpdateAllTestTargetedSpell before it reaches here.
     local inTestMode = (DF.testMode or DF.raidTestMode) and db.personalTargetedSpellEnabled
     
     if moverShown or inTestMode then
@@ -2334,8 +2318,9 @@ local TL_UnitClassFromGUID = UnitClassFromGUID
 local TL_UnitInParty = UnitInParty
 local TL_UnitCanAttack = UnitCanAttack
 local TL_UnitExists = UnitExists
-local TL_UnitName = UnitName
-local TL_UnitClass = UnitClass
+-- (Removed) TL_UnitName / TL_UnitClass upvalue caches — unused. The list resolves
+-- both through TL_UnitNameFromGUID / TL_UnitClassFromGUID, which is what made these
+-- two look used to a substring search.
 local TL_IsInGroup = IsInGroup
 local TL_IsInRaid = IsInRaid
 local TL_GetTime = GetTime
@@ -4640,11 +4625,6 @@ end
 function DF:InitTargetedSpells()
     local db = DF:GetDB()
 
-    -- Raid group-frame Targeted Spells stays disabled (Blizzard's 2026-04-07
-    -- UnitIsUnit hotfix killed the relay). Force only the raid setting off so
-    -- the GUI reflects reality every load. The PARTY path is live via
-    -- fingerprinting (DF.GroupTargetedSpellsAPIBlockedParty = false).
-    ForceDisableGroupTargetedSpellSettings()
 
     -- Cast events register for whatever is live (party fingerprint group
     -- display, personal display, and/or the Targeted List), handled by

@@ -89,7 +89,8 @@ local DBG = "AURACONTAINER"
 -- One-time-per-process warning latches so a guarded failure (curve bug, border
 -- taint, native dispel reject) logs ONCE, not once per button.
 local warnedCurve, warnedBorder, warnedNativeDispel = false, false, false
-local warnedRestyle, warnedRefresh, warnedMouse = false, false, false
+-- (warnedMouse was a third latch here with no warning behind it — removed.)
+local warnedRestyle, warnedRefresh = false, false
 local warnedCreate = false
 
 -- Animations SAFE to run on an OVERLAY-mode border (Aura Designer). These render

@@ -143,7 +143,6 @@ FilterRegistry\SpellPicker.lua
 
 # Aura Blacklist
 AuraBlacklist\Config.lua
-AuraBlacklist\Options.lua
 
 Features\TargetedSpells.lua
 Features\VersionCheck.lua

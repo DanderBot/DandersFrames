@@ -26,8 +26,6 @@ local reusableActiveGroups = {}
 local reusableActiveGroupList = {}
 local reusableFrameToGroup = {}
 local reusableGroupCurrentPos = {}
-local reusableVisibleFrames = {}
-local reusableVisibleSet = {}
 
 -- ============================================================
 -- MOVER SYNC HELPER

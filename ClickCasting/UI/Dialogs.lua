@@ -1153,7 +1153,6 @@ function CC:ShowMacroEditorDialog(existingMacro)
     bodyInput:SetScript("OnTextChanged", UpdateCharCount)
     
     -- Buttons at bottom
-    local buttonY = -340
     
     -- Cancel button
     local cancelBtn = CreateFrame("Button", nil, macroEditorDialog, "BackdropTemplate")

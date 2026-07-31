@@ -43,7 +43,11 @@ DF.MemTest = {
     enableHealPrediction = true,        -- Frames/Bars.lua
     enableAbsorbs = true,               -- Frames/Bars.lua
     -- Event-driven updates
-    enableTargetedSpells = true,        -- Features/TargetedSpells.lua
+    -- (Removed) enableTargetedSpells. Its only reader was the guard at the top of
+    -- DF:ShowTargetedSpellIcon, which went with the group-frame display. The
+    -- surviving Personal Targeted / Targeted List paths never had one, so the flag
+    -- went write-only and its checkbox inert — exactly what the note above warns
+    -- about. Re-add it only together with a real DF:MemTestDisabled guard.
     enableHealthUpdates = true,         -- Frames/Create.lua  OnEvent
     enablePowerBar = true,              -- Frames/Create.lua  OnEvent
     enableNameUpdates = true,           -- Frames/Create.lua  OnEvent
@@ -58,7 +62,7 @@ DF.MemTest = {
 local GUI = DF.GUI
 
 local frame = nil
-local allCheckboxes = {}        -- { container, ... } — each carries .perfKey
+local allCheckboxes = {}        -- { container, ... } for the bulk on/off buttons
 
 -- ☠ "QUEUED" HAS TO MEAN QUEUED.
 -- ApplyMemTestFlags cannot touch containers in combat, and the RESTORE path
@@ -212,7 +216,6 @@ local COL_RIGHT = {
     { key = "enableHealthUpdates",  label = "Health Updates" },
     { key = "enablePowerBar",       label = "Power Bar" },
     { key = "enableNameUpdates",    label = "Name Updates" },
-    { key = "enableTargetedSpells", label = "Targeted Spells" },
     { key = "enableRoleLeaderIcons",label = "Role/Leader Icons" },
     { key = "enableStatusIcons",    label = "Status Icons" },
     { key = "enableConnectionStatus", label = "Connection Status" },
@@ -228,7 +231,6 @@ local function AddCheckbox(parent, spec, x, y)
         function() return DF.MemTest[spec.key] end,
         function(val) DF.MemTest[spec.key] = val end)
     cb:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    cb.perfKey = spec.key
     if spec.tip then cb.tooltip = spec.tip end
     allCheckboxes[#allCheckboxes + 1] = cb
     return cb

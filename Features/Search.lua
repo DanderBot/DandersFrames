@@ -14,7 +14,6 @@ local L = DF.L
 -- UI CONSTANTS (match GUI styling)
 -- ============================================================
 local C_BACKGROUND = {r = 0.11, g = 0.11, b = 0.11, a = 0.98}
-local C_PANEL      = {r = 0.16, g = 0.16, b = 0.16, a = 1}
 local C_BORDER     = {r = 0, g = 0, b = 0, a = 1}
 local C_ACCENT     = {r = 0.2, g = 0.6, b = 1.0, a = 1}
 local C_RAID       = {r = 1.0, g = 0.4, b = 0.2, a = 1}

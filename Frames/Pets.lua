@@ -773,8 +773,8 @@ function DF:UpdatePetFrameTestMode(frame)
     if frame.healthText then
         local db = DF:GetFrameDB(frame)
         if db.petShowHealthText and not hideLegacyText then
-            local maxHealth = 50000
-            local currentHealth = math.floor(maxHealth * healthPercent)
+            -- (Removed) a hardcoded `maxHealth = 50000` and the currentHealth it fed.
+            -- Nothing consumed either — pet health text is a percentage.
             frame.healthText:SetText(string.format("%d%%", math.floor(healthPercent * 100)))
             frame.healthText:Show()
         else

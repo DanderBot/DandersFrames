@@ -1270,7 +1270,8 @@ function GUI.GapCheck(mode)
         :format(#rows, tostring(pageName), nPages))
     print("  |cff808080Read: padBottom is the slack under a row -- the knob is GUI.RowHeight[kind], and slot - content IS that slack. A kind sorting to the top of the first list is over-spaced; one near zero is cramped. In the second list, 'varies' means the gap is not coming from RowHeight alone. Add 'all' for every row, 'clear' to wipe the saved capture.|r")
 end
-GUI.GapCheckAll = function() GUI.GapCheck("all") end
+-- (Removed) GUI.GapCheckAll — a no-arg alias for GapCheck("all"), superseded once the
+-- dispatcher started forwarding the mode argument. Zero callers.
 
 -- Every frame that carries a 1px backdrop edge, so the sweep below can find them
 -- without any page needing to know what it contains. Weak keys: a retired page's
@@ -6734,7 +6735,6 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         -- Hook the OK button to run full update when confirmed
         if useLightweight and lightweightCallback then
             -- We need to run full update when picker is closed via OK
-            local oldSetup = ColorPickerFrame.SetupColorPickerAndShow
             -- Use a frame to detect when color picker closes
             if not container.colorPickerWatcher then
                 container.colorPickerWatcher = CreateFrame("Frame")
@@ -11029,10 +11029,10 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         return btn
     end
     
-    local tankBtn = CreateQuickAddButton("+ " .. L["Tanks"], "TANK", ROLE_COLORS.TANK, 0)
-    local healerBtn = CreateQuickAddButton("+ " .. L["Healers"], "HEALER", ROLE_COLORS.HEALER, 72)
-    local dpsBtn = CreateQuickAddButton("+ " .. L["DPS"], "DAMAGER", ROLE_COLORS.DAMAGER, 144)
-    local allBtn = CreateQuickAddButton("+ " .. L["All"], "ALL", {0.6, 0.6, 0.6}, 216)
+    CreateQuickAddButton("+ " .. L["Tanks"], "TANK", ROLE_COLORS.TANK, 0)
+    CreateQuickAddButton("+ " .. L["Healers"], "HEALER", ROLE_COLORS.HEALER, 72)
+    CreateQuickAddButton("+ " .. L["DPS"], "DAMAGER", ROLE_COLORS.DAMAGER, 144)
+    CreateQuickAddButton("+ " .. L["All"], "ALL", {0.6, 0.6, 0.6}, 216)
     
     -- Clear All button (right side) — persistent red via the tinted variant.
     local clearBtn = CreateFrame("Button", nil, buttonRow, "BackdropTemplate")
@@ -12861,12 +12861,10 @@ function DF:CreateGUI()
     -- Store category order
     GUI.CategoryOrder = {}
     
-    local function CreateTab(name, label)
-        -- Legacy single tab support - create as category with one item
-        local page = CreateSubTab("tools", name, label)
-        return page
-    end
-    
+    -- (Removed) CreateTab — "legacy single tab support", a thin wrapper over
+    -- CreateSubTab("tools", ...). Every page registers through CreateSubTab directly
+    -- now, so it had no callers.
+
     local function BuildPage(page, builderFunc)
         -- Internal: construct all widget frames for the current mode.
         -- Called on first visit and whenever the cache is invalidated.

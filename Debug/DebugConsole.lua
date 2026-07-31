@@ -8,7 +8,7 @@ local addonName, DF = ...
 -- ============================================================
 
 local pairs, ipairs, type, tostring = pairs, ipairs, type, tostring
-local tinsert, tremove, wipe = table.insert, table.remove, wipe
+local tinsert, wipe = table.insert, wipe
 local format = string.format
 local date, time = date, time
 
@@ -25,7 +25,8 @@ local SEVERITY = {
     ERROR = { level = 3, label = "ERROR", color = "|cffff6666" },  -- Red
 }
 
-local SEVERITY_ORDER = { "INFO", "WARN", "ERROR" }
+-- (Removed) SEVERITY_ORDER — never read. RefreshDisplay and GetExportText compare
+-- SEVERITY[x].level numerically rather than walking an ordered list.
 
 -- ============================================================
 -- DECLARED CATEGORY REGISTRY
@@ -86,7 +87,7 @@ local CATEGORY_GROUPS = {
             { key = "API",          desc = "External API callback fires (OnFramesSorted, etc.)" },
             { key = "CLICK",        desc = "Click-casting binding apply, hover, PreClick state" },
             { key = "PET",          desc = "Pet frame lifecycle and visibility" },
-            { key = "POPUP",        desc = "Popup/wizard config errors and step flow" },
+            { key = "POPUP",        desc = "Popup and dialog config errors" },
             { key = "ROLE",         desc = "Role icon show/hide decisions and combat transitions" },
             { key = "SCRIPT",       desc = "Lua script errors and pcall failures" },
             { key = "SYSTEM",       desc = "Reload separators and init confirmation" },
@@ -504,12 +505,10 @@ function DebugConsole:SetEnabled(enabled)
         debugDb.enabled = enabled
     end
     -- No DF.debugEnabled mirror: it was write-only (see the note in Core.lua).
-    -- IsEnabled() below is the master switch; DF:DebugActive(cat) is the per-
-    -- category one that consumers actually ask.
-end
-
-function DebugConsole:IsEnabled()
-    return debugDb and debugDb.enabled or false
+    -- DF:DebugActive(cat) is the question consumers actually ask — 50 call sites.
+    -- (Removed) DebugConsole:IsEnabled(), a `debugDb.enabled` accessor that read
+    -- like the master switch but had zero callers. Restore it if an external
+    -- consumer ever needs the global state rather than a per-category answer.
 end
 
 -- ============================================================

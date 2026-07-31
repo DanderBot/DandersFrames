@@ -12,10 +12,7 @@ local L = DF.L
 -- palette change reaches both. These were a hand-copied set that happened to
 -- match; only the genuinely bespoke tones below stay local.
 local C_BACKGROUND = DF.GUI.Colors.background
-local C_PANEL      = DF.GUI.Colors.panel
-local C_ELEMENT    = DF.GUI.Colors.element
 local C_BORDER     = DF.GUI.Colors.border
-local C_HOVER      = DF.GUI.Colors.hover
 local C_TEXT       = DF.GUI.Colors.text
 local C_TEXT_DIM   = DF.GUI.Colors.textDim
 -- Card body backdrop — distinctly darker than C_ELEMENT (the header colour)
@@ -24,7 +21,6 @@ local C_TEXT_DIM   = DF.GUI.Colors.textDim
 local C_BODY_BG    = {r = 0.09, g = 0.09, b = 0.09, a = 1}
 -- Recessed dark backdrop for the list panel — distinctly darker than C_ELEMENT
 -- (the card color) so cards visibly sit "on top" of the panel surface.
-local C_LIST_PANEL     = {r = 0.04, g = 0.04, b = 0.04, a = 1}
 -- Right-side settings panel chrome. Mirrors AD's rightPanel backdrop
 -- (AuraDesigner/Options.lua:5989-5993) — dark fill + dim translucent border —
 -- so the tab strip + per-tab content sit on a visible panel surface.
@@ -32,8 +28,6 @@ local C_RIGHT_PANEL_BG     = {r = 0.10, g = 0.10, b = 0.10, a = 1}
 local C_RIGHT_PANEL_BORDER = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}
 
 -- Destructive action red — matches Aura Designer's delete X cross palette.
-local C_DESTRUCTIVE       = {r = 0.55, g = 0.20, b = 0.20, a = 1}
-local C_DESTRUCTIVE_HOVER = {r = 1.00, g = 0.35, b = 0.35, a = 1}
 
 -- Primary-CTA backdrop multipliers (applied to the theme accent color).
 -- Mirrors AuraDesigner/Options.lua:4894-4915 "+ Add Indicator" button.

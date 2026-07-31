@@ -196,8 +196,9 @@ local WrapFrameOnUpdate
 -- ⚠ The install CANNOT simply move to ADDON_LOADED either: this file sits at
 -- TOC line 68 deliberately (see the "Profiler.lua is loaded earlier" note in
 -- the TOC) so the hook is in place before the files that install an OnUpdate at
--- THEIR file scope — six ticker/throttle singletons across Headers, StatusIcons,
--- AutoProfiles and Performance, all of which load later. Installing at
+-- THEIR file scope — five ticker/throttle singletons across Headers, StatusIcons
+-- and AutoProfiles, all of which load later. (A sixth lived in Performance.lua,
+-- since deleted.) Installing at
 -- ADDON_LOADED would miss every one of them.
 --
 -- So: install unconditionally and record from the first moment, then resolve the
@@ -413,10 +414,10 @@ local PROFILED_FUNCTIONS = {
     "TextDesigner.Render.UpdateFrame",
     "TextDesigner.Resolver.Resolve",
 
-    -- ----------------------------------------------------------
-    -- Targeted Spells
-    -- ----------------------------------------------------------
-    "UpdateTargetedSpellLayout",
+    -- (Removed) the Targeted Spells entry "UpdateTargetedSpellLayout" — that function
+    -- went with the group-frame display. Not a silent stale entry: Profiler:Start
+    -- reports targets it cannot resolve, so this printed an unresolved-target line on
+    -- every profiler start.
 
     -- ----------------------------------------------------------
     -- Pets
@@ -1567,7 +1568,6 @@ function Profiler:CreateUI()
         UpdateUI()
         UpdateColumnHeaders()
     end)
-    f.durationInput = durationInput
 
     -- "s Run" button (triggers timed profile with input value)
     local runBtn = CreateFrame("Button", nil, f, "BackdropTemplate")
@@ -1716,7 +1716,6 @@ function Profiler:CreateUI()
     hookBanner:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 6)
     hookBanner:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 6)
     f.hookBanner = hookBanner
-    f.hookBannerText = hookBanner.body
 
     local hookCheckbox = CreateFrame("CheckButton", nil, hookBanner, "BackdropTemplate")
     hookCheckbox:SetPoint("RIGHT", -6, 0)
@@ -1746,12 +1745,10 @@ function Profiler:CreateUI()
         })
     end)
     hookCheckbox:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
-    f.hookCheckbox = hookCheckbox
 
     local hookLabel = hookBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     hookLabel:SetPoint("RIGHT", hookCheckbox, "LEFT", -2, 0)
     hookLabel:SetText("Track OnUpdate")
-    f.hookBannerLabel = hookLabel
 
     -- Keep the banner's body clear of the toggle. The factory anchors the body
     -- TOPLEFT-of-icon and RIGHT-of-banner; re-issue BOTH points rather than just
@@ -1775,7 +1772,6 @@ function Profiler:CreateUI()
         hookCheckbox:SetChecked(DandersFramesDB_v2 and DandersFramesDB_v2.profilerOnUpdateHook or false)
         hookBanner:Show()
     end
-    f.UpdateHookBanner = UpdateHookBanner
     UpdateHookBanner()
 
     -- Column headers
