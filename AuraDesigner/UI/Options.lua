@@ -2,7 +2,7 @@ local addonName, DF = ...
 
 -- ============================================================
 -- AURA DESIGNER - OPTIONS GUI
--- Custom page layout: left content area + fixed 280px right panel
+-- Custom S.page layout: left content area + fixed 280px right panel
 -- Called from Options/Options.lua via DF.BuildAuraDesignerPage()
 -- ============================================================
 
@@ -18,14 +18,31 @@ local RAID_CLASS_COLORS = RAID_CLASS_COLORS
 local LOCALIZED_CLASS_NAMES_MALE = LOCALIZED_CLASS_NAMES_MALE
 local L = DF.L
 
--- Local references set during BuildAuraDesignerPage
-local GUI
-local page
-local db
-local Adapter
+-- Mutable editor state.
+-- These were file-scope locals. A `local` re-declared on the far side of a
+-- file split becomes a SECOND variable, so the halves silently stop sharing
+-- state -- no error, just a tab that will not switch or a preview that will
+-- not refresh. One table keeps a split honest: each part reads the same
+-- state via `local S = DF.AuraDesigner._uiState`.
+-- GUI and Adapter are NOT here: both are load-time constants (DF.GUI and
+-- DF.AuraDesigner.Adapter), so each part can simply re-declare them.
+local S = {}
+DF.AuraDesigner = DF.AuraDesigner or {}
+DF.AuraDesigner._uiState = S
+
+-- Load-time constants. Both used to be assigned inside BuildAuraDesignerPage,
+-- which made them mutable and so un-splittable. Neither ever actually varies:
+-- every caller arrives as DF.GUI -> SetupGUIPages -> here, and Adapter was only
+-- ever assigned DF.AuraDesigner.Adapter. Resolving them at load lets each split
+-- part re-declare them as plain aliases -- which is why 412 of this file's
+-- reference sites needed no change at all.
+-- Both source files load earlier in the TOC, so these are populated here.
+local GUI = DF.GUI
+local Adapter = DF.AuraDesigner.Adapter
+-- (S.page and S.db are set per build on the state table)
 
 -- State
-local selectedSpec = nil         -- Current spec key being viewed
+S.selectedSpec = nil         -- Current spec key being viewed
 
 -- Reusable color constants: reference the shared GUI palette (same numeric
 -- values, zero visual change) so they track any future palette change in
@@ -713,7 +730,7 @@ local function GetAuraDesignerDB()
         adDB = DF:GetModeBaseAuraDesigner(mode)
     end
     -- Pre-migration / very-early fallback to the legacy inline config.
-    adDB = adDB or (db and db.auraDesigner)
+    adDB = adDB or (S.db and S.db.auraDesigner)
     if adDB and (not adDB._specScopedV1 or not adDB._specScopedV2) then
         MigrateToSpecScoped(adDB)
     end
@@ -805,10 +822,10 @@ end
 -- to keep standard buff icons or let AD fully replace them.
 -- ============================================================
 
-local buffCoexistPopup
+-- (S.buffCoexistPopup declared on the state table)
 
 local function ShowBuffCoexistPopup(onConfirm, onCancel)
-    if not buffCoexistPopup then
+    if not S.buffCoexistPopup then
         local f = CreateFrame("Frame", "DFADBuffPopup", UIParent, "BackdropTemplate")
         f:SetSize(420, 130)
         f:SetPoint("CENTER")
@@ -862,10 +879,10 @@ local function ShowBuffCoexistPopup(onConfirm, onCancel)
             end
         end)
 
-        buffCoexistPopup = f
+        S.buffCoexistPopup = f
     end
 
-    local f = buffCoexistPopup
+    local f = S.buffCoexistPopup
     f._onCancel = onCancel
 
     f.keepBtn:SetScript("OnClick", function()
@@ -1067,17 +1084,17 @@ end
 -- groups, migrations, the spec dropdown itself) deliberately do not.
 -- ============================================================
 
-local activeBuffTab = "my"   -- "my" | "debuffs" | "other"
+S.activeBuffTab = "my"   -- "my" | "debuffs" | "other"
 
 local function IsOtherTab()
-    return activeBuffTab == "other"
+    return S.activeBuffTab == "other"
 end
 
 -- C2: the Debuffs tab hosts debuff CATEGORY groups (spec-independent, no
 -- spell pool, no placed indicators). Its Effects sub-tab frosts, the spec
 -- dropdown greys, and CurrentAuraPool reads empty.
 local function IsDebuffTab()
-    return activeBuffTab == "debuffs"
+    return S.activeBuffTab == "debuffs"
 end
 
 -- Read-only placeholder returned while the other pool doesn't exist yet.
@@ -1088,7 +1105,7 @@ local EMPTY_POOL = {}
 -- READ access to the active tab's pool. Never creates adDB.otherAuras.
 -- `spec` is forwarded to GetSpecAuras on the My Buffs tab only.
 local function CurrentAuraPool(spec)
-    if activeBuffTab == "other" then
+    if S.activeBuffTab == "other" then
         local adDB = GetAuraDesignerDB()
         if adDB and adDB.otherAuras then return GetOtherAuras() end
         return EMPTY_POOL
@@ -1096,14 +1113,14 @@ local function CurrentAuraPool(spec)
     -- The Debuffs tab has no aura pool: no placed indicators and no
     -- frame-level effects, so every pool-routed surface (preview passes,
     -- effect list) reads empty. Category groups live in adDB.debuffGroups.
-    if activeBuffTab == "debuffs" then return EMPTY_POOL end
+    if S.activeBuffTab == "debuffs" then return EMPTY_POOL end
     return GetSpecAuras(spec)
 end
 
 -- WRITE access: creates the pool table (the other pool is born lazily on
 -- the first add — drag-drop, picker click, or add-by-ID).
 local function CurrentAuraPoolWrite()
-    if activeBuffTab == "other" then return GetOtherAuras() end
+    if S.activeBuffTab == "other" then return GetOtherAuras() end
     return GetSpecAuras()
 end
 
@@ -1112,7 +1129,7 @@ end
 -- (expandedCards "placed:other:<name>#<id>" / "frame:<type>:other:<name>",
 -- preview slot keys). The auraName itself never carries the prefix.
 local function PoolKeyPrefix()
-    return (activeBuffTab == "other") and "other:" or ""
+    return (S.activeBuffTab == "other") and "other:" or ""
 end
 
 -- READ access to the debuff category groups array (C2). Never creates
@@ -1164,7 +1181,7 @@ end
 -- (Debuffs never reaches these — its Layout Groups tab builds debuff
 -- category groups instead.)
 local function CurrentLayoutGroups()
-    if activeBuffTab == "other" then return GetOtherLayoutGroups(false) end
+    if S.activeBuffTab == "other" then return GetOtherLayoutGroups(false) end
     return GetSpecLayoutGroups()
 end
 
@@ -1735,14 +1752,14 @@ local function GetIndicatorByID(auraName, indicatorID, pool)
 end
 
 -- Remove an indicator instance by its stable ID
-local CleanupAdHocAura  -- forward decl: defined after FRAME_LEVEL_TYPE_KEYS
+-- (S.CleanupAdHocAura declared on the state table)
 local function RemoveIndicatorInstance(auraName, indicatorID)
     local auraCfg = CurrentAuraPool()[auraName]
     if not auraCfg or not auraCfg.indicators then return end
     for i, inst in ipairs(auraCfg.indicators) do
         if inst.id == indicatorID then
             table.remove(auraCfg.indicators, i)
-            if CleanupAdHocAura then CleanupAdHocAura(auraName) end
+            if S.CleanupAdHocAura then S.CleanupAdHocAura(auraName) end
             return
         end
     end
@@ -1798,16 +1815,16 @@ end
 
 -- Forward declaration: lightweight preview refresh (defined after RefreshPreviewEffects)
 -- Called from proxy __newindex so every setting change updates the preview in real-time
-local RefreshPreviewLightweight
+-- (S.RefreshPreviewLightweight declared on the state table)
 
 -- Throttled live-frame refresh: re-syncs the factory containers on all
 -- visible AD-enabled frames. Debounced so rapid slider drags only trigger one refresh.
-local pendingLiveRefresh = false
+S.pendingLiveRefresh = false
 local function RefreshLiveFramesThrottled()
-    if pendingLiveRefresh then return end
-    pendingLiveRefresh = true
+    if S.pendingLiveRefresh then return end
+    S.pendingLiveRefresh = true
     C_Timer.After(0.1, function()
-        pendingLiveRefresh = false
+        S.pendingLiveRefresh = false
         local engine = DF.AuraDesigner and DF.AuraDesigner.Engine
         if engine and engine.ForceRefreshAllFrames then
             engine:ForceRefreshAllFrames()
@@ -1866,9 +1883,9 @@ local function AddExpiryAlertControls(g, parent, proxy, include)
         anchorOptions = OPTS.ANCHOR_OPTIONS,
         include       = include,
         -- Sub-table colour / alpha writes skip the proxy __newindex, so drive the refresh by
-        -- hand (RefreshPreviewLightweight is assigned by editor open; mirrors the card's RPL).
+        -- hand (S.RefreshPreviewLightweight is assigned by editor open; mirrors the card's RPL).
         fullUpdate    = function()
-            if RefreshPreviewLightweight then RefreshPreviewLightweight() end
+            if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end
             RefreshLiveFramesThrottled()
         end,
         -- A mode change collapses the now-irrelevant rows: LayoutChildren re-evaluates hideOn,
@@ -1883,9 +1900,9 @@ local function AddExpiryAlertControls(g, parent, proxy, include)
     g:RefreshChildStates()   -- initial grey (the initial hide rides AddGroup's LayoutChildren)
 end
 
--- Colours-page cross-link placed under an AD "Color by Time Remaining" TEXT control, matching
+-- Colours-S.page cross-link placed under an AD "Color by Time Remaining" TEXT control, matching
 -- the aura pages' duration link (jump + whole-section flash). The duration text's By-Time colour
--- draws from the shared Colours-page breakpoints, so the link points there. Fixed-layout note, so
+-- draws from the shared Colours-S.page breakpoints, so the link points there. Fixed-layout note, so
 -- size it to the group's inner width up front (the group advances Y by the height we pass).
 -- Built once in GUI:CreateColorsPageLink. NOT for the bar FILL colour (fixed ramp, immutable).
 local function AddDurationColorsLink(g, parent)
@@ -1947,7 +1964,7 @@ local function CreateInstanceProxy(auraName, indicatorID)
             local inst = GetIndicatorByID(auraName, indicatorID, pool())
             if not inst then return end
             inst[k] = v
-            if RefreshPreviewLightweight then RefreshPreviewLightweight() end
+            if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end
             RefreshLiveFramesThrottled()
         end,
     })
@@ -1984,7 +2001,7 @@ local function CreateProxy(auraName, typeKey)
         __newindex = function(_, k, v)
             local typeCfg = EnsureTypeConfig(auraName, typeKey, pool())
             typeCfg[k] = v
-            if RefreshPreviewLightweight then RefreshPreviewLightweight() end
+            if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end
             RefreshLiveFramesThrottled()
         end,
     })
@@ -2004,7 +2021,7 @@ local function CreateAuraProxy(auraName)
         __newindex = function(_, k, v)
             local auraCfg = EnsureAuraConfig(auraName, pool())
             auraCfg[k] = v
-            if RefreshPreviewLightweight then RefreshPreviewLightweight() end
+            if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end
             RefreshLiveFramesThrottled()
         end,
     })
@@ -2223,16 +2240,16 @@ end
 -- open helpers live below the tab system (OpenADPicker).
 -- ============================================================
 
-local adPickerHandle         -- shared-picker handle (nil until the first open)
-local adPickerDirty = false  -- an add landed while the picker stayed open
+-- (S.adPickerHandle declared on the state table)
+S.adPickerDirty = false  -- an add landed while the picker stayed open
                              -- (the tab behind it is stale; rebuilt on close)
 
 -- Close the shared picker if it's open. Called on sub-tab, main-tab and
 -- spec switches: the picker's records/handlers capture the pool and effect
 -- from open time, so a stale open picker must not linger.
 local function CloseADPicker()
-    if adPickerHandle and adPickerHandle:IsOpen() then
-        adPickerHandle:Close()
+    if S.adPickerHandle and S.adPickerHandle:IsOpen() then
+        S.adPickerHandle:Close()
     end
 end
 
@@ -2343,7 +2360,7 @@ end
 -- Delete a debuff category group by ID (C2). No member indicators to cascade
 -- (category groups own no placed indicators). The caller runs the FULL
 -- structural chain afterwards — the group's claimed categories return to the
--- main debuff bar. Card keys are "dgroup:<id>" (see BuildDebuffGroupsTab).
+-- main debuff bar. Card keys are "dgroup:<id>" (see S.BuildDebuffGroupsTab).
 local function DeleteDebuffGroup(groupID)
     local groups = DebuffGroupsRead()
     for i, group in ipairs(groups) do
@@ -2416,16 +2433,16 @@ local ANCHOR_POSITIONS = {
 -- FRAME REFERENCES (populated during build)
 -- Declared early so drag/indicator/effects code can capture them
 -- ============================================================
-local mainFrame           -- The root frame for the entire page
-local leftPanel           -- Left content area (frame preview)
-local rightPanel          -- Right settings panel (tabbed)
-local enableBanner        -- Enable toggle banner
-local framePreview        -- Mock unit frame preview
-local dragHintText        -- Dynamic hint text below frame preview
+-- (S.mainFrame declared on the state table)
+-- (S.leftPanel declared on the state table)
+-- (S.rightPanel declared on the state table)
+-- (S.enableBanner declared on the state table)
+-- (S.framePreview declared on the state table)
+-- (S.dragHintText declared on the state table)
 
 -- Layout anchors — stored during build
-local contentRightInset     -- Right inset for left-side panels
-local origY_framePreview    -- original yPos of framePreview
+-- (S.contentRightInset declared on the state table)
+-- (S.origY_framePreview declared on the state table)
 
 -- (The DF_AURA_DESIGNER_RESET_GLOBAL popup was retired with the editing-banner
 -- "Reset to Global" button — the preset dropdown's "Inherit (Global)" entry now
@@ -2434,18 +2451,18 @@ local origY_framePreview    -- original yPos of framePreview
 -- ============================================================
 -- UI STATE (v4 redesign — tabbed right panel)
 -- ============================================================
-local activeTab = "effects"       -- "effects" | "layout" | "global"
-local activeFilter = "all"        -- Filter chip state
+S.activeTab = "effects"       -- "effects" | "layout" | "global"
+S.activeFilter = "all"        -- Filter chip state
 local expandedCards = {}           -- { ["placed:AuraName#1"] = true, ["frame:border:AuraName"] = true }
 
 -- Tab system frame references
-local tabBar                -- Tab bar frame (Effects | Layout Groups | Global)
+-- (S.tabBar declared on the state table)
 local tabButtons = {}       -- { effects = btn, layout = btn, global = btn }
 local mainTabButtons = {}   -- { my = btn, other = btn } (B2 main pool tab strip)
-local specDropdown          -- shared spec dropdown (lives on the main tab strip)
-local specDropdownUpdate    -- rebuilds the spec dropdown options + opener text
-local tabContentFrame       -- Scrollable content area below tabs
-local tabScrollFrame        -- ScrollFrame wrapping tabContentFrame
+-- (S.specDropdown declared on the state table)
+-- (S.specDropdownUpdate declared on the state table)
+-- (S.tabContentFrame declared on the state table)
+-- (S.tabScrollFrame declared on the state table)
 local effectCardPool = {}   -- Reusable card frames
 
 -- ============================================================
@@ -2463,7 +2480,7 @@ local FRAME_LEVEL_TYPE_KEYS = { "border", "healthbar", "background", "nametext",
 -- phantom entry (group/trigger pickers, SavedVariables growth). Curated
 -- auras deliberately keep today's linger behavior. Forward-declared above
 -- RemoveIndicatorInstance, which calls it after every removal.
-CleanupAdHocAura = function(auraName)
+S.CleanupAdHocAura = function(auraName)
     if not AdHocSpellID(auraName) then return end
     local auras = CurrentAuraPool()
     local auraCfg = auras and auras[auraName]
@@ -2478,11 +2495,11 @@ end
 -- Effect-type display labels. Same file-scope-vs-overlay timing issue as the
 -- option tables near the top of this file: build them in a registered refresh
 -- fn so they pick up the active locale.
-local FRAME_LEVEL_LABELS = {}
-local PLACED_TYPE_LABELS = {}
+S.FRAME_LEVEL_LABELS = {}
+S.PLACED_TYPE_LABELS = {}
 
 local function RefreshEffectLabels()
-    FRAME_LEVEL_LABELS = {
+    S.FRAME_LEVEL_LABELS = {
         border     = L["Border"],
         healthbar  = L["Health Bar"],
         background  = L["Background"],
@@ -2491,7 +2508,7 @@ local function RefreshEffectLabels()
         sound      = L["Sound Alert"],
     }
 
-    PLACED_TYPE_LABELS = {
+    S.PLACED_TYPE_LABELS = {
         icon   = L["Icon"],
         square = L["Square"],
         bar    = L["Bar"],
@@ -2621,42 +2638,42 @@ local dragState = {
     indicatorType = nil,    -- "icon" | "square" | "bar" — type to create on drop
 }
 
-local dragGhost = nil
-local dragUpdateFrame = nil
+S.dragGhost = nil
+S.dragUpdateFrame = nil
 
 local function CreateDragGhost()
-    if dragGhost then return dragGhost end
+    if S.dragGhost then return S.dragGhost end
 
-    dragGhost = CreateFrame("Frame", "DFAuraDesignerDragGhost", UIParent, "BackdropTemplate")
-    dragGhost:SetSize(36, 36)
-    dragGhost:SetFrameStrata("TOOLTIP")
-    dragGhost:SetFrameLevel(1000)
-    dragGhost:EnableMouse(false)  -- KEY: mouse events pass through to drop targets
-    dragGhost:Hide()
+    S.dragGhost = CreateFrame("Frame", "DFAuraDesignerDragGhost", UIParent, "BackdropTemplate")
+    S.dragGhost:SetSize(36, 36)
+    S.dragGhost:SetFrameStrata("TOOLTIP")
+    S.dragGhost:SetFrameLevel(1000)
+    S.dragGhost:EnableMouse(false)  -- KEY: mouse events pass through to drop targets
+    S.dragGhost:Hide()
 
-    if not dragGhost.SetBackdrop then Mixin(dragGhost, BackdropTemplateMixin) end
-    DF.GUI:CreateElementBackdrop(dragGhost, {
+    if not S.dragGhost.SetBackdrop then Mixin(S.dragGhost, BackdropTemplateMixin) end
+    DF.GUI:CreateElementBackdrop(S.dragGhost, {
         edgeSize = 2,
         bgColor     = { 0.05, 0.05, 0.05, 0.9 },
     })
 
     -- Spell icon
-    local icon = dragGhost:CreateTexture(nil, "ARTWORK")
+    local icon = S.dragGhost:CreateTexture(nil, "ARTWORK")
     icon:SetPoint("TOPLEFT", 3, -3)
     icon:SetPoint("BOTTOMRIGHT", -3, 3)
     icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    dragGhost.icon = icon
+    S.dragGhost.icon = icon
 
     -- Name label under ghost
-    local label = dragGhost:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    label:SetPoint("TOP", dragGhost, "BOTTOM", 0, -2)
+    local label = S.dragGhost:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    label:SetPoint("TOP", S.dragGhost, "BOTTOM", 0, -2)
     label:SetTextColor(1, 1, 1, 0.8)
-    dragGhost.label = label
+    S.dragGhost.label = label
 
-    return dragGhost
+    return S.dragGhost
 end
 
-local EndDrag  -- forward declaration (defined below StartMoveDrag)
+-- (S.EndDrag declared on the state table)
 
 -- Start a move-drag for an existing placed indicator (the ghost +
 -- cursor-following + anchor-dot system; new-placement drags died with the
@@ -2704,9 +2721,9 @@ local function StartMoveDrag(auraName, indicatorID, specKey)
     ghost:Show()
 
     -- Show drag hint
-    if dragHintText then
-        dragHintText:SetText(format(L["Drop on an anchor point to move %s"], displayName))
-        dragHintText:SetTextColor(tc.r, tc.g, tc.b, 0.9)
+    if S.dragHintText then
+        S.dragHintText:SetText(format(L["Drop on an anchor point to move %s"], displayName))
+        S.dragHintText:SetTextColor(tc.r, tc.g, tc.b, 0.9)
     end
 
     -- Show and enlarge all anchor dots
@@ -2718,12 +2735,12 @@ local function StartMoveDrag(auraName, indicatorID, specKey)
     end
 
     -- Start cursor following
-    if not dragUpdateFrame then
-        dragUpdateFrame = CreateFrame("Frame")
+    if not S.dragUpdateFrame then
+        S.dragUpdateFrame = CreateFrame("Frame")
     end
-    dragUpdateFrame:SetScript("OnUpdate", function()
+    S.dragUpdateFrame:SetScript("OnUpdate", function()
         if not dragState.isDragging then
-            dragUpdateFrame:Hide()
+            S.dragUpdateFrame:Hide()
             return
         end
 
@@ -2735,13 +2752,13 @@ local function StartMoveDrag(auraName, indicatorID, specKey)
         ghost:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", cursorX + 10, cursorY - 10)
 
         if not IsMouseButtonDown("LeftButton") then
-            EndDrag()
+            S.EndDrag()
         end
     end)
-    dragUpdateFrame:Show()
+    S.dragUpdateFrame:Show()
 end
 
-EndDrag = function()
+S.EndDrag = function()
     if not dragState.isDragging then return end
 
     local auraName = dragState.auraName
@@ -2759,17 +2776,17 @@ EndDrag = function()
     dragState.indicatorType = nil
 
     -- Hide ghost
-    if dragGhost then dragGhost:Hide() end
+    if S.dragGhost then S.dragGhost:Hide() end
 
     -- Stop cursor following
-    if dragUpdateFrame then
-        dragUpdateFrame:Hide()
-        dragUpdateFrame:SetScript("OnUpdate", nil)
+    if S.dragUpdateFrame then
+        S.dragUpdateFrame:Hide()
+        S.dragUpdateFrame:SetScript("OnUpdate", nil)
     end
 
     -- Clear drag hint
-    if dragHintText then
-        dragHintText:SetText("")
+    if S.dragHintText then
+        S.dragHintText:SetText("")
     end
 
     -- Hide anchor dots (only visible during drag)
@@ -2818,14 +2835,14 @@ end
 
 local placedIndicators = {}
 
--- Set by ClearPlacedIndicators, consumed by the page's RefreshStates: tab
--- switching re-enters the page through GUI RefreshCached -> RefreshStates ONLY
--- (the builder is cache-skipped), and RefreshStates early-outs when the page
+-- Set by ClearPlacedIndicators, consumed by the S.page's RefreshStates: tab
+-- switching re-enters the S.page through GUI RefreshCached -> RefreshStates ONLY
+-- (the builder is cache-skipped), and RefreshStates early-outs when the S.page
 -- dimensions are unchanged — so a canvas cleared by the OnHide hook stayed
 -- blank on every same-size revisit (the first revisit only worked because the
 -- dims baseline was captured pre-layout). The flag lets the dimension guard
 -- distinguish "nothing changed" from "cleared and awaiting repaint".
-local placedCleared = false
+S.placedCleared = false
 
 local function ClearPlacedIndicators()
     -- Preview border ANIMATIONS must be stopped explicitly on every frame this
@@ -2852,8 +2869,8 @@ local function ClearPlacedIndicators()
     wipe(placedIndicators)
 
     -- Clean up AD indicator maps on the mockFrame
-    if framePreview and framePreview.mockFrame then
-        local mock = framePreview.mockFrame
+    if S.framePreview and S.framePreview.mockFrame then
+        local mock = S.framePreview.mockFrame
         if mock.dfADPreviewSlots then
             for _, rec in pairs(mock.dfADPreviewSlots) do
                 stopAnims(rec.slot)
@@ -2865,7 +2882,7 @@ local function ClearPlacedIndicators()
         end
         mock.dfAD = nil
     end
-    placedCleared = true
+    S.placedCleared = true
 end
 
 -- ============================================================
@@ -3020,7 +3037,7 @@ local function WirePreviewIndicator(slot, capturedAura, capturedID, spec)
             local cardKey = "placed:" .. PoolKeyPrefix() .. capturedAura .. "#" .. capturedID
             wipe(expandedCards)
             expandedCards[cardKey] = true
-            activeTab = "effects"
+            S.activeTab = "effects"
             DF:AuraDesigner_RefreshPage()
         end
     end)
@@ -3265,10 +3282,10 @@ end
 
 local function RefreshPlacedIndicators()
     ClearPlacedIndicators()
-    placedCleared = false   -- this pass IS the repaint (after Clear re-armed the flag)
-    if not framePreview then return end
+    S.placedCleared = false   -- this pass IS the repaint (after Clear re-armed the flag)
+    if not S.framePreview then return end
 
-    local mockFrame = framePreview.mockFrame
+    local mockFrame = S.framePreview.mockFrame
     if not mockFrame then return end
 
     local adDB = GetAuraDesignerDB()
@@ -3461,13 +3478,13 @@ local function GetOrCreatePreviewCustomBorder(mockFrame, key)
 end
 
 local function RefreshPreviewEffects()
-    if not framePreview then return end
-    local mockFrame = framePreview.mockFrame
+    if not S.framePreview then return end
+    local mockFrame = S.framePreview.mockFrame
     if not mockFrame then return end
 
     -- Reset shared border overlay (Stage 5.4: DF.Border — hide edges + anim)
-    if framePreview.borderOverlay then
-        DF.Border:Apply(framePreview.borderOverlay, { enabled = false })
+    if S.framePreview.borderOverlay then
+        DF.Border:Apply(S.framePreview.borderOverlay, { enabled = false })
     end
     -- Reset custom border overlays
     if mockFrame.dfPreviewCustomBorders then
@@ -3475,14 +3492,14 @@ local function RefreshPreviewEffects()
             DF.Border:Apply(ch, { enabled = false })
         end
     end
-    if framePreview.healthFill then
-        framePreview.healthFill:SetVertexColor(0.18, 0.80, 0.44, 0.85)
+    if S.framePreview.healthFill then
+        S.framePreview.healthFill:SetVertexColor(0.18, 0.80, 0.44, 0.85)
     end
-    if framePreview.nameText then
-        framePreview.nameText:SetTextColor(0.18, 0.80, 0.44, 1)
+    if S.framePreview.nameText then
+        S.framePreview.nameText:SetTextColor(0.18, 0.80, 0.44, 1)
     end
-    if framePreview.hpText then
-        framePreview.hpText:SetTextColor(0.87, 0.87, 0.87, 1)
+    if S.framePreview.hpText then
+        S.framePreview.hpText:SetTextColor(0.87, 0.87, 0.87, 1)
     end
     mockFrame:SetAlpha(1)
     -- Reset the shared single-target elements to their defaults ONCE, before any
@@ -3490,11 +3507,11 @@ local function RefreshPreviewEffects()
     -- in-loop `elseif`, so a background-less aura could wipe an earlier aura's
     -- background depending on pairs() iteration order — the intermittent
     -- "doesn't show on preview" report for Background / Health Bar Color.
-    if framePreview.healthBg then
-        framePreview.healthBg:SetColorTexture(0, 0, 0, 0.4)
+    if S.framePreview.healthBg then
+        S.framePreview.healthBg:SetColorTexture(0, 0, 0, 0.4)
     end
-    if framePreview.missingHealth then
-        framePreview.missingHealth:SetColorTexture(0, 0, 0, 0.4)
+    if S.framePreview.missingHealth then
+        S.framePreview.missingHealth:SetColorTexture(0, 0, 0, 0.4)
     end
 
     -- Frame-level effects all draw onto the SAME single preview elements (one
@@ -3532,19 +3549,19 @@ local function RefreshPreviewEffects()
         spec.enabled = true
         if auraCfg.border.borderMode == "custom" then
             DF.Border:Apply(GetOrCreatePreviewCustomBorder(mockFrame, auraName), spec)
-        elseif not claimed.border and framePreview.borderOverlay then
+        elseif not claimed.border and S.framePreview.borderOverlay then
             claimed.border = true
-            DF.Border:Apply(framePreview.borderOverlay, spec)
+            DF.Border:Apply(S.framePreview.borderOverlay, spec)
         end
     end
 
     -- Health bar color (first claim wins)
-    if not claimed.healthbar and auraCfg.healthbar and auraCfg.healthbar.enabled ~= false and framePreview.healthFill then
+    if not claimed.healthbar and auraCfg.healthbar and auraCfg.healthbar.enabled ~= false and S.framePreview.healthFill then
         claimed.healthbar = true
         local clr = auraCfg.healthbar.color or {r = 1, g = 1, b = 1, a = 1}
         local blend = auraCfg.healthbar.blend or 0.5
         if auraCfg.healthbar.mode == "Replace" then
-            framePreview.healthFill:SetVertexColor(clr.r, clr.g, clr.b, clr.a or 1)
+            S.framePreview.healthFill:SetVertexColor(clr.r, clr.g, clr.b, clr.a or 1)
         else
             -- Tint: blend original green with the configured color, scaled by alpha
             -- so dragging the colour picker's alpha visibly weakens the tint
@@ -3553,42 +3570,42 @@ local function RefreshPreviewEffects()
             local r = 0.18 * (1 - effBlend) + clr.r * effBlend
             local g = 0.80 * (1 - effBlend) + clr.g * effBlend
             local b = 0.44 * (1 - effBlend) + clr.b * effBlend
-            framePreview.healthFill:SetVertexColor(r, g, b, 1)
+            S.framePreview.healthFill:SetVertexColor(r, g, b, 1)
             -- Tint Entire Bar: paint the same tint hue over the (dark) missing-
             -- health region so the preview shows the colour spanning the full bar.
-            if auraCfg.healthbar.tintWholeBar and framePreview.missingHealth then
-                framePreview.missingHealth:SetColorTexture(clr.r * effBlend, clr.g * effBlend, clr.b * effBlend, 0.4 + 0.25 * effBlend)
+            if auraCfg.healthbar.tintWholeBar and S.framePreview.missingHealth then
+                S.framePreview.missingHealth:SetColorTexture(clr.r * effBlend, clr.g * effBlend, clr.b * effBlend, 0.4 + 0.25 * effBlend)
             end
         end
     end
 
     -- Background color (first claim wins). Recolours the frame background — shows
     -- through the missing-health area, like the runtime overlay behind the bars.
-    if not claimed.background and auraCfg.background and auraCfg.background.enabled ~= false and framePreview.healthBg then
+    if not claimed.background and auraCfg.background and auraCfg.background.enabled ~= false and S.framePreview.healthBg then
         claimed.background = true
         local clr = auraCfg.background.color or {r = 1, g = 1, b = 1, a = 1}
         if auraCfg.background.mode == "Replace" then
             local a = clr.a or 1
-            framePreview.healthBg:SetColorTexture(clr.r, clr.g, clr.b, 0.4 + 0.6 * a)
+            S.framePreview.healthBg:SetColorTexture(clr.r, clr.g, clr.b, 0.4 + 0.6 * a)
         else
             local blend = (auraCfg.background.blend or 0.5) * (clr.a or 1)
             -- Blend the configured colour over the dark default background.
-            framePreview.healthBg:SetColorTexture(clr.r * blend, clr.g * blend, clr.b * blend, 0.4 + 0.4 * blend)
+            S.framePreview.healthBg:SetColorTexture(clr.r * blend, clr.g * blend, clr.b * blend, 0.4 + 0.4 * blend)
         end
     end
 
     -- Name text color (first claim wins)
-    if not claimed.nametext and auraCfg.nametext and auraCfg.nametext.enabled ~= false and framePreview.nameText then
+    if not claimed.nametext and auraCfg.nametext and auraCfg.nametext.enabled ~= false and S.framePreview.nameText then
         claimed.nametext = true
         local clr = auraCfg.nametext.color or {r = 1, g = 1, b = 1, a = 1}
-        framePreview.nameText:SetTextColor(clr.r, clr.g, clr.b, clr.a or 1)
+        S.framePreview.nameText:SetTextColor(clr.r, clr.g, clr.b, clr.a or 1)
     end
 
     -- Health text color (first claim wins)
-    if not claimed.healthtext and auraCfg.healthtext and auraCfg.healthtext.enabled ~= false and framePreview.hpText then
+    if not claimed.healthtext and auraCfg.healthtext and auraCfg.healthtext.enabled ~= false and S.framePreview.hpText then
         claimed.healthtext = true
         local clr = auraCfg.healthtext.color or {r = 1, g = 1, b = 1, a = 1}
-        framePreview.hpText:SetTextColor(clr.r, clr.g, clr.b, clr.a or 1)
+        S.framePreview.hpText:SetTextColor(clr.r, clr.g, clr.b, clr.a or 1)
     end
 
     end  -- for _, entry in sortedAuras
@@ -3601,9 +3618,9 @@ end
 -- slider drag tick, checkbox toggle, or dropdown change is live.
 -- ============================================================
 
-RefreshPreviewLightweight = function()
-    if not framePreview or not framePreview.mockFrame then return end
-    local mockFrame = framePreview.mockFrame
+S.RefreshPreviewLightweight = function()
+    if not S.framePreview or not S.framePreview.mockFrame then return end
+    local mockFrame = S.framePreview.mockFrame
 
     local adDB = GetAuraDesignerDB()
     local isOther = IsOtherTab()
@@ -3877,7 +3894,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     end
 
     -- Color picker callback shorthand — refreshes both the AD preview and live frames
-    local function RPL() if RefreshPreviewLightweight then RefreshPreviewLightweight() end RefreshLiveFramesThrottled() end
+    local function RPL() if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end RefreshLiveFramesThrottled() end
 
     -- Shared Duration Bar section for the icon / square placed indicators — both carry
     -- durationBar* keys and the strip hangs off the slot edge regardless of shape. Same
@@ -3946,7 +3963,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, proxy, "frameLevel")), 54)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], proxy, "hideSwipe"), 28)
             -- Text-only mode: the icon TEXTURE is hidden, so a border (static OR
-            -- expiring) would frame nothing. Rebuild the page on toggle so the
+            -- expiring) would frame nothing. Rebuild the S.page on toggle so the
             -- Border group + the expiring-border thickness control hide/show
             -- (gated on proxy.hideIcon below) — matching the runtime, which
             -- force-disables both borders in this mode.
@@ -3997,7 +4014,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     gradient = true, shadow = true, alpha = true,
                 },
                 -- IMPORTANT: AD's per-aura proxy only triggers
-                -- RefreshLiveFramesThrottled + RefreshPreviewLightweight
+                -- RefreshLiveFramesThrottled + S.RefreshPreviewLightweight
                 -- on direct key assignment (proxy.X = v) via __newindex.
                 -- CreateColorPicker and the Border Alpha slider mutate
                 -- SUB-TABLE fields (proxy.BorderColor.a = v) which reads
@@ -4358,19 +4375,19 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- offered here — only a Text/Glyph alert. A note whose click jump-scrolls the card up to
         -- the Color Mode. (A full InfoBanner link-banner can't live in this AD card — html needs
         -- a post-SetWidth reflow the card's static-height path disables — so the whole note is the
-        -- click target, with "Color Mode" tinted to signal it, like the cross-page links.)
+        -- click target, with "Color Mode" tinted to signal it, like the cross-S.page links.)
         AddGroup(L["Expiration"], function(g)
             -- Note with a jump-link: only "Color Mode" is clickable — clicking scrolls the card
             -- up to Texture & Colors and flashes it. GUI:CreateLink = fixed-layout inline links
             -- (safe in the reflowing card); GUI:LinkToSetting = scroll + "show me" flash. The |c
             -- placeholder only satisfies the markup parser; CreateLink themes the link itself.
             local function scrollToTexColors()
-                if not (tabScrollFrame and texColorsGroup and texColorsGroup.GetTop) then return end
-                local sfTop, gTop = tabScrollFrame:GetTop(), texColorsGroup:GetTop()
+                if not (S.tabScrollFrame and texColorsGroup and texColorsGroup.GetTop) then return end
+                local sfTop, gTop = S.tabScrollFrame:GetTop(), texColorsGroup:GetTop()
                 if not (sfTop and gTop) then return end
-                local target = tabScrollFrame:GetVerticalScroll() + (sfTop - gTop) - 8
-                local maxS = tabScrollFrame:GetVerticalScrollRange() or 0
-                tabScrollFrame:SetVerticalScroll(math.max(0, math.min(maxS, target)))
+                local target = S.tabScrollFrame:GetVerticalScroll() + (sfTop - gTop) - 8
+                local maxS = S.tabScrollFrame:GetVerticalScrollRange() or 0
+                S.tabScrollFrame:SetVerticalScroll(math.max(0, math.min(maxS, target)))
             end
             local link = format("|cffffffff|HdfADScroll:texcolors|h%s|h|r", L["Color Mode"])
             -- Fixed-layout note: hand it the group's inner width so its wrapped (2-line) height is
@@ -4783,7 +4800,7 @@ local function BuildGlobalView(parent)
     local contentWidth = parentW - 16  -- 8px padding each side
     local totalHeight = 8
     local widgets = {}
-    local function RPL() if RefreshPreviewLightweight then RefreshPreviewLightweight() end end
+    local function RPL() if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end end
 
     local function AddWidget(widget, height)
         widget:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -totalHeight)
@@ -4962,7 +4979,7 @@ local function BuildGlobalView(parent)
         descText:SetPoint("RIGHT", descFrame, "RIGHT", 0, 0)
         descText:SetJustifyH("LEFT")
         descText:SetWordWrap(true)
-        descText:SetText(L["Standard buff visibility is managed on the Aura Filters page."])
+        descText:SetText(L["Standard buff visibility is managed on the Aura Filters S.page."])
         descText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         g:AddWidget(descFrame, 24)
 
@@ -4993,7 +5010,7 @@ local function BuildGlobalView(parent)
             -- Copy at the preset level: the source mode's preset content is
             -- copied INTO the dest mode's preset, in place, so the dest preset
             -- object identity (and every consumer bound to it) is preserved.
-            -- BASE resolvers: this page edits the user's BASE presets — with a
+            -- BASE resolvers: this S.page edits the user's BASE presets — with a
             -- runtime auto-layout active, the ACTIVE resolver would copy
             -- from/into the layout's preset instead.
             local source = (DF.GetModeBaseAuraDesigner and DF:GetModeBaseAuraDesigner(srcMode))
@@ -5063,7 +5080,7 @@ local function CreateEnableBanner(parent)
     local banner = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     -- Two-row layout: row 1 (36px) has Enable toggle (left) + Sync/Copy buttons
     -- (right); row 2 (32px) is the preset bar (anchored into the banner by the
-    -- page build; the spec dropdown moved onto the B2 main tab strip). Sound
+    -- S.page build; the spec dropdown moved onto the B2 main tab strip). Sound
     -- Alerts live on the Global tab (set-once settings).
     banner:SetHeight(68)
     banner:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
@@ -5093,7 +5110,7 @@ local function CreateEnableBanner(parent)
             -- Show popup asking about buff coexistence
             ShowBuffCoexistPopup(function(keepBuffs)
                 GetAuraDesignerDB().enabled = true
-                db.showBuffs = keepBuffs
+                S.db.showBuffs = keepBuffs
                 DF:AuraDesigner_RefreshPage()
                 DF:InvalidateAuraLayout()
                 DF:UpdateAllFrames()
@@ -5135,7 +5152,7 @@ end
 local function CreateSpecDropdown(parent)
     -- Spec selector. Ported to the shared GUI:CreateDropdown (inline mode, so the
     -- container is just the opener button — the "Spec:" label beside it is
-    -- hand-placed by the page build). optionsFunc rebuilds the list each open so
+    -- hand-placed by the S.page build). optionsFunc rebuilds the list each open so
     -- the "Auto (Spec Name)" text always reflects the live detected spec.
     -- The shared dropdown supports per-option colour (the `color` field), so the
     -- class-coloured menu entries are preserved. (The OPENER text stays standard
@@ -5270,7 +5287,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
     -- Dark bg + DIM border (matches Text Designer; no solid white outline).
     ApplyBackdrop(container, {r = 0.10, g = 0.10, b = 0.10, a = 1}, {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5})
     -- Apply the subtle spec class-color hint immediately. CreateFramePreview runs
-    -- on every page build — including a party/raid rebuild (page:Refresh always
+    -- on every S.page build — including a party/raid rebuild (S.page:Refresh always
     -- rebuilds) — so without this the new preview falls back to the dim default
     -- border until the next AuraDesigner_RefreshPage (spec change / tab revisit).
     local cbSpec = ResolveSpec()
@@ -5433,8 +5450,8 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
                 dot:SetColorTexture(tc.r, tc.g, tc.b, 0.9)
                 dragState.dropAnchor = capturedAnchorName
                 -- Update hint to show target anchor
-                if dragHintText and dragState.auraInfo then
-                    dragHintText:SetText(format(L["Place %s at %s"], dragState.auraInfo.display, capturedAnchorName))
+                if S.dragHintText and dragState.auraInfo then
+                    S.dragHintText:SetText(format(L["Place %s at %s"], dragState.auraInfo.display, capturedAnchorName))
                 end
             else
                 local tc = GetThemeColor()
@@ -5450,9 +5467,9 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
                 dot:SetColorTexture(tc.r, tc.g, tc.b, 0.5)
                 dragState.dropAnchor = nil
                 -- Revert hint to generic drag message
-                if dragHintText and dragState.auraInfo then
-                    dragHintText:SetText(format(L["Drop on an anchor point to place %s"], dragState.auraInfo.display))
-                    dragHintText:SetTextColor(tc.r, tc.g, tc.b, 0.9)
+                if S.dragHintText and dragState.auraInfo then
+                    S.dragHintText:SetText(format(L["Drop on an anchor point to place %s"], dragState.auraInfo.display))
+                    S.dragHintText:SetTextColor(tc.r, tc.g, tc.b, 0.9)
                 end
             else
                 local tc = GetThemeColor()
@@ -5519,11 +5536,11 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
     scaleSlider:SetSize(220, 30)
 
     -- Drag-state hint text (shows contextual guidance during drag operations)
-    dragHintText = container:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(dragHintText, 9, "OUTLINE")
-    dragHintText:SetPoint("TOP", mockFrame, "BOTTOM", 0, -6)
-    dragHintText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
-    dragHintText:SetText("")
+    S.dragHintText = container:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(S.dragHintText, 9, "OUTLINE")
+    S.dragHintText:SetPoint("TOP", mockFrame, "BOTTOM", 0, -6)
+    S.dragHintText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
+    S.dragHintText:SetText("")
 
     return container
 end
@@ -5535,13 +5552,13 @@ end
 -- ============================================================
 
 -- Forward declarations (mutually referencing functions)
-local SwitchTab
-local BuildEffectsTab, BuildGlobalTab, BuildLayoutGroupsTab, BuildDebuffGroupsTab
-local CreateEffectCard
+-- (S.SwitchTab declared on the state table)
+-- (S.BuildEffectsTab, S.BuildGlobalTab, S.BuildLayoutGroupsTab, S.BuildDebuffGroupsTab declared on the state table)
+-- (S.CreateEffectCard declared on the state table)
 
-local spellPickerBlockedIDs        -- spell ids tracked by the OPPOSITE pool (B2
+-- (S.spellPickerBlockedIDs declared on the state table)
                                    -- cross-tab block; rebuilt per picker open)
-local spellPickerBlockCache = {}   -- auraName -> bool memo over spellPickerBlockedIDs
+local spellPickerBlockCache = {}   -- auraName -> bool memo over S.spellPickerBlockedIDs
                                    -- (wiped whenever the set is rebuilt) so blocked
                                    -- checks don't re-resolve identity per row bind
 
@@ -5549,7 +5566,7 @@ local spellPickerBlockCache = {}   -- auraName -> bool memo over spellPickerBloc
 -- (nil-spec identity on the Other tab — the naming contract's resolver —
 -- else the spec identity) already tracked by the opposite pool.
 local function IsCandidateCrossBlocked(auraName, spec)
-    if not spellPickerBlockedIDs or not next(spellPickerBlockedIDs) then return false end
+    if not S.spellPickerBlockedIDs or not next(S.spellPickerBlockedIDs) then return false end
     local cached = spellPickerBlockCache[auraName]
     if cached ~= nil then return cached end
     local blocked = false
@@ -5557,7 +5574,7 @@ local function IsCandidateCrossBlocked(auraName, spec)
     local map = f and f.includeSpellIDs
     if map then
         for id in pairs(map) do
-            if spellPickerBlockedIDs[id] then blocked = true; break end
+            if S.spellPickerBlockedIDs[id] then blocked = true; break end
         end
     end
     spellPickerBlockCache[auraName] = blocked
@@ -5572,13 +5589,13 @@ end
 
 -- Clear all child frames and regions from the tab content area
 local function ClearTabContent()
-    if not tabContentFrame then return end
-    local children = { tabContentFrame:GetChildren() }
+    if not S.tabContentFrame then return end
+    local children = { S.tabContentFrame:GetChildren() }
     for _, child in ipairs(children) do
         child:Hide()
         child:ClearAllPoints()
     end
-    local regions = { tabContentFrame:GetRegions() }
+    local regions = { S.tabContentFrame:GetRegions() }
     for _, region in ipairs(regions) do
         region:Hide()
     end
@@ -5589,12 +5606,12 @@ end
 -- programmatic/ancestor hide). Brings the tab surfaces back and rebuilds
 -- the active tab when an add landed while the picker stayed open.
 local function ADPickerClosed()
-    spellPickerBlockedIDs = nil -- recomputed on next open (memo wiped with it)
-    if tabBar then tabBar:Show() end
-    if tabScrollFrame then tabScrollFrame:Show() end
-    if adPickerDirty then
-        adPickerDirty = false
-        SwitchTab(activeTab or "effects")
+    S.spellPickerBlockedIDs = nil -- recomputed on next open (memo wiped with it)
+    if S.tabBar then S.tabBar:Show() end
+    if S.tabScrollFrame then S.tabScrollFrame:Show() end
+    if S.adPickerDirty then
+        S.adPickerDirty = false
+        S.SwitchTab(S.activeTab or "effects")
     end
 end
 
@@ -5603,12 +5620,12 @@ end
 -- hide the tab surfaces the overlay replaces, and open the shared picker
 -- over the right panel.
 local function OpenADPicker(opts)
-    spellPickerBlockedIDs = CrossPoolTrackedIDs()
+    S.spellPickerBlockedIDs = CrossPoolTrackedIDs()
     wipe(spellPickerBlockCache)
-    adPickerDirty = false
-    if tabBar then tabBar:Hide() end
-    if tabScrollFrame then tabScrollFrame:Hide() end
-    opts.parent = rightPanel
+    S.adPickerDirty = false
+    if S.tabBar then S.tabBar:Hide() end
+    if S.tabScrollFrame then S.tabScrollFrame:Hide() end
+    opts.parent = S.rightPanel
     opts.onClose = ADPickerClosed
     -- Empty record list on My Buffs = unsupported/undetected spec: keep
     -- the old picker's guidance instead of a bare "No results found".
@@ -5616,7 +5633,7 @@ local function OpenADPicker(opts)
     if not IsOtherTab() then
         opts.emptyText = L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."]
     end
-    adPickerHandle = DF.FilterRegistry:OpenSpellPicker(opts)
+    S.adPickerHandle = DF.FilterRegistry:OpenSpellPicker(opts)
 end
 
 -- ── PICKER RECORDS ──
@@ -5680,7 +5697,7 @@ local function ADCrossBlockText(rec)
 end
 
 -- ── SWITCH TAB ──
-SwitchTab = function(tabKey)
+S.SwitchTab = function(tabKey)
     -- Effects is frosted on the Debuffs tab (C2: category groups have no
     -- placed indicators) — coerce to Layout Groups (belt-and-braces; the
     -- sub-tab button is also frosted).
@@ -5688,16 +5705,16 @@ SwitchTab = function(tabKey)
         tabKey = "layout"
     end
     -- Preserve scroll position when refreshing the same tab
-    local prevTab = activeTab
+    local prevTab = S.activeTab
     local savedScroll = 0
-    if tabKey == prevTab and tabScrollFrame then
-        savedScroll = tabScrollFrame:GetVerticalScroll()
+    if tabKey == prevTab and S.tabScrollFrame then
+        savedScroll = S.tabScrollFrame:GetVerticalScroll()
     end
 
-    activeTab = tabKey
+    S.activeTab = tabKey
     -- This switch rebuilds the tab anyway — skip the close hook's own
     -- dirty rebuild so the tab isn't built twice.
-    adPickerDirty = false
+    S.adPickerDirty = false
     CloseADPicker()
     if GUI then GUI:CloseAllMenus() end   -- an open dropdown (e.g. spec) must not outlive the tab
 
@@ -5708,27 +5725,27 @@ SwitchTab = function(tabKey)
     ClearTabContent()
 
     if tabKey == "effects" then
-        BuildEffectsTab()
+        S.BuildEffectsTab()
     elseif tabKey == "layout" then
         -- The Debuffs tab's Layout Groups list shows ONLY debuff category
         -- groups; My Buffs / Other Buffs each build their OWN pool's
-        -- member+filter groups (BuildLayoutGroupsTab is pool-routed).
+        -- member+filter groups (S.BuildLayoutGroupsTab is pool-routed).
         if IsDebuffTab() then
-            BuildDebuffGroupsTab()
+            S.BuildDebuffGroupsTab()
         else
-            BuildLayoutGroupsTab()
+            S.BuildLayoutGroupsTab()
         end
     elseif tabKey == "global" then
-        BuildGlobalTab()
+        S.BuildGlobalTab()
     end
 
-    if tabScrollFrame then
+    if S.tabScrollFrame then
         if tabKey == prevTab then
             -- Clamp to new max scroll range (content may have changed height)
-            local maxScroll = tabScrollFrame:GetVerticalScrollRange()
-            tabScrollFrame:SetVerticalScroll(min(savedScroll, maxScroll))
+            local maxScroll = S.tabScrollFrame:GetVerticalScrollRange()
+            S.tabScrollFrame:SetVerticalScroll(min(savedScroll, maxScroll))
         else
-            tabScrollFrame:SetVerticalScroll(0)
+            S.tabScrollFrame:SetVerticalScroll(0)
         end
     end
 end
@@ -5755,24 +5772,24 @@ end
 -- tabs (both pools are shared across specs); restore the live spec text on
 -- My Buffs.
 local function UpdateSpecDropdownState()
-    if not specDropdown then return end
+    if not S.specDropdown then return end
     if IsOtherTab() or IsDebuffTab() then
-        if specDropdown.SetDisplayOverride then
-            specDropdown:SetDisplayOverride(L["— (shared across specs)"])
+        if S.specDropdown.SetDisplayOverride then
+            S.specDropdown:SetDisplayOverride(L["— (shared across specs)"])
         end
-        specDropdown:SetEnabled(false)
+        S.specDropdown:SetEnabled(false)
     else
-        specDropdown:SetEnabled(true)
-        if specDropdown.SetDisplayOverride then
-            specDropdown:SetDisplayOverride(nil)
+        S.specDropdown:SetEnabled(true)
+        if S.specDropdown.SetDisplayOverride then
+            S.specDropdown:SetDisplayOverride(nil)
         end
-        if specDropdownUpdate then specDropdownUpdate() end
+        if S.specDropdownUpdate then S.specDropdownUpdate() end
     end
 end
 
 local function SetMainTab(tabKey)
-    if activeBuffTab == tabKey then return end
-    activeBuffTab = tabKey
+    if S.activeBuffTab == tabKey then return end
+    S.activeBuffTab = tabKey
     -- Editor keys are pool-prefixed (B1) so cards can't collide across tabs,
     -- but mirror the spec dropdown's behavior: a pool switch collapses all
     -- expanded cards (wipe, not per-tab preservation).
@@ -5789,10 +5806,10 @@ local function SetMainTab(tabKey)
     -- Effects is frosted on the Debuffs tab, so land on Layout Groups (the
     -- tab's primary surface). Layout Groups is live on both buff tabs — no
     -- coercion needed when arriving there.
-    if activeBuffTab == "debuffs" and activeTab == "effects" then
-        activeTab = "layout"
+    if S.activeBuffTab == "debuffs" and S.activeTab == "effects" then
+        S.activeTab = "layout"
     end
-    -- One entry point swaps every surface: RefreshPage → SwitchTab(activeTab)
+    -- One entry point swaps every surface: RefreshPage → S.SwitchTab(S.activeTab)
     -- (list, chips, add menu) + RefreshPlacedIndicators/RefreshPreviewEffects
     -- (preview, drag targets) — all pool-routed through CurrentAuraPool.
     DF:AuraDesigner_RefreshPage()
@@ -5838,9 +5855,9 @@ local function AddSpellToGroup(groupID, auraName, display, typeKey, skipEcho, pi
     local instance = CreateIndicatorInstance(auraName, typeKey)
     if not instance then return end
     AddGroupMember(groupID, auraName, instance.id)
-    adPickerDirty = true  -- layout tab behind the picker is stale; rebuilt on close
+    S.adPickerDirty = true  -- layout tab behind the picker is stale; rebuilt on close
     if not skipEcho and picker then
-        local typeLabel = PLACED_TYPE_LABELS[typeKey] or typeKey
+        local typeLabel = S.PLACED_TYPE_LABELS[typeKey] or typeKey
         picker:Echo(format(L["Added %s."],
             format("%s (%s)", display or auraName, typeLabel)))
     end
@@ -5858,7 +5875,7 @@ end
 -- Snap known ids to their pool/curated record (then behave exactly like
 -- clicking that spell's row — same AddPickedSpell / AddSpellToGroup paths);
 -- unknown ids become an ad-hoc "#<id>" aura whose key IS its identity
--- (CleanupAdHocAura drops the config again once its last effect is
+-- (S.CleanupAdHocAura drops the config again once its last effect is
 -- removed). The picker stays open (echo confirms), so several ids can be
 -- added in a row. The shared picker has already validated the digits and
 -- normalized leading zeros; idText is that validated digit STRING. Returns
@@ -5908,8 +5925,8 @@ local function ADAddByID(idNum, idText, picker, mode, typeKey, groupID)
     -- or the raw id for ad-hoc — is already tracked by the OPPOSITE pool.
     -- Checked before the group branch so group adds are blocked too.
     local crossBlocked = false
-    if spellPickerBlockedIDs and next(spellPickerBlockedIDs) then
-        if spellPickerBlockedIDs[idNum] then
+    if S.spellPickerBlockedIDs and next(S.spellPickerBlockedIDs) then
+        if S.spellPickerBlockedIDs[idNum] then
             crossBlocked = true
         elseif not isAdHoc then
             crossBlocked = IsCandidateCrossBlocked(auraName, spec)
@@ -5959,7 +5976,7 @@ local function ADAddByID(idNum, idText, picker, mode, typeKey, groupID)
     end
 
     AddPickedSpell(auraName, typeKey, mode)
-    adPickerDirty = true
+    S.adPickerDirty = true
     if isAdHoc then
         picker:Echo(format(L["Added #%d as an unknown spell ID — name and icon will show if the ID is valid."], idNum))
     else
@@ -5985,13 +6002,13 @@ local function OpenIndicatorPicker(typeKey, mode)
     local badgeColor = BADGE_COLORS[typeKey] or BADGE_COLORS.icon
     local title
     if mode == "frame" then
-        title = format(L["Select trigger for %s"], FRAME_LEVEL_LABELS[typeKey] or typeKey)
+        title = format(L["Select trigger for %s"], S.FRAME_LEVEL_LABELS[typeKey] or typeKey)
     else
         title = L["Select a spell"]
     end
     OpenADPicker({
         title = title,
-        subtitle = PLACED_TYPE_LABELS[typeKey] or FRAME_LEVEL_LABELS[typeKey] or typeKey,
+        subtitle = S.PLACED_TYPE_LABELS[typeKey] or S.FRAME_LEVEL_LABELS[typeKey] or typeKey,
         subtitleColor = badgeColor,
         records = function() return BuildADPickerRecords(false) end,
         classLock = (not isOther) and specInfo and specInfo.class or nil,
@@ -6011,7 +6028,7 @@ local function OpenIndicatorPicker(typeKey, mode)
                 handler = function(rec, _, picker)
                     AddPickedSpell(rec.auraName, typeKey, mode)
                     picker:Close()
-                    SwitchTab("effects")
+                    S.SwitchTab("effects")
                     RefreshPlacedIndicators()
                     RefreshPreviewEffects()
                 end,
@@ -6046,7 +6063,7 @@ local function OpenGroupSpellPicker(groupID)
         isBlocked = ADCrossBlockText,
         rowActions = {
             {
-                label = PLACED_TYPE_LABELS.icon or "Icon",
+                label = S.PLACED_TYPE_LABELS.icon or "Icon",
                 color = BADGE_COLORS.icon,
                 typeKey = "icon",
                 handler = function(rec, _, picker)
@@ -6054,7 +6071,7 @@ local function OpenGroupSpellPicker(groupID)
                 end,
             },
             {
-                label = PLACED_TYPE_LABELS.square or "Square",
+                label = S.PLACED_TYPE_LABELS.square or "Square",
                 color = BADGE_COLORS.square,
                 typeKey = "square",
                 handler = function(rec, _, picker)
@@ -6072,7 +6089,7 @@ end
 -- ── CREATE EFFECT CARD ──
 -- Creates a collapsible card for one effect in the effects list.
 -- Returns the new yPos after the card.
-CreateEffectCard = function(parent, yPos, effect)
+S.CreateEffectCard = function(parent, yPos, effect)
     local isPlaced = (effect.source == "placed")
     -- B1 key scheme: the pool prefix rides the NAME segment, so the two
     -- pools' expandedCards entries can never collide.
@@ -6122,8 +6139,8 @@ CreateEffectCard = function(parent, yPos, effect)
     -- Type badge
     local badgeColor = BADGE_COLORS[effect.typeKey] or BADGE_COLORS.icon
     local typeLabel = isPlaced
-        and (PLACED_TYPE_LABELS[effect.typeKey] or effect.typeKey)
-        or (FRAME_LEVEL_LABELS[effect.typeKey] or effect.typeKey)
+        and (S.PLACED_TYPE_LABELS[effect.typeKey] or effect.typeKey)
+        or (S.FRAME_LEVEL_LABELS[effect.typeKey] or effect.typeKey)
 
     local badgeBg = CreateFrame("Frame", nil, header, "BackdropTemplate")
     badgeBg:SetHeight(16)
@@ -6203,10 +6220,10 @@ CreateEffectCard = function(parent, yPos, effect)
                 else
                     local auraCfg = CurrentAuraPool()[effect.auraName]
                     if auraCfg then auraCfg[effect.typeKey] = nil end
-                    CleanupAdHocAura(effect.auraName)  -- drop emptied ad-hoc "#<id>" entries
+                    S.CleanupAdHocAura(effect.auraName)  -- drop emptied ad-hoc "#<id>" entries
                 end
                 expandedCards[cardKey] = nil
-                SwitchTab("effects")
+                S.SwitchTab("effects")
                 RefreshPlacedIndicators()
                 RefreshPreviewEffects()
                 -- Structural change: the container must rebuild AND the buff-row
@@ -6267,7 +6284,7 @@ CreateEffectCard = function(parent, yPos, effect)
             -- Structural change: the factory must tear down / stand up the
             -- container and the buff-row dedup union changes (hidden = not
             -- tracked), so run the full refresh path (mirror the enable toggle).
-            SwitchTab("effects")
+            S.SwitchTab("effects")
             RefreshPlacedIndicators()
             RefreshPreviewEffects()
             DF:InvalidateAuraLayout()
@@ -6287,7 +6304,7 @@ CreateEffectCard = function(parent, yPos, effect)
     -- Header click → toggle expansion
     header:SetScript("OnClick", function()
         expandedCards[cardKey] = not expandedCards[cardKey]
-        SwitchTab("effects")
+        S.SwitchTab("effects")
     end)
     header:SetScript("OnEnter", function(self)
         self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
@@ -6315,7 +6332,7 @@ CreateEffectCard = function(parent, yPos, effect)
         end
 
         -- Build type-specific widgets (derive width from parent scroll frame)
-        local bodyWidth = (tabContentFrame and tabContentFrame:GetWidth() or 260) - 24
+        local bodyWidth = (S.tabContentFrame and S.tabContentFrame:GetWidth() or 260) - 24
         if bodyWidth < 100 then bodyWidth = 240 end
 
         local triggersH = 0
@@ -6401,7 +6418,7 @@ CreateEffectCard = function(parent, yPos, effect)
                         tone = "danger",
                         onClick = function()
                             RemoveFrameEffectTrigger(effect.auraName, effect.typeKey, capturedTrigName)
-                            SwitchTab("effects")
+                            S.SwitchTab("effects")
                             RefreshPreviewEffects()
                         end,
                     })
@@ -6450,7 +6467,7 @@ CreateEffectCard = function(parent, yPos, effect)
                 for _, t in ipairs(currentTriggers) do trigLookup[t] = true end
 
                 OpenADPicker({
-                    title = format(L["Select trigger for %s"], FRAME_LEVEL_LABELS[effect.typeKey] or effect.typeKey),
+                    title = format(L["Select trigger for %s"], S.FRAME_LEVEL_LABELS[effect.typeKey] or effect.typeKey),
                     subtitle = effect.displayName,
                     records = function() return BuildADPickerRecords(true) end,
                     classLock = (not isOtherTrig) and trigSpecInfo and trigSpecInfo.class or nil,
@@ -6462,7 +6479,7 @@ CreateEffectCard = function(parent, yPos, effect)
                             handler = function(rec, _, picker)
                                 AddFrameEffectTrigger(effect.auraName, effect.typeKey, rec.auraName, capturedPool)
                                 picker:Close()
-                                SwitchTab("effects")
+                                S.SwitchTab("effects")
                                 RefreshPreviewEffects()
                             end,
                         },
@@ -6534,13 +6551,13 @@ CreateEffectCard = function(parent, yPos, effect)
                 sharedBtn:SetScript("OnClick", function()
                     local cfg = EnsureTypeConfig(effect.auraName, effect.typeKey)
                     cfg.borderMode = nil  -- shared is default
-                    SwitchTab("effects")
+                    S.SwitchTab("effects")
                     RefreshPreviewEffects()
                 end)
                 customBtn:SetScript("OnClick", function()
                     local cfg = EnsureTypeConfig(effect.auraName, effect.typeKey)
                     cfg.borderMode = "custom"
-                    SwitchTab("effects")
+                    S.SwitchTab("effects")
                     RefreshPreviewEffects()
                 end)
 
@@ -6636,7 +6653,7 @@ CreateEffectCard = function(parent, yPos, effect)
         end)
         collapseBar:SetScript("OnClick", function()
             expandedCards[cardKey] = false
-            SwitchTab("effects")
+            S.SwitchTab("effects")
         end)
 
         local contentH = (bodyH or 50) + triggersH + collapseBarH
@@ -6649,9 +6666,9 @@ CreateEffectCard = function(parent, yPos, effect)
 end
 
 -- ── BUILD EFFECTS TAB ──
-BuildEffectsTab = function()
-    if not tabContentFrame then return end
-    local parent = tabContentFrame
+S.BuildEffectsTab = function()
+    if not S.tabContentFrame then return end
+    local parent = S.tabContentFrame
     local yPos = -10
     local tc = GetThemeColor()
 
@@ -6795,12 +6812,12 @@ BuildEffectsTab = function()
         -- Shared styling: standard hover + an active (selected) state marked by a
         -- prominent accent border. The row rebuilds on click, so set active here.
         GUI:StyleButton(chipBtn)
-        chipBtn:SetActive(activeFilter == chip.key)
+        chipBtn:SetActive(S.activeFilter == chip.key)
 
         local capturedKey = chip.key
         chipBtn:SetScript("OnClick", function()
-            activeFilter = capturedKey
-            SwitchTab("effects")
+            S.activeFilter = capturedKey
+            S.SwitchTab("effects")
         end)
 
         tinsert(chipBtns, chipBtn)
@@ -6846,7 +6863,7 @@ BuildEffectsTab = function()
     -- Apply filter
     local filtered = {}
     for _, effect in ipairs(effects) do
-        if activeFilter == "all" or effect.typeKey == activeFilter then
+        if S.activeFilter == "all" or effect.typeKey == S.activeFilter then
             tinsert(filtered, effect)
         end
     end
@@ -6861,16 +6878,16 @@ BuildEffectsTab = function()
         -- unsupported-spec message there.
         if not IsOtherTab() and (not spec or not specAuras or #specAuras == 0) then
             empty:SetText(L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."])
-        elseif activeFilter == "all" then
+        elseif S.activeFilter == "all" then
             empty:SetText(L["No effects configured yet.\nClick '+ Add Indicator' to get started."])
         else
-            empty:SetText(format(L["No %s effects configured."], (PLACED_TYPE_LABELS[activeFilter] or FRAME_LEVEL_LABELS[activeFilter] or activeFilter)))
+            empty:SetText(format(L["No %s effects configured."], (S.PLACED_TYPE_LABELS[S.activeFilter] or S.FRAME_LEVEL_LABELS[S.activeFilter] or S.activeFilter)))
         end
         empty:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
         empty:SetJustifyH("CENTER")
     else
         for _, effect in ipairs(filtered) do
-            yPos = CreateEffectCard(parent, yPos, effect)
+            yPos = S.CreateEffectCard(parent, yPos, effect)
         end
     end
 
@@ -6879,9 +6896,9 @@ end
 
 -- ── BUILD GLOBAL TAB ──
 -- Wraps the existing BuildGlobalView into the tab content frame
-BuildGlobalTab = function()
-    if not tabContentFrame then return end
-    BuildGlobalView(tabContentFrame)
+S.BuildGlobalTab = function()
+    if not S.tabContentFrame then return end
+    BuildGlobalView(S.tabContentFrame)
 end
 
 -- ── BUILD LAYOUT GROUPS TAB ──
@@ -6975,7 +6992,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     -- Visibility changes inside the section (border style dropdown swapping its
     -- widget set) re-measure heights, so rebuild the tab — the same full-rebuild
     -- the effect cards' dropdown callbacks run (AuraDesigner_RefreshPage).
-    local function rebuildTab() SwitchTab("layout") end
+    local function rebuildTab() S.SwitchTab("layout") end
 
     -- One collapsible box PER CATEGORY — the expanded effect card's section
     -- structure (Appearance / Border / Duration Text / Stack Count, same names
@@ -7133,9 +7150,9 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     return by
 end
 
-BuildLayoutGroupsTab = function()
-    if not tabContentFrame then return end
-    local parent = tabContentFrame
+S.BuildLayoutGroupsTab = function()
+    if not S.tabContentFrame then return end
+    local parent = S.tabContentFrame
     local yPos = -10
     local tc = GetThemeColor()
 
@@ -7154,7 +7171,7 @@ BuildLayoutGroupsTab = function()
         local group = CreateLayoutGroup()
         if group then
             expandedGroups[GroupExpandKey(group.id)] = true
-            SwitchTab("layout")
+            S.SwitchTab("layout")
             RefreshPlacedIndicators()
         end
     end)
@@ -7168,7 +7185,7 @@ BuildLayoutGroupsTab = function()
         local group = CreateLayoutGroup(nil, "filter")
         if group then
             expandedGroups[GroupExpandKey(group.id)] = true
-            SwitchTab("layout")
+            S.SwitchTab("layout")
             RefreshPlacedIndicators()
         end
     end)
@@ -7258,7 +7275,7 @@ BuildLayoutGroupsTab = function()
                 size = 22,
                 onClick = function()
                     DeleteLayoutGroup(capturedGroupID)
-                    SwitchTab("layout")
+                    S.SwitchTab("layout")
                     RefreshPlacedIndicators()
                     -- Deleting a group deletes its member indicators — same
                     -- structural refresh as the effect-card delete / eye toggle.
@@ -7297,7 +7314,7 @@ BuildLayoutGroupsTab = function()
                 eyeBtn:SetScript("OnClick", function()
                     group.enabled = (group.enabled == false) and true or false
                     updateEyeIcon()
-                    SwitchTab("layout")
+                    S.SwitchTab("layout")
                     RefreshPlacedIndicators()
                     DF:InvalidateAuraLayout()
                     DF:UpdateAllFrames()
@@ -7313,7 +7330,7 @@ BuildLayoutGroupsTab = function()
             -- Header click → toggle expansion
             header:SetScript("OnClick", function()
                 expandedGroups[expandKey] = not expandedGroups[expandKey]
-                SwitchTab("layout")
+                S.SwitchTab("layout")
             end)
             header:SetScript("OnEnter", function(self)
                 self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
@@ -7333,7 +7350,7 @@ BuildLayoutGroupsTab = function()
                     {r = gc.r * 0.20, g = gc.g * 0.20, b = gc.b * 0.20, a = 0.3})
 
                 local by = -10
-                local bodyWidth = (tabContentFrame and tabContentFrame:GetWidth() or 260) - 24
+                local bodyWidth = (S.tabContentFrame and S.tabContentFrame:GetWidth() or 260) - 24
                 if bodyWidth < 100 then bodyWidth = 240 end
 
                 -- Group Name (editable)
@@ -7358,7 +7375,7 @@ BuildLayoutGroupsTab = function()
                         group.name = val
                     end
                     self:ClearFocus()
-                    SwitchTab("layout")
+                    S.SwitchTab("layout")
                 end)
                 nameEdit:SetScript("OnEscapePressed", function(self)
                     self:SetText(group.name)
@@ -7380,7 +7397,7 @@ BuildLayoutGroupsTab = function()
                 fsel.customs = fsel.customs or {}
 
                 local function StructuralFilterRefresh()
-                    SwitchTab("layout")
+                    S.SwitchTab("layout")
                     RefreshPlacedIndicators()
                     DF:InvalidateAuraLayout()
                     DF:UpdateAllFrames()
@@ -7654,7 +7671,7 @@ BuildLayoutGroupsTab = function()
                         -- Page content builds on first show (inside SelectTab), so
                         -- the button reference exists by now.
                         -- The add action is a row inside the Filter Designer's
-                        -- scrolling left list, so the page scrolls it into view and
+                        -- scrolling left list, so the S.page scrolls it into view and
                         -- pulses it itself rather than handing back a bare widget.
                         local fdPage = GUI.Pages["auras_filterdesigner"]
                         if fdPage and fdPage._fdFocusNewFilter then
@@ -7698,7 +7715,7 @@ BuildLayoutGroupsTab = function()
                             upBtn:SetPoint("TOPLEFT", 2, -1)
                             upBtn:SetScript("OnClick", function()
                                 SwapGroupMembers(capturedGroupID, capturedMi, capturedMi - 1)
-                                SwitchTab("layout")
+                                S.SwitchTab("layout")
                                 RefreshPlacedIndicators()
                                 -- Positions moved (member index feeds the grid) — re-arrange live frames.
                                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
@@ -7712,7 +7729,7 @@ BuildLayoutGroupsTab = function()
                             downBtn:SetPoint("BOTTOMLEFT", 2, 1)
                             downBtn:SetScript("OnClick", function()
                                 SwapGroupMembers(capturedGroupID, capturedMi, capturedMi + 1)
-                                SwitchTab("layout")
+                                S.SwitchTab("layout")
                                 RefreshPlacedIndicators()
                                 -- Positions moved (member index feeds the grid) — re-arrange live frames.
                                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
@@ -7758,7 +7775,7 @@ BuildLayoutGroupsTab = function()
                             end
                         end
                         local mBadgeColor = BADGE_COLORS[memberType or "icon"] or BADGE_COLORS.icon
-                        local mBadgeLabel = PLACED_TYPE_LABELS[memberType or "icon"] or "Icon"
+                        local mBadgeLabel = S.PLACED_TYPE_LABELS[memberType or "icon"] or "Icon"
 
                         local mBadge = CreateFrame("Frame", nil, memberRow, "BackdropTemplate")
                         mBadge:SetHeight(16)
@@ -7787,7 +7804,7 @@ BuildLayoutGroupsTab = function()
                             RemoveGroupMember(capturedGroupID, capturedMember.auraName, capturedMember.indicatorID)
                             -- Also delete the placed indicator itself
                             RemoveIndicatorInstance(capturedMember.auraName, capturedMember.indicatorID)
-                            SwitchTab("layout")
+                            S.SwitchTab("layout")
                             RefreshPlacedIndicators()
                             RefreshPreviewEffects()
                             -- Structural change: same full refresh as the
@@ -7818,7 +7835,7 @@ BuildLayoutGroupsTab = function()
                             local cardKey = "placed:" .. PoolKeyPrefix() .. capturedAuraName .. "#" .. capturedIndID
                             wipe(expandedCards)
                             expandedCards[cardKey] = true
-                            activeTab = "effects"
+                            S.activeTab = "effects"
                             DF:AuraDesigner_RefreshPage()
                         end)
 
@@ -8007,7 +8024,7 @@ BuildLayoutGroupsTab = function()
                     -- (an othersOnly group's spells keep their row icon).
                     if isOtherGroups then
                         local ooCb = GUI:CreateCheckbox(body, L["Others Only"], group, "othersOnly", function()
-                            SwitchTab("layout")
+                            S.SwitchTab("layout")
                             RefreshPlacedIndicators()
                             DF:InvalidateAuraLayout()
                             DF:UpdateAllFrames()
@@ -8055,9 +8072,9 @@ end
 -- prefix can never collide with them (the two id counters overlap).
 -- ============================================================
 
-BuildDebuffGroupsTab = function()
-    if not tabContentFrame then return end
-    local parent = tabContentFrame
+S.BuildDebuffGroupsTab = function()
+    if not S.tabContentFrame then return end
+    local parent = S.tabContentFrame
     local yPos = -10
     local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab accent
 
@@ -8077,7 +8094,7 @@ BuildDebuffGroupsTab = function()
     -- checkboxes, dispel mode, hide-long controls, eye, delete, add): the
     -- claims union moves AND the card summary / grey states must rebuild.
     local function StructuralDebuffGroupRefresh()
-        SwitchTab("layout")
+        S.SwitchTab("layout")
         RefreshPlacedIndicators()
         DF:InvalidateAuraLayout()
         DF:UpdateAllFrames()
@@ -8087,7 +8104,7 @@ BuildDebuffGroupsTab = function()
     end
 
     -- Same structural chain WITHOUT the tab rebuild — slider/dropdown-safe
-    -- (a SwitchTab from inside a slider callback destroys the widget
+    -- (a S.SwitchTab from inside a slider callback destroys the widget
     -- mid-interaction). Layout edits don't move the claims union, but the
     -- version bump keeps the factory's version-keyed dgroup record cache
     -- honest and costs one sig-gated re-resolve (offsets → ApplyStyle,
@@ -8225,7 +8242,7 @@ BuildDebuffGroupsTab = function()
             -- Header click → toggle expansion
             header:SetScript("OnClick", function()
                 expandedGroups[cardKey] = not expandedGroups[cardKey]
-                SwitchTab("layout")
+                S.SwitchTab("layout")
             end)
             header:SetScript("OnEnter", function(self)
                 self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
@@ -8245,7 +8262,7 @@ BuildDebuffGroupsTab = function()
                     {r = gc.r * 0.20, g = gc.g * 0.20, b = gc.b * 0.20, a = 0.3})
 
                 local by = -10
-                local bodyWidth = (tabContentFrame and tabContentFrame:GetWidth() or 260) - 24
+                local bodyWidth = (S.tabContentFrame and S.tabContentFrame:GetWidth() or 260) - 24
                 if bodyWidth < 100 then bodyWidth = 240 end
 
                 -- Repair a missing selection table (hand-edited data). All
@@ -8281,7 +8298,7 @@ BuildDebuffGroupsTab = function()
                     end
                     self:ClearFocus()
                     -- Name feeds no sig — cosmetic only (header + canvas label).
-                    SwitchTab("layout")
+                    S.SwitchTab("layout")
                     RefreshPlacedIndicators()
                 end)
                 nameEdit:SetScript("OnEscapePressed", function(self)
@@ -8465,64 +8482,62 @@ end
 -- ============================================================
 
 function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
-    local prevDB = db  -- capture before overwrite to detect mode switch
-    GUI = guiRef
-    page = pageRef
-    db = dbRef
-    Adapter = DF.AuraDesigner.Adapter
+    local prevDB = S.db  -- capture before overwrite to detect mode switch
+    S.page = pageRef
+    S.db = dbRef
 
-    local parent = page.child
+    local parent = S.page.child
 
     -- ========================================
-    -- REUSE: If mainFrame already exists, db hasn't changed (same mode) AND the
+    -- REUSE: If S.mainFrame already exists, S.db hasn't changed (same mode) AND the
     -- frame dimensions are unchanged, just re-parent, show, and refresh. A mode
-    -- switch (Party↔Raid) changes db; an auto-layout switch keeps the SAME db
+    -- switch (Party↔Raid) changes S.db; an auto-layout switch keeps the SAME S.db
     -- reference but changes frameWidth/Height — both must force a full rebuild so
     -- the preview mock resizes to the active layout's frame size.
     -- ========================================
     local _adFDB = (DF.GetDB and DF:GetDB((GUI and GUI.SelectedMode) or "party")) or {}
     local _adW, _adH = _adFDB.frameWidth or 125, _adFDB.frameHeight or 64
-    -- Auto-layout identity: two raid layouts share the SAME db proxy and may share
+    -- Auto-layout identity: two raid layouts share the SAME S.db proxy and may share
     -- frame dimensions, so neither check below distinguishes them — without this,
-    -- switching between same-size raid layouts reuses the stale page.
+    -- switching between same-size raid layouts reuses the stale S.page.
     local _adLayout = (DF.AutoProfilesUI and (DF.AutoProfilesUI.editingProfile or DF.AutoProfilesUI.activeRuntimeProfile)) or nil
-    -- Preset identity: switching the mode's preset keeps the same db/size/layout,
-    -- so without this the stale page (bound to the old preset) would be reused.
+    -- Preset identity: switching the mode's preset keeps the same S.db/size/layout,
+    -- so without this the stale S.page (bound to the old preset) would be reused.
     local _adPreset = DF.GetModeDesignerPresetName
         and DF:GetModeDesignerPresetName("aura", (GUI and GUI.SelectedMode) or "party")
     -- Editing identity: entering edit of the ACTIVE layout keeps the same table
     -- object (editingProfile == activeRuntimeProfile), so _adLayout alone
     -- misses the transition and the editing-banner offset is never applied.
     local _adEditing = (DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing()) or false
-    if mainFrame and prevDB == dbRef
-       and mainFrame.dfBuiltFrameW == _adW and mainFrame.dfBuiltFrameH == _adH
-       and mainFrame.dfBuiltLayout == _adLayout
-       and mainFrame.dfBuiltPreset == _adPreset
-       and mainFrame.dfBuiltEditing == _adEditing then
-        mainFrame:SetParent(parent)
-        mainFrame:SetAllPoints()
-        mainFrame:Show()
+    if S.mainFrame and prevDB == dbRef
+       and S.mainFrame.dfBuiltFrameW == _adW and S.mainFrame.dfBuiltFrameH == _adH
+       and S.mainFrame.dfBuiltLayout == _adLayout
+       and S.mainFrame.dfBuiltPreset == _adPreset
+       and S.mainFrame.dfBuiltEditing == _adEditing then
+        S.mainFrame:SetParent(parent)
+        S.mainFrame:SetAllPoints()
+        S.mainFrame:Show()
         DF:AuraDesigner_RefreshPage()
         return
     end
 
     -- Full build (first time, or mode switch)
-    if mainFrame then
-        mainFrame:Hide()
-        mainFrame:SetParent(nil)
+    if S.mainFrame then
+        S.mainFrame:Hide()
+        S.mainFrame:SetParent(nil)
     end
     wipe(placedIndicators)
     wipe(expandedCards)
     wipe(effectCardPool)
 
-    activeTab = "effects"
-    activeBuffTab = "my"
-    activeFilter = "all"
-    -- A shared picker left open on the OLD rightPanel dies with it (its
+    S.activeTab = "effects"
+    S.activeBuffTab = "my"
+    S.activeFilter = "all"
+    -- A shared picker left open on the OLD S.rightPanel dies with it (its
     -- close hook may already have run via the ancestor hide); drop the
     -- handle so CloseADPicker can't poke a stale overlay.
-    adPickerDirty = false
-    adPickerHandle = nil
+    S.adPickerDirty = false
+    S.adPickerHandle = nil
 
     -- Layout constants
     local BANNER_H = 68
@@ -8532,44 +8547,44 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     -- ========================================
     -- MAIN FRAME
     -- ========================================
-    mainFrame = CreateFrame("Frame", nil, parent)
-    mainFrame:SetAllPoints()
+    S.mainFrame = CreateFrame("Frame", nil, parent)
+    S.mainFrame:SetAllPoints()
     -- Record the frame dims this build was made for, so the reuse-guard above can
-    -- detect an auto-layout switch (same db, different frameWidth/Height) and rebuild.
-    mainFrame.dfBuiltFrameW = _adW
-    mainFrame.dfBuiltFrameH = _adH
-    mainFrame.dfBuiltLayout = _adLayout
-    mainFrame.dfBuiltPreset = _adPreset
-    mainFrame.dfBuiltEditing = _adEditing
-    -- Closing the settings window (or leaving this page) hides mainFrame with
+    -- detect an auto-layout switch (same S.db, different frameWidth/Height) and rebuild.
+    S.mainFrame.dfBuiltFrameW = _adW
+    S.mainFrame.dfBuiltFrameH = _adH
+    S.mainFrame.dfBuiltLayout = _adLayout
+    S.mainFrame.dfBuiltPreset = _adPreset
+    S.mainFrame.dfBuiltEditing = _adEditing
+    -- Closing the settings window (or leaving this S.page) hides S.mainFrame with
     -- no refresh pass, which would leave the rendered preview pool's border
     -- animations ticking on the external driver (it ticks hidden secretRect
     -- borders — see ClearPlacedIndicators). OnHide fires on effective-visibility
-    -- loss, so an ancestor hide (window close, page switch) reaches it too; the
+    -- loss, so an ancestor hide (window close, S.page switch) reaches it too; the
     -- reuse path re-renders via AuraDesigner_RefreshPage → RefreshPlacedIndicators
-    -- on return. mainFrame is created fresh per full build (the old one is hidden
+    -- on return. S.mainFrame is created fresh per full build (the old one is hidden
     -- and unparented above), so this hook lands exactly once per frame.
-    mainFrame:HookScript("OnHide", ClearPlacedIndicators)
+    S.mainFrame:HookScript("OnHide", ClearPlacedIndicators)
 
     -- Override RefreshStates: Aura Designer uses its own layout system.
     --
     -- This hook gets called by anything that walks the GUI parent chain
-    -- looking for a page with RefreshStates+children — including
+    -- looking for a S.page with RefreshStates+children — including
     -- CreateInfoBanner's TriggerHostRelayout after every measure cycle.
     -- AuraDesigner_RefreshPage is a heavyweight rebuild (destroys +
     -- recreates every effect card on the active tab), so firing it
     -- from a banner's auto-resize cascade meant: each new banner from
-    -- BuildEffectsTab triggered SetText → schedule DoRecomputeHeight →
-    -- TriggerHostRelayout → page:RefreshStates → AuraDesigner_RefreshPage
-    -- → SwitchTab → BuildEffectsTab → create more banners → repeat at
+    -- S.BuildEffectsTab triggered SetText → schedule DoRecomputeHeight →
+    -- TriggerHostRelayout → S.page:RefreshStates → AuraDesigner_RefreshPage
+    -- → S.SwitchTab → S.BuildEffectsTab → create more banners → repeat at
     -- ~9 Hz, locking up the GUI the moment the perf-warning banner
     -- surfaced (because picking an animation triggered the chain).
     --
-    -- The fix: only call AuraDesigner_RefreshPage when the page
+    -- The fix: only call AuraDesigner_RefreshPage when the S.page
     -- dimensions actually changed.  GUI window resize cases (the real
     -- reason this hook exists) still rebuild; banner-cascade-as-noop
     -- cases stop the loop.
-    page.RefreshStates = function(self)
+    S.page.RefreshStates = function(self)
         local pageH = self:GetHeight()
         self.child:SetHeight(pageH)
         local newW = GUI.contentFrame and (GUI.contentFrame:GetWidth() - 30) or nil
@@ -8588,9 +8603,9 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
             -- Same-size revisit AFTER the OnHide hook cleared the canvas (tab
             -- away + back re-enters ONLY through RefreshCached -> here; the
             -- builder is cache-skipped). Repaint the pooled slots without the
-            -- full page rebuild: slot restyling creates no banners, so the
+            -- full S.page rebuild: slot restyling creates no banners, so the
             -- banner-cascade loop this early-out exists for cannot re-arm.
-            if placedCleared then
+            if S.placedCleared then
                 RefreshPlacedIndicators()
                 RefreshPreviewEffects()
             end
@@ -8603,7 +8618,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
 
     local yPos = -8  -- top gap; kept equal to the Text Designer's _tdTopY for a consistent header gap
     -- While editing a raid auto-layout, the AutoProfiles editing banner is a ~50px
-    -- overlay anchored to the top of the content frame; this custom AD page lays
+    -- overlay anchored to the top of the content frame; this custom AD S.page lays
     -- its own content out from the top too, so push everything down to clear it
     -- (otherwise the editing banner sits on top of the enable banner / preset bar).
     if DF.AutoProfilesUI and DF.AutoProfilesUI.IsEditing and DF.AutoProfilesUI:IsEditing() then
@@ -8613,12 +8628,12 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     -- ========================================
     -- ENABLE BANNER (full width)
     -- ========================================
-    enableBanner = CreateEnableBanner(mainFrame)
-    enableBanner:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
-    enableBanner:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
+    S.enableBanner = CreateEnableBanner(S.mainFrame)
+    S.enableBanner:SetPoint("TOPLEFT", S.mainFrame, "TOPLEFT", 0, yPos)
+    S.enableBanner:SetPoint("TOPRIGHT", S.mainFrame, "TOPRIGHT", 0, yPos)
 
-    -- No Copy / Sync pair here (every other mode-specific page has one). The one
-    -- key this page owns is the template NAME, and the template bar below sets
+    -- No Copy / Sync pair here (every other mode-specific S.page has one). The one
+    -- key this S.page owns is the template NAME, and the template bar below sets
     -- it directly — so Copy was "pick that name in the other tab" and Sync was a
     -- link that could only ever hold one name in step. Sharing is now stated and
     -- undone on the bar itself; see GUI:CreateDesignerPresetBar.
@@ -8626,10 +8641,10 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     -- ========================================
     -- PRESET BAR (which named preset this mode uses + library management)
     -- Rides row 2 of the enable banner (left side; the spec dropdown holds the
-    -- right side). Compact icon buttons keep the row within the page width.
+    -- right side). Compact icon buttons keep the row within the S.page width.
     -- ========================================
     if GUI.CreateDesignerPresetBar then
-        local presetBar = GUI:CreateDesignerPresetBar(enableBanner, {
+        local presetBar = GUI:CreateDesignerPresetBar(S.enableBanner, {
             kind = "aura",
             iconButtons = true,
             getMode = function() return (GUI and GUI.SelectedMode) or "party" end,
@@ -8640,7 +8655,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
                 -- own click handler.
                 if C_Timer and C_Timer.After then
                     C_Timer.After(0, function()
-                        if DF.BuildAuraDesignerPage then DF.BuildAuraDesignerPage(GUI, page, db) end
+                        if DF.BuildAuraDesignerPage then DF.BuildAuraDesignerPage(GUI, S.page, S.db) end
                         DF:InvalidateAuraLayout()
                         DF:UpdateAllFrames()
                         local E = DF.AuraDesigner and DF.AuraDesigner.Engine
@@ -8651,9 +8666,9 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         })
         -- Row 2 reflows (B2): the spec dropdown moved onto the tab strip, so
         -- the preset bar takes the whole row.
-        presetBar:SetPoint("LEFT", enableBanner, "LEFT", 10, -18)
-        presetBar:SetPoint("RIGHT", enableBanner, "RIGHT", -10, -18)
-        enableBanner.presetBar = presetBar
+        presetBar:SetPoint("LEFT", S.enableBanner, "LEFT", 10, -18)
+        presetBar:SetPoint("RIGHT", S.enableBanner, "RIGHT", -10, -18)
+        S.enableBanner.presetBar = presetBar
     end
 
     yPos = yPos - (BANNER_H + SECTION_GAP)
@@ -8665,10 +8680,10 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     -- relocated spec dropdown on the strip's right end (per the prototype —
     -- the spec only applies to My Buffs).
     -- ========================================
-    local buffTabBar = CreateFrame("Frame", nil, mainFrame)
+    local buffTabBar = CreateFrame("Frame", nil, S.mainFrame)
     buffTabBar:SetHeight(BUFFTAB_H)
-    buffTabBar:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
-    buffTabBar:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", 0, yPos)
+    buffTabBar:SetPoint("TOPLEFT", S.mainFrame, "TOPLEFT", 0, yPos)
+    buffTabBar:SetPoint("TOPRIGHT", S.mainFrame, "TOPRIGHT", 0, yPos)
 
     -- The three pools differ on two axes the labels can't carry — WHOSE casts
     -- count, and whether the pool is per-spec — so each tab explains itself on
@@ -8711,7 +8726,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
             GUI:ShowTooltip(self, { title = tipTitle, lines = tipLines })
         end)
         btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
-        btn:SetActive(activeBuffTab == def.key)
+        btn:SetActive(S.activeBuffTab == def.key)
         mainTabButtons[def.key] = btn
         prevMainBtn = btn
     end
@@ -8720,10 +8735,10 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     local stripSpecLabel = buffTabBar:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     stripSpecLabel:SetText(L["Spec:"])
     stripSpecLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    specDropdown, specDropdownUpdate = CreateSpecDropdown(buffTabBar)
-    specDropdown:SetSize(165, 22)
-    specDropdown:SetPoint("RIGHT", buffTabBar, "RIGHT", -5, 0)
-    stripSpecLabel:SetPoint("RIGHT", specDropdown, "LEFT", -4, 0)
+    S.specDropdown, S.specDropdownUpdate = CreateSpecDropdown(buffTabBar)
+    S.specDropdown:SetSize(165, 22)
+    S.specDropdown:SetPoint("RIGHT", buffTabBar, "RIGHT", -5, 0)
+    stripSpecLabel:SetPoint("RIGHT", S.specDropdown, "LEFT", -4, 0)
     UpdateSpecDropdownState()
 
     yPos = yPos - (BUFFTAB_H + SECTION_GAP)
@@ -8731,44 +8746,44 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     -- ========================================
     -- 50/50 SPLIT: LEFT PANEL + RIGHT PANEL
     -- ========================================
-    local splitContainer = CreateFrame("Frame", nil, mainFrame)
-    splitContainer:SetPoint("TOPLEFT", mainFrame, "TOPLEFT", 0, yPos)
-    splitContainer:SetPoint("BOTTOMRIGHT", mainFrame, "BOTTOMRIGHT", 0, 0)
-    mainFrame.splitContainer = splitContainer
+    local splitContainer = CreateFrame("Frame", nil, S.mainFrame)
+    splitContainer:SetPoint("TOPLEFT", S.mainFrame, "TOPLEFT", 0, yPos)
+    splitContainer:SetPoint("BOTTOMRIGHT", S.mainFrame, "BOTTOMRIGHT", 0, 0)
+    S.mainFrame.splitContainer = splitContainer
 
     -- ── LEFT PANEL (frame preview) ──
-    leftPanel = CreateFrame("Frame", nil, splitContainer, "BackdropTemplate")
-    leftPanel:SetPoint("TOPLEFT", 0, 0)
-    leftPanel:SetPoint("BOTTOMLEFT", 0, 0)
-    leftPanel:SetPoint("RIGHT", splitContainer, "CENTER", -3, 0)
+    S.leftPanel = CreateFrame("Frame", nil, splitContainer, "BackdropTemplate")
+    S.leftPanel:SetPoint("TOPLEFT", 0, 0)
+    S.leftPanel:SetPoint("BOTTOMLEFT", 0, 0)
+    S.leftPanel:SetPoint("RIGHT", splitContainer, "CENTER", -3, 0)
     -- NO border here — the inner preview container (CreateFramePreview) draws the
     -- visible dim border. A border on both stacked to a brighter doubled line.
-    GUI:CreatePanelBackdrop(leftPanel, {border = false})
+    GUI:CreatePanelBackdrop(S.leftPanel, {border = false})
 
     -- Frame preview (reuses existing CreateFramePreview with adapted anchoring)
-    origY_framePreview = 0
-    framePreview = CreateFramePreview(leftPanel, 0, nil)
-    contentRightInset = 0  -- No right inset needed in new layout
+    S.origY_framePreview = 0
+    S.framePreview = CreateFramePreview(S.leftPanel, 0, nil)
+    S.contentRightInset = 0  -- No right inset needed in new layout
 
     -- ── RIGHT PANEL (tabbed settings) ──
-    rightPanel = CreateFrame("Frame", nil, splitContainer, "BackdropTemplate")
-    rightPanel:SetPoint("TOPRIGHT", 0, 0)
-    rightPanel:SetPoint("BOTTOMRIGHT", 0, 0)
-    rightPanel:SetPoint("LEFT", splitContainer, "CENTER", 3, 0)  -- 6px split gap (matches Text Designer)
-    GUI:CreatePanelBackdrop(rightPanel, {borderColor = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}})
+    S.rightPanel = CreateFrame("Frame", nil, splitContainer, "BackdropTemplate")
+    S.rightPanel:SetPoint("TOPRIGHT", 0, 0)
+    S.rightPanel:SetPoint("BOTTOMRIGHT", 0, 0)
+    S.rightPanel:SetPoint("LEFT", splitContainer, "CENTER", 3, 0)  -- 6px split gap (matches Text Designer)
+    GUI:CreatePanelBackdrop(S.rightPanel, {borderColor = {r = C_BORDER.r, g = C_BORDER.g, b = C_BORDER.b, a = 0.5}})
 
     -- ── TAB BAR ── (shared underline-tab style, mirroring the Pinned Frames
     -- tabs: a transparent strip with a baseline; each tab is a StyleButton in
     -- `tab` mode — faint cell when inactive, accent fill + underline + accent
     -- label when active. Per-tab accent preserves each section's identity.)
-    tabBar = CreateFrame("Frame", nil, rightPanel, "BackdropTemplate")
-    tabBar:SetHeight(28)
+    S.tabBar = CreateFrame("Frame", nil, S.rightPanel, "BackdropTemplate")
+    S.tabBar:SetHeight(28)
     -- Inset just inside the panel's border so the tabs don't overlap/overrun it.
-    tabBar:SetPoint("TOPLEFT", 4, -4)
-    tabBar:SetPoint("TOPRIGHT", -4, -4)
+    S.tabBar:SetPoint("TOPLEFT", 4, -4)
+    S.tabBar:SetPoint("TOPRIGHT", -4, -4)
 
     -- Baseline under the whole strip; the active tab's underline sits on it.
-    local tabBaseline = tabBar:CreateTexture(nil, "ARTWORK")
+    local tabBaseline = S.tabBar:CreateTexture(nil, "ARTWORK")
     tabBaseline:SetTexture("Interface\\Buttons\\WHITE8x8")
     tabBaseline:SetHeight(1)
     tabBaseline:SetPoint("BOTTOMLEFT", 0, 0)
@@ -8784,7 +8799,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
 
     wipe(tabButtons)
     for i, def in ipairs(TAB_DEFS) do
-        local btn = CreateFrame("Button", nil, tabBar, "BackdropTemplate")
+        local btn = CreateFrame("Button", nil, S.tabBar, "BackdropTemplate")
         btn:SetHeight(28)
         if i == 1 then
             btn:SetPoint("TOPLEFT", 0, 0)
@@ -8796,14 +8811,14 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
         if provW < 100 then provW = 600 end
         btn:SetWidth(max(60, floor(((provW / 2) - (#TAB_DEFS - 1) * TAB_GAP) / #TAB_DEFS)))
 
-        -- Shared underline-tab styling; SwitchTab drives SetActive. label = btn.Text.
+        -- Shared underline-tab styling; S.SwitchTab drives SetActive. label = btn.Text.
         GUI:StyleButton(btn, { tab = true, text = def.label, accent = def.accent, font = "DFFontHighlight" })
         btn.label = btn.Text
 
         btn.tabKey = def.key
         btn:SetScript("OnClick", function(self)
             if self.dfDisabled then return end  -- frosted (Effects on Debuffs)
-            SwitchTab(self.tabKey)
+            S.SwitchTab(self.tabKey)
         end)
 
         -- Effects is buff-pool-only (C2): frosted on the Debuffs tab —
@@ -8825,7 +8840,7 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     UpdateLayoutTabState()
 
     -- Equal-width tabs (accounting for the gaps) on parent resize.
-    tabBar:SetScript("OnSizeChanged", function(self, w, h)
+    S.tabBar:SetScript("OnSizeChanged", function(self, w, h)
         local n = #TAB_DEFS
         local tabW = (w - (n - 1) * TAB_GAP) / n
         for _, def in ipairs(TAB_DEFS) do
@@ -8835,35 +8850,35 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     end)
 
     -- ── TAB CONTENT (scrollable) ──
-    tabScrollFrame = CreateFrame("ScrollFrame", nil, rightPanel, "ScrollFrameTemplate")
-    tabScrollFrame:SetPoint("TOPLEFT", tabBar, "BOTTOMLEFT", 0, 0)
-    tabScrollFrame:SetPoint("BOTTOMRIGHT", -22, 0)
+    S.tabScrollFrame = CreateFrame("ScrollFrame", nil, S.rightPanel, "ScrollFrameTemplate")
+    S.tabScrollFrame:SetPoint("TOPLEFT", S.tabBar, "BOTTOMLEFT", 0, 0)
+    S.tabScrollFrame:SetPoint("BOTTOMRIGHT", -22, 0)
 
-    tabContentFrame = CreateFrame("Frame", nil, tabScrollFrame)
-    -- Pre-compute initial width from parent geometry so SwitchTab() has
+    S.tabContentFrame = CreateFrame("Frame", nil, S.tabScrollFrame)
+    -- Pre-compute initial width from parent geometry so S.SwitchTab() has
     -- accurate dimensions before the first layout pass fires OnSizeChanged.
     local earlyW = parent:GetWidth()
     if earlyW < 100 then earlyW = (GUI.contentFrame and GUI.contentFrame:GetWidth() or 600) - 30 end
-    tabContentFrame:SetWidth(max(1, (earlyW / 2) - 2 - 22))
-    tabContentFrame:SetHeight(800)
-    tabScrollFrame:SetScrollChild(tabContentFrame)
-    DF.GUI.StyleScrollBar(tabScrollFrame)
+    S.tabContentFrame:SetWidth(max(1, (earlyW / 2) - 2 - 22))
+    S.tabContentFrame:SetHeight(800)
+    S.tabScrollFrame:SetScrollChild(S.tabContentFrame)
+    DF.GUI.StyleScrollBar(S.tabScrollFrame)
 
     -- Match scroll child width to scroll frame
-    tabScrollFrame:SetScript("OnSizeChanged", function(self, w, h)
-        tabContentFrame:SetWidth(w)
+    S.tabScrollFrame:SetScript("OnSizeChanged", function(self, w, h)
+        S.tabContentFrame:SetWidth(w)
     end)
 
     -- Smooth scroll
     local SCROLL_STEP = 30
-    tabScrollFrame:SetScript("OnMouseWheel", function(self, delta)
+    S.tabScrollFrame:SetScript("OnMouseWheel", function(self, delta)
         local current = self:GetVerticalScroll()
         local maxScroll = max(0, self:GetVerticalScrollRange())
         local newScroll = max(0, min(maxScroll, current - (delta * SCROLL_STEP)))
         self:SetVerticalScroll(newScroll)
     end)
-    tabContentFrame:EnableMouseWheel(true)
-    tabContentFrame:SetScript("OnMouseWheel", function(self, delta)
+    S.tabContentFrame:EnableMouseWheel(true)
+    S.tabContentFrame:SetScript("OnMouseWheel", function(self, delta)
         local p = self:GetParent()
         if p and p:GetScript("OnMouseWheel") then
             p:GetScript("OnMouseWheel")(p, delta)
@@ -8875,9 +8890,9 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     -- ========================================
 
     -- Force initial width sync: OnSizeChanged won't fire until the frame renders,
-    -- but SwitchTab needs accurate widths now for slider/dropdown sizing.
+    -- but S.SwitchTab needs accurate widths now for slider/dropdown sizing.
     -- Compute initial scroll content width from parent geometry.
-    -- rightPanel:GetWidth() returns 0 before the first layout pass, so we
+    -- S.rightPanel:GetWidth() returns 0 before the first layout pass, so we
     -- calculate from the parent which already has valid geometry on a mode
     -- switch (Party↔Raid).
     local parentW = parent:GetWidth()
@@ -8885,13 +8900,13 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     if parentW < 100 then parentW = UIParent:GetWidth() / 2 end
     local initW = (parentW / 2) - 2 - 22  -- half split minus gap minus scrollbar
     if initW > 50 then
-        tabContentFrame:SetWidth(initW)
+        S.tabContentFrame:SetWidth(initW)
     end
 
-    SwitchTab("effects")
+    S.SwitchTab("effects")
     C_Timer.After(0, function()
-        if tabBar and tabBar:IsVisible() and tabBar:GetWidth() > 10 then
-            local tabW = (tabBar:GetWidth() - (#TAB_DEFS - 1) * TAB_GAP) / #TAB_DEFS
+        if S.tabBar and S.tabBar:IsVisible() and S.tabBar:GetWidth() > 10 then
+            local tabW = (S.tabBar:GetWidth() - (#TAB_DEFS - 1) * TAB_GAP) / #TAB_DEFS
             for _, def in ipairs(TAB_DEFS) do
                 if tabButtons[def.key] then
                     tabButtons[def.key]:SetWidth(tabW)
@@ -8908,41 +8923,41 @@ end
 -- ============================================================
 
 function DF:AuraDesigner_RefreshPage()
-    if not mainFrame then return end
+    if not S.mainFrame then return end
 
     -- Account for editing banner offset (50px) when editing an auto layout
     local editingOffset = 0
     if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
         editingOffset = 50
     end
-    mainFrame:ClearAllPoints()
-    mainFrame:SetPoint("TOPLEFT", mainFrame:GetParent(), "TOPLEFT", 0, -editingOffset)
-    mainFrame:SetPoint("BOTTOMRIGHT", mainFrame:GetParent(), "BOTTOMRIGHT", 0, 0)
+    S.mainFrame:ClearAllPoints()
+    S.mainFrame:SetPoint("TOPLEFT", S.mainFrame:GetParent(), "TOPLEFT", 0, -editingOffset)
+    S.mainFrame:SetPoint("BOTTOMRIGHT", S.mainFrame:GetParent(), "BOTTOMRIGHT", 0, 0)
 
     -- Check if spec changed
     local currentSpec = ResolveSpec()
-    if currentSpec ~= selectedSpec then
-        selectedSpec = currentSpec
+    if currentSpec ~= S.selectedSpec then
+        S.selectedSpec = currentSpec
     end
 
     -- Subtle class-color hint on the preview border, dimmed to 0.5 alpha so it
     -- stays as quiet as the Text Designer's neutral border (just tinted to the
     -- spec). Was previously full alpha = the harsh "white line" (white for Priest).
-    if framePreview then
-        local resolvedSpec = currentSpec or selectedSpec
+    if S.framePreview then
+        local resolvedSpec = currentSpec or S.selectedSpec
         local specInfoEntry = resolvedSpec and DF.AuraDesigner.SpecInfo[resolvedSpec]
         local classToken = specInfoEntry and specInfoEntry.class
         local classColor = classToken and RAID_CLASS_COLORS[classToken]
         if classColor then
-            framePreview:SetBackdropBorderColor(classColor.r, classColor.g, classColor.b, 0.5)
+            S.framePreview:SetBackdropBorderColor(classColor.r, classColor.g, classColor.b, 0.5)
         else
-            framePreview:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+            S.framePreview:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
         end
     end
 
     -- Rebuild the current tab to reflect data changes
-    if activeTab and SwitchTab then
-        SwitchTab(activeTab)
+    if S.activeTab and S.SwitchTab then
+        S.SwitchTab(S.activeTab)
     end
 
     -- Refresh frame preview
@@ -8950,30 +8965,30 @@ function DF:AuraDesigner_RefreshPage()
     RefreshPreviewEffects()
 
     -- Update enable state
-    if enableBanner then
-        enableBanner.checkbox:SetChecked(GetAuraDesignerDB().enabled)
+    if S.enableBanner then
+        S.enableBanner.checkbox:SetChecked(GetAuraDesignerDB().enabled)
     end
     -- Spec dropdown lives on the main tab strip (B2): refresh its text on
     -- My Buffs / keep the greyed "shared across specs" caption on Other Buffs.
     UpdateSpecDropdownState()
 
     -- Show/hide disabled overlay on the split container
-    if mainFrame.splitContainer then
+    if S.mainFrame.splitContainer then
         local adEnabled = GetAuraDesignerDB().enabled
         if not adEnabled then
-            if not mainFrame.disabledOverlay then
-                -- Shared with the Text Designer and Raid Auto Layouts; this page
+            if not S.mainFrame.disabledOverlay then
+                -- Shared with the Text Designer and Raid Auto Layouts; this S.page
                 -- only owns the extent (the whole split container) and the label.
-                local overlay = GUI:CreateDisabledOverlay(mainFrame.splitContainer, {
+                local overlay = GUI:CreateDisabledOverlay(S.mainFrame.splitContainer, {
                     label = L["Aura Designer is disabled"],
                 })
                 overlay:SetAllPoints()
-                mainFrame.disabledOverlay = overlay
+                S.mainFrame.disabledOverlay = overlay
             end
-            mainFrame.disabledOverlay:Show()
+            S.mainFrame.disabledOverlay:Show()
         else
-            if mainFrame.disabledOverlay then
-                mainFrame.disabledOverlay:Hide()
+            if S.mainFrame.disabledOverlay then
+                S.mainFrame.disabledOverlay:Hide()
             end
         end
     end
@@ -8987,7 +9002,7 @@ function DF:AuraDesigner_RefreshPage()
     -- 12.1: the native factory buff row DERIVES its Aura-Designer dedup set from the AD
     -- config at build time. Indicator add/remove (and other config mutations) funnel
     -- through this refresh but do NOT otherwise re-drive live frames, so poke the buff
-    -- row here — mirror the aura-blacklist page (InvalidateAuraLayout -> RefreshFactoryRows).
+    -- row here — mirror the aura-blacklist S.page (InvalidateAuraLayout -> RefreshFactoryRows).
     -- DriveBuffFactory rebuilds only when the excluded set actually moved (sig-gated), so a
     -- navigation-only refresh is a cheap no-op. Factory-gated so the pre-12.1 path is untouched.
     if DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported()
