@@ -77,11 +77,11 @@ GUI\IconLib.lua
 GUI\GUI.lua
 GUI\Widgets.lua
 GUI\DFFonts.lua
+# Loads DandersFrames_Options on demand and owns the DF:ToggleGUI stub. The
+# settings panel, both designers, the click-casting UI, test mode and the debug
+# tools all live in that companion now.
+GUI\LoadOptions.lua
 Features\Search.lua
-# Settings pages. DF:SetupGUIPages was one 9,673-line function; it is now a
-# chain -- Options.lua calls part 2 at its end, part 2 calls part 3, and so on.
-# Order is load-bearing: a later part must be defined before the earlier one
-# runs, and all five must load before anything opens the panel.
 
 # Popup System (alert / confirm / input dialogs)
 GUI\Popup.lua
