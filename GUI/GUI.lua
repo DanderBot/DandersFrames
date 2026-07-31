@@ -3,6 +3,18 @@ local GUI = {}
 DF.GUI = GUI
 local L = DF.L
 
+-- Mutable module state.
+-- These four were file-scope locals, and two of them are read and written more
+-- than 6,000 lines apart. That is harmless in one file and silently broken the
+-- moment the file is split: a `local` re-declared in the second half becomes an
+-- independent variable, so the two halves stop sharing state with no error.
+-- Holding them on one table keeps a future split honest -- each part reads the
+-- same table via `local S = GUI._state`. Read-only aliases (the C_* colours, L,
+-- GUI itself) do not need this: re-declaring those yields the same value.
+-- Private by convention -- nothing outside this file should touch GUI._state.
+local S = {}
+GUI._state = S
+
 -- =========================================================================
 -- MODERN UI CONSTANTS & STYLING (Matching Original v2.3.8)
 -- =========================================================================
@@ -394,14 +406,14 @@ function GUI:UpdateTabAvailability()
 end
 
 -- Track currently open dropdown menu (only one can be open at a time)
-local currentOpenDropdown = nil
+S.currentOpenDropdown = nil
 
 -- Close any currently open dropdown
 local function CloseOpenDropdown()
-    if currentOpenDropdown and currentOpenDropdown:IsShown() then
-        currentOpenDropdown:Hide()
+    if S.currentOpenDropdown and S.currentOpenDropdown:IsShown() then
+        S.currentOpenDropdown:Hide()
     end
-    currentOpenDropdown = nil
+    S.currentOpenDropdown = nil
 end
 
 -- Helper to get current theme color
@@ -874,7 +886,6 @@ end
 -- mouse), then a live trace of every change in focus and in each row's plate
 -- alpha, stamped with the frame number. (a) and (b) show up as repeated
 -- transitions within a single crossing; (c) as a run of frames with nothing lit.
-local navTrace
 function GUI.NavProbe(seconds)
     local container = GUI.tabContainer
     if not (container and container:IsVisible()) then
@@ -947,14 +958,14 @@ function GUI.NavProbe(seconds)
     print(("  %d overlapping rows, %d dead bands between rows"):format(overlaps, bands))
 
     -- Live trace.
-    navTrace = navTrace or CreateFrame("Frame")
-    navTrace:SetScript("OnUpdate", nil)
+    S.navTrace = S.navTrace or CreateFrame("Frame")
+    S.navTrace:SetScript("OnUpdate", nil)
     local dur = tonumber(seconds) or 8
     local elapsed, frames, events = 0, 0, 0
     local lastLit, lastFocus = nil, nil
     print(("  |cff00ff00tracing for %ds|r -- sweep the cursor across the nav list now."):format(dur))
 
-    navTrace:SetScript("OnUpdate", function(_, dt)
+    S.navTrace:SetScript("OnUpdate", function(_, dt)
         elapsed = elapsed + dt
         frames = frames + 1
 
@@ -1002,7 +1013,7 @@ function GUI.NavProbe(seconds)
         end
 
         if elapsed >= dur then
-            navTrace:SetScript("OnUpdate", nil)
+            S.navTrace:SetScript("OnUpdate", nil)
             print(("  |cff00ff00navprobe done|r -- %d frames, %d state changes%s"):format(
                 frames, events, events > 120 and " (first 120 shown)" or ""))
             print("  |cff808080Read: one enter + one leave per row = clean, look elsewhere. Repeated flips inside one crossing = focus thrash. TWO LIT = a stale plate. lit=(none) with focus on a row = the handler did not fire.|r")
@@ -2568,26 +2579,25 @@ end
 -- probe (no per-call FontString churn); measured fresh so a font-family change is
 -- always reflected. Returns the EXACT fractional advance (no pixel rounding) so the
 -- flow spaces identically to native wrapped text — see the return note below.
-local _flowProbe
 local function FlowSpaceWidth(tmpl, sizePx)
     tmpl = tmpl or "DFFontHighlightSmall"
-    if not _flowProbe then
-        _flowProbe = UIParent:CreateFontString(nil, "OVERLAY")
+    if not S._flowProbe then
+        S._flowProbe = UIParent:CreateFontString(nil, "OVERLAY")
     end
     if sizePx and DF.SafeSetFont then
         local fontName = (DF.db and DF.db.settingsFont) or "DF Roboto SemiBold"
-        DF:SafeSetFont(_flowProbe, fontName, sizePx, "")
+        DF:SafeSetFont(S._flowProbe, fontName, sizePx, "")
     else
-        _flowProbe:SetFontObject(_G[tmpl] or _G.GameFontHighlight)
+        S._flowProbe:SetFontObject(_G[tmpl] or _G.GameFontHighlight)
     end
     -- Average over N spaces: each GetStringWidth is pixel-rounded, so a single-space
     -- "m m" - "mm" diff can inflate the space advance by ~1px (which read as too-loose
     -- word gaps next to the native-wrapped notes). Isolating N spaces and dividing
     -- shrinks that rounding error to ~1/N of a pixel, so the flow spaces like real text.
     local N = 12
-    _flowProbe:SetText("m" .. string.rep(" m", N)); local wA = _flowProbe:GetStringWidth()
-    _flowProbe:SetText("m" .. string.rep("m", N));  local wB = _flowProbe:GetStringWidth()
-    _flowProbe:SetText("")
+    S._flowProbe:SetText("m" .. string.rep(" m", N)); local wA = S._flowProbe:GetStringWidth()
+    S._flowProbe:SetText("m" .. string.rep("m", N));  local wB = S._flowProbe:GetStringWidth()
+    S._flowProbe:SetText("")
     local sp = (wA - wB) / N
     if not sp or sp <= 0 then sp = 3 end
     -- Return the EXACT fractional advance, NOT math.floor(sp+0.5). Rounding a small
@@ -4817,14 +4827,14 @@ end
 -- to widget containers when editing an auto profile
 
 -- Debug flag - when true, shows all reset buttons regardless of override state
-local overrideDebugMode = false
+S.overrideDebugMode = false
 
 -- Track all widgets with override indicators for refresh
 local overrideWidgets = {}
 
 -- Function to check if debug mode is active (exposed for other files)
 local function IsOverrideDebugMode()
-    return overrideDebugMode
+    return S.overrideDebugMode
 end
 GUI.IsOverrideDebugMode = IsOverrideDebugMode
 
@@ -4854,12 +4864,12 @@ end
 -- NOT a dump, despite what the old description ("Auto layout override table
 -- dump") claimed — it prints no table. It forces every reset button / override
 -- marker visible regardless of override state, so you can see which controls
--- carry the machinery at all. overrideDebugMode is live: read by
+-- carry the machinery at all. S.overrideDebugMode is live: read by
 -- GUI.IsOverrideDebugMode and three marker call sites.
 DF:RegisterDebugSlash("DFOVERRIDEDEBUG", "Force-show every override marker and reset button", true, "/dfoverridedebug")
 SlashCmdList["DFOVERRIDEDEBUG"] = function()
-    overrideDebugMode = not overrideDebugMode
-    DF:Say("Override debug mode " .. (overrideDebugMode and "ENABLED" or "DISABLED"))
+    S.overrideDebugMode = not S.overrideDebugMode
+    DF:Say("Override debug mode " .. (S.overrideDebugMode and "ENABLED" or "DISABLED"))
     -- Refresh all override indicators
     RefreshAllOverrideIndicators()
     -- Also update position panel if open
@@ -5044,7 +5054,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
     -- Function to update override indicators
     container.UpdateOverrideIndicators = function(self, currentValue)
         -- Debug mode shows all buttons
-        if overrideDebugMode then
+        if S.overrideDebugMode then
             self.overrideStar:Show()
             self.overrideResetBtn:Show()
             self.overrideGlobalText:SetText("(debug)")
@@ -5220,7 +5230,7 @@ local function AddOrderListOverrideIndicators(container, dbKey, onReset)
     -- Update function
     container.UpdateOverrideIndicators = function(self, currentValue)
         -- Debug mode
-        if overrideDebugMode then
+        if S.overrideDebugMode then
             self.overrideStar:Show()
             self.overrideResetBtn:Show()
             self.overrideModifiedText:SetText("Modified (debug)")
@@ -7002,8 +7012,8 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
 
     -- Clear tracking when hidden
     menuFrame:SetScript("OnHide", function()
-        if currentOpenDropdown == menuFrame then
-            currentOpenDropdown = nil
+        if S.currentOpenDropdown == menuFrame then
+            S.currentOpenDropdown = nil
         end
         if searchBox then
             searchBox:SetText("")
@@ -7234,7 +7244,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     btn:SetScript("OnClick", function(self)
         if menuFrame:IsShown() then
             menuFrame:Hide()
-            currentOpenDropdown = nil
+            S.currentOpenDropdown = nil
         else
             -- Close any other open dropdown first
             CloseOpenDropdown()
@@ -7269,7 +7279,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
                 menuFrame:SetWidth(math.max(btn:GetWidth() or 0, menuContentW + 24))
             end
             menuFrame:Show()
-            currentOpenDropdown = menuFrame
+            S.currentOpenDropdown = menuFrame
             if searchBox then searchBox:SetFocus() end
         end
     end)
@@ -8496,8 +8506,8 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
         menuFrame:Hide()
 
         menuFrame:SetScript("OnHide", function()
-            if currentOpenDropdown == menuFrame then
-                currentOpenDropdown = nil
+            if S.currentOpenDropdown == menuFrame then
+                S.currentOpenDropdown = nil
             end
         end)
 
@@ -8568,7 +8578,7 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
         btn:SetScript("OnClick", function(self)
             if menuFrame:IsShown() then
                 menuFrame:Hide()
-                currentOpenDropdown = nil
+                S.currentOpenDropdown = nil
             else
                 CloseOpenDropdown()
                 -- Highlight current selection
@@ -8582,7 +8592,7 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
                     end
                 end
                 menuFrame:Show()
-                currentOpenDropdown = menuFrame
+                S.currentOpenDropdown = menuFrame
             end
         end)
 
@@ -8777,8 +8787,8 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     
     -- Clear tracking when hidden
     menuFrame:SetScript("OnHide", function()
-        if currentOpenDropdown == menuFrame then
-            currentOpenDropdown = nil
+        if S.currentOpenDropdown == menuFrame then
+            S.currentOpenDropdown = nil
         end
         searchBox:SetText("")
         searchBox:ClearFocus()
@@ -8919,14 +8929,14 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     btn:SetScript("OnClick", function(self)
         if menuFrame:IsShown() then
             menuFrame:Hide()
-            currentOpenDropdown = nil
+            S.currentOpenDropdown = nil
         else
             -- Close any other open dropdown first
             CloseOpenDropdown()
             -- Rebuild menu with current SharedMedia textures
             RebuildMenu()
             menuFrame:Show()
-            currentOpenDropdown = menuFrame
+            S.currentOpenDropdown = menuFrame
             -- Focus search box
             searchBox:SetFocus()
         end
@@ -9087,8 +9097,8 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     
     -- Clear tracking when hidden
     menuFrame:SetScript("OnHide", function()
-        if currentOpenDropdown == menuFrame then
-            currentOpenDropdown = nil
+        if S.currentOpenDropdown == menuFrame then
+            S.currentOpenDropdown = nil
         end
         searchBox:SetText("")
         searchBox:ClearFocus()
@@ -9237,14 +9247,14 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     btn:SetScript("OnClick", function(self)
         if menuFrame:IsShown() then
             menuFrame:Hide()
-            currentOpenDropdown = nil
+            S.currentOpenDropdown = nil
         else
             -- Close any other open dropdown first
             CloseOpenDropdown()
             -- Rebuild menu with current SharedMedia fonts
             RebuildMenu()
             menuFrame:Show()
-            currentOpenDropdown = menuFrame
+            S.currentOpenDropdown = menuFrame
             -- Focus search box
             searchBox:SetFocus()
         end
@@ -9369,8 +9379,8 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
     end)
 
     menuFrame:SetScript("OnHide", function()
-        if currentOpenDropdown == menuFrame then
-            currentOpenDropdown = nil
+        if S.currentOpenDropdown == menuFrame then
+            S.currentOpenDropdown = nil
         end
         searchBox:SetText("")
         searchBox:ClearFocus()
@@ -9478,12 +9488,12 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
     btn:SetScript("OnClick", function(self)
         if menuFrame:IsShown() then
             menuFrame:Hide()
-            currentOpenDropdown = nil
+            S.currentOpenDropdown = nil
         else
             CloseOpenDropdown()
             RebuildMenu()
             menuFrame:Show()
-            currentOpenDropdown = menuFrame
+            S.currentOpenDropdown = menuFrame
             searchBox:SetFocus()
         end
     end)
@@ -11656,7 +11666,7 @@ function DF:CreateGUI()
     -- Function to update position override indicator
     local function UpdatePositionOverrideIndicator()
         -- Debug mode shows indicator
-        if overrideDebugMode then
+        if S.overrideDebugMode then
             positionOverrideStar:Show()
             return
         end
