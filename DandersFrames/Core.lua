@@ -4942,6 +4942,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- "on"/"off" are the logging toggle, not commands named on/off.
             if dbgWord and dbgWord:lower() ~= "on" and dbgWord:lower() ~= "off" then
                 local dbgKey = DF.DebugSlashBySub[dbgWord:lower()]
+                -- Several debug tools live in the companion and register their
+                -- slashes only when it loads. If the word is unknown and the
+                -- companion is not in yet, load it and retry once -- otherwise
+                -- the first use of /df debug memtest fell through to the final
+                -- else and opened the settings window instead of the tool.
+                if not dbgKey and not DF._optionsAddonLoaded
+                        and DF.EnsureOptionsLoaded and DF:EnsureOptionsLoaded() then
+                    dbgKey = DF.DebugSlashBySub[dbgWord:lower()]
+                end
                 if dbgKey and SlashCmdList[dbgKey] then
                     SlashCmdList[dbgKey](dbgRest or "")
                 else
@@ -5216,6 +5225,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- is generated and cannot drift instead of duplicating a subset
                 -- of it by hand.
             elseif msg == "test" then
+                -- The test panel lives in the load-on-demand companion.
+                -- Deliberate user command -> load it; the old nil-guard made
+                -- /df test a silent no-op until the settings panel was opened.
+                if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
                 if DF.ToggleTestPanel then DF:ToggleTestPanel() end
             elseif msg == "hide" then
                 if DF.HideTestFrames then DF:HideTestFrames() end
@@ -5520,6 +5533,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- can find the current ID (for re-hardcoding after reshuffles).
                 -- Results also land in the SavedVariables root (flushed by the
                 -- next /reload) so they can be read from disk — no chat copy.
+                -- DF.TestData lives in the companion; load it or bail.
+                if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
+                if not DF.TestData then DF:Err("test data unavailable") return end
                 local dump = {}
                 local o = DF:Out("Test IDs", "spell-ID audit")
                 for _, poolName in ipairs({ "buffs", "debuffs" }) do

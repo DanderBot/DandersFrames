@@ -353,6 +353,12 @@ function CC:SetActiveProfile(profileName)
         if self.hasConflictingAddons and self.conflictingAddons then
             C_Timer.After(0.1, function()
                 if CC.db.enabled and CC.hasConflictingAddons then
+                    -- ☠ Popup lives in the companion; profile switches are
+                    -- reachable without the panel (slash, permanent movers,
+                    -- loadout auto-switch). Modal warning -> load, don't skip.
+                    if not CC.ShowClickCastConflictPopup then
+                        if not (DF.EnsureOptionsLoaded and DF:EnsureOptionsLoaded()) then return end
+                    end
                     CC:ShowClickCastConflictPopup(CC.conflictingAddons, CC.enableCb)
                 end
             end)

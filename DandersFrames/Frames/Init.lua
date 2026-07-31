@@ -868,7 +868,15 @@ function DF:UnlockRaidFrames()
         DF:Err("Cannot unlock raid frames during combat.")
         return
     end
-    
+
+    -- Unlocking shows raid test frames, which live in the load-on-demand
+    -- companion. Deliberate user action (/df raidunlock, mover button), so
+    -- load it -- without this, ShowRaidTestFrames was a nil call and the
+    -- unlock aborted halfway: grid shown, movers never set up.
+    if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then
+        return
+    end
+
     if not DF.raidContainer then
         DF:Err("Cannot unlock - raid container doesn't exist!")
         return

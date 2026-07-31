@@ -41,6 +41,7 @@ local function noop() end
 if not DF.GetTestUnitData        then DF.GetTestUnitData        = function() return nil end end
 
 if not DF.ShowTestFrames         then DF.ShowTestFrames         = noop end
+if not DF.ShowRaidTestFrames     then DF.ShowRaidTestFrames     = noop end
 if not DF.HideTestFrames         then DF.HideTestFrames         = noop end
 if not DF.RefreshTestFrames      then DF.RefreshTestFrames      = noop end
 if not DF.UpdateTestFrame        then DF.UpdateTestFrame        = noop end

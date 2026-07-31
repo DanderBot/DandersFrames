@@ -66,7 +66,7 @@ function CC:RegisterEvents()
                     CC:ApplyBindings()
                     -- Also refresh UI in case talents changed
                     CC:DeferAfter("uiRefresh", 0.3, function()
-                        CC:RefreshClickCastingUI()
+                        CC:RefreshUIIfLoaded()
                     end)
                 end)
             else
@@ -78,14 +78,16 @@ function CC:RegisterEvents()
             if not InCombatLockdown() then
                 CC:ApplyBindings()
                 CC:DeferAfter("uiRefresh", 0.2, function()
-                    CC:RefreshClickCastingUI()
+                    CC:RefreshUIIfLoaded()
                 end)
             else
                 CC:Defer("bindingRefresh")
             end
         elseif event == "PLAYER_EQUIPMENT_CHANGED" then
-            -- Equipment changed - refresh items tab if visible
-            if CC.activeTab == "items" then
+            -- Equipment changed - refresh items tab if visible. activeTab is only
+            -- ever set by the companion, but guard the method explicitly rather
+            -- than lean on that invariant.
+            if CC.activeTab == "items" and CC.RefreshSpellGrid then
                 CC:RefreshSpellGrid()
             end
         elseif event == "PLAYER_ENTERING_WORLD" then
@@ -360,7 +362,7 @@ function CC:DrainDeferred(onlyJob)
     -- Refresh UI if needed (after a short delay for everything to settle)
     if needsUIRefresh then
         self:DeferAfter("uiRefresh", 0.2, function()
-            CC:RefreshClickCastingUI()
+            CC:RefreshUIIfLoaded()
         end)
     end
 end
@@ -376,6 +378,18 @@ end
 --
 -- DeferAfter keys each timer: scheduling the same key again cancels the
 -- pending one, so there is always at most one run in flight per key.
+
+-- ☠ The click-casting UI lives in the load-on-demand companion; this file is
+-- resident. Every "refresh the panel" reaction to a talent/spec/level event
+-- must go through this guard: with the panel never opened the method is nil,
+-- and DeferAfter runs its callback raw inside a C_Timer, so an unguarded call
+-- is a Lua error on every talent swap. A refresh with no UI is correctly a
+-- no-op -- the panel builds itself from current state when it loads.
+function CC:RefreshUIIfLoaded()
+    if self.RefreshClickCastingUI then
+        self:RefreshClickCastingUI()
+    end
+end
 
 function CC:DeferAfter(key, delay, fn)
     self.timers = self.timers or {}
@@ -412,7 +426,7 @@ function CC:OnSpecChanged()
         self:ApplyBindings()
         -- Refresh UI after a short delay to ensure spell data is ready
         self:DeferAfter("uiRefresh", 0.3, function()
-            CC:RefreshClickCastingUI()
+            CC:RefreshUIIfLoaded()
         end)
     else
         self:Defer("loadoutCheck")

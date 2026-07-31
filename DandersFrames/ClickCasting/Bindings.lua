@@ -3787,11 +3787,18 @@ SlashCmdList["DFCC"] = function(msg)
             -- user was never shown. Fall through to "unknown" rather than
             -- reporting "dev only": a hidden command must not advertise itself.
             if e[1] == word and (not e[3] or dev) then
+                -- The handlers register when the companion loads. A deliberate
+                -- command -> load it, then retry the lookup. The old branch
+                -- errored with "click-casting module not loaded", which was
+                -- false (only the UI wasn't) and never self-healed.
                 local handler = SlashCmdList[e[2]]
+                if not handler and DF.EnsureOptionsLoaded and DF:EnsureOptionsLoaded() then
+                    handler = SlashCmdList[e[2]]
+                end
                 if handler then
                     handler(rest or "")
                 else
-                    DF:Err("click-casting module not loaded")
+                    DF:Err("click-casting UI unavailable")
                 end
                 return
             end

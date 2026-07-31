@@ -71,3 +71,24 @@ toggleStub = function()
     return DF:ToggleGUI()
 end
 DF.ToggleGUI = toggleStub
+
+-- ============================================================
+-- COLOUR-PICKER GLOBAL OVERRIDE BOOTSTRAP
+-- ============================================================
+-- The setting promises DF's colour picker replaces Blizzard's EVERYWHERE --
+-- including pickers opened by other addons and the stock UI. The hook that
+-- delivers it installs at companion load, so for a user who enabled it the
+-- feature silently reverted to the stock picker every session until they
+-- opened /df once. If the setting is on, load the companion at login: only
+-- users who opted into the override pay, and what they pay for is the
+-- feature actually working.
+local pickerBoot = CreateFrame("Frame")
+pickerBoot:RegisterEvent("PLAYER_ENTERING_WORLD")
+pickerBoot:SetScript("OnEvent", function(self, _, isInitialLogin, isReloadingUi)
+    if not (isInitialLogin or isReloadingUi) then return end
+    self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+    local db = DF.db and DF.db.party
+    if db and db.colorPickerGlobalOverride then
+        DF:EnsureOptionsLoaded()
+    end
+end)

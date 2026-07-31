@@ -404,7 +404,12 @@ local function RefreshPermMoverActions()
     UNLOCK_FRAMES     = { label = L["Unlock Frames"],              combatSafe = false, fn = function(mode)
         if mode == "raid" then DF:UnlockRaidFrames() else DF:UnlockFrames() end
     end },
-    TOGGLE_TEST       = { label = L["Toggle Test Mode"],           combatSafe = false, fn = function() if DF.ToggleTestMode then DF:ToggleTestMode() end end },
+    TOGGLE_TEST       = { label = L["Toggle Test Mode"],           combatSafe = false, fn = function()
+        -- Test mode lives in the companion; a mover button is a deliberate
+        -- action, so load it rather than silently do nothing.
+        if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
+        if DF.ToggleTestMode then DF:ToggleTestMode() end
+    end },
     SWITCH_PROFILE    = { label = L["Quick Switch Profile"],       combatSafe = false, fn = function(mode, handle) DF:ShowPermanentMoverProfilePopup(handle) end },
     SWITCH_CC_PROFILE = { label = L["Quick Switch CC Profile"],    combatSafe = false, fn = function(mode, handle) DF:ShowPermanentMoverCCProfilePopup(handle) end },
     CYCLE_PROFILE     = { label = L["Cycle Next Profile"],         combatSafe = false, fn = function() DF:CycleNextProfile() end },
@@ -2340,6 +2345,14 @@ end
 function DF:UnlockFrames()
     if InCombatLockdown() then
         DF:Err(L["Cannot unlock frames during combat."])
+        return
+    end
+
+    -- Unlocking shows test frames, and test mode lives in the load-on-demand
+    -- companion. This is a deliberate user action (/df unlock, mover button),
+    -- so load the companion rather than let the shim no-op leave the movers up
+    -- with no frames in them. Failure already reported by Ensure.
+    if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then
         return
     end
 

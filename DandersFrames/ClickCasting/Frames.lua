@@ -348,6 +348,14 @@ function CC:InitializeSecureFrames()
         -- Delay slightly to ensure UI is ready
         C_Timer.After(1.5, function()
             if CC.db.enabled and CC.hasConflictingAddons then
+                -- ☠ The popup lives in the load-on-demand companion; this fires at
+                -- login before anyone has opened the panel. It is a modal warning
+                -- the user must act on (Clique/Clicked conflict), so load the
+                -- companion for it rather than silently skip -- this only costs
+                -- users who actually have a conflicting addon installed.
+                if not CC.ShowClickCastConflictPopup then
+                    if not (DF.EnsureOptionsLoaded and DF:EnsureOptionsLoaded()) then return end
+                end
                 CC:ShowClickCastConflictPopup(CC.conflictingAddons, CC.enableCb)
             end
         end)
