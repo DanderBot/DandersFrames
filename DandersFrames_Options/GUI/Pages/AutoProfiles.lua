@@ -83,8 +83,13 @@ end
 -- registered refresh fn so Core rebuilds them after the overlay.
 local CONTENT_TYPES = {}
 
+-- ☠ Rebuilds IN PLACE. It used to reassign CONTENT_TYPES, which was harmless
+-- while everything lived in one file. It is not now: the settings page reads
+-- this table from _priv, and a locale refresh reassigning the engine's local
+-- would leave the page holding the previous table forever -- stale labels, no
+-- error. Keeping the table's identity stable makes any reference safe.
 local function RefreshContentTypes()
-    CONTENT_TYPES = {
+    local rebuilt = {
         {
             key = "instanced",
             title = L["Instanced / PvP"],
@@ -110,6 +115,10 @@ local function RefreshContentTypes()
             isFixed = false,
         },
     }
+    wipe(CONTENT_TYPES)
+    for i = 1, #rebuilt do
+        CONTENT_TYPES[i] = rebuilt[i]
+    end
 end
 
 RefreshContentTypes()
