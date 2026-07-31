@@ -30,6 +30,9 @@
 #   GUI/Pages/Options first                  (heads the page chain)
 
 # GUI parts used only by settings pages
+# Widget factories the live addon never calls, lifted out of the resident
+# GUI.lua / Widgets.lua. Loads first: the parts below build pages with them.
+GUI\SettingsWidgets.lua
 GUI\Sections.lua
 GUI\Controls.lua
 GUI\Panel.lua
