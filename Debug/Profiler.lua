@@ -262,8 +262,12 @@ hooksecurefunc(frameMeta, "SetScript", function(frame, scriptType, handler)
         ResolveFrameLabel(frame)
         -- If profiler is currently recording, wrap the new handler
         -- right now so this newly added OnUpdate is visible from its
-        -- first frame.
-        if Profiler.active and WrapFrameOnUpdate then
+        -- first frame. ⚠ Except our own window: opening the profiler UI
+        -- mid-recording installs its refresh handler through this hook, and
+        -- Profiler:Start's exclusion list only covers frames that already
+        -- existed. Both doors need the same guard.
+        if Profiler.active and WrapFrameOnUpdate
+            and frame ~= tickFrame and frame ~= profilerFrame then
             WrapFrameOnUpdate(frame, handler)
         end
     else
@@ -607,9 +611,17 @@ end
 -- ones, which is precisely backwards from what you want when ranking.
 --
 -- So measure it: run the identical pattern around a function that does
--- nothing, and whatever it reports IS the overhead. Take the best of several
--- batches rather than the mean — a batch that caught a GC step or a stray
--- frame is contaminated upward, and the floor is the honest figure.
+-- nothing, and whatever it reports IS the overhead.
+--
+-- ⚠ THE ESTIMATOR IS THE MINIMUM OF BATCH MEANS, and the batches are kept
+-- SHORT on purpose. Averaging within a batch is what defeats timer
+-- quantisation — individual samples of a do-nothing call frequently read 0,
+-- so a minimum over raw samples would report ~0 and under-subtract, which is
+-- worse than not correcting at all. Taking the minimum ACROSS batches is what
+-- discards contamination: a batch that caught a GC step reads high, and only
+-- the cleanest batch is kept. Long batches break that, because with enough
+-- iterations every batch catches a GC step and the "clean" floor is a floor
+-- of dirty numbers. Hence many short batches rather than a few long ones.
 --
 -- ⚠ KEEP THIS LOOP SHAPED LIKE THE REAL WRAPPER. It mimics the call form
 -- deliberately: two args plus varargs in, five returns captured out. Change
@@ -623,8 +635,11 @@ end
 -- separate it from real work. Deeply-nested rows therefore keep a small
 -- residual. It is bounded by (wrapped calls beneath) x (a fraction of a
 -- microsecond) and is the reason the legend says "corrected", not "exact".
-local CAL_BATCHES = 5
-local CAL_ITERS = 500
+-- 25 x 80 = the same 2000 samples as the original 5 x 500, redistributed so a
+-- GC-free batch is likely to exist. See the estimator note above before changing
+-- these: raising ITERS while lowering BATCHES quietly re-breaks the correction.
+local CAL_BATCHES = 25
+local CAL_ITERS = 80
 
 local function CalibrateOverhead()
     local noop = function() end
@@ -672,18 +687,13 @@ local function Corrected(totalMs, selfMs, ownCalls, deepCalls)
     return t, s
 end
 
--- Denominator for the % column. `useSelf` picks which of the two is a
--- legitimate sum for the view being shown — see the note in GetSortedResults.
-local function SumCorrected(source, useSelf)
-    local sum = 0
-    for _, d in pairs(source) do
-        if d.calls > 0 then
-            local t, s = Corrected(d.total, d.selfMs or 0, d.calls, d.descN)
-            sum = sum + (useSelf and s or t)
-        end
-    end
-    return sum
-end
+-- (Removed) SumCorrected. It walked the raw buckets and corrected each one, while
+-- GetSortedResults aggregates a function's per-frame-type buckets FIRST and corrects
+-- the total once. Those are not the same number: Corrected clamps at zero, so
+-- correcting five buckets independently and adding them loses the negative headroom
+-- that a single combined correction keeps. The status line and the % denominator
+-- could therefore disagree. GetGrandTotalMs now asks GetSortedResults instead, so
+-- there is one aggregation and they cannot drift apart.
 
 -- ============================================================
 -- CORE PROFILING
@@ -976,8 +986,12 @@ function Profiler:Start()
     local updatesWrapped = 0
     local toRemove
     for frame, handler in pairs(onUpdateRegistry) do
-        if frame == tickFrame then
-            -- don't profile our own tick driver
+        if frame == tickFrame or frame == profilerFrame then
+            -- Don't profile our own machinery. tickFrame drives the spike counter;
+            -- profilerFrame is this window's own half-second refresh, and it is named
+            -- "DFProfilerFrame" so IsDFFrame matches it like any other DF frame. Left
+            -- in, the profiler's own UI showed up in its own OnUpdate table — and it
+            -- got busier the longer you watched, because the table it renders grows.
         elseif not IsDFFrame(frame) then
             -- Stale non-DF entry (recorded pre-filter). Drop it.
             toRemove = toRemove or {}
@@ -1148,8 +1162,13 @@ local function ViewUsesSelf(mode)
     return mode == "functions"
 end
 
+-- ⚠ Deliberately delegates rather than summing the buckets itself. A second
+-- aggregation is a second chance to disagree with the table the user is reading,
+-- and the two DID disagree. The extra sort costs nothing worth counting: this is a
+-- debug window refreshing twice a second, and UpdateUI calls GetSortedResults anyway.
 function Profiler:GetGrandTotalMs()
-    return SumCorrected(GetActiveSource(self), ViewUsesSelf(self.viewMode))
+    local _, grand = self:GetSortedResults()
+    return grand or 0
 end
 
 -- Display name suffixes for frame types
@@ -2122,7 +2141,7 @@ function Profiler:CreateUI()
     -- Total and Self answer different questions and only one of them adds up.
     infoLabel:SetText(
         "Total = inclusive (counts nested profiled calls)  |  Self = excludes them — this is what % ranks, and % sums to 100\n" ..
-        "Peak/tk = max calls in one frame  |  Bytes = avg alloc per call  |  measured wrapper overhead subtracted from all times")
+        "Peak/tk = max calls in one frame  |  Bytes = avg alloc per call  |  wrapper overhead subtracted; a row cheaper than it reads 0.00, not below zero")
 
     -- Live refresh via OnUpdate
     f.elapsed = 0

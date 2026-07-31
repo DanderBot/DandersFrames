@@ -130,9 +130,13 @@ end
 -- form to fall back to, so a bind is the only way to reach it. That is the rule
 -- below, not a hardcoded name — add another such alias and it keeps working.
 --
--- "/df <name>" (no "debug") still answers for everything, unlisted, so macros
--- and muscle memory survive. It is deliberately undocumented: the same "one
--- command, one list" reasoning that pulled pixelcheck/navprobe out of /df help.
+-- ☠ "/df <name>" (no "debug") does NOT answer for diagnostics. This comment used to
+-- claim it did, "unlisted, so macros and muscle memory survive" — that was the intent
+-- at the time, and THE GATE further down (search: "☠ THE GATE") was written later and
+-- deliberately closed it: anything that is not an everyday command and did not arrive
+-- via "/df debug" opens the settings window instead. The gate is the behaviour that
+-- ships; this note is kept as a warning because the changelog and CLAUDE.md both
+-- inherited the old claim and had to be corrected. A diagnostic is "/df debug <name>".
 --
 -- A derived name that collides with a hand-written branch in the /df debug dispatcher
 -- loses: the dispatcher is checked first and the registry is the fallback. The
@@ -262,7 +266,16 @@ DF.OUT = {
     CMD     = "|cffeda55f",   -- something you can type
 }
 local O = DF.OUT
-local function tone(t) return O[t] or "" end
+-- ☠ CASE-INSENSITIVE ON PURPOSE. DF.OUT is keyed in caps, but roughly fifty call
+-- sites across Core, Bars, Headers, ColorPicker, AutoProfiles and TextDesigner pass
+-- "good"/"bad"/"warn" in lower case — several files mix both spellings within
+-- themselves, so it is a typo class rather than a second convention. A miss used to
+-- resolve to "", and because `status` was still truthy the Out writers appended a
+-- bare "|r" anyway: the line rendered with no colour and nothing looked broken. That
+-- silently killed the colour coding in the very commands that were rewritten to add
+-- it. Normalising here fixes every site at once; fixing them individually would only
+-- last until the next one is written.
+local function tone(t) return O[t] or (t and O[t:upper()]) or "" end
 
 local Out = {}
 Out.__index = Out
@@ -2588,7 +2601,7 @@ end
 DF.cachedContentType = nil
 DF.cachedInstanceType = nil
 
--- Debug: Force arena mode for testing (toggle with /dfarena)
+-- Debug: Force arena mode for testing (toggle with /df debug arena)
 DF.forceArenaMode = false
 
 -- Get the current content type for frame/profile switching
@@ -2705,7 +2718,12 @@ end
 
 -- ============================================================
 -- DEBUG: Force Arena Mode
--- Usage: /dfarena - Toggle arena mode for testing
+-- Usage: /df debug arena - Toggle arena mode for testing.
+-- ⚠ The "/dfarena" alias below is the REGISTRY SPELLING, not a working bind: it is
+-- /df-prefixed, so RegisterDebugSlash routes it to DebugSlashBySub["arena"] and
+-- deliberately creates no SLASH_ global (only non-/df aliases like "/rl" get one).
+-- Typing "/dfarena" does nothing. That is the intended shape — one command form —
+-- but it read as a promise, so both the comment above and CLAUDE.md claimed it worked.
 -- Requires being in a raid group to see frames
 -- ============================================================
 DF:RegisterDebugSlash("DFARENA", "Toggle arena test mode (raid group)", false, "/dfarena")
@@ -5244,10 +5262,23 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     for _, g in ipairs(DF.DEBUG_GROUP_ORDER) do
                         local rows = groups[g]
                         if rows then
-                            o:Line(L[DF.DEBUG_GROUP_NAMES[g]], "NEUTRAL")
+                            -- ☠ RAW, NOT L[...]. Both of these used to route through
+                            -- AceLocale, which put ~50 developer-only strings into the
+                            -- locale table — "container identity-gate dump", "audit
+                            -- test-pool spell IDs against this client" and the like.
+                            -- CLAUDE.md's never-localize list names exactly this class,
+                            -- and the Debug page's category descriptions on the same
+                            -- screen were already raw, so the two disagreed.
+                            --
+                            -- ⚠ Time-sensitive, which is why it is not a style nit: the
+                            -- packager's -S flag uploads English source strings to the
+                            -- portal on the next build. Once developer text is in front
+                            -- of translators for ten languages, removing it is a portal
+                            -- cleanup rather than a git revert.
+                            o:Line(DF.DEBUG_GROUP_NAMES[g], "NEUTRAL")
                             for _, r in ipairs(rows) do
                                 -- One typeable form per row, in O.CMD.
-                                o:Item(DF.OUT.CMD .. r.name .. "|r", L[r.desc])
+                                o:Item(DF.OUT.CMD .. r.name .. "|r", r.desc)
                             end
                         end
                     end

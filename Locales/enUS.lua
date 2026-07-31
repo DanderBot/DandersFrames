@@ -35,21 +35,22 @@ L["Export for"] = true
 L["Frame Layout"] = true
 L["Import for"] = true
 L["Profiles include both Party and Raid settings. Exporting and importing always works on the profile as a whole, no matter which mode tab is selected above. Use the 'Export for' and 'Import for' checkboxes in each column to choose which mode's settings are included."] = true
--- Debug-listing group headings (DF.DEBUG_GROUP_NAMES in Core.lua).
-L["Auras, dispel and the aura container"] = true
-L["Frames, layout and sorting"] = true
-L["Click-casting"] = true
-L["Settings window"] = true
-L["Profiles, spell data and exports"] = true
-L["System, API and performance"] = true
--- "Other" is the last DEBUG_GROUP_NAMES heading, but it is also a general label
--- and is already defined in the alphabetical block below — one definition serves
--- both readers.
-L["active auto-layout overrides"] = true
-L["Atlas texture browser"] = true
-L["Auto profiles test harness"] = true
+-- ☠ DEBUG-LISTING TEXT IS NOT LOCALISED, AND MUST NOT BE ADDED BACK.
+-- The `/df debug` listing used to print L[DF.DEBUG_GROUP_NAMES[g]] and L[r.desc],
+-- which made every group heading and every command description a locale KEY —
+-- around fifty developer-only strings ("container identity-gate dump", "audit
+-- test-pool spell IDs against this client"). Those call sites now print raw; see
+-- the note beside them in Core.lua.
+--
+-- Two reasons this is a rule and not a preference: CLAUDE.md's never-localize list
+-- names slash-command diagnostics explicitly, and the packager's -S flag uploads
+-- English source strings to the translation portal on the next build — once
+-- developer text is in front of translators for ten languages, taking it back is a
+-- portal cleanup rather than a git revert.
+--
+-- "Other" is deliberately NOT removed: it is also a general-purpose label with its
+-- own readers, and is defined in the alphabetical block below.
 L["clear stuck auto-layout overrides"] = true
-L["Color picker hook status / toggle"] = true
 L["console page"] = true
 L["Turns every category on except the noisy ones, which log many lines per frame during layout and sorting."] = true
 L["Enable those only while reproducing a layout or sorting bug."] = true
@@ -58,74 +59,18 @@ L["Debug logging"] = true
 L["Defensives"] = true
 L["dev build"] = true
 L["Dev tools (alpha/beta builds only)"] = true
-L["Dispel overlay state: [unit], or ids | render"] = true
-L["export category drift check"] = true
-L["command list"] = true
-L["group members running DandersFrames"] = true
-L["reset the whole profile"] = true
-L["foreign frames anchored to ours"] = true
-L["frame level / strata map"] = true
-L["identify the frame under the cursor after 2s"] = true
-L["container identity-gate dump"] = true
-L["missing-buff layout-push dump"] = true
-L["Aura Designer missing-buff trace (add 'mark')"] = true
-L["colour-by-time curve dump"] = true
-L["spell database curation drift check"] = true
-L["toggle missing-locale-key warnings"] = true
-L["report GUI elements off the device pixel grid"] = true
-L["GUI spacing probe (add 'all' or 'clear')"] = true
-L["nav menu row probe"] = true
-L["GUI width dump"] = true
-L["Text Designer mirror state"] = true
-L["open the profiler UI"] = true
-L["quick profile for N seconds"] = true
-L["toggle the test frame panel"] = true
-L["hide the test frames"] = true
-L["toggle raid debug backgrounds"] = true
-L["Flat raid debug / info / reinit"] = true
-L["Flat raid debug overlay"] = true
-L["Frame sorting diagnostics"] = true
 L["hide test frames"] = true
-L["Icon library browser"] = true
 L["list debug commands (on/off toggles debug logging)"] = true
 L["lock/unlock party frames"] = true
 L["lock/unlock raid frames"] = true
 L["open settings"] = true
 L["open the debug console page"] = true
-L["Pinned frames diagnostics"] = true
-L["Public API test / event refire"] = true
-L["Range fading diagnostics"] = true
-L["Raw spell dump"] = true
 L["reset party + raid profiles to defaults"] = true
 L["reset settings window size/position"] = true
-L["Roster / unit map dump"] = true
--- Debug-command descriptions rewritten by the console consolidation. Core.lua's
--- listing does L[r.desc], so every desc registered via RegisterDebugSlash /
--- RegisterDebugSub is a locale KEY. These 21 were reworded in the code but not
--- here, so `/df debug` printed them in English on every locale and each one fired
--- geterrorhandler() under `/df debug localewarn`. The superseded wordings are
--- pruned separately with the rest of the orphans.
-L["secure header state dump, or a /dfheaders subcommand"] = true
-L["live aura data enumeration (add a unit token)"] = true
-L["dispel overlay state: a unit token, or ids | render"] = true
-L["force the missing-buff badge to stay visible (geometry probe)"] = true
-L["font / SharedMedia availability dump"] = true
-L["rested indicator state"] = true
-L["moved to /df debug cc registration"] = true
-L["cast history"] = true
-L["clear the cast history buffer"] = true
-L["reset GUI scale, size and position"] = true
-L["moved to /df debug cc resetconflict"] = true
-L["audit test-pool spell IDs against this client"] = true
-L["lock frame movers (also: unlock, raidlock, raidunlock)"] = true
-L["Roster unit-event dispatcher self-test"] = true
-L["Click-casting diagnostics - run bare for the list"] = true
-L["Aura filter row explorer"] = true
-L["Memory test suite"] = true
-L["Aura pipeline dump — filters, groups, dedup (add a unit token)"] = true
-L["Aura duration API availability dump"] = true
-L["Trace every write to the raid container/header (until reload)"] = true
-L["Force-show every override marker and reset button"] = true
+-- (Removed) the block of debug-command descriptions that used to live here. The
+-- previous note explained that they were locale KEYS because Core.lua's listing did
+-- L[r.desc] — that is no longer true, and the whole class is now printed raw. See
+-- the ☠ note at the top of this file before adding any of them back.
 -- Test-panel raid-grey reason for the Targeted List. Replaces the old shared
 -- string, which explained the group cast-fingerprint matching that no longer exists.
 L["The Targeted List is a party-only feature, so it does nothing in raid mode."] = true
@@ -145,8 +90,6 @@ L["Need support? Join our Discord"] = true
 L["Join the DandersFrames Discord"] = true
 L["Settings to include"] = true
 L["Status Icons"] = true
-L["Secure header state dump: [cmd] for a subcommand"] = true
-L["Secure sort diagnostics"] = true
 L["show DandersFrames users in your group"] = true
 L["Support / diagnostics"] = true
 L["Support with PayPal"] = true
@@ -325,7 +268,6 @@ L["Target Unit"] = true
 L["Target on cast"] = true
 L["Target unit when click-casting"] = true
 L["Also make this unit your target when you click-cast on it. Overrides the global 'Target unit when click-casting' setting."] = true
-L["Toggle arena test mode (raid group)"] = true
 L["toggle the test mode panel"] = true
 L["When enabled, click-casting a spell on a frame also makes that unit your target. Individual bindings can override this in the binding editor."] = true
 L["When using any spell binding on a dead target,"] = true

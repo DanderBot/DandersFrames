@@ -1334,7 +1334,19 @@ end
 -- rather than riding the console category toggle. Output goes to the console
 -- under FLATRAID so it can be copied out with the rest of the trace.
 function DF:InstallFlatLayoutDebugHooks()
-    if DF.flatLayoutDebugHooksInstalled then return end
+    -- ☠ LATCH PER SURFACE, NOT ONCE FOR THE WHOLE FUNCTION.
+    -- The two blocks below each depend on a frame that may not exist yet. A single
+    -- flag set unconditionally at the end meant running this before the raid container
+    -- or flat header was created marked the tool "armed" with ZERO hooks installed —
+    -- and the early-out then fired forever, so every later attempt answered "already
+    -- armed. Reload to remove them." while tracing nothing, and the caller's "nothing
+    -- to hook" branch became unreachable.
+    --
+    -- One flag per surface fixes both halves: a surface that did not exist yet can be
+    -- picked up by a later run, and a surface already hooked is never double-hooked
+    -- (hooksecurefunc cannot be undone, so a repeat would print every write twice).
+    DF._flatDbgHooked = DF._flatDbgHooked or {}
+    local hooked = DF._flatDbgHooked
 
     local function traceWrite(label)
         return function(_, a, b)
@@ -1344,40 +1356,48 @@ function DF:InstallFlatLayoutDebugHooks()
         end
     end
 
-    if DF.raidContainer then
+    local added = 0
+
+    if DF.raidContainer and not hooked.container then
         hooksecurefunc(DF.raidContainer, "SetSize", traceWrite("raidContainer:SetSize"))
         hooksecurefunc(DF.raidContainer, "SetPoint", traceWrite("raidContainer:SetPoint"))
         hooksecurefunc(DF.raidContainer, "ClearAllPoints", traceWrite("raidContainer:ClearAllPoints"))
+        hooked.container = true
+        added = added + 1
     end
 
-    if DF.FlatRaidFrames and DF.FlatRaidFrames.header then
+    if DF.FlatRaidFrames and DF.FlatRaidFrames.header and not hooked.header then
         local header = DF.FlatRaidFrames.header
         hooksecurefunc(header, "SetSize", traceWrite("header:SetSize"))
         hooksecurefunc(header, "SetPoint", traceWrite("header:SetPoint"))
         hooksecurefunc(header, "ClearAllPoints", traceWrite("header:ClearAllPoints"))
         hooksecurefunc(header, "SetWidth", traceWrite("header:SetWidth"))
         hooksecurefunc(header, "SetHeight", traceWrite("header:SetHeight"))
+        hooked.header = true
+        added = added + 1
     end
 
-    DF.flatLayoutDebugHooksInstalled = true
+    -- Reflects reality rather than "this ran": true once ANY surface is traced.
+    DF.flatLayoutDebugHooksInstalled = (hooked.container or hooked.header) and true or false
+    return added
 end
 
 -- Arms the call-stack hooks above. One-way: they cannot be removed until reload.
 DF:RegisterDebugSlash("DFFLATDEBUG", "Trace every write to the raid container/header (until reload)", true, "/dfflatdebug")
 SlashCmdList["DFFLATDEBUG"] = function()
-    if DF.flatLayoutDebugHooksInstalled then
+    -- Ask the installer first and report what it DID. The old order asked the flag
+    -- first and returned early on "already armed", which meant a run that had hooked
+    -- only one of the two surfaces could never pick up the other.
+    local added = DF:InstallFlatLayoutDebugHooks()
+
+    if added > 0 then
+        DF:Say("Call-stack hooks armed", added .. " surface(s)", "GOOD")
+        DF:Say("Enable the FLATRAID category in the debug console to see them.")
+    elseif DF.flatLayoutDebugHooksInstalled then
         DF:Say("Call-stack hooks are already armed. Reload to remove them.")
-        return
-    end
-
-    DF:InstallFlatLayoutDebugHooks()
-
-    if not DF.flatLayoutDebugHooksInstalled then
+    else
         DF:Say("No raid container or flat header exists yet — nothing to hook.")
-        return
     end
-
-    DF:Say("Call-stack hooks armed. Enable the FLATRAID category in the debug console to see them.")
 end
 
 -- Comprehensive state dump function. No longer its own slash command: it was

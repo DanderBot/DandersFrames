@@ -6102,12 +6102,30 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         impOn.tooltip = L["Boss, role and priority debuffs already sort to the front of the row. This also makes them larger and marks them, so they read at a glance without needing their own placement."]
 
         -- CreateSlider(parent, label, min, max, step, db, key, callback, lightweightUpdate,
-        -- usePreviewMode, ...). Pass the SAME function to both: the drag path is what makes
-        -- the preview move under the cursor, and the release path is what guarantees the
-        -- final value is applied. Leaving callback nil left the slider updating only via
-        -- the lightweight path, so the size appeared to change only when you let go.
+        -- usePreviewMode, ...) — arg 8 is the release callback, arg 9 the per-drag-tick one
+        -- and arg 10 the boolean that arms it.
+        --
+        -- ☠ NO LIGHTWEIGHT PATH ON ANY OF THE FOUR SLIDERS IN THIS SECTION, and it must
+        -- stay that way. Every key here feeds recStyleSig (Features/Auras.lua), which is
+        -- part of the STRUCTURAL signature — so each new value forces h:Rebuild: a
+        -- NativeBackend:teardown plus a fresh container and fresh buttons, per rendered
+        -- frame per visible unit. applyRecordStyle then creates a badge host frame and two
+        -- textures per styled button, and WoW never frees a frame. Wired to the drag tick,
+        -- a few seconds of dragging in a 20-man leaked frames by the thousand. The
+        -- "documented frame-leak case" note in AuraContainer.lua is about this path.
+        --
+        -- The cost is that the preview moves on release rather than under the cursor. That
+        -- is the deliberate trade: one rebuild per adjustment is the price every other
+        -- structural setting pays, and it is bounded.
+        --
+        -- ⚠ The better fix is to let badge geometry ride ApplyStyle instead of forcing a
+        -- rebuild — applyRecordStyle is already idempotent and safe to re-run — but the
+        -- record style is captured as an upvalue in the secure initializeFrame closure, so
+        -- a live read has to be plumbed through first. That is engine work, not a slider
+        -- change, and narrowing the signature WITHOUT it would leave these sliders writing
+        -- to the DB while nothing on screen moves.
         local impScale = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Size Step"], 1.0, 2.0, 0.05,
-            db, "debuffImportantScale", ImportantChanged, ImportantChanged, true), 55)
+            db, "debuffImportantScale", ImportantChanged), 55)
         impScale.disableOn = ImportantOff
         impScale.tooltip = L["How much larger an important debuff renders. 1.00 keeps it the same size as the rest of the row."]
 
@@ -6117,7 +6135,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         impBadge.tooltip = L["A small marker on the corner of the icon. It survives being shrunk better than a colour change, and it does not compete with the dispel border."]
 
         local impBadgeSize = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Marker Size"], 6, 20, 1,
-            db, "debuffImportantBadgeSize", nil, ImportantChanged, true), 55)
+            db, "debuffImportantBadgeSize", ImportantChanged), 55)
         impBadgeSize.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
 
         -- hasAlpha=false, and NO lightweight path: a colour change here rebuilds the
@@ -6132,11 +6150,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         impBadgePt.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
 
         local impBadgeX = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Marker Offset X"], -20, 20, 1,
-            db, "debuffImportantBadgeX", nil, ImportantChanged, true), 55)
+            db, "debuffImportantBadgeX", ImportantChanged), 55)
         impBadgeX.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
 
         local impBadgeY = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Marker Offset Y"], -20, 20, 1,
-            db, "debuffImportantBadgeY", nil, ImportantChanged, true), 55)
+            db, "debuffImportantBadgeY", ImportantChanged), 55)
         impBadgeY.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
 
         local impBadgeCol = impGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Marker Color"],
@@ -9393,9 +9411,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- The log lives in SavedVariables, so one left behind is re-read from disk at
         -- every login until something clears it. 0 = keep forever, for anyone chasing
         -- a bug that only shows up across several days.
-        -- "0 = never" is in the LABEL because CreateSlider's 9th parameter is
-        -- `lightweightUpdate`, a boolean — not a value-label map. Passing a table
-        -- there would read as truthy and quietly change how the slider commits.
+        -- "0 = never" is in the LABEL because CreateSlider has no value-label map to
+        -- put it in: parameter 9 is `lightweightUpdate` (a per-drag-tick FUNCTION) and
+        -- 10 is `usePreviewMode` (the boolean that arms it). Passing a table into
+        -- either would read as truthy and quietly change how the slider commits.
         AddToSection(GUI:CreateSlider(self.child, L["Clear Log After (Days, 0 = Never)"],
             0, 30, 1, debugProxy, "logMaxAgeDays"), 55, 1)
 
