@@ -4,7 +4,10 @@
 -- These frames are completely independent of live header children
 -- ============================================================
 
-local _, DF = ...
+-- ☠ Companion addon: `...` yields THIS addon's private table, not the parent's,
+-- so every DF.* read here would be nil. DandersFrames publishes its own table
+-- as a global via ## AllowAddOnTableAccess -- take it from there.
+local DF = DandersFrames
 
 -- Test frame storage
 DF.testPartyFrames = {}  -- [0]=player, [1-4]=party

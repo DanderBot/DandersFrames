@@ -1,6 +1,9 @@
 -- Part 3 of the Aura Designer editor, split from Options.lua.
 -- Aliases of objects the first part created; they add no state.
-local addonName, DF = ...
+-- ☠ Companion addon: `...` yields THIS addon's private table, not the parent's,
+-- so every DF.* read here would be nil. DandersFrames publishes its own table
+-- as a global via ## AllowAddOnTableAccess -- take it from there.
+local DF = DandersFrames
 local L = DF.L
 local GUI = DF.GUI
 local Adapter = DF.AuraDesigner.Adapter

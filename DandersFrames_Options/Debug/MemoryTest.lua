@@ -1,4 +1,9 @@
-local addonName, DF = ...
+-- ☠ Companion addon: `...` yields THIS addon's private table, not the parent's,
+-- so every DF.* read here would be nil. DandersFrames publishes its own table
+-- as a global via ## AllowAddOnTableAccess -- take it from there.
+local DF = DandersFrames
+local addonName = "DandersFrames"
+local companionName = "DandersFrames_Options"
 
 -- ============================================================
 -- MEMORY TEST PANEL
@@ -137,9 +142,12 @@ local function CreateReadout(parent, tone)
     return fs
 end
 
+-- ☠ DandersFrames is two addons now. This panel lives in the companion, so the
+-- companion is loaded by definition whenever a reading is taken -- measuring
+-- only the parent would omit the larger half and quietly flatter every result.
 local function CurrentMemory()
     UpdateAddOnMemoryUsage()
-    return GetAddOnMemoryUsage(addonName)
+    return GetAddOnMemoryUsage(addonName) + GetAddOnMemoryUsage(companionName)
 end
 
 -- Shared body of the timed tests. `seconds` is the window; the panel's own

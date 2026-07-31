@@ -1,7 +1,10 @@
 -- Part 2 of the GUI toolkit, split from the original GUI.lua.
 -- These re-declarations are aliases of the SAME objects the first part
 -- created; they add no state. See docs/reorg-tools/splits.manifest.
-local addonName, DF = ...
+-- ☠ Companion addon: `...` yields THIS addon's private table, not the parent's,
+-- so every DF.* read here would be nil. DandersFrames publishes its own table
+-- as a global via ## AllowAddOnTableAccess -- take it from there.
+local DF = DandersFrames
 local GUI = DF.GUI
 local L = DF.L
 local S = GUI._state

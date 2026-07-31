@@ -1,4 +1,7 @@
-local addonName, DF = ...
+-- ☠ Companion addon: `...` yields THIS addon's private table, not the parent's,
+-- so every DF.* read here would be nil. DandersFrames publishes its own table
+-- as a global via ## AllowAddOnTableAccess -- take it from there.
+local DF = DandersFrames
 
 -- Get module namespace
 local CC = DF.ClickCast
@@ -3728,16 +3731,10 @@ function CC:CreateSpecialActionCell(parent, actionType, label, iconPath)
     return cell
 end
 
--- Initialize when player enters world (deferred from ADDON_LOADED for faster load times)
-local initFrame = CreateFrame("Frame")
-initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-initFrame:SetScript("OnEvent", function(self, event, isInitialLogin, isReloadingUi)
-    -- Only initialize on first load or reload, not zone changes
-    if isInitialLogin or isReloadingUi then
-        CC:Initialize()
-        self:UnregisterEvent("PLAYER_ENTERING_WORLD")
-    end
-end)
+-- The click-casting bootstrap used to live here. It cannot: this file is in the
+-- load-on-demand companion, and its trigger only fires on the login/reload
+-- PLAYER_ENTERING_WORLD, which is long gone by the time anything loads us. It
+-- now lives in the resident ClickCasting/Events.lua.
 
 -- Debug slash command to list all detected spells
 -- Non-dev: DUMP. Spell detection is a common source of "my bind does nothing"

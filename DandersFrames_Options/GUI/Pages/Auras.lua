@@ -1,6 +1,9 @@
 -- Part 3 of the settings pages, split from Options.lua.
 -- The parts run as a chain so the pages build in their original order.
-local addonName, DF = ...
+-- ☠ Companion addon: `...` yields THIS addon's private table, not the parent's,
+-- so every DF.* read here would be nil. DandersFrames publishes its own table
+-- as a global via ## AllowAddOnTableAccess -- take it from there.
+local DF = DandersFrames
 local format = string.format
 function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L, AddColorsPageLink, CreateCopyButton, pagePinnedFrames, pageBuffs, pageIcons)
     pagePinnedFrames:SetScript("OnHide", function()

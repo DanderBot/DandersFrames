@@ -4,7 +4,10 @@
 -- PLAYER_ENTERING_WORLD and exposes GUI:OpenColorPicker as the public API.
 -- Dev harness: /dfcolorhook (hook status/install/uninstall; dev builds only).
 
-local addonName, DF = ...
+-- ☠ Companion addon: `...` yields THIS addon's private table, not the parent's,
+-- so every DF.* read here would be nil. DandersFrames publishes its own table
+-- as a global via ## AllowAddOnTableAccess -- take it from there.
+local DF = DandersFrames
 local GUI = DF.GUI
 local L = DF.L
 local testFrame = nil
@@ -95,15 +98,13 @@ local function SaveColorsToDb()
     DandersFramesDB_v2.colorPickerSquare = preferSquarePicker
 end
 
--- Load on addon load
-local loader = CreateFrame("Frame")
-loader:RegisterEvent("ADDON_LOADED")
-loader:SetScript("OnEvent", function(self, event, addonName)
-    if addonName == "DandersFrames" then
-        LoadSavedColors()
-        self:UnregisterEvent("ADDON_LOADED")
-    end
-end)
+-- ☠ This used to wait for ADDON_LOADED("DandersFrames"). It cannot: this file is
+-- in the load-on-demand companion, so by the time it runs the parent has long
+-- since loaded and that event will never fire again -- the saved swatches would
+-- stay empty and the next SaveColorsToDb would overwrite them with nothing.
+-- The parent is loaded by definition (RequiredDeps + LoadAddOn), which also
+-- means its SavedVariables are already populated, so just read them now.
+LoadSavedColors()
 
 -- Helper to create a unique color key
 local function ColorKey(r, g, b, a)
@@ -1993,17 +1994,13 @@ function GUI:IsColorPickerHookInstalled()
     return midnightHooked or legacyHooked
 end
 
--- Auto-install hook after addon is fully loaded
-local hookInitFrame = CreateFrame("Frame")
-hookInitFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-hookInitFrame:SetScript("OnEvent", function(self, event)
-    -- Always install the hook - the hook itself checks settings when invoked
-    -- Use a timer to ensure ColorPickerFrame is fully initialized
-    C_Timer.After(1, function()
-        GUI:InstallColorPickerHook()
-    end)
-    self:UnregisterEvent("PLAYER_ENTERING_WORLD")
-end)
+-- Always install the hook - the hook itself checks settings when invoked.
+-- This used to wait a second past the login PLAYER_ENTERING_WORLD so that
+-- ColorPickerFrame was ready. In the companion neither is needed: nothing loads
+-- this file until the player opens the settings panel, by which point the login
+-- events are long past and ColorPickerFrame exists. Waiting for the next zoning
+-- would leave the hook uninstalled for the first swatch clicked.
+GUI:InstallColorPickerHook()
 
 -- Debug command to check hook status
 DF:RegisterDebugSlash("DFCOLORHOOK", "Color picker hook status / toggle", true, "/dfcolorhook")

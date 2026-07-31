@@ -629,6 +629,26 @@ function CC:GetNameplateClickableFrame(nameplate, unitToken)
     return nil
 end
 
+-- ============================================================
+-- BOOTSTRAP
+-- ============================================================
+-- ☠ This must stay resident. It used to live in ClickCasting/UI/BindingEditor,
+-- which is now in the load-on-demand companion -- and the trigger below only
+-- fires on the login/reload PLAYER_ENTERING_WORLD. A companion loaded on demand
+-- has already missed it, and the zone-change firings are filtered out by the
+-- flags, so click-casting would never have initialised at all.
+--
+-- CC:Initialize itself is in ClickCasting/Frames.lua and is resident too.
+local initFrame = CreateFrame("Frame")
+initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+initFrame:SetScript("OnEvent", function(self, event, isInitialLogin, isReloadingUi)
+    -- Only initialize on first load or reload, not zone changes
+    if isInitialLogin or isReloadingUi then
+        CC:Initialize()
+        self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+    end
+end)
+
 -- Register all currently visible nameplates
 function CC:RegisterAllNameplates()
     if not self.db or not self.db.enabled then return end
