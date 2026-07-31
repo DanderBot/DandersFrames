@@ -15,6 +15,17 @@ local L = DF.L
 local S = {}
 GUI._state = S
 
+-- Shared private helpers.
+-- A `local function` is invisible to any other file, so a helper used thousands
+-- of lines from its declaration pins this file together: it cannot be split
+-- while a later section still calls it. Publishing the wide-reaching ones here
+-- lets a sibling file re-declare `local X = GUI._priv.X` -- the same function
+-- object, so no call site changes and behaviour is identical.
+-- Only helpers spanning >1000 lines are listed; narrow ones stay private.
+-- Private by convention -- nothing outside GUI/ should touch GUI._priv.
+local P = {}
+GUI._priv = P
+
 -- =========================================================================
 -- MODERN UI CONSTANTS & STYLING (Matching Original v2.3.8)
 -- =========================================================================
@@ -415,6 +426,7 @@ local function CloseOpenDropdown()
     end
     S.currentOpenDropdown = nil
 end
+P.CloseOpenDropdown = CloseOpenDropdown
 
 -- Helper to get current theme color
 -- The theme colour for an EXPLICIT mode. Use this for any surface that belongs to
@@ -441,6 +453,7 @@ local function PixelsPerUnit(frame)
     if not (eff and eff > 0 and physH and physH > 0) then return nil end
     return eff * physH / 768
 end
+P.PixelsPerUnit = PixelsPerUnit
 
 -- ⚠ THERE IS NO RUNTIME GEOMETRY CORRECTION, AND THERE SHOULD NOT BE ONE.
 --
@@ -2507,6 +2520,7 @@ local INFO_BANNER_TONES = {
 }
 -- Legacy alias: "warning" was merged into "caution" (near-duplicate golds).
 INFO_BANNER_TONES.warning = INFO_BANNER_TONES.caution
+P.INFO_BANNER_TONES = INFO_BANNER_TONES
 
 -- Hex accent ("ffRRGGBB", for inline |c...|r escapes) matching a banner tone, so
 -- inline caveat text (e.g. a warning word in a subtitle) reads as the SAME
@@ -5199,6 +5213,7 @@ local function AddOverrideIndicators(container, lbl, dbKey, onReset, verticalOff
     
     return container
 end
+P.AddOverrideIndicators = AddOverrideIndicators
 
 -- Override indicators for order list controls (drag lists)
 -- These don't have traditional labels, so we use a compact star + reset + "Modified" badge
@@ -5273,6 +5288,7 @@ local function AddOrderListOverrideIndicators(container, dbKey, onReset)
     -- Register for refresh tracking
     table.insert(overrideWidgets, container)
 end
+P.AddOrderListOverrideIndicators = AddOrderListOverrideIndicators
 
 -- ============================================================
 -- SHARED CHECK / RADIO LOOK — single source of truth
