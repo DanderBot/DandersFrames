@@ -58,6 +58,11 @@ Core\ExportCategories.lua
 Core.lua
 Designer\Presets.lua
 Core\RosterEvents.lua
+# Auto-profile switching engine. Resident because it is live behaviour -- it has
+# to switch profiles whether or not the settings panel has ever been opened.
+# The page half is in the companion. ☠ Must load after Core.lua: it calls
+# DF:RegisterLocaleRefresh at file scope.
+Core\AutoProfiles.lua
 
 # Debug Console (loads early so all modules can use DF:Debug)
 Debug\DebugConsole.lua
