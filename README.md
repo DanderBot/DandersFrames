@@ -69,7 +69,8 @@ folder in with a **directory junction** — a junction (`/J`), not a symlink
 From your `Interface/AddOns` folder, with WoW closed:
 
 ```
-mklink /J "DandersFrames" "C:\path\to\repo\DandersFrames"
+mklink /J "DandersFrames"         "C:\path\to\repo\DandersFrames"
+mklink /J "DandersFrames_Options" "C:\path\to\repo\DandersFrames_Options"
 ```
 
 Delete any real `AddOns/DandersFrames` folder first — a junction cannot
@@ -79,21 +80,29 @@ After that, edit in the repo and `/reload` in game; the junction means there
 is no copy or sync step. `git status`, branches and PRs are unchanged — one
 repo, one branch, one PR.
 
-### Why a container, when there is only one addon folder
+### Why a container, rather than one addon folder
 
-Groundwork for a load-on-demand companion, `DandersFrames_Options`, holding
-the settings panel, the designers and the debug tools. WoW resolves
-`LoadAddOn("Name")` to `AddOns/Name/Name.toc`, so a companion has to be a
-top-level addon folder — a sibling of `DandersFrames`, not a subfolder. That
-is only possible if the repo root is a container, hence this layout.
+`DandersFrames_Options` is a load-on-demand companion holding the settings
+panel, both designers, the click-casting UI, test mode and the debug tools —
+30 files, about a third of the code. WoW resolves `LoadAddOn("Name")` to
+`AddOns/Name/Name.toc`, so a companion has to be a top-level addon folder — a
+sibling of `DandersFrames`, not a subfolder. That is only possible if the repo
+root is a container, hence this layout.
 
 Measured on the PTR build: with that payload not loaded, DandersFrames uses
 **8,957 KB instead of 12,348 KB — 3,391 KB less, 27.5%** — and ~55,000 lines
 are never parsed at login. The saving lasts until the settings panel is
 opened; the login cost is avoided every time.
 
-**The companion does not exist yet.** When it does, it gets a second junction
-alongside the first, and this section will say so.
+Users do none of this: the packager ships the two folders as siblings in the
+zip, and `.pkgmeta` maps them. The junctions exist only because there is no
+packager running locally.
+
+**Nothing may depend on the companion to work.** Live behaviour that happened
+to live in a settings file has to move back to the main addon, not be guarded
+away — the auto-profile engine, the click-casting bootstrap and the aura
+migrations are all resident for that reason. `docs/reorg-tools/lod_login_check.py`
+catches the common form of this.
 
 ### Verification tooling
 
