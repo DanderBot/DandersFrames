@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# generate_changelog.sh — Reads CHANGELOG.md and generates Core/Changelog.lua
+# generate_changelog.sh — Reads CHANGELOG.md and generates the addon Changelog.lua
 # Called by GitHub Actions before packaging.
 
 set -euo pipefail
@@ -7,7 +7,7 @@ set -euo pipefail
 CHANGELOG_FILE="CHANGELOG.md"
 # Core/ since the 2026-07 folder reorg. release.yml greps this same path for the
 # release channel and skips builds that only touch it — keep all three in step.
-OUTPUT_FILE="Core/Changelog.lua"
+OUTPUT_FILE="DandersFrames/Core/Changelog.lua"
 
 if [ ! -f "$CHANGELOG_FILE" ]; then
     echo "Error: $CHANGELOG_FILE not found."
@@ -157,7 +157,7 @@ fi
 echo "$CHANGELOG_CONTENT" > "$CHANGELOG_FILE"
 
 # Sync TOC version if it doesn't already match (avoids double-bump when manually updated)
-TOC_FILE="DandersFrames.toc"
+TOC_FILE="DandersFrames/DandersFrames.toc"
 CURRENT_TOC_VERSION=$(grep '^## Version:' "$TOC_FILE" | sed 's/^## Version: //')
 if [ "$CURRENT_TOC_VERSION" != "$VERSION" ]; then
     sed -i "s/^## Version: .*/## Version: ${VERSION}/" "$TOC_FILE"

@@ -1,3 +1,26 @@
+# ☠ UNRESOLVED — THIS FILE IS STILL WRITTEN FOR THE OLD SINGLE-FOLDER LAYOUT
+# and will NOT package the container layout correctly. Do not cut a release
+# until it is fixed and verified.
+#
+# The repo root now holds DandersFrames/ (and later DandersFrames_Options/),
+# so `package-as: DandersFrames` would produce .release/DandersFrames/ with the
+# real addon nested one level too deep at .release/DandersFrames/DandersFrames/.
+#
+# `move-folders` is the mechanism, but the exact semantics matter and I could
+# not confirm them offline: whether its keys are relative to .release or to the
+# package directory decides whether the obvious config collides with itself
+# (moving .release/DandersFrames/DandersFrames onto .release/DandersFrames).
+#
+# HOW TO SETTLE IT — do not reason about it, measure it:
+#   1. Push a throwaway tag (e.g. v0.0.0-pkgtest) on a scratch branch.
+#   2. Download the produced zip and look at its top level.
+#   3. It must contain DandersFrames/ and DandersFrames_Options/ as SIBLINGS,
+#      each with its own .toc at its root.
+#   4. Delete the tag and the release.
+# Checking a comparable multi-folder addon's own .pkgmeta would also answer it.
+#
+# ⚠ Also verify: release.yml's locale validation globs .release/DandersFrames/
+# Locales/*.lua -- that path may shift with whatever fix lands here.
 package-as: DandersFrames
 enable-nolib-creation: no
 
