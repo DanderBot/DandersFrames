@@ -26,9 +26,19 @@ local L = DF.L
 -- state via `local S = DF.AuraDesigner._uiState`.
 -- GUI and Adapter are NOT here: both are load-time constants (DF.GUI and
 -- DF.AuraDesigner.Adapter), so each part can simply re-declare them.
+-- Shared private helpers.
+-- A `local function` is invisible to any other file, so a helper called far
+-- from its declaration pins this file together -- it cannot be split while a
+-- later section still calls it. This editor is densely coupled: 75 helpers
+-- reach across the chosen boundaries. Publishing them lets each part
+-- re-declare `local X = P.X` -- the same function object, so no call site
+-- changes and behaviour is identical.
+-- Private by convention -- nothing outside AuraDesigner/ should touch this.
+local P = {}
 local S = {}
 DF.AuraDesigner = DF.AuraDesigner or {}
 DF.AuraDesigner._uiState = S
+DF.AuraDesigner._priv    = P
 
 -- Load-time constants. Both used to be assigned inside BuildAuraDesignerPage,
 -- which made them mutable and so un-splittable. Neither ever actually varies:
@@ -65,6 +75,7 @@ local C_TEXT_DIM   = DF.GUI.Colors.textDim
 -- One namespace table instead of one local per option table (the main chunk
 -- rides the Lua 5.1 200-locals ceiling; seven locals reclaimed to one).
 local OPTS = {}
+P.OPTS = OPTS
 
 local function RefreshLocaleStrings()
     OPTS.INDICATOR_TYPES = {
@@ -746,10 +757,12 @@ local function GetAuraDesignerDB()
     MigrateDefaultRefreshLazy(adDB)
     return adDB
 end
+P.GetAuraDesignerDB = GetAuraDesignerDB
 
 local function GetThemeColor()
     return GUI.GetThemeColor()
 end
+P.GetThemeColor = GetThemeColor
 
 local function ApplyBackdrop(frame, bgColor, borderColor)
     -- Build through the shared GUI backdrop once per frame, then push only
@@ -778,6 +791,7 @@ local function ApplyBackdrop(frame, bgColor, borderColor)
         end
     end
 end
+P.ApplyBackdrop = ApplyBackdrop
 
 -- ============================================================
 -- COLLAPSIBLE CARD SHELL
@@ -815,6 +829,7 @@ local function CreateCardShell(parent, opts)
 
     return card, header, chevron
 end
+P.CreateCardShell = CreateCardShell
 
 -- ============================================================
 -- BUFF COEXISTENCE POPUP
@@ -896,6 +911,7 @@ local function ShowBuffCoexistPopup(onConfirm, onCancel)
 
     f:Show()
 end
+P.ShowBuffCoexistPopup = ShowBuffCoexistPopup
 
 -- Get or resolve the active spec key from settings
 local function ResolveSpec()
@@ -905,6 +921,7 @@ local function ResolveSpec()
     end
     return adDB.spec
 end
+P.ResolveSpec = ResolveSpec
 
 -- Track which spec aura tables have already been sanitized this session
 local sanitizedSpecAuras = {}
@@ -938,6 +955,7 @@ local function GetSpecAuras(spec)
     end
     return specAuras
 end
+P.GetSpecAuras = GetSpecAuras
 
 -- Returns the spec-INDEPENDENT "Other Buffs" pool (B1): a flat map auraName -> auraCfg
 -- with the EXACT record shape of adDB.auras[spec] entries (indicators array, frame-level
@@ -974,6 +992,7 @@ local function GetOtherAuras()
     end
     return otherAuras
 end
+P.GetOtherAuras = GetOtherAuras
 
 -- Returns the preset's DEBUFF CATEGORY GROUPS array (C1): a flat, spec-INDEPENDENT
 -- array of group records (mirror of the otherAuras siblings-not-pseudo-spec rule —
@@ -1031,6 +1050,7 @@ local function NextGroupName(groups, prefix)
     end
     return prefix .. " " .. (highest + 1)
 end
+P.NextGroupName = NextGroupName
 
 -- Create a new debuff category group (C1 data model; C2 wires the UI). Defaults:
 -- Boss + Role selected (the classic "important debuffs" baseline), everything
@@ -1063,6 +1083,7 @@ local function CreateDebuffGroup(name)
     tinsert(groups, group)
     return group
 end
+P.CreateDebuffGroup = CreateDebuffGroup
 
 -- Returns the spec-scoped layout groups array, creating it if needed
 local function GetSpecLayoutGroups(spec)
@@ -1074,6 +1095,7 @@ local function GetSpecLayoutGroups(spec)
     if not adDB.layoutGroups[spec] then adDB.layoutGroups[spec] = {} end
     return adDB.layoutGroups[spec]
 end
+P.GetSpecLayoutGroups = GetSpecLayoutGroups
 
 -- ============================================================
 -- MAIN POOL TABS (B2) — My Buffs / Other Buffs
@@ -1089,6 +1111,7 @@ S.activeBuffTab = "my"   -- "my" | "debuffs" | "other"
 local function IsOtherTab()
     return S.activeBuffTab == "other"
 end
+P.IsOtherTab = IsOtherTab
 
 -- C2: the Debuffs tab hosts debuff CATEGORY groups (spec-independent, no
 -- spell pool, no placed indicators). Its Effects sub-tab frosts, the spec
@@ -1096,11 +1119,13 @@ end
 local function IsDebuffTab()
     return S.activeBuffTab == "debuffs"
 end
+P.IsDebuffTab = IsDebuffTab
 
 -- Read-only placeholder returned while the other pool doesn't exist yet.
 -- Merely VISITING the Other Buffs tab must not create adDB.otherAuras —
 -- only the first ADD does (via CurrentAuraPoolWrite). Never written.
 local EMPTY_POOL = {}
+P.EMPTY_POOL = EMPTY_POOL
 
 -- READ access to the active tab's pool. Never creates adDB.otherAuras.
 -- `spec` is forwarded to GetSpecAuras on the My Buffs tab only.
@@ -1116,6 +1141,7 @@ local function CurrentAuraPool(spec)
     if S.activeBuffTab == "debuffs" then return EMPTY_POOL end
     return GetSpecAuras(spec)
 end
+P.CurrentAuraPool = CurrentAuraPool
 
 -- WRITE access: creates the pool table (the other pool is born lazily on
 -- the first add — drag-drop, picker click, or add-by-ID).
@@ -1131,6 +1157,7 @@ end
 local function PoolKeyPrefix()
     return (S.activeBuffTab == "other") and "other:" or ""
 end
+P.PoolKeyPrefix = PoolKeyPrefix
 
 -- READ access to the debuff category groups array (C2). Never creates
 -- adDB.debuffGroups — merely visiting the Debuffs tab must not write
@@ -1141,6 +1168,7 @@ local function DebuffGroupsRead()
     if adDB and adDB.debuffGroups then return GetDebuffGroups() end
     return EMPTY_POOL
 end
+P.DebuffGroupsRead = DebuffGroupsRead
 
 -- Other Buffs LAYOUT GROUPS: a flat, spec-INDEPENDENT array of group records
 -- over the other pool (sibling of otherAuras/debuffGroups — never a pseudo-spec
@@ -1175,6 +1203,7 @@ local function GetOtherLayoutGroups(create)
     end
     return groups
 end
+P.GetOtherLayoutGroups = GetOtherLayoutGroups
 
 -- Active tab's layout groups (READ — never creates the other store): the
 -- flat other store on Other Buffs, the spec-keyed array on My Buffs.
@@ -1184,6 +1213,7 @@ local function CurrentLayoutGroups()
     if S.activeBuffTab == "other" then return GetOtherLayoutGroups(false) end
     return GetSpecLayoutGroups()
 end
+P.CurrentLayoutGroups = CurrentLayoutGroups
 
 -- Display name for an OTHER-pool aura key: ad-hoc "#<id>" resolves live,
 -- SpellDB names resolve through GetSpellDisplay (localized), else the raw key.
@@ -1201,6 +1231,7 @@ local function OtherPoolDisplayName(auraName)
     end
     return auraName
 end
+P.OtherPoolDisplayName = OtherPoolDisplayName
 
 -- Union of every spell ID tracked by one pool of an adDB (cross-tab
 -- used-affordance). which = "my" walks ALL spec pools (the preset object is
@@ -1243,6 +1274,7 @@ DF.ADEditor_PoolTrackedIDs = PoolTrackedIDs
 local function CrossPoolTrackedIDs()
     return PoolTrackedIDs(GetAuraDesignerDB(), IsOtherTab() and "my" or "other")
 end
+P.CrossPoolTrackedIDs = CrossPoolTrackedIDs
 
 -- Ensure an aura config table exists, creating it with defaults if needed.
 -- `pool` (optional) pins the target pool — proxies capture their pool at
@@ -1256,6 +1288,7 @@ local function EnsureAuraConfig(auraName, pool)
     end
     return auras[auraName]
 end
+P.EnsureAuraConfig = EnsureAuraConfig
 
 -- Ensure a type sub-table exists within an aura config
 local function EnsureTypeConfig(auraName, typeKey, pool)
@@ -1399,6 +1432,7 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
     end
     return auraCfg[typeKey]
 end
+P.EnsureTypeConfig = EnsureTypeConfig
 
 -- Default values per type key, used as fallback when a saved config is missing new keys
 local TYPE_DEFAULTS = {
@@ -1702,6 +1736,7 @@ local TYPE_DEFAULTS = {
         showWhenMissing = false,
     },
 }
+P.TYPE_DEFAULTS = TYPE_DEFAULTS
 
 -- ============================================================
 -- INSTANCE-BASED INDICATOR HELPERS
@@ -1737,6 +1772,7 @@ local function CreateIndicatorInstance(auraName, typeKey)
     tinsert(auraCfg.indicators, instance)
     return instance
 end
+P.CreateIndicatorInstance = CreateIndicatorInstance
 
 -- Find an indicator instance by its stable ID. `pool` (optional) pins the
 -- pool; defaults to the active tab's pool.
@@ -1764,6 +1800,7 @@ local function RemoveIndicatorInstance(auraName, indicatorID)
         end
     end
 end
+P.RemoveIndicatorInstance = RemoveIndicatorInstance
 
 -- (ChangeInstanceType removed — uncalled since the tile-strip type switcher
 -- left the v4 redesign; reclaimed for the 200-locals ceiling.)
@@ -1812,6 +1849,7 @@ local function CopyIndicatorAppearance(srcAuraName, srcIndicatorID, dstAuraName,
         end
     end
 end
+P.CopyIndicatorAppearance = CopyIndicatorAppearance
 
 -- Forward declaration: lightweight preview refresh (defined after RefreshPreviewEffects)
 -- Called from proxy __newindex so every setting change updates the preview in real-time
@@ -1831,6 +1869,7 @@ local function RefreshLiveFramesThrottled()
         end
     end)
 end
+P.RefreshLiveFramesThrottled = RefreshLiveFramesThrottled
 
 -- Global-default key mapping: which global default keys apply to placed types
 local GLOBAL_DEFAULT_MAP = {
@@ -1899,6 +1938,7 @@ local function AddExpiryAlertControls(g, parent, proxy, include)
     })
     g:RefreshChildStates()   -- initial grey (the initial hide rides AddGroup's LayoutChildren)
 end
+P.AddExpiryAlertControls = AddExpiryAlertControls
 
 -- Colours-S.page cross-link placed under an AD "Color by Time Remaining" TEXT control, matching
 -- the aura pages' duration link (jump + whole-section flash). The duration text's By-Time colour
@@ -1911,6 +1951,7 @@ local function AddDurationColorsLink(g, parent)
     g:AddWidget(note, (note.layoutHeight or 16) + 2)
     return note
 end
+P.AddDurationColorsLink = AddDurationColorsLink
 
 -- Create a proxy table that maps flat key access to an indicator instance
 -- Fallback chain: instance value → global defaults → TYPE_DEFAULTS
@@ -1969,6 +2010,7 @@ local function CreateInstanceProxy(auraName, indicatorID)
         end,
     })
 end
+P.CreateInstanceProxy = CreateInstanceProxy
 
 -- Create a proxy table that maps flat key access to nested aura config
 local function CreateProxy(auraName, typeKey)
@@ -2006,6 +2048,7 @@ local function CreateProxy(auraName, typeKey)
         end,
     })
 end
+P.CreateProxy = CreateProxy
 
 -- Create a proxy for the aura-level config (priority, expiring)
 local function CreateAuraProxy(auraName)
@@ -2026,6 +2069,7 @@ local function CreateAuraProxy(auraName)
         end,
     })
 end
+P.CreateAuraProxy = CreateAuraProxy
 
 -- ============================================================
 -- WARNING BADGE
@@ -2058,6 +2102,7 @@ local function GetAuraWarningKey(specKey, auraName)
     end
     return nil
 end
+P.GetAuraWarningKey = GetAuraWarningKey
 
 -- Attach (or refresh) a warning triangle badge on the given region.
 -- host:     parent Frame the badge is attached to (must be a Frame).
@@ -2112,6 +2157,7 @@ local function AttachWarningBadge(host, warnKey, opts)
     badge.tooltipText = tooltipText
     badge:Show()
 end
+P.AttachWarningBadge = AttachWarningBadge
 
 -- Ad-hoc add-by-ID auras (picker "Add" with an ID the SpellDB doesn't know)
 -- are stored under the key "#<spellID>" — the name IS the identity, so the
@@ -2152,6 +2198,7 @@ local function WithConfiguredAdHocAuras(list, spec)
     end
     return out
 end
+P.WithConfiguredAdHocAuras = WithConfiguredAdHocAuras
 
 -- Get spell icon texture for an aura
 -- Uses static texture IDs to avoid C_Spell.GetSpellTexture returning
@@ -2185,6 +2232,7 @@ local function GetAuraIcon(specKey, auraName)
     end
     return nil
 end
+P.GetAuraIcon = GetAuraIcon
 
 -- (CountActiveEffects removed — uncalled since the v4 flat-card redesign;
 -- reclaimed for the file-scope 200-locals ceiling.)
@@ -2203,6 +2251,7 @@ local function GetFrameEffectTriggers(auraName, typeKey)
     end
     return { auraName }  -- Default: just the owning aura
 end
+P.GetFrameEffectTriggers = GetFrameEffectTriggers
 
 -- Add a trigger aura to a frame effect. `pool` (optional) pins the target
 -- pool — the floating trigger picker captures it at OPEN time so a dropdown
@@ -2218,6 +2267,7 @@ local function AddFrameEffectTrigger(auraName, typeKey, triggerName, pool)
     end
     tinsert(typeCfg.triggers, triggerName)
 end
+P.AddFrameEffectTrigger = AddFrameEffectTrigger
 
 -- Remove a trigger aura from a frame effect (minimum 1 trigger required)
 local function RemoveFrameEffectTrigger(auraName, typeKey, triggerName)
@@ -2231,6 +2281,7 @@ local function RemoveFrameEffectTrigger(auraName, typeKey, triggerName)
         end
     end
 end
+P.RemoveFrameEffectTrigger = RemoveFrameEffectTrigger
 
 -- ============================================================
 -- SHARED SPELL PICKER STATE
@@ -2252,6 +2303,7 @@ local function CloseADPicker()
         S.adPickerHandle:Close()
     end
 end
+P.CloseADPicker = CloseADPicker
 
 -- ============================================================
 -- LAYOUT GROUP HELPERS
@@ -2260,6 +2312,7 @@ end
 
 -- State for expanded layout group cards
 local expandedGroups = {}
+P.expandedGroups = expandedGroups
 
 -- expandedGroups key for a layout group id on the ACTIVE tab: raw numeric id
 -- on My Buffs (legacy keys, kept as-is), "othergroup:<id>" on Other Buffs.
@@ -2269,6 +2322,7 @@ local function GroupExpandKey(groupID)
     if IsOtherTab() then return "othergroup:" .. groupID end
     return groupID
 end
+P.GroupExpandKey = GroupExpandKey
 
 -- Find which layout group (if any) an indicator belongs to — searched in the
 -- ACTIVE tab's group store, so an other-pool indicator only matches other-pool
@@ -2287,6 +2341,7 @@ local function GetIndicatorLayoutGroup(auraName, indicatorID)
     end
     return nil
 end
+P.GetIndicatorLayoutGroup = GetIndicatorLayoutGroup
 
 -- (GetUngroupedIndicators removed — uncalled since the group picker moved to
 -- the full spell-picker "group" mode; reclaimed for the 200-locals ceiling.)
@@ -2336,6 +2391,7 @@ local function CreateLayoutGroup(name, kind)
     tinsert(groups, group)
     return group
 end
+P.CreateLayoutGroup = CreateLayoutGroup
 
 -- Delete a layout group by ID (from the ACTIVE tab's store; the member-
 -- indicator cascade removes from the active pool via RemoveIndicatorInstance's
@@ -2356,6 +2412,7 @@ local function DeleteLayoutGroup(groupID)
     end
     expandedGroups[GroupExpandKey(groupID)] = nil
 end
+P.DeleteLayoutGroup = DeleteLayoutGroup
 
 -- Delete a debuff category group by ID (C2). No member indicators to cascade
 -- (category groups own no placed indicators). The caller runs the FULL
@@ -2371,6 +2428,7 @@ local function DeleteDebuffGroup(groupID)
     end
     expandedGroups["dgroup:" .. groupID] = nil
 end
+P.DeleteDebuffGroup = DeleteDebuffGroup
 
 -- Find a layout group by ID (active tab's store)
 local function GetLayoutGroupByID(groupID)
@@ -2380,6 +2438,7 @@ local function GetLayoutGroupByID(groupID)
     end
     return nil
 end
+P.GetLayoutGroupByID = GetLayoutGroupByID
 
 -- Add a member to a layout group
 local function AddGroupMember(groupID, auraName, indicatorID)
@@ -2392,6 +2451,7 @@ local function AddGroupMember(groupID, auraName, indicatorID)
     end
     tinsert(group.members, { auraName = auraName, indicatorID = indicatorID })
 end
+P.AddGroupMember = AddGroupMember
 
 -- Remove a member from a layout group
 local function RemoveGroupMember(groupID, auraName, indicatorID)
@@ -2404,6 +2464,7 @@ local function RemoveGroupMember(groupID, auraName, indicatorID)
         end
     end
 end
+P.RemoveGroupMember = RemoveGroupMember
 
 -- Swap two members in a layout group (for reordering)
 local function SwapGroupMembers(groupID, idx1, idx2)
@@ -2412,9 +2473,11 @@ local function SwapGroupMembers(groupID, idx1, idx2)
     if idx1 < 1 or idx1 > #group.members or idx2 < 1 or idx2 > #group.members then return end
     group.members[idx1], group.members[idx2] = group.members[idx2], group.members[idx1]
 end
+P.SwapGroupMembers = SwapGroupMembers
 
 -- Anchor dot pool (populated during CreateFramePreview, used by drag system)
 local anchorDots = {}
+P.anchorDots = anchorDots
 
 -- Anchor point positions relative to the mock frame
 local ANCHOR_POSITIONS = {
@@ -2428,6 +2491,7 @@ local ANCHOR_POSITIONS = {
     BOTTOM      = { x = 0.5, y = 1,    ax = "BOTTOM",      ay = "BOTTOM"      },
     BOTTOMRIGHT = { x = 1,   y = 1,    ax = "BOTTOMRIGHT", ay = "BOTTOMRIGHT" },
 }
+P.ANCHOR_POSITIONS = ANCHOR_POSITIONS
 
 -- ============================================================
 -- FRAME REFERENCES (populated during build)
@@ -2454,16 +2518,20 @@ local ANCHOR_POSITIONS = {
 S.activeTab = "effects"       -- "effects" | "layout" | "global"
 S.activeFilter = "all"        -- Filter chip state
 local expandedCards = {}           -- { ["placed:AuraName#1"] = true, ["frame:border:AuraName"] = true }
+P.expandedCards = expandedCards
 
 -- Tab system frame references
 -- (S.tabBar declared on the state table)
 local tabButtons = {}       -- { effects = btn, layout = btn, global = btn }
+P.tabButtons = tabButtons
 local mainTabButtons = {}   -- { my = btn, other = btn } (B2 main pool tab strip)
+P.mainTabButtons = mainTabButtons
 -- (S.specDropdown declared on the state table)
 -- (S.specDropdownUpdate declared on the state table)
 -- (S.tabContentFrame declared on the state table)
 -- (S.tabScrollFrame declared on the state table)
 local effectCardPool = {}   -- Reusable card frames
+P.effectCardPool = effectCardPool
 
 -- ============================================================
 -- EFFECTS LIST DATA COLLECTION
@@ -2529,6 +2597,7 @@ local BADGE_COLORS = {
     healthtext = { r = 0.72, g = 0.72, b = 0.94 },  -- Light blue
     sound      = { r = 0.94, g = 0.76, b = 0.24 },  -- Gold/yellow
 }
+P.BADGE_COLORS = BADGE_COLORS
 
 -- Collect all configured effects into a flat, sorted list
 -- Returns: { { source="placed"|"frame", auraName, typeKey, ... }, ... }
@@ -2609,6 +2678,7 @@ local function CollectAllEffects()
 
     return effects
 end
+P.CollectAllEffects = CollectAllEffects
 
 -- Check if a specific aura + type combo already has a placed indicator
 local function IsAuraTypePlaced(auraName, typeKey)
@@ -2619,6 +2689,7 @@ local function IsAuraTypePlaced(auraName, typeKey)
     end
     return false
 end
+P.IsAuraTypePlaced = IsAuraTypePlaced
 
 -- ============================================================
 -- DRAG AND DROP SYSTEM
@@ -2637,6 +2708,7 @@ local dragState = {
     moveIndicatorID = nil,  -- Set when re-dragging an existing placed indicator
     indicatorType = nil,    -- "icon" | "square" | "bar" — type to create on drop
 }
+P.dragState = dragState
 
 S.dragGhost = nil
 S.dragUpdateFrame = nil
@@ -2834,6 +2906,7 @@ end
 -- ============================================================
 
 local placedIndicators = {}
+P.placedIndicators = placedIndicators
 
 -- Set by ClearPlacedIndicators, consumed by the S.page's RefreshStates: tab
 -- switching re-enters the S.page through GUI RefreshCached -> RefreshStates ONLY
@@ -2884,6 +2957,7 @@ local function ClearPlacedIndicators()
     end
     S.placedCleared = true
 end
+P.ClearPlacedIndicators = ClearPlacedIndicators
 
 -- ============================================================
 -- NATIVE PREVIEW SLOTS (12.1)
@@ -3458,6 +3532,7 @@ local function RefreshPlacedIndicators()
         end
     end
 end
+P.RefreshPlacedIndicators = RefreshPlacedIndicators
 
 -- ============================================================
 -- PREVIEW EFFECTS
@@ -3610,6 +3685,7 @@ local function RefreshPreviewEffects()
 
     end  -- for _, entry in sortedAuras
 end
+P.RefreshPreviewEffects = RefreshPreviewEffects
 
 -- ============================================================
 -- LIGHTWEIGHT PREVIEW REFRESH
@@ -4752,6 +4828,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     parent:SetHeight(totalHeight)
     return widgets, totalHeight
 end
+P.BuildTypeContent = BuildTypeContent
 
 -- ============================================================
 -- GLOBAL VIEW (used by Global tab)
@@ -5142,6 +5219,7 @@ local function CreateEnableBanner(parent)
     banner.checkbox = cb
     return banner
 end
+P.CreateEnableBanner = CreateEnableBanner
 
 -- ============================================================
 -- SPEC DROPDOWN (B2: relocated from the enable banner onto the
@@ -5257,6 +5335,7 @@ local function CreateSpecDropdown(parent)
 
     return specDrop, UpdateSpecText
 end
+P.CreateSpecDropdown = CreateSpecDropdown
 
 -- ============================================================
 -- FRAME PREVIEW
@@ -5544,6 +5623,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
 
     return container
 end
+P.CreateFramePreview = CreateFramePreview
 
 -- ============================================================
 -- TAB SYSTEM, SPELL PICKER & EFFECT CARDS (v4 redesign)
@@ -5767,6 +5847,7 @@ local function UpdateLayoutTabState()
         effectsBtn:SetDisabled(IsDebuffTab())
     end
 end
+P.UpdateLayoutTabState = UpdateLayoutTabState
 
 -- Grey the spec dropdown + swap its opener text on the Other and Debuffs
 -- tabs (both pools are shared across specs); restore the live spec text on
@@ -5786,6 +5867,7 @@ local function UpdateSpecDropdownState()
         if S.specDropdownUpdate then S.specDropdownUpdate() end
     end
 end
+P.UpdateSpecDropdownState = UpdateSpecDropdownState
 
 local function SetMainTab(tabKey)
     if S.activeBuffTab == tabKey then return end
@@ -5814,6 +5896,7 @@ local function SetMainTab(tabKey)
     -- (preview, drag targets) — all pool-routed through CurrentAuraPool.
     DF:AuraDesigner_RefreshPage()
 end
+P.SetMainTab = SetMainTab
 
 -- ── ADD FROM PICKER (shared path) ──
 -- What accepting a spell in the picker DOES: create the placed indicator
@@ -6085,6 +6168,7 @@ local function OpenGroupSpellPicker(groupID)
         end,
     })
 end
+P.OpenGroupSpellPicker = OpenGroupSpellPicker
 
 -- ── CREATE EFFECT CARD ──
 -- Creates a collapsible card for one effect in the effects list.
@@ -7149,6 +7233,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
 
     return by
 end
+P.AddGroupAppearanceSection = AddGroupAppearanceSection
 
 S.BuildLayoutGroupsTab = function()
     if not S.tabContentFrame then return end
