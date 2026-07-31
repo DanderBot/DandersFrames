@@ -194,7 +194,7 @@ local function MigrateToSpecScoped(adDB)
                 if orphans then
                     adDB._unscopedAuras = orphans
                     if DF.DebugWarn then
-                        DF:DebugWarn("AuraDesigner",
+                        DF:DebugWarn("AD",
                             "spec-scope migration: %d aura config(s) matched no spec; parked in _unscopedAuras",
                             orphanCount)
                     end
@@ -595,7 +595,76 @@ local function MigrateAbsoluteLevelsLazy(adDB)
     end
     adDB._absoluteFrameLevelV1 = true
 end
+
+-- V2 — undo the two places V1 got AD's level wrong. Read this before touching either.
+--
+-- AD's real level has always been 40 (the buff-icon band). Commit 47075137 then added
+-- `indicatorFrameLevel = 30` as a Config default while the render still computed
+-- `40 + stored`, so 30 was written into a field that meant a NUDGE — it reads like the
+-- status-icon convention (30) copied into the wrong units. Effect: 40 + 30 = 70.
+--
+-- V1 above then made levels absolute and added the base back, so a spurious nudge of 30
+-- became a stored 70. Correct logic, bad input: it preserved the mistake permanently, and
+-- 70 sits ABOVE the defensive icon (65) — which is meant to be the top layer.
+--
+-- V1 also only walked auraCfg.indicators. It never shifted adDB.defaults.indicatorFrameLevel,
+-- so that key was left holding the pre-absolute 30 while every per-indicator value moved to
+-- the absolute scale. The two numbers have been in different units ever since, which is why
+-- the Default Frame Level slider reads 30 on a profile whose indicators all render at 70.
+--
+-- So V2 restores the baseline:
+--   defaults.indicatorFrameLevel == 30  -> 40
+--   per-indicator frameLevel     == 70  -> 40
+--
+-- ⚠ Both rewrites are value-targeted, not blanket. 30 and 70 are the exact fingerprints of
+-- the bad seed. A deliberate absolute 30 is not a thing anyone would choose (it puts AD
+-- UNDER the buff/debuff rows at 40), and 70 is only reachable from the seeded nudge. The
+-- accepted cost: someone who genuinely nudged +30 for a reason loses it and lands at the
+-- baseline. That is judged the right trade while 12.1 is unshipped and the alpha population
+-- is small — an untouched profile drawing AD over the defensive icon is the worse default.
+-- Any OTHER stored level is left exactly as it is; those are real user choices.
+local function ResetSeededIndicatorLevels(auraCfg)
+    if type(auraCfg) ~= "table" then return end
+    local inds = auraCfg.indicators
+    if type(inds) ~= "table" then return end
+    for _, ind in pairs(inds) do
+        if type(ind) == "table" and tonumber(ind.frameLevel) == 70 then
+            ind.frameLevel = 40
+        end
+    end
+end
+local function MigrateAbsoluteLevelsV2Lazy(adDB)
+    if type(adDB) ~= "table" or adDB._absoluteFrameLevelV2 then return end
+
+    local defs = adDB.defaults
+    if type(defs) == "table" and tonumber(defs.indicatorFrameLevel) == 30 then
+        defs.indicatorFrameLevel = 40
+    end
+
+    local auras = adDB.auras
+    if type(auras) == "table" then
+        -- Same shape detection as V1 (flat auraCfg vs spec-scoped), for the same reason.
+        for _, val in pairs(auras) do
+            if type(val) == "table" then
+                if val.priority ~= nil or val.indicators ~= nil or val.icon ~= nil then
+                    for _, auraCfg in pairs(auras) do ResetSeededIndicatorLevels(auraCfg) end
+                else
+                    for _, specAuras in pairs(auras) do
+                        if type(specAuras) == "table" then
+                            for _, auraCfg in pairs(specAuras) do ResetSeededIndicatorLevels(auraCfg) end
+                        end
+                    end
+                end
+            end
+            break
+        end
+    end
+
+    adDB._absoluteFrameLevelV2 = true
+end
+
 DF.MigrateAuraDesignerAbsoluteLevelsLazy = MigrateAbsoluteLevelsLazy
+DF.MigrateAuraDesignerAbsoluteLevelsV2Lazy = MigrateAbsoluteLevelsV2Lazy
 
 
 -- Lazy, flag-gated ONE-TIME refresh of the AD global text defaults to the Midnight
@@ -656,6 +725,7 @@ local function GetAuraDesignerDB()
     -- and skips a migration, the editor shows UN-migrated values -- and anything saved from that
     -- state gets migrated a second time when the render finally runs.
     MigrateAbsoluteLevelsLazy(adDB)
+    MigrateAbsoluteLevelsV2Lazy(adDB)
     MigrateDefaultRefreshLazy(adDB)
     return adDB
 end
@@ -1787,8 +1857,9 @@ local GLOBAL_DEFAULT_MAP = {
 -- are secret (PTR-5), and out-of-combat-only animation is worthless for an expiry warning.
 -- `include` (optional) selects which reveal types + controls apply to this indicator's shape:
 -- square indicators (icon/square) pass nil (Border + Tint + Match); a rectangular one (bar)
--- passes { border = false, match = false } — Border distorts off-square, and a Tint auto-fills
--- so there's no Match / manual Size.
+-- passes { border = false, tint = false, match = false } — Border distorts off-square, and the
+-- |T tint is font-coupled so it collapses on a thin bar; a bar's expiry colour is its own fill
+-- (Duration Bar Color Mode), leaving Text/Glyph as the bar's alert types.
 local function AddExpiryAlertControls(g, parent, proxy, include)
     GUI:CreateExpirationControls(g, proxy, {
         parent        = parent,
@@ -2787,7 +2858,9 @@ local function ClearPlacedIndicators()
             for _, rec in pairs(mock.dfADPreviewSlots) do
                 stopAnims(rec.slot)
                 rec.slot:Hide()
-                if rec.alertHolder then rec.alertHolder:Hide() end
+                -- The alert slot carries no border (its style is duration-only), so it has
+                -- no animation to stop — only the indicator's slot needs stopAnims.
+                if rec.alertSlot then rec.alertSlot:Hide() end
             end
         end
         mock.dfAD = nil
@@ -2851,7 +2924,7 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         -- driver ticks secretRect borders even while hidden (Border.lua).
         if rec.slot.dfBorder and DF.Border then DF.Border:StopAnimation(rec.slot.dfBorder) end
         rec.slot:Hide()
-        if rec.alertHolder then rec.alertHolder:Hide() end
+        if rec.alertSlot then rec.alertSlot:Hide() end
         rec = nil
     end
     if not rec then
@@ -2876,44 +2949,47 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     AC.PaintPreviewSlot(slot, cfg, 1)
     slot:Show()
 
-    -- Expiry Alert element sample (cfg.alertPreview): the reveal's REAL duration spec,
-    -- bound to the SAME duration object driving this slot's countdown, so the sample
-    -- counts down and changes colour exactly as the live companion does — including
-    -- stepping through the by-time ramp and going empty above the threshold. Binding it
-    -- rather than stamping a payload is the whole point: a preview-only renderer is what
-    -- previously left by-time samples stuck on a hardcoded red.
-    -- Anchored to the PREVIEW SLOT: live, the companion slot's invisible button
-    -- coincides with the indicator's rect and its duration text pins the
-    -- configured anchor point to the same point on the button plus offsets —
-    -- the holder-over-slot + anchored FontString here is the same math (+7 =
-    -- the companion's duration holder layering). nil (hidden) when the alert
-    -- is off or the indicator is show-when-missing (buildAlertPreview gates
-    -- both, matching the factory's live behaviour).
+    -- Expiry Alert sample: a SECOND PREVIEW SLOT laid over the indicator's, styled and
+    -- painted by the same StylePreviewSlot/PaintPreviewSlot pipeline as the indicator
+    -- itself and the group blocks. cfg.alertPreview is a whole slot config from
+    -- Factory:BuildAlertPreviewConfig, carrying the SAME style table the live companion
+    -- renders — so the FontString, its font, anchor, offsets, alpha and holder level are
+    -- all container-engine output here, not decisions made in this file.
+    --
+    -- This used to hand-build a FontString and hand-set its layering. Two separate bugs
+    -- came out of that in one day: the live companion moved and the canvas could not
+    -- follow, because the canvas was never DERIVED from it, only numerically matched. The
+    -- rule is the one that already covers test mode — a preview may differ in DATA, never
+    -- in RENDERING.
+    --
+    -- nil (hidden) whenever the live companion would also be absent: alertSlotStyle is the
+    -- single gate for both, so "off", "no formatter API" and "show-when-missing" can no
+    -- longer mean different things on the canvas than they do live.
     local ap = cfg.alertPreview
     if ap then
-        local ah = rec.alertHolder
+        local ah = rec.alertSlot
         if not ah then
             ah = CreateFrame("Frame", nil, slot)
-            ah.fs = ah:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            rec.alertHolder = ah
+            rec.alertSlot = ah
         end
+        -- Share the indicator's OWN entry, so both slots count down the same aura for the
+        -- same 15s rather than two entries that happen to agree. cfg.testEntries is
+        -- rewritten above when no spell ID resolved, hence taking it here and not at build.
+        ap.testEntries = cfg.testEntries
+        AC.StylePreviewSlot(ah, ap)
+        -- SetAllPoints AFTER styling: styleButton_regions sizes the slot from the layout,
+        -- and the alert must coincide with the indicator's rect exactly, the way the live
+        -- companion's invisible button does.
         ah:ClearAllPoints()
         ah:SetAllPoints(slot)
         ah:SetFrameStrata(slot:GetFrameStrata())
-        ah:SetFrameLevel(slot:GetFrameLevel() + 7)
-        ah.fs:ClearAllPoints()
-        ah.fs:SetPoint(ap.anchor, ah, ap.anchor, ap.offsetX, ap.offsetY)
-        if DF.SafeSetFont then DF:SafeSetFont(ah.fs, ap.font, ap.size, "OUTLINE") end
-        ah.fs:SetAlpha(ap.alpha or 1)   -- border/tint opacity (region alpha scales the |T)
-        -- PaintPreviewSlot armed slot._dfTestDurObj for the icon's own countdown; reusing
-        -- it keeps the reveal in lockstep with the timer it is meant to be reacting to.
-        if not (AC.BindDurationTextPreview
-                and AC.BindDurationTextPreview(ah.fs, ap, slot._dfTestDurObj, rec, "alertBinding")) then
-            ah.fs:SetText("")   -- no duration API: show nothing rather than a stale sample
-        end
+        ah:SetFrameLevel(slot:GetFrameLevel() + (Factory.ALERT_ROW_LIFT or 13))
+        -- Reuse the indicator slot's duration object (PaintPreviewSlot armed it just above)
+        -- so the reveal reacts to the very timer it sits on, not a second one.
+        AC.PaintPreviewSlot(ah, ap, 1, slot._dfTestDurObj)
         ah:Show()
-    elseif rec.alertHolder then
-        rec.alertHolder:Hide()
+    elseif rec.alertSlot then
+        rec.alertSlot:Hide()
     end
     return slot
 end
@@ -4490,14 +4566,14 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             local previewBtn = GUI:CreateButton(parent, L["Preview Sound"], 120, 22, function()
                 local soundFile = DF:GetSoundPath(proxy.soundLSMKey) or proxy.soundFile
                 if not soundFile or soundFile == "" then
-                    print("|cffff8033DandersFrames:|r " .. L["No sound file selected. Choose a sound from the dropdown or enter a custom path."])
+                    DF:Say(L["No sound file selected. Choose a sound from the dropdown or enter a custom path."])
                     return
                 end
                 local volume = proxy.volume or 0.8
                 if DF.AuraDesigner.SoundEngine then
                     local willPlay = DF.AuraDesigner.SoundEngine:PlayWithVolume(soundFile, volume)
                     if not willPlay then
-                        print("|cffff8033DandersFrames:|r " .. format(L["Sound file could not be played: %s"], tostring(soundFile)))
+                        DF:Say(format(L["Sound file could not be played: %s"], tostring(soundFile)))
                     end
                 end
             end)
@@ -4542,7 +4618,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 local prev = GUI:CreateButton(parent, L["Preview Sound"], 120, 22, function()
                     local sf = DF:GetSoundPath(ec.soundLSMKey) or ec.soundFile
                     if not sf or sf == "" then
-                        print("|cffff8033DandersFrames:|r " .. L["No sound file selected. Choose a sound from the dropdown or enter a custom path."])
+                        DF:Say(L["No sound file selected. Choose a sound from the dropdown or enter a custom path."])
                         return
                     end
                     if DF.AuraDesigner.SoundEngine then
@@ -4576,7 +4652,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- alone. "roadmap" = temporary (delete the single call site when the port
     -- lands); "limitation" = permanent (secret-value casualty).
     -- ============================================================
-    local ADgate = function(d) return DF:FactoryOwnsAD(d) end
 
     if typeKey == "icon" or typeKey == "square" then
         -- P4.3/P4.5 SHIPPED: icon/square render on the container engine (native icon / solid
@@ -4867,7 +4942,7 @@ local function BuildGlobalView(parent)
                 if buffsDB.buffStackFont then defaults.stackFont = buffsDB.buffStackFont end
                 if buffsDB.buffStackScale then defaults.stackScale = buffsDB.buffStackScale end
                 if buffsDB.buffStackOutline then defaults.stackOutline = buffsDB.buffStackOutline end
-                DF:Debug("Aura Designer: Imported Buffs tab defaults")
+                DF:Debug("AD", "Imported Buffs tab defaults")
                 importBtn.Text:SetText(L["Imported!"])
                 C_Timer.After(1.5, function() importBtn.Text:SetText(L["Import Buffs Tab Defaults"]) end)
                 DF:AuraDesigner_RefreshPage()
@@ -4938,7 +5013,7 @@ local function BuildGlobalView(parent)
                 for k in pairs(dest) do dest[k] = nil end
                 for k, v in pairs(source) do dest[k] = DeepCopy(v) end
             end
-            DF:Debug("Aura Designer: Copied " .. srcMode .. " settings to " .. dstMode)
+            DF:Debug("AD", "Copied %s settings to %s", tostring(srcMode), tostring(dstMode))
         end)
         g:AddWidget(copyBtn, 32)
 
@@ -4963,7 +5038,7 @@ local function BuildGlobalView(parent)
                             end
                             DF:AuraDesigner_RefreshPage()
                             RefreshLiveFramesThrottled()
-                            DF:Debug("Aura Designer: Reset all aura configurations")
+                            DF:Debug("AD", "Reset all aura configurations")
                         end,
                     },
                     { label = L["Cancel"] },
@@ -5187,8 +5262,6 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
 
     -- Outer container with label
     local container = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    local INSTR_COUNT = 3  -- number of instruction rows
-    local INSTR_ROW_H = 18
     local rightInset = rightPanelRef and (rightPanelRef:GetWidth() + 6) or 0
     container:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, yOffset)
     container:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -rightInset, yOffset)
@@ -7066,11 +7139,8 @@ BuildLayoutGroupsTab = function()
     local yPos = -10
     local tc = GetThemeColor()
 
-    -- Grow direction options
-    local GROW_DIRECTIONS = {
-        RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down",
-        _order = { "RIGHT", "LEFT", "UP", "DOWN" },
-    }
+    -- (Removed) a GROW_DIRECTIONS option map — never read. Also note its labels were
+    -- raw English, so wiring it up as-is would have been a localisation regression.
 
     -- "+ Create Group" / "+ Filter Group" buttons (prominent, theme-colored).
     -- Left = classic member-arranger group; right = registry-linked filter group.

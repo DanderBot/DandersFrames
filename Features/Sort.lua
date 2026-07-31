@@ -445,38 +445,57 @@ DF:RegisterDebugSlash("DFSORT", "Frame sorting diagnostics", false, "/dfsort")
 SlashCmdList["DFSORT"] = function(msg)
     if msg == "refresh" or msg == "resort" then
         Sort:TriggerResort()
-        print("|cff00ff00DandersFrames:|r Re-sorted frames.")
+        DF:Say("Re-sorted frames.")
     elseif msg == "clear" then
         Sort:ClearCache()
-        print("|cff00ff00DandersFrames:|r Cleared sort cache.")
-    elseif msg == "debug" then
-        print("|cff00ccffDandersFrames Sort Debug:|r")
+        DF:Say("Cleared sort cache.")
+    -- Bare form prints the dump, matching its two siblings: /df debug secure with no
+    -- argument prints status, /df debug flatraid with no argument prints info. "debug"
+    -- meant three different things across the three sort/layout commands — a dump
+    -- here, a real TOGGLE in secure, a console signpost in flatraid — so the bare
+    -- form is now the consistent way in. "debug" stays as an alias.
+    elseif msg == "debug" or msg == "" then
+        -- ☠ THE BODY GOES THROUGH THE WRITER, NOT print().
+        -- This block opened a DF:Out header and then printed its body with bare
+        -- print(). That reads as a style inconsistency and is not one: the writers
+        -- route through DebugConsole:Log, which is where secret values are
+        -- sanitised. The unit rows below call UnitName() on group members — on 12.1
+        -- that can return a secret value, and handing one to a raw print is exactly
+        -- what the sanitiser exists to prevent. It also meant these lines never
+        -- reached the console log, so they were missing from the very export someone
+        -- would attach to a sorting bug report.
+        local o = DF:Out("Sort")
         local db = DF:GetDB()
-        print("  sortEnabled:", db.sortEnabled)
-        print("  sortSelfPosition:", db.sortSelfPosition)
-        print("  sortByClass:", db.sortByClass)
-        print("  sortAlphabetical:", tostring(db.sortAlphabetical))
-        print("  sortSeparateMeleeRanged:", db.sortSeparateMeleeRanged)
-        print("  sortRoleOrder:", table.concat(db.sortRoleOrder or {}, ", "))
+        o:Field("sortEnabled", tostring(db.sortEnabled))
+        o:Field("sortSelfPosition", tostring(db.sortSelfPosition))
+        o:Field("sortByClass", tostring(db.sortByClass))
+        o:Field("sortAlphabetical", tostring(db.sortAlphabetical))
+        o:Field("sortSeparateMeleeRanged", tostring(db.sortSeparateMeleeRanged))
+        o:Field("sortRoleOrder", table.concat(db.sortRoleOrder or {}, ", "))
         if db.sortByClass then
-            print("  sortClassOrder:", table.concat(db.sortClassOrder or {}, ", "))
+            o:Field("sortClassOrder", table.concat(db.sortClassOrder or {}, ", "))
         end
-        
-        -- Show detected roles and classes for party members
-        print("  Unit Info:")
-        local _, playerClass = UnitClass("player")
-        print("    player:", Sort:GetUnitRole("player"), "-", playerClass, "-", UnitName("player"))
+
+        -- Detected roles and classes for party members.
+        o:Section("Unit Info")
+        local function unitRow(unit)
+            local _, unitClass = UnitClass(unit)
+            o:Field(unit, string.format("%s - %s - %s",
+                tostring(Sort:GetUnitRole(unit)), tostring(unitClass), tostring(UnitName(unit))))
+        end
+        unitRow("player")
         for i = 1, 4 do
             local unit = "party" .. i
             if UnitExists(unit) then
-                local _, unitClass = UnitClass(unit)
-                print("    " .. unit .. ":", Sort:GetUnitRole(unit), "-", unitClass, "-", UnitName(unit))
+                unitRow(unit)
             end
         end
+        o:Siblings("sort")
     else
-        print("|cff00ff00DandersFrames:|r /dfsort commands:")
-        print("  refresh - Re-sort frames")
-        print("  clear - Clear role cache")
-        print("  debug - Show sort debug info")
+        local o = DF:Out("Sort")
+        o:Section("Commands")
+        o:Item("(no argument)", "sort config, roles and classes")
+        o:Item("refresh", "re-sort frames")
+        o:Item("clear", "clear the role cache")
     end
 end

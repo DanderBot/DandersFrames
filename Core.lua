@@ -33,13 +33,13 @@ function DF:RunLocaleRefreshers()
     for i = 1, #DF._localeRefreshers do
         local ok, err = pcall(DF._localeRefreshers[i])
         if not ok and DF.DebugError then
-            DF:DebugError("LocaleRefresh failed: " .. tostring(err))
+            DF:DebugError("SCRIPT", "LocaleRefresh failed: %s", tostring(err))
         end
     end
 end
 
 -- Locale warnings: silent by default (see Locales/enUS.lua for rationale).
--- Call DF:SetLocaleWarnings(true) — or use /df localewarn — to enable
+-- Call DF:SetLocaleWarnings(true) — or use /df debug localewarn — to enable
 -- error-handler warnings on missing L["..."] keys for the current session.
 DF.localeWarningsEnabled = false
 function DF:SetLocaleWarnings(enabled)
@@ -59,7 +59,14 @@ function DF:SetLocaleWarnings(enabled)
 end
 
 -- Debug flags
-DF.debugEnabled = false
+-- ☠ (Removed) DF.debugEnabled. It was WRITE-ONLY: declared here and assigned in
+-- three places, but read nowhere once consumers moved to DF:DebugActive(category)
+-- — which is per-category, so a single global boolean could not express the
+-- question anyway. Three comments in the addon still record "was gated on
+-- DF.debugEnabled". A flag that is maintained but never consulted is worse than
+-- no flag: it reads as a live gate. Ask DF:DebugActive(cat) — there is no global
+-- accessor, because no consumer ever wanted one (DebugConsole:IsEnabled() was
+-- added for that and removed unused).
 DF.demoMode = false
 DF.demoPercent = 1
 DF.initialized = false  -- Set to true after frames are created and ready
@@ -110,15 +117,443 @@ end
 -- key = the SlashCmdList key; desc = one-liner for /df debug; devOnly = only
 -- register on alpha/beta builds; ... = the slash alias(es) ("/dfauras", ...).
 -- The handler stays a plain `SlashCmdList[key] = function` at the call site.
+-- The command's NAME is derived by stripping "/df" from its first alias, so
+-- "/dfauraexp" becomes "auraexp" and is typed as "/df debug auraexp".
+--
+-- ☠ THE STANDALONE /dfXXX BINDS ARE NO LONGER REGISTERED. They used to be, and
+-- the /df debug listing carried them in grey as a second form. That put ~25 DF
+-- commands into the GLOBAL slash namespace — where they collide with other
+-- addons and clutter every slash autocomplete — to document a spelling nobody
+-- needed twice. One documented form now: "/df debug <command>".
+--
+-- The one exception is an alias that is NOT /df-prefixed: "/rl" has no "/df"
+-- form to fall back to, so a bind is the only way to reach it. That is the rule
+-- below, not a hardcoded name — add another such alias and it keeps working.
+--
+-- ☠ "/df <name>" (no "debug") does NOT answer for diagnostics. This comment used to
+-- claim it did, "unlisted, so macros and muscle memory survive" — that was the intent
+-- at the time, and THE GATE further down (search: "☠ THE GATE") was written later and
+-- deliberately closed it: anything that is not an everyday command and did not arrive
+-- via "/df debug" opens the settings window instead. The gate is the behaviour that
+-- ships; this note is kept as a warning because the changelog and CLAUDE.md both
+-- inherited the old claim and had to be corrected. A diagnostic is "/df debug <name>".
+--
+-- A derived name that collides with a hand-written branch in the /df debug dispatcher
+-- loses: the dispatcher is checked first and the registry is the fallback. The
+-- three real collisions (auras, dispel, headers) are merged into single
+-- commands rather than left to shadow each other silently.
+DF.DebugSlashBySub = {}
+
 function DF:RegisterDebugSlash(key, desc, devOnly, ...)
     local entry = { key = key, desc = desc, dev = devOnly, cmds = { ... } }
     entry.active = not devOnly or DF:IsDevBuild()
+    local first = select("#", ...) > 0 and (select(1, ...)) or nil
+    entry.sub = type(first) == "string" and first:match("^/df(.+)$") or nil
     table.insert(DF.DebugCommands, entry)
     if entry.active then
+        local n = 0
         for i = 1, select("#", ...) do
-            _G["SLASH_" .. key .. i] = (select(i, ...))
+            local alias = select(i, ...)
+            if type(alias) == "string" then
+                local word = alias:match("^/df(.+)$")
+                if word then
+                    -- EVERY /df-prefixed alias routes, not just the first: a
+                    -- command registered with both a long and a short spelling
+                    -- must answer to both, and keying only off entry.sub
+                    -- silently dropped every alias after the first.
+                    DF.DebugSlashBySub[word] = key
+                else
+                    -- No "/df <name>" route to fall back on (e.g. "/rl"), so a real
+                    -- slash bind is the only way to reach it.
+                    n = n + 1
+                    _G["SLASH_" .. key .. n] = alias
+                end
+            end
         end
     end
+end
+
+-- ============================================================
+-- WHERE A COMMAND LIVES
+-- ============================================================
+-- Everyday commands keep the short "/df <name>" form and are documented by
+-- "/df help". Everything else is a diagnostic and is typed "/df debug <name>",
+-- documented by "/df debug". ONE table decides, so the listing, the Siblings
+-- footer and the help text can never disagree about where a command lives —
+-- which is exactly how the old build ended up listing everyday commands under
+-- /df debug and debug commands under /df help.
+DF.EVERYDAY_COMMANDS = {
+    help = true, console = true, users = true, reset = true, resetgui = true,
+    test = true, hide = true, lock = true, unlock = true, raidlock = true,
+    raidunlock = true, clearoverride = true,
+}
+
+--- The typeable path for a command word, e.g. "dispel" -> "/df debug dispel".
+function DF:CmdPath(word)
+    return (DF.EVERYDAY_COMMANDS[word] and "/df " or "/df debug ") .. word
+end
+
+-- (Removed) DF:IsDebugCommand. Written so "the listing, the Siblings footer and the
+-- help text can never disagree", but each of those was subsequently rewritten to
+-- read what it needs directly — the listing walks the two registries itself and
+-- Out:Siblings uses DF:CmdPath — leaving it with zero callers.
+
+-- ============================================================
+-- /df SUBCOMMAND REGISTRY
+-- ============================================================
+-- The /dfXXX half of "/df debug" is generated from DebugCommands above, so it
+-- cannot drift. The /df SUBCOMMAND half used to be eight hand-written print()
+-- lines carrying the comment "keep in sync with this handler" — and it had
+-- drifted BOTH ways: it advertised "/df debug auratimer", which was never
+-- implemented, while omitting ~45 subcommands that were (pixelcheck, gapcheck,
+-- navprobe, idgate, ppdump, zorder, localewarn, every test*, …).
+--
+-- This registry is now the single source for that listing. Adding a branch to
+-- the dispatcher without registering it here means it stays invisible, so
+-- register alongside the branch.
+--
+-- `args` documents the argument shape for the listing ("<sec>", "on|off"),
+-- nil for bare commands. `dev` hides it on release builds, matching the slash
+-- half. Order is preserved for display — grouped, not alphabetical.
+DF.DebugSubCommands = {}
+
+-- ☠ `dev` USED TO MEAN "hidden from the list" AND NOTHING ELSE.
+-- The slash half really does block: RegisterDebugSlash sets entry.active and
+-- skips both the /df route and the SLASH_* globals, so a dev command has no
+-- reachable token on release. The sub() half only bucketed the row into a "dev"
+-- section of the printed listing — every branch stayed fully runnable via
+-- "/df debug <word>", including ones that force debug art onto LIVE frames
+-- (raidbg, ppbadge) and one that switches on locale warning spam (localewarn).
+-- This lookup is what the dispatcher gate consults so the two halves now match.
+DF.DEBUG_SUB_DEV = {}
+
+-- ============================================================
+-- CHAT OUTPUT HOUSE STYLE  (DF:Out)
+-- ============================================================
+-- Every slash command prints through this. Before it there were SEVEN competing
+-- conventions across ~1000 print() calls — "DandersFrames:" in five different
+-- colours, plus [DF SecureSort], [DF Headers], [DFRange], [DF Flat Debug],
+-- "DF PerfTest:" and some with no prefix at all — and banner rules in three
+-- different widths.
+--
+-- The shape (one title line, indented sections, a footer of what to type next):
+--
+--   DandersFrames · Pinned Frames          <- brand purple + module, ONCE
+--     Module state                         <- section, gold
+--       initialized: no                    <- field, 4-space indent
+--     Sets (3 configured, 2 enabled)       <- section with a count
+--       1  Kesara — 2 units, enabled
+--       … 37 more — /df debug pinned map full    <- capped list + escape hatch
+--     More: /df debug pinned info · /df debug pinned test
+--
+-- ☠ TWO RULES THAT ARE EASY TO GET WRONG
+-- 1. The chat font is PROPORTIONAL. Space-padded columns DO NOT line up in game
+--    — they drift the moment a value is a different width. Use "key: value" and
+--    indentation for structure, never padding for alignment.
+-- 2. Colour marks STATUS, not datatype. `false` is not automatically red:
+--    "debug: off" is neutral, "handler missing" is bad. Red must mean "look
+--    here" or it means nothing. That confusion is why the old SecureSort dump
+--    showed inCombat:no green and handlerExists:false red — same shape,
+--    opposite colours.
+DF.OUT = {
+    BRAND   = "|cff7373f2",   -- the addon name, once per output
+    TITLE   = "|cffffffff",   -- the module name — must OUTRANK SECTION, see below
+    SECTION = "|cffffcc00",   -- a group heading
+    GOOD    = "|cff40d073",   -- working, active, present
+    BAD     = "|cffff6b5e",   -- A PROBLEM. not merely "false"
+    WARN    = "|cffffa832",   -- works, but worth knowing
+    NEUTRAL = "|cff909090",   -- off, unused, n/a — NOT a fault
+    CMD     = "|cffeda55f",   -- something you can type
+}
+local O = DF.OUT
+-- ☠ CASE-INSENSITIVE ON PURPOSE. DF.OUT is keyed in caps, but roughly fifty call
+-- sites across Core, Bars, Headers, ColorPicker, AutoProfiles and TextDesigner pass
+-- "good"/"bad"/"warn" in lower case — several files mix both spellings within
+-- themselves, so it is a typo class rather than a second convention. A miss used to
+-- resolve to "", and because `status` was still truthy the Out writers appended a
+-- bare "|r" anyway: the line rendered with no colour and nothing looked broken. That
+-- silently killed the colour coding in the very commands that were rewritten to add
+-- it. Normalising here fixes every site at once; fixing them individually would only
+-- last until the next one is written.
+local function tone(t) return O[t] or (t and O[t:upper()]) or "" end
+
+local Out = {}
+Out.__index = Out
+
+-- The leading rule. Run two commands in a row and the previous output's footer
+-- sits flush against the next title with nothing between them — the eye has no
+-- edge to catch when scrolling chat back. One short rule fixes that for one line.
+--
+-- ☠ FIXED WIDTH ON PURPOSE. A full-width rule WRAPS on a narrow chat frame and
+-- becomes two ragged lines; that is what makes the old
+-- "========================================" banners look broken, not the idea
+-- of a rule. Do not "improve" this by making it span the frame — the frame width
+-- is not knowable here, and this fits any usable chat size.
+--
+-- ☠ EM DASH (U+2014) ON PURPOSE, not a box-drawing character. The em dash is
+-- already used ~200 times across the addon and is confirmed to render in the
+-- chat frame; U+2500 and friends are NOT used anywhere, and WoW's default fonts
+-- do not reliably carry box-drawing glyphs — a missing glyph here would put a
+-- tofu box above every single command's output.
+local RULE = O.NEUTRAL .. ("—"):rep(14) .. "|r"
+
+--- Start an output block. Prints a separator rule and the title line immediately;
+--- a command with nothing further to say is simply a title and stops there (the
+--- old "one-liner" shape is this with no body, not a separate format).
+--- @param module string  the subsystem name, e.g. "Pinned Frames"
+--- @param suffix string|nil  trailing detail for the title, e.g. a unit token
+--- ☠ The module name is UPPERCASED and printed in TITLE (pure white), not left as
+--- sentence case. Chat has no bold and no font-size control, so the only levers
+--- for weight are capitalisation and contrast — and the title needs both, because
+--- without them it loses to its own children: gold SECTION heads at sentence case
+--- were visually louder than the title above them, inverting the hierarchy. Pure
+--- white outranks gold on a dark ground, and caps carry the rest.
+--- The suffix stays lowercase and NEUTRAL so it reads as an aside, not a second title.
+function DF:Out(module, suffix)
+    print(RULE)
+    print(O.BRAND .. "DandersFrames|r " .. O.NEUTRAL .. "·|r "
+        .. O.TITLE .. (module or ""):upper() .. "|r"
+        .. (suffix and (" " .. O.NEUTRAL .. suffix .. "|r") or ""))
+    return setmetatable({ module = module }, Out)
+end
+
+--- A group heading. `count` is optional trailing detail, e.g. "3 configured".
+function Out:Section(name, count)
+    print("  " .. O.SECTION .. name .. "|r"
+        .. (count and (" " .. O.NEUTRAL .. "(" .. count .. ")|r") or ""))
+    return self
+end
+
+--- key: value. `status` is one of the DF.OUT tone names ("GOOD"/"BAD"/"WARN"/
+--- "NEUTRAL"); omit it for an uncoloured value. Booleans render as yes/no.
+function Out:Field(key, value, status)
+    if type(value) == "boolean" then value = value and "yes" or "no" end
+    print("    " .. key .. ": " .. tone(status) .. tostring(value) .. (status and "|r" or ""))
+    return self
+end
+
+--- A free line inside a section, already indented. `status` tones the whole line.
+function Out:Line(text, status)
+    print("    " .. tone(status) .. text .. (status and "|r" or ""))
+    return self
+end
+
+--- A list item: "  1  Kesara — 2 units, enabled".
+function Out:Item(label, detail, status)
+    print("    " .. label
+        .. (detail and (" " .. O.NEUTRAL .. "—|r " .. tone(status) .. detail .. (status and "|r" or "")) or ""))
+    return self
+end
+
+--- Print at most `max` items, then a tail pointing at the full form. Unbounded
+--- dumps scroll the useful part off screen and hit chat's backlog cap, so every
+--- list longer than a screenful goes through here.
+--- @param items table  array of strings (already formatted)
+--- @param max number
+--- @param fullCmd string|nil  the command that prints all of them
+function Out:More(items, max, fullCmd)
+    local n = #items
+    for i = 1, math.min(n, max) do print("    " .. items[i]) end
+    if n > max then
+        print("    " .. O.NEUTRAL .. "… " .. (n - max) .. " more|r"
+            .. (fullCmd and (" " .. O.NEUTRAL .. "—|r " .. O.CMD .. fullCmd .. "|r") or ""))
+    end
+    return self
+end
+
+-- ============================================================
+-- SIBLING COMMANDS — the footer every dump ends with
+-- ============================================================
+-- ☠ A REGISTRY, NOT A HAND-WRITTEN LINE PER DUMP, because hand-written footers
+-- went wrong three separate ways: some dumps never got one; /df debug secure listed
+-- two of its sixteen; and /df debug dispel's sat after an early `return`, so it
+-- printed only when the unit HAD debuffs — the one case where you did not need
+-- it. One table, one call, and Siblings takes no state so it is safe to call
+-- from an early return.
+--
+-- Key is the /df debug word. Entries are what you can type after it; "<unit>" and
+-- friends are ARGUMENT SHAPES rather than literal subcommands, which is what a
+-- reader actually wants to see.
+DF.COMMAND_SIBLINGS = {
+    auras     = { "<unit>" },
+    auradata  = { "<unit>" },
+    dispel    = { "<unit>", "ids", "render" },
+    idgate    = {},   -- no args; present so o:Siblings is a no-op, not a nil index
+    guiwidth  = {},
+    gapcheck  = { "all", "clear" },
+    pixelcheck = {},
+    admissing = { "mark" },
+    -- The dev list here MUST stay in step with HEADER_MUTATORS in Frames/Headers.lua,
+    -- which is what actually refuses them on a release build. Listing one without
+    -- the other is how a command ends up advertised and then rejected.
+    headers   = { "info", "map", dev = { "init", "refresh", "sort <type>", "horizontal|vertical", "grow <pos>", "center", "self <pos>" } },
+    pinned    = { "info", "test", "reinit", "bosstest <1-8>", "bossspawn demo" },
+    range     = { "stats", "spell", "dump", "clear" },
+    sort      = { "refresh", "clear" },
+    -- Public half is read-only. The dev half must stay in step with
+    -- SECURE_MUTATORS in Features/SecureSort.lua, which is what refuses them.
+    -- "init" leads the dev list because every other one needs the handler.
+    secure    = { "help", "status", dev = { "init", "party", "raid", "all", "register",
+                  "test", "swap", "swapback", "debug", "ui", "show", "hide" } },
+    flatraid  = { "info", "reinit", "test" },
+    -- (No "cc" entry.) /df debug cc's BARE form already prints its full subcommand
+    -- table — that is its entire job — so a Siblings footer would repeat it.
+    api       = { "test", "fire", "snippet", "watch", "list" },
+    colorhook = { "on", "off", "api" },
+    spelldump = { "<search term>" },
+}
+
+--- Footer listing what else this command takes. Safe from an early return.
+--- ☠ The array part is what EVERYONE sees. A `dev` sub-table is appended only on
+--- a dev build, so a release user is never shown a command their client refuses —
+--- the same drift that once listed everyday commands under /df debug, and that
+--- put "/dfheaders hide" in a help block with no handler behind it.
+--- @param cmd string  the /df debug word, e.g. "dispel"
+function Out:Siblings(cmd)
+    local list = DF.COMMAND_SIBLINGS[cmd]
+    if not list then return self end
+    -- Built from DF:CmdPath, never a literal "/df " — the footer has to name the
+    -- form the user can actually type, and that moved to "/df debug <cmd>".
+    local path = DF:CmdPath(cmd)
+    local parts = {}
+    for _, sub in ipairs(list) do
+        parts[#parts + 1] = O.CMD .. path .. " " .. sub .. "|r"
+    end
+    if list.dev and DF:IsDevBuild() then
+        for _, sub in ipairs(list.dev) do
+            parts[#parts + 1] = O.CMD .. path .. " " .. sub .. "|r"
+        end
+    end
+    if #parts == 0 then return self end
+    print("  " .. O.NEUTRAL .. "Also:|r " .. table.concat(parts, " " .. O.NEUTRAL .. "·|r "))
+    return self
+end
+
+--- Closing line of typeable next steps. Pass command strings.
+function Out:Hints(...)
+    local n = select("#", ...)
+    if n == 0 then return self end
+    local parts = {}
+    for i = 1, n do parts[i] = O.CMD .. (select(i, ...)) .. "|r" end
+    print("  " .. O.NEUTRAL .. "More:|r " .. table.concat(parts, " " .. O.NEUTRAL .. "·|r "))
+    return self
+end
+
+-- Say/Err deliberately do NOT print the rule. A separator above "Pinned frames
+-- reinitialised" is heavier than the message it introduces, and these fire far
+-- more often than dumps do. The cost is that two visual shapes exist — a ruled
+-- block and a bare line — but the line still carries the same brand prefix, so
+-- they read as one family and the rule stays meaningful as "a block starts here".
+
+--- Title-only output: the house style with no body. Use for confirmations.
+function DF:Say(text, value, status)
+    print(O.BRAND .. "DandersFrames|r " .. O.NEUTRAL .. "·|r " .. text
+        .. (value and (" " .. tone(status or "GOOD") .. value .. "|r") or ""))
+end
+
+--- Title-only output in the BAD tone. Use for refusals and failures.
+function DF:Err(text)
+    print(O.BRAND .. "DandersFrames|r " .. O.NEUTRAL .. "·|r " .. O.BAD .. text .. "|r")
+end
+
+-- ============================================================
+-- DEBUG COMMAND GROUPING
+-- ============================================================
+-- /df debug used to print three sections split by REGISTRATION MECHANISM —
+-- "Support / diagnostics" and "Dev tools" (both from RegisterDebugSlash) and
+-- "/df diagnostics" (from RegisterDebugSub). That is an implementation detail
+-- nobody reading the list cares about: it put /df debug auras and /df debug auradata in
+-- different sections while they answer the same question, and it made the
+-- first and third sections look like they should be one list.
+--
+-- The split that matters is WHO RUNS IT (dev gate) and WHAT IT IS ABOUT
+-- (subsystem). Both registries resolve their group from the one map below, so
+-- there is a single place to edit and anything unmapped lands visibly in
+-- "Other" rather than silently disappearing.
+DF.DEBUG_GROUP_ORDER = { "auras", "frames", "click", "gui", "data", "system", "other" }
+DF.DEBUG_GROUP_NAMES = {
+    auras  = "Auras, dispel and the aura container",
+    frames = "Frames, layout and sorting",
+    click  = "Click-casting",
+    gui    = "Settings window",
+    data   = "Profiles, spell data and exports",
+    system = "System, API and performance",
+    other  = "Other",
+}
+-- Keyed by the /df <word> form (for a command with no /df debug form, its alias minus
+-- the leading slash). Covers BOTH registries.
+DF.DEBUG_GROUP_OF = {
+    auras = "auras", auradata = "auras", dispel = "auras", auraexp = "auras",
+    duration = "auras", idgate = "auras", ppdump = "auras", ppbadge = "auras",
+    admissing = "auras", cbt = "auras",
+
+    headers = "frames", flatraid = "frames", secure = "frames", sort = "frames",
+    roster = "frames", pinned = "frames", range = "frames", arena = "frames",
+    attached = "frames", zorder = "frames", mousefoci = "frames",
+    flatdebug = "frames", flatoverlay = "frames", raidbg = "frames",
+    rostertest = "frames",
+
+    cc = "click", clickcast = "click", spelldump = "click",
+    casthistory = "click", clearhistory = "click", resetconflict = "click",
+
+    pixelcheck = "gui", gapcheck = "gui", navprobe = "gui", guiwidth = "gui",
+    tdmirror = "gui", colorhook = "gui", overridedebug = "gui", atlas = "gui",
+    icons = "gui",
+
+    auditspells = "data", exportaudit = "data", overrides = "data",
+    localewarn = "data", testids = "data", autotest = "data",
+
+    api = "system", profiler = "system", profile = "system",
+    memtest = "system", debugrested = "system",
+    -- Media availability, not a settings-window probe — it answers "does this
+    -- client have the font at all", which matters everywhere fonts are drawn.
+    debugfonts = "system",
+}
+
+-- `hidden` keeps a command ANSWERING, and registered here for the drift check, but
+-- off the /df debug listing. Two reasons qualify:
+--   1. It is an everyday command already listed by /df help (test, reset, lock...).
+--      Each command should be documented in exactly ONE list — the one its audience
+--      reads — or the two drift apart, which is how pixelcheck ended up in both.
+--   2. (Removed 2026-07-29) There used to be a second reason: console-migration
+--      signposts that toggled nothing. Those commands are gone rather than hidden
+--      — a command whose whole job is to say "this moved" is one more spelling to
+--      learn, and the console page already says where tracing lives.
+function DF:RegisterDebugSub(cmd, desc, devOnly, args, hidden)
+    table.insert(DF.DebugSubCommands, { cmd = cmd, desc = desc, dev = devOnly, args = args, hidden = hidden })
+    -- Registering IS the gate. Populated here rather than at the branch so a
+    -- command cannot be marked dev in the listing while staying runnable on
+    -- release — the two can no longer drift apart.
+    if devOnly then DF.DEBUG_SUB_DEV[cmd] = true end
+end
+
+-- ============================================================
+-- MEMORY TEST GATE
+-- ============================================================
+-- The ONLY way any system may consult a memory-test flag. Never read
+-- DF.MemTest directly in a guard — see the three conditions below, each of
+-- which is load-bearing.
+--
+-- ☠ WHY THIS LIVES IN Core.lua AND NOT IN Debug/MemoryTest.lua
+-- The flag table is declared at TOC line 160; every consumer of it loads
+-- earlier (Border 91, Icons 99, Auras 110, AD Factory 125, TD Render 134). The
+-- old idiom was `DF.MemTest and not DF.MemTest.enableX`, which reads a MISSING
+-- key as nil -> `not nil` -> true -> DISABLED. So any window where a consumer
+-- knew about a flag the table did not yet declare silently switched that system
+-- off on live frames, and it took a second reload to come back. A partial or
+-- failed load of MemoryTest.lua would do the same thing. Absence must mean
+-- ENABLED, and the gate must exist before anything that calls it.
+--
+--   1. MemTestArmed   — only true while the panel is actually OPEN. Closing it
+--      restores every flag, so a forgotten tick can never outlive the window.
+--   2. table present   — if MemoryTest.lua fails to load at all, nothing
+--      is disabled rather than everything.
+--   3. `== false`      — STRICT. nil, missing, or any other value is enabled.
+--      This is the polarity fix; do not relax it to `not v`.
+function DF:MemTestDisabled(key)
+    return DF.MemTestArmed == true
+        and DF.MemTest ~= nil
+        and DF.MemTest[key] == false
 end
 
 -- Aura layout version: incremented when any layout-affecting setting changes.
@@ -131,6 +566,20 @@ function DF:InvalidateAuraLayout()
     -- update cycle (next UNIT_AURA), so without an immediate re-drive a GUI layout
     -- change applies "one aura event late". Drive them now (OOC; no-op pre-12.1).
     if DF.RefreshFactoryRows then DF:RefreshFactoryRows() end
+
+    -- ⚠ TEST MODE NEEDS ITS OWN PASS. RefreshFactoryRows goes through
+    -- driveFactoryRowsNow -> UseFactoryFor{Buffs,Debuffs,Defensive,MissingBuff}, and
+    -- ALL FOUR of those predicates contain `not (DF.testMode or DF.raidTestMode)` —
+    -- deliberately, because the test drives call the factories themselves. The effect
+    -- was that every container setting re-drove live frames and skipped the preview:
+    -- change a buff/debuff/defensive setting while previewing and nothing moved until
+    -- test mode was reopened. Aura Designer looked like the only thing that worked
+    -- because it is the one surface whose "update every test frame" helper was wired up.
+    --
+    -- Each helper below self-guards on test mode, so this is inert on the live path.
+    if DF.UpdateAllTestAuras then DF:UpdateAllTestAuras() end
+    if DF.UpdateAllTestMissingBuff then DF:UpdateAllTestMissingBuff() end
+    if DF.UpdateAllTestDefensiveBar then DF:UpdateAllTestDefensiveBar() end
 end
 
 -- ============================================================
@@ -140,8 +589,7 @@ end
 -- During slider drag: only update the one property (e.g., just frame height)
 -- On slider release: perform full frame update to ensure everything is in sync
 
--- Debug flag for slider updates (toggle with /df debugslider)
-DF.debugSliderUpdates = false
+-- Debug flag for slider updates (enable the GUI category in the debug console)
 
 -- Track active slider dragging state
 DF.sliderDragging = false
@@ -163,21 +611,16 @@ function DF:OnSliderDragStart(lightweightFunc, funcName, usePreviewMode)
     DF.sliderLightweightName = funcName or "unknown"
     DF.sliderUpdateCallCount = 0  -- Reset counter
     
-    if DF.debugSliderUpdates then
-        local previewStr = usePreviewMode and " |cffff00ff(PREVIEW MODE)|r" or ""
-        if lightweightFunc then
-            print("|cff00ff00[DF Slider]|r Drag START - lightweight: |cff88ff88" .. DF.sliderLightweightName .. "|r" .. previewStr)
-        else
-            print("|cff00ff00[DF Slider]|r Drag START - |cffff8888no lightweight function|r (will skip until release)" .. previewStr)
-        end
-    end
+    DF:Debug("GUI", "Slider drag START - %s%s",
+        lightweightFunc and ("lightweight: " .. tostring(DF.sliderLightweightName))
+            or "no lightweight function (will skip until release)",
+        usePreviewMode and " (PREVIEW MODE)" or "")
 end
 
 -- Called when a slider stops being dragged (mouse up)
 function DF:OnSliderDragStop()
-    if DF.debugSliderUpdates then
-        print("|cff00ff00[DF Slider]|r Drag STOP - " .. DF.sliderUpdateCallCount .. " lightweight calls, now |cffffff00FULL UpdateAll()|r")
-    end
+    DF:Debug("GUI", "Slider drag STOP - %s lightweight calls, now FULL UpdateAll()",
+        tostring(DF.sliderUpdateCallCount))
     
     DF.sliderDragging = false
     DF.sliderLightweightFunc = nil
@@ -2038,7 +2481,7 @@ end
 
 function DF:DebugAuraFilters(unit)
     if not UnitExists(unit) then
-        print("|cffff0000DandersFrames:|r Unit '" .. unit .. "' does not exist.")
+        DF:Err("Unit '" .. unit .. "' does not exist.")
         return
     end
     
@@ -2050,11 +2493,11 @@ function DF:DebugAuraFilters(unit)
         "HELPFUL|CANCELABLE",
     }
     
-    print("|cff00ff00=== DandersFrames Aura Debug for " .. unit .. " ===|r")
+    local o = DF:Out("Aura Data", "unit " .. unit)
     
     for _, filter in ipairs(filters) do
-        print("|cffffcc00Filter: " .. filter .. "|r")
         local count = 0
+        local found = {}
         for i = 1, 40 do
             local auraData = nil
             if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
@@ -2067,78 +2510,71 @@ function DF:DebugAuraFilters(unit)
             pcall(function() name = auraData.name or "?" end)
             pcall(function() spellId = auraData.spellId or "?" end)
             
-            print("  " .. i .. ": " .. tostring(name) .. " (ID: " .. tostring(spellId) .. ")")
+            found[#found + 1] = { i, tostring(name) .. " (ID: " .. tostring(spellId) .. ")" }
             count = count + 1
         end
-        if count == 0 then
-            print("  (none)")
+        o:Section(filter, count)
+        for _, row in ipairs(found) do
+            o:Item(row[1], row[2])
         end
-        print("")
+        if count == 0 then
+            -- An empty pool is normal, not a fault: the unit simply has no aura
+            -- matching that filter right now.
+            o:Line("none", "neutral")
+        end
     end
     
-    -- Check what Blizzard filter functions are available
-    print("|cffffcc00Blizzard Filter Functions:|r")
-    print("  CompactUnitFrame_UtilShouldDisplayBuff: " .. tostring(CompactUnitFrame_UtilShouldDisplayBuff ~= nil))
-    print("  AuraUtil.ShouldDisplayBuff: " .. tostring(AuraUtil and AuraUtil.ShouldDisplayBuff ~= nil))
-    print("  AuraUtil.ForEachAura: " .. tostring(AuraUtil and AuraUtil.ForEachAura ~= nil))
-    print("")
-    
-    -- Try Blizzard's filter
-    print("|cffffcc00Testing Blizzard Filters:|r")
+    -- Check what Blizzard filter functions are available.
+    -- CompactUnitFrame_UtilShouldDisplayBuff is NOT probed any more: it does not
+    -- exist anywhere in the 12.1 client source, so the old test could only ever
+    -- report "N/A" for every aura.
+    o:Section("Blizzard filter functions")
+    local hasSDB = AuraUtil and AuraUtil.ShouldDisplayBuff ~= nil
+    local hasFEA = AuraUtil and AuraUtil.ForEachAura ~= nil
+    o:Field("AuraUtil.ShouldDisplayBuff", hasSDB and "present" or "absent", hasSDB and "good" or "warn")
+    o:Field("AuraUtil.ForEachAura", hasFEA and "present" or "absent", hasFEA and "good" or "warn")
+
+    o:Section("ShouldDisplayBuff per aura")
     if AuraUtil and AuraUtil.ForEachAura then
-        local blizzBuffs = {}
+        local rows = {}
+        -- usePackedAura MUST be true. The signature is
+        --   ForEachAura(unit, filter, batchSize, func, usePackedAura)
+        -- and without that last argument the callback receives the legacy
+        -- UNPACKED arg list, so `auraData` was the aura NAME STRING — which is
+        -- why every row printed "? (ID: ?)".
         AuraUtil.ForEachAura(unit, "HELPFUL", nil, function(auraData)
-            local name = "?"
-            local spellId = "?"
-            local shouldDisplay1 = "N/A"
-            local shouldDisplay2 = "N/A"
-            
+            local name, spellId, verdict = "?", "?", "N/A"
             pcall(function() name = auraData.name or "?" end)
             pcall(function() spellId = auraData.spellId or "?" end)
-            
-            -- Try CompactUnitFrame_UtilShouldDisplayBuff
-            if CompactUnitFrame_UtilShouldDisplayBuff then
-                local ok, result = pcall(function()
-                    return CompactUnitFrame_UtilShouldDisplayBuff(unit, auraData.auraInstanceID, auraData)
-                end)
-                if ok then
-                    shouldDisplay1 = tostring(result)
-                else
-                    shouldDisplay1 = "ERROR: " .. tostring(result)
-                end
-            end
-            
-            -- Try AuraUtil.ShouldDisplayBuff
+
+            -- Real signature: ShouldDisplayBuff(unitCaster, spellId, canApplyAura).
+            -- The old call passed the whole auraData table as unitCaster, which
+            -- fell through to the final `else` and returned false for everything.
             if AuraUtil.ShouldDisplayBuff then
                 local ok, result = pcall(function()
-                    return AuraUtil.ShouldDisplayBuff(auraData)
+                    return AuraUtil.ShouldDisplayBuff(auraData.sourceUnit, auraData.spellId, auraData.canApplyAura)
                 end)
-                if ok then
-                    shouldDisplay2 = tostring(result)
-                else
-                    shouldDisplay2 = "ERROR: " .. tostring(result)
-                end
+                verdict = ok and tostring(result) or ("ERROR: " .. tostring(result))
             end
-            
-            table.insert(blizzBuffs, {
-                name = name,
-                spellId = spellId,
-                compactFrame = shouldDisplay1,
-                auraUtil = shouldDisplay2
-            })
+
+            table.insert(rows, { name = name, spellId = spellId, verdict = verdict })
             return false  -- continue iteration
-        end)
-        
-        for i, buff in ipairs(blizzBuffs) do
-            print("  " .. buff.name .. " (ID: " .. buff.spellId .. ")")
-            print("    CompactUnitFrame: " .. buff.compactFrame)
-            print("    AuraUtil: " .. buff.auraUtil)
+        end, true)
+
+        if #rows == 0 then
+            o:Line("none", "neutral")
+        end
+        for _, r in ipairs(rows) do
+            -- The verdict is the ANSWER, not a health signal - only a pcall
+            -- failure is a fault, so plain false stays untinted.
+            o:Item(tostring(r.name) .. " (ID: " .. tostring(r.spellId) .. ")", r.verdict,
+                r.verdict:match("^ERROR") and "bad" or nil)
         end
     else
-        print("  AuraUtil.ForEachAura not available")
+        o:Line("AuraUtil.ForEachAura not available", "bad")
     end
-    
-    print("|cff00ff00=== End Aura Debug ===|r")
+
+    o:Siblings("auradata")
 end
 
 -- ============================================================
@@ -2165,7 +2601,7 @@ end
 DF.cachedContentType = nil
 DF.cachedInstanceType = nil
 
--- Debug: Force arena mode for testing (toggle with /dfarena)
+-- Debug: Force arena mode for testing (toggle with /df debug arena)
 DF.forceArenaMode = false
 
 -- Get the current content type for frame/profile switching
@@ -2282,26 +2718,33 @@ end
 
 -- ============================================================
 -- DEBUG: Force Arena Mode
--- Usage: /dfarena - Toggle arena mode for testing
+-- Usage: /df debug arena - Toggle arena mode for testing.
+-- ⚠ The "/dfarena" alias below is the REGISTRY SPELLING, not a working bind: it is
+-- /df-prefixed, so RegisterDebugSlash routes it to DebugSlashBySub["arena"] and
+-- deliberately creates no SLASH_ global (only non-/df aliases like "/rl" get one).
+-- Typing "/dfarena" does nothing. That is the intended shape — one command form —
+-- but it read as a promise, so both the comment above and CLAUDE.md claimed it worked.
 -- Requires being in a raid group to see frames
 -- ============================================================
 DF:RegisterDebugSlash("DFARENA", "Toggle arena test mode (raid group)", false, "/dfarena")
 SlashCmdList["DFARENA"] = function(msg)
     if InCombatLockdown() then
-        print("|cffff8033DandersFrames:|r " .. L["Cannot toggle arena mode during combat"])
+        DF:Say(L["Cannot toggle arena mode during combat"])
         return
     end
     
     DF.forceArenaMode = not DF.forceArenaMode
     
     if DF.forceArenaMode then
-        print("|cffff8033DandersFrames:|r " .. format(L["Arena mode %sENABLED%s for testing"], "|cff00ff00", "|r"))
-        print("  - " .. L["Join a raid group (2-5 players works best)"])
-        print("  - " .. L["Arena header will show using raid1-5 unit IDs"])
-        print("  - " .. L["Uses party frame settings/position"])
-        print("  - " .. L["Type /dfarena again to disable"])
+        local o = DF:Out("Arena", "test mode enabled")
+        o:Line(L["Join a raid group (2-5 players works best)"], "NEUTRAL")
+        o:Line(L["Arena header will show using raid1-5 unit IDs"], "NEUTRAL")
+        o:Line(L["Uses party frame settings/position"], "NEUTRAL")
+        -- NOT o:Hints("/df debug arena"): a "More:" footer naming the command you just
+        -- ran reads as a bug. Toggles say so in words instead.
+        o:Line(format(L["Run %s again to turn this off."], "/df debug arena"), "NEUTRAL")
     else
-        print("|cffff8033DandersFrames:|r " .. format(L["Arena mode %sDISABLED%s"], "|cffff0000", "|r"))
+        DF:Say(format(L["Arena mode %sDISABLED%s"], "|cffff0000", "|r"))
     end
     
     -- Apply full header settings (includes orientation, grow from center, etc.)
@@ -2803,9 +3246,14 @@ local ABS_LEVEL_SENTINEL_DEFAULT = {
     raidRoleIconFrameLevel = 30, summonIconFrameLevel = 30, bgCarrierIconFrameLevel = 30,
     combatIconFrameLevel = 30, missingBuffIconFrameLevel = 35, defensiveIconFrameLevel = 65,
 }
--- These were not sentinels: the render added a fixed base to whatever was stored, so EVERY
--- value shifts by that base (including 0).
-local ABS_LEVEL_ADDEND = { targetedSpellFrameLevel = 30 }
+-- (Removed) ABS_LEVEL_ADDEND = { targetedSpellFrameLevel = 30 }. Its only key belonged
+-- to the group-frame display and has no readers left.
+--
+-- ☠ It was not merely inert. The loop applied `(tonumber(modeDb[key]) or 0) + addend`
+-- UNCONDITIONALLY, so for any profile without the migration flag it CREATED
+-- targetedSpellFrameLevel = 30 in both the party and raid tables — including profiles
+-- that never had the key. A migration that invents a key nothing reads is not covered
+-- by change-the-baseline: that rule preserves what the user set.
 
 function DF:MigrateAbsoluteFrameLevels()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
@@ -2819,9 +3267,6 @@ function DF:MigrateAbsoluteFrameLevels()
                         -- offset from the unit frame and is left exactly as the user set it.
                         if modeDb[key] == 0 or modeDb[key] == nil then modeDb[key] = builtin end
                     end
-                    for key, addend in pairs(ABS_LEVEL_ADDEND) do
-                        modeDb[key] = (tonumber(modeDb[key]) or 0) + addend
-                    end
                     -- Aura Designer global default: the render added 40 to it.
                     local ad = modeDb.auraDesigner
                     if type(ad) == "table" and type(ad.defaults) == "table" then
@@ -2833,7 +3278,7 @@ function DF:MigrateAbsoluteFrameLevels()
         end
 
         -- V2 (alpha-only correction). V1 wrote the defensive baseline as 51, the legacy
-        -- value. A /df zorder dump then showed 51 is BROKEN: an aura row is ~16 levels
+        -- value. A /df debug zorder dump then showed 51 is BROKEN: an aura row is ~16 levels
         -- thick, so the buff/debuff rows (base 40) reach 60 and draw over the defensive
         -- button at 57. The baseline moved to 65, but a profile that already ran V1 has a
         -- stored 51 that nothing would ever revisit -- Config defaults only fill MISSING
@@ -2863,9 +3308,10 @@ end
 -- ADDON_LOADED block). The exceptions are the ones that write UNCONDITIONALLY behind
 -- a profile-stored flag -- and because that flag is not part of Config, a brand-new
 -- profile did not carry it and got shifted:
---   * MigrateAbsoluteFrameLevels  -- targetedSpellFrameLevel 30 -> 60,
---     auraDesigner.defaults.indicatorFrameLevel 40 -> 80 (both already ABSOLUTE in
---     Config; the render's own `or 30` / `or 40` fallbacks prove it).
+--   * MigrateAbsoluteFrameLevels  -- auraDesigner.defaults.indicatorFrameLevel
+--     40 -> 80 (already ABSOLUTE in Config; the render's own `or 40` fallback proves
+--     it). It also shifted targetedSpellFrameLevel until that key's reader went with
+--     the group display and the addend was removed.
 --   * MigratePersonalContainerPosition -- personalTargetedSpellX 0 -> 92.
 -- On a fresh install the AD value was then folded into the Party/Raid designer
 -- preset on first login, making it permanent.
@@ -2973,14 +3419,13 @@ function DF:MigrateTargetedSpellImportantBorder()
         if type(profile) == "table" then
             -- Group/party Targeted Spells. Guarded independently from personal so a
             -- profile already through this step still receives the personal one.
-            if not profile._tsImportantBorderV1 then
-                for _, modeKey in ipairs({ "party", "raid" }) do
-                    local m = profile[modeKey]
-                    if type(m) == "table" then mapHighlight(m, "targetedSpell") end
-                end
-                profile._tsImportantBorderV1 = true
-            end
-            -- Personal Targeted Spell.
+            -- (Removed) the group half, mapHighlight(m, "targetedSpell"). It mapped the
+            -- old highlight keys onto targetedSpellImportantBorder*, which has no
+            -- readers now the group display is gone. Conditional on the legacy key, so
+            -- unlike the frame-level addend it only touched old profiles — but it still
+            -- wrote keys nothing will read. The _tsImportantBorderV1 flag is left on
+            -- profiles that already have it; it is never read again.
+            -- Personal Targeted Spell — LIVE, do not touch.
             if not profile._personalTsImportantBorderV1 then
                 for _, modeKey in ipairs({ "party", "raid" }) do
                     local m = profile[modeKey]
@@ -3008,7 +3453,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         raid = DF:DeepCopy(DF.RaidDefaults),
                     }
                 },
-                wizardConfigs = {},
             }
             -- Born from current defaults => every one-time migration is already done.
             DF:StampFreshProfileMigrations(DandersFramesDB_v2.profiles["Default"])
@@ -3126,7 +3570,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Ensure structure exists
         if not DandersFramesDB_v2.profiles then DandersFramesDB_v2.profiles = {} end
         if not DandersFramesDB_v2.currentProfile then DandersFramesDB_v2.currentProfile = "Default" end
-        if not DandersFramesDB_v2.wizardConfigs then DandersFramesDB_v2.wizardConfigs = {} end
+        -- (Removed) wizardConfigs was seeded here for WizardBuilder.lua, which is
+        -- gone. Nothing ever READ the table — it was write-only even while the
+        -- builder was reachable — so there is nothing to migrate. Any key already
+        -- in a user's SavedVariables is simply ignored and left alone.
         if not DandersFramesDB_v2.global then DandersFramesDB_v2.global = {} end
 
         -- Track last seen version for auto-showing changelog on update
@@ -3826,7 +4273,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     end
                 end
                 if recovered > 0 then
-                    print("|cff00ff00DandersFrames:|r " .. format(L["Recovered %d raid settings from interrupted auto layout editing session."], recovered))
+                    DF:Say(format(L["Recovered %d raid settings from interrupted auto layout editing session."], recovered))
                 end
             end
             DF.db.raidAutoEditingRecovery = nil
@@ -4397,7 +4844,85 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- (avoids "secret value" errors during combat reload initialization)
         DF.raidBuffFilteringReady = true
         
-        -- Setup slash command
+        -- ============================================================
+        -- /df SUBCOMMAND REGISTRATIONS
+        -- ============================================================
+        -- Drives the "/df diagnostics" section of /df debug. Register every
+        -- branch added to the dispatcher below — an unregistered branch works
+        -- but is invisible, which is exactly how ~45 of these went unlisted.
+        -- Pure aliases are folded into the primary's description rather than
+        -- listed twice.
+        local sub = function(...) DF:RegisterDebugSub(...) end
+        -- Support / general
+        -- These six plus resetgui/test/hide/lock below are EVERYDAY commands and are
+        -- already listed by /df help, so they carry hidden = true to stay out of the
+        -- /df debug listing. Same duplication that got pixelcheck/navprobe/gapcheck
+        -- pulled from help, resolved the other way round: each command is documented
+        -- in exactly one list, the one its audience reads. They still answer, and
+        -- they still need sub() entries so the drift check can see them.
+        sub("help",         "command list", nil, nil, true)
+        sub("console",      "open the debug console page", nil, nil, true)
+        sub("users",        "group members running DandersFrames", nil, nil, true)
+        sub("reset",        "reset the whole profile", nil, nil, true)
+        -- Frame state
+        -- headers and dispel are registered in BOTH registries — RegisterDebugSlash
+        -- (which supplies the /dfXXX alias) and here (which supplies the argument
+        -- hint). The old three-section listing printed each one twice and it read as
+        -- deliberate because the copies sat in different sections; grouping by
+        -- subsystem put them side by side and the duplication was obvious. Hidden
+        -- here, with the argument hint folded into the slash description, so the
+        -- entry survives for the drift check but appears once.
+        sub("headers",      "secure header state dump, or a /dfheaders subcommand", nil, "[cmd]", true)
+        sub("attached",     "foreign frames anchored to ours")
+        sub("zorder",       "frame level / strata map")
+        sub("mousefoci",    "identify the frame under the cursor after 2s")
+        -- Auras (12.1 container era)
+        sub("auradata",     "live aura data enumeration (add a unit token)", nil, "[unit]")
+        sub("dispel",       "dispel overlay state: a unit token, or ids | render", nil, "[unit|cmd]", true)
+        sub("idgate",       "container identity-gate dump", true)
+        sub("ppdump",       "missing-buff layout-push dump", true)
+        -- Not logging, despite the old wording: it window-parks the badge so the
+        -- anchor stays live and the badge shows even when the buff is present.
+        sub("ppbadge",      "force the missing-buff badge to stay visible (geometry probe)", true)
+        sub("admissing",    "Aura Designer missing-buff trace (add 'mark')", true, "[mark]")
+        sub("cbt",          "colour-by-time curve dump", true, "<spellID>")
+        -- Data integrity. Both dev-gated for the same reason as /df debug duration: they
+        -- check OUR curation data against the client, so the output only means
+        -- something to whoever maintains that data.
+        sub("auditspells",  "spell database curation drift check", true)
+        sub("exportaudit",  "export category drift check", true)
+        sub("overrides",    "active auto-layout overrides")
+        sub("localewarn",   "toggle missing-locale-key warnings", true)
+        -- GUI probes (stay useful as new surfaces are added)
+        sub("pixelcheck",   "report GUI elements off the device pixel grid", true)
+        sub("gapcheck",     "GUI spacing probe (add 'all' or 'clear')", true, "[all|clear]")
+        sub("navprobe",     "nav menu row probe", true, "[n]")
+        sub("guiwidth",     "GUI width dump", true)
+        sub("tdmirror",     "Text Designer mirror state", true)
+        -- Performance
+        sub("profiler",     "open the profiler UI")
+        sub("profile",      "quick profile for N seconds", nil, "<sec>")
+        -- Feature state dumps (one-shot, pasteable)
+        sub("debugfonts",   "font / SharedMedia availability dump")
+        sub("debugrested",  "rested indicator state")
+        -- Both moved under /df debug cc (see CC_SUBCOMMANDS). Hidden here rather than
+        -- deleted: they still answer, and the drift check needs to see them.
+        sub("clickcast",    "moved to /df debug cc registration", nil, nil, true)
+        sub("casthistory",  "cast history")
+        sub("clearhistory", "clear the cast history buffer")
+        -- Ongoing traces still on their own flag (console migration pending)
+        -- HIDDEN: both are console-migration signposts now. They toggle nothing, so
+        -- listing them as "toggle X logging" offered a no-op; they still answer for
+        -- anyone typing the old command.
+        -- Config repair
+        sub("resetgui",     "reset GUI scale, size and position", nil, nil, true)
+        sub("resetconflict", "moved to /df debug cc resetconflict", nil, nil, true)
+        -- Test / preview
+        sub("test",         "toggle the test frame panel", nil, nil, true)
+        sub("testids",      "audit test-pool spell IDs against this client", true)
+        sub("hide",         "hide the test frames", nil, nil, true)
+        sub("lock",         "lock frame movers (also: unlock, raidlock, raidunlock)", nil, nil, true)
+        sub("raidbg",       "toggle raid debug backgrounds", true)
         SLASH_DANDERSFRAMES1 = "/df"
         SLASH_DANDERSFRAMES2 = "/dandersframes"
         SlashCmdList["DANDERSFRAMES"] = function(msg)
@@ -4407,17 +4932,74 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- "/df clearoverride <key|prefix|all>" — remove a stuck auto-layout
             -- override from the target layout. Parsed from the raw message so the
             -- key keeps its original case (override keys are mixed-case).
-            local firstWord, restRaw = rawMsg:match("^%s*(%S+)%s*(.-)%s*$")
-            if firstWord and (firstWord:lower() == "clearoverride" or firstWord:lower() == "clearoverrides") then
-                if DF.AutoProfilesUI and DF.AutoProfilesUI.ClearOverrideCommand then
-                    DF.AutoProfilesUI:ClearOverrideCommand(restRaw ~= "" and restRaw or nil)
+            -- "/df debug <command> [args]" — THE form for every diagnostic.
+            -- Handled before the if-chain because that chain matches the whole
+            -- lowercased message exactly, so "debug auradata player" would fall
+            -- past every branch and open the GUI. Args come off rawMsg so unit
+            -- tokens and spell names keep their case.
+            local dbgWord, dbgRest = rawMsg:match("^%s*[Dd][Ee][Bb][Uu][Gg]%s+(%S+)%s*(.-)%s*$")
+            -- "on"/"off" are the logging toggle, not commands named on/off.
+            if dbgWord and dbgWord:lower() ~= "on" and dbgWord:lower() ~= "off" then
+                local dbgKey = DF.DebugSlashBySub[dbgWord:lower()]
+                if dbgKey and SlashCmdList[dbgKey] then
+                    SlashCmdList[dbgKey](dbgRest or "")
                 else
-                    print("|cff00ff00DandersFrames:|r Auto profiles module not loaded.")
+                    -- Not in the slash registry, so it is a dispatcher branch:
+                    -- re-enter with the "debug " prefix stripped. One line covers
+                    -- all ~50 sub() commands instead of a case per branch. The flag
+                    -- is what tells the gate below this arrived via /df debug.
+                    DF._viaDebug = true
+                    SlashCmdList["DANDERSFRAMES"](
+                        dbgWord .. ((dbgRest and dbgRest ~= "") and (" " .. dbgRest) or ""))
+                    DF._viaDebug = nil
                 end
                 return
             end
 
-            -- "/df zorder" — dump the REAL resolved frame levels for every aura row on
+            -- ☠ THE GATE. Everything below this line is reachable ONLY via
+            -- "/df debug <command>" or by being an everyday command. Anything else
+            -- — a diagnostic typed bare, or a word /df does not know — opens the
+            -- settings window, with no message naming a different spelling.
+            --
+            -- Written as "allow a known-good shape through" rather than "block the
+            -- known debug words", because the block-list version kept leaking: it
+            -- could only reject names it had a registry entry for, and commands
+            -- reach this dispatcher three different ways (RegisterDebugSlash, the
+            -- sub() table, and hand-written branches with no registration at all).
+            -- "/df perf" survived three separate attempts to remove it that way.
+            -- This shape needs no list of what to reject, so a branch added later
+            -- with no registration is covered on the day it is written.
+            local bareWord = rawMsg:match("^%s*(%S+)")
+            local lw = bareWord and bareWord:lower()
+            if lw and lw ~= "debug" and not DF.EVERYDAY_COMMANDS[lw] and not DF._viaDebug then
+                if DF.ToggleGUI then DF:ToggleGUI() else DF:Err("GUI not loaded yet.") end
+                return
+            end
+
+            -- ☠ SECOND HALF OF THE GATE: dev-only diagnostics.
+            -- The check above only decides whether a word arrived by a legitimate
+            -- route; it says nothing about whether this BUILD should have the word
+            -- at all. sub()'s devOnly flag used to gate the printed listing alone,
+            -- so every dev branch below stayed runnable on a release build through
+            -- "/df debug <word>" — see the DEBUG_SUB_DEV note at the registry.
+            -- Falls through to the settings window, exactly like an unknown word:
+            -- a hidden command must not announce itself by refusing.
+            if lw and DF.DEBUG_SUB_DEV[lw] and not DF:IsDevBuild() then
+                if DF.ToggleGUI then DF:ToggleGUI() else DF:Err("GUI not loaded yet.") end
+                return
+            end
+
+            local firstWord, restRaw = rawMsg:match("^%s*(%S+)%s*(.-)%s*$")
+            if firstWord and firstWord:lower() == "clearoverride" then
+                if DF.AutoProfilesUI and DF.AutoProfilesUI.ClearOverrideCommand then
+                    DF.AutoProfilesUI:ClearOverrideCommand(restRaw ~= "" and restRaw or nil)
+                else
+                    DF:Say("Auto profiles module not loaded.")
+                end
+                return
+            end
+
+            -- "/df debug zorder" — dump the REAL resolved frame levels for every aura row on
             -- the first shown frame. Static reading says defensive (+51) must draw over
             -- debuffs (+40); when the screen disagrees, this says which link in the chain
             -- (anchor frame -> CustomAuraContainer -> button -> DF art host) breaks it.
@@ -4432,11 +5014,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     end
                 end
                 if not frame then
-                    print("|cffff9900DandersFrames:|r no shown frame — enable test mode first.")
+                    DF:Say("no shown frame — enable test mode first.", nil, "WARN")
                     return
                 end
-                print(("|cff00ff00DF z-order|r  unit=%s  frame level=%d  strata=%s")
-                    :format(tostring(frame.unit), frame:GetFrameLevel(), tostring(frame:GetFrameStrata())))
+                local o = DF:Out("Z-Order", "unit " .. tostring(frame.unit))
+                o:Section("Frame")
+                o:Field("level", frame:GetFrameLevel(), "NEUTRAL")
+                o:Field("strata", tostring(frame:GetFrameStrata()), "NEUTRAL")
                 local rows = {
                     { "buff", frame.buffFactory }, { "debuff", frame.debuffFactory },
                     { "defensive", frame.defensiveFactory },
@@ -4467,23 +5051,84 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         end
                     end
                 end
+
+                -- AURA DESIGNER rows and groups. Everything above covers only the three
+                -- BUILT-IN rows, which is why a "defensive draws under the Aura Designer"
+                -- report could never be settled from this dump — the thing doing the
+                -- overdrawing was not in it. Same fields, one line per live AD handle,
+                -- bucketed by store key (AuraDesigner/Factory.lua: frame.dfADFactory).
+                o:Section("Aura Designer")
+                local adStore = frame.dfADFactory
+                if not adStore then
+                    print("  |cff888888(no AD factory store on this frame)|r")
+                else
+                    local any = false
+                    for _, storeKey in ipairs({ "placed", "fgroups", "dgroups", "healthbar",
+                                                "background", "border", "nametext", "healthtext" }) do
+                        local t = adStore[storeKey]
+                        if t then
+                            for id, entry in pairs(t) do
+                                local h = entry and entry.handle
+                                if h then
+                                    any = true
+                                    local hf = h.GetFrame and h:GetFrame()
+                                    local cont = h.backend and h.backend.container
+                                    local btn = h.buttons and h.buttons[1]
+                                    print(("  %-9s %-12s anchor=%s  container=%s  button1=%s  cfgOffset=%s  strata=%s")
+                                        :format(storeKey, tostring(id):sub(1, 12),
+                                            hf and tostring(hf:GetFrameLevel()) or "-",
+                                            cont and tostring(cont:GetFrameLevel()) or "-",
+                                            btn and tostring(btn:GetFrameLevel()) or "-",
+                                            tostring(h.config and h.config.frameLevelOffset or "nil"),
+                                            hf and tostring(hf:GetFrameStrata()) or "-"))
+                                    if btn then
+                                        for _, k in ipairs({ "dfBorderHost", "dfBorder", "dfADBorder",
+                                                             "dfCD", "dfBar" }) do
+                                            local w = btn[k]
+                                            if w and w.GetFrameLevel then
+                                                print(("      .%-14s level=%d"):format(k, w:GetFrameLevel()))
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    if not any then
+                        print("  |cff888888(store present but no live handles)|r")
+                    end
+                end
+
+                -- The CONFIGURED values, so the dump shows setting-vs-reality side by side.
+                -- That is the whole question in an "it says 30 but behaves like more" report.
+                o:Section("Configured")
+                local zdb = DF.GetDB and DF:GetDB()
+                o:Field("defensiveIconFrameLevel", tostring(zdb and zdb.defensiveIconFrameLevel), "NEUTRAL")
+                -- DF:ResolveAuraDesigner is the RENDER-side resolver (the same one
+                -- Factory:SyncFrame uses). Options.lua's GetAuraDesignerDB is a file-local
+                -- and is the EDITOR's view — reading that here would report the wrong table
+                -- for a pinned/auto-layout frame.
+                local zad = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
+                local zdef = zad and zad.defaults
+                o:Field("AD indicatorFrameLevel", tostring(zdef and zdef.indicatorFrameLevel), "NEUTRAL")
+                o:Field("AD indicatorFrameStrata", tostring(zdef and zdef.indicatorFrameStrata), "NEUTRAL")
                 return
             end
             if msg == "unlock" then
                 if DF.UnlockFrames then DF:UnlockFrames() end
             elseif msg == "lock" then
                 if DF.LockFrames then DF:LockFrames() end
-            elseif msg == "raidunlock" or msg == "unlockraid" then
+            elseif msg == "raidunlock" then
                 -- While an auto layout is active, base-position unlock is blocked
                 -- (matches the disabled toolbar button) — point users to the active
                 -- layout's own Unlock button so they don't move the base by accident.
                 if DF.AutoProfilesUI and DF.AutoProfilesUI.IsLayoutActive and DF.AutoProfilesUI:IsLayoutActive() then
                     local name = DF.AutoProfilesUI.GetActiveLayoutName and DF.AutoProfilesUI:GetActiveLayoutName()
-                    print("|cffff9900DandersFrames:|r " .. string.format(L["Auto layout \"%s\" is active. Unlock it from the Auto Layouts page to move its frames."], name or "?"))
+                    DF:Say(string.format(L["Auto layout \"%s\" is active. Unlock it from the Auto Layouts page to move its frames."], name or "?"))
                 elseif DF.UnlockRaidFrames then
                     DF:UnlockRaidFrames()
                 end
-            elseif msg == "raidlock" or msg == "lockraid" then
+            elseif msg == "raidlock" then
                 if DF.LockRaidFrames then DF:LockRaidFrames() end
             elseif msg == "reset" then
                 DF:ResetFullProfile()
@@ -4508,7 +5153,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     end
                     DF.GUIFrame:Show()
                 end
-                print("|cff00ff00DandersFrames:|r " .. L["GUI reset to default size, scale, and position."])
+                DF:Say(L["GUI reset to default size, scale, and position."])
             elseif msg == "pixelcheck" then
                 -- Measures the open settings page against the device pixel grid.
                 -- Separates "border split across two rows" from "border cut off by
@@ -4516,7 +5161,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if DF.GUI and DF.GUI.PixelCheck then
                     DF.GUI.PixelCheck()
                 else
-                    print("|cff00ff00DandersFrames:|r GUI module not loaded.")
+                    DF:Say("GUI module not loaded.")
                 end
             elseif msg == "gapcheck" or msg == "gapcheck all" or msg == "gapcheck clear" then
                 -- Measures the vertical rhythm of the open page: how much slack
@@ -4527,7 +5172,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if DF.GUI and DF.GUI.GapCheck then
                     DF.GUI.GapCheck(msg:match("^gapcheck%s+(%a+)$"))
                 else
-                    print("|cff00ff00DandersFrames:|r GUI module not loaded.")
+                    DF:Say("GUI module not loaded.")
                 end
             elseif msg == "navprobe" or msg:match("^navprobe%s+%d+$") then
                 -- Traces the left nav's hover state to separate a stale plate /
@@ -4536,72 +5181,122 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if DF.GUI and DF.GUI.NavProbe then
                     DF.GUI.NavProbe(tonumber(msg:match("(%d+)$")))
                 else
-                    print("|cff00ff00DandersFrames:|r GUI module not loaded.")
+                    DF:Say("GUI module not loaded.")
                 end
             elseif msg == "overrides" then
                 if DF.AutoProfilesUI and DF.AutoProfilesUI.PrintOverrides then
                     DF.AutoProfilesUI:PrintOverrides()
                 else
-                    print("|cff00ff00DandersFrames:|r Auto profiles module not loaded.")
+                    DF:Say("Auto profiles module not loaded.")
                 end
             elseif msg == "help" then
-                print("|cff7373f2DandersFrames|r " .. L["commands"] .. ":")
-                print("  |cff00ff00/df|r - " .. L["open settings"])
-                print("  |cff00ff00/df lock|r / |cff00ff00unlock|r - " .. L["lock/unlock party frames"])
-                print("  |cff00ff00/df raidlock|r / |cff00ff00raidunlock|r - " .. L["lock/unlock raid frames"])
-                print("  |cff00ff00/df test|r - " .. L["toggle the test mode panel"])
-                print("  |cff00ff00/df hide|r - " .. L["hide test frames"])
-                print("  |cff00ff00/df users|r - " .. L["show DandersFrames users in your group"])
-                print("  |cff00ff00/df clearoverride <key|all>|r - " .. L["clear stuck auto-layout overrides"])
-                print("  |cff00ff00/df resetgui|r - " .. L["reset settings window size/position"])
-                print("  |cff00ff00/df reset|r - |cffff6060" .. L["reset party + raid profiles to defaults"] .. "|r")
-                print("  |cff00ff00/df pixelcheck|r - " .. L["measure the open settings page against the pixel grid"])
-                print("  |cff00ff00/df navprobe [secs]|r - " .. L["trace the left nav's hover state while you move the cursor"])
-                print("  |cff00ff00/df gapcheck [all|clear]|r - " .. L["measure the spacing between rows on the open settings page"])
-                print("  |cff00ff00/df console|r - " .. L["open the debug console page"])
-                print("  |cff00ff00/df debug|r - " .. L["list debug commands (on/off toggles debug logging)"])
+                -- The index wears the same header as every other command. Typeable
+                -- commands carry O.CMD, the one tone reserved for "you can type this".
+                local o = DF:Out("Commands")
+                local C = DF.OUT.CMD
+                local function cmd(text, desc, status)
+                    o:Item(C .. text .. "|r", desc, status)
+                end
+                cmd("/df", L["open settings"])
+                cmd("/df lock|r / " .. C .. "unlock", L["lock/unlock party frames"])
+                cmd("/df raidlock|r / " .. C .. "raidunlock", L["lock/unlock raid frames"])
+                cmd("/df test", L["toggle the test mode panel"])
+                cmd("/df hide", L["hide test frames"])
+                cmd("/df users", L["show DandersFrames users in your group"])
+                cmd("/df clearoverride <key|all>", L["clear stuck auto-layout overrides"])
+                cmd("/df resetgui", L["reset settings window size/position"])
+                -- The only destructive entry in the list, so it is the only BAD one.
+                cmd("/df reset", L["reset party + raid profiles to defaults"], "BAD")
+                cmd("/df console", L["open the debug console page"])
+                cmd("/df debug", L["list debug commands (on/off toggles debug logging)"])
+                -- pixelcheck / navprobe / gapcheck used to be listed here as well
+                -- as in the generated /df debug listing. They are dev diagnostics,
+                -- not everyday commands, so help now points at the one list that
+                -- is generated and cannot drift instead of duplicating a subset
+                -- of it by hand.
             elseif msg == "test" then
                 if DF.ToggleTestPanel then DF:ToggleTestPanel() end
             elseif msg == "hide" then
                 if DF.HideTestFrames then DF:HideTestFrames() end
             elseif msg == "debug" then
-                -- Bare "/df debug" lists every available debug command; the
-                -- /dfXXX section is the DF:RegisterDebugSlash registry itself,
-                -- so that part can't drift from what's actually registered.
+                -- Bare "/df debug" lists every available debug command. BOTH
+                -- registries feed one list, grouped by subsystem and split only by
+                -- the dev gate — see the DEBUG_GROUP_* tables for why the old
+                -- three-section shape (which split by registration mechanism) went.
+                -- Fully generated, so it cannot drift from what is registered.
                 local dev = DF:IsDevBuild()
-                print("|cff7373f2DandersFrames|r " .. L["debug commands"] .. (dev and " |cffff8800(" .. L["dev build"] .. ")|r" or "") .. ":")
-                print("  " .. L["Debug logging"] .. ": |cff00ff00/df debug on|r / |cff00ff00/df debug off|r  ·  " .. L["console page"] .. ": |cff00ff00/df console|r")
-                print("  |cffffcc00" .. L["Support / diagnostics"] .. ":|r")
+                local o = DF:Out(L["debug commands"], dev and ("(" .. L["dev build"] .. ")") or nil)
+                o:Field(L["Debug logging"],
+                    DF.OUT.CMD .. "/df debug on|r / " .. DF.OUT.CMD .. "/df debug off|r")
+                o:Field(L["console page"], DF.OUT.CMD .. "/df console|r")
+
+                -- Flatten both registries into one row shape: {name, desc}.
+                -- ONE form per row now. The old listing carried a second grey
+                -- "/dfXXX" column; those binds are gone, so a column showing them
+                -- would be documenting commands the client no longer answers.
+                -- An entry whose alias is not /df-prefixed (/rl) still owns a real
+                -- bind, so it prints that alias verbatim.
+                local byGroup = {}
+                local function bucket(isDev, key, name, desc)
+                    local g = DF.DEBUG_GROUP_OF[key or ""] or "other"
+                    byGroup[isDev] = byGroup[isDev] or {}
+                    byGroup[isDev][g] = byGroup[isDev][g] or {}
+                    table.insert(byGroup[isDev][g], { name = name, desc = desc })
+                end
                 for _, e in ipairs(DF.DebugCommands) do
-                    if not e.dev then
-                        print(string.format("    |cff00ff00%s|r - %s", table.concat(e.cmds, " "), L[e.desc]))
+                    local key = e.sub or (e.cmds[1] or ""):match("^/(.+)$")
+                    bucket(not not e.dev, key,
+                        e.sub and DF:CmdPath(e.sub) or table.concat(e.cmds, " "), e.desc)
+                end
+                for _, e in ipairs(DF.DebugSubCommands) do
+                    if not e.hidden then
+                        bucket(not not e.dev, e.cmd,
+                            DF:CmdPath(e.cmd) .. (e.args and (" " .. e.args) or ""), e.desc)
                     end
                 end
-                if dev then
-                    print("  |cffffcc00" .. L["Dev tools (alpha/beta builds only)"] .. ":|r")
-                    for _, e in ipairs(DF.DebugCommands) do
-                        if e.dev then
-                            print(string.format("    |cff00ff00%s|r - %s", table.concat(e.cmds, " "), L[e.desc]))
+
+                local function printSection(isDev, heading)
+                    local groups = byGroup[isDev]
+                    if not groups then return end
+                    o:Section(heading)
+                    for _, g in ipairs(DF.DEBUG_GROUP_ORDER) do
+                        local rows = groups[g]
+                        if rows then
+                            -- ☠ RAW, NOT L[...]. Both of these used to route through
+                            -- AceLocale, which put ~50 developer-only strings into the
+                            -- locale table — "container identity-gate dump", "audit
+                            -- test-pool spell IDs against this client" and the like.
+                            -- CLAUDE.md's never-localize list names exactly this class,
+                            -- and the Debug page's category descriptions on the same
+                            -- screen were already raw, so the two disagreed.
+                            --
+                            -- ⚠ Time-sensitive, which is why it is not a style nit: the
+                            -- packager's -S flag uploads English source strings to the
+                            -- portal on the next build. Once developer text is in front
+                            -- of translators for ten languages, removing it is a portal
+                            -- cleanup rather than a git revert.
+                            o:Line(DF.DEBUG_GROUP_NAMES[g], "NEUTRAL")
+                            for _, r in ipairs(rows) do
+                                -- One typeable form per row, in O.CMD.
+                                o:Item(DF.OUT.CMD .. r.name .. "|r", r.desc)
+                            end
                         end
                     end
                 end
-                -- /df subcommand diagnostics (hand-listed — keep in sync with this handler)
-                print("  |cffffcc00" .. L["/df diagnostics"] .. ":|r")
-                print("    |cff00ff00/df exportaudit|r - " .. L["export category drift check"])
-                print("    |cff00ff00/df overrides|r - " .. L["active auto-layout overrides"])
-                print("    |cff00ff00/df attached|r - " .. L["foreign frames anchored to ours"])
-                print("    |cff00ff00/df headers|r / |cff00ff00auras|r / |cff00ff00dispel|r - " .. L["subsystem state dumps"])
-                print("    |cff00ff00/df auratimer|r - " .. L["aura timer stats (add 'reset' to clear)"])
-                print("    |cff00ff00/df profiler|r / |cff00ff00/df profile <sec>|r - " .. L["performance profiling"])
-                print("    |cff00ff00/df debugrole|r / |cff00ff00debugslider|r / |cff00ff00debugfonts|r ... - " .. L["verbose logging toggles"])
+                printSection(false, L["Support / diagnostics"])
+                if dev then printSection(true, L["Dev tools (alpha/beta builds only)"]) end
             elseif msg == "debug on" or msg == "debug off" then
                 local newState = msg == "debug on"
-                if DF.DebugConsole then
-                    DF.DebugConsole:SetEnabled(newState)
-                else
-                    DF.debugEnabled = newState
+                -- The else branch used to set DF.debugEnabled, which nothing read,
+                -- and then reported success either way — so with the console module
+                -- missing this said "Debug logging enabled" while enabling nothing.
+                -- Say what actually happened instead.
+                if not DF.DebugConsole then
+                    DF:Err(L["Debug console module not loaded."])
+                    return
                 end
-                print("|cff00ff00DandersFrames:|r " .. format(L["Debug logging %s"], newState and L["enabled"] or L["disabled"]))
+                DF.DebugConsole:SetEnabled(newState)
+                DF:Say(format(L["Debug logging %s"], newState and L["enabled"] or L["disabled"]))
             elseif msg == "users" then
                 if DF.VersionCheck then DF.VersionCheck:PrintUsers() end
             elseif msg == "console" then
@@ -4614,46 +5309,22 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if DF.GUI and DF.GUI.SelectTab then
                     DF.GUI.SelectTab("debug_console")
                 end
-            elseif msg == "debugrole" then
-                DF.debugRoleIcons = not DF.debugRoleIcons
-                print("|cff00ff00DandersFrames:|r " .. format("Role icon debug %s", DF.debugRoleIcons and L["enabled"] or L["disabled"]))
-                print("  Enter/leave combat to see role icon update logs")
-            elseif msg == "debugslider" then
-                DF.debugSliderUpdates = not DF.debugSliderUpdates
-                print("|cff00ff00DandersFrames:|r " .. format("Slider update debug %s", DF.debugSliderUpdates and L["enabled"] or L["disabled"]))
-                if DF.debugSliderUpdates then
-                    print("  Drag any slider to see update function calls")
-                    print("  " .. format("%sGreen%s = lightweight update, %sYellow%s = full update", "|cff88ff88", "|r", "|cffffff00", "|r"))
-                end
             elseif msg == "debugrested" then
                 if DF.DebugRestedIndicator then
                     DF:DebugRestedIndicator()
                 end
-            elseif msg == "debugraidbuffs" then
-                -- Debug raid buff icon filtering
-                print("|cff00ff00DandersFrames:|r Raid Buff Icon Debug")
-                local icons = DF:GetRaidBuffIcons()
-                print("  Cached raid buff icons:")
-                for icon, _ in pairs(icons) do
-                    print("    " .. tostring(icon) .. " (type: " .. type(icon) .. ")")
-                end
-                -- Also show current buffs on player for comparison
-                print("  Current buffs on player:")
-                for i = 1, 10 do
-                    local auraData = C_UnitAuras.GetAuraDataByIndex("player", i, "HELPFUL")
-                    if auraData then
-                        local iconVal = nil
-                        pcall(function() iconVal = auraData.icon end)
-                        local nameVal = nil
-                        pcall(function() nameVal = auraData.name end)
-                        print("    " .. (nameVal or "?") .. " - icon: " .. tostring(iconVal) .. " (type: " .. type(iconVal) .. ")")
-                        if iconVal and icons[iconVal] then
-                            print("      ^ MATCHES raid buff!")
-                        end
-                    end
-                end
-            elseif msg == "auras" or msg == "debugauras" then
-                -- Debug command to compare aura filters
+            -- (Removed) /df debug debugraidbuffs. It dumped DF:GetRaidBuffIcons() and
+            -- checked the player's buffs against it. That cache existed for ONE
+            -- purpose — matching raid buffs by icon texture when the spell ID is
+            -- secret — and that fallback was never wired to anything: the cache had
+            -- no reader but this dump. 12.1 solved the same problem the other way,
+            -- via the native excludeSpellIDs union with real spell IDs
+            -- (missingBuffHideFromBar, Features/Auras.lua), so the icon-matching
+            -- approach is superseded, not merely unused. Helper deleted with it.
+            elseif msg == "auradata" then
+                -- Live aura DATA enumeration (pre-container: reads via C_UnitAuras).
+                -- Renamed off "auras" so /df debug auras can be the container-era pipeline
+                -- dump — the two answer different questions and both are worth having.
                 DF:DebugAuraFilters("player")
             elseif msg == "ppdump" then
                 -- Pixel-perfect geometry ground truth for aura containers (physical-px
@@ -4668,9 +5339,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- dials, the mode an enabled consumer composes, whether it built a real
                 -- curve or fell back to the legacy seconds buckets, and the expiry
                 -- reveal's threshold + which of its colour bands actually render.
-                -- Optional number = try another reveal threshold ("/df cbt 60").
+                -- Optional number = try another reveal threshold ("/df debug cbt 60").
                 if DF.DebugDumpColorByTime then DF:DebugDumpColorByTime(tonumber(msg:match("(%d+)"))) end
-            elseif msg == "guiwidth" or msg == "guiwidths" then
+            elseif msg == "guiwidth" then
                 -- Settings-layout ground truth: every frame on the open page with its
                 -- live width, flagging any that lost one. Truncated / non-wrapping label
                 -- text is always a width fault; this says WHICH frame caused it.
@@ -4685,44 +5356,50 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Magic/Curse/Disease/Poison shape; this probe shows what it found,
                 -- the SetAuraBorder style enums (Color vs Atlas resolution), and
                 -- whether the shared curve builds.
-                print("|cff00ff00DandersFrames:|r dispel colour probe")
+                local o = DF:Out("Dispel IDs", "colour probe")
                 DF._dispelTypeEnum = nil   -- force a fresh scan
                 local E = DF.FindDispelTypeEnum and DF:FindDispelTypeEnum()
                 if E then
-                    print("  dispel-type enum: Enum." .. tostring(DF._dispelTypeEnumName))
+                    o:Section("Enum." .. tostring(DF._dispelTypeEnumName))
                     for name, val in pairs(E) do
-                        print(string.format("    %s = %s", tostring(name), tostring(val)))
+                        o:Field(tostring(name), tostring(val))
                     end
                 else
-                    print("  |cffff0000no Enum table with Magic/Curse/Disease/Poison found|r")
+                    -- Without this enum the whole custom-colour path has no X axis.
+                    o:Line("no Enum table with Magic/Curse/Disease/Poison found", "bad")
                 end
+                o:Section("Border style enums")
                 local function dumpEnum(label, t)
                     if type(t) == "table" then
                         local parts = {}
                         for k, v in pairs(t) do parts[#parts + 1] = tostring(k) .. "=" .. tostring(v) end
-                        print("  " .. label .. ": " .. table.concat(parts, "  "))
+                        o:Field(label, table.concat(parts, "  "))
                     else
-                        print("  " .. label .. ": nil")
+                        o:Field(label, "nil", "neutral")
                     end
                 end
                 dumpEnum("Enum.CustomAuraButtonBorderStyle", Enum and Enum.CustomAuraButtonBorderStyle)
                 dumpEnum("AuraButtonBorderStyle (legacy global)", _G.AuraButtonBorderStyle)
                 if DF.InvalidateDispelColorCurve then DF:InvalidateDispelColorCurve() end
+                o:Section("Shared builders")
                 local curve = DF.GetDispelColorCurve and DF:GetDispelColorCurve()
-                print("  shared curve built: " .. (curve and "yes" or "no"))
+                o:Field("curve built", curve and "yes" or "no", curve and "good" or "bad")
                 local map = DF.GetDispelColorMap and DF:GetDispelColorMap()
-                print("  shared colour map built: " .. (map and "yes" or "no"))
-                print("  GetAuraDispelTypeColor: " .. tostring(C_UnitAuras and C_UnitAuras.GetAuraDispelTypeColor ~= nil))
+                o:Field("colour map built", map and "yes" or "no", map and "good" or "bad")
+                local hasDTC = C_UnitAuras and C_UnitAuras.GetAuraDispelTypeColor ~= nil
+                o:Field("GetAuraDispelTypeColor", hasDTC and "present" or "absent",
+                    hasDTC and "good" or "warn")
                 -- Overlay ground truth: each SetAuraBorder bind site's last attempt
                 -- ("ok" / the pcall error / never attempted). Keyed by slot key
                 -- (main / gameborder / edgeTOP / …).
                 local be = DF._dispelBindErr
+                o:Section("Overlay binds")
                 if be then
                     for site, res in pairs(be) do
-                        print(string.format("  overlay bind [%s]: %s", tostring(site), tostring(res)))
+                        o:Field(tostring(site), tostring(res), res == "ok" and "good" or "bad")
                     end
                 else
-                    print("  overlay bind: no attempts recorded (no dispellable aura styled since reload?)")
+                    o:Line("no attempts recorded - no dispellable aura styled since reload?", "neutral")
                 end
             elseif msg == "admissing" then
                 -- Diagnostic for the Aura Designer show-when-missing push mechanism
@@ -4735,93 +5412,92 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if DF.DebugTDMirror then DF:DebugTDMirror() end
             elseif msg == "debugfonts" then
                 -- Debug command to show font info
-                print("|cff00ff00DandersFrames:|r Font Debug")
+                local o = DF:Out("Fonts")
                 local LSM = DF.GetLSM and DF.GetLSM()
                 if LSM then
                     local total = #LSM:List("font")
                     local available = 0
                     for _ in pairs(DF:GetFontList()) do available = available + 1 end
-                    print("  Total in SharedMedia: " .. total)
-                    print("  Available in DandersFrames: " .. available)
+                    o:Field("Total in SharedMedia", total)
+                    o:Field("Available in DandersFrames", available)
+                else
+                    -- No LibSharedMedia means the font list falls back to the
+                    -- built-ins only, which is worth knowing rather than silent.
+                    o:Line("LibSharedMedia not available", "warn")
                 end
-            elseif msg:match("^auras ") then
-                local unit = msg:match("^auras (.+)")
+            elseif msg:match("^auradata ") then
+                local unit = msg:match("^auradata (.+)")
                 DF:DebugAuraFilters(unit)
             elseif msg == "clickcast" then
-                -- Debug click-cast registration
-                print("|cff00ff00DandersFrames:|r Click-Cast Debug")
-                if ClickCastFrames then
-                    print("  ClickCastFrames table exists")
-                    local count = 0
-                    local idx = 0
-                    if DF.IteratePartyFrames then
-                        DF:IteratePartyFrames(function(frame)
-                            idx = idx + 1
-                            local status = ClickCastFrames[frame]
-                            print("  Party[" .. idx .. "] frame:", status == true and "registered" or (status == false and "unregistered" or "not in table"))
-                            if status then count = count + 1 end
-                        end)
-                    end
-                    print("  Total registered:", count)
+                -- Moved to /df debug cc registration; this spelling still answers so
+                -- muscle memory keeps working, the same courtesy the eleven
+                -- /dfccXXX commands got when they were folded in.
+                if SlashCmdList["DFCCREGISTRATION"] then
+                    SlashCmdList["DFCCREGISTRATION"]()
                 else
-                    print("  ClickCastFrames table does NOT exist")
-                    print("  (Clicked/Clique addon may not be loaded)")
+                    DF:Err("Click-casting module not loaded")
                 end
             elseif msg == "dispel" or msg:match("^dispel ") then
-                -- Debug dispel detection
-                local unit = msg:match("^dispel (.+)") or "player"
-                if DF.DebugDispel then
-                    DF:DebugDispel(unit)
+                -- Every dispel probe answers here. The arg routing (unit dump /
+                -- "ids" / "render") lives ONCE, in Features/Dispel.lua's DFDISPEL
+                -- handler, so this branch is a pure forward — the two used to
+                -- carry near-identical copies of the same if-chain.
+                local arg = msg:match("^dispel (.+)")
+                if SlashCmdList["DFDISPEL"] then
+                    SlashCmdList["DFDISPEL"](arg or "")
                 else
-                    print("|cffff0000DandersFrames:|r Dispel debug not loaded")
+                    DF:Err("Dispel debug not loaded")
                 end
             elseif msg == "resetconflict" then
-                -- Reset the click-casting conflict warning ignore setting
-                if DandersFramesClickCastingDB then
-                    DandersFramesClickCastingDB.ignoreConflictWarning = nil
-                    print("|cff00ff00DandersFrames:|r Click-casting conflict warning has been re-enabled.")
-                    print("|cff00ff00DandersFrames:|r The warning will appear on next reload if conflicts are detected.")
+                -- Moved to /df debug cc resetconflict; old spelling still answers.
+                if SlashCmdList["DFCCRESETCONFLICT"] then
+                    SlashCmdList["DFCCRESETCONFLICT"]()
                 else
-                    print("|cffff9900DandersFrames:|r Click-casting database not loaded.")
+                    DF:Err("Click-casting module not loaded")
                 end
-            elseif msg == "casthistory" or msg == "history" then
+            elseif msg == "casthistory" then
                 -- Show cast history (TEST feature for secret values)
                 if DF.ShowCastHistory then
                     DF:ShowCastHistory()
                 else
-                    print("|cffff0000DandersFrames:|r Cast history not available")
+                    DF:Err("Cast history not available")
                 end
             elseif msg == "clearhistory" then
                 -- Clear cast history
                 if DF.ClearCastHistory then
                     DF:ClearCastHistory()
                 else
-                    print("|cffff0000DandersFrames:|r Cast history not available")
+                    DF:Err("Cast history not available")
                 end
-            elseif msg == "headers" or msg == "hdump" then
-                -- Dump header debug info
-                if DF.DumpHeaderInfo then
+            elseif msg == "headers" or msg:match("^headers ") then
+                -- Bare "/df debug headers" is the state dump a user pastes back; with an
+                -- argument it forwards to the /dfheaders tool (init, etc.). Merged
+                -- so one name does not mean two different things.
+                local arg = msg:match("^headers (.+)")
+                if arg then
+                    if SlashCmdList["DFHEADERS"] then
+                        SlashCmdList["DFHEADERS"](arg)
+                    else
+                        DF:Err("Header tool not loaded")
+                    end
+                elseif DF.DumpHeaderInfo then
                     DF:DumpHeaderInfo()
                 else
-                    print("|cffff0000DandersFrames:|r Header info not available")
+                    DF:Err("Header info not available")
                 end
-            elseif msg == "attached" or msg == "attachments" then
+            elseif msg == "attached" then
                 -- List other addons anchored/parented to DF unit frames
                 if DF.ScanFrameAttachments then
                     DF:ScanFrameAttachments()
                 else
-                    print("|cffff0000DandersFrames:|r Attachment scan not available")
+                    DF:Err("Attachment scan not available")
                 end
-            elseif msg == "debugheaders" then
-                -- Toggle header debug mode
-                DF.debugHeaders = not DF.debugHeaders
-                print("|cff00ff00DandersFrames:|r " .. format("Header debug %s", DF.debugHeaders and L["enabled"] or L["disabled"]))
             elseif msg == "raidbg" then
                 -- Toggle raid group debug backgrounds
                 if DF.ToggleRaidDebugBackgrounds then
                     DF:ToggleRaidDebugBackgrounds()
                 else
-                    print("|cffff0000DandersFrames:|r Raid debug not available")
+                    DF:Err("Raid debug not available")
                 end
             elseif msg == "exportaudit" then
                 -- Dev: verify every Config default is export-categorised or
@@ -4835,7 +5511,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if DF.FilterRegistry and DF.FilterRegistry.AuditSpellData then
                     DF.FilterRegistry:AuditSpellData()
                 else
-                    print("|cffff0000DandersFrames:|r Filter Registry not available")
+                    DF:Err("Filter Registry not available")
                 end
             elseif msg == "testids" then
                 -- Dev: audit the test pool's spell IDs against this client —
@@ -4844,8 +5520,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Results also land in the SavedVariables root (flushed by the
                 -- next /reload) so they can be read from disk — no chat copy.
                 local dump = {}
+                local o = DF:Out("Test IDs", "spell-ID audit")
                 for _, poolName in ipairs({ "buffs", "debuffs" }) do
-                    print("|cffeda55fDF testids:|r " .. poolName)
+                    o:Section(poolName, #(DF.TestData[poolName] or {}))
                     for i, e in ipairs(DF.TestData[poolName] or {}) do
                         local stored = "-"
                         if e.spellID then
@@ -4858,21 +5535,25 @@ DF._MainEventDispatcher = function(self, event, arg1)
                             byName = tostring(info.spellID) .. " (" .. tostring(info.name) .. ")"
                         end
                         local line = ("%s | %d. %s | stored: %s | byName: %s"):format(poolName, i, e.name, stored, byName)
-                        print("  " .. line)
+                        -- A stored ID the client cannot resolve is the whole point
+                        -- of this audit, so it is the one status worth colouring.
+                        o:Item(i .. ". " .. e.name,
+                            ("stored: %s | byName: %s"):format(stored, byName),
+                            stored:match("ERR") and "bad" or nil)
                         dump[#dump + 1] = line
                     end
                 end
                 if DandersFramesDB_v2 then
                     DandersFramesDB_v2.testIDsDump = dump
-                    print("|cffeda55fDF testids:|r dump saved — /reload to flush it to disk.")
+                    DF:Say("dump saved — /reload to flush it to disk.")
                 end
             elseif msg == "mousefoci" then
                 -- Dev: after 2s, dump the frame stack under the cursor with mouse
                 -- flags — pinpoints which frame is winning hover (tooltip leaks).
-                print("|cffeda55fDandersFrames:|r hover the target for 2 seconds...")
+                DF:Say("hover the target for 2 seconds...")
                 C_Timer.After(2, function()
                     local foci = GetMouseFoci and GetMouseFoci() or {}
-                    print("|cffeda55fDF mousefoci:|r " .. #foci .. " frame(s) under cursor:")
+                    DF:Out("Mouse Foci", #foci .. " frame(s) under the cursor")
                     for i, f in ipairs(foci) do
                         local name = "?"
                         pcall(function() name = f:GetName() or "(anon)" end)
@@ -4883,7 +5564,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         pcall(function() level = tostring(f:GetFrameLevel()) end)
                         local isTip = ""
                         pcall(function()
-                            if f._name or f._spellID then isTip = " |cff40ff40[DF test tip: " .. tostring(f._name) .. "]|r" end
+                            if f._name or f._spellID then isTip = " " .. DF.OUT.NEUTRAL .. "(test tip: " .. tostring(f._name) .. ")|r" end
                         end)
                         print(("  %d. %s (%s) motion=%s level=%s%s"):format(i, name, ftype, motion, level, isTip))
                     end
@@ -4893,6 +5574,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- that has one (legacy overlay = test path; slot widgets = 12.1
                 -- live path) — rect vs parent, fill value, blend, draw order.
                 -- Ground-truth for "strip renders partial width" reports.
+                local o = DF:Out("Dispel Render", "gradient state")
                 local function num(v)
                     if v == nil then return "nil" end
                     if issecretvalue and issecretvalue(v) then return "SECRET" end
@@ -4913,7 +5595,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         if t then blend = t:GetBlendMode(); alpha = t:GetAlpha(); shown = t:IsShown() end
                     end)
                     pcall(function() if hostFrame and hostFrame.healthBar then pw = hostFrame.healthBar:GetWidth() end end)
-                    print(("  %s: shown=%s rect=%sx%s (hb w=%s) val=%s/%s-%s orient=%s rev=%s blend=%s texAlpha=%s texShown=%s lvl=%s"):format(
+                    o:Line(("%s: shown=%s rect=%sx%s (hb w=%s) val=%s/%s-%s orient=%s rev=%s blend=%s texAlpha=%s texShown=%s lvl=%s"):format(
                         tag, tostring(bar:IsShown()), num(w), num(h), num(pw), num(val), num(mn), num(mx),
                         tostring(orient), tostring(rev), tostring(blend), num(alpha), tostring(shown), num(lvl)))
                 end
@@ -4925,20 +5607,21 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     pcall(function() alpha = tex:GetAlpha() end)
                     pcall(function() shown = tex:IsShown() end)
                     pcall(function() layer, sub = tex:GetDrawLayer() end)
-                    print(("  %s: shown=%s rect=%sx%s blend=%s alpha=%s layer=%s/%s"):format(
+                    o:Line(("%s: shown=%s rect=%sx%s blend=%s alpha=%s layer=%s/%s"):format(
                         tag, tostring(shown), num(w), num(h), tostring(blend), num(alpha), tostring(layer), tostring(sub)))
                 end
                 local function dumpFrame(frame, label)
                     if not frame then return end
                     local db2 = DF:GetFrameDB(frame)
-                    print(("|cffeda55fDF dispeldbg %s|r (style=%s onCur=%s hbLvl=%s frameLvl=%s):"):format(
-                        label, tostring(db2 and db2.dispelGradientStyle),
+                    o:Section(label)
+                    o:Line(("style=%s onCur=%s hbLvl=%s frameLvl=%s"):format(
+                        tostring(db2 and db2.dispelGradientStyle),
                         tostring(db2 and db2.dispelGradientOnCurrentHealth),
                         frame.healthBar and tostring(frame.healthBar:GetFrameLevel()) or "?",
-                        tostring(frame:GetFrameLevel())))
+                        tostring(frame:GetFrameLevel())), "neutral")
                     local legacy = frame.dfDispelOverlay
                     if legacy then
-                        print(("  legacy overlay shown=%s lvl=%s tracks=%s"):format(
+                        o:Line(("legacy overlay shown=%s lvl=%s tracks=%s"):format(
                             tostring(legacy:IsShown()), tostring(legacy:GetFrameLevel()),
                             tostring(legacy.gradientTracksHealth)))
                         dumpBar("legacy.gradient", legacy.gradient, frame)
@@ -4949,7 +5632,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         for key, btn in pairs(slots) do
                             local wdg = btn.dfDispelWidget
                             if wdg then
-                                print(("  slot[%s] widget shown=%s lvl=%s tracks=%s"):format(
+                                o:Line(("slot[%s] widget shown=%s lvl=%s tracks=%s"):format(
                                     tostring(key), tostring(wdg:IsShown()), tostring(wdg:GetFrameLevel()),
                                     tostring(wdg.gradientTracksHealth)))
                                 dumpBar("slot.gradient", wdg.gradient, frame)
@@ -4965,7 +5648,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                                 end
                             end
                             if btn._dfDispelCarriers then
-                                print(("  slot[%s] bound carriers=%d"):format(tostring(key), #btn._dfDispelCarriers))
+                                o:Line(("slot[%s] bound carriers=%d"):format(tostring(key), #btn._dfDispelCarriers))
                             end
                         end
                     end
@@ -4987,102 +5670,20 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         if f and f:IsShown() then dumpFrame(f, "test" .. i) end
                     end
                 end
-            elseif msg == "testwizard" then
-                if DF.TestPopupWizard then
-                    DF:TestPopupWizard()
-                else
-                    print("|cffff0000DandersFrames:|r Popup module not loaded")
-                end
-            elseif msg == "testhighlight" then
-                -- Debug: open settings to Frame tab and highlight width/height
-                if not DF.GUIFrame or not DF.GUIFrame:IsShown() then
-                    DF:ToggleGUI()
-                end
-                if DF.GUI and DF.GUI.Tabs and DF.GUI.Tabs["general_frame"] then
-                    DF.GUI.Tabs["general_frame"]:Click()
-                end
-                C_Timer.After(0.3, function()
-                    -- Debug: dump page children info
-                    local page = DF.GUI and DF.GUI.Pages and DF.GUI.Pages["general_frame"]
-                    if page then
-                        print("|cff00ff00DandersFrames:|r Page found, children: " .. (page.children and #page.children or "nil"))
-                        if page.children then
-                            local found = 0
-                            for i, w in ipairs(page.children) do
-                                -- Check direct children
-                                if w.searchEntry and (w.searchEntry.dbKey == "frameWidth" or w.searchEntry.dbKey == "frameHeight") then
-                                    found = found + 1
-                                    print("  [" .. i .. "] dbKey=" .. w.searchEntry.dbKey)
-                                end
-                                -- Check settings group children
-                                if w.isSettingsGroup and w.groupChildren then
-                                    for j, entry in ipairs(w.groupChildren) do
-                                        if entry.widget and entry.widget.searchEntry then
-                                            local dk = entry.widget.searchEntry.dbKey
-                                            if dk == "frameWidth" or dk == "frameHeight" then
-                                                found = found + 1
-                                                print("  [" .. i .. "].group[" .. j .. "] dbKey=" .. dk .. " visible=" .. tostring(entry.widget:IsVisible()))
-                                            end
-                                        end
-                                    end
-                                end
-                            end
-                            print("  Found " .. found .. " matching widgets")
-                        end
-                    else
-                        print("|cffff0000DandersFrames:|r Page 'general_frame' not found")
-                        if DF.GUI and DF.GUI.Pages then
-                            print("  Available pages:")
-                            for k, _ in pairs(DF.GUI.Pages) do
-                                print("  - " .. tostring(k))
-                            end
-                        end
-                    end
-                    DF:HighlightSettings("general_frame", {"frameWidth", "frameHeight"})
-                end)
-            elseif msg == "testalert" then
-                if DF.TestPopupAlert then
-                    DF:TestPopupAlert()
-                else
-                    print("|cffff0000DandersFrames:|r Popup module not loaded")
-                end
-            elseif msg:match("^importwizard ") then
-                local str = msg:match("^importwizard (.+)$")
-                if str and DF.WizardBuilder then
-                    DF.WizardBuilder:HandleImportCommand(str)
-                else
-                    print("|cffff0000DandersFrames:|r Usage: /df importwizard <string>")
-                end
-            elseif msg == "testbuilder" then
-                -- Test the wizard builder popup
-                if DF.ShowWizardBuilder then
-                    DF:ShowWizardBuilder("Test Builder Wizard", function(name)
-                        DF:Debug("Builder saved wizard: " .. tostring(name))
-                        print("|cff00ff00DandersFrames:|r " .. format(L["Wizard '%s' saved!"], tostring(name)))
-                    end)
-                else
-                    print("|cffff0000DandersFrames:|r WizardBuilder not loaded")
-                end
-            elseif msg == "testpicker" then
-                -- Test the settings picker mode
-                if DF.EnterSettingsPickerMode then
-                    DF:EnterSettingsPickerMode(function(tabName, dbKey, controlType)
-                        DF:Debug("Picker selected: tab=" .. tostring(tabName) .. " key=" .. tostring(dbKey) .. " type=" .. tostring(controlType))
-                        print("|cff00ff00DandersFrames:|r " .. format(L["Picked setting: %s%s%s from tab %s%s%s"], "|cffffffff", tostring(dbKey), "|r", "|cffffffff", tostring(tabName), "|r"))
-                    end)
-                else
-                    print("|cffff0000DandersFrames:|r Popup module not loaded")
-                end
-            elseif msg == "localewarn" or msg == "localewarnings" then
+            elseif msg == "localewarn" then
                 -- Toggle AceLocale missing-key warnings for this session
                 DF:SetLocaleWarnings(not DF.localeWarningsEnabled)
-                print("|cff00ff00DandersFrames:|r Locale warnings " .. (DF.localeWarningsEnabled and "|cff00ff00ENABLED|r" or "|cffff9900DISABLED|r") .. " for this session")
+                -- Status goes in the VALUE slot so Say tones it, rather than a
+                -- hand-coloured span inside the sentence.
+                DF:Say("Locale warnings for this session",
+                    DF.localeWarningsEnabled and "enabled" or "disabled",
+                    DF.localeWarningsEnabled and "GOOD" or "NEUTRAL")
             elseif msg == "profiler" then
                 -- Toggle the function profiler UI
                 if DF.Profiler then
                     DF.Profiler:ToggleUI()
                 else
-                    print("|cffff0000DandersFrames:|r Profiler not loaded")
+                    DF:Err("Profiler not loaded")
                 end
             elseif msg == "profiler hook" then
                 -- Toggle the OnUpdate hook (requires /rl)
@@ -5090,28 +5691,40 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 local newState = not DandersFramesDB_v2.profilerOnUpdateHook
                 DandersFramesDB_v2.profilerOnUpdateHook = newState
                 if newState then
-                    print("|cff00ff00DandersFrames:|r Profiler OnUpdate hook |cff00ff00ENABLED|r. Type |cffeda55f/rl|r to apply.")
+                    DF:Say("Profiler OnUpdate hook |cff00ff00ENABLED|r. Type |cffeda55f/rl|r to apply.")
                 else
-                    print("|cff00ff00DandersFrames:|r Profiler OnUpdate hook |cffff9900DISABLED|r. Type |cffeda55f/rl|r to apply.")
+                    DF:Say("Profiler OnUpdate hook |cffff9900DISABLED|r. Type |cffeda55f/rl|r to apply.")
                 end
             elseif msg == "profile" or msg:match("^profile %d") then
-                -- Quick profile run: /df profile [seconds]
+                -- Quick profile run: /df debug profile [seconds]
                 if DF.Profiler then
                     local duration = tonumber(msg:match("(%d+)")) or 10
                     DF.Profiler:QuickProfile(duration)
                 else
-                    print("|cffff0000DandersFrames:|r Profiler not loaded")
+                    DF:Err("Profiler not loaded")
                 end
             else
+                -- ☠ NO BARE-NAME FALLBACK. "/df <name>" used to run any diagnostic,
+                -- which meant two spellings for one command and neither of them said
+                -- "this is a debug tool". Diagnostics are intercepted above; anything
+                -- else unrecognised opens the settings window.
                 if DF.ToggleGUI then
                     DF:ToggleGUI()
                 else
-                    print("|cffff0000DandersFrames:|r GUI not loaded yet.")
+                    DF:Err("GUI not loaded yet.")
                 end
             end
         end
         
         -- Add convenient /rl reload command
+        -- The one slash command that never went through RegisterDebugSlash, so it
+        -- was the only one absent from /df debug. It is a convenience rather than
+        -- a diagnostic, but being listed costs nothing and being invisible is how
+        -- commands get forgotten.
+        -- NOT via RegisterDebugSlash: /rl is universal muscle memory, so listing it
+        -- under /df debug spends a row telling people something they already know.
+        -- It is also the one command with no "/df debug <name>" form, which made it
+        -- the odd row out in a list where every other entry shares one shape.
         SLASH_DFRL1 = "/rl"
         SlashCmdList["DFRL"] = function()
             ReloadUI()
@@ -5264,18 +5877,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
 
         -- ⚰ DEPRECATED-TARGETED-SPELLS — the once-per-account Targeted Spells
         -- setup wizard used to fire here, 5s after login, offering to turn the
-        -- feature on. It cannot stay: the feature is force-disabled at load
-        -- (ForceDisableGroupTargetedSpellSettings) and its settings page is no
-        -- longer in the sidebar, so the wizard would sell a feature that can
-        -- neither run nor be configured, and its "Open settings" button would
-        -- land on a page with no nav row.
+        -- feature on. It could not stay: the feature was force-disabled at load and
+        -- its settings page had left the sidebar, so the wizard would have sold a
+        -- feature that could neither run nor be configured, and its "Open settings"
+        -- button would have landed on a page with no nav row.
         --
-        -- DF:ShowTargetedSpellSetupWizard itself is untouched in
-        -- Features\TargetedSpells.lua — only the auto-fire is gone. Restoring it
-        -- means putting this block back, with its 5s delay, its retry-if-a-popup-
-        -- is-up loop, and the mark-seen-at-schedule-time behaviour (so a cancel
-        -- still counts and doesn't re-nag next login). The saved flag
-        -- DandersFramesDB_v2.targetedSpellWizardSeen is deliberately left alone.
+        -- 2026-07-30: DF:ShowTargetedSpellSetupWizard is now gone too, with the rest
+        -- of the group-frame feature, so there is nothing left to restore here. The
+        -- saved flag DandersFramesDB_v2.targetedSpellWizardSeen is deliberately left
+        -- alone (stripping saved keys is a separate call).
 
     elseif event == "GROUP_ROSTER_UPDATE" then
         if DF.RosterDebugEvent then DF:RosterDebugEvent("Core.lua:GROUP_ROSTER_UPDATE") end
@@ -5391,10 +6001,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
         
-        -- Debug (use /df debugrole to enable)
-        if DF.debugRoleIcons then
-            print("|cff00ffffDF ROLE:|r PLAYER_REGEN_ENABLED (leaving combat)")
-        end
+        DF:Debug("ROLE", "PLAYER_REGEN_ENABLED (leaving combat)")
         
         -- Process any pending unit watch registrations
         if DF.ProcessPendingUnitWatch then
@@ -5454,9 +6061,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
                         if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
                         if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-                        if DF.HideAllTargetedSpells then
-                            DF:HideAllTargetedSpells(frame)
-                        end
                     end
                 end
                 if DF.testPartyContainer then
@@ -5478,9 +6082,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
                         if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
                         if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-                        if DF.HideAllTargetedSpells then
-                            DF:HideAllTargetedSpells(frame)
-                        end
                     end
                 end
                 if DF.testRaidContainer then
@@ -5510,7 +6111,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- frames in combat, so they rendered fake auras.
             DF:TeardownTestModeEngines()
 
-            print("|cffff9900DandersFrames:|r " .. L["Test mode ended — entering combat."])
+            DF:Say(L["Test mode ended — entering combat."])
 
             -- Switch from test mode state drivers ([combat] conditions) to group
             -- transition drivers ([group:raid] conditions) so frames stay visible
@@ -5524,10 +6125,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
         
-        -- Debug (use /df debugrole to enable)
-        if DF.debugRoleIcons then
-            print("|cff00ffffDF ROLE:|r PLAYER_REGEN_DISABLED (entering combat)")
-        end
+        DF:Debug("ROLE", "PLAYER_REGEN_DISABLED (entering combat)")
         -- Update role icons (in case hideInCombat is enabled)
         if DF.UpdateAllRoleIcons then
             DF:UpdateAllRoleIcons()
@@ -5569,9 +6167,7 @@ function DF:UpdateAll()
     -- Invalidate aura layout so all frames re-apply layout on next aura update
     DF:InvalidateAuraLayout()
     
-    if DF.debugSliderUpdates then
-        print("|cffffff00[DF Slider]|r >>> UpdateAll() <<<")
-    end
+    DF:Debug("GUI", ">>> UpdateAll() <<<")
     
     -- Update color curves for gradient mode
     if DF.UpdateColorCurve then
@@ -5935,65 +6531,9 @@ function DF:FullProfileRefresh()
     end
 end
 
--- ============================================================
--- WIZARD SETTINGS APPLICATION
--- Used by the popup wizard system to apply data-driven settings
--- maps from user-created wizards (WizardBuilder)
--- ============================================================
-
-local strsplit = strsplit
-
--- Set a DB value using dot-notation path (e.g., "party.frameWidth")
-function DF:SetDBKeyByPath(path, value)
-    local mode, key = path:match("^(%w+)%.(.+)$")
-    if mode and key and DF.db and DF.db[mode] then
-        DF.db[mode][key] = value
-    end
-end
-
--- Get a DB value using dot-notation path
-function DF:GetDBKeyByPath(path)
-    local mode, key = path:match("^(%w+)%.(.+)$")
-    if mode and key and DF.db and DF.db[mode] then
-        return DF.db[mode][key]
-    end
-    return nil
-end
-
--- Apply a wizard's settingsMap based on collected answers
--- settingsMap format: { stepId = { answerValue = { ["mode.dbKey"] = newValue, ... } } }
-function DF:ApplyWizardSettingsMap(settingsMap, answers)
-    if not settingsMap or not answers then return end
-
-    for stepId, answerValue in pairs(answers) do
-        local stepMap = settingsMap[stepId]
-        if stepMap then
-            if type(answerValue) == "table" then
-                -- Multi-select: apply settings for each selected value
-                for _, val in ipairs(answerValue) do
-                    local changes = stepMap[val]
-                    if changes then
-                        for dbKeyPath, newValue in pairs(changes) do
-                            DF:SetDBKeyByPath(dbKeyPath, newValue)
-                        end
-                    end
-                end
-            else
-                -- Single-select: apply settings for the selected value
-                local changes = stepMap[answerValue]
-                if changes then
-                    for dbKeyPath, newValue in pairs(changes) do
-                        DF:SetDBKeyByPath(dbKeyPath, newValue)
-                    end
-                end
-            end
-        end
-    end
-
-    -- Refresh everything after applying settings
-    DF:UpdateAll("WizardApply")
-end
-
+-- (Removed) WIZARD SETTINGS APPLICATION — DF:ApplyWizardSettingsMap and its
+-- orphaned local strsplit. It applied a wizard's settingsMap to the DB, was
+-- called only from the popup wizard's CompleteWizard, and went with that runtime.
 -- ============================================================
 -- MINIMAP BUTTON (using LibDBIcon)
 -- ============================================================
@@ -6015,7 +6555,7 @@ local LDB = LibStub("LibDataBroker-1.1"):NewDataObject("DandersFrames", {
             if db.soloMode ~= nil then
                 db.soloMode = not db.soloMode
                 DF:UpdateAllFrames()
-                print("|cff00ff00DandersFrames:|r " .. format(L["Solo mode %s"], db.soloMode and L["enabled"] or L["disabled"]))
+                DF:Say(format(L["Solo mode %s"], db.soloMode and L["enabled"] or L["disabled"]))
             end
         end
     end,
@@ -6050,7 +6590,7 @@ function DF:CreateAddonCompartment()
                 if db.soloMode ~= nil then
                     db.soloMode = not db.soloMode
                     DF:UpdateAllFrames()
-                    print("|cff00ff00DandersFrames:|r " .. format(L["Solo mode %s"], db.soloMode and L["enabled"] or L["disabled"]))
+                    DF:Say(format(L["Solo mode %s"], db.soloMode and L["enabled"] or L["disabled"]))
                 end
             end
         end,

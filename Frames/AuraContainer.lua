@@ -89,7 +89,8 @@ local DBG = "AURACONTAINER"
 -- One-time-per-process warning latches so a guarded failure (curve bug, border
 -- taint, native dispel reject) logs ONCE, not once per button.
 local warnedCurve, warnedBorder, warnedNativeDispel = false, false, false
-local warnedRestyle, warnedRefresh, warnedMouse = false, false, false
+-- (warnedMouse was a third latch here with no warning behind it — removed.)
+local warnedRestyle, warnedRefresh = false, false
 local warnedCreate = false
 
 -- Animations SAFE to run on an OVERLAY-mode border (Aura Designer). These render
@@ -297,8 +298,10 @@ local function normalizeFilters(filter)
                 -- INSIDE initializeFrame so its regions are created in secure context
                 -- (SetAuraBorder rejects textures created in the tainted style pass —
                 -- children of the secret aura button are access-constrained, cab.lua:15).
+                -- style: per-record button overrides (scale / badge). See applyRecordStyle
+                -- — a group whose membership IS the predicate can be styled unconditionally.
                 out[#out + 1] = { f = f.filter, key = f.key, candidateFilters = f.candidateFilters,
-                                  onInit = f.onInit }
+                                  onInit = f.onInit, style = f.style }
             end
         end
     end
@@ -575,16 +578,27 @@ local function styleButton_regions(slot, config)
         -- art). A square NEVER binds SetIcon (no dfIcon created), so the icon path is
         -- skipped whenever a square fill is configured. Both are read-free; the slot's
         -- secret show/hide drives their visibility (attach-and-inherit).
+        -- ⚠ squareSpec's PRESENCE means "this slot is a square"; squareSpec.show says
+        -- whether its fill is painted. The two are deliberately separate: a text-only
+        -- square (AD "Hide Icon") must still suppress the icon path below, or it renders
+        -- as the spell icon instead. Keep the icon guard on presence, not on show.
         local squareSpec = style.square
         if squareSpec then
-            if not slot.dfSquare then
-                slot.dfSquare = slot:CreateTexture(nil, "BACKGROUND")
+            if squareSpec.show == false then
+                -- Text-only square: no fill, but the slot stays a square. Hide rather than
+                -- paint transparent so a slot recycled from a visible square clears.
+                if slot.dfSquare then slot.dfSquare:Hide() end
+            else
+                if not slot.dfSquare then
+                    slot.dfSquare = slot:CreateTexture(nil, "BACKGROUND")
+                end
+                local inset = squareSpec.inset or 0
+                slot.dfSquare:ClearAllPoints()
+                slot.dfSquare:SetPoint("TOPLEFT", inset, -inset)
+                slot.dfSquare:SetPoint("BOTTOMRIGHT", -inset, inset)
+                slot.dfSquare:SetColorTexture(readColor(squareSpec.color))
+                slot.dfSquare:Show()
             end
-            local inset = squareSpec.inset or 0
-            slot.dfSquare:ClearAllPoints()
-            slot.dfSquare:SetPoint("TOPLEFT", inset, -inset)
-            slot.dfSquare:SetPoint("BOTTOMRIGHT", -inset, inset)
-            slot.dfSquare:SetColorTexture(readColor(squareSpec.color))
         end
         local iconSpec = style.icon
         if not squareSpec and (iconSpec == nil or iconSpec.show ~= false) then
@@ -670,9 +684,28 @@ local function styleButton_regions(slot, config)
             slot.dfCD = CreateFrame("Cooldown", nil, slot, "CooldownFrameTemplate")
         end
         slot.dfCD:SetAllPoints(slot.dfIcon or slot.dfSquare or slot)
-        if slot.dfCD.SetDrawEdge then slot.dfCD:SetDrawEdge(cdSpec == nil or cdSpec.edge ~= false) end
         -- Swipe on by default; cdSpec.swipe=false hides it (AD "Hide Cooldown Swipe").
-        if slot.dfCD.SetDrawSwipe then slot.dfCD:SetDrawSwipe(cdSpec == nil or cdSpec.swipe ~= false) end
+        local wantSwipe = (cdSpec == nil or cdSpec.swipe ~= false)
+
+        -- EDGE and BLING are ornaments OF the swipe: the edge is the bright leading line
+        -- that sweeps round with it, bling the flash when it completes. They must follow
+        -- the swipe by default, or "Hide Cooldown Swipe" removes the dark fill and leaves
+        -- a yellow line still sweeping the icon — which is exactly how this was reported.
+        -- Edge used to default to ON regardless (`cdSpec.edge ~= false` with no producer
+        -- ever emitting `edge`), and bling was never set at all, so it sat at whatever
+        -- CooldownFrameTemplate ships with. An explicit cdSpec.edge / cdSpec.bling still wins.
+        --
+        -- ⚠ Written as if/else on purpose. The `x == nil and a or b` idiom is WRONG here:
+        -- when the key is nil and the fallback is false it yields b, silently re-enabling
+        -- the thing we are trying to turn off.
+        local cdEdge, cdBling = cdSpec and cdSpec.edge, cdSpec and cdSpec.bling
+        local wantEdge, wantBling
+        if cdEdge == nil then wantEdge = wantSwipe else wantEdge = (cdEdge ~= false) end
+        if cdBling == nil then wantBling = wantSwipe else wantBling = (cdBling ~= false) end
+
+        if slot.dfCD.SetDrawSwipe then slot.dfCD:SetDrawSwipe(wantSwipe) end
+        if slot.dfCD.SetDrawEdge then slot.dfCD:SetDrawEdge(wantEdge) end
+        if slot.dfCD.SetDrawBling then slot.dfCD:SetDrawBling(wantBling) end
         if slot.dfCD.SetReverse then slot.dfCD:SetReverse(cdSpec ~= nil and cdSpec.reverse == true) end
         if slot.dfCD.SetHideCountdownNumbers then
             slot.dfCD:SetHideCountdownNumbers(not (cdSpec and cdSpec.numbers))
@@ -1062,6 +1095,13 @@ local function bindNative(slot, config)
                 local opts = {
                     showWhenHarmful = dispelSpec.showWhenHarmful ~= false,
                     showWhenHelpful = dispelSpec.showWhenHelpful == true,
+                    -- Supplying the letters ourselves takes ApplyDispelTypeText's
+                    -- customText branch, which SetText()+Show()s directly instead of
+                    -- calling AuraUtil.SetAuraSymbol — the only place the
+                    -- `colorblindMode` CVar is read. Same letters the game would use
+                    -- (they come from its own globals), minus the CVar dependency.
+                    -- See DF:GetGameDispelTextMap in Frames/Border.lua.
+                    customDispelTextMap = DF.GetGameDispelTextMap and DF:GetGameDispelTextMap() or nil,
                 }
                 -- 68914: SetAuraSymbol sits in the same "removed after 12.1" deprecation
                 -- block as SetAuraBorder, but unlike that one it is a PLAIN ALIAS —
@@ -1353,7 +1393,7 @@ local function applyContainerLayout(c, handle)
     if handle._pp then
         px, py, pinResolved = snapPinOffsets(handle.frame, G.anchor, px, py, scale)
     end
-    -- /df ppdump ground truth: the last pin decision this handle rendered with.
+    -- /df debug ppdump ground truth: the last pin decision this handle rendered with.
     handle._ppDbg = { px = px, py = py, resolved = pinResolved, anchor = G.anchor, pin = G.pinPoint, scale = scale }
 
     pcall(function()
@@ -1429,6 +1469,20 @@ end
 -- groupSpacing. Unknown keys are silently dropped, never rejected
 -- (CopyAndValidateInboundTable merges over defaults and validates known keys
 -- only), so we carry BOTH families and each build reads its own.
+-- A per-record style that scales its buttons needs the GROUP's layout cell scaled to
+-- match, or the bigger icon overlaps its neighbour: the button size and the flow's
+-- reserved cell are separate things. Returns the base table unchanged when there is
+-- nothing to scale, so callers can pass the result straight through.
+local function scaleGroupLayout(base, style)
+    local sc = style and style.scale
+    if not base or not sc or sc == 1 then return base end
+    local out = {}
+    for k, v in pairs(base) do out[k] = v end
+    if out.elementWidth then out.elementWidth = out.elementWidth * sc end
+    if out.elementHeight then out.elementHeight = out.elementHeight * sc end
+    return out
+end
+
 local function buildGroupLayout(config)
     local L = config.layout or {}
     local sx = (L.sizeX or L.size or 32)
@@ -1671,6 +1725,10 @@ function NativeBackend:build()
         sortMethod, sortDirection = deriveSort(config)
     end
     self.groupKeys = {}
+    -- key -> the record style that group was built with. applyLayout re-pushes group
+    -- layouts on every restyle and would otherwise reset a scaled group's cell back to
+    -- the shared size, so it needs to know which groups are scaled.
+    self.groupStyles = {}
     self.slotButtons = isOverlay and {} or nil   -- overlay: key -> native slot button (consumer styling)
     handle._idGateVulnerable = nil   -- re-derived from this build's records (see the record loop)
     handle._idGateSourceRelative = nil   -- PLAYER-token / isFromPlayerOrPlayerPet pools (visibility gate)
@@ -1688,18 +1746,36 @@ function NativeBackend:build()
         --    provider's matching is a bare-token check and its auras carry no
         --    raid flags / spell IDs / durations (§23 gotcha c).
         local category = (filters[1] and filters[1].f:find("HARMFUL")) and "HARMFUL" or "HELPFUL"
+        -- IMPORTANT-DEBUFF PREVIEW. Test mode replaces the real records with one group
+        -- per slot, so a record's style would be thrown away with them and the
+        -- highlight would be invisible in the preview — which is the one place you can
+        -- actually sit still and position the badge. Capture it before the wipe and
+        -- hand it to the first slots, so the preview shows both treatments side by side
+        -- (styled slot 1-2, plain slot 3+) exactly as a live row would.
+        local testStyle
+        for _, r in ipairs(filters) do
+            if r.style then testStyle = r.style break end
+        end
+        -- ONE styled slot only. Styling several made the preview look like the whole row
+        -- was highlighted; a single styled icon against plain neighbours is both a direct
+        -- A/B for positioning and an honest picture of a live row, where importants are
+        -- the minority.
+        local testStyleSlots = testStyle and math.min(1, maxCount) or 0
+        local testStyleLayout = scaleGroupLayout(groupLayout, testStyle)
         filters = {}   -- the normal declaration loop below is skipped
         for k = 1, maxCount do
             local key = "dfTest" .. k
+            local styled = (k <= testStyleSlots) or nil
             local okGroup, err = pcall(function()
                 c:AddAuraGroup(key, category, {
                     maxFrameCount = 1,
-                    initializeFrame = handle:_makeInitializeFrame(handle._gen, k),
-                    layout = groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
+                    initializeFrame = handle:_makeInitializeFrame(handle._gen, k, nil, styled and testStyle or nil),
+                    layout = styled and testStyleLayout or groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
                 })
             end)
             if okGroup then
                 self.groupKeys[#self.groupKeys + 1] = key
+                self.groupStyles[key] = styled and testStyle or nil
             else
                 DF:DebugWarn(DBG, "test group failed: %s", tostring(err))
             end
@@ -1738,13 +1814,23 @@ function NativeBackend:build()
                     self.slotButtons[key] = btn
                 elseif not okSlot then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
             else
+                -- A record carrying its own style (or an onInit) needs its OWN init
+                -- closure — initFn is shared across every group and would apply the
+                -- override to all of them. Its layout cell is widened to match the
+                -- scaled button, or the bigger icon overlaps the next group along.
+                local groupInit, recLayout = initFn, groupLayout
+                if rec.style or rec.onInit then
+                    groupInit = handle:_makeInitializeFrame(handle._gen, nil, rec.onInit, rec.style)
+                    recLayout = scaleGroupLayout(groupLayout, rec.style)
+                end
                 local okGroup, err = pcall(function()
-                    c:AddAuraGroup(key, f, { maxFrameCount = maxCount, initializeFrame = initFn,
-                                             layout = groupLayout, candidateFilters = cf,
+                    c:AddAuraGroup(key, f, { maxFrameCount = maxCount, initializeFrame = groupInit,
+                                             layout = recLayout, candidateFilters = cf,
                                              sortMethod = sortMethod, sortDirection = sortDirection })
                 end)
                 if okGroup then
                     self.groupKeys[#self.groupKeys + 1] = key
+                    self.groupStyles[key] = rec.style
                 else
                     DF:DebugWarn(DBG, "AddAuraGroup failed: %s", tostring(err))
                 end
@@ -1773,7 +1859,7 @@ function NativeBackend:build()
         -- Centre the badge in the (badge + 2*spill) window: the -MISSING_PAD container pin
         -- and the +MISSING_PAD badge inset still cancel to park it on the window when empty;
         -- the +spill / -spill centres it inside the enlarged window.
-        -- _badgeParkDebug (/df ppbadge): force the WINDOW anchor live — the parked badge
+        -- _badgeParkDebug (/df debug ppbadge): force the WINDOW anchor live — the parked badge
         -- position then can't inherit the empty container's SECRET (and field-measured
         -- fractional) self-width. DIAGNOSTIC ONLY: the layout-push cannot move a
         -- window-anchored badge, so presence no longer hides it while the flag is on.
@@ -1840,7 +1926,14 @@ function NativeBackend:applyLayout()
     if self.groupKeys and c.SetAuraGroupLayout then
         local groupLayout = buildGroupLayout(self.handle.config)
         for _, key in ipairs(self.groupKeys) do
-            pcall(function() c:SetAuraGroupLayout(key, groupLayout) end)
+            -- Per-group, NOT one shared table: a group whose record scales its buttons
+            -- needs its layout CELL scaled to match. Pushing the shared layout to every
+            -- key reset the scaled group's cell to the base width, so on a restyle the
+            -- bigger icon overlapped its neighbour — while a full rebuild looked right,
+            -- because AddAuraGroup got the scaled layout there. Button size and reserved
+            -- cell are separate things and both have to be re-pushed.
+            local gl = scaleGroupLayout(groupLayout, self.groupStyles and self.groupStyles[key])
+            pcall(function() c:SetAuraGroupLayout(key, gl) end)
         end
     end
     -- ★ PARTITION KICK (live-confirmed 2026-07-09): inbound mutators set the dirty
@@ -1992,9 +2085,23 @@ function Handle:_slotCount()
     end
     return self.config.max or 1
 end
-function Handle:_acceptSlot(slot, index)
+-- Forward-declared: applyRecordStyle is defined further down (next to the
+-- initializeFrame factory it was written for) but _acceptSlot below must call it.
+-- Without this declaration the name inside _acceptSlot would resolve to a GLOBAL,
+-- read nil at runtime and the call would error — legal Lua that parses clean.
+local applyRecordStyle
+
+function Handle:_acceptSlot(slot, index, recStyle)
     self.buttons[index] = slot                 -- cache first (mirror of the pre-split order)
+    -- Remember the per-record style ON the button. initializeFrame passes it once at
+    -- create; every later restyle (ApplyStyle, a settings drag, hiding and re-showing
+    -- auras) re-enters here WITHOUT it, and styleButton_regions unconditionally resets
+    -- the button to the shared config size. Re-applying from the stash is what makes the
+    -- override survive — before this, toggling auras off/on or dragging the Size Step
+    -- slider silently reverted the important icons to normal size until a full rebuild.
+    if recStyle ~= nil then slot.dfImpRecStyle = recStyle end
     styleButton_regions(slot, self.config)     -- source-agnostic region creation/styling
+    applyRecordStyle(slot, self, slot.dfImpRecStyle)
 end
 function Handle:_bindNativeSlot(slot)
     bindNative(slot, self.config)              -- native setters (native slots only)
@@ -2313,15 +2420,18 @@ function Handle:_paintTestSlot(slot, index)
     end
     -- Dispel symbol: no native SetAuraSymbol bind in test mode -> fake the colourblind
     -- letter ourselves (house rule: every native-driven region renders in test, or the
-    -- preview lies). Blizzard's per-locale DebuffTypeSymbol letters when available;
-    -- first-two-letters fallback. Live rendering ALSO needs the colorblindMode CVar —
-    -- the preview deliberately ignores that so the option is style-able without
-    -- flipping the CVar (the GUI tooltip + note carry the caveat).
+    -- preview lies) — there is no native bind to drive it on a fake aura.
+    -- ★ Reads the SAME map the live bind hands to customDispelTextMap
+    -- (DF:GetGameDispelTextMap), so preview and live show identical letters rather
+    -- than merely similar ones. Its predecessor derived them independently
+    -- (`debuffType:sub(1, 2)`), which agreed with live only by coincidence and only
+    -- in English. Live no longer depends on the colorblindMode CVar either, so the
+    -- two paths now genuinely match instead of the preview over-promising.
     if slot.dfSymbol then
         local sym
         if e.debuffType then
-            local t = DebuffTypeSymbol   -- FrameXML per-locale letter table (may not exist)
-            sym = (type(t) == "table" and t[e.debuffType]) or e.debuffType:sub(1, 2)
+            local map = DF.GetGameDispelTextMap and DF:GetGameDispelTextMap()
+            sym = map and map[e.debuffType]
         end
         slot.dfSymbol:SetText(sym or "")
         slot.dfSymbol:SetShown(sym and true or false)
@@ -2527,7 +2637,91 @@ end
 -- abort Blizzard's batch creation); the gen token drops a callback from a torn-down or
 -- rebuilt container; a running counter mirrors the old per-index slot id (batches append,
 -- so indices stay contiguous -- ipairs(self.buttons) in ApplyStyle/layoutRow still holds).
-function Handle:_makeInitializeFrame(gen, fixedIndex, onInit)
+-- PER-RECORD STYLE (important-debuff highlight). A row's buttons are all styled from
+-- the container-wide config, which is right for everything except a group that exists
+-- BECAUSE its auras are a distinct class. Records can carry `style` and every button in
+-- that group gets it — unconditionally, because membership already IS the predicate.
+-- Nothing here reads aura data; we never learn which aura a button holds.
+--
+-- ⚠ Runs AFTER _acceptSlot, which sized the button from the shared layout — the scale
+-- below deliberately overrides that. The group's own layout cell is widened to match at
+-- AddAuraGroup (see the record loop), or the bigger button would overlap its neighbour.
+--
+-- Regions are created ONCE and updated in place: initializeFrame re-runs on restyle, and
+-- ApplyStyle re-runs it without teardown. Never Show/Hide a region a native setter owns;
+-- these are DF-owned textures on the button, so plain SetShown is fine.
+-- NOTE: assigns the local forward-declared above _acceptSlot (which calls this on every
+-- restyle). Deliberately NOT `local function` — that would shadow the forward local and
+-- leave _acceptSlot calling a nil global.
+function applyRecordStyle(button, handle, recStyle)
+    if not recStyle then return end
+
+    if recStyle.scale and recStyle.scale ~= 1 then
+        local lay = handle.config and handle.config.layout
+        local sx = lay and (lay.sizeX or lay.size) or 32
+        local sy = lay and (lay.sizeY or lay.size) or sx
+        button:SetSize(sx * recStyle.scale, sy * recStyle.scale)
+    end
+
+    local bs = recStyle.badge
+    if bs then
+        local sz = bs.size or 10
+        -- HOST FRAME, not bare textures on the button. The badge deliberately overhangs
+        -- the button's corner, which puts it in the NEXT button's space — and sibling
+        -- buttons draw in their own order, so a plain OVERLAY texture ends up BEHIND the
+        -- neighbouring icon (seen in game). A child frame with a raised frame level wins
+        -- against siblings regardless of their order. +13 clears DF.Border's +10 and the
+        -- dispel ring's +12, the same clearance the duration-text holder uses.
+        -- Frames don't clip children unless asked, so the overhang still renders.
+        if not button.dfImpBadgeHost then
+            button.dfImpBadgeHost = CreateFrame("Frame", nil, button)
+            button.dfImpBadge = button.dfImpBadgeHost:CreateTexture(nil, "OVERLAY", nil, 6)
+            button.dfImpMark = button.dfImpBadgeHost:CreateTexture(nil, "OVERLAY", nil, 7)
+        end
+        local host = button.dfImpBadgeHost
+        host:SetAllPoints(button)
+        host:SetFrameLevel(button:GetFrameLevel() + 13)
+        local b, m = button.dfImpBadge, button.dfImpMark
+        b:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_AlertBadge")
+        m:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_AlertMark")
+        -- Anchored CENTER-on-corner so the offsets read the same whichever corner is
+        -- picked, then nudged INWARD by a quarter of the badge's own size. The badge
+        -- overlaps the corner but leans into the icon, which is what reads as "a marker
+        -- on this icon" — the first cut pushed it OUTWARD instead and sat it half off
+        -- the art, so every user had to dial in negative offsets just to get back to a
+        -- sane resting place. User offsets are ADDED to the inset, so 0,0 is the good
+        -- position and the sliders are for taste.
+        local inset = sz / 4
+        local ux = tonumber(bs.offsetX) or 0
+        local uy = tonumber(bs.offsetY) or 0
+        local pt = bs.point or "TOPRIGHT"
+        -- "Inward" is a different direction per corner. Both operands are non-false
+        -- numbers, so the and/or is safe here (unlike the nil-fallback trap elsewhere).
+        local dx = (pt == "TOPLEFT" or pt == "BOTTOMLEFT") and inset or -inset
+        local dy = (pt == "BOTTOMLEFT" or pt == "BOTTOMRIGHT") and inset or -inset
+        for _, t in ipairs({ b, m }) do
+            t:ClearAllPoints()
+            t:SetSize(sz, sz)
+            t:SetPoint("CENTER", button, pt, ux + dx, uy + dy)
+        end
+        b:SetVertexColor(readColor(bs.color))
+        m:SetVertexColor(readColor(bs.markColor))
+        -- Re-show the HOST too: the off-path hides it, and a button recycled from a
+        -- pass with the badge disabled would otherwise keep shown textures inside a
+        -- hidden frame — visible nowhere, with nothing obviously wrong in the config.
+        host:SetShown(true)
+        b:SetShown(true)
+        m:SetShown(true)
+    elseif button.dfImpBadgeHost then
+        -- Hide the HOST, not the two textures: one call, and nothing inside it can
+        -- render even if a future region is added. These are DF-owned widgets, so
+        -- SetShown is safe — the no-Show/Hide rule is only for regions handed to a
+        -- native setter, whose Shown aspect Blizzard owns.
+        button.dfImpBadgeHost:SetShown(false)
+    end
+end
+
+function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle)
     local handle = self
     return function(button)
         local ok, err = pcall(function()
@@ -2554,7 +2748,10 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit)
             -- a layout cell so the container's width pushes the badge out of the clip
             -- window (probe 32). No regions, no native binds.
             if handle.config.mode ~= "missing" then
-                handle:_acceptSlot(button, i)      -- size + regions (source-agnostic)
+                -- recStyle is stashed on the button by _acceptSlot and re-applied by it
+                -- on every later restyle, so the override is not lost the moment
+                -- anything else re-styles the row.
+                handle:_acceptSlot(button, i, recStyle)   -- size + regions + per-group overrides
                 if AuraContainer._testMode then
                     -- P5 hybrid preview: the sample provider drives presence and the
                     -- real flow drives geometry, but the sample auras' own data is
@@ -2767,7 +2964,19 @@ function Handle:_applyIdentityGate()
             end
         end
     end
-    self._idGateHidden = hide or nil
+    -- Transition only. "My cross-realm friend's auras vanished" produced no log at
+    -- all before this: the gate is two pcall'ed probes with deliberate fail-open /
+    -- fail-safe asymmetry, and which one tripped is the whole answer. Fires on a
+    -- CHANGE, so a stable gate costs one comparison.
+    local newHidden = hide or nil
+    if self._idGateHidden ~= newHidden then
+        DF:Debug("AURACONTAINER", "identity gate %s for unit=%s (vulnerable=%s sourceRelative=%s)",
+            newHidden and "HIDING" or "showing",
+            tostring(self.config and self.config.unit),
+            tostring(self._idGateVulnerable or false),
+            tostring(self._idGateSourceRelative or false))
+    end
+    self._idGateHidden = newHidden
     self:_applyVisibility()
 end
 
@@ -2816,7 +3025,7 @@ end
 -- ApplyStyle. Pure table math + a db read — combat-safe.
 function Handle:_ppPrepare()
     self._pp = resolvePixelPerfect(self)
-    -- /df ppdump discriminator: the pixel-scale CACHE value this handle's layout
+    -- /df debug ppdump discriminator: the pixel-scale CACHE value this handle's layout
     -- was quantized with. UIParent's scale can settle AFTER login builds — a
     -- stale cache here bakes every snapped size subtly wrong until a restyle.
     self._ppCacheAt = (DF.GetPixelScale and DF:GetPixelScale()) or nil
@@ -2859,6 +3068,16 @@ function Handle:ApplyStyle(style, layout)
     for i, b in ipairs(self.buttons) do
         local ok, err = pcall(function()
             styleButton_regions(b, self.config)
+            -- Per-record overrides, re-applied from the button's stash. This path calls
+            -- styleButton_regions DIRECTLY rather than going through _acceptSlot, so it
+            -- does not inherit the re-apply there — and styleButton_regions always resets
+            -- the button to the SHARED config size. Without this line the important-debuff
+            -- size step survived a rebuild but was silently reverted by every ApplyStyle,
+            -- which is why a test frame snapped back to normal while a pinned frame (which
+            -- rebuilds instead of restyling) looked correct. Traced 2026-07-30: the button
+            -- measured the SCALED size immediately after applyRecordStyle, so the revert
+            -- was always downstream, never in the style itself.
+            applyRecordStyle(b, self, b.dfImpRecStyle)
             if native then
                 if AuraContainer._testMode then
                     -- TEST MODE: re-PAINT, never bind. Binding here was the P5
@@ -3129,6 +3348,15 @@ function Handle:_queueOp(op)
         self._pendingOp = "rebuild"
     else
         self._pendingOp = op
+    end
+    -- ☠ The UPGRADE is the interesting event, not the queueing. Two different
+    -- pending ops (classically enable + retarget) collapse to a full rebuild, and
+    -- that path is the documented frame-leak case — it was previously silent, so a
+    -- leak left no trace at all. Only an actual change of pending op logs.
+    if cur and cur ~= self._pendingOp then
+        DF:DebugWarn("AURACONTAINER", "combat op upgrade: %s + %s -> %s (unit=%s)",
+            tostring(cur), tostring(op), tostring(self._pendingOp),
+            tostring(self.config and self.config.unit))
     end
     self:_registerRegen()
 end
@@ -3448,13 +3676,14 @@ idGateWatch:SetScript("OnEvent", function(_, event)
     end
 end)
 
--- /df idgate — identity-gate ground truth: EVERY handle (not just the
+-- /df debug idgate — identity-gate ground truth: EVERY handle (not just the
 -- vulnerable ones — an under-flagged handle is exactly the failure this dump
 -- must expose), with its unit, vulnerability flag, the LIVE UnitCanAssist
 -- answer, the stored gate verdict, and the window's actual visibility
 -- (+ whether a hover-deferred flip is parked). Developer diagnostic: plain
 -- print by project convention.
 function AuraContainer.DebugDumpIdentityGate()
+    local o = DF:Out("Identity Gate")
     local CAP = 30
     local n, vuln = 0, 0
     for h in pairs(AuraContainer._handles or {}) do
@@ -3491,7 +3720,7 @@ function AuraContainer.DebugDumpIdentityGate()
                 if cf and cf.includeSpellIDs then inc = true end
                 if cf and cf.excludeSpellIDs then exc = true end
             end
-            print(("|cff33ff99[idgate %d]|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s srcRel=%s exists=%s canAssist=%s vis=%s gateHidden=%s intent=%s shown=%s retry=%s"):format(
+            print(("    " .. DF.OUT.SECTION .. "%d|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s srcRel=%s exists=%s canAssist=%s vis=%s gateHidden=%s intent=%s shown=%s retry=%s"):format(
                 n, tostring(cfg.mode or "row"), tostring(unit),
                 table.concat(fParts, "&"), tostring(inc), tostring(exc),
                 tostring(h._idGateVulnerable or false),
@@ -3504,13 +3733,18 @@ function AuraContainer.DebugDumpIdentityGate()
         end
     end
     if n > CAP then
-        print(("|cff33ff99[idgate]|r (capped at %d lines)"):format(CAP))
+        o:Line(("… capped at %d lines"):format(CAP), "NEUTRAL")
     end
-    print(("|cff33ff99[idgate]|r %d handle(s), %d gate-vulnerable; testMode=%s"):format(
-        n, vuln, tostring(AuraContainer._testMode or false)))
+    o:Section("Summary")
+    o:Field("handles", n, n > 0 and "GOOD" or "NEUTRAL")
+    -- A vulnerable handle is the whole point of this dump, so it is the one
+    -- number that must not sit uncoloured in a wall of numbers.
+    o:Field("gate-vulnerable", vuln, vuln > 0 and "WARN" or "GOOD")
+    o:Field("test mode", AuraContainer._testMode or false, "NEUTRAL")
+    o:Siblings("idgate")
 end
 
--- /df ppbadge — diagnostic toggle: park missing badges on the WINDOW instead of
+-- /df debug ppbadge — diagnostic toggle: park missing badges on the WINDOW instead of
 -- the container (see _badgeParkDebug at the build). Border renders perfect =>
 -- the empty container's secret fractional self-width is confirmed as the last
 -- off-grid source. Rebuilds every missing handle on toggle. NOT a fix: the
@@ -3525,12 +3759,12 @@ function AuraContainer.ToggleBadgeParkDebug()
             pcall(function() h:_rebuild() end)
         end
     end
-    print(("|cff33ff99[ppbadge]|r window-anchored badge park: %s (%d missing container(s) rebuilt). Push is %s while on."):format(
+    DF:Say(("Badge park %s — %d missing container(s) rebuilt, push is %s while on"):format(
         AuraContainer._badgeParkDebug and "ON" or "OFF", n,
         AuraContainer._badgeParkDebug and "DISABLED (badge stays visible even when the buff is present)" or "restored"))
 end
 
--- /df ppdump — pixel-perfect geometry ground truth (the resource-bar lesson:
+-- /df debug ppdump — pixel-perfect geometry ground truth (the resource-bar lesson:
 -- field numbers beat source-theorising for pixel bugs). For each visible row /
 -- missing handle: the anchor chain's rects in PHYSICAL pixels with the signed
 -- distance to the nearest pixel grid line ("frac", 0.000 = on-grid), effective
@@ -3539,8 +3773,11 @@ end
 function AuraContainer.DebugDumpPP()
     local _, physH = GetPhysicalScreenSize()
     local uiEff = UIParent:GetEffectiveScale()
-    print(("|cff33ff99[ppdump]|r physH=%d UIParent eff=%.4f (1px = %.4f UIParent-units)"):format(
-        physH, uiEff, (768 / physH) / uiEff))
+    local o = DF:Out("Pixel Push")
+    o:Section("Screen")
+    o:Field("physical height", physH, "NEUTRAL")
+    o:Field("UIParent scale", ("%.4f"):format(uiEff), "NEUTRAL")
+    o:Field("1px", ("%.4f UIParent units"):format((768 / physH) / uiEff), "NEUTRAL")
     local function frac(v, ppu)
         local p = v * ppu
         return p - math.floor(p + 0.5)
@@ -3577,9 +3814,9 @@ function AuraContainer.DebugDumpPP()
         local cfg = h.config
         if cfg and cfg.mode ~= "overlay" and h.frame and h.frame.IsVisible and h.frame:IsVisible() then
             n = n + 1
-            if n > 12 then print("|cff33ff99[ppdump]|r (capped at 12 handles)") break end
+            if n > 12 then print("  " .. DF.OUT.NEUTRAL .. "… capped at 12 handles|r") break end
             local L = cfg.layout or {}
-            print(("|cff33ff99[%d]|r mode=%s unit=%s pp=%s layoutScale=%s anchor=%s quantized=%s"):format(
+            print(("  " .. DF.OUT.SECTION .. "%d|r mode=%s unit=%s pp=%s layoutScale=%s anchor=%s quantized=%s"):format(
                 n, tostring(cfg.mode), tostring(cfg.unit), tostring(h._pp),
                 tostring(L.scale), tostring(L.anchor), tostring(L._ppQuantized)))
             local d = h._ppDbg
@@ -3617,14 +3854,22 @@ function AuraContainer.DebugDumpPP()
             end
         end
     end
-    if n == 0 then print("|cff33ff99[ppdump]|r no visible row/missing containers found") end
+    if n == 0 then print("  " .. DF.OUT.NEUTRAL .. "no visible row or missing containers found|r") end
 end
 
 function AuraContainer.StylePreviewSlot(slot, config)
     styleButton_regions(slot, config)
 end
 
-function AuraContainer.PaintPreviewSlot(slot, config, index)
+function AuraContainer.PaintPreviewSlot(slot, config, index, sharedDur)
+    -- sharedDur: adopt ANOTHER preview slot's duration object instead of arming a fresh
+    -- one, so two slots previewing the same aura count down as a single timer rather than
+    -- two that merely started close together. Used by the AD canvas, where the expiry-alert
+    -- slot overlays its indicator's slot and has to react to that indicator's countdown —
+    -- a reveal that crossed its threshold a frame off from the number beneath it would be
+    -- a preview artifact, not something live can do. armTestDuration only creates when the
+    -- field is empty, so seeding it here is enough.
+    if sharedDur then slot._dfTestDurObj = sharedDur end
     -- Duck-typed handle: the paint core only reads .config (and the duration
     -- formatter inside it).
     Handle._paintTestSlot({ config = config }, slot, index or 1)

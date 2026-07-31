@@ -3,6 +3,14 @@ local addonName, DF = ...
 -- ============================================================
 -- AURA BLACKLIST CONFIG  —  DEBUFFS ONLY (by design)
 --
+-- WHERE THE UI WENT (this note moved here from AuraBlacklist/Options.lua, which is
+-- deleted): the debuff blacklist now lives inside the Filter Designer,
+-- FilterRegistry/Options.lua -> "Debuffs > Blacklist", giving one home for all
+-- per-spell aura control. ONLY the old standalone Options page was removed. This
+-- backend is unchanged (DF.AuraBlacklist.DebuffSpells / .AlternateSpellIDs /
+-- .BuildExcludeMap, consumed by Features/Auras.lua applyDebuffBlacklist) and stored
+-- db.debuffBlacklist data carries over.
+--
 -- DF is whitelist-by-design for BUFFS: the Filter Designer / Aura Filters let the
 -- user opt IN to exactly the buffs they want to see, so a buff "blacklist" is
 -- redundant and has been removed. The blacklist exists purely to HIDE nuisance

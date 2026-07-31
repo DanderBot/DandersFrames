@@ -26,7 +26,7 @@ local GetDefaultProfileName = function() return CC.GetDefaultProfileName() end
 function CC:Initialize()
     -- Check if we're in combat - secure frames can't be created during combat
     if InCombatLockdown() then
-        print("|cffff9900DandersFrames Click Casting:|r Loaded during combat - click casting will initialize when combat ends.")
+        DF:Say("Click-casting loaded during combat", "it will initialise when combat ends", "WARN")
         -- Still initialize saved variables so settings are accessible
         self:InitializeSavedVariables()
         -- Register for combat end to retry
@@ -37,7 +37,7 @@ function CC:Initialize()
             -- Retry initialization after combat
             C_Timer.After(0.5, function()
                 if not self.secureFramesInitialized then
-                    print("|cff33cc33DandersFrames:|r Combat ended - initializing click casting...")
+                    DF:Say("Combat ended - initializing click casting...")
                     self:InitializeSecureFrames()
                 end
             end)
@@ -93,7 +93,7 @@ function CC:InitializeSavedVariables()
     if not self.db.dbVersion or self.db.dbVersion < DB_VERSION then
         -- Check if we have old-style data to migrate
         if self.db.bindings or self.db.customMacros or self.db.options then
-            print("|cff33cc33DandersFrames:|r Migrating to new profile system...")
+            DF:Say("Migrating to new profile system...")
             
             -- Create a Default profile with the existing data
             local class = GetPlayerClass()
@@ -133,11 +133,6 @@ function CC:InitializeSavedVariables()
                 end
             end
             
-            -- Migrate global settings
-            if self.db.options and self.db.options.debugBindings then
-                self.db.global.debugBindings = self.db.options.debugBindings
-            end
-            
             -- Migrate enabled state
             if self.db.enabled ~= nil then
                 defaultProfile.options.enabled = self.db.enabled
@@ -152,7 +147,7 @@ function CC:InitializeSavedVariables()
             self.db.options = nil
             self.db.enabled = nil
             
-            print("|cff33cc33DandersFrames:|r Migration complete. Your bindings are now in the '" .. defaultName .. "' profile.")
+            DF:Say("Migration complete. Your bindings are now in the '" .. defaultName .. "' profile.")
         end
         
         self.db.dbVersion = DB_VERSION
@@ -186,7 +181,7 @@ function CC:InitializeSavedVariables()
             end
         end
         
-        print("|cff33cc33DandersFrames:|r Renamed 'Default' profile to '" .. defaultName .. "'")
+        DF:Say("Renamed 'Default' profile to '" .. defaultName .. "'")
     end
     
     -- ============================================================
@@ -394,11 +389,12 @@ function CC:InitializeSecureFrames()
             if not (CC.db and CC.db.enabled) then return end
             CC:Defer("reassert", frame)
             -- Visible so a roster-reset reapply can be seen in the log (was
-            -- silent). Guarded on DF.debugEnabled because this fires on every
-            -- CompactUnitFrame_SetUnit roster shuffle: DF:Debug drops the line
-            -- itself when debug is off, but its ARGUMENTS are evaluated first, so
-            -- the GetName and tostring calls happened regardless.
-            if DF.debugEnabled then
+            -- silent). Guarded because this fires on every CompactUnitFrame_SetUnit
+            -- roster shuffle: DF:Debug drops the line itself when debug is off, but
+            -- its ARGUMENTS are evaluated first, so the GetName and tostring calls
+            -- happened regardless. DebugActive rather than DF.debugEnabled so the
+            -- args are also skipped when CLICK specifically is filtered off.
+            if DF:DebugActive("CLICK") then
                 DF:Debug("CLICK", "Reassert queued for %s (SecureUnitButton_OnLoad, combat=%s)",
                     frame:GetName() or "unnamed", tostring(InCombatLockdown()))
             end
@@ -481,7 +477,7 @@ function CC:CreateClickCastHeader()
     
     if not success or not header then
         -- Last resort: plain frame (keyboard bindings won't work in combat)
-        print("|cffff9900DandersFrames:|r Warning: Could not create secure header, keyboard bindings limited")
+        DF:Say("Warning: Could not create secure header, keyboard bindings limited", nil, "WARN")
         header = CreateFrame("Frame", "DandersFramesClickCastHeader", UIParent)
     end
     
@@ -1001,8 +997,8 @@ function CC:ScanForThirdPartyFrames()
         end
     end
     
-    if registered > 0 and self.db and self.db.options and self.db.options.debugBindings then
-        print("|cff00ff00DandersFrames:|r Registered " .. registered .. " third-party frames")
+    if registered > 0 then
+        DF:Debug("CLICK", "Registered %d third-party frames", registered)
     end
 end
 
@@ -2042,7 +2038,9 @@ function CC:SetupSecureHandlers(frame)
             else
                 DF:DebugWarn("CLICK", "  WrapScript fired (enterCount=%d phase=%d) but dfBindingsActive=%s snippet=%d chars",
                     wrapEnterCount, enterPhase, tostring(bindingsActive), #snippet)
-                DF:DebugWarn("CLICK", "  snippet preview: %s", snippet:sub(1, 200))
+                if DF:DebugActive("CLICK") then
+                    DF:DebugWarn("CLICK", "  snippet preview: %s", snippet:sub(1, 200))
+                end
             end
             DF:DebugWarn("CLICK", "  handlersSetup=%s registered=%s",
                 tostring(self.dfKeyboardHandlersSetup), tostring(self.dfClickCastRegistered))

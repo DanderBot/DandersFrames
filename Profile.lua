@@ -33,7 +33,7 @@ function DF:ResetProfile(mode)
     DF.db[mode] = DF:DeepCopy(defaults)
     DF:FullProfileRefresh()
     local modeLabel = mode == "party" and "Party" or "Raid"
-    print("|cff00ff00DandersFrames:|r " .. format(L["%s settings reset to defaults."], modeLabel))
+    DF:Say(format(L["%s settings reset to defaults."], modeLabel))
 end
 
 -- Full profile reset: both modes PLUS the profile-level designer preset
@@ -67,7 +67,7 @@ function DF:CopyProfile(srcMode, destMode)
     DF:FullProfileRefresh()
     local s = srcMode == "party" and "Party" or "Raid"
     local d = destMode == "party" and "Party" or "Raid"
-    print("|cff00ff00DandersFrames:|r " .. format(L["Copied settings from %s to %s."], s, d))
+    DF:Say(format(L["Copied settings from %s to %s."], s, d))
 end
 
 -- ============================================================
@@ -166,7 +166,7 @@ function DF:CopySectionSettings(prefixes, srcMode)
     local L = DF.L
     local s = srcMode == "party" and "Party" or "Raid"
     local d = destMode == "party" and "Party" or "Raid"
-    print("|cff00ff00DandersFrames:|r " .. format(L["Copied %d settings from %s to %s."], count, s, d))
+    DF:Say(format(L["Copied %d settings from %s to %s."], count, s, d))
 
     return srcMode, destMode
 end
@@ -225,7 +225,7 @@ function DF:ResetSectionSettings(prefixes, mode)
 
     local L = DF.L
     local m = (mode == "party") and "Party" or "Raid"
-    print("|cff00ff00DandersFrames:|r " .. format(L["Reset %d %s settings to defaults."], count, m))
+    DF:Say(format(L["Reset %d %s settings to defaults."], count, m))
 
     return count
 end
@@ -316,7 +316,7 @@ function DF:SetProfile(name)
         -- Without this, the unconditional frame-level / container-position shifts
         -- fired on the new profile and moved values that were already correct.
         DF:StampFreshProfileMigrations(DandersFramesDB_v2.profiles[name])
-        print("|cff00ff00DandersFrames:|r " .. format(L["Created new profile: %s"], name))
+        DF:Say(format(L["Created new profile: %s"], name))
     end
 
     -- Backfill defaults on older profiles
@@ -381,7 +381,7 @@ function DF:SetProfile(name)
     -- the new profile directly with no stale overlay
     DF:FullProfileRefresh()
 
-    print("|cff00ff00DandersFrames:|r " .. format(L["Switched to profile: %s"], name))
+    DF:Say(format(L["Switched to profile: %s"], name))
 
     -- If the new profile has a different enable-flag state, prompt to reload
     -- so headers can be (re)created. Frames cannot be added/removed at runtime.
@@ -402,13 +402,13 @@ end
 function DF:DeleteProfile(name)
     local L = DF.L
     if name == "Default" then
-        print("|cffff6666DandersFrames:|r " .. L["Cannot delete Default profile."])
+        DF:Err(L["Cannot delete Default profile."])
         return
     end
 
     if DandersFramesDB_v2 and DandersFramesDB_v2.profiles and DandersFramesDB_v2.profiles[name] then
         DandersFramesDB_v2.profiles[name] = nil
-        print("|cff00ff00DandersFrames:|r " .. format(L["Deleted profile: %s"], name))
+        DF:Say(format(L["Deleted profile: %s"], name))
     end
 end
 
@@ -416,7 +416,7 @@ end
 function DF:DuplicateProfile(newName)
     local L = DF.L
     if not newName or newName == "" then
-        print("|cffff6666DandersFrames:|r " .. L["Please enter a profile name."])
+        DF:Err(L["Please enter a profile name."])
         return false
     end
 
@@ -428,7 +428,7 @@ function DF:DuplicateProfile(newName)
 
     -- Check if profile already exists
     if DandersFramesDB_v2.profiles[newName] then
-        print("|cffff6666DandersFrames:|r " .. format(L["Profile '%s' already exists."], newName))
+        DF:Err(format(L["Profile '%s' already exists."], newName))
         return false
     end
     
@@ -449,7 +449,7 @@ function DF:DuplicateProfile(newName)
     -- Apply the profile with full refresh
     DF:FullProfileRefresh()
     
-    print("|cff00ff00DandersFrames:|r " .. format(L["Duplicated profile '%s' to '%s'."], currentName, newName))
+    DF:Say(format(L["Duplicated profile '%s' to '%s'."], currentName, newName))
     return true
 end
 
@@ -612,7 +612,7 @@ function DF:ExportProfile(categories, frameTypes, profileName)
     local LibDeflate = LibStub and LibStub("LibDeflate", true)
 
     if not LibSerialize or not LibDeflate then
-        print("|cffff0000DandersFrames:|r Missing required libraries")
+        DF:Err("Missing required libraries")
         return nil
     end
     
@@ -637,7 +637,7 @@ function DF:ExportProfile(categories, frameTypes, profileName)
     }
     
     if not DF.db then
-        print("|cffff0000DandersFrames:|r No database")
+        DF:Err("No database")
         return nil
     end
     
@@ -665,7 +665,7 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         -- Include dispel colours — same story as roleColors above. This is the
         -- Colors page's dispel palette and the single source of truth for BOTH the
         -- debuff-icon border and the dispel overlay, but it lives at the profile
-        -- root, so /df exportaudit (which only walks party/raid) could never see it
+        -- root, so /df debug exportaudit (which only walks party/raid) could never see it
         -- was missing: a shared profile arrived with stock dispel colours.
         if DF.db.dispelColors and next(DF.db.dispelColors) then
             exportData.dispelColors = DF:DeepCopy(DF.db.dispelColors)
@@ -739,7 +739,7 @@ function DF:ExportProfile(categories, frameTypes, profileName)
     end
 
     if not exportData.party and not exportData.raid then
-        print("|cffff0000DandersFrames:|r " .. L["No data to export"])
+        DF:Err(L["No data to export"])
         return nil
     end
     
@@ -1009,7 +1009,7 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         DF.db = DandersFramesDB_v2.profiles[profileName]
         DF:WrapDB()
         
-        print("|cff00ff00DandersFrames:|r " .. format(L["Created new profile: %s"], profileName))
+        DF:Say(format(L["Created new profile: %s"], profileName))
     end
 
     -- Aura filter registry payload. Runs BEFORE the mode tables are applied:
@@ -1250,7 +1250,7 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     end
 
     DF:FullProfileRefresh()
-    print("|cff00ff00DandersFrames:|r " .. L["Profile imported successfully!"])
+    DF:Say(L["Profile imported successfully!"])
 
     -- If the imported state changed which frame modes are enabled, prompt
     -- the user to reload so headers can be (re)created.
@@ -1295,7 +1295,7 @@ function DF:CheckProfileAutoSwitch()
         if exists then
             local L = DF.L
             DF:SetProfile(profileName)
-            print("|cff00ff00DandersFrames:|r " .. format(L["Auto-switched to profile: %s"], profileName))
+            DF:Say(format(L["Auto-switched to profile: %s"], profileName))
             -- Note: SetProfile now calls FullProfileRefresh which handles GUI refresh
         end
     end

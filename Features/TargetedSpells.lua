@@ -1,14 +1,34 @@
 local addonName, DF = ...
 
 -- ############################################################
--- ⚰ DEPRECATED-TARGETED-SPELLS — QUEUED FOR DELETION
+-- ⚰ DEPRECATED-TARGETED-SPELLS — GROUP HALF REMOVED FROM THIS FILE 2026-07-29
 -- ############################################################
 -- Grep DEPRECATED-TARGETED-SPELLS to find every site. THIS comment is the
 -- canonical one; the others are signposts back to here.
 --
--- WHAT IS DOOMED: the GROUP-FRAME (on-frame) targeted-spell icons — the
--- `targetedSpell*` saved keys, the Indicators > Targeted Spells page, and the
--- icon pool / cast tracking / roster-fingerprint machinery that feeds them.
+-- ☠ THREE THINGS THIS CHECKLIST GOT WRONG — it was written as a plan and never
+-- checked against the code. Following it literally breaks LIVE features:
+--   1. `activeCasters` is NOT group state. It is the shared "which enemies are
+--      casting" registry: HandleTargetChange gates the PERSONAL display on it,
+--      and the history interrupt marking reads its startTime. It STAYS.
+--   2. `RegisterTargetedSpellEvents` is NOT group code — it registers the event
+--      frame that Personal AND the Targeted List both run on. It STAYS.
+--   3. `DF:UpdateTargetedSpellEventRegistration` is shared infrastructure, called
+--      by the personal toggle, the list toggle and InitTargetedSpells. It STAYS.
+-- The general trap: a function whose body names no personal/list symbol can still
+-- be infrastructure both depend on. Symbol counting cannot see that — read the
+-- callers. Everything else below held up.
+--
+-- DONE in this file: the icons, pool, layout, PositionIcons, Show/Hide/HideAll,
+-- ShowInterruptedVisual, the whole roster-fingerprint resolver, GetFrameForUnit,
+-- ShouldShow(Raid)TargetedSpells, Enable/Disable/ToggleTargetedSpells, the
+-- write-only DF.targetedSpellsEnabled flag, and the group branches inside
+-- ProcessCastInternal / HandleCastStop / OnEvent / NeedsCastEvents.
+--
+-- WHAT WENT: the GROUP-FRAME (on-frame) targeted-spell icons — the Indicators >
+-- Targeted Spells page, and the icon pool / cast tracking / roster-fingerprint
+-- machinery that fed them. Saved `targetedSpell*` keys were deliberately left on
+-- existing profiles (see the note at the end of this block).
 --
 -- WHAT IS NOT: the PERSONAL display (`personalTargetedSpell*`, Indicators >
 -- Personal Targeted) and the Targeted List. Both are live, both are supported,
@@ -23,13 +43,16 @@ local addonName, DF = ...
 -- unconditionally at load ever since — every setting on its page configured
 -- something that could not render.
 --
--- STATUS 2026-07-27: page pulled from the sidebar; the code stays put. Two more
--- PTR builds could still restore the API — unlikely, but cheap to wait for.
--- REVERSE IT: delete the `true` 4th arg on the CreateSubTab call in
--- Options\Options.lua, restore the three See Also links and the Core.lua wizard
--- auto-fire (all marked), and re-check ForceDisableGroupTargetedSpellSettings.
+-- STATUS: the page was pulled from the sidebar 2026-07-27, and the group code was
+-- DELETED 2026-07-29/30. This is no longer reversible by flipping a flag — the API
+-- never came back across the remaining PTR builds. Restoring the feature means
+-- restoring it from history, and it would still need an answer to UnitIsUnit.
 --
--- DELETION CHECKLIST — everything that goes when the call is made:
+-- The checklist below is kept as a RECORD, not a plan: it is what the removal
+-- worked from, and the four places it was wrong are listed at the top of this
+-- block. Read those before trusting any similar list.
+--
+-- DELETION CHECKLIST — what the removal covered:
 --   Features\TargetedSpells.lua   the group half of this file: activeCasters,
 --                                 the icon pool, PositionIcons,
 --                                 Show/HideTargetedSpellIcon, the roster
@@ -52,7 +75,7 @@ local addonName, DF = ...
 --   Core.lua                      migrations + the wizard auto-fire (already out)
 --   Features\ElementAppearance.lua, Frames\Position.lua (mover),
 --   Frames\Headers.lua, Options\AutoProfiles.lua (override→page map),
---   Profile.lua, Debug\Profiler.lua, Debug\PerformanceTest.lua
+--   Profile.lua, Debug\Profiler.lua, Debug\MemoryTest.lua
 --   Locales\enUS.lua              the page's strings, once nothing else uses them
 --   DandersFrames.toc             only if the file itself ever goes, which it
 --                                 does not — Personal Targeted lives here
@@ -119,22 +142,17 @@ local activeCasters = {}
 -- the per-frame icon use case (see _Reference/targeted-list-mockup.html).
 -- ============================================================
 
--- Permanent in-memory flag — not persisted, not detected, just on.
-DF.GroupTargetedSpellsAPIBlocked = true
-
--- The party path uses fingerprinting (live), not the dead relay. This
--- flag stays false so the party group-frame display is enabled.
-DF.GroupTargetedSpellsAPIBlockedParty = false
-
--- Force-disables the group-frame targetedSpellEnabled setting on both
--- party and raid profiles for the current profile. Called from Init,
--- so the GUI reflects the disabled state on every load.
-local function ForceDisableGroupTargetedSpellSettings()
-    if not DF.db then return end
-    -- Raid group-frame display is permanently API-blocked (relay is dead).
-    if DF.db.raid then DF.db.raid.targetedSpellEnabled = false end
-    -- party.targetedSpellEnabled is now user-controlled (fingerprint path).
-end
+-- (Removed) DF.GroupTargetedSpellsAPIBlocked and
+-- DF.GroupTargetedSpellsAPIBlockedParty. Both were write-only: their last reader
+-- was the Options page that went with the group display.
+--
+-- (Removed) ForceDisableGroupTargetedSpellSettings, which wrote
+-- DF.db.raid.targetedSpellEnabled = false on every Init so "the GUI reflects the
+-- disabled state". There is no GUI left to reflect it and the key has ZERO readers
+-- addon-wide, so this was worse than dead: it CREATED a key nothing reads in every
+-- raid profile, on every login. Removing a write is not covered by the
+-- change-the-baseline rule — that rule preserves user data, and this manufactured
+-- data no user set.
 
 -- Personal display variables (declared early for HandleTargetChange access)
 local personalContainer = nil
@@ -157,33 +175,10 @@ eventFrame:Hide()
 -- HELPER FUNCTIONS
 -- ============================================================
 
--- Get all party/raid units to check
-local function GetGroupUnits()
-    local units = {}
-    
-    -- Always include player
-    table.insert(units, "player")
-    
-    if IsInRaid() then
-        for i = 1, 40 do
-            local unit = "raid" .. i
-            -- Note: "raidN" tokens never equal "player" string, so simple ~= check is safe
-            -- (avoids potential secret value issues with UnitIsUnit)
-            if UnitExists(unit) and unit ~= "player" then
-                table.insert(units, unit)
-            end
-        end
-    else
-        for i = 1, 4 do
-            local unit = "party" .. i
-            if UnitExists(unit) then
-                table.insert(units, unit)
-            end
-        end
-    end
-    
-    return units
-end
+-- (Removed) GetGroupUnits — enumerated the player plus every party/raid member so the
+-- group display could ask "is this cast aimed at any of them". Its callers were the
+-- on-frame group loop and the roster resolver. Personal only ever looks at "player",
+-- and the Targeted List walks the party itself, so it has no callers left.
 
 -- Get current content type
 -- Returns: "openworld", "dungeon", "raid", "arena", "battleground"
@@ -209,59 +204,34 @@ local function GetContentType()
     return "openworld"
 end
 
--- Check if targeted spells should be shown for party/player frames based on content type
-local function ShouldShowTargetedSpells(db)
-    if not db.targetedSpellEnabled then return false end
-    
-    local contentType = GetContentType()
-    
-    if contentType == "openworld" then
-        return db.targetedSpellInOpenWorld ~= false
-    elseif contentType == "dungeon" then
-        return db.targetedSpellInDungeons ~= false
-    elseif contentType == "arena" then
-        return db.targetedSpellInArena ~= false
-    end
-    
-    return true  -- Default to showing
-end
-
--- Check if targeted spells should be shown for raid frames based on content type
-local function ShouldShowRaidTargetedSpells(db)
-    if not db.targetedSpellEnabled then return false end
-    
-    local contentType = GetContentType()
-    
-    if contentType == "openworld" then
-        return db.targetedSpellInOpenWorld ~= false
-    elseif contentType == "raid" then
-        return db.targetedSpellInRaids ~= false
-    elseif contentType == "battleground" then
-        return db.targetedSpellInBattlegrounds ~= false
-    end
-    
-    return true  -- Default to showing
-end
-
 -- Check if personal targeted spells should be shown based on content type
+-- Returns ok, reason. The reason feeds the PERSONALTARGET trace so a missing personal
+-- icon is diagnosable; existing callers use it as a plain boolean and ignore it.
 local function ShouldShowPersonalTargetedSpells(db)
-    if not db.personalTargetedSpellEnabled then return false end
-    
-    local contentType = GetContentType()
-    
-    if contentType == "openworld" then
-        return db.personalTargetedSpellInOpenWorld ~= false
-    elseif contentType == "dungeon" then
-        return db.personalTargetedSpellInDungeons ~= false
-    elseif contentType == "raid" then
-        return db.personalTargetedSpellInRaids ~= false
-    elseif contentType == "arena" then
-        return db.personalTargetedSpellInArena ~= false
-    elseif contentType == "battleground" then
-        return db.personalTargetedSpellInBattlegrounds ~= false
+    if not db.personalTargetedSpellEnabled then
+        return false, "Personal Targeted Spells is off in settings"
     end
-    
-    return true  -- Default to showing
+
+    local contentType = GetContentType()
+
+    local allowed, key
+    if contentType == "openworld" then
+        allowed, key = db.personalTargetedSpellInOpenWorld ~= false, "Open World"
+    elseif contentType == "dungeon" then
+        allowed, key = db.personalTargetedSpellInDungeons ~= false, "Dungeons"
+    elseif contentType == "raid" then
+        allowed, key = db.personalTargetedSpellInRaids ~= false, "Raids"
+    elseif contentType == "arena" then
+        allowed, key = db.personalTargetedSpellInArena ~= false, "Arena"
+    elseif contentType == "battleground" then
+        allowed, key = db.personalTargetedSpellInBattlegrounds ~= false, "Battlegrounds"
+    else
+        return true  -- unknown content type → default to showing
+    end
+    if not allowed then
+        return false, "content-type checkbox for " .. key .. " is off"
+    end
+    return true
 end
 
 -- Personal Targeted Spells is a player-screen overlay with per-mode settings, so
@@ -276,9 +246,18 @@ local function GetPersonalDB()
     return (IsInRaid() or DF.raidTestMode) and DF:GetRaidDB() or DF:GetDB()
 end
 
--- Check if a unit is valid for targeted spell tracking
--- We ONLY track nameplate units - boss/arena/target/focus all have nameplates too
--- so tracking them separately would cause duplicates
+-- Check if a unit is valid for targeted spell tracking.
+-- We ONLY track nameplate units: the same caster also fires on target/softenemy/
+-- boss/arena, and dedup is keyed on the unit-token STRING, so accepting those
+-- would put the same cast in the list twice.
+--
+-- ⚠ That reasoning assumes every caster we care about HAS a nameplate, which is
+-- only true while the nameplateShowOffscreen CVar is on. With it off, an enemy
+-- outside your view gets no nameplate — so a mob you have targeted and can watch
+-- casting arrives here as "target" only, and is rejected. Confirmed in game
+-- 2026-07-30. Hence the checkbox on the Targeted List / Personal Targeted pages;
+-- see DF:SetNameplateOffscreen. Accepting target/softenemy as a fallback would
+-- need GUID-based dedup instead of token-string dedup, which is a bigger change.
 local function IsValidCasterUnit(unit)
     if not unit then return false end
     
@@ -306,1001 +285,18 @@ local function GetEnemyUnits()
     return units
 end
 
--- Get the frame for a unit
-local function GetFrameForUnit(unit)
-    -- Fast path: use unitFrameMap
-    if DF.unitFrameMap and DF.unitFrameMap[unit] then
-        return DF.unitFrameMap[unit]
-    end
-    
-    local foundFrame = nil
-    
-    DF:IterateAllFrames(function(frame)
-        if frame and frame.unit and frame.unit == unit then
-            foundFrame = frame
-            return true  -- Stop iteration
-        end
-    end)
-    
-    return foundFrame
-end
-
-
 -- ============================================================
--- ICON CREATION AND POOLING
+-- (Removed) THE GROUP-FRAME TARGETED-SPELL DISPLAY
 -- ============================================================
-
--- Create a single targeted spell icon
-local function CreateSingleIcon(parent, index)
-    local container = CreateFrame("Frame", nil, parent)
-    container:SetFrameLevel(parent:GetFrameLevel() + 30 + index)
-    container:Hide()
-    container.index = index
-    
-    -- Disable mouse completely - these should be click-through
-    container:EnableMouse(false)
-    -- Make hitbox zero so clicks pass through
-    container:SetHitRectInsets(10000, 10000, 10000, 10000)
-    
-    -- Importance filter frame - nested inside container
-    -- This allows us to filter by importance using SetAlphaFromBoolean
-    -- when importantOnly is enabled, without affecting the targeting logic
-    local importanceFilterFrame = CreateFrame("Frame", nil, container)
-    importanceFilterFrame:SetAllPoints()
-    importanceFilterFrame:EnableMouse(false)
-    importanceFilterFrame:SetHitRectInsets(10000, 10000, 10000, 10000)
-    container.importanceFilterFrame = importanceFilterFrame
-    
-    -- Icon container (with border) - now parented to importanceFilterFrame
-    local iconFrame = CreateFrame("Frame", nil, importanceFilterFrame)
-    iconFrame:SetSize(28, 28)
-    iconFrame:EnableMouse(false)
-    iconFrame:SetHitRectInsets(10000, 10000, 10000, 10000)
-    container.iconFrame = iconFrame
-    
-    -- Icon border via the unified DF.Border backend (iconMode). The per-update
-    -- ApplyIconSettings drives BuildSpec + Apply; here we just allocate it.
-    local defBorderSize = 2
-    iconFrame.border = DF.Border:New(iconFrame)
-    container.border = iconFrame.border
-    
-    -- Important spell highlight frame - use a frame so we can SetAlphaFromBoolean
-    -- Set frame level ABOVE iconFrame so it renders on top when inset
-    local highlightFrame = CreateFrame("Frame", nil, iconFrame)
-    highlightFrame:SetPoint("TOPLEFT", -4, 4)
-    highlightFrame:SetPoint("BOTTOMRIGHT", 4, -4)
-    highlightFrame:SetFrameLevel(iconFrame:GetFrameLevel() + 5)
-    highlightFrame:Hide()
-    highlightFrame:EnableMouse(false)
-    highlightFrame:SetHitRectInsets(10000, 10000, 10000, 10000)
-    container.highlightFrame = highlightFrame
-    
-    iconFrame.highlightFrame = highlightFrame
-    -- DF.Border overlay for the important-spell highlight (Stage 2). highlightFrame
-    -- stays the secret-safe alpha gate; this DF.Border child draws the highlight.
-    container.highlightBorder = DF.Border:New(highlightFrame)
-    iconFrame.highlightBorder = container.highlightBorder
-
-    -- Icon texture - positioned with inset for border, with TexCoord cropping
-    local icon = iconFrame:CreateTexture(nil, "ARTWORK")
-    icon:SetPoint("TOPLEFT", defBorderSize, -defBorderSize)
-    icon:SetPoint("BOTTOMRIGHT", -defBorderSize, defBorderSize)
-    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-    container.icon = icon
-    iconFrame.icon = icon
-    
-    -- Cooldown frame for swipe animation on icon
-    local cooldown = CreateFrame("Cooldown", nil, iconFrame, "CooldownFrameTemplate")
-    cooldown:SetAllPoints(icon)
-    cooldown:SetDrawEdge(false)
-    cooldown:SetDrawBling(false)
-    cooldown:SetDrawSwipe(true)
-    cooldown:SetReverse(true)
-    cooldown:SetHideCountdownNumbers(true)  -- We use our own duration text
-    cooldown:EnableMouse(false)
-    cooldown:SetHitRectInsets(10000, 10000, 10000, 10000)
-    container.cooldown = cooldown
-    iconFrame.cooldown = cooldown
-    
-    -- Overlay frame for duration text (sits above cooldown swipe)
-    local textOverlay = CreateFrame("Frame", nil, iconFrame)
-    textOverlay:SetAllPoints()
-    textOverlay:SetFrameLevel(cooldown:GetFrameLevel() + 5)
-    textOverlay:EnableMouse(false)
-    textOverlay:SetHitRectInsets(10000, 10000, 10000, 10000)
-    container.textOverlay = textOverlay
-    
-    -- Custom duration text (on overlay so it's above the swipe)
-    local durationText = textOverlay:CreateFontString(nil, "OVERLAY")
-    DF.GUI:SetSettingsFont(durationText, 10, "OUTLINE")
-    durationText:SetPoint("CENTER", iconFrame, "CENTER", 0, 0)
-    durationText:SetTextColor(1, 1, 1, 1)
-    container.durationText = durationText
-    iconFrame.durationText = durationText
-    
-    -- Interrupted overlay (X mark)
-    local interruptOverlay = CreateFrame("Frame", nil, iconFrame)
-    interruptOverlay:SetAllPoints()
-    interruptOverlay:SetFrameLevel(cooldown:GetFrameLevel() + 10)
-    interruptOverlay:Hide()
-    interruptOverlay:EnableMouse(false)
-    interruptOverlay:SetHitRectInsets(10000, 10000, 10000, 10000)
-    container.interruptOverlay = interruptOverlay
-    
-    -- Red tint for interrupted
-    local interruptTint = interruptOverlay:CreateTexture(nil, "OVERLAY")
-    interruptTint:SetAllPoints()
-    interruptTint:SetColorTexture(1, 0, 0, 0.5)
-    container.interruptTint = interruptTint
-    
-    -- X mark for interrupted
-    local interruptX = interruptOverlay:CreateFontString(nil, "OVERLAY")
-    DF.GUI:SetSettingsFont(interruptX, 16, "OUTLINE")
-    interruptX:SetPoint("CENTER", iconFrame, "CENTER", 0, 0)
-    interruptX:SetText("X")
-    interruptX:SetTextColor(1, 0, 0, 1)
-    container.interruptX = interruptX
-    
-    -- OnUpdate for cleanup checking and duration text
-    local durationThrottle = 0
-    container:SetScript("OnUpdate", function(self, elapsed)
-        -- Test mode: live timers come from durationObject (a secret aura value)
-        -- which test icons don't have, so drive a looping fake countdown here so
-        -- the preview animates instead of sitting static.
-        if self.dfTestTimer and (DF.testMode or DF.raidTestMode) then
-            local t = self.dfTestTimer
-            local cyc = (GetTime() + (t.offset or 0)) % t.duration
-            -- Re-arm the cooldown swipe whenever the cycle wraps, so it loops.
-            if self.cooldown and (not t.last or cyc < t.last) then
-                self.cooldown:SetCooldown(GetTime() - cyc, t.duration)
-            end
-            t.last = cyc
-            durationThrottle = durationThrottle + elapsed
-            if durationThrottle >= 0.1 then
-                durationThrottle = 0
-                if self.durationText and self.durationText:IsShown() then
-                    self.durationText:SetFormattedText("%.1f", t.duration - cyc)
-                    if self.durationColor then
-                        self.durationText:SetTextColor(self.durationColor.r, self.durationColor.g, self.durationColor.b, 1)
-                    end
-                end
-            end
-            return
-        end
-
-        -- Skip if not active (alpha is controlled by SetAlphaFromBoolean, can't read it)
-        if not self.isActive then return end
-        
-        -- Handle interrupted animation (needs to run every frame for smooth animation)
-        if self.isInterrupted then
-            self.interruptTimer = (self.interruptTimer or 0) + elapsed
-            local db = self.unitFrame and DF:GetFrameDB(self.unitFrame) or DF:GetDB()
-            local duration = db.targetedSpellInterruptedDuration or 0.5
-            
-            if self.interruptTimer >= duration then
-                -- Animation complete, hide icon
-                if self.unitFrame and self.casterKey then
-                    DF:HideTargetedSpellIcon(self.unitFrame, self.casterKey, true)
-                end
-            end
-            return
-        end
-        
-        -- Throttle duration text updates to ~10 FPS for performance
-        durationThrottle = durationThrottle + elapsed
-        if durationThrottle < 0.1 then return end
-        durationThrottle = 0
-        
-        -- Update duration text from duration object
-        -- Note: GetRemainingDuration returns a secret value so we can't compare it
-        -- Just display it and use a fixed color from settings
-        -- TODO: Can use durationObject:EvaluateRemainingPercent(colorCurve) for dynamic color-by-time
-        -- similar to how aura icons do it in Frames/Create.lua
-        if self.durationObject and self.durationText then
-            local ok, remaining = pcall(self.durationObject.GetRemainingDuration, self.durationObject)
-            if ok and remaining then
-                -- Use SetFormattedText which handles secret values
-                self.durationText:SetFormattedText("%.1f", remaining)
-                
-                -- Apply the configured color (can't do color-by-time with secret values)
-                if self.durationColor then
-                    self.durationText:SetTextColor(self.durationColor.r, self.durationColor.g, self.durationColor.b, 1)
-                end
-            end
-        end
-        
-        -- Note: We DON'T check if cast is still active here anymore
-        -- Events (UNIT_SPELLCAST_STOP, INTERRUPTED, etc.) handle all cleanup
-        -- This prevents race conditions with interrupt visuals
-    end)
-    
-    return container
-end
-
--- Ensure icon pool exists for a frame
-local function EnsureIconPool(frame, count)
-    -- Create OOR container if it doesn't exist
-    -- This container receives out-of-range alpha, so individual icons
-    -- can use SetAlphaFromBoolean for targeting without conflict
-    if not frame.targetedSpellContainer then
-        local container = CreateFrame("Frame", nil, frame)
-        container:SetAllPoints()
-        container:SetFrameLevel(frame:GetFrameLevel() + 29)
-        container:EnableMouse(false)
-        container:SetHitRectInsets(10000, 10000, 10000, 10000)
-        frame.targetedSpellContainer = container
-    end
-    
-    if not frame.targetedSpellIcons then
-        frame.targetedSpellIcons = {}
-    end
-    if not frame.dfActiveTargetedSpells then
-        frame.dfActiveTargetedSpells = {}
-    end
-    
-    count = count or 5  -- Default pool size
-
-    local existing = #frame.targetedSpellIcons
-    if existing >= count then return end
-
-    -- Raid frames: create only 1 icon now, stagger the rest to avoid
-    -- "script ran too long" when 40 frames each create 5 icons simultaneously
-    if frame.isRaidFrame and existing == 0 then
-        frame.targetedSpellIcons[1] = CreateSingleIcon(frame.targetedSpellContainer, 1)
-        frame.targetedSpellIcons[1].unitFrame = frame
-        -- Schedule remaining icons one-per-timer-tick
-        if not frame.dfIconPoolStaggered then
-            frame.dfIconPoolStaggered = true
-            for i = 2, count do
-                C_Timer.After(0.05 * (i - 1), function()
-                    if not frame.targetedSpellIcons then return end
-                    if #frame.targetedSpellIcons >= i then return end
-                    frame.targetedSpellIcons[i] = CreateSingleIcon(frame.targetedSpellContainer, i)
-                    frame.targetedSpellIcons[i].unitFrame = frame
-                end)
-            end
-        end
-        return
-    end
-
-    for i = existing + 1, count do
-        -- Parent icons to the OOR container, not directly to frame
-        frame.targetedSpellIcons[i] = CreateSingleIcon(frame.targetedSpellContainer, i)
-        frame.targetedSpellIcons[i].unitFrame = frame
-    end
-end
-
--- Expose EnsureIconPool for test mode
-function DF:EnsureTargetedSpellIconPool(frame, count)
-    EnsureIconPool(frame, count)
-end
-
--- Get an available icon from the pool
-local function GetAvailableIcon(frame)
-    EnsureIconPool(frame, 5)
-    
-    for i, icon in ipairs(frame.targetedSpellIcons) do
-        if not icon:IsShown() or not icon.isActive then
-            return icon, i
-        end
-    end
-    
-    -- All icons in use, create a new one - parent to container
-    local newIndex = #frame.targetedSpellIcons + 1
-    frame.targetedSpellIcons[newIndex] = CreateSingleIcon(frame.targetedSpellContainer, newIndex)
-    frame.targetedSpellIcons[newIndex].unitFrame = frame
-    return frame.targetedSpellIcons[newIndex], newIndex
-end
-
+-- The on-frame icons, their pool and layout, and the roster-fingerprint
+-- machinery that resolved which party member an enemy was casting at.
+-- Blizzard's 2026-04-07 UnitIsUnit hotfix removed the only way to answer that
+-- question, and the feature had been force-disabled at load ever since.
+--
+-- Personal Targeted Spells and the Targeted List are UNAFFECTED and live: both
+-- share this file, and the personal path compares against "player", which the
+-- hotfix left alone. GetFrameForUnit went too - its only caller was in here.
 -- ============================================================
--- LAYOUT AND POSITIONING
--- ============================================================
-
--- Position all icons based on growth direction
--- Sorts by cast start time for consistent ordering
-local function PositionIcons(frame)
-    if not frame or not frame.targetedSpellIcons or not frame.dfActiveTargetedSpells then return end
-    
-    local db = DF:GetFrameDB(frame)
-    
-    local iconSize = db.targetedSpellSize or 28
-    local scale = db.targetedSpellScale or 1.0
-    local anchor = db.targetedSpellAnchor or "LEFT"
-    local x = db.targetedSpellX or -30
-    local y = db.targetedSpellY or 0
-    local growthDirection = db.targetedSpellGrowth or "DOWN"
-    local spacing = db.targetedSpellSpacing or 2
-    local frameLevel = db.targetedSpellFrameLevel or 30
-    local maxIcons = db.targetedSpellMaxIcons or 5
-    -- local sortByTime = db.targetedSpellSortByTime ~= false  -- Keep for future use
-    -- local newestFirst = db.targetedSpellSortNewestFirst ~= false  -- Keep for future use
-    
-    -- Apply pixel perfect to icon size
-    if db.pixelPerfect then
-        iconSize = DF:PixelPerfect(iconSize)
-        spacing = DF:PixelPerfect(spacing)
-    end
-    
-    -- Apply scale to size for positioning calculations
-    local scaledSize = iconSize * scale
-    local scaledSpacing = spacing * scale
-    
-    -- Collect active casters with their data
-    local casterData = {}
-    for casterKey, iconIndex in pairs(frame.dfActiveTargetedSpells) do
-        local icon = frame.targetedSpellIcons[iconIndex]
-        if icon and icon.isActive then
-            table.insert(casterData, {
-                casterKey = casterKey,
-                iconIndex = iconIndex,
-                startTime = icon.startTime or 0
-            })
-        end
-    end
-    
-    -- Sort by caster key (unit token) for deterministic order
-    -- This ensures icons don't jump around as casts end
-    table.sort(casterData, function(a, b)
-        return a.casterKey < b.casterKey
-    end)
-    
-    --[[ ALTERNATIVE: Sort by time (uncomment to use)
-    if sortByTime then
-        table.sort(casterData, function(a, b)
-            if newestFirst then
-                return a.startTime > b.startTime
-            else
-                return a.startTime < b.startTime
-            end
-        end)
-    end
-    --]]
-    
-    -- Limit to max icons
-    local numIcons = math.min(#casterData, maxIcons)
-    
-    -- Position each icon based on its sorted position
-    for i = 1, #casterData do
-        local data = casterData[i]
-        local icon = frame.targetedSpellIcons[data.iconIndex]
-        
-        if icon then
-            if i <= maxIcons then
-                local offsetX, offsetY = 0, 0
-                local index = i - 1  -- 0-based for calculation
-                
-                if growthDirection == "UP" then
-                    offsetY = index * (scaledSize + scaledSpacing)
-                elseif growthDirection == "DOWN" then
-                    offsetY = -index * (scaledSize + scaledSpacing)
-                elseif growthDirection == "LEFT" then
-                    offsetX = -index * (scaledSize + scaledSpacing)
-                elseif growthDirection == "RIGHT" then
-                    offsetX = index * (scaledSize + scaledSpacing)
-                elseif growthDirection == "CENTER_H" then
-                    -- Grow horizontally from center
-                    local centerOffset = (numIcons - 1) * (scaledSize + scaledSpacing) / 2
-                    offsetX = index * (scaledSize + scaledSpacing) - centerOffset
-                elseif growthDirection == "CENTER_V" then
-                    -- Grow vertically from center
-                    local centerOffset = (numIcons - 1) * (scaledSize + scaledSpacing) / 2
-                    offsetY = index * (scaledSize + scaledSpacing) - centerOffset
-                end
-                
-                icon:ClearAllPoints()
-                icon:SetPoint(anchor, frame, anchor, x + offsetX, y + offsetY)
-                DF:SnapPointToPixelGrid(icon, (DF:GetFrameDB(frame) or {}).pixelPerfect)
-                icon:SetSize(scaledSize, scaledSize)
-                
-                -- Set frame level
-                icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel + data.iconIndex)
-                
-                -- Position icon frame within container
-                icon.iconFrame:SetSize(scaledSize, scaledSize)
-                icon.iconFrame:ClearAllPoints()
-                icon.iconFrame:SetPoint("CENTER", icon, "CENTER", 0, 0)
-                
-                icon:Show()
-            else
-                -- Hide icons beyond max limit
-                icon:Hide()
-            end
-        end
-    end
-end
-
--- Apply settings to a single icon
-local function ApplyIconSettings(icon, db, spellID)
-    local borderColor = db.targetedSpellBorderColor or {r = 1, g = 0.3, b = 0}
-    local borderSize = db.targetedSpellBorderSize or 2
-    local showBorder = db.targetedSpellShowBorder ~= false
-    local showSwipe = not db.targetedSpellHideSwipe
-    local showDuration = db.targetedSpellShowDuration ~= false
-    local durationFont = db.targetedSpellDurationFont or "Fonts\\FRIZQT__.TTF"
-    local durationScale = db.targetedSpellDurationScale or 1.0
-    local durationOutline = db.targetedSpellDurationOutline or "OUTLINE"
-    local durationX = db.targetedSpellDurationX or 0
-    local durationY = db.targetedSpellDurationY or 0
-    local durationColor = db.targetedSpellDurationColor or {r = 1, g = 1, b = 1}
-    local alpha = db.targetedSpellAlpha or 1.0
-    local highlightImportant = db.targetedSpellHighlightImportant ~= false
-    -- Important-spell highlight now reads the targetedSpellImportant* border keys
-    -- directly via BuildSpec (see the highlight block below); the old
-    -- targetedSpellHighlightStyle/Color/Size/Inset locals are retired here.
-    local importantOnly = db.targetedSpellImportantOnly
-    if durationOutline == "NONE" then durationOutline = "" end
-    
-    -- Apply pixel perfect to border size
-    if db.pixelPerfect then
-        borderSize = DF:PixelPerfect(borderSize)
-    end
-    
-    -- Store settings on icon for OnUpdate to use
-    icon.durationColor = durationColor
-    icon.baseAlpha = alpha
-    
-    -- Important spell filter (nested frame approach)
-    -- When importantOnly is enabled, use SetAlphaFromBoolean to hide non-important spells
-    if icon.importanceFilterFrame then
-        if importantOnly and spellID then
-            local isImportant = C_Spell.IsSpellImportant(spellID)
-            icon.importanceFilterFrame:SetAlphaFromBoolean(isImportant)
-        else
-            -- Not filtering, show everything
-            icon.importanceFilterFrame:SetAlpha(1)
-        end
-    end
-    
-    -- Important spell highlight
-    if icon.highlightFrame then
-        -- Important Spell Border: a second DF.Border (full toolkit via BuildSpec),
-        -- shown on important spells, gated by the Highlight-Important toggle + the
-        -- secret-safe isImportant alpha. Positioned just outside the base border;
-        -- sized/inset from the targetedSpellImportantBorder* keys.
-        -- Frame offset is inset-INDEPENDENT: it just clears the base border + the
-        -- highlight band. The Border Inset is owned by the engine (BuildSpec sets
-        -- spec.inset), which nudges the band symmetrically on all four edges, so it
-        -- stays centred as the slider moves. (The old `- hlInset` double-applied it.)
-        local hlSize  = db.targetedSpellImportantBorderSize or 3
-        local offset  = borderSize + hlSize
-        icon.highlightFrame:ClearAllPoints()
-        icon.highlightFrame:SetPoint("TOPLEFT", icon.iconFrame, "TOPLEFT", -offset, offset)
-        icon.highlightFrame:SetPoint("BOTTOMRIGHT", icon.iconFrame, "BOTTOMRIGHT", offset, -offset)
-        if highlightImportant and spellID and icon.highlightBorder then
-            local isImportant = C_Spell.IsSpellImportant(spellID)
-            local spec = DF.Border:BuildSpec(db, "targetedSpellImportant", { iconMode = true })
-            spec.enabled = true
-            DF.Border:Apply(icon.highlightBorder, spec)
-            icon.highlightFrame:Show()
-            icon.highlightFrame:SetAlphaFromBoolean(isImportant)
-        else
-            if icon.highlightBorder then DF.Border:Apply(icon.highlightBorder, { enabled = false }) end
-            icon.highlightFrame:Hide()
-        end
-    end
-
-    -- Border via the unified DF.Border backend (iconMode) — parity with Personal
-    -- Targeted Spell / Targeted List. BuildSpec reads the targetedSpell* keys;
-    -- spec.size carries the (pixel-perfect-adjusted) thickness, and the art +
-    -- cooldown inset by that thickness when the border is shown.
-    if icon.border then
-        local spec = DF.Border:BuildSpec(db, "targetedSpell", { iconMode = true })
-        spec.enabled = showBorder
-        spec.size = borderSize
-        DF.Border:Apply(icon.border, spec)
-    end
-    do
-        local ai = showBorder and borderSize or 0
-        if icon.icon then
-            icon.icon:ClearAllPoints()
-            icon.icon:SetPoint("TOPLEFT", icon.iconFrame, "TOPLEFT", ai, -ai)
-            icon.icon:SetPoint("BOTTOMRIGHT", icon.iconFrame, "BOTTOMRIGHT", -ai, ai)
-        end
-        if icon.cooldown then
-            icon.cooldown:ClearAllPoints()
-            icon.cooldown:SetPoint("TOPLEFT", icon.iconFrame, "TOPLEFT", ai, -ai)
-            icon.cooldown:SetPoint("BOTTOMRIGHT", icon.iconFrame, "BOTTOMRIGHT", -ai, ai)
-        end
-    end
-    
-    -- Cooldown on icon (hide native countdown, we use custom)
-    if icon.cooldown then
-        icon.cooldown:SetDrawSwipe(showSwipe)
-        icon.cooldown:SetHideCountdownNumbers(true)
-    end
-    
-    -- Custom duration text
-    if icon.durationText then
-        if showDuration then
-            icon.durationText:Show()
-            local fontSize = 10 * durationScale
-            DF:SafeSetFont(icon.durationText, durationFont, fontSize, durationOutline)
-            icon.durationText:ClearAllPoints()
-            icon.durationText:SetPoint("CENTER", icon.iconFrame, "CENTER", durationX, durationY)
-            icon.durationText:SetTextColor(durationColor.r, durationColor.g, durationColor.b, 1)
-        else
-            icon.durationText:Hide()
-        end
-    end
-end
-
--- ============================================================
--- SHOW/HIDE FUNCTIONS
--- ============================================================
-
--- Show a targeted spell icon for a specific caster on a frame
--- casterKey is the unit token (e.g. "nameplate7") used as table key
-function DF:ShowTargetedSpellIcon(frame, casterKey, casterUnit, texture, spellName, durationObject, isChannel, spellID, startTime)
-    if not frame then return end
-    
-    -- PERF TEST: Skip if disabled
-    if DF.PerfTest and not DF.PerfTest.enableTargetedSpells then return end
-    
-    local db = DF:GetFrameDB(frame)
-    if not db.targetedSpellEnabled then return end
-    
-    EnsureIconPool(frame, 5)
-    
-    -- Check if we already have an icon for this caster (using unit token as key)
-    local existingIndex = frame.dfActiveTargetedSpells[casterKey]
-    local icon
-    
-    if existingIndex and frame.targetedSpellIcons[existingIndex] then
-        icon = frame.targetedSpellIcons[existingIndex]
-    else
-        -- Get a new icon
-        icon, existingIndex = GetAvailableIcon(frame)
-        frame.dfActiveTargetedSpells[casterKey] = existingIndex
-    end
-    
-    if not icon then return end
-    
-    -- Store tracking data
-    icon.casterKey = casterKey  -- Unit token used as table key
-    icon.casterUnit = casterUnit
-    icon.spellName = spellName
-    icon.spellID = spellID
-    icon.isChannel = isChannel
-    icon.durationObject = durationObject  -- Store for OnUpdate to get remaining time
-    icon.startTime = startTime or GetTime()
-    icon.isInterrupted = false
-    icon.interruptTimer = nil
-    
-    -- Hide interrupt overlay
-    if icon.interruptOverlay then
-        icon.interruptOverlay:Hide()
-    end
-    
-    -- Set icon texture
-    if texture and icon.icon then
-        icon.icon:SetTexture(texture)
-        icon.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-        icon.icon:SetDesaturated(false)
-    end
-    
-    -- Apply settings (including important spell highlight)
-    ApplyIconSettings(icon, db, spellID)
-    
-    -- Set up cooldown on icon
-    if icon.cooldown and durationObject then
-        icon.cooldown:SetCooldownFromDurationObject(durationObject)
-    end
-    
-    -- Mark as active (for OnUpdate cleanup checks)
-    icon.isActive = true
-    
-    -- Show the icon (alpha will be set by caller via SetAlphaFromBoolean)
-    icon:Show()
-    
-    return icon
-end
-
--- Show interrupted visual on an icon
-local function ShowInterruptedVisual(icon, db)
-    if not icon or not db.targetedSpellShowInterrupted then return end
-    
-    icon.isInterrupted = true
-    icon.interruptTimer = 0
-    
-    -- Desaturate the icon
-    if icon.icon then
-        icon.icon:SetDesaturated(true)
-    end
-    
-    -- Hide duration text
-    if icon.durationText then
-        icon.durationText:Hide()
-    end
-    
-    -- Stop cooldown
-    if icon.cooldown then
-        icon.cooldown:Clear()
-    end
-    
-    -- Apply interrupted visual settings
-    local tintColor = db.targetedSpellInterruptedTintColor or {r = 1, g = 0, b = 0}
-    local tintAlpha = db.targetedSpellInterruptedTintAlpha or 0.5
-    local showX = db.targetedSpellInterruptedShowX ~= false
-    local xColor = db.targetedSpellInterruptedXColor or {r = 1, g = 0, b = 0}
-    local xSize = db.targetedSpellInterruptedXSize or 16
-    
-    -- Apply tint
-    if icon.interruptTint then
-        icon.interruptTint:SetColorTexture(tintColor.r, tintColor.g, tintColor.b, tintAlpha)
-    end
-    
-    -- Apply X mark settings
-    if icon.interruptX then
-        if showX then
-            icon.interruptX:Show()
-            icon.interruptX:SetTextColor(xColor.r, xColor.g, xColor.b, 1)
-            DF.GUI:SetSettingsFont(icon.interruptX, xSize, "OUTLINE")
-        else
-            icon.interruptX:Hide()
-        end
-    end
-    
-    -- Show interrupt overlay
-    if icon.interruptOverlay then
-        icon.interruptOverlay:Show()
-    end
-end
-
--- Hide a specific targeted spell icon by caster key (unit token)
-function DF:HideTargetedSpellIcon(frame, casterKey, skipInterruptAnim)
-    if not frame or not frame.dfActiveTargetedSpells then return end
-    
-    local iconIndex = frame.dfActiveTargetedSpells[casterKey]
-    if not iconIndex then return end
-    
-    local icon = frame.targetedSpellIcons and frame.targetedSpellIcons[iconIndex]
-    if icon then
-        -- If already showing interrupt animation, let it finish
-        if icon.isInterrupted and not skipInterruptAnim then
-            return
-        end
-        
-        icon:Hide()
-        icon.isActive = nil
-        icon.casterKey = nil
-        icon.casterUnit = nil
-        icon.spellName = nil
-        icon.spellID = nil
-        icon.isChannel = nil
-        icon.durationObject = nil
-        icon.startTime = nil
-        icon.isInterrupted = nil
-        icon.interruptTimer = nil
-        icon.isImportant = nil
-        
-        if icon.cooldown then
-            icon.cooldown:Clear()
-        end
-        if icon.durationText then
-            icon.durationText:SetText("")
-        end
-        if icon.interruptOverlay then
-            icon.interruptOverlay:Hide()
-        end
-        if icon.highlightFrame then
-            icon.highlightFrame:Hide()
-            if icon.highlightBorder then DF.Border:Apply(icon.highlightBorder, { enabled = false }) end
-        end
-        if icon.icon then
-            icon.icon:SetDesaturated(false)
-        end
-    end
-    
-    frame.dfActiveTargetedSpells[casterKey] = nil
-    
-    -- Reposition remaining icons
-    PositionIcons(frame)
-end
-
--- Hide all targeted spell icons on a frame
-function DF:HideAllTargetedSpells(frame)
-    if not frame then return end
-    
-    if frame.targetedSpellIcons then
-        for _, icon in ipairs(frame.targetedSpellIcons) do
-            icon:Hide()
-            icon.isActive = nil
-            icon.casterKey = nil
-            icon.casterUnit = nil
-            icon.spellName = nil
-            icon.spellID = nil
-            icon.isChannel = nil
-            icon.durationObject = nil
-            icon.startTime = nil
-            icon.isInterrupted = nil
-            icon.interruptTimer = nil
-            icon.isImportant = nil
-            
-            if icon.cooldown then
-                icon.cooldown:Clear()
-            end
-            if icon.durationText then
-                icon.durationText:SetText("")
-            end
-            if icon.interruptOverlay then
-                icon.interruptOverlay:Hide()
-            end
-            if icon.highlightFrame then
-                icon.highlightFrame:Hide()
-                if icon.highlightBorder then DF.Border:Apply(icon.highlightBorder, { enabled = false }) end
-            end
-            if icon.icon then
-                icon.icon:SetDesaturated(false)
-            end
-        end
-    end
-    
-    if frame.dfActiveTargetedSpells then
-        wipe(frame.dfActiveTargetedSpells)
-    end
-end
-
--- ============================================================
--- LAYOUT UPDATE FUNCTIONS
--- ============================================================
-
--- Update layout for all icons on a frame
-function DF:UpdateTargetedSpellLayout(frame)
-    if not frame or not frame.targetedSpellIcons then return end
-    
-    local db = DF:GetFrameDB(frame)
-    
-    -- Apply settings to all active icons
-    for _, icon in ipairs(frame.targetedSpellIcons) do
-        if icon.isActive then
-            ApplyIconSettings(icon, db, icon.spellID)
-        end
-    end
-    
-    -- Reposition
-    PositionIcons(frame)
-end
-
--- Update all frames
-function DF:UpdateAllTargetedSpellLayouts()
-    DF:IterateAllFrames(function(frame)
-        if frame then
-            DF:UpdateTargetedSpellLayout(frame)
-        end
-    end)
-end
-
--- ============================================================
--- FINGERPRINT DETECTION (party-only group Targeted Spells)
--- Infers which party member an enemy is targeting by matching
--- the target's class/role/race/sex against a roster fingerprint.
--- Ellesmere's technique (used with permission, June 2026).
--- ============================================================
-
--- Two fingerprints are indistinguishable when every dimension BOTH
--- have is equal. A dimension missing on either side cannot be used
--- to tell them apart, so it does not count as a difference.
-local function FingerprintsCollide(a, b)
-    if not a or not b then return false end
-    if a.class ~= b.class then return false end        -- class is the hard key
-    if a.role and b.role and a.role ~= b.role then return false end
-    if a.race and b.race and a.race ~= b.race then return false end
-    if a.sex  and b.sex  and a.sex  ~= b.sex  then return false end
-    return true
-end
-
--- Given [unit]=fingerprint, return [unit]=true for members that
--- collide with at least one OTHER member (i.e. untrackable this run).
-local function ComputeUntrackable(fps)
-    local out = {}
-    for u1, f1 in pairs(fps) do
-        for u2, f2 in pairs(fps) do
-            if u1 ~= u2 and FingerprintsCollide(f1, f2) then
-                out[u1] = true
-                break
-            end
-        end
-    end
-    return out
-end
-
--- Return a list of units whose fingerprint matches the target's.
--- targetFP may have missing dimensions (secret reads); we match on
--- whatever is present, class required.
-local function MatchFingerprint(targetFP, fps)
-    local matches = {}
-    if not targetFP or not targetFP.class then return matches end
-    for u, f in pairs(fps) do
-        if f.class == targetFP.class
-            and (not targetFP.role or not f.role or f.role == targetFP.role)
-            and (not targetFP.race or not f.race or f.race == targetFP.race)
-            and (not targetFP.sex  or not f.sex  or f.sex  == targetFP.sex) then
-            matches[#matches + 1] = u
-        end
-    end
-    return matches
-end
-
--- Self-test for the pure matching logic. Run in-game:
---   /dump DandersFrames.TargetedSpells_RunFingerprintTests()
-function DF.TargetedSpells_RunFingerprintTests()
-    local function fp(c, r, ra, s) return { class = c, role = r, race = ra, sex = s } end
-    local pass, fail = 0, 0
-    local function check(name, cond)
-        if cond then pass = pass + 1 else fail = fail + 1; print("FAIL: " .. name) end
-    end
-
-    -- Distinct classes -> no collisions, unique match
-    local roster = {
-        player = fp("PRIEST", "HEALER", "Human", 2),
-        party1 = fp("WARRIOR", "TANK", "Orc", 1),
-        party2 = fp("MAGE", "DAMAGER", "Gnome", 1),
-    }
-    local untrackable = ComputeUntrackable(roster)
-    check("no collisions when classes differ", next(untrackable) == nil)
-    check("unique match by class", #MatchFingerprint(fp("MAGE"), roster) == 1)
-
-    -- Two identical DPS -> both untrackable, ambiguous match
-    roster.party3 = fp("MAGE", "DAMAGER", "Gnome", 1)
-    untrackable = ComputeUntrackable(roster)
-    check("identical members untrackable", untrackable.party2 and untrackable.party3)
-    check("ambiguous match returns 2", #MatchFingerprint(fp("MAGE", "DAMAGER", "Gnome", 1), roster) == 2)
-
-    -- Same class, different race -> distinguishable
-    roster.party3 = fp("MAGE", "DAMAGER", "Troll", 1)
-    untrackable = ComputeUntrackable(roster)
-    check("race distinguishes same class", not untrackable.party2 and not untrackable.party3)
-
-    -- Target with secret race (missing dim) -> falls back to class+role+sex
-    check("missing target dim still narrows",
-        #MatchFingerprint(fp("MAGE", "DAMAGER", nil, 1), roster) == 2)
-
-    print(string.format("Fingerprint tests: %d passed, %d failed", pass, fail))
-    return fail == 0
-end
-
--- Live caches, rebuilt on roster/role change.
-local rosterFingerprints = {}   -- [unit] = fingerprint
-local untrackableUnits   = {}   -- [unit] = true (collides with another member)
-local lastCompositionKey = nil
-
--- Read one party member's fingerprint. Own-party tokens (player/partyN)
--- are not identity-restricted, so all four reads are normally available.
--- IMPORTANT: read the class/race TOKEN (2nd return), never the localized
--- 1st return (which is ConditionalSecret and goes secret in M+).
-local function ReadMemberFingerprint(unit)
-    local _, classToken = UnitClass(unit)            -- 2nd return = "WARRIOR" token
-    if issecretvalue(classToken) or type(classToken) ~= "string" then return nil end
-    local f = { class = classToken }
-    local role = UnitGroupRolesAssigned(unit)
-    if not issecretvalue(role) and type(role) == "string" and role ~= "NONE" then f.role = role end
-    local okR, _, raceToken = pcall(UnitRace, unit)  -- 2nd return = englishRaceName
-    if okR and not issecretvalue(raceToken) and type(raceToken) == "string" then f.race = raceToken end
-    local okS, sex = pcall(UnitSex, unit)
-    if okS and not issecretvalue(sex) and type(sex) == "number" then f.sex = sex end
-    return f
-end
-
--- Cheap composition key so repeated roster events don't re-fire work.
-local function BuildCompositionKey()
-    local parts = {}
-    for i = 1, 4 do
-        local u = "party" .. i
-        if UnitExists(u) then
-            local _, c = UnitClass(u)
-            local role = UnitGroupRolesAssigned(u)
-            local cPart = (not issecretvalue(c) and type(c) == "string") and c or "?"
-            local rPart = (not issecretvalue(role) and type(role) == "string") and role or "?"
-            parts[#parts + 1] = cPart .. ":" .. rPart
-        end
-    end
-    return table.concat(parts, "|")
-end
-
--- Rebuild fingerprints + untrackable set for player + party1-4.
--- Returns true if the composition actually changed.
-local function BuildRosterFingerprints(force)
-    local key = BuildCompositionKey()
-    if not force and key == lastCompositionKey then return false end
-    lastCompositionKey = key
-    wipe(rosterFingerprints)
-    local units = { "player", "party1", "party2", "party3", "party4" }
-    for _, u in ipairs(units) do
-        if UnitExists(u) then
-            local f = ReadMemberFingerprint(u)
-            if f then rosterFingerprints[u] = f end
-        end
-    end
-    untrackableUnits = ComputeUntrackable(rosterFingerprints)
-    return true
-end
-DF.TargetedSpells_BuildRosterFingerprints = BuildRosterFingerprints
-
--- Per-caster generation counter so a mid-cast retarget invalidates
--- stale deferred resolves (prevents flashing the wrong frame).
-local resolveGen = {}
--- Which frame currently shows each caster's icon (for retarget cleanup).
-local casterShownFrame = {}
-
--- Clear a caster's icon from whatever frame it was last shown on.
-local function ClearCasterShown(casterUnit)
-    local prev = casterShownFrame[casterUnit]
-    if prev then
-        DF:HideTargetedSpellIcon(prev, casterUnit)
-        casterShownFrame[casterUnit] = nil
-    end
-end
-
--- Read the enemy target's fingerprint, gated by party membership.
--- Returns a fingerprint table, or nil if the target isn't a party member
--- (pets/NPCs excluded) or its class is unreadable.
-local function ReadTargetFingerprint(casterUnit)
-    local target = casterUnit .. "target"
-    if not UnitExists(target) then return nil end
-    -- Party gate: non-secret boolean post-hotfix. Excludes pets/NPCs.
-    if IsInGroup() and not UnitInParty(target) then return nil end
-    local _, classToken = UnitClass(target)
-    if issecretvalue(classToken) or type(classToken) ~= "string" then return nil end
-    local f = { class = classToken }
-    local role = UnitGroupRolesAssigned(target)
-    if not issecretvalue(role) and type(role) == "string" and role ~= "NONE" then f.role = role end
-    local okR, _, raceToken = pcall(UnitRace, target)
-    if okR and not issecretvalue(raceToken) and type(raceToken) == "string" then f.race = raceToken end
-    local okS, sex = pcall(UnitSex, target)
-    if okS and not issecretvalue(sex) and type(sex) == "number" then f.sex = sex end
-    return f
-end
-
--- Resolve which single party member this caster is targeting and show
--- the icon there. Ambiguous / no-match / non-party -> show nothing.
-local function ResolveFingerprintTarget(casterUnit, texture, spellName, durationObject, isChannel, spellID, startTime, myGen)
-    if resolveGen[casterUnit] ~= myGen then return end       -- stale resolve
-    local targetFP = ReadTargetFingerprint(casterUnit)
-    if not targetFP then ClearCasterShown(casterUnit); return end   -- target left party / unreadable -> clear stale icon
-    local matches = MatchFingerprint(targetFP, rosterFingerprints)
-    if #matches ~= 1 then ClearCasterShown(casterUnit); return end  -- now ambiguous / no match -> clear stale icon
-    local unit = matches[1]
-    local frame = GetFrameForUnit(unit)
-    if not frame then return end
-    -- If this caster was showing on a different frame, clear the old one.
-    local prev = casterShownFrame[casterUnit]
-    if prev and prev ~= frame then
-        DF:HideTargetedSpellIcon(prev, casterUnit)
-    end
-    local db = DF:GetFrameDB(frame)
-    local icon = DF:ShowTargetedSpellIcon(frame, casterUnit, casterUnit, texture, spellName, durationObject, isChannel, spellID, startTime)
-    if icon then
-        casterShownFrame[casterUnit] = frame
-        PositionIcons(frame)                                  -- size + anchor the icon (Show alone leaves it 0-size/unanchored)
-        icon:SetAlpha(db.targetedSpellAlpha or 1)             -- our path doesn't use SetAlphaFromBoolean
-    end
-end
-DF.TargetedSpells_ResolveFingerprintTarget = ResolveFingerprintTarget
-
--- Names of party members that can't be distinguished this run.
-function DF:TargetedSpells_GetUntrackableNames()
-    local names = {}
-    for unit in pairs(untrackableUnits) do
-        local n = UnitName(unit)
-        if n then names[#names + 1] = n end
-    end
-    table.sort(names)
-    return names
-end
-
--- Fired when the roster fingerprint composition changes (the OnEvent
--- GROUP_ROSTER_UPDATE / PLAYER_ROLES_ASSIGNED branch calls this).
-function DF:TargetedSpells_OnRosterFingerprintChanged()
-    -- Refresh the settings-page readout if it exists (defined in a later task).
-    if DF.RefreshTargetedSpellUntrackable then DF:RefreshTargetedSpellUntrackable() end
-    local db = DF:GetDB("party")
-    if not db or not db.targetedSpellEnabled or db.targetedSpellWarnDuplicates == false then return end
-    local names = DF:TargetedSpells_GetUntrackableNames()
-    if #names < 2 then return end
-    local L = DF.L
-    print("|cff00ff00DandersFrames|r " .. string.format(L["Targeted Spells can't tell %s apart (identical class/race/sex/role) — their casts won't show on frames."], table.concat(names, ", ")))
-end
-
 -- ============================================================
 -- CAST EVENT HANDLING
 -- ============================================================
@@ -1334,20 +330,9 @@ local function ProcessCastInternal(casterUnit, isChannel)
     -- Use GetTime() for start time - we can't do arithmetic on secret values from UnitCastingInfo
     local startTime = GetTime()
     
-    -- Clean up any existing icons for this caster before creating new ones
-    -- This prevents duplicate icons from multiple events
-    if activeCasters[casterUnit] then
-        -- Already tracking this caster, update instead of duplicate
-        local groupUnits = GetGroupUnits()
-        for _, targetUnit in ipairs(groupUnits) do
-            local frame = GetFrameForUnit(targetUnit)
-            if frame then
-                DF:HideTargetedSpellIcon(frame, casterUnit)
-            end
-        end
-        resolveGen[casterUnit] = (resolveGen[casterUnit] or 0) + 1
-        casterShownFrame[casterUnit] = nil
-    end
+    -- A re-entry for a caster already in the table just overwrites it below. The
+    -- group-icon cleanup that used to run here (hide every on-frame icon, bump
+    -- resolveGen, clear casterShownFrame) went with the on-frame feature.
     
     -- Track this caster by unit token (not GUID - GUIDs are secret values)
     activeCasters[casterUnit] = {
@@ -1356,31 +341,25 @@ local function ProcessCastInternal(casterUnit, isChannel)
         isChannel = isChannel
     }
     
-    -- For each group member, create icon with visibility controlled by SetAlphaFromBoolean
-    local groupUnits = GetGroupUnits()
-    local db = DF:GetDB()
-    local raidDb = DF:GetRaidDB()
-    
-    -- Check content type for party frames
-    local showOnPartyFrames = ShouldShowTargetedSpells(db)
-    -- Check content type for raid frames
-    local showOnRaidFrames = ShouldShowRaidTargetedSpells(raidDb)
-    
-    -- Party-only fingerprint detection (replaces the dead relay loop).
-    -- Raid is intentionally unsupported (collisions are near-total).
-    if not DF.GroupTargetedSpellsAPIBlockedParty and showOnPartyFrames and db.targetedSpellEnabled and not IsInRaid() then
-        if not lastCompositionKey then BuildRosterFingerprints(true) end
-        resolveGen[casterUnit] = (resolveGen[casterUnit] or 0) + 1
-        local myGen = resolveGen[casterUnit]
-        ResolveFingerprintTarget(casterUnit, texture, name, durationObject, isChannel, spellID, startTime, myGen)
-        C_Timer.After(0.1,  function() ResolveFingerprintTarget(casterUnit, texture, name, durationObject, isChannel, spellID, startTime, myGen) end)
-        C_Timer.After(0.25, function() ResolveFingerprintTarget(casterUnit, texture, name, durationObject, isChannel, spellID, startTime, myGen) end)
-    end
+    -- (Removed) the on-frame path: the group-unit loop, the party/raid content-type
+    -- checks, and the party fingerprint resolution that fed them. The locals they
+    -- needed (groupUnits, db, raidDb) went with it — the personal display resolves
+    -- its own DB below, and the cast-history block needs none of them.
 
     -- Create personal display icon (always, for every cast - use SetAlphaFromBoolean for visibility)
-    if ShouldShowPersonalTargetedSpells(GetPersonalDB()) then
+    --
+    -- Only casterUnit and the channel flag are clean enough to log here; spellID,
+    -- texture and durationObject are secret-tainted on nameplates (see the gotcha #0
+    -- note in the Targeted List section) and must never reach a format string.
+    local personalOk, personalWhy = ShouldShowPersonalTargetedSpells(GetPersonalDB())
+    if personalOk then
+        if DF.DebugActive and DF:DebugActive("PERSONALTARGET") then
+            DF:Debug("PERSONALTARGET", "pickup %s (channel=%s)", casterUnit, isChannel and "y" or "n")
+        end
         -- Always show icon, let SetAlphaFromBoolean control visibility based on targeting
         DF:ShowPersonalTargetedSpellIcon(casterUnit, casterUnit, spellID, texture, durationObject, isChannel, startTime)
+    elseif DF.DebugActive and DF:DebugActive("PERSONALTARGET") then
+        DF:Debug("PERSONALTARGET", "skip %s: %s", casterUnit, personalWhy)
     end
     
     -- Log cast to history for review
@@ -1464,13 +443,21 @@ local function ProcessCast(casterUnit, isChannel)
     
     C_Timer.After(CAST_PROCESS_DELAY, function()
         -- Validate the cast is still active after the delay
-        -- If it finished/was interrupted during the delay, don't show anything
-        if isChannel then
-            if not UnitChannelInfo(casterUnit) then return end
-        else
-            if not UnitCastingInfo(casterUnit) then return end
+        -- If it finished/was interrupted during the delay, don't show anything.
+        -- ⚠ This silently eats any cast shorter than CAST_PROCESS_DELAY (0.2s). Traced
+        -- so "fast casts never show" is visible rather than guessed at. Instants are a
+        -- separate matter: they never fire UNIT_SPELLCAST_START at all.
+        local function endedEarly()
+            if DF.DebugActive and DF:DebugActive("PERSONALTARGET") then
+                DF:Debug("PERSONALTARGET", "drop %s: cast ended inside the 0.2s pickup delay", casterUnit)
+            end
         end
-        
+        if isChannel then
+            if not UnitChannelInfo(casterUnit) then endedEarly() return end
+        else
+            if not UnitCastingInfo(casterUnit) then endedEarly() return end
+        end
+
         ProcessCastInternal(casterUnit, isChannel)
     end)
 end
@@ -1523,41 +510,18 @@ local function HandleCastStop(casterUnit, wasInterrupted)
         end
     end
     
-    -- Remove from active casters (using unit token, not GUID)
+    -- Remove from active casters (using unit token, not GUID).
+    -- ⚠ The REGISTRY ITSELF STAYS. HandleTargetChange gates the PERSONAL display
+    -- on activeCasters[casterUnit], and the history interrupt marking just above
+    -- reads its startTime — so this is shared infrastructure, not group state,
+    -- despite what the deletion checklist at the top of this file used to say.
+    -- Only the group's own resolveGen / casterShownFrame bookkeeping went.
     activeCasters[casterUnit] = nil
-    resolveGen[casterUnit] = (resolveGen[casterUnit] or 0) + 1
-    casterShownFrame[casterUnit] = nil
 
-    -- Get db for interrupt setting
-    local db = DF:GetDB()
-    
-    -- Process icons on all frames
-    local function ProcessFrame(frame)
-        if not frame or not frame.dfActiveTargetedSpells then return end
-        
-        local iconIndex = frame.dfActiveTargetedSpells[casterUnit]
-        if not iconIndex then return end
-        
-        local icon = frame.targetedSpellIcons and frame.targetedSpellIcons[iconIndex]
-        if not icon or not icon.isActive then return end
-        
-        -- Check frame-specific db for raid frames
-        local frameDb = DF:IsRaidFrame(frame) and DF:GetRaidDB() or db
-        
-        if wasInterrupted and frameDb.targetedSpellShowInterrupted then
-            -- Show interrupted visual
-            ShowInterruptedVisual(icon, frameDb)
-        else
-            -- Just hide immediately
-            DF:HideTargetedSpellIcon(frame, casterUnit)
-        end
-    end
-    
-    -- Process icons on all frames using iterators
-    DF:IterateAllFrames(function(frame)
-        ProcessFrame(frame)
-    end)
-    
+    -- (Removed) the on-frame teardown: the ProcessFrame closure, the
+    -- IterateAllFrames walk it drove, the interrupted visual, and the local db
+    -- they needed. The personal hide below resolves its own DB.
+
     -- Also hide personal targeted spell icon for this caster
     if GetPersonalDB().personalTargetedSpellEnabled then
         if wasInterrupted and GetPersonalDB().personalTargetedSpellShowInterrupted then
@@ -1614,22 +578,10 @@ local function OnEvent(self, event, unit, ...)
            event == "UNIT_SPELLCAST_CHANNEL_STOP" or event == "UNIT_SPELLCAST_EMPOWER_STOP" then
         HandleCastStop(unit, false)  -- Normal end
     elseif event == "UNIT_TARGET" then
-        -- Enemy changed target mid-cast
+        -- Enemy changed target mid-cast. Updates the PERSONAL display; the
+        -- group-frame fingerprint re-resolve that also ran here went with the
+        -- on-frame feature.
         HandleTargetChange(unit)
-        -- Fingerprint re-resolve on retarget (party only)
-        if not IsInRaid() and activeCasters[unit] then
-            resolveGen[unit] = (resolveGen[unit] or 0) + 1
-            local myGen = resolveGen[unit]
-            local c = activeCasters[unit]
-            C_Timer.After(0.05, function()
-                local nm, _, tex = UnitCastingInfo(unit)
-                if not nm then nm, _, tex = UnitChannelInfo(unit) end
-                if nm then
-                    local dur = UnitCastingDuration(unit) or UnitChannelDuration(unit)
-                    ResolveFingerprintTarget(unit, tex, nm, dur, c.isChannel, c.spellID, c.startTime, myGen)
-                end
-            end)
-        end
     elseif event == "NAME_PLATE_UNIT_ADDED" then
         -- New nameplate, check if casting
         local castName = UnitCastingInfo(unit)
@@ -1645,13 +597,11 @@ local function OnEvent(self, event, unit, ...)
         HandleCastStop(unit, false)
     elseif event == "PLAYER_TARGET_CHANGED" or event == "PLAYER_FOCUS_CHANGED" then
         ScanAllEnemyCasts()
-    elseif event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ROLES_ASSIGNED" then
-        if BuildRosterFingerprints(false) then
-            if DF.TargetedSpells_OnRosterFingerprintChanged then
-                DF:TargetedSpells_OnRosterFingerprintChanged()
-            end
-        end
     end
+    -- (Removed) the GROUP_ROSTER_UPDATE / PLAYER_ROLES_ASSIGNED branch: it existed
+    -- only to rebuild the group-frame roster fingerprints. Both events stay
+    -- registered — the Targeted List branch below and other consumers still want
+    -- the rest of the stream.
 
     -- ============================================================
     -- Targeted List branch (alpha/beta only, stubs until commit #4)
@@ -1670,6 +620,15 @@ local function OnEvent(self, event, unit, ...)
        or event == "UNIT_SPELLCAST_EMPOWER_START" then
         if DF._TargetedListProcessCastStart then
             DF._TargetedListProcessCastStart(unit, event, ...)
+        end
+    elseif event == "NAME_PLATE_UNIT_ADDED" then
+        -- A nameplate can appear while its owner is ALREADY casting — walking into
+        -- range, turning the camera, a mob streaming into a pull. The *_START events
+        -- above already fired (or never will for us), so without this the bar only
+        -- shows on that mob's NEXT cast. The Personal branch above has always done
+        -- this; the list did not. Confirmed missing in game 2026-07-30.
+        if DF._TargetedListPickupInProgressCast then
+            DF._TargetedListPickupInProgressCast(unit)
         end
     elseif event == "UNIT_SPELLCAST_STOP"
            or event == "UNIT_SPELLCAST_FAILED"
@@ -1737,10 +696,29 @@ eventFrame:SetScript("OnEvent", OnEvent)
 -- NAMEPLATE OFFSCREEN CVAR
 -- ============================================================
 
+-- nameplateShowOffscreen is a GAME setting, not a DF profile setting: it is
+-- account-wide and affects every nameplate, not just ours. So the CVar itself is
+-- the source of truth — there is deliberately no saved key mirroring it. The
+-- Targeted List / Personal Targeted checkboxes read and write it directly via
+-- these two, and re-read on OnShow so a change made in the game menu shows up.
+--
+-- Why the features care (confirmed in game 2026-07-30, on 12.1): with this OFF,
+-- an enemy outside your view gets NO nameplate at all, so there is no
+-- nameplateN unit token — and IsValidCasterUnit accepts nameplate tokens only.
+-- A mob casting behind you is invisible to both features until you turn to face
+-- it, even when you have it targeted and can see the cast on its frame.
+-- Not combat-protected, so the write is safe mid-fight.
 function DF:SetNameplateOffscreen(enabled)
     if C_CVar and C_CVar.SetCVar then
         C_CVar.SetCVar("nameplateShowOffscreen", enabled and "1" or "0")
     end
+end
+
+function DF:GetNameplateOffscreen()
+    if C_CVar and C_CVar.GetCVarBool then
+        return C_CVar.GetCVarBool("nameplateShowOffscreen")
+    end
+    return false
 end
 
 -- ============================================================
@@ -1782,26 +760,23 @@ local function RegisterTargetedSpellEvents()
     eventFrame:RegisterEvent("UPDATE_INSTANCE_INFO")
     -- CVAR changes that affect nameplate visibility.
     eventFrame:RegisterEvent("CVAR_UPDATE")
-    -- Roster composition changes: rebuild fingerprint cache.
-    eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
-    eventFrame:RegisterEvent("PLAYER_ROLES_ASSIGNED")
+    -- (Removed) GROUP_ROSTER_UPDATE and PLAYER_ROLES_ASSIGNED. They were registered
+    -- to "rebuild the fingerprint cache", which went with the group display — OnEvent
+    -- has no branch for either, so both woke the handler and fell through every
+    -- chain. Neither Personal nor the Targeted List asks about roster composition.
     eventFrame:Show()
 end
 
 -- Returns true if any consumer of the shared cast-event stream needs it
--- registered right now. Consumers: personal Targeted Spells display, the
--- (permanently-disabled) group-frame display, and the new Targeted List.
--- Checks both party and raid mode profiles because the addon may switch
--- modes based on group composition without us re-running this check.
+-- registered right now. Consumers are now the Personal Targeted Spells display
+-- and the Targeted List; the group-frame display was removed, so its API-blocked
+-- checks went with it. Checks both party and raid mode profiles because the addon
+-- may switch modes based on group composition without us re-running this check.
 local function NeedsCastEvents()
     if not DF.db then return false end
     local function modeNeeds(modeDb)
         if not modeDb then return false end
-        local blocked = (modeDb == DF.db.raid) and DF.GroupTargetedSpellsAPIBlocked
-            or (modeDb == DF.db.party) and DF.GroupTargetedSpellsAPIBlockedParty
-        local groupOn = (not blocked) and modeDb.targetedSpellEnabled
-        local personalOn = modeDb.personalTargetedSpellEnabled
-        return groupOn or personalOn
+        return modeDb.personalTargetedSpellEnabled and true or false
     end
     if modeNeeds(DF.db.party) or modeNeeds(DF.db.raid) then return true end
     -- Targeted List is party-only
@@ -1814,8 +789,27 @@ end
 -- Public: re-evaluate whether eventFrame should be registered. Call this
 -- whenever any of the gating settings change (group toggle, personal toggle,
 -- API block trip).
+-- ⚠ THIS IS ONLY RE-EVALUATED FROM THREE PLACES: DF:InitTargetedSpells (once, from
+-- Frames/Headers.lua) and the two feature toggles. It is NOT re-run on
+-- PLAYER_ENTERING_WORLD or on a profile switch.
+--
+-- That matters because NeedsCastEvents() returns false when DF.db is not resolved
+-- yet, and a false result UNREGISTERS EVERYTHING. So if Init ever wins the race
+-- against profile load, both Personal Targeted and the Targeted List are silently
+-- dead for the whole session until the user toggles a setting or reloads — which is
+-- exactly what "it worked better after a /reload" looks like. Traced so that
+-- condition is visible at login instead of being invisible.
 function DF:UpdateTargetedSpellEventRegistration()
-    if NeedsCastEvents() then
+    local needed = NeedsCastEvents()
+    if DF.DebugActive and DF:DebugActive("PERSONALTARGET") then
+        DF:Debug("PERSONALTARGET", "cast events %s (db=%s, personal party=%s raid=%s, list=%s)",
+            needed and "REGISTERED" or "unregistered",
+            DF.db and "y" or "NO",
+            (DF.db and DF.db.party and DF.db.party.personalTargetedSpellEnabled) and "y" or "n",
+            (DF.db and DF.db.raid and DF.db.raid.personalTargetedSpellEnabled) and "y" or "n",
+            (DF.db and DF.db.party and DF.db.party.targetedListEnabled) and "y" or "n")
+    end
+    if needed then
         RegisterTargetedSpellEvents()
     else
         eventFrame:UnregisterAllEvents()
@@ -1824,104 +818,26 @@ function DF:UpdateTargetedSpellEventRegistration()
     end
 end
 
-function DF:EnableTargetedSpells()
-    -- Raid group-frame display is permanently API-blocked; force it off.
-    -- The party fingerprint path is live, so still register events + scan.
-    ForceDisableGroupTargetedSpellSettings()
-    DF.targetedSpellsEnabled = true
-    DF:UpdateTargetedSpellEventRegistration()
-    ScanAllEnemyCasts()
-end
+-- (Removed) DF:EnableTargetedSpells / DisableTargetedSpells / ToggleTargetedSpells
+-- and the DF.targetedSpellsEnabled flag they maintained — the flag was written in
+-- two places and read in none. These were the group feature's public API; the only
+-- external caller was the Indicators > Targeted Spells page, removed with it.
+--
+-- ⚠ Deleting them does NOT orphan event registration, which was the risk worth
+-- checking: DF:UpdateTargetedSpellEventRegistration is still called by the personal
+-- toggle, the Targeted List toggle, and DF:InitTargetedSpells.
 
-function DF:DisableTargetedSpells()
-    -- Track enabled state
-    DF.targetedSpellsEnabled = false
+-- (Removed) DF:ScanAllEnemyCasts — a one-line export "for unified roster handler".
+-- That handler was the GROUP_ROSTER_UPDATE branch cut from OnEvent, so the wrapper
+-- has no callers.
+--
+-- ⚠ The file-local ScanAllEnemyCasts of the same name is LIVE — OnEvent's
+-- PLAYER_TARGET_CHANGED / PLAYER_FOCUS_CHANGED branch calls it. Only the DF: export
+-- is gone.
 
-    -- Hide all group-frame icons
-    DF:IterateAllFrames(function(frame)
-        if frame then
-            DF:HideAllTargetedSpells(frame)
-        end
-    end)
-
-    -- Re-evaluate whether events still need to be registered for personal display.
-    -- If personal display is off too, this unregisters everything.
-    DF:UpdateTargetedSpellEventRegistration()
-end
-
--- Export scan function for unified roster handler
-function DF:ScanAllEnemyCasts()
-    ScanAllEnemyCasts()
-end
-
-function DF:ToggleTargetedSpells(enabled)
-    if enabled then
-        DF:EnableTargetedSpells()
-    else
-        DF:DisableTargetedSpells()
-    end
-end
-
--- ============================================================
--- SETUP WIZARD
--- Opt-in flow shown once on first login (and re-runnable from the
--- settings page). Explains what the feature does, its limitations,
--- and that it relies on unsupported Blizzard behaviour that could
--- break at any time. Selecting "Enable Targeted Spells" turns it on.
--- ============================================================
-function DF:ShowTargetedSpellSetupWizard()
-    local L = DF.L
-    if not DF.ShowPopupWizard then
-        DF:DebugWarn("ShowTargetedSpellSetupWizard: Popup module not loaded")
-        return
-    end
-
-    DF:ShowPopupWizard({
-        title = L["Targeted Spells"],
-        steps = {
-            {
-                id = "intro",
-                question = L["Targeted Spells is back"],
-                description = L["Puts an icon on the party member an enemy is about to hit, so you can react to incoming danger. It works by matching the enemy's target to your group by class, role, race, and sex."],
-                type = "multi",
-                options = {},
-                next = "choice",
-            },
-            {
-                id = "choice",
-                question = L["Before you turn it on"],
-                description = L["A few things to know:\n\n- Party only — raid frames aren't supported.\n\n- If two members share the same class, role, race and sex, they can't be told apart and won't show an icon (you'll be warned by name).\n\n- This relies on Blizzard behaviour that isn't officially supported. Blizzard could change it at any time — if they do, the feature simply stops working and there's no fix. There's no guarantee it stays."],
-                type = "single",
-                options = {
-                    { label = L["Enable Targeted Spells"], value = "enable" },
-                    { label = L["Not Now"], value = "no" },
-                },
-                next = nil,
-            },
-        },
-        onComplete = function(answers)
-            if answers and answers.choice == "enable" then
-                local pdb = DF:GetDB("party")
-                if pdb then pdb.targetedSpellEnabled = true end
-                if DF.ToggleTargetedSpells then DF:ToggleTargetedSpells(true) end
-                -- Open the settings window to the Targeted Spells page so the
-                -- user lands on the controls right after enabling. Delayed so it
-                -- runs after the wizard popup closes and the GUI can build.
-                C_Timer.After(0.1, function()
-                    if not DF.GUIFrame or not DF.GUIFrame:IsShown() then
-                        if DF.ToggleGUI then DF:ToggleGUI() end
-                    end
-                    if DF.GUI and DF.GUI.SelectTab then
-                        DF.GUI.SelectTab("indicators_targetedspells")
-                    end
-                end)
-            end
-        end,
-        onCancel = function()
-            -- User closed/cancelled: feature stays off. No-op.
-        end,
-    })
-end
+-- (Removed) SETUP WIZARD — DF:ShowTargetedSpellSetupWizard. It existed to opt the
+-- user in to the group-frame display, which is gone. This was also the ONLY caller
+-- of the DF:ShowPopupWizard runtime in Popup.lua, so that runtime is now dead too.
 
 -- ============================================================
 -- PERSONAL TARGETED SPELLS DISPLAY
@@ -2179,7 +1095,8 @@ end
 
 -- Apply settings to a personal icon
 local function ApplyPersonalIconSettings(icon, db, spellID)
-    local borderColor = db.personalTargetedSpellBorderColor or {r = 1, g = 0.3, b = 0}
+    -- No borderColor read here: the colour comes from DF.Border:BuildSpec via the
+    -- canonical personalTargetedSpell* keys, so a second local read went unused.
     local borderSize = db.personalTargetedSpellBorderSize or 2
     local showBorder = db.personalTargetedSpellShowBorder ~= false
     local showSwipe = db.personalTargetedSpellShowSwipe ~= false
@@ -2811,7 +1728,10 @@ function DF:UpdateTestPersonalTargetedSpells()
     -- Update if mover is shown OR if in test mode with personal enabled
     local db = GetPersonalDB()
     local moverShown = DF.personalTargetedSpellsMover and DF.personalTargetedSpellsMover:IsShown()
-    -- Show personal targeted spells in test mode if personal is enabled (don't require testShowTargetedSpell)
+    -- Show personal targeted spells in test mode whenever personal is enabled. This
+    -- deliberately does NOT consult a test-panel toggle: the group feature's
+    -- testShowTargetedSpell key is gone, and Personal's own testShowPersonalTargeted
+    -- is checked by DF:UpdateAllTestTargetedSpell before it reaches here.
     local inTestMode = (DF.testMode or DF.raidTestMode) and db.personalTargetedSpellEnabled
     
     if moverShown or inTestMode then
@@ -2844,7 +1764,7 @@ function DF:ClearCastHistory()
     if DF.castHistorySecrets then
         wipe(DF.castHistorySecrets)
     end
-    print("|cff00ff00DandersFrames:|r Cast history cleared")
+    DF:Say("Cast history cleared")
     -- Refresh UI if open
     if DF.castHistoryFrame and DF.castHistoryFrame:IsShown() then
         DF:RefreshCastHistoryUI()
@@ -3481,8 +2401,9 @@ local TL_UnitClassFromGUID = UnitClassFromGUID
 local TL_UnitInParty = UnitInParty
 local TL_UnitCanAttack = UnitCanAttack
 local TL_UnitExists = UnitExists
-local TL_UnitName = UnitName
-local TL_UnitClass = UnitClass
+-- (Removed) TL_UnitName / TL_UnitClass upvalue caches — unused. The list resolves
+-- both through TL_UnitNameFromGUID / TL_UnitClassFromGUID, which is what made these
+-- two look used to a substring search.
 local TL_IsInGroup = IsInGroup
 local TL_IsInRaid = IsInRaid
 local TL_GetTime = GetTime
@@ -3560,13 +2481,18 @@ end
 -- so that stop events still clear tracked state even if the user
 -- toggles content-type checkboxes mid-cast. Otherwise stale bars
 -- would get stuck on screen until the next reload.
+-- Returns ok, reason. The reason is a plain literal for the TARGETEDLIST log — every
+-- caller uses `if not TargetedList_IsActive() then`, so the extra return is inert
+-- for them. Reasons exist because a missing bar used to be completely silent: the
+-- pickup path logged only successes, so there was no way to tell which gate ate a
+-- cast. Never put a secret value in one of these strings.
 local function TargetedList_IsActive()
-    if not TargetedList_IsGateOpen() then return false end
-    if not DF.db then return false end
+    if not TargetedList_IsGateOpen() then return false, "dev gate closed (release build)" end
+    if not DF.db then return false, "no profile loaded yet" end
     local party = DF.db.party
-    if not party or not party.targetedListEnabled then return false end
-    if not TL_IsInGroup() then return false end
-    if TL_IsInRaid() then return false end
+    if not party or not party.targetedListEnabled then return false, "Targeted List is off in settings" end
+    if not TL_IsInGroup() then return false, "not in a group (party-only feature)" end
+    if TL_IsInRaid() then return false, "in a raid (party-only feature)" end
     return true
 end
 
@@ -3575,9 +2501,13 @@ end
 -- interruptibility-change handlers use IsActive alone so they can
 -- clean up existing state regardless of content-type settings.
 local function TargetedList_ShouldPickup()
-    if not TargetedList_IsActive() then return false end
+    local ok, why = TargetedList_IsActive()
+    if not ok then return false, why end
     local party = DF.db.party
-    return TargetedList_ContentTypeAllowed(party)
+    if not TargetedList_ContentTypeAllowed(party) then
+        return false, "content-type filter excludes this instance type"
+    end
+    return true
 end
 
 -- Exposed for NeedsCastEvents below, so the shared event frame stays
@@ -3612,14 +2542,24 @@ end
 -- The render pipeline (commit #5) will fetch the target name via
 -- UnitSpellTargetName and feed it directly into a FontString:SetText
 -- secret-safe sink, which doesn't require comparing or indexing.
+-- Returns ok, reason (see TargetedList_IsActive for why).
+--
+-- ⚠ The last check is the one to distrust if bars go missing in a group. The comment
+-- block above claims UnitInParty on a compound token is "empirically NOT blocked" by
+-- the 2026-04-07 hotfix. That is an ASSERTION, not something we have measured on this
+-- build. If 12.1 did seal it, this returns false for every real party target and the
+-- only bars you'd ever see are untargeted casts — which looks exactly like "the list
+-- misses a lot". The trace below distinguishes the two cases.
 local function TargetedList_CastTargetIsPartyMember(casterUnit)
     local target = casterUnit .. "target"
-    if not TL_UnitExists(target) then return false end
+    if not TL_UnitExists(target) then return false, "cast has no target" end
     -- Reject mob-targeting-mob casts (we'd never care about those)
-    if TL_UnitCanAttack("player", target) then return false end
+    if TL_UnitCanAttack("player", target) then return false, "target is an enemy (mob vs mob)" end
     -- The actual filter: is the targeted unit a party member?
     -- TS3 uses this exact compound-vs-party check post-hotfix.
-    if TL_IsInGroup() and not TL_UnitInParty(target) then return false end
+    if TL_IsInGroup() and not TL_UnitInParty(target) then
+        return false, "UnitInParty(<caster>target) false — not a party member, OR the API is sealed"
+    end
     return true
 end
 
@@ -3639,13 +2579,21 @@ local TARGETEDLIST_PICKUP_DELAY = 0.2
 -- Is this unit a nameplate we're willing to look at? Filters out
 -- friendly nameplates, party-member nameplates (wargames/mercenary),
 -- and anything that isn't a valid enemy unit token.
+-- Returns ok, reason (see TargetedList_IsActive for why).
+--
+-- ⚠ THE NAMEPLATE REQUIREMENT IS THE FEATURE'S HARD CEILING. Only `nameplateN`
+-- tokens are accepted, so an enemy with no nameplate is invisible to this feature no
+-- matter what it casts. That makes the list sensitive to the nameplate CVars —
+-- nameplateShowEnemies (off = nothing at all), nameplateShowOffscreen (off = casters
+-- behind you or off-screen never appear), nameplateMaxDistance — and to WoW's own
+-- cap on simultaneous nameplates.
 local function TargetedList_IsRelevantCaster(casterUnit)
-    if type(casterUnit) ~= "string" then return false end
-    if string.sub(casterUnit, 1, 9) ~= "nameplate" then return false end
-    if not TL_UnitExists(casterUnit) then return false end
-    if not TL_UnitCanAttack("player", casterUnit) then return false end
+    if type(casterUnit) ~= "string" then return false, "not a unit token" end
+    if string.sub(casterUnit, 1, 9) ~= "nameplate" then return false, "not a nameplate unit" end
+    if not TL_UnitExists(casterUnit) then return false, "nameplate gone (died / out of range)" end
+    if not TL_UnitCanAttack("player", casterUnit) then return false, "caster not attackable" end
     -- Exclude own party members that have nameplates (rare but real)
-    if TL_UnitInParty(casterUnit) then return false end
+    if TL_UnitInParty(casterUnit) then return false, "caster is a party member" end
     return true
 end
 
@@ -3682,33 +2630,71 @@ local TL_C_Spell_IsSpellImportant = C_Spell and C_Spell.IsSpellImportant
 -- equality compare on a secret-tainted castID errors. We accept rare
 -- flicker on rapid same-spell restart in exchange for not crashing.
 local function TargetedList_DelayedPickup(casterUnit, isChannel, eventSpellId)
-    if not TargetedList_ShouldPickup() then return end
-    if not TargetedList_IsRelevantCaster(casterUnit) then return end
-
-    -- Combat filter: skip casters not in combat (idle mobs casting nearby)
-    local party = DF.db and DF.db.party
-    if party and party.targetedListHideOutOfCombat then
-        if not TL_UnitAffectingCombat(casterUnit) then return end
+    -- One local so the whole gate chain below can report why it dropped a cast.
+    -- Every reason is a literal; nothing secret is ever formatted here (see the
+    -- gotcha #0 note further down — casterUnit and the channel flag are the only
+    -- clean values available at this point).
+    local trace = DF.DebugActive and DF:DebugActive("TARGETEDLIST")
+    local function drop(why)
+        if trace then DF:Debug("TARGETEDLIST", "drop %s at pickup: %s", casterUnit, why) end
     end
+
+    local pickupOk, pickupWhy = TargetedList_ShouldPickup()
+    if not pickupOk then drop(pickupWhy) return end
+
+    -- Re-checked after the 0.2s delay: a caster can die or leave nameplate range
+    -- inside the window. Worth tracing here (unlike at START) because it passed once.
+    local relevantOk, relevantWhy = TargetedList_IsRelevantCaster(casterUnit)
+    if not relevantOk then drop(relevantWhy .. " (during the 0.2s pickup delay)") return end
 
     -- Targeting filter: check if the cast targets a party member.
     -- If "Show Untargeted" is on, also accept casts that have no
     -- target at all (ground AoEs, self-buffs, untargeted channels).
+    --
+    -- This runs BEFORE the combat filter on purpose — see the note there.
+    local party = DF.db and DF.db.party
     local showUntargeted = party and party.targetedListShowUntargeted
     local target = casterUnit .. "target"
     local hasTarget = TL_UnitExists(target)
+    local targetsPartyMember = false
 
     if hasTarget then
         -- Has a target — check if it's a party member
-        if not TargetedList_CastTargetIsPartyMember(casterUnit) then
+        local targetOk, targetWhy = TargetedList_CastTargetIsPartyMember(casterUnit)
+        if not targetOk then
+            drop(targetWhy)
             return
         end
+        targetsPartyMember = true
     elseif not showUntargeted then
         -- No target and untargeted display is off — skip
+        drop("cast has no target and Show Untargeted is off")
         return
     end
     -- If hasTarget is false and showUntargeted is true, we fall through
     -- and show the bar with no target name.
+
+    -- Combat filter: suppress ambient casts from idle NPCs standing around.
+    --
+    -- ⚠ ONLY applies to casts with no party-member target. This used to run before
+    -- the targeting filter and gate EVERY cast on the caster's combat flag, which
+    -- silently ate the pull-opener: a mob whose opening move is a cast is not
+    -- flagged in combat yet, so the one cast you most want to see was dropped —
+    -- and targetedListHideOutOfCombat DEFAULTS TO TRUE, so it happened out of the
+    -- box. (Measured: 10 such drops in one 19-minute session.)
+    --
+    -- Ordering it after the target check makes the two cases separable, because
+    -- they genuinely look different:
+    --   * pull-opener   — out of combat, but aimed AT a party member -> keep
+    --   * ambient noise — out of combat, aimed at nothing            -> drop
+    -- Casts aimed at another NPC or a non-party unit never reach here at all;
+    -- TargetedList_CastTargetIsPartyMember already rejected them above.
+    if not targetsPartyMember and party and party.targetedListHideOutOfCombat then
+        if not TL_UnitAffectingCombat(casterUnit) then
+            drop("untargeted cast from a caster not in combat (Hide Out of Combat is on)")
+            return
+        end
+    end
 
     -- IMPORTANT — gotcha #0 update: spellId from the event payload is
     -- ALSO secret-tainted on nameplates. We can pass it through
@@ -3727,7 +2713,10 @@ local function TargetedList_DelayedPickup(casterUnit, isChannel, eventSpellId)
     --   * The debug log can only print clean values (casterUnit, the
     --     channel flag, the event name). No spell name.
     local spellId = eventSpellId
-    if spellId == nil then return end
+    if spellId == nil then
+        drop("no spellId in the event payload")
+        return
+    end
 
     -- Re-detect cast vs channel at pickup time. The 0.2s delay means
     -- a cast may have transitioned to a channel since the START event.
@@ -3824,8 +2813,36 @@ end
 -- visible cost is missing a bar when a nameplate enters range while
 -- the mob is mid-cast (gap bounded by the cast remaining duration).
 local function TargetedList_ProcessCastStart(casterUnit, event, ...)
-    if not TargetedList_ShouldPickup() then return end
-    if not TargetedList_IsRelevantCaster(casterUnit) then return end
+    -- Structural check FIRST, and MOSTLY silent: it fires for every cast event in the
+    -- game — the player's, party members' — and tracing all of that would bury the
+    -- useful lines.
+    --
+    -- The one case worth surfacing is an ENEMY casting under a token that is not a
+    -- nameplate ("target", "focus", "boss1", "arena2"...). Blizzard registers nameplate
+    -- castbars per-unit (Blizzard_UnitFrame/UnitFrame.lua:97 RegisterUnitEvent with the
+    -- nameplate token), so nameplateN should receive these events — but this feature is
+    -- nameplate-ONLY, so if events ever arrive under a different token for the same mob
+    -- the cast is dropped here with no other symptom. Low volume (enemies only, once
+    -- per cast) and it directly answers "I watched it cast and got nothing".
+    local relevant, relevantWhy = TargetedList_IsRelevantCaster(casterUnit)
+    if not relevant then
+        if relevantWhy == "not a nameplate unit"
+           and type(casterUnit) == "string"
+           and TL_UnitExists(casterUnit)
+           and TL_UnitCanAttack("player", casterUnit)
+           and DF.DebugActive and DF:DebugActive("TARGETEDLIST") then
+            DF:Debug("TARGETEDLIST", "ignored %s: enemy cast arrived on a non-nameplate token", casterUnit)
+        end
+        return
+    end
+
+    local pickupOk, pickupWhy = TargetedList_ShouldPickup()
+    if not pickupOk then
+        if DF.DebugActive and DF:DebugActive("TARGETEDLIST") then
+            DF:Debug("TARGETEDLIST", "skip %s at START: %s", casterUnit, pickupWhy)
+        end
+        return
+    end
     if not TL_C_Timer_After then return end
 
     local isChannel
@@ -3867,6 +2884,59 @@ local function TargetedList_ProcessCastStart(casterUnit, event, ...)
     TL_C_Timer_After(TARGETEDLIST_PICKUP_DELAY, function()
         TargetedList_DelayedPickup(casterUnit, isChannel, eventSpellId)
     end)
+end
+
+-- Pick up a cast that was ALREADY IN PROGRESS when its nameplate appeared.
+--
+-- Why this exists: everything above is driven by UNIT_SPELLCAST_*_START, so the
+-- nameplate has to already exist at the moment the cast begins. Walk into range, turn
+-- the camera, or have a mob stream into a pull mid-cast and the bar never appears for
+-- that cast at all — it only shows up on the mob's NEXT cast. The Personal Targeted
+-- branch has always handled this (OnEvent's NAME_PLATE_UNIT_ADDED case); the Targeted
+-- List never did. Confirmed in game 2026-07-30.
+--
+-- There is no event payload here, so spellId comes from the unit APIs by positional
+-- discard. Positions verified against Blizzard_APIDocumentationGenerated/
+-- UnitDocumentation.lua, not memory:
+--   UnitCastingInfo  -> name, displayName, textureID, startTimeMs, endTimeMs,
+--                       isTradeskill, castID, notInterruptible, castingSpellID  (9th)
+--   UnitChannelInfo  -> name, displayName, textureID, startTimeMs, endTimeMs,
+--                       isTradeskill, notInterruptible, spellID                 (8th)
+-- Deliberately NOT touching startTimeMs / endTimeMs — those are the secret-tainted
+-- fields that gotcha #0 is about. Duration comes from Unit*Duration inside
+-- DelayedPickup as usual.
+--
+-- No 0.2s delay: that delay exists because target/duration data is not populated at
+-- the instant START fires. A cast already in flight has long since settled, so we go
+-- straight to the shared pickup, which re-derives cast-vs-channel and re-runs every
+-- gate itself.
+local function TargetedList_PickupInProgressCast(casterUnit)
+    -- Cheap structural gate first; the shared pickup re-checks everything anyway.
+    if not TargetedList_IsRelevantCaster(casterUnit) then return end
+
+    -- Already tracked: a nameplate can be removed and re-added while one cast runs
+    -- (range flicker, LOS). Re-picking up would reset startTime and visibly restart
+    -- the bar mid-cast, so leave a live record alone.
+    local existing = activeTargetedListCasts[casterUnit]
+    if existing and not existing.fadingStartedAt then return end
+
+    local spellId, isChannel
+    if TL_UnitCastingInfo(casterUnit) ~= nil then
+        isChannel = false
+        spellId = select(9, TL_UnitCastingInfo(casterUnit))
+    elseif TL_UnitChannelInfo(casterUnit) ~= nil then
+        isChannel = true
+        spellId = select(8, TL_UnitChannelInfo(casterUnit))
+    else
+        return  -- not casting; nothing to recover
+    end
+    if spellId == nil then return end
+
+    if DF.DebugActive and DF:DebugActive("TARGETEDLIST") then
+        DF:Debug("TARGETEDLIST", "recover %s: nameplate appeared mid-cast (channel=%s)",
+            casterUnit, isChannel and "y" or "n")
+    end
+    TargetedList_DelayedPickup(casterUnit, isChannel, spellId)
 end
 
 -- Called for every "cast stopped" shaped event. Handles cast-ID
@@ -4058,6 +3128,7 @@ end
 
 -- Expose internal hooks for the shared OnEvent dispatcher above.
 DF._TargetedListProcessCastStart = TargetedList_ProcessCastStart
+DF._TargetedListPickupInProgressCast = TargetedList_PickupInProgressCast
 DF._TargetedListOnCastStop = TargetedList_OnCastStop
 DF._TargetedListOnCastUpdate = TargetedList_OnCastUpdate
 DF._TargetedListOnInterruptibilityChange = TargetedList_OnInterruptibilityChange
@@ -4682,6 +3753,18 @@ local function TargetedList_ApplyBarContent(bar, activeRec)
     if party and party.targetedListImportantOnly
        and TL_C_Spell_IsSpellImportant
        and bar.SetShownFromBoolean then
+        -- ⚠ THE LOG CANNOT TELL YOU WHETHER THIS BAR ENDED UP VISIBLE. isImportant is
+        -- a SECRET value: SetShownFromBoolean consumes it inside the engine and Lua may
+        -- never inspect it. So with this filter on, a cast logs a normal "+cast" and
+        -- then silently renders invisible if the spell is not flagged important.
+        --
+        -- That combination — accepted in the log, absent on screen, no drop reason
+        -- anywhere — is exactly what made "the Targeted List misses casts" hard to
+        -- pin down. Trace the fact that the filter is deciding, since we cannot trace
+        -- its verdict.
+        if DF.DebugActive and DF:DebugActive("TARGETEDLIST") then
+            DF:Debug("TARGETEDLIST", "  ^ important-only filter is ON: visibility set from a secret value we cannot read")
+        end
         local isImportant = TL_C_Spell_IsSpellImportant(spellId)
         bar:SetShownFromBoolean(isImportant, true, false)
     else
@@ -5661,6 +4744,7 @@ TargetedList_OnInterruptibilityChange = function(...)
 end
 
 DF._TargetedListProcessCastStart = TargetedList_ProcessCastStart
+DF._TargetedListPickupInProgressCast = TargetedList_PickupInProgressCast
 DF._TargetedListOnCastStop = TargetedList_OnCastStop
 DF._TargetedListOnCastUpdate = TargetedList_OnCastUpdate
 DF._TargetedListOnInterruptibilityChange = TargetedList_OnInterruptibilityChange
@@ -5785,22 +4869,17 @@ end
 -- ============================================================
 
 function DF:InitTargetedSpells()
-    local db = DF:GetDB()
-
-    -- Raid group-frame Targeted Spells stays disabled (Blizzard's 2026-04-07
-    -- UnitIsUnit hotfix killed the relay). Force only the raid setting off so
-    -- the GUI reflects reality every load. The PARTY path is live via
-    -- fingerprinting (DF.GroupTargetedSpellsAPIBlockedParty = false).
-    ForceDisableGroupTargetedSpellSettings()
-
     -- Cast events register for whatever is live (party fingerprint group
     -- display, personal display, and/or the Targeted List), handled by
     -- UpdateTargetedSpellEventRegistration below.
 
-    -- Apply nameplate offscreen setting if enabled
-    if db.targetedSpellNameplateOffscreen then
-        DF:SetNameplateOffscreen(true)
-    end
+    -- No nameplateShowOffscreen write here. This used to force the CVar ON at
+    -- every login from a saved key that no surviving control could clear, so a
+    -- user who ticked it once in the old Targeted Spells page had it forced on
+    -- forever with no way off. The CVar is now owned outright by the checkboxes
+    -- on the Targeted List / Personal Targeted pages (DF:GetNameplateOffscreen /
+    -- DF:SetNameplateOffscreen) and the targetedSpellNameplateOffscreen key is
+    -- retired — stale copies in saved profiles are simply never read.
 
     -- Initialize personal targeted spells. Note: TogglePersonalTargetedSpells
     -- only manages the container/icons; the events that drive cast tracking

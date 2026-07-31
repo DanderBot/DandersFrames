@@ -298,7 +298,6 @@ DF.ExportCategories = {
         "debuffBorderColorCurse",
         "debuffBorderColorDisease",
         "debuffBorderColorMagic",
-        "debuffBorderColorNone",
         "debuffBorderColorPoison",
         "debuffBorderGradientDirection",
         "debuffBorderGradientEndColor",
@@ -354,6 +353,15 @@ DF.ExportCategories = {
         "debuffFilterRole",
         "debuffGrowth",
         "debuffHideSwipe",
+        "debuffImportantBadge",
+        "debuffImportantBadgeColor",
+        "debuffImportantBadgePoint",
+        "debuffImportantBadgeSize",
+        "debuffImportantBadgeX",
+        "debuffImportantBadgeY",
+        "debuffImportantHighlight",
+        "debuffImportantMarkColor",
+        "debuffImportantScale",
         "debuffMax",
         "debuffMaxDurationEnabled",
         "debuffMaxDurationKeepImportant",
@@ -470,7 +478,7 @@ DF.ExportCategories = {
         "defensiveBarWrap",
         -- defensiveBarX / defensiveBarY removed: no such settings exist (only
         -- Growth/Max/Spacing/Wrap do). Harmless at runtime because
-        -- ExtractCategorySettings nil-guards, but they made /df exportaudit
+        -- ExtractCategorySettings nil-guards, but they made /df debug exportaudit
         -- report two phantoms, so the audit never came back clean.
         "defensiveDurationBarBGColor",
         "defensiveDurationBarColor",
@@ -579,11 +587,7 @@ DF.ExportCategories = {
         "personalTargetedSpellDurationY",
         "personalTargetedSpellEnabled",
         "personalTargetedSpellGrowth",
-        "personalTargetedSpellHighlightColor",
         "personalTargetedSpellHighlightImportant",
-        "personalTargetedSpellHighlightInset",
-        "personalTargetedSpellHighlightSize",
-        "personalTargetedSpellHighlightStyle",
         "personalTargetedSpellImportantBorderAnimationColor",
         "personalTargetedSpellImportantBorderAnimationCornerLength",
         "personalTargetedSpellImportantBorderAnimationFrequency",
@@ -634,104 +638,6 @@ DF.ExportCategories = {
         "personalTargetedSpellSpacing",
         "personalTargetedSpellX",
         "personalTargetedSpellY",
-        "targetedSpellAlpha",
-        "targetedSpellAnchor",
-        "targetedSpellBorderAnimationColor",
-        "targetedSpellBorderAnimationCornerLength",
-        "targetedSpellBorderAnimationFrequency",
-        "targetedSpellBorderAnimationInset",
-        "targetedSpellBorderAnimationLength",
-        "targetedSpellBorderAnimationMask",
-        "targetedSpellBorderAnimationOffsetX",
-        "targetedSpellBorderAnimationOffsetY",
-        "targetedSpellBorderAnimationParticles",
-        "targetedSpellBorderAnimationProcStart",
-        "targetedSpellBorderAnimationScale",
-        "targetedSpellBorderAnimationSidesAxis",
-        "targetedSpellBorderAnimationThickness",
-        "targetedSpellBorderAnimationType",
-        "targetedSpellBorderBlendMode",
-        "targetedSpellBorderColor",
-        "targetedSpellBorderGradientDirection",
-        "targetedSpellBorderGradientEndColor",
-        "targetedSpellBorderGradientStartColor",
-        "targetedSpellBorderInset",
-        "targetedSpellBorderShadowColor",
-        "targetedSpellBorderShadowEnabled",
-        "targetedSpellBorderShadowOffsetX",
-        "targetedSpellBorderShadowOffsetY",
-        "targetedSpellBorderShadowSize",
-        "targetedSpellBorderSize",
-        "targetedSpellBorderStyle",
-        "targetedSpellBorderTexture",
-        "targetedSpellDurationColor",
-        "targetedSpellDurationFont",
-        "targetedSpellDurationOutline",
-        "targetedSpellDurationScale",
-        "targetedSpellDurationX",
-        "targetedSpellDurationY",
-        "targetedSpellEnabled",
-        "targetedSpellFrameLevel",
-        "targetedSpellGrowth",
-        "targetedSpellHideSwipe",
-        "targetedSpellHighlightColor",
-        "targetedSpellHighlightImportant",
-        "targetedSpellHighlightInset",
-        "targetedSpellHighlightSize",
-        "targetedSpellHighlightStyle",
-        "targetedSpellImportantBorderAnimationColor",
-        "targetedSpellImportantBorderAnimationCornerLength",
-        "targetedSpellImportantBorderAnimationFrequency",
-        "targetedSpellImportantBorderAnimationInset",
-        "targetedSpellImportantBorderAnimationLength",
-        "targetedSpellImportantBorderAnimationMask",
-        "targetedSpellImportantBorderAnimationOffsetX",
-        "targetedSpellImportantBorderAnimationOffsetY",
-        "targetedSpellImportantBorderAnimationParticles",
-        "targetedSpellImportantBorderAnimationProcStart",
-        "targetedSpellImportantBorderAnimationScale",
-        "targetedSpellImportantBorderAnimationSidesAxis",
-        "targetedSpellImportantBorderAnimationThickness",
-        "targetedSpellImportantBorderAnimationType",
-        "targetedSpellImportantBorderBlendMode",
-        "targetedSpellImportantBorderColor",
-        "targetedSpellImportantBorderGradientDirection",
-        "targetedSpellImportantBorderGradientEndColor",
-        "targetedSpellImportantBorderGradientStartColor",
-        "targetedSpellImportantBorderInset",
-        "targetedSpellImportantBorderShadowColor",
-        "targetedSpellImportantBorderShadowEnabled",
-        "targetedSpellImportantBorderShadowOffsetX",
-        "targetedSpellImportantBorderShadowOffsetY",
-        "targetedSpellImportantBorderShadowSize",
-        "targetedSpellImportantBorderSize",
-        "targetedSpellImportantBorderStyle",
-        "targetedSpellImportantBorderTexture",
-        "targetedSpellImportantOnly",
-        "targetedSpellInArena",
-        "targetedSpellInBattlegrounds",
-        "targetedSpellInDungeons",
-        "targetedSpellInOpenWorld",
-        "targetedSpellInRaids",
-        "targetedSpellInterruptedDuration",
-        "targetedSpellInterruptedShowX",
-        "targetedSpellInterruptedTintAlpha",
-        "targetedSpellInterruptedTintColor",
-        "targetedSpellInterruptedXColor",
-        "targetedSpellInterruptedXSize",
-        "targetedSpellMaxIcons",
-        "targetedSpellNameplateOffscreen",
-        "targetedSpellScale",
-        "targetedSpellShowBorder",
-        "targetedSpellShowDuration",
-        "targetedSpellShowInterrupted",
-        "targetedSpellSize",
-        "targetedSpellSortByTime",
-        "targetedSpellSortNewestFirst",
-        "targetedSpellSpacing",
-        "targetedSpellWarnDuplicates",
-        "targetedSpellX",
-        "targetedSpellY",
     },
     -- Targeted List page
     targetedList = {
@@ -1072,7 +978,6 @@ DF.ExportCategories = {
         "oorMissingBuffAlpha",
         "oorMissingHealthAlpha",
         "oorPowerBarAlpha",
-        "oorTargetedSpellAlpha",
         "oorTextAlpha",
         "petAnchor",
         "petBackgroundColor",
@@ -1161,13 +1066,7 @@ DF.ExportCategories = {
         "testShowSelection",
         "testShowStatusIcons",
         "testShowTargetedList",
-        "testShowTargetedSpell",
         "testShowTextDesigner",
-        "tooltipAuraAnchor",
-        "tooltipAuraDisableInCombat",
-        "tooltipAuraEnabled",
-        "tooltipAuraX",
-        "tooltipAuraY",
         "tooltipBindingAnchor",
         "tooltipBindingAnchorPos",
         "tooltipBindingDisableInCombat",
@@ -1422,7 +1321,7 @@ end
 -- against Config defaults: pre-4.6.1, 188 live settings (the whole Targeted
 -- List page, the buff/debuff border families, permanent movers, My Buff
 -- Indicators, ...) were in no category, so selective export silently dropped
--- them. `/df exportaudit` recomputes that drift on demand: every Party/Raid
+-- them. `/df debug exportaudit` recomputes that drift on demand: every Party/Raid
 -- default key must be either assigned to a category or EXPLICITLY declared
 -- local-only below. Run it whenever defaults or categories change.
 
@@ -1434,16 +1333,14 @@ DF.ExportLocalOnly = {
     minimapIcon = true,                                 -- minimap button state
     useSecureHeaders = true,                            -- internal escape hatch (no GUI)
 
-    -- Dead legacy keys: still present in Config defaults on this branch but no
-    -- longer read anywhere; their defaults are deleted outright in the pending
-    -- cleanup / aura-source-removal PRs. Declared local-only so the audit is
-    -- clean regardless of which of those PRs has landed.
-    frameBorderAlpha = true,             -- alpha rides frameBorderColor.a
-    auraSourceMode = true,               -- Direct is the only aura source
-    defensiveIconShowSwipe = true,
-    highlightFrames = true,
-    resurrectionIconHideInCombat = true,
-    targetedSpellShowSwipe = true,
+    -- (Removed) five dead-legacy declarations: frameBorderAlpha, auraSourceMode,
+    -- defensiveIconShowSwipe, highlightFrames, resurrectionIconHideInCombat. They
+    -- hedged against cleanup PRs that had not landed yet — "still present in Config
+    -- defaults on this branch but no longer read anywhere". Those PRs have landed:
+    -- none of the five is a Config key any more, and only frameBorderAlpha still
+    -- exists as a name anywhere (as a signature FIELD derived from
+    -- frameBorderColor.a in Frames/Bars.lua — an unrelated symbol). With no default
+    -- to suppress, the entries suppressed nothing.
 }
 
 -- Keys that legitimately appear in category lists WITHOUT a Config default
@@ -1454,8 +1351,11 @@ DF.ExportLocalOnly = {
 local EXPORT_KEYS_WITHOUT_DEFAULTS = {
     afkIconTimerFont = true, afkIconTimerOutline = true,
     auraDesignerPreset = true, textDesignerPreset = true,
-    auraDesigner = true, textDesigner = true,           -- legacy inline tables
-    defensiveIconBorderColorSource = true, missingBuffIconBorderColorSource = true,
+    textDesigner = true,                                -- legacy inline table
+    -- (Removed) auraDesigner, defensiveIconBorderColorSource and
+    -- missingBuffIconBorderColorSource. All three now HAVE Config defaults, so the
+    -- allowlist no longer suppressed anything for them — they resolve as normal
+    -- exported keys with defaults. textDesigner stays: it genuinely has none.
     raidPlayerGroupFirst = true,
     raidAutoProfiles = true,                            -- top-level key, special-cased in Profile.lua
     -- Config.lua lists this as `= nil` (documentation only — a nil assignment
@@ -1464,7 +1364,7 @@ local EXPORT_KEYS_WITHOUT_DEFAULTS = {
     absorbBarOvershieldColor = true,
 }
 
--- Dev tool behind /df exportaudit. Returns true when clean.
+-- Dev tool behind /df debug exportaudit. Returns true when clean.
 function DF:AuditExportCategories()
     local assigned = {}
     for _, keys in pairs(DF.ExportCategories) do
@@ -1490,16 +1390,22 @@ function DF:AuditExportCategories()
     table.sort(phantoms)
 
     if #missing == 0 and #phantoms == 0 then
-        print("|cff00ff00DF exportaudit:|r clean — every default key is categorised or declared local-only.")
+        DF:Say("Export audit clean", "every default key is categorised or declared local-only")
         return true
     end
+
+    -- ONE block, two sections. Both branches can fire in the same run, so opening
+    -- a DF:Out in each made a single audit render as two separate outputs.
+    local o = DF:Out("Export Audit")
     if #missing > 0 then
-        print(("|cffff4444DF exportaudit:|r %d default key(s) in NO export category (selective export will drop them):"):format(#missing))
-        for _, k in ipairs(missing) do print("  missing: " .. k) end
+        o:Section(("%d default key(s) in NO export category"):format(#missing))
+        o:Line("Selective export will drop these.", "BAD")
+        o:More(missing, 12)
     end
     if #phantoms > 0 then
-        print(("|cffff9900DF exportaudit:|r %d category key(s) with no Config default (typo, or add to the allowlist):"):format(#phantoms))
-        for _, k in ipairs(phantoms) do print("  phantom: " .. k) end
+        o:Section(("%d category key(s) with no Config default"):format(#phantoms))
+        o:Line("Typo, or needs adding to the allowlist.", "WARN")
+        o:More(phantoms, 12)
     end
     return false
 end

@@ -463,10 +463,8 @@ function CC:OnNamePlateAdded(unitToken)
     local nameplate = C_NamePlate.GetNamePlateForUnit(unitToken)
     if not nameplate then return end
     
-    -- Debug output
-    if self.db.options.debugBindings then
-        local name = UnitName(unitToken) or "Unknown"
-        print("|cff33cc66DF Nameplate:|r Added for " .. name .. " (" .. unitToken .. ")")
+    if DF:DebugActive("CLICK") then
+        DF:Debug("CLICK", "Nameplate: added for %s (%s)", tostring(UnitName(unitToken) or "Unknown"), tostring(unitToken))
     end
     
     -- Get the actual clickable button from the nameplate
@@ -485,18 +483,15 @@ function CC:OnNamePlateAdded(unitToken)
         if not InCombatLockdown() then
             self:RegisterFrame(clickableFrame)
             
-            if self.db.options.debugBindings then
-                local frameName = clickableFrame:GetName() or "unnamed"
-                print("|cff33cc66DF Nameplate:|r Registered frame: " .. frameName)
+            if DF:DebugActive("CLICK") then
+                DF:Debug("CLICK", "Nameplate: registered frame: %s", tostring(clickableFrame:GetName() or "unnamed"))
             end
         else
             -- Queue for after combat
             self:Defer("register", clickableFrame)
         end
     else
-        if self.db.options.debugBindings then
-            print("|cffff6666DF Nameplate:|r Could not find clickable frame for " .. unitToken)
-        end
+        DF:DebugWarn("CLICK", "Nameplate: could not find clickable frame for %s", tostring(unitToken))
     end
 end
 
@@ -505,9 +500,7 @@ function CC:OnNamePlateRemoved(unitToken)
     local frame = self.registeredNameplates[unitToken]
     
     if frame then
-        if self.db.options.debugBindings then
-            print("|cff33cc66DF Nameplate:|r Removed for " .. unitToken)
-        end
+        DF:Debug("CLICK", "Nameplate: removed for %s", tostring(unitToken))
         
         -- Unregister from click-casting
         if not InCombatLockdown() then
@@ -528,13 +521,11 @@ function CC:GetNameplateClickableFrame(nameplate, unitToken)
     
     -- Debug helper
     local function debugFrame(label, frame)
-        if self.db.options.debugBindings and frame then
-            local name = frame:GetName() or "unnamed"
-            local objType = frame:GetObjectType()
-            local isButton = frame:IsObjectType("Button")
-            local hasRegister = frame.RegisterForClicks ~= nil
-            local unit = frame:GetAttribute("unit") or frame.unit
-            print("  [Debug " .. label .. "] " .. name .. " (" .. objType .. ") isButton=" .. tostring(isButton) .. " hasRegister=" .. tostring(hasRegister) .. " unit=" .. tostring(unit))
+        if frame and DF:DebugActive("CLICK") then
+            DF:Debug("CLICK", "Nameplate probe [%s] %s (%s) isButton=%s hasRegister=%s unit=%s",
+                tostring(label), tostring(frame:GetName() or "unnamed"), tostring(frame:GetObjectType()),
+                tostring(frame:IsObjectType("Button")), tostring(frame.RegisterForClicks ~= nil),
+                tostring(frame:GetAttribute("unit") or frame.unit))
         end
     end
     
@@ -633,9 +624,7 @@ function CC:GetNameplateClickableFrame(nameplate, unitToken)
         return unitFrame
     end
     
-    if self.db.options.debugBindings then
-        print("  [Debug] No suitable clickable frame found for nameplate")
-    end
+    DF:Debug("CLICK", "Nameplate: no suitable clickable frame found")
     
     return nil
 end
@@ -648,9 +637,7 @@ function CC:RegisterAllNameplates()
     -- Get all visible nameplates
     local nameplates = C_NamePlate.GetNamePlates()
     
-    if self.db.options.debugBindings then
-        print("|cff33cc66DF Nameplate:|r Registering " .. #nameplates .. " visible nameplates")
-    end
+    DF:Debug("CLICK", "Nameplate: registering %d visible nameplates", #nameplates)
     
     for _, nameplate in ipairs(nameplates) do
         local unitToken = nameplate.namePlateUnitToken

@@ -7,7 +7,6 @@ local addonName, DF = ...
 
 -- Local caching of frequently used globals and WoW API for performance
 local pairs, ipairs, type, pcall, wipe = pairs, ipairs, type, pcall, wipe
-local tinsert, tremove = table.insert, table.remove
 local C_UnitAuras = C_UnitAuras
 local UnitIsUnit = UnitIsUnit
 local GetTime = GetTime
@@ -21,13 +20,11 @@ local issecretvalue = issecretvalue
 local strsplit = strsplit
 local C_CurveUtil = C_CurveUtil
 local GetAuraDataByAuraInstanceID = C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID
-local IsAuraFilteredOut = C_UnitAuras and C_UnitAuras.IsAuraFilteredOutByInstanceID
-local strfind = string.find
 
--- Table pool to reduce garbage collection
--- PERFORMANCE FIX 2025-01-20: Reuse aura entry tables instead of creating new ones
-local tablePool = {}
-local poolSize = 0
+-- (Removed) the 2025-01-20 aura-entry table pool (tablePool / poolSize) and the
+-- cached IsAuraFilteredOutByInstanceID / strfind / tinsert / tremove. All were
+-- infrastructure for the old scan-and-cache pipeline; the 12.1 container port made
+-- the pool unreachable and left the rest as unused upvalues.
 
 -- Forward declarations: these helpers are defined later in the file but used
 -- by code above their definitions (the ClassifyAura defensive/dispel filter
@@ -125,6 +122,34 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- could keep the duplicate if they wanted it.
     if db.debuffDeduplicateDesigner == false then claimed = nil end
 
+    -- IMPORTANT HIGHLIGHT: the per-record button style handed to whichever records
+    -- hold boss/role and priority auras. Declared HERE, above the Show All branch,
+    -- because both modes need it — the first cut declared it further down and was
+    -- therefore out of scope in Show All, which is the DEFAULT, so the feature did
+    -- nothing at all on an untouched profile.
+    --
+    -- ★ Why this is expressible under 12.1: we never ask a button what it holds
+    -- (spellId / dispelName / presence are secret). Blizzard filters the group, so
+    -- membership IS the predicate and every button in it can be styled blind.
+    --
+    -- Nil for the Aura Designer facade — that caller builds a synthetic db with no
+    -- debuffImportant* keys, so AD groups keep their own styling (row-only).
+    local importantStyle
+    if db.debuffImportantHighlight then
+        local sc = tonumber(db.debuffImportantScale) or 1
+        importantStyle = {
+            scale = (sc > 0) and sc or 1,
+            badge = db.debuffImportantBadge ~= false and {
+                size = tonumber(db.debuffImportantBadgeSize) or 10,
+                point = db.debuffImportantBadgePoint or "TOPRIGHT",
+                offsetX = tonumber(db.debuffImportantBadgeX) or 0,
+                offsetY = tonumber(db.debuffImportantBadgeY) or 0,
+                color = db.debuffImportantBadgeColor,
+                markColor = db.debuffImportantMarkColor,
+            } or nil,
+        }
+    end
+
     if db.directDebuffShowAll then
         -- ALL mode: no category filtering, but Hide Long Debuffs still applies as
         -- one native maxDuration record. Keep Important CANNOT be honoured here:
@@ -166,6 +191,47 @@ local function BuildDirectDebuffFilters(db, claimed)
             end
         end
         if allMaxDur then cf = cf or {}; cf.maxDuration = allMaxDur end
+
+        -- IMPORTANT HIGHLIGHT in ALL mode. Show All is normally ONE blanket HARMFUL
+        -- record, which is why the highlight did nothing here: there is no boss/role
+        -- or priority record to style. Split into three MUTUALLY EXCLUSIVE records so
+        -- the important ones can be styled and still lead the row (groups render in
+        -- declaration order). Exclusive by construction, because groups do NOT dedupe
+        -- against each other — overlapping filters would show an aura twice:
+        --   1 boss-or-role                                  -> styled
+        --   2 priority, NOT boss-or-role                    -> styled
+        --   3 neither                                       -> normal
+        -- Each inherits the claim/maxDuration cf built above, so Hide Long Debuffs and
+        -- Aura Designer claims keep working. A claimed category drops its record
+        -- entirely rather than being filtered out of it.
+        --
+        -- ⚠ ONLY when the highlight is on. With it off this stays exactly one record —
+        -- Show All is the default for everyone, and splitting it unconditionally would
+        -- change every existing user's row for a feature they never enabled.
+        if importantStyle then
+            local function withCf(extra)
+                local t = {}
+                if cf then for k, v in pairs(cf) do t[k] = v end end
+                for k, v in pairs(extra) do t[k] = v end
+                return t
+            end
+            local out = {}
+            -- claimed.boss AND claimed.role = the whole boss-or-role pool is the AD's;
+            -- a partial claim leaves the rest, and the claim cf above already excludes
+            -- the claimed half (isBossAura/isRoleAura = false ANDs with the flag here).
+            if not (claimed and claimed.boss and claimed.role) then
+                out[#out + 1] = { filter = filterStr, key = "allboss", style = importantStyle,
+                                  candidateFilters = withCf({ isBossOrRoleAura = true }) }
+            end
+            if not (claimed and claimed.priority) then
+                out[#out + 1] = { filter = filterStr, key = "allprio", style = importantStyle,
+                                  candidateFilters = withCf({ isBossOrRoleAura = false, isPriorityAura = true }) }
+            end
+            out[#out + 1] = { filter = filterStr, key = "all",
+                              candidateFilters = withCf({ isBossOrRoleAura = false, isPriorityAura = false }) }
+            return out
+        end
+
         if cf or filterStr ~= "HARMFUL" then
             return { { filter = filterStr, key = "all", candidateFilters = cf } }
         end
@@ -209,6 +275,9 @@ local function BuildDirectDebuffFilters(db, claimed)
         return cf
     end
 
+    -- CATEGORY mode: the boss/role and priority records below already exist and are
+    -- already declared FIRST, so "important debuffs lead the row" needs no sort work —
+    -- importantStyle (declared at the top of this function) only styles them.
     local filters = {}
     local boss, role = db.debuffFilterBoss, db.debuffFilterRole
     -- Claim-effective category flags (claimed nil = all pass; the negation/exclude
@@ -218,11 +287,13 @@ local function BuildDirectDebuffFilters(db, claimed)
     if effBoss or effRole then
         local flag = (effBoss and effRole) and "isBossOrRoleAura" or (effBoss and "isBossAura" or "isRoleAura")
         filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "bossrole",
-                                  candidateFilters = cfFor(true, { [flag] = true }) }
+                                  candidateFilters = cfFor(true, { [flag] = true }),
+                                  style = importantStyle }
     end
     if db.debuffFilterPriority and not (claimed and claimed.priority) then
         filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "priority",
-                                  candidateFilters = cfFor(true, { isPriorityAura = true }) }
+                                  candidateFilters = cfFor(true, { isPriorityAura = true }),
+                                  style = importantStyle }
     end
     if ccToken and not (claimed and claimed.crowdControl) then
         filters[#filters + 1] = { filter = "HARMFUL|" .. ccToken .. neg(true, false, false),
@@ -336,6 +407,7 @@ end)
 function DF:UseFactoryForBuffs(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
         and not (DF.testMode or DF.raidTestMode)
+        and not DF:MemTestDisabled("enableAuras")
 end
 
 -- GUI-facing predicate: does the factory own the buff row for this mode's db? Unlike
@@ -903,14 +975,16 @@ function DF:_wipeDurationCurves()
     wipe(durationCurveCache)
 end
 
--- /df cbt — colour-by-time ground truth. Reports what the engine ACTUALLY resolved
+-- /df debug cbt — colour-by-time ground truth. Reports what the engine ACTUALLY resolved
 -- rather than what the Colours page shows: whether the curve APIs are reachable at all
 -- (if not, every mode silently degrades to the legacy seconds buckets = stepped seconds
 -- no matter what the dials say), the account-wide dials, the mode a plain enabled
 -- consumer composes, and whether that mode produced a real curve or the bucket fallback.
 function DF:DebugDumpColorByTime(threshold)
-    local function say(fmt, ...) print(string.format(fmt, ...)) end
-    say("|cff33ff99Color by Time|r")
+    local o = DF:Out("Colour by Time")
+    -- Strips ONE level of the call sites' hand-indent so o:Line supplies the base
+    -- indent while their relative nesting survives.
+    local function say(fmt, ...) o:Line((string.format(fmt, ...):gsub("^  ", ""))) end
     say("  curve APIs reachable: %s", tostring(curvesAvailable()))
     say("    C_CurveUtil.CreateColorCurve=%s CreateColor=%s DurationTextBindingProperty=%s LuaCurveType=%s",
         tostring(C_CurveUtil and C_CurveUtil.CreateColorCurve ~= nil), tostring(CreateColor ~= nil),
@@ -937,7 +1011,7 @@ function DF:DebugDumpColorByTime(threshold)
     -- EXPIRY REVEALS, per indicator. Bands and the Alert Below threshold are ONE formatter
     -- sampled against ONE property, so each indicator's unit governs both — and only stops
     -- BELOW its threshold ever render, which is the usual "why is my top colour missing".
-    say("|cff33ff99Expiry reveals|r  (unit, threshold and ramp are PER INDICATOR)")
+    o:Section("Expiry reveals", "unit, threshold and ramp are PER INDICATOR")
     local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
     local seen, found = {}, 0
     for _, adMode in ipairs({ "party", "raid" }) do
@@ -972,9 +1046,12 @@ function DF:DebugDumpColorByTime(threshold)
                                         local into = (at < liveT) and parts or hidden
                                         into[#into + 1] = ("%s%s=%s"):format(tostring(at), ipct and "%" or "s", tostring(bp.hex))
                                     end
-                                    say("      bands: %s", (#parts > 0) and table.concat(parts, "  ") or "|cffff6060none|r")
+                                    say("      bands: %s", (#parts > 0) and table.concat(parts, "  ") or "none")
                                     if #hidden > 0 then
-                                        say("      |cffff6060above the threshold (never render):|r %s", table.concat(hidden, "  "))
+                                        -- Stops above the threshold are the usual
+                                        -- "why is my top colour missing", so WARN.
+                                        o:Line(("    above the threshold (never render): %s")
+                                            :format(table.concat(hidden, "  ")), "WARN")
                                     end
                                 end
                             end
@@ -1686,13 +1763,29 @@ end
 -- AddAuraGroup freezes (a group's filterString can't be changed live; the record SET
 -- defines the groups themselves). Per-record candidateFilters are deliberately
 -- EXCLUDED — they're live-tunable (see filterTuningSig).
+-- A record's per-button STYLE (important-debuff highlight). STRUCTURAL, not tuning:
+-- it decides whether the group gets its own initializeFrame closure, whether the badge
+-- regions exist at all, and the group's layout cell size — none of which ApplyStyle can
+-- change in place. Serialized here so toggling the highlight actually rebuilds; without
+-- this the setting writes to the DB and nothing on screen moves.
+local function recStyleSig(s)
+    if type(s) ~= "table" then return "" end
+    local b = s.badge
+    return "@" .. tostring(s.scale) .. "/" .. (b and (tostring(b.size) .. ","
+        .. tostring(b.point) .. "," .. tostring(b.offsetX) .. "," .. tostring(b.offsetY) .. ","
+        .. tostring(b.color and b.color.r) .. "," .. tostring(b.color and b.color.g) .. ","
+        .. tostring(b.color and b.color.b) .. ","
+        .. tostring(b.markColor and b.markColor.r) .. "," .. tostring(b.markColor and b.markColor.g) .. ","
+        .. tostring(b.markColor and b.markColor.b)) or "-")
+end
+
 local function filterStructSig(f)
     if type(f) ~= "table" then return tostring(f) end
     local parts = {}
     for i = 1, #f do
         local entry = f[i]
         if type(entry) == "table" then
-            parts[i] = tostring(entry.filter) .. "#" .. tostring(entry.key)
+            parts[i] = tostring(entry.filter) .. "#" .. tostring(entry.key) .. recStyleSig(entry.style)
         else
             parts[i] = entry
         end
@@ -1823,9 +1916,13 @@ function DF:DriveBuffFactory(frame, db)
     -- 'retarget', would upgrade to a full rebuild (frame leak). The container's own
     -- OnShow/OnHide drive event (de)registration. (SetUnit combat-legality is queued for Krathe.)
     if h:GetUnit() ~= frame.unit then
+        DF:Debug("AURAROW", "buff: retarget %s -> %s%s",
+            tostring(h:GetUnit()), tostring(frame.unit),
+            InCombatLockdown() and " (in combat: row hidden until regen)" or "")
         h:SetUnit(frame.unit)
         frame.dfBuffFactoryHidden = InCombatLockdown() or nil
     elseif frame.dfBuffFactoryHidden and not InCombatLockdown() then
+        DF:Debug("AURAROW", "buff: regen, unhiding row after deferred retarget")
         frame.dfBuffFactoryHidden = nil
     end
     -- Show/hide only on state change (no per-event SetShown churn on the live tree).
@@ -1853,11 +1950,18 @@ function DF:DriveBuffFactory(frame, db)
         h:ApplyZOrder(cfg)
         local structSig, tuningSig = rowStructSig(cfg), rowTuningSig(cfg)
         if frame.buffFactoryStructSig ~= structSig then
+            -- "I changed a setting and nothing happened" is always answered by WHICH
+            -- SIG MOVED. Both are already computed, and this only runs when the
+            -- layout version bumped, so it is free at steady state.
+            DF:Debug("AURAROW", "buff: REBUILD - struct sig %s -> %s",
+                tostring(frame.buffFactoryStructSig), tostring(structSig))
             frame.buffFactoryStructSig = structSig
             frame.buffFactoryTuningSig = tuningSig
             h:Rebuild(cfg)                      -- structural (filter set/regions/tooltips) — discrete, leak-safe
         else
             if frame.buffFactoryTuningSig ~= tuningSig then
+                DF:Debug("AURAROW", "buff: TUNING - tuning sig %s -> %s (struct unchanged)",
+                    tostring(frame.buffFactoryTuningSig), tostring(tuningSig))
                 frame.buffFactoryTuningSig = tuningSig
                 -- Per-record candidateFilters ride cfg.filter; the struct sig pins
                 -- every record's filter string + key, so the fresh list is
@@ -1887,6 +1991,7 @@ end
 function DF:UseFactoryForDebuffs(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
         and not (DF.testMode or DF.raidTestMode)
+        and not DF:MemTestDisabled("enableAuras")
 end
 
 -- GUI-facing predicate (does NOT exclude test mode — see FactoryOwnsBuffRow).
@@ -1971,9 +2076,13 @@ function DF:DriveDebuffFactory(frame, db)
     end
 
     if h:GetUnit() ~= frame.unit then
+        DF:Debug("AURAROW", "debuff: retarget %s -> %s%s",
+            tostring(h:GetUnit()), tostring(frame.unit),
+            InCombatLockdown() and " (in combat: row hidden until regen)" or "")
         h:SetUnit(frame.unit)
         frame.dfDebuffFactoryHidden = InCombatLockdown() or nil
     elseif frame.dfDebuffFactoryHidden and not InCombatLockdown() then
+        DF:Debug("AURAROW", "debuff: regen, unhiding row after deferred retarget")
         frame.dfDebuffFactoryHidden = nil
     end
     local rowShown = not frame.dfDebuffFactoryHidden
@@ -2004,11 +2113,18 @@ function DF:DriveDebuffFactory(frame, db)
         h:ApplyZOrder(cfg)
         local structSig, tuningSig = rowStructSig(cfg), rowTuningSig(cfg)
         if frame.debuffFactoryStructSig ~= structSig then
+            -- "I changed a setting and nothing happened" is always answered by WHICH
+            -- SIG MOVED. Both are already computed, and this only runs when the
+            -- layout version bumped, so it is free at steady state.
+            DF:Debug("AURAROW", "debuff: REBUILD - struct sig %s -> %s",
+                tostring(frame.debuffFactoryStructSig), tostring(structSig))
             frame.debuffFactoryStructSig = structSig
             frame.debuffFactoryTuningSig = tuningSig
             h:Rebuild(cfg)                      -- structural — REPLACES the config wholesale
         else
             if frame.debuffFactoryTuningSig ~= tuningSig then
+                DF:Debug("AURAROW", "debuff: TUNING - tuning sig %s -> %s (struct unchanged)",
+                    tostring(frame.debuffFactoryTuningSig), tostring(tuningSig))
                 frame.debuffFactoryTuningSig = tuningSig
                 -- hideLong minutes / Keep Important within a stable category set
                 -- live in the RECORDS' candidateFilters — swap the (group-identical)
@@ -2038,6 +2154,7 @@ function DF:UseFactoryForDefensive(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
         and BuildDirectDefensiveFilters() ~= nil
         and not (DF.testMode or DF.raidTestMode)
+        and not DF:MemTestDisabled("enableDefensive")
 end
 
 -- GUI-facing predicate (does NOT exclude test mode, so a "blocked" overlay doesn't
@@ -2130,7 +2247,7 @@ function DF:BuildDefensiveRowConfig(db, unit)
         -- Z-order: an ABSOLUTE offset from the unit frame. Highest of the aura surfaces, so a
         -- defensive cue is never buried. Applied via h:ApplyZOrder(cfg) at Create + re-apply.
         --
-        -- ★ 65, NOT the legacy 51 (fixed 2026-07-25 from a /df zorder dump). A row is not one
+        -- ★ 65, NOT the legacy 51 (fixed 2026-07-25 from a /df debug zorder dump). A row is not one
         -- level thick: the anchor sits at +offset, Blizzard's container at +1, its buttons at
         -- +2, and DF's own slot art stacks ON the button — border +10, duration text +13,
         -- stack text +14. So ONE row occupies ~16 levels. At 51 the buff/debuff rows (40)
@@ -2196,9 +2313,13 @@ function DF:DriveDefensiveFactory(frame, db)
     -- plain anchor frame (GetFrame():SetShown), NOT h:SetShown -- the latter queues an enable
     -- op that would upgrade a queued retarget into a full rebuild (frame leak).
     if h:GetUnit() ~= frame.unit then
+        DF:Debug("AURAROW", "defensive: retarget %s -> %s%s",
+            tostring(h:GetUnit()), tostring(frame.unit),
+            InCombatLockdown() and " (in combat: row hidden until regen)" or "")
         h:SetUnit(frame.unit)
         frame.dfDefFactoryHidden = InCombatLockdown() or nil
     elseif frame.dfDefFactoryHidden and not InCombatLockdown() then
+        DF:Debug("AURAROW", "defensive: regen, unhiding row after deferred retarget")
         frame.dfDefFactoryHidden = nil
     end
     -- Show/hide only on state change (no per-event SetShown churn on the live tree —
@@ -2222,11 +2343,18 @@ function DF:DriveDefensiveFactory(frame, db)
         h:ApplyZOrder(cfg)
         local structSig, tuningSig = rowStructSig(cfg), rowTuningSig(cfg)
         if frame.defensiveFactoryStructSig ~= structSig then
+            -- "I changed a setting and nothing happened" is always answered by WHICH
+            -- SIG MOVED. Both are already computed, and this only runs when the
+            -- layout version bumped, so it is free at steady state.
+            DF:Debug("AURAROW", "defensive: REBUILD - struct sig %s -> %s",
+                tostring(frame.defensiveFactoryStructSig), tostring(structSig))
             frame.defensiveFactoryStructSig = structSig
             frame.defensiveFactoryTuningSig = tuningSig
             h:Rebuild(cfg)                      -- structural (filter set/regions/tooltips)
         else
             if frame.defensiveFactoryTuningSig ~= tuningSig then
+                DF:Debug("AURAROW", "defensive: TUNING - tuning sig %s -> %s (struct unchanged)",
+                    tostring(frame.defensiveFactoryTuningSig), tostring(tuningSig))
                 frame.defensiveFactoryTuningSig = tuningSig
                 h.config.filter = cfg.filter    -- group-identical records (see the buff driver)
                 h:ApplyTuning(cfg)              -- max/sort/candidateFilters — in place, no leak
@@ -2256,6 +2384,7 @@ local MISSING_BADGE_GAP  = 2
 function DF:UseFactoryForMissingBuff(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
         and not (DF.testMode or DF.raidTestMode)
+        and not DF:MemTestDisabled("enableMissingBuff")
 end
 
 -- GUI-facing predicate (does NOT exclude test mode — see FactoryOwnsBuffRow).
@@ -2404,7 +2533,7 @@ end
 
 -- pp: the badge subtree renders under the strip's SetScale — quantize the badge
 -- size in that scaled space so every cell window / badge edge lands on whole
--- physical pixels. Field-caught (/df ppdump): a raw size rendered the cell at
+-- physical pixels. Field-caught (/df debug ppdump): a raw size rendered the cell at
 -- 28.13 physical px — the right/top edges straddled the grid and the badge
 -- border drew visibly thicker on one side.
 local function missingBadgeSizeFor(db)
@@ -2539,6 +2668,11 @@ function DF:DriveMissingBuffFactory(frame, db)
         frame.dfMissingStripShown = nil
     end
     if not cells or frame.missingFactorySig ~= sig then
+        -- The one destructive edge in this row: every cell is destroyed and the set
+        -- rebuilt. Worth seeing, and it only fires when the tracked-buff set moves.
+        DF:Debug("AURAROW", "missing buff: REBUILD cells - sig %s -> %s (%s)",
+            tostring(frame.missingFactorySig), tostring(sig),
+            cells and "replacing existing" or "first build")
         if cells then
             for _, h in pairs(cells) do h:Destroy() end
         end
@@ -2673,8 +2807,14 @@ end
 function DF:UpdateAuras_Enhanced(frame)
     if not frame or not frame.unit then return end
 
-    -- PERF TEST: Skip if disabled
-    if DF.PerfTest and not DF.PerfTest.enableAuras then return end
+    -- ☠ PERF TEST: the enableAuras flag is folded into UseFactoryForBuffs /
+    -- UseFactoryForDebuffs, NOT early-returned here. On 12.1 the container is
+    -- Blizzard-driven: once built it renders and self-updates from the sealed
+    -- side, so skipping THIS function stops our decisions but not the auras.
+    -- Turning the flag off has to reach the "factory inactive -> hide the
+    -- container" path below, which is what actually takes them off the frame.
+    -- (This early-returned for the whole of v4/v5-alpha, which is why the
+    -- checkbox looked inert and freed no memory.)
 
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
@@ -3333,66 +3473,195 @@ if CompactUnitFrame_UpdateSelectionHighlight then
     end)
 end
 
--- Slash command
-DF:RegisterDebugSlash("DFAURAS", "Aura filtering / pipeline state dump", false, "/dfauras")
-SlashCmdList["DFAURAS"] = function(msg)
-    if msg == "hideparty" then
-    elseif msg == "hideparty" then
-        local db = DF:GetDB()
-        db.hideBlizzardPartyFrames = not db.hideBlizzardPartyFrames
-        DF:UpdateBlizzardFrameVisibility()
-        print("|cff00ff00DandersFrames:|r Blizzard party frames " .. (db.hideBlizzardPartyFrames and "hidden" or "visible"))
-    elseif msg == "hideraid" then
-        local raidDb = DF:GetRaidDB()
-        raidDb.hideBlizzardRaidFrames = not raidDb.hideBlizzardRaidFrames
-        DF:UpdateBlizzardFrameVisibility()
-        print("|cff00ff00DandersFrames:|r Blizzard raid frames " .. (raidDb.hideBlizzardRaidFrames and "hidden" or "visible"))
-    elseif msg == "hideblizz" or msg == "hide" then
-        -- Toggle both for convenience
-        local db = DF:GetDB()
-        local raidDb = DF:GetRaidDB()
-        local newState = not (db.hideBlizzardPartyFrames or raidDb.hideBlizzardRaidFrames)
-        db.hideBlizzardPartyFrames = newState
-        raidDb.hideBlizzardRaidFrames = newState
-        DF:UpdateBlizzardFrameVisibility()
-        print("|cff00ff00DandersFrames:|r Blizzard frames " .. (newState and "hidden" or "visible"))
-    elseif msg == "sidemenu" then
-        -- Debug: list potential side menu frames
-        print("|cff00ff00DandersFrames:|r Searching for side menu frames...")
-        local framesToCheck = {
-            "CompactPartyFrame",
-            "CompactPartyFrameTitle",
-            "CompactPartyFrameBorderFrame", 
-            "PartyFrame",
-            "CompactRaidFrameManager",
-            "CompactRaidFrameManagerDisplayFrame",
-            "CompactRaidFrameManagerContainerResizeFrame",
-        }
-        for _, name in ipairs(framesToCheck) do
-            local frame = _G[name]
-            if frame then
-                print("  Found: " .. name .. " (shown: " .. tostring(frame:IsShown()) .. ", alpha: " .. tostring(frame:GetAlpha()) .. ")")
-                -- List children
-                if frame.GetChildren then
-                    for i, child in ipairs({frame:GetChildren()}) do
-                        local childName = child:GetName() or ("unnamed_" .. i)
-                        if child:IsShown() then
-                            print("    Child: " .. childName .. " (alpha: " .. tostring(child:GetAlpha()) .. ")")
-                        end
-                    end
+-- ============================================================
+-- /dfauras — the aura pipeline dump
+--
+-- This is the command we ask a user to paste back when auras render wrong, so
+-- it is deliberately NON-DEV: a dump nobody can run on a release build is worth
+-- nothing. It reports what we actually handed the container, not what the GUI
+-- says, because the gap between those two is where aura bugs live.
+--
+-- It replaces a command that shared only the name: /dfauras used to toggle
+-- Blizzard frame visibility and list side-menu frames. Those toggles are fully
+-- exposed on the Visibility page, and frame-hunting is better served by
+-- /df debug attached and /df debug mousefoci.
+-- ============================================================
+
+-- Every AuraUtil.AuraFilters member DF can consult, and where (if anywhere) it
+-- is reachable from the GUI. The point of the "unexposed" column: the debuff row
+-- surfaces six category filters as toggles, the buff row surfaces NONE — its
+-- filter string is only ever HELPFUL or HELPFUL|PLAYER.
+local FILTER_CATALOGUE = {
+    { key = "Raid",              where = "debuff row (Raid toggle)" },
+    { key = "RaidInCombat",      where = "unexposed" },
+    { key = "Cancelable",        where = "unexposed" },
+    { key = "BigDefensive",      where = "defensive bar + buff dedup" },
+    { key = "ExternalDefensive", where = "unexposed" },
+    { key = "Important",         where = "unexposed" },
+    { key = "CrowdControl",      where = "debuff row (Crowd Control toggle)" },
+    { key = "Dispellable",       where = "debuff row (Dispellable, ANY mode)" },
+}
+
+-- Takes the CALLER'S writer rather than opening its own, so one command still
+-- prints one header. Same shape as DF:DumpFlatLayoutState(o).
+local function pr(o, fmt, ...)
+    o:Line(select("#", ...) > 0 and format(fmt, ...) or fmt)
+end
+
+-- Render one container handle's live config. `h.config.filter` is the same
+-- value normalizeFilters() consumes, so this prints the groups Blizzard is
+-- actually being asked to build.
+local function dumpRow(o, label, h)
+    if not h then
+        o:Section(label)
+        o:Line("not built", "NEUTRAL")
+        return
+    end
+    -- Report an unexpected shape instead of erroring on it. Not defensive
+    -- padding: frame.missingFactory looks like the other three by name but is a
+    -- MAP of handles, and calling GetUnit on it threw. A dump that dies halfway
+    -- is worse than useless — it hides the rows it had not reached yet.
+    if type(h) ~= "table" or type(h.GetUnit) ~= "function" then
+        o:Section(label)
+        -- A handle of the wrong shape IS a fault: something built the row wrong.
+        o:Line(format("present but not a container handle (%s)", type(h)), "BAD")
+        return
+    end
+    local cfg = h.config or {}
+    -- config.sort is { method = <enum member NAME>, direction? } — names, not
+    -- enum values, so this prints what we asked for even if the build renamed it.
+    local sort = cfg.sort
+    o:Section(label)
+    o:Line(format("unit=%s shown=%s max=%s sort=%s/%s",
+        tostring(h:GetUnit()),
+        tostring(h:GetFrame() and h:GetFrame():IsShown()),
+        tostring(cfg.max),
+        tostring(sort and sort.method or "default"),
+        tostring(sort and sort.direction or "Normal")))
+
+    local filter = cfg.filter
+    if type(filter) == "string" then
+        pr(o, "group 1: %s", filter)
+        return
+    elseif type(filter) ~= "table" then
+        pr(o, "filter: %s (unexpected type)", tostring(filter))
+        return
+    end
+
+    for i, f in ipairs(filter) do
+        local str, key, cf
+        if type(f) == "string" then str = f
+        elseif type(f) == "table" then str, key, cf = f.filter, f.key, f.candidateFilters end
+        pr(o, "group %d%s: %s", i, key and (" [" .. tostring(key) .. "]") or "", tostring(str))
+        if cf then
+            for _, ck in ipairs({ "isBossAura", "isRoleAura", "isBossOrRoleAura", "isPriorityAura",
+                                  "isStealable", "canApplyAura", "isFromPlayerOrPlayerPet", "maxDuration" }) do
+                if cf[ck] ~= nil then pr(o, "    %s = %s", ck, tostring(cf[ck])) end
+            end
+            for _, mk in ipairs({ "includeSpellIDs", "excludeSpellIDs", "includeDispelTypes", "excludeDispelTypes" }) do
+                local m = cf[mk]
+                if m then
+                    local n = 0
+                    for _ in pairs(m) do n = n + 1 end
+                    pr(o, "    %s = %d entr%s", mk, n, n == 1 and "y" or "ies")
                 end
             end
         end
-        -- Also check for any visible frame with "party" in name at UIParent level
-        print("  Checking UIParent children for party-related frames...")
-        for i, child in ipairs({UIParent:GetChildren()}) do
-            local name = child:GetName()
-            if name and (name:lower():find("party") or name:lower():find("compact")) and child:IsShown() then
-                print("    UIParent child: " .. name .. " (alpha: " .. tostring(child:GetAlpha()) .. ")")
+    end
+end
+
+DF:RegisterDebugSlash("DFAURAS", "Aura pipeline dump — filters, groups, dedup (add a unit token)", false, "/dfauras")
+SlashCmdList["DFAURAS"] = function(msg)
+    local unit = (msg or ""):lower():trim()
+    if unit == "" then unit = "player" end
+
+    -- DF:Out, not DF:Say. Say deliberately prints no separator rule because it is
+    -- for one-liners; a multi-section dump wearing a one-liner header is the
+    -- failure this whole sweep is meant to remove.
+    local o = DF:Out("Aura Pipeline", "unit " .. unit)
+
+    -- Capability gate first: on a build without the container widgets every row
+    -- below is legitimately absent, and that is the answer, not a symptom.
+    local AC = DF.AuraContainer
+    o:Section("Container")
+    o:Line(format("supported=%s spellFilter=%s sort=%s  (toc %s)",
+        tostring(AC and AC.IsSupported and AC.IsSupported()),
+        tostring(AC and AC.HasSpellFilter and AC.HasSpellFilter()),
+        tostring(AC and AC.HasSort and AC.HasSort()),
+        tostring(select(4, GetBuildInfo()))))
+
+    -- Find the frame driving this unit.
+    local target
+    if DF.IterateAllFrames then
+        DF:IterateAllFrames(function(f)
+            if not target and f.unit == unit then target = f end
+        end)
+    end
+    if not target then
+        local o = DF:Out("Aura Pipeline", "unit " .. unit)
+        -- IterateAllFrames covers party/raid/arena, not pets or pinned sets.
+        o:Line("No DF party/raid/arena frame is currently driving that unit.", "WARN")
+        o:Line("Try player, party1..4 or raid1..40, and make sure the frames are shown.", "NEUTRAL")
+        o:Siblings("auras")
+        return
+    end
+
+    -- GetFrameDB resolves raid vs party AND the pinned effective-DB override, so
+    -- this is the same table the drive functions read — not a mode guess.
+    local db = DF:GetFrameDB(target)
+    dumpRow(o, "Buff row",      target.buffFactory)
+    dumpRow(o, "Debuff row",    target.debuffFactory)
+    dumpRow(o, "Defensive bar", target.defensiveFactory)
+    -- Missing buff is NOT one container. frame.missingFactory is a map of
+    -- spell key -> handle, one cell per tracked buff (see DriveMissingBuffFactory),
+    -- so it gets its own walk rather than being treated as a single row.
+    local cells = target.missingFactory
+    if type(cells) ~= "table" then
+        o:Section("Missing buff")
+        o:Line("not built", "NEUTRAL")
+    else
+        -- Keep the ORIGINAL keys for the lookup — they can be numeric spell IDs,
+        -- and a tostring'd copy would index the map to nil.
+        local keys = {}
+        for k in pairs(cells) do keys[#keys + 1] = k end
+        if #keys == 0 then
+            o:Section("Missing buff")
+            o:Line("built, no cells", "NEUTRAL")
+        else
+            table.sort(keys, function(a, b) return tostring(a) < tostring(b) end)
+            o:Section("Missing buff", #keys .. " cell(s)")
+            for _, k in ipairs(keys) do
+                dumpRow(o, "cell " .. tostring(k), cells[k])
             end
         end
-    else
-        print("|cff00ff00DandersFrames:|r /dfauras hideparty | hideraid | hide | check")
     end
+
+    -- Dedup state: which categories the Aura Designer has claimed, and whether
+    -- the row is honouring the claim. "Show All + claims" is the common report.
+    o:Section("Dedup")
+    pr(o, "buff  -> defensive bar: %s", tostring(db and db.buffDeduplicateDefensives))
+    pr(o, "debuff -> AD groups:    %s", tostring(db and db.debuffDeduplicateDesigner ~= false))
+    if DF.GetClaimedDebuffCategories and db then
+        local claimed = DF:GetClaimedDebuffCategories(target, db)
+        if claimed and next(claimed) then
+            local keys = {}
+            for k, v in pairs(claimed) do if v then keys[#keys + 1] = k end end
+            table.sort(keys)
+            pr(o, "AD claims: %s", table.concat(keys, ", "))
+        else
+            pr(o, "AD claims: none")
+        end
+    end
+    pr(o, "debuff mode: %s", (db and db.directDebuffShowAll) and "SHOW ALL" or "categories")
+
+    -- Blizzard's category filters on this build, and what we do with them.
+    o:Section("Blizzard filter catalogue")
+    for _, e in ipairs(FILTER_CATALOGUE) do
+        local tok = AuraFilters and AuraFilters[e.key]
+        pr(o, "%-18s %s  %s", e.key, tok and "present" or "ABSENT ", e.where)
+    end
+    pr(o, "(the buff row exposes none of these — its string is only HELPFUL or HELPFUL|PLAYER)")
+
+    o:Siblings("auras")
 end
 

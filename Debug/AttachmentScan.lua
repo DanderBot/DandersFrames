@@ -7,7 +7,7 @@ local addonName, DF = ...
 -- features apart from castbars / cooldowns / auras that another
 -- addon has attached to our frames.
 --
--- Read-only and run on demand via `/df attached`. WoW has no
+-- Read-only and run on demand via `/df debug attached`. WoW has no
 -- "frame -> owning addon" API, so addon attribution is a best-effort
 -- name heuristic; unknown frames are reported with their type and
 -- attach method so the user can investigate.
@@ -295,10 +295,11 @@ function DF:ScanFrameAttachments()
         f = EnumerateFrames(f)
     end
 
-    print(format("|cff00ff00DandersFrames:|r foreign-attachment scan — %d frames scanned", scanned))
+    local o = DF:Out("Attachment Scan", format("%d frames scanned", scanned))
     if total == 0 then
-        print("  No other addons appear to be attached to DandersFrames unit frames.")
-        print("  (Note: a foreign frame re-parented onto ours with no name can't be detected.)")
+        -- Nothing attached is the DESIRABLE result here, so it reads GOOD.
+        o:Line("No other addons appear to be attached to DandersFrames unit frames.", "GOOD")
+        o:Line("A foreign frame re-parented onto ours with no name cannot be detected.", "NEUTRAL")
         return
     end
 
@@ -307,19 +308,21 @@ function DF:ScanFrameAttachments()
     tsort(labels)
 
     for _, label in ipairs(labels) do
-        print("|cffffd100" .. label .. ":|r")
+        o:Section(label, #results[label])
         for _, e in ipairs(results[label]) do
             local who
             if e.addon and e.curated then
                 who = e.addon                       -- confident, from curated list
             elseif e.addon then
-                who = e.addon .. "|cffaaaaaa?|r"     -- guessed from frame name
+                who = e.addon .. "?"                -- guessed from frame name
             else
-                who = "|cffaaaaaaunknown addon|r"
+                who = "unknown addon"
             end
             local nm = e.name or "<anonymous>"
-            print(format("    %s  —  %s [%s, %s]", who, nm, e.otype, e.kind))
+            o:Item(who, format("%s [%s, %s]", nm, e.otype, e.kind))
         end
     end
-    print(format("  %d attachment(s) found across %d frame(s).", total, #labels))
+    -- A foreign attachment is a FINDING, not a fault: usually a deliberate setup
+    -- by another addon. WARN so it stands out without accusing anyone.
+    o:Line(format("%d attachment(s) found across %d frame(s).", total, #labels), "WARN")
 end

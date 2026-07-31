@@ -418,7 +418,7 @@ end
 -- Enum.AuraDispelType values. Feature-detected: returns nil (caller keeps the
 -- game/native colour) when C_CurveUtil / the enum is absent. Cached on
 -- DF.debuffBorderCurve; DF:InvalidateDispelColorCurve() nils it on any change.
--- ⚠ The Enum.AuraDispelType field set needs an in-game confirm (/df dispelids).
+-- ⚠ The Enum.AuraDispelType field set needs an in-game confirm (/df debug dispelids).
 -- Name-keyed colour map for SetAuraBorder's customDispelColorMap: Blizzard indexes
 -- auraData.dispelName ("Magic"/"Curse"/... ; "" when the aura has no dispel type)
 -- straight into this table private-side, with map[""] as the no-type fallback —
@@ -493,6 +493,48 @@ function DF:GetGameDispelPalette()
     }
     if getC then DF._gameDispelPalette = pal end   -- don't cache a pre-AuraUtil fallback
     return pal
+end
+
+-- The dispel-type LETTERS ("Ma", "Po", …), read from the client's own localised
+-- globals so they match what WoW itself would draw, in every language.
+--
+-- ☠ WHY THIS EXISTS: Blizzard only draws these when the player's `colorblindMode`
+-- CVar is on — `AuraUtil.SetAuraSymbol` is the sole place that CVar is read, and it
+-- Hide()s the fontstring otherwise. But `SetDispelTypeText` takes a
+-- `customDispelTextMap`, and when a key resolves, `ApplyDispelTypeText` does
+-- SetText()+Show() DIRECTLY and never reaches SetAuraSymbol. Feeding it the same
+-- letters the game would have used therefore changes nothing visually while
+-- removing the CVar dependency entirely — and we never write the CVar itself
+-- (it is a global accessibility setting; not ours to touch).
+--
+-- Map key is `auraData.dispelName or "None"` (Blizzard_CustomAuraButton
+-- GetDispelTypeMapKey). ⚠ The generated API doc claims an EMPTY key covers auras
+-- with no dispel type — the code says otherwise; trust the code. In practice
+-- "None" is unreachable for us anyway: ShouldShowDispelTypeForAura rejects a nil
+-- dispelName before the text path unless `showWithoutDispelType` is passed.
+--
+-- Per-key fallthrough: a missing key falls back to the CVar-gated path for THAT
+-- type only, so the fallbacks below matter — a nil global must not silently
+-- reintroduce the gate.
+local DISPEL_TEXT_FALLBACK = {
+    Magic = "Ma", Curse = "Cu", Disease = "Di", Poison = "Po", Bleed = "Bl",
+}
+
+function DF:GetGameDispelTextMap()
+    if DF._gameDispelTextMap then return DF._gameDispelTextMap end
+    local map, sawGlobal = {}, false
+    for typeName, fb in pairs(DISPEL_TEXT_FALLBACK) do
+        local s = _G["DEBUFF_SYMBOL_" .. typeName:upper()]
+        if type(s) == "string" and s ~= "" then
+            map[typeName], sawGlobal = s, true
+        else
+            map[typeName] = fb
+        end
+    end
+    -- Only cache once the client's strings were actually available; a pre-load
+    -- read would otherwise freeze the fallbacks in for the session.
+    if sawGlobal then DF._gameDispelTextMap = map end
+    return map
 end
 
 function DF:GetDispelColorMap()
@@ -675,6 +717,10 @@ local function ensureSharedAnimDriver()
     if sharedAnimDriver then return sharedAnimDriver end
     sharedAnimDriver = CreateFrame("Frame", nil, UIParent)
     sharedAnimDriver:SetScript("OnUpdate", function(_, dt)
+        -- MEMORY TEST (enableAnimations): one check for every animated border in
+        -- the game, since they all ride this single driver. Borders keep their
+        -- registry entry and resume mid-phase when the flag comes back on.
+        if DF:MemTestDisabled("enableAnimations") then return end
         for border, e in pairs(animRegistry) do
             if border._secretRect or border:IsShown() then
                 e.elapsed = e.elapsed + dt

@@ -698,7 +698,8 @@ function DF:UpdatePetFrame(frame)
     -- Update visibility and data
     local unitExists = UnitExists(frame.unit)
     local ownerDead = UnitIsDeadOrGhost(ownerUnit)
-    if unitExists and not ownerDead then
+    local shouldShow = unitExists and not ownerDead
+    if shouldShow then
         -- Apply visual styling
         DF:ApplyPetFrameStyle(frame)
         -- Update health and name
@@ -706,10 +707,17 @@ function DF:UpdatePetFrame(frame)
         DF:UpdatePetName(frame)
         DF:UpdatePetPower(frame)
         DF:SetPetFrameVisible(frame, true)
-        DF:Debug("PET", "UpdatePetFrame: %s VISIBLE (unitExists=%s ownerDead=%s)", frame.unit, tostring(unitExists), tostring(ownerDead))
     else
         DF:SetPetFrameVisible(frame, false)
-        DF:Debug("PET", "UpdatePetFrame: %s HIDDEN (unitExists=%s ownerDead=%s)", frame.unit, tostring(unitExists), tostring(ownerDead))
+    end
+
+    -- Edge-triggered: both arms used to log unconditionally, so every pet frame
+    -- reported its visibility on every roster/pet event whether or not it moved.
+    if frame.dfLastPetVisible ~= shouldShow then
+        frame.dfLastPetVisible = shouldShow
+        DF:Debug("PET", "UpdatePetFrame: %s %s (unitExists=%s ownerDead=%s)",
+            tostring(frame.unit), shouldShow and "VISIBLE" or "HIDDEN",
+            tostring(unitExists), tostring(ownerDead))
     end
 end
 
@@ -765,8 +773,8 @@ function DF:UpdatePetFrameTestMode(frame)
     if frame.healthText then
         local db = DF:GetFrameDB(frame)
         if db.petShowHealthText and not hideLegacyText then
-            local maxHealth = 50000
-            local currentHealth = math.floor(maxHealth * healthPercent)
+            -- (Removed) a hardcoded `maxHealth = 50000` and the currentHealth it fed.
+            -- Nothing consumed either — pet health text is a percentage.
             frame.healthText:SetText(string.format("%d%%", math.floor(healthPercent * 100)))
             frame.healthText:Show()
         else

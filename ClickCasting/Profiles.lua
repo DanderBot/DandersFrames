@@ -316,7 +316,7 @@ function CC:SetActiveProfile(profileName)
     if InCombatLockdown() then
         -- Queue the switch for after combat
         self:Defer("profileSwitch", profileName)
-        print("|cffff9900DandersFrames:|r Profile switch to '" .. profileName .. "' queued (in combat)")
+        DF:Say("Profile switch to '" .. profileName .. "' queued (in combat)")
         return false
     end
     
@@ -324,7 +324,7 @@ function CC:SetActiveProfile(profileName)
     
     -- Check profile exists
     if not classData.profiles[profileName] then
-        print("|cffff0000DandersFrames:|r Profile '" .. profileName .. "' does not exist")
+        DF:Err("Profile '" .. profileName .. "' does not exist")
         return false
     end
     
@@ -360,7 +360,7 @@ function CC:SetActiveProfile(profileName)
     end
 
     if oldProfile ~= profileName then
-        print("|cff33cc33DandersFrames:|r Switched to profile: " .. profileName)
+        DF:Say("Switched to profile: " .. profileName)
     end
 
     return true
@@ -371,7 +371,7 @@ function CC:CreateProfile(profileName, copyFrom)
     local classData = self:GetClassData()
     
     if classData.profiles[profileName] then
-        print("|cffff0000DandersFrames:|r Profile '" .. profileName .. "' already exists")
+        DF:Err("Profile '" .. profileName .. "' already exists")
         return false
     end
     
@@ -381,7 +381,7 @@ function CC:CreateProfile(profileName, copyFrom)
         classData.profiles[profileName] = self:CreateEmptyProfile()
     end
     
-    print("|cff33cc33DandersFrames:|r Created profile: " .. profileName)
+    DF:Say("Created profile: " .. profileName)
     return true
 end
 
@@ -392,12 +392,12 @@ function CC:DeleteProfile(profileName)
     
     -- Cannot delete the default profile (check both old and new naming)
     if profileName == defaultName or profileName == "Default" then
-        print("|cffff0000DandersFrames:|r Cannot delete the default profile")
+        DF:Err("Cannot delete the default profile")
         return false
     end
     
     if not classData.profiles[profileName] then
-        print("|cffff0000DandersFrames:|r Profile '" .. profileName .. "' does not exist")
+        DF:Err("Profile '" .. profileName .. "' does not exist")
         return false
     end
     
@@ -417,7 +417,7 @@ function CC:DeleteProfile(profileName)
     end
     
     classData.profiles[profileName] = nil
-    print("|cff33cc33DandersFrames:|r Deleted profile: " .. profileName)
+    DF:Say("Deleted profile: " .. profileName)
     return true
 end
 
@@ -428,17 +428,17 @@ function CC:RenameProfile(oldName, newName)
     
     -- Cannot rename the default profile (check both old and new naming)
     if oldName == defaultName or oldName == "Default" then
-        print("|cffff0000DandersFrames:|r Cannot rename the default profile")
+        DF:Err("Cannot rename the default profile")
         return false
     end
     
     if not classData.profiles[oldName] then
-        print("|cffff0000DandersFrames:|r Profile '" .. oldName .. "' does not exist")
+        DF:Err("Profile '" .. oldName .. "' does not exist")
         return false
     end
     
     if classData.profiles[newName] then
-        print("|cffff0000DandersFrames:|r Profile '" .. newName .. "' already exists")
+        DF:Err("Profile '" .. newName .. "' already exists")
         return false
     end
     
@@ -460,7 +460,7 @@ function CC:RenameProfile(oldName, newName)
         end
     end
     
-    print("|cff33cc33DandersFrames:|r Renamed profile: " .. oldName .. " → " .. newName)
+    DF:Say("Renamed profile: " .. oldName .. " → " .. newName)
     return true
 end
 
@@ -538,7 +538,7 @@ function CC:CheckLoadoutProfileSwitch()
             self:ApplyBindings()
             self:RefreshClickCastingUI()
             local source = isSpecific and "loadout: " .. loadoutName or "spec default"
-            print("|cff33cc33DandersFrames:|r Switched to profile: " .. assignedProfile .. " (" .. source .. ")")
+            DF:Say("Switched to profile: " .. assignedProfile .. " (" .. source .. ")")
         end
     elseif not assignedProfile and loadoutID > 0 then
         -- No profile assigned to this loadout or spec at all
@@ -583,7 +583,7 @@ end
 -- Show notification that a profile was auto-created
 function CC:ShowProfileCreatedNotification(profileName)
     -- Simple print for now - could be a fancy toast later
-    print("|cff33cc33DandersFrames:|r Auto-created profile: |cffffffff" .. profileName .. "|r")
+    DF:Say("Auto-created profile: |cffffffff" .. profileName .. "|r")
     print("|cff888888Your bindings were copied to this new profile. You can customize it in the Profiles tab.|r")
 end
 
@@ -748,7 +748,7 @@ function CC:ExportProfile()
     local profile, profileName = self:GetActiveProfile()
     
     if not profile then
-        print("|cffff0000DandersFrames:|r No profile to export")
+        DF:Err("No profile to export")
         return nil
     end
     
@@ -762,7 +762,7 @@ function CC:ExportProfile()
     
     local encoded, err = SerializeTable(exportData)
     if not encoded or encoded == "" then
-        print("|cffff0000DandersFrames:|r Export failed: " .. (err or "unknown error"))
+        DF:Err("Export failed: " .. (err or "unknown error"))
         return nil
     end
     

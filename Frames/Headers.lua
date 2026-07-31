@@ -1,5 +1,12 @@
 local addonName, DF = ...
 
+-- Header tracing, routed to the debug console's HEADERS category. This was 68
+-- inline `if DF.debugHeaders then print(...) end` guards behind a chat-only
+-- toggle; funnelling them through one printer makes the console the single
+-- place to turn header logging on or off, and puts the output in the copyable
+-- log instead of the chat frame.
+local headerDebug = DF:MakeDebugPrinter("HEADERS")
+
 -- ============================================================
 -- SECURE GROUP HEADER MANAGEMENT
 -- Manages SecureGroupHeaderTemplate for party/raid frames
@@ -497,38 +504,38 @@ SlashCmdList["DFROSTER"] = function(msg)
         wipe(DF.RosterDebug.events)
         DF.RosterDebug.startTime = GetTime()
         DF.RosterDebug.enabled = true
-        print("|cff00ff00[DF Roster Debug]|r Started monitoring. Join/leave groups, then type /dfroster again to see results.")
+        DF:Say("Started monitoring. Join/leave groups, then type /dfroster again to see results.")
     else
         -- Stop and report
         DF.RosterDebug.enabled = false
         local elapsed = GetTime() - DF.RosterDebug.startTime
-        print("|cff00ff00[DF Roster Debug]|r Results after " .. string.format("%.1f", elapsed) .. " seconds:")
-        
-        -- Sort and print events
-        print("|cffffcc00Events:|r")
+        local o = DF:Out("Roster", string.format("results after %.1fs", elapsed))
+
         local eventList = {}
         for event, count in pairs(DF.RosterDebug.events) do
             table.insert(eventList, {name = event, count = count})
         end
         table.sort(eventList, function(a, b) return a.count > b.count end)
+        o:Section("Events", #eventList)
         for _, item in ipairs(eventList) do
-            print("  " .. item.name .. ": " .. item.count)
+            o:Field(item.name, item.count)
         end
-        
-        -- Sort and print function calls
-        print("|cffffcc00Function Calls:|r")
+
         local funcList = {}
         for func, count in pairs(DF.RosterDebug.counts) do
             table.insert(funcList, {name = func, count = count})
         end
         table.sort(funcList, function(a, b) return a.count > b.count end)
+        o:Section("Function calls", #funcList)
         for _, item in ipairs(funcList) do
-            local color = item.count > 50 and "|cffff0000" or (item.count > 10 and "|cffffff00" or "|cff00ff00")
-            print("  " .. color .. item.name .. ": " .. item.count .. "|r")
+            -- Status here is a CALL-RATE judgement, not a datatype: a handler firing
+            -- 50+ times for one roster change is exactly what this probe hunts.
+            o:Field(item.name, item.count,
+                item.count > 50 and "bad" or (item.count > 10 and "warn" or "good"))
         end
-        
+
         if #eventList == 0 and #funcList == 0 then
-            print("  (no activity recorded)")
+            o:Line("no activity recorded", "neutral")
         end
     end
 end
@@ -990,8 +997,8 @@ function DF:InitializeHeaderChild(frame)
     end)
     
     -- Debug output
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Initialized child frame:", frame:GetName(), "Size:", frameWidth, "x", frameHeight)
+    if DF:DebugActive("HEADERS") then
+        headerDebug("Initialized child frame:", frame:GetName(), "Size:", frameWidth, "x", frameHeight)
     end
 end
 
@@ -1008,8 +1015,8 @@ function DF:CreateContainers()
     -- Parent to existing DF.container so mover works automatically
     if not DF.partyContainer then
         local parent = DF.container or UIParent
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r Creating partyContainer, parent:", parent:GetName() or "UIParent")
+        if DF:DebugActive("HEADERS") then
+            headerDebug("Creating partyContainer, parent:", parent:GetName() or "UIParent")
         end
         
         -- CRITICAL: Ensure parent container is shown!
@@ -1113,14 +1120,16 @@ function DF:CreatePartyHeader()
     DF.partyHeader:Show()
     DF.partyHeader:SetAttribute("startingIndex", 1)   -- Reset to normal operation
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Created party header (includes player)")
+    if DF:DebugActive("HEADERS") then
+        headerDebug("Created party header (includes player)")
         -- List created children
         C_Timer.After(0.1, function()
             for i = 1, 10 do
                 local child = DF.partyHeader:GetAttribute("child" .. i)
                 if child then
-                    print("|cFF00FF00[DF Headers]|r   Child " .. i .. ":", child:GetName())
+                    if DF:DebugActive("HEADERS") then
+                        headerDebug("  Child " .. i .. ":", child:GetName())
+                    end
                 end
             end
         end)
@@ -1194,13 +1203,15 @@ function DF:CreateArenaHeader()
     DF.arenaHeader:SetAttribute("startingIndex", 1)   -- Reset to normal operation
     DF.arenaHeader:Hide()  -- Start hidden, only show when in arena
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Created arena header (raid units 1-5)")
+    if DF:DebugActive("HEADERS") then
+        headerDebug("Created arena header (raid units 1-5)")
         C_Timer.After(0.1, function()
             for i = 1, 10 do
                 local child = DF.arenaHeader:GetAttribute("child" .. i)
                 if child then
-                    print("|cFF00FF00[DF Headers]|r   Arena Child " .. i .. ":", child:GetName())
+                    if DF:DebugActive("HEADERS") then
+                        headerDebug("  Arena Child " .. i .. ":", child:GetName())
+                    end
                 end
             end
         end)
@@ -1256,7 +1267,7 @@ function DF:CreateRaidHeaders()
         end
         
         -- Debug: count frames after delay
-        if DF.debugHeaders then
+        if DF:DebugActive("HEADERS") then
             local flatCount = 0
             if DF.FlatRaidFrames and DF.FlatRaidFrames.header then
                 for i = 1, 40 do
@@ -1265,7 +1276,7 @@ function DF:CreateRaidHeaders()
                     end
                 end
             end
-            print("|cFF00FF00[DF Headers]|r FlatRaidFrames header children after delay:", flatCount)
+            headerDebug("FlatRaidFrames header children after delay:", flatCount)
             
             -- Count separated
             if DF.raidSeparatedHeaders then
@@ -1279,7 +1290,7 @@ function DF:CreateRaidHeaders()
                             end
                         end
                         if count > 0 then
-                            print("|cFF00FF00[DF Headers]|r   Group " .. g .. " header children:", count)
+                            DF:Debug("HEADERS", "  Group %s header children: %s", g, count)
                         end
                     end
                 end
@@ -1311,139 +1322,122 @@ end
 function DF:CreateRaidCombinedHeader()
     -- Legacy flat raid system has been removed
     -- All flat layouts now use FlatRaidFrames module
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r CreateRaidCombinedHeader: Legacy system removed, using FlatRaidFrames")
-    end
+    headerDebug("CreateRaidCombinedHeader: Legacy system removed, using FlatRaidFrames")
 end
 
--- Debug hooks for tracking what moves the container/header
+-- Call-stack hooks for tracking what moves/resizes the raid container and the
+-- flat header. The routine FLATRAID trace covers our own writes; these hooks
+-- catch writes from ANYWHERE — Blizzard's SecureGroupHeader_Update, or another
+-- addon — which is the only way to find a third party fighting us for position.
+--
+-- hooksecurefunc cannot be undone, so this stays opt-in behind a slash command
+-- rather than riding the console category toggle. Output goes to the console
+-- under FLATRAID so it can be copied out with the rest of the trace.
 function DF:InstallFlatLayoutDebugHooks()
-    if not DF.debugFlatLayout then return end
-    if DF.flatLayoutDebugHooksInstalled then return end
-    
-    print("|cFFFF00FF[DF Flat Debug]|r Installing debug hooks...")
-    
-    -- Hook raidContainer
-    if DF.raidContainer then
-        hooksecurefunc(DF.raidContainer, "SetSize", function(self, w, h)
-            print("|cFFFF00FF[DF Flat Debug]|r raidContainer:SetSize(" .. tostring(w) .. ", " .. tostring(h) .. ")")
-            print("  Stack: " .. (debugstack(2, 20, 0) or "unknown"))
-        end)
-        
-        hooksecurefunc(DF.raidContainer, "SetPoint", function(self, point, ...)
-            print("|cFFFF00FF[DF Flat Debug]|r raidContainer:SetPoint(" .. tostring(point) .. ", ...)")
-            print("  Stack: " .. (debugstack(2, 20, 0) or "unknown"))
-        end)
-        
-        hooksecurefunc(DF.raidContainer, "ClearAllPoints", function(self)
-            print("|cFFFF00FF[DF Flat Debug]|r raidContainer:ClearAllPoints()")
-            print("  Stack: " .. (debugstack(2, 20, 0) or "unknown"))
-        end)
-    end
-    
-    -- Hook FlatRaidFrames header
-    if DF.FlatRaidFrames and DF.FlatRaidFrames.header then
-        local header = DF.FlatRaidFrames.header
-        hooksecurefunc(header, "SetSize", function(self, w, h)
-            print("|cFFFF00FF[DF Flat Debug]|r FlatRaidFrames.header:SetSize(" .. tostring(w) .. ", " .. tostring(h) .. ")")
-            print("  Stack: " .. (debugstack(2, 20, 0) or "unknown"))
-        end)
-        
-        hooksecurefunc(header, "SetPoint", function(self, point, ...)
-            print("|cFFFF00FF[DF Flat Debug]|r FlatRaidFrames.header:SetPoint(" .. tostring(point) .. ", ...)")
-            print("  Stack: " .. (debugstack(2, 20, 0) or "unknown"))
-        end)
-        
-        hooksecurefunc(header, "ClearAllPoints", function(self)
-            print("|cFFFF00FF[DF Flat Debug]|r FlatRaidFrames.header:ClearAllPoints()")
-            print("  Stack: " .. (debugstack(2, 20, 0) or "unknown"))
-        end)
-        
-        hooksecurefunc(header, "SetWidth", function(self, w)
-            print("|cFFFF00FF[DF Flat Debug]|r FlatRaidFrames.header:SetWidth(" .. tostring(w) .. ")")
-            print("  Stack: " .. (debugstack(2, 20, 0) or "unknown"))
-        end)
-        
-        hooksecurefunc(header, "SetHeight", function(self, h)
-            print("|cFFFF00FF[DF Flat Debug]|r FlatRaidFrames.header:SetHeight(" .. tostring(h) .. ")")
-            print("  Stack: " .. (debugstack(2, 20, 0) or "unknown"))
-        end)
-    end
-    
-    DF.flatLayoutDebugHooksInstalled = true
-    print("|cFFFF00FF[DF Flat Debug]|r Debug hooks installed!")
-end
+    -- ☠ LATCH PER SURFACE, NOT ONCE FOR THE WHOLE FUNCTION.
+    -- The two blocks below each depend on a frame that may not exist yet. A single
+    -- flag set unconditionally at the end meant running this before the raid container
+    -- or flat header was created marked the tool "armed" with ZERO hooks installed —
+    -- and the early-out then fired forever, so every later attempt answered "already
+    -- armed. Reload to remove them." while tracing nothing, and the caller's "nothing
+    -- to hook" branch became unreachable.
+    --
+    -- One flag per surface fixes both halves: a surface that did not exist yet can be
+    -- picked up by a later run, and a surface already hooked is never double-hooked
+    -- (hooksecurefunc cannot be undone, so a repeat would print every write twice).
+    DF._flatDbgHooked = DF._flatDbgHooked or {}
+    local hooked = DF._flatDbgHooked
 
--- Slash command to toggle flat layout debug
-DF:RegisterDebugSlash("DFFLATDEBUG", "Flat raid verbose event logging", true, "/dfflatdebug")
-SlashCmdList["DFFLATDEBUG"] = function()
-    DF.debugFlatLayout = not DF.debugFlatLayout
-    print("|cFFFF00FF[DF Flat Debug]|r Debug mode:", DF.debugFlatLayout and "ON" or "OFF")
-    
-    if DF.debugFlatLayout and not DF.flatLayoutDebugHooksInstalled then
-        DF:InstallFlatLayoutDebugHooks()
-    end
-    
-    if DF.debugFlatLayout then
-        DF:DumpFlatLayoutState()
-    end
-end
-
--- New slash command to dump state without toggling debug
-DF:RegisterDebugSlash("DFFLATSTATE", "Flat raid frames state dump", false, "/dfflatstate")
-SlashCmdList["DFFLATSTATE"] = function()
-    DF:DumpFlatLayoutState()
-end
-
--- Comprehensive state dump function
-function DF:DumpFlatLayoutState()
-    print("|cFFFF00FF[DF Flat Debug]|r ============ CURRENT STATE ============")
-    
-    -- FlatRaidFrames status
-    print("|cFFFF00FF[DF Flat Debug]|r FlatRaidFrames Module:")
-    if DF.FlatRaidFrames then
-        print("  initialized:", tostring(DF.FlatRaidFrames.initialized))
-        print("  header:", DF.FlatRaidFrames.header and "EXISTS" or "nil")
-        print("  innerContainer:", DF.FlatRaidFrames.innerContainer and "EXISTS" or "nil")
-        if DF.FlatRaidFrames.header then
-            local header = DF.FlatRaidFrames.header
-            print("  header shown:", header:IsShown())
-            local childCount = 0
-            for i = 1, 40 do
-                if header:GetAttribute("child" .. i) then childCount = childCount + 1 end
-            end
-            print("  child frames:", childCount)
+    local function traceWrite(label)
+        return function(_, a, b)
+            if not DF:DebugActive("FLATRAID") then return end
+            DF:Debug("FLATRAID", "HOOK %s(%s%s) from\n%s", label, tostring(a),
+                b ~= nil and (", " .. tostring(b)) or "", debugstack(2, 20, 0) or "unknown")
         end
-    else
-        print("  NOT LOADED")
     end
-    print("")
-    
+
+    local added = 0
+
+    if DF.raidContainer and not hooked.container then
+        hooksecurefunc(DF.raidContainer, "SetSize", traceWrite("raidContainer:SetSize"))
+        hooksecurefunc(DF.raidContainer, "SetPoint", traceWrite("raidContainer:SetPoint"))
+        hooksecurefunc(DF.raidContainer, "ClearAllPoints", traceWrite("raidContainer:ClearAllPoints"))
+        hooked.container = true
+        added = added + 1
+    end
+
+    if DF.FlatRaidFrames and DF.FlatRaidFrames.header and not hooked.header then
+        local header = DF.FlatRaidFrames.header
+        hooksecurefunc(header, "SetSize", traceWrite("header:SetSize"))
+        hooksecurefunc(header, "SetPoint", traceWrite("header:SetPoint"))
+        hooksecurefunc(header, "ClearAllPoints", traceWrite("header:ClearAllPoints"))
+        hooksecurefunc(header, "SetWidth", traceWrite("header:SetWidth"))
+        hooksecurefunc(header, "SetHeight", traceWrite("header:SetHeight"))
+        hooked.header = true
+        added = added + 1
+    end
+
+    -- Reflects reality rather than "this ran": true once ANY surface is traced.
+    DF.flatLayoutDebugHooksInstalled = (hooked.container or hooked.header) and true or false
+    return added
+end
+
+-- Arms the call-stack hooks above. One-way: they cannot be removed until reload.
+DF:RegisterDebugSlash("DFFLATDEBUG", "Trace every write to the raid container/header (until reload)", true, "/dfflatdebug")
+SlashCmdList["DFFLATDEBUG"] = function()
+    -- Ask the installer first and report what it DID. The old order asked the flag
+    -- first and returned early on "already armed", which meant a run that had hooked
+    -- only one of the two surfaces could never pick up the other.
+    local added = DF:InstallFlatLayoutDebugHooks()
+
+    if added > 0 then
+        DF:Say("Call-stack hooks armed", added .. " surface(s)", "GOOD")
+        DF:Say("Enable the FLATRAID category in the debug console to see them.")
+    elseif DF.flatLayoutDebugHooksInstalled then
+        DF:Say("Call-stack hooks are already armed. Reload to remove them.")
+    else
+        DF:Say("No raid container or flat header exists yet — nothing to hook.")
+    end
+end
+
+-- Comprehensive state dump function. No longer its own slash command: it was
+-- /dfflatstate, half of the flat-raid picture, while /df debug flatraid info printed
+-- the other half. Both now run from /df debug flatraid.
+-- Second half of the flat-raid picture, emitted INTO the caller's block.
+-- ☠ Takes the writer rather than opening its own — it used to call DF:Out three
+-- times, which turned three SECTIONS of one dump into three separate top-level
+-- blocks, each with its own rule and title. /df debug flatraid looked like it was
+-- running four commands. Promoting a section to a block is the inverse of the
+-- bug that left dumps with no header at all, and the same conversion caused both.
+--
+-- Deliberately does NOT re-print module state or the settings FlatRaidFrames:
+-- DebugPrint already covers — merging the two commands exposed that both were
+-- printing raidUseGroups, growDirection and raidPlayersPerRow. Only what the
+-- other half does not have lives here.
+function DF:DumpFlatLayoutState(o)
+    if not o then return end
     local db = DF:GetRaidDB()
-    print("|cFFFF00FF[DF Flat Debug]|r Settings from DB:")
-    print("  raidUseGroups:", db.raidUseGroups)
-    print("  growDirection:", db.growDirection)
-    print("  raidPlayersPerRow:", db.raidPlayersPerRow)
-    print("  raidFlatGrowthAnchor:", db.raidFlatGrowthAnchor or "TOPLEFT")
-    print("  raidFlatFrameAnchor:", db.raidFlatFrameAnchor or "START")
-    print("  raidFlatColumnAnchor:", db.raidFlatColumnAnchor or "START")
-    print("  raidFlatHorizontalSpacing:", db.raidFlatHorizontalSpacing)
-    print("  raidFlatVerticalSpacing:", db.raidFlatVerticalSpacing)
-    print("  frameWidth:", db.frameWidth)
-    print("  frameHeight:", db.frameHeight)
-    
-    if DF.raidContainer then
-        local w, h = DF.raidContainer:GetSize()
-        local point, relativeTo, relativePoint, x, y = DF.raidContainer:GetPoint(1)
-        print("|cFFFF00FF[DF Flat Debug]|r raidContainer:")
-        print("  size:", w, "x", h)
-        print("  point:", point, "->", relativePoint, "offset:", x, y)
-        print("  shown:", DF.raidContainer:IsShown())
-    else
-        print("|cFFFF00FF[DF Flat Debug]|r raidContainer: NIL")
+
+    o:Section("Layout")
+    o:Field("innerContainer", DF.FlatRaidFrames and DF.FlatRaidFrames.innerContainer and "exists" or "none",
+        (DF.FlatRaidFrames and DF.FlatRaidFrames.innerContainer) and "GOOD" or "NEUTRAL")
+    o:Field("growth anchor", db.raidFlatGrowthAnchor or "TOPLEFT", "NEUTRAL")
+    o:Field("frame anchor", db.raidFlatFrameAnchor or "START", "NEUTRAL")
+    o:Field("column anchor", db.raidFlatColumnAnchor or "START", "NEUTRAL")
+    o:Field("spacing", (db.raidFlatHorizontalSpacing or 0) .. " h, " .. (db.raidFlatVerticalSpacing or 0) .. " v", "NEUTRAL")
+    o:Field("frame size", (db.frameWidth or "?") .. " x " .. (db.frameHeight or "?"), "NEUTRAL")
+
+    if not DF.raidContainer then
+        o:Section("Raid container")
+        o:Line("none", "BAD")
+        return
     end
-    
-    print("|cFFFF00FF[DF Flat Debug]|r =========================================")
+    local w, h = DF.raidContainer:GetSize()
+    local point, _, relativePoint, x, y = DF.raidContainer:GetPoint(1)
+    o:Section("Raid container", DF.raidContainer:IsShown() and "shown" or "hidden")
+    o:Field("size", string.format("%.0f x %.0f", w, h), "NEUTRAL")
+    o:Field("anchor", string.format("%s -> %s at %.0f, %.0f",
+        tostring(point), tostring(relativePoint), x or 0, y or 0), "NEUTRAL")
 end
 
 
@@ -1461,18 +1455,18 @@ end
 function DF:ToggleFlatDebugOverlay()
     if DF.flatDebugOverlay and DF.flatDebugOverlay:IsShown() then
         DF.flatDebugOverlay:Hide()
-        print("|cFFFF00FF[DF Flat Debug]|r Overlay HIDDEN")
+        DF:Say("Overlay HIDDEN")
         return
     end
     
     DF:CreateFlatDebugOverlay()
     DF.flatDebugOverlay:Show()
-    print("|cFFFF00FF[DF Flat Debug]|r Overlay SHOWN - Magenta = expected positions, Cyan = actual child positions")
+    DF:Say("Overlay SHOWN - Magenta = expected positions, Cyan = actual child positions")
 end
 
 function DF:CreateFlatDebugOverlay()
     if not DF.raidContainer then
-        print("|cFFFF00FF[DF Flat Debug]|r No raidContainer exists!")
+        DF:Say("No raidContainer exists!")
         return
     end
     
@@ -1533,11 +1527,13 @@ function DF:CreateFlatDebugOverlay()
     end
     overlay.border:Show()
     
-    print("|cFFFF00FF[DF Flat Debug]|r Creating overlay:")
-    print("  Container size:", containerWidth, "x", containerHeight)
-    print("  horizontal=" .. tostring(horizontal) .. " playersPerUnit=" .. playersPerUnit)
-    print("  hSpacing=" .. hSpacing .. " vSpacing=" .. vSpacing)
-    print("  anchor=" .. anchor .. " reverseFill=" .. tostring(reverseFill))
+    local o = DF:Out("Flat Overlay", "geometry")
+    o:Field("Container size", containerWidth .. " x " .. containerHeight)
+    o:Field("horizontal", tostring(horizontal))
+    o:Field("playersPerUnit", playersPerUnit)
+    o:Field("spacing", hSpacing .. " h, " .. vSpacing .. " v")
+    o:Field("anchor", anchor)
+    o:Field("reverseFill", tostring(reverseFill))
     
     -- Create EXPECTED position boxes (magenta) - our calculated positions
     -- This uses the math WE think SecureGroupHeaderTemplate should use
@@ -1657,7 +1653,7 @@ function DF:CreateFlatDebugOverlay()
         end
     end
     
-    print("|cFFFF00FF[DF Flat Debug]|r Overlay created with 40 expected (magenta) + actual (cyan) boxes")
+    DF:Say("Overlay created with 40 expected (magenta) + actual (cyan) boxes")
 end
 
 function DF:CreateRaidSeparatedHeaders()
@@ -1719,7 +1715,7 @@ function DF:CreateRaidSeparatedHeaders()
         header:SetAttribute("frameHeight", db.frameHeight or 40)
         header:SetAttribute("spacing", db.frameSpacing or 2)
         
-        -- Debug background (toggle with /df raidbg)
+        -- Debug background (toggle with /df debug raidbg)
         local debugBg = header:CreateTexture(nil, "BACKGROUND")
         debugBg:SetAllPoints()
         debugBg:SetColorTexture(unpack(groupColors[group]))
@@ -1747,9 +1743,7 @@ function DF:CreateRaidSeparatedHeaders()
         DF.raidSeparatedHeaders[group] = header
     end
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Created 8 separated raid headers")
-    end
+    headerDebug("Created 8 separated raid headers")
 end
 
 -- ============================================================
@@ -1870,7 +1864,7 @@ function DF:CreateRaidPositionHandler()
     
     -- CRITICAL: SecureHandlerWrapScript requires combat-safe window
     if InCombatLockdown() then
-        print("|cFFFF0000[DF Headers]|r Cannot create raid position handler in combat")
+        DF:Err("Cannot create raid position handler in combat")
         DF.pendingRaidPositionHandler = true
         return
     end
@@ -2892,9 +2886,7 @@ function DF:CreateRaidPositionHandler()
             end
             handler:SetAttribute("group" .. i .. "count", count)
             
-            if DF.debugHeaders then
-                print("|cFF00FF00[DF Headers]|r Group " .. i .. " initial count: " .. count)
-            end
+            DF:Debug("HEADERS", "Group %s initial count: %s", i, count)
         end
     end
     
@@ -2914,9 +2906,7 @@ function DF:CreateRaidPositionHandler()
     DF:TriggerRaidPosition()
     DF:HookRaidChildrenForRepositioning()
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Created secure raid position handler")
-    end
+    headerDebug("Created secure raid position handler")
 end
 
 -- Hook raid group header children to trigger repositioning on show/hide
@@ -3018,9 +3008,7 @@ function DF:HookRaidChildrenForRepositioning()
                         end
                     ]])
                     
-                    if DF.debugHeaders then
-                        print("|cFF00FF00[DF Headers]|r Hooked child " .. j .. " of group " .. groupIndex)
-                    end
+                    DF:Debug("HEADERS", "Hooked child %s of group %s", j, groupIndex)
                 end
             end
         end
@@ -3085,9 +3073,7 @@ function DF:UpdateRaidHeaderLayoutAttributes()
         end
     end
 
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Updated header layout attributes: horizontal=" .. tostring(horizontal))
-    end
+    DF:Debug("HEADERS", "Updated header layout attributes: horizontal=%s", tostring(horizontal))
 end
 
 -- Update raid position attributes - SECURE ONLY (no Lua fallback for debugging)
@@ -3125,9 +3111,7 @@ function DF:UpdateRaidPositionAttributes()
     -- Trigger repositioning
     DF:TriggerRaidPosition()
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r UpdateRaidPositionAttributes triggered secure positioning")
-    end
+    headerDebug("UpdateRaidPositionAttributes triggered secure positioning")
 end
 
 -- Trigger secure repositioning
@@ -3153,7 +3137,7 @@ function DF:TriggerRaidPosition()
         DF:Debug("POSITION", "TriggerRaidPosition: firing (counter=%d)", v + 1)
         DF.raidPositionHandler:SetAttribute("triggerposition", v + 1)
         
-        if DF.debugHeaders then
+        if DF:DebugActive("HEADERS") then
             -- Read back debug info after a tiny delay
             C_Timer.After(0.01, function()
                 local numPop = DF.raidPositionHandler:GetAttribute("debugpopulated") or "nil"
@@ -3162,7 +3146,7 @@ function DF:TriggerRaidPosition()
                 local groupsGrow = DF.raidPositionHandler:GetAttribute("debuggroupsgrow") or "nil"
                 local gpr = DF.raidPositionHandler:GetAttribute("debuggroupsperrow") or "nil"
                 local prows = DF.raidPositionHandler:GetAttribute("debugpoprows") or "nil"
-                print("|cFF00FF00[DF Headers]|r Secure: pop=" .. tostring(numPop) .. " dir=" .. tostring(dir) .. " playerGrow=" .. tostring(playerGrow) .. " groupsGrow=" .. tostring(groupsGrow) .. " gpr=" .. tostring(gpr) .. " popRows=" .. tostring(prows))
+                DF:Debug("HEADERS", "Secure: pop=%s dir=%s playerGrow=%s groupsGrow=%s gpr=%s popRows=%s", tostring(numPop), tostring(dir), tostring(playerGrow), tostring(groupsGrow), tostring(gpr), tostring(prows))
             end)
         end
     end
@@ -3180,9 +3164,7 @@ function DF:UpdatePlayerGroupTracking()
     local oldGroup = DF.cachedPlayerGroup
     DF.cachedPlayerGroup = DF:GetPlayerRaidGroup()
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Player group tracking: " .. tostring(oldGroup) .. " -> " .. tostring(DF.cachedPlayerGroup))
-    end
+    DF:Debug("HEADERS", "Player group tracking: %s -> %s", tostring(oldGroup), tostring(DF.cachedPlayerGroup))
     
     -- If group changed and we have the handler, update attributes
     if oldGroup ~= DF.cachedPlayerGroup and DF.raidPositionHandler then
@@ -3218,7 +3200,7 @@ function DF:UpdateRaidGroupOrderAttributes()
         end
     end
     if not isValid then
-        DF:DebugWarn("UpdateRaidGroupOrderAttributes: raidGroupDisplayOrder is invalid or missing, using default order")
+        DF:DebugWarn("ROSTER", "UpdateRaidGroupOrderAttributes: raidGroupDisplayOrder is invalid or missing, using default order")
         displayOrder = {1, 2, 3, 4, 5, 6, 7, 8}
     end
     
@@ -3247,7 +3229,7 @@ function DF:UpdateRaidGroupOrderAttributes()
     for displayPos = 1, 8 do
         local groupNum = effectiveOrder[displayPos]
         if not groupNum then
-            DF:DebugWarn("UpdateRaidGroupOrderAttributes: effectiveOrder[%d] is nil, falling back", displayPos)
+            DF:DebugWarn("ROSTER", "UpdateRaidGroupOrderAttributes: effectiveOrder[%d] is nil, falling back", displayPos)
             groupNum = displayPos
         end
         handler:SetAttribute("displayorder" .. displayPos, groupNum)
@@ -3259,9 +3241,9 @@ function DF:UpdateRaidGroupOrderAttributes()
         handler:SetAttribute("groupdisplaypos" .. groupNum, displayPos)
     end
     
-    if DF.debugHeaders then
+    if DF:DebugActive("HEADERS") then
         local orderStr = table.concat(effectiveOrder, ",")
-        DF:Debug("UpdateRaidGroupOrderAttributes: group display order: %s", orderStr)
+        DF:Debug("ROSTER", "UpdateRaidGroupOrderAttributes: group display order: %s", orderStr)
     end
 end
 
@@ -3349,8 +3331,8 @@ function DF:ApplyRaidGroupSorting()
     local groupChanged = previousGroup and playerGroup and previousGroup ~= playerGroup
     DF.lastPlayerRaidGroup = playerGroup
     
-    if groupChanged and DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Player changed groups:", previousGroup, "->", playerGroup)
+    if groupChanged and DF:DebugActive("HEADERS") then
+        headerDebug("Player changed groups:", previousGroup, "->", playerGroup)
     end
     
     -- Determine if we need nameList for advanced sorting
@@ -3366,11 +3348,11 @@ function DF:ApplyRaidGroupSorting()
     -- turns sorting on.
     local hasHidden = DF.GetPinnedHiddenNames and DF:GetPinnedHiddenNames() ~= nil
 
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r ApplyRaidGroupSorting:")
-        print("|cFF00FF00[DF Headers]|r   playerGroup=", playerGroup, "selfPosition=", selfPosition)
-        print("|cFF00FF00[DF Headers]|r   sortEnabled=", tostring(sortEnabled), "separateMeleeRanged=", tostring(separateMeleeRanged), "sortByClass=", tostring(sortByClass))
-        print("|cFF00FF00[DF Headers]|r   needsAdvancedSorting=", tostring(needsAdvancedSorting), "playerNeedsNameList=", tostring(playerNeedsNameList))
+    if DF:DebugActive("HEADERS") then
+        headerDebug("ApplyRaidGroupSorting:")
+        headerDebug("  playerGroup=", playerGroup, "selfPosition=", selfPosition)
+        DF:Debug("HEADERS", "  sortEnabled= %s separateMeleeRanged= %s sortByClass= %s", tostring(sortEnabled), tostring(separateMeleeRanged), tostring(sortByClass))
+        DF:Debug("HEADERS", "  needsAdvancedSorting= %s playerNeedsNameList= %s", tostring(needsAdvancedSorting), tostring(playerNeedsNameList))
     end
     
     -- Legacy: Hide raidPlayerHeader if it exists (no longer created, but may exist from old sessions)
@@ -3471,9 +3453,7 @@ function DF:ApplyRaidGroupSorting()
                     header:SetAttribute("groupFilter", tostring(i))  -- Keep groupFilter to show correct group
                     header:SetAttribute("sortMethod", "INDEX")
 
-                    if DF.debugHeaders then
-                        print("|cFF00FF00[DF Headers]|r   Group", i, ": sorting DISABLED, using INDEX")
-                    end
+                    headerDebug("  Group", i, ": sorting DISABLED, using INDEX")
                 else
                     -- Sorting enabled - determine if this group uses nameList
                     -- Use nameList when:
@@ -3502,9 +3482,9 @@ function DF:ApplyRaidGroupSorting()
                         header:SetAttribute("nameList", nameList)
                         header:SetAttribute("sortMethod", "NAMELIST")
 
-                        if DF.debugHeaders then
+                        if DF:DebugActive("HEADERS") then
                             local tag = isPlayerGroup and "(player)" or ""
-                            print("|cFF00FF00[DF Headers]|r   Group", i, tag, ": nameList mode -", nameList)
+                            headerDebug("  Group", i, tag, ": nameList mode -", nameList)
                         end
                     else
                         sortKey = "ROLE:" .. i .. ":" .. roleOrderString
@@ -3517,9 +3497,7 @@ function DF:ApplyRaidGroupSorting()
                         header:SetAttribute("groupBy", "ASSIGNEDROLE")
                         header:SetAttribute("sortMethod", "NAME")
 
-                        if DF.debugHeaders then
-                            print("|cFF00FF00[DF Headers]|r   Group", i, ": native role sorting, groupFilter=", i)
-                        end
+                        headerDebug("  Group", i, ": native role sorting, groupFilter=", i)
                     end
                 end
 
@@ -3704,9 +3682,7 @@ function DF:ApplyRaidGroupSorting()
     -- NOTE: Frame refresh is handled by OnAttributeChanged when units swap
     -- No need for explicit refresh here - it causes flicker due to double update
 
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Raid group sorting applied")
-    end
+    headerDebug("Raid group sorting applied")
 
     -- OnFramesSorted callback is fired from child OnAttributeChanged.
 end
@@ -3999,9 +3975,7 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
         local idxNames = {}
         for _, m in ipairs(ordered) do idxNames[#idxNames + 1] = m.name end
         local idxResult = ProcessNameList(table.concat(idxNames, ","), STRIP_REALMS_FROM_NAMELIST)
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r   Sorting OFF + hide active: preserving index order:", idxResult)
-        end
+        headerDebug("  Sorting OFF + hide active: preserving index order:", idxResult)
         return idxResult
     end
 
@@ -4010,13 +3984,15 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
     local sortByClass = db.sortByClass
     local sortAlphabetical = db.sortAlphabetical
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r === BuildSortedNameList ===")
-        print("|cFF00FF00[DF Headers]|r   selfPosition:", selfPosition, "members:", #members)
-        print("|cFF00FF00[DF Headers]|r   separateMeleeRanged:", tostring(separateMeleeRanged))
-        print("|cFF00FF00[DF Headers]|r   sortByClass:", tostring(sortByClass))
-        print("|cFF00FF00[DF Headers]|r   sortAlphabetical:", tostring(sortAlphabetical))
-        print("|cFF00FF00[DF Headers]|r   roleOrder:", table.concat(roleOrder, ", "))
+    if DF:DebugActive("HEADERS") then
+        headerDebug("=== BuildSortedNameList ===")
+        headerDebug("  selfPosition:", selfPosition, "members:", #members)
+        DF:Debug("HEADERS", "  separateMeleeRanged: %s", tostring(separateMeleeRanged))
+        DF:Debug("HEADERS", "  sortByClass: %s", tostring(sortByClass))
+        DF:Debug("HEADERS", "  sortAlphabetical: %s", tostring(sortAlphabetical))
+        if DF:DebugActive("HEADERS") then
+            headerDebug("  roleOrder:", table.concat(roleOrder, ", "))
+        end
     end
     
     -- Build role priority map (lower = higher priority)
@@ -4132,11 +4108,13 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
             table.insert(sortedMembers, entry)
         end
         
-        if DF.debugHeaders then
+        if DF:DebugActive("HEADERS") then
             local tag = member.isPlayer and "Player" or member.unit
-            print("|cFF00FF00[DF Headers]|r   " .. tag .. ":", member.name, 
-                  "role=", role, "sortRole=", sortRole,
-                  "class=", class, "classPri=", entry.classPriority, "rolePri=", entry.rolePriority)
+            if DF:DebugActive("HEADERS") then
+                headerDebug("  " .. tag .. ":", member.name, 
+                      "role=", role, "sortRole=", sortRole,
+                      "class=", class, "classPri=", entry.classPriority, "rolePri=", entry.rolePriority)
+            end
         end
     end
     
@@ -4192,9 +4170,7 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
         for _, entry in ipairs(sortedMembers) do
             table.insert(names, entry.name)
         end
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r   Mode: FIRST - player at position 1")
-        end
+        headerDebug("  Mode: FIRST - player at position 1")
         
     elseif selfPosition == "LAST" and playerEntry then
         -- Sorted others, then player
@@ -4202,9 +4178,7 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
             table.insert(names, entry.name)
         end
         table.insert(names, playerEntry.name)
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r   Mode: LAST - player at last position")
-        end
+        headerDebug("  Mode: LAST - player at last position")
         
     else
         -- SORTED: Include player in normal sorting
@@ -4215,9 +4189,7 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
         for _, entry in ipairs(sortedMembers) do
             table.insert(names, entry.name)
         end
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r   Mode: SORTED - player sorted with group")
-        end
+        headerDebug("  Mode: SORTED - player sorted with group")
     end
     
     local result = table.concat(names, ",")
@@ -4226,9 +4198,7 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
     -- SecureGroupHeaderTemplate uses UnitName() internally which doesn't include realms
     result = ProcessNameList(result, STRIP_REALMS_FROM_NAMELIST)
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r   Final nameList:", result)
-    end
+    headerDebug("  Final nameList:", result)
     
     return result
 end
@@ -4259,12 +4229,12 @@ end
 -- Toggle raid group debug backgrounds
 function DF:ToggleRaidDebugBackgrounds()
     if not DF.raidSeparatedHeaders then
-        print("|cFFFF0000[DF Headers]|r No raid headers exist")
+        DF:Err("No raid headers exist")
         return
     end
     
     if InCombatLockdown() then
-        print("|cFFFF0000[DF Headers]|r Cannot toggle in combat")
+        DF:Err("Cannot toggle in combat")
         return
     end
     
@@ -4320,7 +4290,8 @@ function DF:ToggleRaidDebugBackgrounds()
         DF:PositionRaidHeaders()
     end
     
-    print("|cFF00FF00[DF Headers]|r Raid debug backgrounds:", DF.raidDebugBgVisible and "ON" or "OFF")
+    DF:Say("Raid debug backgrounds", DF.raidDebugBgVisible and "on" or "off",
+        DF.raidDebugBgVisible and "GOOD" or "NEUTRAL")
 end
 
 -- ============================================================
@@ -4483,9 +4454,10 @@ function DF:UpdateHeaderVisibility(skipRaidReposition)
         tostring(contentType), tostring(inRaid), tostring(inParty), tostring(skipRaidReposition),
         debugstack(2, 1, 0) or "?")
 
-    -- ARENA DEBUG: Log the visibility decision
-    local inInst, instType = IsInInstance()
-    
+    -- (Removed) an IsInInstance() call whose BOTH return values were unused — the
+    -- "ARENA DEBUG" trace it fed is long gone, so the call did nothing but cost an
+    -- API round trip on every visibility evaluation.
+
     -- Solo mode check
     local showSolo = db.soloMode and not inParty and not inRaid and not inArena
     
@@ -4790,11 +4762,8 @@ end
 
 -- Position raid group headers relative to each other within the container
 function DF:PositionRaidHeaders()
-    -- Debug: trace what's calling this function with FULL stack
-    if DF.debugFlatLayout then
-        print("|cFFFF00FF[DF Flat Debug]|r ========== PositionRaidHeaders ==========")
-        print("|cFFFF00FF[DF Flat Debug]|r Full call stack:")
-        print(debugstack(2, 10, 0) or "unknown")
+    if DF:DebugActive("FLATRAID") then
+        DF:Debug("FLATRAID", "PositionRaidHeaders: called from\n%s", debugstack(2, 10, 0) or "unknown")
     end
     
     local db = DF:GetRaidDB()
@@ -4814,9 +4783,7 @@ function DF:PositionRaidHeaders()
     -- Works both in and out of combat!
     DF:UpdateRaidPositionAttributes()
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r PositionRaidHeaders: delegated to secure handler")
-    end
+    headerDebug("PositionRaidHeaders: delegated to secure handler")
 end
 
 -- Update grouped raid frame sizes (separated headers only)
@@ -4827,9 +4794,7 @@ function DF:UpdateRaidGroupFrameSizes()
     local frameWidth = db.frameWidth or 80
     local frameHeight = db.frameHeight or 40
 
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r UpdateRaidGroupFrameSizes: width=" .. frameWidth .. " height=" .. frameHeight)
-    end
+    DF:Debug("HEADERS", "UpdateRaidGroupFrameSizes: width=%s height=%s", frameWidth, frameHeight)
 
     -- Update raidPlayerHeader frame (legacy, may not exist)
     if DF.raidPlayerHeader then
@@ -4866,9 +4831,7 @@ function DF:UpdateRaidFlatFrameSizes()
     local frameWidth = db.frameWidth or 80
     local frameHeight = db.frameHeight or 40
 
-    if DF.debugFlatLayout then
-        print("|cFFFF00FF[DF Flat Debug]|r UpdateRaidFlatFrameSizes: " .. frameWidth .. " x " .. frameHeight)
-    end
+    DF:Debug("FLATRAID", "UpdateRaidFlatFrameSizes: %s x %s", tostring(frameWidth), tostring(frameHeight))
 
     if DF.FlatRaidFrames and DF.FlatRaidFrames.header then
         for i = 1, 40 do
@@ -4886,9 +4849,7 @@ end
 -- Get which raid group the player is in (1-8, or nil if not in raid)
 function DF:GetPlayerRaidGroup()
     if not IsInRaid() then 
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r GetPlayerRaidGroup: Not in raid")
-        end
+        headerDebug("GetPlayerRaidGroup: Not in raid")
         return nil 
     end
     
@@ -4896,9 +4857,7 @@ function DF:GetPlayerRaidGroup()
     local playerName = UnitName("player")
     local playerFullName = GetUnitName("player", true) -- includes realm
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r GetPlayerRaidGroup: Looking for player:", playerName, "/", playerFullName)
-    end
+    headerDebug("GetPlayerRaidGroup: Looking for player:", playerName, "/", playerFullName)
     
     -- Scan all raid members and compare by name
     for i = 1, 40 do
@@ -4906,9 +4865,7 @@ function DF:GetPlayerRaidGroup()
         if name then
             -- Compare names (GetRaidRosterInfo returns name with realm for cross-realm)
             if name == playerName or name == playerFullName or (playerFullName and name:find(playerName, 1, true)) then
-                if DF.debugHeaders then
-                    print("|cFF00FF00[DF Headers]|r GetPlayerRaidGroup: Found player at index", i, "name=", name, "subgroup=", subgroup)
-                end
+                headerDebug("GetPlayerRaidGroup: Found player at index", i, "name=", name, "subgroup=", subgroup)
                 return subgroup
             end
         end
@@ -4918,16 +4875,12 @@ function DF:GetPlayerRaidGroup()
     for i = 1, 40 do
         local name, _, subgroup = GetRaidRosterInfo(i)
         if name and UnitIsUnit("raid" .. i, "player") then
-            if DF.debugHeaders then
-                print("|cFF00FF00[DF Headers]|r GetPlayerRaidGroup: Found via UnitIsUnit at raid", i, "subgroup=", subgroup)
-            end
+            headerDebug("GetPlayerRaidGroup: Found via UnitIsUnit at raid", i, "subgroup=", subgroup)
             return subgroup
         end
     end
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r GetPlayerRaidGroup: Could not find player's group")
-    end
+    headerDebug("GetPlayerRaidGroup: Could not find player's group")
     
     return nil
 end
@@ -5206,7 +5159,7 @@ end)
 
 function DF:SetPartySorting(sortMethod, groupBy, groupingOrder)
     if InCombatLockdown() then
-        print("|cFFFF0000[DF Headers]|r Cannot change sorting in combat")
+        DF:Err("Cannot change sorting in combat")
         return
     end
     
@@ -5236,9 +5189,7 @@ function DF:SetPartySorting(sortMethod, groupBy, groupingOrder)
         end
         DF.partyHeader:SetAttribute("unitsPerColumn", 5)
         
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r Party sorting:", sortMethod or "nil", groupBy or "nil", groupingOrder or "nil")
-        end
+        headerDebug("Party sorting:", sortMethod or "nil", groupBy or "nil", groupingOrder or "nil")
     end
 end
 
@@ -5274,10 +5225,10 @@ function DF:ApplyPartyGroupSorting()
     -- order (not role order), so hiding never silently turns sorting on.
     local hasHidden = DF.GetPinnedHiddenNames and DF:GetPinnedHiddenNames() ~= nil
 
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r ApplyPartyGroupSorting:")
-        print("|cFF00FF00[DF Headers]|r   selfPosition=", selfPosition, "sortEnabled=", tostring(sortEnabled), "hasHidden=", tostring(hasHidden))
-        print("|cFF00FF00[DF Headers]|r   needsNameList=", tostring(needsNameList))
+    if DF:DebugActive("HEADERS") then
+        headerDebug("ApplyPartyGroupSorting:")
+        DF:Debug("HEADERS", "  selfPosition= %s sortEnabled= %s hasHidden= %s", selfPosition, tostring(sortEnabled), tostring(hasHidden))
+        DF:Debug("HEADERS", "  needsNameList= %s", tostring(needsNameList))
     end
 
     if not needsNameList and sortEnabled and not hasHidden then
@@ -5302,9 +5253,7 @@ function DF:ApplyPartyGroupSorting()
         SetHeaderAttribute(DF.partyHeader, "groupBy", "ASSIGNEDROLE")
         SetHeaderAttribute(DF.partyHeader, "sortMethod", "NAME")
         
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r   Using native role sorting (combat-safe)")
-        end
+        headerDebug("  Using native role sorting (combat-safe)")
     elseif not sortEnabled and not hasHidden then
         -- Sorting disabled entirely - clear ALL sorting attributes
         -- CRITICAL: Must clear all attributes to prevent stale nameList/groupBy from persisting
@@ -5321,9 +5270,7 @@ function DF:ApplyPartyGroupSorting()
         DF.partyHeader:Hide()
         DF.partyHeader:Show()
         
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r   Sorting disabled, using INDEX (cleared all attributes)")
-        end
+        headerDebug("  Sorting disabled, using INDEX (cleared all attributes)")
     else
         -- Use nameList for FIRST/LAST or any advanced sorting options
         local nameList = DF:BuildPartyNameList(selfPosition)
@@ -5344,9 +5291,7 @@ function DF:ApplyPartyGroupSorting()
         DF.partyHeader:Hide()
         DF.partyHeader:Show()
         
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r   Using nameList mode:", nameList)
-        end
+        headerDebug("  Using nameList mode:", nameList)
     end
     
     -- NOTE: Frame refresh is handled by OnAttributeChanged when units swap
@@ -5446,10 +5391,10 @@ function DF:ApplyArenaHeaderSorting()
     -- Determine if we need nameList (any advanced option or FIRST/LAST)
     local needsNameList = (selfPosition ~= "SORTED") or separateMeleeRanged or sortByClass or sortAlphabetical
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r ApplyArenaHeaderSorting:")
-        print("|cFF00FF00[DF Headers]|r   selfPosition=", selfPosition, "sortEnabled=", tostring(sortEnabled))
-        print("|cFF00FF00[DF Headers]|r   needsNameList=", tostring(needsNameList))
+    if DF:DebugActive("HEADERS") then
+        headerDebug("ApplyArenaHeaderSorting:")
+        DF:Debug("HEADERS", "  selfPosition= %s sortEnabled= %s", selfPosition, tostring(sortEnabled))
+        DF:Debug("HEADERS", "  needsNameList= %s", tostring(needsNameList))
     end
     
     if not needsNameList and sortEnabled then
@@ -5475,9 +5420,7 @@ function DF:ApplyArenaHeaderSorting()
         DF.arenaHeader:SetAttribute("sortMethod", "NAME")
         SetArenaNameListIncomplete(false)  -- not a filtering mode
 
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r   Arena using native role sorting")
-        end
+        headerDebug("  Arena using native role sorting")
     elseif not sortEnabled then
         -- Sorting disabled entirely - clear ALL sorting attributes
         -- CRITICAL: Must clear all attributes to prevent stale nameList/groupBy from persisting
@@ -5494,9 +5437,7 @@ function DF:ApplyArenaHeaderSorting()
         DF.arenaHeader:Hide()
         DF.arenaHeader:Show()
 
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r   Arena sorting disabled, using INDEX (cleared all attributes)")
-        end
+        headerDebug("  Arena sorting disabled, using INDEX (cleared all attributes)")
     else
         -- Use nameList for FIRST/LAST or any advanced sorting options
         local nameList, complete = DF:BuildArenaNameList(selfPosition)
@@ -5518,17 +5459,13 @@ function DF:ApplyArenaHeaderSorting()
             DF.arenaHeader:SetAttribute("sortMethod", "INDEX")
             SetArenaNameListIncomplete(true)
             ScheduleArenaSortRetry()
-            if DF.debugHeaders then
-                print("|cFF00FF00[DF Headers]|r   Arena nameList INCOMPLETE (unresolved name) — using INDEX + retry")
-            end
+            headerDebug("  Arena nameList INCOMPLETE (unresolved name) — using INDEX + retry")
         else
             -- Set nameList and sortMethod
             DF.arenaHeader:SetAttribute("nameList", nameList)
             DF.arenaHeader:SetAttribute("sortMethod", "NAMELIST")
             SetArenaNameListIncomplete(false)
-            if DF.debugHeaders then
-                print("|cFF00FF00[DF Headers]|r   Arena using nameList mode:", nameList)
-            end
+            headerDebug("  Arena using nameList mode:", nameList)
         end
 
         -- Force header to re-evaluate
@@ -5559,7 +5496,7 @@ end
 
 function DF:SetRaidSorting(sortMethod, groupBy, groupingOrder)
     if InCombatLockdown() then
-        print("|cFFFF0000[DF Headers]|r Cannot change sorting in combat")
+        DF:Err("Cannot change sorting in combat")
         return
     end
     
@@ -5608,9 +5545,7 @@ function DF:SetRaidSorting(sortMethod, groupBy, groupingOrder)
         end
     end
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Raid sorting:", sortMethod or "nil", groupBy or "nil", groupingOrder or "nil")
-    end
+    headerDebug("Raid sorting:", sortMethod or "nil", groupBy or "nil", groupingOrder or "nil")
 end
 
 -- Convenience functions for common sort configurations
@@ -5618,25 +5553,25 @@ function DF:SetSortByRole()
     -- Use ASSIGNEDROLE (dungeon finder roles) not ROLE (older system)
     DF:SetPartySorting("NAME", "ASSIGNEDROLE", "TANK,HEALER,DAMAGER")
     DF:SetRaidSorting("NAME", "ASSIGNEDROLE", "TANK,HEALER,DAMAGER")
-    print("|cFF00FF00[DF Headers]|r Sorting by ROLE (Tank > Healer > DPS)")
+    DF:Say("Sorting by ROLE (Tank > Healer > DPS)")
 end
 
 function DF:SetSortByName()
     DF:SetPartySorting("NAME", nil, nil)
     DF:SetRaidSorting("NAME", nil, nil)
-    print("|cFF00FF00[DF Headers]|r Sorting by NAME")
+    DF:Say("Sorting by NAME")
 end
 
 function DF:SetSortByIndex()
     DF:SetPartySorting("INDEX", nil, nil)
     DF:SetRaidSorting("INDEX", nil, nil)
-    print("|cFF00FF00[DF Headers]|r Sorting by INDEX (group order)")
+    DF:Say("Sorting by INDEX (group order)")
 end
 
 function DF:SetSortByGroup()
     -- Only applies to raid combined header
     DF:SetRaidSorting("INDEX", "GROUP", "1,2,3,4,5,6,7,8")
-    print("|cFF00FF00[DF Headers]|r Raid sorting by GROUP")
+    DF:Say("Raid sorting by GROUP")
 end
 
 -- ============================================================
@@ -5646,7 +5581,7 @@ end
 
 function DF:SetPartyOrientation(horizontal, growFrom, selfPosition)
     if InCombatLockdown() then
-        print("|cFFFF0000[DF Headers]|r Cannot change orientation in combat")
+        DF:Err("Cannot change orientation in combat")
         return
     end
     
@@ -5706,9 +5641,7 @@ function DF:SetPartyOrientation(horizontal, growFrom, selfPosition)
         end
     end
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r SetPartyOrientation: horizontal=", horizontal, "growFrom=", growFrom, "selfPosition=", selfPosition)
-    end
+    headerDebug("SetPartyOrientation: horizontal=", horizontal, "growFrom=", growFrom, "selfPosition=", selfPosition)
     
     -- Configure partyHeader (single header for player + party)
     if DF.partyHeader then
@@ -5792,22 +5725,18 @@ function DF:SetPartyOrientation(horizontal, growFrom, selfPosition)
         DF:SetGrowFromCenter(false, selfPosition)
     end
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Party orientation:", horizontal and "HORIZONTAL" or "VERTICAL", "growFrom:", growFrom, "selfPosition:", selfPosition)
-    end
+    headerDebug("Party orientation:", horizontal and "HORIZONTAL" or "VERTICAL", "growFrom:", growFrom, "selfPosition:", selfPosition)
 end
 
 function DF:SetRaidOrientation(horizontal, growFrom)
     if InCombatLockdown() then
-        print("|cFFFF0000[DF Headers]|r Cannot change orientation in combat")
+        DF:Err("Cannot change orientation in combat")
         return
     end
     
-    -- ALWAYS print stack trace when debugFlatLayout is on
-    if DF.debugFlatLayout then
-        print("|cFFFF00FF[DF Flat Debug]|r ========== SetRaidOrientation CALLED ==========")
-        print("|cFFFF00FF[DF Flat Debug]|r   horizontal=" .. tostring(horizontal) .. " growFrom=" .. tostring(growFrom))
-        print(debugstack(2, 10, 0) or "unknown")
+    if DF:DebugActive("FLATRAID") then
+        DF:Debug("FLATRAID", "SetRaidOrientation: horizontal=%s growFrom=%s, called from\n%s",
+            tostring(horizontal), tostring(growFrom), debugstack(2, 10, 0) or "unknown")
     end
     
     local db = DF:GetRaidDB()
@@ -5820,26 +5749,16 @@ function DF:SetRaidOrientation(horizontal, growFrom)
         local combinedSortDir = (growFrom == "END") and "DESC" or "ASC"
         DF.FlatRaidFrames.header:SetAttribute("sortDir", combinedSortDir)
         
-        if DF.debugFlatLayout then
-            print("|cFFFF00FF[DF Flat Debug]|r   -> Set sortDir=" .. combinedSortDir)
-        end
+        DF:Debug("FLATRAID", "SetRaidOrientation:   -> set sortDir=%s", combinedSortDir)
     end
-    
-    if DF.debugFlatLayout then
-        print("|cFFFF00FF[DF Flat Debug]|r   -> Now calling PositionRaidHeaders...")
-    end
-    
+
+    DF:Debug("FLATRAID", "SetRaidOrientation:   -> calling PositionRaidHeaders")
+
     -- PositionRaidHeaders handles both flat (via ApplyFlatLayoutAttributes) 
     -- and group-based (via UpdateRaidPositionAttributes) layouts
     DF:PositionRaidHeaders()
-    
-    if DF.debugFlatLayout then
-        print("|cFFFF00FF[DF Flat Debug]|r ================================================")
-    end
-    
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Raid orientation:", horizontal and "HORIZONTAL" or "VERTICAL", "growFrom:", growFrom)
-    end
+
+    headerDebug("Raid orientation:", horizontal and "HORIZONTAL" or "VERTICAL", "growFrom:", growFrom)
 end
 
 -- ============================================================
@@ -5994,8 +5913,8 @@ function DF:SetupSecurePositioning(header, isPlayerHeader)
         end
     ]])
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Set up secure positioning for:", header:GetName())
+    if DF:DebugActive("HEADERS") then
+        headerDebug("Set up secure positioning for:", header:GetName())
     end
 end
 
@@ -6011,7 +5930,7 @@ end
 -- selfPosition: "FIRST", "LAST", or "SORTED"
 function DF:SetGrowFromCenter(enabled, selfPosition)
     if InCombatLockdown() then
-        print("|cFFFF0000[DF Headers]|r Cannot change grow-from-center in combat")
+        DF:Err("Cannot change grow-from-center in combat")
         return
     end
     
@@ -6044,9 +5963,7 @@ function DF:SetGrowFromCenter(enabled, selfPosition)
         end
     end
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r SetGrowFromCenter:", enabled and "ENABLED" or "DISABLED", "selfPosition:", selfPosition, "partyChildCount:", partyChildCount, "arenaChildCount:", arenaChildCount)
-    end
+    headerDebug("SetGrowFromCenter:", enabled and "ENABLED" or "DISABLED", "selfPosition:", selfPosition, "partyChildCount:", partyChildCount, "arenaChildCount:", arenaChildCount)
     
     -- With single partyHeader, all modes use the same centering logic
     -- partyHeader contains all frames (player + party) sorted by nameList
@@ -6077,15 +5994,13 @@ function DF:SetGrowFromCenter(enabled, selfPosition)
         DF:TriggerSecurePosition(DF.arenaHeader)
     end
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Secure position triggered for center mode")
-    end
+    headerDebug("Secure position triggered for center mode")
 end
 
 -- Initialize secure positioning on all headers
 function DF:InitSecurePositioning()
     if InCombatLockdown() then
-        print("|cFFFF0000[DF Headers]|r Cannot init secure positioning in combat")
+        DF:Err("Cannot init secure positioning in combat")
         return
     end
     
@@ -6152,7 +6067,7 @@ function DF:InitSecurePositioning()
     -- Hook arena children's OnShow/OnHide to trigger counting
     DF:HookArenaChildrenForRepositioning()
     
-    print("|cFF00FF00[DF Headers]|r Secure positioning initialized")
+    DF:Say("Secure positioning initialized")
 end
 
 -- Hook party header children to trigger repositioning on show/hide
@@ -6223,17 +6138,15 @@ function DF:HookPartyChildrenForRepositioning()
                 end
             ]])
             
-            if DF.debugHeaders then
-                print("|cFF00FF00[DF Headers]|r Hooked child", i, "for repositioning:", child:GetName())
+            if DF:DebugActive("HEADERS") then
+                headerDebug("Hooked child", i, "for repositioning:", child:GetName())
             end
         end
     end
     
     DF.partyChildrenHooked = true
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Party children hooked for repositioning")
-    end
+    headerDebug("Party children hooked for repositioning")
 end
 
 -- Hook arena header children to trigger repositioning on show/hide
@@ -6298,17 +6211,15 @@ function DF:HookArenaChildrenForRepositioning()
                 end
             ]])
             
-            if DF.debugHeaders then
-                print("|cFF00FF00[DF Headers]|r Hooked arena child", i, "for repositioning:", child:GetName())
+            if DF:DebugActive("HEADERS") then
+                headerDebug("Hooked arena child", i, "for repositioning:", child:GetName())
             end
         end
     end
     
     DF.arenaChildrenHooked = true
     
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Arena children hooked for repositioning")
-    end
+    headerDebug("Arena children hooked for repositioning")
 end
 
 -- Update the totalFrameCount attribute based on current group (backup for out of combat)
@@ -6324,38 +6235,35 @@ end
 -- DEBUG
 -- ============================================================
 
-DF.debugHeaders = false  -- Set to true for debug output
-
 function DF:DumpHeaderInfo()
-    print("|cFF00FF00[DF Headers]|r === Header Debug Info ===")
-    
-    -- Show group status
-    print("Group Status:")
+    local o = DF:Out("Headers", "state dump")
+
+    o:Section("Group status")
     print("  IsInRaid:", IsInRaid() and "true" or "false")
     print("  IsInGroup:", IsInGroup() and "true" or "false")
     print("  GetNumGroupMembers:", GetNumGroupMembers())
     
     -- Show init state
-    print("Init State:")
+    o:Section("Init state")
     print("  headersCreated:", DF.headersCreated and "true" or "false")
     print("  headersInitialized:", DF.headersInitialized and "true" or "false")
     print("  partyChildrenHooked:", DF.partyChildrenHooked and "true" or "false")
     print("  pendingHeaderSettingsApply:", DF.pendingHeaderSettingsApply and "true" or "false")
     
     -- Show containers
-    print("Containers:")
+    o:Section("Containers")
     print("  partyContainer:", DF.partyContainer and (DF.partyContainer:IsShown() and "VISIBLE" or "hidden") or "nil")
     print("  raidContainer:", DF.raidContainer and (DF.raidContainer:IsShown() and "VISIBLE" or "hidden") or "nil")
     
     -- Show current settings
     local db = DF:GetDB()
     local raidDb = DF:GetRaidDB()
-    print("Party Settings:")
+    o:Section("Party settings")
     print("  growDirection:", db.growDirection or "nil")
     print("  growthAnchor:", db.growthAnchor or "nil")
     print("  sortSelfPosition:", db.sortSelfPosition or "nil")
     print("  sortEnabled:", db.sortEnabled and "true" or "false")
-    print("Raid Settings:")
+    o:Section("Raid settings")
     print("  raidUseGroups:", raidDb.raidUseGroups and "true" or "false")
     print("  raidEnabled:", raidDb.raidEnabled and "true" or "false")
     print("  sortEnabled:", raidDb.sortEnabled and "true" or "false")
@@ -6438,8 +6346,10 @@ function DF:DumpHeaderInfo()
             end
         end
     else
-        print("Raid Separated Headers: nil")
+        print("  " .. DF.OUT.NEUTRAL .. "Raid separated headers: none|r")
     end
+
+    o:Siblings("headers")
 end
 
 -- ============================================================
@@ -6448,10 +6358,8 @@ end
 -- ============================================================
 
 function DF:ApplyHeaderSettings()
-    -- Debug: Track what's calling ApplyHeaderSettings with FULL stack
-    if DF.debugFlatLayout then
-        print("|cFFFF00FF[DF Flat Debug]|r ========== ApplyHeaderSettings ==========")
-        print(debugstack(2, 10, 0) or "unknown")
+    if DF:DebugActive("FLATRAID") then
+        DF:Debug("FLATRAID", "ApplyHeaderSettings: called from\n%s", debugstack(2, 10, 0) or "unknown")
     end
     
     if InCombatLockdown() then
@@ -6462,28 +6370,21 @@ function DF:ApplyHeaderSettings()
     
     -- Make sure headers are created
     if not DF.headersCreated then
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r ApplyHeaderSettings skipped - headers not created yet")
-        end
+        headerDebug("ApplyHeaderSettings skipped - headers not created yet")
         return
     end
     
     -- Double-check headers exist
     if not DF.partyHeader then
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r ApplyHeaderSettings skipped - party header missing")
-        end
+        headerDebug("ApplyHeaderSettings skipped - party header missing")
         return
     end
     
     local db = DF:GetDB()
     local raidDb = DF:GetRaidDB()
     
-    if DF.debugFlatLayout then
-        print("|cFFFF00FF[DF Flat Debug]|r   raidUseGroups=" .. tostring(raidDb.raidUseGroups))
-        print("|cFFFF00FF[DF Flat Debug]|r   growDirection=" .. tostring(raidDb.growDirection))
-        print("|cFFFF00FF[DF Flat Debug]|r   raidFlatPlayerAnchor=" .. tostring(raidDb.raidFlatPlayerAnchor))
-    end
+    DF:Debug("FLATRAID", "ApplyHeaderSettings: raidUseGroups=%s growDirection=%s raidFlatPlayerAnchor=%s",
+        tostring(raidDb.raidUseGroups), tostring(raidDb.growDirection), tostring(raidDb.raidFlatPlayerAnchor))
     
     -- Apply orientation from growDirection, growthAnchor, and selfPosition settings
     local horizontal = (db.growDirection == "HORIZONTAL")
@@ -6503,9 +6404,8 @@ function DF:ApplyHeaderSettings()
     else
         -- Combined/flat mode: use raidFlatPlayerAnchor (different setting!)
         local raidGrowFrom = raidDb.raidFlatPlayerAnchor or "START"
-        if DF.debugFlatLayout then
-            print("|cFFFF00FF[DF Flat Debug]|r   FLAT MODE: calling SetRaidOrientation(" .. tostring(raidHorizontal) .. ", " .. raidGrowFrom .. ")")
-        end
+        DF:Debug("FLATRAID", "ApplyHeaderSettings:   FLAT MODE: SetRaidOrientation(%s, %s)",
+            tostring(raidHorizontal), raidGrowFrom)
         DF:SetRaidOrientation(raidHorizontal, raidGrowFrom)
     end
 
@@ -6536,9 +6436,7 @@ function DF:ApplyHeaderSettings()
         DF:ApplyRaidGroupSorting()
     else
         DF:UpdateRaidFlatFrameSizes()
-        if DF.debugFlatLayout then
-            print("|cFFFF00FF[DF Flat Debug]|r   -> calling ApplyRaidFlatSorting...")
-        end
+        DF:Debug("FLATRAID", "ApplyHeaderSettings:   -> calling ApplyRaidFlatSorting")
         DF:ApplyRaidFlatSorting()
         
         -- ============================================================
@@ -6571,9 +6469,8 @@ function DF:ApplyHeaderSettings()
                 -- Force the size
                 DF.FlatRaidFrames.header:SetSize(fullWidth, fullHeight)
                 
-                if DF.debugFlatLayout then
-                    print("|cFFFF00FF[DF Flat Debug]|r   FINAL size forcing: " .. fullWidth .. " x " .. fullHeight)
-                end
+                DF:Debug("FLATRAID", "ApplyHeaderSettings:   FINAL size forcing: %s x %s",
+                    tostring(fullWidth), tostring(fullHeight))
                 
                 -- Trigger re-layout by toggling showRaid attribute
                 -- This causes SecureGroupHeader_Update to run again with the correct header size
@@ -6583,17 +6480,11 @@ function DF:ApplyHeaderSettings()
                 -- Force size again after re-layout (since SecureGroupHeader_Update resizes)
                 DF.FlatRaidFrames.header:SetSize(fullWidth, fullHeight)
                 
-                if DF.debugFlatLayout then
-                    print("|cFFFF00FF[DF Flat Debug]|r   Triggered re-layout and re-forced size")
-                end
+                DF:Debug("FLATRAID", "ApplyHeaderSettings:   triggered re-layout and re-forced size")
             end
         end
     end
     
-    if DF.debugFlatLayout then
-        print("|cFFFF00FF[DF Flat Debug]|r ==========================================")
-    end
-
     -- Schedule private aura reanchor after ALL attribute changes settle.
     -- This catches the showRaid false/true toggle above which can cause a second
     -- round of unit reassignments after the sorting functions have already run.
@@ -6612,9 +6503,7 @@ function DF:CreateHeaderFrames()
     -- Check if secure headers are enabled in settings
     local db = DF:GetDB()
     if db and db.useSecureHeaders == false then
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r Secure headers disabled in settings")
-        end
+        headerDebug("Secure headers disabled in settings")
         return
     end
     
@@ -6983,9 +6872,7 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         -- Apply pending sorting update (roster changed during combat)
         if DF.pendingSortingUpdate then
             DF.pendingSortingUpdate = false
-            if DF.debugHeaders then
-                print("|cFF00FF00[DF Headers]|r Applying queued sorting update after combat")
-            end
+            headerDebug("Applying queued sorting update after combat")
             -- When FrameSort integration is active, FrameSort already fires its own
             -- combat-end sort synchronously on PLAYER_REGEN_ENABLED (via its
             -- RunWhenCombatEnds callback queue). Calling ProcessRosterUpdate here
@@ -7023,7 +6910,6 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
     if event == "ARENA_PREP_OPPONENT_SPECIALIZATIONS" then
         if not DF.headersInitialized then return end
         local contentType = DF:GetContentType()
-        local arenaShown = DF.arenaHeader and DF.arenaHeader:IsShown()
         if contentType == "arena" and DF.arenaHeader and not DF.arenaHeader:IsShown() then
             if not InCombatLockdown() then
                 DF:UpdateHeaderVisibility()
@@ -7040,9 +6926,7 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
                     DF:RefreshLiveFrames()
                 end
                 QueueRosterUpdate()
-                if DF.debugHeaders then
-                    print("|cFF00FF00[DF Headers]|r ARENA_PREP: corrected header visibility")
-                end
+                headerDebug("ARENA_PREP: corrected header visibility")
             else
                 DF.pendingVisibilityUpdate = true
                 DF.pendingSortingUpdate = true
@@ -7267,11 +7151,11 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
             -- Schedule an independent recheck here so the party fills in even
             -- without a subsequent GROUP_ROSTER_UPDATE.
             if not IsInRaid() and IsInGroup() and GetNumGroupMembers() < 5 and not InCombatLockdown() then
-                DF:Debug("PEW: incomplete party (" .. GetNumGroupMembers() .. " members), scheduling follower recheck")
+                DF:Debug("ROSTER", "PEW: incomplete party (%d members), scheduling follower recheck", GetNumGroupMembers())
                 -- Queue a roster update after a delay to give NPCs time to register
                 C_Timer.After(FOLLOWER_RECHECK_DELAY, function()
                     if not InCombatLockdown() and IsInGroup() and GetNumGroupMembers() < 5 then
-                        DF:Debug("PEW follower recheck — group has " .. GetNumGroupMembers() .. " members")
+                        DF:Debug("ROSTER", "PEW follower recheck — group has %d members", GetNumGroupMembers())
                         rosterMembershipCache = {}
                         lastRosterCount = 0
                         QueueRosterUpdate()
@@ -7309,7 +7193,6 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         local function ArenaDetectionRetry()
             if not DF.headersInitialized then return end
             local ct = DF:GetContentType()
-            local arenaShown = DF.arenaHeader and DF.arenaHeader:IsShown()
             if ct == "arena" and DF.arenaHeader and not DF.arenaHeader:IsShown() then
                 if not InCombatLockdown() then
                     DF:UpdateHeaderVisibility()
@@ -7327,9 +7210,7 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
                     end
                     -- Queue a roster update so arena sorting gets applied properly
                     QueueRosterUpdate()
-                    if DF.debugHeaders then
-                        print("|cFF00FF00[DF Headers]|r Arena detection retry: corrected header visibility")
-                    end
+                    headerDebug("Arena detection retry: corrected header visibility")
                 else
                     -- In combat - defer everything
                     DF.pendingVisibilityUpdate = true
@@ -7457,9 +7338,7 @@ function DF:ProcessRosterUpdate()
         -- Arena sorting can't run during combat - queue for after
         if InCombatLockdown() then
             DF.pendingSortingUpdate = true
-            if DF.debugHeaders then
-                print("|cFF00FF00[DF Headers]|r Arena sorting update queued (combat lockdown)")
-            end
+            headerDebug("Arena sorting update queued (combat lockdown)")
             return
         end
         
@@ -7577,9 +7456,7 @@ function DF:ProcessRosterUpdate()
     -- Queue for after combat if in combat lockdown
     if InCombatLockdown() then
         DF.pendingSortingUpdate = true
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Headers]|r Sorting update queued (combat lockdown)")
-        end
+        headerDebug("Sorting update queued (combat lockdown)")
         return
     end
     
@@ -7676,7 +7553,7 @@ function DF:ProcessRosterUpdate()
                 followerRecheckTimer = C_Timer.NewTimer(FOLLOWER_RECHECK_DELAY, function()
                     followerRecheckTimer = nil
                     if not InCombatLockdown() and IsInGroup() and GetNumGroupMembers() < 5 then
-                        DF:Debug("Follower dungeon recheck " .. retryCount .. "/" .. FOLLOWER_RECHECK_MAX .. " — group has " .. GetNumGroupMembers() .. " members")
+                        DF:Debug("ROSTER", "Follower dungeon recheck %d/%d — group has %d members", retryCount, FOLLOWER_RECHECK_MAX, GetNumGroupMembers())
                         -- Force roster cache to see the change
                         rosterMembershipCache = {}
                         lastRosterCount = 0
@@ -7694,9 +7571,7 @@ function DF:ProcessRosterUpdate()
         end
     end
 
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Headers]|r Roster update processed")
-    end
+    headerDebug("Roster update processed")
 end
 
 -- Cached role update
@@ -8370,19 +8245,45 @@ function externalDefSubscriber:OnUnitAura(event, unit)
 end
 DF:RegisterRosterUnitEvent(externalDefSubscriber, "UNIT_AURA", "OnUnitAura")
 
--- Slash command for debug
-DF:RegisterDebugSlash("DFHEADERS", "Secure header state dump", false, "/dfheaders")
+-- Slash command for debug.
+-- ☠ SPLIT AUDIENCE, DELIBERATELY. The command stays NON-dev because the bare dump
+-- is the single most paste-able thing in the addon: headersCreated / initialized /
+-- partyChildrenHooked, container visible-or-hidden, and the sort settings are
+-- exactly what we need from a user reporting "my frames aren't showing" or
+-- "raid frames are in the wrong order". Gating it would mean we could not ask.
+--
+-- The MUTATING subcommands are dev-only, because they do not report anything —
+-- they rewrite secure header state. A user poking them mid-diagnosis changes the
+-- symptom we are trying to read, and then reports the new one. See MUTATORS below.
+DF:RegisterDebugSlash("DFHEADERS", "Secure header state dump: [cmd] for a subcommand", false, "/dfheaders")
+
+-- Subcommands that WRITE. Everything not listed here only reads.
+local HEADER_MUTATORS = {
+    init = true, refresh = true, apply = true, sort = true,
+    horizontal = true, h = true, vertical = true, v = true,
+    grow = true, center = true, self = true, selfpos = true,
+}
+
 SlashCmdList["DFHEADERS"] = function(msg)
     local args = {}
     for word in msg:gmatch("%S+") do
         table.insert(args, word:lower())
     end
     local cmd = args[1] or ""
-    
+
+    if HEADER_MUTATORS[cmd] and not DF:IsDevBuild() then
+        local o = DF:Out("Headers", "'" .. cmd .. "' is a dev-build command")
+        o:Line("It rewrites secure header state rather than reporting it, so it is not available on a release build.", "NEUTRAL")
+        o:Line("The read-only views are:", "NEUTRAL")
+        o:Item("(no argument) or info", "full state dump")
+        o:Item("map", "unit-to-frame map")
+        o:Hints("/df debug headers", "/df debug headers map")
+        return
+    end
+
     if cmd == "debug" then
-        DF.debugHeaders = not DF.debugHeaders
-        print("|cFF00FF00[DF Headers]|r Debug:", DF.debugHeaders and "ON" or "OFF")
-    
+        DF:Say("Header tracing moved to the debug console — enable the HEADERS category there.")
+
     elseif cmd == "init" then
         DF:CreateHeaderFrames()
         C_Timer.After(0.2, function()
@@ -8391,7 +8292,7 @@ SlashCmdList["DFHEADERS"] = function(msg)
     
     elseif cmd == "refresh" or cmd == "apply" then
         DF:ApplyHeaderSettings()
-        print("|cFF00FF00[DF Headers]|r Settings applied from DB")
+        DF:Say("Settings applied from DB")
     
     -- Sorting commands
     elseif cmd == "sort" then
@@ -8405,7 +8306,7 @@ SlashCmdList["DFHEADERS"] = function(msg)
         elseif sortType == "group" then
             DF:SetSortByGroup()
         else
-            print("|cFF00FF00[DF Headers]|r Sort options: role, name, index, group")
+            DF:Say("Sort options: role, name, index, group")
         end
     
     -- Orientation commands
@@ -8441,9 +8342,9 @@ SlashCmdList["DFHEADERS"] = function(msg)
             local raidDb = DF:GetRaidDB()
             local raidHorizontal = (raidDb.growDirection == "HORIZONTAL")
             DF:SetRaidOrientation(raidHorizontal, mode)
-            print("|cFF00FF00[DF Headers]|r Grow from:", mode)
+            DF:Say("Grow from", mode, "NEUTRAL")
         else
-            print("|cFF00FF00[DF Headers]|r Grow options: start, center, end")
+            DF:Say("Grow options: start, center, end")
         end
     
     -- Legacy center command (shortcut for grow center)
@@ -8453,10 +8354,10 @@ SlashCmdList["DFHEADERS"] = function(msg)
         local selfPos = db.sortSelfPosition or "FIRST"
         if args[2] == "off" then
             DF:SetPartyOrientation(horizontal, "START", selfPos)
-            print("|cFF00FF00[DF Headers]|r Grow from: START")
+            DF:Say("Grow from: START")
         else
             DF:SetPartyOrientation(horizontal, "CENTER", selfPos)
-            print("|cFF00FF00[DF Headers]|r Grow from: CENTER")
+            DF:Say("Grow from: CENTER")
         end
     
     -- Self position (first/last/sorted)
@@ -8467,9 +8368,9 @@ SlashCmdList["DFHEADERS"] = function(msg)
             local horizontal = (db.growDirection == "HORIZONTAL")
             local growFrom = db.growthAnchor or "START"
             DF:SetPartyOrientation(horizontal, growFrom, mode)
-            print("|cFF00FF00[DF Headers]|r Self position:", mode)
+            DF:Say("Self position", mode, "NEUTRAL")
         else
-            print("|cFF00FF00[DF Headers]|r Self options: first, last, sorted")
+            DF:Say("Self options: first, last, sorted")
         end
     
     elseif cmd == "info" or cmd == "" then
@@ -8478,7 +8379,7 @@ SlashCmdList["DFHEADERS"] = function(msg)
     elseif cmd == "map" then
         -- Dump unitFrameMap for debugging the O(1) lookup table
         local count = 0
-        print("|cFF00FF00[DF Headers]|r unitFrameMap contents:")
+        DF:Say("unitFrameMap contents:")
         for unit, frame in pairs(unitFrameMap) do
             local name = frame.unit and UnitName(frame.unit) or "?"
             local visible = frame:IsShown() and "shown" or "hidden"
@@ -8488,29 +8389,23 @@ SlashCmdList["DFHEADERS"] = function(msg)
         print("  Total entries: " .. count)
     
     else
-        print("|cFF00FF00[DF Headers]|r Commands:")
-        print("  /dfheaders - Show header info")
-        print("  /dfheaders debug - Toggle debug output")
-        print("  /dfheaders map - Dump unitFrameMap (O(1) lookup table)")
-        print("  /dfheaders init - Initialize headers")
-        print("  /dfheaders refresh - Re-apply settings from DB")
-        print("  /dfheaders hide - Hide legacy frames")
-        print("  /dfheaders show - Show legacy frames")
-        print("  |cFFFFFF00Sorting:|r")
-        print("  /dfheaders sort role - Sort by role (Tank>Healer>DPS)")
-        print("  /dfheaders sort name - Sort alphabetically")
-        print("  /dfheaders sort index - Sort by group index")
-        print("  /dfheaders sort group - Sort by raid group")
-        print("  |cFFFFFF00Orientation:|r")
-        print("  /dfheaders horizontal - Grow horizontally")
-        print("  /dfheaders vertical - Grow vertically")
-        print("  |cFFFFFF00Positioning:|r")
-        print("  /dfheaders grow start - Grow from start (left/top)")
-        print("  /dfheaders grow center - Grow from center")
-        print("  /dfheaders grow end - Grow from end (right/bottom)")
-        print("  |cFFFFFF00Self Position:|r")
-        print("  /dfheaders self first - Player always first")
-        print("  /dfheaders self last - Player always last")
-        print("  /dfheaders self sorted - Player sorted with group")
+        local o = DF:Out("Headers")
+        o:Section("Read-only")
+        o:Item("(no argument) or info", "full state dump")
+        o:Item("map", "unit-to-frame map (the O(1) lookup table)")
+        o:Item("debug", "where header tracing went")
+        -- The writing half is only listed on a dev build, to match the gate at
+        -- the top of this handler. Listing commands a release build refuses is
+        -- the same drift that put everyday commands in /df debug.
+        if DF:IsDevBuild() then
+            o:Section("Rewrites secure state", "dev builds only")
+            o:Item("init", "create and initialise headers")
+            o:Item("refresh / apply", "re-apply settings from the DB")
+            o:Item("sort role|name|index|group", "change the sort")
+            o:Item("horizontal / vertical", "change growth axis")
+            o:Item("grow start|center|end", "change growth origin")
+            o:Item("self first|last|sorted", "change the player position")
+        end
+        o:Siblings("headers")
     end
 end

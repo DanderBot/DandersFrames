@@ -273,8 +273,17 @@ end
 -- Renders a single elem on a frame. Called per-element from UpdateFrame.
 -- source is a DataSource (Live or Mock).
 local function updateOne(frame, elem, source, globalDefaults, enabledById)
-    DF:Debug("TD", "updateOne: id=%s type=%s enabled=%s",
-        tostring(elem.id), tostring(elem.contentType), tostring(elem.enabled))
+    -- ☠ GUARDED, and this is the most load-bearing guard in the file. This is the
+    -- per-ELEMENT entry point, and TD renders are driven from DF:UpdateHealth —
+    -- per unit per health tick in combat. Unguarded, the three tostring() calls
+    -- allocated on every element of every frame on every tick. DF:Debug drops the
+    -- line, but the CALLER builds the arguments before it can, and `TD` is a
+    -- `noisy` category so it ships DISABLED — i.e. this was pure waste for
+    -- essentially every user. Same idiom as the guard in UpdateTextDesigner below.
+    if DF:DebugActive("TD") then
+        DF:Debug("TD", "updateOne: id=%s type=%s enabled=%s",
+            tostring(elem.id), tostring(elem.contentType), tostring(elem.enabled))
+    end
     if not elem.enabled then
         local existing = frame._tdFontStrings and frame._tdFontStrings[elem.id]
         if existing then existing:Hide() end
@@ -328,9 +337,15 @@ function Render:UpdateFrame(frame, tdDB, source, hint, isPreview)
         DF:Debug("TD", "Render:UpdateFrame: nil frame or tdDB (isPreview=%s)", tostring(isPreview))
         return
     end
-    DF:Debug("TD", "Render:UpdateFrame: unit=%s hint=%s isPreview=%s enabled=%s elements=%d",
-        tostring(frame.unit), tostring(hint), tostring(isPreview),
-        tostring(tdDB.enabled), #(tdDB.elements or {}))
+    -- ☠ GUARDED — and note the `or {}` in the length: unguarded, that allocated a
+    -- THROWAWAY TABLE on every call, purely to take a count for a line that was
+    -- then dropped. Per frame, per render, with TD logging off. The four tostring()
+    -- calls were the cheaper half of the problem.
+    if DF:DebugActive("TD") then
+        DF:Debug("TD", "Render:UpdateFrame: unit=%s hint=%s isPreview=%s enabled=%s elements=%d",
+            tostring(frame.unit), tostring(hint), tostring(isPreview),
+            tostring(tdDB.enabled), #(tdDB.elements or {}))
+    end
     if not isPreview and not tdDB.enabled then
         DF:Debug("TD", "Render:UpdateFrame: master toggle OFF, hiding all fontstrings")
         -- Master toggle off (live mode only) — hide all FontStrings
@@ -500,6 +515,20 @@ function DF:UpdateTextDesigner(frame, hint)
         DF:Debug("TD", "UpdateTextDesigner: skipping pet frame %s", tostring(frame.unit))
         return
     end
+    -- MEMORY TEST (enableTextDesigner): TD re-renders every element on every frame
+    -- on every health tick, so it is the one system worth isolating on its own.
+    -- Tear the FontStrings/mirrors down once on the transition rather than just
+    -- skipping, so the memory reading actually moves.
+    if DF:MemTestDisabled("enableTextDesigner") then
+        if not frame.dfTDMemTestCleared then
+            frame.dfTDMemTestCleared = true
+            if DF.TextDesigner and DF.TextDesigner.Render then
+                DF.TextDesigner.Render:Teardown(frame)
+            end
+        end
+        return
+    end
+    frame.dfTDMemTestCleared = nil
     local db = DF:GetFrameDB(frame)
     if not db then
         DF:Debug("TD", "UpdateTextDesigner: no db for frame.unit=%s", tostring(frame.unit))
@@ -510,10 +539,15 @@ function DF:UpdateTextDesigner(frame, hint)
         DF:Debug("TD", "UpdateTextDesigner: no resolved textDesigner preset for unit=%s", tostring(frame.unit))
         return
     end
-    DF:Debug("TD", "UpdateTextDesigner: unit=%s hint=%s enabled=%s elements=%d",
-        tostring(frame.unit), tostring(hint),
-        tostring(tdDB.enabled),
-        tdDB.elements and #tdDB.elements or -1)
+    -- Guarded: this runs per unit per health tick in combat, and the argument list
+    -- walks the element array for its length plus three tostrings. DF:Debug drops
+    -- the line when TD is filtered off, but the CALLER builds the args first.
+    if DF:DebugActive("TD") then
+        DF:Debug("TD", "UpdateTextDesigner: unit=%s hint=%s enabled=%s elements=%d",
+            tostring(frame.unit), tostring(hint),
+            tostring(tdDB.enabled),
+            tdDB.elements and #tdDB.elements or -1)
+    end
 
     -- Test frames: use the per-unit Test data source and gate on the test-mode
     -- toggle (db.testShowTextDesigner) rather than the live master toggle. Like
@@ -548,7 +582,7 @@ end
 
 
 -- ============================================================
--- DIAGNOSTICS — /df tdmirror
+-- DIAGNOSTICS — /df debug tdmirror
 -- Developer probe for the mirror engine ahead of the AD factory wiring:
 -- toggles ALWAYS-VISIBLE mirrors (magenta name / cyan health) on the
 -- player's frame. Validates the two things the feature stands on: the
@@ -564,7 +598,7 @@ function DF:DebugTDMirror()
     if DF.IteratePartyFrames then DF:IteratePartyFrames(findPlayer) end
     if not target and DF.IterateRaidFrames then DF:IterateRaidFrames(findPlayer) end
     if not target then
-        print("|cff7373f2DandersFrames|r tdmirror: no player unit frame found")
+        DF:Say("no player unit frame found")
         return
     end
     if target._tdMirrorProbeOn then
@@ -572,7 +606,7 @@ function DF:DebugTDMirror()
         Render:DisableMirrors(target, "name")
         Render:DisableMirrors(target, "health")
         if target._tdMirrorProbeHolder then target._tdMirrorProbeHolder:Hide() end
-        print("|cff7373f2DandersFrames|r tdmirror: probe OFF")
+        DF:Say("probe OFF")
         return
     end
     local holder = target._tdMirrorProbeHolder
@@ -588,7 +622,11 @@ function DF:DebugTDMirror()
     Render:EnableMirrors(target, "name",   holder, { r = 1, g = 0, b = 1, a = 1 })
     Render:EnableMirrors(target, "health", holder, { r = 0, g = 1, b = 1, a = 1 })
     if DF.UpdateTextDesigner then DF:UpdateTextDesigner(target, "all") end
-    print("|cff7373f2DandersFrames|r tdmirror: probe ON — name should read MAGENTA, health CYAN,"
-        .. " glyph-perfect over the real text, health still ticking in combat. Run again to toggle off."
-        .. " (Needs Text Designer enabled with name/health elements.)")
+    local o = DF:Out("Text Designer", "mirror probe on")
+    o:Line("Name should read MAGENTA, health CYAN, glyph-perfect over the real text,", "NEUTRAL")
+    o:Line("and health should still tick in combat.", "NEUTRAL")
+    o:Line("Needs Text Designer enabled with name and health elements.", "NEUTRAL")
+    -- NOT o:Hints("/df debug tdmirror"): a "More:" footer naming the command you just
+    -- ran reads as a bug. Toggles say so in words instead.
+    o:Line("Run /df debug tdmirror again to turn this off.", "NEUTRAL")
 end

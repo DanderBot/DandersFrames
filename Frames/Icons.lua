@@ -7,7 +7,6 @@ local addonName, DF = ...
 
 -- Local caching of frequently used globals and WoW API for performance
 local pairs, ipairs, type, wipe = pairs, ipairs, type, wipe
-local tinsert = table.insert
 local floor = math.floor
 local strsplit = strsplit
 local UnitBuff, UnitDebuff = UnitBuff, UnitDebuff
@@ -26,45 +25,23 @@ local issecretvalue = issecretvalue or function() return false end
 -- PERFORMANCE FIX: Default colors for UpdateDefensiveBar fallbacks
 -- Avoids creating tables on every call when db values are nil
 -- ============================================================
-local DEFAULT_DEFENSIVE_BORDER_COLOR = {r = 0, g = 0.8, b = 0, a = 1}
-local DEFAULT_DEFENSIVE_DURATION_COLOR = {r = 1, g = 1, b = 1}
 
--- Get raid buff icons for fallback filtering (when spellId is secret)
--- This is cached after first call
-function DF:GetRaidBuffIcons()
-    if DF.RaidBuffIconCache then
-        return DF.RaidBuffIconCache
-    end
-    
-    local icons = {}
-    for _, buffInfo in ipairs(DF.RaidBuffs) do
-        local spellIdOrTable = buffInfo[1]
-        -- Handle both single spell ID and table of spell IDs
-        local spellIds = type(spellIdOrTable) == "table" and spellIdOrTable or {spellIdOrTable}
-        for _, spellId in ipairs(spellIds) do
-            local icon = nil
-            if C_Spell and C_Spell.GetSpellTexture then
-                icon = C_Spell.GetSpellTexture(spellId)
-            elseif GetSpellTexture then
-                icon = GetSpellTexture(spellId)
-            end
-            if icon then
-                icons[icon] = true
-            end
-        end
-    end
-    
-    DF.RaidBuffIconCache = icons
-    return icons
-end
-
+-- (Removed) DF:GetRaidBuffIcons + DF.RaidBuffIconCache — a spellID -> icon-texture
+-- set built "for fallback filtering (when spellId is secret)". That fallback was
+-- never wired: nothing read the cache except /df debug debugraidbuffs, a dump of the
+-- thing itself. 12.1 answered the same question from the other end — the native
+-- excludeSpellIDs union carries real spell IDs (missingBuffHideFromBar in
+-- Features/Auras.lua) — so matching by texture is superseded, not just unused.
+-- DF.RaidBuffs itself is very much live; only the icon projection is gone.
 
 function DF:UpdateMissingBuffIcon(frame, forceUpdate)
     if not frame or not frame.unit then return end
 
-    -- PERF TEST: Skip if disabled
-    if DF.PerfTest and not DF.PerfTest.enableMissingBuff then return end
-    
+    -- MEMORY TEST: enableMissingBuff is folded into UseFactoryForMissingBuff, not
+    -- early-returned — returning here would leave the Blizzard-driven strip
+    -- standing and the flag would look inert. Falling through reaches the
+    -- "factory inactive -> hide the strip" path below.
+
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
 
@@ -138,9 +115,9 @@ end
 function DF:UpdateDefensiveBar(frame)
     if not frame or not frame.unit then return end
 
-    -- PERF TEST: Skip if disabled
-    if DF.PerfTest and not DF.PerfTest.enableDefensive then return end
-    
+    -- MEMORY TEST: enableDefensive is folded into UseFactoryForDefensive, not
+    -- early-returned — see UpdateMissingBuffIcon above for why.
+
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
     local unit = frame.unit

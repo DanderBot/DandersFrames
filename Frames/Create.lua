@@ -327,74 +327,65 @@ end
 function DF:StartTooltipRefresh(frame) StartTooltipRefresh(frame) end
 function DF:StopTooltipRefresh() StopTooltipRefresh() end
 
--- Debug flag for duration API troubleshooting
--- Set to true to enable debug output: /run DandersFrames.debugDurationAPI = true
-DF.debugDurationAPI = false
-
--- Test function to verify debug is working - call with: /run DandersFrames:TestDurationDebug()
+-- One-shot report of which duration APIs this build exposes.
 function DF:TestDurationDebug()
-    print("|cFF00FF00[DF Duration Debug]|r === Debug Test ===")
-    print("|cFF00FF00[DF Duration Debug]|r debugDurationAPI flag:", self.debugDurationAPI and "ENABLED" or "DISABLED")
-    print("|cFF00FF00[DF Duration Debug]|r")
-    print("|cFF00FF00[DF Duration Debug]|r === API Availability ===")
-    print("|cFF00FF00[DF Duration Debug]|r C_UnitAuras exists:", C_UnitAuras ~= nil)
+    local o = DF:Out("Aura Duration API")
+
+    -- A missing entry point here is genuinely BAD: it means this build cannot do
+    -- something DF relies on, which is the whole reason to run this command.
+    o:Section("C_UnitAuras", C_UnitAuras and "present" or "MISSING")
     if C_UnitAuras then
-        print("|cFF00FF00[DF Duration Debug]|r   .GetAuraDurationRemainingPercent:", C_UnitAuras.GetAuraDurationRemainingPercent ~= nil)
-        print("|cFF00FF00[DF Duration Debug]|r   .GetAuraDurationRemaining:", C_UnitAuras.GetAuraDurationRemaining ~= nil)
-        print("|cFF00FF00[DF Duration Debug]|r   .GetAuraDataByIndex:", C_UnitAuras.GetAuraDataByIndex ~= nil)
-        print("|cFF00FF00[DF Duration Debug]|r   .DoesAuraHaveExpirationTime:", C_UnitAuras.DoesAuraHaveExpirationTime ~= nil)
-    end
-    print("|cFF00FF00[DF Duration Debug]|r C_CurveUtil exists:", C_CurveUtil ~= nil)
-    if C_CurveUtil then
-        print("|cFF00FF00[DF Duration Debug]|r   .CreateColorCurve:", C_CurveUtil.CreateColorCurve ~= nil)
-    end
-    print("|cFF00FF00[DF Duration Debug]|r")
-    print("|cFF00FF00[DF Duration Debug]|r durationAPIMode:", self.durationAPIMode or "not set yet")
-    print("|cFF00FF00[DF Duration Debug]|r")
-    
-    -- Try to get a sample aura to check its structure
-    print("|cFF00FF00[DF Duration Debug]|r === Sample Aura Check ===")
-    if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
-        local auraData = C_UnitAuras.GetAuraDataByIndex("player", 1, "HELPFUL")
-        if auraData then
-            local auraName = "(protected)"
-            pcall(function() auraName = auraData.name or "?" end)
-            print("|cFF00FF00[DF Duration Debug]|r Found buff:", auraName)
-            print("|cFF00FF00[DF Duration Debug]|r   .duration type:", type(auraData.duration))
-            print("|cFF00FF00[DF Duration Debug]|r   .duration value:", tostring(auraData.duration))
-            print("|cFF00FF00[DF Duration Debug]|r   .expirationTime:", auraData.expirationTime)
-            if type(auraData.duration) == "table" then
-                print("|cFF00FF00[DF Duration Debug]|r   Duration is a TABLE - checking for methods...")
-                for k, v in pairs(auraData.duration) do
-                    print("|cFF00FF00[DF Duration Debug]|r     ." .. k .. " = " .. type(v))
-                end
-            elseif type(auraData.duration) == "number" then
-                print("|cFF00FF00[DF Duration Debug]|r   Duration is a NUMBER (old style)")
-            end
-        else
-            print("|cFF00FF00[DF Duration Debug]|r No buffs found on player slot 1")
+        local fns = {
+            "GetAuraDurationRemainingPercent", "GetAuraDurationRemaining",
+            "GetAuraDataByIndex", "DoesAuraHaveExpirationTime",
+        }
+        for _, fn in ipairs(fns) do
+            o:Field(fn, C_UnitAuras[fn] ~= nil, C_UnitAuras[fn] and "GOOD" or "BAD")
         end
     end
-    
-    print("|cFF00FF00[DF Duration Debug]|r")
-    print("|cFF00FF00[DF Duration Debug]|r To enable continuous debug: /run DandersFrames.debugDurationAPI = true")
+
+    o:Section("C_CurveUtil", C_CurveUtil and "present" or "MISSING")
+    if C_CurveUtil then
+        o:Field("CreateColorCurve", C_CurveUtil.CreateColorCurve ~= nil,
+            C_CurveUtil.CreateColorCurve and "GOOD" or "BAD")
+    end
+    -- (Removed) a "durationAPIMode: old/new" line. DF.durationAPIMode was declared
+    -- nil with a "set once on first use" comment and then never assigned by any
+    -- code path, so this always reported "not set yet" — a dump that looked like a
+    -- measurement but only ever printed its own placeholder.
+
+    o:Section("Sample aura")
+    local auraData = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex
+        and C_UnitAuras.GetAuraDataByIndex("player", 1, "HELPFUL")
+    if not auraData then
+        o:Line("No buff in player slot 1 — buff yourself and re-run.", "NEUTRAL")
+    else
+        local auraName = "(protected)"
+        pcall(function() auraName = auraData.name or "?" end)
+        o:Field("name", auraName, "NEUTRAL")
+        local dt = type(auraData.duration)
+        o:Field("duration", tostring(auraData.duration) .. " (" .. dt .. ")", "NEUTRAL")
+        o:Field("expirationTime", tostring(auraData.expirationTime), "NEUTRAL")
+        if dt == "table" then
+            local keys = {}
+            for k, v in pairs(auraData.duration) do keys[#keys + 1] = "." .. tostring(k) .. " = " .. type(v) end
+            table.sort(keys)
+            o:Line("duration is a TABLE — fields:", "WARN")
+            o:More(keys, 8)
+        end
+    end
 end
 
--- Track which API we're using (set once on first use)
-DF.durationAPIMode = nil  -- Will be "old" or "new" once detected
-
--- Register a simple slash command for debug (in case the main addon slash commands aren't loaded yet)
-DF:RegisterDebugSlash("DFDURATIONDEBUG", "Aura duration debug toggle", true, "/dfduration")
+-- One-shot dump of which duration APIs this build exposes. The old on/off
+-- subcommands set DF.debugDurationAPI, which nothing ever read — the "continuous
+-- debug" they advertised did not exist. Only the dump was ever real.
+-- Dev-gated: it reports which C_UnitAuras / C_CurveUtil entry points exist on this
+-- build, which means nothing to someone who does not maintain the code. The earlier
+-- reasoning for opening it up — "let a PTR tester paste it back" — was wrong on its
+-- own terms: testers run alpha builds, so the dev gate does not hide it from them.
+DF:RegisterDebugSlash("DFDURATIONDEBUG", "Aura duration API availability dump", true, "/dfduration")
 SlashCmdList["DFDURATIONDEBUG"] = function(msg)
-    if msg == "on" then
-        DF.debugDurationAPI = true
-        print("|cFF00FF00[DF Duration Debug]|r Debug ENABLED - watch for output when auras update")
-    elseif msg == "off" then
-        DF.debugDurationAPI = false
-        print("|cFF00FF00[DF Duration Debug]|r Debug DISABLED")
-    else
-        DF:TestDurationDebug()
-    end
+    DF:TestDurationDebug()
 end
 
 -- Local caching of frequently used globals for performance
@@ -1384,8 +1375,8 @@ function DF:CreateUnitFrame(unit, index, isRaid)
         -- Wait until addon is fully initialized
         if not DF.initialized then return end
         
-        -- PERF TEST: Nuclear option - disable ALL event handling
-        if DF.PerfTest and not DF.PerfTest.enableAllEvents then return end
+        -- MEMORY TEST: Nuclear option - disable ALL event handling
+        if DF:MemTestDisabled("enableAllEvents") then return end
         
         -- PERFORMANCE NOTE 2025-01-20: With RegisterUnitEvent, unit events are now filtered
         -- at the C++ level, so this check should rarely/never trigger for unit events.
@@ -1394,7 +1385,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
         
         -- Route events to appropriate update functions
         if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
-            if not DF.PerfTest or DF.PerfTest.enableHealthUpdates then
+            if not DF:MemTestDisabled("enableHealthUpdates") then
                 if DF.UpdateHealthFast then
                     DF:UpdateHealthFast(self)
                 else
@@ -1402,7 +1393,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
                 end
             end
         elseif event == "UNIT_NAME_UPDATE" then
-            if not DF.PerfTest or DF.PerfTest.enableNameUpdates then
+            if not DF:MemTestDisabled("enableNameUpdates") then
                 DF:UpdateName(self)
             end
         elseif event == "UNIT_AURA" then
@@ -1411,7 +1402,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
                 DF:UpdateExternalDefIcon(self)
             end
         elseif event == "UNIT_POWER_UPDATE" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER" then
-            if not DF.PerfTest or DF.PerfTest.enablePowerBar then
+            if not DF:MemTestDisabled("enablePowerBar") then
                 if DF.UpdatePower then
                     DF:UpdatePower(self)
                 else
@@ -1434,15 +1425,15 @@ function DF:CreateUnitFrame(unit, index, isRaid)
                 DF:UpdateHealPrediction(self)
             end
         elseif event == "UNIT_CONNECTION" then
-            if not DF.PerfTest or DF.PerfTest.enableConnectionStatus then
+            if not DF:MemTestDisabled("enableConnectionStatus") then
                 DF:UpdateUnitFrame(self)
             end
         elseif event == "READY_CHECK_CONFIRM" then
-            if not DF.PerfTest or DF.PerfTest.enableStatusIcons then
+            if not DF:MemTestDisabled("enableStatusIcons") then
                 DF:UpdateReadyCheckIcon(self)
             end
         elseif event == "INCOMING_SUMMON_CHANGED" or event == "INCOMING_RESURRECT_CHANGED" then
-            if not DF.PerfTest or DF.PerfTest.enableStatusIcons then
+            if not DF:MemTestDisabled("enableStatusIcons") then
                 DF:UpdateCenterStatusIcon(self)
             end
         end

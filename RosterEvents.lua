@@ -359,7 +359,7 @@ SlashCmdList["DFROSTERTEST"] = function()
     else
         DF:DisableRosterEventsSelfTest()
     end
-    print("|cff00ff00DandersFrames:|r Roster self-test "
+    DF:Say("Roster self-test "
         .. (DF.rosterSelfTestActive and "|cff00ff00ENABLED|r" or "|cffff9900DISABLED|r")
         .. " (watch the ROSTER category in /df console)")
 end

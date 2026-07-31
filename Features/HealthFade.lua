@@ -117,7 +117,7 @@ function DF:UpdateHealthFade(frame)
         return
     end
 
-    if DF.PerfTest and not DF.PerfTest.enableHealthFade then return end
+    if DF:MemTestDisabled("enableHealthFade") then return end
     if DF.testMode or DF.raidTestMode then return end
 
     local db = DF:GetFrameDB(frame)

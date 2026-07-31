@@ -8,7 +8,6 @@ local addonName, DF = ...
 
 -- Create module namespace
 DF.ClickCast = DF.ClickCast or {}
-local CC = DF.ClickCast
 
 -- CRITICAL: Create ClickCastFrames global IMMEDIATELY if it doesn't exist
 -- This allows other addons (like Unhalted, NephUI, etc.) to register their frames

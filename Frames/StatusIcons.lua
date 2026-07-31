@@ -901,7 +901,6 @@ end
 -- ============================================================
 
 -- Cache for raid role assignments (unit -> role string)
-local raidRoleCache = {}
 
 function DF:UpdateRaidRoleIcon(frame)
     if not frame or not frame.unit or not frame.raidRoleIcon then return end

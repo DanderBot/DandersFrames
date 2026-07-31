@@ -3212,56 +3212,65 @@ end)
 -- ============================================================
 
 function PinnedFrames:DebugPrint()
-    print("|cFF00FFFF[DF Pinned]|r === Debug Info ===")
-    print("  Initialized:", tostring(self.initialized))
-    print("  Current mode:", self.currentMode or "unknown")
-    print("  Actual mode:", GetActualMode())
-    print("  DF.db exists:", tostring(DF.db ~= nil))
-    
+    local o = DF:Out("Pinned Frames")
+
+    o:Section("Module state")
+    o:Field("initialized", self.initialized, self.initialized and "GOOD" or "BAD")
+    o:Field("current mode", self.currentMode or "unknown", self.currentMode and "NEUTRAL" or "WARN")
+    o:Field("actual mode", GetActualMode(), "NEUTRAL")
+    -- Both DBs missing is a real fault, so they are BAD rather than plain false.
+    o:Field("profile DB", DF.db ~= nil, DF.db and "GOOD" or "BAD")
     local hlDB = GetPinnedDB()
-    print("  pinnedFrames DB exists:", tostring(hlDB ~= nil))
-    
-    -- Show current group roster
+    o:Field("pinnedFrames DB", hlDB ~= nil, hlDB and "GOOD" or "BAD")
+
     local roster = GetGroupRoster()
-    local rosterCount = 0
-    for _ in pairs(roster) do rosterCount = rosterCount + 1 end
-    print("  Group roster count:", rosterCount)
-    for name, _ in pairs(roster) do
-        print("    -", name)
-    end
-    
+    local names = {}
+    for name in pairs(roster) do names[#names + 1] = name end
+    table.sort(names)
+    o:Section("Group roster", #names == 0 and "solo" or (#names .. " members"))
+    o:More(names, 8, "/who")
+
     for i = 1, PinnedFrames.MAX_SETS do
         local set = GetSetDB(i)
-        print(" ")
-        print("  === Set " .. i .. " ===")
-        if set then
-            print("    Enabled:", tostring(set.enabled))
-            print("    ShowLabel:", tostring(set.showLabel))
-            print("    Name:", set.name or "(nil)")
-            print("    Players in set:", #set.players)
+        if not set then
+            o:Section("Set " .. i)
+            o:Line("(no config)", "NEUTRAL")
+        else
+            o:Section("Set " .. i .. (set.name and (" — " .. set.name) or ""),
+                set.enabled and "enabled" or "disabled")
+            o:Field("show label", set.showLabel, "NEUTRAL")
+            local players = {}
             for j, p in ipairs(set.players) do
-                local inGroup = IsPlayerInGroup(p, roster)
-                print("      [" .. j .. "]", p, inGroup and "(IN GROUP)" or "(not in group)")
+                -- A pinned player who is not in the group is the single most common
+                -- cause of "my pinned frame is empty", so it is called out in WARN
+                -- rather than left for the reader to spot.
+                players[j] = IsPlayerInGroup(p, roster) and p or (p .. " " .. DF.OUT.WARN .. "(not in group)|r")
             end
-            
+            o:Field("players", #set.players, #set.players > 0 and "GOOD" or "NEUTRAL")
+            o:More(players, 6, "/df debug pinned info")
+
             local container = self.containers[i]
             local header = self.headers[i]
             local label = self.labels[i]
             
-            print("    Container exists:", tostring(container ~= nil))
-            if container then
-                print("      Shown:", tostring(container:IsShown()))
-                print("      Size:", container:GetWidth(), "x", container:GetHeight())
+            if not container then
+                o:Field("container", "missing", "BAD")
+            else
+                o:Field("container", string.format("%s, %.0f x %.0f",
+                    container:IsShown() and "shown" or "hidden",
+                    container:GetWidth(), container:GetHeight()),
+                    container:IsShown() and "GOOD" or "NEUTRAL")
             end
-            
-            print("    Header exists:", tostring(header ~= nil))
-            if header then
-                print("      Shown:", tostring(header:IsShown()))
-                local nameListAttr = header:GetAttribute("nameList") or "(nil)"
-                print("      nameList attr:", nameListAttr)
-                print("      sortMethod:", header:GetAttribute("sortMethod") or "(nil)")
-                print("      template:", header:GetAttribute("template") or "(nil)")
-                
+
+            if not header then
+                o:Field("header", "missing", "BAD")
+            else
+                o:Field("header", header:IsShown() and "shown" or "hidden",
+                    header:IsShown() and "GOOD" or "NEUTRAL")
+                o:Field("nameList", header:GetAttribute("nameList") or "(none)", "NEUTRAL")
+                o:Field("sortMethod", header:GetAttribute("sortMethod") or "(none)", "NEUTRAL")
+                o:Field("template", header:GetAttribute("template") or "(none)", "NEUTRAL")
+
                 -- Count children
                 local childCount = 0
                 local shownChildren = 0
@@ -3274,35 +3283,40 @@ function PinnedFrames:DebugPrint()
                         end
                     end
                 end
-                print("      Children (total):", childCount)
-                print("      Children (shown):", shownChildren)
-                
-                -- List first few children
-                for j = 1, math.min(5, childCount) do
+                o:Field("children", childCount .. " total, " .. shownChildren .. " shown",
+                    childCount > 0 and (shownChildren > 0 and "GOOD" or "WARN") or "NEUTRAL")
+
+                local kids = {}
+                for j = 1, childCount do
                     local child = header:GetAttribute("child" .. j)
                     if child then
-                        local unit = child:GetAttribute("unit") or "none"
-                        print("        child" .. j .. ":", child:GetName() or "unnamed", "unit=" .. unit, child:IsShown() and "SHOWN" or "hidden")
+                        kids[#kids + 1] = string.format("child%d  %s %s— unit=%s, %s|r", j,
+                            child:GetName() or "unnamed", DF.OUT.NEUTRAL,
+                            child:GetAttribute("unit") or "none",
+                            child:IsShown() and "shown" or "hidden")
                     end
                 end
+                o:More(kids, 5, "/df debug headers map")
             end
-            
-            print("    Label exists:", tostring(label ~= nil))
-            if label then
-                print("      Shown:", tostring(label:IsShown()))
-                print("      Text:", label:GetText() or "(nil)")
+
+            if not label then
+                o:Field("label", "none", "NEUTRAL")
+            else
+                o:Field("label", (label:IsShown() and "shown" or "hidden")
+                    .. ": " .. (label:GetText() or "(no text)"),
+                    label:IsShown() and "GOOD" or "NEUTRAL")
             end
-        else
-            print("    (set config is nil)")
         end
     end
+
+    o:Siblings("pinned")
 end
 
 -- Test function - adds player to set 1 and enables it
 function PinnedFrames:Test()
     local set = GetSetDB(1)
     if not set then
-        print("|cFF00FFFF[DF Pinned]|r Test: No set 1 config found!")
+        DF:Err("Pinned test: no set 1 config found")
         return
     end
     
@@ -3319,9 +3333,9 @@ function PinnedFrames:Test()
     
     if not found then
         table.insert(set.players, fullName)
-        print("|cFF00FFFF[DF Pinned]|r Test: Added", fullName, "to set 1")
+        DF:Say("Pinned test: added " .. fullName .. " to set 1")
     else
-        print("|cFF00FFFF[DF Pinned]|r Test:", fullName, "already in set 1")
+        DF:Say("Pinned test: " .. fullName .. " is already in set 1", nil, "NEUTRAL")
     end
     
     -- Enable set 1
@@ -3331,8 +3345,9 @@ function PinnedFrames:Test()
     -- Update nameList
     self:UpdateHeaderNameList(1)
     
-    print("|cFF00FFFF[DF Pinned]|r Test: Set 1 enabled with player")
-    print("|cFF00FFFF[DF Pinned]|r Run /dfpinned info to see details")
+    local o = DF:Out("Pinned Frames", "test")
+    o:Line("Set 1 enabled with the player added.", "GOOD")
+    o:Hints("/df debug pinned info")
 end
 
 -- ============================================================
@@ -4112,9 +4127,9 @@ function PinnedFrames:StopBossSpawn(auto)
     self.bossSpawnGeneration = self.bossSpawnGeneration + 1
     RestoreBossFrameDrivers()
     if auto then
-        print("|cFF00FFFF[DF Pinned]|r bossspawn script finished; real drivers restored")
+        DF:Say("bossspawn script finished", "real drivers restored")
     else
-        print("|cFF00FFFF[DF Pinned]|r bossspawn OFF; real drivers restored")
+        DF:Say("bossspawn cancelled", "real drivers restored")
     end
 end
 
@@ -4137,7 +4152,7 @@ function PinnedFrames:SetBossSpawnTest(arg)
         end
     end
     if not anyBossSet then
-        print("|cFF00FFFF[DF Pinned]|r No enabled boss-mode sets found. Enable a pinned set and set Frame Type to 'Friendly Boss NPCs' first.")
+        DF:Err("No enabled boss-mode sets. Enable a pinned set and set its Frame Type to 'Friendly Boss NPCs' first.")
         return
     end
 
@@ -4147,14 +4162,15 @@ function PinnedFrames:SetBossSpawnTest(arg)
     else
         local parsed, err = ParseBossSpawnScript(arg)
         if not parsed then
-            print("|cFF00FFFF[DF Pinned]|r bossspawn parse error: " .. err)
-            print("|cFF00FFFF[DF Pinned]|r expected: '1+:0,3+:2,1-:5' (idx <+|->:<seconds>)")
+            local o = DF:Out("Pinned Frames", "bossspawn")
+            o:Line("Parse error: " .. err, "BAD")
+            o:Line("Expected: 1+:0,3+:2,1-:5   (index <+|->:<seconds>)", "NEUTRAL")
             return
         end
         steps = parsed
     end
 
-    print(format("|cFF00FFFF[DF Pinned]|r bossspawn running %d steps", #steps))
+    DF:Say("bossspawn running", #steps .. " steps")
     self:RunBossSpawnScript(steps)
 end
 
@@ -4168,7 +4184,7 @@ end
 -- verify the secure reposition snippet runs correctly).
 function PinnedFrames:SetBossTestMode(visibleCount)
     if InCombatLockdown() then
-        print("|cFF00FFFF[DF Pinned]|r Boss test mode cannot toggle during combat")
+        DF:Err("Boss test mode cannot toggle during combat")
         return
     end
 
@@ -4240,13 +4256,19 @@ function PinnedFrames:SetBossTestMode(visibleCount)
     end
 
     if not anyToggled then
-        print("|cFF00FFFF[DF Pinned]|r No enabled boss-mode sets found. Enable a pinned set and set Frame Type to 'Friendly Boss NPCs' first.")
+        DF:Err("No enabled boss-mode sets. Enable a pinned set and set its Frame Type to 'Friendly Boss NPCs' first.")
     elseif isDyn then
-        print("|cFF00FFFF[DF Pinned]|r Boss test mode ON (dynamic): boss1 always; +2,3 with SHIFT; +4,5 with CTRL; +6,7,8 with ALT. Works in combat. Run '/dfpinned bosstest off' to exit.")
+        local o = DF:Out("Pinned Frames", "boss test — dynamic")
+        o:Line("boss1 always shown", "GOOD")
+        o:Line("hold SHIFT for +2,3   CTRL for +4,5   ALT for +6,7,8", "NEUTRAL")
+        o:Line("works in combat", "NEUTRAL")
+        o:Hints("/df debug pinned bosstest off")
     elseif visibleCount > 0 then
-        print(format("|cFF00FFFF[DF Pinned]|r Boss test mode ON: showing %d boss frames. Run '/dfpinned bosstest off' to exit.", visibleCount))
+        local o = DF:Out("Pinned Frames", "boss test")
+        o:Line(format("Showing %d boss frames.", visibleCount), "GOOD")
+        o:Hints("/df debug pinned bosstest off")
     else
-        print("|cFF00FFFF[DF Pinned]|r Boss test mode OFF: restored real state drivers")
+        DF:Say("Boss test mode off", "real state drivers restored")
     end
 end
 
@@ -4257,7 +4279,7 @@ SlashCmdList["DFPINNED"] = function(msg)
         PinnedFrames:DebugPrint()
     elseif msg == "reinit" then
         PinnedFrames:Reinitialize()
-        print("|cFF00FFFF[DF Pinned]|r Reinitialized")
+        DF:Say("Pinned frames reinitialised")
     elseif msg == "test" then
         PinnedFrames:Test()
     elseif msg and msg:match("^bosstest") then
@@ -4274,15 +4296,21 @@ SlashCmdList["DFPINNED"] = function(msg)
         local arg = msg:match("^bossspawn%s+(.+)$")
         PinnedFrames:SetBossSpawnTest(arg)
     else
-        print("|cFF00FFFF[DF Pinned]|r Commands:")
-        print("  info - Show detailed debug info (one-shot; pinned frame state dump)")
-        print("  test - Add player to set 1 and enable")
-        print("  bosstest <N> - Show N boss frames to test secure positioning (1-8, 'off' to exit)")
-        print("  bosstest dyn - Modifier-driven test: boss1 always, +2,3 SHIFT, +4,5 CTRL, +6,7,8 ALT (works in combat)")
-        print("  bossspawn demo - Run a 20s simulated spawn/despawn sequence for layout testing")
-        print("  bossspawn <script> - Custom timed script, e.g. '1+:0,3+:2,1-:5'")
-        print("  bossspawn off - Cancel any running bossspawn script")
-        print("  reinit - Reinitialize frames")
-        print("  (Continuous debug output is routed through the Debug Console under the 'PINNED' category — use /df console)")
+        local o = DF:Out("Pinned Frames")
+        o:Section("Commands")
+        o:Item("info", "detailed state dump")
+        o:Item("test", "add the player to set 1 and enable")
+        o:Item("reinit", "reinitialise frames")
+        o:Section("Boss frame testing")
+        o:Item("bosstest <1-8>", "show N boss frames to test secure positioning")
+        o:Item("bosstest dyn", "boss1 always, +2,3 SHIFT, +4,5 CTRL, +6,7,8 ALT", "GOOD")
+        o:Line("works in combat", "NEUTRAL")
+        o:Item("bosstest off", "leave boss test mode")
+        o:Section("Spawn scripting")
+        o:Item("bossspawn demo", "20s simulated spawn/despawn sequence")
+        o:Item("bossspawn <script>", "custom timed script, e.g. 1+:0,3+:2,1-:5")
+        o:Item("bossspawn off", "cancel a running script")
+        o:Line("Ongoing tracing is in the debug console — enable the PINNED category.", "NEUTRAL")
+        o:Hints("/df debug pinned info", "/df console")
     end
 end

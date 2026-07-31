@@ -264,8 +264,7 @@ function VC:ShowNag(newVersion)
     if self.hasNagged then return end
     self.hasNagged = true
     local L = DF.L
-    print("|cffeda55fDandersFrames:|r " ..
-        format(L["A newer version is available (%s). Get it on CurseForge."], tostring(newVersion)))
+    DF:Say(format(L["A newer version is available (%s). Get it on CurseForge."], tostring(newVersion)))
 end
 
 -- Receive H: respond with our version on the same channel type, with small jitter.
@@ -361,7 +360,7 @@ end
 
 function VC:PrintUsers()
     if not IsInGroup() then
-        print("|cffeda55fDandersFrames:|r Not in a group.")
+        DF:Say("Not in a group.")
         return
     end
     local members = self:CollectGroupMembers()
@@ -374,6 +373,6 @@ function VC:PrintUsers()
             print(format("|cff888888x|r %s - not detected", m.name))
         end
     end
-    print(format("|cffeda55fDandersFrames:|r %d / %d members running DandersFrames.",
+    DF:Say(format("%d / %d members running DandersFrames.",
         detected, #members))
 end

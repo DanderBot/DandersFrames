@@ -35,10 +35,11 @@ GUI.Colors = {
     warning    = C_WARNING,  -- soft red for behaviour-change / caution notes
 }
 
--- Dialog chrome. Popup.lua and WizardBuilder.lua are standalone dialogs rather
--- than settings pages, and both wanted the same handful of extras on top of the
--- shared neutrals — so both had grown a private copy of the WHOLE palette, one
--- of them complete (11 hardcoded colours) and matching today only by luck.
+-- Dialog chrome. Popup.lua is a standalone dialog rather than a settings page and
+-- wanted the same handful of extras on top of the shared neutrals — so it had
+-- grown a private copy of the WHOLE palette (11 hardcoded colours), matching
+-- today only by luck. (WizardBuilder.lua was the other such dialog, since
+-- deleted as dead code — hence "three separate copies" in the note below.)
 -- One owner: the neutrals below are the SAME tables as GUI.Colors, so they
 -- theme-track in lockstep, and only what genuinely differs is declared here.
 -- Read-only by convention — these tables are shared, so nothing may mutate them.
@@ -76,7 +77,7 @@ GUI.DialogColors = {
 --     (slot - content) of the row above  +  (content's top inset) of the row below
 --
 -- which means a row whose content is short inside a tall slot silently gets a big
--- gap. That is how the GUI ended up with a 4x spread. /df gapcheck measured it
+-- gap. That is how the GUI ended up with a 4x spread. /df debug gapcheck measured it
 -- across four pages (267 rows), and the content heights came back IDENTICAL on
 -- every page, so the slots can be derived rather than guessed:
 --
@@ -228,7 +229,7 @@ function GUI:RelayoutHost(widget, slotHeight)
     end
 end
 
--- "/df guiwidth" — width ground truth for the page on screen: every top-level child and
+-- "/df debug guiwidth" — width ground truth for the page on screen: every top-level child and
 -- every settings-group child with its live width, flagging any that is non-positive or
 -- narrower than its group allows.
 -- Use it to TELL APART the two causes of truncated label text, which look identical:
@@ -240,12 +241,16 @@ end
 function GUI:DebugDumpWidths()
     local page = GUI.CurrentPageName and GUI.Pages[GUI.CurrentPageName]
     if not page or not page.children then
-        print("|cff00ff00DandersFrames:|r no built page on screen.")
+        DF:Say("GUI width", "no built page on screen", "WARN")
         return
     end
     local content = GUI.contentFrame and GUI.contentFrame:GetWidth() or -1
-    print(("|cff00ff00DandersFrames|r guiwidth — page '%s', content %.0f, child %.0f")
-        :format(GUI.CurrentPageName, content, page.child and page.child:GetWidth() or -1))
+    local o = DF:Out("GUI Width", ("page '%s'"):format(GUI.CurrentPageName))
+    o:Section("Widths")
+    o:Field("content frame", ("%.0f"):format(content), content > 0 and "GOOD" or "BAD")
+    o:Field("scroll child", ("%.0f"):format(page.child and page.child:GetWidth() or -1), "NEUTRAL")
+
+    o:Section("Widgets")
     local bad = 0
     local function flag(w, limit)
         if not w or w <= 0 then bad = bad + 1; return "|cffff4444 <== NON-POSITIVE|r" end
@@ -270,7 +275,9 @@ function GUI:DebugDumpWidths()
                 :format(i, w, tostring(widget.layoutCol), tostring(widget:IsShown()), flag(w)))
         end
     end
-    print(("|cff00ff00DandersFrames:|r %d suspect frame(s)."):format(bad))
+    o:Section("Result")
+    o:Field("suspect frames", bad, bad > 0 and "WARN" or "GOOD")
+    o:Siblings("guiwidth")
 end
 
 DF.SectionRegistry = DF.SectionRegistry or {}
@@ -504,7 +511,7 @@ GUI.SnapHeightEven = SnapHeightEven
 -- nil global and every capture would look like a new session.
 local GAP_SESSION = date and date("%Y-%m-%d %H:%M:%S") or "?"
 
--- /df pixelcheck -- measure, don't guess
+-- /df debug pixelcheck -- measure, don't guess
 --
 -- The "top border of a box goes missing until you scroll" bug has now been
 -- diagnosed twice from reasoning about the layout and fixed twice, and it is
@@ -517,7 +524,7 @@ local GAP_SESSION = date and date("%Y-%m-%d %H:%M:%S") or "?"
 --
 -- Scrolling "fixes" both, which is exactly why the screenshot can't separate
 -- them. This reports the numbers for the open page so the next change is aimed.
--- Debug output: deliberately raw, like the other /df dumps.
+-- Debug output: deliberately raw, like the other /df debug dumps.
 -- ============================================================
 
 -- Signed distance from `v` (UI units) to the nearest whole device pixel.
@@ -605,13 +612,13 @@ function GUI.PixelCheck()
         if p.IsShown and p:IsShown() then page, pageName = p, name; break end
     end
     if not page then
-        print("|cff7373f2DandersFrames|r pixelcheck: no settings page is open.")
+        DF:Say("Pixel check", "no settings page is open", "WARN")
         return
     end
 
     local ppu = PixelsPerUnit(page)
     if not ppu then
-        print("|cff7373f2DandersFrames|r pixelcheck: scale unresolved (is the window shown?).")
+        DF:Say("Pixel check", "scale unresolved — is the window shown?", "WARN")
         return
     end
 
@@ -619,16 +626,20 @@ function GUI.PixelCheck()
     local scrollOff = PixelOffsetOf(scroll, ppu)
     local clipTop = page:GetTop()
 
-    print(("|cff7373f2DandersFrames|r pixelcheck  page=|cffffffff%s|r  scale=%.4f  px/unit=%.4f")
-        :format(tostring(pageName), page:GetEffectiveScale() or 0, ppu))
+    local o = DF:Out("Pixel Check", ("page %s"):format(tostring(pageName)))
+    o:Section("Scale")
+    o:Field("effective scale", ("%.4f"):format(page:GetEffectiveScale() or 0), "NEUTRAL")
+    o:Field("px per unit", ("%.4f"):format(ppu), "NEUTRAL")
+
+    o:Section("Scroll")
     -- Reported, not judged. This used to print a red NOT SNAPPED when the offset
     -- was off-grid, back when the scroll offset was quantised and being off-grid
     -- meant something had gone wrong. Nothing quantises it now -- a 2px border
     -- draws the same ink at any offset -- so an off-grid figure here is the
     -- normal state of a scrolled page, and flagging it as a fault sends the next
     -- person reading this output after a bug that is not there.
-    print(("  scroll offset = %.3f  (%.2f px off grid -- expected; nothing quantises this)")
-        :format(scroll, scrollOff or 0))
+    o:Field("offset", ("%.3f  (%.2f px off grid)"):format(scroll, scrollOff or 0), "NEUTRAL")
+    o:Line("Off-grid here is expected — nothing quantises the scroll offset.", "NEUTRAL")
 
     -- THE CLIP BOUNDARY ITSELF. Earlier runs measured each box's DISTANCE to this
     -- edge but never whether the edge is on-grid. A ScrollFrame clips to its own
@@ -647,20 +658,23 @@ function GUI.PixelCheck()
     -- is the entire See-Also footer bug.
     local badTop = dPageTop and math.abs(dPageTop) > 0.05
     local badBot = dPageBot and math.abs(dPageBot) > 0.05
-    print(("  viewport (the clip edge): top%+.2f bot%+.2f h%+.2f%s")
-        :format(dPageTop or 0, dPageBot or 0, dPageH or 0,
-            (badTop or badBot)
-                and (" |cffff6060<-- CLIP EDGE OFF-GRID (%s)|r"):format(
-                    badTop and (badBot and "top+bottom" or "top") or "bottom")
-                or ""))
+    o:Section("Viewport", "the clip edge")
+    o:Field("offsets", ("top%+.2f  bot%+.2f  h%+.2f"):format(dPageTop or 0, dPageBot or 0, dPageH or 0),
+        (badTop or badBot) and "BAD" or "GOOD")
+    if badTop or badBot then
+        o:Line(("Clip edge OFF-GRID (%s) — it shaves a partial row off whatever rests against it."):format(
+            badTop and (badBot and "top and bottom" or "top") or "bottom"), "BAD")
+    end
     local kid = page.child or (page.GetScrollChild and page:GetScrollChild())
     if kid then
         local kppu = PixelsPerUnit(kid) or ppu
-        print(("  scroll child:             top%+.2f w%+.2f%s")
-            :format(PixelOffsetOf(kid:GetTop(), kppu) or 0,
-                    PixelOffsetOf(kid:GetWidth(), kppu) or 0,
-                    (math.abs(PixelOffsetOf(kid:GetTop(), kppu) or 0) > 0.05)
-                        and " |cffff6060<-- CHILD OFF-GRID|r" or ""))
+        local kidBad = math.abs(PixelOffsetOf(kid:GetTop(), kppu) or 0) > 0.05
+        o:Field("scroll child", ("top%+.2f  w%+.2f"):format(
+            PixelOffsetOf(kid:GetTop(), kppu) or 0, PixelOffsetOf(kid:GetWidth(), kppu) or 0),
+            kidBad and "BAD" or "GOOD")
+        if kidBad then
+            o:Line("Content is positioned against this, so every box inherits its phase.", "BAD")
+        end
     end
 
     -- "Is it the section BOXES or the controls inside them?" is the question the
@@ -734,8 +748,9 @@ function GUI.PixelCheck()
     end
 
     table.sort(rows, function(a, b) return a.score > b.score end)
-    print(("  %d bordered frames | %d with an OFF-GRID top | %d within 1px of the clip edge")
-        :format(#rows, offGrid, nearClip))
+    o:Section("Bordered frames", #rows)
+    o:Field("off-grid top", offGrid, offGrid > 0 and "BAD" or "GOOD")
+    o:Field("within 1px of the clip edge", nearClip, nearClip > 0 and "WARN" or "GOOD")
 
     -- Per-kind tally: this is the line that says whether fixing controls would
     -- also fix the section boxes, or whether they are a separate problem.
@@ -744,7 +759,7 @@ function GUI.PixelCheck()
         kindLine[#kindLine + 1] = ("%s %d/%d"):format(kind, k.bad, k.n)
     end
     table.sort(kindLine)
-    print("  off-grid by kind (bad/total): " .. table.concat(kindLine, "  "))
+    o:Field("by kind (bad/total)", table.concat(kindLine, "  "), "NEUTRAL")
 
     local function emit(r)
         local flag = ""
@@ -765,7 +780,7 @@ function GUI.PixelCheck()
     local boxes = 0
     for _, r in ipairs(rows) do if r.kind == "BOX" then boxes = boxes + 1 end end
     if boxes > 0 then
-        print(("  section boxes (%d) -- these are the outlines around each section:"):format(boxes))
+        o:Section("Section boxes", boxes .. " — the outlines around each section")
         local shown = 0
         for _, r in ipairs(rows) do
             if r.kind == "BOX" and shown < 10 then
@@ -781,10 +796,12 @@ function GUI.PixelCheck()
             end
         end
     else
-        print("  |cffffaa00no section boxes found on this page|r")
+        o:Section("Section boxes")
+        o:Line("None found on this page.", "WARN")
     end
 
-    print("  worst overall -- topOff/botOff/heightOff are px from the grid; clip is px below the viewport top:")
+    o:Section("Worst overall")
+    o:Line("topOff/botOff/heightOff are px from the grid; clip is px below the viewport top.", "NEUTRAL")
     for i = 1, math.min(#rows, 10) do emit(rows[i]) end
     print("  |cff808080Read: OFF-GRID = geometry. SOFT-EDGE = the edge is a fractional number of device px wide, so it bleeds into the next row -- a box can be a perfect 0.00 and still lose its border this way. FAINT = so little alpha that any split is invisible.|r")
     print("  |cff808080Nothing is corrected at runtime any more. Every widget gets its whole-pixel numbers from its FACTORY at construction (nudging them afterwards is what made chained button rows drift), so an off-grid row after a scale change is expected and is not a bug. What still matters here is SOFT-EDGE and FAINT.|r")
@@ -834,7 +851,7 @@ function GUI.PixelCheck()
 end
 
 -- ============================================================
--- /df navprobe -- catch the left-nav hover flash in the act
+-- /df debug navprobe -- catch the left-nav hover flash in the act
 --
 -- The symptom: sweeping the cursor down the nav list shows a "ghost" -- of the
 -- row's text, or of the bottom part of the hover plate. It happens at moderate
@@ -861,7 +878,7 @@ local navTrace
 function GUI.NavProbe(seconds)
     local container = GUI.tabContainer
     if not (container and container:IsVisible()) then
-        print("|cff7373f2DandersFrames|r navprobe: the settings window is not open.")
+        DF:Say("the settings window is not open.")
         return
     end
     local ppu = PixelsPerUnit(container) or 1
@@ -881,7 +898,10 @@ function GUI.NavProbe(seconds)
         end
     end
 
-    print(("|cff7373f2DandersFrames|r navprobe  %d visible rows  px/unit=%.4f"):format(#rows, ppu))
+    local o = DF:Out("Nav Probe")
+    o:Section("Rows")
+    o:Field("visible", #rows, #rows > 0 and "GOOD" or "WARN")
+    o:Field("px per unit", ("%.4f"):format(ppu), "NEUTRAL")
 
     -- The ANCESTOR CHAIN, because a row cannot be on the grid if the frame it
     -- hangs off is not: every ancestor here is two-corner anchored, so nothing
@@ -991,7 +1011,7 @@ function GUI.NavProbe(seconds)
 end
 
 -- ============================================================
--- /df gapcheck -- measure the vertical rhythm, don't eyeball it
+-- /df debug gapcheck -- measure the vertical rhythm, don't eyeball it
 --
 -- The question this answers: "which rows are too far apart, and which are too
 -- close?" It cannot be answered from GUI.RowHeight alone, because those numbers
@@ -1059,7 +1079,7 @@ function GUI.GapCheck(mode)
     if mode == "clear" then
         DandersFramesDebugDB = DandersFramesDebugDB or {}
         DandersFramesDebugDB.gapcheck = nil
-        print("|cff7373f2DandersFrames|r gapcheck: saved capture cleared (/reload to flush).")
+        DF:Say("saved capture cleared (/reload to flush).")
         return
     end
 
@@ -1068,7 +1088,7 @@ function GUI.GapCheck(mode)
         if p.IsShown and p:IsShown() then page, pageName = p, name break end
     end
     if not page then
-        print("|cff7373f2DandersFrames|r gapcheck: no settings page is open.")
+        DF:Say("Gap check", "no settings page is open", "WARN")
         return
     end
 
@@ -1138,15 +1158,19 @@ function GUI.GapCheck(mode)
     end
 
     if nRows == 0 then
-        print(("|cff7373f2DandersFrames|r gapcheck  page=|cffffffff%s|r -- no measurable rows (all collapsed?)")
-            :format(tostring(pageName)))
+        local o = DF:Out("Gap Check", "page " .. tostring(pageName))
+        o:Line("No measurable rows — is everything collapsed?", "WARN")
+        o:Siblings("gapcheck")
         return
     end
 
-    print(("|cff7373f2DandersFrames|r gapcheck  page=|cffffffff%s|r  %d groups  %d rows  (UI units)")
-        :format(tostring(pageName), #groups, nRows))
+    local o = DF:Out("Gap Check", "page " .. tostring(pageName))
+    o:Section("Measured", "UI units")
+    o:Field("groups", #groups, "NEUTRAL")
+    o:Field("rows", nRows, "NEUTRAL")
 
-    print("  per kind -- slot is what RowHeight hands out, content is what it actually draws:")
+    o:Section("Per kind")
+    o:Line("slot is what RowHeight hands out; content is what it actually draws.", "NEUTRAL")
     local kinds = {}
     for kind in pairs(byKind) do kinds[#kinds + 1] = kind end
     table.sort(kinds, function(a, b) return (byKind[a].padBot / byKind[a].n) > (byKind[b].padBot / byKind[b].n) end)
@@ -1246,7 +1270,8 @@ function GUI.GapCheck(mode)
         :format(#rows, tostring(pageName), nPages))
     print("  |cff808080Read: padBottom is the slack under a row -- the knob is GUI.RowHeight[kind], and slot - content IS that slack. A kind sorting to the top of the first list is over-spaced; one near zero is cramped. In the second list, 'varies' means the gap is not coming from RowHeight alone. Add 'all' for every row, 'clear' to wipe the saved capture.|r")
 end
-GUI.GapCheckAll = function() GUI.GapCheck("all") end
+-- (Removed) GUI.GapCheckAll — a no-arg alias for GapCheck("all"), superseded once the
+-- dispatcher started forwarding the mode argument. Zero callers.
 
 -- Every frame that carries a 1px backdrop edge, so the sweep below can find them
 -- without any page needing to know what it contains. Weak keys: a retired page's
@@ -1355,7 +1380,7 @@ local function LayoutPixelBorder(frame)
     -- care where it lands.
     local devicePx = PX_BORDER_THICKNESS * (frame._pxWeight or 1)
     local px = devicePx / ppu
-    frame._pxDevicePx = devicePx   -- what /df pixelcheck reports for this surface
+    frame._pxDevicePx = devicePx   -- what /df debug pixelcheck reports for this surface
     frame._pxPpu = ppu             -- the scale this thickness was derived at
 
     b.top:ClearAllPoints()
@@ -2130,7 +2155,7 @@ function GUI:CreateSettingsGroup(parent, width, opts)
             if kind and GUI.RowCompact[kind] then
                 for j = i + 1, #self.groupChildren do
                     if entryVisible(self.groupChildren[j], j) then
-                        -- Recorded even when it does NOT match, so /df gapcheck can
+                        -- Recorded even when it does NOT match, so /df debug gapcheck can
                         -- say WHY a run did not close up: a row with no rowKind
                         -- sitting between two checkboxes breaks the run for the
                         -- layout while being invisible to the report (a widget
@@ -2311,7 +2336,7 @@ function GUI:CreateLabel(parent, text, width, color)
     -- resolves its wrap lazily, so one that was laid out before its frame reached
     -- final width keeps the old single-line layout and renders ellipsised
     -- ("Customize class colors used throughout DandersFra…") even though the frame
-    -- measures a correct 260 — /df guiwidth reports zero suspect frames while the
+    -- measures a correct 260 — /df debug guiwidth reports zero suspect frames while the
     -- text is visibly truncated. Scrolling the settings window dirties it and the
     -- text snaps back, which is the tell that it is a stale layout, not a bad size.
     -- Clearing the text first matters: SetText with an unchanged string can early-out
@@ -4037,6 +4062,40 @@ end
 --   tone = nil      → dim grey "×" at rest → white on hover (close/dismiss; default)
 --   tone = "danger" → RED "×" at rest → brighter red on hover (inline destructive
 --                     removes: list-item / tag removes). Both keep the red hover wash.
+-- A horizontal row of buttons, chained left-to-right with one gap, sized as a
+-- single layout slot. Pages were building this by hand every time -- a bare
+-- CreateFrame, then SetPoint("LEFT", prev, "RIGHT", 6, 0) per button, plus the
+-- HookScript/ShowTooltip pair on any button that needed a tooltip.
+--
+-- buttons = { { label, width, onClick, icon, tooltip, key }, ... }
+--   tooltip is a ShowTooltip spec ({title, lines, tone}); a button IS its own
+--   label, so it takes the whole-widget hover rather than AttachTooltip's
+--   label-only hit area (AttachTooltip returns early without a label region).
+--   key names the button on row.buttons for a caller that needs it later.
+function GUI:CreateButtonRow(parent, buttons, opts)
+    opts = opts or {}
+    local gap, h = opts.gap or 6, opts.height or 24
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetSize(opts.width or 540, opts.rowHeight or (h + 4))
+    row.buttons = {}
+    local prev
+    for i, spec in ipairs(buttons) do
+        local btn = GUI:CreateButton(row, spec.label, spec.width or 80, h, spec.onClick, spec.icon)
+        if prev then
+            btn:SetPoint("LEFT", prev, "RIGHT", gap, 0)
+        else
+            btn:SetPoint("LEFT", 0, 0)
+        end
+        if spec.tooltip then
+            btn:HookScript("OnEnter", function(self) GUI:ShowTooltip(self, spec.tooltip) end)
+            btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+        end
+        row.buttons[spec.key or i] = btn
+        prev = btn
+    end
+    return row
+end
+
 function GUI:CreateCloseButton(parent, opts)
     opts = opts or {}
     local size = opts.size or 20
@@ -4792,11 +4851,15 @@ function GUI.RegisterOverrideWidget(widget)
     table.insert(overrideWidgets, widget)
 end
 
--- Slash command to toggle debug mode
-DF:RegisterDebugSlash("DFOVERRIDEDEBUG", "Auto layout override table dump", true, "/dfoverridedebug")
+-- NOT a dump, despite what the old description ("Auto layout override table
+-- dump") claimed — it prints no table. It forces every reset button / override
+-- marker visible regardless of override state, so you can see which controls
+-- carry the machinery at all. overrideDebugMode is live: read by
+-- GUI.IsOverrideDebugMode and three marker call sites.
+DF:RegisterDebugSlash("DFOVERRIDEDEBUG", "Force-show every override marker and reset button", true, "/dfoverridedebug")
 SlashCmdList["DFOVERRIDEDEBUG"] = function()
     overrideDebugMode = not overrideDebugMode
-    print("|cff00ff00DandersFrames:|r Override debug mode " .. (overrideDebugMode and "ENABLED" or "DISABLED"))
+    DF:Say("Override debug mode " .. (overrideDebugMode and "ENABLED" or "DISABLED"))
     -- Refresh all override indicators
     RefreshAllOverrideIndicators()
     -- Also update position panel if open
@@ -5275,7 +5338,7 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(220, 24)
     container.preferredHeight = GUI.RowHeight.checkbox   -- factory-owned slot height (see GUI.RowHeight)
-    container.rowKind = "checkbox"       -- /df gapcheck groups the spacing report by this
+    container.rowKind = "checkbox"       -- /df debug gapcheck groups the spacing report by this
     container.fixedRowHeight = true
 
     local cb = CreateFrame("CheckButton", nil, container, "BackdropTemplate")
@@ -5327,14 +5390,17 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
     end
     
     container:SetScript("OnShow", UpdateState)
+    -- Re-read the source and repaint the box, for a caller that changed the value
+    -- behind the widget's back (a "set all" button). Same contract as
+    -- CreateSegmentToggle:Refresh(); before this, call sites reached for a
+    -- Hide()/Show() bounce to fire the OnShow above.
+    container.Refresh = UpdateState
     cb:SetScript("OnClick", function(self)
         local val = self:GetChecked()
-        if DF.debugEnabled then
-            print("|cffff00ffDF DEBUG:|r Checkbox OnClick")
-            print("  dbKey:", dbKey)
-            print("  overrideKey:", overrideKey)
-            print("  new value:", val)
-        end
+        -- Was gated on DF.debugEnabled and printed straight to CHAT, bypassing the
+        -- console entirely. GUI is the right category and it is already declared.
+        DF:Debug("GUI", "checkbox OnClick: dbKey=%s overrideKey=%s value=%s",
+            tostring(dbKey), tostring(overrideKey), tostring(val))
 
         -- Runtime override protection: redirect to baseline, skip refresh
         if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
@@ -5356,14 +5422,14 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
         end
         
         if callback then 
-            if DF.debugEnabled then print("  -> calling callback") end
+            DF:Debug("GUI", "checkbox OnClick: calling callback")
             callback() 
         end
         if parent.RefreshStates then 
-            if DF.debugEnabled then print("  -> calling RefreshStates") end
+            DF:Debug("GUI", "checkbox OnClick: calling RefreshStates")
             parent:RefreshStates() 
         end
-        if DF.debugEnabled then print("  -> calling DF:UpdateAll()") end
+        DF:Debug("GUI", "checkbox OnClick: calling DF:UpdateAll")
         DF:UpdateAll()
     end)
     
@@ -5510,7 +5576,12 @@ end
 -- Used by the Debug > Categories sub-tab. The categoryKey writes
 -- directly to DandersFramesDB_v2.debug.filters.
 -- ============================================================
-function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width)
+-- opts.noisy marks a firehose category: one user action can produce dozens of
+-- lines, which evicts the trace the log was opened to capture. It renders as the
+-- shared caution icon with its own tooltip rather than a "(noisy)" suffix baked
+-- into the description string -- the suffix was untranslatable in place, and it
+-- competed with the description for the same line of text.
+function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width, noisy)
     local row = CreateFrame("Frame", nil, parent)
     row:SetSize(width or 520, 28)
     row:EnableMouse(true)
@@ -5535,11 +5606,52 @@ function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width)
     nameTxt:SetText(categoryKey)
     nameTxt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
+    -- Caution icon for a firehose category. Its own hit area, so it can carry a
+    -- different tooltip from the row without stealing the row's click: the frame
+    -- only enables mouse, it has no OnMouseUp, so a click still falls through to
+    -- the row underneath and toggles the category like anywhere else on it.
+    local noisyIcon
+    if noisy then
+        noisyIcon = CreateFrame("Frame", nil, row)
+        noisyIcon:SetSize(14, 14)
+        noisyIcon:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+        noisyIcon:EnableMouse(true)
+        noisyIcon:SetFrameLevel(row:GetFrameLevel() + 2)
+        local tex = noisyIcon:CreateTexture(nil, "OVERLAY")
+        tex:SetAllPoints()
+        tex:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning")
+        -- The caution tone's ICON colour, read straight from the shared tone table
+        -- so this stays in step with every banner and note that uses it.
+        local ic = INFO_BANNER_TONES.caution.iconColor
+        tex:SetVertexColor(ic[1], ic[2], ic[3])
+        noisyIcon:SetScript("OnEnter", function(self)
+            -- Keep the row's wash up: the pointer is still over the row, and
+            -- letting it drop would read as the row losing focus.
+            row.hoverBg:Show()
+            GUI:ShowTooltip(self, {
+                title = L["Noisy category"],
+                lines = { L["This category can fill the log very quickly, burying the entries you are looking for."],
+                          L["Turn it on only while reproducing the bug it relates to."] },
+                tone = "caution",
+            })
+        end)
+        noisyIcon:SetScript("OnLeave", function()
+            row.hoverBg:Hide()
+            GUI:HideTooltip()
+        end)
+        row.noisyIcon = noisyIcon
+    end
+
     -- Description (dim, fills remaining space, wraps if too long)
     if description and description ~= "" then
         local descTxt = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         descTxt:SetPoint("LEFT", nameTxt, "RIGHT", 12, 0)
-        descTxt:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+        -- Stop short of the icon rather than running under it.
+        if noisyIcon then
+            descTxt:SetPoint("RIGHT", noisyIcon, "LEFT", -6, 0)
+        else
+            descTxt:SetPoint("RIGHT", row, "RIGHT", -8, 0)
+        end
         descTxt:SetJustifyH("LEFT")
         descTxt:SetText(description)
         descTxt:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
@@ -6623,7 +6735,6 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
         -- Hook the OK button to run full update when confirmed
         if useLightweight and lightweightCallback then
             -- We need to run full update when picker is closed via OK
-            local oldSetup = ColorPickerFrame.SetupColorPickerAndShow
             -- Use a frame to detect when color picker closes
             if not container.colorPickerWatcher then
                 container.colorPickerWatcher = CreateFrame("Frame")
@@ -10918,10 +11029,10 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         return btn
     end
     
-    local tankBtn = CreateQuickAddButton("+ " .. L["Tanks"], "TANK", ROLE_COLORS.TANK, 0)
-    local healerBtn = CreateQuickAddButton("+ " .. L["Healers"], "HEALER", ROLE_COLORS.HEALER, 72)
-    local dpsBtn = CreateQuickAddButton("+ " .. L["DPS"], "DAMAGER", ROLE_COLORS.DAMAGER, 144)
-    local allBtn = CreateQuickAddButton("+ " .. L["All"], "ALL", {0.6, 0.6, 0.6}, 216)
+    CreateQuickAddButton("+ " .. L["Tanks"], "TANK", ROLE_COLORS.TANK, 0)
+    CreateQuickAddButton("+ " .. L["Healers"], "HEALER", ROLE_COLORS.HEALER, 72)
+    CreateQuickAddButton("+ " .. L["DPS"], "DAMAGER", ROLE_COLORS.DAMAGER, 144)
+    CreateQuickAddButton("+ " .. L["All"], "ALL", {0.6, 0.6, 0.6}, 216)
     
     -- Clear All button (right side) — persistent red via the tinted variant.
     local clearBtn = CreateFrame("Button", nil, buttonRow, "BackdropTemplate")
@@ -11645,7 +11756,7 @@ function DF:CreateGUI()
         if btnLock.dfDisabled then
             local name = DF.AutoProfilesUI and DF.AutoProfilesUI.GetActiveLayoutName
                 and DF.AutoProfilesUI:GetActiveLayoutName()
-            print("|cffff9900DandersFrames:|r " .. format(L["Auto layout \"%s\" is active. Unlock it from the Auto Layouts page to move its frames."], name or "?"))
+            DF:Say(format(L["Auto layout \"%s\" is active. Unlock it from the Auto Layouts page to move its frames."], name or "?"))
             return
         end
 
@@ -11989,7 +12100,7 @@ function DF:CreateGUI()
     -- ★ Every offset in the nav chain is SNAPPED, for the same structural reason
     -- the page viewport is: these frames are anchored by two corners, nothing
     -- nudges them afterwards, and the numbers going in are the only
-    -- lever. Unsnapped, the whole list inherits the fraction -- /df navprobe
+    -- lever. Unsnapped, the whole list inherits the fraction -- /df debug navprobe
     -- measured every one of 42 rows at top+0.38, which is the 4-unit inset below
     -- (5.625 device px at 1.4062 px/unit) propagated down the chain. A row that
     -- starts on a fractional device row draws its hover plate's top and bottom
@@ -12096,7 +12207,7 @@ function DF:CreateGUI()
     -- lever.
     --
     -- The BOTTOM one is what mattered. A raw 36 is 50.625 device px at 1.4062
-    -- px/unit, i.e. 0.625 above a grid line -- and /df pixelcheck reported
+    -- px/unit, i.e. 0.625 above a grid line -- and /df debug pixelcheck reported
     -- exactly that on every page it was ever run on: "viewport top+0.00
     -- bot-0.375". The page's own inset was already snapped, but a snapped inset
     -- off a fractional PARENT edge is still fractional, so the viewport's bottom
@@ -12413,10 +12524,6 @@ function DF:CreateGUI()
             -- Tab switching uses the cache-aware path so revisiting a tab is cheap.
             GUI.Pages[name]:RefreshCached()
             if GUI.Pages[name].RefreshStates then GUI.Pages[name]:RefreshStates() end
-            -- Reapply picker overlays if in picker mode
-            if DF.settingsPickerMode and DF.ApplyPickerOverlaysToCurrentPage then
-                C_Timer.After(0.05, function() DF:ApplyPickerOverlaysToCurrentPage() end)
-            end
         end
         local nc = GetThemeColor()
         if GUI.Tabs[name] then
@@ -12625,7 +12732,7 @@ function DF:CreateGUI()
         -- was hanging off. A ScrollFrame clips to its own rect, so its top edge is
         -- the boundary every box near the top of a page is cut against -- and a
         -- raw 8-unit inset is 11.25 DEVICE PIXELS at 0.75 scale, i.e. a quarter
-        -- pixel off the grid. /df pixelcheck measured exactly that: viewport
+        -- pixel off the grid. /df debug pixelcheck measured exactly that: viewport
         -- top-0.25, scroll child top-0.25 (it inherits the phase), while every
         -- box inside reported a flawless top+0.00. The boxes were never the
         -- problem; the surface they are clipped against was.
@@ -12681,7 +12788,7 @@ function DF:CreateGUI()
         -- no strip between them where the cursor is over nothing.
         --
         -- They used to be 28 tall on a 30 stride (and 26 on 28), leaving a 2-unit
-        -- dead band -- about 3 device pixels -- between every pair. /df navprobe
+        -- dead band -- about 3 device pixels -- between every pair. /df debug navprobe
         -- caught what that costs: crossing the band puts mouse focus on the plain
         -- container Frame behind the list for a single frame, with NO row lit, so
         -- the hover plate blinks off and back on mid-sweep. That one dark frame is
@@ -12754,12 +12861,10 @@ function DF:CreateGUI()
     -- Store category order
     GUI.CategoryOrder = {}
     
-    local function CreateTab(name, label)
-        -- Legacy single tab support - create as category with one item
-        local page = CreateSubTab("tools", name, label)
-        return page
-    end
-    
+    -- (Removed) CreateTab — "legacy single tab support", a thin wrapper over
+    -- CreateSubTab("tools", ...). Every page registers through CreateSubTab directly
+    -- now, so it had no callers.
+
     local function BuildPage(page, builderFunc)
         -- Internal: construct all widget frames for the current mode.
         -- Called on first visit and whenever the cache is invalidated.

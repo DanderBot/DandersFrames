@@ -27,21 +27,22 @@ DF.AuraDesigner = DF.AuraDesigner or {}
 local SoundEngine = {}
 DF.AuraDesigner.SoundEngine = SoundEngine
 
--- States
+-- States. ⚠ There was a third, STATE_DELAYED = 1, that nothing ever assigned or
+-- compared — the delayed leg of this state machine was never wired, so a sound with
+-- a configured delay goes straight IDLE -> PLAYING. Removed as dead, but worth
+-- revisiting if per-sound delay is meant to work.
 local STATE_IDLE    = 0
-local STATE_DELAYED = 1
 local STATE_PLAYING = 2
 
 -- Per-aura state: { state, delayStart, ticker, lastHandle }
 local soundStates = {}
 
--- Evaluation suppression (instance transitions)
-local suppressUntil = 0
-
--- Reference to adapter (lazy init)
-
--- Reusable presence table (wiped each evaluation)
-local presenceData = {}  -- auraName → { present = N, total = N, soundCfg = cfg }
+-- ⚠ (Removed) `suppressUntil`, commented "Evaluation suppression (instance
+-- transitions)", and `presenceData`, "Reusable presence table (wiped each
+-- evaluation)". Both were declared and never read, so the suppression was never
+-- implemented: nothing stops aura sounds evaluating across a loading screen or an
+-- instance change. Flagged rather than quietly dropped — that is a MISSING feature,
+-- not just unused storage.
 
 -- ============================================================
 -- SOUND PLAYBACK (CVar-swap for per-indicator volume)
@@ -83,7 +84,7 @@ function SoundEngine:PlayWithVolume(soundFile, volume)
     SetCVar(volCVar, originalVol)
 
     if not willPlay then
-        DF:DebugWarn("SoundEngine", "PlaySoundFile failed for: %s", tostring(soundFile))
+        DF:DebugWarn("AD", "SoundEngine: PlaySoundFile failed for: %s", tostring(soundFile))
         return nil, nil
     end
 

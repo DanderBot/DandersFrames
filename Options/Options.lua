@@ -730,9 +730,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                         DF:SetRangeCheckSpell(spellID)
                     end
                     RefreshRangeInfoLabel()
-                    print("|cFF00FF00[DFRange]|r Custom spell set: " .. spellName .. " (ID: " .. spellID .. ")")
+                    DF:Say("Range spell set to " .. spellName, "ID " .. spellID)
                 else
-                    print("|cFFFF0000[DFRange]|r Invalid spell ID: " .. spellID)
+                    DF:Err("Invalid spell ID: " .. spellID)
                     customSpellInput.EditBox:SetText("")
                 end
             end
@@ -814,8 +814,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local oorDefensive = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Defensive Icon Alpha"], 0.0, 1.0, 0.05, db, "oorDefensiveIconAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
         oorDefensive.disableOn = HideOOROptions
         
-        local oorTargetedSpell = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Targeted Spell Alpha"], 0.0, 1.0, 0.05, db, "oorTargetedSpellAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        oorTargetedSpell.disableOn = HideOOROptions
+        -- (Removed) the Targeted Spell Alpha slider on oorTargetedSpellAlpha. Its only
+        -- consumer was DF:UpdateTargetedSpellAppearance, which faded the group-frame
+        -- container and went with that display. Personal Targeted is a screen overlay
+        -- that never ran through ElementAppearance's out-of-range path, and the
+        -- Targeted List has its own container and colours — so the slider was moving
+        -- a value nothing read.
 
         local oorAuraDesigner = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Aura Designer Alpha"], 0.0, 1.0, 0.05, db, "oorAuraDesignerAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
         oorAuraDesigner.disableOn = HideOOROptions
@@ -887,7 +891,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         end), 55)
         hfThreshold.tooltip = L["Units at or above this health percent are faded."]
 
-        local hfCancelDispel = hfGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Cancel Fade on Dispellable Debuff"], db, "hfCancelOnDispel", function()
+        hfGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Cancel Fade on Dispellable Debuff"], db, "hfCancelOnDispel", function()
             DF:UpdateAllFrames()
             DF:RefreshAllVisibleFrames()
         end), 30)
@@ -1724,7 +1728,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         raidModeGroup:AddWidget(GUI:CreateHeader(self.child, L["Raid Layout Mode"]), 40)
         raidModeGroup.hideOn = function() return GUI.SelectedMode ~= "raid" end
         
-        local useGroupsCheck = raidModeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Group-Based Layout"], db, "raidUseGroups", function()
+        raidModeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Group-Based Layout"], db, "raidUseGroups", function()
             UpdateFrames()
             if DF.SecureSort then
                 DF.SecureSort:PushRaidGroupLayoutConfig()
@@ -2044,7 +2048,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             db.debuffDurationFont = font; db.debuffDurationOutline = outline
             db.petNameFont = font; db.petNameFontOutline = outline
             db.petHealthFont = font; db.petHealthFontOutline = outline
-            db.targetedSpellDurationFont = font; db.targetedSpellDurationOutline = outline
             db.personalTargetedSpellDurationFont = font; db.personalTargetedSpellDurationOutline = outline
             db.targetedListFont = font; db.targetedListFontOutline = outline
             db.defensiveIconDurationFont = font; db.defensiveIconDurationOutline = outline
@@ -2105,7 +2108,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             DF:UpdateAllFrames()
             if GUI.SelectedMode == "raid" and DF.UpdateRaidLayout then DF:UpdateRaidLayout() end
             if DF.ApplyPetSettings then DF:ApplyPetSettings() end
-            if DF.UpdateAllTargetedSpellLayouts then DF:UpdateAllTargetedSpellLayouts() end
             if (DF.testMode or DF.raidTestMode) and DF.UpdateAllTestTargetedSpell then DF:UpdateAllTestTargetedSpell() end
             if DF.UpdateTestPersonalTargetedSpells then DF:UpdateTestPersonalTargetedSpells() end
             if DF.UpdateTargetedListLayout then DF:UpdateTargetedListLayout() end
@@ -2126,7 +2128,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 DF.TextDesigner.Preview:RefreshLiveFrames()
             end
 
-            print("|cff00ff00DandersFrames:|r Applied global font settings to all text elements.")
+            DF:Say("Applied global font settings to all text elements.")
         end)
         fontSelectGroup:AddWidget(applyBtn, 35)
 
@@ -3325,7 +3327,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Pinned frames now lock/unlock together with the main frames (global
         -- lock), so there is no per-set Lock Position toggle. Show Label is always
         -- editable; the "Drag to Move" handle only appears while globally unlocked.
-        local showLabelCheck = settingsGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Show Label"], "showLabel", function()
+        settingsGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Show Label"], "showLabel", function()
             if not DF.PinnedFrames then return end
             if IsEditingActiveMode() then
                 DF.PinnedFrames:SetShowLabel(activeHighlightTab, GetCurrentSet().showLabel)
@@ -3355,8 +3357,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
             RefreshTestModeIfActive()
         end
-        local hideAurasCheck = settingsGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Hide Auras"], "hideAuras", RefreshPinnedDisplay), 28)
-        local hideIconsCheck = settingsGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Hide Status Icons"], "hideIcons", RefreshPinnedDisplay), 28)
+        settingsGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Hide Auras"], "hideAuras", RefreshPinnedDisplay), 28)
+        settingsGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Hide Status Icons"], "hideIcons", RefreshPinnedDisplay), 28)
 
         -- Hide from Main Frames (#78): when on, this set's members are filtered out
         -- of the main party/raid frames so they only appear in the pinned set. Re-
@@ -4131,9 +4133,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 GUI:UninstallColorPickerHook()
             end
             if db.colorPickerOverride then
-                print("|cff00ff00DandersFrames:|r Color picker override enabled")
+                DF:Say("Color picker override enabled")
             else
-                print("|cffff9900DandersFrames:|r Color picker override disabled")
+                DF:Say("Color picker override disabled", nil, "WARN")
             end
         end), 30)
         colorPickerGroup:AddWidget(GUI:CreateLabel(self.child, L["Replace Blizzard's color picker with the DandersFrames color picker for this addon."], 250), 40)
@@ -4145,9 +4147,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 GUI:UninstallColorPickerHook()
             end
             if db.colorPickerGlobalOverride then
-                print("|cff00ff00DandersFrames:|r Custom color picker enabled for all addons")
+                DF:Say("Custom color picker enabled for all addons")
             else
-                print("|cffff9900DandersFrames:|r Custom color picker disabled for all addons")
+                DF:Say("Custom color picker disabled for all addons", nil, "WARN")
             end
         end), 30)
         colorPickerGroup:AddWidget(GUI:CreateLabel(self.child, L["Show the DF color picker when any addon opens a color picker."], 250), 30)
@@ -5862,7 +5864,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Duration Text Group (col2)
         local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
         durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration"]), 40)
-        local durShow = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "buffShowDuration", function()
+        durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "buffShowDuration", function()
             self:RefreshStates()
             DF:UpdateAllFrames()
         end), 30)
@@ -6077,6 +6079,93 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         debuffAlpha.disableOn = function(d) return not d.showDebuffs end
         Add(appearanceGroup, nil, 2)
 
+        -- ===== IMPORTANT DEBUFFS (col2) =====
+        -- Boss/role and priority debuffs already render as their OWN aura groups, and
+        -- those groups are declared first — so they already lead the row. Everything
+        -- here styles them so they also LOOK different without moving to a separate
+        -- placement. Every change is STRUCTURAL (region presence / group layout cell /
+        -- the group's init closure), so each callback must invalidate rather than
+        -- lightweight-reposition — same pair the Hide Duplicate Debuffs toggle uses.
+        local function ImportantChanged()
+            if DF.RebuildDirectFilterStrings then DF:RebuildDirectFilterStrings() end
+            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+        end
+        local function ImportantOff(d) return not d.showDebuffs or not d.debuffImportantHighlight end
+
+        local impGroup = GUI:CreateSettingsGroup(self.child, 280)
+        impGroup:AddWidget(GUI:CreateHeader(self.child, L["Important Debuffs"]), 40)
+        impGroup:AddWidget(GUI:CreateLabel(self.child,
+            L["Makes boss, role and priority debuffs stand out in the normal debuff row."], 250), 30)
+        local impOn = impGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Highlight Important Debuffs"],
+            db, "debuffImportantHighlight", ImportantChanged), 30)
+        impOn.disableOn = function(d) return not d.showDebuffs end
+        impOn.tooltip = L["Boss, role and priority debuffs already sort to the front of the row. This also makes them larger and marks them, so they read at a glance without needing their own placement."]
+
+        -- CreateSlider(parent, label, min, max, step, db, key, callback, lightweightUpdate,
+        -- usePreviewMode, ...) — arg 8 is the release callback, arg 9 the per-drag-tick one
+        -- and arg 10 the boolean that arms it.
+        --
+        -- ☠ NO LIGHTWEIGHT PATH ON ANY OF THE FOUR SLIDERS IN THIS SECTION, and it must
+        -- stay that way. Every key here feeds recStyleSig (Features/Auras.lua), which is
+        -- part of the STRUCTURAL signature — so each new value forces h:Rebuild: a
+        -- NativeBackend:teardown plus a fresh container and fresh buttons, per rendered
+        -- frame per visible unit. applyRecordStyle then creates a badge host frame and two
+        -- textures per styled button, and WoW never frees a frame. Wired to the drag tick,
+        -- a few seconds of dragging in a 20-man leaked frames by the thousand. The
+        -- "documented frame-leak case" note in AuraContainer.lua is about this path.
+        --
+        -- The cost is that the preview moves on release rather than under the cursor. That
+        -- is the deliberate trade: one rebuild per adjustment is the price every other
+        -- structural setting pays, and it is bounded.
+        --
+        -- ⚠ The better fix is to let badge geometry ride ApplyStyle instead of forcing a
+        -- rebuild — applyRecordStyle is already idempotent and safe to re-run — but the
+        -- record style is captured as an upvalue in the secure initializeFrame closure, so
+        -- a live read has to be plumbed through first. That is engine work, not a slider
+        -- change, and narrowing the signature WITHOUT it would leave these sliders writing
+        -- to the DB while nothing on screen moves.
+        local impScale = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Size Step"], 1.0, 2.0, 0.05,
+            db, "debuffImportantScale", ImportantChanged), 55)
+        impScale.disableOn = ImportantOff
+        impScale.tooltip = L["How much larger an important debuff renders. 1.00 keeps it the same size as the rest of the row."]
+
+        local impBadge = impGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Corner Marker"],
+            db, "debuffImportantBadge", ImportantChanged), 30)
+        impBadge.disableOn = ImportantOff
+        impBadge.tooltip = L["A small marker on the corner of the icon. It survives being shrunk better than a colour change, and it does not compete with the dispel border."]
+
+        local impBadgeSize = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Marker Size"], 6, 20, 1,
+            db, "debuffImportantBadgeSize", ImportantChanged), 55)
+        impBadgeSize.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+        -- hasAlpha=false, and NO lightweight path: a colour change here rebuilds the
+        -- group (the tint is baked at initializeFrame), so there is nothing cheaper to
+        -- run on drag. Signature is (parent, label, db, key, hasAlpha, cb, lightCb, useLight).
+        -- Corner + nudge. Offsets are ADDED to a built-in overhang that pushes the badge
+        -- out of whichever corner is picked, so 0/0 is already a sensible resting place.
+        local badgePoints = { TOPRIGHT = L["Top Right"], TOPLEFT = L["Top Left"],
+                              BOTTOMRIGHT = L["Bottom Right"], BOTTOMLEFT = L["Bottom Left"] }
+        local impBadgePt = impGroup:AddWidget(GUI:CreateDropdown(self.child, L["Marker Corner"],
+            badgePoints, db, "debuffImportantBadgePoint", ImportantChanged), 55)
+        impBadgePt.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+        local impBadgeX = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Marker Offset X"], -20, 20, 1,
+            db, "debuffImportantBadgeX", ImportantChanged), 55)
+        impBadgeX.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+        local impBadgeY = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Marker Offset Y"], -20, 20, 1,
+            db, "debuffImportantBadgeY", ImportantChanged), 55)
+        impBadgeY.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+        local impBadgeCol = impGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Marker Color"],
+            db, "debuffImportantBadgeColor", false, ImportantChanged, nil, false), 35)
+        impBadgeCol.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+        local impMarkCol = impGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Marker Symbol Color"],
+            db, "debuffImportantMarkColor", false, ImportantChanged, nil, false), 35)
+        impMarkCol.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+        Add(impGroup, nil, 2)
+
         -- Layout Group (col1)
         local gridGroup = GUI:CreateSettingsGroup(self.child, 280)
         gridGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
@@ -6161,28 +6250,26 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         stackCountGroup.disableChildrenOn = function(d) return not d.showDebuffs end
         Add(stackCountGroup, nil, 1)
 
-        -- Dispel Symbol Group (col1, under Stack Count) — the native colourblind
-        -- dispel-type letter, engine-written per aura (12.1 factory rows only; the
-        -- legacy renderer has no symbol source). The game draws it ONLY while
-        -- Colorblind Mode is on — the tooltip + caution note set that expectation;
-        -- test mode previews it regardless.
+        -- Dispel Text Group (col1, under Stack Count) — the dispel-type letters
+        -- ("Ma", "Po", …), engine-written per aura (12.1 factory rows only; the
+        -- legacy renderer has no source for them).
+        -- ★ 2026-07-31: no longer requires Colorblind Mode. The bind passes
+        -- customDispelTextMap, which takes Blizzard's direct SetText path instead of
+        -- the CVar-gated one (DF:GetGameDispelTextMap, Frames/Border.lua) — so the
+        -- old caution note and the CVar caveat in the tooltip are gone with it.
+        -- Renamed from "Dispel Symbol" the same day: that read as the dispel ICON,
+        -- which is a different native feature. DB keys stay debuffDispelSymbol*.
         local symbolGroup = GUI:CreateSettingsGroup(self.child, 280)
-        symbolGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Symbol"]), 40)
-        local symbolEnable = symbolGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Dispel Symbol"], db, "debuffDispelSymbolEnabled", function()
+        symbolGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Text"]), 40)
+        local symbolEnable = symbolGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Dispel Text"], db, "debuffDispelSymbolEnabled", function()
             self:RefreshStates()
             -- Region presence is structural (create-once) — full re-drive rebuilds the row.
             DF:InvalidateAuraLayout()
             DF:UpdateAllFrames()
         end), 30)
-        symbolEnable.tooltip = L["Shows a letter on each debuff indicating its dispel type. Requires Colorblind Mode to be enabled in WoW's Accessibility settings — without it the game does not draw the symbol."]
+        symbolEnable.tooltip = L["Shows a short letter code on each debuff for its dispel type — Ma for Magic, Po for Poison, and so on. Uses the game's own wording for your language."]
         symbolEnable.keepEnabled = true
         symbolEnable.disableOn = function(d) return not d.showDebuffs end
-        local symbolCVarNote = symbolGroup:AddWidget(GUI:CreateNote(self.child, L["Colorblind Mode is off, so the symbol will not appear in-game. Enable it in WoW's Accessibility settings."], {tone = "caution", width = 230}), 40)
-        symbolCVarNote.hideOn = function(d)
-            if not d.debuffDispelSymbolEnabled then return true end
-            local on = C_CVar and C_CVar.GetCVarBool and C_CVar.GetCVarBool("colorblindmode")
-            return on and true or false
-        end
         GUI:CreateTextControls(symbolGroup, db, "debuffDispelSymbol", {
             parent    = self.child,
             include   = { color = true },
@@ -6197,7 +6284,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Duration Text Group (col2)
         local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
         durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration"]), 40)
-        local durShow = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "debuffShowDuration", function()
+        durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "debuffShowDuration", function()
             self:RefreshStates()
             DF:UpdateAllFrames()
         end), 30)
@@ -6260,7 +6347,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         debuffBarEnable.disableOn = function(d) return not d.showDebuffs end
         durBarGroup.disableChildrenOn = function(d) return not d.showDebuffs or not d.debuffDurationBarEnabled end
         -- Where the bar sits, then what it looks like. One box rather than two:
-        -- every other optional element on this page (Stack Count, Dispel Symbol)
+        -- every other optional element on this page (Stack Count, Dispel Text)
         -- is a single box, and splitting only this one into geometry + style
         -- made the bar read as more of a feature than its neighbours while
         -- taking up half of column 2.
@@ -6502,7 +6589,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Skipped: colour-by-time / colour-by-type (no aura-state context here).
         local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
         borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        local mbBorderW = GUI:CreateBorderControls(borderGroup, db, "missingBuffIcon", {
+        GUI:CreateBorderControls(borderGroup, db, "missingBuffIcon", {
             parent       = self.child,
             include      = { alpha = true, inset = true, offset = true, blendMode = true,
                              gradient = true, shadow = true, animate = true,
@@ -6662,7 +6749,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- the border edges inward (positive) or outward (negative) relative
         -- to the icon's bounds — independent of borderSize (thickness) and
         -- independent of the artwork's own inset.
-        local defBorderW = GUI:CreateBorderControls(borderGroup, db, "defensiveIcon", {
+        GUI:CreateBorderControls(borderGroup, db, "defensiveIcon", {
             parent       = self.child,
             -- Class/Role colour makes sense here: at a glance, the border
             -- communicates WHO is using the defensive cooldown (their class
@@ -6893,324 +6980,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     -- ========================================
     CreateCategory("indicators", L["Indicators"])
     
-    -- ⚰ DEPRECATED-TARGETED-SPELLS — page pulled from the sidebar, whole feature
-    -- queued for deletion. Full inventory + the condition that would reverse it:
-    -- the block comment at the top of Features\TargetedSpells.lua.
-    --
-    -- The `true` is the hidden flag. The page still builds and still answers to
-    -- GUI.SelectTab, it just has no sidebar row — so nothing here needed touching
-    -- and one deleted word brings it back if a PTR build restores the API.
-    local pageTargetedSpells = CreateSubTab("indicators", "indicators_targetedspells", L["Targeted Spells"], true)
-    BuildPage(pageTargetedSpells, function(self, db, Add, AddSpace, AddSyncPoint)
-        -- Copy button at top
-        Add(CreateCopyButton(self.child, {"targetedSpell"}, L["Targeted Spells"], "indicators_targetedspells"), 25, 2)
-
-        local anchorOptions = {
-            CENTER= L["Center"], TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"],
-            TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
-        }
-        local growthOptions = { UP= L["Up"], DOWN= L["Down"], LEFT= L["Left"], RIGHT= L["Right"], CENTER_H= L["Center (Horizontal)"], CENTER_V= L["Center (Vertical)"] }
-        
-        local function HideTargetedSpellOptions(d) return not d.targetedSpellEnabled end
-        local function HideTargetedDurationOptions(d) return not d.targetedSpellEnabled or not d.targetedSpellShowDuration end
-        
-        local function TargetedSpellLightweightUpdate()
-            if (DF.testMode or DF.raidTestMode) and DF.UpdateAllTestTargetedSpell then DF:UpdateAllTestTargetedSpell() end
-        end
-        
-        local function FullUpdate()
-            if DF.UpdateAllTargetedSpellLayouts then DF:UpdateAllTargetedSpellLayouts() end
-            TargetedSpellLightweightUpdate()
-        end
-
-        -- ===== DISCLAIMER BANNER (full width) =====
-        local tsDisclaimerBanner = GUI:CreateInfoBanner(self.child, {
-            tone = "caution",
-            text = L["Targeted Spells guesses who an enemy is targeting from their class, role, race, and sex. Members who share all four can't be told apart and won't show an icon."],
-        })
-        Add(tsDisclaimerBanner, tsDisclaimerBanner.layoutHeight, "both")
-
-        -- ===== SETTINGS GROUP (Column 1) =====
-        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
-        settingsGroup:AddWidget(GUI:CreateLabel(self.child, L["Shows an icon when an enemy is casting a spell targeting a party/raid member."], 250), 35)
-        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Targeted Spells"], db, "targetedSpellEnabled", function()
-            self:RefreshStates()
-            if DF.ToggleTargetedSpells then DF:ToggleTargetedSpells(db.targetedSpellEnabled) end
-        end), 30)
-        local tsWarnDup = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Warn About Untrackable Duplicates"], db, "targetedSpellWarnDuplicates", nil), 30)
-        tsWarnDup.disableOn = HideTargetedSpellOptions
-        local tsUntrackableLabel = settingsGroup:AddWidget(GUI:CreateLabel(self.child, "", 250), 30)
-        function DF:RefreshTargetedSpellUntrackable()
-            if not tsUntrackableLabel then return end
-            local names = DF.TargetedSpells_GetUntrackableNames and DF:TargetedSpells_GetUntrackableNames() or {}
-            if #names >= 2 then
-                tsUntrackableLabel:SetText(string.format(L["Currently can't track: %s"], table.concat(names, ", ")))
-            else
-                tsUntrackableLabel:SetText("")
-            end
-        end
-        DF:RefreshTargetedSpellUntrackable()
-        local tsImportantOnly = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Important Spells Only"], db, "targetedSpellImportantOnly", function()
-            self:RefreshStates()
-            FullUpdate()
-        end), 30)
-        tsImportantOnly.disableOn = HideTargetedSpellOptions
-        local tsNameplateOffscreen = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Offscreen Nameplates"], db, "targetedSpellNameplateOffscreen", function()
-            if DF.SetNameplateOffscreen then DF:SetNameplateOffscreen(db.targetedSpellNameplateOffscreen) end
-            FullUpdate()
-        end), 30)
-        tsNameplateOffscreen.disableOn = HideTargetedSpellOptions
-        settingsGroup:AddWidget(GUI:CreateButton(self.child, L["Run Setup Wizard"], 160, 24, function()
-            if DF.ShowTargetedSpellSetupWizard then DF:ShowTargetedSpellSetupWizard() end
-        end), 34)
-        Add(settingsGroup, nil, 1)
-        
-        -- ===== CONTENT TYPES GROUP (Column 2) =====
-        local contentGroup = GUI:CreateSettingsGroup(self.child, 280)
-        contentGroup:AddWidget(GUI:CreateHeader(self.child, L["Content Types"]), 40)
-        contentGroup:AddWidget(GUI:CreateLabel(self.child, L["Show in content types:"], 250), 25)
-        local tsOpenWorld = contentGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Open World"], db, "targetedSpellInOpenWorld", nil), 25)
-        tsOpenWorld.disableOn = HideTargetedSpellOptions
-        local tsDungeons = contentGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Dungeons"], db, "targetedSpellInDungeons", nil), 25)
-        tsDungeons.disableOn = HideTargetedSpellOptions
-        tsDungeons.hideOn = function() return GUI.SelectedMode == "raid" end
-        local tsArena = contentGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Arena"], db, "targetedSpellInArena", nil), 25)
-        tsArena.disableOn = HideTargetedSpellOptions
-        tsArena.hideOn = function() return GUI.SelectedMode == "raid" end
-        local tsRaids = contentGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Raids"], db, "targetedSpellInRaids", nil), 25)
-        tsRaids.disableOn = HideTargetedSpellOptions
-        tsRaids.hideOn = function() return GUI.SelectedMode ~= "raid" end
-        local tsBattlegrounds = contentGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Battlegrounds"], db, "targetedSpellInBattlegrounds", nil), 25)
-        tsBattlegrounds.disableOn = HideTargetedSpellOptions
-        tsBattlegrounds.hideOn = function() return GUI.SelectedMode ~= "raid" end
-        contentGroup.hideOn = HideTargetedSpellOptions
-        Add(contentGroup, nil, 2)
-        
-        -- Cast History button
-        local historyBtn = GUI:CreateButton(self.child, L["Open Cast History"], 140, 24, function()
-            if DF.ShowCastHistoryUI then DF:ShowCastHistoryUI() end
-        end)
-        Add(historyBtn, 30, 1)
-        
-        -- Size Group (col1)
-        local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
-        sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Size"]), 40)
-        local tsIconSize = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 12, 48, 1, db, "targetedSpellSize", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
-        tsIconSize.disableOn = HideTargetedSpellOptions
-        local tsScale = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 4.0, 0.1, db, "targetedSpellScale", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
-        tsScale.disableOn = HideTargetedSpellOptions
-        local tsAlpha = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.0, 1.0, 0.05, db, "targetedSpellAlpha", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
-        tsAlpha.disableOn = HideTargetedSpellOptions
-        local tsSpacing = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing"], 0, 10, 1, db, "targetedSpellSpacing", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
-        tsSpacing.disableOn = HideTargetedSpellOptions
-        local tsMaxIcons = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Icons"], 1, 10, 1, db, "targetedSpellMaxIcons", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
-        tsMaxIcons.disableOn = HideTargetedSpellOptions
-        local tsLevel = sizeGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "targetedSpellFrameLevel", FullUpdate, TargetedSpellLightweightUpdate, true)), 55)
-        tsLevel.disableOn = HideTargetedSpellOptions
-        Add(sizeGroup, nil, 1)
-
-        -- Position Group (col1)
-        local positionGroup = GUI:CreateSettingsGroup(self.child, 280)
-        positionGroup:AddWidget(GUI:CreateHeader(self.child, L["Position"]), 40)
-        local tsAnchor = positionGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "targetedSpellAnchor", FullUpdate), 55)
-        tsAnchor.disableOn = HideTargetedSpellOptions
-        local tsX = positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -100, 100, 1, db, "targetedSpellX", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
-        tsX.disableOn = HideTargetedSpellOptions
-        local tsY = positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -100, 100, 1, db, "targetedSpellY", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
-        tsY.disableOn = HideTargetedSpellOptions
-        local tsGrowth = positionGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growthOptions, db, "targetedSpellGrowth", FullUpdate), 55)
-        tsGrowth.disableOn = HideTargetedSpellOptions
-        Add(positionGroup, nil, 1)
-        
-        -- Border Group (col1)
-        local borderGroup = GUI:CreateSettingsGroup(self.child, 280)
-        borderGroup:AddWidget(GUI:CreateHeader(self.child, L["Border"]), 40)
-        -- Full DF.Border toolkit (matches Personal Targeted Spell): Show Border,
-        -- Size, Style/Gradient, Colour, Alpha, Inset, Blend Mode, Shadow, Animate.
-        -- BuildSpec in ApplyIconSettings already reads every targetedSpell* border
-        -- key, so these controls light up the whole engine.
-        GUI:CreateBorderControls(borderGroup, db, "targetedSpell", {
-            parent        = self.child,
-            include       = { alpha = true, inset = true, blendMode = true,
-                              gradient = true, shadow = true, animate = true },
-            fullUpdate    = FullUpdate,
-            lightUpdate   = TargetedSpellLightweightUpdate,
-            lightColors   = FullUpdate,
-            refreshStates = function() self:RefreshStates() end,
-            hideWhen      = HideTargetedSpellOptions,
-            sizeMin = 0, sizeMax = 8, sizeStep = 1,
-        })
-        Add(borderGroup, nil, 2)
-        
-        -- Duration Group (col2)
-        local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
-        durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Text"]), 40)
-        local showDur = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "targetedSpellShowDuration", function()
-            self:RefreshStates()
-            FullUpdate()
-        end), 30)
-        showDur.disableOn = HideTargetedSpellOptions
-        -- The cooldown swipe is the radial cooldown sweep on the icon (independent
-        -- of the numeric duration text), so it's gated only on the feature itself.
-        local hideSwipe = durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Cooldown Swipe"], db, "targetedSpellHideSwipe", FullUpdate), 30)
-        hideSwipe.disableOn = HideTargetedSpellOptions
-        local tsDurFont = durationGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "targetedSpellDurationFont", FullUpdate), 55)
-        tsDurFont.disableOn = HideTargetedDurationOptions
-        local tsDurScale = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "targetedSpellDurationScale", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
-        tsDurScale.disableOn = HideTargetedDurationOptions
-        local tsDurOutline = durationGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "targetedSpellDurationOutline", FullUpdate), 55)
-        tsDurOutline.disableOn = HideTargetedDurationOptions
-        local tsDurShadow = durationGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "targetedSpellDurationOutline", FullUpdate), 30)
-        tsDurShadow.disableOn = HideTargetedDurationOptions
-        local tsDurX = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -20, 20, 1, db, "targetedSpellDurationX", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
-        tsDurX.disableOn = HideTargetedDurationOptions
-        local tsDurY = durationGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -20, 20, 1, db, "targetedSpellDurationY", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
-        tsDurY.disableOn = HideTargetedDurationOptions
-        local tsDurColor = durationGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "targetedSpellDurationColor", false, FullUpdate), 35)
-        tsDurColor.disableOn = HideTargetedDurationOptions
-        Add(durationGroup, nil, 2)
-        
-        
-        
-        local function HideHighlightOptions(d) return not d.targetedSpellEnabled or not d.targetedSpellHighlightImportant end
-
-        local highlightGroup = GUI:CreateSettingsGroup(self.child, 280)
-        highlightGroup:AddWidget(GUI:CreateHeader(self.child, L["Highlight Settings"]), 40)
-        local tsHighlightImportant = highlightGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Highlight Important Spells"], db, "targetedSpellHighlightImportant", function()
-            self:RefreshStates()
-            FullUpdate()
-        end), 30)
-        tsHighlightImportant.disableOn = HideTargetedSpellOptions
-        -- Important Spell Border: the highlight on its own DF.Border (full toolkit),
-        -- gated by the Highlight Important Spells toggle above.
-        GUI:CreateBorderControls(highlightGroup, db, "targetedSpellImportant", {
-            parent        = self.child,
-            noShowToggle  = true,  -- the Highlight Important Spells checkbox is the gate
-            include       = { alpha = true, inset = true, blendMode = true,
-                              gradient = true, shadow = true, animate = true },
-            fullUpdate    = FullUpdate,
-            lightUpdate   = TargetedSpellLightweightUpdate,
-            lightColors   = FullUpdate,
-            refreshStates = function() self:RefreshStates() end,
-            hideWhen      = HideHighlightOptions,
-            sizeMin = 0, sizeMax = 8, sizeStep = 1,
-        })
-        Add(highlightGroup, nil, 1)
-        
-        
-        
-        local function HideInterruptedOptions(d) return not d.targetedSpellEnabled or not d.targetedSpellShowInterrupted end
-        local function HideXOptions(d) return not d.targetedSpellEnabled or not d.targetedSpellShowInterrupted or not d.targetedSpellInterruptedShowX end
-        
-        local interruptGroup = GUI:CreateSettingsGroup(self.child, 280)
-        interruptGroup:AddWidget(GUI:CreateHeader(self.child, L["Interrupt Settings"]), 40)
-        local tsShowInterrupted = interruptGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Interrupted Visual"], db, "targetedSpellShowInterrupted", function()
-            self:RefreshStates()
-            FullUpdate()
-        end), 30)
-        tsShowInterrupted.disableOn = HideTargetedSpellOptions
-        local tsInterruptedDuration = interruptGroup:AddWidget(GUI:CreateSlider(self.child, L["Duration"], 0.1, 2.0, 0.1, db, "targetedSpellInterruptedDuration", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
-        tsInterruptedDuration.disableOn = HideInterruptedOptions
-        local tsInterruptedTintColor = interruptGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Tint Color"], db, "targetedSpellInterruptedTintColor", false, FullUpdate), 35)
-        tsInterruptedTintColor.disableOn = HideInterruptedOptions
-        local tsInterruptedTintAlpha = interruptGroup:AddWidget(GUI:CreateSlider(self.child, L["Tint Opacity"], 0, 1, 0.1, db, "targetedSpellInterruptedTintAlpha", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
-        tsInterruptedTintAlpha.disableOn = HideInterruptedOptions
-        Add(interruptGroup, nil, 2)
-        
-        local xMarkGroup = GUI:CreateSettingsGroup(self.child, 280)
-        xMarkGroup:AddWidget(GUI:CreateHeader(self.child, L["X Mark"]), 40)
-        local tsInterruptedShowX = xMarkGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show X Mark"], db, "targetedSpellInterruptedShowX", function()
-            self:RefreshStates()
-            FullUpdate()
-        end), 30)
-        tsInterruptedShowX.disableOn = HideInterruptedOptions
-        local tsInterruptedXColor = xMarkGroup:AddWidget(GUI:CreateColorPicker(self.child, L["X Color"], db, "targetedSpellInterruptedXColor", false, FullUpdate), 35)
-        tsInterruptedXColor.disableOn = HideXOptions
-        local tsInterruptedXSize = xMarkGroup:AddWidget(GUI:CreateSlider(self.child, L["X Size"], 8, 32, 1, db, "targetedSpellInterruptedXSize", FullUpdate, TargetedSpellLightweightUpdate, true), 55)
-        tsInterruptedXSize.disableOn = HideXOptions
-        xMarkGroup.hideOn = HideInterruptedOptions
-        Add(xMarkGroup, nil, 2)
-        
-        
-        -- See Also links
-        AddSpace(GUI.Space.block, "both")
-        Add(GUI:CreateSeeAlso(self.child, {
-            {pageId = "auras_buffs", label = L["Buffs"]},
-            {pageId = "auras_debuffs", label = L["Debuffs"]},
-            {pageId = "general_integrations", label = L["Integrations"]},
-            {pageId = "indicators_personal_targeted", label = L["Personal Targeted Spells"]},
-        }), 30, "both")
-
-        -- ============================================================
-        -- API COMPATIBILITY OVERLAY (Group-frame Targeted Spells)
-        --
-        -- Group-frame Targeted Spells relies on UnitIsUnit comparing a
-        -- nameplateXtarget against a party/raid token. Blizzard's
-        -- 2026-04-07 hotfix made that combination return nil, with no
-        -- in-addon workaround (the new PlayerIsSpellTarget API only
-        -- answers for the player). DF.GroupTargetedSpellsAPIBlocked is
-        -- set permanently at addon load in Features/TargetedSpells.lua,
-        -- so this overlay is always visible on this page.
-        --
-        -- The overlay is parented to the page (not self.child) so it
-        -- survives Refresh() rebuilds and floats above the scroll
-        -- content.
-        -- ============================================================
-        if not self.apiBlockedOverlay then
-            -- Parent to the page (ScrollFrame). The GUI window is in DIALOG
-            -- strata; widgets inside it inherit DIALOG. We bump the overlay
-            -- to FULLSCREEN_DIALOG and crank the frame level so it draws
-            -- above everything in the page including the scroll child.
-            local overlay = CreateFrame("Frame", nil, self, "BackdropTemplate")
-            overlay:SetFrameStrata("FULLSCREEN_DIALOG")
-            overlay:SetFrameLevel(500)
-            overlay:SetAllPoints(self)
-            overlay:EnableMouse(true) -- block clicks to underlying controls
-            GUI:CreatePanelBackdrop(overlay, { bgColor = {0, 0, 0}, bgAlpha = 0.85, border = false })
-
-            local title = overlay:CreateFontString(nil, "OVERLAY", "DFFontNormalHuge")
-            title:SetPoint("CENTER", 0, 80)
-            title:SetText(L["Not Available on Raid Frames"])
-            title:SetTextColor(1, 0.82, 0)
-
-            local body = overlay:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
-            body:SetPoint("TOP", title, "BOTTOM", 0, -20)
-            body:SetWidth(520)
-            body:SetJustifyH("CENTER")
-            body:SetText(L["Targeted Spells isn't available on raid frames — too many members share the same class, role, race, and sex to tell them apart.\n\nPersonal Targeted Spells still works for casts targeting you."])
-
-            local gotoBtn = GUI:CreateButton(overlay, L["Open Personal Targeted Spells"], 260, 30, function()
-                if GUI.SelectTab then GUI.SelectTab("indicators_personal_targeted") end
-            end)
-            gotoBtn:SetParent(overlay)
-            gotoBtn:SetFrameStrata("FULLSCREEN_DIALOG")
-            gotoBtn:SetFrameLevel(501)
-            gotoBtn:SetPoint("TOP", body, "BOTTOM", 0, -25)
-
-            self.apiBlockedOverlay = overlay
-            overlay:Hide()
-        end
-
-        if GUI.SelectedMode == "raid" then
-            self.apiBlockedOverlay:Show()
-        else
-            self.apiBlockedOverlay:Hide()
-        end
-    end)
-
-    -- Stub kept for ABI compatibility — the overlay is now always visible
-    -- so this is a no-op, but other code paths still call it.
-    GUI.RefreshTargetedSpellsOverlay = function()
-        local page = GUI.Pages and GUI.Pages["indicators_targetedspells"]
-        if page and page.apiBlockedOverlay then
-            if GUI.SelectedMode == "raid" then
-                page.apiBlockedOverlay:Show()
-            else
-                page.apiBlockedOverlay:Hide()
-            end
-        end
-    end
+    -- (Removed) Indicators > Targeted Spells. The group-frame display it
+    -- configured is gone - Blizzard's 2026-04-07 UnitIsUnit hotfix removed the
+    -- only way to tell which group member an enemy was casting at. The page had
+    -- already been pulled from the sidebar; this removes the page itself, its
+    -- api-blocked overlay, and GUI.RefreshTargetedSpellsOverlay (no callers).
+    -- Personal Targeted and the Targeted List below are unaffected.
 
     -- ============================================================
     -- Indicators > Targeted List
@@ -7275,7 +7050,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tlShowUntargeted.disableOn = HideTLOptions
             local tlHideOOC = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Out-of-Combat Casts"], db, "targetedListHideOutOfCombat", TargetedListUpdate), 30)
             tlHideOOC.disableOn = HideTLOptions
-            tlHideOOC.tooltip = L["Only show casts from enemies that are in combat. Filters out idle mobs casting nearby."]
+            tlHideOOC.tooltip = L["Hides the ambient spells idle NPCs cast while standing around: casts with no target, from an enemy that is not in combat. Casts aimed at you or a group member always show, so the opening cast of a pull is never hidden."]
+            -- Game CVar, not a profile key — bound straight to the CVar via
+            -- customGet/customSet so it cannot drift out of sync. See
+            -- DF:SetNameplateOffscreen for why both features depend on it.
+            local tlOffscreen = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Offscreen Nameplates"], nil, nil, nil,
+                function() return DF:GetNameplateOffscreen() end,
+                function(val) DF:SetNameplateOffscreen(val) end), 30)
+            tlOffscreen.disableOn = HideTLOptions
+            tlOffscreen.tooltip = L["Changes the Blizzard game setting 'nameplateShowOffscreen', which decides whether enemies outside your view still get a nameplate. This feature spots casts by watching the game's enemy nameplates, so with the setting off an enemy casting behind you is missed until you turn to face it — even if you have it targeted. Note that this is a game setting, not a DandersFrames one: it applies to your whole account and changes the game's nameplates everywhere."]
             local tlMaxBars = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Bars"], 1, 20, 1, db, "targetedListMaxBars", TargetedListUpdate, TargetedListUpdate, true), 55)
             tlMaxBars.disableOn = HideTLOptions
             Add(settingsGroup, nil, 1)
@@ -7557,6 +7340,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.TogglePersonalTargetedSpells then DF:TogglePersonalTargetedSpells(db.personalTargetedSpellEnabled) end
         end), 30)
         settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Important Spells Only"], db, "personalTargetedSpellImportantOnly", PersonalTargetedUpdate), 30)
+        -- Same game CVar as the Targeted List page — Personal detects casts through
+        -- nameplate tokens too (IsValidCasterUnit), so it has the identical
+        -- offscreen blind spot. Both checkboxes drive the one CVar.
+        local ptsOffscreen = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Offscreen Nameplates"], nil, nil, nil,
+            function() return DF:GetNameplateOffscreen() end,
+            function(val) DF:SetNameplateOffscreen(val) end), 30)
+        ptsOffscreen.disableOn = HidePersonalOptions
+        ptsOffscreen.tooltip = L["Changes the Blizzard game setting 'nameplateShowOffscreen', which decides whether enemies outside your view still get a nameplate. This feature spots casts by watching the game's enemy nameplates, so with the setting off an enemy casting behind you is missed until you turn to face it — even if you have it targeted. Note that this is a game setting, not a DandersFrames one: it applies to your whole account and changes the game's nameplates everywhere."]
         Add(settingsGroup, nil, 1)
         
         -- ===== CONTENT TYPES GROUP (Column 2) =====
@@ -8930,7 +8721,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local createBtn = GUI:CreateButton(self.child, L["Create Empty"], 115, 24, function()
             local text = input.EditBox:GetText()
             if not text or text == "" then
-                print("|cffff6666DandersFrames:|r Please enter a profile name.")
+                DF:Err("Please enter a profile name.")
                 return
             end
             DF:SetProfile(text) 
@@ -8943,7 +8734,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local dupeBtn = GUI:CreateButton(self.child, L["Duplicate Current"], 115, 24, function()
             local text = input.EditBox:GetText()
             if not text or text == "" then
-                print("|cffff6666DandersFrames:|r Please enter a name for the duplicated profile.")
+                DF:Err("Please enter a name for the duplicated profile.")
                 return
             end
             if DF:DuplicateProfile(text) then
@@ -8968,7 +8759,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         actionsGroup:AddWidget(GUI:CreateIconButton(self.child, "delete", L["Delete Current Profile"], 240, 26, function()
             local p = DF:GetCurrentProfile()
             if p == "Default" then
-                print("|cffff6666DandersFrames:|r Cannot delete Default profile.")
+                DF:Err("Cannot delete Default profile.")
                 return
             end
             -- The profile name rides the closure rather than the StaticPopup
@@ -9284,9 +9075,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 self.exportEditBox:SetText(str)
                 self.exportEditBox:HighlightText()
                 self.exportEditBox:SetFocus()
-                print("|cff00ff00DandersFrames:|r Export generated.")
+                DF:Say("Export generated.")
             elseif not str then
-                print("|cffff0000DandersFrames:|r Export failed - no string returned")
+                DF:Err("Export failed - no string returned")
             end
         end), 32)
         
@@ -9325,13 +9116,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if not self.importEditBox then return end
             local str = self.importEditBox:GetText()
             if not str or str == "" then
-                print("|cffff6666DandersFrames:|r Paste a string first.")
+                DF:Err("Paste a string first.")
                 return
             end
             
             local importData, errMsg = DF:ValidateImportString(str)
             if not importData then
-                print("|cffff0000DandersFrames:|r " .. errMsg)
+                DF:Err(errMsg)
                 if self.importInfoLabel then self.importInfoLabel:SetText("|cffff6666Error: " .. errMsg .. "|r") end
                 return
             end
@@ -9372,7 +9163,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 self.importRaidCheck:SetChecked(info.hasRaid)
             end
             
-            print("|cff00ff00DandersFrames:|r Parsed. Select options and Import.")
+            DF:Say("Parsed. Select options and Import.")
         end), 30)
         
         -- Info label
@@ -9452,7 +9243,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Import button
         importActionsGroup:AddWidget(GUI:CreateIconButton(self.child, "download", L["Import Selected"], 240, 26, function()
             if not self.parsedImportData then
-                print("|cffff6666DandersFrames:|r Parse a string first.")
+                DF:Err("Parse a string first.")
                 return
             end
             
@@ -9464,7 +9255,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
             
             if #selectedCats == 0 then
-                print("|cffff6666DandersFrames:|r Select at least one category.")
+                DF:Err("Select at least one category.")
                 return
             end
             
@@ -9474,7 +9265,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             }
             
             if not selectedFrameTypes.party and not selectedFrameTypes.raid then
-                print("|cffff6666DandersFrames:|r Select Party or Raid.")
+                DF:Err("Select Party or Raid.")
                 return
             end
             
@@ -9617,6 +9408,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end), 55, 2)
 
+        -- The log lives in SavedVariables, so one left behind is re-read from disk at
+        -- every login until something clears it. 0 = keep forever, for anyone chasing
+        -- a bug that only shows up across several days.
+        -- "0 = never" is in the LABEL because CreateSlider has no value-label map to
+        -- put it in: parameter 9 is `lightweightUpdate` (a per-drag-tick FUNCTION) and
+        -- 10 is `usePreviewMode` (the boolean that arms it). Passing a table into
+        -- either would read as truthy and quietly change how the slider commits.
+        AddToSection(GUI:CreateSlider(self.child, L["Clear Log After (Days, 0 = Never)"],
+            0, 30, 1, debugProxy, "logMaxAgeDays"), 55, 1)
+
         AddSyncPoint()
 
         -- ============================================================
@@ -9625,11 +9426,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local categoriesSection = Add(GUI:CreateCollapsibleSection(self.child, L["Logged Categories"], true), 36, "both")
         currentSection = categoriesSection
 
-        AddToSection(GUI:CreateLabel(self.child, "|cff888888" .. L["Unchecked categories are not logged at all. Disable noisy categories before reproducing a bug to keep the buffer focused."] .. "|r", 540), 36, "both")
+        AddToSection(GUI:CreateNote(self.child,
+            L["Unchecked categories are not logged at all. Disable noisy categories before reproducing a bug to keep the buffer focused."],
+            { width = 540 }), 36, "both")
 
-        -- All / None buttons row
-        local filterBtnRow = CreateFrame("Frame", nil, self.child)
-        filterBtnRow:SetSize(540, 24)
 
         local function CollectAllCategories()
             local set = {}
@@ -9655,37 +9455,55 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.DebugConsole then DF.DebugConsole:RefreshDisplay() end
         end
 
-        local btnAll = GUI:CreateButton(filterBtnRow, L["All"], 60, 22, function()
-            if DandersFramesDB_v2 and DandersFramesDB_v2.debug then
-                local filters = DandersFramesDB_v2.debug.filters
-                for cat in pairs(CollectAllCategories()) do
-                    filters[cat] = true
-                end
+        local function SetAllFilters(value)
+            if not (DandersFramesDB_v2 and DandersFramesDB_v2.debug) then return end
+            local filters = DandersFramesDB_v2.debug.filters
+            for cat in pairs(CollectAllCategories()) do
+                filters[cat] = value
             end
             RefreshAllRows()
-        end)
-        btnAll:SetPoint("LEFT", 0, 0)
+        end
 
-        local btnNone = GUI:CreateButton(filterBtnRow, L["None"], 60, 22, function()
-            if DandersFramesDB_v2 and DandersFramesDB_v2.debug then
-                local filters = DandersFramesDB_v2.debug.filters
-                for cat in pairs(CollectAllCategories()) do
-                    filters[cat] = false
-                end
-            end
-            RefreshAllRows()
-        end)
-        btnNone:SetPoint("LEFT", btnAll, "RIGHT", 6, 0)
+        local filterBtnRow = GUI:CreateButtonRow(self.child, {
+            { label = L["All"],  width = 60, onClick = function() SetAllFilters(true) end },
+            { label = L["None"], width = 60, onClick = function() SetAllFilters(false) end },
+            -- The baseline: everything on except the per-frame firehoses. All/None
+            -- are blunt; this is the state you actually want to start an
+            -- investigation from, and the way back after turning things on.
+            { label = L["Default"], width = 80,
+              onClick = function()
+                  if DF.DebugConsole and DF.DebugConsole:ApplyDefaultFilters() then
+                      RefreshAllRows()
+                  end
+              end,
+              tooltip = {
+                  title = L["Default"],
+                  lines = {
+                      L["Turns every category on except the noisy ones, which log many lines per frame during layout and sorting."],
+                      L["Enable those only while reproducing a layout or sorting bug."],
+                  },
+              } },
+        }, { height = 22 })
 
         AddToSection(filterBtnRow, 28, "both")
+
+        -- One colour for the category-group headings, passed to CreateLabel rather
+        -- than baked into each string as a |c escape -- an escape inside a
+        -- localised string is invisible to translators and easy to unbalance.
+        local GROUP_HEADING_COLOR = { r = 0.93, g = 0.65, b = 0.37 }
 
         if DF.DebugConsole then
             local groups = DF.DebugConsole:GetCategoryGroups()
             for _, group in ipairs(groups) do
                 local groupLabel = L[group.name] or group.name
-                AddToSection(GUI:CreateLabel(self.child, "|cffeda55f" .. groupLabel .. "|r", 540), 22, "both")
+                AddToSection(GUI:CreateLabel(self.child, groupLabel, 540, GROUP_HEADING_COLOR), 22, "both")
                 for _, cat in ipairs(group.categories) do
-                    local row = GUI:CreateDebugCategoryRow(self.child, cat.key, cat.desc, 540)
+                    -- The firehoses are marked in the row itself, so "why is this
+                    -- one off?" is answered where the user is looking rather than
+                    -- only in the Default button's tooltip. The row renders it as
+                    -- the shared caution icon; it used to be a "(noisy)" suffix
+                    -- concatenated onto the description.
+                    local row = GUI:CreateDebugCategoryRow(self.child, cat.key, cat.desc, 540, cat.noisy)
                     self.filterRows[cat.key] = row
                     AddToSection(row, 28, "both")
                 end
@@ -9702,7 +9520,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
             if #extras > 0 then
                 table.sort(extras)
-                AddToSection(GUI:CreateLabel(self.child, "|cffeda55f" .. L["Discovered"] .. "|r", 540), 22, "both")
+                AddToSection(GUI:CreateLabel(self.child, L["Discovered"], 540, GROUP_HEADING_COLOR), 22, "both")
                 for _, cat in ipairs(extras) do
                     local row = GUI:CreateDebugCategoryRow(self.child, cat, nil, 540)
                     self.filterRows[cat] = row
@@ -9723,75 +9541,46 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local entryCountLabel = GUI:CreateLabel(self.child, "", 540)
         local function UpdateEntryCount()
             local count = DF.DebugConsole and DF.DebugConsole:GetLogEntryCount() or 0
-            entryCountLabel:SetText("|cff888888" .. format(L["Log entries: %d"], count) .. "|r")
+            -- No |c escape: CreateLabel's default colour is already the dim body tone.
+            entryCountLabel:SetText(format(L["Log entries: %d"], count))
         end
         UpdateEntryCount()
         AddToSection(entryCountLabel, 20, "both")
 
         -- Action buttons row (Refresh / Clear Log / Copy to Clipboard)
-        local actionRow = CreateFrame("Frame", nil, self.child)
-        actionRow:SetSize(540, 28)
-
-        local refreshBtn = GUI:CreateButton(actionRow, L["Refresh"], 100, 24, function()
-            if DF.DebugConsole then
-                DF.DebugConsole:RefreshDisplay()
-                UpdateEntryCount()
-            end
-        end)
-        refreshBtn:SetPoint("LEFT", 0, 0)
-
-        local clearBtn = GUI:CreateButton(actionRow, L["Clear Log"], 100, 24, function()
-            if DF.DebugConsole then
-                DF.DebugConsole:ClearLog()
-                UpdateEntryCount()
-            end
-        end)
-        clearBtn:SetPoint("LEFT", refreshBtn, "RIGHT", 6, 0)
-
-        local copyBtn = GUI:CreateButton(actionRow, L["Copy to Clipboard"], 140, 24, function()
+        local function CopyLogToClipboard()
             if not DF.DebugConsole then return end
-            local text = DF.DebugConsole:GetExportText()
-
-            local popup = CreateFrame("Frame", "DFDebugExportPopup", UIParent, "BackdropTemplate")
-            popup:SetSize(500, 350)
-            popup:SetPoint("CENTER")
-            popup:SetFrameStrata("DIALOG")
-            popup:SetFrameLevel(200)
-            GUI:CreatePanelBackdrop(popup)
-            popup:EnableMouse(true)
-            popup:SetMovable(true)
-            popup:RegisterForDrag("LeftButton")
-            popup:SetScript("OnDragStart", popup.StartMoving)
-            popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
-
-            local title = popup:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
-            title:SetPoint("TOP", 0, -10)
-            title:SetText(L["Debug Log Export (Filtered)"])
-            title:SetTextColor(0.9, 0.9, 0.9)
-
-            local instructions = popup:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            instructions:SetPoint("TOP", title, "BOTTOM", 0, -4)
-            instructions:SetText(L["Press Ctrl+A to select all, then Ctrl+C to copy"])
-            instructions:SetTextColor(0.6, 0.6, 0.6)
-
-            local scrollContainer = GUI:CreateTextArea(popup, {
-                text      = text,
-                readOnly  = true,   -- copy-me: selectable, but not editable
-                autoFocus = true,
-                onEscape  = function() popup:Hide() end,
+            -- Was a hand-rolled dialog: ~35 lines building its own frame, backdrop,
+            -- title, drag handlers and close button. ☠ It also called CreateFrame
+            -- with the FIXED global name "DFDebugExportPopup" on every click, so a
+            -- second export built a second frame over the same global and orphaned
+            -- the first — a leak per click. The shared input popup is a singleton
+            -- and is the same control the click-cast profile export already uses.
+            DF:ShowPopupInput({
+                title       = L["Debug Log Export (Filtered)"],
+                message     = L["Press Ctrl+A to select all, then Ctrl+C to copy"],
+                text        = DF.DebugConsole:GetExportText(),
+                multiline   = true,
+                readOnly    = true,
+                cancelLabel = L["Close"],
             })
-            scrollContainer:SetPoint("TOPLEFT", 12, -45)
-            scrollContainer:SetPoint("BOTTOMRIGHT", -12, 40)
+        end
 
-            local closeBtn = GUI:CreateButton(popup, L["Close"], 80, 24, function() popup:Hide() end)
-            closeBtn:SetPoint("BOTTOM", 0, 10)
-
-            popup:SetScript("OnHide", function(s)
-                s:SetParent(nil)
-                s:ClearAllPoints()
-            end)
-        end)
-        copyBtn:SetPoint("LEFT", clearBtn, "RIGHT", 6, 0)
+        local actionRow = GUI:CreateButtonRow(self.child, {
+            { label = L["Refresh"], width = 100, onClick = function()
+                if DF.DebugConsole then
+                    DF.DebugConsole:RefreshDisplay()
+                    UpdateEntryCount()
+                end
+            end },
+            { label = L["Clear Log"], width = 100, onClick = function()
+                if DF.DebugConsole then
+                    DF.DebugConsole:ClearLog()
+                    UpdateEntryCount()
+                end
+            end },
+            { label = L["Copy to Clipboard"], width = 140, onClick = CopyLogToClipboard },
+        })
 
         AddToSection(actionRow, 32, "both")
 
@@ -9848,27 +9637,39 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local scriptStatusLabel = GUI:CreateLabel(self.child, "", 540)
         AddToSection(scriptStatusLabel, 20, "both")
 
+        -- Status is a TONE, not an ad-hoc colour: these were five hand-picked hex
+        -- values that drifted from the info/caution/danger/success language every
+        -- banner, note and tooltip in the GUI already speaks. ToneHex is the one
+        -- source for the inline form.
+        local function SetScriptStatus(text, tone)
+            if tone then
+                scriptStatusLabel:SetText("|c" .. GUI:ToneHex(tone) .. text .. "|r")
+            else
+                scriptStatusLabel:SetText(text)   -- default dim body tone
+            end
+        end
+
         AddToSection(GUI:CreateButton(self.child, L["Run Script"], 540, 26, function()
             local code = scriptEditBox:GetText()
             if not code or code == "" then
-                scriptStatusLabel:SetText("|cff666666No script to run.|r")
+                SetScriptStatus(L["No script to run."])
                 return
             end
             local fn, err = loadstring(code)
             if not fn then
-                scriptStatusLabel:SetText("|cffff6666Error: " .. tostring(err) .. "|r")
+                SetScriptStatus(format(L["Error: %s"], tostring(err)), "danger")
                 DF:DebugError("SCRIPT", "Compile error: %s", tostring(err))
                 return
             end
             local ok, result = pcall(fn)
             if ok then
                 if result ~= nil then
-                    scriptStatusLabel:SetText("|cff88ccffResult: " .. tostring(result) .. "|r")
+                    SetScriptStatus(format(L["Result: %s"], tostring(result)), "info")
                 else
-                    scriptStatusLabel:SetText("|cff88ff88Script executed successfully.|r")
+                    SetScriptStatus(L["Script executed successfully."], "success")
                 end
             else
-                scriptStatusLabel:SetText("|cffff6666Runtime: " .. tostring(result) .. "|r")
+                SetScriptStatus(format(L["Runtime: %s"], tostring(result)), "danger")
                 DF:DebugError("SCRIPT", "Runtime error: %s", tostring(result))
             end
         end), 32, "both")

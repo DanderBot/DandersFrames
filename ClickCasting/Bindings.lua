@@ -558,6 +558,11 @@ end
 -- since each frame requires ~500 SetAttribute calls to clear+reapply bindings
 -- and highlight headers pre-create up to 40 frames each (80 total).
 function CC:ApplyBindings()
+    -- MEMORY TEST (enableClickCastApplyBindings): a full rebuild is ~500
+    -- SetAttribute calls per frame across up to 80 frames, so it is worth
+    -- isolating. Bindings already applied stay live — this stops the REBUILD,
+    -- which is the cost being measured.
+    if DF:MemTestDisabled("enableClickCastApplyBindings") then return end
     if InCombatLockdown() then
         self:Defer("bindingRefresh")
         return
@@ -709,7 +714,7 @@ function CC:CreateHovercastButton()
     end
     
     if not success or not self.hovercastButton then
-        print("|cffff9900DandersFrames:|r Warning: Could not create hovercast button")
+        DF:Say("Warning: Could not create hovercast button", nil, "WARN")
         return
     end
     
@@ -723,20 +728,18 @@ function CC:CreateHovercastButton()
     self.hovercastButton:RegisterForClicks("AnyDown", "AnyUp")
     
     -- Debug hooks to see if button receives clicks
+    -- These two are installed unconditionally at button creation, so they gate on
+    -- the console category directly rather than on an armed flag.
     self.hovercastButton:HookScript("PreClick", function(btn, mouseButton, isDown)
-        if CC.debugClicksEnabled then
-            print("|cff00ffff[DF Debug]|r PreClick: button=" .. tostring(mouseButton) .. " isDown=" .. tostring(isDown))
-            local typeAttr = btn:GetAttribute("type-" .. (mouseButton or ""))
-            local macroAttr = btn:GetAttribute("macrotext-" .. (mouseButton or ""))
-            print("|cff00ffff[DF Debug]|r  type-" .. tostring(mouseButton) .. "=" .. tostring(typeAttr))
-            print("|cff00ffff[DF Debug]|r  macrotext-" .. tostring(mouseButton) .. "=" .. tostring(macroAttr and macroAttr:sub(1,50)))
-        end
+        if not DF:DebugActive("CLICK") then return end
+        DF:Debug("CLICK", "Hovercast PreClick: button=%s isDown=%s type-%s=%s macrotext-%s=%s",
+            tostring(mouseButton), tostring(isDown),
+            tostring(mouseButton), tostring(btn:GetAttribute("type-" .. (mouseButton or ""))),
+            tostring(mouseButton), tostring((btn:GetAttribute("macrotext-" .. (mouseButton or "")) or ""):sub(1, 50)))
     end)
-    
+
     self.hovercastButton:HookScript("PostClick", function(btn, mouseButton, isDown)
-        if CC.debugClicksEnabled then
-            print("|cff00ffff[DF Debug]|r PostClick: button=" .. tostring(mouseButton) .. " isDown=" .. tostring(isDown))
-        end
+        DF:Debug("CLICK", "Hovercast PostClick: button=%s isDown=%s", tostring(mouseButton), tostring(isDown))
     end)
 end
 
@@ -962,7 +965,7 @@ function CC:ApplyGlobalBindings()
     self:CreateHovercastButton()
     
     if not self.hovercastButton then
-        print("|cffff0000DF Error:|r Failed to create on hover button")
+        DF:Err("Failed to create on hover button")
         return
     end
     
@@ -981,9 +984,7 @@ function CC:ApplyGlobalBindings()
     if setupScript and setupScript ~= "" and setupScript ~= "local button = self" then
         -- Check if Execute is available
         if not self.hovercastButton.Execute then
-            if self.db.options and self.db.options.debugBindings then
-                print("|cff33cc66DF OnHover:|r Hovercast button missing Execute method")
-            end
+            DF:Debug("CLICK", "OnHover: hovercast button missing Execute method")
         else
             -- Use pcall in case secure handler isn't working
             local execSuccess = pcall(function()
@@ -991,31 +992,22 @@ function CC:ApplyGlobalBindings()
             end)
             
             if not execSuccess then
-                print("|cffff9900DandersFrames:|r Warning: Could not execute hovercast setup script")
+                DF:Say("Warning: Could not execute hovercast setup script", nil, "WARN")
             end
             
-            if execSuccess and self.db.options and self.db.options.debugBindings then
-                print("|cff33cc66DF OnHover:|r Executed setup script")
-                -- Count and show bindings
+            if execSuccess and DF:DebugActive("CLICK") then
                 local count = 0
                 for line in setupScript:gmatch("[^\n]+") do
                     if line:find("SetBindingClick") then
                         count = count + 1
                     end
                 end
-                print("|cff33cc66DF OnHover:|r Set " .. count .. " bindings via Execute()")
-                
-                -- Show the script for debugging
-                print("|cff888888Script:|r")
-                for line in setupScript:gmatch("[^\n]+") do
-                    print("  " .. line)
-                end
+                DF:Debug("CLICK", "OnHover: executed setup script, set %d bindings via Execute()\n%s",
+                    count, setupScript)
             end
         end
     else
-        if self.db.options and self.db.options.debugBindings then
-            print("|cff33cc66DF OnHover:|r No onhover bindings to set")
-        end
+        DF:Debug("CLICK", "OnHover: no onhover bindings to set")
     end
 end
 
@@ -1805,17 +1797,16 @@ end
 
 -- Debug command to test resurrection spell detection
 -- Note: If this doesn't work, use /dfrestest instead (defined in Core.lua)
-DF:RegisterDebugSlash("DFCCRES", "Resurrection spell detection test", true, "/dfccres")
 SlashCmdList["DFCCRES"] = function(msg)
     -- Safety check
     if not CC or not CC.RESURRECTION_SPELL_NAMES then
-        print("|cffff0000DF Error:|r ClickCasting module not fully loaded.")
+        DF:Err("ClickCasting module not fully loaded.")
         print("Try using |cff00ff00/dfrestest|r instead for diagnostics.")
         return
     end
     
     local spellName = msg and msg ~= "" and msg or nil
-    print("|cff33cc66=== DF Resurrection Spell Debug ===|r")
+    DF:Out("Click-Casting", "resurrection spells")
     
     if spellName then
         local isRes = CC:IsResurrectionSpell(spellName)
@@ -2523,9 +2514,7 @@ function CC:BuildUnifiedMacroMap()
                 isSpecialAction = true,
             }
             
-            if self.db.options and self.db.options.debugBindings then
-                print("|cff00ff00DF Special:|r " .. keyString .. " -> " .. (specialBinding.actionType or "?"))
-            end
+            DF:Debug("CLICK", "Special: %s -> %s", tostring(keyString), tostring(specialBinding.actionType or "?"))
         elseif itemBinding then
             -- Item binding - build simple /use macro
             local macroText = self:BuildMacroTextForBinding(itemBinding)
@@ -2538,10 +2527,7 @@ function CC:BuildUnifiedMacroMap()
                     keyString = keyString,
                 }
                 
-                if self.db.options and self.db.options.debugBindings then
-                    print("|cff00ff00DF Item:|r " .. keyString)
-                    print("|cff888888" .. macroText .. "|r")
-                end
+                DF:Debug("CLICK", "Item: %s\n%s", tostring(keyString), tostring(macroText))
             end
         else
             -- Normal spell/macro binding - try to build combined macro
@@ -2555,10 +2541,7 @@ function CC:BuildUnifiedMacroMap()
                     keyString = keyString,
                 }
                 
-                if self.db.options and self.db.options.debugBindings then
-                    print("|cff00ff00DF Macro:|r " .. keyString)
-                    print("|cff888888" .. macroText .. "|r")
-                end
+                DF:Debug("CLICK", "Macro: %s\n%s", tostring(keyString), tostring(macroText))
             end
         end
     end
@@ -3111,17 +3094,21 @@ CC.COMMON_MACRO_ICONS = {
 -- DEBUG SLASH COMMAND
 -- ============================================================
 
-DF:RegisterDebugSlash("DFSPELLDUMP", "Raw spell dump", true, "/dfspelldump")
+-- Non-dev: this is a DUMP, and dumps are what we ask a user to paste back on a
+-- bug report. Dev-gating one makes it unrunnable by the only people who can
+-- produce the state we need to see. (Traces stay dev-only — they belong in the
+-- debug console, not in a user's chat frame.)
+DF:RegisterDebugSlash("DFSPELLDUMP", "Raw spell dump", false, "/dfspelldump")
 SlashCmdList["DFSPELLDUMP"] = function(msg)
     local searchTerm = msg and msg:lower() or ""
-    print("|cff33cc66=== DF Spellbook Dump ===|r")
+    local o = DF:Out("Click-Casting", "spellbook dump")
     if searchTerm ~= "" then
-        print("|cff33cc66Filtering for:|r " .. searchTerm)
+        o:Field("Filtering for", searchTerm)
     end
     
     local bookType = Enum.SpellBookSpellBank.Player
     local numTabs = C_SpellBook.GetNumSpellBookSkillLines()
-    print("|cff33cc66Total tabs:|r " .. numTabs)
+    o:Field("Total tabs", numTabs)
     
     local totalSpells = 0
     local matchedSpells = 0
@@ -3134,7 +3121,7 @@ SlashCmdList["DFSPELLDUMP"] = function(msg)
             local tabName = skillLineInfo.name or "Unknown"
             local shouldHide = skillLineInfo.shouldHide
             
-            print("|cffaaaaaa--- Tab " .. tabIndex .. ": " .. tabName .. " (slots: " .. numSlots .. ", hide: " .. tostring(shouldHide) .. ") ---|r")
+            print("  " .. DF.OUT.SECTION .. "Tab " .. tabIndex .. ": " .. tabName .. " (slots: " .. numSlots .. ", hide: " .. tostring(shouldHide) .. ")|r")
             
             for i = 1, numSlots do
                 local slotIndex = offset + i
@@ -3188,30 +3175,17 @@ SlashCmdList["DFSPELLDUMP"] = function(msg)
             end
         end
     end
-    
-    print("|cff33cc66=== Total: " .. totalSpells .. " spells, Matched: " .. matchedSpells .. " ===|r")
+
+    o:Siblings("spelldump")
 end
 
 -- ============================================================
 -- CLICK CASTING DEBUG TOOLS
 -- ============================================================
 
--- Debug: Toggle debug mode
-DF:RegisterDebugSlash("DFCCDEBUG", "Click-casting debug toggle", false, "/dfccdebug")
-SlashCmdList["DFCCDEBUG"] = function()
-    CC.debugMode = not CC.debugMode
-    if CC.debugMode then
-        print("|cff33cc66[DF Click Casting]|r Debug mode |cff00ff00ENABLED|r")
-        print("  You will now see debug messages in chat.")
-    else
-        print("|cff33cc66[DF Click Casting]|r Debug mode |cffff0000DISABLED|r")
-    end
-end
-
 -- Debug: Show current mouseover state
-DF:RegisterDebugSlash("DFCCMOUSEOVER", "Mouseover resolution debug", true, "/dfccmouseover")
 SlashCmdList["DFCCMOUSEOVER"] = function()
-    print("|cff33cc66=== DF Click Cast Mouseover Debug ===|r")
+    DF:Out("Click-Casting", "mouseover resolution")
     
     -- Check WoW's mouseover
     local moUnit = UnitExists("mouseover") and "mouseover" or nil
@@ -3253,14 +3227,14 @@ SlashCmdList["DFCCMOUSEOVER"] = function()
             -- Show the binding snippet stored on the frame (Cell approach)
             local bindingSnippet = focus:GetAttribute("dfBindingSnippet")
             if bindingSnippet and bindingSnippet ~= "" then
-                print("|cff00ff00--- Frame Binding Snippet (Cell-style) ---")
+                print("  " .. DF.OUT.SECTION .. "Frame Binding Snippet (Cell-style)|r")
                 local bindCount = 0
                 for _ in bindingSnippet:gmatch("SetBindingClick") do
                     bindCount = bindCount + 1
                 end
                 print("|cff00ff00SetBindingClick calls: " .. bindCount .. "|r")
                 print(bindingSnippet)
-                print("--- End Snippet ---|r")
+                print("  " .. DF.OUT.SECTION .. "End Snippet|r")
             else
                 print("|cffff6666No dfBindingSnippet set on frame|r")
             end
@@ -3281,7 +3255,7 @@ SlashCmdList["DFCCMOUSEOVER"] = function()
             print("|cff00ff00dfClickCastEnabled on header:|r " .. tostring(dfEnabled))
             
             if headerSnippet and headerSnippet ~= "" then
-                print("|cff00ff00--- Header OnEnter Snippet ---")
+                print("  " .. DF.OUT.SECTION .. "Header OnEnter Snippet|r")
                 -- Count SetBindingClick calls
                 local bindCount = 0
                 for _ in headerSnippet:gmatch("SetBindingClick") do
@@ -3297,7 +3271,7 @@ SlashCmdList["DFCCMOUSEOVER"] = function()
                 else
                     print(headerSnippet)
                 end
-                print("--- End Snippet ---|r")
+                print("  " .. DF.OUT.SECTION .. "End Snippet|r")
             else
                 print("|cffff6666No df_setup_onenter set on header|r")
             end
@@ -3309,15 +3283,15 @@ SlashCmdList["DFCCMOUSEOVER"] = function()
         if focus.GetAttribute then
             local snippet = focus:GetAttribute("dfBindingSnippet")
             if snippet and snippet ~= "" then
-                print("|cffffff00--- Old Frame Binding Snippet (deprecated) ---")
+                print("  " .. DF.OUT.SECTION .. "Old Frame Binding Snippet (deprecated)|r")
                 print(snippet)
-                print("--- End Old Snippet ---|r")
+                print("  " .. DF.OUT.SECTION .. "End Old Snippet|r")
             end
         end
         
         -- Show relevant attributes
         if focus.GetAttribute then
-            print("--- Frame Attributes ---")
+            print("  " .. DF.OUT.SECTION .. "Frame Attributes|r")
             for i = 1, 5 do
                 local typeAttr = focus:GetAttribute("type" .. i)
                 local spellAttr = focus:GetAttribute("spell" .. i)
@@ -3337,7 +3311,7 @@ SlashCmdList["DFCCMOUSEOVER"] = function()
             end
             
             -- Check virtual button attributes for keyboard bindings
-            print("--- Virtual Button Attributes (for keyboard bindings) ---")
+            print("  " .. DF.OUT.SECTION .. "Virtual Button Attributes (for keyboard bindings)|r")
             -- Check common key names (not prefixed with "key")
             local virtButtons = {"Q", "F", "E", "R", "T", "G", "1", "2", "3", "4", "5",
                                  "shiftQ", "shiftF", "ctrlQ", "ctrlF", "altQ", "altF"}
@@ -3356,9 +3330,11 @@ SlashCmdList["DFCCMOUSEOVER"] = function()
 end
 
 -- Debug: Show current override bindings
-DF:RegisterDebugSlash("DFCCKEYBINDS", "Keyboard binding state dump", true, "/dfcckeybinds")
+-- Non-dev: DUMP (see the note on DFSPELLDUMP).
+-- ⚠ Near-duplicate of /dfccbindcheck below — this one covers a wider key set,
+-- that one only 1-9. Merge candidate, deferred until PR #218 lands.
 SlashCmdList["DFCCKEYBINDS"] = function()
-    print("|cff33cc66=== DF Override Binding Check ===|r")
+    DF:Out("Click-Casting", "override binding check")
     
     -- Check specific keys
     local keysToCheck = {"Q", "F", "E", "R", "T", "G", "1", "2", "3", "4", "5", 
@@ -3380,62 +3356,54 @@ SlashCmdList["DFCCKEYBINDS"] = function()
     end
     
     if focus and focus.dfActiveKeyboardBindings then
-        print("--- Frame's tracked keyboard bindings ---")
+        print("  " .. DF.OUT.SECTION .. "Frame's tracked keyboard bindings|r")
         for _, bindKey in ipairs(focus.dfActiveKeyboardBindings) do
             print("  " .. bindKey)
         end
     end
 end
 
--- Debug: Enable live click debugging
-CC.debugClicksEnabled = false
-
-DF:RegisterDebugSlash("DFCCDEBUGCLICKS", "Click registration dump", true, "/dfccdebugclicks")
+-- Arms per-frame PreClick/PostClick tracing. Output goes to the debug console's
+-- CLICK category; this command only INSTALLS the hooks, because HookScript
+-- cannot be undone and so must not ride a console toggle the user flips freely.
+-- Same shape as /df debug flatdebug.
 SlashCmdList["DFCCDEBUGCLICKS"] = function()
-    CC.debugClicksEnabled = not CC.debugClicksEnabled
-    if CC.debugClicksEnabled then
-        print("|cff33cc66DF Click Debug:|r ENABLED - will print info on each click")
-        -- Hook PreClick on all registered frames
-        if CC.registeredFrames then
-            for frame in pairs(CC.registeredFrames) do
-                if not frame.dfDebugClickHooked then
-                    frame:HookScript("PreClick", function(self, button, down)
-                        if not CC.debugClicksEnabled then return end
-                        local unit = self:GetAttribute("unit") or self.unit or "none"
-                        local moExists = UnitExists("mouseover")
-                        local moName = moExists and UnitName("mouseover") or "none"
-                        local frameName = self:GetName() or "unnamed"
-                        print("|cffff9900[PreClick]|r " .. frameName .. " btn=" .. button .. " down=" .. tostring(down))
-                        print("  frame.unit=" .. tostring(unit) .. " mouseover=" .. moName .. " (exists=" .. tostring(moExists) .. ")")
-                        
-                        -- Show the attribute that will be used
-                        local typeAttr = self:GetAttribute("type1")
-                        local macroAttr = self:GetAttribute("macrotext1")
-                        if button == "RightButton" then
-                            typeAttr = self:GetAttribute("type2")
-                            macroAttr = self:GetAttribute("macrotext2")
-                        end
-                        print("  type=" .. tostring(typeAttr) .. " macro=" .. tostring(macroAttr and macroAttr:sub(1, 60)))
-                    end)
-                    frame:HookScript("PostClick", function(self, button, down)
-                        if not CC.debugClicksEnabled then return end
-                        local moExists = UnitExists("mouseover")
-                        local moName = moExists and UnitName("mouseover") or "none"
-                        print("|cff00ff00[PostClick]|r mouseover=" .. moName .. " (exists=" .. tostring(moExists) .. ")")
-                    end)
-                    frame.dfDebugClickHooked = true
-                end
+    if CC.dfClickHooksArmed then
+        DF:Say("Click hooks are already armed", "reload to remove them", "WARN")
+        return
+    end
+
+    local hooked = 0
+    if CC.registeredFrames then
+        for frame in pairs(CC.registeredFrames) do
+            if not frame.dfDebugClickHooked then
+                frame:HookScript("PreClick", function(self, button, down)
+                    if not DF:DebugActive("CLICK") then return end
+                    local typeAttr = self:GetAttribute(button == "RightButton" and "type2" or "type1")
+                    local macroAttr = self:GetAttribute(button == "RightButton" and "macrotext2" or "macrotext1")
+                    DF:Debug("CLICK", "PreClick %s btn=%s down=%s unit=%s mouseover=%s\n  type=%s macro=%s",
+                        tostring(self:GetName() or "unnamed"), tostring(button), tostring(down),
+                        tostring(self:GetAttribute("unit") or self.unit or "none"),
+                        tostring(UnitExists("mouseover") and UnitName("mouseover") or "none"),
+                        tostring(typeAttr), tostring(macroAttr and macroAttr:sub(1, 60)))
+                end)
+                frame:HookScript("PostClick", function(self, button, down)
+                    DF:Debug("CLICK", "PostClick mouseover=%s",
+                        tostring(UnitExists("mouseover") and UnitName("mouseover") or "none"))
+                end)
+                frame.dfDebugClickHooked = true
+                hooked = hooked + 1
             end
         end
-    else
-        print("|cff33cc66DF Click Debug:|r DISABLED")
     end
+
+    CC.dfClickHooksArmed = true
+    DF:Say("Click tracing armed on " .. hooked .. " frame(s)", "enable the CLICK console category to see them")
 end
 
 -- Debug: Show all bindings and their macro text
-DF:RegisterDebugSlash("DFCCBINDINGS", "Click-casting bindings dump", false, "/dfccbindings")
 SlashCmdList["DFCCBINDINGS"] = function()
-    print("|cff33cc66=== DF Click Cast Bindings ===|r")
+    DF:Out("Click-Casting", "bindings")
     
     if not CC.db or not CC.db.bindings then
         print("No bindings found")
@@ -3468,9 +3436,9 @@ SlashCmdList["DFCCBINDINGS"] = function()
 end
 
 -- Debug command: Check actual override bindings for common keys
-DF:RegisterDebugSlash("DFCCBINDCHECK", "Override key binding check", true, "/dfccbindcheck")
+-- Non-dev: DUMP. See the merge note on /dfcckeybinds above.
 SlashCmdList["DFCCBINDCHECK"] = function()
-    print("|cff00ff00[DF CC]|r Checking override bindings for keys 1-9:")
+    DF:Say("Checking override bindings for keys 1-9:")
     
     for i = 1, 9 do
         local key = tostring(i)
@@ -3478,7 +3446,7 @@ SlashCmdList["DFCCBINDCHECK"] = function()
         print(string.format("  Key %s: action=%s", key, tostring(action)))
     end
     
-    print("--- Checking hovered frame's bindings ---")
+    print("  " .. DF.OUT.SECTION .. "Checking hovered frame's bindings|r")
     local frame = CC.currentHoveredFrame
     if frame then
         local frameName = frame:GetName()
@@ -3489,19 +3457,20 @@ SlashCmdList["DFCCBINDCHECK"] = function()
 end
 
 -- Debug command: Show binding attributes on hovered frame
-DF:RegisterDebugSlash("DFCCFRAMEATTRS", "Secure frame attribute dump", true, "/dfccframeattrs")
+-- Non-dev: DUMP. Reads the currently hovered frame, so the user must be hovering
+-- one when they run it — worth saying in the reply when we ask for it.
 SlashCmdList["DFCCFRAMEATTRS"] = function()
     local frame = CC.currentHoveredFrame
     if not frame then
-        print("|cffff6600[DF CC]|r No frame currently hovered")
+        DF:Say("No frame currently hovered")
         return
     end
     
     local frameName = frame:GetName() or "unnamed"
-    print("|cff00ff00[DF CC]|r Frame Attributes for: " .. frameName)
+    DF:Out("Click-Casting", "frame attributes — " .. frameName)
     
     -- Event counters
-    print("--- Secure Event Counters ---")
+    print("  " .. DF.OUT.SECTION .. "Secure Event Counters|r")
     print("  _onenter fired: " .. tostring(frame:GetAttribute("dfOnEnterAttrCount") or 0))
     print("  _onenter ran snippet: " .. tostring(frame:GetAttribute("dfOnEnterRanSnippet") or "n/a"))
     print("  _onleave fired: " .. tostring(frame:GetAttribute("dfOnLeaveAttrCount") or 0))
@@ -3511,7 +3480,7 @@ SlashCmdList["DFCCFRAMEATTRS"] = function()
     local snippet = frame:GetAttribute("dfBindingSnippet") or ""
     local lineCount = 0
     for _ in snippet:gmatch("[^\n]+") do lineCount = lineCount + 1 end
-    print("--- Binding Snippet (" .. lineCount .. " lines) ---")
+    print("  " .. DF.OUT.SECTION .. "Binding Snippet (" .. lineCount .. " lines)|r")
     if snippet ~= "" then
         for line in snippet:gmatch("[^\n]+") do
             print("  " .. line)
@@ -3521,7 +3490,7 @@ SlashCmdList["DFCCFRAMEATTRS"] = function()
     end
     
     -- Check actual bindings for keys in snippet
-    print("--- Actual Bindings (GetBindingAction) ---")
+    print("  " .. DF.OUT.SECTION .. "Actual Bindings (GetBindingAction)|r")
     if snippet ~= "" then
         for line in snippet:gmatch("[^\n]+") do
             local key = line:match('SetBindingClick%(true,%s*"([^"]+)"')
@@ -3538,16 +3507,16 @@ SlashCmdList["DFCCFRAMEATTRS"] = function()
         print("  (no snippet)")
     end
     
-    print("--- Frame State ---")
+    print("  " .. DF.OUT.SECTION .. "Frame State|r")
     print("  registered=" .. tostring(frame.dfClickCastRegistered) .. 
           ", isDandersFrame=" .. tostring(frame.dfIsDandersFrame) ..
           ", handlersSetup=" .. tostring(frame.dfKeyboardHandlersSetup))
 end
 
 -- Debug loadout profile switching
-DF:RegisterDebugSlash("DFCCLOADOUT", "Click-casting loadout internals", true, "/dfccloadout")
+-- Non-dev: DUMP (see the note on DFSPELLDUMP).
 SlashCmdList["DFCCLOADOUT"] = function()
-    print("|cff00ffffDandersFrames Click-Casting Loadout Debug:|r")
+    DF:Out("Click-Casting", "loadout")
     
     -- These are functions, not methods - don't use : syntax
     local specIndex = CC.GetCurrentSpec and CC.GetCurrentSpec() or GetSpecialization() or 0
@@ -3580,30 +3549,16 @@ SlashCmdList["DFCCLOADOUT"] = function()
     CC:CheckLoadoutProfileSwitch()
 end
 
--- Debug: Toggle click debugging on hovercast button
-DF:RegisterDebugSlash("DFCCCLICKDEBUG", "Click event debug toggle", true, "/dfccclickdebug")
-SlashCmdList["DFCCCLICKDEBUG"] = function()
-    CC.debugClicksEnabled = not CC.debugClicksEnabled
-    if CC.debugClicksEnabled then
-        print("|cff00ff00[DF CC]|r Click debug ENABLED - press your bound key and watch for PreClick/PostClick messages")
-        print("|cff00ff00[DF CC]|r If you see PreClick but spell doesn't cast, the issue is with the macro/spell")
-        print("|cff00ff00[DF CC]|r If you see NOTHING, the binding isn't triggering the click")
-    else
-        print("|cff00ff00[DF CC]|r Click debug disabled")
-    end
-end
-
 -- Debug: Comprehensive keyboard fallback diagnosis
-DF:RegisterDebugSlash("DFCCKBFALLBACK", "Keyboard fallback debug", true, "/dfcckbfallback")
 SlashCmdList["DFCCKBFALLBACK"] = function()
-    print("|cff33cc66=== DF Keyboard Fallback Debug ===|r")
+    DF:Out("Click-Casting", "keyboard fallback")
     
     -- 1. Check if click-casting is enabled
-    print("|cff00ff00[1] Click-Casting Status:|r")
+    print("  " .. DF.OUT.SECTION .. "1. Click-Casting Status:|r")
     print("  Enabled: " .. tostring(CC.db and CC.db.enabled))
     
     -- 2. Check hovercast button
-    print("|cff00ff00[2] Hovercast Button:|r")
+    print("  " .. DF.OUT.SECTION .. "2. Hovercast Button:|r")
     local hcButton = CC.hovercastButton
     if hcButton then
         print("  Button exists: yes")
@@ -3650,7 +3605,7 @@ SlashCmdList["DFCCKBFALLBACK"] = function()
     end
     
     -- 3. Check global bindings with fallbacks
-    print("|cff00ff00[3] Bindings with Fallbacks:|r")
+    print("  " .. DF.OUT.SECTION .. "3. Bindings with Fallbacks:|r")
     if CC.db and CC.db.bindings then
         local fallbackCount = 0
         for i, binding in ipairs(CC.db.bindings) do
@@ -3682,7 +3637,7 @@ SlashCmdList["DFCCKBFALLBACK"] = function()
     end
     
     -- 4. Check actual override bindings
-    print("|cff00ff00[4] Override Bindings (GetBindingAction):|r")
+    print("  " .. DF.OUT.SECTION .. "4. Override Bindings (GetBindingAction):|r")
     local keysToCheck = {"Q", "E", "R", "T", "F", "G", "1", "2", "3", "4", "5",
                          "SHIFT-Q", "SHIFT-E", "CTRL-Q", "CTRL-E"}
     local foundOurs = false
@@ -3704,14 +3659,14 @@ SlashCmdList["DFCCKBFALLBACK"] = function()
     end
     
     -- 5. Check current unit state
-    print("|cff00ff00[5] Current Unit State:|r")
+    print("  " .. DF.OUT.SECTION .. "5. Current Unit State:|r")
     local moExists = UnitExists("mouseover")
     local tgtExists = UnitExists("target")
     print("  mouseover: " .. (moExists and UnitName("mouseover") or "none"))
     print("  target: " .. (tgtExists and UnitName("target") or "none"))
     
     -- 6. Check if currently hovering a frame
-    print("|cff00ff00[6] Currently Hovered Frame:|r")
+    print("  " .. DF.OUT.SECTION .. "6. Currently Hovered Frame:|r")
     local hoveredFrame = CC.currentHoveredFrame
     if hoveredFrame then
         print("  Frame: " .. tostring(hoveredFrame:GetName()))
@@ -3720,7 +3675,7 @@ SlashCmdList["DFCCKBFALLBACK"] = function()
     end
     
     -- 7. Try to manually execute the setup script and report result
-    print("|cff00ff00[7] Manual Execute Test:|r")
+    print("  " .. DF.OUT.SECTION .. "7. Manual Execute Test:|r")
     if hcButton and hcButton.Execute and hcButton.setupScript then
         local success, err = pcall(function()
             hcButton:Execute(hcButton.setupScript)
@@ -3750,4 +3705,106 @@ SlashCmdList["DFCCKBFALLBACK"] = function()
     print("|cff888888Tip: If fallbacks aren't working, check that:|r")
     print("|cff888888  1. Section [7] shows attributes are set after Execute|r")
     print("|cff888888  2. Section [4] shows keys bound to DFHovercastButton|r")
+end
+
+-- ============================================================
+-- /df debug cc — one entry point for click-casting diagnostics
+-- ============================================================
+-- These were eleven separate /dfccXXX commands, each dumping one adjacent slice
+-- of the same subsystem. Nobody remembers eleven names, and click-casting is our
+-- highest-volume bug source, so the one thing a user must be able to do is find
+-- the dump. The handlers are unchanged — only the way in is.
+--
+-- Resolved through SlashCmdList at CALL time, so it does not matter that three
+-- of these handlers live in other files loaded after this one.
+-- Which addon owns each frame's click-casting registration. Distinct from
+-- "frames", which dumps secure attributes of the ONE currently hovered frame —
+-- this is the ownership picture across all of them, and the two are read together
+-- when a binding fires on some frames but not others.
+SlashCmdList["DFCCREGISTRATION"] = function()
+    local o = DF:Out("Click-Casting", "frame registration")
+    if not ClickCastFrames then
+        o:Line("ClickCastFrames does not exist — no click-casting addon has claimed it.", "WARN")
+        return
+    end
+    local rows, count, idx = {}, 0, 0
+    if DF.IteratePartyFrames then
+        DF:IteratePartyFrames(function(frame)
+            idx = idx + 1
+            local status = ClickCastFrames[frame]
+            local label = status == true and "registered"
+                or (status == false and "explicitly excluded" or "not registered")
+            local tone = status == true and DF.OUT.GOOD
+                or (status == false and DF.OUT.WARN or DF.OUT.NEUTRAL)
+            rows[#rows + 1] = ("party%d  %s%s|r"):format(idx, tone, label)
+            if status then count = count + 1 end
+        end)
+    end
+    o:Section("Party frames", count .. " of " .. idx .. " registered")
+    o:More(rows, 10)
+end
+
+-- Clears the ignore flag on the conflict warning, so it can fire again next login.
+SlashCmdList["DFCCRESETCONFLICT"] = function()
+    if not DandersFramesClickCastingDB then
+        DF:Err("Click-casting database not loaded")
+        return
+    end
+    DandersFramesClickCastingDB.ignoreConflictWarning = nil
+    DF:Say("Conflict warning re-enabled", "it will show on next reload if conflicts are found")
+end
+
+local CC_SUBCOMMANDS = {
+    -- name         handler key        dev?   what it shows
+    { "bindings",   "DFCCBINDINGS",    false, "every binding and its macro text" },
+    { "keybinds",   "DFCCKEYBINDS",    false, "keyboard binding state" },
+    { "bindcheck",  "DFCCBINDCHECK",   false, "override key binding check" },
+    { "frames",     "DFCCFRAMEATTRS",  false, "secure frame attributes" },
+    { "loadout",    "DFCCLOADOUT",     false, "loadout internals" },
+    { "spells",     "DFCCSPELLS",      false, "spellbook detection" },
+    { "registration", "DFCCREGISTRATION", false, "which addon owns each frame's click-casting" },
+    { "resetconflict", "DFCCRESETCONFLICT", false, "re-enable the conflict warning" },
+    { "res",        "DFCCRES",         true,  "resurrection spell detection" },
+    { "mouseover",  "DFCCMOUSEOVER",   true,  "mouseover resolution" },
+    { "fallback",   "DFCCKBFALLBACK",  true,  "keyboard fallback diagnosis" },
+    { "global",     "DFCCGLOBAL",      true,  "global bindings (apply|mouseover)" },
+    { "clicks",     "DFCCDEBUGCLICKS", true,  "arm per-click tracing (until reload)" },
+}
+
+DF:RegisterDebugSlash("DFCC", "Click-casting diagnostics - run bare for the list", false, "/dfcc")
+SlashCmdList["DFCC"] = function(msg)
+    local word, rest = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
+    word = (word or ""):lower()
+
+    local dev = DF:IsDevBuild()
+
+    if word ~= "" then
+        for _, e in ipairs(CC_SUBCOMMANDS) do
+            -- ☠ The dev flag (e[3]) has to gate EXECUTION, not just the listing
+            -- below. It used to filter only the printed rows, so on a release
+            -- build "/df debug cc clicks" still armed per-click tracing until
+            -- reload — real overhead in the click hot path, from a command the
+            -- user was never shown. Fall through to "unknown" rather than
+            -- reporting "dev only": a hidden command must not advertise itself.
+            if e[1] == word and (not e[3] or dev) then
+                local handler = SlashCmdList[e[2]]
+                if handler then
+                    handler(rest or "")
+                else
+                    DF:Err("click-casting module not loaded")
+                end
+                return
+            end
+        end
+        DF:Say("unknown click-casting command '" .. word .. "'")
+    end
+
+    local o = DF:Out("Click-Casting")
+    for _, e in ipairs(CC_SUBCOMMANDS) do
+        if not e[3] or dev then
+            -- No %-10s padding: WoW's chat font is PROPORTIONAL, so space-padded
+            -- columns do not line up. o:Item's separator does the alignment work.
+            o:Item("/df debug cc " .. e[1], e[4] .. (e[3] and " (dev)" or ""))
+        end
+    end
 end

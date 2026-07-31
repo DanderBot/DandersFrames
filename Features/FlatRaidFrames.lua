@@ -25,18 +25,14 @@ FlatRaidFrames.pendingVisibility = nil  -- nil = no pending, true/false = pendin
 FlatRaidFrames.pendingInitialize = false
 FlatRaidFrames.pendingReinitialize = false
 
--- Debug flag
-FlatRaidFrames.debug = false
-
 -- ============================================================
 -- DEBUG UTILITIES
 -- ============================================================
 
-local function DebugPrint(...)
-    if FlatRaidFrames.debug then
-        print("|cFF00FFFF[DF FlatRaid]|r", ...)
-    end
-end
+-- Routed to the debug console's FLATRAID category. Every DebugPrint call site
+-- in this file feeds this one helper, so the console is the single place to
+-- turn them on or off.
+local DebugPrint = DF:MakeDebugPrinter("FLATRAID")
 
 -- Build groupFilter string from raidGroupVisible setting
 -- Returns e.g. "1,2,3,5,6,7" if group 4 and 8 are hidden
@@ -128,32 +124,10 @@ local function GetGrowthAnchorPoint(db)
     end
 end
 
--- Get current group roster as a lookup table
--- Returns: { [name] = true, ... }
-local function GetGroupRoster()
-    local roster = {}
-    local numMembers = GetNumGroupMembers()
-    
-    if numMembers == 0 then
-        -- Solo
-        local name = UnitName("player")
-        if name then
-            roster[name] = true
-        end
-        return roster
-    end
-    
-    local isRaid = IsInRaid()
-    for i = 1, numMembers do
-        local unit = isRaid and ("raid" .. i) or (i == 1 and "player" or "party" .. (i - 1))
-        local name = UnitName(unit)
-        if name then
-            roster[name] = true
-        end
-    end
-    
-    return roster
-end
+-- (Removed) GetGroupRoster — built a { [name] = true } lookup of the current group.
+-- No callers: flat-raid layout works from unit tokens and the header's own child
+-- list, never from a set of names. (Names are also a poor key under 12.1, where
+-- UnitName can return a secret value.)
 
 
 -- ============================================================
@@ -1377,7 +1351,9 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
                 DebugPrint("ADDON_LOADED: Conditions not met, will initialize later")
                 DebugPrint("  db:", DF.db and "yes" or "no")
                 DebugPrint("  useNewFlatRaid:", "yes (always)")
-                DebugPrint("  ShouldBeActive:", ShouldBeActive() and "yes" or "no")
+                if DF:DebugActive("FLATRAID") then
+                    DebugPrint("  ShouldBeActive:", ShouldBeActive() and "yes" or "no")
+                end
                 DebugPrint("  raidContainer:", DF.raidContainer and "yes" or "no")
             end
         end
@@ -1451,90 +1427,112 @@ end)
 DF:RegisterDebugSlash("DFFLATRAID", "Flat raid debug / info / reinit", false, "/dfflatraid")
 SlashCmdList["DFFLATRAID"] = function(msg)
     if msg == "debug" then
-        FlatRaidFrames.debug = not FlatRaidFrames.debug
-        print("|cFF00FFFF[DF FlatRaid]|r Debug:", FlatRaidFrames.debug and "ON" or "OFF")
-        
-    elseif msg == "info" then
+        DF:Say("Flat raid tracing is in the debug console", "enable the FLATRAID category", "NEUTRAL")
+
+    elseif msg == "info" or msg == "" then
+        -- Both halves of the flat-raid picture in one paste. These used to be
+        -- two commands: /dfflatstate dumped the container and DB settings while
+        -- /dfflatraid info dumped the header attributes. Neither was much use
+        -- without the other.
         FlatRaidFrames:DebugPrint()
-        
+
     elseif msg == "reinit" then
         if InCombatLockdown() then
-            print("|cFF00FFFF[DF FlatRaid]|r Cannot reinitialize in combat")
+            DF:Err("Cannot reinitialise flat raid frames in combat")
         else
             FlatRaidFrames:Reinitialize()
-            print("|cFF00FFFF[DF FlatRaid]|r Reinitialized")
+            DF:Say("Flat raid frames reinitialised")
         end
-        
+
     elseif msg == "test" then
-        -- Quick test - initialize and enable
-        FlatRaidFrames:Initialize()
-        FlatRaidFrames:SetEnabled(true)
-        print("|cFF00FFFF[DF FlatRaid]|r Test: Initialized and enabled")
-        
+        -- Quick test - initialize and enable.
+        -- ☠ Same combat guard as "reinit" above, and for a stronger reason: this
+        -- path does MORE secure work (Initialize + SetEnabled -> CreateFrames and
+        -- SetHeaderChildrenEventsEnabled), and header attribute writes are
+        -- protected in combat. It went unguarded while its weaker sibling was
+        -- guarded — the asymmetry was the bug, not the guard.
+        if InCombatLockdown() then
+            DF:Err("Cannot initialise flat raid frames in combat")
+        else
+            FlatRaidFrames:Initialize()
+            FlatRaidFrames:SetEnabled(true)
+            DF:Say("Flat raid initialised and enabled")
+        end
+
     else
-        print("|cFF00FFFF[DF FlatRaid]|r Commands:")
-        print("  debug - Toggle debug output")
-        print("  info - Show detailed state info")
-        print("  reinit - Reinitialize frames")
-        print("  test - Initialize and enable (for testing)")
+        local o = DF:Out("Flat Raid")
+        o:Section("Commands")
+        o:Item("(no argument) or info", "full state dump: header, container and settings")
+        o:Item("reinit", "reinitialise frames")
+        o:Item("test", "initialise and enable")
+        o:Line("Ongoing tracing is in the debug console — enable the FLATRAID category.", "NEUTRAL")
+        o:Hints("/df debug flatraid info", "/df console")
     end
 end
 
 -- Detailed state dump
 function FlatRaidFrames:DebugPrint()
-    print("|cFF00FFFF[DF FlatRaid]|r ========== State Info ==========")
-    print("  useNewFlatRaid:", "true (always)")
-    print("  initialized:", self.initialized and "true" or "false")
-    print("  debug:", self.debug and "true" or "false")
-    print("  shouldBeActive:", ShouldBeActive() and "true" or "false")
-    
-    print(" ")
-    print("  Pending updates:")
-    print("    nameList:", self.pendingNameListUpdate and "true" or "false")
-    print("    layout:", self.pendingLayoutUpdate and "true" or "false")
-    print("    visibility:", self.pendingVisibility ~= nil and tostring(self.pendingVisibility) or "none")
-    
-    print(" ")
-    if self.header then
-        print("  Header: EXISTS")
-        print("    shown:", self.header:IsShown() and "true" or "false")
-        print("    nameList:", self.header:GetAttribute("nameList") or "(nil)")
-        print("    sortMethod:", self.header:GetAttribute("sortMethod") or "(nil)")
-        print("    groupFilter:", self.header:GetAttribute("groupFilter") or "(nil)")
-        print("    point:", self.header:GetAttribute("point") or "(nil)")
-        print("    unitsPerColumn:", self.header:GetAttribute("unitsPerColumn") or "(nil)")
-        print("    maxColumns:", self.header:GetAttribute("maxColumns") or "(nil)")
-        
-        -- Count children
-        local childCount = 0
-        local shownCount = 0
+    local o = DF:Out("Flat Raid")
+    local active = ShouldBeActive()
+
+    o:Section("Module state")
+    o:Field("initialized", self.initialized, self.initialized and "GOOD" or "BAD")
+    -- Not active is a legitimate state (wrong group size, feature off), so it is
+    -- neutral rather than a fault; initialized being false while active IS a fault.
+    o:Field("should be active", active, "NEUTRAL")
+
+    local pending = self.pendingNameListUpdate or self.pendingLayoutUpdate
+        or self.pendingVisibility ~= nil
+    o:Section("Pending updates", pending and "waiting on combat end" or "none")
+    if pending then
+        o:Field("nameList", self.pendingNameListUpdate, self.pendingNameListUpdate and "WARN" or "NEUTRAL")
+        o:Field("layout", self.pendingLayoutUpdate, self.pendingLayoutUpdate and "WARN" or "NEUTRAL")
+        o:Field("visibility", self.pendingVisibility ~= nil and tostring(self.pendingVisibility) or "none",
+            self.pendingVisibility ~= nil and "WARN" or "NEUTRAL")
+    end
+
+    if not self.header then
+        o:Section("Header")
+        o:Line("missing", "BAD")
+    else
+        local childCount, shownCount = 0, 0
         for i = 1, 40 do
             local child = self.header:GetAttribute("child" .. i)
             if child then
                 childCount = childCount + 1
-                if child:IsShown() then
-                    shownCount = shownCount + 1
-                end
+                if child:IsShown() then shownCount = shownCount + 1 end
             end
         end
-        print("    children (total):", childCount)
-        print("    children (shown):", shownCount)
-    else
-        print("  Header: NIL")
+        o:Section("Header", self.header:IsShown() and "shown" or "hidden")
+        o:Field("nameList", self.header:GetAttribute("nameList") or "(none)", "NEUTRAL")
+        o:Field("sortMethod", self.header:GetAttribute("sortMethod") or "(none)", "NEUTRAL")
+        o:Field("groupFilter", self.header:GetAttribute("groupFilter") or "(none)", "NEUTRAL")
+        o:Field("point", self.header:GetAttribute("point") or "(none)", "NEUTRAL")
+        o:Field("unitsPerColumn", self.header:GetAttribute("unitsPerColumn") or "(none)", "NEUTRAL")
+        o:Field("maxColumns", self.header:GetAttribute("maxColumns") or "(none)", "NEUTRAL")
+        -- Children existing but none shown is the signature of a layout fault,
+        -- so that specific combination is the one worth colouring.
+        o:Field("children", childCount .. " total, " .. shownCount .. " shown",
+            childCount == 0 and "NEUTRAL" or (shownCount > 0 and "GOOD" or "BAD"))
     end
-    
-    print(" ")
+
     local db = GetRaidDB()
-    if db then
-        print("  DB Settings:")
-        print("    raidUseGroups:", db.raidUseGroups and "true" or "false")
-        print("    growDirection:", db.growDirection or "(nil)")
-        print("    raidPlayersPerRow:", db.raidPlayersPerRow or "(nil)")
-        print("    raidFlatPlayerAnchor:", db.raidFlatPlayerAnchor or "(nil)")
-        print("    sortSelfPosition:", db.sortSelfPosition or "(nil)")
+    if not db then
+        o:Section("Settings")
+        o:Line("raid DB missing", "BAD")
     else
-        print("  DB: NIL")
+        o:Section("Settings")
+        o:Field("raidUseGroups", db.raidUseGroups, "NEUTRAL")
+        o:Field("growDirection", db.growDirection or "(none)", "NEUTRAL")
+        o:Field("raidPlayersPerRow", db.raidPlayersPerRow or "(none)", "NEUTRAL")
+        o:Field("raidFlatPlayerAnchor", db.raidFlatPlayerAnchor or "(none)", "NEUTRAL")
+        o:Field("sortSelfPosition", db.sortSelfPosition or "(none)", "NEUTRAL")
     end
-    
-    print("|cFF00FFFF[DF FlatRaid]|r ================================")
+
+    -- The other half of the picture, emitted into THIS block rather than opening
+    -- its own — the two were separate commands once and the merge is only useful
+    -- if it reads as one dump.
+    if DF.DumpFlatLayoutState then DF:DumpFlatLayoutState(o) end
+
+    o:Siblings("flatraid")
 end

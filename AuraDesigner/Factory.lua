@@ -1000,7 +1000,8 @@ end
 -- secret-safe reveal. These thin locals keep the factory's own call sites reading the
 -- same, passing the icon side as the engine's geometry.baseSize (BORDER auto-match reads
 -- it). Size/anchor are computed inside the engine's StructSig / BuildDurationSpec /
--- BuildPreview, so the factory no longer needs its own effectiveAlertSize/Anchor.
+-- BuildDurationSpec (via alertSlotStyle), so the factory no longer needs its own
+-- effectiveAlertSize/Anchor.
 local function alertElemMode(indicator) return DF.Expiration:Mode(indicator) end
 -- geom (from alertGeometry, defined after resolveBarSize) carries the target's shape: a square
 -- { baseSize } for icons/squares, or a rectangular { width, height } for bars. Defaults to the
@@ -1057,11 +1058,16 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec, defs)
     if isSquare then
         -- Solid-colour box (legacy SetColorTexture). hideIcon = no fill (text-only). The
         -- fill insets by the border thickness so the ring frames it (legacy parity).
-        if not hideIcon then
-            local r, g, b = readADColor(indicator.color)
-            local inset = borderSpec and borderArtInset(borderSpec) or 0
-            style.square = { color = { r, g, b, 1 }, inset = inset }
-        end
+        --
+        -- ⚠ ALWAYS emit style.square, even when hidden — its PRESENCE is what tells
+        -- AuraContainer "this slot is a square, do not run the icon path". Omitting the
+        -- table on hideIcon left both style.square and style.icon nil, and the container's
+        -- `if not squareSpec and (iconSpec == nil ...)` then fell through and bound the
+        -- spell icon: ticking Hide Icon on a square turned it INTO an icon. Mirrors the
+        -- icon branch below, which has always used a `show` flag for the same reason.
+        local r, g, b = readADColor(indicator.color)
+        local inset = borderSpec and borderArtInset(borderSpec) or 0
+        style.square = { show = not hideIcon, color = { r, g, b, 1 }, inset = inset }
     else
         -- Spell icon. hideIcon = text-only: skip the icon texture, keep cooldown/border/
         -- stacks. Art inset matches the border thickness so the ring frames the art.
@@ -1101,9 +1107,9 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec, defs)
     return style
 end
 
--- Full row config for one placed indicator (max=1 single-slot container). frameLevelOffset
--- 40 = the buff-icon level (above the frame's content overlay) so placed AD indicators read
--- on top, nudged by the indicator's own frameLevel; z-order polish is a P4.7 concern.
+-- Full row config for one placed indicator (max=1 single-slot container). Its frame level is
+-- resolveLevel's ABSOLUTE value (default 40, the buff-icon band, above the content overlay)
+-- — not 40 plus the indicator's own frameLevel. See resolveLevel.
 -- Test-preview entry for a placed container: the indicator previews its OWN
 -- configured spell (icon/name/tooltip resolved from the live spell ID by the
 -- shared test paint). Built at config time -- one tiny table per container.
@@ -1144,8 +1150,17 @@ local function resolveStrata(indicator, defStrata)
     return defStrata
 end
 
--- Per-indicator FRAME LEVEL, same chain: instance -> global default -> 0. Callers add it to
--- their own base offset (40 for placed, 41 for the alert companion).
+-- Per-indicator FRAME LEVEL, same chain: instance -> global default -> 40.
+--
+-- ⚠ The returned value is ABSOLUTE (an offset from the unit frame, like every other
+-- *FrameLevel setting since 09d6743). Callers pass it through as frameLevelOffset and
+-- NOTHING adds a base to it — the `or 40` is a fallback for a MISSING key, not a baseline
+-- that gets summed in. This comment used to claim "callers add 40 for placed, 41 for the
+-- alert companion", which was true before the absolute-level change and has misled at
+-- least two readers since into hunting a hidden offset that does not exist.
+-- (The alert companion really does add 13 — see buildAlertCompanionConfig — but that is a
+-- deliberate ONE FULL ROW over its own indicator, not a base. It was +1 until it turned out
+-- a row is 13 levels thick, which parked the alert inside its own indicator's band.)
 local function resolveLevel(indicator, defLevel)
     return tonumber(indicator and indicator.frameLevel) or defLevel or 40
 end
@@ -1439,7 +1454,7 @@ local function buildBarStyle(indicator, borderSpec, defs)
 end
 
 -- Full row config for one placed bar (max=1 single-slot container). Same frame-level band as
--- the icon/square placed indicators (40 + per-indicator frameLevel).
+-- the icon/square placed indicators — resolveLevel's absolute value, nothing added.
 local function buildBarConfig(frame, unit, map, indicator, borderSpec, defs, mine)
     return {
         unit = unit,
@@ -1486,14 +1501,48 @@ end
 -- (GetADTrackedSpellIDs) is built from the CONFIG records, not from live
 -- handles — the companion adds nothing to it.
 -- ============================================================
-local function buildAlertCompanionConfig(unit, map, indicator, layout, mine, geom, defs)
-    -- The reveal's duration spec (formatter + placement + opacity) is engine-owned; the factory
-    -- only wraps it in the AuraContainer plumbing. nil = alert off, or the pre-12.1 formatter
-    -- API is missing (no companion). geom (alertGeometry) is the target's shape — a square for
-    -- an icon (auto-match), a rectangle for a bar (Tint fills it).
+-- How far the alert is lifted above the thing it annotates. ONE constant, used by the live
+-- companion (over its indicator's container) and by the AD canvas (over its preview slot),
+-- so the two can never be nudged apart by editing one literal. A container row is 13 levels
+-- thick — measured: container +0, button +2, cooldown +3, border +12 — the same constant
+-- the Important Debuffs badge host uses in AuraContainer. At the +1 this used to be, the
+-- companion's button landed at +3, INSIDE its own indicator's band: above that indicator's
+-- icon but under its border, and under every sibling indicator's border at the same
+-- configured level. That is why the glyph showed under the icons.
+Factory.ALERT_ROW_LIFT = 13
+
+-- THE alert's render, as ONE table. The live companion slot and the AD canvas preview
+-- BOTH take their style from here, so the reveal can never be styled two ways. It used to
+-- be built live from BuildDurationSpec and on the canvas from a separate path, and that
+-- split is exactly how the two drifted apart on layering twice over.
+--
+-- The reveal's duration spec (formatter + placement + opacity) is engine-owned; the factory
+-- only wraps it in AuraContainer plumbing. geom (alertGeometry) is the target's shape — a
+-- square for an icon (auto-match), a rectangle for a bar (Tint fills it).
+--
+-- nil = no reveal, for any of three reasons: the master toggle is off / the type is unset
+-- (Expiration:Mode), the pre-12.1 formatter API is missing, or the indicator is
+-- SHOW-WHEN-MISSING. That last gate used to live only on the canvas path, so live built a
+-- companion for missing-mode indicators anyway — and since the companion is a NORMAL
+-- (non-inverted) container, it revealed while the aura was PRESENT, i.e. exactly when the
+-- indicator under it was hidden. A floating alert over nothing. "Warn me before this runs
+-- out" and "show me while this is absent" are contradictory settings; the canvas and the
+-- surrounding comments already treated it as nonsensical, so live now agrees with them.
+local function alertSlotStyle(indicator, geom)
+    if indicator.showWhenMissing then return nil end
     local dur = DF.Expiration:BuildDurationSpec(indicator,
         geom or { baseSize = indicator.size, font = indicator.durationFont })
     if not dur then return nil end
+    return {
+        icon     = { show = false },
+        cooldown = { show = false },
+        duration = dur,   -- the alert IS this invisible button's duration text
+    }
+end
+
+local function buildAlertCompanionConfig(unit, map, indicator, layout, mine, geom, defs)
+    local style = alertSlotStyle(indicator, geom)
+    if not style then return nil end
     return {
         unit = unit,
         mode = "row",
@@ -1503,20 +1552,40 @@ local function buildAlertCompanionConfig(unit, map, indicator, layout, mine, geo
         testEntries = testEntryForMap(map),
         enabled = true,
         tooltips = false,   -- companion overlay: see adTooltipsOn (would fight its own indicator)
-        -- One level above the indicator's own container band so the alert text
-        -- draws over the icon / a bar's fill (the companion subtree carries
-        -- nothing but the text, so nothing of the indicator is covered).
-        frameLevelOffset = 1 + resolveLevel(indicator, defs.level),
-        -- MUST mirror the indicator's strata: the +41 level only orders the alert above the
+        -- A FULL ROW above the indicator's own band (see ALERT_ROW_LIFT), so the alert
+        -- clears its own indicator AND any sibling sharing its configured level. The
+        -- companion subtree carries nothing but the text, so nothing is covered.
+        frameLevelOffset = Factory.ALERT_ROW_LIFT + resolveLevel(indicator, defs.level),
+        -- MUST mirror the indicator's strata: the level only orders the alert above the
         -- indicator WITHIN a band, so leaving the companion in the frame's band while the
         -- indicator moves to HIGH would strand the alert text underneath it.
         frameStrata = resolveStrata(indicator, defs.strata),
         layout = layout,   -- the INDICATOR's own layout: the invisible button coincides with its rect
-        style = {
-            icon     = { show = false },
-            cooldown = { show = false },
-            duration = dur,   -- the alert IS this invisible button's duration text
-        },
+        style = style,
+    }
+end
+
+-- Canvas twin of the companion. The AD editor has no container row to layer inside — it
+-- paints a single PREVIEW SLOT — so the alert there is a second preview slot laid over the
+-- indicator's, taking the SAME style table. Options.lua then only has to position it: the
+-- FontString, its font, anchor, offsets, alpha and holder level all come from the shared
+-- spec via styleButton_regions, exactly as they do live.
+--
+-- That is the whole point of this function existing. The canvas used to hand-build its own
+-- FontString and hand-set the layering to a literal that merely happened to match the live
+-- one; when the live number moved, the canvas could not follow, because it was never
+-- derived from it. Two bugs came out of that in one day.
+function Factory:BuildAlertPreviewConfig(indicator, geom, layout, entries)
+    local style = alertSlotStyle(indicator, geom)
+    if not style then return nil end
+    return {
+        mode = "row",
+        max = 1,
+        filter = "HELPFUL",   -- canvas sample: the pool never gates a preview slot
+        testEntries = entries,
+        tooltips = false,
+        layout = layout,
+        style = style,
     }
 end
 
@@ -1604,19 +1673,17 @@ end
 -- recreates its slot frame when the sig changes (regions are create-only,
 -- mirror the live Rebuild rule).
 -- ============================================================
--- Editor-canvas sample for the expiry-alert element (cfg.alertPreview): the
--- static payload at the configured anchor/offset/size, so positioning is
--- WYSIWYG while editing — anchored to the indicator's PREVIEW SLOT. Live, the
--- companion slot's button coincides with the indicator's rect and the text
--- sits at expiryAlertAnchor+offsets on it, so anchoring the sample to the
--- preview slot is the same math. Payload composed by the SAME shared helper
--- the live formatter uses, so preview and live can never drift. nil when the
--- alert is off OR the indicator is in show-when-missing mode (the factory
--- builds no companion for missing-mode indicators — nothing to count down —
--- so the canvas must not show one).
-local function buildAlertPreview(indicator, geom)
-    return DF.Expiration:BuildPreview(indicator,
-        geom or { baseSize = indicator.size, font = indicator.durationFont })
+-- Editor-canvas sample for the expiry-alert element (cfg.alertPreview). This is a WHOLE
+-- PREVIEW-SLOT CONFIG, not a bare spec: Options.lua lays a second preview slot over the
+-- indicator's and styles/paints it through StylePreviewSlot/PaintPreviewSlot, the same
+-- pipeline the indicator itself and the group blocks already use.
+--
+-- It used to hand back only the duration spec, leaving the canvas to build its own
+-- FontString and pick its own layering — a second renderer for one feature, and the reason
+-- the two drifted. nil (no slot) whenever the live companion would also be absent, since
+-- both now ask alertSlotStyle.
+local function buildAlertPreview(indicator, layout, entries, geom)
+    return Factory:BuildAlertPreviewConfig(indicator, geom, layout, entries)
 end
 
 function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defs)
@@ -1628,36 +1695,49 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defs)
     if typeKey == "bar" then
         local borderSpec = placedBorderOn(indicator, false)
             and buildPlacedBorderSpec(frame, indicator, false) or nil
+        local layout = buildBarLayout(frame, indicator)
+        local geom = alertGeometry(frame, indicator, true)
         local cfg = {
             mode = "row", max = 1, filter = "HELPFUL",
             adBorderAnim = true,
-            layout = buildBarLayout(frame, indicator),
+            layout = layout,
             style = buildBarStyle(indicator, borderSpec, defs),
             testEntries = entries,
-            alertPreview = buildAlertPreview(indicator, alertGeometry(frame, indicator, true)),
+            -- The alert slot mirrors the indicator's OWN layout, so its invisible button
+            -- coincides with the bar's rect — the same relationship the live companion has.
+            alertPreview = buildAlertPreview(indicator, layout, entries, geom),
         }
+        -- The alert's structural key rides the sig so the canvas recreates its slots on any
+        -- structural alert change, mirroring the live Rebuild rule (regions are create-only).
         local sig = "bar|" .. tostring(borderSpec ~= nil)
             .. "|" .. tostring(cfg.style.duration ~= nil)
             .. "|" .. durationFmtKey(indicator, false, defs.cbt)
+            .. "|xa=" .. (cfg.alertPreview and alertElemStructKey(indicator, geom) or "")
         return cfg, sig
     end
     local isSquare = (typeKey == "square")
     local hideIcon = indicator.hideIcon and true or false
     local borderSpec = placedBorderOn(indicator, hideIcon)
         and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
+    local layout = buildPlacedLayout(indicator)
     local cfg = {
         mode = "row", max = 1, filter = "HELPFUL",
         adBorderAnim = true,
-        layout = buildPlacedLayout(indicator),
+        layout = layout,
         style = buildPlacedStyle(indicator, isSquare, borderSpec, defs),
         testEntries = entries,
-        alertPreview = buildAlertPreview(indicator),
+        -- The alert slot mirrors the indicator's OWN layout, so its invisible button
+        -- coincides with the icon's rect — the same relationship the live companion has.
+        alertPreview = buildAlertPreview(indicator, layout, entries),
     }
+    -- The alert's structural key rides the sig so the canvas recreates its slots on any
+    -- structural alert change, mirroring the live Rebuild rule (regions are create-only).
     local sig = (isSquare and "square|" or "icon|") .. tostring(hideIcon)
         .. "|" .. tostring(cfg.style.stacks ~= nil)
         .. "|" .. tostring(cfg.style.duration ~= nil)
         .. "|" .. tostring(borderSpec ~= nil)
         .. "|" .. durationFmtKey(indicator, true, defs.cbt)
+        .. "|xa=" .. (cfg.alertPreview and alertElemStructKey(indicator) or "")
     return cfg, sig
 end
 
@@ -2914,6 +2994,20 @@ function Factory:SyncFrame(frame)
     if not frame or not frame.unit then return end
     if not (DF.AuraContainer and DF.AuraContainer.IsSupported()) then return end
 
+    -- MEMORY TEST (enableAuraDesigner): tear the AD containers down ONCE on the
+    -- transition, then stay quiet. Merely skipping the sync would leave every
+    -- container standing for Blizzard to keep rendering — the flag has to
+    -- release them to show up in the memory reading. The latch matters:
+    -- ClearFrame ends in SyncSound, which is not free to re-run per update.
+    if DF:MemTestDisabled("enableAuraDesigner") then
+        if not frame.dfADMemTestCleared then
+            frame.dfADMemTestCleared = true
+            self:ClearFrame(frame)
+        end
+        return
+    end
+    frame.dfADMemTestCleared = nil
+
     local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
     if not adDB then return end
 
@@ -2940,6 +3034,7 @@ function Factory:SyncFrame(frame)
     if DF.MigrateAuraDesignerBorderKeysLazy then DF.MigrateAuraDesignerBorderKeysLazy(adDB) end
     if DF.MigrateAuraDesignerPrioritiesLazy then DF.MigrateAuraDesignerPrioritiesLazy(adDB) end
     if DF.MigrateAuraDesignerAbsoluteLevelsLazy then DF.MigrateAuraDesignerAbsoluteLevelsLazy(adDB) end
+    if DF.MigrateAuraDesignerAbsoluteLevelsV2Lazy then DF.MigrateAuraDesignerAbsoluteLevelsV2Lazy(adDB) end
     -- One-time refresh of the AD global text defaults to the Midnight baseline — must run
     -- on the RENDER-resolved adDB too (not just the editor's GetAuraDesignerDB), or live
     -- frames resolve from the un-migrated defaults while the editor shows the new ones.
@@ -3515,7 +3610,7 @@ end
 -- ============================================================
 
 -- ============================================================
--- DIAGNOSTICS — /df admissing
+-- DIAGNOSTICS — /df debug admissing
 -- Developer probe for the show-when-missing push mechanism. Dumps every AD
 -- missing-mode container AND (as the control group) the Missing Buffs cells
 -- on the same frames, so the two consumers of the identical backend can be
@@ -3534,7 +3629,7 @@ do
         return tostring(v)
     end
     local function dumpHandle(tag, key, h)
-        if not h then print("    " .. tag .. " [" .. key .. "] handle=nil") return end
+        if not h then print("    " .. tag .. " [" .. key .. "] " .. DF.OUT.BAD .. "handle=nil|r") return end
         local backend = h.backend
         local c = backend and backend.container
         local groups = backend and backend.groupKeys and #backend.groupKeys or 0
@@ -3601,11 +3696,12 @@ do
         end
         if DF.IteratePartyFrames then DF:IteratePartyFrames(scan) end
         if DF.IterateRaidFrames then DF:IterateRaidFrames(scan) end
-        print("|cff7373f2DandersFrames|r admissing markers placed: " .. n
-            .. " (magenta = AD, cyan = MB; watch whether they SLIDE when the aura is applied)")
+        local o = DF:Out("Aura Designer", "missing markers placed")
+        o:Field("markers", n, n > 0 and "GOOD" or "WARN")
+        o:Line("magenta = AD, cyan = MB. Watch whether they SLIDE when the aura is applied.", "NEUTRAL")
     end
     function DF:DebugADMissing()
-        print("|cff7373f2DandersFrames|r AD missing-mode probe:")
+        local o = DF:Out("Aura Designer", "missing-mode probe")
         local function scan(frame)
             if not frame or not frame.unit then return end
             local shown
@@ -3616,7 +3712,7 @@ do
                     if t then
                         for key, entry in pairs(t) do
                             if entry and entry.missing then
-                                if not shown then shown = true; print("  frame unit=" .. tostring(frame.unit)) end
+                                if not shown then shown = true; o:Section("unit " .. tostring(frame.unit)) end
                                 dumpHandle("AD:" .. storeKey, tostring(key), entry.handle)
                             end
                         end
@@ -3626,14 +3722,15 @@ do
             -- Control group: the proven Missing Buffs cells on the same frame.
             if frame.missingFactory then
                 for key, h in pairs(frame.missingFactory) do
-                    if not shown then shown = true; print("  frame unit=" .. tostring(frame.unit)) end
+                    if not shown then shown = true; o:Section("unit " .. tostring(frame.unit)) end
                     dumpHandle("MB", tostring(key), h)
                 end
             end
         end
         if DF.IteratePartyFrames then DF:IteratePartyFrames(scan) end
         if DF.IterateRaidFrames then DF:IterateRaidFrames(scan) end
-        print("  (run once with the aura absent, once applied; compare 'children')")
+        o:Line("Run once with the aura absent and once applied, then compare 'children'.", "NEUTRAL")
+        o:Siblings("admissing")
     end
 end
 

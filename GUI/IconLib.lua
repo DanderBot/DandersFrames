@@ -47,7 +47,6 @@ local function CreateIconPreview()
     local C_BG = DF.GUI.Colors.background
     local C_BORDER = {r = 0.3, g = 0.3, b = 0.3}
     local C_ACCENT = {r = 0.6, g = 0.4, b = 0.8}
-    local C_TEXT = {r = 1, g = 1, b = 1}
     local C_TEXT_DIM = DF.GUI.Colors.textDim
     
     -- Main frame
@@ -198,7 +197,7 @@ local function CreateIconPreview()
         end)
         container:SetScript("OnClick", function()
             local path = ICONS_PATH .. iconName
-            print("|cff9966ffDandersFrames:|r " .. DF.L["Copied: "] .. path)
+            DF:Say(DF.L["Copied: "] .. path)
         end)
     end
     
@@ -220,5 +219,5 @@ end
 -- Print load message
 C_Timer.After(1, function()
     -- Only print if debug mode or first time
-    -- print("|cff9966ffDandersFrames:|r Icon library loaded. Use /dficons to preview.")
+    -- DF:Say("Icon library loaded. Use /dficons to preview.")
 end)

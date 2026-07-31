@@ -217,20 +217,15 @@ function Expiration:BuildDurationSpec(cfg, geometry)
     }
 end
 
--- Editor-canvas sample for the expiry alert. This is deliberately nothing but
--- BuildDurationSpec — the SAME spec the live companion slot runs — so the canvas drives
--- its sample through the real formatter against a real duration and cannot disagree with
--- what the reveal actually does. Placement (anchor / offsets / size / alpha / font) is
--- already on that spec, so there is nothing preview-specific to add.
+-- (BuildPreview lived here: a canvas-only wrapper that gated show-when-missing and then
+-- delegated to BuildDurationSpec. Removed once the AD canvas started rendering the alert
+-- as a real preview slot from the factory's shared alertSlotStyle, which asks
+-- BuildDurationSpec itself and owns that gate for BOTH paths.
 --
--- It used to compose a STATIC payload instead, with by-time hardcoded to red on the
--- reasoning that "the canvas is one still frame, so show the about-to-expire end". That
--- second pathway is precisely how the canvas ended up permanently red while live walked
--- the ramp, and it would drift again on any future change to the reveal.
---
--- nil when the alert is off, or in show-when-missing mode: no aura means nothing counts
--- down, and the live factory builds no companion there either.
-function Expiration:BuildPreview(cfg, geometry)
-    if cfg.showWhenMissing then return nil end
-    return self:BuildDurationSpec(cfg, geometry)
-end
+-- The lesson is worth keeping even though the code is gone. This engine has now had two
+-- canvas-specific pathways for one feature. The first composed a STATIC payload with
+-- by-time hardcoded to red, on the reasoning that "the canvas is one still frame" — which
+-- left the canvas permanently red while live walked the ramp. The second was this thin
+-- wrapper, which looked harmless because it delegated, yet still meant the canvas and live
+-- disagreed about show-when-missing. A preview may differ in DATA. It must not have its
+-- own entry point into RENDERING, however small that entry point looks.)

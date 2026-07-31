@@ -9,6 +9,13 @@ local GUI = DF.GUI
 local L = DF.L
 local testFrame = nil
 
+-- Colour-picker tracing. This used to hang off a persisted db.party.colorPickerDebug
+-- toggled by "/df debug colorhook debug" — the last boolean logging flag in the addon; it
+-- survived the console consolidation only because it lived in the DB rather than on
+-- DF, so the flag sweep did not see it. Now a console category (COLORPICKER, noisy:
+-- the Blizzard sync below fires on every drag frame).
+local cpDebug = DF:MakeDebugPrinter("COLORPICKER")
+
 -- Shared palette, so a change there reaches the picker too. These were all
 -- hardcoded copies; four already matched exactly, and the dim text was a
 -- bespoke 0.5 brought up to the norm's 0.6 (the same call the binding editor
@@ -1614,12 +1621,9 @@ end
 local function SyncColorToBlizzard(r, g, b, a)
     if not ColorPickerFrame:IsShown() then return end
     
-    local debugEnabled = DandersFrames and DandersFrames.db and DandersFrames.db.party and DandersFrames.db.party.colorPickerDebug
-    
-    if debugEnabled then
-        print("|cffff9900[ColorPicker Debug] Syncing to Blizzard:|r", r, g, b, a)
-    end
-    
+    cpDebug("Syncing to Blizzard:", r, g, b, a)
+
+
     -- Set color via the internal ColorPicker widget
     -- This triggers Blizzard's OnColorSelect which fires all addon callbacks naturally
     if ColorPickerFrame.Content and ColorPickerFrame.Content.ColorPicker then
@@ -1641,12 +1645,9 @@ end
 
 -- Click Blizzard's OK button with color sync (for external addon use)
 local function ClickBlizzardOKWithColor(r, g, b, a)
-    local debugEnabled = DandersFrames and DandersFrames.db and DandersFrames.db.party and DandersFrames.db.party.colorPickerDebug
-    
-    if debugEnabled then
-        print("|cffff9900[ColorPicker Debug] ClickBlizzardOKWithColor called:|r", r, g, b, a)
-    end
-    
+    cpDebug("ClickBlizzardOKWithColor called:", r, g, b, a)
+
+
     if ColorPickerFrame and ColorPickerFrame.Footer and ColorPickerFrame.Footer.OkayButton then
         -- Mark as not hidden first (prevents cleanup hook from running)
         blizzardPickerHidden = false
@@ -1659,45 +1660,34 @@ local function ClickBlizzardOKWithColor(r, g, b, a)
         -- Sync final color directly before clicking OK
         if ColorPickerFrame.Content and ColorPickerFrame.Content.ColorPicker then
             ColorPickerFrame.Content.ColorPicker:SetColorRGB(r, g, b)
-            if debugEnabled then
-                print("  Set Content.ColorPicker RGB:", r, g, b)
-            end
+            cpDebug("Set Content.ColorPicker RGB:", r, g, b)
             if ColorPickerFrame.hasOpacity and a and ColorPickerFrame.Content.ColorPicker.SetColorAlpha then
                 ColorPickerFrame.Content.ColorPicker:SetColorAlpha(a)
-                if debugEnabled then
-                    print("  Set Content.ColorPicker Alpha:", a)
-                end
+                cpDebug("Set Content.ColorPicker Alpha:", a)
             end
         end
         if ColorPickerFrame.SetColorRGB then
             ColorPickerFrame:SetColorRGB(r, g, b)
-            if debugEnabled then
-                print("  Set ColorPickerFrame RGB:", r, g, b)
-            end
+            cpDebug("Set ColorPickerFrame RGB:", r, g, b)
         end
         if ColorPickerFrame.hasOpacity and a and ColorPickerFrame.SetColorAlpha then
             ColorPickerFrame:SetColorAlpha(a)
-            if debugEnabled then
-                print("  Set ColorPickerFrame Alpha:", a)
-            end
+            cpDebug("Set ColorPickerFrame Alpha:", a)
         end
         
-        -- Debug: verify what values will be read
-        if debugEnabled then
+        -- Verify what values will be read back. Guarded on DebugActive because the
+        -- two getters are real API calls, not just arguments to format.
+        if DF:DebugActive("COLORPICKER") then
             if ColorPickerFrame.GetColorRGB then
-                local rr, gg, bb = ColorPickerFrame:GetColorRGB()
-                print("  Verify GetColorRGB:", rr, gg, bb)
+                cpDebug("Verify GetColorRGB:", ColorPickerFrame:GetColorRGB())
             end
             if ColorPickerFrame.GetColorAlpha then
-                local aa = ColorPickerFrame:GetColorAlpha()
-                print("  Verify GetColorAlpha:", aa)
+                cpDebug("Verify GetColorAlpha:", ColorPickerFrame:GetColorAlpha())
             end
         end
         
         -- Click OK - Blizzard will hide the frame and call swatchFunc
-        if debugEnabled then
-            print("  Clicking OK button...")
-        end
+        cpDebug("Clicking OK button")
         ColorPickerFrame.Footer.OkayButton:Click()
         
         -- Now restore scale for next time (frame is hidden now)
@@ -1705,13 +1695,11 @@ local function ClickBlizzardOKWithColor(r, g, b, a)
         ColorPickerFrame:ClearAllPoints()
         ColorPickerFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
         
-        if debugEnabled then
-            print("  Done!")
-        end
+        cpDebug("Done")
     else
-        if debugEnabled then
-            print("|cffff0000[ColorPicker Debug] ERROR: ColorPickerFrame or OkayButton not found!|r")
-        end
+        -- A real failure, so it is reported unconditionally rather than hidden
+        -- behind a flag that never existed.
+        DF:DebugWarn("COLORPICKER", "ColorPickerFrame or OkayButton not found")
     end
 end
 
@@ -1740,15 +1728,11 @@ end
 
 -- Open our color picker alongside hidden Blizzard picker
 local function OpenDFColorPickerWithBlizzard(info, useBlizzardAsBackend)
-    local debugEnabled = DandersFrames and DandersFrames.db and DandersFrames.db.party and DandersFrames.db.party.colorPickerDebug
-    
-    if debugEnabled then
-        print("|cffff9900[ColorPicker Debug] Opening with Blizzard backend:|r", useBlizzardAsBackend)
-        print("  r:", info.r, "g:", info.g, "b:", info.b)
-        print("  hasOpacity:", info.hasOpacity)
-        print("  opacity:", info.opacity)
-    end
-    
+    cpDebug("Opening with Blizzard backend:", useBlizzardAsBackend,
+        "r:", info.r, "g:", info.g, "b:", info.b,
+        "hasOpacity:", info.hasOpacity, "opacity:", info.opacity)
+
+
     -- Get initial color
     local r, g, b = info.r or 1, info.g or 1, info.b or 1
     local a = info.opacity or info.a or 1
@@ -2025,71 +2009,69 @@ end)
 DF:RegisterDebugSlash("DFCOLORHOOK", "Color picker hook status / toggle", true, "/dfcolorhook")
 SlashCmdList["DFCOLORHOOK"] = function(arg)
     if arg == "on" then
-        local success = GUI:InstallColorPickerHook()
-        if success then
-            print(L["Color picker hook installed"])
+        if GUI:InstallColorPickerHook() then
+            DF:Say(L["Color picker hook installed"])
         else
-            print(L["Failed to install hook (already hooked or API not available)"])
+            DF:Err(L["Failed to install hook (already hooked or API not available)"])
         end
     elseif arg == "off" then
         GUI:UninstallColorPickerHook()
-        print(L["Color picker hook removed"])
-    elseif arg == "debug" then
-        -- Toggle debug mode
-        local dfGlobal = DandersFrames
-        local db = dfGlobal and dfGlobal.db and dfGlobal.db.party
-        if db then
-            db.colorPickerDebug = not db.colorPickerDebug
-            print(string.format(L["Color picker debug %s"],
-                db.colorPickerDebug and "|cff00ff00" .. L["enabled"] .. "|r"
-                                     or "|cffff0000" .. L["disabled"] .. "|r"))
-            print(L["Open a color picker to see debug output"])
-        else
-            print(L["DB not available"])
-        end
+        DF:Say(L["Color picker hook removed"])
     elseif arg == "api" then
-        -- Show API info
-        print("|cff7373f2Checking API functions:|r")
-        print("  OpenColorPicker:", type(OpenColorPicker))
-        print("  ColorPickerFrame:", type(ColorPickerFrame))
+        local o = DF:Out("Colour Picker", "API surface")
+        -- A missing function is a real fault here: the hook cannot install without
+        -- one of the two entry points, so absence is BAD rather than merely off.
+        local function api(label, v)
+            o:Field(label, type(v), type(v) == "function" and "good" or "bad")
+        end
+        o:Section("Globals")
+        api("OpenColorPicker", OpenColorPicker)
+        o:Field("ColorPickerFrame", type(ColorPickerFrame),
+            ColorPickerFrame and "good" or "bad")
         if ColorPickerFrame then
-            print("  ColorPickerFrame.SetupColorPickerAndShow:", type(ColorPickerFrame.SetupColorPickerAndShow))
-            print("  ColorPickerFrame.Show:", type(ColorPickerFrame.Show))
-            print("  ColorPickerFrame.SetColorRGB:", type(ColorPickerFrame.SetColorRGB))
-            print("  ColorPickerFrame.GetColorRGB:", type(ColorPickerFrame.GetColorRGB))
-            print("  ColorPickerFrame.SetColorAlpha:", type(ColorPickerFrame.SetColorAlpha))
-            print("  ColorPickerFrame.GetColorAlpha:", type(ColorPickerFrame.GetColorAlpha))
-            if ColorPickerFrame.Content then
-                print("  ColorPickerFrame.Content:", type(ColorPickerFrame.Content))
-                if ColorPickerFrame.Content.ColorPicker then
-                    print("  ColorPickerFrame.Content.ColorPicker:", type(ColorPickerFrame.Content.ColorPicker))
-                    print("  ColorPickerFrame.Content.ColorPicker.SetColorRGB:", type(ColorPickerFrame.Content.ColorPicker.SetColorRGB))
-                    print("  ColorPickerFrame.Content.ColorPicker.GetColorRGB:", type(ColorPickerFrame.Content.ColorPicker.GetColorRGB))
-                    print("  ColorPickerFrame.Content.ColorPicker.SetColorAlpha:", type(ColorPickerFrame.Content.ColorPicker.SetColorAlpha))
-                    print("  ColorPickerFrame.Content.ColorPicker.GetColorAlpha:", type(ColorPickerFrame.Content.ColorPicker.GetColorAlpha))
-                end
+            o:Section("ColorPickerFrame")
+            api("SetupColorPickerAndShow", ColorPickerFrame.SetupColorPickerAndShow)
+            api("Show", ColorPickerFrame.Show)
+            api("SetColorRGB", ColorPickerFrame.SetColorRGB)
+            api("GetColorRGB", ColorPickerFrame.GetColorRGB)
+            api("SetColorAlpha", ColorPickerFrame.SetColorAlpha)
+            api("GetColorAlpha", ColorPickerFrame.GetColorAlpha)
+            local cp = ColorPickerFrame.Content and ColorPickerFrame.Content.ColorPicker
+            if cp then
+                o:Section("Content.ColorPicker")
+                api("SetColorRGB", cp.SetColorRGB)
+                api("GetColorRGB", cp.GetColorRGB)
+                api("SetColorAlpha", cp.SetColorAlpha)
+                api("GetColorAlpha", cp.GetColorAlpha)
             end
         end
+        o:Siblings("colorhook")
     else
         local isInstalled = GUI:IsColorPickerHookInstalled()
         local dfGlobal = DandersFrames
         local db = dfGlobal and dfGlobal.db and dfGlobal.db.party
-        print("|cff7373f2DandersFrames Color Picker Hook Status:|r")
-        print("  Hook installed: " .. (isInstalled and "|cff00ff00Yes|r" or "|cffff0000No|r"))
-        print("  Midnight API (SetupColorPickerAndShow): " .. (ColorPickerFrame and type(ColorPickerFrame.SetupColorPickerAndShow) or "N/A"))
-        print("  Legacy API (OpenColorPicker): " .. type(OpenColorPicker))
-        print("  originalSetupColorPickerAndShow: " .. (originalSetupColorPickerAndShow and "|cff00ff00captured|r" or "|cffff0000nil|r"))
-        print("  originalOpenColorPicker: " .. (originalOpenColorPicker and "|cff00ff00captured|r" or "|cffff0000nil|r"))
-        print("  DB available: " .. (db and "|cff00ff00Yes|r" or "|cffff0000No|r"))
+        local o = DF:Out("Colour Picker", "hook status")
+        o:Field("Hook installed", isInstalled and "yes" or "no", isInstalled and "good" or "neutral")
+        o:Field("Midnight API (SetupColorPickerAndShow)",
+            ColorPickerFrame and type(ColorPickerFrame.SetupColorPickerAndShow) or "n/a")
+        o:Field("Legacy API (OpenColorPicker)", type(OpenColorPicker))
+        o:Section("Captured originals")
+        -- Only a fault while the hook IS installed - uninstalled, nil is correct.
+        local capStatus = isInstalled and "bad" or "neutral"
+        o:Field("SetupColorPickerAndShow", originalSetupColorPickerAndShow and "captured" or "nil",
+            originalSetupColorPickerAndShow and "good" or capStatus)
+        o:Field("OpenColorPicker", originalOpenColorPicker and "captured" or "nil",
+            originalOpenColorPicker and "good" or capStatus)
+        o:Section("Settings")
+        o:Field("DB available", db and "yes" or "no", db and "good" or "bad")
         if db then
-            print("  colorPickerOverride: " .. (db.colorPickerOverride and "|cff00ff00true|r" or "|cffff0000false|r"))
-            print("  colorPickerGlobalOverride: " .. (db.colorPickerGlobalOverride and "|cff00ff00true|r" or "|cffff0000false|r"))
-            print("  colorPickerDebug: " .. (db.colorPickerDebug and "|cff00ff00true|r" or "|cffff0000false|r"))
+            o:Field("colorPickerOverride", db.colorPickerOverride and "on" or "off",
+                db.colorPickerOverride and "good" or "neutral")
+            o:Field("colorPickerGlobalOverride", db.colorPickerGlobalOverride and "on" or "off",
+                db.colorPickerGlobalOverride and "good" or "neutral")
         end
-        print(string.format(L["Use %s or %s to toggle"],
-            "|cffeda55f/dfcolorhook on|r", "|cffeda55f/dfcolorhook off|r"))
-        print(string.format(L["Use %s to toggle debug output"], "|cffeda55f/dfcolorhook debug|r"))
-        print(string.format(L["Use %s to show API info"], "|cffeda55f/dfcolorhook api|r"))
+        o:Hints(L["Tracing is in the debug console - enable the COLORPICKER category."])
+        o:Siblings("colorhook")
     end
 end
 

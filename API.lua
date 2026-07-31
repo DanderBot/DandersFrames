@@ -840,7 +840,7 @@ SlashCmdList["DFAPI"] = function(msg)
         DF:FireAPICallback("OnFramesSorted", "party")
         DF:FireAPICallback("OnFramesSorted", "raid")
         DF:FireAPICallback("OnFramesSorted", "arena")
-        print("|cff00ff00DandersFrames:|r Fired test OnFramesSorted (party + raid + arena)")
+        DF:Say("Fired test OnFramesSorted (party + raid + arena)")
 
     elseif msg == "fire" then
         -- Re-apply the party header sort. Real sorting happens via the
@@ -848,52 +848,52 @@ SlashCmdList["DFAPI"] = function(msg)
         -- (Headers.lua), not the SecureSort snippet path. This is what
         -- actually drives OnFramesSorted in production.
         if InCombatLockdown() then
-            print("|cffff0000DandersFrames:|r Cannot fire sort in combat (header attributes are protected)")
+            DF:Err("Cannot fire sort in combat (header attributes are protected)")
             return
         end
         if DF.ApplyPartyGroupSorting then
             DF:ApplyPartyGroupSorting()
-            print("|cff00ff00DandersFrames:|r Applied party sort - callback fires ~1 frame later")
+            DF:Say("Applied party sort - callback fires ~1 frame later")
         else
-            print("|cffff0000DandersFrames:|r ApplyPartyGroupSorting not available")
+            DF:Err("ApplyPartyGroupSorting not available")
         end
 
     elseif msg == "snippet" then
         -- Isolation test: run a bare secure snippet that ONLY calls CallMethod.
-        -- If this fires the [DF API TRACE] chat line, secure->Lua hop works and
+        -- If this fires the API trace chat line, secure->Lua hop works and
         -- the sort-path failure is elsewhere (snippet bailing early, etc.).
         if DF.SecureSort and DF.SecureSort.handler and DF.SecureSort.initialized then
             if InCombatLockdown() then
-                print("|cffff0000DandersFrames:|r Cannot run snippet test in combat")
+                DF:Err("Cannot run snippet test in combat")
                 return
             end
             DF.SecureSort.handler:Execute([[
                 self:CallMethod("NotifySortComplete", "snippet-test")
             ]])
-            print("|cff00ff00DandersFrames:|r Executed bare snippet with CallMethod - expect [DF API TRACE] chat line")
+            DF:Say("Executed bare snippet with CallMethod", "expect an API trace line", "NEUTRAL")
         else
-            print("|cffff0000DandersFrames:|r SecureSort.handler not ready (initialized=" .. tostring(DF.SecureSort and DF.SecureSort.initialized) .. ")")
+            DF:Err("SecureSort.handler not ready (initialized=" .. tostring(DF.SecureSort and DF.SecureSort.initialized) .. ")")
         end
 
     elseif msg == "watch" then
         if DF._apiWatchToken then
             DandersFrames.UnregisterCallback(DF._apiWatchToken, "OnFramesSorted")
             DF._apiWatchToken = nil
-            print("|cff00ff00DandersFrames:|r API watch OFF")
+            DF:Say("API watch OFF")
         else
             DF._apiWatchToken = {}
             DandersFrames.RegisterCallback(DF._apiWatchToken, "OnFramesSorted", function(event, sortType)
-                print(format("|cff00ccff[DF API]|r %s: %s @ %.3f", event, tostring(sortType), GetTime()))
+                DF:Say(format("%s: %s", event, tostring(sortType)), format("@ %.3f", GetTime()), "NEUTRAL")
             end)
-            print("|cff00ff00DandersFrames:|r API watch ON - chat messages on every OnFramesSorted")
+            DF:Say("API watch ON - chat messages on every OnFramesSorted")
         end
 
     elseif msg == "list" then
         if not DF.APICallbacks or not DF.APICallbacks.events then
-            print("|cffff0000DandersFrames:|r callback registry not initialized")
+            DF:Err("callback registry not initialized")
             return
         end
-        print("|cff00ccffDandersFrames API callbacks:|r")
+        DF:Out("API", "registered callbacks")
         local any = false
         for event, subs in pairs(DF.APICallbacks.events) do
             local count = 0
@@ -906,11 +906,13 @@ SlashCmdList["DFAPI"] = function(msg)
         end
 
     else
-        print("|cff00ff00DandersFrames API commands:|r")
-        print("  /dfapi test    - fire a test callback (bypasses sort)")
-        print("  /dfapi fire    - trigger a real sort (with pipeline diagnostics)")
-        print("  /dfapi snippet - run a bare secure snippet that only calls CallMethod")
-        print("  /dfapi watch   - toggle a chat-printing subscriber")
-        print("  /dfapi list    - list current subscribers per event")
+        local o = DF:Out("API")
+        o:Section("Commands")
+        o:Item("test", "fire a test callback (bypasses sort)")
+        o:Item("fire", "trigger a real sort, with pipeline diagnostics")
+        o:Item("snippet", "run a bare secure snippet that only calls CallMethod")
+        o:Item("watch", "toggle a chat-printing subscriber")
+        o:Item("list", "current subscribers per event")
+        o:Siblings("api")
     end
 end

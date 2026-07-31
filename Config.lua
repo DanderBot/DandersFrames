@@ -904,7 +904,7 @@ DF.GlobalDefaults = {
     -- writes (probe-verified). So durationTextColorSmooth above is text-only by nature.
     -- A stop at or above an indicator's Alert Below threshold never renders — the reveal
     -- doesn't exist up there, the same way a text stop past the aura's duration never
-    -- shows. /df cbt lists the affected stops per indicator.
+    -- shows. /df debug cbt lists the affected stops per indicator.
     -- (Removed 2026-07-24: durationBorderColorScale + durationBorderColorStops +
     -- durationBorderColorPercentStops. A separate border palette bought nothing once the
     -- defaults were asked to match the text, and the account-wide scale could not express
@@ -1145,6 +1145,21 @@ DF.PartyDefaults = {
     debuffFilterCrowdControl = true,          -- Crowd control (CROWD_CONTROL token)
     debuffFilterRaid = false,                 -- Other raid-flagged debuffs (RAID token)
     debuffFilterDispellable = true,           -- Dispellable debuffs (mode below)
+    -- IMPORTANT DEBUFF HIGHLIGHT. Boss/role and priority auras already render as their
+    -- OWN aura groups (keys "bossrole"/"priority" in BuildDirectDebuffFilters) and those
+    -- groups are declared first, so they already lead the row. These keys style them.
+    -- Membership of the group IS the "is this important" test — nothing reads aura data,
+    -- which is what makes this expressible at all under the 12.1 secret rules.
+    -- OFF by default: it changes the look of a row every user already has.
+    debuffImportantHighlight = false,         -- master toggle for the treatment below
+    debuffImportantScale = 1.25,              -- icon size step for important debuffs (1 = same as the rest)
+    debuffImportantBadge = true,              -- corner "!" badge
+    debuffImportantBadgeSize = 10,            -- badge diameter in px (centred inside the corner, inset by size/4)
+    debuffImportantBadgePoint = "TOPRIGHT",   -- which icon corner the badge sits on
+    debuffImportantBadgeX = 0,                -- nudge from that corner (ADDED to the default inward inset)
+    debuffImportantBadgeY = 0,
+    debuffImportantBadgeColor = {r = 1, g = 0.616, b = 0.18, a = 1},   -- disc
+    debuffImportantMarkColor = {r = 0.08, g = 0.055, b = 0.024, a = 1}, -- the "!" itself
     -- Debuff blacklist: hide these non-secret debuffs from the debuff row (12.1
     -- excludeSpellIDs, friendly-safe — NeverSecret only). Default hides the
     -- post-Lust family (Sated/Exhaustion/Temporal Displacement/Fatigued/Insanity);
@@ -1210,7 +1225,6 @@ DF.PartyDefaults = {
     debuffBorderColorCurse = {r = 0.6, g = 0, b = 1},
     debuffBorderColorDisease = {r = 0.6, g = 0.4, b = 0},
     debuffBorderColorMagic = {r = 0.2, g = 0.6, b = 1},
-    debuffBorderColorNone = {r = 0, g = 0, b = 0, a = 1},
     debuffBorderColorPoison = {r = 0, g = 0.6, b = 0},
     debuffShowBorder = true,
     debuffDispelBorderInset = 0,    -- native dispel ring: + inward / - outward halo
@@ -1616,7 +1630,6 @@ DF.PartyDefaults = {
     -- alike). MigrateOORTextAlpha folds the old name value, then strips both.
     oorTextAlpha = 0.55,
     oorPowerBarAlpha = 0.20000000298023,
-    oorTargetedSpellAlpha = 0.5,
     oorAuraDesignerAlpha = 0.20000000298023,
 
     -- Personal Targeted Spells (Nameplate)
@@ -1657,11 +1670,7 @@ DF.PartyDefaults = {
     personalTargetedSpellDurationY = 0,
     personalTargetedSpellEnabled = false,
     personalTargetedSpellGrowth = "RIGHT",
-    personalTargetedSpellHighlightColor = {r = 1, g = 0.8, b = 0},
     personalTargetedSpellHighlightImportant = true,
-    personalTargetedSpellHighlightInset = 3,
-    personalTargetedSpellHighlightSize = 3,
-    personalTargetedSpellHighlightStyle = "glow",
     personalTargetedSpellImportantBorderAnimationColor = {r = 1, g = 0.8, b = 0, a = 1},
     personalTargetedSpellImportantBorderAnimationCornerLength = 10,
     personalTargetedSpellImportantBorderAnimationFrequency = 1,
@@ -2028,107 +2037,8 @@ DF.PartyDefaults = {
     combatIconY = 6,
 
     -- ⚰ DEPRECATED-TARGETED-SPELLS — this whole block goes when the feature does
-    -- (there is a second stray key, targetedSpellWarnDuplicates, further down).
     -- See the block comment at the top of Features\TargetedSpells.lua.
     -- Targeted Spells (on-frame)
-    targetedSpellAlpha = 1,
-    targetedSpellAnchor = "BOTTOM",
-    targetedSpellBorderAnimationColor = {r = 0.95, g = 0.95, b = 0.32, a = 1},
-    targetedSpellBorderAnimationCornerLength = 10,
-    targetedSpellBorderAnimationFrequency = 0.25,
-    targetedSpellBorderAnimationInset = 0,
-    targetedSpellBorderAnimationLength = 8,
-    targetedSpellBorderAnimationMask = false,
-    targetedSpellBorderAnimationOffsetX = 0,
-    targetedSpellBorderAnimationOffsetY = 0,
-    targetedSpellBorderAnimationParticles = 8,
-    targetedSpellBorderAnimationProcStart = false,
-    targetedSpellBorderAnimationScale = 1,
-    targetedSpellBorderAnimationSidesAxis = "HORIZONTAL",
-    targetedSpellBorderAnimationThickness = 3,
-    targetedSpellBorderAnimationType = "NONE",
-    targetedSpellBorderBlendMode = "BLEND",
-    targetedSpellBorderColor = {r = 1, g = 0.3, b = 0},
-    targetedSpellBorderGradientDirection = "HORIZONTAL",
-    targetedSpellBorderGradientEndColor = {r = 0.5, g = 0.5, b = 0.5, a = 1},
-    targetedSpellBorderGradientStartColor = {r = 0, g = 0, b = 0, a = 1},
-    targetedSpellBorderInset = 0,
-    targetedSpellBorderShadowColor = {r = 0, g = 0, b = 0, a = 0.8},
-    targetedSpellBorderShadowEnabled = false,
-    targetedSpellBorderShadowOffsetX = 1,
-    targetedSpellBorderShadowOffsetY = -1,
-    targetedSpellBorderShadowSize = 1,
-    targetedSpellBorderSize = 2,
-    targetedSpellBorderStyle = "SOLID",
-    targetedSpellBorderTexture = "SOLID",
-    targetedSpellImportantBorderAnimationColor = {r = 1, g = 0.8, b = 0, a = 1},
-    targetedSpellImportantBorderAnimationCornerLength = 10,
-    targetedSpellImportantBorderAnimationFrequency = 1,
-    targetedSpellImportantBorderAnimationInset = 2,
-    targetedSpellImportantBorderAnimationLength = 8,
-    targetedSpellImportantBorderAnimationMask = false,
-    targetedSpellImportantBorderAnimationOffsetX = 0,
-    targetedSpellImportantBorderAnimationOffsetY = 0,
-    targetedSpellImportantBorderAnimationParticles = 8,
-    targetedSpellImportantBorderAnimationProcStart = true,
-    targetedSpellImportantBorderAnimationScale = 1,
-    targetedSpellImportantBorderAnimationSidesAxis = "HORIZONTAL",
-    targetedSpellImportantBorderAnimationThickness = 3,
-    targetedSpellImportantBorderAnimationType = "DF_PROC",
-    targetedSpellImportantBorderBlendMode = "BLEND",
-    targetedSpellImportantBorderColor = {r = 1, g = 0.8, b = 0, a = 0.5},
-    targetedSpellImportantBorderGradientDirection = "HORIZONTAL",
-    targetedSpellImportantBorderGradientEndColor = {r = 0.5, g = 0.5, b = 0.5, a = 1},
-    targetedSpellImportantBorderGradientStartColor = {r = 0, g = 0, b = 0, a = 1},
-    targetedSpellImportantBorderInset = -2,
-    targetedSpellImportantBorderShadowColor = {r = 0, g = 0, b = 0, a = 0.8},
-    targetedSpellImportantBorderShadowEnabled = false,
-    targetedSpellImportantBorderShadowOffsetX = 1,
-    targetedSpellImportantBorderShadowOffsetY = -1,
-    targetedSpellImportantBorderShadowSize = 1,
-    targetedSpellImportantBorderSize = 2,
-    targetedSpellImportantBorderStyle = "SOLID",
-    targetedSpellImportantBorderTexture = "SOLID",
-    targetedSpellDurationColor = {r = 1, g = 1, b = 1},
-    targetedSpellDurationFont = "DF Roboto SemiBold",
-    targetedSpellDurationOutline = "SHADOW",
-    targetedSpellDurationScale = 1,
-    targetedSpellDurationX = 0,
-    targetedSpellDurationY = 0,
-    targetedSpellEnabled = false,
-    targetedSpellFrameLevel = 30,
-    targetedSpellGrowth = "CENTER_H",
-    targetedSpellHideSwipe = false,
-    targetedSpellHighlightColor = {r = 1, g = 0.8, b = 0},
-    targetedSpellHighlightImportant = true,
-    targetedSpellHighlightInset = 2,
-    targetedSpellHighlightSize = 3,
-    targetedSpellHighlightStyle = "glow",
-    targetedSpellImportantOnly = false,
-    targetedSpellInArena = true,
-    targetedSpellInBattlegrounds = true,
-    targetedSpellInDungeons = true,
-    targetedSpellInOpenWorld = true,
-    targetedSpellInRaids = true,
-    targetedSpellInterruptedDuration = 0.5,
-    targetedSpellInterruptedShowX = true,
-    targetedSpellInterruptedTintAlpha = 0.5,
-    targetedSpellInterruptedTintColor = {r = 1, g = 0, b = 0},
-    targetedSpellInterruptedXColor = {r = 1, g = 0, b = 0},
-    targetedSpellInterruptedXSize = 16,
-    targetedSpellMaxIcons = 3,
-    targetedSpellNameplateOffscreen = false,
-    targetedSpellScale = 1,
-    targetedSpellShowBorder = true,
-    targetedSpellShowDuration = true,
-    targetedSpellShowInterrupted = true,
-    targetedSpellSize = 24,
-    targetedSpellSortByTime = true,
-    targetedSpellSortNewestFirst = true,
-    targetedSpellSpacing = 6,
-    targetedSpellWarnDuplicates = true,
-    targetedSpellX = 0,
-    targetedSpellY = -30,
 
     -- Targeted List (party-mode only)
     -- Stacked cast-bar display showing enemy casts targeting party members.
@@ -2249,17 +2159,11 @@ DF.PartyDefaults = {
     testShowReducedMaxHealth = false,
     testShowSelection = false,
     testShowStatusIcons = true,
-    testShowTargetedSpell = true,
     testShowPersonalTargeted = true,
     testShowAuraDesigner = true,
     testShowTextDesigner = true,
 
     -- Tooltip settings
-    tooltipAuraAnchor = "DEFAULT",
-    tooltipAuraDisableInCombat = false,
-    tooltipAuraEnabled = true,
-    tooltipAuraX = 0,
-    tooltipAuraY = 0,
     tooltipBuffAnchor = "FRAME",
     tooltipBuffAnchorPos = "BOTTOMRIGHT",
     tooltipBuffDisableInCombat = true,
@@ -2443,7 +2347,6 @@ local RAID_DEFAULT_OVERRIDES = {
 
 local PARTY_ONLY_PREFIX = "targetedList"
 local PARTY_ONLY_KEYS = {
-    targetedSpellWarnDuplicates = true,
     testAnimateTargetedList = true,
     testShowTargetedList = true,
 }

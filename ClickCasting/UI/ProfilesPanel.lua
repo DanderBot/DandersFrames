@@ -191,9 +191,9 @@ function CC:CreateProfilesPanelContent()
             CC.db.global.autoCreateProfiles = checked
         end
         if checked then
-            print("|cff33cc33DandersFrames:|r Auto-create profiles enabled.")
+            DF:Say("Auto-create profiles enabled.")
         else
-            print("|cffff9900DandersFrames:|r Auto-create profiles disabled. Profiles will not be created for new loadouts.")
+            DF:Say("Auto-create profiles disabled. Profiles will not be created for new loadouts.", nil, "WARN")
         end
         -- Refresh to update the status text
         CC:RefreshProfilesPanel()
@@ -252,9 +252,9 @@ function CC:CreateProfilesPanelContent()
             CC.db.global.disableWhileFlying  = disableFlying
         end
         if checked then
-            print("|cff33cc33DandersFrames:|r Click-casting will be disabled while mounted/flying.")
+            DF:Say("Click-casting will be disabled while mounted/flying.")
         else
-            print("|cffff9900DandersFrames:|r Click-casting will stay active while mounted/flying.")
+            DF:Say("Click-casting will stay active while mounted/flying.", nil, "WARN")
         end
         -- Rebuild bindings with new macro conditions (if not in combat)
         if not InCombatLockdown() then
@@ -312,9 +312,9 @@ function CC:CreateProfilesPanelContent()
             CC.db.global.disableWhileMounted = disableMounted
         end
         if checked then
-            print("|cff33cc33DandersFrames:|r Click-casting will be disabled only while flying.")
+            DF:Say("Click-casting will be disabled only while flying.")
         else
-            print("|cffff9900DandersFrames:|r Click-casting will stay active while flying.")
+            DF:Say("Click-casting will stay active while flying.", nil, "WARN")
         end
         if not InCombatLockdown() then
             CC:ApplyBindings()
@@ -362,9 +362,9 @@ function CC:CreateProfilesPanelContent()
             CC.db.global.targetOnCast = checked
         end
         if checked then
-            print("|cff33cc33DandersFrames:|r Click-casting will now also target the unit you cast on.")
+            DF:Say("Click-casting will now also target the unit you cast on.")
         else
-            print("|cffff9900DandersFrames:|r Click-casting will no longer change your target.")
+            DF:Say("Click-casting will no longer change your target.", nil, "WARN")
         end
         if not InCombatLockdown() then
             CC:ApplyBindings()
@@ -541,7 +541,7 @@ function CC:RefreshProfilesPanel()
                     self:RefreshClickCastingUI()  -- Refresh entire UI including bindings list
                 end
             elseif InCombatLockdown() then
-                print("|cffff9900DandersFrames:|r Cannot switch profiles during combat")
+                DF:Say("Cannot switch profiles during combat", nil, "WARN")
             else
                 -- Already active, just refresh to update selection highlight
                 self:RefreshProfilesPanel()
@@ -887,7 +887,7 @@ function CC:ShowClearAllConfirmation()
     local profileName = self.currentProfileName or "Default"
     
     if bindingCount == 0 then
-        print("|cffff9900DandersFrames:|r No bindings to clear.")
+        DF:Say("No bindings to clear.", nil, "WARN")
         return
     end
     
@@ -948,7 +948,7 @@ function CC:ResetBindingsToDefaults()
     -- Refresh the UI
     self:RefreshClickCastingUI()
     
-    print("|cff33cc33DandersFrames:|r Reset bindings to defaults (Target + Menu). " .. count .. " custom binding(s) removed.")
+    DF:Say("Reset bindings to defaults (Target + Menu). " .. count .. " custom binding(s) removed.")
 end
 
 function CC:ShowExportDialog()
@@ -987,10 +987,10 @@ function CC:ShowImportDialog()
             if not importString or importString == "" then return end
             local success, result = CC:ImportProfile(importString)
             if success then
-                print("|cff33cc33DandersFrames:|r Profile imported: " .. result)
+                DF:Say("Profile imported: " .. result)
                 CC:RefreshProfilesPanel()
             else
-                print("|cffff0000DandersFrames:|r Import failed: " .. (result or "unknown error"))
+                DF:Err("Import failed: " .. (result or "unknown error"))
             end
         end,
     })

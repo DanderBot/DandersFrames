@@ -508,7 +508,7 @@ function CC:ImportProfile(importString, newProfileName)
         -- Set callback
         pendingImportCallback = function(choice)
             if choice == "cancel" then
-                print("|cffff9900DandersFrames:|r " .. L["Import cancelled"])
+                DF:Say(L["Import cancelled"])
                 pendingImportData = nil
                 return
             end
@@ -586,9 +586,9 @@ function CC:DoImportProfile(data, bindings, newProfileName, importedInvalid)
     
     -- Print result
     local bindingCount = #bindings
-    print("|cff33cc33DandersFrames:|r " .. format(L["Imported profile: %s"], profileName) .. " (" .. bindingCount .. " bindings)")
+    DF:Say(format(L["Imported profile: %s"], profileName) .. " (" .. bindingCount .. " bindings)")
     if importedInvalid then
-        print("|cffff9900DandersFrames:|r " .. L["Note: Some imported spells may not work with your current class/spec"])
+        DF:Say(L["Note: Some imported spells may not work with your current class/spec"])
     end
     
     -- Refresh the UI to show the new profile
@@ -795,8 +795,8 @@ function CC:ShowClickCastConflictPopup(conflicts, enableCheckbox)
         else
             -- Confirmed - save setting and proceed to enable
             CC.db.ignoreConflictWarning = true
-            print("|cff33cc33DandersFrames:|r " .. L["Conflict warning disabled. Both addons will remain enabled."])
-            print("|cffff9900DandersFrames:|r " .. L["You can re-enable this warning by typing: /df resetconflict"])
+            DF:Say(L["Conflict warning disabled. Both addons will remain enabled."])
+            DF:Say(L["You can re-enable this warning by typing: /df debug cc resetconflict"])
             popup:Hide()
             -- Proceed to Blizzard warning / enable
             CC:ShowBlizzardClickCastWarning(enableCheckbox, function()
@@ -930,7 +930,7 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
         -- Reset Blizzard's click-casting profile to default (removes all custom bindings)
         if C_ClickBindings and C_ClickBindings.ResetCurrentProfile then
             C_ClickBindings.ResetCurrentProfile()
-            print("|cff33cc33DandersFrames:|r " .. L["Blizzard click-casting profile reset to default."])
+            DF:Say(L["Blizzard click-casting profile reset to default."])
         end
         
         -- Deliberately NOT persisted: clearing is a destructive one-time action
@@ -1153,7 +1153,6 @@ function CC:ShowMacroEditorDialog(existingMacro)
     bodyInput:SetScript("OnTextChanged", UpdateCharCount)
     
     -- Buttons at bottom
-    local buttonY = -340
     
     -- Cancel button
     local cancelBtn = CreateFrame("Button", nil, macroEditorDialog, "BackdropTemplate")
@@ -1216,11 +1215,11 @@ function CC:ShowMacroEditorDialog(existingMacro)
         syncBtn:SetScript("OnClick", function()
             local success, msg = CC:SyncImportedMacro(existingMacro.id)
             if success then
-                print("|cff00ff00DandersFrames:|r " .. msg)
+                DF:Say(msg)
                 thisDialog:Hide()
                 CC:ShowMacroEditorDialog(CC:GetMacroById(existingMacro.id))
             else
-                print("|cffff4444DandersFrames:|r " .. msg)
+                DF:Err(msg)
             end
         end)
         
@@ -1245,15 +1244,15 @@ function CC:ShowMacroEditorDialog(existingMacro)
             local body = bodyInput:GetText()
             
             if name == "" then
-                print("|cffff4444DandersFrames:|r " .. L["Please enter a macro name"])
+                DF:Err(L["Please enter a macro name"])
                 return
             end
             if body == "" then
-                print("|cffff4444DandersFrames:|r " .. L["Please enter macro text"])
+                DF:Err(L["Please enter macro text"])
                 return
             end
             if #body > 255 then
-                print("|cffff4444DandersFrames:|r " .. L["Macro text exceeds 255 characters"])
+                DF:Err(L["Macro text exceeds 255 characters"])
                 return
             end
             
@@ -1624,9 +1623,9 @@ function CC:ShowImportMacroDialog()
         if imported > 0 then msg = msg .. format(L["Imported %d macro(s). "], imported) end
         if updated > 0 then msg = msg .. format(L["Updated %d macro(s)."], updated) end
         if msg ~= "" then
-            print("|cff00ff00DandersFrames:|r " .. msg)
+            DF:Say(msg)
         else
-            print("|cff00ff00DandersFrames:|r " .. L["All macros already imported."])
+            DF:Say(L["All macros already imported."])
         end
         
         thisDialog:Hide()
@@ -1653,7 +1652,7 @@ function CC:ShowImportMacroDialog()
         if imported > 0 then msg = msg .. format(L["Imported %d macro(s). "], imported) end
         if updated > 0 then msg = msg .. format(L["Updated %d macro(s)."], updated) end
         if msg ~= "" then
-            print("|cff00ff00DandersFrames:|r " .. msg)
+            DF:Say(msg)
         end
         
         thisDialog:Hide()
@@ -1899,7 +1898,7 @@ function CC:ShowQuickMacroDialog()
     DF.GUI:StyleButton(createBtn, { width = 100, height = 28, text = L["Create Macro"], primary = true, accent = CC.ACCENT })
     createBtn:SetScript("OnClick", function()
         if not selectedSpell then
-            print("|cffff4444DandersFrames:|r " .. L["Please enter a spell name"])
+            DF:Err(L["Please enter a spell name"])
             return
         end
         
@@ -1933,11 +1932,9 @@ end
 
 
 -- Debug slash command for global bindings
-DF:RegisterDebugSlash("DFCCGLOBAL", "Global bindings debug", true, "/dfccglobal")
 SlashCmdList["DFCCGLOBAL"] = function(msg)
     if msg == "debug" then
-        CC.db.options.debugBindings = not CC.db.options.debugBindings
-        print("|cff33cc66DandersFrames:|r Debug mode " .. (CC.db.options.debugBindings and "ENABLED" or "DISABLED"))
+        DF:Say("Click-casting tracing moved to the debug console — enable the CLICK category there.")
     elseif msg == "apply" then
         -- Reapplied
         CC:ApplyBindings()
@@ -1964,7 +1961,7 @@ SlashCmdList["DFCCGLOBAL"] = function(msg)
             -- This won't actually click due to secure restrictions, but shows the info
         end
     elseif msg == "list" then
-        print("|cff33cc66DandersFrames:|r Bindings by scope:")
+        DF:Say("Bindings by scope:")
         local counts = {unitframes = 0, blizzard = 0, onhover = 0, targetcast = 0}
         for i, binding in ipairs(CC.db.bindings) do
             if binding.enabled ~= false then
@@ -2039,7 +2036,7 @@ SlashCmdList["DFCCGLOBAL"] = function(msg)
         end
     elseif msg == "nameplates" then
         -- Show all registered nameplates
-        print("|cff33cc66DandersFrames:|r Registered Nameplates:")
+        DF:Say("Registered Nameplates:")
         local count = 0
         for unitToken, frame in pairs(CC.registeredNameplates or {}) do
             count = count + 1
