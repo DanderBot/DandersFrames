@@ -8,6 +8,16 @@ local addonName, DF = ...
 -- original functions are fully restored — no runtime checks,
 -- no wrappers, no cost.
 --
+-- Two things make the numbers trustworthy rather than merely indicative:
+--   * Self time. Profiled functions call other profiled functions, so every
+--     Total contains its children. Self strips them back out, and it is what
+--     the % column ranks — see the CALL STACK block below.
+--   * Overhead subtraction. The wrapper's own in-window cost is measured on
+--     the machine at Start and removed from every figure, so a function
+--     called 200,000 times is not penalised against one called 200.
+-- Both are corrections, not guarantees; the residuals are documented at
+-- CalibrateOverhead.
+--
 -- Usage:
 --   /df debug profiler             Toggle the profiler UI
 --   /df debug profile [seconds]    Quick run for N seconds (default 10)
@@ -31,6 +41,32 @@ local CreateFrame = CreateFrame
 local tickRef = { 0 }
 
 -- ============================================================
+-- CALL STACK (for exclusive / "self" time)
+-- ----------------------------------------------------------
+-- Every wrapper is a stack frame. On the way in it pushes a slot; on the
+-- way out it adds its own inclusive time and call count into its PARENT's
+-- slot. Self time is then just `elapsed - childMs[myDepth]`.
+--
+-- Why this matters: wrapped functions call other wrapped functions —
+-- UpdateAllAuras -> UpdateAuras_Enhanced, and UpdateTextDesigner ->
+-- Render.UpdateFrame -> Resolver.Resolve three deep by design. Every level's
+-- `total` contains its children, so summing the rows counted the same
+-- microsecond two and three times and the % column was a share of an
+-- invented denominator. Self time sums correctly; inclusive time does not.
+--
+-- Only WRAPPED children are subtracted, which is exactly right: time in an
+-- unwrapped local helper genuinely belongs to the function that called it.
+--
+-- ☠ callDepth must never be allowed to ratchet. A Lua error inside a
+-- profiled function unwinds past the decrement, leaving the counter high
+-- forever and every subsequent call recorded as somebody's child. The tick
+-- driver below resets it every frame, which is safe because nothing here
+-- yields: no DF call is ever still on the stack when a new frame starts.
+local callDepth = 0
+local childMs = {}   -- [depth] = inclusive ms of wrapped children at that depth
+local childN  = {}   -- [depth] = count of wrapped calls beneath that depth
+
+-- ============================================================
 -- STATE
 -- ============================================================
 
@@ -41,7 +77,8 @@ local Profiler = {
     combatAuto = false,     -- auto start/stop on combat enter/leave
     splitByFrame = false,   -- show per-frame-type breakdown
     viewMode = "functions", -- "functions" | "events"
-    data = {},              -- [funcName|type] = { calls, total, max, mem }
+    overheadMs = 0,         -- measured cost the wrapper adds to each call (ms)
+    data = {},              -- [funcName|type] = { calls, total, selfMs, descN, max, mem }
     tickStats = {},         -- [funcName] = { lastTick, calls, maxPerTick }
     originals = {},         -- [funcPath] = { table, key, original }
     eventData = {},         -- [eventName] = { calls, total, max, mem, source }
@@ -70,6 +107,9 @@ local tickFrame = CreateFrame("Frame")
 tickFrame:Hide()
 tickFrame:SetScript("OnUpdate", function()
     tickRef[1] = tickRef[1] + 1
+    -- Self-heal the call-stack depth (see the ☠ note on callDepth). A clean
+    -- frame always ends at 0, so this is a no-op except after an error.
+    callDepth = 0
 end)
 
 -- ============================================================
@@ -401,9 +441,12 @@ local PROFILED_FUNCTIONS = {
     -- cheap frame into an expensive one.
     --
     -- ⚠ Resolve is the highest-CALL-COUNT target in this table (elements ×
-    -- frames × ticks), and the wrapper costs two debugprofilestop plus two
-    -- collectgarbage("count") per call. Its own overhead is more visible here
-    -- than anywhere else — read its total as an upper bound, not an exact figure.
+    -- frames × ticks), which is exactly the shape the overhead correction
+    -- exists for: a per-call tax lands hardest on the row with the most calls.
+    -- Its figure is now overhead-corrected rather than an upper bound. (The
+    -- two collectgarbage("count") calls the wrapper makes never inflated it —
+    -- they sit outside the timed window. They cost the GAME time while
+    -- profiling, but they were never charged to the function.)
     --
     -- ⚠ Resolve lands in the UNCLASSIFIED ("?") bucket, and that is correct, not
     -- a bug: the bucket is picked from the first argument's .unit, and Resolve
@@ -552,6 +595,97 @@ local function FormatElapsed(seconds)
 end
 
 -- ============================================================
+-- OVERHEAD CALIBRATION
+-- ============================================================
+-- The wrapper cannot measure a function without also measuring a little of
+-- itself. What lands INSIDE the timed window is the tail of the opening
+-- debugprofilestop, the vararg pack and 5-return dispatch into the original,
+-- and the head of the closing debugprofilestop. Small — but it is charged
+-- once per call, so it scales with call COUNT, not with cost. Left
+-- uncorrected it quietly taxes the hot-and-cheap functions (Resolver.Resolve
+-- runs elements x frames x ticks) and barely touches the cold-and-expensive
+-- ones, which is precisely backwards from what you want when ranking.
+--
+-- So measure it: run the identical pattern around a function that does
+-- nothing, and whatever it reports IS the overhead. Take the best of several
+-- batches rather than the mean — a batch that caught a GC step or a stray
+-- frame is contaminated upward, and the floor is the honest figure.
+--
+-- ⚠ KEEP THIS LOOP SHAPED LIKE THE REAL WRAPPER. It mimics the call form
+-- deliberately: two args plus varargs in, five returns captured out. Change
+-- the wrappers' call form and this stops measuring the same thing, and the
+-- correction silently becomes wrong rather than absent.
+--
+-- What this does NOT remove: the rest of the wrapper (the two
+-- collectgarbage("count") calls, the bucket writes, the stack push/pop) sits
+-- outside the window and so never enters this row's own numbers — but for a
+-- NESTED call it does land inside its parent's window, where nothing can
+-- separate it from real work. Deeply-nested rows therefore keep a small
+-- residual. It is bounded by (wrapped calls beneath) x (a fraction of a
+-- microsecond) and is the reason the legend says "corrected", not "exact".
+local CAL_BATCHES = 5
+local CAL_ITERS = 500
+
+local function CalibrateOverhead()
+    local noop = function() end
+    local dummy = {}
+
+    -- One wrapper-shaped measurement. Returns what the wrapper would have
+    -- recorded for a call that costs nothing.
+    local function measureOnce(selfArg, a1, ...)
+        local t0 = debugprofilestop()
+        local r1, r2, r3, r4, r5 = noop(selfArg, a1, ...)
+        return debugprofilestop() - t0
+    end
+
+    -- Warm-up: first calls through a fresh closure are not representative.
+    for _ = 1, CAL_ITERS do measureOnce(dummy, 1) end
+
+    local best
+    for _ = 1, CAL_BATCHES do
+        local sum = 0
+        for _ = 1, CAL_ITERS do
+            sum = sum + measureOnce(dummy, 1)
+        end
+        local mean = sum / CAL_ITERS
+        if not best or mean < best then best = mean end
+    end
+
+    return best or 0
+end
+
+-- Strip the instrumentation's own cost out of one row.
+--   ownCalls  invocations of this row itself
+--   deepCalls wrapped invocations nested beneath it — their in-window
+--             overhead is sitting inside this row's INCLUSIVE total, so it
+--             comes off the total but not off self time.
+-- Clamped: a function genuinely cheaper than the wrapper reads as 0 rather
+-- than negative, and self can never exceed the corrected inclusive total.
+local function Corrected(totalMs, selfMs, ownCalls, deepCalls)
+    local oh = Profiler.overheadMs
+    if oh <= 0 then return totalMs, selfMs end
+    local t = totalMs - oh * (ownCalls + (deepCalls or 0))
+    local s = selfMs - oh * ownCalls
+    if t < 0 then t = 0 end
+    if s < 0 then s = 0 end
+    if s > t then s = t end
+    return t, s
+end
+
+-- Denominator for the % column. `useSelf` picks which of the two is a
+-- legitimate sum for the view being shown — see the note in GetSortedResults.
+local function SumCorrected(source, useSelf)
+    local sum = 0
+    for _, d in pairs(source) do
+        if d.calls > 0 then
+            local t, s = Corrected(d.total, d.selfMs or 0, d.calls, d.descN)
+            sum = sum + (useSelf and s or t)
+        end
+    end
+    return sum
+end
+
+-- ============================================================
 -- CORE PROFILING
 -- ============================================================
 
@@ -584,19 +718,41 @@ WrapFrameOnUpdate = function(frame, original)
     local label = ResolveFrameLabel(frame)
     local stats = Profiler.updateData[label]
     if not stats then
-        stats = { calls = 0, total = 0, max = 0, mem = 0 }
+        stats = { calls = 0, total = 0, selfMs = 0, descN = 0, max = 0, mem = 0 }
         Profiler.updateData[label] = stats
     end
 
     local wrapped = function(self, elapsed, ...)
+        -- OnUpdate handlers are stack ROOTS in practice (the C layer calls
+        -- them sequentially, never nested) but they call plenty of wrapped DF
+        -- methods, so they push a frame like everything else — that is what
+        -- keeps "time in the handler itself" separate from "time in the
+        -- functions it drove".
+        local d = callDepth + 1
+        callDepth = d
+        childMs[d] = 0
+        childN[d] = 0
+
         local m0 = collectgarbage("count")
         local t0 = debugprofilestop()
         original(self, elapsed, ...)
         local elapsedMs = debugprofilestop() - t0
         local mDelta = collectgarbage("count") - m0
         if mDelta < 0 then mDelta = 0 end
+
+        local ct, cn = childMs[d], childN[d]
+        callDepth = d - 1
+        if d > 1 then
+            childMs[d - 1] = childMs[d - 1] + elapsedMs
+            childN[d - 1] = childN[d - 1] + cn + 1
+        end
+        local selfDelta = elapsedMs - ct
+        if selfDelta < 0 then selfDelta = 0 end
+
         stats.calls = stats.calls + 1
         stats.total = stats.total + elapsedMs
+        stats.selfMs = stats.selfMs + selfDelta
+        stats.descN = stats.descN + cn
         stats.mem = stats.mem + mDelta
         if elapsedMs > stats.max then stats.max = elapsedMs end
     end
@@ -614,6 +770,12 @@ function Profiler:Start()
         return
     end
 
+    -- Measure the wrapper's own in-window cost before anything is wrapped, so
+    -- the correction reflects THIS machine under THESE conditions rather than
+    -- a constant baked in at authoring time. Taken before startTime so the
+    -- calibration loop itself never lands inside the profiled window.
+    self.overheadMs = CalibrateOverhead()
+
     self.active = true
     self.startTime = debugprofilestop()
     self.stopTime = 0
@@ -626,6 +788,7 @@ function Profiler:Start()
     wipe(self.eventOriginals)
     wipe(self.updateData)
     tickRef[1] = 0
+    callDepth = 0
 
     local wrapped = 0
     -- ☠ An unresolved target used to vanish without a trace: the branch below
@@ -644,13 +807,15 @@ function Profiler:Start()
             -- Save originals so Stop() can fully restore.
             self.originals[path] = { container = container, key = key, original = original }
 
-            -- Per-frame-type buckets. Each entry tracks: calls, total ms,
-            -- max single-call ms, and total memory delta (KB).
-            local dP  = { calls = 0, total = 0, max = 0, mem = 0 }
-            local dR  = { calls = 0, total = 0, max = 0, mem = 0 }
-            local dHP = { calls = 0, total = 0, max = 0, mem = 0 }
-            local dHR = { calls = 0, total = 0, max = 0, mem = 0 }
-            local dU  = { calls = 0, total = 0, max = 0, mem = 0 }
+            -- Per-frame-type buckets. Each entry tracks: calls, total
+            -- (inclusive) ms, selfMs (exclusive of wrapped children), descN
+            -- (wrapped calls beneath, for the overhead correction), max
+            -- single-call ms, and total memory delta (KB).
+            local dP  = { calls = 0, total = 0, selfMs = 0, descN = 0, max = 0, mem = 0 }
+            local dR  = { calls = 0, total = 0, selfMs = 0, descN = 0, max = 0, mem = 0 }
+            local dHP = { calls = 0, total = 0, selfMs = 0, descN = 0, max = 0, mem = 0 }
+            local dHR = { calls = 0, total = 0, selfMs = 0, descN = 0, max = 0, mem = 0 }
+            local dU  = { calls = 0, total = 0, selfMs = 0, descN = 0, max = 0, mem = 0 }
 
             self.data[path .. "|P"]  = dP
             self.data[path .. "|R"]  = dR
@@ -678,6 +843,15 @@ function Profiler:Start()
                     ts.maxPerTick = ts.calls
                 end
 
+                -- Push a call-stack frame. Deliberately OUTSIDE the timed
+                -- window below: this bookkeeping is instrumentation, not the
+                -- function's cost, and charging it here would defeat the
+                -- correction it exists to enable.
+                local d = callDepth + 1
+                callDepth = d
+                childMs[d] = 0
+                childN[d] = 0
+
                 -- Time + memory delta around the call.
                 -- collectgarbage("count") returns kilobytes; deltas are exact
                 -- between calls, but a GC cycle running mid-call shows as
@@ -688,6 +862,17 @@ function Profiler:Start()
                 local elapsed = debugprofilestop() - t0
                 local mDelta = collectgarbage("count") - m0
                 if mDelta < 0 then mDelta = 0 end
+
+                -- Pop: hand our inclusive time and call count up to whoever
+                -- called us, so THEIR self time excludes us.
+                local ct, cn = childMs[d], childN[d]
+                callDepth = d - 1
+                if d > 1 then
+                    childMs[d - 1] = childMs[d - 1] + elapsed
+                    childN[d - 1] = childN[d - 1] + cn + 1
+                end
+                local selfDelta = elapsed - ct
+                if selfDelta < 0 then selfDelta = 0 end
 
                 -- Classify: 2-3 field lookups on the first argument
                 local bucket
@@ -702,6 +887,8 @@ function Profiler:Start()
                 end
                 bucket.calls = bucket.calls + 1
                 bucket.total = bucket.total + elapsed
+                bucket.selfMs = bucket.selfMs + selfDelta
+                bucket.descN = bucket.descN + cn
                 bucket.mem = bucket.mem + mDelta
                 if elapsed > bucket.max then bucket.max = elapsed end
 
@@ -730,6 +917,15 @@ function Profiler:Start()
             local source = dispatcher.source
 
             container[key] = function(selfArg, event, ...)
+                -- Dispatchers sit at the root of nearly every call chain DF
+                -- runs, so their self time — the dispatch and routing work,
+                -- with the profiled methods they drive taken back out — is
+                -- the number that says whether routing itself is expensive.
+                local d = callDepth + 1
+                callDepth = d
+                childMs[d] = 0
+                childN[d] = 0
+
                 local m0 = collectgarbage("count")
                 local t0 = debugprofilestop()
                 local r1, r2, r3, r4, r5 = orig(selfArg, event, ...)
@@ -737,13 +933,25 @@ function Profiler:Start()
                 local mDelta = collectgarbage("count") - m0
                 if mDelta < 0 then mDelta = 0 end
 
+                local ct, cn = childMs[d], childN[d]
+                callDepth = d - 1
+                if d > 1 then
+                    childMs[d - 1] = childMs[d - 1] + elapsed
+                    childN[d - 1] = childN[d - 1] + cn + 1
+                end
+                local selfDelta = elapsed - ct
+                if selfDelta < 0 then selfDelta = 0 end
+
                 local bucket = eventData[event]
                 if not bucket then
-                    bucket = { calls = 0, total = 0, max = 0, mem = 0, source = source }
+                    bucket = { calls = 0, total = 0, selfMs = 0, descN = 0,
+                               max = 0, mem = 0, source = source }
                     eventData[event] = bucket
                 end
                 bucket.calls = bucket.calls + 1
                 bucket.total = bucket.total + elapsed
+                bucket.selfMs = bucket.selfMs + selfDelta
+                bucket.descN = bucket.descN + cn
                 bucket.mem = bucket.mem + mDelta
                 if elapsed > bucket.max then bucket.max = elapsed end
 
@@ -788,8 +996,8 @@ function Profiler:Start()
     -- Start the per-tick OnUpdate that drives spike detection.
     tickFrame:Show()
 
-    DF:Say(format("Recording — %d/%d functions, %d events, %d OnUpdate handlers instrumented",
-        wrapped, #PROFILED_FUNCTIONS, eventsWrapped, updatesWrapped))
+    DF:Say(format("Recording — %d/%d functions, %d events, %d OnUpdate handlers instrumented (wrapper overhead %sus/call, subtracted)",
+        wrapped, #PROFILED_FUNCTIONS, eventsWrapped, updatesWrapped, FormatUs(self.overheadMs)))
     -- Naming them matters more than counting them: "91/94" tells you something
     -- broke, the list tells you WHAT. A target goes missing when the function is
     -- renamed or deleted and this table is not updated with it.
@@ -825,7 +1033,10 @@ function Profiler:Stop()
     wipe(onUpdateWrapped)
 
     -- Stop the per-tick OnUpdate so profiler has zero idle cost when stopped.
+    -- That also stops the per-frame callDepth reset, so clear it here — the
+    -- next Start would otherwise inherit whatever an error left behind.
     tickFrame:Hide()
+    callDepth = 0
 
     DF:Say("Profiler stopped", FormatElapsed(self:GetElapsedSeconds()), "NEUTRAL")
 end
@@ -834,6 +1045,8 @@ function Profiler:Reset()
     for _, d in pairs(self.data) do
         d.calls = 0
         d.total = 0
+        d.selfMs = 0
+        d.descN = 0
         d.max = 0
         d.mem = 0
     end
@@ -847,9 +1060,12 @@ function Profiler:Reset()
     for _, d in pairs(self.updateData) do
         d.calls = 0
         d.total = 0
+        d.selfMs = 0
+        d.descN = 0
         d.max = 0
         d.mem = 0
     end
+    callDepth = 0
     if self.active then
         self.startTime = debugprofilestop()
         self:_SnapshotContainerStats()
@@ -915,10 +1131,25 @@ function Profiler:GetTotalCalls()
     return total
 end
 
+-- ============================================================
+-- WHICH TOTAL IS A LEGITIMATE SUM
+-- ----------------------------------------------------------
+-- ☠ Functions view: these rows NEST inside each other by design, so adding
+-- their inclusive times counts the same microsecond once per level. It is not
+-- a total of anything. Self time is the only honest sum here, and it is what
+-- the % column is a share of.
+--
+-- Events / OnUpdate views: those rows do not nest — one event dispatch never
+-- runs inside another, and the C layer calls OnUpdate handlers one after the
+-- other rather than within each other. Inclusive is both a valid sum and the
+-- more useful reading there ("what did this event cost me, all in"), so those
+-- two views keep it.
+local function ViewUsesSelf(mode)
+    return mode == "functions"
+end
+
 function Profiler:GetGrandTotalMs()
-    local total = 0
-    for _, d in pairs(GetActiveSource(self)) do total = total + d.total end
-    return total
+    return SumCorrected(GetActiveSource(self), ViewUsesSelf(self.viewMode))
 end
 
 -- Display name suffixes for frame types
@@ -939,14 +1170,24 @@ function Profiler:GetSortedResults()
     end
 
     local results = {}
-    local grandTotal = 0
+    local grandSelf = 0
     local tickStats = self.tickStats
+    local oh = self.overheadMs
+
+    -- Max is a single-call inclusive figure, so exactly one wrapper's worth of
+    -- overhead is in it. Children nested under that one call carry theirs too
+    -- and cannot be separated out — this corrects what is knowable.
+    local function CorrectedMax(m)
+        local v = m - oh
+        return v > 0 and v or 0
+    end
 
     if self.splitByFrame then
         -- Split mode: one row per function+type combination (only those with calls)
         for key, d in pairs(self.data) do
             if d.calls > 0 then
-                grandTotal = grandTotal + d.total
+                local total, selfMs = Corrected(d.total, d.selfMs, d.calls, d.descN)
+                grandSelf = grandSelf + selfMs
                 -- Parse "funcName|type" into base name + suffix
                 local baseName, suffix = key:match("^(.+)(|.+)$")
                 if not baseName then
@@ -958,9 +1199,10 @@ function Profiler:GetSortedResults()
                 results[#results + 1] = {
                     name = displayName,
                     calls = d.calls,
-                    total = d.total,
-                    avg = d.total / d.calls,
-                    max = d.max,
+                    total = total,
+                    selfMs = selfMs,
+                    avg = total / d.calls,
+                    max = CorrectedMax(d.max),
                     -- Memory: bytes per call (KB delta * 1024 / calls)
                     mem = d.calls > 0 and (d.mem * 1024 / d.calls) or 0,
                     -- Peak/tick is per-function, not per-bucket; show the same
@@ -970,19 +1212,25 @@ function Profiler:GetSortedResults()
             end
         end
     else
-        -- Aggregate mode: combine all frame types into one row per function
+        -- Aggregate mode: combine all frame types into one row per function.
+        -- ⚠ Sum the RAW fields and correct once at the end. Correcting each
+        -- bucket first and then adding would clamp each partial at zero
+        -- independently, so a function that is cheap in party and expensive in
+        -- raid would lose the party rows' negative headroom and read high.
         local aggregated = {}
         local aggOrder = {}  -- preserve insertion order for deterministic iteration
         for key, d in pairs(self.data) do
             if d.calls > 0 then
                 local baseName = key:match("^(.+)|") or key
                 if not aggregated[baseName] then
-                    aggregated[baseName] = { calls = 0, total = 0, max = 0, mem = 0 }
+                    aggregated[baseName] = { calls = 0, total = 0, selfMs = 0, descN = 0, max = 0, mem = 0 }
                     aggOrder[#aggOrder + 1] = baseName
                 end
                 local agg = aggregated[baseName]
                 agg.calls = agg.calls + d.calls
                 agg.total = agg.total + d.total
+                agg.selfMs = agg.selfMs + d.selfMs
+                agg.descN = agg.descN + d.descN
                 agg.mem = agg.mem + d.mem
                 if d.max > agg.max then agg.max = d.max end
             end
@@ -990,23 +1238,28 @@ function Profiler:GetSortedResults()
 
         for _, baseName in ipairs(aggOrder) do
             local agg = aggregated[baseName]
-            grandTotal = grandTotal + agg.total
+            local total, selfMs = Corrected(agg.total, agg.selfMs, agg.calls, agg.descN)
+            grandSelf = grandSelf + selfMs
             local ts = tickStats[baseName]
             results[#results + 1] = {
                 name = baseName,
                 calls = agg.calls,
-                total = agg.total,
-                avg = agg.total / agg.calls,
-                max = agg.max,
+                total = total,
+                selfMs = selfMs,
+                avg = total / agg.calls,
+                max = CorrectedMax(agg.max),
                 mem = agg.calls > 0 and (agg.mem * 1024 / agg.calls) or 0,
                 peak = ts and ts.maxPerTick or 0,
             }
         end
     end
 
+    -- Share of SELF time, not of the inclusive sum — see the ViewUsesSelf note.
+    -- These add up to 100%; the old inclusive shares did not add up to anything.
     for _, r in ipairs(results) do
-        r.pct = grandTotal > 0 and (r.total / grandTotal * 100) or 0
+        r.pct = grandSelf > 0 and (r.selfMs / grandSelf * 100) or 0
     end
+    local grandTotal = grandSelf
 
     local col = self.sortColumn
     local desc = self.sortDesc
@@ -1027,21 +1280,26 @@ function Profiler:GetSortedUpdateResults()
     local results = {}
     local grandTotal = 0
 
+    local oh = self.overheadMs
+
     for label, d in pairs(self.updateData) do
         if d.calls > 0 then
-            grandTotal = grandTotal + d.total
+            local total, selfMs = Corrected(d.total, d.selfMs, d.calls, d.descN)
+            grandTotal = grandTotal + total
             -- Trim very long parent-chain labels: keep the last segment.
             local short = label
             if #label > 36 then
                 local tail = label:match("([^%.]+)$")
                 short = tail and ("…" .. tail) or label:sub(-36)
             end
+            local mx = d.max - oh
             results[#results + 1] = {
                 name = short,
                 calls = d.calls,
-                total = d.total,
-                avg = d.total / d.calls,
-                max = d.max,
+                total = total,
+                selfMs = selfMs,
+                avg = total / d.calls,
+                max = mx > 0 and mx or 0,
                 mem = d.calls > 0 and (d.mem * 1024 / d.calls) or 0,
                 peak = 0,
             }
@@ -1072,15 +1330,24 @@ function Profiler:GetSortedEventResults()
     local results = {}
     local grandTotal = 0
 
+    local oh = self.overheadMs
+
     for eventName, d in pairs(self.eventData) do
         if d.calls > 0 then
-            grandTotal = grandTotal + d.total
+            local total, selfMs = Corrected(d.total, d.selfMs, d.calls, d.descN)
+            grandTotal = grandTotal + total
+            local mx = d.max - oh
             results[#results + 1] = {
                 name = eventName .. (d.source and ("  [" .. d.source .. "]") or ""),
                 calls = d.calls,
-                total = d.total,
-                avg = d.total / d.calls,
-                max = d.max,
+                total = total,
+                -- Self here = dispatch and routing only, with the profiled DF
+                -- methods this event drove subtracted back out. A big Total
+                -- next to a tiny Self means the event is expensive because of
+                -- what it triggers, not because routing it costs anything.
+                selfMs = selfMs,
+                avg = total / d.calls,
+                max = mx > 0 and mx or 0,
                 mem = d.calls > 0 and (d.mem * 1024 / d.calls) or 0,
                 peak = 0,
             }
@@ -1140,8 +1407,12 @@ function Profiler:PrintResults()
     end
 
     print(" ")
-    DF:Say(format("[%s] %s | %s calls | %sms profiled CPU",
-        self.viewMode, FormatElapsed(elapsed), CommaNumber(totalCalls), FormatMs(grandTotal)))
+    -- Name the denominator. In the functions view it is the sum of SELF times
+    -- (the only sum that doesn't count nested calls twice); in the other two,
+    -- where rows don't nest, it is the inclusive sum.
+    DF:Say(format("[%s] %s | %s calls | %sms %s CPU",
+        self.viewMode, FormatElapsed(elapsed), CommaNumber(totalCalls), FormatMs(grandTotal),
+        ViewUsesSelf(self.viewMode) and "self" or "inclusive"))
     local cd = self:GetContainerDelta()
     if cd then
         -- Builds during steady-state combat = rebuild storm; see counter block above.
@@ -1157,10 +1428,11 @@ function Profiler:PrintResults()
         elseif r.pct >= 10 then color = "|cffffff88"
         else color = "|cff88ff88" end
 
-        print(format("  %s%2d. %-36s|r  %s calls  %sms  %sus avg  %sus max  pk %s  %sB  %s%5.1f%%|r",
+        print(format("  %s%2d. %-36s|r  %s calls  %sms  %sms self  %sus avg  %sus max  pk %s  %sB  %s%5.1f%%|r",
             color, i, r.name,
             CommaNumber(r.calls),
             FormatMs(r.total),
+            FormatMs(r.selfMs or 0),
             FormatUs(r.avg),
             FormatUs(r.max),
             FormatPeak(r.peak),
@@ -1208,9 +1480,9 @@ function Profiler:PrintSummary()
 
     print(" ")
     print(format("|cff00ff00DF Profiler Summary:|r %s elapsed", FormatElapsed(elapsed)))
-    print(format("  Functions: %sms total CPU across wrapped DF methods", FormatMs(funcGrand)))
-    print(format("  Events:    %sms total CPU across event handlers", FormatMs(evtGrand)))
-    print(format("  OnUpdate:  %sms total CPU across every-frame handlers", FormatMs(updGrand)))
+    print(format("  Functions: %sms SELF CPU across wrapped DF methods (nested calls counted once)", FormatMs(funcGrand)))
+    print(format("  Events:    %sms inclusive CPU across event handlers", FormatMs(evtGrand)))
+    print(format("  OnUpdate:  %sms inclusive CPU across every-frame handlers", FormatMs(updGrand)))
     print("  " .. DF.OUT.NEUTRAL .. ("—"):rep(14) .. "|r")
 
     local function dump(label, mode)
@@ -1221,10 +1493,11 @@ function Profiler:PrintSummary()
         end
         print(format("  |cffffd700Top 5 %s:|r", label))
         for i, r in ipairs(rows) do
-            print(format("    %d. %-34s  %s calls  %sms  %sus avg  %s%%",
+            print(format("    %d. %-34s  %s calls  %sms  %sms self  %sus avg  %s%%",
                 i, r.name,
                 CommaNumber(r.calls),
                 FormatMs(r.total),
+                FormatMs(r.selfMs or 0),
                 FormatUs(r.avg),
                 format("%.1f", r.pct)))
         end
@@ -1243,7 +1516,7 @@ end
 
 local ROW_HEIGHT = 18
 local MAX_ROWS = 30
-local FRAME_WIDTH = 720
+local FRAME_WIDTH = 786   -- +66 over the pre-Self-column width
 local CONTENT_LEFT = 10
 local CONTENT_RIGHT = -10
 local HEADER_Y = -66
@@ -1254,6 +1527,10 @@ local COLUMNS = {
     { key = "name",  label = "Function",  width = 210, align = "LEFT" },
     { key = "calls", label = "Calls",     width = 54,  align = "RIGHT" },
     { key = "total", label = "Total ms",  width = 60,  align = "RIGHT" },
+    -- Self = Total minus the time spent inside OTHER profiled functions this
+    -- one called. Sort by this to find where the work actually happens; sort
+    -- by Total to find which entry point owns a whole subtree.
+    { key = "selfMs", label = "Self ms",  width = 62,  align = "RIGHT" },
     { key = "avg",   label = "Avg us",    width = 52,  align = "RIGHT" },
     { key = "max",   label = "Max us",    width = 52,  align = "RIGHT" },
     { key = "peak",  label = "Peak/tk",   width = 52,  align = "RIGHT" },
@@ -1379,6 +1656,10 @@ UpdateUI = function()
             row.cols.total:SetText(FormatMs(r.total))
             row.cols.total:SetTextColor(0.8, 0.8, 0.8)
 
+            -- Self is the ranked figure, so it reads brighter than Total.
+            row.cols.selfMs:SetText(FormatMs(r.selfMs or 0))
+            row.cols.selfMs:SetTextColor(0.95, 0.95, 0.8)
+
             row.cols.avg:SetText(FormatUs(r.avg))
             row.cols.avg:SetTextColor(0.7, 0.7, 0.7)
 
@@ -1455,12 +1736,12 @@ function Profiler:CreateUI()
     --   6  banner offset from the frame bottom
     --  34  the banner's minimum height
     --   6  gap
-    --  12  the column legend that sits above it
+    --  24  the column legend that sits above it (TWO lines since Self landed)
     --  10  breathing room before the last data row
     -- The old value was 30, which did not even clear the 28px strip that used to
     -- live there — a full 30-row table clipped its last row behind it, and the
     -- legend was underneath the strip entirely.
-    f:SetSize(FRAME_WIDTH, DATA_START_Y * -1 + MAX_ROWS * ROW_HEIGHT + 68)
+    f:SetSize(FRAME_WIDTH, DATA_START_Y * -1 + MAX_ROWS * ROW_HEIGHT + 80)
     f:SetPoint("CENTER", 0, 50)
     -- Panel chrome, same as every other DF window. Was a bespoke plate from three
     -- hand-mixed literals, which is the other half of why this window read as
@@ -1836,7 +2117,12 @@ function Profiler:CreateUI()
     local infoLabel = f:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     infoLabel:SetPoint("BOTTOMLEFT", f.hookBanner, "TOPLEFT", 2, 6)
     infoLabel:SetTextColor(0.4, 0.4, 0.4)
-    infoLabel:SetText("Inclusive times  |  Peak/tk = max calls in one frame  |  Bytes = avg alloc per call")
+    infoLabel:SetJustifyH("LEFT")
+    -- Two lines. The first says what the numbers ARE, which matters because
+    -- Total and Self answer different questions and only one of them adds up.
+    infoLabel:SetText(
+        "Total = inclusive (counts nested profiled calls)  |  Self = excludes them — this is what % ranks, and % sums to 100\n" ..
+        "Peak/tk = max calls in one frame  |  Bytes = avg alloc per call  |  measured wrapper overhead subtracted from all times")
 
     -- Live refresh via OnUpdate
     f.elapsed = 0
