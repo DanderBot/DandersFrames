@@ -51,7 +51,6 @@ local UpdateSpecDropdownState = P.UpdateSpecDropdownState
 local SetMainTab = P.SetMainTab
 local OpenGroupSpellPicker = P.OpenGroupSpellPicker
 local AddGroupAppearanceSection = P.AddGroupAppearanceSection
-P.AddGroupAppearanceSection = AddGroupAppearanceSection
 
 S.BuildLayoutGroupsTab = function()
     if not S.tabContentFrame then return end

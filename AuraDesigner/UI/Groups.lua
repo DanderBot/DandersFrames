@@ -27,7 +27,6 @@ local OtherPoolDisplayName = P.OtherPoolDisplayName
 local EnsureAuraConfig = P.EnsureAuraConfig
 local EnsureTypeConfig = P.EnsureTypeConfig
 local TYPE_DEFAULTS = P.TYPE_DEFAULTS
-P.TYPE_DEFAULTS = TYPE_DEFAULTS
 
 -- ============================================================
 -- INSTANCE-BASED INDICATOR HELPERS

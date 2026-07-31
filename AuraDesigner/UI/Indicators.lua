@@ -1038,4 +1038,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     totalHeight = totalHeight + 8  -- bottom padding
     parent:SetHeight(totalHeight)
     return widgets, totalHeight
-end
+end
+
+-- ☠ Published HERE, in the part that DEFINES it -- see the note in Options.lua.
+P.BuildTypeContent = BuildTypeContent

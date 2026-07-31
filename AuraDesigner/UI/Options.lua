@@ -1735,4 +1735,10 @@ local TYPE_DEFAULTS = {
         color = {r = 1, g = 1, b = 1, a = 1},
         showWhenMissing = false,
     },
-}
+}
+
+-- ☠ Published HERE, in the part that DEFINES it. A publish must never be
+-- separated from its definition by a split boundary: this one originally
+-- landed in the next part, which then aliased P.TYPE_DEFAULTS before anything
+-- had published it -- nil, and a crash on the first effect card.
+P.TYPE_DEFAULTS = TYPE_DEFAULTS

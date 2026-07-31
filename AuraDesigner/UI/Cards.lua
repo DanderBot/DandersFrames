@@ -56,7 +56,6 @@ local dragState = P.dragState
 local RefreshPlacedIndicators = P.RefreshPlacedIndicators
 local RefreshPreviewEffects = P.RefreshPreviewEffects
 local BuildTypeContent = P.BuildTypeContent
-P.BuildTypeContent = BuildTypeContent
 
 -- ============================================================
 -- GLOBAL VIEW (used by Global tab)
@@ -2460,4 +2459,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     end)
 
     return by
-end
+end
+
+-- ☠ Published HERE, in the part that DEFINES it -- see the note in Options.lua.
+P.AddGroupAppearanceSection = AddGroupAppearanceSection
