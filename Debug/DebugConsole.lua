@@ -91,7 +91,8 @@ local CATEGORY_GROUPS = {
             { key = "ROLE",         desc = "Role icon show/hide decisions and combat transitions" },
             { key = "SCRIPT",       desc = "Lua script errors and pcall failures" },
             { key = "SYSTEM",       desc = "Reload separators and init confirmation" },
-            { key = "TARGETEDLIST", desc = "Targeted List cast pickup, stop, and interrupter lookup (alpha/beta only)" },
+            { key = "TARGETEDLIST", desc = "Targeted List cast pickup + why a cast was dropped, stop, interrupter lookup" },
+            { key = "PERSONALTARGET", desc = "Personal Targeted Spells: cast pickup, target changes, and why a cast was skipped" },
             { key = "GUI",          desc = "Settings window internals — slider drag paths, relayout" },
             -- Kept out of GUI: the Blizzard-picker sync fires on every colour
             -- drag, so folding it in would make the whole GUI category noisy.

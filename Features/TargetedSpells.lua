@@ -205,24 +205,33 @@ local function GetContentType()
 end
 
 -- Check if personal targeted spells should be shown based on content type
+-- Returns ok, reason. The reason feeds the PERSONALTARGET trace so a missing personal
+-- icon is diagnosable; existing callers use it as a plain boolean and ignore it.
 local function ShouldShowPersonalTargetedSpells(db)
-    if not db.personalTargetedSpellEnabled then return false end
-    
-    local contentType = GetContentType()
-    
-    if contentType == "openworld" then
-        return db.personalTargetedSpellInOpenWorld ~= false
-    elseif contentType == "dungeon" then
-        return db.personalTargetedSpellInDungeons ~= false
-    elseif contentType == "raid" then
-        return db.personalTargetedSpellInRaids ~= false
-    elseif contentType == "arena" then
-        return db.personalTargetedSpellInArena ~= false
-    elseif contentType == "battleground" then
-        return db.personalTargetedSpellInBattlegrounds ~= false
+    if not db.personalTargetedSpellEnabled then
+        return false, "Personal Targeted Spells is off in settings"
     end
-    
-    return true  -- Default to showing
+
+    local contentType = GetContentType()
+
+    local allowed, key
+    if contentType == "openworld" then
+        allowed, key = db.personalTargetedSpellInOpenWorld ~= false, "Open World"
+    elseif contentType == "dungeon" then
+        allowed, key = db.personalTargetedSpellInDungeons ~= false, "Dungeons"
+    elseif contentType == "raid" then
+        allowed, key = db.personalTargetedSpellInRaids ~= false, "Raids"
+    elseif contentType == "arena" then
+        allowed, key = db.personalTargetedSpellInArena ~= false, "Arena"
+    elseif contentType == "battleground" then
+        allowed, key = db.personalTargetedSpellInBattlegrounds ~= false, "Battlegrounds"
+    else
+        return true  -- unknown content type → default to showing
+    end
+    if not allowed then
+        return false, "content-type checkbox for " .. key .. " is off"
+    end
+    return true
 end
 
 -- Personal Targeted Spells is a player-screen overlay with per-mode settings, so
@@ -329,9 +338,19 @@ local function ProcessCastInternal(casterUnit, isChannel)
     -- its own DB below, and the cast-history block needs none of them.
 
     -- Create personal display icon (always, for every cast - use SetAlphaFromBoolean for visibility)
-    if ShouldShowPersonalTargetedSpells(GetPersonalDB()) then
+    --
+    -- Only casterUnit and the channel flag are clean enough to log here; spellID,
+    -- texture and durationObject are secret-tainted on nameplates (see the gotcha #0
+    -- note in the Targeted List section) and must never reach a format string.
+    local personalOk, personalWhy = ShouldShowPersonalTargetedSpells(GetPersonalDB())
+    if personalOk then
+        if DF.DebugActive and DF:DebugActive("PERSONALTARGET") then
+            DF:Debug("PERSONALTARGET", "pickup %s (channel=%s)", casterUnit, isChannel and "y" or "n")
+        end
         -- Always show icon, let SetAlphaFromBoolean control visibility based on targeting
         DF:ShowPersonalTargetedSpellIcon(casterUnit, casterUnit, spellID, texture, durationObject, isChannel, startTime)
+    elseif DF.DebugActive and DF:DebugActive("PERSONALTARGET") then
+        DF:Debug("PERSONALTARGET", "skip %s: %s", casterUnit, personalWhy)
     end
     
     -- Log cast to history for review
@@ -415,13 +434,21 @@ local function ProcessCast(casterUnit, isChannel)
     
     C_Timer.After(CAST_PROCESS_DELAY, function()
         -- Validate the cast is still active after the delay
-        -- If it finished/was interrupted during the delay, don't show anything
-        if isChannel then
-            if not UnitChannelInfo(casterUnit) then return end
-        else
-            if not UnitCastingInfo(casterUnit) then return end
+        -- If it finished/was interrupted during the delay, don't show anything.
+        -- ⚠ This silently eats any cast shorter than CAST_PROCESS_DELAY (0.2s). Traced
+        -- so "fast casts never show" is visible rather than guessed at. Instants are a
+        -- separate matter: they never fire UNIT_SPELLCAST_START at all.
+        local function endedEarly()
+            if DF.DebugActive and DF:DebugActive("PERSONALTARGET") then
+                DF:Debug("PERSONALTARGET", "drop %s: cast ended inside the 0.2s pickup delay", casterUnit)
+            end
         end
-        
+        if isChannel then
+            if not UnitChannelInfo(casterUnit) then endedEarly() return end
+        else
+            if not UnitCastingInfo(casterUnit) then endedEarly() return end
+        end
+
         ProcessCastInternal(casterUnit, isChannel)
     end)
 end
@@ -725,8 +752,27 @@ end
 -- Public: re-evaluate whether eventFrame should be registered. Call this
 -- whenever any of the gating settings change (group toggle, personal toggle,
 -- API block trip).
+-- ⚠ THIS IS ONLY RE-EVALUATED FROM THREE PLACES: DF:InitTargetedSpells (once, from
+-- Frames/Headers.lua) and the two feature toggles. It is NOT re-run on
+-- PLAYER_ENTERING_WORLD or on a profile switch.
+--
+-- That matters because NeedsCastEvents() returns false when DF.db is not resolved
+-- yet, and a false result UNREGISTERS EVERYTHING. So if Init ever wins the race
+-- against profile load, both Personal Targeted and the Targeted List are silently
+-- dead for the whole session until the user toggles a setting or reloads — which is
+-- exactly what "it worked better after a /reload" looks like. Traced so that
+-- condition is visible at login instead of being invisible.
 function DF:UpdateTargetedSpellEventRegistration()
-    if NeedsCastEvents() then
+    local needed = NeedsCastEvents()
+    if DF.DebugActive and DF:DebugActive("PERSONALTARGET") then
+        DF:Debug("PERSONALTARGET", "cast events %s (db=%s, personal party=%s raid=%s, list=%s)",
+            needed and "REGISTERED" or "unregistered",
+            DF.db and "y" or "NO",
+            (DF.db and DF.db.party and DF.db.party.personalTargetedSpellEnabled) and "y" or "n",
+            (DF.db and DF.db.raid and DF.db.raid.personalTargetedSpellEnabled) and "y" or "n",
+            (DF.db and DF.db.party and DF.db.party.targetedListEnabled) and "y" or "n")
+    end
+    if needed then
         RegisterTargetedSpellEvents()
     else
         eventFrame:UnregisterAllEvents()
@@ -2398,13 +2444,18 @@ end
 -- so that stop events still clear tracked state even if the user
 -- toggles content-type checkboxes mid-cast. Otherwise stale bars
 -- would get stuck on screen until the next reload.
+-- Returns ok, reason. The reason is a plain literal for the TARGETEDLIST log — every
+-- caller uses `if not TargetedList_IsActive() then`, so the extra return is inert
+-- for them. Reasons exist because a missing bar used to be completely silent: the
+-- pickup path logged only successes, so there was no way to tell which gate ate a
+-- cast. Never put a secret value in one of these strings.
 local function TargetedList_IsActive()
-    if not TargetedList_IsGateOpen() then return false end
-    if not DF.db then return false end
+    if not TargetedList_IsGateOpen() then return false, "dev gate closed (release build)" end
+    if not DF.db then return false, "no profile loaded yet" end
     local party = DF.db.party
-    if not party or not party.targetedListEnabled then return false end
-    if not TL_IsInGroup() then return false end
-    if TL_IsInRaid() then return false end
+    if not party or not party.targetedListEnabled then return false, "Targeted List is off in settings" end
+    if not TL_IsInGroup() then return false, "not in a group (party-only feature)" end
+    if TL_IsInRaid() then return false, "in a raid (party-only feature)" end
     return true
 end
 
@@ -2413,9 +2464,13 @@ end
 -- interruptibility-change handlers use IsActive alone so they can
 -- clean up existing state regardless of content-type settings.
 local function TargetedList_ShouldPickup()
-    if not TargetedList_IsActive() then return false end
+    local ok, why = TargetedList_IsActive()
+    if not ok then return false, why end
     local party = DF.db.party
-    return TargetedList_ContentTypeAllowed(party)
+    if not TargetedList_ContentTypeAllowed(party) then
+        return false, "content-type filter excludes this instance type"
+    end
+    return true
 end
 
 -- Exposed for NeedsCastEvents below, so the shared event frame stays
@@ -2450,14 +2505,24 @@ end
 -- The render pipeline (commit #5) will fetch the target name via
 -- UnitSpellTargetName and feed it directly into a FontString:SetText
 -- secret-safe sink, which doesn't require comparing or indexing.
+-- Returns ok, reason (see TargetedList_IsActive for why).
+--
+-- ⚠ The last check is the one to distrust if bars go missing in a group. The comment
+-- block above claims UnitInParty on a compound token is "empirically NOT blocked" by
+-- the 2026-04-07 hotfix. That is an ASSERTION, not something we have measured on this
+-- build. If 12.1 did seal it, this returns false for every real party target and the
+-- only bars you'd ever see are untargeted casts — which looks exactly like "the list
+-- misses a lot". The trace below distinguishes the two cases.
 local function TargetedList_CastTargetIsPartyMember(casterUnit)
     local target = casterUnit .. "target"
-    if not TL_UnitExists(target) then return false end
+    if not TL_UnitExists(target) then return false, "cast has no target" end
     -- Reject mob-targeting-mob casts (we'd never care about those)
-    if TL_UnitCanAttack("player", target) then return false end
+    if TL_UnitCanAttack("player", target) then return false, "target is an enemy (mob vs mob)" end
     -- The actual filter: is the targeted unit a party member?
     -- TS3 uses this exact compound-vs-party check post-hotfix.
-    if TL_IsInGroup() and not TL_UnitInParty(target) then return false end
+    if TL_IsInGroup() and not TL_UnitInParty(target) then
+        return false, "UnitInParty(<caster>target) false — not a party member, OR the API is sealed"
+    end
     return true
 end
 
@@ -2477,13 +2542,21 @@ local TARGETEDLIST_PICKUP_DELAY = 0.2
 -- Is this unit a nameplate we're willing to look at? Filters out
 -- friendly nameplates, party-member nameplates (wargames/mercenary),
 -- and anything that isn't a valid enemy unit token.
+-- Returns ok, reason (see TargetedList_IsActive for why).
+--
+-- ⚠ THE NAMEPLATE REQUIREMENT IS THE FEATURE'S HARD CEILING. Only `nameplateN`
+-- tokens are accepted, so an enemy with no nameplate is invisible to this feature no
+-- matter what it casts. That makes the list sensitive to the nameplate CVars —
+-- nameplateShowEnemies (off = nothing at all), nameplateShowOffscreen (off = casters
+-- behind you or off-screen never appear), nameplateMaxDistance — and to WoW's own
+-- cap on simultaneous nameplates.
 local function TargetedList_IsRelevantCaster(casterUnit)
-    if type(casterUnit) ~= "string" then return false end
-    if string.sub(casterUnit, 1, 9) ~= "nameplate" then return false end
-    if not TL_UnitExists(casterUnit) then return false end
-    if not TL_UnitCanAttack("player", casterUnit) then return false end
+    if type(casterUnit) ~= "string" then return false, "not a unit token" end
+    if string.sub(casterUnit, 1, 9) ~= "nameplate" then return false, "not a nameplate unit" end
+    if not TL_UnitExists(casterUnit) then return false, "nameplate gone (died / out of range)" end
+    if not TL_UnitCanAttack("player", casterUnit) then return false, "caster not attackable" end
     -- Exclude own party members that have nameplates (rare but real)
-    if TL_UnitInParty(casterUnit) then return false end
+    if TL_UnitInParty(casterUnit) then return false, "caster is a party member" end
     return true
 end
 
@@ -2520,13 +2593,33 @@ local TL_C_Spell_IsSpellImportant = C_Spell and C_Spell.IsSpellImportant
 -- equality compare on a secret-tainted castID errors. We accept rare
 -- flicker on rapid same-spell restart in exchange for not crashing.
 local function TargetedList_DelayedPickup(casterUnit, isChannel, eventSpellId)
-    if not TargetedList_ShouldPickup() then return end
-    if not TargetedList_IsRelevantCaster(casterUnit) then return end
+    -- One local so the whole gate chain below can report why it dropped a cast.
+    -- Every reason is a literal; nothing secret is ever formatted here (see the
+    -- gotcha #0 note further down — casterUnit and the channel flag are the only
+    -- clean values available at this point).
+    local trace = DF.DebugActive and DF:DebugActive("TARGETEDLIST")
+    local function drop(why)
+        if trace then DF:Debug("TARGETEDLIST", "drop %s at pickup: %s", casterUnit, why) end
+    end
 
-    -- Combat filter: skip casters not in combat (idle mobs casting nearby)
+    local pickupOk, pickupWhy = TargetedList_ShouldPickup()
+    if not pickupOk then drop(pickupWhy) return end
+
+    -- Re-checked after the 0.2s delay: a caster can die or leave nameplate range
+    -- inside the window. Worth tracing here (unlike at START) because it passed once.
+    local relevantOk, relevantWhy = TargetedList_IsRelevantCaster(casterUnit)
+    if not relevantOk then drop(relevantWhy .. " (during the 0.2s pickup delay)") return end
+
+    -- Combat filter: skip casters not in combat (idle mobs casting nearby).
+    -- ⚠ targetedListHideOutOfCombat DEFAULTS TO TRUE, and a mob whose opening move is
+    -- a cast is not flagged in combat yet — so the pull-opener, often the cast you
+    -- most want to see, is dropped here on a default profile.
     local party = DF.db and DF.db.party
     if party and party.targetedListHideOutOfCombat then
-        if not TL_UnitAffectingCombat(casterUnit) then return end
+        if not TL_UnitAffectingCombat(casterUnit) then
+            drop("caster not in combat (Hide Out of Combat is on)")
+            return
+        end
     end
 
     -- Targeting filter: check if the cast targets a party member.
@@ -2538,11 +2631,14 @@ local function TargetedList_DelayedPickup(casterUnit, isChannel, eventSpellId)
 
     if hasTarget then
         -- Has a target — check if it's a party member
-        if not TargetedList_CastTargetIsPartyMember(casterUnit) then
+        local targetOk, targetWhy = TargetedList_CastTargetIsPartyMember(casterUnit)
+        if not targetOk then
+            drop(targetWhy)
             return
         end
     elseif not showUntargeted then
         -- No target and untargeted display is off — skip
+        drop("cast has no target and Show Untargeted is off")
         return
     end
     -- If hasTarget is false and showUntargeted is true, we fall through
@@ -2565,7 +2661,10 @@ local function TargetedList_DelayedPickup(casterUnit, isChannel, eventSpellId)
     --   * The debug log can only print clean values (casterUnit, the
     --     channel flag, the event name). No spell name.
     local spellId = eventSpellId
-    if spellId == nil then return end
+    if spellId == nil then
+        drop("no spellId in the event payload")
+        return
+    end
 
     -- Re-detect cast vs channel at pickup time. The 0.2s delay means
     -- a cast may have transitioned to a channel since the START event.
@@ -2662,8 +2761,36 @@ end
 -- visible cost is missing a bar when a nameplate enters range while
 -- the mob is mid-cast (gap bounded by the cast remaining duration).
 local function TargetedList_ProcessCastStart(casterUnit, event, ...)
-    if not TargetedList_ShouldPickup() then return end
-    if not TargetedList_IsRelevantCaster(casterUnit) then return end
+    -- Structural check FIRST, and MOSTLY silent: it fires for every cast event in the
+    -- game — the player's, party members' — and tracing all of that would bury the
+    -- useful lines.
+    --
+    -- The one case worth surfacing is an ENEMY casting under a token that is not a
+    -- nameplate ("target", "focus", "boss1", "arena2"...). Blizzard registers nameplate
+    -- castbars per-unit (Blizzard_UnitFrame/UnitFrame.lua:97 RegisterUnitEvent with the
+    -- nameplate token), so nameplateN should receive these events — but this feature is
+    -- nameplate-ONLY, so if events ever arrive under a different token for the same mob
+    -- the cast is dropped here with no other symptom. Low volume (enemies only, once
+    -- per cast) and it directly answers "I watched it cast and got nothing".
+    local relevant, relevantWhy = TargetedList_IsRelevantCaster(casterUnit)
+    if not relevant then
+        if relevantWhy == "not a nameplate unit"
+           and type(casterUnit) == "string"
+           and TL_UnitExists(casterUnit)
+           and TL_UnitCanAttack("player", casterUnit)
+           and DF.DebugActive and DF:DebugActive("TARGETEDLIST") then
+            DF:Debug("TARGETEDLIST", "ignored %s: enemy cast arrived on a non-nameplate token", casterUnit)
+        end
+        return
+    end
+
+    local pickupOk, pickupWhy = TargetedList_ShouldPickup()
+    if not pickupOk then
+        if DF.DebugActive and DF:DebugActive("TARGETEDLIST") then
+            DF:Debug("TARGETEDLIST", "skip %s at START: %s", casterUnit, pickupWhy)
+        end
+        return
+    end
     if not TL_C_Timer_After then return end
 
     local isChannel
@@ -3520,6 +3647,18 @@ local function TargetedList_ApplyBarContent(bar, activeRec)
     if party and party.targetedListImportantOnly
        and TL_C_Spell_IsSpellImportant
        and bar.SetShownFromBoolean then
+        -- ⚠ THE LOG CANNOT TELL YOU WHETHER THIS BAR ENDED UP VISIBLE. isImportant is
+        -- a SECRET value: SetShownFromBoolean consumes it inside the engine and Lua may
+        -- never inspect it. So with this filter on, a cast logs a normal "+cast" and
+        -- then silently renders invisible if the spell is not flagged important.
+        --
+        -- That combination — accepted in the log, absent on screen, no drop reason
+        -- anywhere — is exactly what made "the Targeted List misses casts" hard to
+        -- pin down. Trace the fact that the filter is deciding, since we cannot trace
+        -- its verdict.
+        if DF.DebugActive and DF:DebugActive("TARGETEDLIST") then
+            DF:Debug("TARGETEDLIST", "  ^ important-only filter is ON: visibility set from a secret value we cannot read")
+        end
         local isImportant = TL_C_Spell_IsSpellImportant(spellId)
         bar:SetShownFromBoolean(isImportant, true, false)
     else
