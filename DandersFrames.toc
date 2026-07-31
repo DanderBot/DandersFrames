@@ -139,6 +139,12 @@ Features\Dispel.lua
 # Aura Designer
 AuraDesigner\Config.lua
 AuraDesigner\AuraAdapter.lua
+# Migrations rewrite SAVED DATA, so they stay resident even once the editor
+# below becomes load-on-demand. Core.lua runs them on ADDON_LOADED and
+# Factory.lua on the render path -- both guarded, so an unloaded editor would
+# not error, it would silently skip and leave saved data unmigrated.
+# ☠ Must load after AuraAdapter.lua: it reads DF.AuraDesigner.Adapter at file scope.
+AuraDesigner\Migrations.lua
 AuraDesigner\Engine.lua
 AuraDesigner\Factory.lua
 AuraDesigner\SoundEngine.lua
