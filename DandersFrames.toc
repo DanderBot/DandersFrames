@@ -72,7 +72,14 @@ Debug\AttachmentScan.lua
 
 # GUI System
 GUI\IconLib.lua
+# GUI toolkit, split from one 13k-line file. Order is load-bearing: GUI.lua
+# creates the GUI table plus GUI._state / GUI._priv, which every later part
+# re-declares aliases from.
 GUI\GUI.lua
+GUI\Sections.lua
+GUI\Widgets.lua
+GUI\Controls.lua
+GUI\Panel.lua
 GUI\DFFonts.lua
 GUI\ColorPicker.lua
 Features\Search.lua
