@@ -2223,9 +2223,6 @@ function DF:HideTestFrames(silent)
             if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
             if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
             if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-            if DF.HideAllTargetedSpells then
-                DF:HideAllTargetedSpells(frame)
-            end
         end
     end
 
@@ -2469,9 +2466,6 @@ function DF:HideRaidTestFrames()
             if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
             if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
             if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-            if DF.HideAllTargetedSpells then
-                DF:HideAllTargetedSpells(frame)
-            end
         end
     end
 
@@ -3367,327 +3361,9 @@ function DF:UpdateAllTestDefensiveBar()
 end
 
 
--- ============================================================
--- TEST MODE: TARGETED SPELLS
--- ============================================================
-
-function DF:UpdateTestTargetedSpell(frame, testData)
-    if not frame then return end
-    
-    local db = DF:GetFrameDB(frame)
-    
-    -- Show icons on all frames in test mode
-    local showIcon = testData ~= nil
-    
-    if db.targetedSpellEnabled and showIcon then
-        -- Use max icons setting, with variation per frame based on index
-        local maxIcons = db.targetedSpellMaxIcons or 5
-        local frameIndex = testData.index or 0
-        -- Each frame shows between 1 and maxIcons (varies by frame for visual variety)
-        local numTestIcons = math.max(1, ((frameIndex % maxIcons) + 1))
-        
-        -- Ensure icon pool exists using the proper creation function
-        if DF.EnsureTargetedSpellIconPool then
-            DF:EnsureTargetedSpellIconPool(frame, numTestIcons)
-        else
-            -- Fallback if function not available yet
-            if not frame.targetedSpellIcons then
-                frame.targetedSpellIcons = {}
-            end
-            if not frame.dfActiveTargetedSpells then
-                frame.dfActiveTargetedSpells = {}
-            end
-        end
-        
-        -- Test spells - include important, non-important, and one interrupted
-        local testSpells = {
-            {id = 686, name = "Shadow Bolt", texture = "Interface\\Icons\\Spell_Shadow_ShadowBolt", isImportant = true, isInterrupted = false},
-            {id = 348, name = "Immolate", texture = "Interface\\Icons\\Spell_Fire_Immolation", isImportant = false, isInterrupted = false},
-            {id = 172, name = "Corruption", texture = "Interface\\Icons\\Spell_Shadow_AbominationExplosion", isImportant = true, isInterrupted = true},  -- Interrupted example
-            {id = 980, name = "Agony", texture = "Interface\\Icons\\Spell_Shadow_CurseOfSargeras", isImportant = false, isInterrupted = false},
-            {id = 30108, name = "Unstable Affliction", texture = "Interface\\Icons\\Spell_Shadow_UnstableAffliction_3", isImportant = true, isInterrupted = false},
-        }
-        
-        -- Get all settings
-        local borderColor = db.targetedSpellBorderColor or {r = 1, g = 0.3, b = 0}
-        local borderSize = db.targetedSpellBorderSize or 2
-        local showBorder = db.targetedSpellShowBorder ~= false
-        local showSwipe = not db.targetedSpellHideSwipe
-        local showDuration = db.targetedSpellShowDuration ~= false
-        local durationFont = db.targetedSpellDurationFont or "Fonts\\FRIZQT__.TTF"
-        local durationScale = db.targetedSpellDurationScale or 1.0
-        local durationOutline = db.targetedSpellDurationOutline or "OUTLINE"
-        local durationX = db.targetedSpellDurationX or 0
-        local durationY = db.targetedSpellDurationY or 0
-        local durationColor = db.targetedSpellDurationColor or {r = 1, g = 1, b = 1}
-        local alpha = db.targetedSpellAlpha or 1.0
-        
-        -- Apply health-based or OOR alpha in test mode
-        if frame.dfTestHealthFadeAlphas and frame.dfTestHealthFadeAlphas.targetedSpell then
-            alpha = alpha * frame.dfTestHealthFadeAlphas.targetedSpell
-        elseif frame.dfTestOORAlphas and frame.dfTestOORAlphas.targetedSpell then
-            alpha = alpha * frame.dfTestOORAlphas.targetedSpell
-        end
-        
-        local iconSize = db.targetedSpellSize or 28
-        local scale = db.targetedSpellScale or 1.0
-        local anchor = db.targetedSpellAnchor or "LEFT"
-        local x = db.targetedSpellX or -30
-        local y = db.targetedSpellY or 0
-        local growthDirection = db.targetedSpellGrowth or "DOWN"
-        local spacing = db.targetedSpellSpacing or 2
-        local frameLevel = db.targetedSpellFrameLevel or 30
-        local highlightImportant = db.targetedSpellHighlightImportant ~= false
-
-        if durationOutline == "NONE" then durationOutline = "" end
-        
-        -- Apply pixel perfect
-        if db.pixelPerfect then
-            iconSize = DF:PixelPerfect(iconSize)
-            spacing = DF:PixelPerfect(spacing)
-            borderSize = DF:PixelPerfect(borderSize)
-        end
-        
-        -- Apply scale
-        local scaledSize = iconSize * scale
-        local scaledSpacing = spacing * scale
-        local fontSize = 10 * durationScale
-        
-        for i = 1, numTestIcons do
-            local testGUID = "test-caster-" .. i
-            
-            local icon = frame.targetedSpellIcons[i]
-            if not icon then
-                -- Icon pool wasn't created properly, skip
-                break
-            end
-            
-            local spell = testSpells[i] or testSpells[1]  -- Fall back to first spell if index exceeds
-            
-            -- Get texture
-            local texture = spell.texture
-            if C_Spell and C_Spell.GetSpellTexture then
-                local spellTexture = C_Spell.GetSpellTexture(spell.id)
-                if spellTexture then texture = spellTexture end
-            end
-            
-            icon.icon:SetTexture(texture)
-            icon.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-            
-            -- Handle interrupted spell differently
-            local showInterrupted = db.targetedSpellShowInterrupted and spell.isInterrupted
-            
-            if showInterrupted then
-                -- Show as interrupted
-                icon.icon:SetDesaturated(true)
-                
-                -- Get interrupted visual settings
-                local tintColor = db.targetedSpellInterruptedTintColor or {r = 1, g = 0, b = 0}
-                local tintAlpha = db.targetedSpellInterruptedTintAlpha or 0.5
-                local showX = db.targetedSpellInterruptedShowX ~= false
-                local xColor = db.targetedSpellInterruptedXColor or {r = 1, g = 0, b = 0}
-                local xSize = db.targetedSpellInterruptedXSize or 16
-                
-                -- Apply tint
-                if icon.interruptTint then
-                    icon.interruptTint:SetColorTexture(tintColor.r, tintColor.g, tintColor.b, tintAlpha)
-                end
-                
-                -- Apply X mark settings
-                if icon.interruptX then
-                    if showX then
-                        icon.interruptX:Show()
-                        icon.interruptX:SetTextColor(xColor.r, xColor.g, xColor.b, 1)
-                        DF:SafeSetFont(icon.interruptX, nil, xSize, "OUTLINE")
-                    else
-                        icon.interruptX:Hide()
-                    end
-                end
-                
-                if icon.interruptOverlay then
-                    icon.interruptOverlay:Show()
-                end
-                
-                -- Hide cooldown and duration for interrupted
-                if icon.cooldown then
-                    icon.cooldown:Clear()
-                end
-                if icon.durationText then
-                    icon.durationText:Hide()
-                end
-                icon.dfTestTimer = nil  -- interrupted icons don't count down
-            else
-                -- Normal spell display
-                icon.icon:SetDesaturated(false)
-
-                if icon.interruptOverlay then
-                    icon.interruptOverlay:Hide()
-                end
-
-                -- Animate the preview timer: the container OnUpdate loops this
-                -- fake countdown (live timers use a durationObject test lacks).
-                icon.durationColor = durationColor
-                icon.dfTestTimer = { duration = 3, offset = i * 0.5 }
-                
-                -- Cooldown on icon
-                if icon.cooldown then
-                    local duration = 3
-                    local elapsed = (GetTime() + i * 0.5) % duration  -- Offset each icon
-                    local startTime = GetTime() - elapsed
-                    icon.cooldown:SetCooldown(startTime, duration)
-                    icon.cooldown:SetDrawSwipe(showSwipe)
-                    icon.cooldown:SetHideCountdownNumbers(true)  -- We use custom text
-                end
-                
-                -- Custom duration text
-                if icon.durationText then
-                    if showDuration then
-                        icon.durationText:Show()
-                        DF:SafeSetFont(icon.durationText, durationFont, fontSize, durationOutline)
-                        icon.durationText:ClearAllPoints()
-                        icon.durationText:SetPoint("CENTER", icon.iconFrame, "CENTER", durationX, durationY)
-                        
-                        -- Show sample duration for preview
-                        local remaining = 3 - ((GetTime() + i * 0.5) % 3)
-                        icon.durationText:SetText(string.format("%.1f", remaining))
-                        
-                        -- Apply duration color
-                        icon.durationText:SetTextColor(durationColor.r, durationColor.g, durationColor.b, 1)
-                    else
-                        icon.durationText:Hide()
-                    end
-                end
-            end
-            
-            -- Apply important spell highlight (show on important spells, including
-            -- interrupted ones). Mirrors live ApplyIconSettings: the highlight is
-            -- its own DF.Border (full toolkit via BuildSpec on the
-            -- targetedSpellImportant* keys), gated by the Highlight Important
-            -- Spells master toggle. Overlay lazily allocated.
-            if icon.highlightFrame then
-                if icon.highlight then icon.highlight:Hide() end
-                icon.highlightBorder = icon.highlightBorder or DF.Border:New(icon.highlightFrame)
-                if highlightImportant and spell.isImportant then
-                    -- Inset owned by the engine (BuildSpec spec.inset); frame
-                    -- offset is inset-independent so the band stays centred.
-                    local hlSize  = db.targetedSpellImportantBorderSize or 3
-                    local offset  = borderSize + hlSize
-                    icon.highlightFrame:ClearAllPoints()
-                    icon.highlightFrame:SetPoint("TOPLEFT", icon.iconFrame, "TOPLEFT", -offset, offset)
-                    icon.highlightFrame:SetPoint("BOTTOMRIGHT", icon.iconFrame, "BOTTOMRIGHT", offset, -offset)
-                    icon.highlightFrame:SetAlpha(1)
-                    icon.highlightFrame:Show()
-                    local spec = DF.Border:BuildSpec(db, "targetedSpellImportant", { iconMode = true })
-                    spec.enabled = true
-                    DF.Border:Apply(icon.highlightBorder, spec)
-                else
-                    DF.Border:Apply(icon.highlightBorder, { enabled = false })
-                    icon.highlightFrame:Hide()
-                end
-            end
-            
-            -- Border via the unified DF.Border backend (iconMode), mirroring live
-            -- ApplyIconSettings. The live create path replaced the old 4 edge
-            -- textures with a DF.Border, so test mode must render the same way.
-            icon.border = icon.border or DF.Border:New(icon.iconFrame)
-            local bspec = DF.Border:BuildSpec(db, "targetedSpell", { iconMode = true })
-            bspec.enabled = showBorder
-            bspec.size = borderSize
-            DF.Border:Apply(icon.border, bspec)
-            do
-                local ai = showBorder and borderSize or 0
-                if icon.icon then
-                    icon.icon:ClearAllPoints()
-                    icon.icon:SetPoint("TOPLEFT", icon.iconFrame, "TOPLEFT", ai, -ai)
-                    icon.icon:SetPoint("BOTTOMRIGHT", icon.iconFrame, "BOTTOMRIGHT", -ai, ai)
-                end
-                if icon.cooldown then
-                    icon.cooldown:ClearAllPoints()
-                    icon.cooldown:SetPoint("TOPLEFT", icon.iconFrame, "TOPLEFT", ai, -ai)
-                    icon.cooldown:SetPoint("BOTTOMRIGHT", icon.iconFrame, "BOTTOMRIGHT", -ai, ai)
-                end
-            end
-            -- Hide any legacy edge textures left on a pooled icon.
-            if icon.borderLeft then icon.borderLeft:Hide() end
-            if icon.borderRight then icon.borderRight:Hide() end
-            if icon.borderTop then icon.borderTop:Hide() end
-            if icon.borderBottom then icon.borderBottom:Hide() end
-            
-            icon:SetAlpha(alpha)
-            icon:Show()
-            
-            -- Hide cast bar (removed feature)
-            if icon.castBar then
-                icon.castBar:Hide()
-            end
-            
-            frame.dfActiveTargetedSpells[testGUID] = i
-        end
-        
-        -- Position all icons
-        for i = 1, numTestIcons do
-            local icon = frame.targetedSpellIcons[i]
-            if icon then
-                local offsetX, offsetY = 0, 0
-                local index = i - 1
-                
-                if growthDirection == "UP" then
-                    offsetY = index * (scaledSize + scaledSpacing)
-                elseif growthDirection == "DOWN" then
-                    offsetY = -index * (scaledSize + scaledSpacing)
-                elseif growthDirection == "LEFT" then
-                    offsetX = -index * (scaledSize + scaledSpacing)
-                elseif growthDirection == "RIGHT" then
-                    offsetX = index * (scaledSize + scaledSpacing)
-                elseif growthDirection == "CENTER_H" then
-                    -- Grow horizontally from center
-                    local centerOffset = (numTestIcons - 1) * (scaledSize + scaledSpacing) / 2
-                    offsetX = index * (scaledSize + scaledSpacing) - centerOffset
-                elseif growthDirection == "CENTER_V" then
-                    -- Grow vertically from center
-                    local centerOffset = (numTestIcons - 1) * (scaledSize + scaledSpacing) / 2
-                    offsetY = index * (scaledSize + scaledSpacing) - centerOffset
-                end
-                
-                icon:ClearAllPoints()
-                icon:SetPoint(anchor, frame, anchor, x + offsetX, y + offsetY)
-                icon:SetSize(scaledSize, scaledSize)
-                
-                -- Set frame level
-                icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel + i)
-                
-                icon.iconFrame:SetSize(scaledSize, scaledSize)
-                icon.iconFrame:ClearAllPoints()
-                icon.iconFrame:SetPoint("CENTER", icon, "CENTER", 0, 0)
-                
-                -- Hide cast bar (removed feature)
-                if icon.castBar then
-                    icon.castBar:Hide()
-                end
-            end
-        end
-        
-        -- Hide extra icons beyond numTestIcons
-        if frame.targetedSpellIcons then
-            for i = numTestIcons + 1, #frame.targetedSpellIcons do
-                local icon = frame.targetedSpellIcons[i]
-                if icon then
-                    icon:Hide()
-                end
-            end
-        end
-    else
-        -- Hide all test icons
-        if frame.targetedSpellIcons then
-            for _, icon in ipairs(frame.targetedSpellIcons) do
-                icon:Hide()
-            end
-        end
-        if frame.dfActiveTargetedSpells then
-            wipe(frame.dfActiveTargetedSpells)
-        end
-    end
-end
+-- (Removed) TEST MODE: TARGETED SPELLS — the on-frame test painter
+-- (DF:UpdateTestTargetedSpell). Orphaned once UpdateAllTestTargetedSpell stopped
+-- driving it; the group-frame display it previewed is gone.
 
 -- Targeted List demo bars in test mode. This is a single global
 -- container (not per-frame), so the update function just toggles the
@@ -3711,47 +3387,13 @@ function DF:UpdateAllTestTargetedList()
     end
 end
 
+-- ⚠ Despite the name this is NOT group-only, which is why it survives the removal
+-- of the group-frame Targeted Spells display. It also drives the PERSONAL preview
+-- and the Targeted List demo bars, and is called from four places.
+-- (Removed) the group half: the UpdateFrame closure that painted on-frame icons,
+-- and the party/raid frame loops that existed only to drive it.
 function DF:UpdateAllTestTargetedSpell()
-    local function UpdateFrame(frame, testData, isRaid)
-        if not frame then return end
-        local db = DF:GetFrameDB(frame)
-
-        -- Group Targeted Spells are PARTY-ONLY: the cast->target match is
-        -- fingerprint-based and "Raid is intentionally unsupported (collisions are
-        -- near-total)" (Features/TargetedSpells.lua). So the raid preview must never
-        -- draw them, whatever the raid profile's toggles say. This guard was claimed
-        -- in the old comment but never actually implemented, so raid test frames kept
-        -- painting icons for a feature that does nothing live.
-        if not isRaid and db.targetedSpellEnabled and db.testShowTargetedSpell ~= false then
-            DF:UpdateTestTargetedSpell(frame, testData)
-        else
-            -- Hide all icons and their highlights (new multi-icon system)
-            if frame.targetedSpellIcons then
-                for _, icon in ipairs(frame.targetedSpellIcons) do
-                    icon:Hide()
-                    -- Also hide pinned frame if it exists
-                    if icon.highlightFrame then
-                        icon.highlightFrame:Hide()
-                        if icon.highlightBorder then DF.Border:Apply(icon.highlightBorder, { enabled = false }) end
-                    end
-                end
-            end
-            if frame.dfActiveTargetedSpells then
-                wipe(frame.dfActiveTargetedSpells)
-            end
-        end
-    end
-    
-    -- Update party test frames
     if DF.testMode then
-        for i = 0, 4 do
-            local frame = DF.testPartyFrames[i]
-            if frame then
-                local testData = DF:GetTestUnitData(i, false)
-                UpdateFrame(frame, testData)
-            end
-        end
-        
         -- Update personal targeted spells display in test mode
         local db = DF:GetDB()
         if db.personalTargetedSpellEnabled and db.testShowPersonalTargeted ~= false and DF.ShowTestPersonalTargetedSpells then
@@ -3766,19 +3408,12 @@ function DF:UpdateAllTestTargetedSpell()
         end
     end
 
-    -- Update raid test frames
     if DF.raidTestMode then
         local raidDb = DF:GetRaidDB()
-        local testFrameCount = raidDb.raidTestFrameCount or 10
-        for i = 1, testFrameCount do
-            local frame = DF.testRaidFrames[i]
-            if frame then
-                local testData = DF:GetTestUnitData(i, true)
-                UpdateFrame(frame, testData, true)   -- isRaid: group targeted spells forced off
-            end
-        end
+        -- (Removed) the raid frame loop — it only called the group-frame painter, and
+        -- group Targeted Spells were party-only anyway (raid was forced off).
 
-        -- Also show personal targeted spells in raid test mode. Personal Targeted is a
+        -- Show personal targeted spells in raid test mode. Personal Targeted is a
         -- player-screen overlay with PER-MODE settings, so the raid preview must gate on
         -- the RAID profile — this read DF:GetDB() (party), so the raid panel's toggle was
         -- ignored and the party value decided it instead.

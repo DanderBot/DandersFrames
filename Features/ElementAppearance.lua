@@ -1034,36 +1034,10 @@ function DF:UpdateDefensiveIconAppearance(frame)
     end
 end
 
--- ============================================================
--- TARGETED SPELL CONTAINER APPEARANCE
--- ⚰ DEPRECATED-TARGETED-SPELLS — goes with the on-frame feature. This is the
--- GROUP container only; Personal Targeted does not come through here. See the
--- block comment at the top of Features\TargetedSpells.lua.
--- ============================================================
-
-function DF:UpdateTargetedSpellAppearance(frame)
-    if not IsDandersFrame(frame) then return end
-    if not frame.targetedSpellContainer then return end
-    
-    -- PERF: Skip if container isn't visible
-    if not frame.targetedSpellContainer:IsShown() then return end
-    
-    local db = GetDB(frame)
-    if not db then return end
-    
-    if DF.testMode or DF.raidTestMode then return end
-    
-    local inRange = GetInRange(frame)
-    
-    local alpha = 1.0
-
-    if db.oorEnabled then
-        local oorAlpha = db.oorTargetedSpellAlpha or 0.5
-        ApplyOORAlpha(frame.targetedSpellContainer, inRange, alpha, oorAlpha)
-    else
-        frame.targetedSpellContainer:SetAlpha(alpha)
-    end
-end
+-- (Removed) TARGETED SPELL CONTAINER APPEARANCE — DF:UpdateTargetedSpellAppearance
+-- and its DF.UpdateTargetedSpellAlpha alias. It faded frame.targetedSpellContainer,
+-- which no longer exists; this was the GROUP container only, and Personal Targeted
+-- never came through here.
 
 -- ============================================================
 -- AURA DESIGNER INDICATORS APPEARANCE
@@ -1207,7 +1181,6 @@ function DF:UpdateAllElementAppearances(frame)
     DF:UpdateHealAbsorbBarAppearance(frame)
     DF:UpdateHealPredictionBarAppearance(frame)
     DF:UpdateDefensiveIconAppearance(frame)
-    DF:UpdateTargetedSpellAppearance(frame)
 end
 
 -- ============================================================
@@ -1268,5 +1241,4 @@ DF.UpdateReadyCheckIconAlpha = DF.UpdateReadyCheckIconAppearance
 DF.UpdateDispelOverlayAlpha = DF.UpdateDispelOverlayAppearance
 DF.UpdateMissingBuffAlpha = DF.UpdateMissingBuffAppearance
 DF.UpdateDefensiveIconAlpha = DF.UpdateDefensiveIconAppearance
-DF.UpdateTargetedSpellAlpha = DF.UpdateTargetedSpellAppearance
 DF.UpdateFrameAlpha = DF.UpdateFrameAppearance

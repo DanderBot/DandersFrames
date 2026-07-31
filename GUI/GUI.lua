@@ -12524,10 +12524,6 @@ function DF:CreateGUI()
             -- Tab switching uses the cache-aware path so revisiting a tab is cheap.
             GUI.Pages[name]:RefreshCached()
             if GUI.Pages[name].RefreshStates then GUI.Pages[name]:RefreshStates() end
-            -- Reapply picker overlays if in picker mode
-            if DF.settingsPickerMode and DF.ApplyPickerOverlaysToCurrentPage then
-                C_Timer.After(0.05, function() DF:ApplyPickerOverlaysToCurrentPage() end)
-            end
         end
         local nc = GetThemeColor()
         if GUI.Tabs[name] then

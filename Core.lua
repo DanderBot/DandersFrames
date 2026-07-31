@@ -5781,12 +5781,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- neither run nor be configured, and its "Open settings" button would
         -- land on a page with no nav row.
         --
-        -- DF:ShowTargetedSpellSetupWizard itself is untouched in
-        -- Features\TargetedSpells.lua — only the auto-fire is gone. Restoring it
-        -- means putting this block back, with its 5s delay, its retry-if-a-popup-
-        -- is-up loop, and the mark-seen-at-schedule-time behaviour (so a cancel
-        -- still counts and doesn't re-nag next login). The saved flag
-        -- DandersFramesDB_v2.targetedSpellWizardSeen is deliberately left alone.
+        -- 2026-07-30: DF:ShowTargetedSpellSetupWizard is now gone too, with the rest
+        -- of the group-frame feature, so there is nothing left to restore here. The
+        -- saved flag DandersFramesDB_v2.targetedSpellWizardSeen is deliberately left
+        -- alone (stripping saved keys is a separate call).
 
     elseif event == "GROUP_ROSTER_UPDATE" then
         if DF.RosterDebugEvent then DF:RosterDebugEvent("Core.lua:GROUP_ROSTER_UPDATE") end
@@ -5962,9 +5960,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
                         if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
                         if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-                        if DF.HideAllTargetedSpells then
-                            DF:HideAllTargetedSpells(frame)
-                        end
                     end
                 end
                 if DF.testPartyContainer then
@@ -5986,9 +5981,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
                         if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
                         if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-                        if DF.HideAllTargetedSpells then
-                            DF:HideAllTargetedSpells(frame)
-                        end
                     end
                 end
                 if DF.testRaidContainer then
@@ -6438,65 +6430,9 @@ function DF:FullProfileRefresh()
     end
 end
 
--- ============================================================
--- WIZARD SETTINGS APPLICATION
--- Used by the popup wizard system to apply data-driven settings
--- maps from user-created wizards (WizardBuilder)
--- ============================================================
-
-local strsplit = strsplit
-
--- Set a DB value using dot-notation path (e.g., "party.frameWidth")
-function DF:SetDBKeyByPath(path, value)
-    local mode, key = path:match("^(%w+)%.(.+)$")
-    if mode and key and DF.db and DF.db[mode] then
-        DF.db[mode][key] = value
-    end
-end
-
--- Get a DB value using dot-notation path
-function DF:GetDBKeyByPath(path)
-    local mode, key = path:match("^(%w+)%.(.+)$")
-    if mode and key and DF.db and DF.db[mode] then
-        return DF.db[mode][key]
-    end
-    return nil
-end
-
--- Apply a wizard's settingsMap based on collected answers
--- settingsMap format: { stepId = { answerValue = { ["mode.dbKey"] = newValue, ... } } }
-function DF:ApplyWizardSettingsMap(settingsMap, answers)
-    if not settingsMap or not answers then return end
-
-    for stepId, answerValue in pairs(answers) do
-        local stepMap = settingsMap[stepId]
-        if stepMap then
-            if type(answerValue) == "table" then
-                -- Multi-select: apply settings for each selected value
-                for _, val in ipairs(answerValue) do
-                    local changes = stepMap[val]
-                    if changes then
-                        for dbKeyPath, newValue in pairs(changes) do
-                            DF:SetDBKeyByPath(dbKeyPath, newValue)
-                        end
-                    end
-                end
-            else
-                -- Single-select: apply settings for the selected value
-                local changes = stepMap[answerValue]
-                if changes then
-                    for dbKeyPath, newValue in pairs(changes) do
-                        DF:SetDBKeyByPath(dbKeyPath, newValue)
-                    end
-                end
-            end
-        end
-    end
-
-    -- Refresh everything after applying settings
-    DF:UpdateAll("WizardApply")
-end
-
+-- (Removed) WIZARD SETTINGS APPLICATION — DF:ApplyWizardSettingsMap and its
+-- orphaned local strsplit. It applied a wizard's settingsMap to the DB, was
+-- called only from the popup wizard's CompleteWizard, and went with that runtime.
 -- ============================================================
 -- MINIMAP BUTTON (using LibDBIcon)
 -- ============================================================
