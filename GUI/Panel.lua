@@ -11,8 +11,8 @@ local ResolveRowHeight = GUI.ResolveRowHeight
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
 local SnapLenUp = GUI.SnapLenUp
-local CreateElementBackdrop = GUI.CreateElementBackdrop
-local CreatePanelBackdrop = GUI.CreatePanelBackdrop
+local CreateElementBackdrop = GUI._priv.CreateElementBackdrop
+local CreatePanelBackdrop = GUI._priv.CreatePanelBackdrop
 local StyleScrollBar = GUI.StyleScrollBar
 local RefreshAllOverrideIndicators = GUI.RefreshAllOverrideIndicators
 function DF:CreateGUI()

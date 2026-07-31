@@ -11,7 +11,7 @@ local C_BACKGROUND, C_TEXT, C_TEXT_DIM =
 local ResolveRowHeight = GUI.ResolveRowHeight
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
-local CreateElementBackdrop = GUI.CreateElementBackdrop
+local CreateElementBackdrop = GUI._priv.CreateElementBackdrop
 
 function GUI:CreateSettingsGroup(parent, width, opts)
     -- opts can be a boolean (legacy: collapsible) or a table { collapsible, showSummary, onCollapseChanged }

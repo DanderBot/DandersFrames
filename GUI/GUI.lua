@@ -1654,6 +1654,14 @@ local function CreatePanelBackdrop(frame)
         borderColor = { 0, 0, 0, 1 },
     })
 end
+-- ☠ These two MUST be published here, on the private table, not aliased from
+-- GUI.CreateElementBackdrop / GUI.CreatePanelBackdrop. Those public names are
+-- METHOD WRAPPERS (`function GUI:X(...) return X(...) end`) declared later in
+-- GUI/Widgets.lua -- a different object that happens to share the name. A
+-- sibling part aliasing the wrapper gets nil at load time, and if it did not,
+-- the wrapper would end up calling itself.
+P.CreateElementBackdrop = CreateElementBackdrop
+P.CreatePanelBackdrop   = CreatePanelBackdrop
 
 -- Style a ScrollFrameTemplate scrollbar to use the pill-shaped thumb
 -- All scroll frames must use ScrollFrameTemplate (not UIPanelScrollFrameTemplate)

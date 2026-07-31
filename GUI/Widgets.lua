@@ -13,8 +13,8 @@ local GetThemeColorFor = GUI.GetThemeColorFor
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
 local SnapHeightEven = GUI.SnapHeightEven
-local CreateElementBackdrop = GUI.CreateElementBackdrop
-local CreatePanelBackdrop = GUI.CreatePanelBackdrop
+local CreateElementBackdrop = GUI._priv.CreateElementBackdrop
+local CreatePanelBackdrop = GUI._priv.CreatePanelBackdrop
 local StyleScrollBar = GUI.StyleScrollBar
 local INFO_BANNER_TONES = GUI._priv.INFO_BANNER_TONES
 
