@@ -608,6 +608,14 @@ end
 
 function DF:ExportProfile(categories, frameTypes, profileName)
     local L = DF.L
+    -- Selective export reads the category tables, which live in the companion
+    -- (~85 KB only import/export ever touches). Export is a deliberate user
+    -- action, so load them; a FULL export (categories == nil, the shape the
+    -- external DandersFrames_Export API uses) never needs them -- don't make
+    -- Wago pack exports pay for the panel.
+    if categories and not DF.ExportCategories and DF.EnsureOptionsLoaded then
+        if not DF:EnsureOptionsLoaded() then return nil end
+    end
     local LibSerialize = LibStub and LibStub("LibSerialize", true)
     local LibDeflate = LibStub and LibStub("LibDeflate", true)
 
@@ -861,7 +869,11 @@ end
 -- Get info about what's in the import data
 function DF:GetImportInfo(importData)
     if not importData then return nil end
-    
+    -- Iterates DF.ExportCategories (companion-owned) unconditionally below.
+    if not DF.ExportCategories and DF.EnsureOptionsLoaded then
+        if not DF:EnsureOptionsLoaded() then return nil end
+    end
+
     local info = {
         version = self:GetImportVersion(importData),
         hasParty = importData.party ~= nil,
@@ -946,6 +958,14 @@ end
 function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTypes, newProfileName, createNewProfile, allowOverwrite)
     local L = DF.L
     if not importData then return false end
+
+    -- A SELECTIVE payload (importData.categories set) merges through the
+    -- category tables in the companion. Import is a deliberate user action --
+    -- and an external caller (Wago pack) could hand us a selective string with
+    -- the panel closed -- so load rather than nil-index. Full imports skip this.
+    if importData.categories and not DF.ExportCategories and DF.EnsureOptionsLoaded then
+        if not DF:EnsureOptionsLoaded() then return false end
+    end
 
     local importInfo = self:GetImportInfo(importData)
 

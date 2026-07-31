@@ -29,7 +29,18 @@
 #   AuraDesigner/UI/Options first            (creates _uiState and _priv)
 #   GUI/Pages/Options first                  (heads the page chain)
 
+# Selective import/export category tables. Only Profile.lua's selective
+# paths and the Modules page read these; both load this addon first.
+Core\ExportCategories.lua
+
+# Changelog text (~180 KB string, GENERATED from CHANGELOG.md). Only the panel
+# reads it, so it rides the companion; the stamped header stays resident.
+Changelog.lua
+
 # GUI parts used only by settings pages
+# /dficons dev icon browser. Its slash registers on load; the /df debug
+# dispatcher loads the companion on an unknown word, so first use still works.
+GUI\IconLib.lua
 # Widget factories the live addon never calls, lifted out of the resident
 # GUI.lua / Widgets.lua. Loads first: the parts below build pages with them.
 GUI\SettingsWidgets.lua
@@ -80,4 +91,6 @@ TestMode\TestMode.lua
 Debug\AuraExplorer.lua
 Debug\AtlasBrowser.lua
 Debug\MemoryTest.lua
+# Profiler window; engine and SetScript hook stay resident in Debug/Profiler.lua
+Debug\ProfilerUI.lua
 Debug\AttachmentScan.lua

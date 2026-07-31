@@ -1,4 +1,5 @@
-local addonName, DF = ...
+-- ☠ Companion addon: bind the parent table from the global, never `...`.
+local DF = DandersFrames
 
 -- Icon Library Preview
 -- Use /dficons to open the preview window

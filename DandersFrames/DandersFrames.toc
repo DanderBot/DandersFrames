@@ -54,7 +54,6 @@ DandersFrames.xml
 Core\Config.lua
 Core\Changelog.lua
 Core\Profile.lua
-Core\ExportCategories.lua
 Core.lua
 Designer\Presets.lua
 Core\RosterEvents.lua
@@ -75,7 +74,6 @@ Debug\Profiler.lua
 # Foreign-attachment scan (/df attached) — diagnoses other addons anchored to our frames
 
 # GUI System
-GUI\IconLib.lua
 # GUI toolkit, split from one 13k-line file. Order is load-bearing: GUI.lua
 # creates the GUI table plus GUI._state / GUI._priv, which every later part
 # re-declares aliases from.

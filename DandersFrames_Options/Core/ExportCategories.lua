@@ -1,4 +1,7 @@
-local addonName, DF = ...
+-- ☠ Companion addon: bind the parent table from the global, never `...`.
+-- Resident consumers (selective import/export in Core/Profile.lua) load this
+-- addon on demand before touching the tables below.
+local DF = DandersFrames
 
 -- ============================================================
 -- EXPORT/IMPORT CATEGORY DEFINITIONS

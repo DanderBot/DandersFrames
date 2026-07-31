@@ -5516,6 +5516,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
             elseif msg == "exportaudit" then
                 -- Dev: verify every Config default is export-categorised or
                 -- declared local-only (guards against export-list drift).
+                -- Category tables live in the companion.
+                if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
                 if DF.AuditExportCategories then
                     DF:AuditExportCategories()
                 end
