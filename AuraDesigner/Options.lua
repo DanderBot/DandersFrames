@@ -1857,8 +1857,9 @@ local GLOBAL_DEFAULT_MAP = {
 -- are secret (PTR-5), and out-of-combat-only animation is worthless for an expiry warning.
 -- `include` (optional) selects which reveal types + controls apply to this indicator's shape:
 -- square indicators (icon/square) pass nil (Border + Tint + Match); a rectangular one (bar)
--- passes { border = false, match = false } — Border distorts off-square, and a Tint auto-fills
--- so there's no Match / manual Size.
+-- passes { border = false, tint = false, match = false } — Border distorts off-square, and the
+-- |T tint is font-coupled so it collapses on a thin bar; a bar's expiry colour is its own fill
+-- (Duration Bar Color Mode), leaving Text/Glyph as the bar's alert types.
 local function AddExpiryAlertControls(g, parent, proxy, include)
     GUI:CreateExpirationControls(g, proxy, {
         parent        = parent,

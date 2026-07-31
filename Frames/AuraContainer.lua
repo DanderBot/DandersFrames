@@ -1095,6 +1095,13 @@ local function bindNative(slot, config)
                 local opts = {
                     showWhenHarmful = dispelSpec.showWhenHarmful ~= false,
                     showWhenHelpful = dispelSpec.showWhenHelpful == true,
+                    -- Supplying the letters ourselves takes ApplyDispelTypeText's
+                    -- customText branch, which SetText()+Show()s directly instead of
+                    -- calling AuraUtil.SetAuraSymbol — the only place the
+                    -- `colorblindMode` CVar is read. Same letters the game would use
+                    -- (they come from its own globals), minus the CVar dependency.
+                    -- See DF:GetGameDispelTextMap in Frames/Border.lua.
+                    customDispelTextMap = DF.GetGameDispelTextMap and DF:GetGameDispelTextMap() or nil,
                 }
                 -- 68914: SetAuraSymbol sits in the same "removed after 12.1" deprecation
                 -- block as SetAuraBorder, but unlike that one it is a PLAIN ALIAS —
@@ -2413,15 +2420,18 @@ function Handle:_paintTestSlot(slot, index)
     end
     -- Dispel symbol: no native SetAuraSymbol bind in test mode -> fake the colourblind
     -- letter ourselves (house rule: every native-driven region renders in test, or the
-    -- preview lies). Blizzard's per-locale DebuffTypeSymbol letters when available;
-    -- first-two-letters fallback. Live rendering ALSO needs the colorblindMode CVar —
-    -- the preview deliberately ignores that so the option is style-able without
-    -- flipping the CVar (the GUI tooltip + note carry the caveat).
+    -- preview lies) — there is no native bind to drive it on a fake aura.
+    -- ★ Reads the SAME map the live bind hands to customDispelTextMap
+    -- (DF:GetGameDispelTextMap), so preview and live show identical letters rather
+    -- than merely similar ones. Its predecessor derived them independently
+    -- (`debuffType:sub(1, 2)`), which agreed with live only by coincidence and only
+    -- in English. Live no longer depends on the colorblindMode CVar either, so the
+    -- two paths now genuinely match instead of the preview over-promising.
     if slot.dfSymbol then
         local sym
         if e.debuffType then
-            local t = DebuffTypeSymbol   -- FrameXML per-locale letter table (may not exist)
-            sym = (type(t) == "table" and t[e.debuffType]) or e.debuffType:sub(1, 2)
+            local map = DF.GetGameDispelTextMap and DF:GetGameDispelTextMap()
+            sym = map and map[e.debuffType]
         end
         slot.dfSymbol:SetText(sym or "")
         slot.dfSymbol:SetShown(sym and true or false)

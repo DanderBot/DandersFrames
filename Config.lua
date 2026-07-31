@@ -1154,9 +1154,9 @@ DF.PartyDefaults = {
     debuffImportantHighlight = false,         -- master toggle for the treatment below
     debuffImportantScale = 1.25,              -- icon size step for important debuffs (1 = same as the rest)
     debuffImportantBadge = true,              -- corner "!" badge
-    debuffImportantBadgeSize = 10,            -- badge diameter in px (drawn at the corner, overhanging by a third)
+    debuffImportantBadgeSize = 10,            -- badge diameter in px (centred inside the corner, inset by size/4)
     debuffImportantBadgePoint = "TOPRIGHT",   -- which icon corner the badge sits on
-    debuffImportantBadgeX = 0,                -- nudge from that corner (ADDED to the default overhang)
+    debuffImportantBadgeX = 0,                -- nudge from that corner (ADDED to the default inward inset)
     debuffImportantBadgeY = 0,
     debuffImportantBadgeColor = {r = 1, g = 0.616, b = 0.18, a = 1},   -- disc
     debuffImportantMarkColor = {r = 0.08, g = 0.055, b = 0.024, a = 1}, -- the "!" itself

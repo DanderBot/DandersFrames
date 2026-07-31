@@ -6232,28 +6232,26 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         stackCountGroup.disableChildrenOn = function(d) return not d.showDebuffs end
         Add(stackCountGroup, nil, 1)
 
-        -- Dispel Symbol Group (col1, under Stack Count) — the native colourblind
-        -- dispel-type letter, engine-written per aura (12.1 factory rows only; the
-        -- legacy renderer has no symbol source). The game draws it ONLY while
-        -- Colorblind Mode is on — the tooltip + caution note set that expectation;
-        -- test mode previews it regardless.
+        -- Dispel Text Group (col1, under Stack Count) — the dispel-type letters
+        -- ("Ma", "Po", …), engine-written per aura (12.1 factory rows only; the
+        -- legacy renderer has no source for them).
+        -- ★ 2026-07-31: no longer requires Colorblind Mode. The bind passes
+        -- customDispelTextMap, which takes Blizzard's direct SetText path instead of
+        -- the CVar-gated one (DF:GetGameDispelTextMap, Frames/Border.lua) — so the
+        -- old caution note and the CVar caveat in the tooltip are gone with it.
+        -- Renamed from "Dispel Symbol" the same day: that read as the dispel ICON,
+        -- which is a different native feature. DB keys stay debuffDispelSymbol*.
         local symbolGroup = GUI:CreateSettingsGroup(self.child, 280)
-        symbolGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Symbol"]), 40)
-        local symbolEnable = symbolGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Dispel Symbol"], db, "debuffDispelSymbolEnabled", function()
+        symbolGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Text"]), 40)
+        local symbolEnable = symbolGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Dispel Text"], db, "debuffDispelSymbolEnabled", function()
             self:RefreshStates()
             -- Region presence is structural (create-once) — full re-drive rebuilds the row.
             DF:InvalidateAuraLayout()
             DF:UpdateAllFrames()
         end), 30)
-        symbolEnable.tooltip = L["Shows a letter on each debuff indicating its dispel type. Requires Colorblind Mode to be enabled in WoW's Accessibility settings — without it the game does not draw the symbol."]
+        symbolEnable.tooltip = L["Shows a short letter code on each debuff for its dispel type — Ma for Magic, Po for Poison, and so on. Uses the game's own wording for your language."]
         symbolEnable.keepEnabled = true
         symbolEnable.disableOn = function(d) return not d.showDebuffs end
-        local symbolCVarNote = symbolGroup:AddWidget(GUI:CreateNote(self.child, L["Colorblind Mode is off, so the symbol will not appear in-game. Enable it in WoW's Accessibility settings."], {tone = "caution", width = 230}), 40)
-        symbolCVarNote.hideOn = function(d)
-            if not d.debuffDispelSymbolEnabled then return true end
-            local on = C_CVar and C_CVar.GetCVarBool and C_CVar.GetCVarBool("colorblindmode")
-            return on and true or false
-        end
         GUI:CreateTextControls(symbolGroup, db, "debuffDispelSymbol", {
             parent    = self.child,
             include   = { color = true },
@@ -6331,7 +6329,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         debuffBarEnable.disableOn = function(d) return not d.showDebuffs end
         durBarGroup.disableChildrenOn = function(d) return not d.showDebuffs or not d.debuffDurationBarEnabled end
         -- Where the bar sits, then what it looks like. One box rather than two:
-        -- every other optional element on this page (Stack Count, Dispel Symbol)
+        -- every other optional element on this page (Stack Count, Dispel Text)
         -- is a single box, and splitting only this one into geometry + style
         -- made the bar read as more of a feature than its neighbours while
         -- taking up half of column 2.

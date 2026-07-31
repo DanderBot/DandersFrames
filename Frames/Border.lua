@@ -495,6 +495,48 @@ function DF:GetGameDispelPalette()
     return pal
 end
 
+-- The dispel-type LETTERS ("Ma", "Po", …), read from the client's own localised
+-- globals so they match what WoW itself would draw, in every language.
+--
+-- ☠ WHY THIS EXISTS: Blizzard only draws these when the player's `colorblindMode`
+-- CVar is on — `AuraUtil.SetAuraSymbol` is the sole place that CVar is read, and it
+-- Hide()s the fontstring otherwise. But `SetDispelTypeText` takes a
+-- `customDispelTextMap`, and when a key resolves, `ApplyDispelTypeText` does
+-- SetText()+Show() DIRECTLY and never reaches SetAuraSymbol. Feeding it the same
+-- letters the game would have used therefore changes nothing visually while
+-- removing the CVar dependency entirely — and we never write the CVar itself
+-- (it is a global accessibility setting; not ours to touch).
+--
+-- Map key is `auraData.dispelName or "None"` (Blizzard_CustomAuraButton
+-- GetDispelTypeMapKey). ⚠ The generated API doc claims an EMPTY key covers auras
+-- with no dispel type — the code says otherwise; trust the code. In practice
+-- "None" is unreachable for us anyway: ShouldShowDispelTypeForAura rejects a nil
+-- dispelName before the text path unless `showWithoutDispelType` is passed.
+--
+-- Per-key fallthrough: a missing key falls back to the CVar-gated path for THAT
+-- type only, so the fallbacks below matter — a nil global must not silently
+-- reintroduce the gate.
+local DISPEL_TEXT_FALLBACK = {
+    Magic = "Ma", Curse = "Cu", Disease = "Di", Poison = "Po", Bleed = "Bl",
+}
+
+function DF:GetGameDispelTextMap()
+    if DF._gameDispelTextMap then return DF._gameDispelTextMap end
+    local map, sawGlobal = {}, false
+    for typeName, fb in pairs(DISPEL_TEXT_FALLBACK) do
+        local s = _G["DEBUFF_SYMBOL_" .. typeName:upper()]
+        if type(s) == "string" and s ~= "" then
+            map[typeName], sawGlobal = s, true
+        else
+            map[typeName] = fb
+        end
+    end
+    -- Only cache once the client's strings were actually available; a pre-load
+    -- read would otherwise freeze the fallbacks in for the session.
+    if sawGlobal then DF._gameDispelTextMap = map end
+    return map
+end
+
 function DF:GetDispelColorMap()
     if DF.dispelColorMap then return DF.dispelColorMap end
     if not CreateColor then return nil end
