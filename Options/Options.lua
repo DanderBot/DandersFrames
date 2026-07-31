@@ -6965,7 +6965,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             tlShowUntargeted.disableOn = HideTLOptions
             local tlHideOOC = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Out-of-Combat Casts"], db, "targetedListHideOutOfCombat", TargetedListUpdate), 30)
             tlHideOOC.disableOn = HideTLOptions
-            tlHideOOC.tooltip = L["Only show casts from enemies that are in combat. Filters out idle mobs casting nearby."]
+            tlHideOOC.tooltip = L["Hides the ambient spells idle NPCs cast while standing around: casts with no target, from an enemy that is not in combat. Casts aimed at you or a group member always show, so the opening cast of a pull is never hidden."]
+            -- Game CVar, not a profile key — bound straight to the CVar via
+            -- customGet/customSet so it cannot drift out of sync. See
+            -- DF:SetNameplateOffscreen for why both features depend on it.
+            local tlOffscreen = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Offscreen Nameplates"], nil, nil, nil,
+                function() return DF:GetNameplateOffscreen() end,
+                function(val) DF:SetNameplateOffscreen(val) end), 30)
+            tlOffscreen.disableOn = HideTLOptions
+            tlOffscreen.tooltip = L["Changes the Blizzard game setting 'nameplateShowOffscreen', which decides whether enemies outside your view still get a nameplate. This feature spots casts by watching the game's enemy nameplates, so with the setting off an enemy casting behind you is missed until you turn to face it — even if you have it targeted. Note that this is a game setting, not a DandersFrames one: it applies to your whole account and changes the game's nameplates everywhere."]
             local tlMaxBars = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Bars"], 1, 20, 1, db, "targetedListMaxBars", TargetedListUpdate, TargetedListUpdate, true), 55)
             tlMaxBars.disableOn = HideTLOptions
             Add(settingsGroup, nil, 1)
@@ -7247,6 +7255,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.TogglePersonalTargetedSpells then DF:TogglePersonalTargetedSpells(db.personalTargetedSpellEnabled) end
         end), 30)
         settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Important Spells Only"], db, "personalTargetedSpellImportantOnly", PersonalTargetedUpdate), 30)
+        -- Same game CVar as the Targeted List page — Personal detects casts through
+        -- nameplate tokens too (IsValidCasterUnit), so it has the identical
+        -- offscreen blind spot. Both checkboxes drive the one CVar.
+        local ptsOffscreen = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Offscreen Nameplates"], nil, nil, nil,
+            function() return DF:GetNameplateOffscreen() end,
+            function(val) DF:SetNameplateOffscreen(val) end), 30)
+        ptsOffscreen.disableOn = HidePersonalOptions
+        ptsOffscreen.tooltip = L["Changes the Blizzard game setting 'nameplateShowOffscreen', which decides whether enemies outside your view still get a nameplate. This feature spots casts by watching the game's enemy nameplates, so with the setting off an enemy casting behind you is missed until you turn to face it — even if you have it targeted. Note that this is a game setting, not a DandersFrames one: it applies to your whole account and changes the game's nameplates everywhere."]
         Add(settingsGroup, nil, 1)
         
         -- ===== CONTENT TYPES GROUP (Column 2) =====

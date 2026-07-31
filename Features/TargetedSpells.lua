@@ -246,9 +246,18 @@ local function GetPersonalDB()
     return (IsInRaid() or DF.raidTestMode) and DF:GetRaidDB() or DF:GetDB()
 end
 
--- Check if a unit is valid for targeted spell tracking
--- We ONLY track nameplate units - boss/arena/target/focus all have nameplates too
--- so tracking them separately would cause duplicates
+-- Check if a unit is valid for targeted spell tracking.
+-- We ONLY track nameplate units: the same caster also fires on target/softenemy/
+-- boss/arena, and dedup is keyed on the unit-token STRING, so accepting those
+-- would put the same cast in the list twice.
+--
+-- ⚠ That reasoning assumes every caster we care about HAS a nameplate, which is
+-- only true while the nameplateShowOffscreen CVar is on. With it off, an enemy
+-- outside your view gets no nameplate — so a mob you have targeted and can watch
+-- casting arrives here as "target" only, and is rejected. Confirmed in game
+-- 2026-07-30. Hence the checkbox on the Targeted List / Personal Targeted pages;
+-- see DF:SetNameplateOffscreen. Accepting target/softenemy as a fallback would
+-- need GUID-based dedup instead of token-string dedup, which is a bigger change.
 local function IsValidCasterUnit(unit)
     if not unit then return false end
     
@@ -612,6 +621,15 @@ local function OnEvent(self, event, unit, ...)
         if DF._TargetedListProcessCastStart then
             DF._TargetedListProcessCastStart(unit, event, ...)
         end
+    elseif event == "NAME_PLATE_UNIT_ADDED" then
+        -- A nameplate can appear while its owner is ALREADY casting — walking into
+        -- range, turning the camera, a mob streaming into a pull. The *_START events
+        -- above already fired (or never will for us), so without this the bar only
+        -- shows on that mob's NEXT cast. The Personal branch above has always done
+        -- this; the list did not. Confirmed missing in game 2026-07-30.
+        if DF._TargetedListPickupInProgressCast then
+            DF._TargetedListPickupInProgressCast(unit)
+        end
     elseif event == "UNIT_SPELLCAST_STOP"
            or event == "UNIT_SPELLCAST_FAILED"
            or event == "UNIT_SPELLCAST_FAILED_QUIET"
@@ -678,10 +696,29 @@ eventFrame:SetScript("OnEvent", OnEvent)
 -- NAMEPLATE OFFSCREEN CVAR
 -- ============================================================
 
+-- nameplateShowOffscreen is a GAME setting, not a DF profile setting: it is
+-- account-wide and affects every nameplate, not just ours. So the CVar itself is
+-- the source of truth — there is deliberately no saved key mirroring it. The
+-- Targeted List / Personal Targeted checkboxes read and write it directly via
+-- these two, and re-read on OnShow so a change made in the game menu shows up.
+--
+-- Why the features care (confirmed in game 2026-07-30, on 12.1): with this OFF,
+-- an enemy outside your view gets NO nameplate at all, so there is no
+-- nameplateN unit token — and IsValidCasterUnit accepts nameplate tokens only.
+-- A mob casting behind you is invisible to both features until you turn to face
+-- it, even when you have it targeted and can see the cast on its frame.
+-- Not combat-protected, so the write is safe mid-fight.
 function DF:SetNameplateOffscreen(enabled)
     if C_CVar and C_CVar.SetCVar then
         C_CVar.SetCVar("nameplateShowOffscreen", enabled and "1" or "0")
     end
+end
+
+function DF:GetNameplateOffscreen()
+    if C_CVar and C_CVar.GetCVarBool then
+        return C_CVar.GetCVarBool("nameplateShowOffscreen")
+    end
+    return false
 end
 
 -- ============================================================
@@ -2610,24 +2647,16 @@ local function TargetedList_DelayedPickup(casterUnit, isChannel, eventSpellId)
     local relevantOk, relevantWhy = TargetedList_IsRelevantCaster(casterUnit)
     if not relevantOk then drop(relevantWhy .. " (during the 0.2s pickup delay)") return end
 
-    -- Combat filter: skip casters not in combat (idle mobs casting nearby).
-    -- ⚠ targetedListHideOutOfCombat DEFAULTS TO TRUE, and a mob whose opening move is
-    -- a cast is not flagged in combat yet — so the pull-opener, often the cast you
-    -- most want to see, is dropped here on a default profile.
-    local party = DF.db and DF.db.party
-    if party and party.targetedListHideOutOfCombat then
-        if not TL_UnitAffectingCombat(casterUnit) then
-            drop("caster not in combat (Hide Out of Combat is on)")
-            return
-        end
-    end
-
     -- Targeting filter: check if the cast targets a party member.
     -- If "Show Untargeted" is on, also accept casts that have no
     -- target at all (ground AoEs, self-buffs, untargeted channels).
+    --
+    -- This runs BEFORE the combat filter on purpose — see the note there.
+    local party = DF.db and DF.db.party
     local showUntargeted = party and party.targetedListShowUntargeted
     local target = casterUnit .. "target"
     local hasTarget = TL_UnitExists(target)
+    local targetsPartyMember = false
 
     if hasTarget then
         -- Has a target — check if it's a party member
@@ -2636,6 +2665,7 @@ local function TargetedList_DelayedPickup(casterUnit, isChannel, eventSpellId)
             drop(targetWhy)
             return
         end
+        targetsPartyMember = true
     elseif not showUntargeted then
         -- No target and untargeted display is off — skip
         drop("cast has no target and Show Untargeted is off")
@@ -2643,6 +2673,28 @@ local function TargetedList_DelayedPickup(casterUnit, isChannel, eventSpellId)
     end
     -- If hasTarget is false and showUntargeted is true, we fall through
     -- and show the bar with no target name.
+
+    -- Combat filter: suppress ambient casts from idle NPCs standing around.
+    --
+    -- ⚠ ONLY applies to casts with no party-member target. This used to run before
+    -- the targeting filter and gate EVERY cast on the caster's combat flag, which
+    -- silently ate the pull-opener: a mob whose opening move is a cast is not
+    -- flagged in combat yet, so the one cast you most want to see was dropped —
+    -- and targetedListHideOutOfCombat DEFAULTS TO TRUE, so it happened out of the
+    -- box. (Measured: 10 such drops in one 19-minute session.)
+    --
+    -- Ordering it after the target check makes the two cases separable, because
+    -- they genuinely look different:
+    --   * pull-opener   — out of combat, but aimed AT a party member -> keep
+    --   * ambient noise — out of combat, aimed at nothing            -> drop
+    -- Casts aimed at another NPC or a non-party unit never reach here at all;
+    -- TargetedList_CastTargetIsPartyMember already rejected them above.
+    if not targetsPartyMember and party and party.targetedListHideOutOfCombat then
+        if not TL_UnitAffectingCombat(casterUnit) then
+            drop("untargeted cast from a caster not in combat (Hide Out of Combat is on)")
+            return
+        end
+    end
 
     -- IMPORTANT — gotcha #0 update: spellId from the event payload is
     -- ALSO secret-tainted on nameplates. We can pass it through
@@ -2834,6 +2886,59 @@ local function TargetedList_ProcessCastStart(casterUnit, event, ...)
     end)
 end
 
+-- Pick up a cast that was ALREADY IN PROGRESS when its nameplate appeared.
+--
+-- Why this exists: everything above is driven by UNIT_SPELLCAST_*_START, so the
+-- nameplate has to already exist at the moment the cast begins. Walk into range, turn
+-- the camera, or have a mob stream into a pull mid-cast and the bar never appears for
+-- that cast at all — it only shows up on the mob's NEXT cast. The Personal Targeted
+-- branch has always handled this (OnEvent's NAME_PLATE_UNIT_ADDED case); the Targeted
+-- List never did. Confirmed in game 2026-07-30.
+--
+-- There is no event payload here, so spellId comes from the unit APIs by positional
+-- discard. Positions verified against Blizzard_APIDocumentationGenerated/
+-- UnitDocumentation.lua, not memory:
+--   UnitCastingInfo  -> name, displayName, textureID, startTimeMs, endTimeMs,
+--                       isTradeskill, castID, notInterruptible, castingSpellID  (9th)
+--   UnitChannelInfo  -> name, displayName, textureID, startTimeMs, endTimeMs,
+--                       isTradeskill, notInterruptible, spellID                 (8th)
+-- Deliberately NOT touching startTimeMs / endTimeMs — those are the secret-tainted
+-- fields that gotcha #0 is about. Duration comes from Unit*Duration inside
+-- DelayedPickup as usual.
+--
+-- No 0.2s delay: that delay exists because target/duration data is not populated at
+-- the instant START fires. A cast already in flight has long since settled, so we go
+-- straight to the shared pickup, which re-derives cast-vs-channel and re-runs every
+-- gate itself.
+local function TargetedList_PickupInProgressCast(casterUnit)
+    -- Cheap structural gate first; the shared pickup re-checks everything anyway.
+    if not TargetedList_IsRelevantCaster(casterUnit) then return end
+
+    -- Already tracked: a nameplate can be removed and re-added while one cast runs
+    -- (range flicker, LOS). Re-picking up would reset startTime and visibly restart
+    -- the bar mid-cast, so leave a live record alone.
+    local existing = activeTargetedListCasts[casterUnit]
+    if existing and not existing.fadingStartedAt then return end
+
+    local spellId, isChannel
+    if TL_UnitCastingInfo(casterUnit) ~= nil then
+        isChannel = false
+        spellId = select(9, TL_UnitCastingInfo(casterUnit))
+    elseif TL_UnitChannelInfo(casterUnit) ~= nil then
+        isChannel = true
+        spellId = select(8, TL_UnitChannelInfo(casterUnit))
+    else
+        return  -- not casting; nothing to recover
+    end
+    if spellId == nil then return end
+
+    if DF.DebugActive and DF:DebugActive("TARGETEDLIST") then
+        DF:Debug("TARGETEDLIST", "recover %s: nameplate appeared mid-cast (channel=%s)",
+            casterUnit, isChannel and "y" or "n")
+    end
+    TargetedList_DelayedPickup(casterUnit, isChannel, spellId)
+end
+
 -- Called for every "cast stopped" shaped event. Handles cast-ID
 -- matching, SUCCEEDED-during-channel suppression, mob-death guards,
 -- and interrupter lookup.
@@ -3023,6 +3128,7 @@ end
 
 -- Expose internal hooks for the shared OnEvent dispatcher above.
 DF._TargetedListProcessCastStart = TargetedList_ProcessCastStart
+DF._TargetedListPickupInProgressCast = TargetedList_PickupInProgressCast
 DF._TargetedListOnCastStop = TargetedList_OnCastStop
 DF._TargetedListOnCastUpdate = TargetedList_OnCastUpdate
 DF._TargetedListOnInterruptibilityChange = TargetedList_OnInterruptibilityChange
@@ -4638,6 +4744,7 @@ TargetedList_OnInterruptibilityChange = function(...)
 end
 
 DF._TargetedListProcessCastStart = TargetedList_ProcessCastStart
+DF._TargetedListPickupInProgressCast = TargetedList_PickupInProgressCast
 DF._TargetedListOnCastStop = TargetedList_OnCastStop
 DF._TargetedListOnCastUpdate = TargetedList_OnCastUpdate
 DF._TargetedListOnInterruptibilityChange = TargetedList_OnInterruptibilityChange
@@ -4762,17 +4869,17 @@ end
 -- ============================================================
 
 function DF:InitTargetedSpells()
-    local db = DF:GetDB()
-
-
     -- Cast events register for whatever is live (party fingerprint group
     -- display, personal display, and/or the Targeted List), handled by
     -- UpdateTargetedSpellEventRegistration below.
 
-    -- Apply nameplate offscreen setting if enabled
-    if db.targetedSpellNameplateOffscreen then
-        DF:SetNameplateOffscreen(true)
-    end
+    -- No nameplateShowOffscreen write here. This used to force the CVar ON at
+    -- every login from a saved key that no surviving control could clear, so a
+    -- user who ticked it once in the old Targeted Spells page had it forced on
+    -- forever with no way off. The CVar is now owned outright by the checkboxes
+    -- on the Targeted List / Personal Targeted pages (DF:GetNameplateOffscreen /
+    -- DF:SetNameplateOffscreen) and the targetedSpellNameplateOffscreen key is
+    -- retired — stale copies in saved profiles are simply never read.
 
     -- Initialize personal targeted spells. Note: TogglePersonalTargetedSpells
     -- only manages the container/icons; the events that drive cast tracking
