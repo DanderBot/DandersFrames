@@ -51,18 +51,17 @@ This addon bundles the following third-party libraries, each under their own res
 ## Development setup
 
 This repo is a **container**, not an addon folder. Its root holds the addon
-folders side by side, the way ElvUI and Grid2 do:
+folder rather than being it, the way ElvUI and Grid2 are laid out:
 
 ```
 <repo>/
   DandersFrames/            the addon
-  DandersFrames_Options/    load-on-demand companion (settings, editors, debug)
   README.md  CHANGELOG.md  .pkgmeta  .github/  Tools/
 ```
 
 WoW only loads addons from `Interface/AddOns/<Name>/<Name>.toc`, so the repo
 cannot live inside `AddOns/` any more. Clone it anywhere and link the addon
-folders in with **directory junctions** — junctions (`/J`), not symlinks
+folder in with a **directory junction** — a junction (`/J`), not a symlink
 (`/D`), so no admin rights or Developer Mode are needed.
 
 ### One-time, per game install
@@ -70,22 +69,31 @@ folders in with **directory junctions** — junctions (`/J`), not symlinks
 From your `Interface/AddOns` folder, with WoW closed:
 
 ```
-mklink /J "DandersFrames"         "C:\path\to\repo\DandersFrames"
-mklink /J "DandersFrames_Options" "C:\path\to\repo\DandersFrames_Options"
+mklink /J "DandersFrames" "C:\path\to\repo\DandersFrames"
 ```
 
 Delete any real `AddOns/DandersFrames` folder first — a junction cannot
 replace an existing directory. Repeat per install (`_retail_`, `_ptr_`).
 
 After that, edit in the repo and `/reload` in game; the junction means there
-is no copy or sync step. `git status`, branches and PRs are unchanged: one
-repo, one branch, one PR, even for a change spanning both folders.
+is no copy or sync step. `git status`, branches and PRs are unchanged — one
+repo, one branch, one PR.
 
-### Without the junctions
+### Why a container, when there is only one addon folder
 
-WoW loads whatever it finds. If only `DandersFrames` is linked you get the
-frames but no settings panel; if neither is, the addon simply is not there.
-Nothing silently half-works.
+Groundwork for a load-on-demand companion, `DandersFrames_Options`, holding
+the settings panel, the designers and the debug tools. WoW resolves
+`LoadAddOn("Name")` to `AddOns/Name/Name.toc`, so a companion has to be a
+top-level addon folder — a sibling of `DandersFrames`, not a subfolder. That
+is only possible if the repo root is a container, hence this layout.
+
+Measured on the PTR build: with that payload not loaded, DandersFrames uses
+**8,957 KB instead of 12,348 KB — 3,391 KB less, 27.5%** — and ~55,000 lines
+are never parsed at login. The saving lasts until the settings panel is
+opened; the login cost is avoided every time.
+
+**The companion does not exist yet.** When it does, it gets a second junction
+alongside the first, and this section will say so.
 
 ### Verification tooling
 
