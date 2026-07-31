@@ -51,13 +51,13 @@ Locales\zhTW.lua
 DandersFrames.xml
 
 # Core
-Config.lua
-Changelog.lua
-Profile.lua
-ExportCategories.lua
+Core\Config.lua
+Core\Changelog.lua
+Core\Profile.lua
+Core\ExportCategories.lua
 Core.lua
-DesignerPresets.lua
-RosterEvents.lua
+Designer\Presets.lua
+Core\RosterEvents.lua
 
 # Debug Console (loads early so all modules can use DF:Debug)
 Debug\DebugConsole.lua
@@ -76,13 +76,13 @@ GUI\GUI.lua
 GUI\DFFonts.lua
 GUI\ColorPicker.lua
 Features\Search.lua
-Options\Options.lua
-Options\AutoProfiles.lua
-Options\NicknamesPage.lua
-Options\NicknamesPicker.lua
+GUI\Pages\Options.lua
+GUI\Pages\AutoProfiles.lua
+GUI\Pages\NicknamesPage.lua
+GUI\Pages\NicknamesPicker.lua
 
 # Popup System (alert / confirm / input dialogs)
-Popup.lua
+GUI\Popup.lua
 
 # Frame System
 Frames\Core.lua
@@ -123,7 +123,7 @@ AuraDesigner\AuraAdapter.lua
 AuraDesigner\Engine.lua
 AuraDesigner\Factory.lua
 AuraDesigner\SoundEngine.lua
-AuraDesigner\Options.lua
+AuraDesigner\UI\Options.lua
 
 # Text Designer
 TextDesigner\TextDesigner.lua
@@ -133,13 +133,13 @@ TextDesigner\Resolver.lua
 TextDesigner\Render.lua
 TextDesigner\Migration.lua
 TextDesigner\Preview.lua
-TextDesigner\Options.lua
+TextDesigner\UI\Options.lua
 
 # Filter Registry
 FilterRegistry\SpellDB.lua
 FilterRegistry\Registry.lua
-FilterRegistry\Options.lua
-FilterRegistry\SpellPicker.lua
+FilterRegistry\UI\Options.lua
+FilterRegistry\UI\SpellPicker.lua
 
 # Aura Blacklist
 AuraBlacklist\Config.lua
@@ -169,4 +169,4 @@ ClickCasting\UI\BindingEditor.lua
 ClickCasting\UI\Dialogs.lua
 
 # External API (for Wago UI Packs, etc.)
-API.lua
+Core\API.lua

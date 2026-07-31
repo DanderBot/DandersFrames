@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# generate_changelog.sh — Reads CHANGELOG.md and generates Changelog.lua
+# generate_changelog.sh — Reads CHANGELOG.md and generates Core/Changelog.lua
 # Called by GitHub Actions before packaging.
 
 set -euo pipefail
 
 CHANGELOG_FILE="CHANGELOG.md"
-OUTPUT_FILE="Changelog.lua"
+# Core/ since the 2026-07 folder reorg. release.yml greps this same path for the
+# release channel and skips builds that only touch it — keep all three in step.
+OUTPUT_FILE="Core/Changelog.lua"
 
 if [ ! -f "$CHANGELOG_FILE" ]; then
     echo "Error: $CHANGELOG_FILE not found."

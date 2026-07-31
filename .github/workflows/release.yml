@@ -36,7 +36,7 @@ jobs:
           DOMINATED=true
           for f in $(git diff --name-only HEAD~1..HEAD 2>/dev/null); do
             case "$f" in
-              *.md|*.sh|.github/*|.gitignore|.pkgmeta|Changelog.lua) ;;
+              *.md|*.sh|.github/*|.gitignore|.pkgmeta|Core/Changelog.lua) ;;
               *) DOMINATED=false; break ;;
             esac
           done
@@ -58,7 +58,7 @@ jobs:
           ./generate_changelog.sh
 
           VERSION=$(grep '^## Version:' DandersFrames.toc | sed 's/^## Version: //')
-          CHANNEL=$(grep 'DF.RELEASE_CHANNEL' Changelog.lua | sed 's/.*= "\(.*\)"/\1/')
+          CHANNEL=$(grep 'DF.RELEASE_CHANNEL' Core/Changelog.lua | sed 's/.*= "\(.*\)"/\1/')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "channel=$CHANNEL" >> $GITHUB_OUTPUT
 
