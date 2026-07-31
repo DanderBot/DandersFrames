@@ -471,7 +471,6 @@ L["Auto-switched to profile: %s"] = true
 L["Auto-switching disabled"] = true
 L["Automatically add players by role when they join your group."] = true
 L["Available Profiles"] = true
-L["Back"] = true
 L["Background"] = true
 L["Background Alpha"] = true
 L["Background Color"] = true
@@ -1657,8 +1656,10 @@ L["• Text Designer (Name, Health, Status & custom text)\n• Buff Stack & Dura
 -- the rest of the locale orphans. ⚠ The reason given for leaving them — "pruning them
 -- is the same edit across all 11 locale files" — was WRONG: the 10 translated files
 -- are 9-line packager stubs holding zero keys, so a key lives in enUS.lua only.
--- "Back", "Cancel", "Next", "None", "Party" and "Raid" survived the cut because they
+-- "Cancel", "Next", "None", "Party" and "Raid" survived the cut because they
 -- have real readers (Popup.lua, ClickCasting/UI/BindingEditor.lua, DesignerPresets.lua).
+-- "Back" was on that list in error — its only reader was the wizard runtime's step
+-- navigation, which went with Popup.lua's trim, so the key is now gone too.
 L["Name"] = true
 L["Notice"] = true
 L["Test Mode"] = true

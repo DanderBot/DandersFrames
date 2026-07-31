@@ -394,7 +394,8 @@ DF.COMMAND_SIBLINGS = {
     -- SECURE_MUTATORS in Features/SecureSort.lua, which is what refuses them.
     -- "init" leads the dev list because every other one needs the handler.
     secure    = { "help", "status", dev = { "init", "party", "raid", "all", "register",
-                  "test", "swap", "swapback", "debug", "ui", "show", "hide" } },
+                  "test", "swap", "swapback", "debug", "ui", "show", "hide",
+                  "showbutton", "hidebutton" } },
     flatraid  = { "info", "reinit", "test" },
     -- (No "cc" entry.) /df debug cc's BARE form already prints its full subcommand
     -- table — that is its entire job — so a Siblings footer would repeat it.

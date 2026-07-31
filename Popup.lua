@@ -620,7 +620,3 @@ end
 
 -- (Removed) DF:IsPopupShown — no callers. Consumers that care whether a dialog is
 -- up check their own state; nothing ever asked the popup system.
-
--- ============================================================
--- TEST COMMANDS (temporary, for validation)
--- ============================================================

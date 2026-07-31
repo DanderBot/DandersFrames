@@ -3598,7 +3598,8 @@ SlashCmdList["DFAURAS"] = function(msg)
         end)
     end
     if not target then
-        local o = DF:Out("Aura Pipeline", "unit " .. unit)
+        -- Reuse the writer opened above; a second DF:Out here printed the
+        -- separator rule and the title twice on the not-found path.
         -- IterateAllFrames covers party/raid/arena, not pets or pinned sets.
         o:Line("No DF party/raid/arena frame is currently driving that unit.", "WARN")
         o:Line("Try player, party1..4 or raid1..40, and make sure the frames are shown.", "NEUTRAL")

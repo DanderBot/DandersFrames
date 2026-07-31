@@ -504,7 +504,11 @@ SlashCmdList["DFROSTER"] = function(msg)
         wipe(DF.RosterDebug.events)
         DF.RosterDebug.startTime = GetTime()
         DF.RosterDebug.enabled = true
-        DF:Say("Started monitoring. Join/leave groups, then type /dfroster again to see results.")
+        -- Via CmdPath, not a hardcoded spelling: /dfroster is no longer a bind
+        -- after the one-command rework, and the path stays right if roster ever
+        -- moves between the everyday and debug listings.
+        DF:Say("Started monitoring. Join/leave groups, then run "
+            .. DF:CmdPath("roster") .. " again to see results.")
     else
         -- Stop and report
         DF.RosterDebug.enabled = false
