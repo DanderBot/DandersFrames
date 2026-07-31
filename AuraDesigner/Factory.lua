@@ -1101,9 +1101,9 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec, defs)
     return style
 end
 
--- Full row config for one placed indicator (max=1 single-slot container). frameLevelOffset
--- 40 = the buff-icon level (above the frame's content overlay) so placed AD indicators read
--- on top, nudged by the indicator's own frameLevel; z-order polish is a P4.7 concern.
+-- Full row config for one placed indicator (max=1 single-slot container). Its frame level is
+-- resolveLevel's ABSOLUTE value (default 40, the buff-icon band, above the content overlay)
+-- — not 40 plus the indicator's own frameLevel. See resolveLevel.
 -- Test-preview entry for a placed container: the indicator previews its OWN
 -- configured spell (icon/name/tooltip resolved from the live spell ID by the
 -- shared test paint). Built at config time -- one tiny table per container.
@@ -1144,8 +1144,16 @@ local function resolveStrata(indicator, defStrata)
     return defStrata
 end
 
--- Per-indicator FRAME LEVEL, same chain: instance -> global default -> 0. Callers add it to
--- their own base offset (40 for placed, 41 for the alert companion).
+-- Per-indicator FRAME LEVEL, same chain: instance -> global default -> 40.
+--
+-- ⚠ The returned value is ABSOLUTE (an offset from the unit frame, like every other
+-- *FrameLevel setting since 09d6743). Callers pass it through as frameLevelOffset and
+-- NOTHING adds a base to it — the `or 40` is a fallback for a MISSING key, not a baseline
+-- that gets summed in. This comment used to claim "callers add 40 for placed, 41 for the
+-- alert companion", which was true before the absolute-level change and has misled at
+-- least two readers since into hunting a hidden offset that does not exist.
+-- (The alert companion really does add 1 — see buildAlertCompanionConfig — but that is a
+-- deliberate +1 over its own indicator, not a base.)
 local function resolveLevel(indicator, defLevel)
     return tonumber(indicator and indicator.frameLevel) or defLevel or 40
 end
@@ -1439,7 +1447,7 @@ local function buildBarStyle(indicator, borderSpec, defs)
 end
 
 -- Full row config for one placed bar (max=1 single-slot container). Same frame-level band as
--- the icon/square placed indicators (40 + per-indicator frameLevel).
+-- the icon/square placed indicators — resolveLevel's absolute value, nothing added.
 local function buildBarConfig(frame, unit, map, indicator, borderSpec, defs, mine)
     return {
         unit = unit,
@@ -2954,6 +2962,7 @@ function Factory:SyncFrame(frame)
     if DF.MigrateAuraDesignerBorderKeysLazy then DF.MigrateAuraDesignerBorderKeysLazy(adDB) end
     if DF.MigrateAuraDesignerPrioritiesLazy then DF.MigrateAuraDesignerPrioritiesLazy(adDB) end
     if DF.MigrateAuraDesignerAbsoluteLevelsLazy then DF.MigrateAuraDesignerAbsoluteLevelsLazy(adDB) end
+    if DF.MigrateAuraDesignerAbsoluteLevelsV2Lazy then DF.MigrateAuraDesignerAbsoluteLevelsV2Lazy(adDB) end
     -- One-time refresh of the AD global text defaults to the Midnight baseline — must run
     -- on the RENDER-resolved adDB too (not just the editor's GetAuraDesignerDB), or live
     -- frames resolve from the un-migrated defaults while the editor shows the new ones.

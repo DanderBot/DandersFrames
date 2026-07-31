@@ -595,7 +595,76 @@ local function MigrateAbsoluteLevelsLazy(adDB)
     end
     adDB._absoluteFrameLevelV1 = true
 end
+
+-- V2 — undo the two places V1 got AD's level wrong. Read this before touching either.
+--
+-- AD's real level has always been 40 (the buff-icon band). Commit 47075137 then added
+-- `indicatorFrameLevel = 30` as a Config default while the render still computed
+-- `40 + stored`, so 30 was written into a field that meant a NUDGE — it reads like the
+-- status-icon convention (30) copied into the wrong units. Effect: 40 + 30 = 70.
+--
+-- V1 above then made levels absolute and added the base back, so a spurious nudge of 30
+-- became a stored 70. Correct logic, bad input: it preserved the mistake permanently, and
+-- 70 sits ABOVE the defensive icon (65) — which is meant to be the top layer.
+--
+-- V1 also only walked auraCfg.indicators. It never shifted adDB.defaults.indicatorFrameLevel,
+-- so that key was left holding the pre-absolute 30 while every per-indicator value moved to
+-- the absolute scale. The two numbers have been in different units ever since, which is why
+-- the Default Frame Level slider reads 30 on a profile whose indicators all render at 70.
+--
+-- So V2 restores the baseline:
+--   defaults.indicatorFrameLevel == 30  -> 40
+--   per-indicator frameLevel     == 70  -> 40
+--
+-- ⚠ Both rewrites are value-targeted, not blanket. 30 and 70 are the exact fingerprints of
+-- the bad seed. A deliberate absolute 30 is not a thing anyone would choose (it puts AD
+-- UNDER the buff/debuff rows at 40), and 70 is only reachable from the seeded nudge. The
+-- accepted cost: someone who genuinely nudged +30 for a reason loses it and lands at the
+-- baseline. That is judged the right trade while 12.1 is unshipped and the alpha population
+-- is small — an untouched profile drawing AD over the defensive icon is the worse default.
+-- Any OTHER stored level is left exactly as it is; those are real user choices.
+local function ResetSeededIndicatorLevels(auraCfg)
+    if type(auraCfg) ~= "table" then return end
+    local inds = auraCfg.indicators
+    if type(inds) ~= "table" then return end
+    for _, ind in pairs(inds) do
+        if type(ind) == "table" and tonumber(ind.frameLevel) == 70 then
+            ind.frameLevel = 40
+        end
+    end
+end
+local function MigrateAbsoluteLevelsV2Lazy(adDB)
+    if type(adDB) ~= "table" or adDB._absoluteFrameLevelV2 then return end
+
+    local defs = adDB.defaults
+    if type(defs) == "table" and tonumber(defs.indicatorFrameLevel) == 30 then
+        defs.indicatorFrameLevel = 40
+    end
+
+    local auras = adDB.auras
+    if type(auras) == "table" then
+        -- Same shape detection as V1 (flat auraCfg vs spec-scoped), for the same reason.
+        for _, val in pairs(auras) do
+            if type(val) == "table" then
+                if val.priority ~= nil or val.indicators ~= nil or val.icon ~= nil then
+                    for _, auraCfg in pairs(auras) do ResetSeededIndicatorLevels(auraCfg) end
+                else
+                    for _, specAuras in pairs(auras) do
+                        if type(specAuras) == "table" then
+                            for _, auraCfg in pairs(specAuras) do ResetSeededIndicatorLevels(auraCfg) end
+                        end
+                    end
+                end
+            end
+            break
+        end
+    end
+
+    adDB._absoluteFrameLevelV2 = true
+end
+
 DF.MigrateAuraDesignerAbsoluteLevelsLazy = MigrateAbsoluteLevelsLazy
+DF.MigrateAuraDesignerAbsoluteLevelsV2Lazy = MigrateAbsoluteLevelsV2Lazy
 
 
 -- Lazy, flag-gated ONE-TIME refresh of the AD global text defaults to the Midnight
@@ -656,6 +725,7 @@ local function GetAuraDesignerDB()
     -- and skips a migration, the editor shows UN-migrated values -- and anything saved from that
     -- state gets migrated a second time when the render finally runs.
     MigrateAbsoluteLevelsLazy(adDB)
+    MigrateAbsoluteLevelsV2Lazy(adDB)
     MigrateDefaultRefreshLazy(adDB)
     return adDB
 end

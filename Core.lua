@@ -5019,6 +5019,67 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         end
                     end
                 end
+
+                -- AURA DESIGNER rows and groups. Everything above covers only the three
+                -- BUILT-IN rows, which is why a "defensive draws under the Aura Designer"
+                -- report could never be settled from this dump — the thing doing the
+                -- overdrawing was not in it. Same fields, one line per live AD handle,
+                -- bucketed by store key (AuraDesigner/Factory.lua: frame.dfADFactory).
+                o:Section("Aura Designer")
+                local adStore = frame.dfADFactory
+                if not adStore then
+                    print("  |cff888888(no AD factory store on this frame)|r")
+                else
+                    local any = false
+                    for _, storeKey in ipairs({ "placed", "fgroups", "dgroups", "healthbar",
+                                                "background", "border", "nametext", "healthtext" }) do
+                        local t = adStore[storeKey]
+                        if t then
+                            for id, entry in pairs(t) do
+                                local h = entry and entry.handle
+                                if h then
+                                    any = true
+                                    local hf = h.GetFrame and h:GetFrame()
+                                    local cont = h.backend and h.backend.container
+                                    local btn = h.buttons and h.buttons[1]
+                                    print(("  %-9s %-12s anchor=%s  container=%s  button1=%s  cfgOffset=%s  strata=%s")
+                                        :format(storeKey, tostring(id):sub(1, 12),
+                                            hf and tostring(hf:GetFrameLevel()) or "-",
+                                            cont and tostring(cont:GetFrameLevel()) or "-",
+                                            btn and tostring(btn:GetFrameLevel()) or "-",
+                                            tostring(h.config and h.config.frameLevelOffset or "nil"),
+                                            hf and tostring(hf:GetFrameStrata()) or "-"))
+                                    if btn then
+                                        for _, k in ipairs({ "dfBorderHost", "dfBorder", "dfADBorder",
+                                                             "dfCD", "dfBar" }) do
+                                            local w = btn[k]
+                                            if w and w.GetFrameLevel then
+                                                print(("      .%-14s level=%d"):format(k, w:GetFrameLevel()))
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    if not any then
+                        print("  |cff888888(store present but no live handles)|r")
+                    end
+                end
+
+                -- The CONFIGURED values, so the dump shows setting-vs-reality side by side.
+                -- That is the whole question in an "it says 30 but behaves like more" report.
+                o:Section("Configured")
+                local zdb = DF.GetDB and DF:GetDB()
+                o:Field("defensiveIconFrameLevel", tostring(zdb and zdb.defensiveIconFrameLevel), "NEUTRAL")
+                -- DF:ResolveAuraDesigner is the RENDER-side resolver (the same one
+                -- Factory:SyncFrame uses). Options.lua's GetAuraDesignerDB is a file-local
+                -- and is the EDITOR's view — reading that here would report the wrong table
+                -- for a pinned/auto-layout frame.
+                local zad = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
+                local zdef = zad and zad.defaults
+                o:Field("AD indicatorFrameLevel", tostring(zdef and zdef.indicatorFrameLevel), "NEUTRAL")
+                o:Field("AD indicatorFrameStrata", tostring(zdef and zdef.indicatorFrameStrata), "NEUTRAL")
                 return
             end
             if msg == "unlock" then
