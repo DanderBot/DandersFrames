@@ -2409,6 +2409,162 @@ local OUTLINE_FLAG_ORDER = { "NONE", "OUTLINE", "THICKOUTLINE", "MONOCHROME", "M
 -- Returns the created widgets keyed { font, scale, outline, shadow, color, anchor,
 -- offsetX, offsetY, justifyH, justifyV } so pages can attach extra gates.
 -- ============================================================
+-- ============================================================
+-- TOOLTIPS AND BANNER TONES  (moved back from the companion)
+-- ============================================================
+-- ☠ These lived in DandersFrames_Options/GUI/Sections.lua while HideTooltip
+-- sat here -- the pair split across an addon boundary. Live code calls
+-- ShowTooltip from pinned frames, the mover panel and the icon library, so
+-- with the settings panel unloaded every one of those hovers errored. Found
+-- by teaching lod_gate_check.py the GUI namespace; nothing else could see it.
+
+-- ============================================================
+-- CreateInfoBanner
+-- ------------------------------------------------------------
+-- A self-resizing banner with an icon, body text, and a "tone"
+-- (info / caution / danger / success) that controls background,
+-- border, default text colour, and default icon. ("warning" is a
+-- legacy alias of "caution".) Do NOT pass fontTemplate — banners
+-- share one font on purpose; only the tone should vary.
+--
+-- Usage:
+--   local banner = GUI:CreateInfoBanner(parent, { tone = "caution", text = "..." })
+--   Add(banner, banner.layoutHeight, "both")
+--
+-- Methods on the returned frame:
+--   :SetTone(name)                  apply a preset (see TONES below)
+--   :SetText(text, optColor)        plain text mode, auto-wraps + auto-resizes
+--   :SetHTML(html, onLinkClick)     flow-layout body with clickable link buttons
+--   :SetIcon(texture, r, g, b)      icon texture + optional vertex colour
+--   :SetIconTexture(path)           icon texture only
+--   :SetIconColor(r, g, b)          icon vertex colour only
+--
+-- The body word-wraps automatically; banner height is recomputed via
+-- OnSizeChanged so resizing the GUI (or calling SetText/SetHTML) grows
+-- or shrinks the banner to fit. The host page is re-laid out so widgets
+-- below the banner reposition.
+-- ============================================================
+-- Each tone carries FOUR colour roles so all three consumers (banners,
+-- inline ToneHex text, and tooltips) stay in sync:
+--   bg / border / textColor / icon+iconColor  drive the BANNER box itself.
+--   accent                                     is the vivid emphasis colour
+--     used for INLINE text (ToneHex) and tooltip titles, read against the
+--     dark GUI background rather than the banner's own tinted bg. It is a
+--     SEPARATE role from iconColor: e.g. the danger icon is a light warm so
+--     the triangle pops on the orange banner, but inline "Warning" text must
+--     be a real red to out-rank a caution — deriving one from the other
+--     (the original bug) made inline danger paler than caution.
+local INFO_BANNER_TONES = {
+    info = {
+        bg = {0.15, 0.18, 0.28, 1},
+        useThemeBorder = true, borderAlpha = 0.5,
+        icon = "info",
+        textColor = {0.85, 0.85, 0.85},
+        accent = {0.6, 0.8, 1},          -- light blue
+    },
+    -- NOTE: "warning" was merged into "caution" (they were near-duplicate golds).
+    -- SetTone("warning") still resolves via the alias below for safety.
+    caution = {
+        bg = {0.5, 0.45, 0.1, 0.9},
+        border = {0.7, 0.6, 0.1, 1},
+        icon = "warning", iconColor = {1, 0.9, 0.3},
+        textColor = {1, 0.95, 0.7},
+        accent = {1, 0.82, 0},           -- gold
+    },
+    danger = {
+        bg = {0.6, 0.3, 0.1, 0.9},
+        border = {0.8, 0.4, 0.1, 1},
+        -- icon kept a light warm (not the mid-orange bg hue) so the triangle pops
+        icon = "warning", iconColor = {1, 0.9, 0.72},
+        textColor = {1, 0.85, 0.7},
+        accent = {1, 0.27, 0.27},        -- real red (destructive), NOT the pale icon warm
+    },
+    success = {
+        bg = {0.1, 0.4, 0.2, 0.9},
+        border = {0.2, 0.6, 0.3, 1},
+        icon = "check", iconColor = {0.3, 1, 0.5},
+        textColor = {0.7, 1, 0.8},
+        accent = {0.4, 0.85, 0.5},       -- green
+    },
+}
+-- Legacy alias: "warning" was merged into "caution" (near-duplicate golds).
+INFO_BANNER_TONES.warning = INFO_BANNER_TONES.caution
+P.INFO_BANNER_TONES = INFO_BANNER_TONES
+
+-- The line grammar, shared by ShowTooltip and ShowGameTooltip so a DF line
+-- appended under a spell tooltip reads exactly like one under a plain title.
+local function AddTooltipLines(lines)
+    if not lines then return end
+    local acc
+    for _, line in ipairs(lines) do
+        if line == " " or line == "" then
+            GameTooltip:AddLine(" ")
+        elseif type(line) == "string" then
+            GameTooltip:AddLine(line, 0.7, 0.7, 0.7, true)
+        elseif type(line) == "table" and (line.text or line.left) then
+            local r, g, b = 0.7, 0.7, 0.7
+            if line.hint then
+                r, g, b = 0.55, 0.55, 0.55
+            elseif line.accent then
+                acc = acc or GetThemeColor()
+                r, g, b = acc.r, acc.g, acc.b
+            elseif line.color then
+                -- Accept {r=,g=,b=} or {r,g,b}: the palette uses the first, most
+                -- call sites building a colour inline reach for the second.
+                local c = line.color
+                r, g, b = c.r or c[1], c.g or c[2], c.b or c[3]
+            end
+            if line.left then
+                -- Two-column form (label … value), for key/value dumps. Never
+                -- wraps -- AddDoubleLine has no wrap argument.
+                GameTooltip:AddDoubleLine(line.left, line.right, r, g, b, 1, 1, 1)
+            else
+                GameTooltip:AddLine(line.text, r, g, b, true)
+            end
+        end
+    end
+end
+
+-- How far the cursor-anchored tooltip is nudged off the pointer. ONE dial.
+--
+-- Small on purpose. This started at 24 while the tooltip could still appear over
+-- a slider or dropdown, where it had to clear the whole control. Now that the
+-- hover lives on the LABEL only (see GUI:AttachTooltip) there is nothing
+-- underneath worth clearing — the lift just has to keep the tooltip off the
+-- words you are reading, so a nudge does it.
+--
+-- ⚠ ANCHOR_CURSOR_RIGHT, not ANCHOR_CURSOR — plain ANCHOR_CURSOR DISCARDS the
+-- offsets. Verified against the client's own code rather than assumed:
+-- Blizzard_AuraContainer/Blizzard_AuraButton.lua asserts the signature
+-- SetOwner(point, offsetX, offsetY) with both offsets optional numbers, and
+-- Blizzard's own callers only ever pass offsets alongside the _RIGHT / _LEFT
+-- variants (QuestDataProvider "ANCHOR_CURSOR_RIGHT", 5, 2 — never with the plain
+-- cursor anchor). Positive Y is up in WoW, so this lifts regardless of which
+-- edge the anchor pins.
+local CURSOR_LIFT_X, CURSOR_LIFT_Y = 0, 8
+
+function GUI:ShowTooltip(owner, opts)
+    if not owner or not opts or not opts.title then return end
+    if opts.anchor then
+        GameTooltip:SetOwner(owner, opts.anchor)
+    else
+        GameTooltip:SetOwner(owner, "ANCHOR_CURSOR_RIGHT", CURSOR_LIFT_X, CURSOR_LIFT_Y)
+    end
+    -- Title colour is single-sourced from the tone's inline accent so a tooltip
+    -- title reads the same as inline ToneHex text of the same tone. Untoned = white.
+    local toneDef = opts.tone and INFO_BANNER_TONES[opts.tone]
+    local ac = toneDef and toneDef.accent
+    if ac then
+        GameTooltip:SetText(opts.title, ac[1], ac[2], ac[3])
+    else
+        GameTooltip:SetText(opts.title, 1, 1, 1)
+    end
+    AddTooltipLines(opts.lines)
+    GameTooltip:Show()
+end
+
+P.AddTooltipLines = AddTooltipLines
+
 
 -- ============================================================
 -- SHARED WITH THE SETTINGS-PANEL WIDGETS

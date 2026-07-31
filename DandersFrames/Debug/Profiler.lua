@@ -1749,6 +1749,15 @@ function Profiler:CreateUI()
         return
     end
 
+    -- ☠ This window is built from settings-panel widgets -- CreateInfoBanner in
+    -- particular, which parents the hook checkbox, so there is nothing sensible
+    -- to fall back to if it is missing. The profiler is opened deliberately, so
+    -- pulling the companion in here costs nothing anyone will notice and keeps
+    -- the panel whole. Same call the settings panel itself uses.
+    if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then
+        return
+    end
+
     -- Main frame
     local f = CreateFrame("Frame", "DFProfilerFrame", UIParent, "BackdropTemplate")
     -- Bottom slack has to clear TWO stacked things, not one:
