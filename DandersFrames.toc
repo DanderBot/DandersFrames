@@ -117,6 +117,10 @@ Frames\Position.lua
 Frames\Pets.lua
 
 # Test Mode
+# Shim.lua stays resident when the rest of this folder becomes load-on-demand:
+# live rendering calls into test mode, so the entry points must always exist.
+# ☠ It MUST load before TestMode.lua, which overwrites every stub.
+TestMode\Shim.lua
 TestMode\TestFramePool.lua
 TestMode\TestMode.lua
 
