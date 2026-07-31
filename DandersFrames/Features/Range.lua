@@ -863,7 +863,8 @@ function rangeSubscriber:OnUnitInRange(event, unit)
             if header and header:IsShown() then
                 local maxChildren = DF.PinnedFrames.currentMode == "raid" and 40 or 5
                 for i = 1, maxChildren do
-                    local child = header:GetAttribute("child" .. i)
+                    -- Precomputed attribute name: per UNIT_IN_RANGE_UPDATE.
+                    local child = header:GetAttribute(DF.CHILD_ATTR[i])
                     if child and child:IsShown() and child.unit == unit then
                         DF:UpdateRange(child)
                     end

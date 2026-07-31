@@ -622,9 +622,10 @@ local function PhasedTimerUpdate()
         else
             -- Open world: use distance gating for UnitPhaseReason reliability
             -- (UnitPhaseReason only works within ~250 yards)
-            local ok, distSq, valid = pcall(function()
-                return UnitDistanceSquared(unit)
-            end)
+            -- pcall(fn, arg), not pcall(closure): this runs per unit on a 1s
+            -- ticker in the open world, and the closure form allocated one each
+            -- time. Same form as the UnitInOtherParty call earlier in this file.
+            local ok, distSq, valid = pcall(UnitDistanceSquared, unit)
             if ok and valid and canaccessvalue(distSq) then
                 local inrange = distSq < 62500  -- 250*250
                 if inrange ~= phasedRange[unit] then

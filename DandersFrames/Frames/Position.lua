@@ -32,7 +32,10 @@ end
 -- Log a write to db.raidAnchorX/Y. Call BEFORE the assignment so
 -- we can capture the old value, then perform the assignment.
 function DF:LogRaidAnchorWrite(reason, newX, newY)
-    if not DF.Debug then return end
+    -- ☠ DebugActive, not `DF.Debug` -- that only asked whether the function
+    -- exists, which it always does, so ShortCaller's debugstack() built a
+    -- stack string on every raid-anchor write with logging off.
+    if not DF:DebugActive("RAIDPOS") then return end
     local db = DF:GetRaidDB()
     local oldX, oldY = db and db.raidAnchorX or 0, db and db.raidAnchorY or 0
     DF:Debug("RAIDPOS", "raidAnchor WRITE [%s] @ %s : (%.1f,%.1f) -> (%.1f,%.1f)",
@@ -2312,7 +2315,9 @@ function DF:UpdateRaidContainerPosition()
     end
     local cx, cy = x + dx, y + dy
 
-    if DF.Debug then
+    -- ☠ DebugActive, not `DF.Debug`: ShortCaller runs debugstack(), and this
+    -- fires on every raid container reposition.
+    if DF:DebugActive("RAIDPOS") then
         if dx ~= 0 or dy ~= 0 then
             DF:Debug("RAIDPOS", "UpdateRaidContainerPosition @ %s : applying (%.1f,%.1f) +comp(%.1f,%.1f) -> (%.1f,%.1f) scale=%.3f combat=%s",
                 ShortCaller(3), x, y, dx, dy, cx, cy, scale, tostring(InCombatLockdown()))

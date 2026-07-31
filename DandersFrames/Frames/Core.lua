@@ -773,3 +773,17 @@ function DF:RefreshIconPreviews()
     if not list then return end
     for i = 1, #list do list[i]() end
 end
+
+-- Precomputed secure-header child attribute names: CHILD_ATTR[i] == "child"..i.
+--
+-- Header iteration is written as `header:GetAttribute("child" .. i)`, which is
+-- fine once but not inside per-unit event handlers -- the pinned-frame lookup
+-- alone rebuilds up to 80 of these strings on every UNIT_HEALTH, UNIT_POWER and
+-- UNIT_AURA. Indexing a ready table is a hash lookup instead of a concat.
+--
+-- Only the hot scans use this. The ~80 cold sites (setup, options, one-off
+-- sweeps) still concatenate, which reads better and costs nothing there.
+DF.CHILD_ATTR = {}
+for i = 1, 40 do
+    DF.CHILD_ATTR[i] = "child" .. i
+end

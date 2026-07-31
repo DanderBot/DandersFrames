@@ -184,6 +184,21 @@ function DF:UpdateAllVisibleReducedMaxHealth(unit)
         end
     end
 
+    -- ☠ Single-unit fast path. UNIT_MAX_HEALTH_MODIFIERS_CHANGED is PER-UNIT and
+    -- storms when an affix or raid-wide debuff hits the group; the iterators
+    -- below walk every party AND raid frame to find the one that matches, so a
+    -- storm is O(roster^2). The roster map exists for exactly this lookup.
+    -- Falls through when the map has no entry (pinned frames are deliberately
+    -- excluded from it), so behaviour is unchanged -- only the common case is
+    -- faster.
+    if unit and DF.unitFrameMap then
+        local mapped = DF.unitFrameMap[unit]
+        if mapped then
+            updateFrame(mapped)
+            return
+        end
+    end
+
     if DF.IteratePartyFrames then
         DF:IteratePartyFrames(updateFrame)
     end

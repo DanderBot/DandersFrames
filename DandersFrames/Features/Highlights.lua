@@ -1004,7 +1004,8 @@ highlightEventFrame:SetScript("OnEvent", function(self, event, ...)
                 if header and header:IsShown() then
                     local maxChildren = IsInRaid() and 40 or 5
                     for i = 1, maxChildren do
-                        local child = header:GetAttribute("child" .. i)
+                        -- Precomputed attribute name: per threat/target event.
+                        local child = header:GetAttribute(DF.CHILD_ATTR[i])
                         if child and child:IsShown() and child.unit == unit then
                             DF:UpdateHighlights(child)
                         end

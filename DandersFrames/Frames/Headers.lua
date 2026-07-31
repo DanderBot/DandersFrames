@@ -4454,9 +4454,14 @@ function DF:UpdateHeaderVisibility(skipRaidReposition)
     local inRaid = IsInRaid() and not inArena  -- Raid but NOT arena
     local inParty = IsInGroup() and not IsInRaid()
 
-    DF:Debug("VISIBILITY", "UpdateHeaderVisibility: content=%s inRaid=%s inParty=%s skipRaidRepos=%s caller=%s",
-        tostring(contentType), tostring(inRaid), tostring(inParty), tostring(skipRaidReposition),
-        debugstack(2, 1, 0) or "?")
+    -- ☠ Guarded: debugstack() builds a stack string whether or not logging is
+    -- on, and this runs on every roster and zone change. The FLATRAID traces
+    -- elsewhere in this file already do it this way.
+    if DF:DebugActive("VISIBILITY") then
+        DF:Debug("VISIBILITY", "UpdateHeaderVisibility: content=%s inRaid=%s inParty=%s skipRaidRepos=%s caller=%s",
+            tostring(contentType), tostring(inRaid), tostring(inParty), tostring(skipRaidReposition),
+            debugstack(2, 1, 0) or "?")
+    end
 
     -- (Removed) an IsInInstance() call whose BOTH return values were unused — the
     -- "ARENA DEBUG" trace it fed is long gone, so the call did nothing but cost an
@@ -7671,6 +7676,15 @@ end
 DF.IteratePinnedFrames = IteratePinnedFrames
 
 -- Helper to find pinned frame for a specific unit (player-mode or boss-mode set)
+--
+-- ⚠ HOT. Called from the UNIT_HEALTH / UNIT_POWER / UNIT_NAME_UPDATE /
+-- UNIT_CONNECTION / UNIT_AURA handlers below, i.e. per unit event. It early-
+-- outs cheaply when pinned frames are off or hidden, so only pinned users pay
+-- the scan -- but for them it is up to 2x40 secure attribute reads per event.
+-- CHILD_ATTR keeps the string cost out of it; replacing the scan itself with a
+-- maintained pinned-unit map is the real fix and is on the Perfy list, because
+-- the invalidation (frames re-slot on roster change) needs in-game validation.
+local CHILD_ATTR = DF.CHILD_ATTR
 local function FindPinnedFrameForUnit(unit)
     if not DF.PinnedFrames or not DF.PinnedFrames.initialized then
         return nil
@@ -7681,7 +7695,7 @@ local function FindPinnedFrameForUnit(unit)
             local header = DF.PinnedFrames.headers[setIndex]
             if header and header:IsShown() then
                 for i = 1, 40 do
-                    local child = header:GetAttribute("child" .. i)
+                    local child = header:GetAttribute(CHILD_ATTR[i])
                     if child and child:IsVisible() and child.unit == unit then
                         return child
                     end

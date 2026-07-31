@@ -24,11 +24,20 @@ local issecretvalue = issecretvalue
 -- Typically only 1-2 unique curves at any time.
 -- ============================================================
 
+-- ☠ Nested by the three numbers rather than one concatenated string key. This
+-- is reached from SetHealthBarValue on EVERY health update of every frame, and
+-- building "threshold_below_above" cost two number->string conversions plus two
+-- concatenations per tick purely to look up a cache HIT. Nesting is three hash
+-- lookups and allocates only on a genuine miss.
 local healthFadeCurveCache = {}
 
 local function BuildHealthFadeCurve(threshold, belowAlpha, aboveAlpha)
-    local key = threshold .. "_" .. belowAlpha .. "_" .. aboveAlpha
-    if healthFadeCurveCache[key] then return healthFadeCurveCache[key] end
+    local byThreshold = healthFadeCurveCache[threshold]
+    if byThreshold then
+        local byBelow = byThreshold[belowAlpha]
+        local hit = byBelow and byBelow[aboveAlpha]
+        if hit then return hit end
+    end
 
     local curve = C_CurveUtil.CreateColorCurve()
     curve:SetType(Enum.LuaCurveType.Linear)
@@ -43,7 +52,17 @@ local function BuildHealthFadeCurve(threshold, belowAlpha, aboveAlpha)
     if pos < 0.999 then curve:AddPoint(pos + 0.001, aboveColor) end
     curve:AddPoint(1, aboveColor)
 
-    healthFadeCurveCache[key] = curve
+    byThreshold = healthFadeCurveCache[threshold]
+    if not byThreshold then
+        byThreshold = {}
+        healthFadeCurveCache[threshold] = byThreshold
+    end
+    local byBelow = byThreshold[belowAlpha]
+    if not byBelow then
+        byBelow = {}
+        byThreshold[belowAlpha] = byBelow
+    end
+    byBelow[aboveAlpha] = curve
     return curve
 end
 

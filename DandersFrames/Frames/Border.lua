@@ -733,7 +733,7 @@ end
 -- Register/replace this border's per-frame tick. initialElapsed seeds the
 -- accumulator (DF_DASH resumes its march across restarts; others start at 0).
 local function registerAnimTick(border, fn, initialElapsed)
-    ensureSharedAnimDriver()
+    ensureSharedAnimDriver():Show()
     local e = animRegistry[border]
     if not e then e = {}; animRegistry[border] = e end
     e.fn = fn
@@ -741,6 +741,13 @@ local function registerAnimTick(border, fn, initialElapsed)
 end
 local function unregisterAnimTick(border)
     animRegistry[border] = nil
+    -- ☠ Hide the driver once the last animated border goes. An OnUpdate on a
+    -- shown frame runs every frame forever; emptying the registry alone left
+    -- it paying a MemTestDisabled call and an empty pairs() loop for the rest
+    -- of the session once any border had animated even once.
+    if sharedAnimDriver and next(animRegistry) == nil then
+        sharedAnimDriver:Hide()
+    end
 end
 
 -- Reset all four edges to fully opaque. Called from StopAnimation so the
