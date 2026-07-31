@@ -298,8 +298,10 @@ local function normalizeFilters(filter)
                 -- INSIDE initializeFrame so its regions are created in secure context
                 -- (SetAuraBorder rejects textures created in the tainted style pass —
                 -- children of the secret aura button are access-constrained, cab.lua:15).
+                -- style: per-record button overrides (scale / badge). See applyRecordStyle
+                -- — a group whose membership IS the predicate can be styled unconditionally.
                 out[#out + 1] = { f = f.filter, key = f.key, candidateFilters = f.candidateFilters,
-                                  onInit = f.onInit }
+                                  onInit = f.onInit, style = f.style }
             end
         end
     end
@@ -1460,6 +1462,20 @@ end
 -- groupSpacing. Unknown keys are silently dropped, never rejected
 -- (CopyAndValidateInboundTable merges over defaults and validates known keys
 -- only), so we carry BOTH families and each build reads its own.
+-- A per-record style that scales its buttons needs the GROUP's layout cell scaled to
+-- match, or the bigger icon overlaps its neighbour: the button size and the flow's
+-- reserved cell are separate things. Returns the base table unchanged when there is
+-- nothing to scale, so callers can pass the result straight through.
+local function scaleGroupLayout(base, style)
+    local sc = style and style.scale
+    if not base or not sc or sc == 1 then return base end
+    local out = {}
+    for k, v in pairs(base) do out[k] = v end
+    if out.elementWidth then out.elementWidth = out.elementWidth * sc end
+    if out.elementHeight then out.elementHeight = out.elementHeight * sc end
+    return out
+end
+
 local function buildGroupLayout(config)
     local L = config.layout or {}
     local sx = (L.sizeX or L.size or 32)
@@ -1702,6 +1718,10 @@ function NativeBackend:build()
         sortMethod, sortDirection = deriveSort(config)
     end
     self.groupKeys = {}
+    -- key -> the record style that group was built with. applyLayout re-pushes group
+    -- layouts on every restyle and would otherwise reset a scaled group's cell back to
+    -- the shared size, so it needs to know which groups are scaled.
+    self.groupStyles = {}
     self.slotButtons = isOverlay and {} or nil   -- overlay: key -> native slot button (consumer styling)
     handle._idGateVulnerable = nil   -- re-derived from this build's records (see the record loop)
     handle._idGateSourceRelative = nil   -- PLAYER-token / isFromPlayerOrPlayerPet pools (visibility gate)
@@ -1719,18 +1739,36 @@ function NativeBackend:build()
         --    provider's matching is a bare-token check and its auras carry no
         --    raid flags / spell IDs / durations (§23 gotcha c).
         local category = (filters[1] and filters[1].f:find("HARMFUL")) and "HARMFUL" or "HELPFUL"
+        -- IMPORTANT-DEBUFF PREVIEW. Test mode replaces the real records with one group
+        -- per slot, so a record's style would be thrown away with them and the
+        -- highlight would be invisible in the preview — which is the one place you can
+        -- actually sit still and position the badge. Capture it before the wipe and
+        -- hand it to the first slots, so the preview shows both treatments side by side
+        -- (styled slot 1-2, plain slot 3+) exactly as a live row would.
+        local testStyle
+        for _, r in ipairs(filters) do
+            if r.style then testStyle = r.style break end
+        end
+        -- ONE styled slot only. Styling several made the preview look like the whole row
+        -- was highlighted; a single styled icon against plain neighbours is both a direct
+        -- A/B for positioning and an honest picture of a live row, where importants are
+        -- the minority.
+        local testStyleSlots = testStyle and math.min(1, maxCount) or 0
+        local testStyleLayout = scaleGroupLayout(groupLayout, testStyle)
         filters = {}   -- the normal declaration loop below is skipped
         for k = 1, maxCount do
             local key = "dfTest" .. k
+            local styled = (k <= testStyleSlots) or nil
             local okGroup, err = pcall(function()
                 c:AddAuraGroup(key, category, {
                     maxFrameCount = 1,
-                    initializeFrame = handle:_makeInitializeFrame(handle._gen, k),
-                    layout = groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
+                    initializeFrame = handle:_makeInitializeFrame(handle._gen, k, nil, styled and testStyle or nil),
+                    layout = styled and testStyleLayout or groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
                 })
             end)
             if okGroup then
                 self.groupKeys[#self.groupKeys + 1] = key
+                self.groupStyles[key] = styled and testStyle or nil
             else
                 DF:DebugWarn(DBG, "test group failed: %s", tostring(err))
             end
@@ -1769,13 +1807,23 @@ function NativeBackend:build()
                     self.slotButtons[key] = btn
                 elseif not okSlot then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
             else
+                -- A record carrying its own style (or an onInit) needs its OWN init
+                -- closure — initFn is shared across every group and would apply the
+                -- override to all of them. Its layout cell is widened to match the
+                -- scaled button, or the bigger icon overlaps the next group along.
+                local groupInit, recLayout = initFn, groupLayout
+                if rec.style or rec.onInit then
+                    groupInit = handle:_makeInitializeFrame(handle._gen, nil, rec.onInit, rec.style)
+                    recLayout = scaleGroupLayout(groupLayout, rec.style)
+                end
                 local okGroup, err = pcall(function()
-                    c:AddAuraGroup(key, f, { maxFrameCount = maxCount, initializeFrame = initFn,
-                                             layout = groupLayout, candidateFilters = cf,
+                    c:AddAuraGroup(key, f, { maxFrameCount = maxCount, initializeFrame = groupInit,
+                                             layout = recLayout, candidateFilters = cf,
                                              sortMethod = sortMethod, sortDirection = sortDirection })
                 end)
                 if okGroup then
                     self.groupKeys[#self.groupKeys + 1] = key
+                    self.groupStyles[key] = rec.style
                 else
                     DF:DebugWarn(DBG, "AddAuraGroup failed: %s", tostring(err))
                 end
@@ -1871,7 +1919,14 @@ function NativeBackend:applyLayout()
     if self.groupKeys and c.SetAuraGroupLayout then
         local groupLayout = buildGroupLayout(self.handle.config)
         for _, key in ipairs(self.groupKeys) do
-            pcall(function() c:SetAuraGroupLayout(key, groupLayout) end)
+            -- Per-group, NOT one shared table: a group whose record scales its buttons
+            -- needs its layout CELL scaled to match. Pushing the shared layout to every
+            -- key reset the scaled group's cell to the base width, so on a restyle the
+            -- bigger icon overlapped its neighbour — while a full rebuild looked right,
+            -- because AddAuraGroup got the scaled layout there. Button size and reserved
+            -- cell are separate things and both have to be re-pushed.
+            local gl = scaleGroupLayout(groupLayout, self.groupStyles and self.groupStyles[key])
+            pcall(function() c:SetAuraGroupLayout(key, gl) end)
         end
     end
     -- ★ PARTITION KICK (live-confirmed 2026-07-09): inbound mutators set the dirty
@@ -2023,9 +2078,23 @@ function Handle:_slotCount()
     end
     return self.config.max or 1
 end
-function Handle:_acceptSlot(slot, index)
+-- Forward-declared: applyRecordStyle is defined further down (next to the
+-- initializeFrame factory it was written for) but _acceptSlot below must call it.
+-- Without this declaration the name inside _acceptSlot would resolve to a GLOBAL,
+-- read nil at runtime and the call would error — legal Lua that parses clean.
+local applyRecordStyle
+
+function Handle:_acceptSlot(slot, index, recStyle)
     self.buttons[index] = slot                 -- cache first (mirror of the pre-split order)
+    -- Remember the per-record style ON the button. initializeFrame passes it once at
+    -- create; every later restyle (ApplyStyle, a settings drag, hiding and re-showing
+    -- auras) re-enters here WITHOUT it, and styleButton_regions unconditionally resets
+    -- the button to the shared config size. Re-applying from the stash is what makes the
+    -- override survive — before this, toggling auras off/on or dragging the Size Step
+    -- slider silently reverted the important icons to normal size until a full rebuild.
+    if recStyle ~= nil then slot.dfImpRecStyle = recStyle end
     styleButton_regions(slot, self.config)     -- source-agnostic region creation/styling
+    applyRecordStyle(slot, self, slot.dfImpRecStyle)
 end
 function Handle:_bindNativeSlot(slot)
     bindNative(slot, self.config)              -- native setters (native slots only)
@@ -2558,7 +2627,91 @@ end
 -- abort Blizzard's batch creation); the gen token drops a callback from a torn-down or
 -- rebuilt container; a running counter mirrors the old per-index slot id (batches append,
 -- so indices stay contiguous -- ipairs(self.buttons) in ApplyStyle/layoutRow still holds).
-function Handle:_makeInitializeFrame(gen, fixedIndex, onInit)
+-- PER-RECORD STYLE (important-debuff highlight). A row's buttons are all styled from
+-- the container-wide config, which is right for everything except a group that exists
+-- BECAUSE its auras are a distinct class. Records can carry `style` and every button in
+-- that group gets it — unconditionally, because membership already IS the predicate.
+-- Nothing here reads aura data; we never learn which aura a button holds.
+--
+-- ⚠ Runs AFTER _acceptSlot, which sized the button from the shared layout — the scale
+-- below deliberately overrides that. The group's own layout cell is widened to match at
+-- AddAuraGroup (see the record loop), or the bigger button would overlap its neighbour.
+--
+-- Regions are created ONCE and updated in place: initializeFrame re-runs on restyle, and
+-- ApplyStyle re-runs it without teardown. Never Show/Hide a region a native setter owns;
+-- these are DF-owned textures on the button, so plain SetShown is fine.
+-- NOTE: assigns the local forward-declared above _acceptSlot (which calls this on every
+-- restyle). Deliberately NOT `local function` — that would shadow the forward local and
+-- leave _acceptSlot calling a nil global.
+function applyRecordStyle(button, handle, recStyle)
+    if not recStyle then return end
+
+    if recStyle.scale and recStyle.scale ~= 1 then
+        local lay = handle.config and handle.config.layout
+        local sx = lay and (lay.sizeX or lay.size) or 32
+        local sy = lay and (lay.sizeY or lay.size) or sx
+        button:SetSize(sx * recStyle.scale, sy * recStyle.scale)
+    end
+
+    local bs = recStyle.badge
+    if bs then
+        local sz = bs.size or 10
+        -- HOST FRAME, not bare textures on the button. The badge deliberately overhangs
+        -- the button's corner, which puts it in the NEXT button's space — and sibling
+        -- buttons draw in their own order, so a plain OVERLAY texture ends up BEHIND the
+        -- neighbouring icon (seen in game). A child frame with a raised frame level wins
+        -- against siblings regardless of their order. +13 clears DF.Border's +10 and the
+        -- dispel ring's +12, the same clearance the duration-text holder uses.
+        -- Frames don't clip children unless asked, so the overhang still renders.
+        if not button.dfImpBadgeHost then
+            button.dfImpBadgeHost = CreateFrame("Frame", nil, button)
+            button.dfImpBadge = button.dfImpBadgeHost:CreateTexture(nil, "OVERLAY", nil, 6)
+            button.dfImpMark = button.dfImpBadgeHost:CreateTexture(nil, "OVERLAY", nil, 7)
+        end
+        local host = button.dfImpBadgeHost
+        host:SetAllPoints(button)
+        host:SetFrameLevel(button:GetFrameLevel() + 13)
+        local b, m = button.dfImpBadge, button.dfImpMark
+        b:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_AlertBadge")
+        m:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_AlertMark")
+        -- Anchored CENTER-on-corner so the offsets read the same whichever corner is
+        -- picked, then nudged INWARD by a quarter of the badge's own size. The badge
+        -- overlaps the corner but leans into the icon, which is what reads as "a marker
+        -- on this icon" — the first cut pushed it OUTWARD instead and sat it half off
+        -- the art, so every user had to dial in negative offsets just to get back to a
+        -- sane resting place. User offsets are ADDED to the inset, so 0,0 is the good
+        -- position and the sliders are for taste.
+        local inset = sz / 4
+        local ux = tonumber(bs.offsetX) or 0
+        local uy = tonumber(bs.offsetY) or 0
+        local pt = bs.point or "TOPRIGHT"
+        -- "Inward" is a different direction per corner. Both operands are non-false
+        -- numbers, so the and/or is safe here (unlike the nil-fallback trap elsewhere).
+        local dx = (pt == "TOPLEFT" or pt == "BOTTOMLEFT") and inset or -inset
+        local dy = (pt == "BOTTOMLEFT" or pt == "BOTTOMRIGHT") and inset or -inset
+        for _, t in ipairs({ b, m }) do
+            t:ClearAllPoints()
+            t:SetSize(sz, sz)
+            t:SetPoint("CENTER", button, pt, ux + dx, uy + dy)
+        end
+        b:SetVertexColor(readColor(bs.color))
+        m:SetVertexColor(readColor(bs.markColor))
+        -- Re-show the HOST too: the off-path hides it, and a button recycled from a
+        -- pass with the badge disabled would otherwise keep shown textures inside a
+        -- hidden frame — visible nowhere, with nothing obviously wrong in the config.
+        host:SetShown(true)
+        b:SetShown(true)
+        m:SetShown(true)
+    elseif button.dfImpBadgeHost then
+        -- Hide the HOST, not the two textures: one call, and nothing inside it can
+        -- render even if a future region is added. These are DF-owned widgets, so
+        -- SetShown is safe — the no-Show/Hide rule is only for regions handed to a
+        -- native setter, whose Shown aspect Blizzard owns.
+        button.dfImpBadgeHost:SetShown(false)
+    end
+end
+
+function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle)
     local handle = self
     return function(button)
         local ok, err = pcall(function()
@@ -2585,7 +2738,10 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit)
             -- a layout cell so the container's width pushes the badge out of the clip
             -- window (probe 32). No regions, no native binds.
             if handle.config.mode ~= "missing" then
-                handle:_acceptSlot(button, i)      -- size + regions (source-agnostic)
+                -- recStyle is stashed on the button by _acceptSlot and re-applied by it
+                -- on every later restyle, so the override is not lost the moment
+                -- anything else re-styles the row.
+                handle:_acceptSlot(button, i, recStyle)   -- size + regions + per-group overrides
                 if AuraContainer._testMode then
                     -- P5 hybrid preview: the sample provider drives presence and the
                     -- real flow drives geometry, but the sample auras' own data is
@@ -2902,6 +3058,16 @@ function Handle:ApplyStyle(style, layout)
     for i, b in ipairs(self.buttons) do
         local ok, err = pcall(function()
             styleButton_regions(b, self.config)
+            -- Per-record overrides, re-applied from the button's stash. This path calls
+            -- styleButton_regions DIRECTLY rather than going through _acceptSlot, so it
+            -- does not inherit the re-apply there — and styleButton_regions always resets
+            -- the button to the SHARED config size. Without this line the important-debuff
+            -- size step survived a rebuild but was silently reverted by every ApplyStyle,
+            -- which is why a test frame snapped back to normal while a pinned frame (which
+            -- rebuilds instead of restyling) looked correct. Traced 2026-07-30: the button
+            -- measured the SCALED size immediately after applyRecordStyle, so the revert
+            -- was always downstream, never in the style itself.
+            applyRecordStyle(b, self, b.dfImpRecStyle)
             if native then
                 if AuraContainer._testMode then
                     -- TEST MODE: re-PAINT, never bind. Binding here was the P5

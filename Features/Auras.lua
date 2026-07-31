@@ -122,6 +122,34 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- could keep the duplicate if they wanted it.
     if db.debuffDeduplicateDesigner == false then claimed = nil end
 
+    -- IMPORTANT HIGHLIGHT: the per-record button style handed to whichever records
+    -- hold boss/role and priority auras. Declared HERE, above the Show All branch,
+    -- because both modes need it — the first cut declared it further down and was
+    -- therefore out of scope in Show All, which is the DEFAULT, so the feature did
+    -- nothing at all on an untouched profile.
+    --
+    -- ★ Why this is expressible under 12.1: we never ask a button what it holds
+    -- (spellId / dispelName / presence are secret). Blizzard filters the group, so
+    -- membership IS the predicate and every button in it can be styled blind.
+    --
+    -- Nil for the Aura Designer facade — that caller builds a synthetic db with no
+    -- debuffImportant* keys, so AD groups keep their own styling (row-only).
+    local importantStyle
+    if db.debuffImportantHighlight then
+        local sc = tonumber(db.debuffImportantScale) or 1
+        importantStyle = {
+            scale = (sc > 0) and sc or 1,
+            badge = db.debuffImportantBadge ~= false and {
+                size = tonumber(db.debuffImportantBadgeSize) or 10,
+                point = db.debuffImportantBadgePoint or "TOPRIGHT",
+                offsetX = tonumber(db.debuffImportantBadgeX) or 0,
+                offsetY = tonumber(db.debuffImportantBadgeY) or 0,
+                color = db.debuffImportantBadgeColor,
+                markColor = db.debuffImportantMarkColor,
+            } or nil,
+        }
+    end
+
     if db.directDebuffShowAll then
         -- ALL mode: no category filtering, but Hide Long Debuffs still applies as
         -- one native maxDuration record. Keep Important CANNOT be honoured here:
@@ -163,6 +191,47 @@ local function BuildDirectDebuffFilters(db, claimed)
             end
         end
         if allMaxDur then cf = cf or {}; cf.maxDuration = allMaxDur end
+
+        -- IMPORTANT HIGHLIGHT in ALL mode. Show All is normally ONE blanket HARMFUL
+        -- record, which is why the highlight did nothing here: there is no boss/role
+        -- or priority record to style. Split into three MUTUALLY EXCLUSIVE records so
+        -- the important ones can be styled and still lead the row (groups render in
+        -- declaration order). Exclusive by construction, because groups do NOT dedupe
+        -- against each other — overlapping filters would show an aura twice:
+        --   1 boss-or-role                                  -> styled
+        --   2 priority, NOT boss-or-role                    -> styled
+        --   3 neither                                       -> normal
+        -- Each inherits the claim/maxDuration cf built above, so Hide Long Debuffs and
+        -- Aura Designer claims keep working. A claimed category drops its record
+        -- entirely rather than being filtered out of it.
+        --
+        -- ⚠ ONLY when the highlight is on. With it off this stays exactly one record —
+        -- Show All is the default for everyone, and splitting it unconditionally would
+        -- change every existing user's row for a feature they never enabled.
+        if importantStyle then
+            local function withCf(extra)
+                local t = {}
+                if cf then for k, v in pairs(cf) do t[k] = v end end
+                for k, v in pairs(extra) do t[k] = v end
+                return t
+            end
+            local out = {}
+            -- claimed.boss AND claimed.role = the whole boss-or-role pool is the AD's;
+            -- a partial claim leaves the rest, and the claim cf above already excludes
+            -- the claimed half (isBossAura/isRoleAura = false ANDs with the flag here).
+            if not (claimed and claimed.boss and claimed.role) then
+                out[#out + 1] = { filter = filterStr, key = "allboss", style = importantStyle,
+                                  candidateFilters = withCf({ isBossOrRoleAura = true }) }
+            end
+            if not (claimed and claimed.priority) then
+                out[#out + 1] = { filter = filterStr, key = "allprio", style = importantStyle,
+                                  candidateFilters = withCf({ isBossOrRoleAura = false, isPriorityAura = true }) }
+            end
+            out[#out + 1] = { filter = filterStr, key = "all",
+                              candidateFilters = withCf({ isBossOrRoleAura = false, isPriorityAura = false }) }
+            return out
+        end
+
         if cf or filterStr ~= "HARMFUL" then
             return { { filter = filterStr, key = "all", candidateFilters = cf } }
         end
@@ -206,6 +275,9 @@ local function BuildDirectDebuffFilters(db, claimed)
         return cf
     end
 
+    -- CATEGORY mode: the boss/role and priority records below already exist and are
+    -- already declared FIRST, so "important debuffs lead the row" needs no sort work —
+    -- importantStyle (declared at the top of this function) only styles them.
     local filters = {}
     local boss, role = db.debuffFilterBoss, db.debuffFilterRole
     -- Claim-effective category flags (claimed nil = all pass; the negation/exclude
@@ -215,11 +287,13 @@ local function BuildDirectDebuffFilters(db, claimed)
     if effBoss or effRole then
         local flag = (effBoss and effRole) and "isBossOrRoleAura" or (effBoss and "isBossAura" or "isRoleAura")
         filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "bossrole",
-                                  candidateFilters = cfFor(true, { [flag] = true }) }
+                                  candidateFilters = cfFor(true, { [flag] = true }),
+                                  style = importantStyle }
     end
     if db.debuffFilterPriority and not (claimed and claimed.priority) then
         filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "priority",
-                                  candidateFilters = cfFor(true, { isPriorityAura = true }) }
+                                  candidateFilters = cfFor(true, { isPriorityAura = true }),
+                                  style = importantStyle }
     end
     if ccToken and not (claimed and claimed.crowdControl) then
         filters[#filters + 1] = { filter = "HARMFUL|" .. ccToken .. neg(true, false, false),
@@ -1689,13 +1763,29 @@ end
 -- AddAuraGroup freezes (a group's filterString can't be changed live; the record SET
 -- defines the groups themselves). Per-record candidateFilters are deliberately
 -- EXCLUDED — they're live-tunable (see filterTuningSig).
+-- A record's per-button STYLE (important-debuff highlight). STRUCTURAL, not tuning:
+-- it decides whether the group gets its own initializeFrame closure, whether the badge
+-- regions exist at all, and the group's layout cell size — none of which ApplyStyle can
+-- change in place. Serialized here so toggling the highlight actually rebuilds; without
+-- this the setting writes to the DB and nothing on screen moves.
+local function recStyleSig(s)
+    if type(s) ~= "table" then return "" end
+    local b = s.badge
+    return "@" .. tostring(s.scale) .. "/" .. (b and (tostring(b.size) .. ","
+        .. tostring(b.point) .. "," .. tostring(b.offsetX) .. "," .. tostring(b.offsetY) .. ","
+        .. tostring(b.color and b.color.r) .. "," .. tostring(b.color and b.color.g) .. ","
+        .. tostring(b.color and b.color.b) .. ","
+        .. tostring(b.markColor and b.markColor.r) .. "," .. tostring(b.markColor and b.markColor.g) .. ","
+        .. tostring(b.markColor and b.markColor.b)) or "-")
+end
+
 local function filterStructSig(f)
     if type(f) ~= "table" then return tostring(f) end
     local parts = {}
     for i = 1, #f do
         local entry = f[i]
         if type(entry) == "table" then
-            parts[i] = tostring(entry.filter) .. "#" .. tostring(entry.key)
+            parts[i] = tostring(entry.filter) .. "#" .. tostring(entry.key) .. recStyleSig(entry.style)
         else
             parts[i] = entry
         end

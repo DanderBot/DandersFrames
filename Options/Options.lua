@@ -6079,6 +6079,75 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         debuffAlpha.disableOn = function(d) return not d.showDebuffs end
         Add(appearanceGroup, nil, 2)
 
+        -- ===== IMPORTANT DEBUFFS (col2) =====
+        -- Boss/role and priority debuffs already render as their OWN aura groups, and
+        -- those groups are declared first — so they already lead the row. Everything
+        -- here styles them so they also LOOK different without moving to a separate
+        -- placement. Every change is STRUCTURAL (region presence / group layout cell /
+        -- the group's init closure), so each callback must invalidate rather than
+        -- lightweight-reposition — same pair the Hide Duplicate Debuffs toggle uses.
+        local function ImportantChanged()
+            if DF.RebuildDirectFilterStrings then DF:RebuildDirectFilterStrings() end
+            if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+        end
+        local function ImportantOff(d) return not d.showDebuffs or not d.debuffImportantHighlight end
+
+        local impGroup = GUI:CreateSettingsGroup(self.child, 280)
+        impGroup:AddWidget(GUI:CreateHeader(self.child, L["Important Debuffs"]), 40)
+        impGroup:AddWidget(GUI:CreateLabel(self.child,
+            L["Makes boss, role and priority debuffs stand out in the normal debuff row."], 250), 30)
+        local impOn = impGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Highlight Important Debuffs"],
+            db, "debuffImportantHighlight", ImportantChanged), 30)
+        impOn.disableOn = function(d) return not d.showDebuffs end
+        impOn.tooltip = L["Boss, role and priority debuffs already sort to the front of the row. This also makes them larger and marks them, so they read at a glance without needing their own placement."]
+
+        -- CreateSlider(parent, label, min, max, step, db, key, callback, lightweightUpdate,
+        -- usePreviewMode, ...). Pass the SAME function to both: the drag path is what makes
+        -- the preview move under the cursor, and the release path is what guarantees the
+        -- final value is applied. Leaving callback nil left the slider updating only via
+        -- the lightweight path, so the size appeared to change only when you let go.
+        local impScale = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Size Step"], 1.0, 2.0, 0.05,
+            db, "debuffImportantScale", ImportantChanged, ImportantChanged, true), 55)
+        impScale.disableOn = ImportantOff
+        impScale.tooltip = L["How much larger an important debuff renders. 1.00 keeps it the same size as the rest of the row."]
+
+        local impBadge = impGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Corner Marker"],
+            db, "debuffImportantBadge", ImportantChanged), 30)
+        impBadge.disableOn = ImportantOff
+        impBadge.tooltip = L["A small marker on the corner of the icon. It survives being shrunk better than a colour change, and it does not compete with the dispel border."]
+
+        local impBadgeSize = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Marker Size"], 6, 20, 1,
+            db, "debuffImportantBadgeSize", nil, ImportantChanged, true), 55)
+        impBadgeSize.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+        -- hasAlpha=false, and NO lightweight path: a colour change here rebuilds the
+        -- group (the tint is baked at initializeFrame), so there is nothing cheaper to
+        -- run on drag. Signature is (parent, label, db, key, hasAlpha, cb, lightCb, useLight).
+        -- Corner + nudge. Offsets are ADDED to a built-in overhang that pushes the badge
+        -- out of whichever corner is picked, so 0/0 is already a sensible resting place.
+        local badgePoints = { TOPRIGHT = L["Top Right"], TOPLEFT = L["Top Left"],
+                              BOTTOMRIGHT = L["Bottom Right"], BOTTOMLEFT = L["Bottom Left"] }
+        local impBadgePt = impGroup:AddWidget(GUI:CreateDropdown(self.child, L["Marker Corner"],
+            badgePoints, db, "debuffImportantBadgePoint", ImportantChanged), 55)
+        impBadgePt.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+        local impBadgeX = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Marker Offset X"], -20, 20, 1,
+            db, "debuffImportantBadgeX", nil, ImportantChanged, true), 55)
+        impBadgeX.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+        local impBadgeY = impGroup:AddWidget(GUI:CreateSlider(self.child, L["Marker Offset Y"], -20, 20, 1,
+            db, "debuffImportantBadgeY", nil, ImportantChanged, true), 55)
+        impBadgeY.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+        local impBadgeCol = impGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Marker Color"],
+            db, "debuffImportantBadgeColor", false, ImportantChanged, nil, false), 35)
+        impBadgeCol.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+
+        local impMarkCol = impGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Marker Symbol Color"],
+            db, "debuffImportantMarkColor", false, ImportantChanged, nil, false), 35)
+        impMarkCol.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
+        Add(impGroup, nil, 2)
+
         -- Layout Group (col1)
         local gridGroup = GUI:CreateSettingsGroup(self.child, 280)
         gridGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)

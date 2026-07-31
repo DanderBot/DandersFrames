@@ -1145,6 +1145,21 @@ DF.PartyDefaults = {
     debuffFilterCrowdControl = true,          -- Crowd control (CROWD_CONTROL token)
     debuffFilterRaid = false,                 -- Other raid-flagged debuffs (RAID token)
     debuffFilterDispellable = true,           -- Dispellable debuffs (mode below)
+    -- IMPORTANT DEBUFF HIGHLIGHT. Boss/role and priority auras already render as their
+    -- OWN aura groups (keys "bossrole"/"priority" in BuildDirectDebuffFilters) and those
+    -- groups are declared first, so they already lead the row. These keys style them.
+    -- Membership of the group IS the "is this important" test — nothing reads aura data,
+    -- which is what makes this expressible at all under the 12.1 secret rules.
+    -- OFF by default: it changes the look of a row every user already has.
+    debuffImportantHighlight = false,         -- master toggle for the treatment below
+    debuffImportantScale = 1.25,              -- icon size step for important debuffs (1 = same as the rest)
+    debuffImportantBadge = true,              -- corner "!" badge
+    debuffImportantBadgeSize = 10,            -- badge diameter in px (drawn at the corner, overhanging by a third)
+    debuffImportantBadgePoint = "TOPRIGHT",   -- which icon corner the badge sits on
+    debuffImportantBadgeX = 0,                -- nudge from that corner (ADDED to the default overhang)
+    debuffImportantBadgeY = 0,
+    debuffImportantBadgeColor = {r = 1, g = 0.616, b = 0.18, a = 1},   -- disc
+    debuffImportantMarkColor = {r = 0.08, g = 0.055, b = 0.024, a = 1}, -- the "!" itself
     -- Debuff blacklist: hide these non-secret debuffs from the debuff row (12.1
     -- excludeSpellIDs, friendly-safe — NeverSecret only). Default hides the
     -- post-Lust family (Sated/Exhaustion/Temporal Displacement/Fatigued/Insanity);

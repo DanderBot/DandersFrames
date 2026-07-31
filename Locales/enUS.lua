@@ -2312,4 +2312,22 @@ L["Optional Debuffs are per mode: what you hide here applies to this mode only."
 L["Which filters are selected is per mode, so Party and Raid keep separate choices — use Copy or Sync above to share them. What a filter CONTAINS is not per mode: editing its spells changes both."] = true
 L["Which filters are selected is per mode, so Party and Raid keep separate choices — use Copy or Sync above to share them. A custom filter's spells are shared by every profile on the account."] = true
 
+
+-- Important Debuffs (Debuffs page). Boss/role and priority debuffs already render
+-- as their own aura groups and already lead the row; these style them so they also
+-- LOOK different without moving to a separate placement.
+L["Important Debuffs"] = true
+L["Makes boss, role and priority debuffs stand out in the normal debuff row."] = true
+L["Highlight Important Debuffs"] = true
+L["Boss, role and priority debuffs already sort to the front of the row. This also makes them larger and marks them, so they read at a glance without needing their own placement."] = true
+L["Size Step"] = true
+L["How much larger an important debuff renders. 1.00 keeps it the same size as the rest of the row."] = true
+L["Show Corner Marker"] = true
+L["A small marker on the corner of the icon. It survives being shrunk better than a colour change, and it does not compete with the dispel border."] = true
+L["Marker Size"] = true
+L["Marker Corner"] = true
+L["Marker Offset X"] = true
+L["Marker Offset Y"] = true
+L["Marker Color"] = true
+L["Marker Symbol Color"] = true
 --@end-do-not-package@
