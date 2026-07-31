@@ -68,7 +68,6 @@ Debug\DebugConsole.lua
 Debug\Profiler.lua
 
 # Foreign-attachment scan (/df attached) — diagnoses other addons anchored to our frames
-Debug\AttachmentScan.lua
 
 # GUI System
 GUI\IconLib.lua
@@ -76,25 +75,13 @@ GUI\IconLib.lua
 # creates the GUI table plus GUI._state / GUI._priv, which every later part
 # re-declares aliases from.
 GUI\GUI.lua
-GUI\Sections.lua
 GUI\Widgets.lua
-GUI\Controls.lua
-GUI\Panel.lua
 GUI\DFFonts.lua
-GUI\ColorPicker.lua
 Features\Search.lua
 # Settings pages. DF:SetupGUIPages was one 9,673-line function; it is now a
 # chain -- Options.lua calls part 2 at its end, part 2 calls part 3, and so on.
 # Order is load-bearing: a later part must be defined before the earlier one
 # runs, and all five must load before anything opens the panel.
-GUI\Pages\Options.lua
-GUI\Pages\Frames.lua
-GUI\Pages\Auras.lua
-GUI\Pages\Indicators.lua
-GUI\Pages\Modules.lua
-GUI\Pages\AutoProfiles.lua
-GUI\Pages\NicknamesPage.lua
-GUI\Pages\NicknamesPicker.lua
 
 # Popup System (alert / confirm / input dialogs)
 GUI\Popup.lua
@@ -121,8 +108,6 @@ Frames\Pets.lua
 # live rendering calls into test mode, so the entry points must always exist.
 # ☠ It MUST load before TestMode.lua, which overwrites every stub.
 TestMode\Shim.lua
-TestMode\TestFramePool.lua
-TestMode\TestMode.lua
 
 # Features
 Features\Auras.lua
@@ -150,11 +135,6 @@ AuraDesigner\Factory.lua
 AuraDesigner\SoundEngine.lua
 # Editor UI, split from one 9k-line file. Order is load-bearing: Options.lua
 # creates DF.AuraDesigner._uiState / ._priv, which every later part aliases.
-AuraDesigner\UI\Options.lua
-AuraDesigner\UI\Groups.lua
-AuraDesigner\UI\Indicators.lua
-AuraDesigner\UI\Cards.lua
-AuraDesigner\UI\Editor.lua
 
 # Text Designer
 TextDesigner\TextDesigner.lua
@@ -164,13 +144,10 @@ TextDesigner\Resolver.lua
 TextDesigner\Render.lua
 TextDesigner\Migration.lua
 TextDesigner\Preview.lua
-TextDesigner\UI\Options.lua
 
 # Filter Registry
 FilterRegistry\SpellDB.lua
 FilterRegistry\Registry.lua
-FilterRegistry\UI\Options.lua
-FilterRegistry\UI\SpellPicker.lua
 
 # Aura Blacklist
 AuraBlacklist\Config.lua
@@ -183,9 +160,6 @@ Features\PinnedFrames.lua
 Features\FlatRaidFrames.lua
 
 # Debug (Profiler.lua is loaded earlier so its SetScript hook is in place)
-Debug\AuraExplorer.lua
-Debug\AtlasBrowser.lua
-Debug\MemoryTest.lua
 
 # Click-Casting System
 ClickCasting\Core.lua
@@ -194,10 +168,6 @@ ClickCasting\Profiles.lua
 ClickCasting\Frames.lua
 ClickCasting\Bindings.lua
 ClickCasting\Events.lua
-ClickCasting\UI\Main.lua
-ClickCasting\UI\ProfilesPanel.lua
-ClickCasting\UI\BindingEditor.lua
-ClickCasting\UI\Dialogs.lua
 
 # External API (for Wago UI Packs, etc.)
 Core\API.lua

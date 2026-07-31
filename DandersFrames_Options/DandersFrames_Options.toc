@@ -1,0 +1,77 @@
+## Interface: 120100
+## Title: DandersFrames |cff9482c9Options|r
+## Notes: Settings panel, editors and debug tools for DandersFrames. Loads on demand.
+## Author: Danders
+## Version: v5.0.0-alpha.13
+## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
+## LoadOnDemand: 1
+## RequiredDeps: DandersFrames
+## AllowAddOnTableAccess: 1
+
+# ============================================================
+# DandersFrames Options -- load-on-demand companion
+# ============================================================
+# Everything the settings panel needs and the frames do not. Not loaded at
+# login; DandersFrames loads it the first time you open /df.
+#
+# Measured on the PTR build: while this stays unloaded DandersFrames uses
+# 8,957 KB instead of 12,348 KB -- 3,391 KB less, 27.5% -- and ~55,000 lines
+# are never parsed at any login. The memory saving lasts until the panel is
+# opened; the parse saving happens every login regardless.
+#
+# RequiredDeps plus the matching name prefix makes the addon list show this
+# as a collapsible child of DandersFrames rather than a separate entry.
+#
+# ☠ ORDER IS LOAD-BEARING, exactly as in the main .toc. These files were split
+# out of three monoliths and each group has a first file that creates the
+# shared state every later part aliases:
+#   GUI/Sections -> Controls -> Panel        (GUI.lua stays resident)
+#   AuraDesigner/UI/Options first            (creates _uiState and _priv)
+#   GUI/Pages/Options first                  (heads the page chain)
+
+# GUI parts used only by settings pages
+GUI\Sections.lua
+GUI\Controls.lua
+GUI\Panel.lua
+GUI\ColorPicker.lua
+
+# Settings pages -- Options.lua heads the chain, the rest follow in order
+GUI\Pages\Options.lua
+GUI\Pages\Frames.lua
+GUI\Pages\Auras.lua
+GUI\Pages\Indicators.lua
+GUI\Pages\Modules.lua
+GUI\Pages\AutoProfiles.lua
+GUI\Pages\NicknamesPage.lua
+GUI\Pages\NicknamesPicker.lua
+
+# Aura Designer editor (migrations stay resident in the main addon)
+AuraDesigner\UI\Options.lua
+AuraDesigner\UI\Groups.lua
+AuraDesigner\UI\Indicators.lua
+AuraDesigner\UI\Cards.lua
+AuraDesigner\UI\Editor.lua
+
+# Text Designer editor
+TextDesigner\UI\Options.lua
+
+# Filter Registry UI
+FilterRegistry\UI\Options.lua
+FilterRegistry\UI\SpellPicker.lua
+
+# Click-Casting UI
+ClickCasting\UI\Main.lua
+ClickCasting\UI\ProfilesPanel.lua
+ClickCasting\UI\BindingEditor.lua
+ClickCasting\UI\Dialogs.lua
+
+# Test mode -- TestMode\Shim.lua stays resident so live rendering always has
+# the entry points; these overwrite the stubs when this addon loads.
+TestMode\TestFramePool.lua
+TestMode\TestMode.lua
+
+# Debug tools (DebugConsole and Profiler stay resident in the main addon)
+Debug\AuraExplorer.lua
+Debug\AtlasBrowser.lua
+Debug\MemoryTest.lua
+Debug\AttachmentScan.lua
