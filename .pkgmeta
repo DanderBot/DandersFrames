@@ -9,8 +9,10 @@ enable-nolib-creation: no
 # package name as the root; values are relative to the package root. So
 # "DandersFrames/DandersFrames: DandersFrames" reads as "the DandersFrames
 # folder inside the package dir becomes the top-level DandersFrames" -- it
-# looks like it collides with its own parent and does not. This is the same
-# shape ElvUI ships (ElvUI/ElvUI: ElvUI, ElvUI/ElvUI_Options: ElvUI_Options).
+# looks like it collides with its own parent and does not. This is the
+# documented shape for a container repo that ships more than one folder;
+# verified against a working example before writing it, after talking myself
+# out of it once on the assumption that it would collide.
 #
 # Everything at the repo root that is not an addon folder is stripped by the
 # ignore list below, so the zip contains only the two addon folders.
