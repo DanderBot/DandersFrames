@@ -49,8 +49,24 @@ local addonName, DF = ...
 DF.SecureSort = DF.SecureSort or {}
 local SecureSort = DF.SecureSort
 
--- Debug flag - enable verbose output
+-- Debug flag. The verbose Lua-side output has moved to the debug console's
+-- SECURESORT category; this flag remains because the SECURE environment keeps
+-- its own `debugEnabled` copy, which a console category cannot reach into.
 SecureSort.debug = false
+
+-- Single entry point for flipping the flag, so the Lua side and the secure
+-- environment can never disagree. Previously the test panel's button set only
+-- the Lua flag while the slash command also pushed it into the handler.
+function SecureSort:SetDebug(on)
+    SecureSort.debug = not not on
+    if SecureSort.handler then
+        SecureHandlerExecute(SecureSort.handler, "debugEnabled = " .. tostring(SecureSort.debug))
+    end
+    local o = DF:Out("Secure Sort", "debug")
+    o:Field("secure-side tracing", SecureSort.debug and "on" or "off",
+        SecureSort.debug and "GOOD" or "NEUTRAL")
+    o:Line("Lua-side tracing is in the debug console — enable the SECURESORT category.", "NEUTRAL")
+end
 
 -- Track initialization state
 SecureSort.initialized = false
@@ -135,18 +151,17 @@ end
 -- DEBUG UTILITIES
 -- ============================================================
 
-local function DebugPrint(...)
-    if SecureSort.debug then
-        print("|cff00ffff[DF SecureSort]|r", ...)
-    end
-end
+-- Routed to the debug console's SECURESORT category. Every DebugPrint call site
+-- in this file feeds this one helper, so the console is the single place to
+-- turn them on or off.
+local DebugPrint = DF:MakeDebugPrinter("SECURESORT")
 
 -- This function can be called FROM secure code via CallMethod
--- to output debug information
+-- to output debug information. Secure snippets can hand us tainted values, so
+-- this goes through the same printer, which replaces secrets with a placeholder.
+local secureDebugPrint = DF:MakeDebugPrinter("SECURESORT")
 local function SecureDebugCallback(self, msg)
-    if SecureSort.debug then
-        print("|cffff00ff[DF Secure]|r", msg or "nil")
-    end
+    secureDebugPrint("[secure]", msg ~= nil and msg or "nil")
 end
 
 -- ============================================================
@@ -221,7 +236,7 @@ function SecureSort:CreateHandler()
         debugEnabled = ]] .. tostring(SecureSort.debug) .. [[
     ]])
     
-    DebugPrint("Secure environment initialized (debug=" .. tostring(SecureSort.debug) .. ")")
+    DF:Debug("SECURESORT", "Secure environment initialized (debug=%s)", tostring(SecureSort.debug))
     
     -- ============================================================
     -- STATE DRIVER FOR AUTOMATIC TRIGGERING
@@ -1315,20 +1330,21 @@ function SecureSort:CreateHandler()
     -- Debug code - prints info about what data we can access
     -- This runs in INSECURE code so we can use all Lua functions
     debugRolesButton:SetScript("OnClick", function()
-        print("|cff00ff00[DF Debug]|r Querying role data...")
+        DF:Say("Querying role data...")
         
         local rqh = DF.SecureSort.roleQueryHeader
         if not rqh then
-            print("|cffff0000[DF Debug]|r No roleQueryHeader!")
+            DF:Err("No roleQueryHeader!")
             return
         end
         
-        print("|cff00ff00[DF Debug]|r Header: " .. tostring(rqh:GetName()))
-        print("|cff00ff00[DF Debug]|r Shown: " .. tostring(rqh:IsShown()))
+        local o = DF:Out("Secure Sort", "raid quick header")
+        o:Field("header", tostring(rqh:GetName()), "NEUTRAL")
+        o:Field("shown", rqh:IsShown(), rqh:IsShown() and "GOOD" or "NEUTRAL")
         
         -- Get children via GetChildren()
         local children = {rqh:GetChildren()}
-        print("|cff00ff00[DF Debug]|r Number of children: " .. #children)
+        o:Field("children", #children, #children > 0 and "GOOD" or "WARN")
         
         for i, child in ipairs(children) do
             local unit = child:GetAttribute("unit")
@@ -1345,7 +1361,7 @@ function SecureSort:CreateHandler()
         end
         
         -- Also check direct party info
-        print("|cff00ff00[DF Debug]|r Direct party check:")
+        DF:Out("Secure Sort", "direct party check")
         print("  IsInGroup: " .. tostring(IsInGroup()))
         print("  GetNumGroupMembers: " .. tostring(GetNumGroupMembers()))
         
@@ -1368,7 +1384,7 @@ function SecureSort:CreateHandler()
         end
         
         -- Show our party frames' unit attributes
-        print("|cff00ff00[DF Debug]|r Our party frames:")
+        DF:Out("Secure Sort", "our party frames")
         if DF.playerFrame then
             local unit = DF.playerFrame:GetAttribute("unit")
             print("  playerFrame: unit=" .. tostring(unit))
@@ -1386,7 +1402,7 @@ function SecureSort:CreateHandler()
         end
         
         -- Show sort button state
-        print("|cff00ff00[DF Debug]|r Sort button state:")
+        DF:Out("Secure Sort", "sort button state")
         local sb = DF.SecureSort.sortButton
         if sb then
             print("  roleOrder1: " .. tostring(sb:GetAttribute("roleOrder1")))
@@ -1398,7 +1414,7 @@ function SecureSort:CreateHandler()
             print("  sortEnabled: " .. tostring(sb:GetAttribute("sortEnabled")))
             
             -- Show layout params
-            print("|cffff8800[DF Debug]|r Layout params:")
+            DF:Out("Secure Sort", "layout params")
             print("  layoutWidth: " .. tostring(sb:GetAttribute("layoutWidth")))
             print("  layoutHeight: " .. tostring(sb:GetAttribute("layoutHeight")))
             print("  layoutSpacing: " .. tostring(sb:GetAttribute("layoutSpacing")))
@@ -1411,7 +1427,7 @@ function SecureSort:CreateHandler()
         -- Show handler debug info
         local h = DF.SecureSort.handler
         if h then
-            print("|cffff8800[DF Debug]|r Handler attributes:")
+            DF:Out("Secure Sort", "handler attributes")
             print("  posFrameCount: " .. tostring(h:GetAttribute("posFrameCount")))
             print("  sortOrder0: " .. tostring(h:GetAttribute("sortOrder0")))
             print("  sortOrder1: " .. tostring(h:GetAttribute("sortOrder1")))
@@ -1425,7 +1441,7 @@ function SecureSort:CreateHandler()
         -- Show layoutParams (Lua side)
         local lp = DF.SecureSort.layoutParams
         if lp then
-            print("|cffff00ff[DF Debug]|r layoutParams (Lua):")
+            DF:Out("Secure Sort", "layoutParams (Lua side)")
             print("  frameWidth: " .. tostring(lp.frameWidth))
             print("  frameHeight: " .. tostring(lp.frameHeight))
             print("  spacing: " .. tostring(lp.spacing))
@@ -1435,7 +1451,7 @@ function SecureSort:CreateHandler()
             print("  (no layoutParams)")
         end
         
-        print("|cff00ff00[DF Debug]|r Done!")
+        DF:Say("Done!")
     end)
     
     DebugPrint("Debug Roles button created (Phase 3)")
@@ -1529,20 +1545,20 @@ function SecureSort:CreateTestUI()
     
     CreateButton("Register Party (5)", function()
         if not SecureSort.initialized then
-            print("|cffff0000Not initialized!|r")
+            DF:Err("Not initialized!")
             return
         end
         local count = SecureSort:RegisterPartyFrames()
-        print("|cff00ffff[SecureSort]|r Registered " .. (count or 0) .. "/5 party frames")
+        DF:Say("Registered party frames", (count or 0) .. "/5", (count or 0) == 5 and "GOOD" or "WARN")
     end)
     
     CreateButton("Register Raid (40)", function()
         if not SecureSort.initialized then
-            print("|cffff0000Not initialized!|r")
+            DF:Err("Not initialized!")
             return
         end
         local count = SecureSort:RegisterRaidFrames()
-        print("|cff00ffff[SecureSort]|r Registered " .. (count or 0) .. "/40 raid frames")
+        DF:Say("Registered raid frames", (count or 0) .. "/40", (count or 0) == 40 and "GOOD" or "WARN")
     end)
     
     -- Section: Phase 2 - Combat Swap Test
@@ -1554,7 +1570,7 @@ function SecureSort:CreateTestUI()
     
     CreateButton("Swap (ooc)", function()
         if InCombatLockdown() then
-            print("|cffff0000In combat! Use the swap button instead|r")
+            DF:Err("In combat! Use the swap button instead")
             return
         end
         SecureSort:RunSnippet("test_swap_positions")
@@ -1565,61 +1581,61 @@ function SecureSort:CreateTestUI()
     
     CreateButton("Update Layout Params", function()
         if not SecureSort.initialized then
-            print("|cffff0000Not initialized!|r")
+            DF:Err("Not initialized!")
             return
         end
         SecureSort:UpdateLayoutParams()
         SecureSort:RunSnippet("test_layout_config")
         C_Timer.After(0.1, function()
             local status = SecureSort:GetStatus()
-            print("|cff00ffff[SecureSort]|r Layout: " .. 
-                (status.testLayoutWidth or "?") .. "x" .. (status.testLayoutHeight or "?") ..
-                " spacing=" .. (status.testLayoutSpacing or "?") ..
-                " horiz=" .. (status.testLayoutHorizontal or "?") ..
-                " anchor=" .. (status.testLayoutAnchor or "?"))
+            local o = DF:Out("Secure Sort", "layout")
+            o:Field("size", (status.testLayoutWidth or "?") .. " x " .. (status.testLayoutHeight or "?"), "NEUTRAL")
+            o:Field("spacing", status.testLayoutSpacing or "?", "NEUTRAL")
+            o:Field("horizontal", status.testLayoutHorizontal or "?", "NEUTRAL")
+            o:Field("anchor", status.testLayoutAnchor or "?", "NEUTRAL")
         end)
     end)
     
     CreateButton("Frame 0 → Slot 2", function()
         if InCombatLockdown() then
-            print("|cffff0000In combat! Position tests only work out of combat|r")
+            DF:Err("In combat! Position tests only work out of combat")
             return
         end
         if not SecureSort.initialized then
-            print("|cffff0000Not initialized!|r")
+            DF:Err("Not initialized!")
             return
         end
         SecureSort:SecurePositionFrameToSlot(0, 2, 5)
         C_Timer.After(0.1, function()
             local status = SecureSort:GetStatus()
-            print("|cff00ffff[SecureSort]|r Position result: " .. (status.positionResult or "?") ..
-                " at (" .. (status.positionX or "?") .. ", " .. (status.positionY or "?") .. ")")
+            DF:Say("Position result: " .. (status.positionResult or "?"),
+                "(" .. (status.positionX or "?") .. ", " .. (status.positionY or "?") .. ")", "NEUTRAL")
         end)
     end)
     
     CreateButton("Frame 1 → Slot 0", function()
         if InCombatLockdown() then
-            print("|cffff0000In combat!|r")
+            DF:Err("In combat!")
             return
         end
         if not SecureSort.initialized then
-            print("|cffff0000Not initialized!|r")
+            DF:Err("Not initialized!")
             return
         end
         SecureSort:SecurePositionFrameToSlot(1, 0, 5)
         C_Timer.After(0.1, function()
             local status = SecureSort:GetStatus()
-            print("|cff00ffff[SecureSort]|r Position result: " .. (status.positionResult or "?"))
+            DF:Say("Position result", status.positionResult or "?", "NEUTRAL")
         end)
     end)
     
     CreateButton("Reset All (0,1,2,3,4)", function()
         if InCombatLockdown() then
-            print("|cffff0000In combat!|r")
+            DF:Err("In combat!")
             return
         end
         if not SecureSort.initialized then
-            print("|cffff0000Not initialized!|r")
+            DF:Err("Not initialized!")
             return
         end
         -- Reset to natural order: frame 0 → slot 0, frame 1 → slot 1, etc.
@@ -1627,17 +1643,17 @@ function SecureSort:CreateTestUI()
         SecureSort:SecurePositionAllFrames(sortOrder, 5)
         C_Timer.After(0.1, function()
             local status = SecureSort:GetStatus()
-            print("|cff00ffff[SecureSort]|r Positioned " .. (status.positionAllCount or "?") .. " frames")
+            DF:Say("Positioned frames", tostring(status.positionAllCount or "?"), "GOOD")
         end)
     end)
     
     CreateButton("Reverse (4,3,2,1,0)", function()
         if InCombatLockdown() then
-            print("|cffff0000In combat!|r")
+            DF:Err("In combat!")
             return
         end
         if not SecureSort.initialized then
-            print("|cffff0000Not initialized!|r")
+            DF:Err("Not initialized!")
             return
         end
         -- Reverse order: frame 4 → slot 0, frame 3 → slot 1, etc.
@@ -1645,21 +1661,21 @@ function SecureSort:CreateTestUI()
         SecureSort:SecurePositionAllFrames(sortOrder, 5)
         C_Timer.After(0.1, function()
             local status = SecureSort:GetStatus()
-            print("|cff00ffff[SecureSort]|r Positioned " .. (status.positionAllCount or "?") .. " frames (reversed)")
+            DF:Say("Positioned frames (reversed)", tostring(status.positionAllCount or "?"), "GOOD")
         end)
     end)
     
     CreateButton("Trigger Secure Sort", function()
         if not SecureSort.initialized then
-            print("|cffff0000Not initialized!|r")
+            DF:Err("Not initialized!")
             return
         end
         if not SecureSort.framesRegistered then
-            print("|cffff0000Frames not registered!|r")
+            DF:Err("Frames not registered!")
             return
         end
         SecureSort:TriggerSecureSort("DebugButton")
-        print("|cff00ffff[SecureSort]|r Secure sort triggered!")
+        DF:Say("Secure sort triggered")
     end, {0.2, 0.5, 0.8})
     
     -- Section: Debug
@@ -1673,13 +1689,12 @@ function SecureSort:CreateTestUI()
         if SecureSort.debugRolesButton then
             SecureSort.debugRolesButton:Click()
         else
-            print("|cffff0000Debug button not created!|r")
+            DF:Err("Debug button not created!")
         end
     end, {0.2, 0.6, 0.2})
     
     CreateButton("Toggle Debug", function()
-        SecureSort.debug = not SecureSort.debug
-        print("|cff00ffff[SecureSort]|r Debug: " .. (SecureSort.debug and "|cff00ff00ON|r" or "|cffaaaaaaoff|r"))
+        SecureSort:SetDebug(not SecureSort.debug)
     end)
     
     -- Close button
@@ -1743,7 +1758,7 @@ function SecureSort:ShowTestUI()
     end
     self.testUI:Show()
     self:UpdateTestUIStatus()
-    print("|cff00ffff[SecureSort]|r Test UI shown. Drag to move.")
+    DF:Say("Secure sort test UI shown", "drag to move")
 end
 
 function SecureSort:HideTestUI()
@@ -1839,10 +1854,6 @@ function SecureSort:SetSecurePath(value, ...)
         ]])
     end
     
-    if SecureSort.debug then
-        local pathParts = {...}
-        -- Debug removed - too spammy
-    end
 end
 
 -- Convenience wrapper on DF namespace
@@ -1902,8 +1913,9 @@ function SecureSort:ShowTestButtons()
     if self.debugRolesButton then
         self.debugRolesButton:Show()
     end
-    print("|cff00ffff[DF SecureSort]|r Test buttons shown. Works in combat!")
-    print("|cff00ffff[DF SecureSort]|r Commands: |cffffffff/click DFSecureSortButton|r or |cffffffff/click DFDebugRolesButton|r")
+    local o = DF:Out("Secure Sort", "test buttons")
+    o:Line("Shown. These work in combat.", "GOOD")
+    o:Hints("/click DFSecureSortButton", "/click DFDebugRolesButton")
 end
 
 -- Hide the test buttons
@@ -1926,7 +1938,7 @@ function SecureSort:HideTestButtons()
     if self.debugRolesButton then
         self.debugRolesButton:Hide()
     end
-    print("|cff00ffff[DF SecureSort]|r Test buttons hidden.")
+    DF:Say("Secure sort test buttons hidden")
 end
 
 -- Update layout params on combat buttons (must be called out of combat)
@@ -2089,11 +2101,13 @@ function SecureSort:PushSortSettings()
     -- Push unit names for alphabetical sorting
     self:PushPartyUnitNames()
     
-    DebugPrint("Sort settings pushed: " .. 
-        (roleOrder[1] or "?") .. ">" .. (roleOrder[2] or "?") .. ">" .. (roleOrder[3] or "?") ..
-        " self=" .. (db.sortSelfPosition or "SORTED") ..
-        " class=" .. tostring(db.sortByClass or false) ..
-        " alpha=" .. tostring(db.sortAlphabetical or false))
+    if DF:DebugActive("SECURESORT") then
+        DebugPrint("Sort settings pushed: " .. 
+            (roleOrder[1] or "?") .. ">" .. (roleOrder[2] or "?") .. ">" .. (roleOrder[3] or "?") ..
+            " self=" .. (db.sortSelfPosition or "SORTED") ..
+            " class=" .. tostring(db.sortByClass or false) ..
+            " alpha=" .. tostring(db.sortAlphabetical or false))
+    end
     
     return true
 end
@@ -2127,7 +2141,9 @@ function SecureSort:PushPartyUnitNames()
         self.handler:SetAttribute("frameName" .. i, name)
     end
     
-    DebugPrint("Names pushed: " .. table.concat(names, ", "))
+    if DF:DebugActive("SECURESORT") then
+        DebugPrint("Names pushed: " .. table.concat(names, ", "))
+    end
     return true
 end
 
@@ -2150,12 +2166,12 @@ function SecureSort:TriggerSecureSort(caller)
                 end
             end)
         end
-        DebugPrint("TriggerSecureSort THROTTLED (caller=" .. caller .. ")")
+        DF:Debug("SECURESORT", "TriggerSecureSort THROTTLED (caller=%s)", caller)
         return true
     end
     self.lastPartySortTime = now
     
-    DebugPrint("TriggerSecureSort called (caller=" .. caller .. ")")
+    DF:Debug("SECURESORT", "TriggerSecureSort called (caller=%s)", caller)
     
     if not self.handler then
         DebugPrint("WARNING: Handler not created yet")
@@ -2588,11 +2604,13 @@ function SecureSort:PushRaidSortSettings()
     -- Push unit names for alphabetical sorting
     self:PushRaidUnitNames()
     
-    DebugPrint("Raid sort settings pushed: " .. 
-        (roleOrder[1] or "?") .. ">" .. (roleOrder[2] or "?") .. ">" .. (roleOrder[3] or "?") ..
-        " self=" .. (db.sortSelfPosition or "SORTED") ..
-        " class=" .. tostring(db.sortByClass or false) ..
-        " alpha=" .. tostring(db.sortAlphabetical or false))
+    if DF:DebugActive("SECURESORT") then
+        DebugPrint("Raid sort settings pushed: " .. 
+            (roleOrder[1] or "?") .. ">" .. (roleOrder[2] or "?") .. ">" .. (roleOrder[3] or "?") ..
+            " self=" .. (db.sortSelfPosition or "SORTED") ..
+            " class=" .. tostring(db.sortByClass or false) ..
+            " alpha=" .. tostring(db.sortAlphabetical or false))
+    end
     
     return true
 end
@@ -2633,7 +2651,7 @@ function SecureSort:PushRaidUnitNames()
         self.handler:SetAttribute("raidFrameName" .. i, "")
     end
     
-    DebugPrint("Raid names pushed: " .. nameCount .. " units")
+    DF:Debug("SECURESORT", "Raid names pushed: %s units", nameCount)
     return true
 end
 
@@ -2678,9 +2696,11 @@ function SecureSort:PushRaidLayoutConfig()
     
     SecureHandlerExecute(self.handler, code)
     
-    DebugPrint("Raid layout config pushed: " .. lp.frameWidth .. "x" .. lp.frameHeight ..
-        " ppr=" .. lp.playersPerRow .. " horiz=" .. tostring(lp.horizontal) ..
-        " anchor=" .. (lp.gridAnchor or "START"))
+    if DF:DebugActive("SECURESORT") then
+        DebugPrint("Raid layout config pushed: " .. lp.frameWidth .. "x" .. lp.frameHeight ..
+            " ppr=" .. lp.playersPerRow .. " horiz=" .. tostring(lp.horizontal) ..
+            " anchor=" .. (lp.gridAnchor or "START"))
+    end
     
     return true
 end
@@ -2732,8 +2752,10 @@ function SecureSort:PushRaidGroupLayoutConfig()
     
     SecureHandlerExecute(self.handler, code)
     
-    DebugPrint("Raid GROUP layout config pushed: useGroups=" .. tostring(useGroups) ..
-        " groupsPerRowCol=" .. lp.groupsPerRowCol)
+    if DF:DebugActive("SECURESORT") then
+        DebugPrint("Raid GROUP layout config pushed: useGroups=" .. tostring(useGroups) ..
+            " groupsPerRowCol=" .. lp.groupsPerRowCol)
+    end
     
     return true
 end
@@ -2754,12 +2776,12 @@ function SecureSort:TriggerSecureRaidSort(caller)
                 end
             end)
         end
-        DebugPrint("TriggerSecureRaidSort THROTTLED (caller=" .. caller .. ")")
+        DF:Debug("SECURESORT", "TriggerSecureRaidSort THROTTLED (caller=%s)", caller)
         return true
     end
     self.lastRaidSortTime = now
     
-    DebugPrint("TriggerSecureRaidSort called (caller=" .. caller .. ")")
+    DF:Debug("SECURESORT", "TriggerSecureRaidSort called (caller=%s)", caller)
     
     if not self.handler then
         DebugPrint("WARNING: Handler not created yet")
@@ -3277,7 +3299,7 @@ function SecureSort:PositionFrameToSlot(frame, slotIndex, frameCount, layoutPara
     -- border straddle two physical rows; this nudges it back on-grid (bounded ≤0.5px).
     DF:SnapPointToPixelGrid(frame, (DF:GetFrameDB(frame) or {}).pixelPerfect)
 
-    DebugPrint("Positioned frame to slot " .. slotIndex .. " at (" .. x .. ", " .. y .. ")")
+    DF:Debug("SECURESORT", "Positioned frame to slot %s at (%s, %s)", slotIndex, x, y)
     return true
 end
 
@@ -3297,7 +3319,7 @@ function SecureSort:PositionAllFramesToSlots(frames, layoutParams, container)
         self:PositionFrameToSlot(frame, slotIndex, frameCount, layoutParams, container)
     end
     
-    DebugPrint("Positioned " .. frameCount .. " frames to slots")
+    DF:Debug("SECURESORT", "Positioned %s frames to slots", frameCount)
     return true
 end
 
@@ -3367,7 +3389,7 @@ function SecureSort:UpdateLayoutParams(mode)
     mode = mode or "party"  -- Default to party
     local db = DF:GetDB(mode)
     if not db then
-        DebugPrint("WARNING: No db for mode '" .. mode .. "', using defaults")
+        DF:Debug("SECURESORT", "WARNING: No db for mode '%s', using defaults", mode)
         return
     end
     
@@ -3516,13 +3538,15 @@ function SecureSort:UpdateRaidLayoutParams()
         self.raidLayoutParams.vSpacing = DF:PixelPerfect(self.raidLayoutParams.vSpacing)
     end
     
-    DebugPrint("Raid layout params updated: " .. 
-        self.raidLayoutParams.frameWidth .. "x" .. self.raidLayoutParams.frameHeight .. 
-        " hSpacing=" .. self.raidLayoutParams.hSpacing ..
-        " vSpacing=" .. self.raidLayoutParams.vSpacing ..
-        " playersPerRow=" .. self.raidLayoutParams.playersPerRow ..
-        " horizontal=" .. tostring(self.raidLayoutParams.horizontal) ..
-        " headerAnchorPoint=" .. self.raidLayoutParams.headerAnchorPoint)
+    if DF:DebugActive("SECURESORT") then
+        DebugPrint("Raid layout params updated: " .. 
+            self.raidLayoutParams.frameWidth .. "x" .. self.raidLayoutParams.frameHeight .. 
+            " hSpacing=" .. self.raidLayoutParams.hSpacing ..
+            " vSpacing=" .. self.raidLayoutParams.vSpacing ..
+            " playersPerRow=" .. self.raidLayoutParams.playersPerRow ..
+            " horizontal=" .. tostring(self.raidLayoutParams.horizontal) ..
+            " headerAnchorPoint=" .. self.raidLayoutParams.headerAnchorPoint)
+    end
     
     -- Note: Secure environment is updated via PushRaidLayoutConfig() which is called
     -- separately when triggering secure raid sort
@@ -3552,8 +3576,8 @@ function SecureSort:UpdateRaidGroupLayoutParams()
         DebugPrint("WARNING: No raid db, using defaults for group layout")
         -- [LEAK-TEST] Early-return case: shared table NOT replaced, stale fields survive.
         if DF.debugLeakTest then
-            print(string.format(
-                "|cffffa500[DF LEAK-TEST]|r UpdateRaidGroupLayoutParams EARLY RETURN (no db) -- table NOT replaced. Existing testMode=%s",
+            DF:Say(string.format(
+                "LEAK-TEST: UpdateRaidGroupLayoutParams EARLY RETURN (no db) -- table NOT replaced. Existing testMode=%s",
                 tostring(self.raidGroupLayoutParams and self.raidGroupLayoutParams.testMode)
             ))
         end
@@ -3563,8 +3587,8 @@ function SecureSort:UpdateRaidGroupLayoutParams()
     -- [LEAK-TEST] About to replace shared table. Capture existing testMode so we can prove
     -- whether fields survive the assignment at the next line.
     if DF.debugLeakTest then
-        print(string.format(
-            "|cffffa500[DF LEAK-TEST]|r UpdateRaidGroupLayoutParams REPLACING table  old.testMode=%s",
+        DF:Say(string.format(
+            "LEAK-TEST: UpdateRaidGroupLayoutParams REPLACING table  old.testMode=%s",
             tostring(self.raidGroupLayoutParams and self.raidGroupLayoutParams.testMode)
         ))
     end
@@ -3591,13 +3615,15 @@ function SecureSort:UpdateRaidGroupLayoutParams()
         self.raidGroupLayoutParams.rowColSpacing = DF:PixelPerfect(self.raidGroupLayoutParams.rowColSpacing)
     end
     
-    DebugPrint("Raid GROUP layout params updated: " .. 
-        self.raidGroupLayoutParams.frameWidth .. "x" .. self.raidGroupLayoutParams.frameHeight .. 
-        " playerSpacing=" .. self.raidGroupLayoutParams.playerSpacing ..
-        " groupSpacing=" .. self.raidGroupLayoutParams.groupSpacing ..
-        " rowColSpacing=" .. self.raidGroupLayoutParams.rowColSpacing ..
-        " groupsPerRowCol=" .. self.raidGroupLayoutParams.groupsPerRowCol ..
-        " horizontal=" .. tostring(self.raidGroupLayoutParams.horizontal))
+    if DF:DebugActive("SECURESORT") then
+        DebugPrint("Raid GROUP layout params updated: " .. 
+            self.raidGroupLayoutParams.frameWidth .. "x" .. self.raidGroupLayoutParams.frameHeight .. 
+            " playerSpacing=" .. self.raidGroupLayoutParams.playerSpacing ..
+            " groupSpacing=" .. self.raidGroupLayoutParams.groupSpacing ..
+            " rowColSpacing=" .. self.raidGroupLayoutParams.rowColSpacing ..
+            " groupsPerRowCol=" .. self.raidGroupLayoutParams.groupsPerRowCol ..
+            " horizontal=" .. tostring(self.raidGroupLayoutParams.horizontal))
+    end
 end
 
 -- Calculate group-based position for a frame
@@ -3821,8 +3847,8 @@ function SecureSort:PositionRaidFrameToGroupSlot(frame, groupNum, posInGroup, pl
         local frameName = (frame and frame.GetName and frame:GetName()) or "?"
         local containerName = (container and container.GetName and container:GetName()) or "?"
         local isTestFrame = frame and frame.dfIsTestFrame and true or false
-        print(string.format(
-            "|cffffa500[DF LEAK-TEST]|r PositionRaidFrameToGroupSlot frame=%s container=%s dfIsTestFrame=%s lp.testMode=%s DF.raidTestMode=%s",
+        DF:Say(string.format(
+            "LEAK-TEST: PositionRaidFrameToGroupSlot frame=%s container=%s dfIsTestFrame=%s lp.testMode=%s DF.raidTestMode=%s",
             tostring(frameName),
             tostring(containerName),
             tostring(isTestFrame),
@@ -3887,7 +3913,7 @@ function SecureSort:RegisterContainer(container, name)
     -- Also set as frame ref on handler for direct access
     SecureHandlerSetFrameRef(self.handler, name, container)
     
-    DebugPrint("Registered container: " .. name)
+    DF:Debug("SECURESORT", "Registered container: %s", name)
     return true
 end
 
@@ -5083,68 +5109,63 @@ function SecureSort:GetStatus()
 end
 
 function SecureSort:PrintStatus()
-    print("|cff00ffff========== DF SecureSort Status ==========|r")
     local status = self:GetStatus()
-    
-    print("|cffaaaaaaModule State:|r")
-    print("  initialized:", status.initialized and "|cff00ff00true|r" or "|cffff0000false|r")
-    print("  handlerReady:", status.handlerReady and "|cff00ff00true|r" or "|cffff0000false|r")
-    print("  handlerExists:", status.handlerExists and "|cff00ff00true|r" or "|cffff0000false|r")
-    print("  debug:", status.debug and "|cff00ff00ON|r" or "|cffaaaaaa off|r")
-    print("  inCombat:", status.inCombat and "|cffff9900YES|r" or "|cff00ff00no|r")
-    
-    if status.combatLimited then
-        print("|cffff9900  (values may be stale - in combat)|r")
+    local o = DF:Out("Secure Sort", status.combatLimited and "in combat — values may be stale" or nil)
+
+    -- ☠ COLOUR MEANS STATUS, NOT DATATYPE. The old version painted every `false`
+    -- red and every `no` green, so `inCombat: no` was green while
+    -- `handlerExists: false` was red — same shape, opposite colours, and the
+    -- reader had to know which booleans were faults. Now: a missing handler is
+    -- BAD because DF cannot sort without it; being out of combat is NEUTRAL
+    -- because it is neither good nor bad; debug being off is NEUTRAL, not a fault.
+    o:Section("Module state")
+    o:Field("initialized",   status.initialized,   status.initialized and "GOOD" or "BAD")
+    o:Field("handler ready", status.handlerReady,  status.handlerReady and "GOOD" or "BAD")
+    o:Field("handler exists",status.handlerExists, status.handlerExists and "GOOD" or "BAD")
+    o:Field("debug", status.debug and "on" or "off", status.debug and "GOOD" or "NEUTRAL")
+    o:Field("in combat", status.inCombat, "NEUTRAL")
+
+    if not status.handlerExists then
+        o:Line("No secure handler exists yet, so nothing below can be read.", "BAD")
+        -- Spelling out the ORDER matters: the old version listed init among the
+        -- other commands with no hint that it is a prerequisite, so the natural
+        -- move was to try one of the others and get nothing.
+        o:Line("Run /df debug secure init first — every other subcommand needs it.", "WARN")
+        o:Siblings("secure")
+        return
     end
-    
-    if status.handlerExists then
-        print("|cffaaaaaaSecure Environment:|r")
-        print("  isInitialized:", status.secureIsInit and "|cff00ff00true|r" or "|cffff0000false|r")
-        print("  frameCount:", status.secureFrameCount or "?")
-        
-        print("|cffaaaaaaPhase 0 Tests:|r")
-        print("  test_basic ran:", status.testBasicRan and "|cff00ff00true|r" or "|cffaaaaaa not yet|r")
-        
-        -- Handle testFrameCount properly (could be nil, -1, or a valid number)
-        local frameCountStr
-        if status.testFrameCount == nil then
-            frameCountStr = "|cffaaaaaa not run|r"
-        elseif status.testFrameCount == -1 then
-            frameCountStr = "|cffaaaaaa not run|r"
+
+    o:Section("Secure environment")
+    o:Field("isInitialized", status.secureIsInit, status.secureIsInit and "GOOD" or "BAD")
+    o:Field("frameCount", status.secureFrameCount or "?",
+        (status.secureFrameCount or 0) > 0 and "GOOD" or "WARN")
+
+    -- "not run" is deliberately NEUTRAL, not a failure: these are opt-in probes,
+    -- so not having run one says nothing about whether the module works.
+    local function countField(label, count, want)
+        if count == nil or count == -1 then
+            o:Field(label, "not run", "NEUTRAL")
         else
-            frameCountStr = "|cff00ff00" .. tostring(status.testFrameCount) .. " frames|r"
+            o:Field(label, count .. "/" .. want, count == want and "GOOD" or "WARN")
         end
-        print("  test_count_frames:", frameCountStr)
-        
-        print("  test_frame_valid:", status.testFrameValid and "|cff00ff00valid|r" or "|cffaaaaaa not valid/not run|r")
-        
-        -- Phase 1 test results
-        print("|cffaaaaaaPhase 1 Tests:|r")
-        
-        -- Party frames
-        local partyCountStr
-        if status.testPartyCount == nil or status.testPartyCount == -1 then
-            partyCountStr = "|cffaaaaaa not run|r"
-        elseif status.testPartyCount == 5 then
-            partyCountStr = "|cff00ff00" .. tostring(status.testPartyCount) .. "/5|r"
-        else
-            partyCountStr = "|cffff9900" .. tostring(status.testPartyCount) .. "/5|r"
-        end
-        print("  party frames:", partyCountStr)
-        
-        -- Raid frames
-        local raidCountStr
-        if status.testRaidCount == nil or status.testRaidCount == -1 then
-            raidCountStr = "|cffaaaaaa not run|r"
-        elseif status.testRaidCount == 40 then
-            raidCountStr = "|cff00ff00" .. tostring(status.testRaidCount) .. "/40|r"
-        else
-            raidCountStr = "|cffff9900" .. tostring(status.testRaidCount) .. "/40|r"
-        end
-        print("  raid frames:", raidCountStr)
     end
-    
-    print("|cff00ffff=============================================|r")
+
+    o:Section("Phase 0 tests")
+    o:Field("test_basic", status.testBasicRan and "ran" or "not run",
+        status.testBasicRan and "GOOD" or "NEUTRAL")
+    if status.testFrameCount == nil or status.testFrameCount == -1 then
+        o:Field("test_count_frames", "not run", "NEUTRAL")
+    else
+        o:Field("test_count_frames", status.testFrameCount .. " frames", "GOOD")
+    end
+    o:Field("test_frame_valid", status.testFrameValid and "valid" or "not valid / not run",
+        status.testFrameValid and "GOOD" or "NEUTRAL")
+
+    o:Section("Phase 1 tests")
+    countField("party frames", status.testPartyCount, 5)
+    countField("raid frames", status.testRaidCount, 40)
+
+    o:Siblings("secure")
 end
 
 -- ============================================================
@@ -5218,9 +5239,9 @@ function SecureSort:RegisterPartyFrames()
         if frame then
             self:SetSecurePath(frame, "partyFrames", i)
             count = count + 1
-            DebugPrint("Registered partyFrame" .. i .. " at partyFrames[" .. i .. "]")
+            DF:Debug("SECURESORT", "Registered partyFrame%s at partyFrames[%s]", i, i)
         else
-            DebugPrint("WARNING: partyFrame" .. i .. " not found")
+            DF:Debug("SECURESORT", "WARNING: partyFrame%s not found", i)
         end
     end
     
@@ -5323,12 +5344,12 @@ function SecureSort:RegisterPartyFrames()
                         if self.handler then
                             self.handler:SetAttribute("frameClass" .. i, class)
                         end
-                        DebugPrint("Set frameClass" .. i .. " = " .. class)
+                        DF:Debug("SECURESORT", "Set frameClass%s = %s", i, class)
                     end
                 end
             end
         end
-        DebugPrint("Set " .. sortFrameRefsSet .. " frame refs on sortButton")
+        DF:Debug("SECURESORT", "Set %s frame refs on sortButton", sortFrameRefsSet)
     end
     
     -- Set container ref on sort button for positioning
@@ -5372,7 +5393,7 @@ function SecureSort:RegisterPartyFrames()
                     owner:SetAttribute("state-sorttrigger", 1 - v)
                 ]])
                 
-                DebugPrint("Wrapped OnShow/OnHide for in-combat sorting on frame" .. i)
+                DF:Debug("SECURESORT", "Wrapped OnShow/OnHide for in-combat sorting on frame%s", i)
             end
         end
         DebugPrint("In-combat sorting hooks registered on party frames")
@@ -5385,7 +5406,7 @@ function SecureSort:RegisterPartyFrames()
     -- This prevents TriggerSecureSort from clicking with invalid refs
     if sortFrameRefsSet > 0 and DF.playerFrame then
         self.framesRegistered = true
-        DebugPrint("Party frame registration complete: " .. count .. "/5 frames")
+        DF:Debug("SECURESORT", "Party frame registration complete: %s/5 frames", count)
         DebugPrint("Combat buttons ready! In-combat sorting enabled!")
     else
         self.framesRegistered = false
@@ -5427,11 +5448,11 @@ function SecureSort:RegisterRaidFrames()
                 self:SetSecurePath(frame, "raidFrames", frameIndex)
                 count = count + 1
                 if SecureSort.debug then
-                    DebugPrint("Registered raidFrame" .. frameIndex .. " at raidFrames[" .. frameIndex .. "]")
+                    DF:Debug("SECURESORT", "Registered raidFrame%s at raidFrames[%s]", frameIndex, frameIndex)
                 end
             else
                 if SecureSort.debug then
-                    DebugPrint("WARNING: raidFrame" .. frameIndex .. " not found")
+                    DF:Debug("SECURESORT", "WARNING: raidFrame%s not found", frameIndex)
                 end
             end
         end)
@@ -5483,7 +5504,7 @@ function SecureSort:RegisterRaidFrames()
     DebugPrint("Raid frames registered (OnShow/OnHide hooks disabled to prevent cascade)")
     
     self.raidFramesRegistered = true
-    DebugPrint("Raid frame registration complete: " .. count .. "/40 frames")
+    DF:Debug("SECURESORT", "Raid frame registration complete: %s/40 frames", count)
     return count
 end
 
@@ -5502,32 +5523,53 @@ end
 -- ============================================================
 
 DF:RegisterDebugSlash("DFSECURE", "Secure sort diagnostics", false, "/dfsecure")
+-- ☠ Everything here except the status dump REWIRES A LIVE ENGINE. SecureSort is
+-- not a prototype: Frames/Init.lua initialises it on load and it drives party
+-- and raid positioning plus every re-sort triggered from the Options pages.
+-- `init` re-creates the secure handler; party/raid/all/register re-register
+-- frames with it; and `swap` physically swaps two frames and LEAVES THEM THAT
+-- WAY until swapback. Someone running these while diagnosing a sorting problem
+-- ends up with a second problem that looks like the first.
+--
+-- The status dump stays public for the opposite reason: "handlerReady: no" is
+-- the answer when sorting silently is not working, and a user cannot see that
+-- state any other way.
+-- ⚠ Must stay in step with COMMAND_SIBLINGS.secure.dev in Core.lua.
+local SECURE_MUTATORS = {
+    init = true, party = true, raid = true, all = true, register = true,
+    swap = true, swapback = true, test = true, debug = true,
+    show = true, hide = true, showbutton = true, hidebutton = true, ui = true,
+}
+
 SlashCmdList["DFSECURE"] = function(msg)
     local cmd, arg = msg:match("^(%S*)%s*(.-)$")
     cmd = cmd:lower()
-    
+
+    if SECURE_MUTATORS[cmd] and not DF:IsDevBuild() then
+        local o = DF:Out("Secure Sort", "'" .. cmd .. "' is a dev-build command")
+        o:Line("It rewires the live secure sorting handler rather than reporting on it,", "NEUTRAL")
+        o:Line("so it is not available on a release build.", "NEUTRAL")
+        o:Siblings("secure")
+        return
+    end
+
     if cmd == "status" or cmd == "" then
         SecureSort:PrintStatus()
         
     elseif cmd == "debug" then
-        SecureSort.debug = not SecureSort.debug
-        -- Also toggle in secure environment
-        if SecureSort.handler then
-            SecureHandlerExecute(SecureSort.handler, "debugEnabled = " .. tostring(SecureSort.debug))
-        end
-        print("|cff00ffff[DF SecureSort]|r Debug:", SecureSort.debug and "|cff00ff00ON|r" or "|cffaaaaaaoff|r")
-        
+        SecureSort:SetDebug(not SecureSort.debug)
+
     elseif cmd == "init" then
         SecureSort:Initialize()
-        print("|cff00ffff[DF SecureSort]|r Initialization complete")
+        DF:Say("Secure sort initialised")
         
     elseif cmd == "test" then
         if not SecureSort.initialized then
-            print("|cff00ffff[DF SecureSort]|r Not initialized! Run /dfsecure init first")
+            DF:Err("Secure sort not initialised — run /df debug secure init first")
             return
         end
         
-        print("|cff00ffff[DF SecureSort]|r Running tests...")
+        DF:Say("Running secure sort tests", nil, "NEUTRAL")
         
         -- Run test snippets
         SecureSort:RunSnippet("test_basic")
@@ -5542,92 +5584,94 @@ SlashCmdList["DFSECURE"] = function(msg)
     elseif cmd == "party" then
         -- Phase 1: Register and verify all party frames
         if not SecureSort.initialized then
-            print("|cff00ffff[DF SecureSort]|r Not initialized! Run /dfsecure init first")
+            DF:Err("Secure sort not initialised — run /df debug secure init first")
             return
         end
         
-        print("|cff00ffff[DF SecureSort]|r Registering party frames...")
+        DF:Say("Registering party frames", nil, "NEUTRAL")
         
         -- Register all party frames
         local count = SecureSort:RegisterPartyFrames()
         if not count then
-            print("|cffff0000ERROR:|r Registration failed")
+            DF:Err("Registration failed")
             return
         end
         
-        print("|cff00ffff[DF SecureSort]|r Registered " .. count .. "/5 party frames")
+        DF:Say("Registered party frames", count .. "/5", count == 5 and "GOOD" or "WARN")
         
         -- Verify they're accessible
-        print("|cff00ffff[DF SecureSort]|r Verifying in secure environment...")
+        DF:Say("Verifying in the secure environment", nil, "NEUTRAL")
         SecureSort:RunSnippet("test_count_party")
         SecureSort:RunSnippet("test_party_valid")
         
         C_Timer.After(0.1, function()
             local status = SecureSort:GetStatus()
-            print("|cff00ffff[DF SecureSort]|r Results:")
-            print("  Party frame count:", status.testPartyCount and ("|cff00ff00" .. status.testPartyCount .. "/5|r") or "|cffaaaaa not run|r")
-            print("  Frame details:", status.testPartyResults or "not run")
+            local o = DF:Out("Secure Sort", "party registration")
+            o:Field("Party frame count", status.testPartyCount and (status.testPartyCount .. "/5") or "not run",
+                status.testPartyCount == 5 and "GOOD" or (status.testPartyCount and "WARN" or "NEUTRAL"))
+            o:Field("Frame details", status.testPartyResults or "not run")
             
             if status.testPartyCount == 5 then
-                print("|cff00ff00SUCCESS:|r All party frames registered and accessible!")
+                DF:Say("All party frames registered and accessible")
             else
-                print("|cffff9900WARNING:|r Expected 5 frames, got " .. tostring(status.testPartyCount))
+                DF:Say("Expected 5 frames, got", tostring(status.testPartyCount), "WARN")
             end
         end)
         
     elseif cmd == "raid" then
         -- Phase 1: Register and verify all raid frames
         if not SecureSort.initialized then
-            print("|cff00ffff[DF SecureSort]|r Not initialized! Run /dfsecure init first")
+            DF:Err("Secure sort not initialised — run /df debug secure init first")
             return
         end
         
-        print("|cff00ffff[DF SecureSort]|r Registering raid frames...")
+        DF:Say("Registering raid frames", nil, "NEUTRAL")
         
         -- Register all raid frames
         local count = SecureSort:RegisterRaidFrames()
         if not count then
-            print("|cffff0000ERROR:|r Registration failed")
+            DF:Err("Registration failed")
             return
         end
         
-        print("|cff00ffff[DF SecureSort]|r Registered " .. count .. "/40 raid frames")
+        DF:Say("Registered raid frames", count .. "/40", count == 40 and "GOOD" or "WARN")
         
         -- Verify they're accessible
-        print("|cff00ffff[DF SecureSort]|r Verifying in secure environment...")
+        DF:Say("Verifying in the secure environment", nil, "NEUTRAL")
         SecureSort:RunSnippet("test_count_raid")
         SecureSort:RunSnippet("test_raid_valid")
         
         C_Timer.After(0.1, function()
             local status = SecureSort:GetStatus()
-            print("|cff00ffff[DF SecureSort]|r Results:")
-            print("  Raid frame count:", status.testRaidCount and ("|cff00ff00" .. status.testRaidCount .. "/40|r") or "|cffaaaaa not run|r")
-            print("  Frame sample:", status.testRaidResults or "not run")
+            local o = DF:Out("Secure Sort", "raid registration")
+            o:Field("Raid frame count", status.testRaidCount and (status.testRaidCount .. "/40") or "not run",
+                status.testRaidCount == 40 and "GOOD" or (status.testRaidCount and "WARN" or "NEUTRAL"))
+            o:Field("Frame sample", status.testRaidResults or "not run")
             
             if status.testRaidCount == 40 then
-                print("|cff00ff00SUCCESS:|r All raid frames registered and accessible!")
+                DF:Say("All raid frames registered and accessible")
             else
-                print("|cffff9900WARNING:|r Expected 40 frames, got " .. tostring(status.testRaidCount))
+                DF:Say("Expected 40 frames, got", tostring(status.testRaidCount), "WARN")
             end
         end)
         
     elseif cmd == "all" then
         -- Phase 1: Register ALL frames (party + raid)
         if not SecureSort.initialized then
-            print("|cff00ffff[DF SecureSort]|r Not initialized! Run /dfsecure init first")
+            DF:Err("Secure sort not initialised — run /df debug secure init first")
             return
         end
         
-        print("|cff00ffff[DF SecureSort]|r Registering ALL frames...")
+        DF:Say("Registering all frames", nil, "NEUTRAL")
         
         local results = SecureSort:RegisterAllFrames()
         
-        print("|cff00ffff[DF SecureSort]|r Registered:")
+        print("  " .. DF.OUT.SECTION .. "Registered|r")
         print("  Party frames:", (results.partyCount or 0) .. "/5")
         print("  Raid frames:", (results.raidCount or 0) .. "/40")
         
         -- Verify
-        print("|cff00ffff[DF SecureSort]|r Verifying in secure environment...")
+        DF:Say("Verifying in the secure environment", nil, "NEUTRAL")
         SecureSort:RunSnippet("test_count_party")
         SecureSort:RunSnippet("test_count_raid")
         
@@ -5636,70 +5680,70 @@ SlashCmdList["DFSECURE"] = function(msg)
             local partyOK = status.testPartyCount == 5
             local raidOK = status.testRaidCount == 40
             
-            print("|cff00ffff[DF SecureSort]|r Verification:")
-            print("  Party:", partyOK and "|cff00ff005/5|r" or ("|cffff9900" .. tostring(status.testPartyCount) .. "/5|r"))
-            print("  Raid:", raidOK and "|cff00ff0040/40|r" or ("|cffff9900" .. tostring(status.testRaidCount) .. "/40|r"))
+            local o = DF:Out("Secure Sort", "verification")
+            o:Field("Party", tostring(status.testPartyCount) .. "/5", partyOK and "GOOD" or "WARN")
+            o:Field("Raid", tostring(status.testRaidCount) .. "/40", raidOK and "GOOD" or "WARN")
             
             if partyOK and raidOK then
-                print("|cff00ff00SUCCESS:|r All 45 frames registered and accessible!")
+                DF:Say("All 45 frames registered and accessible")
             else
-                print("|cffff9900WARNING:|r Some frames missing")
+                DF:Say("Some frames missing", nil, "WARN")
             end
         end)
         
     elseif cmd == "register" then
         -- Legacy: Test registering just player frame (kept for backwards compatibility)
         if not SecureSort.initialized then
-            print("|cff00ffff[DF SecureSort]|r Not initialized!")
+            DF:Err("Secure sort not initialised — run /df debug secure init first")
             return
         end
         
         -- Try to register player frame if it exists
         if DF.playerFrame then
             SecureSort:SetSecurePath(DF.playerFrame, "partyFrames", 0)
-            print("|cff00ffff[DF SecureSort]|r Registered playerFrame at partyFrames[0]")
+            DF:Say("Registered playerFrame at partyFrames[0]")
             
             -- Test it
             SecureSort:RunSnippet("test_frame_valid")
             C_Timer.After(0.1, function()
                 local status = SecureSort:GetStatus()
                 if status.testFrameValid then
-                    print("|cff00ff00SUCCESS:|r Frame is accessible in secure environment!")
+                    DF:Say("Frame is accessible in the secure environment")
                 else
-                    print("|cffff0000FAILED:|r Frame not accessible")
+                    DF:Err("Frame not accessible")
                 end
             end)
         else
-            print("|cff00ffff[DF SecureSort]|r playerFrame not found - is DF initialized?")
+            DF:Err("playerFrame not found — is DandersFrames initialised?")
         end
         
     elseif cmd == "swap" then
         -- Phase 2: Test swapping frame positions
         if not SecureSort.initialized then
-            print("|cff00ffff[DF SecureSort]|r Not initialized! Run /dfsecure init first")
+            DF:Err("Secure sort not initialised — run /df debug secure init first")
             return
         end
         
-        print("|cff00ffff[DF SecureSort]|r |cffff9900[Phase 2]|r Testing position swap...")
+        DF:Say("Testing position swap", "phase 2", "NEUTRAL")
         
         if InCombatLockdown() then
             -- IN COMBAT: Must use the visible button!
-            print("|cffff9900[COMBAT MODE]|r Cannot call SetAttribute during combat!")
-            print("|cff00ffff[DF SecureSort]|r Use: |cffffffff/click DFSecureSwapButton|r")
-            print("|cff00ffff[DF SecureSort]|r Or run: |cffffffff/dfsecure showbutton|r and click it!")
+            local o = DF:Out("Secure Sort", "position swap")
+            o:Line("In combat — the swap must be driven by a click.", "WARN")
+            o:Hints("/click DFSecureSwapButton", "/df debug secure showbutton")
             SecureSort:ShowTestButtons()
         else
             -- OUT OF COMBAT: Use direct execution
-            print("|cff00ffff[DF SecureSort]|r Swapping player frame (0) and party1 frame (1)...")
+            DF:Say("Swapping player frame (0) with party1 frame (1)", nil, "NEUTRAL")
             SecureSort:RunSnippet("test_swap_positions")
             
             C_Timer.After(0.1, function()
                 local swapStatus = SecureSort:GetStatus()
                 if swapStatus.testSwapResult == "SUCCESS" then
-                    print("|cff00ff00SUCCESS:|r Frames swapped! Look at your frames - they should be in different positions.")
-                    print("|cff00ffff[DF SecureSort]|r Run |cffffffff/dfsecure swapback|r to swap them back.")
+                    DF:Say("Frames swapped - they should now be in different positions")
+                    DF:Say("Swapped", "run /df debug secure swapback to undo", "NEUTRAL")
                 else
-                    print("|cffff0000FAILED:|r Swap result: " .. tostring(swapStatus.testSwapResult))
+                    DF:Err("Swap failed - result: " .. tostring(swapStatus.testSwapResult))
                 end
             end)
         end
@@ -5707,23 +5751,25 @@ SlashCmdList["DFSECURE"] = function(msg)
     elseif cmd == "swapback" then
         -- Phase 2: Swap frames back to original positions
         if not SecureSort.initialized then
-            print("|cff00ffff[DF SecureSort]|r Not initialized!")
+            DF:Err("Secure sort not initialised — run /df debug secure init first")
             return
         end
         
         if InCombatLockdown() then
-            print("|cffff9900[COMBAT MODE]|r Use: |cffffffff/click DFSecureSwapBackButton|r")
+            local o = DF:Out("Secure Sort", "swap back")
+            o:Line("In combat — SetAttribute is blocked, so the swap must be driven by a click.", "WARN")
+            o:Hints("/click DFSecureSwapBackButton")
             SecureSort:ShowTestButtons()
         else
-            print("|cff00ffff[DF SecureSort]|r Swapping frames back...")
+            DF:Say("Swapping frames back", nil, "NEUTRAL")
             SecureSort:RunSnippet("test_swap_back")
             
             C_Timer.After(0.1, function()
                 local swapStatus = SecureSort:GetStatus()
                 if swapStatus.testSwapResult == "SWAPPED_BACK" then
-                    print("|cff00ff00SUCCESS:|r Frames swapped back to original positions!")
+                    DF:Say("Frames swapped back to their original positions")
                 else
-                    print("|cffff9900Result:|r " .. tostring(swapStatus.testSwapResult))
+                    DF:Say("Result", tostring(swapStatus.testSwapResult), "WARN")
                 end
             end)
         end
@@ -5731,7 +5777,7 @@ SlashCmdList["DFSECURE"] = function(msg)
     elseif cmd == "showbutton" or cmd == "show" then
         -- Show the test buttons for combat testing
         if not SecureSort.initialized then
-            print("|cff00ffff[DF SecureSort]|r Not initialized!")
+            DF:Err("Secure sort not initialised — run /df debug secure init first")
             return
         end
         SecureSort:ShowTestButtons()
@@ -5739,7 +5785,7 @@ SlashCmdList["DFSECURE"] = function(msg)
     elseif cmd == "hidebutton" or cmd == "hide" then
         -- Hide the test buttons
         if not SecureSort.initialized then
-            print("|cff00ffff[DF SecureSort]|r Not initialized!")
+            DF:Err("Secure sort not initialised — run /df debug secure init first")
             return
         end
         SecureSort:HideTestButtons()
@@ -5749,21 +5795,26 @@ SlashCmdList["DFSECURE"] = function(msg)
         SecureSort:ToggleTestUI()
         
     elseif cmd == "help" then
-        print("|cff00ffff[DF SecureSort]|r Commands:")
-        print("  |cffffffff/dfsecure ui|r - Toggle test UI panel (easiest!)")
-        print("  /dfsecure status - Show current status")
-        print("  /dfsecure debug - Toggle debug output")
-        print("  /dfsecure init - Initialize the secure handler")
-        print("  /dfsecure party - Register party frames (5)")
-        print("  /dfsecure raid - Register raid frames (40)")
-        print("  /dfsecure all - Register ALL frames (45)")
-        print("  /dfsecure swap - Swap frames 0 and 1")
-        print("  /dfsecure swapback - Swap them back")
-        print("  /dfsecure showbutton - Show combat test buttons")
-        print("  /dfsecure hidebutton - Hide combat test buttons")
+        local o = DF:Out("Secure Sort")
+        o:Section("Commands")
+        o:Item("(no argument) or status", "current state")
+        -- Gated the same way as the handler, so the help never offers a command
+        -- a release build would refuse.
+        if DF:IsDevBuild() then
+            o:Section("Rewires the live handler", "dev builds only")
+            o:Item("init", "initialise the secure handler — DO THIS FIRST, the rest need it")
+            o:Item("party / raid / all", "register frames with the handler (5 / 40 / 45)")
+            o:Item("register", "register the player frame at partyFrames[0]")
+            o:Item("test", "run the phase 0-1 snippets")
+            o:Item("swap / swapback", "swap frames 0 and 1, and put them back")
+            o:Item("debug", "toggle SECURE-side tracing (the Lua side is a console category)")
+            o:Item("ui / show / hide", "the test panel")
+            o:Item("showbutton / hidebutton", "combat-safe test buttons")
+        end
+        o:Siblings("secure")
         
     else
-        print("|cff00ffff[DF SecureSort]|r Unknown command. Try |cffffffff/dfsecure ui|r or |cffffffff/dfsecure help|r")
+        DF:Err("Unknown secure sort command — try /df debug secure help")
     end
 end
 
@@ -6017,7 +6068,7 @@ initFrame:SetScript("OnEvent", function(self, event, arg1)
             if TryFullInit() or attempts >= 20 then  -- Max 1 second of polling
                 ticker:Cancel()
                 if framesAttempted then
-                    DebugPrint("SecureSort ready after " .. (attempts * 0.05) .. "s")
+                    DF:Debug("SECURESORT", "SecureSort ready after %.2fs", attempts * 0.05)
                 end
             end
         end)

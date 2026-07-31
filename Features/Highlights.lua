@@ -545,7 +545,7 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
     -- DEBUG: Track what's happening
     local debugHighlights = false  -- Set to true to enable debug output
     if debugHighlights then
-        print("|cffFFFF00[DF Highlights Debug]|r UpdateHighlights called")
+        DF:Out("Highlights", "UpdateHighlights")
         print("  frame:", frame:GetName() or "unnamed")
         print("  dfIsTestFrame:", frame.dfIsTestFrame and "true" or "false")
         print("  isRaidFrame:", frame.isRaidFrame and "true" or "false")
@@ -578,8 +578,8 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         return
     end
     
-    -- PERF TEST: Skip if disabled
-    if DF.PerfTest and not DF.PerfTest.enableHighlights then return end
+    -- MEMORY TEST: Skip if disabled
+    if DF:MemTestDisabled("enableHighlights") then return end
     
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)

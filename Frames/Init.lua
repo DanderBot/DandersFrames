@@ -1,5 +1,8 @@
 local addonName, DF = ...
 
+-- Header tracing -> debug console HEADERS category (see Frames/Headers.lua).
+local headerDebug = DF:MakeDebugPrinter("HEADERS")
+
 -- ============================================================
 -- FRAMES INIT MODULE
 -- Contains frame initialization and raid frame setup
@@ -68,9 +71,7 @@ function DF:InitializeFrames()
     -- Legacy frame creation has been removed
     -- All frames are now managed by SecureGroupHeaderTemplate in Headers.lua
     -- ============================================================
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Init]|r Header mode - creating container and mover only")
-    end
+    headerDebug("Header mode - creating container and mover only")
     
     -- Create container (needed for headers and movers)
     DF.container = CreateFrame("Frame", "DandersFramesContainer", UIParent)
@@ -313,8 +314,8 @@ function DF:UpdateRaidGroupedLayout()
     -- [LEAK-TEST] Instrumentation: does the live Lua path run, and what's lp.testMode?
     -- Toggle: /run DandersFrames.debugLeakTest = true (or false to silence)
     if DF.debugLeakTest then
-        print(string.format(
-            "|cffffa500[DF LEAK-TEST]|r UpdateRaidGroupedLayout -> Lua fallback  raidTestMode=%s  lp.testMode=%s  db.sortEnabled=%s",
+        DF:Say(string.format(
+            "LEAK-TEST: UpdateRaidGroupedLayout -> Lua fallback  raidTestMode=%s  lp.testMode=%s  db.sortEnabled=%s",
             tostring(DF.raidTestMode),
             tostring(lp and lp.testMode),
             tostring(db and db.sortEnabled)
@@ -695,7 +696,7 @@ function DF:CreateRaidMoverFrame()
     
     -- CRITICAL: Ensure raidContainer exists before creating mover
     if not DF.raidContainer then
-        print("|cFFFF0000[DF Init]|r Cannot create raid mover - DF.raidContainer doesn't exist!")
+        DF:Err("Cannot create raid mover - DF.raidContainer doesn't exist!")
         return
     end
     
@@ -866,12 +867,12 @@ end
 
 function DF:UnlockRaidFrames()
     if InCombatLockdown() then
-        print("|cffff0000DandersFrames:|r Cannot unlock raid frames during combat.")
+        DF:Err("Cannot unlock raid frames during combat.")
         return
     end
     
     if not DF.raidContainer then
-        print("|cffff0000DandersFrames:|r Cannot unlock - raid container doesn't exist!")
+        DF:Err("Cannot unlock - raid container doesn't exist!")
         return
     end
     
@@ -884,7 +885,7 @@ function DF:UnlockRaidFrames()
     
     -- Safety check - if mover still doesn't exist, abort
     if not DF.raidMoverFrame then
-        print("|cffff0000DandersFrames:|r Cannot unlock - failed to create raid mover frame!")
+        DF:Err("Cannot unlock - failed to create raid mover frame!")
         return
     end
     
@@ -923,9 +924,7 @@ function DF:UnlockRaidFrames()
             5 * (frameHeight + spacing)
         )
         
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Init]|r Raid container size was too small, set fallback size")
-        end
+        headerDebug("Raid container size was too small, set fallback size")
     end
     
     -- In flat mode, ensure container size is correct before reading it
@@ -969,12 +968,12 @@ function DF:UnlockRaidFrames()
     end
     
     -- Debug info
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Init]|r Raid unlock - container size:", DF.raidContainer:GetWidth(), "x", DF.raidContainer:GetHeight())
-        print("|cFF00FF00[DF Init]|r Raid unlock - mover size:", DF.raidMoverFrame:GetWidth(), "x", DF.raidMoverFrame:GetHeight())
-        print("|cFF00FF00[DF Init]|r Raid unlock - mover shown:", DF.raidMoverFrame:IsShown() and "yes" or "no")
-        print("|cFF00FF00[DF Init]|r Raid unlock - mover strata:", DF.raidMoverFrame:GetFrameStrata())
-        print("|cFF00FF00[DF Init]|r Raid unlock - mover parent:", DF.raidMoverFrame:GetParent():GetName() or "unnamed")
+    if DF:DebugActive("HEADERS") then
+        headerDebug("Raid unlock - container size:", DF.raidContainer:GetWidth(), "x", DF.raidContainer:GetHeight())
+        headerDebug("Raid unlock - mover size:", DF.raidMoverFrame:GetWidth(), "x", DF.raidMoverFrame:GetHeight())
+        headerDebug("Raid unlock - mover shown:", DF.raidMoverFrame:IsShown() and "yes" or "no")
+        headerDebug("Raid unlock - mover strata:", DF.raidMoverFrame:GetFrameStrata())
+        headerDebug("Raid unlock - mover parent:", DF.raidMoverFrame:GetParent():GetName() or "unnamed")
     end
     
     -- Always refresh grid state from db when unlocking
@@ -1032,7 +1031,7 @@ function DF:UnlockRaidFrames()
     -- Hide permanent mover while full overlay is active
     if DF.permanentRaidMover then DF.permanentRaidMover:Hide() end
 
-    print("|cff00ff00DandersFrames:|r Raid frames unlocked. Drag to move, right-click to lock.")
+    DF:Say("Raid frames unlocked. Drag to move, right-click to lock.")
 end
 
 function DF:LockRaidFrames()
@@ -1106,7 +1105,7 @@ function DF:LockRaidFrames()
         if DF.GUI.UpdateTestButtonState then DF.GUI.UpdateTestButtonState() end
     end
     
-    print("|cff00ff00DandersFrames:|r Raid frames locked.")
+    DF:Say("Raid frames locked.")
 end
 
 -- ============================================================
@@ -1264,10 +1263,8 @@ end
 -- UPDATE LIVE RAID FRAMES (when actually in a raid)
 -- ============================================================
 function DF:UpdateLiveRaidFrames()
-    -- Debug: Track what's calling UpdateLiveRaidFrames
-    if DF.debugFlatLayout then
-        print("|cFFFF00FF[DF Flat Debug]|r UpdateLiveRaidFrames() called!")
-        print("  Full stack: " .. (debugstack(2, 10, 0) or "unknown"))
+    if DF:DebugActive("FLATRAID") then
+        DF:Debug("FLATRAID", "UpdateLiveRaidFrames: called from\n%s", debugstack(2, 10, 0) or "unknown")
     end
     
     -- Don't show live frames while in test mode
@@ -1432,10 +1429,8 @@ function DF:UpdateLiveRaidFrames()
 end
 
 function DF:UpdateAllFrames()
-    -- Debug: Track what's calling UpdateAllFrames
-    if DF.debugFlatLayout then
-        print("|cFFFF00FF[DF Flat Debug]|r UpdateAllFrames() called!")
-        print("  Full stack: " .. (debugstack(2, 10, 0) or "unknown"))
+    if DF:DebugActive("FLATRAID") then
+        DF:Debug("FLATRAID", "UpdateAllFrames: called from\n%s", debugstack(2, 10, 0) or "unknown")
     end
 
     -- 12.1 factory rows: GUI callbacks that end in a full update (checkboxes,
@@ -1443,9 +1438,15 @@ function DF:UpdateAllFrames()
     -- applies one aura event late. Bump the layout version so the (debounced)
     -- drive re-applies; placed before the early-return branches so every path is
     -- covered. Gated on factory ownership so pre-12.1 / legacy paths pay nothing.
+    -- ⚠ Asks "is the container era live at all", NOT "is a specific row active".
+    -- This used to call the two RENDER gates (UseFactoryForBuffs /
+    -- UseFactoryForDefensive), which then grew a perf-test term — so switching
+    -- Auras and Defensive off in the perf panel silently stopped the version
+    -- bump that the dispel overlay, missing-buff strip and Aura Designer also
+    -- ride, and their settings changes started applying one aura event late.
+    -- IsSupported is the question this gate actually means.
     if DF.InvalidateAuraLayout
-        and ((DF.UseFactoryForBuffs and DF:UseFactoryForBuffs(nil, nil))
-          or (DF.UseFactoryForDefensive and DF:UseFactoryForDefensive(nil, nil))) then
+        and DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported() then
         DF:InvalidateAuraLayout()
     end
     
@@ -1543,15 +1544,10 @@ function DF:UpdateAllFrames()
     local inGroup = IsInGroup()
     local numPartyMembers = GetNumSubgroupMembers()
     
-    -- DEBUG
-    if DF.debugEnabled then
-        print("|cffff00ffDF DEBUG:|r UpdateAllFrames called")
-        print("  inGroup:", inGroup)
-        print("  numPartyMembers:", numPartyMembers)
-        print("  testMode:", DF.testMode)
-        print("  db.soloMode:", db.soloMode)
-        print("  db.soloMode == true:", db.soloMode == true)
-    end
+    -- Was a DF:Out block printing to CHAT behind DF.debugEnabled. These are
+    -- visibility inputs, so they belong in the console under VISIBILITY.
+    DF:Debug("VISIBILITY", "UpdateAllFrames: inGroup=%s party=%d testMode=%s soloMode=%s",
+        tostring(inGroup), numPartyMembers or 0, tostring(DF.testMode), tostring(db.soloMode))
     
     -- Determine what to show:
     -- Test Mode: show everything (player + 4 party frames)
@@ -1565,12 +1561,9 @@ function DF:UpdateAllFrames()
     local showPlayerFrame = (DF.testMode and not DF.raidTestMode) or ((inGroup or (db.soloMode == true)) and not db.hidePlayerFrame and not DF.raidTestMode)
     local showPartyFrames = (DF.testMode and not DF.raidTestMode) or (inGroup and not DF.raidTestMode)
     
-    if DF.debugEnabled then
-        print("  showPlayerFrame:", showPlayerFrame)
-        print("  showPartyFrames:", showPartyFrames)
-        print("  hidePlayerFrame:", db.hidePlayerFrame)
-        print("  raidTestMode:", DF.raidTestMode)
-    end
+    DF:Debug("VISIBILITY", "UpdateAllFrames: showPlayer=%s showParty=%s hidePlayer=%s raidTest=%s",
+        tostring(showPlayerFrame), tostring(showPartyFrames),
+        tostring(db.hidePlayerFrame), tostring(DF.raidTestMode))
     
     -- Update container position (always use CENTER for consistency with position panel)
     local partyScale = db.frameScale or 1.0

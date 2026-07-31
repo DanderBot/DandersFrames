@@ -230,7 +230,7 @@ function CC:CreateClickCastUI(parent)
         end,
         function(profileName)
             if InCombatLockdown() then
-                print("|cffff9900DandersFrames:|r " .. L["Cannot switch profiles during combat"])
+                DF:Say(L["Cannot switch profiles during combat"])
                 return
             end
             if profileName ~= CC:GetActiveProfileName() then

@@ -2,6 +2,9 @@ local addonName, DF = ...
 local L = DF.L
 local format = string.format
 
+-- Header tracing -> debug console HEADERS category (see Frames/Headers.lua).
+local headerDebug = DF:MakeDebugPrinter("HEADERS")
+
 -- ============================================================
 -- FRAMES POSITION MODULE
 -- Contains mover, grid overlay, and position panel
@@ -237,7 +240,7 @@ function DF:CreateMoverFrame()
     
     -- CRITICAL: Ensure container exists before creating mover
     if not DF.container then
-        print("|cFFFF0000[DF Position]|r Cannot create mover - DF.container doesn't exist!")
+        DF:Err("Cannot create mover - DF.container doesn't exist!")
         return
     end
     
@@ -411,7 +414,7 @@ local function RefreshPermMoverActions()
         db.soloMode = not db.soloMode
         DF:UpdateAllFrames()
         if DF.UpdateDefaultPlayerFrame then DF:UpdateDefaultPlayerFrame() end
-        print("|cff00ff00DandersFrames:|r " .. format(L["Solo mode %s"], db.soloMode and L["enabled"] or L["disabled"]))
+        DF:Say(format(L["Solo mode %s"], db.soloMode and L["enabled"] or L["disabled"]))
     end },
     RELOAD_UI         = { label = L["Reload UI"],                  combatSafe = true,  fn = function() ReloadUI() end },
     RESET_POSITION    = { label = L["Reset Position"],             combatSafe = false, fn = function() DF:ResetPosition() end },
@@ -460,7 +463,7 @@ function DF:CycleNextCCProfile()
             local nextName = profiles[(i % #profiles) + 1]
             CC:SetActiveProfile(nextName)
             CC:ApplyBindings()
-            print("|cff00ff00DandersFrames:|r " .. format(L["Click-cast profile: %s"], nextName))
+            DF:Say(format(L["Click-cast profile: %s"], nextName))
             return
         end
     end
@@ -613,7 +616,7 @@ function DF:ShowPermanentMoverCCProfilePopup(anchorFrame)
     popup:Populate(L["Click-Cast Profiles"], profiles, current, function(name)
         CC:SetActiveProfile(name)
         CC:ApplyBindings()
-        print("|cff00ff00DandersFrames:|r " .. format(L["Click-cast profile: %s"], name))
+        DF:Say(format(L["Click-cast profile: %s"], name))
     end, ar, ag, ab)
 
     popup:ClearAllPoints()
@@ -858,7 +861,7 @@ function DF:CreatePermanentMover(container, mode)
         local action = actionKey and DF.PERM_MOVER_ACTIONS[actionKey]
         if action and action.fn then
             if InCombatLockdown() and not action.combatSafe then
-                print("|cff00ff00DandersFrames:|r " .. L["Cannot use this action in combat."])
+                DF:Say(L["Cannot use this action in combat."])
                 return
             end
             action.fn(mode, self)
@@ -2109,9 +2112,9 @@ function DF:ResetPosition()
             db.raidAnchorY = DF.savedRaidPositionY
             DF:UpdateRaidContainerPosition()
             DF:UpdatePositionPanel()
-            print("|cff00ff00DandersFrames:|r " .. L["Raid position reset."])
+            DF:Say(L["Raid position reset."])
         else
-            print("|cffff0000DandersFrames:|r " .. L["No saved position to reset to."])
+            DF:Err(L["No saved position to reset to."])
         end
     elseif DF.positionPanelMode == "party" or DF.positionPanelMode == nil then
         if DF.savedPositionX and DF.savedPositionY then
@@ -2120,9 +2123,9 @@ function DF:ResetPosition()
             db.anchorY = DF.savedPositionY
             DF:UpdateContainerPosition()
             DF:UpdatePositionPanel()
-            print("|cff00ff00DandersFrames:|r " .. L["Position reset."])
+            DF:Say(L["Position reset."])
         else
-            print("|cffff0000DandersFrames:|r " .. L["No saved position to reset to."])
+            DF:Err(L["No saved position to reset to."])
         end
     else
         -- personal / targetedList: no "previous" saved state to
@@ -2196,7 +2199,7 @@ function DF:CenterFrames()
         end
         DF:UpdateRaidContainerPosition()
         DF:UpdatePositionPanel()
-        print("|cff00ff00DandersFrames:|r " .. L["Raid frames centered."])
+        DF:Say(L["Raid frames centered."])
     else
         local db = DF:GetDB()
         local horizontal = db.growDirection == "HORIZONTAL"
@@ -2255,7 +2258,7 @@ function DF:CenterFrames()
         DF:UpdatePositionPanel()
         DF:UpdateAllFrames()
         
-        print("|cff00ff00DandersFrames:|r " .. L["Frames centered on screen."])
+        DF:Say(L["Frames centered on screen."])
     end
 end
 
@@ -2336,7 +2339,7 @@ end
 
 function DF:UnlockFrames()
     if InCombatLockdown() then
-        print("|cffff0000DandersFrames:|r " .. L["Cannot unlock frames during combat."])
+        DF:Err(L["Cannot unlock frames during combat."])
         return
     end
 
@@ -2344,7 +2347,7 @@ function DF:UnlockFrames()
 
     -- Ensure container exists
     if not DF.container then
-        print("|cffff0000DandersFrames:|r " .. L["Cannot unlock - container doesn't exist!"])
+        DF:Err(L["Cannot unlock - container doesn't exist!"])
         return
     end
 
@@ -2355,7 +2358,7 @@ function DF:UnlockFrames()
 
     -- Safety check - if mover still doesn't exist, abort
     if not DF.moverFrame then
-        print("|cffff0000DandersFrames:|r " .. L["Cannot unlock - failed to create mover frame!"])
+        DF:Err(L["Cannot unlock - failed to create mover frame!"])
         return
     end
     
@@ -2391,9 +2394,7 @@ function DF:UnlockFrames()
             DF.container:SetSize(frameWidth, 5 * (frameHeight + spacing) - spacing)
         end
         
-        if DF.debugHeaders then
-            print("|cFF00FF00[DF Position]|r Container size was too small, set fallback size")
-        end
+        headerDebug("Container size was too small, set fallback size")
     end
     
     DF.container:SetMovable(true)
@@ -2415,10 +2416,10 @@ function DF:UnlockFrames()
     end
     
     -- Debug info
-    if DF.debugHeaders then
-        print("|cFF00FF00[DF Position]|r Unlock - container size:", DF.container:GetWidth(), "x", DF.container:GetHeight())
-        print("|cFF00FF00[DF Position]|r Unlock - mover size:", DF.moverFrame:GetWidth(), "x", DF.moverFrame:GetHeight())
-        print("|cFF00FF00[DF Position]|r Unlock - mover strata:", DF.moverFrame:GetFrameStrata())
+    if DF:DebugActive("HEADERS") then
+        headerDebug("Unlock - container size:", DF.container:GetWidth(), "x", DF.container:GetHeight())
+        headerDebug("Unlock - mover size:", DF.moverFrame:GetWidth(), "x", DF.moverFrame:GetHeight())
+        headerDebug("Unlock - mover strata:", DF.moverFrame:GetFrameStrata())
     end
     
     -- Show personal targeted spells mover if enabled
@@ -2483,7 +2484,7 @@ function DF:UnlockFrames()
     -- Hide permanent mover while full overlay is active
     if DF.permanentPartyMover then DF.permanentPartyMover:Hide() end
 
-    print("|cff00ff00DandersFrames:|r " .. L["Frames unlocked. Drag to move, right-click to lock."])
+    DF:Say(L["Frames unlocked. Drag to move, right-click to lock."])
 end
 
 function DF:LockFrames()
@@ -2549,6 +2550,6 @@ function DF:LockFrames()
     end
     DF.partyTestModeBeforeUnlock = nil
 
-    print("|cff00ff00DandersFrames:|r " .. L["Frames locked."])
+    DF:Say(L["Frames locked."])
 end
 

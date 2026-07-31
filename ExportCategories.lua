@@ -470,7 +470,7 @@ DF.ExportCategories = {
         "defensiveBarWrap",
         -- defensiveBarX / defensiveBarY removed: no such settings exist (only
         -- Growth/Max/Spacing/Wrap do). Harmless at runtime because
-        -- ExtractCategorySettings nil-guards, but they made /df exportaudit
+        -- ExtractCategorySettings nil-guards, but they made /df debug exportaudit
         -- report two phantoms, so the audit never came back clean.
         "defensiveDurationBarBGColor",
         "defensiveDurationBarColor",
@@ -1422,7 +1422,7 @@ end
 -- against Config defaults: pre-4.6.1, 188 live settings (the whole Targeted
 -- List page, the buff/debuff border families, permanent movers, My Buff
 -- Indicators, ...) were in no category, so selective export silently dropped
--- them. `/df exportaudit` recomputes that drift on demand: every Party/Raid
+-- them. `/df debug exportaudit` recomputes that drift on demand: every Party/Raid
 -- default key must be either assigned to a category or EXPLICITLY declared
 -- local-only below. Run it whenever defaults or categories change.
 
@@ -1464,7 +1464,7 @@ local EXPORT_KEYS_WITHOUT_DEFAULTS = {
     absorbBarOvershieldColor = true,
 }
 
--- Dev tool behind /df exportaudit. Returns true when clean.
+-- Dev tool behind /df debug exportaudit. Returns true when clean.
 function DF:AuditExportCategories()
     local assigned = {}
     for _, keys in pairs(DF.ExportCategories) do
@@ -1490,16 +1490,22 @@ function DF:AuditExportCategories()
     table.sort(phantoms)
 
     if #missing == 0 and #phantoms == 0 then
-        print("|cff00ff00DF exportaudit:|r clean — every default key is categorised or declared local-only.")
+        DF:Say("Export audit clean", "every default key is categorised or declared local-only")
         return true
     end
+
+    -- ONE block, two sections. Both branches can fire in the same run, so opening
+    -- a DF:Out in each made a single audit render as two separate outputs.
+    local o = DF:Out("Export Audit")
     if #missing > 0 then
-        print(("|cffff4444DF exportaudit:|r %d default key(s) in NO export category (selective export will drop them):"):format(#missing))
-        for _, k in ipairs(missing) do print("  missing: " .. k) end
+        o:Section(("%d default key(s) in NO export category"):format(#missing))
+        o:Line("Selective export will drop these.", "BAD")
+        o:More(missing, 12)
     end
     if #phantoms > 0 then
-        print(("|cffff9900DF exportaudit:|r %d category key(s) with no Config default (typo, or add to the allowlist):"):format(#phantoms))
-        for _, k in ipairs(phantoms) do print("  phantom: " .. k) end
+        o:Section(("%d category key(s) with no Config default"):format(#phantoms))
+        o:Line("Typo, or needs adding to the allowlist.", "WARN")
+        o:More(phantoms, 12)
     end
     return false
 end

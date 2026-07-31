@@ -1,5 +1,5 @@
 -- Atlas Icon Browser for DandersFrames
--- Opens with /df atlas or /dfatlas (dev builds only)
+-- Opens with /df debug atlas or /dfatlas (dev builds only)
 
 local addonName, DF = ...
 
@@ -249,7 +249,7 @@ local function ValidateAtlases()
     end
     validatedAtlases = unique
     
-    print("|cff7373f2DandersFrames:|r Found " .. #validatedAtlases .. " valid atlases")
+    DF:Say("Found " .. #validatedAtlases .. " valid atlases")
 end
 
 local function GetFilteredList()
@@ -575,22 +575,8 @@ SlashCmdList["DFATLAS"] = function()
     CreateAtlasBrowser()
 end
 
--- Also hook into /df atlas (dev builds only — matches the gated /dfatlas)
-if DF:IsDevBuild() then
-    local frame = CreateFrame("Frame")
-    frame:RegisterEvent("PLAYER_LOGIN")
-    frame:SetScript("OnEvent", function()
-        C_Timer.After(2, function()
-            local oldSlashHandler = SlashCmdList["DANDERSFRAMES"]
-            if oldSlashHandler then
-                SlashCmdList["DANDERSFRAMES"] = function(msg)
-                    if msg and msg:lower() == "atlas" then
-                        CreateAtlasBrowser()
-                    else
-                        oldSlashHandler(msg)
-                    end
-                end
-            end
-        end)
-    end)
-end
+-- (Removed) The same dispatcher monkey-patch MemoryTest.lua carried under its
+-- former name PerformanceTest.lua, on a
+-- PLAYER_LOGIN + 2s timer, to make "/df atlas" work. It wrapped the dispatcher and
+-- so ran ahead of every routing rule inside it. "/df debug atlas" comes from the
+-- RegisterDebugSlash entry above. ☠ Never wrap the dispatcher.

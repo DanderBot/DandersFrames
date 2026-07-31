@@ -1532,7 +1532,7 @@ function CC:SaveEditBindingPanel()
     
     -- Validate that we have a binding key
     if not binding.bindType or (not binding.button and not binding.key) then
-        print("|cffff6666DandersFrames:|r " .. L["Please set a binding key first."])
+        DF:Err(L["Please set a binding key first."])
         return
     end
     
@@ -1559,7 +1559,7 @@ function CC:FinalizeSaveBinding()
     local excludeIndex = panel.isEditing and panel.existingIndex or nil
     local duplicateIndex = self:FindDuplicateBinding(binding, excludeIndex)
     if duplicateIndex then
-        print("|cffff9900DandersFrames:|r " .. L["That binding already exists."])
+        DF:Say(L["That binding already exists."])
         return
     end
 
@@ -1731,7 +1731,7 @@ function CC:ProcessKeybind(bindType, key)
     -- Check for duplicate binding
     local duplicateIndex = self:FindDuplicateBinding(newBinding)
     if duplicateIndex then
-        print("|cffff9900DandersFrames:|r " .. L["That binding already exists."])
+        DF:Say(L["That binding already exists."])
         return
     end
 
@@ -1788,7 +1788,7 @@ function CC:CommitQuickBindingDirect(newBinding)
     
     -- Debug for item bindings
     if newBinding.actionType == self.ACTION_TYPES.ITEM then
-        print("|cff00ff00DF:|r Item binding added - " .. (newBinding.itemName or "?") .. " (" .. (newBinding.itemType or "?") .. ") total=" .. #self.db.bindings)
+        DF:Say("Item binding added: " .. (newBinding.itemName or "?") .. " (" .. (newBinding.itemType or "?") .. "), total=" .. #self.db.bindings)
     end
     
     self:UpdateBlizzardFrameRegistration()
@@ -2705,7 +2705,7 @@ function CC:RefreshItemsGrid(skipScrollReset)
             -- Check if already saved
             for _, cons in ipairs(self.db.savedConsumables) do
                 if cons.itemId == itemId then
-                    print("|cff00ff00DandersFrames:|r " .. L["Item already in list"])
+                    DF:Say(L["Item already in list"])
                     return
                 end
             end
@@ -2728,7 +2728,7 @@ function CC:RefreshItemsGrid(skipScrollReset)
             end
             for _, cons in ipairs(self.db.savedConsumables) do
                 if cons.itemId == itemId then
-                    print("|cff00ff00DandersFrames:|r " .. L["Item already in list"])
+                    DF:Say(L["Item already in list"])
                     return
                 end
             end
@@ -3742,11 +3742,12 @@ initFrame:SetScript("OnEvent", function(self, event, isInitialLogin, isReloading
 end)
 
 -- Debug slash command to list all detected spells
-DF:RegisterDebugSlash("DFCCSPELLS", "Spellbook detection dump", true, "/dfccspells")
+-- Non-dev: DUMP. Spell detection is a common source of "my bind does nothing"
+-- reports, and the user is the only one who can produce their spellbook state.
 SlashCmdList["DFCCSPELLS"] = function(msg)
     if msg == "raw" then
         -- Dump raw spellbook data with item types
-        print("|cff00ff00DandersFrames:|r Raw spellbook dump:")
+        DF:Say("Raw spellbook dump:")
         local bookType = Enum.SpellBookSpellBank.Player
         local numTabs = C_SpellBook.GetNumSpellBookSkillLines()
         
@@ -3798,7 +3799,7 @@ SlashCmdList["DFCCSPELLS"] = function(msg)
         end
     elseif msg == "types" then
         -- Just show counts by type
-        print("|cff00ff00DandersFrames:|r Spell counts by type:")
+        DF:Say("Spell counts by type:")
         local bookType = Enum.SpellBookSpellBank.Player
         local numTabs = C_SpellBook.GetNumSpellBookSkillLines()
         local typeCounts = {}
@@ -3865,7 +3866,7 @@ SlashCmdList["DFCCSPELLS"] = function(msg)
         end
     else
         local spells = CC:GetAllPlayerSpells()
-        print("|cff00ff00DandersFrames:|r Found " .. #spells .. " spells")
+        DF:Out("Click-Casting", #spells .. " spells found")
         print("Commands:")
         print("  |cff00ff00/dfccspells list|r - Show included spells by category")
         print("  |cff00ff00/dfccspells types|r - Show counts by spell type")

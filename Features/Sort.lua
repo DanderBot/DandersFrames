@@ -445,12 +445,17 @@ DF:RegisterDebugSlash("DFSORT", "Frame sorting diagnostics", false, "/dfsort")
 SlashCmdList["DFSORT"] = function(msg)
     if msg == "refresh" or msg == "resort" then
         Sort:TriggerResort()
-        print("|cff00ff00DandersFrames:|r Re-sorted frames.")
+        DF:Say("Re-sorted frames.")
     elseif msg == "clear" then
         Sort:ClearCache()
-        print("|cff00ff00DandersFrames:|r Cleared sort cache.")
-    elseif msg == "debug" then
-        print("|cff00ccffDandersFrames Sort Debug:|r")
+        DF:Say("Cleared sort cache.")
+    -- Bare form prints the dump, matching its two siblings: /df debug secure with no
+    -- argument prints status, /df debug flatraid with no argument prints info. "debug"
+    -- meant three different things across the three sort/layout commands — a dump
+    -- here, a real TOGGLE in secure, a console signpost in flatraid — so the bare
+    -- form is now the consistent way in. "debug" stays as an alias.
+    elseif msg == "debug" or msg == "" then
+        local o = DF:Out("Sort")
         local db = DF:GetDB()
         print("  sortEnabled:", db.sortEnabled)
         print("  sortSelfPosition:", db.sortSelfPosition)
@@ -473,10 +478,12 @@ SlashCmdList["DFSORT"] = function(msg)
                 print("    " .. unit .. ":", Sort:GetUnitRole(unit), "-", unitClass, "-", UnitName(unit))
             end
         end
+        o:Siblings("sort")
     else
-        print("|cff00ff00DandersFrames:|r /dfsort commands:")
-        print("  refresh - Re-sort frames")
-        print("  clear - Clear role cache")
-        print("  debug - Show sort debug info")
+        local o = DF:Out("Sort")
+        o:Section("Commands")
+        o:Item("(no argument)", "sort config, roles and classes")
+        o:Item("refresh", "re-sort frames")
+        o:Item("clear", "clear the role cache")
     end
 end

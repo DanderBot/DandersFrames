@@ -418,7 +418,7 @@ end
 -- Enum.AuraDispelType values. Feature-detected: returns nil (caller keeps the
 -- game/native colour) when C_CurveUtil / the enum is absent. Cached on
 -- DF.debuffBorderCurve; DF:InvalidateDispelColorCurve() nils it on any change.
--- ⚠ The Enum.AuraDispelType field set needs an in-game confirm (/df dispelids).
+-- ⚠ The Enum.AuraDispelType field set needs an in-game confirm (/df debug dispelids).
 -- Name-keyed colour map for SetAuraBorder's customDispelColorMap: Blizzard indexes
 -- auraData.dispelName ("Magic"/"Curse"/... ; "" when the aura has no dispel type)
 -- straight into this table private-side, with map[""] as the no-type fallback —
@@ -675,6 +675,10 @@ local function ensureSharedAnimDriver()
     if sharedAnimDriver then return sharedAnimDriver end
     sharedAnimDriver = CreateFrame("Frame", nil, UIParent)
     sharedAnimDriver:SetScript("OnUpdate", function(_, dt)
+        -- MEMORY TEST (enableAnimations): one check for every animated border in
+        -- the game, since they all ride this single driver. Borders keep their
+        -- registry entry and resume mid-phase when the flag comes back on.
+        if DF:MemTestDisabled("enableAnimations") then return end
         for border, e in pairs(animRegistry) do
             if border._secretRect or border:IsShown() then
                 e.elapsed = e.elapsed + dt

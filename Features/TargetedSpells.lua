@@ -52,7 +52,7 @@ local addonName, DF = ...
 --   Core.lua                      migrations + the wizard auto-fire (already out)
 --   Features\ElementAppearance.lua, Frames\Position.lua (mover),
 --   Frames\Headers.lua, Options\AutoProfiles.lua (override→page map),
---   Profile.lua, Debug\Profiler.lua, Debug\PerformanceTest.lua
+--   Profile.lua, Debug\Profiler.lua, Debug\MemoryTest.lua
 --   Locales\enUS.lua              the page's strings, once nothing else uses them
 --   DandersFrames.toc             only if the file itself ever goes, which it
 --                                 does not — Personal Targeted lives here
@@ -833,8 +833,8 @@ end
 function DF:ShowTargetedSpellIcon(frame, casterKey, casterUnit, texture, spellName, durationObject, isChannel, spellID, startTime)
     if not frame then return end
     
-    -- PERF TEST: Skip if disabled
-    if DF.PerfTest and not DF.PerfTest.enableTargetedSpells then return end
+    -- MEMORY TEST: Skip if disabled
+    if DF:MemTestDisabled("enableTargetedSpells") then return end
     
     local db = DF:GetFrameDB(frame)
     if not db.targetedSpellEnabled then return end
@@ -1872,7 +1872,7 @@ end
 function DF:ShowTargetedSpellSetupWizard()
     local L = DF.L
     if not DF.ShowPopupWizard then
-        DF:DebugWarn("ShowTargetedSpellSetupWizard: Popup module not loaded")
+        DF:DebugWarn("POPUP", "ShowTargetedSpellSetupWizard: Popup module not loaded")
         return
     end
 
@@ -2844,7 +2844,7 @@ function DF:ClearCastHistory()
     if DF.castHistorySecrets then
         wipe(DF.castHistorySecrets)
     end
-    print("|cff00ff00DandersFrames:|r Cast history cleared")
+    DF:Say("Cast history cleared")
     -- Refresh UI if open
     if DF.castHistoryFrame and DF.castHistoryFrame:IsShown() then
         DF:RefreshCastHistoryUI()

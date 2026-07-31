@@ -396,7 +396,7 @@ end
 -- DEBUG SYSTEM
 -- ============================================================
 
-local debugEnabled = false
+-- (verbose range tracing now lives in the debug console's RANGE category)
 local debugStats = {
     checks = 0,
     cacheHits = 0,
@@ -404,11 +404,8 @@ local debugStats = {
     lastReset = time(),
 }
 
-local function DebugPrint(...)
-    if debugEnabled then
-        print("|cFF00FF00[DFRange]|r", ...)
-    end
-end
+-- Routed to the debug console's RANGE category.
+local DebugPrint = DF:MakeDebugPrinter("RANGE")
 
 local function ResetStats()
     debugStats.checks = 0
@@ -541,7 +538,7 @@ end
 function DF:UpdateRange(frame)
     if not frame or not frame.unit then return end
     
-    if DF.PerfTest and not DF.PerfTest.enableRange then return end
+    if DF:MemTestDisabled("enableRange") then return end
     if DF.testMode or DF.raidTestMode then return end
     
     local unit = frame.unit
@@ -583,7 +580,13 @@ function DF:UpdateRange(frame)
     local isSecret = issecretvalue and (issecretvalue(inRange) or issecretvalue(cached))
     if not isSecret and cached == inRange then
         debugStats.cacheHits = debugStats.cacheHits + 1
-        DebugPrint("SKIP", unit, "cached:", tostring(cached))
+        -- (Removed) a "SKIP <unit> cached:<v>" line here. It fired on the cache-HIT
+        -- branch, i.e. it logged that NOTHING changed, once per unit per
+        -- UNIT_IN_RANGE_UPDATE — hundreds of lines a second in a moving raid, every
+        -- one of them uninteresting, and they evicted the real trace under maxLines.
+        -- The cache-MISS branch below already logs the transition, which is the event
+        -- anyone reading RANGE actually wants. debugStats.cacheHits still counts them
+        -- for /df debug range.
         -- Still need to update THIS frame if it hasn't been initialized
         -- (multiple frames can share the same unit, e.g. pinned frames)
         local dfSecret = issecretvalue and issecretvalue(frame.dfInRange)
@@ -716,7 +719,7 @@ local function RangeCheckFrame(frame)
 end
 
 rangeAnimGroup:SetScript("OnLoop", function()
-    if DF.PerfTest and not DF.PerfTest.enableRange then return end
+    if DF:MemTestDisabled("enableRange") then return end
     if not DF.partyHeader then return end
 
     local contentType = DF:GetContentType()
@@ -1078,67 +1081,86 @@ SlashCmdList["DFRANGE"] = function(msg)
     local cmd = msg:lower():trim()
     
     if cmd == "debug" then
-        debugEnabled = not debugEnabled
-        print("|cFF00FF00[DFRange]|r Debug:", debugEnabled and "ON" or "OFF")
-        
+        DF:Say("Range tracing is in the debug console", "enable the RANGE category", "NEUTRAL")
+
     elseif cmd == "stats" then
         local elapsed = time() - debugStats.lastReset
         local total = debugStats.cacheHits + debugStats.cacheMisses
         local hitRate = total > 0 and math.floor((debugStats.cacheHits / total) * 100) or 0
-        
-        print("|cFF00FF00[DFRange]|r Stats (last " .. elapsed .. "s):")
-        print("  Checks: " .. debugStats.checks)
-        print("  Cache hits: |cFF00FF00" .. debugStats.cacheHits .. "|r")
-        print("  Cache misses: |cFFFFFF00" .. debugStats.cacheMisses .. "|r")
-        print("  Hit rate: |cFF00FFFF" .. hitRate .. "%|r")
-        
+
+        local o = DF:Out("Range", "last " .. elapsed .. "s")
+        o:Section("Cache")
+        o:Field("checks", debugStats.checks, "NEUTRAL")
+        o:Field("hits", debugStats.cacheHits, "GOOD")
+        -- A miss is normal traffic, not a fault, so it stays neutral; the HIT RATE
+        -- is the number worth colouring, and only WARN once it is actually poor.
+        o:Field("misses", debugStats.cacheMisses, "NEUTRAL")
+        o:Field("hit rate", hitRate .. "%", hitRate >= 70 and "GOOD" or "WARN")
+        o:Siblings("range")
+
     elseif cmd == "clear" then
         ClearRangeCache()
         ResetStats()
-        print("|cFF00FF00[DFRange]|r Cache cleared")
-        
+        DF:Say("Range cache cleared")
+
     elseif cmd == "spell" then
         local info = DF:GetCurrentRangeSpellInfo()
         local specIndex = GetSpecialization()
         local specID = specIndex and GetSpecializationInfo(specIndex) or nil
-        print("|cFF00FF00[DFRange]|r Current Range Spell:")
-        print("  Class: " .. tostring(playerClass))
-        print("  Spec Index: " .. tostring(specIndex))
-        print("  Spec ID: " .. tostring(specID) .. " (cached: " .. tostring(currentSpecID) .. ")")
-        print("  Friendly Spell: " .. tostring(currentFriendlySpell) .. " (" .. (currentFriendlySpell and C_Spell_GetSpellName(currentFriendlySpell) or "none") .. ")")
-        print("  Hostile Spell: " .. tostring(currentHostileSpell) .. " (" .. (currentHostileSpell and C_Spell_GetSpellName(currentHostileSpell) or "none") .. ")")
-        print("  Rez Spell: " .. tostring(currentRezSpell) .. " (" .. (currentRezSpell and C_Spell_GetSpellName(currentRezSpell) or "none") .. ")")
-        print("  Timer Interval: " .. tostring(rangeAnim:GetDuration()) .. "s")
-        print("  Display: " .. (info.spellName or "None") .. " (" .. (info.range or "?") .. ")")
-        print("  Custom Override: " .. tostring(info.isCustom))
-        -- Show DB values
-        if DF.db then
-            local partyVal = DF.db.party and DF.db.party.rangeCheckSpellID or "nil"
-            local raidVal = DF.db.raid and DF.db.raid.rangeCheckSpellID or "nil"
-            print("  DB Party: " .. tostring(partyVal) .. ", DB Raid: " .. tostring(raidVal))
+        local o = DF:Out("Range", "current spell")
+        local function spellLine(id)
+            if not id then return "none", "WARN" end
+            return id .. " (" .. (C_Spell_GetSpellName(id) or "?") .. ")", "GOOD"
         end
-        -- Test if the friendly spell works on party1
+
+        o:Section("Spec")
+        o:Field("class", tostring(playerClass), "NEUTRAL")
+        o:Field("spec", tostring(specID) .. " (index " .. tostring(specIndex) .. ")", "NEUTRAL")
+        -- A cached spec ID that has drifted from the live one means the range spell
+        -- was resolved for the wrong spec, which is a real fault worth flagging.
+        o:Field("cached spec", tostring(currentSpecID), currentSpecID == specID and "GOOD" or "BAD")
+
+        o:Section("Resolved spells")
+        o:Field("friendly", spellLine(currentFriendlySpell))
+        o:Field("hostile", spellLine(currentHostileSpell))
+        o:Field("rez", spellLine(currentRezSpell))
+
+        o:Section("Display")
+        o:Field("showing", (info.spellName or "none") .. " (" .. (info.range or "?") .. ")",
+            info.spellName and "GOOD" or "WARN")
+        o:Field("custom override", info.isCustom, info.isCustom and "WARN" or "NEUTRAL")
+        o:Field("timer interval", tostring(rangeAnim:GetDuration()) .. "s", "NEUTRAL")
+        if DF.db then
+            o:Field("saved spell ID", "party " .. tostring(DF.db.party and DF.db.party.rangeCheckSpellID or "none")
+                .. ", raid " .. tostring(DF.db.raid and DF.db.raid.rangeCheckSpellID or "none"), "NEUTRAL")
+        end
         if UnitExists("party1") then
             local testResult = currentFriendlySpell and C_Spell_IsSpellInRange(currentFriendlySpell, "party1")
-            print("  Test on party1: " .. tostring(testResult))
+            o:Field("live test on party1", tostring(testResult), testResult ~= nil and "GOOD" or "BAD")
         end
-        
+        o:Siblings("range")
+
     elseif cmd == "dump" then
-        print("|cFF00FF00[DFRange]|r Cache contents:")
-        local count = 0
+        local entries = {}
         for unit, inRange in pairs(rangeCache) do
-            print("  " .. unit .. " = " .. tostring(inRange))
-            count = count + 1
+            entries[#entries + 1] = unit .. " = " .. DF.OUT[inRange and "GOOD" or "NEUTRAL"]
+                .. tostring(inRange) .. "|r"
         end
-        print("  Total: " .. count)
-        
+        table.sort(entries)
+        local o = DF:Out("Range", "cache")
+        o:Section("Entries", #entries)
+        o:More(entries, 12, "/df debug range stats")
+        o:Siblings("range")
+
     else
-        print("|cFF00FF00[DFRange]|r Commands:")
-        print("  /dfrange debug - Toggle debug")
-        print("  /dfrange stats - Show statistics")
-        print("  /dfrange clear - Clear cache")
-        print("  /dfrange spell - Show current spell")
-        print("  /dfrange dump  - Dump cache")
+        local o = DF:Out("Range")
+        o:Section("Commands")
+        o:Item("stats", "cache hit/miss counters")
+        o:Item("spell", "which range spell resolved, and why")
+        o:Item("dump", "cache contents")
+        o:Item("clear", "clear the cache and reset counters")
+        o:Line("Ongoing tracing is in the debug console — enable the RANGE category.", "NEUTRAL")
+        o:Hints("/df debug range spell", "/df console")
     end
 end
 

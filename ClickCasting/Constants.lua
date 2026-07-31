@@ -372,7 +372,6 @@ CC.PROFILE_TEMPLATE = PROFILE_TEMPLATE
 
 -- Global settings template (shared across all profiles)
 local GLOBAL_SETTINGS_TEMPLATE = {
-    debugBindings = false,
     minimapIcon = { hide = false },
     autoCreateProfiles = true, -- Auto-create profiles when switching talent loadouts
     disableWhileMounted = false, -- Disable click casting while mounted or flying

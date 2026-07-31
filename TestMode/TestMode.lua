@@ -1864,13 +1864,13 @@ end
 
 function DF:ShowTestFrames(silent)
     if InCombatLockdown() then
-        print("|cffff9900DandersFrames:|r " .. L["Cannot enter test mode during combat."])
+        DF:Say(L["Cannot enter test mode during combat."])
         return
     end
 
     -- Respect mode-enable flag: party test requires party frames
     if DF.db and DF.db.partyEnabled == false then
-        print("|cffff9900DandersFrames:|r " .. L["Party frames are disabled. Enable them in General settings to use party test mode."])
+        DF:Say(L["Party frames are disabled. Enable them in General settings to use party test mode."])
         return
     end
 
@@ -1946,7 +1946,7 @@ function DF:ShowTestFrames(silent)
     end
     
     if not silent then
-        print("|cff00ff00DandersFrames:|r " .. L["Test mode enabled."])
+        DF:Say(L["Test mode enabled."])
     end
 
     -- Update permanent mover for party test mode
@@ -2282,7 +2282,7 @@ function DF:HideTestFrames(silent)
     end
     
     if not silent then
-        print("|cff00ff00DandersFrames:|r " .. L["Test mode disabled."])
+        DF:Say(L["Test mode disabled."])
     end
 
     -- Update permanent mover after exiting party test mode
@@ -2302,7 +2302,7 @@ end
 function DF:ToggleTestMode()
     -- Cannot toggle test mode during combat (secure frame restrictions)
     if InCombatLockdown() then
-        print("|cffff9900DandersFrames:|r " .. L["Cannot toggle test mode during combat."])
+        DF:Say(L["Cannot toggle test mode during combat."])
         return
     end
 
@@ -2312,7 +2312,7 @@ function DF:ToggleTestMode()
         local db = DF:GetRaidDB()
         -- Don't allow toggling test mode off while frames are unlocked
         if not db.raidLocked and DF.raidTestMode then
-            print("|cffff9900DandersFrames:|r " .. L["Cannot disable test mode while frames are unlocked. Lock frames first."])
+            DF:Say(L["Cannot disable test mode while frames are unlocked. Lock frames first."])
             return
         end
 
@@ -2326,7 +2326,7 @@ function DF:ToggleTestMode()
         local db = DF:GetDB()
         -- Don't allow toggling test mode off while frames are unlocked
         if not db.locked and DF.testMode then
-            print("|cffff9900DandersFrames:|r " .. L["Cannot disable test mode while frames are unlocked. Lock frames first."])
+            DF:Say(L["Cannot disable test mode while frames are unlocked. Lock frames first."])
             return
         end
 
@@ -2342,13 +2342,13 @@ end
 -- Show raid test frames
 function DF:ShowRaidTestFrames()
     if InCombatLockdown() then
-        print("|cffff9900DandersFrames:|r " .. L["Cannot enter test mode during combat."])
+        DF:Say(L["Cannot enter test mode during combat."])
         return
     end
 
     -- Respect mode-enable flag: raid test requires raid frames
     if DF.db and DF.db.raidEnabled == false then
-        print("|cffff9900DandersFrames:|r " .. L["Raid frames are disabled. Enable them in General settings to use raid test mode."])
+        DF:Say(L["Raid frames are disabled. Enable them in General settings to use raid test mode."])
         return
     end
 
@@ -2681,7 +2681,7 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
     -- Use SecureSort's group positioning functions
     local SecureSort = DF.SecureSort
     if not SecureSort then
-        print("|cffff9900[DF SecureSort]|r SecureSort not available. Using flat layout.")
+        DF:Say("Secure sort unavailable", "falling back to flat layout", "WARN")
         return DF:LightweightPositionRaidTestFramesFlat(testFrameCount)
     end
     
@@ -2699,13 +2699,13 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
     if DF.debugLeakTestSimulate then
         lp.testMode = true
         if DF.debugLeakTest then
-            print("|cffffa500[DF LEAK-TEST]|r TestMode SIMULATED patch mutation: lp.testMode = true written")
+            DF:Say("LEAK-TEST: TestMode SIMULATED patch mutation: lp.testMode = true written")
         end
     end
 
     if DF.debugLeakTest then
-        print(string.format(
-            "|cffffa500[DF LEAK-TEST]|r LightweightPositionRaidTestFrames entered  lp.testMode=%s",
+        DF:Say(string.format(
+            "LEAK-TEST: LightweightPositionRaidTestFrames entered  lp.testMode=%s",
             tostring(lp.testMode)
         ))
     end

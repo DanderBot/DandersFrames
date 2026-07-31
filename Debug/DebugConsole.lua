@@ -10,7 +10,7 @@ local addonName, DF = ...
 local pairs, ipairs, type, tostring = pairs, ipairs, type, tostring
 local tinsert, tremove, wipe = table.insert, table.remove, wipe
 local format = string.format
-local date = date
+local date, time = date, time
 
 local DebugConsole = {}
 DF.DebugConsole = DebugConsole
@@ -48,9 +48,15 @@ local CATEGORY_GROUPS = {
             { key = "RAIDPOS",    desc = "Raid container position writes (jumping/stuck-position bug)" },
             { key = "POSITION",   desc = "Secure position handler trigger and snippet runs" },
             { key = "LAYOUT",     desc = "Frame size, spacing, growth direction, container resize" },
+            { key = "HEADERS",    desc = "Secure header creation, attributes and re-anchoring" },
             { key = "VISIBILITY", desc = "Header show/hide and state-driver changes" },
-            { key = "FLATRAID",   desc = "Flat raid layout and sorting" },
+            { key = "HEALTH",     desc = "Health bar value writes, including Reduced Max Health" },
+            { key = "FLATRAID",   desc = "Flat raid layout and sorting", noisy = true },
             { key = "FRAMESORT",  desc = "FrameSort addon integration" },
+            { key = "SECURESORT", desc = "Secure sort handler, snippets and frame registration", noisy = true },
+            -- noisy: driven by UNIT_IN_RANGE_UPDATE per unit, and fans out to pinned
+            -- and boss frames — a moving raid produces a steady stream.
+            { key = "RANGE",      desc = "Range fading checks and cache decisions", noisy = true },
             { key = "PINNED",     desc = "Pinned frames init, layout changes, boss handler, test mode" },
         },
     },
@@ -64,8 +70,13 @@ local CATEGORY_GROUPS = {
     {
         name = "Auras",
         categories = {
-            { key = "AD",            desc = "Aura Designer" },
-            { key = "BLIZAURA",      desc = "Blizzard aura source pipeline" },
+            { key = "AD",            desc = "Aura Designer (incl. sounds)" },
+            { key = "DISPEL",        desc = "Dispel overlay binds and colour resolution" },
+            -- The DECISION layer above the container: which of Rebuild / ApplyTuning
+            -- / ApplyStyle a settings change resolved to, and why. Edge-triggered
+            -- only — the drivers run per UNIT_AURA, so anything per-call is a
+            -- firehose. Replaces BLIZAURA, which was declared but never logged.
+            { key = "AURAROW",       desc = "Aura row drivers: rebuild vs tuning vs style, retargets" },
             { key = "AURACONTAINER", desc = "12.1 AuraContainer factory (build, filters, capability gate)" },
         },
     },
@@ -75,12 +86,44 @@ local CATEGORY_GROUPS = {
             { key = "API",          desc = "External API callback fires (OnFramesSorted, etc.)" },
             { key = "CLICK",        desc = "Click-casting binding apply, hover, PreClick state" },
             { key = "PET",          desc = "Pet frame lifecycle and visibility" },
+            { key = "POPUP",        desc = "Popup/wizard config errors and step flow" },
+            { key = "ROLE",         desc = "Role icon show/hide decisions and combat transitions" },
             { key = "SCRIPT",       desc = "Lua script errors and pcall failures" },
             { key = "SYSTEM",       desc = "Reload separators and init confirmation" },
             { key = "TARGETEDLIST", desc = "Targeted List cast pickup, stop, and interrupter lookup (alpha/beta only)" },
+            { key = "GUI",          desc = "Settings window internals — slider drag paths, relayout" },
+            -- Kept out of GUI: the Blizzard-picker sync fires on every colour
+            -- drag, so folding it in would make the whole GUI category noisy.
+            { key = "COLORPICKER",  desc = "Colour picker handover to/from Blizzard's picker", noisy = true },
+            -- noisy: emits per text ELEMENT per frame per render, and renders are
+            -- driven from DF:UpdateHealth — i.e. per unit per health tick in combat.
+            { key = "TD",           desc = "Text Designer render and mirror state", noisy = true },
+            { key = "TEXTURE",      desc = "Texture and atlas resolution, including missing-file fallback" },
         },
     },
 }
+
+-- ============================================================
+-- NOISY CATEGORIES — off unless the user asks for them
+-- ============================================================
+-- A category marked `noisy = true` above starts DISABLED. These emit per-frame
+-- inside layout and sort loops, so a 40-player roster event can produce dozens
+-- of lines each; left on, they evict the very trace the user opened the console
+-- to capture, well before the maxLines cap is a fair sample.
+--
+-- The rule for the flag: does ONE user action produce more than a handful of
+-- lines? If yes it is a firehose and belongs here — turn it on deliberately
+-- while reproducing a layout or sorting bug, not by default.
+local function seedNoisyFilters(filters)
+    for _, group in ipairs(CATEGORY_GROUPS) do
+        for _, cat in ipairs(group.categories) do
+            if cat.noisy and filters[cat.key] == nil then
+                filters[cat.key] = false
+            end
+        end
+    end
+    return filters
+end
 
 local DEFAULTS = {
     enabled = false,
@@ -88,7 +131,16 @@ local DEFAULTS = {
     maxLines = 10000,
     chatEcho = false,
     filters = {},  -- absent category = visible; explicit false = hidden
+    -- Days a captured log survives before it is dropped at login. The log lives in
+    -- SavedVariables, so a forgotten one is parsed from disk at EVERY login for as
+    -- long as it exists — turning debug off does not clear it. Nobody diagnoses a
+    -- bug from a week-old log, so the default expires it for them. 0 = keep forever.
+    logMaxAgeDays = 7,
 }
+-- NOT in DEFAULTS: `logStamp = nil` in a table constructor is an absent key, so the
+-- pairs() seeding loop below could never see it. debugDb.logStamp holds epoch seconds
+-- of the most recent write, and exists because log ENTRIES carry only "%H:%M:%S" with
+-- no date — they cannot be aged individually.
 
 -- ============================================================
 -- RUNTIME STATE
@@ -97,8 +149,37 @@ local DEFAULTS = {
 local debugDb       -- reference to DandersFramesDB_v2.debug
 local debugLog      -- reference to DandersFramesDB_v2.debugLog
 local knownCategories = {}  -- set: { ["PET"] = true, ["FONT"] = true, ... }
+-- Rebuilt lazily. Init used to walk the whole persisted log (up to maxLines = 10000
+-- entries) to fill this on EVERY login, enabled or not — pure load-time cost for a
+-- table only the console UI reads. The walk now happens on first access instead.
+local categoriesDirty = true
 local liveEditBox         -- EditBox reference when debug tab is visible
 local needsRefresh = false  -- flag to batch refresh when tab is visible
+
+--- Reset every category to the recommended baseline: declared categories on,
+--- except the ones marked `noisy`. Auto-discovered categories are cleared back
+--- to visible.
+---
+--- This exists because the noisy seeding only ever fills in categories the user
+--- has never touched — deliberately, so a considered choice survives a reload.
+--- That leaves no way back to a sane baseline once you have been clicking
+--- around, which is exactly when you want one: mid-investigation, log full of
+--- sort spam, wanting the useful signal back without hand-unticking two dozen
+--- rows.
+---
+--- Declared below debugDb on purpose: it closes over that local, and defining it
+--- above the declaration would silently read a nil global instead.
+function DebugConsole:ApplyDefaultFilters()
+    if not debugDb or not debugDb.filters then return false end
+    local filters = debugDb.filters
+    for k in pairs(filters) do filters[k] = nil end
+    for _, group in ipairs(CATEGORY_GROUPS) do
+        for _, cat in ipairs(group.categories) do
+            filters[cat.key] = not cat.noisy
+        end
+    end
+    return true
+end
 
 -- ============================================================
 -- INITIALIZATION
@@ -121,6 +202,11 @@ function DebugConsole:Init()
         end
     end
 
+    -- Start the firehose categories off. Only seeds keys the user has never
+    -- touched (nil), so an explicit choice either way is never overwritten —
+    -- turning SECURESORT on and reloading keeps it on.
+    seedNoisyFilters(DandersFramesDB_v2.debug.filters)
+
     -- Ensure log array exists
     if not DandersFramesDB_v2.debugLog then
         DandersFramesDB_v2.debugLog = {}
@@ -130,27 +216,54 @@ function DebugConsole:Init()
     debugDb = DandersFramesDB_v2.debug
     debugLog = DandersFramesDB_v2.debugLog
 
-    -- Sync the ephemeral flag with persistent setting
-    DF.debugEnabled = debugDb.enabled
-
-    -- Rebuild known categories from existing log entries
-    wipe(knownCategories)
-    for _, entry in ipairs(debugLog) do
-        local cat = entry[3]
-        if cat and cat ~= "" then
-            knownCategories[cat] = true
+    -- Drop a log that has aged out. Checked BEFORE anything else touches it so an
+    -- expired log costs one comparison at login rather than a walk plus a prune.
+    -- Uses debugDb.logStamp (see DEFAULTS): entries store no date of their own.
+    local maxAge = debugDb.logMaxAgeDays or 0
+    -- A log captured before this feature existed has no stamp. Without seeding one it
+    -- would be immortal — the exact forgotten-log case this is meant to catch. Stamp
+    -- it now so it ages from this login rather than being dropped unread.
+    if #debugLog > 0 and not debugDb.logStamp then
+        debugDb.logStamp = time()
+    end
+    if maxAge > 0 and #debugLog > 0 and debugDb.logStamp then
+        local age = time() - debugDb.logStamp
+        if age > maxAge * 86400 then
+            local dropped = #debugLog
+            wipe(debugLog)
+            debugDb.logStamp = nil
+            -- Reported only when debug is on: a user who left it off does not need
+            -- to hear about a log they had forgotten, but one who is mid-investigation
+            -- must not silently lose lines they were about to read.
+            if debugDb.enabled then
+                self:Log("INFO", "SYSTEM",
+                    "Cleared %d log entries older than %d day(s)", dropped, maxAge)
+            end
         end
     end
 
-    -- Add reload separator if log has prior entries
-    if #debugLog > 0 then
+    -- Categories are rebuilt on demand, not here — see `categoriesDirty`.
+    categoriesDirty = true
+
+    -- Add reload separator if the log has prior entries AND logging is on.
+    --
+    -- ☠ THE `enabled` GATE IS LOAD-BEARING, not tidiness. This block is the only
+    -- other writer of logStamp, and it used to run on every login regardless: a
+    -- user who turned logging OFF and forgot their log would get a separator (and
+    -- so a fresh stamp) at each login, which reset the age clock and made the log
+    -- IMMORTAL — defeating logMaxAgeDays in precisely the case it exists for.
+    -- Gating it is also right on its own terms: appending an entry to a log while
+    -- logging is switched off is a write to a disabled log.
+    if #debugLog > 0 and debugDb.enabled then
         tinsert(debugLog, {
             date("%H:%M:%S"),
             "INFO",
             "SYSTEM",
             "--- UI Reload ---"
         })
-        knownCategories["SYSTEM"] = true
+        -- No knownCategories write: the table is rebuilt on demand and this entry
+        -- is in the log, so the rebuild picks SYSTEM up.
+        debugDb.logStamp = time()
         self:PruneLog()
     end
 
@@ -176,6 +289,49 @@ local function IsCategoryLogged(category)
     return filters[category] ~= false
 end
 
+--- Public predicate: would a DF:Debug call for this category actually be logged?
+--- Call sites only need this when building the log arguments is itself expensive
+--- (a debugstack, a table walk, a string join). DF:Debug already short-circuits,
+--- but its arguments are evaluated by the caller before it can — so an unguarded
+--- debugstack() in a hot path costs the same whether logging is on or off.
+function DF:DebugActive(category)
+    if not debugDb or not debugDb.enabled then return false end
+    return IsCategoryLogged(category)
+end
+
+--- Returns true if the given value is a WoW "secret" (secret-tainted) value.
+--- Secret values cannot be used in table.concat or most string operations
+--- without errors. We use this to sanitize log messages so a tainted value
+--- can never corrupt the debug log. Gracefully no-ops on builds without the API.
+--- Declared here, above its first use, because DF:MakeDebugPrinter closes over it.
+local isSecretValue = _G.issecretvalue or function() return false end
+
+--- Returns a print()-style logger bound to a category: it takes loose varargs
+--- rather than a format string, joins them with spaces, and routes the result
+--- to the console.
+---
+--- This exists because several subsystems grew a file-local `DebugPrint(...)`
+--- helper gated on their own boolean, with dozens to hundreds of call sites
+--- each. Repointing the helper migrates every one of those sites at once, with
+--- no change at the call site. Prefer DF:Debug with a real format string for
+--- new code — this is the bridge for existing vararg call sites.
+---
+--- Secret-tainted values cannot be passed to tostring, so they are replaced
+--- with a placeholder rather than being allowed to error inside a debug path.
+function DF:MakeDebugPrinter(category)
+    return function(...)
+        if not DF:DebugActive(category) then return end
+        local n = select("#", ...)
+        if n == 0 then return end
+        local parts = {}
+        for i = 1, n do
+            local v = select(i, ...)
+            parts[i] = isSecretValue(v) and "<secret>" or tostring(v)
+        end
+        DF:Debug(category, "%s", table.concat(parts, " "))
+    end
+end
+
 function DF:Debug(category, fmt, ...)
     if not debugDb or not debugDb.enabled then return end
     if not IsCategoryLogged(category) then return end
@@ -197,12 +353,6 @@ end
 -- ============================================================
 -- INTERNAL LOGGING
 -- ============================================================
-
--- Returns true if the given value is a WoW "secret" (secret-tainted) value.
--- Secret values cannot be used in table.concat or most string operations
--- without errors. We use this to sanitize log messages so a tainted value
--- can never corrupt the debug log. Gracefully no-ops on builds without the API.
-local isSecretValue = _G.issecretvalue or function() return false end
 
 -- Sanitizes a message string for safe storage in the log. If the string
 -- itself is secret-tainted (because one of the format args was a secret),
@@ -240,6 +390,10 @@ function DebugConsole:Log(level, category, fmt, ...)
     }
 
     tinsert(debugLog, entry)
+
+    -- Age is measured from the last write, not the first: a log you are still
+    -- filling is a log you are still using. One integer store per line.
+    if debugDb then debugDb.logStamp = time() end
 
     -- Track new categories
     local cat = entry[3]
@@ -337,7 +491,9 @@ function DebugConsole:ClearLog()
     if debugLog then
         wipe(debugLog)
     end
+    if debugDb then debugDb.logStamp = nil end
     wipe(knownCategories)
+    categoriesDirty = false   -- nothing to rebuild FROM; an empty set is correct
     if liveEditBox then
         self:RefreshDisplay()
     end
@@ -347,7 +503,9 @@ function DebugConsole:SetEnabled(enabled)
     if debugDb then
         debugDb.enabled = enabled
     end
-    DF.debugEnabled = enabled
+    -- No DF.debugEnabled mirror: it was write-only (see the note in Core.lua).
+    -- IsEnabled() below is the master switch; DF:DebugActive(cat) is the per-
+    -- category one that consumers actually ask.
 end
 
 function DebugConsole:IsEnabled()
@@ -445,6 +603,20 @@ end
 -- ============================================================
 
 function DebugConsole:GetKnownCategories()
+    -- The deferred Init walk happens here, once, the first time anything actually
+    -- needs the set — in practice when the console page is opened.
+    if categoriesDirty then
+        categoriesDirty = false
+        wipe(knownCategories)
+        if debugLog then
+            for _, entry in ipairs(debugLog) do
+                local cat = entry[3]
+                if cat and cat ~= "" then
+                    knownCategories[cat] = true
+                end
+            end
+        end
+    end
     return knownCategories
 end
 

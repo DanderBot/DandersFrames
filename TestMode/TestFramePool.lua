@@ -130,7 +130,7 @@ function DF:CreateTestFramePool()
     DF.testFramePoolInitialized = true
     
     if DF.debugMode then
-        print("|cff00ff00[DF TestFramePool]|r Created 5 party + 40 raid test frames")
+        DF:Say("Created 5 party + 40 raid test frames")
     end
 end
 

@@ -730,9 +730,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                         DF:SetRangeCheckSpell(spellID)
                     end
                     RefreshRangeInfoLabel()
-                    print("|cFF00FF00[DFRange]|r Custom spell set: " .. spellName .. " (ID: " .. spellID .. ")")
+                    DF:Say("Range spell set to " .. spellName, "ID " .. spellID)
                 else
-                    print("|cFFFF0000[DFRange]|r Invalid spell ID: " .. spellID)
+                    DF:Err("Invalid spell ID: " .. spellID)
                     customSpellInput.EditBox:SetText("")
                 end
             end
@@ -2126,7 +2126,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 DF.TextDesigner.Preview:RefreshLiveFrames()
             end
 
-            print("|cff00ff00DandersFrames:|r Applied global font settings to all text elements.")
+            DF:Say("Applied global font settings to all text elements.")
         end)
         fontSelectGroup:AddWidget(applyBtn, 35)
 
@@ -4131,9 +4131,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 GUI:UninstallColorPickerHook()
             end
             if db.colorPickerOverride then
-                print("|cff00ff00DandersFrames:|r Color picker override enabled")
+                DF:Say("Color picker override enabled")
             else
-                print("|cffff9900DandersFrames:|r Color picker override disabled")
+                DF:Say("Color picker override disabled", nil, "WARN")
             end
         end), 30)
         colorPickerGroup:AddWidget(GUI:CreateLabel(self.child, L["Replace Blizzard's color picker with the DandersFrames color picker for this addon."], 250), 40)
@@ -4145,9 +4145,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 GUI:UninstallColorPickerHook()
             end
             if db.colorPickerGlobalOverride then
-                print("|cff00ff00DandersFrames:|r Custom color picker enabled for all addons")
+                DF:Say("Custom color picker enabled for all addons")
             else
-                print("|cffff9900DandersFrames:|r Custom color picker disabled for all addons")
+                DF:Say("Custom color picker disabled for all addons", nil, "WARN")
             end
         end), 30)
         colorPickerGroup:AddWidget(GUI:CreateLabel(self.child, L["Show the DF color picker when any addon opens a color picker."], 250), 30)
@@ -8930,7 +8930,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local createBtn = GUI:CreateButton(self.child, L["Create Empty"], 115, 24, function()
             local text = input.EditBox:GetText()
             if not text or text == "" then
-                print("|cffff6666DandersFrames:|r Please enter a profile name.")
+                DF:Err("Please enter a profile name.")
                 return
             end
             DF:SetProfile(text) 
@@ -8943,7 +8943,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local dupeBtn = GUI:CreateButton(self.child, L["Duplicate Current"], 115, 24, function()
             local text = input.EditBox:GetText()
             if not text or text == "" then
-                print("|cffff6666DandersFrames:|r Please enter a name for the duplicated profile.")
+                DF:Err("Please enter a name for the duplicated profile.")
                 return
             end
             if DF:DuplicateProfile(text) then
@@ -8968,7 +8968,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         actionsGroup:AddWidget(GUI:CreateIconButton(self.child, "delete", L["Delete Current Profile"], 240, 26, function()
             local p = DF:GetCurrentProfile()
             if p == "Default" then
-                print("|cffff6666DandersFrames:|r Cannot delete Default profile.")
+                DF:Err("Cannot delete Default profile.")
                 return
             end
             -- The profile name rides the closure rather than the StaticPopup
@@ -9284,9 +9284,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 self.exportEditBox:SetText(str)
                 self.exportEditBox:HighlightText()
                 self.exportEditBox:SetFocus()
-                print("|cff00ff00DandersFrames:|r Export generated.")
+                DF:Say("Export generated.")
             elseif not str then
-                print("|cffff0000DandersFrames:|r Export failed - no string returned")
+                DF:Err("Export failed - no string returned")
             end
         end), 32)
         
@@ -9325,13 +9325,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if not self.importEditBox then return end
             local str = self.importEditBox:GetText()
             if not str or str == "" then
-                print("|cffff6666DandersFrames:|r Paste a string first.")
+                DF:Err("Paste a string first.")
                 return
             end
             
             local importData, errMsg = DF:ValidateImportString(str)
             if not importData then
-                print("|cffff0000DandersFrames:|r " .. errMsg)
+                DF:Err(errMsg)
                 if self.importInfoLabel then self.importInfoLabel:SetText("|cffff6666Error: " .. errMsg .. "|r") end
                 return
             end
@@ -9372,7 +9372,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 self.importRaidCheck:SetChecked(info.hasRaid)
             end
             
-            print("|cff00ff00DandersFrames:|r Parsed. Select options and Import.")
+            DF:Say("Parsed. Select options and Import.")
         end), 30)
         
         -- Info label
@@ -9452,7 +9452,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Import button
         importActionsGroup:AddWidget(GUI:CreateIconButton(self.child, "download", L["Import Selected"], 240, 26, function()
             if not self.parsedImportData then
-                print("|cffff6666DandersFrames:|r Parse a string first.")
+                DF:Err("Parse a string first.")
                 return
             end
             
@@ -9464,7 +9464,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
             
             if #selectedCats == 0 then
-                print("|cffff6666DandersFrames:|r Select at least one category.")
+                DF:Err("Select at least one category.")
                 return
             end
             
@@ -9474,7 +9474,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             }
             
             if not selectedFrameTypes.party and not selectedFrameTypes.raid then
-                print("|cffff6666DandersFrames:|r Select Party or Raid.")
+                DF:Err("Select Party or Raid.")
                 return
             end
             
@@ -9617,6 +9617,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end), 55, 2)
 
+        -- The log lives in SavedVariables, so one left behind is re-read from disk at
+        -- every login until something clears it. 0 = keep forever, for anyone chasing
+        -- a bug that only shows up across several days.
+        -- "0 = never" is in the LABEL because CreateSlider's 9th parameter is
+        -- `lightweightUpdate`, a boolean — not a value-label map. Passing a table
+        -- there would read as truthy and quietly change how the slider commits.
+        AddToSection(GUI:CreateSlider(self.child, L["Clear Log After (Days, 0 = Never)"],
+            0, 30, 1, debugProxy, "logMaxAgeDays"), 55, 1)
+
         AddSyncPoint()
 
         -- ============================================================
@@ -9625,11 +9634,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local categoriesSection = Add(GUI:CreateCollapsibleSection(self.child, L["Logged Categories"], true), 36, "both")
         currentSection = categoriesSection
 
-        AddToSection(GUI:CreateLabel(self.child, "|cff888888" .. L["Unchecked categories are not logged at all. Disable noisy categories before reproducing a bug to keep the buffer focused."] .. "|r", 540), 36, "both")
+        AddToSection(GUI:CreateNote(self.child,
+            L["Unchecked categories are not logged at all. Disable noisy categories before reproducing a bug to keep the buffer focused."],
+            { width = 540 }), 36, "both")
 
-        -- All / None buttons row
-        local filterBtnRow = CreateFrame("Frame", nil, self.child)
-        filterBtnRow:SetSize(540, 24)
 
         local function CollectAllCategories()
             local set = {}
@@ -9655,37 +9663,55 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             if DF.DebugConsole then DF.DebugConsole:RefreshDisplay() end
         end
 
-        local btnAll = GUI:CreateButton(filterBtnRow, L["All"], 60, 22, function()
-            if DandersFramesDB_v2 and DandersFramesDB_v2.debug then
-                local filters = DandersFramesDB_v2.debug.filters
-                for cat in pairs(CollectAllCategories()) do
-                    filters[cat] = true
-                end
+        local function SetAllFilters(value)
+            if not (DandersFramesDB_v2 and DandersFramesDB_v2.debug) then return end
+            local filters = DandersFramesDB_v2.debug.filters
+            for cat in pairs(CollectAllCategories()) do
+                filters[cat] = value
             end
             RefreshAllRows()
-        end)
-        btnAll:SetPoint("LEFT", 0, 0)
+        end
 
-        local btnNone = GUI:CreateButton(filterBtnRow, L["None"], 60, 22, function()
-            if DandersFramesDB_v2 and DandersFramesDB_v2.debug then
-                local filters = DandersFramesDB_v2.debug.filters
-                for cat in pairs(CollectAllCategories()) do
-                    filters[cat] = false
-                end
-            end
-            RefreshAllRows()
-        end)
-        btnNone:SetPoint("LEFT", btnAll, "RIGHT", 6, 0)
+        local filterBtnRow = GUI:CreateButtonRow(self.child, {
+            { label = L["All"],  width = 60, onClick = function() SetAllFilters(true) end },
+            { label = L["None"], width = 60, onClick = function() SetAllFilters(false) end },
+            -- The baseline: everything on except the per-frame firehoses. All/None
+            -- are blunt; this is the state you actually want to start an
+            -- investigation from, and the way back after turning things on.
+            { label = L["Default"], width = 80,
+              onClick = function()
+                  if DF.DebugConsole and DF.DebugConsole:ApplyDefaultFilters() then
+                      RefreshAllRows()
+                  end
+              end,
+              tooltip = {
+                  title = L["Default"],
+                  lines = {
+                      L["Turns every category on except the noisy ones, which log many lines per frame during layout and sorting."],
+                      L["Enable those only while reproducing a layout or sorting bug."],
+                  },
+              } },
+        }, { height = 22 })
 
         AddToSection(filterBtnRow, 28, "both")
+
+        -- One colour for the category-group headings, passed to CreateLabel rather
+        -- than baked into each string as a |c escape -- an escape inside a
+        -- localised string is invisible to translators and easy to unbalance.
+        local GROUP_HEADING_COLOR = { r = 0.93, g = 0.65, b = 0.37 }
 
         if DF.DebugConsole then
             local groups = DF.DebugConsole:GetCategoryGroups()
             for _, group in ipairs(groups) do
                 local groupLabel = L[group.name] or group.name
-                AddToSection(GUI:CreateLabel(self.child, "|cffeda55f" .. groupLabel .. "|r", 540), 22, "both")
+                AddToSection(GUI:CreateLabel(self.child, groupLabel, 540, GROUP_HEADING_COLOR), 22, "both")
                 for _, cat in ipairs(group.categories) do
-                    local row = GUI:CreateDebugCategoryRow(self.child, cat.key, cat.desc, 540)
+                    -- The firehoses are marked in the row itself, so "why is this
+                    -- one off?" is answered where the user is looking rather than
+                    -- only in the Default button's tooltip. The row renders it as
+                    -- the shared caution icon; it used to be a "(noisy)" suffix
+                    -- concatenated onto the description.
+                    local row = GUI:CreateDebugCategoryRow(self.child, cat.key, cat.desc, 540, cat.noisy)
                     self.filterRows[cat.key] = row
                     AddToSection(row, 28, "both")
                 end
@@ -9702,7 +9728,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
             if #extras > 0 then
                 table.sort(extras)
-                AddToSection(GUI:CreateLabel(self.child, "|cffeda55f" .. L["Discovered"] .. "|r", 540), 22, "both")
+                AddToSection(GUI:CreateLabel(self.child, L["Discovered"], 540, GROUP_HEADING_COLOR), 22, "both")
                 for _, cat in ipairs(extras) do
                     local row = GUI:CreateDebugCategoryRow(self.child, cat, nil, 540)
                     self.filterRows[cat] = row
@@ -9723,75 +9749,46 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local entryCountLabel = GUI:CreateLabel(self.child, "", 540)
         local function UpdateEntryCount()
             local count = DF.DebugConsole and DF.DebugConsole:GetLogEntryCount() or 0
-            entryCountLabel:SetText("|cff888888" .. format(L["Log entries: %d"], count) .. "|r")
+            -- No |c escape: CreateLabel's default colour is already the dim body tone.
+            entryCountLabel:SetText(format(L["Log entries: %d"], count))
         end
         UpdateEntryCount()
         AddToSection(entryCountLabel, 20, "both")
 
         -- Action buttons row (Refresh / Clear Log / Copy to Clipboard)
-        local actionRow = CreateFrame("Frame", nil, self.child)
-        actionRow:SetSize(540, 28)
-
-        local refreshBtn = GUI:CreateButton(actionRow, L["Refresh"], 100, 24, function()
-            if DF.DebugConsole then
-                DF.DebugConsole:RefreshDisplay()
-                UpdateEntryCount()
-            end
-        end)
-        refreshBtn:SetPoint("LEFT", 0, 0)
-
-        local clearBtn = GUI:CreateButton(actionRow, L["Clear Log"], 100, 24, function()
-            if DF.DebugConsole then
-                DF.DebugConsole:ClearLog()
-                UpdateEntryCount()
-            end
-        end)
-        clearBtn:SetPoint("LEFT", refreshBtn, "RIGHT", 6, 0)
-
-        local copyBtn = GUI:CreateButton(actionRow, L["Copy to Clipboard"], 140, 24, function()
+        local function CopyLogToClipboard()
             if not DF.DebugConsole then return end
-            local text = DF.DebugConsole:GetExportText()
-
-            local popup = CreateFrame("Frame", "DFDebugExportPopup", UIParent, "BackdropTemplate")
-            popup:SetSize(500, 350)
-            popup:SetPoint("CENTER")
-            popup:SetFrameStrata("DIALOG")
-            popup:SetFrameLevel(200)
-            GUI:CreatePanelBackdrop(popup)
-            popup:EnableMouse(true)
-            popup:SetMovable(true)
-            popup:RegisterForDrag("LeftButton")
-            popup:SetScript("OnDragStart", popup.StartMoving)
-            popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
-
-            local title = popup:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
-            title:SetPoint("TOP", 0, -10)
-            title:SetText(L["Debug Log Export (Filtered)"])
-            title:SetTextColor(0.9, 0.9, 0.9)
-
-            local instructions = popup:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            instructions:SetPoint("TOP", title, "BOTTOM", 0, -4)
-            instructions:SetText(L["Press Ctrl+A to select all, then Ctrl+C to copy"])
-            instructions:SetTextColor(0.6, 0.6, 0.6)
-
-            local scrollContainer = GUI:CreateTextArea(popup, {
-                text      = text,
-                readOnly  = true,   -- copy-me: selectable, but not editable
-                autoFocus = true,
-                onEscape  = function() popup:Hide() end,
+            -- Was a hand-rolled dialog: ~35 lines building its own frame, backdrop,
+            -- title, drag handlers and close button. ☠ It also called CreateFrame
+            -- with the FIXED global name "DFDebugExportPopup" on every click, so a
+            -- second export built a second frame over the same global and orphaned
+            -- the first — a leak per click. The shared input popup is a singleton
+            -- and is the same control the click-cast profile export already uses.
+            DF:ShowPopupInput({
+                title       = L["Debug Log Export (Filtered)"],
+                message     = L["Press Ctrl+A to select all, then Ctrl+C to copy"],
+                text        = DF.DebugConsole:GetExportText(),
+                multiline   = true,
+                readOnly    = true,
+                cancelLabel = L["Close"],
             })
-            scrollContainer:SetPoint("TOPLEFT", 12, -45)
-            scrollContainer:SetPoint("BOTTOMRIGHT", -12, 40)
+        end
 
-            local closeBtn = GUI:CreateButton(popup, L["Close"], 80, 24, function() popup:Hide() end)
-            closeBtn:SetPoint("BOTTOM", 0, 10)
-
-            popup:SetScript("OnHide", function(s)
-                s:SetParent(nil)
-                s:ClearAllPoints()
-            end)
-        end)
-        copyBtn:SetPoint("LEFT", clearBtn, "RIGHT", 6, 0)
+        local actionRow = GUI:CreateButtonRow(self.child, {
+            { label = L["Refresh"], width = 100, onClick = function()
+                if DF.DebugConsole then
+                    DF.DebugConsole:RefreshDisplay()
+                    UpdateEntryCount()
+                end
+            end },
+            { label = L["Clear Log"], width = 100, onClick = function()
+                if DF.DebugConsole then
+                    DF.DebugConsole:ClearLog()
+                    UpdateEntryCount()
+                end
+            end },
+            { label = L["Copy to Clipboard"], width = 140, onClick = CopyLogToClipboard },
+        })
 
         AddToSection(actionRow, 32, "both")
 
@@ -9848,27 +9845,39 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local scriptStatusLabel = GUI:CreateLabel(self.child, "", 540)
         AddToSection(scriptStatusLabel, 20, "both")
 
+        -- Status is a TONE, not an ad-hoc colour: these were five hand-picked hex
+        -- values that drifted from the info/caution/danger/success language every
+        -- banner, note and tooltip in the GUI already speaks. ToneHex is the one
+        -- source for the inline form.
+        local function SetScriptStatus(text, tone)
+            if tone then
+                scriptStatusLabel:SetText("|c" .. GUI:ToneHex(tone) .. text .. "|r")
+            else
+                scriptStatusLabel:SetText(text)   -- default dim body tone
+            end
+        end
+
         AddToSection(GUI:CreateButton(self.child, L["Run Script"], 540, 26, function()
             local code = scriptEditBox:GetText()
             if not code or code == "" then
-                scriptStatusLabel:SetText("|cff666666No script to run.|r")
+                SetScriptStatus(L["No script to run."])
                 return
             end
             local fn, err = loadstring(code)
             if not fn then
-                scriptStatusLabel:SetText("|cffff6666Error: " .. tostring(err) .. "|r")
+                SetScriptStatus(format(L["Error: %s"], tostring(err)), "danger")
                 DF:DebugError("SCRIPT", "Compile error: %s", tostring(err))
                 return
             end
             local ok, result = pcall(fn)
             if ok then
                 if result ~= nil then
-                    scriptStatusLabel:SetText("|cff88ccffResult: " .. tostring(result) .. "|r")
+                    SetScriptStatus(format(L["Result: %s"], tostring(result)), "info")
                 else
-                    scriptStatusLabel:SetText("|cff88ff88Script executed successfully.|r")
+                    SetScriptStatus(L["Script executed successfully."], "success")
                 end
             else
-                scriptStatusLabel:SetText("|cffff6666Runtime: " .. tostring(result) .. "|r")
+                SetScriptStatus(format(L["Runtime: %s"], tostring(result)), "danger")
                 DF:DebugError("SCRIPT", "Runtime error: %s", tostring(result))
             end
         end), 32, "both")

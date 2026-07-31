@@ -2914,6 +2914,20 @@ function Factory:SyncFrame(frame)
     if not frame or not frame.unit then return end
     if not (DF.AuraContainer and DF.AuraContainer.IsSupported()) then return end
 
+    -- MEMORY TEST (enableAuraDesigner): tear the AD containers down ONCE on the
+    -- transition, then stay quiet. Merely skipping the sync would leave every
+    -- container standing for Blizzard to keep rendering — the flag has to
+    -- release them to show up in the memory reading. The latch matters:
+    -- ClearFrame ends in SyncSound, which is not free to re-run per update.
+    if DF:MemTestDisabled("enableAuraDesigner") then
+        if not frame.dfADMemTestCleared then
+            frame.dfADMemTestCleared = true
+            self:ClearFrame(frame)
+        end
+        return
+    end
+    frame.dfADMemTestCleared = nil
+
     local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
     if not adDB then return end
 
@@ -3515,7 +3529,7 @@ end
 -- ============================================================
 
 -- ============================================================
--- DIAGNOSTICS — /df admissing
+-- DIAGNOSTICS — /df debug admissing
 -- Developer probe for the show-when-missing push mechanism. Dumps every AD
 -- missing-mode container AND (as the control group) the Missing Buffs cells
 -- on the same frames, so the two consumers of the identical backend can be
@@ -3534,7 +3548,7 @@ do
         return tostring(v)
     end
     local function dumpHandle(tag, key, h)
-        if not h then print("    " .. tag .. " [" .. key .. "] handle=nil") return end
+        if not h then print("    " .. tag .. " [" .. key .. "] " .. DF.OUT.BAD .. "handle=nil|r") return end
         local backend = h.backend
         local c = backend and backend.container
         local groups = backend and backend.groupKeys and #backend.groupKeys or 0
@@ -3601,11 +3615,12 @@ do
         end
         if DF.IteratePartyFrames then DF:IteratePartyFrames(scan) end
         if DF.IterateRaidFrames then DF:IterateRaidFrames(scan) end
-        print("|cff7373f2DandersFrames|r admissing markers placed: " .. n
-            .. " (magenta = AD, cyan = MB; watch whether they SLIDE when the aura is applied)")
+        local o = DF:Out("Aura Designer", "missing markers placed")
+        o:Field("markers", n, n > 0 and "GOOD" or "WARN")
+        o:Line("magenta = AD, cyan = MB. Watch whether they SLIDE when the aura is applied.", "NEUTRAL")
     end
     function DF:DebugADMissing()
-        print("|cff7373f2DandersFrames|r AD missing-mode probe:")
+        local o = DF:Out("Aura Designer", "missing-mode probe")
         local function scan(frame)
             if not frame or not frame.unit then return end
             local shown
@@ -3616,7 +3631,7 @@ do
                     if t then
                         for key, entry in pairs(t) do
                             if entry and entry.missing then
-                                if not shown then shown = true; print("  frame unit=" .. tostring(frame.unit)) end
+                                if not shown then shown = true; o:Section("unit " .. tostring(frame.unit)) end
                                 dumpHandle("AD:" .. storeKey, tostring(key), entry.handle)
                             end
                         end
@@ -3626,14 +3641,15 @@ do
             -- Control group: the proven Missing Buffs cells on the same frame.
             if frame.missingFactory then
                 for key, h in pairs(frame.missingFactory) do
-                    if not shown then shown = true; print("  frame unit=" .. tostring(frame.unit)) end
+                    if not shown then shown = true; o:Section("unit " .. tostring(frame.unit)) end
                     dumpHandle("MB", tostring(key), h)
                 end
             end
         end
         if DF.IteratePartyFrames then DF:IteratePartyFrames(scan) end
         if DF.IterateRaidFrames then DF:IterateRaidFrames(scan) end
-        print("  (run once with the aura absent, once applied; compare 'children')")
+        o:Line("Run once with the aura absent and once applied, then compare 'children'.", "NEUTRAL")
+        o:Siblings("admissing")
     end
 end
 

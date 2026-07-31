@@ -81,9 +81,8 @@ Options\AutoProfiles.lua
 Options\NicknamesPage.lua
 Options\NicknamesPicker.lua
 
-# Popup System (generic wizard & alert popups)
+# Popup System (alert / confirm / input dialogs)
 Popup.lua
-WizardBuilder.lua
 
 # Frame System
 Frames\Core.lua
@@ -154,10 +153,9 @@ Features\PinnedFrames.lua
 Features\FlatRaidFrames.lua
 
 # Debug (Profiler.lua is loaded earlier so its SetScript hook is in place)
-Debug\DebugAuras.lua
+Debug\AuraExplorer.lua
 Debug\AtlasBrowser.lua
-Debug\Performance.lua
-Debug\PerformanceTest.lua
+Debug\MemoryTest.lua
 
 # Click-Casting System
 ClickCasting\Core.lua

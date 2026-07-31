@@ -16,7 +16,7 @@ local C_WARNING = {r = 1.0, g = 0.67, b = 0.0, a = 1}
 
 -- ============================================================
 -- OVERRIDE KEY LABELS
--- The override tooltip and /df overrides both list which settings a layout has
+-- The override tooltip and /df debug overrides both list which settings a layout has
 -- overridden. They used to print the RAW saved key -- "auraDesignerPreset",
 -- "buffBorderSize" -- so users were shown internal camelCase identifiers. Noise at
 -- best, and actively misleading where a key's wording no longer matches the UI:
@@ -423,7 +423,7 @@ end
 -- Canonical override count for display: everything that actually gets shown
 -- (mapped groups + "Other"), deduped so redundant flat siblings of a whole-table
 -- override aren't counted. Used by the row badge, the editing status line, and
--- /df overrides so all three agree.
+-- /df debug overrides so all three agree.
 local function CountDisplayedOverrides(overrides)
     if not overrides then return 0 end
     local groups, unknownKeys = GroupOverridesByTab(overrides)
@@ -627,12 +627,12 @@ local function FindMatchingProfile(contentKey, raidSize)
 
     for _, profile in ipairs(ct.profiles) do
         if raidSize >= profile.min and raidSize <= profile.max then
-            DF:Debug("LAYOUT", "FindMatchingProfile: matched \"%s\" for %s (size %d, range %d-%d)", profile.name or "?", contentKey, raidSize, profile.min, profile.max)
+            DF:Debug("AUTOPROFILE", "FindMatchingProfile: matched \"%s\" for %s (size %d, range %d-%d)", profile.name or "?", contentKey, raidSize, profile.min, profile.max)
             return profile
         end
     end
 
-    DF:Debug("LAYOUT", "FindMatchingProfile: no match for %s (size %d, %d profiles checked)", contentKey, raidSize, #ct.profiles)
+    DF:Debug("AUTOPROFILE", "FindMatchingProfile: no match for %s (size %d, %d profiles checked)", contentKey, raidSize, #ct.profiles)
     return nil
 end
 
@@ -703,14 +703,14 @@ end
 -- Create a profile
 function AutoProfilesUI:CreateProfile(contentKey, name, min, max)
     self:InitDefaults()
-    DF:Debug("LAYOUT", "CreateProfile: contentKey=%s name=\"%s\" min=%s max=%s", contentKey, name or "?", tostring(min), tostring(max))
+    DF:Debug("AUTOPROFILE", "CreateProfile: contentKey=%s name=\"%s\" min=%s max=%s", contentKey, name or "?", tostring(min), tostring(max))
 
     if contentKey == "mythic" then
         DF.db.raidAutoProfiles.mythic.profile = {
             name = name or "Mythic Setup",
             overrides = {}
         }
-        DF:Debug("LAYOUT", "CreateProfile: mythic layout created")
+        DF:Debug("AUTOPROFILE", "CreateProfile: mythic layout created")
         return true
     end
 
@@ -718,7 +718,7 @@ function AutoProfilesUI:CreateProfile(contentKey, name, min, max)
     local profiles = DF.db.raidAutoProfiles[contentKey].profiles
     for _, p in ipairs(profiles) do
         if p.name:lower() == name:lower() then
-            DF:DebugWarn("LAYOUT", "CreateProfile: name conflict with \"%s\"", name)
+            DF:DebugWarn("AUTOPROFILE", "CreateProfile: name conflict with \"%s\"", name)
             return false, L["Name already exists"]
         end
     end
@@ -758,23 +758,23 @@ function AutoProfilesUI:DeleteProfile(contentKey, index)
             deletedProfile = profiles[index]
             table.remove(profiles, index)
         else
-            DF:DebugWarn("LAYOUT", "DeleteProfile: index %s not found in %s", tostring(index), contentKey)
+            DF:DebugWarn("AUTOPROFILE", "DeleteProfile: index %s not found in %s", tostring(index), contentKey)
             return false
         end
     end
 
-    DF:Debug("LAYOUT", "DeleteProfile: removed \"%s\" from %s", deletedProfile and deletedProfile.name or "?", contentKey)
+    DF:Debug("AUTOPROFILE", "DeleteProfile: removed \"%s\" from %s", deletedProfile and deletedProfile.name or "?", contentKey)
 
     -- If the deleted profile was the active runtime profile, deactivate it
     if deletedProfile and self.activeRuntimeProfile == deletedProfile then
-        DF:Debug("LAYOUT", "DeleteProfile: deleted layout was active, deactivating overlay")
+        DF:Debug("AUTOPROFILE", "DeleteProfile: deleted layout was active, deactivating overlay")
         DF.raidOverrides = nil
         self.activeRuntimeProfile = nil
         self.activeRuntimeContentKey = nil
         if DF.FullProfileRefresh then
             DF:FullProfileRefresh()
         end
-        print("|cff00ff00DandersFrames:|r " .. L["Auto-profile deactivated (profile deleted)"])
+        DF:Say(L["Auto-profile deactivated (profile deleted)"])
     end
 
     return true
@@ -783,7 +783,7 @@ end
 -- Update profile range
 function AutoProfilesUI:UpdateProfileRange(contentKey, index, newMin, newMax)
     self:InitDefaults()
-    DF:Debug("LAYOUT", "UpdateProfileRange: %s index=%s newMin=%d newMax=%d", contentKey, tostring(index), newMin, newMax)
+    DF:Debug("AUTOPROFILE", "UpdateProfileRange: %s index=%s newMin=%d newMax=%d", contentKey, tostring(index), newMin, newMax)
 
     if contentKey == "mythic" then
         return false, L["Mythic has fixed range"]
@@ -797,14 +797,14 @@ function AutoProfilesUI:UpdateProfileRange(contentKey, index, newMin, newMax)
     -- Check for overlap (excluding current profile)
     local overlap = self:CheckRangeOverlap(contentKey, newMin, newMax, index)
     if overlap then
-        DF:DebugWarn("LAYOUT", "UpdateProfileRange: overlap with \"%s\" (%d-%d)", overlap.name, overlap.min, overlap.max)
+        DF:DebugWarn("AUTOPROFILE", "UpdateProfileRange: overlap with \"%s\" (%d-%d)", overlap.name, overlap.min, overlap.max)
         return false, format(L["Overlaps with \"%s\""], overlap.name)
     end
 
     local oldMin, oldMax = profiles[index].min, profiles[index].max
     profiles[index].min = newMin
     profiles[index].max = newMax
-    DF:Debug("LAYOUT", "UpdateProfileRange: \"%s\" range %d-%d -> %d-%d", profiles[index].name or "?", oldMin, oldMax, newMin, newMax)
+    DF:Debug("AUTOPROFILE", "UpdateProfileRange: \"%s\" range %d-%d -> %d-%d", profiles[index].name or "?", oldMin, oldMax, newMin, newMax)
 
     -- Re-sort
     table.sort(profiles, function(a, b) return a.min < b.min end)
@@ -1326,7 +1326,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
     end
     
     -- Override count: everything displayed (mapped groups + "Other"), deduped — same
-    -- helper the editing status line and /df overrides use, so all three agree.
+    -- helper the editing status line and /df debug overrides use, so all three agree.
     local overrideCount = CountDisplayedOverrides(profile.overrides)
     
     local overrideText = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -1363,7 +1363,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
             -- Hard cap on tooltip body lines so a large layout can't overflow the
             -- screen. Every emitted line (group headers, scalars, walk leaves, Other)
             -- counts; once the cap is hit we stop and flag truncation. The footer
-            -- pointing at /df overrides (the complete dump) always shows.
+            -- pointing at /df debug overrides (the complete dump) always shows.
             local MAX_LINES = 40
             local shown, truncated = 0, false
             local function canEmit()
@@ -1436,10 +1436,10 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
             if truncated then
                 lines[#lines + 1] = { text = L["Too many to show here."], color = { 1, 0.6, 0.2 } }
             end
-            -- /df overrides reports on the active layout (or one being edited), not
+            -- /df debug overrides reports on the active layout (or one being edited), not
             -- whichever row is hovered — so note that inactive layouts need Edit first.
             lines[#lines + 1] = {
-                text  = L["Use /df overrides for the full list — active layout, or Edit one to inspect it."],
+                text  = L["Use /df debug overrides for the full list — active layout, or Edit one to inspect it."],
                 color = { 0.4, 0.4, 0.4 },
             }
 
@@ -1515,7 +1515,7 @@ function AutoProfilesUI:CreateProfileRow(GUI, pageFrame, parent, contentType, pr
             local locked = DF:GetRaidDB().raidLocked
             if locked then
                 if InCombatLockdown() then
-                    print("|cffff0000DandersFrames:|r Cannot unlock during combat.")
+                    DF:Err("Cannot unlock during combat.")
                     return
                 end
                 -- Edit THIS layout (already the active one) so drag-writes land on
@@ -2418,7 +2418,7 @@ function AutoProfilesUI:GetActiveLayoutName()
 end
 
 function AutoProfilesUI:EnterEditing(contentType, profileIndex)
-    DF:Debug("LAYOUT", "EnterEditing: contentType=%s profileIndex=%s", contentType, tostring(profileIndex))
+    DF:Debug("AUTOPROFILE", "EnterEditing: contentType=%s profileIndex=%s", contentType, tostring(profileIndex))
 
     -- Enforcement guard (mirror of the row's blockEdit greying in CreateProfileRow).
     -- Editing writes the layout's settings into the live raid db for preview, so
@@ -2439,7 +2439,7 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
         end
         if requested and self.activeRuntimeProfile ~= requested
             and (self.activeRuntimeProfile ~= nil or IsInRaid()) then
-            DF:DebugWarn("LAYOUT", "EnterEditing: refused — only the active layout is editable in a raid group")
+            DF:DebugWarn("AUTOPROFILE", "EnterEditing: refused — only the active layout is editable in a raid group")
             -- The row's Edit button greys out with a tooltip, but its disabled
             -- state is drawn at page-build time and can be STALE (e.g. you
             -- joined a raid with the window open). A silent refusal on a
@@ -2451,7 +2451,7 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
             else
                 msg = L["While in a raid group you can only edit the active layout. Leave the raid group to edit other layouts."]
             end
-            print("|cffff9900DandersFrames:|r " .. (msg or ""))
+            DF:Say((msg or ""))
             local GUI = DF.GUI
             if GUI and GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
             return false, "Blocked: live raid frames"
@@ -2461,7 +2461,7 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
     -- Clear overlay so snapshot captures true globals (no RemoveRuntimeProfile
     -- needed — real table was never mutated)
     if self.activeRuntimeProfile then
-        DF:Debug("LAYOUT", "EnterEditing: clearing active runtime overlay before snapshot")
+        DF:Debug("AUTOPROFILE", "EnterEditing: clearing active runtime overlay before snapshot")
         DF.raidOverrides = nil
         self.activeRuntimeProfile = nil
         self.activeRuntimeContentKey = nil
@@ -2478,13 +2478,13 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
             self.editingProfile = profiles[profileIndex]
             self.editingProfileIndex = profileIndex
         else
-            DF:DebugWarn("LAYOUT", "EnterEditing: profile not found at index %s", tostring(profileIndex))
+            DF:DebugWarn("AUTOPROFILE", "EnterEditing: profile not found at index %s", tostring(profileIndex))
             return false, "Profile not found"
         end
     end
     
     self.editingContentType = contentType
-    DF:Debug("LAYOUT", "EnterEditing: editing \"%s\" (%s)", self.editingProfile.name or "?", contentType)
+    DF:Debug("AUTOPROFILE", "EnterEditing: editing \"%s\" (%s)", self.editingProfile.name or "?", contentType)
 
     -- Snapshot ALL true global values before anything gets modified
     -- This lets controls freely write to DF._realRaidDB for live preview while
@@ -2545,18 +2545,18 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
     if self.editingProfile.overrides then
         for key, value in pairs(self.editingProfile.overrides) do
             if key == "pinnedFrames" then
-                DF:DebugWarn("LAYOUT", "EnterEditing: skipping stale pinnedFrames direct override key")
+                DF:DebugWarn("AUTOPROFILE", "EnterEditing: skipping stale pinnedFrames direct override key")
             elseif not IsKeyOverridable(key) then
                 -- transient/never-override key (e.g. a stale raidLocked) — don't
                 -- apply it to the live preview (ExitEditing self-heals it away).
-                DF:DebugWarn("LAYOUT", "EnterEditing: skipping non-overridable override \"%s\"", key)
+                DF:DebugWarn("AUTOPROFILE", "EnterEditing: skipping non-overridable override \"%s\"", key)
             else
                 SetRaidValue(key, DeepCopyValue(value))
                 overrideCount = overrideCount + 1
             end
         end
     end
-    DF:Debug("LAYOUT", "EnterEditing: applied %d overrides for live preview", overrideCount)
+    DF:Debug("AUTOPROFILE", "EnterEditing: applied %d overrides for live preview", overrideCount)
     
     -- Refresh pinned frames to show overridden settings in live preview.
     --   * In an actual raid: re-apply each set's enabled + layout to the LIVE
@@ -2650,7 +2650,7 @@ local function DeepCompare(a, b)
 end
 
 function AutoProfilesUI:ExitEditing(skipUIUpdates)
-    DF:Debug("LAYOUT", "ExitEditing: profile=\"%s\" skipUIUpdates=%s", self.editingProfile and self.editingProfile.name or "?", tostring(skipUIUpdates))
+    DF:Debug("AUTOPROFILE", "ExitEditing: profile=\"%s\" skipUIUpdates=%s", self.editingProfile and self.editingProfile.name or "?", tostring(skipUIUpdates))
 
     -- Diff safety net: before restoring globals, scan live values vs snapshot
     -- to catch any overrides that weren't explicitly tracked by controls
@@ -2672,7 +2672,7 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
                 if overrides[key] ~= nil then
                     overrides[key] = nil
                     autoCleaned = autoCleaned + 1
-                    DF:DebugWarn("LAYOUT", "ExitEditing: removed stale pinnedFrames direct override key")
+                    DF:DebugWarn("AUTOPROFILE", "ExitEditing: removed stale pinnedFrames direct override key")
                 end
             elseif not IsKeyOverridable(key) then
                 -- Transient/never-override key (e.g. raidLocked) — never store it,
@@ -2680,7 +2680,7 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
                 if overrides[key] ~= nil then
                     overrides[key] = nil
                     autoCleaned = autoCleaned + 1
-                    DF:DebugWarn("LAYOUT", "ExitEditing: removed non-overridable override \"%s\"", key)
+                    DF:DebugWarn("AUTOPROFILE", "ExitEditing: removed non-overridable override \"%s\"", key)
                 end
             else
                 local currentVal = GetRaidValue(key)
@@ -2704,7 +2704,7 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
                     if overrides[key] ~= nil then
                         overrides[key] = nil
                         autoCleaned = autoCleaned + 1
-                        DF:DebugWarn("LAYOUT", "ExitEditing: removed redundant whole-table override \"%s\" (tracked via flat keys)", key)
+                        DF:DebugWarn("AUTOPROFILE", "ExitEditing: removed redundant whole-table override \"%s\" (tracked via flat keys)", key)
                     end
                 elseif not matches then
                     -- Only deep-copy when override is new or has actually changed
@@ -2737,7 +2737,7 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
 
         local totalOverrides = 0
         for _ in pairs(overrides) do totalOverrides = totalOverrides + 1 end
-        DF:Debug("LAYOUT", "ExitEditing: diff scan — autoStored=%d autoCleaned=%d orphansRemoved=%d totalOverrides=%d", autoStored, autoCleaned, orphansRemoved, totalOverrides)
+        DF:Debug("AUTOPROFILE", "ExitEditing: diff scan — autoStored=%d autoCleaned=%d orphansRemoved=%d totalOverrides=%d", autoStored, autoCleaned, orphansRemoved, totalOverrides)
     end
     
     -- Restore all modified values back to their true globals
@@ -3295,11 +3295,11 @@ function AutoProfilesUI:SetProfileSetting(key, value)
     if valuesMatch then
         -- Same as global, remove override
         self.editingProfile.overrides[key] = nil
-        DF:Debug("LAYOUT", "SetProfileSetting: %s matches global, override removed", key)
+        DF:Debug("AUTOPROFILE", "SetProfileSetting: %s matches global, override removed", key)
     else
         -- Different from global, store override (deep copy to avoid reference issues)
         self.editingProfile.overrides[key] = DeepCopyValue(value)
-        DF:Debug("LAYOUT", "SetProfileSetting: %s overridden (value=%s)", key, tostring(value))
+        DF:Debug("AUTOPROFILE", "SetProfileSetting: %s overridden (value=%s)", key, tostring(value))
     end
 
     -- Refresh tab stars so they update live as settings change
@@ -3311,7 +3311,7 @@ end
 -- Reset a setting to global (remove override)
 function AutoProfilesUI:ResetProfileSetting(key)
     if not self.editingProfile then return false end
-    DF:Debug("LAYOUT", "ResetProfileSetting: %s — restoring to global", key)
+    DF:Debug("AUTOPROFILE", "ResetProfileSetting: %s — restoring to global", key)
 
     if self.editingProfile.overrides then
         self.editingProfile.overrides[key] = nil
@@ -3366,34 +3366,34 @@ end
 function AutoProfilesUI:GetActiveProfile()
     local autoDb = DF.db.raidAutoProfiles
     if not autoDb or not autoDb.enabled then
-        DF:Debug("LAYOUT", "GetActiveProfile: disabled or no autoDb")
+        DF:Debug("AUTOPROFILE", "GetActiveProfile: disabled or no autoDb")
         return nil
     end
 
     -- Must be in a raid group for auto-profiles to apply
     if not IsInRaid() then
-        DF:Debug("LAYOUT", "GetActiveProfile: not in raid")
+        DF:Debug("AUTOPROFILE", "GetActiveProfile: not in raid")
         return nil
     end
 
     -- Use the existing content type detection from Core.lua
     local contentType = DF:GetContentType()
     if not contentType then
-        DF:Debug("LAYOUT", "GetActiveProfile: no content type detected")
+        DF:Debug("AUTOPROFILE", "GetActiveProfile: no content type detected")
         return nil
     end
 
     local raidSize = GetNumGroupMembers()
-    DF:Debug("LAYOUT", "GetActiveProfile: contentType=%s raidSize=%d", contentType, raidSize)
+    DF:Debug("AUTOPROFILE", "GetActiveProfile: contentType=%s raidSize=%d", contentType, raidSize)
 
     -- Mythic: single profile, no range check needed
     if contentType == "mythic" then
         local mythicProfile = autoDb.mythic and autoDb.mythic.profile
         if mythicProfile then
-            DF:Debug("LAYOUT", "GetActiveProfile: matched mythic layout \"%s\"", mythicProfile.name or "?")
+            DF:Debug("AUTOPROFILE", "GetActiveProfile: matched mythic layout \"%s\"", mythicProfile.name or "?")
             return mythicProfile, "mythic"
         end
-        DF:Debug("LAYOUT", "GetActiveProfile: mythic content but no layout configured")
+        DF:Debug("AUTOPROFILE", "GetActiveProfile: mythic content but no layout configured")
         return nil
     end
     
@@ -3405,7 +3405,7 @@ function AutoProfilesUI:GetActiveProfile()
     elseif contentType == "openWorld" then
         profileKey = "openWorld"
     else
-        DF:Debug("LAYOUT", "GetActiveProfile: unmapped content type \"%s\", no layout", contentType)
+        DF:Debug("AUTOPROFILE", "GetActiveProfile: unmapped content type \"%s\", no layout", contentType)
         return nil
     end
 
@@ -3415,7 +3415,7 @@ function AutoProfilesUI:GetActiveProfile()
         return profile, profileKey
     end
 
-    DF:Debug("LAYOUT", "GetActiveProfile: no matching range for %s (size %d)", profileKey, raidSize)
+    DF:Debug("AUTOPROFILE", "GetActiveProfile: no matching range for %s (size %d)", profileKey, raidSize)
     return nil
 end
 
@@ -3437,7 +3437,7 @@ end
 -- Apply a profile's overrides as a read-through overlay (does NOT mutate the real raid table)
 function AutoProfilesUI:ApplyRuntimeProfile(profile, contentKey)
     if not profile or not profile.overrides then return end
-    DF:Debug("LAYOUT", "ApplyRuntimeProfile: \"%s\" (%s)", profile.name or "?", contentKey)
+    DF:Debug("AUTOPROFILE", "ApplyRuntimeProfile: \"%s\" (%s)", profile.name or "?", contentKey)
 
     -- Group nested overrides by parent table so multiple overrides on the same
     -- parent (e.g. raidGroupVisible_1 and raidGroupVisible_3) share one copy
@@ -3540,7 +3540,7 @@ function AutoProfilesUI:ApplyRuntimeProfile(profile, contentKey)
     for _ in pairs(overlay) do overlayCount = overlayCount + 1 end
     local totalOverrides = 0
     for _ in pairs(profile.overrides) do totalOverrides = totalOverrides + 1 end
-    DF:Debug("LAYOUT", "ApplyRuntimeProfile: overlay active — %d overrides, %d overlay keys", totalOverrides, overlayCount)
+    DF:Debug("AUTOPROFILE", "ApplyRuntimeProfile: overlay active — %d overrides, %d overlay keys", totalOverrides, overlayCount)
 
     -- Store active state
     self.activeRuntimeProfile = profile
@@ -3554,7 +3554,7 @@ function AutoProfilesUI:ApplyRuntimeProfile(profile, contentKey)
     -- Chat notification
     local raidSize = GetNumGroupMembers()
     local contentName = GetContentDisplayName(contentKey)
-    print("|cff00ff00DandersFrames:|r " .. format(L["Auto-profile \"%s\" activated (%s, %d players)"], profile.name or L["Unnamed"], contentName, raidSize))
+    DF:Say(format(L["Auto-profile \"%s\" activated (%s, %d players)"], profile.name or L["Unnamed"], contentName, raidSize))
 
     -- Update tab override stars
     self:RefreshTabOverrideStars()
@@ -3567,7 +3567,7 @@ end
 -- Remove the active runtime profile overlay
 function AutoProfilesUI:RemoveRuntimeProfile()
     if not self.activeRuntimeProfile then return end
-    DF:Debug("LAYOUT", "RemoveRuntimeProfile: deactivating \"%s\" (%s)", self.activeRuntimeProfile.name or "?", self.activeRuntimeContentKey or "?")
+    DF:Debug("AUTOPROFILE", "RemoveRuntimeProfile: deactivating \"%s\" (%s)", self.activeRuntimeProfile.name or "?", self.activeRuntimeContentKey or "?")
 
     -- Clear overlay FIRST so any subsequent refresh reads global settings
     DF.raidOverrides = nil
@@ -3582,7 +3582,7 @@ function AutoProfilesUI:RemoveRuntimeProfile()
         DF:FullProfileRefresh()
     end
 
-    print("|cff00ff00DandersFrames:|r " .. L["Auto-profile deactivated, using global settings"])
+    DF:Say(L["Auto-profile deactivated, using global settings"])
     self:RefreshTabOverrideStars()
 
     -- A layout deactivating must re-enable the toolbar Unlock — otherwise it stays
@@ -3657,7 +3657,7 @@ function AutoProfilesUI:HandleRuntimeWrite(key, value)
             -- a metatable); sets without one are the real table by reference.
             isOverridden = overlaySet ~= nil and getmetatable(overlaySet) ~= nil
         end
-        DF:Debug("LAYOUT", "HandleRuntimeWrite: pinned key %s — overridden=%s, wrote to real table", key, tostring(isOverridden))
+        DF:Debug("AUTOPROFILE", "HandleRuntimeWrite: pinned key %s — overridden=%s, wrote to real table", key, tostring(isOverridden))
         return isOverridden
     end
 
@@ -3668,14 +3668,14 @@ function AutoProfilesUI:HandleRuntimeWrite(key, value)
             tbl[index] = value
         end
         local isOverridden = DF.raidOverrides[tableName] ~= nil
-        DF:Debug("LAYOUT", "HandleRuntimeWrite: table key %s — overridden=%s, wrote to real table", key, tostring(isOverridden))
+        DF:Debug("AUTOPROFILE", "HandleRuntimeWrite: table key %s — overridden=%s, wrote to real table", key, tostring(isOverridden))
         return isOverridden
     end
 
     -- Simple key: write to real table so user changes persist in the global profile
     if DF.raidOverrides[key] ~= nil then
         DF._realRaidDB[key] = value
-        DF:Debug("LAYOUT", "HandleRuntimeWrite: %s — overridden, wrote value=%s to global", key, tostring(value))
+        DF:Debug("AUTOPROFILE", "HandleRuntimeWrite: %s — overridden, wrote value=%s to global", key, tostring(value))
         return true
     end
     return false
@@ -3766,7 +3766,7 @@ local function MigrateAutoProfileOverrides()
     end
 
     if cleaned > 0 then
-        DF:Debug("LAYOUT", "MigrateAutoProfileOverrides: removed stale pinnedFrames key from %d profile(s)", cleaned)
+        DF:Debug("AUTOPROFILE", "MigrateAutoProfileOverrides: removed stale pinnedFrames key from %d profile(s)", cleaned)
     end
 end
 
@@ -3774,7 +3774,7 @@ end
 function AutoProfilesUI:EvaluateAndApply()
     if not DF.initialized then return end
     if self:IsEditing() then
-        DF:Debug("LAYOUT", "EvaluateAndApply: skipped (editing mode)")
+        DF:Debug("AUTOPROFILE", "EvaluateAndApply: skipped (editing mode)")
         return
     end
 
@@ -3782,7 +3782,7 @@ function AutoProfilesUI:EvaluateAndApply()
 
     -- Cannot modify secure frames during combat — queue for later
     if InCombatLockdown() then
-        DF:Debug("LAYOUT", "EvaluateAndApply: in combat, queued for PLAYER_REGEN_ENABLED")
+        DF:Debug("AUTOPROFILE", "EvaluateAndApply: in combat, queued for PLAYER_REGEN_ENABLED")
         self.pendingAutoProfileEval = true
         return
     end
@@ -3794,12 +3794,12 @@ function AutoProfilesUI:EvaluateAndApply()
 
     -- No change — same profile (or both nil)
     if newProfile == self.activeRuntimeProfile then
-        DF:Debug("LAYOUT", "EvaluateAndApply: no change (active=\"%s\")", oldName)
+        DF:Debug("AUTOPROFILE", "EvaluateAndApply: no change (active=\"%s\")", oldName)
         return
     end
     if newProfile == nil and self.activeRuntimeProfile == nil then return end
 
-    DF:Debug("LAYOUT", "EvaluateAndApply: switching \"%s\" -> \"%s\"", oldName, newName)
+    DF:Debug("AUTOPROFILE", "EvaluateAndApply: switching \"%s\" -> \"%s\"", oldName, newName)
     DF:Debug("RAIDPOS", "AutoProfile SWITCH: \"%s\" -> \"%s\" (raid size=%d)", oldName, newName, GetNumGroupMembers())
 
     -- Capture whether an old profile was active before clearing state
@@ -3870,19 +3870,19 @@ autoProfileEventFrame:SetScript("OnEvent", function(self, event)
     if not DF.initialized then return end
     if event == "PLAYER_REGEN_ENABLED" then
         if AutoProfilesUI.pendingAutoProfileEval then
-            DF:Debug("LAYOUT", "Event: %s — processing queued evaluation", event)
+            DF:Debug("AUTOPROFILE", "Event: %s — processing queued evaluation", event)
             AutoProfilesUI.pendingAutoProfileEval = false
             QueueAutoProfileEval()
         end
         return
     end
 
-    DF:Debug("LAYOUT", "Event: %s — queuing evaluation", event)
+    DF:Debug("AUTOPROFILE", "Event: %s — queuing evaluation", event)
     QueueAutoProfileEval()
 end)
 
 -- ============================================================
--- PRINT OVERRIDES: /df overrides
+-- PRINT OVERRIDES: /df debug overrides
 -- Shows which settings are overridden, grouped by tab
 -- ============================================================
 
@@ -3904,12 +3904,12 @@ function AutoProfilesUI:PrintOverrides()
     end
 
     if not profile then
-        print("|cffff8020DandersFrames:|r " .. L["No auto-profile is currently active or being edited."])
+        DF:Say(L["No auto-profile is currently active or being edited."])
         return
     end
 
     if not profile.overrides or not next(profile.overrides) then
-        print("|cffff8020DandersFrames:|r " .. format(L["Profile \"%s\" has no overrides."], profile.name or L["Unnamed"]))
+        DF:Say(format(L["Profile \"%s\" has no overrides."], profile.name or L["Unnamed"]))
         return
     end
 
@@ -3919,9 +3919,9 @@ function AutoProfilesUI:PrintOverrides()
     -- Count total: everything shown (mapped groups + "Other"), deduped.
     local total = CountDisplayedOverrides(profile.overrides)
 
-    print("|cffff8020" .. L["DandersFrames Auto-Profile Overrides:"] .. "|r")
-    print("  " .. L["Profile:"] .. " |cffffffff\"" .. (profile.name or L["Unnamed"]) .. "\"|r (" .. source .. ")")
-    print("  " .. L["Total:"] .. " |cffffffff" .. format(total > 1 and L["%d overrides"] or L["%d override"], total) .. "|r")
+    local o = DF:Out(L["Auto-Profile Overrides"])
+    o:Field(L["Profile:"], "\"" .. (profile.name or L["Unnamed"]) .. "\" (" .. source .. ")")
+    o:Field(L["Total:"], format(total > 1 and L["%d overrides"] or L["%d override"], total))
 
     -- Sort tab IDs for consistent output
     local tabOrder = {}
@@ -3993,7 +3993,7 @@ end
 -- Escape hatch to remove a stuck auto-layout override directly, for cases the
 -- normal settings UI can't reach (e.g. a pinned-players override when not in a
 -- raid). Targets the layout being edited, else the active/matched one — same
--- resolution as /df overrides.
+-- resolution as /df debug overrides.
 -- ============================================================
 function AutoProfilesUI:ClearOverrideCommand(arg)
     local profile, editing
@@ -4006,12 +4006,12 @@ function AutoProfilesUI:ClearOverrideCommand(arg)
     end
 
     if not profile or not profile.overrides or not next(profile.overrides) then
-        print("|cffff8020DandersFrames:|r " .. L["No auto-profile is currently active or being edited."])
+        DF:Say(L["No auto-profile is currently active or being edited."])
         return
     end
 
     if not arg or arg == "" then
-        print("|cffff8020DandersFrames:|r " .. L["Usage: /df clearoverride <key|prefix|all>  (see /df overrides for keys)"])
+        DF:Say(L["Usage: /df clearoverride <key|prefix|all>  (see /df debug overrides for keys)"])
         return
     end
 
@@ -4031,7 +4031,7 @@ function AutoProfilesUI:ClearOverrideCommand(arg)
     end
 
     if #toClear == 0 then
-        print("|cffff8020DandersFrames:|r " .. format(L["No override matching \"%s\" on layout \"%s\"."], arg, profile.name or L["Unnamed"]))
+        DF:Say(format(L["No override matching \"%s\" on layout \"%s\"."], arg, profile.name or L["Unnamed"]))
         return
     end
 
@@ -4046,8 +4046,8 @@ function AutoProfilesUI:ClearOverrideCommand(arg)
         end
     end
 
-    print("|cff00ff00DandersFrames:|r " .. format(L["Cleared %d override(s) from layout \"%s\":"], #toClear, profile.name or L["Unnamed"]))
-    for _, k in ipairs(toClear) do print("    |cffffffff" .. k .. "|r") end
+    local o = DF:Out("Auto Profiles", format(L["Cleared %d override(s) from layout \"%s\":"], #toClear, profile.name or L["Unnamed"]))
+    o:More(toClear, 10)
 
     -- Reflect the change live.
     if editing then
@@ -4073,13 +4073,16 @@ SlashCmdList["DFAUTOTEST"] = function()
     local contentType = DF.GetContentType and DF:GetContentType() or "N/A"
     local raidSize = GetNumGroupMembers()
     
-    print("|cffff8020DandersFrames Auto Profile Detection:|r")
-    print("  Enabled: " .. (enabled and "|cff00ff00YES|r" or "|cffff4444NO|r"))
-    print("  In Raid: " .. (inRaid and "|cff00ff00YES|r" or "|cffff4444NO|r"))
-    print("  Content Type: |cffffffff" .. tostring(contentType) .. "|r")
-    print("  Raid Size: |cffffffff" .. raidSize .. "|r")
-    
+    local o = DF:Out("Auto Profiles", "detection")
+    -- "Not in a raid" is the normal state outside one, so it reads NEUTRAL. Only
+    -- the feature being switched off is worth flagging, and only as a warning.
+    o:Field("Enabled", enabled and "yes" or "no", enabled and "good" or "warn")
+    o:Field("In raid", inRaid and "yes" or "no", inRaid and "good" or "neutral")
+    o:Field("Content type", contentType)
+    o:Field("Raid size", raidSize)
+
     local profile, profileKey = AutoProfilesUI:GetActiveProfile()
+    o:Section("Active profile")
     if profile then
         local overrideCount = 0
         if profile.overrides then
@@ -4087,18 +4090,17 @@ SlashCmdList["DFAUTOTEST"] = function()
                 overrideCount = overrideCount + 1
             end
         end
-        print("  Active Profile: |cff00ff00\"" .. (profile.name or "Unnamed") .. "\"|r")
-        print("  Matched Key: |cffffffff" .. tostring(profileKey) .. "|r")
+        o:Field("Name", profile.name or "Unnamed", "good")
+        o:Field("Matched key", profileKey)
         if profile.min and profile.max then
-            print("  Range: |cffffffff" .. profile.min .. "-" .. profile.max .. " players|r")
+            o:Field("Range", profile.min .. "-" .. profile.max .. " players")
         end
-        print("  Overrides: |cffffffff" .. overrideCount .. "|r")
+        o:Field("Overrides", overrideCount)
     else
-        print("  Active Profile: |cff999999None (using global settings)|r")
+        o:Line("none - using global settings", "neutral")
     end
 
-    -- Runtime state
-    print("  --- Runtime State ---")
+    o:Section("Runtime state")
     local rtProfile = AutoProfilesUI.activeRuntimeProfile
     if rtProfile then
         local rtOverrides = 0
@@ -4109,31 +4111,39 @@ SlashCmdList["DFAUTOTEST"] = function()
         if DF.raidOverrides then
             for _ in pairs(DF.raidOverrides) do overlayKeys = overlayKeys + 1 end
         end
-        print("  Runtime Profile: |cff00ff00\"" .. (rtProfile.name or "Unnamed") .. "\"|r ("
-            .. tostring(AutoProfilesUI.activeRuntimeContentKey) .. ")")
-        print("  Applied Overrides: |cffffffff" .. rtOverrides .. "|r, Overlay Keys: |cffffffff" .. overlayKeys .. "|r")
+        o:Field("Runtime profile", (rtProfile.name or "Unnamed")
+            .. " (" .. tostring(AutoProfilesUI.activeRuntimeContentKey) .. ")", "good")
+        o:Field("Applied overrides", rtOverrides)
+        o:Field("Overlay keys", overlayKeys)
     else
-        print("  Runtime Profile: |cff999999None|r")
+        o:Field("Runtime profile", "none", "neutral")
     end
-    print("  Pending Combat Eval: " .. (AutoProfilesUI.pendingAutoProfileEval and "|cffff8020YES|r" or "|cff999999No|r"))
-    print("  Editing Mode: " .. (AutoProfilesUI:IsEditing() and "|cffff8020YES|r" or "|cff999999No|r"))
+    -- A deferred evaluation is a WARN: settings the user expects are not applied yet.
+    o:Field("Pending combat eval", AutoProfilesUI.pendingAutoProfileEval and "yes" or "no",
+        AutoProfilesUI.pendingAutoProfileEval and "warn" or "neutral")
+    o:Field("Editing mode", AutoProfilesUI:IsEditing() and "yes" or "no",
+        AutoProfilesUI:IsEditing() and "warn" or "neutral")
 
     -- Also list all configured profiles for context
     if autoDb then
-        print("  --- Configured Profiles ---")
+        local configured = {}
         for _, ctDef in ipairs(CONTENT_TYPES) do
             local key = ctDef.key
             if key == "mythic" then
                 local mp = autoDb.mythic and autoDb.mythic.profile
                 if mp then
-                    print("  [Mythic] \"" .. (mp.name or "Unnamed") .. "\" (20 fixed)")
+                    configured[#configured + 1] = { "Mythic", (mp.name or "Unnamed") .. " (20 fixed)" }
                 end
             else
                 local profiles = autoDb[key] and autoDb[key].profiles or {}
                 for _, p in ipairs(profiles) do
-                    print("  [" .. ctDef.title .. "] \"" .. p.name .. "\" (" .. p.min .. "-" .. p.max .. ")")
+                    configured[#configured + 1] = { ctDef.title, p.name .. " (" .. p.min .. "-" .. p.max .. ")" }
                 end
             end
+        end
+        o:Section("Configured profiles", #configured)
+        for _, row in ipairs(configured) do
+            o:Item(row[1], row[2])
         end
     end
 end

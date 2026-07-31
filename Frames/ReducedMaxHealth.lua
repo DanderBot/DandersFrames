@@ -168,7 +168,8 @@ function DF:UpdateReducedMaxHealth(frame)
 
     if DF.Debug then
         -- Never pass the raw pct to Debug on the secret path — format/concat taints.
-        DF:Debug("ReducedMaxHealth", "Updated", unit or "(test)", "pct=", pctIsSecret and "<secret>" or pct)
+        DF:Debug("HEALTH", "ReducedMaxHealth updated: unit=%s pct=%s",
+            tostring(unit or "(test)"), tostring(pctIsSecret and "<secret>" or pct))
     end
 end
 

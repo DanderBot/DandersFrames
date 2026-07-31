@@ -9,8 +9,8 @@ local addonName, DF = ...
 -- no wrappers, no cost.
 --
 -- Usage:
---   /df profiler             Toggle the profiler UI
---   /df profile [seconds]    Quick run for N seconds (default 10)
+--   /df debug profiler             Toggle the profiler UI
+--   /df debug profile [seconds]    Quick run for N seconds (default 10)
 -- ============================================================
 
 local debugprofilestop = debugprofilestop
@@ -179,41 +179,78 @@ end
 -- closure scope and needs to share state with this hook).
 local WrapFrameOnUpdate
 
--- OnUpdate hook toggle. Stored in the global SavedVariables table so it
--- persists across sessions and can be read at file-load time (before
--- DF.db / profiles are initialized). The hook can only be installed at
--- load time — toggling requires a /rl.
-local onUpdateHookEnabled = DandersFramesDB_v2
-    and DandersFramesDB_v2.profilerOnUpdateHook == true
+-- ============================================================
+-- ONUPDATE TRACKING HOOK
+-- ============================================================
+-- ☠ SAVEDVARIABLES ARE NOT LOADED WHEN THIS FILE EXECUTES.
+-- This used to read DandersFramesDB_v2.profilerOnUpdateHook right here, at file
+-- scope, and install the hook only if it was true. The global does not exist
+-- yet at that point — it is populated before ADDON_LOADED, which is AFTER every
+-- addon file has run — so the read was always nil and the hook was NEVER
+-- installed, no matter what the saved file said. Ticking the box, reloading,
+-- and finding it still off was that, exactly: the value saved correctly and was
+-- then read a frame too early, forever.
+-- Every other consumer of this table in the addon reads it inside a function
+-- (DF:GetGlobalDB and friends) and so never hit this.
+--
+-- ⚠ The install CANNOT simply move to ADDON_LOADED either: this file sits at
+-- TOC line 68 deliberately (see the "Profiler.lua is loaded earlier" note in
+-- the TOC) so the hook is in place before the files that install an OnUpdate at
+-- THEIR file scope — six ticker/throttle singletons across Headers, StatusIcons,
+-- AutoProfiles and Performance, all of which load later. Installing at
+-- ADDON_LOADED would miss every one of them.
+--
+-- So: install unconditionally and record from the first moment, then resolve the
+-- user's setting at ADDON_LOADED and drop everything if they had it off. The
+-- cost of being wrong for that one window is a table of a few dozen entries;
+-- the cost of the hook itself when latched off is the two comparisons below,
+-- since scriptType ~= "OnUpdate" rejects almost every SetScript call in the game
+-- before anything else happens.
+local onUpdateHookEnabled = nil   -- nil = undecided (still loading); resolved below
 Profiler.onUpdateHookEnabled = onUpdateHookEnabled
 
--- The hook itself. Runs after every Frame:SetScript call in the game.
--- Only installed when the user has opted in via /df profiler hook.
-if onUpdateHookEnabled then
-    local frameMeta = getmetatable(CreateFrame("Frame")).__index
-    hooksecurefunc(frameMeta, "SetScript", function(frame, scriptType, handler)
-        if installingOnUpdate then return end
-        if scriptType ~= "OnUpdate" then return end
-        if not IsDFFrame(frame) then return end  -- skip non-DF frames (taint safety)
+local frameMeta = getmetatable(CreateFrame("Frame")).__index
+hooksecurefunc(frameMeta, "SetScript", function(frame, scriptType, handler)
+    if onUpdateHookEnabled == false then return end   -- latched off at ADDON_LOADED
+    if installingOnUpdate then return end
+    if scriptType ~= "OnUpdate" then return end
+    if not IsDFFrame(frame) then return end  -- skip non-DF frames (taint safety)
 
-        if handler then
-            onUpdateRegistry[frame] = handler
-            ResolveFrameLabel(frame)
-            -- If profiler is currently recording, wrap the new handler
-            -- right now so this newly added OnUpdate is visible from its
-            -- first frame.
-            if Profiler.active and WrapFrameOnUpdate then
-                WrapFrameOnUpdate(frame, handler)
-            end
-        else
-            -- nil handler = OnUpdate removed; drop bookkeeping.
-            onUpdateRegistry[frame] = nil
-            if onUpdateWrapped[frame] then
-                onUpdateWrapped[frame] = nil
-            end
+    if handler then
+        onUpdateRegistry[frame] = handler
+        ResolveFrameLabel(frame)
+        -- If profiler is currently recording, wrap the new handler
+        -- right now so this newly added OnUpdate is visible from its
+        -- first frame.
+        if Profiler.active and WrapFrameOnUpdate then
+            WrapFrameOnUpdate(frame, handler)
         end
-    end)
-end
+    else
+        -- nil handler = OnUpdate removed; drop bookkeeping.
+        onUpdateRegistry[frame] = nil
+        if onUpdateWrapped[frame] then
+            onUpdateWrapped[frame] = nil
+        end
+    end
+end)
+
+-- Resolve the setting at the first moment SavedVariables actually exist.
+local hookSettingFrame = CreateFrame("Frame")
+hookSettingFrame:RegisterEvent("ADDON_LOADED")
+hookSettingFrame:SetScript("OnEvent", function(self, _, loadedAddon)
+    if loadedAddon ~= addonName then return end
+    self:UnregisterEvent("ADDON_LOADED")
+    onUpdateHookEnabled = (DandersFramesDB_v2
+        and DandersFramesDB_v2.profilerOnUpdateHook == true) or false
+    Profiler.onUpdateHookEnabled = onUpdateHookEnabled
+    if not onUpdateHookEnabled then
+        -- Opted out: throw away what the load window collected and latch the
+        -- hook off. Nothing else in the profiler reads these while disabled.
+        wipe(onUpdateRegistry)
+        wipe(onUpdateLabels)
+        wipe(onUpdateDFCheck)
+    end
+end)
 
 combatFrame:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_REGEN_DISABLED" then
@@ -241,11 +278,11 @@ function Profiler:SetCombatAuto(enabled)
     if enabled then
         combatFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
         combatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-        print("|cff00ff00DF Profiler:|r Combat auto-profile |cff00ff00ON|r — will start on combat, stop + print on combat end.")
+        DF:Say("Combat auto-profile |cff00ff00ON|r — will start on combat, stop + print on combat end.")
     else
         combatFrame:UnregisterEvent("PLAYER_REGEN_DISABLED")
         combatFrame:UnregisterEvent("PLAYER_REGEN_ENABLED")
-        print("|cff00ff00DF Profiler:|r Combat auto-profile |cffff4444OFF|r")
+        DF:Say("Combat auto-profile |cffff4444OFF|r")
     end
 end
 
@@ -349,6 +386,32 @@ local PROFILED_FUNCTIONS = {
     "BuildADIdentityFilters",
     "AuraDesigner.Factory.SyncFrame",
     "AuraDesigner.Factory.ClearFrame",
+
+    -- ----------------------------------------------------------
+    -- Text Designer
+    -- Driven from the central header dispatcher (tdRefresh, Frames/Headers.lua)
+    -- once per event per frame — plus the pinned mirror — and "health" is one of
+    -- the hints. On 12.1 the aura rows render game-side, so this is plausibly
+    -- the largest per-frame consumer LEFT IN LUA. It was absent from this table
+    -- entirely, which made the system most worth measuring invisible.
+    --
+    -- Three levels on purpose: the DF: entry gives the total, UpdateFrame is the
+    -- per-frame worker, and Resolve is per ELEMENT — the multiplier that turns a
+    -- cheap frame into an expensive one.
+    --
+    -- ⚠ Resolve is the highest-CALL-COUNT target in this table (elements ×
+    -- frames × ticks), and the wrapper costs two debugprofilestop plus two
+    -- collectgarbage("count") per call. Its own overhead is more visible here
+    -- than anywhere else — read its total as an upper bound, not an exact figure.
+    --
+    -- ⚠ Resolve lands in the UNCLASSIFIED ("?") bucket, and that is correct, not
+    -- a bug: the bucket is picked from the first argument's .unit, and Resolve
+    -- takes (elem, source) — an element config, not a frame. The other two are
+    -- frame-first and split party/raid/pinned normally.
+    -- ----------------------------------------------------------
+    "UpdateTextDesigner",
+    "TextDesigner.Render.UpdateFrame",
+    "TextDesigner.Resolver.Resolve",
 
     -- ----------------------------------------------------------
     -- Targeted Spells
@@ -546,7 +609,7 @@ end
 
 function Profiler:Start()
     if self.active then
-        print("|cff00ff00DF Profiler:|r Already recording.")
+        DF:Say("Already recording.")
         return
     end
 
@@ -564,11 +627,19 @@ function Profiler:Start()
     tickRef[1] = 0
 
     local wrapped = 0
+    -- ☠ An unresolved target used to vanish without a trace: the branch below
+    -- just skips it, and the "N functions instrumented" line gives no clue that
+    -- N is short. Rename or delete a profiled function and it silently stops
+    -- being measured — you read a clean profile and conclude the system is
+    -- cheap. Collect the misses and name them.
+    local missing = {}
     local typeCheck = type  -- cache as upvalue
 
     for _, path in ipairs(PROFILED_FUNCTIONS) do
         local container, key, original = ResolveFunctionPath(path)
-        if container and type(original) == "function" then
+        local resolved = container and type(original) == "function"
+        if not resolved then missing[#missing + 1] = path end
+        if resolved then
             -- Save originals so Stop() can fully restore.
             self.originals[path] = { container = container, key = key, original = original }
 
@@ -716,8 +787,17 @@ function Profiler:Start()
     -- Start the per-tick OnUpdate that drives spike detection.
     tickFrame:Show()
 
-    print(format("|cff00ff00DF Profiler:|r Recording. %d functions, %d events, %d OnUpdate handlers instrumented.",
-        wrapped, eventsWrapped, updatesWrapped))
+    DF:Say(format("Recording — %d/%d functions, %d events, %d OnUpdate handlers instrumented",
+        wrapped, #PROFILED_FUNCTIONS, eventsWrapped, updatesWrapped))
+    -- Naming them matters more than counting them: "91/94" tells you something
+    -- broke, the list tells you WHAT. A target goes missing when the function is
+    -- renamed or deleted and this table is not updated with it.
+    if #missing > 0 then
+        DF:Say("Profiler targets that did NOT resolve (not measured)", tostring(#missing), "BAD")
+        for _, path in ipairs(missing) do
+            print("    " .. DF.OUT.BAD .. path .. "|r")
+        end
+    end
 end
 
 function Profiler:Stop()
@@ -746,7 +826,7 @@ function Profiler:Stop()
     -- Stop the per-tick OnUpdate so profiler has zero idle cost when stopped.
     tickFrame:Hide()
 
-    print(format("|cff00ff00DF Profiler:|r Stopped after %s.", FormatElapsed(self:GetElapsedSeconds())))
+    DF:Say("Profiler stopped", FormatElapsed(self:GetElapsedSeconds()), "NEUTRAL")
 end
 
 function Profiler:Reset()
@@ -1031,7 +1111,7 @@ function Profiler:QuickProfile(duration)
     if self.active then self:Stop() end
 
     self:Start()
-    print(format("|cff00ff00DF Profiler:|r Auto-stopping in %ds...", duration))
+    DF:Say("Profiler auto-stopping", duration .. "s", "NEUTRAL")
 
     C_Timer.After(duration, function()
         if self.active then
@@ -1054,12 +1134,12 @@ function Profiler:PrintResults()
     local totalCalls = self:GetTotalCalls()
 
     if #results == 0 then
-        print("|cff00ff00DF Profiler:|r No data collected.")
+        DF:Say("No data collected.")
         return
     end
 
     print(" ")
-    print(format("|cff00ff00DF Profiler:|r [%s] %s | %s calls | %sms profiled CPU",
+    DF:Say(format("[%s] %s | %s calls | %sms profiled CPU",
         self.viewMode, FormatElapsed(elapsed), CommaNumber(totalCalls), FormatMs(grandTotal)))
     local cd = self:GetContainerDelta()
     if cd then
@@ -1068,7 +1148,7 @@ function Profiler:PrintResults()
         print(format("  %sAura containers: %d built, %d torn down, %d rebuilds deferred to combat end|r",
             warn, cd.builds, cd.teardowns, cd.defers))
     end
-    print("|cffaaaaaa------------------------------------------------------------|r")
+    print("  " .. DF.OUT.NEUTRAL .. ("—"):rep(14) .. "|r")
 
     for i, r in ipairs(results) do
         local color
@@ -1088,7 +1168,7 @@ function Profiler:PrintResults()
         ))
     end
 
-    print("|cffaaaaaa------------------------------------------------------------|r")
+    print("  " .. DF.OUT.NEUTRAL .. ("—"):rep(14) .. "|r")
     print(" ")
 end
 
@@ -1114,7 +1194,7 @@ end
 function Profiler:PrintSummary()
     local elapsed = self:GetElapsedSeconds()
     if elapsed <= 0 then
-        print("|cff00ff00DF Profiler:|r No data collected.")
+        DF:Say("No data collected.")
         return
     end
 
@@ -1130,7 +1210,7 @@ function Profiler:PrintSummary()
     print(format("  Functions: %sms total CPU across wrapped DF methods", FormatMs(funcGrand)))
     print(format("  Events:    %sms total CPU across event handlers", FormatMs(evtGrand)))
     print(format("  OnUpdate:  %sms total CPU across every-frame handlers", FormatMs(updGrand)))
-    print("|cffaaaaaa------------------------------------------------------------|r")
+    print("  " .. DF.OUT.NEUTRAL .. ("—"):rep(14) .. "|r")
 
     local function dump(label, mode)
         local rows = TopN(self, mode, 5)
@@ -1152,7 +1232,7 @@ function Profiler:PrintSummary()
     dump("Events (by total ms)",    "events")
     dump("OnUpdate (by total ms)",  "updates")
 
-    print("|cffaaaaaa------------------------------------------------------------|r")
+    print("  " .. DF.OUT.NEUTRAL .. ("—"):rep(14) .. "|r")
     print(" ")
 end
 
@@ -1370,13 +1450,21 @@ function Profiler:CreateUI()
 
     -- Main frame
     local f = CreateFrame("Frame", "DFProfilerFrame", UIParent, "BackdropTemplate")
-    f:SetSize(FRAME_WIDTH, DATA_START_Y * -1 + MAX_ROWS * ROW_HEIGHT + 30)
+    -- Bottom slack has to clear TWO stacked things, not one:
+    --   6  banner offset from the frame bottom
+    --  34  the banner's minimum height
+    --   6  gap
+    --  12  the column legend that sits above it
+    --  10  breathing room before the last data row
+    -- The old value was 30, which did not even clear the 28px strip that used to
+    -- live there — a full 30-row table clipped its last row behind it, and the
+    -- legend was underneath the strip entirely.
+    f:SetSize(FRAME_WIDTH, DATA_START_Y * -1 + MAX_ROWS * ROW_HEIGHT + 68)
     f:SetPoint("CENTER", 0, 50)
-    DF.GUI:CreateElementBackdrop(f, {
-        edgeSize = 2,
-        bgColor     = { 0.06, 0.06, 0.06, 0.98 },
-        borderColor = { 0.25, 0.25, 0.25, 1 },
-    })
+    -- Panel chrome, same as every other DF window. Was a bespoke plate from three
+    -- hand-mixed literals, which is the other half of why this window read as
+    -- foreign next to the settings frame.
+    DF.GUI:CreatePanelBackdrop(f)
     f:SetFrameStrata("HIGH")
     f:SetMovable(true)
     f:EnableMouse(true)
@@ -1386,18 +1474,24 @@ function Profiler:CreateUI()
     f:SetClampedToScreen(true)
     profilerFrame = f
 
-    -- Title
+    -- Title. The "DF" used to be hardcoded bright green, which matched nothing
+    -- else in the addon; the theme accent is what every section header uses and
+    -- it follows the party/raid pole like the rest of the GUI.
     local title = f:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
     title:SetPoint("TOPLEFT", 12, -10)
-    title:SetText("|cff00ff00DF|r Profiler")
+    title:SetText("Profiler")
+    do
+        local tc = DF.GUI.GetThemeColor and DF.GUI.GetThemeColor()
+        if tc then title:SetTextColor(tc.r, tc.g, tc.b) end
+    end
 
-    -- Close button
-    local closeBtn = CreateFrame("Button", nil, f)
-    closeBtn:SetSize(18, 18)
+    -- Close button. Was Blizzard's raw UI-Panel-MinimizeButton textures, which is
+    -- why this window's X had chrome no other DF surface has.
+    local closeBtn = DF.GUI:CreateCloseButton(f, {
+        onClick = function() f:Hide() end,
+        tooltip = "Close",
+    })
     closeBtn:SetPoint("TOPRIGHT", -6, -6)
-    closeBtn:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
-    closeBtn:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight")
-    closeBtn:SetScript("OnClick", function() f:Hide() end)
 
     -- Status line
     f.statusText = f:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -1587,22 +1681,42 @@ function Profiler:CreateUI()
     f.splitBtn:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
     UpdateSplitBtnText()
 
-    -- OnUpdate Hook warning banner (shown when hook is disabled)
-    -- Positioned at the bottom of the profiler window, above the data rows
-    local hookBanner = CreateFrame("Frame", nil, f, "BackdropTemplate")
-    hookBanner:SetHeight(28)
+    -- ============================================================
+    -- ONUPDATE TRACKING STRIP  (bottom of the window, above the rows)
+    -- ============================================================
+    -- What the toggle actually controls: a hooksecurefunc on the Frame
+    -- metatable's SetScript (see the top of this file), which registers every
+    -- OnUpdate handler a DF frame installs. That registry IS the OnUpdate tab —
+    -- with the hook off, the tab has no data source and is simply empty.
+    --
+    -- ☠ It can only be installed at FILE-LOAD time: the hook has to be in place
+    -- before frames install their handlers, or everything set up during login is
+    -- invisible. Hence /rl, and hence the setting living in DandersFramesDB_v2
+    -- (account SavedVariables) rather than a profile — it must be readable
+    -- before profiles initialise.
+    --
+    -- ⚠ FORWARD-DECLARED. The checkbox's OnClick closure below calls this, and
+    -- the closure is built BEFORE the definition. Without this line the name
+    -- resolves as a global at closure-creation time, reads nil, and clicking the
+    -- box back to its current state throws "attempt to call a nil value" — the
+    -- same out-of-scope-local trap that left 8 dead branches in ColorPicker.
+    local UpdateHookBanner
+
+    -- The real banner system, not a lookalike. This was a hand-built frame with
+    -- two hand-mixed colour literals approximating the "caution" tone; SetTone
+    -- gives the exact palette plus the matching icon, and cannot drift from the
+    -- banners on the settings pages.
+    --
+    -- CreateInfoBanner self-measures its height and calls GUI:RelayoutHost. That
+    -- is a no-op here — RelayoutHost only does work for a widget inside a
+    -- settingsGroup, and walks the parent chain looking for a RefreshStates host
+    -- it will never find on a floating window — so the banner simply sizes
+    -- itself against the two anchors below.
+    local hookBanner = DF.GUI:CreateInfoBanner(f, { tone = "caution" })
     hookBanner:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 6)
     hookBanner:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 6)
-    DF.GUI:CreateElementBackdrop(hookBanner, {
-        bgColor     = { 0.3, 0.15, 0, 0.9 },
-        borderColor = { 0.8, 0.5, 0, 1 },
-    })
     f.hookBanner = hookBanner
-
-    local hookText = hookBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    hookText:SetPoint("LEFT", 8, 0)
-    hookText:SetTextColor(1, 0.8, 0.2)
-    f.hookBannerText = hookText
+    f.hookBannerText = hookBanner.body
 
     local hookCheckbox = CreateFrame("CheckButton", nil, hookBanner, "BackdropTemplate")
     hookCheckbox:SetPoint("RIGHT", -6, 0)
@@ -1612,31 +1726,54 @@ function Profiler:CreateUI()
         if not DandersFramesDB_v2 then DandersFramesDB_v2 = {} end
         local newState = cb:GetChecked()
         DandersFramesDB_v2.profilerOnUpdateHook = newState
-        -- Update banner to show pending state
         if newState == self.onUpdateHookEnabled then
-            -- Back to current state, no reload needed
+            -- Toggled back to what is already live — no reload needed.
             UpdateHookBanner()
         else
-            hookText:SetText(newState
-                and "OnUpdate hook enabled — type /rl to apply"
-                or "OnUpdate hook disabled — type /rl to apply")
+            hookBanner:SetTone("caution")
+            hookBanner:SetText(newState
+                and "OnUpdate tracking will be ON after /rl."
+                or  "OnUpdate tracking will be OFF after /rl.")
         end
     end)
+    hookCheckbox:SetScript("OnEnter", function(cb)
+        DF.GUI:ShowTooltip(cb, {
+            title = "Track OnUpdate handlers",
+            lines = {
+                "Hooks SetScript so the profiler can see every OnUpdate a DF frame installs. This is the data source for the OnUpdate tab — with it off, that tab is empty.",
+                "Applies at load only, so a /rl is required either way.",
+            },
+        })
+    end)
+    hookCheckbox:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
     f.hookCheckbox = hookCheckbox
 
     local hookLabel = hookBanner:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     hookLabel:SetPoint("RIGHT", hookCheckbox, "LEFT", -2, 0)
-    hookLabel:SetText("Enable")
-    hookLabel:SetTextColor(1, 0.8, 0.2)
+    hookLabel:SetText("Track OnUpdate")
+    f.hookBannerLabel = hookLabel
 
-    local function UpdateHookBanner()
+    -- Keep the banner's body clear of the toggle. The factory anchors the body
+    -- TOPLEFT-of-icon and RIGHT-of-banner; re-issue BOTH points rather than just
+    -- the right one, so there is no question of a stale anchor surviving.
+    hookBanner.body:ClearAllPoints()
+    hookBanner.body:SetPoint("TOPLEFT", hookBanner.icon, "TOPRIGHT", 8, -5)
+    hookBanner.body:SetPoint("RIGHT", hookLabel, "LEFT", -10, 0)
+
+    -- ☠ The strip stays VISIBLE in both states. It used to Hide() itself once
+    -- the hook was on — and the checkbox lives inside it, so the only way to
+    -- turn tracking back off was the /df debug profiler hook command. A toggle
+    -- you can reach in one direction only is not a toggle.
+    function UpdateHookBanner()
         if self.onUpdateHookEnabled then
-            hookBanner:Hide()
+            hookBanner:SetTone("info")
+            hookBanner:SetText("OnUpdate tracking is on.")
         else
-            hookText:SetText("OnUpdate tracking is disabled. Enable and /rl to use the OnUpdate tab.")
-            hookCheckbox:SetChecked(DandersFramesDB_v2 and DandersFramesDB_v2.profilerOnUpdateHook or false)
-            hookBanner:Show()
+            hookBanner:SetTone("caution")
+            hookBanner:SetText("OnUpdate tracking is off — the OnUpdate tab will be empty.")
         end
+        hookCheckbox:SetChecked(DandersFramesDB_v2 and DandersFramesDB_v2.profilerOnUpdateHook or false)
+        hookBanner:Show()
     end
     f.UpdateHookBanner = UpdateHookBanner
     UpdateHookBanner()
@@ -1693,9 +1830,15 @@ function Profiler:CreateUI()
         dataRows[i] = row
     end
 
-    -- Info label at bottom
+    -- Column legend, stacked ABOVE the hook banner.
+    -- ☠ It used to be anchored to the frame's own bottom at y=8 — which is inside
+    -- the banner's rect. That was survivable only while the banner HID itself
+    -- whenever tracking was on; now that the banner is always visible (so the
+    -- toggle is reachable in both directions) the legend sat behind it
+    -- permanently, bleeding through as ghost text. Anchor to the banner instead
+    -- of to the frame, so it also tracks the banner if its text ever wraps.
     local infoLabel = f:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    infoLabel:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 12, 8)
+    infoLabel:SetPoint("BOTTOMLEFT", f.hookBanner, "TOPLEFT", 2, 6)
     infoLabel:SetTextColor(0.4, 0.4, 0.4)
     infoLabel:SetText("Inclusive times  |  Peak/tk = max calls in one frame  |  Bytes = avg alloc per call")
 

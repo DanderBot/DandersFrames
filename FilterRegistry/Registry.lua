@@ -267,7 +267,7 @@ function R:GetSpellByName(name)
 end
 
 -- ------------------------------------------------------------
--- SPELL DATA AUDIT (dev diagnostic, /df auditspells)
+-- SPELL DATA AUDIT (dev diagnostic, /df debug auditspells)
 -- Walks every id in the shipped DB (canonical + alts) and flags:
 --   INVALID — C_Spell.GetSpellInfo returns nothing even after a
 --     load request (id unknown to this client; stale DB entry).
@@ -298,7 +298,7 @@ function R:AuditSpellData()
         pcall(C_Spell.RequestLoadSpellData, e.id)
     end
 
-    print(format("|cff00ff00DandersFrames:|r Spell data audit — %d ids (%d spells + alts), results in ~1.5s...",
+    DF:Say(format("Spell data audit — %d ids (%d spells + alts), results in ~1.5s...",
         #ids, #R.Spells))
 
     C_Timer.After(1.5, function()
@@ -326,18 +326,21 @@ function R:AuditSpellData()
             end
         end
 
-        print(format("|cff00ff00DandersFrames:|r Spell data audit: %d ids checked, %d invalid, %d without a description.",
-            #ids, #invalid, #nodesc))
+        local o = DF:Out("Spell Audit", format("%d ids checked", #ids))
+        -- An id with no client data is STALE (a real defect in our data); one with
+        -- no description is only a review candidate, so it warns rather than fails.
+        o:Field("invalid", #invalid, #invalid > 0 and "BAD" or "GOOD")
+        o:Field("no description", #nodesc, #nodesc > 0 and "WARN" or "GOOD")
         if #invalid > 0 then
-            print(format("INVALID (no client data) — stale or wrong ids (%d):", #invalid))
-            for _, e in ipairs(invalid) do print(describe(e)) end
+            o:Section("Invalid - no client data, stale or wrong id", #invalid)
+            for _, e in ipairs(invalid) do o:Line(describe(e), "BAD") end
         end
         if #nodesc > 0 then
-            print(format("NO DESCRIPTION (server-side aura or suspect) — candidates for review, not automatically wrong (%d):", #nodesc))
-            for _, e in ipairs(nodesc) do print(describe(e)) end
+            o:Section("No description - server-side aura or suspect", #nodesc)
+            for _, e in ipairs(nodesc) do o:Line(describe(e), "WARN") end
         end
         if #invalid == 0 and #nodesc == 0 then
-            print("All spell DB ids have client data and descriptions.")
+            o:Line("All spell DB ids have client data and descriptions.", "GOOD")
         end
     end)
 end

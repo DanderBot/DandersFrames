@@ -26,8 +26,8 @@ local Mixin = Mixin
 
 -- The shared dialog palette (GUI.lua loads first). Neutrals are the same tables
 -- as GUI.Colors so they theme-track in lockstep; the dialog-specific tones
--- (denser background, selected, green, red) live there too, alongside the ones
--- the wizard builder needs, so there is exactly one copy in the addon.
+-- (denser background, selected, green, red) live there too, so there is exactly
+-- one copy in the addon. (A third copy lived in WizardBuilder.lua, since deleted.)
 local C = DF.GUI.DialogColors
 
 -- Live theme accent (party purple / raid orange). The popup is a standalone
@@ -411,7 +411,7 @@ function DF:HighlightSettings(tabName, dbKeys)
 
     local page = DF.GUI.Pages[tabName]
     if not page or not page.children then
-        DF:DebugWarn("HighlightSettings: page not found or has no children: " .. tostring(tabName))
+        DF:DebugWarn("POPUP", "HighlightSettings: page not found or has no children: %s", tostring(tabName))
         return
     end
 
@@ -454,7 +454,7 @@ function DF:HighlightSettings(tabName, dbKeys)
         end
     end
 
-    DF:Debug("HighlightSettings: matched " .. matchCount .. "/" .. #dbKeys .. " controls on tab " .. tabName)
+    DF:Debug("POPUP", "HighlightSettings: matched %d/%d controls on tab %s", matchCount, #dbKeys, tostring(tabName))
 
     -- Scroll to first highlighted widget
     if firstWidget and page.SetVerticalScroll then
@@ -1155,7 +1155,7 @@ RenderWizardStep = function()
     local f = PopupFrame
     local step = GetStepById(wizardCurrentStepId)
     if not step then
-        DF:DebugError("Popup: step not found: " .. tostring(wizardCurrentStepId))
+        DF:DebugError("POPUP", "step not found: %s", tostring(wizardCurrentStepId))
         return
     end
 
@@ -1982,7 +1982,7 @@ end
 
 function DF:ShowPopupWizard(config)
     if not config or not config.steps or #config.steps == 0 then
-        DF:DebugError("ShowPopupWizard: config must include at least one step")
+        DF:DebugError("POPUP", "ShowPopupWizard: config must include at least one step")
         return
     end
     ConfigureForWizard(config)
@@ -1990,7 +1990,7 @@ end
 
 function DF:ShowPopupAlert(config)
     if not config then
-        DF:DebugError("ShowPopupAlert: config is required")
+        DF:DebugError("POPUP", "ShowPopupAlert: config is required")
         return
     end
     ConfigureForAlert(config)
@@ -2053,7 +2053,7 @@ end
 --   onAccept(text), onCancel()
 function DF:ShowPopupInput(config)
     if not config then
-        DF:DebugError("ShowPopupInput: config is required")
+        DF:DebugError("POPUP", "ShowPopupInput: config is required")
         return
     end
     local f = CreatePopupFrame()
@@ -2132,15 +2132,15 @@ end
 -- config.id is required for answer namespacing.
 function DF:ShowSubWizard(config)
     if not config or not config.steps or #config.steps == 0 then
-        DF:DebugError("ShowSubWizard: config must include at least one step")
+        DF:DebugError("POPUP", "ShowSubWizard: config must include at least one step")
         return
     end
     if not config.id then
-        DF:DebugError("ShowSubWizard: config.id is required")
+        DF:DebugError("POPUP", "ShowSubWizard: config.id is required")
         return
     end
     if popupMode ~= "wizard" then
-        DF:DebugWarn("ShowSubWizard: no active wizard to return to, launching as top-level")
+        DF:DebugWarn("POPUP", "ShowSubWizard: no active wizard to return to, launching as top-level")
         DF:ShowPopupWizard(config)
         return
     end
@@ -2203,159 +2203,3 @@ end
 -- ============================================================
 -- TEST COMMANDS (temporary, for validation)
 -- ============================================================
-
-function DF:TestPopupWizard()
-    DF:ShowPopupWizard({
-        title = "Test Wizard",
-        steps = {
-            {
-                id = "color",
-                question = "Pick your favourite colour",
-                description = "This is a single-select step. Clicking an option auto-advances.",
-                type = "single",
-                options = {
-                    { label = "Red",    value = "red" },
-                    { label = "Blue",   value = "blue" },
-                    { label = "Green",  value = "green" },
-                },
-                next = function(answer)
-                    if answer == "blue" then return "blueshade" end
-                    return "layout"
-                end,
-            },
-            {
-                id = "blueshade",
-                question = "Which shade of blue?",
-                type = "single",
-                options = {
-                    { label = "Sky Blue",   value = "sky" },
-                    { label = "Navy",       value = "navy" },
-                    { label = "Teal",       value = "teal" },
-                },
-                next = "layout",
-            },
-            {
-                id = "layout",
-                question = "Which frame layout do you prefer?",
-                description = "Click an image to select it.",
-                type = "imageselect",
-                options = {
-                    { label = "Compact",  value = "compact",  image = "Interface\\Icons\\INV_Misc_GroupNeedMore" },
-                    { label = "Standard", value = "standard", image = "Interface\\Icons\\INV_Misc_GroupLooking" },
-                    { label = "Wide",     value = "wide",     image = "Interface\\Icons\\Achievement_BG_grab_cap_quickly" },
-                },
-                next = "preview",
-            },
-            {
-                -- Test: opens settings GUI and highlights frame size controls
-                id = "preview",
-                question = "Adjust the frame size to your liking",
-                description = "The Frame Width and Frame Height sliders are highlighted in your settings panel. Adjust them, then click Next.",
-                type = "single",
-                options = {
-                    { label = "Looks good, continue", value = "ok" },
-                },
-                openTab = "general_frame",
-                highlightSettings = { "frameWidth", "frameHeight" },
-                testMode = "party",
-                next = "subwizard_launch",
-            },
-            {
-                -- Test: launches a sub-wizard
-                id = "subwizard_launch",
-                question = "",
-                type = "single",
-                options = {},
-                testModeOff = true,
-                launchWizard = {
-                    id = "bonus",
-                    title = "Bonus Sub-Wizard",
-                    mergeAnswers = true,
-                    steps = {
-                        {
-                            id = "bonus_q",
-                            question = "This is a sub-wizard! Pick a bonus option:",
-                            description = "When you complete or cancel this, you'll return to the parent wizard.",
-                            type = "single",
-                            options = {
-                                { label = "Extra Sparkle",   value = "sparkle" },
-                                { label = "More Cowbell",    value = "cowbell" },
-                                { label = "Nothing Thanks",  value = "none" },
-                            },
-                            next = nil,
-                        },
-                    },
-                    onComplete = function(answers)
-                        DF:Debug("Sub-wizard complete: bonus_q = " .. tostring(answers.bonus_q))
-                    end,
-                },
-            },
-            {
-                id = "features",
-                question = "Which features do you want?",
-                description = "This is a multi-select step. Select as many as you like, then click Next.",
-                type = "multi",
-                options = {
-                    { label = "Aura Tracking",     value = "auras" },
-                    { label = "Health Fade",        value = "healthfade" },
-                    { label = "Range Check",        value = "range" },
-                    { label = "Dispel Highlight",   value = "dispel" },
-                },
-                next = "size",
-            },
-            {
-                id = "size",
-                question = "What frame size feels right?",
-                type = "single",
-                options = {
-                    { label = "Small (for large raids)",    value = "small" },
-                    { label = "Medium (balanced)",          value = "medium" },
-                    { label = "Large (healer focus)",       value = "large" },
-                },
-                next = "extras",
-            },
-            {
-                id = "extras",
-                question = "Any extra options?",
-                description = "Pick as many as you like.",
-                type = "multi",
-                options = {
-                    { label = "Show power bars",            value = "power" },
-                    { label = "Class-coloured health",      value = "classcolor" },
-                    { label = "Show role icons",            value = "roleicons" },
-                    { label = "Incoming heal prediction",   value = "healpred" },
-                },
-                next = "summary",
-            },
-            {
-                id = "summary",
-                type = "summary",
-            },
-        },
-        onComplete = function(answers)
-            DF:Debug("Test wizard complete! Answers:")
-            for k, v in pairs(answers) do
-                if type(v) == "table" then
-                    DF:Debug("  " .. k .. " = " .. table.concat(v, ", "))
-                else
-                    DF:Debug("  " .. k .. " = " .. tostring(v))
-                end
-            end
-        end,
-        onCancel = function()
-            DF:Debug("Test wizard cancelled")
-        end,
-    })
-end
-
-function DF:TestPopupAlert()
-    DF:ShowPopupAlert({
-        title = "Test Alert",
-        message = "This is a test alert message.\nIt supports multiple lines and will resize to fit the content.\n\nClick a button below to dismiss.",
-        icon = "Interface\\Icons\\INV_Misc_QuestionMark",
-        buttons = {
-            { label = "Action", onClick = function() DF:Debug("Test alert: Action clicked") end },
-            { label = "Dismiss", onClick = nil },
-        },
-    })
-end

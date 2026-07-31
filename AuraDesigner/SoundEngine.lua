@@ -83,7 +83,7 @@ function SoundEngine:PlayWithVolume(soundFile, volume)
     SetCVar(volCVar, originalVol)
 
     if not willPlay then
-        DF:DebugWarn("SoundEngine", "PlaySoundFile failed for: %s", tostring(soundFile))
+        DF:DebugWarn("AD", "SoundEngine: PlaySoundFile failed for: %s", tostring(soundFile))
         return nil, nil
     end
 

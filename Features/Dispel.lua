@@ -1347,7 +1347,7 @@ local function BindDispelCarriers(btn, carriers, db, key)
         btn._dfDispelCurveGen = DF.dispelCurveGen
     elseif not warnedTintBind then
         warnedTintBind = true
-        if DF.DebugWarn then DF:DebugWarn("Dispel", "dispel bind %s failed: %s", tostring(key), tostring(err)) end
+        if DF.DebugWarn then DF:DebugWarn("DISPEL", "dispel bind %s failed: %s", tostring(key), tostring(err)) end
     end
 end
 
@@ -1688,6 +1688,11 @@ end
 function DF:UseFactoryForDispelOverlay(frame, db)
     return DF.AuraContainer and DF.AuraContainer.IsSupported()
         and not (DF.testMode or DF.raidTestMode)
+        -- Memory test: driveFactoryRowsNow (Features/Auras.lua) calls
+        -- DriveDispelOverlayFactory DIRECTLY, bypassing UpdateDispelOverlay's own
+        -- enableDispel guard — so without this term a GUI change would re-show
+        -- the overlay with the box unticked.
+        and not DF:MemTestDisabled("enableDispel")
 end
 
 
@@ -1774,8 +1779,8 @@ end
 function DF:UpdateDispelOverlay(frame)
     if not frame then return end
 
-    -- PERF TEST: Skip if disabled
-    if DF.PerfTest and not DF.PerfTest.enableDispel then
+    -- MEMORY TEST: Skip if disabled
+    if DF:MemTestDisabled("enableDispel") then
         HideDispelAndInvalidate(frame)
         return
     end
@@ -1968,25 +1973,25 @@ end)
 
 function DF:DebugDispel(unit)
     unit = unit or "player"
-    print("|cff00ff00DandersFrames:|r Dispel Debug for " .. unit)
+    local o = DF:Out("Dispel", "unit " .. unit)
     
     local db = DF:GetDB()
-    print("  dispelOverlayEnabled: " .. tostring(db and db.dispelOverlayEnabled))
-    print("  dispelOverlayDispelType: " .. tostring(db and db.dispelOverlayDispelType))
+    o:Section("Settings")
+    o:Field("dispelOverlayEnabled", tostring(db and db.dispelOverlayEnabled))
+    o:Field("dispelOverlayDispelType", tostring(db and db.dispelOverlayDispelType))
     
     -- Get debuffs sorted by expiration
     local sortRule = Enum.UnitAuraSortRule and Enum.UnitAuraSortRule.Expiration or 3
     local auras = C_UnitAuras.GetUnitAuras(unit, "HARMFUL", nil, sortRule)
     
     if not auras or #auras == 0 then
-        print("  No debuffs found")
+        o:Line("No debuffs on this unit.", "NEUTRAL")
+        o:Siblings("dispel")
         return
     end
     
-    print("  Found " .. #auras .. " debuffs (sorted by expiration)")
-    
     -- Show debuffs with dispelName
-    print("  |cffffcc00Debuffs:|r")
+    o:Section("Debuffs", #auras .. " sorted by expiration")
     local lastDispellable = nil
     for i, aura in ipairs(auras) do
         if i > 10 then break end
@@ -1994,31 +1999,35 @@ function DF:DebugDispel(unit)
         local dispelName = aura.dispelName
         
         if dispelName ~= nil then
-            print(string.format("    [%d] %s - |cff00ff00%s|r", i, auraName, dispelName))
+            o:Item("[" .. i .. "] " .. auraName, dispelName, "GOOD")
             lastDispellable = aura
         else
-            print(string.format("    [%d] %s - |cffff0000nil (not dispellable)|r", i, auraName))
+            -- Not dispellable is a FACT about the debuff, not a fault in DF.
+            o:Item("[" .. i .. "] " .. auraName, "not dispellable", "NEUTRAL")
         end
     end
     
     if lastDispellable then
-        print("  |cff00ff00Last dispellable:|r " .. (lastDispellable.name or "?") .. " (" .. lastDispellable.dispelName .. ")")
+        o:Field("Last dispellable",
+            (lastDispellable.name or "?") .. " (" .. lastDispellable.dispelName .. ")", "GOOD")
     else
-        print("  |cffff0000No dispellable debuffs|r")
+        -- Nothing dispellable is a normal state, not an error.
+        o:Line("No dispellable debuffs", "NEUTRAL")
     end
-    
-    print("  |cffffcc00Frame/Overlay Status:|r")
+
+    o:Section("Frame / overlay status")
     local frame = FindFrameByUnit(unit)
     if frame then
-        print("    Frame found: YES")
-        print("    Frame shown: " .. tostring(frame:IsShown()))
+        o:Field("Frame found", "yes", "GOOD")
+        o:Field("Frame shown", tostring(frame:IsShown()))
         if frame.dfDispelOverlay then
             local overlay = frame.dfDispelOverlay
-            print("    Overlay exists: YES")
-            print("    Overlay shown: " .. (overlay:IsShown() and "|cff00ff00YES|r" or "|cffff0000NO|r"))
-            print("    Overlay alpha: " .. string.format("%.2f", overlay:GetAlpha()))
+            o:Field("Overlay exists", "yes", "GOOD")
+            o:Field("Overlay shown", overlay:IsShown() and "yes" or "no",
+                overlay:IsShown() and "GOOD" or "NEUTRAL")
+            o:Field("Overlay alpha", string.format("%.2f", overlay:GetAlpha()))
             if overlay.borderTop then
-                print("    BorderTop shown: " .. tostring(overlay.borderTop:IsShown()))
+                o:Field("BorderTop shown", tostring(overlay.borderTop:IsShown()))
             end
             if overlay.icons then
                 local iconsShown = {}
@@ -2027,484 +2036,59 @@ function DF:DebugDispel(unit)
                         table.insert(iconsShown, name)
                     end
                 end
-                print("    Icons shown: " .. (#iconsShown > 0 and table.concat(iconsShown, ", ") or "none"))
+                o:Field("Icons shown", #iconsShown > 0 and table.concat(iconsShown, ", ") or "none",
+                #iconsShown > 0 and "GOOD" or "NEUTRAL")
             end
         else
-            print("    Overlay exists: NO")
+            o:Field("Overlay exists", "no", "NEUTRAL")
         end
     else
-        print("    Frame found: NO")
+        -- No frame for the unit means nothing can render: that is a real fault.
+        o:Field("Frame found", "no", "BAD")
     end
     
     -- Force update
-    print("  |cffffcc00Forcing update...|r")
+    o:Section("Forced update")
     if frame then
         DF:UpdateDispelOverlay(frame)
         C_Timer.After(0.1, function()
             if frame.dfDispelOverlay then
-                print("  After update - Overlay shown: " .. tostring(frame.dfDispelOverlay:IsShown()))
+                o:Field("overlay shown after update", tostring(frame.dfDispelOverlay:IsShown()))
             end
         end)
     end
+    o:Siblings("dispel")
 end
 
-DF:RegisterDebugSlash("DFDISPEL", "Dispel overlay diagnostics", false, "/dfdispel")
+-- Dispel diagnostics. One command, one job: report what OUR overlay sees and
+-- did for a unit.
+-- (Removed) the ten Blizzard-setting probes that used to live here --
+-- dump/dump2/dump3/dump4, cvar/cvar1/cvar0, indicator, setindicator and
+-- profile. They were archaeology from the hunt for where the game stores its
+-- dispel indicator setting. DF has not read that setting since the v4.3.4
+-- dispel-source rework, and the last two paths that stamped it were deleted in
+-- the v5 cleanup (see the notes in Core.lua and Features/Auras.lua), so they
+-- answered a question that no longer touches anything DF renders. Nothing
+-- outside this handler read raidFramesDispelIndicatorType, the dispellable-
+-- debuff CVars, optionTable or GetRaidProfileOption. Two of them (cvar1/cvar0)
+-- also WROTE a live game CVar, which a diagnostic has no business doing.
+-- (Removed) "test" went with them: it read dispelName off the player's first
+-- aura, which DF:DebugDispel prints for every debuff on any unit.
+DF:RegisterDebugSlash("DFDISPEL", "Dispel overlay state: [unit], or ids | render", false, "/dfdispel")
 SlashCmdList["DFDISPEL"] = function(msg)
-    if msg == "debug" then
-        DF.debugDispel = not DF.debugDispel
-        print("|cff00ff00DandersFrames:|r Dispel debug " .. (DF.debugDispel and "|cff00ff00ENABLED|r" or "|cffff0000DISABLED|r"))
-    elseif msg == "test" then
-        -- Test dispelName field
-        print("|cff00ff00DandersFrames:|r Testing dispelName field...")
-        
-        -- Test against first BUFF (should have nil dispelName)
-        local buff = C_UnitAuras.GetAuraDataByIndex("player", 1, "HELPFUL")
-        if buff then
-            print("  Buff: " .. (buff.name or "?"))
-            print("  dispelName: " .. (buff.dispelName and ("|cff00ff00" .. buff.dispelName .. "|r") or "|cffff0000nil|r"))
-        else
-            print("  No buff found")
-        end
-        
-        -- Test against first DEBUFF
-        local debuff = C_UnitAuras.GetAuraDataByIndex("player", 1, "HARMFUL")
-        if debuff then
-            print("  Debuff: " .. (debuff.name or "?"))
-            print("  dispelName: " .. (debuff.dispelName and ("|cff00ff00" .. debuff.dispelName .. "|r") or "|cffff0000nil|r"))
-        else
-            print("  No debuff found")
-        end
-    elseif msg == "cvar" then
-        -- Test/discover dispel-related CVars
-        print("|cff00ff00DandersFrames:|r Checking dispel-related CVars...")
-        
-        -- Known CVars to check
-        local cvarsToCheck = {
-            "raidFramesDisplayOnlyDispellableDebuffs",
-            "showDispelDebuffs",
-            "showCastableBuffs",
-            "raidFramesDisplayDebuffs",
-            "raidFramesDisplayDispellableDebuffs",
-            "raidOptionDisplayOnlyDispellableDebuffs",
-            "raidFramesDispelMode",
-        }
-        
-        for _, cvarName in ipairs(cvarsToCheck) do
-            local value = GetCVar(cvarName)
-            if value then
-                print(string.format("  %s = |cff00ff00%s|r", cvarName, tostring(value)))
-            else
-                print(string.format("  %s = |cffff0000not found|r", cvarName))
-            end
-        end
-        
-        -- Try to find the dropdown setting via Settings API
-        print("")
-        print("|cffffcc00Checking Settings API...|r")
-        if Settings and Settings.GetValue then
-            -- Try various possible setting names
-            local settingsToCheck = {
-                "PROXY_RAID_FRAMES_DISPLAY_ONLY_DISPELLABLE_DEBUFFS",
-                "raidFramesDisplayOnlyDispellableDebuffs", 
-                "dispelDebuffDisplayMode",
-                "raidFramesDispelDebuffDisplayMode",
-                "displayDispellableDebuffs",
-            }
-            for _, settingName in ipairs(settingsToCheck) do
-                local ok, value = pcall(function() return Settings.GetValue(settingName) end)
-                if ok and value ~= nil then
-                    print(string.format("  Settings.%s = |cff00ff00%s|r", settingName, tostring(value)))
-                end
-            end
-        end
-        
-        -- Check C_CVar for all cvars containing "dispel" or "debuff"
-        print("")
-        print("|cffffcc00Searching all CVars for 'dispel'...|r")
-        if C_CVar and C_CVar.GetCVarInfo then
-            -- Can't enumerate all CVars, but we can try specific ones
-            local moreToCheck = {
-                "raidFramesDisplayDispelDebuffs",
-                "partyFramesDisplayOnlyDispellableDebuffs",
-                "displayOnlyDispellableDebuffs",
-                "dispelDebuffIndicatorMode",
-                "raidOptionDispelDebuffIndicator",
-            }
-            for _, cvarName in ipairs(moreToCheck) do
-                local value = GetCVar(cvarName)
-                if value then
-                    print(string.format("  %s = |cff00ff00%s|r", cvarName, tostring(value)))
-                end
-            end
-        end
-        
-        -- Check EditMode settings if available
-        print("")
-        print("|cffffcc00Checking EditMode/CompactUnitFrame settings...|r")
-        if EditModeManagerFrame then
-            print("  EditModeManagerFrame exists")
-        end
-        
-        -- Try to find the setting on CompactRaidFrameContainer
-        if CompactRaidFrameContainer then
-            print("  CompactRaidFrameContainer exists")
-            if CompactRaidFrameContainer.displayOnlyDispellableDebuffs ~= nil then
-                print("    .displayOnlyDispellableDebuffs = " .. tostring(CompactRaidFrameContainer.displayOnlyDispellableDebuffs))
-            end
-            if CompactRaidFrameContainer.dispelDebuffDisplayMode ~= nil then
-                print("    .dispelDebuffDisplayMode = " .. tostring(CompactRaidFrameContainer.dispelDebuffDisplayMode))
-            end
-        end
-        
-        -- Check DefaultCompactUnitFrameSetupOptions
-        if DefaultCompactUnitFrameSetupOptions then
-            print("  DefaultCompactUnitFrameSetupOptions exists")
-            for k, v in pairs(DefaultCompactUnitFrameSetupOptions) do
-                if type(k) == "string" and (k:lower():find("dispel") or k:lower():find("debuff")) then
-                    print(string.format("    .%s = %s", k, tostring(v)))
-                end
-            end
-        end
-        
-        -- Check the raid profile settings
-        if GetRaidProfileOption then
-            print("")
-            print("|cffffcc00Checking Raid Profile options...|r")
-            local profile = GetActiveRaidProfile and GetActiveRaidProfile() or nil
-            if profile then
-                print("  Active profile: " .. tostring(profile))
-                local optionsToCheck = {
-                    "displayOnlyDispellableDebuffs",
-                    "dispelDebuffDisplayMode",
-                    "displayDebuffs",
-                }
-                for _, opt in ipairs(optionsToCheck) do
-                    local ok, value = pcall(function() return GetRaidProfileOption(profile, opt) end)
-                    if ok and value ~= nil then
-                        print(string.format("    %s = |cff00ff00%s|r", opt, tostring(value)))
-                    end
-                end
-            end
-        end
-        
-    elseif msg == "cvar1" then
-        -- Set to show only dispellable debuffs
-        print("|cff00ff00DandersFrames:|r Setting raidFramesDisplayOnlyDispellableDebuffs = 1")
-        SetCVar("raidFramesDisplayOnlyDispellableDebuffs", 1)
-        
-    elseif msg == "cvar0" then
-        -- Set to show all debuffs
-        print("|cff00ff00DandersFrames:|r Setting raidFramesDisplayOnlyDispellableDebuffs = 0")
-        SetCVar("raidFramesDisplayOnlyDispellableDebuffs", 0)
-        
-    elseif msg == "indicator" then
-        -- Check and show the raidFramesDispelIndicatorType setting
-        print("|cff00ff00DandersFrames:|r Checking raidFramesDispelIndicatorType...")
-        
-        local indicatorType = nil
-        
-        -- Find a Blizzard compact unit frame to check
-        local blizzFrame = nil
-        for i = 1, 4 do
-            local frame = _G["CompactPartyFrameMember" .. i]
-            if frame and frame.optionTable then
-                blizzFrame = frame
-                break
-            end
-        end
-        if not blizzFrame then
-            for i = 1, 40 do
-                local frame = _G["CompactRaidFrame" .. i]
-                if frame and frame.optionTable then
-                    blizzFrame = frame
-                    break
-                end
-            end
-        end
-        
-        if blizzFrame and blizzFrame.optionTable then
-            indicatorType = blizzFrame.optionTable.raidFramesDispelIndicatorType
-            print("  Current value: " .. tostring(indicatorType))
-            if indicatorType == 0 then
-                print("  Mode: |cffff0000DISABLED|r")
-            elseif indicatorType == 1 then
-                print("  Mode: |cff00ff00DISPELLABLE BY ME|r (optimal for PLAYER_DISPELLABLE)")
-            elseif indicatorType == 2 then
-                print("  Mode: |cffffaa00SHOW ALL|r")
-            end
-        else
-            print("  |cffff0000Could not find Blizzard frame to check|r")
-        end
-        
-    elseif msg == "setindicator" then
-        -- This command has been disabled as modifying optionTable causes errors
-        print("|cff00ff00DandersFrames:|r setindicator command disabled.")
-        print("  Modifying frame.optionTable causes protected value errors in combat.")
-        print("  Use the 'Show Overlay For' dropdown in DandersFrames settings instead.")
-        print("  Our addon handles filtering internally based on that setting.")
-        
-    elseif msg == "dump" then
-        -- Dump ALL properties from key objects
-        print("|cff00ff00DandersFrames:|r Comprehensive dump...")
-        
-        -- Dump DefaultCompactUnitFrameSetupOptions
-        print("")
-        print("|cffffcc00DefaultCompactUnitFrameSetupOptions:|r")
-        if DefaultCompactUnitFrameSetupOptions then
-            for k, v in pairs(DefaultCompactUnitFrameSetupOptions) do
-                print(string.format("  %s = %s (%s)", tostring(k), tostring(v), type(v)))
-            end
-        else
-            print("  nil")
-        end
-        
-        -- Dump DefaultCompactMiniFrameSetUpOptions
-        print("")
-        print("|cffffcc00DefaultCompactMiniFrameSetUpOptions:|r")
-        if DefaultCompactMiniFrameSetUpOptions then
-            for k, v in pairs(DefaultCompactMiniFrameSetUpOptions) do
-                print(string.format("  %s = %s (%s)", tostring(k), tostring(v), type(v)))
-            end
-        else
-            print("  nil")
-        end
-        
-    elseif msg == "dump2" then
-        -- Dump CompactRaidFrameManager settings
-        print("|cff00ff00DandersFrames:|r Dumping CompactRaidFrameManager...")
-        
-        if CompactRaidFrameManager then
-            print("  CompactRaidFrameManager exists")
-            -- Check for setting-related properties
-            for k, v in pairs(CompactRaidFrameManager) do
-                if type(k) == "string" and type(v) ~= "function" and type(v) ~= "table" then
-                    print(string.format("    %s = %s", k, tostring(v)))
-                end
-            end
-            
-            -- Check container
-            if CompactRaidFrameManager.container then
-                print("")
-                print("  |cffffcc00.container properties:|r")
-                for k, v in pairs(CompactRaidFrameManager.container) do
-                    if type(k) == "string" and type(v) ~= "function" and type(v) ~= "table" then
-                        print(string.format("    %s = %s", k, tostring(v)))
-                    end
-                end
-            end
-        else
-            print("  nil")
-        end
-        
-        -- Check CompactUnitFrameProfiles
-        print("")
-        print("|cffffcc00CompactUnitFrameProfiles:|r")
-        if CompactUnitFrameProfiles then
-            print("  exists")
-            if CompactUnitFrameProfiles.selectedProfile then
-                print("  selectedProfile = " .. tostring(CompactUnitFrameProfiles.selectedProfile))
-            end
-        else
-            print("  nil")
-        end
-        
-    elseif msg == "dump3" then
-        -- Try to find the setting by checking a Blizzard compact frame directly
-        print("|cff00ff00DandersFrames:|r Checking Blizzard frame options...")
-        
-        -- Find a Blizzard compact unit frame
-        local blizzFrame = nil
-        if CompactRaidFrameContainer then
-            -- Try to get first raid frame
-            for i = 1, 40 do
-                local frameName = "CompactRaidFrame" .. i
-                local frame = _G[frameName]
-                if frame then
-                    blizzFrame = frame
-                    break
-                end
-            end
-        end
-        
-        if not blizzFrame then
-            -- Try party frames
-            for i = 1, 4 do
-                local frameName = "CompactPartyFrameMember" .. i
-                local frame = _G[frameName]
-                if frame then
-                    blizzFrame = frame
-                    break
-                end
-            end
-        end
-        
-        if blizzFrame then
-            print("  Found frame: " .. blizzFrame:GetName())
-            
-            -- Check optionTable
-            if blizzFrame.optionTable then
-                print("")
-                print("  |cffffcc00.optionTable:|r")
-                for k, v in pairs(blizzFrame.optionTable) do
-                    if type(v) ~= "function" and type(v) ~= "table" then
-                        local vStr = tostring(v)
-                        if k:lower():find("dispel") or k:lower():find("debuff") then
-                            print(string.format("    |cff00ff00%s = %s|r", k, vStr))
-                        else
-                            print(string.format("    %s = %s", k, vStr))
-                        end
-                    end
-                end
-            end
-        else
-            print("  No Blizzard compact frame found")
-        end
-        
-    elseif msg == "dump4" then
-        -- Deep search for dispel indicator setting source
-        print("|cff00ff00DandersFrames:|r Searching for dispel indicator setting...")
-        
-        -- Check all GetCVarInfo for dispel-related CVars
-        print("")
-        print("|cffffcc00Searching CVars:|r")
-        local cvarNames = {
-            "raidFramesDispelIndicatorType",
-            "raidFramesDisplayDispelDebuffs", 
-            "showDispelDebuffs",
-            "raidFramesDispelMode",
-            "compactUnitFrameDispelIndicator",
-        }
-        for _, name in ipairs(cvarNames) do
-            local val = GetCVar(name)
-            if val then
-                print("  " .. name .. " = " .. tostring(val))
-            end
-        end
-        
-        -- Check Settings API for dispel-related settings
-        print("")
-        print("|cffffcc00Checking Settings API:|r")
-        if Settings then
-            -- Try to find dispel-related settings
-            local settingNames = {
-                "raidFramesDispelIndicatorType",
-                "PROXY_RAID_FRAMES_DISPEL_INDICATOR_TYPE",
-                "RaidFramesDispelIndicator",
-            }
-            for _, name in ipairs(settingNames) do
-                local ok, val = pcall(function() return Settings.GetValue(name) end)
-                if ok and val ~= nil then
-                    print("  Settings." .. name .. " = " .. tostring(val))
-                end
-            end
-            
-            -- Try to enumerate settings categories
-            if Settings.GetAllCategories then
-                local categories = Settings.GetAllCategories()
-                if categories then
-                    print("  Found " .. #categories .. " settings categories")
-                end
-            end
-        else
-            print("  Settings API not available")
-        end
-        
-        -- Check DefaultCompactUnitFrameSetupOptions
-        print("")
-        print("|cffffcc00DefaultCompactUnitFrameSetupOptions:|r")
-        if DefaultCompactUnitFrameSetupOptions then
-            for k, v in pairs(DefaultCompactUnitFrameSetupOptions) do
-                if type(k) == "string" and k:lower():find("dispel") then
-                    print("  " .. k .. " = " .. tostring(v))
-                end
-            end
-        end
-        
-        -- Check EditModeManagerFrame
-        print("")
-        print("|cffffcc00EditModeManagerFrame:|r")
-        if EditModeManagerFrame then
-            print("  exists")
-            if EditModeManagerFrame.GetAccountSettingValue then
-                local ok, val = pcall(function() 
-                    return EditModeManagerFrame:GetAccountSettingValue(Enum.EditModeAccountSetting.ShowDispelDebuffs)
-                end)
-                if ok then
-                    print("  ShowDispelDebuffs = " .. tostring(val))
-                end
-            end
-        end
-        
-        -- Check if there's a function that provides the optionTable
-        print("")
-        print("|cffffcc00Checking option providers:|r")
-        if DefaultCompactUnitFrameOptions then
-            print("  DefaultCompactUnitFrameOptions exists")
-            if type(DefaultCompactUnitFrameOptions) == "table" then
-                for k, v in pairs(DefaultCompactUnitFrameOptions) do
-                    if type(k) == "string" and k:lower():find("dispel") then
-                        print("    " .. k .. " = " .. tostring(v))
-                    end
-                end
-            end
-        end
-        
-        if CompactUnitFrameProfilesGetAutoActivationState then
-            print("  CompactUnitFrameProfilesGetAutoActivationState exists")
-        end
-        
-        -- Check EditModeSettingDisplayInfoManager for dispel settings
-        if EditModeSettingDisplayInfoManager then
-            print("  EditModeSettingDisplayInfoManager exists")
-        end
-
-    elseif msg == "profile" then
-        -- Dump all raid profile options
-        print("|cff00ff00DandersFrames:|r Dumping Raid Profile options...")
-        
-        if GetActiveRaidProfile and GetRaidProfileOption then
-            local profile = GetActiveRaidProfile()
-            print("  Active profile: " .. tostring(profile))
-            
-            -- Try to get all options by checking known option names
-            local knownOptions = {
-                "keepGroupsTogether", "displayHealPrediction", "displayAggroHighlight",
-                "displayBorder", "displayMainTankAndAssist", "displayPowerBar",
-                "useClassColors", "displayPets", "sortBy", "healthText",
-                "horizontalGroups", "displayNonBossDebuffs", "displayOnlyDispellableDebuffs",
-                "frameWidth", "frameHeight", "autoActivate2Players", "autoActivate3Players",
-                "autoActivate5Players", "autoActivate10Players", "autoActivate15Players",
-                "autoActivate25Players", "autoActivate40Players", "locked",
-            }
-            
-            for _, opt in ipairs(knownOptions) do
-                local ok, value = pcall(function() return GetRaidProfileOption(profile, opt) end)
-                if ok and value ~= nil then
-                    print(string.format("    %s = %s", opt, tostring(value)))
-                end
-            end
-            
-            -- Also try dispel-specific ones
-            print("")
-            print("  |cffffcc00Dispel-related:|r")
-            local dispelOptions = {
-                "displayOnlyDispellableDebuffs",
-                "dispelDebuffDisplayMode",
-                "displayDispellableDebuffs",
-                "dispelMode",
-                "debuffDisplayMode",
-            }
-            for _, opt in ipairs(dispelOptions) do
-                local ok, value = pcall(function() return GetRaidProfileOption(profile, opt) end)
-                if ok and value ~= nil then
-                    print(string.format("    %s = |cff00ff00%s|r", opt, tostring(value)))
-                end
-            end
-        else
-            print("  |cffff0000GetActiveRaidProfile or GetRaidProfileOption not available|r")
-        end
-        
+    local arg = msg and msg:match("^%s*(%S+)") or nil
+    if arg == "ids" then
+        SlashCmdList["DANDERSFRAMES"]("debug dispelids")
+    elseif arg == "render" then
+        SlashCmdList["DANDERSFRAMES"]("debug dispeldbg")
+    elseif arg == nil or UnitExists(arg) then
+        DF:DebugDispel(arg or "player")
     else
-        DF:DebugDispel(msg ~= "" and msg or "player")
+        local o = DF:Out("Dispel", "unknown argument '" .. arg .. "'")
+        o:Item("[unit]", "overlay state for a unit (default: player)")
+        o:Item("ids", "Enum.AuraDispelType field dump")
+        o:Item("render", "overlay render + frame-level state")
+        o:Line("Ongoing dispel tracing is in the debug console - enable the DISPEL category.", "NEUTRAL")
+        o:Siblings("dispel")
     end
 end

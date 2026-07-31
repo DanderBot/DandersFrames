@@ -194,7 +194,7 @@ local function MigrateToSpecScoped(adDB)
                 if orphans then
                     adDB._unscopedAuras = orphans
                     if DF.DebugWarn then
-                        DF:DebugWarn("AuraDesigner",
+                        DF:DebugWarn("AD",
                             "spec-scope migration: %d aura config(s) matched no spec; parked in _unscopedAuras",
                             orphanCount)
                     end
@@ -4490,14 +4490,14 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             local previewBtn = GUI:CreateButton(parent, L["Preview Sound"], 120, 22, function()
                 local soundFile = DF:GetSoundPath(proxy.soundLSMKey) or proxy.soundFile
                 if not soundFile or soundFile == "" then
-                    print("|cffff8033DandersFrames:|r " .. L["No sound file selected. Choose a sound from the dropdown or enter a custom path."])
+                    DF:Say(L["No sound file selected. Choose a sound from the dropdown or enter a custom path."])
                     return
                 end
                 local volume = proxy.volume or 0.8
                 if DF.AuraDesigner.SoundEngine then
                     local willPlay = DF.AuraDesigner.SoundEngine:PlayWithVolume(soundFile, volume)
                     if not willPlay then
-                        print("|cffff8033DandersFrames:|r " .. format(L["Sound file could not be played: %s"], tostring(soundFile)))
+                        DF:Say(format(L["Sound file could not be played: %s"], tostring(soundFile)))
                     end
                 end
             end)
@@ -4542,7 +4542,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 local prev = GUI:CreateButton(parent, L["Preview Sound"], 120, 22, function()
                     local sf = DF:GetSoundPath(ec.soundLSMKey) or ec.soundFile
                     if not sf or sf == "" then
-                        print("|cffff8033DandersFrames:|r " .. L["No sound file selected. Choose a sound from the dropdown or enter a custom path."])
+                        DF:Say(L["No sound file selected. Choose a sound from the dropdown or enter a custom path."])
                         return
                     end
                     if DF.AuraDesigner.SoundEngine then
@@ -4867,7 +4867,7 @@ local function BuildGlobalView(parent)
                 if buffsDB.buffStackFont then defaults.stackFont = buffsDB.buffStackFont end
                 if buffsDB.buffStackScale then defaults.stackScale = buffsDB.buffStackScale end
                 if buffsDB.buffStackOutline then defaults.stackOutline = buffsDB.buffStackOutline end
-                DF:Debug("Aura Designer: Imported Buffs tab defaults")
+                DF:Debug("AD", "Imported Buffs tab defaults")
                 importBtn.Text:SetText(L["Imported!"])
                 C_Timer.After(1.5, function() importBtn.Text:SetText(L["Import Buffs Tab Defaults"]) end)
                 DF:AuraDesigner_RefreshPage()
@@ -4938,7 +4938,7 @@ local function BuildGlobalView(parent)
                 for k in pairs(dest) do dest[k] = nil end
                 for k, v in pairs(source) do dest[k] = DeepCopy(v) end
             end
-            DF:Debug("Aura Designer: Copied " .. srcMode .. " settings to " .. dstMode)
+            DF:Debug("AD", "Copied %s settings to %s", tostring(srcMode), tostring(dstMode))
         end)
         g:AddWidget(copyBtn, 32)
 
@@ -4963,7 +4963,7 @@ local function BuildGlobalView(parent)
                             end
                             DF:AuraDesigner_RefreshPage()
                             RefreshLiveFramesThrottled()
-                            DF:Debug("Aura Designer: Reset all aura configurations")
+                            DF:Debug("AD", "Reset all aura configurations")
                         end,
                     },
                     { label = L["Cancel"] },

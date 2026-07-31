@@ -1353,7 +1353,7 @@ local function applyContainerLayout(c, handle)
     if handle._pp then
         px, py, pinResolved = snapPinOffsets(handle.frame, G.anchor, px, py, scale)
     end
-    -- /df ppdump ground truth: the last pin decision this handle rendered with.
+    -- /df debug ppdump ground truth: the last pin decision this handle rendered with.
     handle._ppDbg = { px = px, py = py, resolved = pinResolved, anchor = G.anchor, pin = G.pinPoint, scale = scale }
 
     pcall(function()
@@ -1773,7 +1773,7 @@ function NativeBackend:build()
         -- Centre the badge in the (badge + 2*spill) window: the -MISSING_PAD container pin
         -- and the +MISSING_PAD badge inset still cancel to park it on the window when empty;
         -- the +spill / -spill centres it inside the enlarged window.
-        -- _badgeParkDebug (/df ppbadge): force the WINDOW anchor live — the parked badge
+        -- _badgeParkDebug (/df debug ppbadge): force the WINDOW anchor live — the parked badge
         -- position then can't inherit the empty container's SECRET (and field-measured
         -- fractional) self-width. DIAGNOSTIC ONLY: the layout-push cannot move a
         -- window-anchored badge, so presence no longer hides it while the flag is on.
@@ -2767,7 +2767,19 @@ function Handle:_applyIdentityGate()
             end
         end
     end
-    self._idGateHidden = hide or nil
+    -- Transition only. "My cross-realm friend's auras vanished" produced no log at
+    -- all before this: the gate is two pcall'ed probes with deliberate fail-open /
+    -- fail-safe asymmetry, and which one tripped is the whole answer. Fires on a
+    -- CHANGE, so a stable gate costs one comparison.
+    local newHidden = hide or nil
+    if self._idGateHidden ~= newHidden then
+        DF:Debug("AURACONTAINER", "identity gate %s for unit=%s (vulnerable=%s sourceRelative=%s)",
+            newHidden and "HIDING" or "showing",
+            tostring(self.config and self.config.unit),
+            tostring(self._idGateVulnerable or false),
+            tostring(self._idGateSourceRelative or false))
+    end
+    self._idGateHidden = newHidden
     self:_applyVisibility()
 end
 
@@ -2816,7 +2828,7 @@ end
 -- ApplyStyle. Pure table math + a db read — combat-safe.
 function Handle:_ppPrepare()
     self._pp = resolvePixelPerfect(self)
-    -- /df ppdump discriminator: the pixel-scale CACHE value this handle's layout
+    -- /df debug ppdump discriminator: the pixel-scale CACHE value this handle's layout
     -- was quantized with. UIParent's scale can settle AFTER login builds — a
     -- stale cache here bakes every snapped size subtly wrong until a restyle.
     self._ppCacheAt = (DF.GetPixelScale and DF:GetPixelScale()) or nil
@@ -3129,6 +3141,15 @@ function Handle:_queueOp(op)
         self._pendingOp = "rebuild"
     else
         self._pendingOp = op
+    end
+    -- ☠ The UPGRADE is the interesting event, not the queueing. Two different
+    -- pending ops (classically enable + retarget) collapse to a full rebuild, and
+    -- that path is the documented frame-leak case — it was previously silent, so a
+    -- leak left no trace at all. Only an actual change of pending op logs.
+    if cur and cur ~= self._pendingOp then
+        DF:DebugWarn("AURACONTAINER", "combat op upgrade: %s + %s -> %s (unit=%s)",
+            tostring(cur), tostring(op), tostring(self._pendingOp),
+            tostring(self.config and self.config.unit))
     end
     self:_registerRegen()
 end
@@ -3448,13 +3469,14 @@ idGateWatch:SetScript("OnEvent", function(_, event)
     end
 end)
 
--- /df idgate — identity-gate ground truth: EVERY handle (not just the
+-- /df debug idgate — identity-gate ground truth: EVERY handle (not just the
 -- vulnerable ones — an under-flagged handle is exactly the failure this dump
 -- must expose), with its unit, vulnerability flag, the LIVE UnitCanAssist
 -- answer, the stored gate verdict, and the window's actual visibility
 -- (+ whether a hover-deferred flip is parked). Developer diagnostic: plain
 -- print by project convention.
 function AuraContainer.DebugDumpIdentityGate()
+    local o = DF:Out("Identity Gate")
     local CAP = 30
     local n, vuln = 0, 0
     for h in pairs(AuraContainer._handles or {}) do
@@ -3491,7 +3513,7 @@ function AuraContainer.DebugDumpIdentityGate()
                 if cf and cf.includeSpellIDs then inc = true end
                 if cf and cf.excludeSpellIDs then exc = true end
             end
-            print(("|cff33ff99[idgate %d]|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s srcRel=%s exists=%s canAssist=%s vis=%s gateHidden=%s intent=%s shown=%s retry=%s"):format(
+            print(("    " .. DF.OUT.SECTION .. "%d|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s srcRel=%s exists=%s canAssist=%s vis=%s gateHidden=%s intent=%s shown=%s retry=%s"):format(
                 n, tostring(cfg.mode or "row"), tostring(unit),
                 table.concat(fParts, "&"), tostring(inc), tostring(exc),
                 tostring(h._idGateVulnerable or false),
@@ -3504,13 +3526,18 @@ function AuraContainer.DebugDumpIdentityGate()
         end
     end
     if n > CAP then
-        print(("|cff33ff99[idgate]|r (capped at %d lines)"):format(CAP))
+        o:Line(("… capped at %d lines"):format(CAP), "NEUTRAL")
     end
-    print(("|cff33ff99[idgate]|r %d handle(s), %d gate-vulnerable; testMode=%s"):format(
-        n, vuln, tostring(AuraContainer._testMode or false)))
+    o:Section("Summary")
+    o:Field("handles", n, n > 0 and "GOOD" or "NEUTRAL")
+    -- A vulnerable handle is the whole point of this dump, so it is the one
+    -- number that must not sit uncoloured in a wall of numbers.
+    o:Field("gate-vulnerable", vuln, vuln > 0 and "WARN" or "GOOD")
+    o:Field("test mode", AuraContainer._testMode or false, "NEUTRAL")
+    o:Siblings("idgate")
 end
 
--- /df ppbadge — diagnostic toggle: park missing badges on the WINDOW instead of
+-- /df debug ppbadge — diagnostic toggle: park missing badges on the WINDOW instead of
 -- the container (see _badgeParkDebug at the build). Border renders perfect =>
 -- the empty container's secret fractional self-width is confirmed as the last
 -- off-grid source. Rebuilds every missing handle on toggle. NOT a fix: the
@@ -3525,12 +3552,12 @@ function AuraContainer.ToggleBadgeParkDebug()
             pcall(function() h:_rebuild() end)
         end
     end
-    print(("|cff33ff99[ppbadge]|r window-anchored badge park: %s (%d missing container(s) rebuilt). Push is %s while on."):format(
+    DF:Say(("Badge park %s — %d missing container(s) rebuilt, push is %s while on"):format(
         AuraContainer._badgeParkDebug and "ON" or "OFF", n,
         AuraContainer._badgeParkDebug and "DISABLED (badge stays visible even when the buff is present)" or "restored"))
 end
 
--- /df ppdump — pixel-perfect geometry ground truth (the resource-bar lesson:
+-- /df debug ppdump — pixel-perfect geometry ground truth (the resource-bar lesson:
 -- field numbers beat source-theorising for pixel bugs). For each visible row /
 -- missing handle: the anchor chain's rects in PHYSICAL pixels with the signed
 -- distance to the nearest pixel grid line ("frac", 0.000 = on-grid), effective
@@ -3539,8 +3566,11 @@ end
 function AuraContainer.DebugDumpPP()
     local _, physH = GetPhysicalScreenSize()
     local uiEff = UIParent:GetEffectiveScale()
-    print(("|cff33ff99[ppdump]|r physH=%d UIParent eff=%.4f (1px = %.4f UIParent-units)"):format(
-        physH, uiEff, (768 / physH) / uiEff))
+    local o = DF:Out("Pixel Push")
+    o:Section("Screen")
+    o:Field("physical height", physH, "NEUTRAL")
+    o:Field("UIParent scale", ("%.4f"):format(uiEff), "NEUTRAL")
+    o:Field("1px", ("%.4f UIParent units"):format((768 / physH) / uiEff), "NEUTRAL")
     local function frac(v, ppu)
         local p = v * ppu
         return p - math.floor(p + 0.5)
@@ -3577,9 +3607,9 @@ function AuraContainer.DebugDumpPP()
         local cfg = h.config
         if cfg and cfg.mode ~= "overlay" and h.frame and h.frame.IsVisible and h.frame:IsVisible() then
             n = n + 1
-            if n > 12 then print("|cff33ff99[ppdump]|r (capped at 12 handles)") break end
+            if n > 12 then print("  " .. DF.OUT.NEUTRAL .. "… capped at 12 handles|r") break end
             local L = cfg.layout or {}
-            print(("|cff33ff99[%d]|r mode=%s unit=%s pp=%s layoutScale=%s anchor=%s quantized=%s"):format(
+            print(("  " .. DF.OUT.SECTION .. "%d|r mode=%s unit=%s pp=%s layoutScale=%s anchor=%s quantized=%s"):format(
                 n, tostring(cfg.mode), tostring(cfg.unit), tostring(h._pp),
                 tostring(L.scale), tostring(L.anchor), tostring(L._ppQuantized)))
             local d = h._ppDbg
@@ -3617,7 +3647,7 @@ function AuraContainer.DebugDumpPP()
             end
         end
     end
-    if n == 0 then print("|cff33ff99[ppdump]|r no visible row/missing containers found") end
+    if n == 0 then print("  " .. DF.OUT.NEUTRAL .. "no visible row or missing containers found|r") end
 end
 
 function AuraContainer.StylePreviewSlot(slot, config)

@@ -904,7 +904,7 @@ DF.GlobalDefaults = {
     -- writes (probe-verified). So durationTextColorSmooth above is text-only by nature.
     -- A stop at or above an indicator's Alert Below threshold never renders — the reveal
     -- doesn't exist up there, the same way a text stop past the aura's duration never
-    -- shows. /df cbt lists the affected stops per indicator.
+    -- shows. /df debug cbt lists the affected stops per indicator.
     -- (Removed 2026-07-24: durationBorderColorScale + durationBorderColorStops +
     -- durationBorderColorPercentStops. A separate border palette bought nothing once the
     -- defaults were asked to match the text, and the account-wide scale could not express

@@ -433,8 +433,8 @@ function DF:UpdateAbsorb(frame, testIndex)
     if not frame then return end
     if not frame.healthBar then return end
 
-    -- PERF TEST: Skip if disabled (but allow test mode to still work)
-    if DF.PerfTest and not DF.PerfTest.enableAbsorbs and not DF.testMode and not DF.raidTestMode then
+    -- MEMORY TEST: Skip if disabled (but allow test mode to still work)
+    if DF:MemTestDisabled("enableAbsorbs") and not DF.testMode and not DF.raidTestMode then
         if frame.absorbBar then frame.absorbBar:Hide() end
         if frame.absorbOvershieldGlow then frame.absorbOvershieldGlow:Hide() end
         if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
@@ -1734,8 +1734,8 @@ end
 function DF:UpdateHealPrediction(frame, testIndex)
     if not frame or not frame.healthBar then return end
     
-    -- PERF TEST: Skip if disabled (but allow test mode to still work)
-    if DF.PerfTest and not DF.PerfTest.enableHealPrediction and not DF.testMode and not DF.raidTestMode then
+    -- MEMORY TEST: Skip if disabled (but allow test mode to still work)
+    if DF:MemTestDisabled("enableHealPrediction") and not DF.testMode and not DF.raidTestMode then
         if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
         return
     end
@@ -2257,7 +2257,14 @@ function DF:UpdateRoleIcon(frame, source)
         end
     end
     if not frame or not frame.unit or not frame.roleIcon then return end
-    
+
+    -- MEMORY TEST (enableRoleLeaderIcons): hide rather than skip, so the icon
+    -- leaves the frame instead of freezing in place.
+    if DF:MemTestDisabled("enableRoleLeaderIcons") then
+        frame.roleIcon:Hide()
+        return
+    end
+
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
     
@@ -2265,11 +2272,6 @@ function DF:UpdateRoleIcon(frame, source)
     
     -- Use our tracked combat state (set by PLAYER_REGEN events)
     local inCombat = DF.playerInCombat or false
-    
-    -- Debug (use /df debugrole to enable)
-    if DF.debugRoleIcons then
-        print("|cff00ffffDF ROLE:|r", frame.unit, "role=", role, "hideInCombat=", db.roleIconHideInCombat, "InCombat=", inCombat)
-    end
     
     if role == "NONE" then
         frame.roleIcon:Hide()
@@ -2293,9 +2295,16 @@ function DF:UpdateRoleIcon(frame, source)
         shouldShow = false
     end
 
-    -- Debug
-    if DF.debugRoleIcons then
-        print("|cff00ffffDF ROLE:|r   shouldShow=", shouldShow, "hideInCombat=", db.roleIconHideInCombat, "inCombat=", inCombat)
+    -- Edge-triggered. This used to be TWO unconditional lines per call, and
+    -- UpdateAllRoleIcons walks every party and raid frame from nine GUI option
+    -- callbacks — so dragging the role-icon scale slider emitted ~80 lines per drag
+    -- frame, none of which said anything had changed. Only a transition is a fact.
+    if frame.dfLastRoleShown ~= shouldShow or frame.dfLastRole ~= role then
+        DF:Debug("ROLE", "%s: role=%s show=%s (hideInCombat=%s inCombat=%s)",
+            tostring(frame.unit), tostring(role), tostring(shouldShow),
+            tostring(db.roleIconHideInCombat), tostring(inCombat))
+        frame.dfLastRoleShown = shouldShow
+        frame.dfLastRole = role
     end
 
     if not shouldShow then
@@ -2329,10 +2338,7 @@ function DF:UpdateAllRoleIcons()
     -- Use our tracked combat state
     local inCombat = DF.playerInCombat or false
     
-    -- Debug (use /df debugrole to enable)
-    if DF.debugRoleIcons then
-        print("|cff00ffffDF ROLE:|r UpdateAllRoleIcons called, InCombat:", inCombat)
-    end
+    DF:Debug("ROLE", "UpdateAllRoleIcons: inCombat=%s", tostring(inCombat))
     
     local function updateFrame(frame)
         if frame and frame:IsShown() then
@@ -2354,7 +2360,13 @@ end
 
 function DF:UpdateLeaderIcon(frame)
     if not frame or not frame.unit or not frame.leaderIcon then return end
-    
+
+    -- MEMORY TEST (enableRoleLeaderIcons): shares the role-icon flag.
+    if DF:MemTestDisabled("enableRoleLeaderIcons") then
+        frame.leaderIcon:Hide()
+        return
+    end
+
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
     
@@ -2628,30 +2640,43 @@ end
 
 -- Debug function for rested indicator
 function DF:DebugRestedIndicator()
-    print("|cff00ff00DandersFrames:|r Rested Indicator Debug")
+    local o = DF:Out("Rested Indicator")
     local playerFrame = DF:GetPlayerFrame()
-    print("  playerFrame exists:", playerFrame ~= nil)
+    o:Section("Widgets")
+    -- No player frame means nothing downstream can render: that IS the fault.
+    o:Field("playerFrame", playerFrame and "exists" or "missing", playerFrame and "good" or "bad")
     if playerFrame then
-        print("  playerFrame:IsShown():", playerFrame:IsShown())
-        print("  restedIndicator exists:", playerFrame.restedIndicator ~= nil)
+        o:Field("playerFrame shown", playerFrame:IsShown() and "yes" or "no",
+            playerFrame:IsShown() and "good" or "neutral")
+        o:Field("restedIndicator", playerFrame.restedIndicator and "exists" or "missing",
+            playerFrame.restedIndicator and "good" or "neutral")
         if playerFrame.restedIndicator then
-            print("  restedIndicator:IsShown():", playerFrame.restedIndicator:IsShown())
+            o:Field("restedIndicator shown", playerFrame.restedIndicator:IsShown() and "yes" or "no",
+                playerFrame.restedIndicator:IsShown() and "good" or "neutral")
         end
-        print("  restedGlow exists:", playerFrame.restedGlow ~= nil)
+        o:Field("restedGlow", playerFrame.restedGlow and "exists" or "missing",
+            playerFrame.restedGlow and "good" or "neutral")
         if playerFrame.restedGlow then
-            print("  restedGlow:IsShown():", playerFrame.restedGlow:IsShown())
+            o:Field("restedGlow shown", playerFrame.restedGlow:IsShown() and "yes" or "no",
+                playerFrame.restedGlow:IsShown() and "good" or "neutral")
         end
     end
     local db = DF:GetDB()
     if db then
-        print("  db.soloMode:", db.soloMode)
-        print("  db.restedIndicator:", db.restedIndicator)
-        print("  db.restedIndicatorIcon:", db.restedIndicatorIcon)
-        print("  db.restedIndicatorGlow:", db.restedIndicatorGlow)
+        o:Section("Settings")
+        -- These are user choices, so OFF is never a fault - only ever neutral.
+        local function opt(label, v)
+            o:Field(label, v and "on" or "off", v and "good" or "neutral")
+        end
+        opt("soloMode", db.soloMode)
+        opt("restedIndicator", db.restedIndicator)
+        opt("restedIndicatorIcon", db.restedIndicatorIcon)
+        opt("restedIndicatorGlow", db.restedIndicatorGlow)
     end
-    print("  IsResting():", IsResting())
-    print("  IsInGroup():", IsInGroup())
-    print("  IsInRaid():", IsInRaid())
+    o:Section("Game state")
+    o:Field("IsResting()", IsResting() and "yes" or "no", IsResting() and "good" or "neutral")
+    o:Field("IsInGroup()", IsInGroup() and "yes" or "no", IsInGroup() and "good" or "neutral")
+    o:Field("IsInRaid()", IsInRaid() and "yes" or "no", IsInRaid() and "good" or "neutral")
 end
 
 -- Raid buff definitions: {spellID, configKey, name, class}

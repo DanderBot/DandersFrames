@@ -198,7 +198,7 @@ local function CreateIconPreview()
         end)
         container:SetScript("OnClick", function()
             local path = ICONS_PATH .. iconName
-            print("|cff9966ffDandersFrames:|r " .. DF.L["Copied: "] .. path)
+            DF:Say(DF.L["Copied: "] .. path)
         end)
     end
     
@@ -220,5 +220,5 @@ end
 -- Print load message
 C_Timer.After(1, function()
     -- Only print if debug mode or first time
-    -- print("|cff9966ffDandersFrames:|r Icon library loaded. Use /dficons to preview.")
+    -- DF:Say("Icon library loaded. Use /dficons to preview.")
 end)
