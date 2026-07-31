@@ -16,7 +16,6 @@ local SnapHeightEven = GUI.SnapHeightEven
 local CreateElementBackdrop = GUI._priv.CreateElementBackdrop
 local CreatePanelBackdrop = GUI._priv.CreatePanelBackdrop
 local StyleScrollBar = GUI.StyleScrollBar
-local INFO_BANNER_TONES = GUI._priv.INFO_BANNER_TONES
 
 -- Counterpart to ShowTooltip: hide the shared GameTooltip. Wrapped so callers
 -- route through GUI instead of poking GameTooltip directly.
@@ -2120,7 +2119,13 @@ function GUI:CreateDebugCategoryRow(parent, categoryKey, description, width, noi
         tex:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning")
         -- The caution tone's ICON colour, read straight from the shared tone table
         -- so this stays in step with every banner and note that uses it.
-        local ic = INFO_BANNER_TONES.caution.iconColor
+        -- ☠ Read at CALL time, not through a file-scope alias. INFO_BANNER_TONES
+        -- is defined in GUI/Sections.lua, which lives in the load-on-demand
+        -- companion, while this file is resident -- an alias captured at load
+        -- would be nil forever and never see the companion's later publish.
+        -- This function is only ever called from a settings page, so the
+        -- companion is loaded by the time it runs.
+        local ic = GUI._priv.INFO_BANNER_TONES.caution.iconColor
         tex:SetVertexColor(ic[1], ic[2], ic[3])
         noisyIcon:SetScript("OnEnter", function(self)
             -- Keep the row's wash up: the pointer is still over the row, and
