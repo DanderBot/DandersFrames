@@ -2857,7 +2857,9 @@ local function ClearPlacedIndicators()
             for _, rec in pairs(mock.dfADPreviewSlots) do
                 stopAnims(rec.slot)
                 rec.slot:Hide()
-                if rec.alertHolder then rec.alertHolder:Hide() end
+                -- The alert slot carries no border (its style is duration-only), so it has
+                -- no animation to stop — only the indicator's slot needs stopAnims.
+                if rec.alertSlot then rec.alertSlot:Hide() end
             end
         end
         mock.dfAD = nil
@@ -2921,7 +2923,7 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         -- driver ticks secretRect borders even while hidden (Border.lua).
         if rec.slot.dfBorder and DF.Border then DF.Border:StopAnimation(rec.slot.dfBorder) end
         rec.slot:Hide()
-        if rec.alertHolder then rec.alertHolder:Hide() end
+        if rec.alertSlot then rec.alertSlot:Hide() end
         rec = nil
     end
     if not rec then
@@ -2946,44 +2948,47 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     AC.PaintPreviewSlot(slot, cfg, 1)
     slot:Show()
 
-    -- Expiry Alert element sample (cfg.alertPreview): the reveal's REAL duration spec,
-    -- bound to the SAME duration object driving this slot's countdown, so the sample
-    -- counts down and changes colour exactly as the live companion does — including
-    -- stepping through the by-time ramp and going empty above the threshold. Binding it
-    -- rather than stamping a payload is the whole point: a preview-only renderer is what
-    -- previously left by-time samples stuck on a hardcoded red.
-    -- Anchored to the PREVIEW SLOT: live, the companion slot's invisible button
-    -- coincides with the indicator's rect and its duration text pins the
-    -- configured anchor point to the same point on the button plus offsets —
-    -- the holder-over-slot + anchored FontString here is the same math (+7 =
-    -- the companion's duration holder layering). nil (hidden) when the alert
-    -- is off or the indicator is show-when-missing (buildAlertPreview gates
-    -- both, matching the factory's live behaviour).
+    -- Expiry Alert sample: a SECOND PREVIEW SLOT laid over the indicator's, styled and
+    -- painted by the same StylePreviewSlot/PaintPreviewSlot pipeline as the indicator
+    -- itself and the group blocks. cfg.alertPreview is a whole slot config from
+    -- Factory:BuildAlertPreviewConfig, carrying the SAME style table the live companion
+    -- renders — so the FontString, its font, anchor, offsets, alpha and holder level are
+    -- all container-engine output here, not decisions made in this file.
+    --
+    -- This used to hand-build a FontString and hand-set its layering. Two separate bugs
+    -- came out of that in one day: the live companion moved and the canvas could not
+    -- follow, because the canvas was never DERIVED from it, only numerically matched. The
+    -- rule is the one that already covers test mode — a preview may differ in DATA, never
+    -- in RENDERING.
+    --
+    -- nil (hidden) whenever the live companion would also be absent: alertSlotStyle is the
+    -- single gate for both, so "off", "no formatter API" and "show-when-missing" can no
+    -- longer mean different things on the canvas than they do live.
     local ap = cfg.alertPreview
     if ap then
-        local ah = rec.alertHolder
+        local ah = rec.alertSlot
         if not ah then
             ah = CreateFrame("Frame", nil, slot)
-            ah.fs = ah:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-            rec.alertHolder = ah
+            rec.alertSlot = ah
         end
+        -- Share the indicator's OWN entry, so both slots count down the same aura for the
+        -- same 15s rather than two entries that happen to agree. cfg.testEntries is
+        -- rewritten above when no spell ID resolved, hence taking it here and not at build.
+        ap.testEntries = cfg.testEntries
+        AC.StylePreviewSlot(ah, ap)
+        -- SetAllPoints AFTER styling: styleButton_regions sizes the slot from the layout,
+        -- and the alert must coincide with the indicator's rect exactly, the way the live
+        -- companion's invisible button does.
         ah:ClearAllPoints()
         ah:SetAllPoints(slot)
         ah:SetFrameStrata(slot:GetFrameStrata())
-        ah:SetFrameLevel(slot:GetFrameLevel() + 7)
-        ah.fs:ClearAllPoints()
-        ah.fs:SetPoint(ap.anchor, ah, ap.anchor, ap.offsetX, ap.offsetY)
-        if DF.SafeSetFont then DF:SafeSetFont(ah.fs, ap.font, ap.size, "OUTLINE") end
-        ah.fs:SetAlpha(ap.alpha or 1)   -- border/tint opacity (region alpha scales the |T)
-        -- PaintPreviewSlot armed slot._dfTestDurObj for the icon's own countdown; reusing
-        -- it keeps the reveal in lockstep with the timer it is meant to be reacting to.
-        if not (AC.BindDurationTextPreview
-                and AC.BindDurationTextPreview(ah.fs, ap, slot._dfTestDurObj, rec, "alertBinding")) then
-            ah.fs:SetText("")   -- no duration API: show nothing rather than a stale sample
-        end
+        ah:SetFrameLevel(slot:GetFrameLevel() + (Factory.ALERT_ROW_LIFT or 13))
+        -- Reuse the indicator slot's duration object (PaintPreviewSlot armed it just above)
+        -- so the reveal reacts to the very timer it sits on, not a second one.
+        AC.PaintPreviewSlot(ah, ap, 1, slot._dfTestDurObj)
         ah:Show()
-    elseif rec.alertHolder then
-        rec.alertHolder:Hide()
+    elseif rec.alertSlot then
+        rec.alertSlot:Hide()
     end
     return slot
 end

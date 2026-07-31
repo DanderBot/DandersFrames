@@ -3851,7 +3851,15 @@ function AuraContainer.StylePreviewSlot(slot, config)
     styleButton_regions(slot, config)
 end
 
-function AuraContainer.PaintPreviewSlot(slot, config, index)
+function AuraContainer.PaintPreviewSlot(slot, config, index, sharedDur)
+    -- sharedDur: adopt ANOTHER preview slot's duration object instead of arming a fresh
+    -- one, so two slots previewing the same aura count down as a single timer rather than
+    -- two that merely started close together. Used by the AD canvas, where the expiry-alert
+    -- slot overlays its indicator's slot and has to react to that indicator's countdown —
+    -- a reveal that crossed its threshold a frame off from the number beneath it would be
+    -- a preview artifact, not something live can do. armTestDuration only creates when the
+    -- field is empty, so seeding it here is enough.
+    if sharedDur then slot._dfTestDurObj = sharedDur end
     -- Duck-typed handle: the paint core only reads .config (and the duration
     -- formatter inside it).
     Handle._paintTestSlot({ config = config }, slot, index or 1)
