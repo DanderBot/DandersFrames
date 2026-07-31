@@ -130,7 +130,13 @@ AuraDesigner\AuraAdapter.lua
 AuraDesigner\Engine.lua
 AuraDesigner\Factory.lua
 AuraDesigner\SoundEngine.lua
+# Editor UI, split from one 9k-line file. Order is load-bearing: Options.lua
+# creates DF.AuraDesigner._uiState / ._priv, which every later part aliases.
 AuraDesigner\UI\Options.lua
+AuraDesigner\UI\Groups.lua
+AuraDesigner\UI\Indicators.lua
+AuraDesigner\UI\Cards.lua
+AuraDesigner\UI\Editor.lua
 
 # Text Designer
 TextDesigner\TextDesigner.lua
