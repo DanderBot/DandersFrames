@@ -33,6 +33,9 @@
 # Widget factories the live addon never calls, lifted out of the resident
 # GUI.lua / Widgets.lua. Loads first: the parts below build pages with them.
 GUI\SettingsWidgets.lua
+# Settings search. It has no entry point of its own -- the search bar is built
+# by GUI\Panel.lua -- so it is only ever reachable with this addon loaded.
+Features\Search.lua
 GUI\Sections.lua
 GUI\Controls.lua
 GUI\Panel.lua

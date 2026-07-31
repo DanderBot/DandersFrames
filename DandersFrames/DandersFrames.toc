@@ -86,7 +86,6 @@ GUI\DFFonts.lua
 # settings panel, both designers, the click-casting UI, test mode and the debug
 # tools all live in that companion now.
 GUI\LoadOptions.lua
-Features\Search.lua
 
 # Popup System (alert / confirm / input dialogs)
 GUI\Popup.lua
