@@ -302,13 +302,23 @@ local fontValidationFrame = CreateFrame("Frame")
 fontValidationFrame:Hide()
 local fontValidationString = fontValidationFrame:CreateFontString(nil, "OVERLAY")
 
--- Preload/validate a font to ensure WoW has it loaded
+-- Preload/validate a font to ensure WoW has it loaded.
+--
+-- Memoised per path. This runs on EVERY DF:SafeSetFont call, and SafeSetFont is one of
+-- the hottest functions in the addon (5.7% of a boss trace's allocation just here), but
+-- a path only ever needs loading once -- the file does not unload and the mapping from
+-- path to file never changes. Keyed on ATTEMPTED rather than succeeded, which matches
+-- the old behaviour exactly: the pcall result was discarded, so a failed load was never
+-- retried anyway.
+--
+-- pcall(fn, args...) not pcall(function() ... end): the closure form allocated one
+-- closure per call on that same hot path.
+local preloadedFonts = {}
 local function PreloadFont(fontPath)
-    if not fontPath then return end
+    if not fontPath or preloadedFonts[fontPath] then return end
+    preloadedFonts[fontPath] = true
     -- Attempt to set the font - this forces WoW to load the font file
-    pcall(function()
-        fontValidationString:SetFont(fontPath, 12, "")
-    end)
+    pcall(fontValidationString.SetFont, fontValidationString, fontPath, 12, "")
 end
 
 -- Build font family members for CreateFontFamily
@@ -679,6 +689,14 @@ function DF:ComposeOutline(flag, shadow)
     return flag
 end
 
+-- Hoisted out of DF:SafeSetFont so the pcall below takes the allocation-free
+-- pcall(fn, args...) form. It is two statements (the GameFontNormal set first is
+-- deliberate — see the call site), so it cannot be inlined as a bare method reference.
+local function setFontObjectPair(fontString, familyObject)
+    fontString:SetFontObject(GameFontNormal)
+    fontString:SetFontObject(familyObject)
+end
+
 function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     if not fontString then return false end
 
@@ -754,10 +772,7 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
         -- data may not be initialized yet, causing an ACCESS_VIOLATION crash when
         -- SetFontObject tries to read it.  Wrap in pcall to fall through to the
         -- direct SetFont() path if the object is broken.
-        local ok = pcall(function()
-            fontString:SetFontObject(GameFontNormal)
-            fontString:SetFontObject(_G[fontFamilyName])
-        end)
+        local ok = pcall(setFontObjectPair, fontString, _G[fontFamilyName])
         if not ok then
             -- Evict the broken cache entry so it gets recreated later. Shared key
             -- builder + same size quantization as GetOrCreateFontFamily — a
