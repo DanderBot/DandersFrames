@@ -63,9 +63,16 @@ local CONTENT_HINTS = {
 -- FONT/COLOR RESOLUTION (overrides + globalDefaults)
 -- ============================================================
 
+-- Shared read-only stand-ins for the absent-table cases. Both are ONLY ever indexed
+-- (never written) in the body below, so one shared instance is safe and saves two
+-- throwaway tables per call on elements that carry no overrides -- which is most of
+-- them. Same for the white fallback, which callers only read fields from.
+local EMPTY_APPEARANCE = {}
+local DEFAULT_TEXT_COLOR = { r = 1, g = 1, b = 1, a = 1 }
+
 local function resolveAppearance(elem, globalDefaults)
-    globalDefaults = globalDefaults or {}
-    local overrides = elem.overrides or {}
+    globalDefaults = globalDefaults or EMPTY_APPEARANCE
+    local overrides = elem.overrides or EMPTY_APPEARANCE
     -- useClassColor is the one boolean field, so the `(override and value) or
     -- global` pattern the others use would swallow an override of FALSE (it
     -- falls through to the global default). Branch on the override flag instead.
@@ -78,7 +85,7 @@ local function resolveAppearance(elem, globalDefaults)
     return {
         font          = (overrides.font          and elem.font)          or globalDefaults.font          or "DF Roboto SemiBold",
         fontSize      = (overrides.fontSize      and elem.fontSize)      or globalDefaults.fontSize      or 10,
-        color         = (overrides.color         and elem.color)         or globalDefaults.color         or {r=1, g=1, b=1, a=1},
+        color         = (overrides.color         and elem.color)         or globalDefaults.color         or DEFAULT_TEXT_COLOR,
         outline       = (overrides.outline       and elem.outline)       or globalDefaults.outline       or "SHADOW;NONE",
         useClassColor = useClassColor,
     }
@@ -297,7 +304,11 @@ local function updateOne(frame, elem, source, globalDefaults, enabledById)
         local token = source:GetClassToken()
         local color = token and RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]
         if color then
-            local app = resolveAppearance(elem, globalDefaults)
+            -- Reuse the appearance applyAppearance already resolved above: same elem,
+            -- same globalDefaults, same deterministic function. This used to re-resolve
+            -- the whole thing just to read one alpha, which is a wasted table (up to
+            -- four) per class-coloured element per tick -- resolveAppearance is #2 in
+            -- every combat trace.
             fs:SetTextColor(color.r, color.g, color.b, (app.color and app.color.a) or 1)
         end
     end
