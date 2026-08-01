@@ -1605,15 +1605,16 @@ function Factory:BuildAlertPreviewConfig(indicator, geom, layout, entries)
     }
 end
 
--- Companion sigs. STRUCTURAL: identity map + filter (bind at build), EVERY
--- alert key (alertElemStructKey — formatter and placement are creation-frozen
--- -> Rebuild), frame level. COSMETIC (ApplyStyle): the mirrored indicator
--- geometry — dragging / resizing the indicator hot-moves its companion — plus
--- font and alpha. Raw-config, alloc-light, computed per pass like the other
--- placed sigs (FIX C discipline).
-local function alertCompanionStructSig(map, indicator, mine, geom, defs)
-    return includeSig(map)
-        .. "|xalert"
+-- Companion sigs. STRUCTURAL: the filter string (binds at build), EVERY alert key
+-- (alertElemStructKey — formatter and placement are creation-frozen -> Rebuild),
+-- frame level. TUNING: the identity map, via the shared placedTuningSig — it is
+-- config.candidateFilters and mutates live, so it must NOT sit here (a Rebuild
+-- strands frames permanently; see placedStructSig). COSMETIC (ApplyStyle): the
+-- mirrored indicator geometry — dragging / resizing the indicator hot-moves its
+-- companion — plus font and alpha. Raw-config, alloc-light, computed per pass like
+-- the other placed sigs (FIX C discipline).
+local function alertCompanionStructSig(indicator, mine, geom, defs)
+    return "xalert"
         .. "|xa=" .. alertElemStructKey(indicator, geom)
         .. "|fl=" .. tostring(resolveLevel(indicator, defs.level))
         .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")
@@ -1650,10 +1651,12 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
     if not alertElemMode(indicator) then return end
     local akey = key .. ":alert"
     local geom = alertGeometry(frame, indicator, isBar)   -- square (icon) or rect (bar)
-    local structSig = alertCompanionStructSig(map, indicator, mine, geom, defs)
+    local structSig = alertCompanionStructSig(indicator, mine, geom, defs)
+    local tuningSig = placedTuningSig(map)
     local coSig = alertCompanionCoSig(frame, indicator, isBar, alpha)
     local entry = placed[akey]
-    if entry and entry.structSig == structSig and entry.coSig == coSig then
+    if entry and entry.structSig == structSig and entry.tuningSig == tuningSig
+       and entry.coSig == coSig then
         live[akey] = true   -- steady state: no config build, no touch
         return
     end
@@ -1664,18 +1667,28 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
         local handle = DF.AuraContainer:Create(frame, cfg)
         if handle then
             applyPlacedAlpha(handle, alpha)
-            placed[akey] = { handle = handle, structSig = structSig, coSig = coSig }
+            placed[akey] = { handle = handle, structSig = structSig,
+                             tuningSig = tuningSig, coSig = coSig }
             live[akey] = true
         end
     elseif entry.structSig ~= structSig then
-        entry.structSig, entry.coSig = structSig, coSig
+        entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
         entry.handle:Rebuild(cfg)
         applyPlacedAlpha(entry.handle, alpha)
         live[akey] = true
     else
-        entry.coSig = coSig
-        entry.handle:ApplyStyle(cfg.style, cfg.layout)
-        applyPlacedAlpha(entry.handle, alpha)
+        -- Selection edit with the struct sig stable: swap the include map on the live
+        -- container (row mode, so applyGroupTuning runs) instead of recreating it.
+        if entry.tuningSig ~= tuningSig then
+            entry.tuningSig = tuningSig
+            entry.handle.config.testEntries = cfg.testEntries
+            entry.handle:ApplyTuning(cfg)
+        end
+        if entry.coSig ~= coSig then
+            entry.coSig = coSig
+            entry.handle:ApplyStyle(cfg.style, cfg.layout)
+            applyPlacedAlpha(entry.handle, alpha)
+        end
         live[akey] = true
     end
 end
@@ -1759,9 +1772,10 @@ end
 
 -- STRUCTURAL signature: identity, duration-text on/off + format key (SetDurationText / SetDuration
 -- Bar bind ONCE), border on/off, frame level. Cosmetic bar styling is barCoSig.
-local function barStructSig(map, indicator, borderOn, defs, mine)
-    return includeSig(map)
-        .. "|bar"
+-- Create-only properties ONLY; the identity map is live-tunable and rides
+-- placedTuningSig (see placedStructSig for why a needless Rebuild is a leak).
+local function barStructSig(indicator, borderOn, defs, mine)
+    return "bar"
         .. "|df=" .. durationFmtKey(indicator, false, defs.cbt)
         -- (No alert keys: the expiry alert lives on the COMPANION slot, whose own
         -- structSig carries alertElemStructKey — an alert edit rebuilds only it.)
@@ -2747,7 +2761,8 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local eff = memberEffective(hasMG, key, indicator)
                         local borderOn = placedBorderOn(indicator, false)
                         local alpha = tonumber(indicator.alpha) or 1
-                        local structSig = barStructSig(map, indicator, borderOn, defs, mine)
+                        local structSig = barStructSig(indicator, borderOn, defs, mine)
+                        local tuningSig = placedTuningSig(map)
                         local coSig = barCoSig(frame, eff, borderOn, alpha)
 
                         local entry = placed[key]
@@ -2757,20 +2772,32 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                                 buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
-                                placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
+                                placed[key] = { handle = handle, structSig = structSig,
+                                                tuningSig = tuningSig, coSig = coSig }
                             end
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
-                            entry.structSig, entry.coSig = structSig, coSig
+                            entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                             entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine))
                             applyPlacedAlpha(entry.handle, alpha)
-                        elseif entry.coSig ~= coSig then
-                            local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
-                            entry.coSig = coSig
-                            entry.handle:ApplyStyle(
-                                buildBarStyle(indicator, borderSpec, defs),
-                                buildBarLayout(frame, eff))
-                            applyPlacedAlpha(entry.handle, alpha)
+                        else
+                            if entry.tuningSig ~= tuningSig then
+                                -- Selection edit, struct sig stable: swap the include map on
+                                -- the live container (row mode) rather than recreating it.
+                                -- borderSpec nil on purpose — ApplyTuning reads only the trio.
+                                entry.tuningSig = tuningSig
+                                local cfg = buildBarConfig(frame, frame.unit, map, eff, nil, defs, mine)
+                                entry.handle.config.testEntries = cfg.testEntries
+                                entry.handle:ApplyTuning(cfg)
+                            end
+                            if entry.coSig ~= coSig then
+                                local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
+                                entry.coSig = coSig
+                                entry.handle:ApplyStyle(
+                                    buildBarStyle(indicator, borderSpec, defs),
+                                    buildBarLayout(frame, eff))
+                                applyPlacedAlpha(entry.handle, alpha)
+                            end
                         end
 
                         -- Expiry-alert companion slot (own container, own sigs —
