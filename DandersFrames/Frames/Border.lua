@@ -161,9 +161,24 @@ end
 -- Resolvers silently fall through when their required ctx is missing, so a
 -- consumer that only knows the unit can still flip on classColor without
 -- worrying about time/type ctx.
+-- Memoised db-key strings, per prefix. BuildSpec calls k() 37 times and each call
+-- used to concatenate a fresh string -- 37 allocations per BuildSpec, on a function
+-- that shows up in both the steady-state traces (2.7% of a boss run) and the rebuild
+-- traces (2.6%). The prefix set is tiny and fixed, and prefix .. suffix is
+-- deterministic, so the built keys are cached and reused forever.
+local borderKeyMemo = {}
+
 function Border:BuildSpec(dbTable, prefix, ctx)
     if not dbTable or not prefix then return {} end
-    local function k(suffix) return prefix .. suffix end
+    local memo = borderKeyMemo[prefix]
+    if not memo then memo = {}; borderKeyMemo[prefix] = memo end
+    -- Still a closure per call (it captures memo), but that is one allocation
+    -- instead of the 37 it was guarding.
+    local function k(suffix)
+        local key = memo[suffix]
+        if not key then key = prefix .. suffix; memo[suffix] = key end
+        return key
+    end
 
     -- Style is the top-level choice: SOLID | GRADIENT | TEXTURE.
     -- GRADIENT owns its own colours (start/end pickers) so the colour-source
