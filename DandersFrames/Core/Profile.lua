@@ -869,10 +869,6 @@ end
 -- Get info about what's in the import data
 function DF:GetImportInfo(importData)
     if not importData then return nil end
-    -- Iterates DF.ExportCategories (companion-owned) unconditionally below.
-    if not DF.ExportCategories and DF.EnsureOptionsLoaded then
-        if not DF:EnsureOptionsLoaded() then return nil end
-    end
 
     local info = {
         version = self:GetImportVersion(importData),
@@ -888,6 +884,14 @@ function DF:GetImportInfo(importData)
     
     -- Detect categories if not explicitly stored (legacy imports)
     if info.isFullExport then
+        -- ☠ The guard belongs HERE, not at the top of the function. The category
+        -- registry is companion-owned and only this branch reads it; a selective
+        -- payload carries its own category list. Guarding the whole function made
+        -- every import load the companion -- including the full-profile Wago path
+        -- that the comment below the caller explicitly says must not pay for it.
+        if not DF.ExportCategories and DF.EnsureOptionsLoaded then
+            if not DF:EnsureOptionsLoaded() then return nil end
+        end
         -- Full export contains all categories — derive the list from the
         -- category registry (single source of truth) rather than keeping a
         -- hand-maintained copy here that drifts when categories change.

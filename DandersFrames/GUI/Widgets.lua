@@ -2543,6 +2543,14 @@ end
 -- edge the anchor pins.
 local CURSOR_LIFT_X, CURSOR_LIFT_Y = 0, 8
 
+-- ☠ ShowTooltip lives here; ShowGameTooltip lives in the companion. The pair
+-- straddles the addon boundary and must use the SAME lift -- a spell tooltip on
+-- a settings row has to sit exactly where every other DF tooltip sits.
+-- Published rather than duplicated so the two cannot drift apart, and because
+-- the companion reading these as bare globals silently got nil (they are
+-- optional SetOwner args, so it dropped the lift with no error).
+P.CURSOR_LIFT_X, P.CURSOR_LIFT_Y = CURSOR_LIFT_X, CURSOR_LIFT_Y
+
 function GUI:ShowTooltip(owner, opts)
     if not owner or not opts or not opts.title then return end
     if opts.anchor then

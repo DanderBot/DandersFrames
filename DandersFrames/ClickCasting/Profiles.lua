@@ -353,9 +353,12 @@ function CC:SetActiveProfile(profileName)
         if self.hasConflictingAddons and self.conflictingAddons then
             C_Timer.After(0.1, function()
                 if CC.db.enabled and CC.hasConflictingAddons then
-                    -- ☠ Popup lives in the companion; profile switches are
-                    -- reachable without the panel (slash, permanent movers,
-                    -- loadout auto-switch). Modal warning -> load, don't skip.
+                    -- ☠ Opt-out first — the popup's own first line is this check,
+                    -- so loading the companion to reach it would be pure waste.
+                    if CC.db.ignoreConflictWarning then return end
+                    -- Popup lives in the companion; profile switches are reachable
+                    -- without the panel (slash, permanent movers, loadout
+                    -- auto-switch). Modal warning -> load, don't skip.
                     if not CC.ShowClickCastConflictPopup then
                         if not (DF.EnsureOptionsLoaded and DF:EnsureOptionsLoaded()) then return end
                     end
@@ -542,7 +545,7 @@ function CC:CheckLoadoutProfileSwitch()
         -- Profile is assigned (either to this specific loadout or as spec default) - switch to it
         if self:SetActiveProfile(assignedProfile) then
             self:ApplyBindings()
-            self:RefreshClickCastingUI()
+            self:RefreshUIIfLoaded()
             local source = isSpecific and "loadout: " .. loadoutName or "spec default"
             DF:Say("Switched to profile: " .. assignedProfile .. " (" .. source .. ")")
         end
@@ -577,7 +580,7 @@ function CC:CheckLoadoutProfileSwitch()
             -- Switch to it
             if self:SetActiveProfile(newProfileName) then
                 self:ApplyBindings()
-                self:RefreshClickCastingUI()
+                self:RefreshUIIfLoaded()
             end
             
             -- Show notification

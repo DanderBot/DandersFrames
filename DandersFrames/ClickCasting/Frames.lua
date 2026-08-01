@@ -348,11 +348,16 @@ function CC:InitializeSecureFrames()
         -- Delay slightly to ensure UI is ready
         C_Timer.After(1.5, function()
             if CC.db.enabled and CC.hasConflictingAddons then
-                -- ☠ The popup lives in the load-on-demand companion; this fires at
-                -- login before anyone has opened the panel. It is a modal warning
-                -- the user must act on (Clique/Clicked conflict), so load the
-                -- companion for it rather than silently skip -- this only costs
-                -- users who actually have a conflicting addon installed.
+                -- ☠ Read the opt-out FIRST. The popup lives in the companion and
+                -- this fires at login, so loading it here is the cost -- but
+                -- ShowClickCastConflictPopup's own first line is this same check
+                -- and returns immediately. Without this, a user who ticked "don't
+                -- warn me again" pulled the entire settings addon in at every
+                -- login to reach a function that does nothing. The flag lives in
+                -- DandersFramesClickCastingDB and is fully readable resident.
+                if CC.db.ignoreConflictWarning then return end
+                -- It is a modal the user must act on, so load rather than skip.
+                -- Only users with a conflicting addon installed ever pay.
                 if not CC.ShowClickCastConflictPopup then
                     if not (DF.EnsureOptionsLoaded and DF:EnsureOptionsLoaded()) then return end
                 end

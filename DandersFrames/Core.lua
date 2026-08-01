@@ -5500,7 +5500,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     DF:Err("Header info not available")
                 end
             elseif msg == "attached" then
-                -- List other addons anchored/parented to DF unit frames
+                -- List other addons anchored/parented to DF unit frames.
+                -- Scanner lives in the companion and registers no slash of its
+                -- own, so it never reaches the /df debug load-and-retry — this
+                -- branch has to load it, same as exportaudit two branches down.
+                if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then return end
                 if DF.ScanFrameAttachments then
                     DF:ScanFrameAttachments()
                 else

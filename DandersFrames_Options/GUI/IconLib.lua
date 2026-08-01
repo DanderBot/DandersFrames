@@ -1,4 +1,9 @@
--- ☠ Companion addon: bind the parent table from the global, never `...`.
+-- ☠ Companion addon: `...` yields THIS addon's private table, not the
+-- parent's, so every DF.* read here would be nil. Take the parent's table
+-- from the global it publishes at DandersFrames/Core.lua:9 (`_G[addonName]
+-- = DF`). NOT from ## AllowAddOnTableAccess -- that directive governs
+-- access to an addon's PRIVATE table and has nothing to do with the global
+-- name; deleting Core.lua:9 as "redundant" would nil DF in every file here.
 local DF = DandersFrames
 
 -- Icon Library Preview

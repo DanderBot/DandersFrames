@@ -50,19 +50,22 @@ This addon bundles the following third-party libraries, each under their own res
 
 ## Development setup
 
-This repo is a **container**, not an addon folder. Its root holds the addon
-folder rather than being it, the way ElvUI and Grid2 are laid out:
+This repo is a **container**, not an addon folder. Its root holds two addon
+folders rather than being one:
 
 ```
 <repo>/
-  DandersFrames/            the addon
-  README.md  CHANGELOG.md  .pkgmeta  .github/  Tools/
+  DandersFrames/            the addon (always loaded)
+  DandersFrames_Options/    settings panel, designers, debug tools
+                            (## LoadOnDemand — loads when /df is opened)
+  README.md  CHANGELOG.md  .pkgmeta  .github/  Tools/  docs/
 ```
 
 WoW only loads addons from `Interface/AddOns/<Name>/<Name>.toc`, so the repo
-cannot live inside `AddOns/` any more. Clone it anywhere and link the addon
-folder in with a **directory junction** — a junction (`/J`), not a symlink
-(`/D`), so no admin rights or Developer Mode are needed.
+cannot live inside `AddOns/` any more, and a load-on-demand companion has to be
+a **sibling** top-level folder rather than a subfolder. Clone the repo anywhere
+and link **both** folders in with **directory junctions** — junctions (`/J`),
+not symlinks (`/D`), so no admin rights or Developer Mode are needed.
 
 ### One-time, per game install
 
@@ -73,8 +76,32 @@ mklink /J "DandersFrames"         "C:\path\to\repo\DandersFrames"
 mklink /J "DandersFrames_Options" "C:\path\to\repo\DandersFrames_Options"
 ```
 
-Delete any real `AddOns/DandersFrames` folder first — a junction cannot
-replace an existing directory. Repeat per install (`_retail_`, `_ptr_`).
+A junction cannot replace an existing directory, so anything already at those
+names has to go first. Repeat per game install — `_retail_`, `_ptr_`, `_beta_`
+— so six junctions if you run all three.
+
+> ### ☠ Removing an existing `AddOns/DandersFrames` — read this
+>
+> If you already develop DandersFrames, that path is **probably a junction, not
+> a folder**, and `rm -rf` in Git Bash *follows it* and deletes your working
+> tree on the other side. Losing an unpushed branch to a cleanup step is a
+> miserable way to start.
+>
+> Check what it is, then remove it as a link:
+>
+> ```
+> cmd //c dir /AL "DandersFrames"     # lists it if it is a junction
+> cmd //c rmdir "DandersFrames"       # removes the LINK, never the target
+> ```
+>
+> `rmdir` refuses to touch a non-empty real directory, so it fails safe either
+> way. Only reach for a recursive delete once you have confirmed it is a real
+> folder you actually want gone.
+
+**If `/df` does not open after this**, the usual cause is only the first
+junction existing — the panel lives in `DandersFrames_Options`, so the addon
+loads fine and the settings command does nothing useful. Note also that a new
+addon folder is only picked up on a **full client restart**, not `/reload`.
 
 After that, edit in the repo and `/reload` in game; the junction means there
 is no copy or sync step. `git status`, branches and PRs are unchanged — one
@@ -101,15 +128,34 @@ packager running locally.
 **Nothing may depend on the companion to work.** Live behaviour that happened
 to live in a settings file has to move back to the main addon, not be guarded
 away — the auto-profile engine, the click-casting bootstrap and the aura
-migrations are all resident for that reason. `docs/reorg-tools/lod_login_check.py`
-catches the common form of this.
+migrations are all resident for that reason.
+
+The rule in practice, when adding anything:
+
+| Kind | Do |
+|---|---|
+| Deliberate user action (`/df test`, unlock, profiler, selective import/export) | **Load** the companion — `DF:EnsureOptionsLoaded()` |
+| Background event (a talent-change UI refresh) | **Guard** and no-op — a refresh with no UI is correctly nothing |
+| Live behaviour | **Keep it resident** |
+
+☠ A companion file's `...` is the *companion's* addon table, not ours. Every
+file there binds `local DF = DandersFrames` — the global published at
+`DandersFrames/Core.lua:9`, **not** by `## AllowAddOnTableAccess`, which
+governs private-table access and is unrelated to the global name.
 
 ### Verification tooling
 
-`docs/reorg-tools/` holds the checkers used during the restructure — TOC
-completeness, load order, split-plumbing aliases, and the load-on-demand
-boundary. They default to `<repo>/DandersFrames`, so they run with no
-arguments from the repo root. `docs/` is gitignored; the tools are local.
+A set of checkers was written during the restructure — TOC completeness, load
+order, split-plumbing aliases, the load-on-demand boundary, and login-time work
+stranded in the companion. Two are worth running after anything that moves code
+between files: the alias checker (this caught two in-game crashes) and the
+boundary checker (which watches the `DF`, `GUI` and `CC` namespaces separately,
+because one that watches a single namespace is blind to the others).
+
+⚠ These live under `docs/reorg-tools/`, which is **gitignored and not part of
+this repo** — ask Krathe for a copy. Most of `docs/` is local; the one tracked
+exception is `docs/gui-conventions.md`. Some in-code comments cite
+`docs/reorg-tools/splits.manifest` for the same reason.
 
 ## License
 

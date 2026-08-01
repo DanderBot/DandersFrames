@@ -15,19 +15,30 @@
 # login; DandersFrames loads it the first time you open /df.
 #
 # Measured on the PTR build: while this stays unloaded DandersFrames uses
-# 8,957 KB instead of 12,348 KB -- 3,391 KB less, 27.5% -- and ~55,000 lines
+# 9,192 KB instead of 12,348 KB -- 3,156 KB less, about 25% -- and ~59,000 lines
 # are never parsed at any login. The memory saving lasts until the panel is
 # opened; the parse saving happens every login regardless.
 #
 # RequiredDeps plus the matching name prefix makes the addon list show this
 # as a collapsible child of DandersFrames rather than a separate entry.
 #
-# ☠ ORDER IS LOAD-BEARING, exactly as in the main .toc. These files were split
-# out of three monoliths and each group has a first file that creates the
-# shared state every later part aliases:
-#   GUI/Sections -> Controls -> Panel        (GUI.lua stays resident)
-#   AuraDesigner/UI/Options first            (creates _uiState and _priv)
-#   GUI/Pages/Options first                  (heads the page chain)
+# ☠ ORDER IS LOAD-BEARING in ONE place here, not three. Verified by resolving
+# every file-scope alias in both addons rather than assumed -- two of the three
+# constraints previously listed were not real, which is worse than none: a
+# reader trusts the wrong ones and misses the one that bites.
+#
+#   REAL, and cross-addon: GUI/Pages/AutoProfiles.lua aliases the RESIDENT
+#     AutoProfilesUI._priv (DandersFrames/Core/AutoProfiles.lua). The parent
+#     addon always loads first, so this holds -- but it is the actual dependency.
+#   REAL, within this addon: AuraDesigner/UI/Options.lua creates _uiState and
+#     _priv; Groups -> Indicators -> Cards -> Editor alias them in that order.
+#
+#   NOT real: GUI/Sections -> Controls -> Panel. All three alias only
+#     GUI._state / GUI._priv from the RESIDENT GUI.lua and Widgets.lua, never
+#     each other. Reordering them breaks nothing.
+#   NOT real: GUI/Pages/Options "first". The parts are a runtime tail-call
+#     chain (_SetupGUIPagesPart2..5) -- each need only be loaded before
+#     SetupGUIPages is CALLED, so TOC order among them is free.
 
 # Selective import/export category tables. Only Profile.lua's selective
 # paths and the Modules page read these; both load this addon first.
