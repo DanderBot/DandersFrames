@@ -3182,7 +3182,12 @@ function Factory:SyncFrame(frame)
             -- replace mode always uses the fill-matched mirror.
             local wholeBar = (mode == "tint") and (bestCfg.tintWholeBar and true or false) or false
 
-            local structSig = includeSig(bestMap) .. "|" .. (wholeBar and "flat" or "mirror") .. "|" .. filt
+            -- The tracked map is live-tunable (overlay slots take
+            -- SetAuraSlotCandidateFilters), so it rides its own sig rather than forcing
+            -- a teardown+recreate. wholeBar STAYS structural: it picks a different
+            -- config builder entirely.
+            local structSig = (wholeBar and "flat" or "mirror") .. "|" .. filt
+            local tuningSig = placedTuningSig(bestMap)
             local entry = hb[bestName]
 
             if wholeBar then
@@ -3193,15 +3198,22 @@ function Factory:SyncFrame(frame)
                     frame.dfADHealthMirror = nil
                     local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
                     if handle then
-                        hb[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
+                        hb[bestName] = { handle = handle, structSig = structSig,
+                                         tuningSig = tuningSig, coSig = coSig }
                     end
                 elseif entry.structSig ~= structSig then
                     frame.dfADHealthMirror = nil
-                    entry.structSig, entry.coSig = structSig, coSig
+                    entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                     entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
-                elseif entry.coSig ~= coSig then
-                    entry.coSig = coSig
-                    entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
+                else
+                    if entry.tuningSig ~= tuningSig then
+                        entry.tuningSig = tuningSig
+                        entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
+                    end
+                    if entry.coSig ~= coSig then
+                        entry.coSig = coSig
+                        entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
+                    end
                 end
             else
                 -- FILLED MIRROR PATH — duplicate StatusBar fed the secret health percent.
@@ -3214,15 +3226,26 @@ function Factory:SyncFrame(frame)
                     frame.dfADHealthMirror = nil   -- onBar re-stashes when the slot builds
                     local handle = DF.AuraContainer:Create(healthBar, buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, onBar, filt))
                     if handle then
-                        hb[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
+                        hb[bestName] = { handle = handle, structSig = structSig,
+                                         tuningSig = tuningSig, coSig = coSig }
                     end
                 elseif entry.structSig ~= structSig then
                     frame.dfADHealthMirror = nil   -- old slot torn down; onBar re-stashes
-                    entry.structSig, entry.coSig = structSig, coSig
+                    entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                     entry.handle:Rebuild(buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, onBar, filt))
-                elseif entry.coSig ~= coSig then
-                    entry.coSig = coSig
-                    entry.handle:ApplyStyle({ overlay = { healthMirror = { texture = tex, color = { r, g, b }, alpha = alpha, onBar = onBar } } })
+                else
+                    if entry.tuningSig ~= tuningSig then
+                        -- ☠ Do NOT clear frame.dfADHealthMirror here. The two branches
+                        -- above clear it because the slot is torn down and onBar re-stashes
+                        -- the new StatusBar; a tuning pass keeps the SAME slot and the same
+                        -- bar, so clearing the ref would strand it (nothing re-stashes).
+                        entry.tuningSig = tuningSig
+                        entry.handle:ApplyTuning(buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, onBar, filt))
+                    end
+                    if entry.coSig ~= coSig then
+                        entry.coSig = coSig
+                        entry.handle:ApplyStyle({ overlay = { healthMirror = { texture = tex, color = { r, g, b }, alpha = alpha, onBar = onBar } } })
+                    end
                 end
             end
           end
@@ -3284,21 +3307,29 @@ function Factory:SyncFrame(frame)
             local mode = slower(bestCfg.mode or "tint")   -- background defaults to tint
             local blend = healthbarBlend(mode, bestCfg.blend, a)
 
-            local structSig = includeSig(bestMap) .. "|" .. filt
+            local structSig = filt
+            local tuningSig = placedTuningSig(bestMap)
             local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
 
             local entry = bg[bestName]
             if not entry then
                 local handle = DF.AuraContainer:Create(bgAnchor, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt))
                 if handle then
-                    bg[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
+                    bg[bestName] = { handle = handle, structSig = structSig,
+                                     tuningSig = tuningSig, coSig = coSig }
                 end
             elseif entry.structSig ~= structSig then
-                entry.structSig, entry.coSig = structSig, coSig
+                entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                 entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt))
-            elseif entry.coSig ~= coSig then
-                entry.coSig = coSig
-                entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
+            else
+                if entry.tuningSig ~= tuningSig then
+                    entry.tuningSig = tuningSig
+                    entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt))
+                end
+                if entry.coSig ~= coSig then
+                    entry.coSig = coSig
+                    entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
+                end
             end
           end
         end
@@ -3355,21 +3386,29 @@ function Factory:SyncFrame(frame)
             -- drawAboveFrameBorder rides the STRUCT sig: it resolves to frameLevelOffset in
             -- buildBorderConfig, which only a Rebuild re-reads (ApplyStyle carries the spec only).
             local drawAbove = bestCfg.drawAboveFrameBorder ~= false
-            local structSig = includeSig(bestMap) .. "|" .. filt .. "|da=" .. tostring(drawAbove)
+            local structSig = filt .. "|da=" .. tostring(drawAbove)
+            local tuningSig = placedTuningSig(bestMap)
             local coSig = borderSpecSig(bestSpec)
 
             local entry = bd[bestName]
             if not entry then
                 local handle = DF.AuraContainer:Create(frame, buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove))
                 if handle then
-                    bd[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
+                    bd[bestName] = { handle = handle, structSig = structSig,
+                                     tuningSig = tuningSig, coSig = coSig }
                 end
             elseif entry.structSig ~= structSig then
-                entry.structSig, entry.coSig = structSig, coSig
+                entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                 entry.handle:Rebuild(buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove))
-            elseif entry.coSig ~= coSig then
-                entry.coSig = coSig
-                entry.handle:ApplyStyle({ border = { spec = bestSpec } })
+            else
+                if entry.tuningSig ~= tuningSig then
+                    entry.tuningSig = tuningSig
+                    entry.handle:ApplyTuning(buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove))
+                end
+                if entry.coSig ~= coSig then
+                    entry.coSig = coSig
+                    entry.handle:ApplyStyle({ border = { spec = bestSpec } })
+                end
             end
           end
         end
@@ -3397,7 +3436,8 @@ function Factory:SyncFrame(frame)
                 local filt = poolFilter(bestCfg, bestPool == 1)
                 local r, g, b, a = readADColor(bestCfg.color)
                 local color = { r = r, g = g, b = b, a = a }
-                local structSig = includeSig(bestMap) .. "|" .. filt
+                local structSig = filt
+                local tuningSig = placedTuningSig(bestMap)
                 local coSig = colSig(bestCfg.color)
                 -- onHost fires on every style pass (create/ApplyStyle/Blizzard re-init):
                 -- stash the host for the TD-teardown recovery below and (re)register the
@@ -3414,11 +3454,22 @@ function Factory:SyncFrame(frame)
                         buildMirrorHostConfig(frame.unit, bestMap, onHost, filt))
                     if handle then
                         st[bestName] = { handle = handle, structSig = structSig,
-                                         coSig = coSig, host = st._lastHost }
+                                         tuningSig = tuningSig, coSig = coSig,
+                                         host = st._lastHost }
                     end
                 elseif entry.structSig ~= structSig then
-                    entry.structSig, entry.coSig = structSig, coSig
+                    entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                     entry.handle:Rebuild(buildMirrorHostConfig(frame.unit, bestMap, onHost, filt))
+                elseif entry.tuningSig ~= tuningSig then
+                    -- Selection edit only: swap the include map on the live slot. Kept as a
+                    -- branch of this elseif chain (rather than folded into the else) so the
+                    -- one-action-per-pass shape the coSig and host-recovery branches below
+                    -- already rely on is preserved — the sync runs every tick, so a second
+                    -- pending change lands on the next one.
+                    -- entry.host is deliberately untouched: the slot survives a tuning pass,
+                    -- so onHost does not re-fire and the stashed host stays valid.
+                    entry.tuningSig = tuningSig
+                    entry.handle:ApplyTuning(buildMirrorHostConfig(frame.unit, bestMap, onHost, filt))
                 elseif entry.coSig ~= coSig then
                     entry.coSig = coSig
                     entry.handle:ApplyStyle({ overlay = { mirrorHost = { onHost = onHost } } })
