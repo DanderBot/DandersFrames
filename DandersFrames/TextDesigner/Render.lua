@@ -19,6 +19,11 @@ local wipe = wipe
 -- Enabled-element id set, rebuilt by UpdateFrame. Module-local and reused
 -- (wipe, not {}) because UpdateFrame runs in the unit-event hot path.
 local enabledScratch = {}
+-- Second scratch for Render:UpdateFrame's delete-sweep. Same reason and same lifetime
+-- as enabledScratch above -- it is filled and consumed inside one call and never
+-- escapes -- but it holds ALL element ids where enabledScratch holds only the enabled
+-- ones, so the two cannot share a table.
+local liveIdScratch = {}
 
 -- ============================================================
 -- HINT CATEGORIES — which content types refresh on which hints
@@ -393,12 +398,12 @@ function Render:UpdateFrame(frame, tdDB, source, hint, isPreview)
     -- are intentionally left in place so a subsequent add reusing the id
     -- recovers the same FontString instead of leaking another one.
     if frame._tdFontStrings then
-        local liveIds = {}
+        wipe(liveIdScratch)
         for _, elem in ipairs(tdDB.elements or {}) do
-            liveIds[elem.id] = true
+            liveIdScratch[elem.id] = true
         end
         for id, fs in pairs(frame._tdFontStrings) do
-            if not liveIds[id] then
+            if not liveIdScratch[id] then
                 fs:Hide()
             end
         end
