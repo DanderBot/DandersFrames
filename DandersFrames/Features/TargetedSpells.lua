@@ -3423,8 +3423,26 @@ end
 -- Called per bar during render (both real and test paths), and again
 -- from UpdateTargetedListLayout when settings change. The function
 -- runs at drag-tick rate during slider interaction so keep it cheap.
+-- Everything this function writes derives from `db` alone -- never from the spell, the
+-- bar's state or the clock -- so it is pure config and does not belong on the render
+-- path. TargetedList_LayoutBars called it for every active bar on EVERY render, which
+-- made it 86% of all Border:Apply allocation in a combat trace (BuildSpec + Apply +
+-- three or four SafeSetFont calls, per bar, per tick).
+--
+-- Gated on targetedListLayoutVersion, which already existed at the top of this file and
+-- was incremented by DF:UpdateTargetedListLayout but never read by anything. That hook
+-- is the single funnel for every settings change: the Options pages call it, preset
+-- application calls it, and a profile switch reaches it via Position.lua. So a bumped
+-- version is exactly "the config changed", which is exactly when this work is needed.
+--
+-- ☠ TargetedList_ResetBar clears the stamp on release, next to the _lastTexturePath it
+-- already cleared for the same reason. Without that, a recycled bar would skip this
+-- function entirely and lose the SetStatusBarTexture that clearing _lastTexturePath
+-- exists to force.
 local function TargetedList_ApplyBarAppearance(bar, db)
     if not bar or not db then return end
+    if bar._appearanceVersion == targetedListLayoutVersion then return end
+    bar._appearanceVersion = targetedListLayoutVersion
     local barH = db.targetedListHeight or 22
     local showIcon = db.targetedListShowIcon ~= false
     local iconPos = db.targetedListIconPosition or "LEFT"
@@ -3538,6 +3556,10 @@ local function TargetedList_ResetBar(pool, bar)
     bar._testDuration = nil
     bar.icon:SetTexture(nil)
     bar._lastTexturePath = nil
+    -- Same reason as _lastTexturePath above: drop the cached appearance stamp so a
+    -- recycled bar re-runs TargetedList_ApplyBarAppearance on acquire. Without this the
+    -- version gate would skip it and the bar would never get its status-bar texture back.
+    bar._appearanceVersion = nil
     if bar.highlightFrame then
         bar.highlightFrame:Hide()
     end
