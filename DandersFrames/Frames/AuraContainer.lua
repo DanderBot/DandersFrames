@@ -1868,13 +1868,15 @@ function NativeBackend:build()
         for k = 1, maxCount do
             local key = "dfTest" .. k
             local styled = (k <= testStyleSlots) or nil
-            local okGroup, err = pcall(function()
-                c:AddAuraGroup(key, category, {
-                    maxFrameCount = 1,
-                    initializeFrame = handle:_makeInitializeFrame(handle._gen, k, nil, styled and testStyle or nil),
-                    layout = styled and testStyleLayout or groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
-                })
-            end)
+            -- pcall(fn, args...) rather than pcall(function() ... end): the closure form
+            -- allocated one closure per group per container per unit frame, purely to
+            -- wrap a call. The options table is unavoidable (the API takes it); the
+            -- closure was not. Protection is unchanged — AddAuraGroup asserts.
+            local okGroup, err = pcall(c.AddAuraGroup, c, key, category, {
+                maxFrameCount = 1,
+                initializeFrame = handle:_makeInitializeFrame(handle._gen, k, nil, styled and testStyle or nil),
+                layout = styled and testStyleLayout or groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
+            })
             if okGroup then
                 self.groupKeys[#self.groupKeys + 1] = key
                 self.groupStyles[key] = styled and testStyle or nil
@@ -1907,12 +1909,11 @@ function NativeBackend:build()
                 -- dispel carriers) so it can create+bind SetAuraBorder in secure
                 -- context; else the shared initFn.
                 local slotInit = rec.onInit and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit) or initFn
-                local okSlot, btn = pcall(function()
-                    return c:AddAuraSlot(key, f, { initializeFrame = slotInit, candidateFilters = cf,
-                                                   sortMethod = sortMethod, sortDirection = sortDirection })
-                end)
+                local okSlot, btn = pcall(c.AddAuraSlot, c, key, f,
+                    { initializeFrame = slotInit, candidateFilters = cf,
+                      sortMethod = sortMethod, sortDirection = sortDirection })
                 if okSlot and btn then
-                    pcall(function() btn:SetAllPoints(handle.frame) end)
+                    pcall(btn.SetAllPoints, btn, handle.frame)
                     self.slotButtons[key] = btn
                 elseif not okSlot then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
             else
@@ -1925,11 +1926,10 @@ function NativeBackend:build()
                     groupInit = handle:_makeInitializeFrame(handle._gen, nil, rec.onInit, rec.style)
                     recLayout = scaleGroupLayout(groupLayout, rec.style)
                 end
-                local okGroup, err = pcall(function()
-                    c:AddAuraGroup(key, f, { maxFrameCount = maxCount, initializeFrame = groupInit,
-                                             layout = recLayout, candidateFilters = cf,
-                                             sortMethod = sortMethod, sortDirection = sortDirection })
-                end)
+                local okGroup, err = pcall(c.AddAuraGroup, c, key, f,
+                    { maxFrameCount = maxCount, initializeFrame = groupInit,
+                      layout = recLayout, candidateFilters = cf,
+                      sortMethod = sortMethod, sortDirection = sortDirection })
                 if okGroup then
                     self.groupKeys[#self.groupKeys + 1] = key
                     self.groupStyles[key] = rec.style
@@ -2035,7 +2035,7 @@ function NativeBackend:applyLayout()
             -- because AddAuraGroup got the scaled layout there. Button size and reserved
             -- cell are separate things and both have to be re-pushed.
             local gl = scaleGroupLayout(groupLayout, self.groupStyles and self.groupStyles[key])
-            pcall(function() c:SetAuraGroupLayout(key, gl) end)
+            pcall(c.SetAuraGroupLayout, c, key, gl)
         end
     end
     -- ★ PARTITION KICK (live-confirmed 2026-07-09): inbound mutators set the dirty
@@ -2107,13 +2107,23 @@ function NativeBackend:applyGroupTuning()
             self.handle._idGateSourceRelative = true
         end
     end
+    -- pcall(fn, args...) not pcall(function() ... end): the closure form allocated THREE
+    -- closures per group key per tuning pass. Protection is unchanged.
+    --
+    -- Ordering note (Blizzard source): SetAuraGroupMaxFrameCount and
+    -- SetAuraGroupSortMethod only MarkDirty, and dirty flags coalesce into one
+    -- ProcessDirtyFlags on the next OnUpdate — so those are near-free however many
+    -- groups there are. SetAuraGroupCandidateFilters runs an immediate UpdateAllAuras
+    -- per call and has no equality guard of its own, so a container with N groups pays
+    -- N full updates here. There is no batch setter; the only real lever is declaring
+    -- fewer groups.
     for _, key in ipairs(self.groupKeys) do
-        pcall(function() c:SetAuraGroupMaxFrameCount(key, maxCount) end)
+        pcall(c.SetAuraGroupMaxFrameCount, c, key, maxCount)
         -- nil CLEARS: the inbound copy runs over an EMPTY defaults table, so a
         -- toggled-off filter set doesn't survive (the old Rebuild-merge lesson).
-        pcall(function() c:SetAuraGroupCandidateFilters(key, cfByKey[key]) end)
+        pcall(c.SetAuraGroupCandidateFilters, c, key, cfByKey[key])
         if sortMethod ~= nil and sortDirection ~= nil then
-            pcall(function() c:SetAuraGroupSortMethod(key, sortMethod, sortDirection) end)
+            pcall(c.SetAuraGroupSortMethod, c, key, sortMethod, sortDirection)
         end
     end
     -- ★ PARTITION KICK (same mechanism as applyLayout): the inbound mutators mark
