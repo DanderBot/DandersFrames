@@ -2061,12 +2061,28 @@ end
 -- in combat.
 function NativeBackend:applyGroupTuning()
     local c = self.container
-    if not c or self.handle.config.mode == "overlay" or self.handle.config.mode == "missing" then return end
+    if not c then return end
+    local mode = self.handle.config.mode
+    -- ☠ MISSING mode stays on the Rebuild path. Its layout-push inversion is
+    -- load-bearing and hard-won (the badge only clears the clip window because ONE
+    -- blank button's layout CELL pushes it out), and a live candidateFilters swap
+    -- changes exactly which buttons exist. Nothing has exercised that combination, so
+    -- it is left alone rather than enabled blind.
+    if mode == "missing" then return end
     -- Test mode declares per-slot PIN groups (maxFrameCount = 1, curated paint) —
     -- tuning them would break the slot pinning. Handle:ApplyTuning rebuilds the
     -- preview instead, so this path is never reached in test mode; guard anyway.
     if AuraContainer._testMode then return end
-    if not (self.groupKeys and c.SetAuraGroupMaxFrameCount) then return end
+    -- OVERLAY declares AuraSLOTs, not groups, so groupKeys is empty and the group
+    -- setters have nothing to act on — it needs the slot-side setters instead. The
+    -- cfByKey derivation below is shared: build() keys slots and groups identically
+    -- (rec.key or positional "df<i>"), so the same map serves both.
+    local isOverlay = mode == "overlay"
+    if isOverlay then
+        if not (self.slotButtons and c.SetAuraSlotCandidateFilters) then return end
+    elseif not (self.groupKeys and c.SetAuraGroupMaxFrameCount) then
+        return
+    end
     local config = self.handle.config
     local maxCount = self.handle:_slotCount()
     -- SetAuraGroupSortMethod validates BOTH args as enum members (nil asserts), so an
@@ -2117,13 +2133,25 @@ function NativeBackend:applyGroupTuning()
     -- per call and has no equality guard of its own, so a container with N groups pays
     -- N full updates here. There is no batch setter; the only real lever is declaring
     -- fewer groups.
-    for _, key in ipairs(self.groupKeys) do
-        pcall(c.SetAuraGroupMaxFrameCount, c, key, maxCount)
-        -- nil CLEARS: the inbound copy runs over an EMPTY defaults table, so a
-        -- toggled-off filter set doesn't survive (the old Rebuild-merge lesson).
-        pcall(c.SetAuraGroupCandidateFilters, c, key, cfByKey[key])
-        if sortMethod ~= nil and sortDirection ~= nil then
-            pcall(c.SetAuraGroupSortMethod, c, key, sortMethod, sortDirection)
+    if isOverlay then
+        -- A slot is a single button: no maxFrameCount and no layout to push, so only
+        -- the candidate filters and the sort (which decides WHICH aura wins the one
+        -- slot) are tunable. Same nil-CLEARS semantics as the group setter.
+        for key in pairs(self.slotButtons) do
+            pcall(c.SetAuraSlotCandidateFilters, c, key, cfByKey[key])
+            if sortMethod ~= nil and sortDirection ~= nil and c.SetAuraSlotSortMethod then
+                pcall(c.SetAuraSlotSortMethod, c, key, sortMethod, sortDirection)
+            end
+        end
+    else
+        for _, key in ipairs(self.groupKeys) do
+            pcall(c.SetAuraGroupMaxFrameCount, c, key, maxCount)
+            -- nil CLEARS: the inbound copy runs over an EMPTY defaults table, so a
+            -- toggled-off filter set doesn't survive (the old Rebuild-merge lesson).
+            pcall(c.SetAuraGroupCandidateFilters, c, key, cfByKey[key])
+            if sortMethod ~= nil and sortDirection ~= nil then
+                pcall(c.SetAuraGroupSortMethod, c, key, sortMethod, sortDirection)
+            end
         end
     end
     -- ★ PARTITION KICK (same mechanism as applyLayout): the inbound mutators mark
