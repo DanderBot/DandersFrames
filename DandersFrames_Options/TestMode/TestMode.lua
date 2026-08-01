@@ -2321,7 +2321,7 @@ function DF:ToggleTestMode()
 end
 
 -- Show raid test frames
-function DF:ShowRaidTestFrames()
+function DF:ShowRaidTestFrames(silent)
     if InCombatLockdown() then
         DF:Say(L["Cannot enter test mode during combat."])
         return
@@ -2422,10 +2422,17 @@ function DF:ShowRaidTestFrames()
     if DF.PinnedFrames and DF.PinnedFrames.EnterTestMode then
         DF.PinnedFrames:EnterTestMode()
     end
+
+    -- Same confirmation party mode gives. Raid never announced itself at all, and
+    -- did not even take `silent` -- Panel.lua has been passing one to the Hide half
+    -- for a while, which quietly did nothing.
+    if not silent then
+        DF:Say(L["Test mode enabled."])
+    end
 end
 
 -- Hide raid test frames
-function DF:HideRaidTestFrames()
+function DF:HideRaidTestFrames(silent)
     DF.raidTestMode = false
     -- Restore the real aura provider only when NEITHER test mode remains active
     -- (party + raid share the global data-provider switch).
@@ -2523,6 +2530,11 @@ function DF:HideRaidTestFrames()
     if DF.PinnedFrames and DF.PinnedFrames.ExitTestMode
         and not DF.testMode then
         DF.PinnedFrames:ExitTestMode()
+    end
+
+    -- Same confirmation party mode gives; see ShowRaidTestFrames.
+    if not silent then
+        DF:Say(L["Test mode disabled."])
     end
 end
 
