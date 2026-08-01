@@ -2568,3 +2568,52 @@ function DF:LockFrames()
     DF:Say(L["Frames locked."])
 end
 
+-- ============================================================
+-- BLIZZARD EDIT MODE — stand down while it is open
+-- ============================================================
+-- Entering /edit left DF half-dressed. The game closes DandersFramesGUI and
+-- DandersFramesTestPanel for us -- both are in UISpecialFrames -- but the position
+-- panel is NOT, so it stayed up, and behind it the grid, the movers and the test
+-- preview all kept running: two grids overlapping and fake party frames sitting on
+-- top of Blizzard's own editor. Field-reported.
+--
+-- The actual gap is that DF had no Edit Mode integration at all; the two windows
+-- that did close were closing by accident of UISpecialFrames membership.
+--
+-- Locking is the right response and needs nothing new: LockFrames/LockRaidFrames
+-- already hide the position panel, the grid, the movers and the pinned drag chrome,
+-- and release unlock's test claim.
+--
+-- ⚠ NOT restored on exit, deliberately. Blizzard's Edit Mode does not put anyone
+-- else's windows back either, and silently re-unlocking frames under someone who
+-- has just finished rearranging their UI is worse than making them click Unlock.
+local function standDownForEditMode()
+    if InCombatLockdown() then return end   -- Edit Mode is unreachable in combat; belt anyway
+
+    local partyDb = DF.GetDB and DF:GetDB()
+    if partyDb and not partyDb.locked then
+        partyDb.locked = true
+        if DF.LockFrames then DF:LockFrames() end
+    end
+
+    local raidDb = DF.GetRaidDB and DF:GetRaidDB()
+    if raidDb and not raidDb.raidLocked then
+        raidDb.raidLocked = true
+        if DF.LockRaidFrames then DF:LockRaidFrames() end
+    end
+
+    -- Drop the user's claim too, so no preview survives into Edit Mode. This also
+    -- settles the aura containers: turning test mode off hands the real data
+    -- provider back, which is what keeps Edit Mode's sample auras out of our rows
+    -- (see Frames/AuraContainer.lua -- test mode owns the provider switch while it
+    -- is running, so the usual guard stands aside for it).
+    if DF.SetTestModeOwner then
+        DF:SetTestModeOwner("party", "user", false, true)
+        DF:SetTestModeOwner("raid", "user", false, true)
+    end
+end
+
+if EventRegistry and EventRegistry.RegisterCallback then
+    EventRegistry:RegisterCallback("EditMode.Enter", standDownForEditMode, DF)
+end
+
