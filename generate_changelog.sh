@@ -163,14 +163,26 @@ fi
 echo "$CHANGELOG_CONTENT" > "$CHANGELOG_FILE"
 
 # Sync TOC version if it doesn't already match (avoids double-bump when manually updated)
-TOC_FILE="DandersFrames/DandersFrames.toc"
-CURRENT_TOC_VERSION=$(grep '^## Version:' "$TOC_FILE" | sed 's/^## Version: //')
-if [ "$CURRENT_TOC_VERSION" != "$VERSION" ]; then
-    sed -i "s/^## Version: .*/## Version: ${VERSION}/" "$TOC_FILE"
-    echo "Updated TOC version: ${CURRENT_TOC_VERSION} -> ${VERSION}"
-else
-    echo "TOC version already matches: ${VERSION}"
-fi
+#
+# ☠ BOTH TOCs. The packager does not rewrite "## Version:" -- its toc_version
+# handling is the Interface (game) version, not this field -- so whatever is
+# committed here is what WoW shows in the addon list, in the zip and locally
+# through a dev junction. Syncing only the main TOC left the companion pinned
+# at whatever it was hand-written as, drifting one version further behind on
+# every release.
+for TOC_FILE in "DandersFrames/DandersFrames.toc" "DandersFrames_Options/DandersFrames_Options.toc"; do
+    if [ ! -f "$TOC_FILE" ]; then
+        echo "Error: $TOC_FILE not found — the addon layout changed without this script." >&2
+        exit 1
+    fi
+    CURRENT_TOC_VERSION=$(grep '^## Version:' "$TOC_FILE" | sed 's/^## Version: //')
+    if [ "$CURRENT_TOC_VERSION" != "$VERSION" ]; then
+        sed -i "s/^## Version: .*/## Version: ${VERSION}/" "$TOC_FILE"
+        echo "Updated ${TOC_FILE}: ${CURRENT_TOC_VERSION} -> ${VERSION}"
+    else
+        echo "${TOC_FILE} already matches: ${VERSION}"
+    fi
+done
 
 # Write the resident header (stamps only -- the addon reads RELEASE_CHANNEL at
 # load; the text below never loads unless the settings panel does)
