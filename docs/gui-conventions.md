@@ -182,7 +182,7 @@ one surface behave unlike the rest of the addon.
 
 | Need | Helper | ☠ What breaks if you skip it |
 |------|--------|------------------------------|
-| A dropdown-style popup menu | `GUI:RegisterMenu(frame)`, `GUI:CloseAllMenus()` | **Register every menu frame at creation.** A menu that isn't registered stays open through a page change, mode switch or window close, and floats over whatever comes next |
+| A dropdown-style popup menu | `GUI:RegisterMenu(frame)` — resident; `GUI:CloseAllMenus()` — **companion-only, see below** | **Register every menu frame at creation.** A menu that isn't registered stays open through a page change, mode switch or window close, and floats over whatever comes next |
 | A widget that changes height | `GUI:RelayoutHost(widget, slotHeight)` | Updates the group's stored slot, re-lays the group, **then bubbles to the page** so sibling groups re-anchor. Without the bubble a grown group's backdrop overshoots the next group's anchor and paints an empty rectangle above it |
 | A border on a bespoke frame | `GUI:ApplyPixelBorder(frame, {r,g,b,a}, weight)`, `GUI:HidePixelBorder(frame)`, `GUI:RefreshPixelBorders()` | Our two-device-pixel border. A `SetBackdrop` edge instead gives you the thinning / vanishing hairline the whole system exists to avoid — see "The pixel grid" |
 | Whole-pixel geometry | `GUI.SnapLen`, `GUI.SnapLenUp` | Right/top edges land mid-pixel and clip whatever they contain |
@@ -191,6 +191,37 @@ one surface behave unlike the rest of the addon.
 | Tab availability | `GUI:UpdateTabAvailability()`, `GUI:IsTabDisabledForCurrentMode(tabName)` | Call after anything that changes which tabs apply to the current mode |
 | Colour-picker interop | `GUI:InstallColorPickerHook()` / `Uninstall…` / `IsColorPickerHookInstalled()` / `MarkColorPickerCall()` | Keeps Blizzard's picker from stomping our own; mark your call or the hook can't tell whose it is |
 | Section collapse state | `GUI:GetCollapsedGroups()` | Persisted collapse state — read it, don't track your own |
+
+### ⚠ The menu registry straddles the addon boundary
+
+The three pieces of the menu system do not live together, which the table above
+cannot show:
+
+| Piece | Where | Loads |
+|---|---|---|
+| `GUI._menus` (the registry table) | `DandersFrames/GUI/Widgets.lua` | always |
+| `GUI:RegisterMenu(frame)` | `DandersFrames/GUI/Widgets.lua` | always |
+| `GUI:CloseAllMenus()` | `DandersFrames_Options/GUI/SettingsWidgets.lua` | with the settings panel |
+
+So **resident code can register a menu but cannot close one.** Resident
+`GUI:CreateDropdown` registers its menu frame, and it has one resident caller —
+the mover panel's anchor dropdown (`Frames/Position.lua`), which exists with
+the settings panel unloaded.
+
+Nothing is broken today: both `CloseAllMenus` callers are companion-side
+(`AuraDesigner/UI/Cards.lua`), so the reader and its callers load together. But
+if you are writing resident code and reach for `CloseAllMenus`, **it will be
+nil until someone has opened `/df`** — and because it is a bulk "tidy up"
+call, a nil-guard that skips it fails silently by leaving a menu floating,
+which is exactly the symptom the registry exists to prevent.
+
+If you need it resident, move the function rather than guarding the call: it is
+four lines and it belongs with the registry it iterates. Guarding would
+document the split instead of removing it.
+
+☠ Not the same thing as `CloseOpenDropdown` (resident, published on
+`GUI._priv`), which closes the *single currently-open* dropdown. That one is
+available on both sides and is what most call sites actually want.
 
 ## Popups — never Blizzard's
 
