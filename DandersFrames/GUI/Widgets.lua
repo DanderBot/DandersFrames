@@ -1822,6 +1822,20 @@ end
 GUI._menus = GUI._menus or {}
 function GUI:RegisterMenu(frame) self._menus[frame] = true end
 
+-- ☠ Lives with the registry it iterates, deliberately. This was in the
+-- companion for a while, which left resident code able to REGISTER a menu but
+-- not close one -- and resident CreateDropdown below does register (the mover
+-- panel's anchor dropdown is a resident caller). Nothing broke, because both
+-- callers happened to be companion-side, but a bulk "dismiss whatever is open"
+-- call that is nil half the time fails SILENTLY: the menu just stays floating,
+-- which is the exact symptom this registry exists to prevent. Four lines is
+-- not worth an addon boundary.
+function GUI:CloseAllMenus()
+    for f in pairs(self._menus) do
+        if f:IsShown() then f:Hide() end
+    end
+end
+
 function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, customGet, customSet, opts)
     opts = opts or {}
     local accentColor = opts.accent

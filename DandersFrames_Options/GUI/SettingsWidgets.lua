@@ -1922,12 +1922,6 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     return container
 end
 
-function GUI:CloseAllMenus()
-    for f in pairs(self._menus) do
-        if f:IsShown() then f:Hide() end
-    end
-end
-
 function GUI:CreateOutlineDropdown(parent, label, dbTable, dbKey, callback, inheritKey)
     local options = {
         NONE = L["None"],
