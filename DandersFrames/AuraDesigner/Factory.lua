@@ -1231,9 +1231,15 @@ end
 -- toggling a region OFF must Rebuild the container to drop it; a plain ApplyStyle would leave
 -- the old region visible. A change here forces a whole-container Rebuild (slots can't be
 -- patched). Cosmetic styling of a live region is coSig.
-local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defs, mine)
-    return includeSig(map)
-        .. "|" .. (isSquare and "sq" or "ic")
+-- STRUCTURAL signature: CREATE-ONLY properties only. A change here costs a full
+-- teardown+recreate -- and teardown can only Hide(), because WoW never destroys frames,
+-- so every rebuild permanently strands the container plus a 10-frame batch per group
+-- (AddAuraGroup always creates FrameCreationBatchSize frames up front). Anything the
+-- native API can mutate live therefore MUST stay out of this sig or it leaks on every
+-- edit. The tracked spell-ID map used to live here; it is live-tunable via
+-- candidateFilters and now rides placedTuningSig.
+local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defs, mine)
+    return (isSquare and "sq" or "ic")
         .. "|" .. (hideIcon and "hi" or "")
         .. "|" .. (showStacks and "st" or "")
         .. "|" .. (showDuration and "du" or "")
@@ -1255,6 +1261,16 @@ local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration
                 .. tostring(tonumber(indicator.durationBarGap) or 1) .. ":"
                 .. tostring(indicator.durationBarColorMode or "STATIC"))
             or "")
+end
+
+-- TUNING signature: the live-mutable half of what placedStructSig used to carry. The
+-- tracked spell-ID map becomes config.candidateFilters ({ includeSpellIDs = map }), and
+-- the native SetAuraGroupCandidateFilters mutates that in place — so a selection edit is
+-- an ApplyTuning, never a Rebuild. A placed indicator pins max = 1 (buildPlacedConfig)
+-- and has no per-indicator sort, so the map IS the whole tuning sig. Mirrors the
+-- filter-group path's tuningSig, which has worked this way since Wave 1.
+local function placedTuningSig(map)
+    return includeSig(map)
 end
 
 -- COSMETIC signature: size/anchor/offset/scale/alpha, swipe, duration/stack styling, square
@@ -2860,8 +2876,9 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         -- Sigs are computed from RAW config every tick (no BuildSpec
                         -- alloc — FIX C); the actual border spec is built ONLY inside a
                         -- create/rebuild/restyle branch below, never per pass.
-                        local structSig = placedStructSig(map, isSquare, hideIcon, showStacks,
+                        local structSig = placedStructSig(isSquare, hideIcon, showStacks,
                             showDuration, borderOn, indicator, defs, mine)
+                        local tuningSig = placedTuningSig(map)
                         local coSig = placedCoSig(eff, isSquare, borderOn, alpha)
 
                         local entry = placed[key]
@@ -2871,20 +2888,41 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                                 buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
-                                placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
+                                placed[key] = { handle = handle, structSig = structSig,
+                                                tuningSig = tuningSig, coSig = coSig }
                             end
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
-                            entry.structSig, entry.coSig = structSig, coSig
+                            entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                             entry.handle:Rebuild(buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine))
                             applyPlacedAlpha(entry.handle, alpha)
-                        elseif entry.coSig ~= coSig then
-                            local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
-                            entry.coSig = coSig
-                            entry.handle:ApplyStyle(
-                                buildPlacedStyle(indicator, isSquare, borderSpec, defs),
-                                buildPlacedLayout(eff))
-                            applyPlacedAlpha(entry.handle, alpha)
+                        else
+                            if entry.tuningSig ~= tuningSig then
+                                -- Selection edit with the struct sig stable: swap the include
+                                -- map on the LIVE container instead of recreating it.
+                                -- ApplyTuning replaces the trio wholesale (max/sort/
+                                -- candidateFilters) off the fresh config and self-defers in
+                                -- combat. testEntries rides along so a test-mode rebuild
+                                -- previews the NEW selection, not a stale one — same pairing
+                                -- as the filter-group path. borderSpec is nil here on purpose:
+                                -- ApplyTuning reads only the trio, and the cosmetic branch
+                                -- below owns the style (building a spec here would be thrown
+                                -- away).
+                                entry.tuningSig = tuningSig
+                                local cfg = buildPlacedConfig(frame, frame.unit, map, eff, isSquare, nil, defs, mine)
+                                entry.handle.config.testEntries = cfg.testEntries
+                                entry.handle:ApplyTuning(cfg)
+                            end
+                            if entry.coSig ~= coSig then
+                                local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
+                                entry.coSig = coSig
+                                entry.handle:ApplyStyle(
+                                    buildPlacedStyle(indicator, isSquare, borderSpec, defs),
+                                    buildPlacedLayout(eff))
+                                -- alpha is part of coSig, so it re-applies here and NOT on the
+                                -- steady-state path — this block runs per indicator per tick.
+                                applyPlacedAlpha(entry.handle, alpha)
+                            end
                         end
 
                         -- Expiry-alert companion slot (own container, own sigs —
