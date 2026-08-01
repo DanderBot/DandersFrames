@@ -89,10 +89,27 @@ jobs:
       - name: Validate locale files
         if: steps.guard.outputs.skip != 'true'
         run: |
+          # ☠ A glob that matches nothing must FAIL, not pass silently.
+          # Without nullglob an unmatched pattern stays literal, grep errors on the
+          # missing file, ERRORS stays 0, and this step prints "validated OK" while
+          # checking nothing — so the guard cannot tell "no problems" from "wrong
+          # path". That matters now the addon layout can move (12.1 container reorg).
+          shopt -s nullglob
+          FILES=(.release/DandersFrames/Locales/*.lua)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "::error::No locale files matched .release/DandersFrames/Locales/*.lua — the packaged layout changed and this check is validating nothing. Fix the path."
+            exit 1
+          fi
+          echo "Validating ${#FILES[@]} locale file(s)"
+
           ERRORS=0
-          for f in .release/DandersFrames/Locales/*.lua; do
-            # Check for CurseForge API error responses injected as raw text
-            if grep -qP '^error code:|^<!DOCTYPE|^<html|^\{"error' "$f" 2>/dev/null; then
+          for f in "${FILES[@]}"; do
+            # Check for CurseForge API error responses injected as raw text.
+            # -E, not -P: the pattern needs no PCRE, and -P is unavailable in some
+            # environments ("supports only unibyte and UTF-8 locales"). Paired with
+            # 2>/dev/null, a grep that fails to run reads as "file is clean" — the
+            # same silent pass the nullglob guard above exists to prevent.
+            if grep -qE '^error code:|^<!DOCTYPE|^<html|^\{"error' "$f" 2>/dev/null; then
               echo "::error::Locale file contains API error response: $(basename $f)"
               head -5 "$f"
               ERRORS=$((ERRORS + 1))
