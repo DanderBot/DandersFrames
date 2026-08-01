@@ -1,13 +1,35 @@
 package-as: DandersFrames
 enable-nolib-creation: no
 
+# The repo root is a container: it holds the addon folders rather than being
+# one. The packager copies the checkout into .release/<package-as>/, so both
+# land a level too deep; move-folders lifts them back out to the zip root.
+#
+# move-folders keys are relative to the working directory and INCLUDE the
+# package name as the root; values are relative to the package root. So
+# "DandersFrames/DandersFrames: DandersFrames" reads as "the DandersFrames
+# folder inside the package dir becomes the top-level DandersFrames" -- it
+# looks like it collides with its own parent and does not. This is the
+# documented shape for a container repo that ships more than one folder;
+# verified against a working example before writing it, after talking myself
+# out of it once on the assumption that it would collide.
+#
+# Everything at the repo root that is not an addon folder is stripped by the
+# ignore list below, so the zip contains only the two addon folders.
+move-folders:
+  DandersFrames/DandersFrames: DandersFrames
+  DandersFrames/DandersFrames_Options: DandersFrames_Options
+
 ignore:
   - CHANGELOG.md
   - README.md
+  - TRANSLATING.md
   - generate_changelog.sh
   - Tools
   - .github
   - .gitignore
+  # Editor/tooling metadata (wow-api.json and friends). Nothing reads it at runtime.
+  - .gitnexus
   # Contributor documentation. Tracked in git so it travels with pull requests,
   # stripped here so it never reaches the packaged addon users download.
   - docs

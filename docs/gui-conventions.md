@@ -192,6 +192,33 @@ one surface behave unlike the rest of the addon.
 | Colour-picker interop | `GUI:InstallColorPickerHook()` / `Uninstall…` / `IsColorPickerHookInstalled()` / `MarkColorPickerCall()` | Keeps Blizzard's picker from stomping our own; mark your call or the hook can't tell whose it is |
 | Section collapse state | `GUI:GetCollapsedGroups()` | Persisted collapse state — read it, don't track your own |
 
+### The menu registry — all three pieces are resident
+
+The registry table, its writer and its reader live together in
+`DandersFrames/GUI/Widgets.lua`, and they should stay that way:
+
+| Piece | Where |
+|---|---|
+| `GUI._menus` (the registry table) | resident |
+| `GUI:RegisterMenu(frame)` | resident |
+| `GUI:CloseAllMenus()` | resident |
+
+`CloseAllMenus` briefly lived in the companion during the load-on-demand split.
+That left resident code able to *register* a menu but not close one — and
+resident `GUI:CreateDropdown` does register, with a resident caller (the mover
+panel's anchor dropdown). Nothing broke, because both `CloseAllMenus` callers
+happened to be companion-side, but the failure mode was the bad kind: a bulk
+"dismiss whatever is open" call that is nil half the time fails **silently**,
+leaving a menu floating — the exact symptom the registry exists to prevent.
+
+☠ Four lines are not worth an addon boundary. If you ever find yourself
+nil-guarding a call like this, move the function instead — a guard documents
+the split rather than removing it.
+
+Not the same thing as `CloseOpenDropdown` (resident, published on `GUI._priv`),
+which closes the *single currently-open* dropdown. That is what most call sites
+actually want.
+
 ## Popups — never Blizzard's
 
 There are **zero** `StaticPopupDialogs` / `StaticPopup_Show` calls left in the addon. Use the DF

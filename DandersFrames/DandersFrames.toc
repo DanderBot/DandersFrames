@@ -1,0 +1,175 @@
+## Interface: 120100
+## Title: DandersFrames
+## Notes: Custom party/raid frames for WoW Midnight 12.0
+## X-Credits: Some optimization patterns informed by studying Grid2 and other community addons. Secret aura tracking techniques from Harrek's Advanced Raid Frames (used with permission).
+## Author: Danders
+## Version: v5.0.0-alpha.13
+## X-Curse-Project-ID: 1389690
+## X-Wago-ID: RNL9B46o
+## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
+## SavedVariables: DandersFramesDB_v2, DandersFramesClickCastingDB, DandersFramesDebugDB
+## SavedVariablesPerCharacter: DandersFramesCharDB
+## AllowAddOnTableAccess: 1
+## OptionalDeps: LibSharedMedia-3.0, SharedMedia, SharedMedia_MyMedia, SharedMediaAdditionalFonts, FrameSort
+## Category: Unit Frames
+## Category-deDE: Einheitenfenster
+## Category-esES: Marcos de unidades
+## Category-esMX: Marcos de unidades
+## Category-frFR: Portraits d'unités
+## Category-itIT: Riquadri delle unità
+## Category-koKR: 개체창
+## Category-ptBR: Quadros de unidade
+## Category-ruRU: Рамки юнитов
+## Category-zhCN: 单位框体
+## Category-zhTW: 單位框架
+
+# Libraries
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\AceLocale-3.0\AceLocale-3.0.lua
+Libs\AceSerializer-3.0\AceSerializer-3.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
+Libs\LibSharedMedia-3.0\LibSharedMedia-3.0.lua
+Libs\LibDeflate\LibDeflate.lua
+Libs\LibSerialize\LibSerialize.lua
+
+# Localization (must load before code that uses L)
+Locales\enUS.lua
+Locales\deDE.lua
+Locales\esES.lua
+Locales\esMX.lua
+Locales\frFR.lua
+Locales\itIT.lua
+Locales\koKR.lua
+Locales\ptBR.lua
+Locales\ruRU.lua
+Locales\zhCN.lua
+Locales\zhTW.lua
+
+# XML Templates (must load before Lua that uses them)
+DandersFrames.xml
+
+# Core
+Core\Config.lua
+Core\Changelog.lua
+Core\Profile.lua
+Core.lua
+Designer\Presets.lua
+Core\RosterEvents.lua
+# Auto-profile switching engine. Resident because it is live behaviour -- it has
+# to switch profiles whether or not the settings panel has ever been opened.
+# The page half is in the companion. ☠ Must load after Core.lua: it calls
+# DF:RegisterLocaleRefresh at file scope.
+Core\AutoProfiles.lua
+
+# Debug Console (loads early so all modules can use DF:Debug)
+Debug\DebugConsole.lua
+
+# Profiler (loads early so its SetScript hook is in place before any
+# feature file binds an OnUpdate handler — this is what gives the
+# OnUpdate registry full coverage of all DF every-frame handlers)
+Debug\Profiler.lua
+
+# Foreign-attachment scan (/df attached) — diagnoses other addons anchored to our frames
+
+# GUI System
+# GUI toolkit, split from one 13k-line file. Order is load-bearing: GUI.lua
+# creates the GUI table plus GUI._state / GUI._priv, which every later part
+# re-declares aliases from.
+GUI\GUI.lua
+GUI\Widgets.lua
+GUI\DFFonts.lua
+# Loads DandersFrames_Options on demand and owns the DF:ToggleGUI stub. The
+# settings panel, both designers, the click-casting UI, test mode and the debug
+# tools all live in that companion now.
+GUI\LoadOptions.lua
+
+# Popup System (alert / confirm / input dialogs)
+GUI\Popup.lua
+
+# Frame System
+Frames\Core.lua
+Frames\Colors.lua
+Frames\Border.lua
+Frames\TextStyle.lua
+Frames\AuraContainer.lua
+Frames\Create.lua
+Frames\Headers.lua
+Frames\Update.lua
+Frames\Bars.lua
+Frames\ReducedMaxHealth.lua
+Frames\Icons.lua
+Frames\StatusIcons.lua
+Frames\Init.lua
+Frames\Position.lua
+Frames\Pets.lua
+
+# Test Mode
+# Shim.lua stays resident when the rest of this folder becomes load-on-demand:
+# live rendering calls into test mode, so the entry points must always exist.
+# ☠ It MUST load before TestMode.lua, which overwrites every stub.
+TestMode\Shim.lua
+
+# Features
+Features\Auras.lua
+Features\Expiration.lua
+Features\Highlights.lua
+Features\ElementAppearance.lua
+Features\Range.lua
+Features\HealthFade.lua
+Features\Sort.lua
+Features\SecureSort.lua
+Features\FrameSort.lua
+Features\Dispel.lua
+
+# Aura Designer
+AuraDesigner\Config.lua
+AuraDesigner\AuraAdapter.lua
+# Migrations rewrite SAVED DATA, so they stay resident even once the editor
+# below becomes load-on-demand. Core.lua runs them on ADDON_LOADED and
+# Factory.lua on the render path -- both guarded, so an unloaded editor would
+# not error, it would silently skip and leave saved data unmigrated.
+# ☠ Must load after AuraAdapter.lua: it reads DF.AuraDesigner.Adapter at file scope.
+AuraDesigner\Migrations.lua
+AuraDesigner\Engine.lua
+AuraDesigner\Factory.lua
+AuraDesigner\SoundEngine.lua
+# Editor UI, split from one 9k-line file. Order is load-bearing: Options.lua
+# creates DF.AuraDesigner._uiState / ._priv, which every later part aliases.
+
+# Text Designer
+TextDesigner\TextDesigner.lua
+TextDesigner\MidnightSafe.lua
+TextDesigner\DataSource.lua
+TextDesigner\Resolver.lua
+TextDesigner\Render.lua
+TextDesigner\Migration.lua
+TextDesigner\Preview.lua
+
+# Filter Registry
+FilterRegistry\SpellDB.lua
+FilterRegistry\Registry.lua
+
+# Aura Blacklist
+AuraBlacklist\Config.lua
+
+Features\TargetedSpells.lua
+Features\VersionCheck.lua
+Features\Nicknames.lua
+Features\NicknamesComm.lua
+Features\PinnedFrames.lua
+Features\FlatRaidFrames.lua
+
+# Debug (Profiler.lua is loaded earlier so its SetScript hook is in place)
+
+# Click-Casting System
+ClickCasting\Core.lua
+ClickCasting\Constants.lua
+ClickCasting\Profiles.lua
+ClickCasting\Frames.lua
+ClickCasting\Bindings.lua
+ClickCasting\Events.lua
+
+# External API (for Wago UI Packs, etc.)
+Core\API.lua

@@ -1,0 +1,229 @@
+-- ☠ Companion addon: `...` yields THIS addon's private table, not the
+-- parent's, so every DF.* read here would be nil. Take the parent's table
+-- from the global it publishes at DandersFrames/Core.lua:9 (`_G[addonName]
+-- = DF`). NOT from ## AllowAddOnTableAccess -- that directive governs
+-- access to an addon's PRIVATE table and has nothing to do with the global
+-- name; deleting Core.lua:9 as "redundant" would nil DF in every file here.
+local DF = DandersFrames
+
+-- Icon Library Preview
+-- Use /dficons to open the preview window
+
+local ICONS_PATH = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+
+local ICONS = {
+    "add",
+    "check",
+    "chevron_right",
+    "close",
+    "content_copy",
+    "delete",
+    "download",
+    "edit",
+    "expand_more",
+    "filter_alt",
+    "filter_list",
+    "info",
+    "keyboard",
+    "lock",
+    "lock_open",
+    "menu",
+    "mouse",
+    "refresh",
+    "save",
+    "search",
+    "settings",
+    "upload",
+    "visibility",
+    "visibility_off",
+    "warning",
+}
+
+local previewFrame = nil
+
+local function CreateIconPreview()
+    if previewFrame then
+        previewFrame:Show()
+        return
+    end
+    
+    -- Colors. Neutrals that already match the shared GUI palette point at it
+    -- (zero visual change); C_BORDER/C_TEXT/C_ACCENT differ from GUI.Colors and
+    -- stay private (this static preview doesn't theme-track).
+    local C_BG = DF.GUI.Colors.background
+    local C_BORDER = {r = 0.3, g = 0.3, b = 0.3}
+    local C_ACCENT = {r = 0.6, g = 0.4, b = 0.8}
+    local C_TEXT_DIM = DF.GUI.Colors.textDim
+    
+    -- Main frame
+    local frame = CreateFrame("Frame", "DFIconPreview", UIParent, "BackdropTemplate")
+    -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
+    frame:SetSize(520, 480)
+    frame:SetPoint("CENTER")
+    DF.GUI:CreateElementBackdrop(frame, {
+        bgColor     = { C_BG.r, C_BG.g, C_BG.b, 0.95 },
+        borderColor = { C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1 },
+    })
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    frame:SetFrameStrata("DIALOG")
+    
+    -- Title
+    local title = frame:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
+    title:SetPoint("TOP", 0, -12)
+    title:SetText(DF.L["Material Icons Preview"])
+    title:SetTextColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b)
+    
+    -- Subtitle
+    local subtitle = frame:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+    subtitle:SetPoint("TOP", title, "BOTTOM", 0, -4)
+    subtitle:SetText(DF.L["25 icons from Google Material Symbols (Apache 2.0)"])
+    subtitle:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    
+    -- Close button
+    local closeBtn = DF.GUI:CreateCloseButton(frame, { size = 20, onClick = function() frame:Hide() end })
+    closeBtn:SetPoint("TOPRIGHT", -8, -8)
+    
+    -- Color buttons for testing SetVertexColor
+    local colorLabel = frame:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+    colorLabel:SetPoint("TOPLEFT", 16, -50)
+    colorLabel:SetText(DF.L["Theme Color:"])
+    colorLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    
+    local colors = {
+        {name = DF.L["White"], r = 1, g = 1, b = 1},
+        {name = DF.L["Purple"], r = 0.6, g = 0.4, b = 0.8},
+        {name = DF.L["Blue"], r = 0.3, g = 0.5, b = 0.9},
+        {name = DF.L["Orange"], r = 0.9, g = 0.5, b = 0.2},
+        {name = DF.L["Red"], r = 0.9, g = 0.3, b = 0.3},
+        {name = DF.L["Green"], r = 0.3, g = 0.8, b = 0.4},
+        {name = DF.L["Yellow"], r = 1, g = 0.8, b = 0.2},
+        {name = DF.L["Gray"], r = 0.5, g = 0.5, b = 0.5},
+    }
+    
+    local currentColor = colors[1]
+    local iconTextures = {}
+    
+    local function UpdateIconColors()
+        for _, tex in ipairs(iconTextures) do
+            tex:SetVertexColor(currentColor.r, currentColor.g, currentColor.b)
+        end
+    end
+    
+    local colorBtns = {}
+    for i, col in ipairs(colors) do
+        local btn = CreateFrame("Button", nil, frame, "BackdropTemplate")
+        btn:SetSize(20, 20)
+        btn:SetPoint("LEFT", colorLabel, "RIGHT", 8 + (i-1) * 24, 0)
+        DF.GUI:CreateElementBackdrop(btn, {
+            bgColor     = { col.r, col.g, col.b, 1 },
+            borderColor = { 0.2, 0.2, 0.2, 1 },
+        })
+        btn:SetScript("OnClick", function()
+            currentColor = col
+            UpdateIconColors()
+            -- Update button borders
+            for j, b in ipairs(colorBtns) do
+                if j == i then
+                    b:SetBackdropBorderColor(1, 1, 1, 1)
+                else
+                    b:SetBackdropBorderColor(0.2, 0.2, 0.2, 1)
+                end
+            end
+        end)
+        btn:SetScript("OnEnter", function(self)
+            DF.GUI:ShowTooltip(self, { title = col.name })
+        end)
+        btn:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
+        
+        if i == 1 then
+            btn:SetBackdropBorderColor(1, 1, 1, 1)
+        end
+        
+        table.insert(colorBtns, btn)
+    end
+    
+    -- Icon grid
+    local ICON_SIZE = 32
+    local CELL_SIZE = 56
+    local ICONS_PER_ROW = 8
+    local START_X = 24
+    local START_Y = -90
+    
+    for i, iconName in ipairs(ICONS) do
+        local row = math.floor((i - 1) / ICONS_PER_ROW)
+        local col = (i - 1) % ICONS_PER_ROW
+        
+        local x = START_X + col * CELL_SIZE
+        local y = START_Y - row * (CELL_SIZE + 16)
+        
+        -- Icon container
+        local container = CreateFrame("Button", nil, frame, "BackdropTemplate")
+        container:SetSize(CELL_SIZE - 4, CELL_SIZE + 12)
+        container:SetPoint("TOPLEFT", x, y)
+        DF.GUI:CreateElementBackdrop(container, {
+            bgColor     = { 0.12, 0.12, 0.12, 1 },
+            borderColor = { C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5 },
+        })
+        
+        -- Icon texture
+        local icon = container:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(ICON_SIZE, ICON_SIZE)
+        icon:SetPoint("TOP", 0, -4)
+        icon:SetTexture(ICONS_PATH .. iconName)
+        icon:SetVertexColor(currentColor.r, currentColor.g, currentColor.b)
+        table.insert(iconTextures, icon)
+        
+        -- Label
+        local label = container:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+        label:SetPoint("BOTTOM", 0, 4)
+        label:SetText(iconName)
+        label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        label:SetWidth(CELL_SIZE - 8)
+        label:SetWordWrap(false)
+        
+        -- Hover and click
+        container:SetScript("OnEnter", function(self)
+            self:SetBackdropBorderColor(C_ACCENT.r, C_ACCENT.g, C_ACCENT.b, 1)
+            DF.GUI:ShowTooltip(self, {
+                title = iconName,
+                lines = {
+                    { text = ICONS_PATH .. iconName, color = { r = 0.6, g = 0.6, b = 0.6 } },
+                    " ",
+                    { text = DF.L["Click to copy texture path"], hint = true },
+                },
+            })
+        end)
+        container:SetScript("OnLeave", function(self)
+            self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+            DF.GUI:HideTooltip()
+        end)
+        container:SetScript("OnClick", function()
+            local path = ICONS_PATH .. iconName
+            DF:Say(DF.L["Copied: "] .. path)
+        end)
+    end
+    
+    -- Usage info at bottom
+    local usage = frame:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
+    usage:SetPoint("BOTTOM", 0, 12)
+    usage:SetText(DF.L["Click icon to copy path • Icons are white and can be tinted with SetVertexColor()"])
+    usage:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    
+    previewFrame = frame
+end
+
+-- Slash command
+DF:RegisterDebugSlash("DFICONS", "Icon library browser", true, "/dficons")
+SlashCmdList["DFICONS"] = function()
+    CreateIconPreview()
+end
+
+-- Print load message
+C_Timer.After(1, function()
+    -- Only print if debug mode or first time
+    -- DF:Say("Icon library loaded. Use /dficons to preview.")
+end)
