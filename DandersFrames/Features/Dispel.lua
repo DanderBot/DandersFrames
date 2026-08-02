@@ -1718,6 +1718,20 @@ function DF:DriveDispelOverlayFactory(frame, db)
         return
     end
 
+    -- EMPTY HEADER SLOT. A raid header keeps its whole child set alive and hands
+    -- units out as the roster fills, so outside a full group most children carry
+    -- no unit at all. They are hidden, they can never match a dispellable aura,
+    -- and AuraContainer:Create defaults a nil unit to "player" -- so building
+    -- here stood up a six-slot container per EMPTY slot and pointed each one at
+    -- the wrong unit. UpdateAllDispelOverlays walks IterateAllFrames unfiltered
+    -- (the aura rows come through FullFrameRefresh, which already returns on a
+    -- unitless frame -- that is why they never paid this).
+    -- Measured, login while solo: 41 containers built, 40 of them empty raid
+    -- slots -- 10.8 MB of the 14.1 MB the addon spent standing containers up.
+    -- Existing handles are deliberately LEFT ALONE: the roster churns, and
+    -- SetUnit re-targets a live one for free when a unit lands in this slot.
+    if not frame.unit then return end
+
     -- Fast path (this runs per UNIT_AURA in combat): already built AND styled at
     -- the current layout version + build generation -> only unit upkeep remains.
     -- Skips the per-call plan/signature allocation entirely; any settings change
