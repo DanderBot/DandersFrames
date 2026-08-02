@@ -1242,8 +1242,13 @@ function DF:LightweightUpdateHighlight(highlightType)
         end
         
         if highlight and highlight:IsShown() then
+            -- ☠ This function writes the four line textures DIRECTLY, bypassing
+            -- ApplyHighlightStyle, so its cached style is stale the moment we touch
+            -- them. Drop it or the next full update sees a matching signature and
+            -- skips, leaving these drag-time values in place permanently.
+            if DF.InvalidateHighlightStyle then DF:InvalidateHighlightStyle(highlight) end
             highlight:SetAlpha(alpha)
-            
+
             -- Update border textures - check both naming conventions
             local top = highlight.top or highlight.topLine
             local bottom = highlight.bottom or highlight.bottomLine

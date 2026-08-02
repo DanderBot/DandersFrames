@@ -313,20 +313,59 @@ end
 -- APPLY HIGHLIGHT STYLE
 -- ============================================================
 
+-- Forget a highlight's cached style so the next ApplyHighlightStyle re-runs in full.
+-- ☠ EVERY path that changes those textures behind this function's back MUST call
+-- this. There are two classes and both are live:
+--   1. DF:LightweightUpdateHighlight (Core.lua) writes size/points/colour straight
+--      onto the four line textures during a slider drag, bypassing this function.
+--   2. The three "not wanted" branches below hide the highlight AND call
+--      SelectionAnimator_Remove. Without invalidation, turning a highlight off and
+--      back on with identical settings would early-out and never re-add it to the
+--      animator -- an ANIMATED highlight that silently stops animating.
+function DF:InvalidateHighlightStyle(ch)
+    if ch then ch._hlSig = nil end
+end
+
+-- ☠ THE SIGNATURE MUST INCLUDE THE THREE IMPLICIT INPUTS, not just the arguments.
+-- This function is 22.4% of trash-fight allocation and target-switch driven, so it
+-- is worth skipping -- but "hide everything then re-apply" means a missed input
+-- leaves stale art with no visible cause. Beyond the eight parameters:
+--   * ch:GetEffectiveScale() -- thickness and inset are pixel-snapped against it,
+--     so a UI-scale change must re-run.
+--   * ch:GetWidth()/GetHeight() -- CORNERS mode derives cornerLen from them, so a
+--     frame resize must re-run.
+--   * db.pixelPerfect -- the only field read off db.
 local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, db)
     if not ch then return end
-    
+
+    local scale = ch:GetEffectiveScale()
+    local w, h = ch:GetWidth(), ch:GetHeight()
+    local pp = (db and db.pixelPerfect) and 1 or 0
+    -- Numeric fields compared individually: building a string key here would
+    -- allocate exactly what the early-out exists to avoid.
+    if ch._hlSig
+        and ch._hlMode == mode and ch._hlThick == thickness and ch._hlInset == inset
+        and ch._hlR == r and ch._hlG == g and ch._hlB == b and ch._hlA == alpha
+        and ch._hlPP == pp and ch._hlScale == scale and ch._hlW == w and ch._hlH == h then
+        return
+    end
+    ch._hlSig = true
+    ch._hlMode, ch._hlThick, ch._hlInset = mode, thickness, inset
+    ch._hlR, ch._hlG, ch._hlB, ch._hlA = r, g, b, alpha
+    ch._hlPP, ch._hlScale, ch._hlW, ch._hlH = pp, scale, w, h
+
     local top, bottom, left, right = ch.topLine, ch.bottomLine, ch.leftLine, ch.rightLine
-    
+
     -- Hide all styles first
     top:Hide() bottom:Hide() left:Hide() right:Hide()
     HideAnimatedBorder(ch)
     HideCornerTextures(ch)
     HideGlowLayers(ch)
     SelectionAnimator_Remove(ch)
-    
-    -- Snap thickness to whole screen pixels so every +1 step is visible
-    local scale = ch:GetEffectiveScale()
+
+    -- Snap thickness to whole screen pixels so every +1 step is visible.
+    -- `scale` is the one read above for the signature -- deliberately the same
+    -- value, so what gets cached and what gets applied can never disagree.
     local px = thickness * scale              -- desired thickness in pixels
     px = math.max(1, math.ceil(px - 0.01))    -- round up (with tiny epsilon for exact integers)
     thickness = px / scale
@@ -769,6 +808,10 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         HideGlowLayers(selectionHighlight)
         selectionHighlight:Hide()
         SelectionAnimator_Remove(selectionHighlight)
+        -- Removing it from the animator undoes what ApplyHighlightStyle set up, so
+        -- the cached style no longer describes reality: without this, re-showing
+        -- with identical settings would early-out and never re-add it.
+        DF:InvalidateHighlightStyle(selectionHighlight)
     end
     
     -- Hover Highlight
@@ -802,6 +845,7 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         HideGlowLayers(hoverHighlight)
         hoverHighlight:Hide()
         SelectionAnimator_Remove(hoverHighlight)
+        DF:InvalidateHighlightStyle(hoverHighlight)
     end
     
     -- Aggro Highlight
@@ -889,6 +933,7 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         HideGlowLayers(aggroHighlight)
         aggroHighlight:Hide()
         SelectionAnimator_Remove(aggroHighlight)
+        DF:InvalidateHighlightStyle(aggroHighlight)
     end
 end
 
