@@ -1647,6 +1647,7 @@ L["X Mark"] = true
 L["X Size"] = true
 L["Yellow=high, Orange=highest, Red=tanking."] = true
 L["Yes"] = true
+L["You already have a filter with that name. Name the imported filter:"] = true
 L["You already have a filter with these spells: \"%s\". Import a separate copy anyway?"] = true
 L["You can enable or disable the spells shown, but not add new ones. Create a custom filter to add your own."] = true
 L["Your UI Scale is already pixel-perfect for this resolution."] = true

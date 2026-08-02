@@ -373,6 +373,41 @@ function R:DecodeFilterString(str)
     return { name = name, spells = spells, rawIDs = rawIDs }
 end
 
+-- ------------------------------------------------------------
+-- NAME COLLISIONS
+-- ------------------------------------------------------------
+-- Filter names are NOT unique, and deliberately stay that way: New, Rename and
+-- Duplicate all let you pick whatever you like, and people have deliberately
+-- similar names saved. What matters is that you SEE the name before it is
+-- committed. Duplicate does — it pre-fills "<name> copy" and prompts. Import did
+-- not, so a shared string could silently add a second row indistinguishable from
+-- one you already had; field-reported, and worst through "Import as Copy", the
+-- option whose whole promise is a copy you can tell apart.
+--
+-- These exist so the import path can ask ONLY when it needs to, leaving a clean
+-- import (no clash) with no extra step.
+function R:IsCustomFilterNameTaken(name, exceptID)
+    if not name or name == "" then return false end
+    for id, f in pairs(self:GetStore().customFilters or {}) do
+        if id ~= exceptID and f.name == name then return true end
+    end
+    return false
+end
+
+-- "X" -> "X copy" -> "X copy 2" ... reusing Duplicate's suffix so both paths
+-- produce names in the same shape. Bounded rather than while-true: a pathological
+-- store should degrade to a duplicate name, not hang the client.
+function R:SuggestUniqueFilterName(name)
+    if not self:IsCustomFilterNameTaken(name) then return name end
+    local base = name .. " copy"
+    if not self:IsCustomFilterNameTaken(base) then return base end
+    for n = 2, 99 do
+        local candidate = base .. " " .. n
+        if not self:IsCustomFilterNameTaken(candidate) then return candidate end
+    end
+    return base
+end
+
 -- ALWAYS creates. Collision handling is the caller's call — a deliberate share
 -- should surface "you already have this" and let the user choose, where profile
 -- import silently reuses (ImportCustomFilters).
