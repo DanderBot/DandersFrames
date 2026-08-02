@@ -771,6 +771,20 @@ function DF:InitializeHeaderChild(frame)
                     -- Sync legacy DF.playerFrame for backward compatibility
                     DF.playerFrame = self
                 end
+
+                -- Click casting needs a unit to accept a frame, and this is the
+                -- moment one arrives. A header child is created before the header
+                -- assigns units, so registration at creation is REFUSED for lack
+                -- of a unit -- and the ClickCastFrames metatable cannot retry,
+                -- because its rawset already spent that frame's one __newindex.
+                -- Without this the frame stays unregistered for the session: no
+                -- hooks, no binds, bound keys falling through to the action bar,
+                -- with only a /reload to clear it. Cheap and idempotent --
+                -- EnsureRegistered returns immediately if already registered, and
+                -- honours an explicit opt-out.
+                if DF.ClickCast and DF.ClickCast.EnsureRegistered then
+                    DF.ClickCast:EnsureRegistered(self)
+                end
                 
                 -- No per-frame event registration needed: global headerChildEventFrame
                 -- handles all unit events and dispatches via unitFrameMap[unit].
