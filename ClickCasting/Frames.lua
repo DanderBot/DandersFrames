@@ -869,6 +869,45 @@ local function clickCastFrameEligible(frame)
     return unit ~= nil
 end
 
+-- Register a frame with click casting, or remember it for when it becomes
+-- eligible. This is the ONE entry point -- ClickCastFrames' __newindex, DF's own
+-- RegisterFrameWithClickCast, and the unit-assignment path all come through here.
+--
+-- Why it exists: __newindex fires only for keys the table does not already have,
+-- and it rawsets before testing eligibility. A header child is created BEFORE the
+-- header assigns its unit ("the header pre-creates children but units aren't set
+-- until group members actually appear" -- Frames/Init.lua), so a fresh child was
+-- rawset (key now present, __newindex spent) and then failed the unit test, and
+-- every later write bypassed the metatable entirely. The frame stayed
+-- unregistered for the session while dfClickCastRegistered claimed otherwise: no
+-- hooks, no binds, keys falling through to the action bar.
+--
+-- Field-proven (2026-08-02 16:18): a party->raid mode change recreated 40 pinned
+-- children; the next 15 seconds of hovering and pressing a bound key produced
+-- ZERO OnEnter/PreClick entries, and the sweep saw 357 frames against 375 after a
+-- reload. ScanForThirdPartyFrames would have caught it, but it only runs 1s and
+-- 3s after setup -- login only -- which is exactly why a reload was the only cure.
+function CC:EnsureRegistered(frame)
+    if not frame then return false end
+    if self.registeredFrames and self.registeredFrames[frame] then return true end
+    if not (self.db and self.db.enabled) then return false end
+
+    -- Respect an explicit opt-out: UnregisterFrameWithClickCast writes false, and
+    -- a frame hidden on purpose must not be resurrected when its unit arrives.
+    if ClickCastFrames and ClickCastFrames[frame] == false then return false end
+
+    if clickCastFrameEligible(frame) then
+        if self.pendingRegistration then self.pendingRegistration[frame] = nil end
+        self:RegisterFrame(frame)
+        return true
+    end
+
+    -- No unit yet. Hold it; the unit-assignment path retries.
+    self.pendingRegistration = self.pendingRegistration or {}
+    self.pendingRegistration[frame] = true
+    return false
+end
+
 function CC:SetupClickCastFramesGlobal()
     -- If our click casting is disabled, DON'T set up our metatable
     -- This allows Clique/Clicked to set up their own metatable and work normally
@@ -898,12 +937,15 @@ function CC:SetupClickCastFramesGlobal()
             -- Always store the value in the table
             rawset(t, frame, enabled)
             
-            -- Process registration since our click casting is enabled
+            -- Process registration since our click casting is enabled.
+            -- EnsureRegistered rather than an inline eligibility test: the rawset
+            -- above has already spent this frame's one __newindex, so a frame that
+            -- is not eligible YET must be remembered rather than dropped.
             if CC.db and CC.db.enabled then
                 if enabled == nil or enabled == false then
                     CC:UnregisterFrame(frame)
-                elseif clickCastFrameEligible(frame) then
-                    CC:RegisterFrame(frame)
+                else
+                    CC:EnsureRegistered(frame)
                 end
             end
         end
@@ -2667,6 +2709,11 @@ end
 -- Unregister a unit frame from click-casting
 function CC:UnregisterFrame(frame)
     if not frame then return end
+    -- Drop any deferred registration first, and unconditionally: a frame can be
+    -- unregistered while still only PENDING (created, no unit yet, then hidden
+    -- before its unit arrived). Leaving it queued would let the unit-assignment
+    -- path resurrect a frame the caller has just opted out of.
+    if self.pendingRegistration then self.pendingRegistration[frame] = nil end
     if not self.registeredFrames then return end
     if not self.registeredFrames[frame] then return end
     
