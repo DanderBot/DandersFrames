@@ -1561,10 +1561,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- "background"/"missingHealth" belong to bars_health (which hosts all
         -- controls for those keys) — not registered here so its Copy/Sync/Reset
         -- solely owns them.
-        -- "permanentMover" (16 keys) and the two growth keys were reached by nothing:
-        -- the whole permanent mover was skipped by Copy, Sync and Reset. ("border" and
-        -- "anchor" match nothing either — the real keys are frameBorder* / frameAnchor*,
-        -- already covered by "frame"; left in place as harmless intent.)
+        -- "permanentMover" (16 keys) was reached by nothing: the whole permanent
+        -- mover was skipped by Copy, Sync and Reset. ("border" and "anchor" match
+        -- nothing either — the real keys are frameBorder* / frameAnchor*, already
+        -- covered by "frame"; left in place as harmless intent.)
         --
         -- ⚠ DELIBERATELY NOT LISTED: the 14 raid* layout keys (raidUseGroups,
         -- raidPlayersPerRow, raidGroup*, raidFlat*, raidRowColSpacing...). They are
@@ -1575,7 +1575,27 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- cost of leaving them out is that Reset Page does not clear raid layout;
         -- that is the lesser of the two, and fixing it properly needs per-direction
         -- ownership, which SectionOwnsKey does not currently express.
-        Add(CreateCopyButton(self.child, {"frame", "permanentMover", "growDirection", "growthAnchor", "border", "anchor"}, L["Frame"], "general_frame"), 25, 2)
+        --
+        -- ☠ growDirection / growthAnchor BELONG TO THAT SAME EXCLUSION and were
+        -- wrongly added to it (3b912fb0, alongside permanentMover). They are exactly
+        -- the case the paragraph above describes -- per-mode, edited from BOTH the
+        -- party and raid pages -- and they escaped it only because they are not
+        -- spelled "raid...". Owning them meant Sync with Raid overwrote the raid
+        -- growth direction from party's every refresh, so raid could never keep a
+        -- different one: field-reported as an imported profile arriving with raid
+        -- laid out in columns instead of rows, reproducible on every import. The
+        -- import was never at fault; the post-import refresh re-synced it.
+        --
+        -- ☠ THE SYMPTOM IS ALMOST INVISIBLE. The sync copies every key under these
+        -- prefixes, but party and raid agree on nearly all of them, so the only
+        -- evidence is the one key where a user's two modes genuinely differ.
+        -- growDirection is that key for most people; do not read "only one setting
+        -- moved" as "small blast radius".
+        --
+        -- The raid page's own dropdown inverts the labels (HORIZONTAL reads as
+        -- "Columns" there and "Rows" on party/flat), which is the clearest signal
+        -- these were never meant to be one shared setting.
+        Add(CreateCopyButton(self.child, {"frame", "permanentMover", "border", "anchor"}, L["Frame"], "general_frame"), 25, 2)
         
         -- Migration: Ensure new flat raid settings have defaults
         if db.raidFlatGrowthAnchor == nil then db.raidFlatGrowthAnchor = "START" end
