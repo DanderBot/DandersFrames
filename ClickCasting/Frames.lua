@@ -855,15 +855,40 @@ end
 -- frame's click attributes to DF's macro/target actions, which BREAKS any
 -- non-unit secure button that lands in the global table — a toy/action button
 -- has no unit and can't receive unit-targeted casts anyway (bug #988,
--- ToyPicker's button had its type1 replaced). Frames whose unit is assigned
--- late (secure header children) are picked up by the next RegisterAllFrames
--- sweep once the attribute exists.
+-- ToyPicker's button had its type1 replaced).
+--
+-- OUR OWN frames are exempt from the unit test -- see below.
 local function clickCastFrameEligible(frame)
     if type(frame) ~= "table" or not frame.GetObjectType or not frame.GetAttribute then
         return false
     end
     local objType = frame:GetObjectType()
     if objType ~= "Button" and objType ~= "Frame" then return false end
+
+    -- Our frames are known unit frames the moment they exist, so they do not
+    -- wait for a unit to be assigned.
+    --
+    -- Nothing in the hover-bind machinery reads the unit. The snippet is
+    -- `owner:SetBindingClick(true, key, self, virtualBtn)` -- the unit resolves
+    -- at click time from the frame's own attribute -- and applicability is
+    -- decided by dfIsDandersFrame, set before registration is even attempted
+    -- (Frames/Headers.lua). The unit test was gating the work on a fact the
+    -- work does not use.
+    --
+    -- That gating is what made the worst case unbounded rather than brief. A
+    -- header child that first gains its unit DURING combat could not be
+    -- registered, because RegisterFrame defers under lockdown -- so its wrap and
+    -- snippet could not be installed until combat ended, leaving it with no
+    -- keyboard binds for the REST OF THE FIGHT. Arming at creation removes the
+    -- window rather than shortening it: by the time a unit arrives, in combat or
+    -- not, there is nothing left to do. A unit-less frame is hidden by
+    -- RegisterUnitWatch and cannot be hovered, so its binds never activate until
+    -- it actually holds someone.
+    if frame.dfIsDandersFrame == true then return true end
+
+    -- Foreign frames keep the strict test: this gate exists to stop click
+    -- casting taking over buttons that are not unit frames at all, and for
+    -- anything we did not create, carrying a unit is the only way to tell.
     local unit = frame:GetAttribute("unit")
     if issecretvalue(unit) then return false end
     return unit ~= nil
@@ -1842,7 +1867,14 @@ function CC:SetupSecureHandlers(frame)
         -- ClearBindings() even during combat — unlike HookScript OnHide.
         -- Covers the case where a frame is hidden while hovered (e.g., party
         -- member leaves group, pet dies) and OnLeave doesn't fire.
+        -- dfHideFired counts every time the wrap RUNS, not every time it clears.
+        -- Without it "clearedBy=onhide never appears" is ambiguous between "this
+        -- path is dead code" and "it runs constantly and correctly has nothing to
+        -- do", and those have opposite conclusions. Same measurement that settled
+        -- the OnShow claim (kept, load-bearing) against the state-driver reclaim
+        -- (deleted, never unique) -- do not delete this path on absence alone.
         local onHideSnippet = [[
+            self:SetAttribute("dfHideFired", (self:GetAttribute("dfHideFired") or 0) + 1)
             if mouseoverbutton == self then
                 self:SetAttribute("dfClearedBy", "onhide")
                 self:ClearBindings()
@@ -2009,11 +2041,18 @@ function CC:SetupSecureHandlers(frame)
         -- the wrap snippet, so when wrapEnter is false they are STALE values from the
         -- last successful cycle, not a description of THIS hover. "phase=7 with
         -- wrapEnter=false" means the PREVIOUS enter completed, nothing more.
-        DF:Debug("CLICK", "OnEnter %s unit=%s kbActive=%s hasKB=%s type1=%s wrapEnter=%s(%d) wrapLeave=%d phase=%d prev=%s postCheck=%s showClaimed=%d reasserted=%d",
+        -- sdFired / hideFired are the instrument-before-delete counters for the
+        -- two release paths that have never been observed doing work. Sampled
+        -- here because OnEnter is the one line that prints on every hover, so a
+        -- normal session builds the evidence without any extra logging.
+        local sdFired = self:GetAttribute("dfStateDriverCount") or 0
+        local hideFired = self:GetAttribute("dfHideFired") or 0
+        DF:Debug("CLICK", "OnEnter %s unit=%s kbActive=%s hasKB=%s type1=%s wrapEnter=%s(%d) wrapLeave=%d phase=%d prev=%s postCheck=%s showClaimed=%d reasserted=%d sdFired=%d hideFired=%d",
             frameName, tostring(unit), tostring(bindingsActive),
             tostring(hasKeyboardBindings), tostring(type1),
             tostring(wrapEnterFired), wrapEnterCount, wrapLeaveCount,
-            enterPhase, prevMouseover, postCheck, showClaimed, reasserted)
+            enterPhase, prevMouseover, postCheck, showClaimed, reasserted,
+            sdFired, hideFired)
 
         -- THE MEASUREMENT: was a redundant set path load-bearing on THIS hover?
         --
