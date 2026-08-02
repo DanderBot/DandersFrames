@@ -557,12 +557,23 @@ function CC:RestoreBlizzardDefaults(frame)
         frame:SetAttribute("type2", orig.type2)
         frame:SetAttribute("*type1", orig.starType1)
         frame:SetAttribute("*type2", orig.starType2)
+        -- ClearBlizzardClickCastFromFrame nils these; nothing put them back, so
+        -- a frame relying on per-button unit overrides lost that for the session.
+        frame:SetAttribute("unit1", orig.unit1)
+        frame:SetAttribute("unit2", orig.unit2)
     else
         -- type1 = left click = target, type2 = right click = togglemenu
         frame:SetAttribute("type1", "target")
         frame:SetAttribute("type2", "togglemenu")
     end
-    
+
+    -- Put the mousewheel back the way we found it. ApplyBindingsToFrameUnified
+    -- force-enables it on every apply, so without this a frame that shipped with
+    -- the wheel disabled kept swallowing scroll events after we handed it back.
+    if frame.EnableMouseWheel and frame.dfOriginalMouseWheel ~= nil then
+        frame:EnableMouseWheel(frame.dfOriginalMouseWheel)
+    end
+
     -- Reset to standard click registration (AnyUp is default)
     if frame.RegisterForClicks then
         frame:RegisterForClicks("AnyUp")
