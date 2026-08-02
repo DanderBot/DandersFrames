@@ -2525,7 +2525,25 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
         end
     end
 
-    if #parts == 0 then return nil end
+    -- No clause was produced. Every clause above requires `.spellName`, but
+    -- findBestSpell will happily return a MACRO-type binding, which has none --
+    -- so a key carrying two macro bindings with different target types built
+    -- nothing, returned nil, and got no entry in the unified map at all. That
+    -- key was completely dead while the binding list showed it as configured.
+    -- The single-binding early returns above hide it; it only bites once a key
+    -- has two or more bindings that do not collapse to one category.
+    --
+    -- Fall back to the single-binding builder for the best candidate we have. A
+    -- macro that ignores the friendly/hostile split is a compromise; a key that
+    -- does nothing at all is a bug.
+    if #parts == 0 then
+        local fallbackBinding = anyBinding or friendlyBinding or hostileBinding
+        if fallbackBinding then
+            DF:Debug("CLICK", "Combined macro produced no clauses (macro-type binding); using single-binding build")
+            return self:BuildMacroTextForBinding(fallbackBinding, forGlobalBinding), fallbackBinding
+        end
+        return nil
+    end
 
     -- Check if any contributing binding has stopSpellTarget enabled
     local useStopSpellTarget = false
