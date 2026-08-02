@@ -1670,6 +1670,36 @@ function DF:GetClassColor(class)
     return RAID_CLASS_COLORS[class] or DEFAULT_CLASS_COLOR
 end
 
+-- ============================================================
+-- UNIT ROLE RESOLUTION
+-- ============================================================
+-- ☠ NEVER CALL UnitGroupRolesAssigned DIRECTLY FOR A GATE. Use this.
+--
+-- UnitGroupRolesAssigned answers "what role did the GROUP assign", not "what
+-- does this player do". It returns "NONE" solo, in the open world, in open-world
+-- groups, and in delves until something forces an assignment -- so a Holy
+-- Paladin standing in Silvermoon reads as NONE, and any caller that maps NONE
+-- onto DAMAGER decides a healer is a DPS. That is what made the resource bar's
+-- Healers toggle inert while solo (the bar answered to the DPS toggle instead),
+-- and why a delve only resolved the role after a spec change.
+--
+-- The player is the one unit we can do better for: GetSpecializationRole is
+-- authoritative and always available. Other units expose no public spec API, so
+-- they stay NONE and the caller keeps whatever fallback it had.
+--
+-- Returns nil for a unit that does not exist, otherwise a role token that may
+-- still be "NONE" -- resolution only, no policy. Callers decide what NONE means.
+function DF:GetUnitRole(unit)
+    if not unit or not UnitExists(unit) then return nil end
+    local role = UnitGroupRolesAssigned and UnitGroupRolesAssigned(unit)
+    if (not role or role == "NONE") and UnitIsUnit and UnitIsUnit(unit, "player")
+       and GetSpecialization and GetSpecializationRole then
+        local spec = GetSpecialization()
+        if spec then role = GetSpecializationRole(spec) or role end
+    end
+    return role
+end
+
 -- Resolve the frame border colour: the static borderColor by default, or
 -- (Stage 2.1+) the unit's class / role colour with its own alpha slider when
 -- the canonical frameBorderColorSource picks one. Non-player / unknown-class
@@ -1724,17 +1754,10 @@ function DF:GetFrameBorderColor(frame, db)
         if frame.dfIsTestFrame then
             local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame)
             role = testData and testData.role
-        elseif frame.unit and UnitExists(frame.unit) and UnitGroupRolesAssigned then
-            role = UnitGroupRolesAssigned(frame.unit)
-            -- UnitGroupRolesAssigned returns "NONE" outside instances where
-            -- roles aren't assigned (solo, world content). For the player,
-            -- fall back to spec role so role colour stays meaningful. Other
-            -- units expose no public spec API; they stay on picker fallback.
-            if (not role or role == "NONE") and UnitIsUnit and UnitIsUnit(frame.unit, "player")
-               and GetSpecialization and GetSpecializationRole then
-                local spec = GetSpecialization()
-                if spec then role = GetSpecializationRole(spec) end
-            end
+        else
+            -- Player falls back to the spec role when the group assigned none;
+            -- other units stay NONE and drop to the picker fallback below.
+            role = DF:GetUnitRole(frame.unit)
         end
         local c = rc and role and role ~= "NONE" and (rc[role] or rc[string.lower(role)])
         if c then

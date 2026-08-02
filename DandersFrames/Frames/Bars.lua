@@ -33,7 +33,15 @@ function DF:ShouldShowResourceBar(unit, db)
     local hasAnyRoleFilter = db.resourceBarShowHealer or db.resourceBarShowTank or db.resourceBarShowDPS
 
     if hasAnyRoleFilter then
-        local role = UnitGroupRolesAssigned(unit)
+        -- ☠ DF:GetUnitRole, not UnitGroupRolesAssigned. The raw call returns
+        -- "NONE" for the player whenever the group has not assigned a role --
+        -- solo, open world, and inside a delve until a spec change forces one --
+        -- and the NONE arm below reads as DAMAGER. So a solo Holy Paladin was
+        -- gated by the DPS toggle: the Healers checkbox did nothing, and ticking
+        -- DPS showed the bar for every spec. GetUnitRole falls the PLAYER back to
+        -- the spec role; other units have no public spec API and still arrive
+        -- NONE, which is why the arm stays.
+        local role = DF:GetUnitRole(unit)
         local inSoloMode = not IsInGroup() and not IsInRaid()
 
         if inSoloMode and db.resourceBarShowInSoloMode then
@@ -45,7 +53,7 @@ function DF:ShouldShowResourceBar(unit, db)
         elseif role == "DAMAGER" then
             roleAllowed = db.resourceBarShowDPS == true
         elseif not role or role == "NONE" then
-            -- Unassigned role (e.g. delves) — treat as DPS
+            -- Still unresolved: another unit with no assigned role. Treat as DPS.
             roleAllowed = db.resourceBarShowDPS == true
         end
     else

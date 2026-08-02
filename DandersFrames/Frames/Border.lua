@@ -377,18 +377,10 @@ function Border:ResolveRoleColor(unit, fallback, roleColors, frame)
     if frame and frame.dfIsTestFrame then
         local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame)
         role = testData and testData.role
-    elseif unit and UnitExists and UnitExists(unit) and UnitGroupRolesAssigned then
-        role = UnitGroupRolesAssigned(unit)
-        -- UnitGroupRolesAssigned returns "NONE" outside instances where roles
-        -- aren't assigned (solo, world content, open-world groups). For the
-        -- player, fall back to the spec role so role colour is meaningful
-        -- regardless of group context. Other units expose no public spec API,
-        -- so they stay on the picker fallback when role is NONE.
-        if (not role or role == "NONE") and UnitIsUnit and UnitIsUnit(unit, "player")
-           and GetSpecialization and GetSpecializationRole then
-            local spec = GetSpecialization()
-            if spec then role = GetSpecializationRole(spec) end
-        end
+    else
+        -- Player falls back to the spec role when the group assigned none;
+        -- other units stay NONE and drop to the picker fallback below.
+        role = DF:GetUnitRole(unit)
     end
 
     local c = role and role ~= "NONE" and (roleColors[role] or roleColors[string.lower(role)])
