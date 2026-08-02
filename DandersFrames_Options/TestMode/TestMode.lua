@@ -3546,8 +3546,7 @@ function DF:CreateTestPanel()
     panel:Hide()
 
     local function ApplyScale(self)
-        local guiScale = DF.db and DF.db.party and DF.db.party.guiScale or 1.0
-        self:SetScale(guiScale)
+        self:SetScale(DF:GetWindowState().scale or 1.0)
     end
 
     panel:SetScript("OnHide", function()

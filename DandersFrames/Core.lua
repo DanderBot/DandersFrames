@@ -3638,6 +3638,37 @@ DF._MainEventDispatcher = function(self, event, arg1)
         DandersFramesCharDB.currentProfile = currentProfile
         DandersFramesDB_v2.currentProfile = currentProfile
 
+        -- Settings-window geometry moves from db.party to account-wide
+        -- windowState (see DF:GetWindowState for why). Seed once from whichever
+        -- profile is active at this login -- that is the window the user last
+        -- sized and scaled, so it is the only correct source.
+        if not DandersFramesDB_v2.windowState then
+            local ws = {}
+            local src = DandersFramesDB_v2.profiles[currentProfile]
+            src = src and src.party
+            if type(src) == "table" then
+                ws.scale, ws.width, ws.height = src.guiScale, src.guiWidth, src.guiHeight
+                ws.point, ws.relPoint, ws.x, ws.y = src.guiPoint, src.guiRelPoint, src.guiX, src.guiY
+            end
+            DandersFramesDB_v2.windowState = ws
+        end
+        -- Clean up the legacy per-profile keys (no longer read anywhere). Same
+        -- shape as the languageOverride strip above: unconditional, so profiles
+        -- that were not the seed source are cleared too. Both modes -- only
+        -- db.party was ever read, but RaidDefaults is copied from PartyDefaults
+        -- so every profile carries a dead db.raid set as well.
+        for _, profile in pairs(DandersFramesDB_v2.profiles) do
+            if type(profile) == "table" then
+                for _, modeKey in ipairs({ "party", "raid" }) do
+                    local m = profile[modeKey]
+                    if type(m) == "table" then
+                        m.guiScale, m.guiWidth, m.guiHeight = nil, nil, nil
+                        m.guiPoint, m.guiRelPoint, m.guiX, m.guiY = nil, nil, nil, nil
+                    end
+                end
+            end
+        end
+
         DF.db = DandersFramesDB_v2.profiles[currentProfile]
         
         -- Ensure both modes exist in current profile
@@ -5172,15 +5203,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 DF:ResetFullProfile()
             elseif msg == "resetgui" then
                 -- Reset GUI scale, size, and position to defaults
-                if DF.db and DF.db.party then
-                    DF.db.party.guiScale = 1.0
-                    DF.db.party.guiWidth = 760
-                    DF.db.party.guiHeight = 520
-                    DF.db.party.guiPoint = nil
-                    DF.db.party.guiRelPoint = nil
-                    DF.db.party.guiX = nil
-                    DF.db.party.guiY = nil
-                end
+                local ws = DF:GetWindowState()
+                ws.scale = 1.0
+                ws.width = 760
+                ws.height = 520
+                ws.point = nil
+                ws.relPoint = nil
+                ws.x = nil
+                ws.y = nil
                 if DF.GUIFrame then
                     DF.GUIFrame:ClearAllPoints()
                     DF.GUIFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)

@@ -1337,7 +1337,6 @@ end
 -- internal escape hatches, not profile content). Underscore-prefixed
 -- migration flags are excluded by rule and don't need listing.
 DF.ExportLocalOnly = {
-    guiScale = true, guiWidth = true, guiHeight = true, -- settings-window geometry
     minimapIcon = true,                                 -- minimap button state
     useSecureHeaders = true,                            -- internal escape hatch (no GUI)
 

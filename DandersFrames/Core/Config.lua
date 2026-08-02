@@ -1460,10 +1460,11 @@ DF.PartyDefaults = {
     groupLabelOutline = "SHADOW",
     groupLabelPosition = "START",
 
-    -- GUI State
-    guiHeight = 693.33349609375,
-    guiScale = 1,
-    guiWidth = 816.6666259765625,
+    -- (Removed) GUI State: guiHeight / guiScale / guiWidth. Settings-window
+    -- geometry is account-wide machine state now -- DandersFramesDB_v2.windowState,
+    -- reached via DF:GetWindowState. As per-profile DEFAULTS they actively caused
+    -- a bug: a new profile is born from this table, so creating one silently
+    -- reset the window's scale and size while the open window kept the old ones.
 
     -- Heal Absorb Bar
     healAbsorbBarAnchor = "BOTTOM",

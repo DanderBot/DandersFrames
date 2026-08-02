@@ -22,6 +22,32 @@ function DF:DeepCopy(src)
 end
 
 -- ============================================================
+-- SETTINGS-WINDOW STATE (ACCOUNT-WIDE, NOT PROFILE CONTENT)
+-- ============================================================
+-- Scale, size and position of the settings window are machine state, not
+-- settings -- ExportCategories has declared them local-only for as long as
+-- exports have existed. They used to be STORED in db.party anyway, which meant
+-- a profile carried them: a freshly created profile is born from PartyDefaults,
+-- so its guiScale was 1 while the already-open window kept the old scale. The
+-- Test Mode and Unlock windows re-read the db on every OnShow, so they snapped
+-- to 100% and only the UI Scale slider (the single writer) could put them back
+-- in step. Holding the state account-wide is what actually enforces the
+-- declared intent -- switching or creating a profile can no longer move,
+-- resize or rescale the window out from under the user.
+--
+-- Fields: scale, width, height, point, relPoint, x, y. All optional; every
+-- reader supplies its own fallback.
+function DF:GetWindowState()
+    if not DandersFramesDB_v2 then DandersFramesDB_v2 = {} end
+    local ws = DandersFramesDB_v2.windowState
+    if not ws then
+        ws = {}
+        DandersFramesDB_v2.windowState = ws
+    end
+    return ws
+end
+
+-- ============================================================
 -- PROFILE MANAGEMENT
 -- ============================================================
 

@@ -29,18 +29,19 @@ function DF:CreateGUI()
     local minWidth, minHeight = 520, 400
     local maxWidth, maxHeight = 1200, 900
     
-    -- Load saved position and size (stored in party db since it's always available)
-    local guiDb = DF.db and DF.db.party or {}
-    local savedScale = guiDb.guiScale or 1.0
-    local savedWidth = guiDb.guiWidth or defaultWidth
-    local savedHeight = guiDb.guiHeight or defaultHeight
+    -- Load saved position and size. Account-wide, NOT per-profile: see
+    -- DF:GetWindowState in Core/Profile.lua for why it must not follow profiles.
+    local guiDb = DF:GetWindowState()
+    local savedScale = guiDb.scale or 1.0
+    local savedWidth = guiDb.width or defaultWidth
+    local savedHeight = guiDb.height or defaultHeight
     
     -- Main frame (matching old addon approach - no BackdropTemplate in CreateFrame)
     local frame = CreateFrame("Frame", "DandersFramesGUI", UIParent)
     frame:SetSize(savedWidth, savedHeight)
     -- Restore saved position, or default to center
-    if guiDb.guiPoint and guiDb.guiX then
-        frame:SetPoint(guiDb.guiPoint, UIParent, guiDb.guiRelPoint or "CENTER", guiDb.guiX, guiDb.guiY)
+    if guiDb.point and guiDb.x then
+        frame:SetPoint(guiDb.point, UIParent, guiDb.relPoint or "CENTER", guiDb.x, guiDb.y)
     else
         frame:SetPoint("CENTER")
     end
@@ -81,12 +82,8 @@ function DF:CreateGUI()
         frame:StopMovingOrSizing()
         -- Save position so it persists across sessions
         local point, _, relPoint, x, y = frame:GetPoint()
-        if DF.db and DF.db.party then
-            DF.db.party.guiPoint = point
-            DF.db.party.guiRelPoint = relPoint
-            DF.db.party.guiX = x
-            DF.db.party.guiY = y
-        end
+        local ws = DF:GetWindowState()
+        ws.point, ws.relPoint, ws.x, ws.y = point, relPoint, x, y
     end)
     titleBar:SetFrameStrata("FULLSCREEN_DIALOG")
     titleBar:SetFrameLevel(200)
@@ -229,8 +226,8 @@ function DF:CreateGUI()
     resizeHandle:SetScript("OnMouseUp", function(self, button)
         frame:StopMovingOrSizing()
         -- Save new size
-        DF.db.party.guiWidth = frame:GetWidth()
-        DF.db.party.guiHeight = frame:GetHeight()
+        local ws = DF:GetWindowState()
+        ws.width, ws.height = frame:GetWidth(), frame:GetHeight()
         -- Update content layout
         if GUI.SelectedMode == "clicks" then
             -- Refresh click casting UI on resize (skip scroll reset)
@@ -495,9 +492,7 @@ function DF:CreateGUI()
     scaleSlider:SetScript("OnMouseUp", function(self)
         local value = math.floor(self:GetValue() * 20 + 0.5) / 20
         frame:SetScale(value)
-        if DF.db and DF.db.party then
-            DF.db.party.guiScale = value
-        end
+        DF:GetWindowState().scale = value
         -- Also update popup panels
         if DF.positionPanel then
             DF.positionPanel:SetScale(value)
@@ -508,7 +503,7 @@ function DF:CreateGUI()
         -- A new scale changes how many device pixels a UI unit covers, so
         -- every border on screen has to be re-derived at the new thickness.
         -- This is the ONLY action that does: nothing else in the GUI writes
-        -- guiScale, and moving or resizing the window leaves it alone.
+        -- windowState.scale, and moving or resizing the window leaves it alone.
         GUI:RefreshPixelBorders()
     end)
 
@@ -931,12 +926,8 @@ function DF:CreateGUI()
     bottomBar:SetScript("OnDragStop", function()
         frame:StopMovingOrSizing()
         local point, _, relPoint, x, y = frame:GetPoint()
-        if DF.db and DF.db.party then
-            DF.db.party.guiPoint = point
-            DF.db.party.guiRelPoint = relPoint
-            DF.db.party.guiX = x
-            DF.db.party.guiY = y
-        end
+        local ws = DF:GetWindowState()
+        ws.point, ws.relPoint, ws.x, ws.y = point, relPoint, x, y
     end)
 
     local footer = CreateFrame("Frame", nil, bottomBar)

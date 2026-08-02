@@ -332,7 +332,7 @@ end
 GUI.GetThemeColor = GetThemeColor
 
 -- Physical pixels per UI unit, measured from the frame's OWN effective scale.
--- The GUI window carries a user scale (guiScale) on top of UIParent's and is
+-- The GUI window carries a user scale (windowState.scale) on top of UIParent's and is
 -- freely resizable, so this is almost never 1 and cannot be read from the
 -- addon-wide DF:GetPixelScale (which is relative to UIParent).
 local function PixelsPerUnit(frame)

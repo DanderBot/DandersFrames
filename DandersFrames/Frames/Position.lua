@@ -514,8 +514,7 @@ function DF:CreatePermanentMoverPopup()
 
     -- Apply GUI scale
     popup:SetScript("OnShow", function(self)
-        local guiScale = DF.db and DF.db.party and DF.db.party.guiScale or 1.0
-        self:SetScale(guiScale)
+        self:SetScale(DF:GetWindowState().scale or 1.0)
         self.closer:Show()
     end)
 
@@ -1569,8 +1568,7 @@ function DF:CreatePositionPanel()
     
     -- Apply scale from settings when shown
     panel:SetScript("OnShow", function(self)
-        local guiScale = DF.db and DF.db.party and DF.db.party.guiScale or 1.0
-        self:SetScale(guiScale)
+        self:SetScale(DF:GetWindowState().scale or 1.0)
     end)
     
     -- Store for theme updates
