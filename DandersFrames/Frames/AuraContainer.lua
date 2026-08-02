@@ -338,10 +338,31 @@ function AuraContainer.SetTestMode(on)
     AuraContainer._testMode = on
     DF:Debug(DBG, "SetTestMode -> %s", tostring(on))
 
+    -- TEST HANDLES ONLY. A container has to be REBUILT across a test transition
+    -- because the two shapes declare different groups and groups can never be
+    -- removed: test mode declares dfTestStyled/dfTestPlain and skips the real
+    -- filter loop entirely (build(), `filters = {}`), so neither shape can be
+    -- reached from the other in place.
+    --
+    -- But that only ever applied to the handles that RENDER the preview. Live
+    -- frames are hidden for the whole session by SetTestModeStateDrivers, and
+    -- their containers are built DEAF (setContainerProviderDeaf), so they ignore
+    -- the global provider bounce and sit on real data untouched from entry to
+    -- exit. Rebuilding them into test shape and back bought nothing.
+    --
+    -- ⚠ It is NOT true that the entry pass can be dropped altogether -- that was
+    -- the first read of the trace and it is wrong. The test frame pool is created
+    -- once (testFramePoolInitialized) and its frames are only HIDDEN on exit, so
+    -- from the SECOND entry onward the test handles already exist here and do
+    -- need the rebuild. On the very first entry this loop legitimately does
+    -- nothing: the pool is built after SetTestMode returns and those handles are
+    -- born in test shape (build() reads _testMode itself).
     local function rebuildAll()
         if AuraContainer._handles then
             for h in pairs(AuraContainer._handles) do
-                if not h._destroyed then pcall(function() h:OnTestModeChanged() end) end
+                if not h._destroyed and h._testFrame then
+                    pcall(function() h:OnTestModeChanged() end)
+                end
             end
         end
     end
@@ -1094,9 +1115,21 @@ local function bindNative(slot, config)
         -- text beat vertex colour, so a spec never carries both (the row builders send
         -- a curve OR a coloured formatter, never each).
         if durSpec.colorCurve and durSpec.colorProperty ~= nil then
-            opts.textColor = { curve = durSpec.colorCurve, property = durSpec.colorProperty }
+            -- Cached on the config by spec identity, exactly like _dfDurBind above:
+            -- the pair is derived purely from durSpec, and a structural Rebuild
+            -- hands over a fresh style table, which invalidates it for free. This
+            -- runs once per BUTTON, so a fresh table here cost one allocation per
+            -- slot per rebuild across every row on every frame.
+            if config._dfDurColorSpec ~= durSpec then
+                config._dfDurColorSpec = durSpec
+                config._dfDurColor = { curve = durSpec.colorCurve, property = durSpec.colorProperty }
+            end
+            opts.textColor = config._dfDurColor
         end
-        local ok, err = pcall(function() slot:SetDurationText(slot.dfDur, opts) end)
+        -- pcall(fn, self, args...) rather than pcall(function() ... end): no wrapper
+        -- closure per button (same reason as the AddAuraGroup call in build()).
+        -- Protection is unchanged.
+        local ok, err = pcall(slot.SetDurationText, slot, slot.dfDur, opts)
         if ok then
             slot._boundDur = true
         elseif not warnedCurve then
@@ -3942,6 +3975,20 @@ function AuraContainer:Create(parent, config)
     -- h.frame is the plain anchor frame DF positions; the backend parents its OWN
     -- CustomAuraContainer to it (one container per consumer).
     h.frame = CreateFrame("Frame", nil, parent)
+    -- TEST-FRAME PROVENANCE, resolved ONCE here rather than per toggle. Only a
+    -- handle that will actually render the preview needs SetTestMode's rebuild;
+    -- see rebuildAll for why the live ones never do. Resolving at Create is safe
+    -- because every test frame carries dfIsTestFrame from its OWN creation --
+    -- TestFramePool.lua stamps it on the pool frames and CreatePlayerTestFrame on
+    -- the pinned ones, both long before any consumer drives a row onto them.
+    -- Bounded walk: the anchor's parent is usually the unit frame, but AD hangs
+    -- containers off the healthBar / background anchor / aura-bar strip instead.
+    local ancestor = parent
+    for _ = 1, 6 do
+        if not ancestor then break end
+        if ancestor.dfIsTestFrame then h._testFrame = true break end
+        ancestor = ancestor.GetParent and ancestor:GetParent() or nil
+    end
     if cfg.mode == "missing" then
         -- MISSING mode (probe 32, live-confirmed 2026-07-10): h.frame is a CLIP WINDOW
         -- exactly the badge's size — the caller positions it. The backend pins its
