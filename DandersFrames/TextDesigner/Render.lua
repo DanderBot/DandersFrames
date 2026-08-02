@@ -75,6 +75,30 @@ local CONTENT_HINTS = {
 local EMPTY_APPEARANCE = {}
 local DEFAULT_TEXT_COLOR = { r = 1, g = 1, b = 1, a = 1 }
 
+-- ☠ SHARED SCRATCH — the returned table is the SAME table on every call.
+-- resolveAppearance is #2 in every combat trace and ran once per element per
+-- frame per tick, so this one table was most of what remained after ac55fb85
+-- shared the three fallbacks.
+--
+-- SAFE ONLY WHILE AT MOST ONE RESOLVED APPEARANCE IS LIVE AT A TIME. That holds
+-- by construction today, and all four parts are load-bearing:
+--   1. applyAppearance is resolveAppearance's only caller, and updateOne is
+--      applyAppearance's only caller (both verified, not assumed).
+--   2. updateOne holds the result across applyPosition -> Resolve ->
+--      mirrorElement. None of those re-enters: resolveAppearance is a FILE-LOCAL,
+--      so nothing outside Render.lua can reach it at all.
+--   3. Nothing RETAINS it. mirrorElement reads app.font/fontSize/outline at the
+--      point of use and stores nothing; the result is dead when updateOne returns.
+--   4. Every field is reassigned on every call, so no stale value can carry over.
+--
+-- ☠ WHAT WOULD BREAK IT: a second resolve while a first result is still in scope.
+-- That exact shape existed until ac55fb85 -- the class-colour branch re-resolved
+-- the same element just to read one alpha, while the outer result was still bound
+-- for mirrorElement -- and a shared table then would have aliased the two
+-- silently, which is why that commit declined to share this one. If you add a
+-- caller, give it its own table or pass it the fields it needs.
+local appearanceScratch = {}
+
 local function resolveAppearance(elem, globalDefaults)
     globalDefaults = globalDefaults or EMPTY_APPEARANCE
     local overrides = elem.overrides or EMPTY_APPEARANCE
@@ -87,13 +111,13 @@ local function resolveAppearance(elem, globalDefaults)
     else
         useClassColor = globalDefaults.useClassColor or false
     end
-    return {
-        font          = (overrides.font          and elem.font)          or globalDefaults.font          or "DF Roboto SemiBold",
-        fontSize      = (overrides.fontSize      and elem.fontSize)      or globalDefaults.fontSize      or 10,
-        color         = (overrides.color         and elem.color)         or globalDefaults.color         or DEFAULT_TEXT_COLOR,
-        outline       = (overrides.outline       and elem.outline)       or globalDefaults.outline       or "SHADOW;NONE",
-        useClassColor = useClassColor,
-    }
+    local app = appearanceScratch
+    app.font          = (overrides.font          and elem.font)          or globalDefaults.font          or "DF Roboto SemiBold"
+    app.fontSize      = (overrides.fontSize      and elem.fontSize)      or globalDefaults.fontSize      or 10
+    app.color         = (overrides.color         and elem.color)         or globalDefaults.color         or DEFAULT_TEXT_COLOR
+    app.outline       = (overrides.outline       and elem.outline)       or globalDefaults.outline       or "SHADOW;NONE"
+    app.useClassColor = useClassColor
+    return app
 end
 
 -- ============================================================
