@@ -645,9 +645,6 @@ function CC:ApplyBindings()
     -- Build unified macro map (all bindings converted to macros)
     self.unifiedMacroMap = self:BuildUnifiedMacroMap()
 
-    -- Set up hovercast button attributes for third-party frame support
-    self:SetupHovercastButtonAttributes()
-
     -- IMPORTANT: Clear Blizzard click-casting BEFORE applying our bindings
     -- This ensures our bindings take precedence and aren't overwritten
     if self.db.enabled then
@@ -881,74 +878,24 @@ function CC:CreateHovercastButton()
     end)
 end
 
--- Set up the hovercast button with spell attributes for third-party frame click casting
--- This is called after bindings are built so the hovercast button can handle redirected clicks
-function CC:SetupHovercastButtonAttributes()
-    if not self.hovercastButton then return end
-    -- Combat-safe by contract: only reached from ApplyBindings, which defers.
-    if InCombatLockdown() then return end
-    
-    local btn = self.hovercastButton
-    
-    -- Clear existing attributes
-    for i = 1, 5 do
-        btn:SetAttribute("type" .. i, nil)
-        btn:SetAttribute("spell" .. i, nil)
-        btn:SetAttribute("macrotext" .. i, nil)
-    end
-    
-    if not self.unifiedMacroMap then return end
-    
-    -- Set up attributes for each mouse binding
-    for keyString, data in pairs(self.unifiedMacroMap) do
-        local binding = data.templateBinding
-        local bindType = binding.bindType or "mouse"
-        
-        if bindType == "mouse" and binding.button then
-            local virtualBtn = self:GetVirtualButtonName(binding)
-            local actionType = binding.actionType or self.ACTION_TYPES.SPELL
-            
-            -- Check if this should be treated as a special action
-            local isSpecialAction = data.isSpecialAction
-            if isSpecialAction == nil then
-                isSpecialAction = (actionType == "menu" or actionType == "target" or 
-                                   actionType == "focus" or actionType == "assist" or
-                                   actionType == self.ACTION_TYPES.MENU or 
-                                   actionType == self.ACTION_TYPES.FOCUS or
-                                   actionType == self.ACTION_TYPES.ASSIST)
-            end
-            
-            if isSpecialAction then
-                if actionType == "menu" or actionType == self.ACTION_TYPES.MENU then
-                    local typeAttr = "type-" .. virtualBtn
-                    btn:SetAttribute(typeAttr, "togglemenu")
-                    -- BUG #10 FIX: state-driver-based combat conditional
-                    local combatCond = GetCombatCondition(binding)
-                    if combatCond then
-                        AddCombatConditional(btn, typeAttr, "togglemenu", combatCond)
-                    end
-                elseif actionType == "target" then
-                    local typeAttr = "type-" .. virtualBtn
-                    btn:SetAttribute(typeAttr, "target")
-                    -- BUG #860 FIX: state-driver-based combat conditional
-                    local combatCond = GetCombatCondition(binding)
-                    if combatCond then
-                        AddCombatConditional(btn, typeAttr, "target", combatCond)
-                    end
-                elseif actionType == "focus" or actionType == self.ACTION_TYPES.FOCUS then
-                    btn:SetAttribute("type-" .. virtualBtn, "focus")
-                elseif actionType == "assist" or actionType == self.ACTION_TYPES.ASSIST then
-                    btn:SetAttribute("type-" .. virtualBtn, "assist")
-                end
-            else
-                -- Use macro for all spell/macro bindings
-                -- This supports smart res, combat conditionals, fallbacks, etc.
-                btn:SetAttribute("type-" .. virtualBtn, "macro")
-                btn:SetAttribute("macrotext-" .. virtualBtn, data.macroText)
-            end
-        end
-    end
-end
+-- SetupHovercastButtonAttributes was removed here (2026-08-02): it wrote
+-- attributes nothing could ever read.
+--
+-- It named its slots with GetVirtualButtonName ("type-shiftmouse3"), while the
+-- bindings that actually reach this button are installed by
+-- BuildHovercastSetupScript using GetHovercastSuffix ("type-dfmouseshift3").
+-- Two disjoint namespaces on one button, so no click or key ever resolved to
+-- anything it set. Its clear loop had the same problem in reverse: it cleared
+-- type1..5 / spell1..5 / macrotext1..5, which nothing on this button writes,
+-- so its own attributes accumulated untouched for the session. The button is
+-- also EnableMouse(false), so it cannot be physically clicked either.
+--
+-- Deleting it also closes an unbounded leak: it called AddCombatConditional on
+-- the hovercast button, appending to a dfAttrDriverList that nothing ever
+-- unregistered or cleared, growing on every ApplyBindings for the whole session.
+--
+-- The real hovercast path is ApplyGlobalBindings -> BuildHovercastSetupScript,
+-- which is unaffected.
 
 -- Get the suffix for a binding (like Clique's GetBindingPrefixSuffix)
 -- For global bindings, returns something like "dfbuttonshiftf" or "dfmouseshift3"
@@ -1232,7 +1179,9 @@ function CC:GetBindingKeyString(binding)
             if num then
                 mapped = "BUTTON" .. num
             else
-                mapped = binding.button:upper():gsub("BUTTON", "BUTTON")
+                -- Was `:gsub("BUTTON", "BUTTON")` — a no-op that read as
+                -- deliberate normalisation. It only ever uppercased.
+                mapped = binding.button:upper()
             end
         end
         key = key .. mapped
@@ -1475,8 +1424,9 @@ function CC:GetBindingActionText(binding)
         return "Open Menu"
     elseif actionType == self.ACTION_TYPES.FOCUS then
         return "Focus Unit"
-    elseif actionType == self.ACTION_TYPES.FOLLOW then
-        return "Follow Unit"
+    -- The FOLLOW branch was removed: ACTION_TYPES has no FOLLOW member, so the
+    -- comparison was `actionType == nil` and a binding with no action type at
+    -- all displayed as "Follow Unit" instead of falling through to "Unknown".
     elseif actionType == self.ACTION_TYPES.ASSIST then
         return "Assist Unit"
     else
