@@ -331,6 +331,31 @@ local function GetThemeColor()
 end
 GUI.GetThemeColor = GetThemeColor
 
+-- Cursor position in FRAME's own coordinate space.
+--
+-- ☠ NEVER DIVIDE THE CURSOR BY UIParent:GetEffectiveScale() FOR A FRAME INSIDE
+-- THE SETTINGS WINDOW. GetCursorPosition returns a value you divide by a frame's
+-- EFFECTIVE scale to get that frame's coordinates. The settings window carries
+-- the user's UI Scale on top of UIParent's, so for anything inside it the two
+-- differ by exactly that factor -- while every frame:GetTop()/GetLeft() you
+-- compare against is already in the frame's own space. Divide by the wrong one
+-- and the comparison is nonsense: at 140% the cursor reads 40% further from the
+-- screen edge than it is, which is why drag-to-reorder only ever dropped in the
+-- right place at 100%.
+--
+-- The exception, and why this takes a frame rather than assuming: a frame
+-- PARENTED AND ANCHORED to UIParent (the Aura Designer's drag ghost) really does
+-- have UIParent's effective scale, so there UIParent is the correct divisor.
+-- Pass the frame whose coordinates you are comparing against and it is right
+-- either way.
+function GUI:CursorPos(frame)
+    local scale = frame and frame.GetEffectiveScale and frame:GetEffectiveScale()
+    if not scale or scale == 0 then scale = UIParent:GetEffectiveScale() end
+    if not scale or scale == 0 then scale = 1 end
+    local x, y = GetCursorPosition()
+    return x / scale, y / scale
+end
+
 -- Physical pixels per UI unit, measured from the frame's OWN effective scale.
 -- The GUI window carries a user scale (windowState.scale) on top of UIParent's and is
 -- freely resizable, so this is almost never 1 and cannot be read from the

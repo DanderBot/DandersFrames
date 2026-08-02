@@ -1627,7 +1627,7 @@ function GUI:CreateRangeSlider(parent, opts)
 
     local dragging = nil
     local function ApplyCursor()
-        local x = select(1, GetCursorPosition()) / UIParent:GetEffectiveScale()
+        local x = select(1, GUI:CursorPos(track))
         local trackLeft = track:GetLeft()
         if not trackLeft then return end
         local pos = math.max(2, math.min(x - trackLeft, width - 2))
@@ -1652,7 +1652,7 @@ function GUI:CreateRangeSlider(parent, opts)
     track:EnableMouse(true)
     track:SetScript("OnMouseDown", function(_, b)
         if b ~= "LeftButton" then return end
-        local x = select(1, GetCursorPosition()) / UIParent:GetEffectiveScale()
+        local x = select(1, GUI:CursorPos(track))
         local trackLeft = track:GetLeft()
         if not trackLeft then return end
         local value = PosToValue(x - trackLeft)
