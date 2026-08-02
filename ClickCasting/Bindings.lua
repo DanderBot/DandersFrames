@@ -361,7 +361,10 @@ local MODIFIER_COMBOS = {
 -- either identical (rescan/roster reapply, the common case) or one refresh
 -- behind (profile switch), and the batch-end rebuild — deferred to combat end
 -- if interrupted — overwrites it either way.
-function CC:ClearBindingsFromFrame(frame, preserveSnippet)
+-- `quiet` suppresses only the per-frame INFO line, never the hovered-frame WARN.
+-- Set by the ApplyBindings sweep, which walks every registered frame: see the
+-- volume note on ApplyBindings' summary line.
+function CC:ClearBindingsFromFrame(frame, preserveSnippet, quiet)
     if not frame then return end
     -- Combat-safe by contract: only reached from ApplyBindingsToFrameUnified,
     -- which defers "bindingRefresh". Do not add a bare return here without one.
@@ -374,7 +377,7 @@ function CC:ClearBindingsFromFrame(frame, preserveSnippet)
     local frameName = frame:GetName() or "unnamed"
     if isCurrentlyHovered then
         DF:DebugWarn("CLICK", "ClearBindings on HOVERED frame %s (preserving snippet/overrides)", frameName)
-    else
+    elseif not quiet then
         DF:Debug("CLICK", "ClearBindings %s", frameName)
     end
 
@@ -671,12 +674,16 @@ function CC:ApplyBindings()
         if #allFrames > 0 then
             local BATCH_SIZE = 10
             local batchIndex = 0
+            local sweepStart = GetTime()
+            local applied = 0
 
             local function ProcessNextBatch()
                 if InCombatLockdown() then
                     -- Combat started during batch - flag for retry after combat
                     CC:Defer("bindingRefresh")
                     CC.batchBindingTimer = nil
+                    DF:Debug("CLICK", "ApplyBindings sweep INTERRUPTED by combat: %d/%d frames in %dms",
+                        applied, #allFrames, (GetTime() - sweepStart) * 1000)
                     return
                 end
 
@@ -684,7 +691,10 @@ function CC:ApplyBindings()
                 local endIdx = math.min(startIdx + BATCH_SIZE - 1, #allFrames)
 
                 for i = startIdx, endIdx do
-                    CC:ApplyBindingsToFrameUnified(allFrames[i], true)
+                    -- quiet=true: one summary line per sweep instead of three per
+                    -- frame. See the note on that summary below.
+                    CC:ApplyBindingsToFrameUnified(allFrames[i], true, true)
+                    applied = applied + 1
                 end
 
                 -- The hovered frame is index 1, so this runs in the first batch
@@ -716,6 +726,21 @@ function CC:ApplyBindings()
                     CC:RefreshKeyboardBindings()
                     -- The header wipe above kills a live hover; put it straight back.
                     CC:ReassertHoverBinds()
+
+                    -- ONE line per sweep. This used to be three INFO lines per
+                    -- frame, and a sweep walks every registered frame -- with
+                    -- ElvUI loaded that is ~590 frames, so ~1770 entries in a
+                    -- second or two. At maxLines = 10000 that let a handful of
+                    -- sweeps evict the entire history: two separate attempts to
+                    -- capture a reported bug (2026-08-02) came back holding only
+                    -- sweep noise, having flushed the hover and PreClick lines
+                    -- around the actual failure -- and in one case the reload
+                    -- marker too. A debug log whose loudest writer destroys the
+                    -- evidence is worse than no log. The hovered-frame WARNs and
+                    -- every per-frame warning still fire; only the routine
+                    -- per-frame INFO chatter is folded into this.
+                    DF:Debug("CLICK", "ApplyBindings sweep: %d frames in %dms",
+                        applied, (GetTime() - sweepStart) * 1000)
                 end
             end
 
@@ -2769,7 +2794,10 @@ end
 
 -- Apply all bindings to a frame using unified macro approach
 -- skipKeyboardUpdate: when true, skip UpdateFrameBindingAttributes (caller will batch it)
-function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
+-- `quiet` suppresses the two per-frame INFO lines (entry and DONE) and nothing
+-- else -- the hovered-frame WARN below and every warning downstream still fire.
+-- Only the ApplyBindings sweep sets it; see the volume note on its summary line.
+function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate, quiet)
     if not frame then return end
     if self:CombatGuard("bindingRefresh") then return end
     
@@ -2784,7 +2812,9 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
 
     -- Debug: track when bindings are reapplied (helps diagnose unexpected clears)
     local isHovered = (self.currentHoveredFrame == frame) or (frame.IsMouseOver and frame:IsMouseOver())
-    DF:Debug("CLICK", "ApplyBindings %s hovered=%s", frameName, tostring(isHovered))
+    if not quiet then
+        DF:Debug("CLICK", "ApplyBindings %s hovered=%s", frameName, tostring(isHovered))
+    end
     if isHovered then
         DF:DebugWarn("CLICK", "ApplyBindings on HOVERED frame %s — bindings may flicker! caller: %s",
             frameName, debugstack(2, 1, 0) or "unknown")
@@ -2855,7 +2885,7 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
     -- left frames snippet-less for a whole fight (see ClearBindingsFromFrame).
     -- The no-bindings leg above must NOT preserve it -- nothing rewrites the
     -- snippet on a frame with no bindings, so there it has to be cleared.
-    self:ClearBindingsFromFrame(frame, skipKeyboardUpdate)
+    self:ClearBindingsFromFrame(frame, skipKeyboardUpdate, quiet)
 
     -- Register for clicks based on castOnDown option
     if frame.RegisterForClicks then
@@ -2959,10 +2989,12 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
     end
 
     -- Debug: confirm final attribute state after apply
-    local finalType1 = frame:GetAttribute("type1")
-    local finalMacro1 = frame:GetAttribute("macrotext1")
-    DF:Debug("CLICK", "ApplyBindings DONE %s type1=%s macro1=%s",
-        frameName, tostring(finalType1), finalMacro1 and finalMacro1:sub(1, 50) or "nil")
+    if not quiet then
+        local finalType1 = frame:GetAttribute("type1")
+        local finalMacro1 = frame:GetAttribute("macrotext1")
+        DF:Debug("CLICK", "ApplyBindings DONE %s type1=%s macro1=%s",
+            frameName, tostring(finalType1), finalMacro1 and finalMacro1:sub(1, 50) or "nil")
+    end
 
     -- Update keyboard binding snippet for WrapScript to use
     -- Skip when caller will batch-refresh all frames (e.g. ApplyBindings)
