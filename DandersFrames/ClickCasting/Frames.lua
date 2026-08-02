@@ -757,12 +757,27 @@ function CC:CaptureOriginalClickBindings(frame)
 
     local t1, t2 = frame:GetAttribute("type1"), frame:GetAttribute("type2")
     local s1, s2 = frame:GetAttribute("*type1"), frame:GetAttribute("*type2")
-    if issecretvalue(t1) or issecretvalue(t2) or issecretvalue(s1) or issecretvalue(s2) then
+    -- unit1/unit2 are captured too: ClearBlizzardClickCastFromFrame nils them,
+    -- and nothing restored them. A foreign frame whose click actions relied on
+    -- per-button unit overrides lost that behaviour for the session.
+    local u1, u2 = frame:GetAttribute("unit1"), frame:GetAttribute("unit2")
+    if issecretvalue(t1) or issecretvalue(t2) or issecretvalue(s1) or issecretvalue(s2)
+        or issecretvalue(u1) or issecretvalue(u2) then
         frame.dfOriginalClickBindings = false
     else
         frame.dfOriginalClickBindings = {
             type1 = t1, type2 = t2, starType1 = s1, starType2 = s2,
+            unit1 = u1, unit2 = u2,
         }
+    end
+
+    -- Mousewheel state is captured separately (it is not an attribute).
+    -- ApplyBindingsToFrameUnified force-enables the wheel on every apply and
+    -- nothing ever turned it off again, so a frame that deliberately left the
+    -- wheel disabled started swallowing scroll events -- scrolling over it
+    -- stopped scrolling the parent scrollframe, for the rest of the session.
+    if frame.IsMouseWheelEnabled then
+        frame.dfOriginalMouseWheel = frame:IsMouseWheelEnabled() and true or false
     end
 end
 
@@ -1048,11 +1063,18 @@ function CC:SetupClickCastFramesGlobal()
         end
     })
     
-    -- Re-register any frames that were already in ClickCastFrames
+    -- Re-register any frames that were already in ClickCastFrames.
+    --
+    -- Through EnsureRegistered, not RegisterFrame directly: the eligibility gate
+    -- lives in EnsureRegistered, so this loop used to register anything present
+    -- unconditionally. Anything an addon parked in the table before our
+    -- PLAYER_ENTERING_WORLD -- including a non-unit secure button, the exact
+    -- case the gate was written for after a toy button had its type1 replaced --
+    -- was adopted with no check at all.
     for frame, enabled in pairs(existingFrames) do
         if enabled then
             rawset(ClickCastFrames, frame, true)
-            CC:RegisterFrame(frame)
+            CC:EnsureRegistered(frame)
         end
     end
     
@@ -1113,8 +1135,15 @@ function CC:ScanForThirdPartyFrames()
     for _, frameName in ipairs(knownFramePatterns) do
         local frame = _G[frameName]
         if frame and type(frame) == "table" and frame.GetAttribute then
-            -- Check if it's a valid unit frame with a unit attribute
+            -- Check if it's a valid unit frame with a unit attribute.
+            -- The issecretvalue guard has to come BEFORE the boolean test, not
+            -- after it as it did for isProtected below: evaluating a secret value
+            -- in a condition throws, and this runs inside a C_Timer callback, so
+            -- the error took out the rest of the pattern list and the
+            -- ClickCastFrames sweep underneath it -- no third-party registration
+            -- at all for the session, from one silent error at login.
             local unit = frame:GetAttribute("unit")
+            if issecretvalue(unit) then unit = nil end
             if unit and not self.registeredFrames[frame] then
                 -- Check if it's a protected secure frame
                 local isProtected = frame.IsProtected and frame:IsProtected()
@@ -1590,6 +1619,22 @@ function CC:RegisterFrame(frame)
     end
 
     if self.registeredFrames[frame] then return end
+
+    -- An unnamed frame can never be a click-cast target. HANDLE:SetBindingClick
+    -- resolves its target through GetName() and errors on a nil name
+    -- (RestrictedFrames.lua), so no hover bind can ever point here.
+    --
+    -- Registering one was actively destructive rather than merely useless:
+    -- ClearBlizzardClickCastFromFrame runs early and has no name check, wiping
+    -- type1/type2 and every modifier variant, while the three functions that
+    -- would have installed our bindings each bail on the missing name further
+    -- down. Net effect on a third-party frame: left-click no longer targets,
+    -- right-click no longer opens the menu, and nothing replaces either, until
+    -- a reload. If we cannot bind it, we do not touch it.
+    if frame.GetName and not frame:GetName() then
+        DF:DebugWarn("CLICK", "Refusing to register an unnamed frame — SetBindingClick requires a name")
+        return
+    end
 
     -- Don't register during combat OR if secure frames aren't initialized yet
     -- (init drains the "register" job once secureFramesInitialized flips)
