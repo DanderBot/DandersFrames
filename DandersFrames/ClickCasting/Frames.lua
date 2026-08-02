@@ -2840,9 +2840,15 @@ function CC:UnregisterFrame(frame)
     if not frame then return end
     -- Drop any deferred registration first, and unconditionally: a frame can be
     -- unregistered while still only PENDING (created, no unit yet, then hidden
-    -- before its unit arrived). Leaving it queued would let the unit-assignment
-    -- path resurrect a frame the caller has just opted out of.
+    -- before its unit arrived) or while sitting in the combat-deferred "register"
+    -- set. Both must go before the early returns below, because a frame in either
+    -- state is NOT in registeredFrames -- so this function used to return without
+    -- touching them, and the queued registration then took over, one combat
+    -- later, a frame the caller had just explicitly opted out of.
     if self.pendingRegistration then self.pendingRegistration[frame] = nil end
+    if self.deferred and type(self.deferred.register) == "table" then
+        self.deferred.register[frame] = nil
+    end
     if not self.registeredFrames then return end
     if not self.registeredFrames[frame] then return end
     

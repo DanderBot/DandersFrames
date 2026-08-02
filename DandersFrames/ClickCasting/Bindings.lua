@@ -315,7 +315,21 @@ function CC:ShouldBindingLoad(binding)
     --
     -- Combat conditions are checked dynamically via state drivers / macro
     -- conditionals, not here.
-    return not not binding.enabled
+    --
+    -- `~= false`, NOT `not not`. A binding with no `enabled` field at all was
+    -- read three different ways: the map grouping and the special-action and
+    -- item paths all treat absent as enabled (`enabled ~= false`), while this
+    -- helper treated it as disabled. So for a key whose bindings ALL lack the
+    -- field, the spell/macro builder dropped every one, produced no macro text,
+    -- and the key got no map entry -- completely dead, while the binding list
+    -- showed it as present and enabled.
+    --
+    -- Reachable because nothing normalizes the field on the way in: the login
+    -- pass fixes up `frames`/`fallback`/`combat` but not `enabled`, and profile
+    -- import inserts bindings verbatim. Absent now means enabled everywhere,
+    -- which matches the majority of the existing paths and the UI's own
+    -- backwards-compatibility default.
+    return binding.enabled ~= false
 end
 
 -- Every modifier prefix combination we ever write, in SecureActionButtonTemplate
@@ -683,9 +697,23 @@ function CC:ApplyBindings()
                 local endIdx = math.min(startIdx + BATCH_SIZE - 1, #allFrames)
 
                 for i = startIdx, endIdx do
-                    -- quiet=true: one summary line per sweep instead of three per
-                    -- frame. See the note on that summary below.
-                    CC:ApplyBindingsToFrameUnified(allFrames[i], true, true)
+                    -- skipKeyboardUpdate=FALSE deliberately. Deferring the snippet
+                    -- rebuild to the batch tail left every already-processed frame
+                    -- holding the OUTGOING snippet while its outgoing
+                    -- type-<virtualBtn> attributes had already been erased -- so
+                    -- the keys that snippet binds pointed at cleared attributes:
+                    -- dead AND stolen from the action bar, for the rest of the
+                    -- sweep, or for the whole fight if combat interrupted it. The
+                    -- hovered-frame hoist above repairs exactly one frame.
+                    --
+                    -- Rebuilding inline costs nothing: RefreshKeyboardBindings at
+                    -- the tail already calls UpdateFrameBindingAttributes once per
+                    -- registered frame, so this is the same N calls moved earlier.
+                    -- It also closes the window the old comment worried about --
+                    -- clear and rebuild now happen inside one call with no yield
+                    -- between them, so combat can no longer land in the gap.
+                    -- quiet=true keeps it to one summary line per sweep.
+                    CC:ApplyBindingsToFrameUnified(allFrames[i], false, true)
                     applied = applied + 1
                 end
 
@@ -1292,9 +1320,17 @@ function CC:SetEnabled(enabled)
 
     -- Update the header attribute so secure snippets know whether to run
     -- This is critical for allowing Clique/Clicked to work when we're disabled
+    --
+    -- The OnEnter snippet reads this attribute to decide whether to run at all,
+    -- so if the write is skipped the DB says enabled and every hover no-ops. It
+    -- used to be skipped silently in combat with no deferral: toggling click
+    -- casting on during a fight left it dead until something else happened to
+    -- rewrite the attribute, while the UI reported it working.
     if self.header then
         if not InCombatLockdown() then
             self.header:SetAttribute("dfClickCastEnabled", enabled)
+        else
+            self:Defer("headerEnabled", enabled and "on" or "off")
         end
     end
 
