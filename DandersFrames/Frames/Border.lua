@@ -168,17 +168,30 @@ end
 -- deterministic, so the built keys are cached and reused forever.
 local borderKeyMemo = {}
 
+-- Key builder for BuildSpec, hoisted OUT of it so there is no closure per call.
+-- 395af09f killed the 37 string concats but left one allocation behind: `k`
+-- captured memo and prefix, so a fresh closure was built on every call -- and
+-- BuildSpec runs per bordered element per tick (4.6% of trash allocation, 4.3%
+-- of boss).
+--
+-- ☠ THE UPVALUES ARE SHARED, which is safe ONLY because BuildSpec cannot
+-- re-enter: its body reaches DF:GetClassColor, DF:GetTestUnitData, DF:GetUnitRole
+-- and the Border:Resolve* helpers, and none of those calls BuildSpec. Verified
+-- against every caller, not assumed. If a resolver ever needs to build a spec it
+-- must not do it through here, or this silently starts reading another prefix's
+-- keys -- a wrong-border bug with nothing at the call site to explain it.
+local bsMemo, bsPrefix
+local function k(suffix)
+    local key = bsMemo[suffix]
+    if not key then key = bsPrefix .. suffix; bsMemo[suffix] = key end
+    return key
+end
+
 function Border:BuildSpec(dbTable, prefix, ctx)
     if not dbTable or not prefix then return {} end
     local memo = borderKeyMemo[prefix]
     if not memo then memo = {}; borderKeyMemo[prefix] = memo end
-    -- Still a closure per call (it captures memo), but that is one allocation
-    -- instead of the 37 it was guarding.
-    local function k(suffix)
-        local key = memo[suffix]
-        if not key then key = prefix .. suffix; memo[suffix] = key end
-        return key
-    end
+    bsMemo, bsPrefix = memo, prefix
 
     -- Style is the top-level choice: SOLID | GRADIENT | TEXTURE.
     -- GRADIENT owns its own colours (start/end pickers) so the colour-source
