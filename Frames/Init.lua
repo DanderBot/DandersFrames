@@ -1836,8 +1836,14 @@ function DF:UpdateAllFrames()
         end
     end
     
-    -- Handle test mode player frame visibility
-    if DF.testMode and not (testFrameCount >= 1) then
+    -- Handle test mode player frame visibility.
+    --
+    -- DF.playerFrame is legitimately nil at times -- the OnAttributeChanged
+    -- handler clears it when the frame holding unit=player gives it up, and with
+    -- "hide self from party frames" the header may never assign a main-frame
+    -- child that unit at all. The two lines below dereference it unguarded, so
+    -- this could throw. The sibling block above already tests it first.
+    if DF.testMode and not (testFrameCount >= 1) and DF.playerFrame then
         UnregisterUnitWatch(DF.playerFrame)
         DF.playerFrame:Hide()
         DF:UnregisterFrameWithClickCast(DF.playerFrame)

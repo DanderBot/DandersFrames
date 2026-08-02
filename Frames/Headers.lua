@@ -776,8 +776,23 @@ function DF:InitializeHeaderChild(frame)
                     self.index = tonumber(num)
                 elseif actualUnit == "player" then
                     self.index = 0
-                    -- Sync legacy DF.playerFrame for backward compatibility
-                    DF.playerFrame = self
+                    -- Sync legacy DF.playerFrame for backward compatibility --
+                    -- main-frame children ONLY.
+                    --
+                    -- DF.playerFrame is not a generic "whichever frame holds
+                    -- unit=player"; ~50 consumers treat it as the party player
+                    -- frame specifically. SecureSort uses it as party slot 0,
+                    -- setting secure paths and swap frame refs on it, and
+                    -- UpdateAllFrames drives its unit watch and its click-cast
+                    -- registration from it. A pinned frame showing the player was
+                    -- being adopted here, which hands all of that the wrong frame.
+                    --
+                    -- The sibling write fifty lines above already guards exactly
+                    -- this ("Skip for pinned frames - they must not remove main
+                    -- frame entries"); this one never got the same treatment.
+                    if not self.isPinnedFrame then
+                        DF.playerFrame = self
+                    end
                 end
 
                 -- Click casting needs a unit to accept a frame, and this is the
