@@ -927,10 +927,73 @@ function CC:EnsureRegistered(frame)
         return true
     end
 
-    -- No unit yet. Hold it; the unit-assignment path retries.
+    -- No unit yet. Hold it; ReconcileClickCastFrames retries.
     self.pendingRegistration = self.pendingRegistration or {}
     self.pendingRegistration[frame] = true
     return false
+end
+
+-- Reconcile CC's registry against the public ClickCastFrames table.
+--
+-- Two things the ClickCastFrames metatable structurally cannot do, both because
+-- __newindex fires only for keys the table does not already hold and the rawset
+-- inside it spends that one chance immediately:
+--
+--   1. RETRY a frame that was ineligible when first written. EnsureRegistered
+--      parks those in pendingRegistration. Our own header children are covered
+--      by the explicit hook on unit assignment (Frames/Headers.lua), but nothing
+--      covered anything else -- a third-party group header that registers its
+--      children before assigning units had them parked and never looked at
+--      again, so an entire foreign raid grid could silently have no click
+--      casting until a reload. pendingRegistration was write-only.
+--
+--   2. Notice an opt-out. The documented Clique-convention unregister is
+--      `ClickCastFrames[frame] = false`, and for any frame that has been
+--      registered the key already exists, so that write lands in the table with
+--      no metamethod at all. DF kept its bindings, its wrap and its snippet on a
+--      frame whose owner had explicitly taken it back, for the rest of the
+--      session.
+--
+-- Both are reconciled by comparing the two tables rather than by trying to
+-- observe writes. Cheap: pendingRegistration is near-empty in steady state, and
+-- the registry walk is a few hundred entries against a table we already own.
+function CC:ReconcileClickCastFrames()
+    if not ClickCastFrames then return end
+    if not (self.db and self.db.enabled) then return end
+    if InCombatLockdown() then return end
+
+    -- (1) Anything parked that has since become eligible.
+    if self.pendingRegistration then
+        local nowReady = {}
+        for frame in pairs(self.pendingRegistration) do
+            if ClickCastFrames[frame] ~= false and clickCastFrameEligible(frame) then
+                nowReady[#nowReady + 1] = frame
+            end
+        end
+        for _, frame in ipairs(nowReady) do
+            self.pendingRegistration[frame] = nil
+            self:RegisterFrame(frame)
+        end
+        if #nowReady > 0 then
+            DF:Debug("CLICK", "Reconcile: registered %d frame(s) that became eligible", #nowReady)
+        end
+    end
+
+    -- (2) Anything we hold that has been opted out of since.
+    if self.registeredFrames then
+        local revoked = {}
+        for frame in pairs(self.registeredFrames) do
+            if ClickCastFrames[frame] == false then
+                revoked[#revoked + 1] = frame
+            end
+        end
+        for _, frame in ipairs(revoked) do
+            self:UnregisterFrame(frame)
+        end
+        if #revoked > 0 then
+            DF:DebugWarn("CLICK", "Reconcile: released %d frame(s) opted out via ClickCastFrames", #revoked)
+        end
+    end
 end
 
 function CC:SetupClickCastFramesGlobal()
