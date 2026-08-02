@@ -185,6 +185,103 @@ do
     end)
 end
 
+-- ============================================================
+-- EDIT-MODE DEAFENING — the per-container opt-out
+-- ============================================================
+-- 12.1 build 68569 folded CustomAuraContainer onto the (new in that build)
+-- ManagedAuraContainer, and with it our containers inherited Edit Mode's sample
+-- data. On 68412 CustomAuraContainerPrivateMixin:ParseAllAuras called
+-- C_UnitAuras.GetUnitAuras HARD-CODED, so custom containers were immune by
+-- construction; now parsing runs through GetAuraSources(), which returns
+-- AuraContainerAuraSourceLists.EditMode whenever the container's own flag is set.
+-- Exactly ONE thing sets that flag — the container's own handler:
+--
+--     ManagedAuraContainerPrivateMixin:OnAuraDataProviderSwitch(useRealDataProvider)
+--         self:SetUseEditModeSource(not useRealDataProvider)
+--
+-- The normal source reads C_UnitAuras DIRECTLY — it does NOT go through the
+-- swapped AuraUtil provider — so a container that never HEARS the switch keeps
+-- rendering live auras with Edit Mode open. Probe 33 already proved this from the
+-- other side ("born-deaf containers": one built after a switch stays on the
+-- previous source); the old "the swap is below the container layer" reading was
+-- wrong for this build.
+--
+-- ☠ WHY IT GOES IN THE BUILD PATH: AURA_DATA_PROVIDER_SWITCH is a STATIC event —
+-- registered once in AuraContainerPrivateMixin:OnLoad_Intrinsic, and
+-- UpdateEventRegistrations only ever churns the DYNAMIC lists — so an unregister
+-- sticks for the life of that frame. But only THAT frame: every structural
+-- rebuild creates a brand new container, which registers it afresh. A one-shot
+-- deafening expires silently, which is the likeliest reason probe 34 read as a
+-- false negative. So it is re-applied on every build, at the creation site.
+--
+-- DF's own test mode RIDES this event (the provider bounce is how the curated
+-- preview gets its data), so this is a TOGGLE, not a permanent unregister:
+-- containers are born deaf, and are born hearing while _testMode is on.
+local PROVIDER_EVENT = "AURA_DATA_PROVIDER_SWITCH"
+
+-- AuraContainer._providerDeafOK: nil = not yet probed, true/false = the live
+-- client's answer. The container is a forbidden-table object; base widget methods
+-- ARE reachable (we already call SetScale / SetPoint / SetMouseClickEnabled on
+-- it), but the event methods have to be proven at runtime rather than assumed.
+-- The dangerous case is a SILENT refusal — the unregister does not error but the
+-- event stays registered — which would leave every row showing sample icons, so
+-- it is tested for explicitly. Anything short of a proven success keeps the old
+-- hide-the-rows guard (see EDIT-MODE GUARD below) as the fallback.
+local function setContainerProviderDeaf(c, deaf)
+    if not c then return end
+
+    -- ☠ ANSWERED IN GAME (68914): this is refused, and it is refused BY DESIGN.
+    --   Frame:UnregisterEvent(): Function call not permitted on forbidden aspect
+    --   'EventRegistrations' (execution tainted by 'DandersFrames')
+    -- Enum.ForbiddenAspect.EventRegistrations is documented as "Restricts querying
+    -- or modifying registered script events for this object", every Register* method
+    -- ADDS it, and UnregisterEvent / UnregisterAllEvents / IsEventRegistered CHECK
+    -- it. Blizzard's own OnLoad_Intrinsic registers AURA_DATA_PROVIDER_SWITCH from
+    -- secure code, so the container carries the aspect from birth — there is no
+    -- window before it, and no ordering trick. The REBIRTH FALLBACK below is the
+    -- real mechanism; keep this only as a one-shot capability probe so a future
+    -- build that relaxes the rule is noticed rather than assumed away.
+    if AuraContainer._providerDeafOK ~= nil then return end   -- answered once, never retried
+
+    if not deaf then
+        -- Test mode wants the container to hear the bounce. Nothing to do: a fresh
+        -- container is already registered by OnLoad, and re-registering would hit
+        -- the same forbidden aspect anyway.
+        return
+    end
+
+    -- ⚠ Written as an explicit branch, not `deaf and c.UnregisterEvent or
+    -- c.RegisterEvent`: that idiom falls through to RegisterEvent when
+    -- UnregisterEvent is nil, i.e. it would REGISTER the event while reporting
+    -- that it had deafened the container. Exactly backwards.
+    local why
+    if not c.UnregisterEvent then
+        AuraContainer._providerDeafOK, AuraContainer._providerDeafWhy =
+            false, "UnregisterEvent missing on the container"
+        return
+    end
+    local ok, err = pcall(c.UnregisterEvent, c, PROVIDER_EVENT)
+    if not ok then
+        AuraContainer._providerDeafOK = false
+        AuraContainer._providerDeafWhy = "UnregisterEvent errored: " .. tostring(err)
+        DF:DebugWarn(DBG, "provider deafening refused: %s", tostring(err))
+        return
+    end
+
+    -- "It did not error" is NOT proof it took — a silent refusal is the case that
+    -- error" is NOT proof it took — a silent refusal is the case that matters.
+    local okQ, stillRegistered = pcall(c.IsEventRegistered, c, PROVIDER_EVENT)
+    if not okQ then
+        AuraContainer._providerDeafOK, why = true, "accepted; IsEventRegistered unavailable (UNVERIFIED)"
+    elseif stillRegistered then
+        AuraContainer._providerDeafOK, why = false, "silently refused — still registered after UnregisterEvent"
+    else
+        AuraContainer._providerDeafOK, why = true, "confirmed deaf"
+    end
+    AuraContainer._providerDeafWhy = why
+    DF:Debug(DBG, "provider deafening: %s", why)
+end
+
 -- TEST MODE (P5 hybrid, probe 33 live-proven). A real CustomAuraContainer reads real
 -- unit auras — nothing renders on a fabricated test unit. Instead of faking the
 -- CONTAINER we fake the DATA: the game's own sample provider
@@ -1641,6 +1738,11 @@ function NativeBackend:build()
     end
     self.container = c
     AuraContainer.stats.builds = AuraContainer.stats.builds + 1
+    -- Deafen to Blizzard's Edit Mode provider switch FIRST, before anything else can
+    -- fire (see EDIT-MODE DEAFENING). Every build gets its own fresh container, so
+    -- this has to be re-applied here rather than once. Inverted while OUR test mode
+    -- is on: that preview needs to hear the bounce.
+    setContainerProviderDeaf(c, not AuraContainer._testMode)
     local isOverlay = config.mode == "overlay"
     local isMissing = config.mode == "missing"
     if isOverlay then
@@ -3441,49 +3543,263 @@ end
 
 -- ============================================================
 -- EDIT-MODE GUARD (shared)
--- Blizzard Edit Mode swaps the ENTIRE aura data layer: AURA_DATA_PROVIDER_SWITCH
--- installs the edit-mode sample provider at the AuraUtil level (AuraUtil.lua:19,
--- AuraUtilDataProvider replaces C_UnitAuras wholesale), so every container in the
--- game re-parses to random-icon fake auras. Per-container opt-out is IMPOSSIBLE —
--- deafening a container to the event was live-disproved (DF_AuraLab probe 34's
--- deaf twin still flipped: the swap is below the container layer). So while a
--- FOREIGN switch is active we HIDE the factory rows (plain anchor frames — the
--- drives' shown-caches keep them from re-showing), and restore + refresh when the
--- real provider returns. DF's own test mode (P5) sets _ownsProviderSwitch around
--- its switches so its curated preview is exempt from the guard.
+-- ============================================================
+-- Blizzard Edit Mode flips every aura container onto its sample-data source. We
+-- cannot stop OUR containers hearing that switch -- the container carries the
+-- EventRegistrations forbidden aspect from birth, so UnregisterEvent is refused
+-- (see EDIT-MODE DEAFENING near the top of this file). But we do not need to.
+--
+-- ★ PRIMARY: hand the real provider straight back. C_UnitAuras.ResetAuraDataProvider
+-- is public and unrestricted (no HasRestrictions in the generated docs; test mode
+-- already drives it), and it re-fires the switch with useRealDataProvider = true, so
+-- every container -- ours and Blizzard's -- returns to the real source. No rebuild,
+-- no teardown, no button pools recreated. The restore is just the real-switch branch.
+--
+-- THE TRADE: this is GLOBAL. Blizzard's own Edit Mode preview loses its sample
+-- auras, so their buff frame and cooldown manager show your REAL auras while you
+-- position them. That is the same class of trade DF test mode already makes in the
+-- other direction, and the alternative is our own rows flashing.
+--
+-- ORDER, and why each step is where it is:
+--   1. PARK synchronously, inside this dispatch. AURA_DATA_PROVIDER_SWITCH is a
+--      SYNCHRONOUS event, so nothing is drawn between the containers' handler and
+--      ours whichever order they run in -- parking here means the sample icons are
+--      never painted at all.
+--   2. RESET one frame later, never inline. An inline reset would nest a dispatch
+--      inside this one, and any container the OUTER fake dispatch had not yet
+--      visited would receive fake AFTER our reset and be stranded on the sample
+--      source. A frame later the outer dispatch has finished and they all flip
+--      together.
+--   3. Only if the reset is unavailable or fails, fall back to REBIRTH: a container
+--      built after a switch never receives it and useEditModeSource initialises
+--      false, so a fresh container is on the real source by construction (probe 33's
+--      born-deaf finding, which test mode's ordering already depends on).
+--
+-- DF's own test mode (P5) sets _ownsProviderSwitch around its switches so its
+-- curated preview is exempt from all of this.
 local function ensureProviderWatch()
     if AuraContainer._providerWatch then return end
     local f = CreateFrame("Frame")
     AuraContainer._providerWatch = f
     f._hidden = setmetatable({}, { __mode = "k" })
     f._fakeActive = false
-    f:RegisterEvent("AURA_DATA_PROVIDER_SWITCH")
+
+    -- Hide every currently-shown row and remember which ones we hid.
+    local function parkAll(watch)
+        watch._fakeActive = true
+        for h in pairs(AuraContainer._handles or {}) do
+            if not h._destroyed and h:GetFrame():IsShown() then
+                watch._hidden[h] = true
+                safeHideWindow(h:GetFrame(), function() return watch._hidden[h] end)
+            end
+        end
+    end
+
+    -- Clear the park BEFORE any restore: _applyVisibility forces a handle hidden
+    -- while _fakeActive and _hidden[h] both hold, so restoring first strands them.
+    local function unpark(watch)
+        watch._fakeActive = false
+        for h in pairs(watch._hidden) do watch._hidden[h] = nil end
+    end
+
+    -- ★ STRANDING SWEEP — the belt to the inline reset's braces.
+    --
+    -- The inline reset leaves one hole, and it is the only way Edit Mode's sample icons
+    -- can still reach a LIVE frame: if the outer fake dispatch had not yet visited some
+    -- container when our reset ran, that container takes fake AFTER the reset and sits
+    -- on the sample source until Edit Mode closes. Measured as not happening on 68914,
+    -- but that rests on an undocumented dispatch order, and this ships to configurations
+    -- we will never test.
+    --
+    -- The sweep removes the need to reason about order at all: bounce the provider
+    -- fake→real BACK TO BACK in one frame. Every container hears both, in that order,
+    -- whatever order it is visited in, and ends on the real source. Nothing paints
+    -- between two consecutive Lua statements.
+    --
+    -- It is near-free: UpdateAllAuras is MarkDirty(FullAuraRebuild), a bit-set, and
+    -- ProcessDirtyFlags runs once on the next OnUpdate — so two marks in one frame
+    -- produce ONE reparse, the same one the reset already scheduled.
+    --
+    -- ☠ THE DANGEROUS HALF: if Switch succeeds and Reset does not, the whole GAME is
+    -- left on the fake provider — every aura display, ours and Blizzard's, showing
+    -- sample icons. So Reset is retried hard, and as a last resort re-armed on a timer.
+    -- Reset is known to work by the time we get here (the inline reset used it moments
+    -- ago), which is why the bounce is safe to attempt at all.
+    local function sweepStranded()
+        -- Only NESTED dispatch can strand: QUEUED means our reset landed after the
+        -- outer dispatch finished, so every container had already taken fake first.
+        if AuraContainer._inlineDispatch ~= "NESTED" then return end
+        if AuraContainer._ownsProviderSwitch then return end
+        local switch = C_UnitAuras and C_UnitAuras.SwitchAuraDataProvider
+        local reset  = C_UnitAuras and C_UnitAuras.ResetAuraDataProvider
+        if not (switch and reset) then return end
+
+        -- Our own handler must ignore both halves; reuse the flag it already honours.
+        AuraContainer._ownsProviderSwitch = true
+        local okS = pcall(switch)
+        local okR = pcall(reset)
+        if okS and not okR then
+            for _ = 1, 3 do
+                if pcall(reset) then okR = true; break end
+            end
+        end
+        AuraContainer._ownsProviderSwitch = false
+
+        if okS and not okR then
+            -- Worst case: the world is on fake data and we could not undo it. Keep
+            -- trying rather than leaving it; a stuck retry is recoverable, a stuck
+            -- fake provider is not.
+            DF:DebugWarn(DBG, "stranding sweep left the fake provider installed — retrying")
+            local function retry(n)
+                if pcall(reset) or n <= 0 then return end
+                C_Timer.After(0.25, function() retry(n - 1) end)
+            end
+            retry(20)
+        elseif not okS then
+            -- Switch refused, so nothing was changed and nothing needs undoing.
+            DF:DebugWarn(DBG, "stranding sweep skipped: SwitchAuraDataProvider refused")
+        end
+    end
+
+    -- LAST RESORT (see step 3 above). Two passes: a raid's worth of teardown +
+    -- CreateFrame + AddAuraGroup in one frame is itself a visible stall, so rebuild
+    -- what is ON SCREEN now and drain the rest 25 per tick. Offscreen handles stay
+    -- flipped for those few frames, which costs nothing because nothing draws them.
+    local function rebirthAll(watch)
+        unpark(watch)
+        local function rebirth(h)
+            if h._destroyed then return end
+            pcall(function() h:_rebuild() end)          -- reborn on the real source
+            pcall(function() h:_applyVisibility() end)  -- and back on screen
+        end
+        local later, n = {}, 0
+        for h in pairs(AuraContainer._handles or {}) do
+            if not h._destroyed then
+                if h:GetFrame():IsShown() then
+                    rebirth(h)
+                else
+                    n = n + 1
+                    later[n] = h
+                end
+            end
+        end
+        if n == 0 then return end
+        local i = 1
+        local function drain()
+            if AuraContainer._ownsProviderSwitch then return end
+            local stop = math.min(i + 24, n)
+            while i <= stop do rebirth(later[i]); i = i + 1 end
+            if i <= n then C_Timer.After(0, drain) end
+        end
+        C_Timer.After(0, drain)
+    end
+
+    f:RegisterEvent(PROVIDER_EVENT)
     f:SetScript("OnEvent", function(self, _, useRealDataProvider)
         if AuraContainer._ownsProviderSwitch then
             self._fakeActive = false   -- P5's own preview manages its rows itself
             return
         end
+
         if useRealDataProvider then
             self._fakeActive = false
             for h in pairs(self._hidden) do
                 self._hidden[h] = nil
                 if not h._destroyed then
-                    -- Restore through the visibility channel: hover-safe, and
-                    -- composes intent + identity gate (a bare Show() re-opened
-                    -- gate-hidden windows on Edit Mode exit).
+                    -- Restore through the visibility channel: hover-safe, and composes
+                    -- intent + identity gate (a bare Show() re-opened gate-hidden
+                    -- windows on Edit Mode exit).
+                    --
+                    -- ⚠ NO Refresh() here. It used to bounce every container
+                    -- (NativeBackend:refresh = Hide+Show), and that bounce was most of
+                    -- the remaining visible delay: N containers each re-registering and
+                    -- re-laying-out. It is redundant twice over —
+                    --   * the real switch already ran SetUseEditModeSource(false) on
+                    --     every container, and that calls UpdateAllAuras itself; and
+                    --   * showing the parent fires the container's OnShow_Intrinsic,
+                    --     which does UpdateEventRegistrations + UpdateAllAuras anyway.
+                    -- The second also closes the only gap worth worrying about: while
+                    -- parked the frame is hidden, so the container drops its UNIT_AURA
+                    -- registration (ShouldRegisterForDynamicEvents = IsVisible and
+                    -- IsEnabled) and would otherwise miss changes made during the park.
                     h:_applyVisibility()
-                    h:Refresh()        -- re-parse real data (Edit Mode exit is OOC)
                 end
             end
-        else
-            self._fakeActive = true
-            for h in pairs(AuraContainer._handles or {}) do
-                if not h._destroyed and h:GetFrame():IsShown() then
-                    self._hidden[h] = true
-                    safeHideWindow(h:GetFrame(), function() return self._hidden[h] end)
-                end
-            end
+            return
         end
+
+        if AuraContainer._providerDeafOK then
+            -- A future build that permits the unregister: our containers never heard
+            -- this switch and are still on the real source. Nothing to do.
+            self._fakeActive = false
+            return
+        end
+
+        parkAll(self)
+
+        -- ⚗ EXPERIMENT (INLINE_PROVIDER_RESET): reset from INSIDE this dispatch rather
+        -- than a frame later. Parking and restoring then both happen before anything is
+        -- drawn, so the remaining sub-50ms blip disappears entirely.
+        --
+        -- ✅ VERIFIED IN GAME on 68914: NESTED, and NOTHING stranded. Confirmed from the
+        -- saved debug log, which also shows neither fallback firing — no reset failure,
+        -- no rebirth. One dispatch, no visible artifact.
+        --
+        -- ⚠ But note WHY that is luck rather than design. The stranding hazard depends on
+        -- where our watch frame sits in the dispatch order, and the obvious prediction was
+        -- wrong: the watch registers before any container exists (ensureProviderWatch runs
+        -- ahead of the first _build), so registration order would have put it FIRST and
+        -- stranded everything. It stranded nothing, so dispatch order is NOT registration
+        -- order — and the real rule is undocumented. Treat this as empirical, not sound.
+        -- If it ever regresses the symptom is rows of random spellbook icons during Edit
+        -- Mode, cleared on exit (Edit Mode's own reset flips every container back), so it
+        -- is self-limiting: no error, no data loss, one toggle to clear.
+        --
+        -- Whether that is safe depends on undocumented dispatch semantics, and the
+        -- outcome is self-reporting — the debug line below says which the client does:
+        --   * QUEUED  — pcall returns with _fakeActive still set, the real switch lands
+        --               later. Identical to the deferred path; safe, no gain.
+        --   * NESTED  — the real switch is dispatched re-entrantly, our restore has
+        --               already run, _fakeActive is clear. Zero blip — BUT any container
+        --               the OUTER fake dispatch had not yet visited receives fake AFTER
+        --               our reset and is stranded on the sample source until Edit Mode
+        --               is toggled again. Visible as rows of random spellbook icons.
+        -- If you see stranded rows, flip this to false; the deferred path below is
+        -- unchanged and known good.
+        local INLINE_PROVIDER_RESET = true
+        local resetNow = C_UnitAuras and C_UnitAuras.ResetAuraDataProvider
+        if INLINE_PROVIDER_RESET and resetNow and pcall(resetNow) then
+            -- Recorded, not just logged: which of the two it is decides whether the
+            -- inline reset is worth keeping, and it is not inferable from "it looked
+            -- fine" — one imperceptible frame and zero frames look identical.
+            AuraContainer._inlineDispatch = self._fakeActive and "QUEUED" or "NESTED"
+            DF:Debug(DBG, "inline provider reset: dispatch was %s",
+                     self._fakeActive and "QUEUED (no gain, safe)" or "NESTED (zero blip; watch for stranded rows)")
+            -- Deliberately NOT returning here. If the dispatch was NESTED the restore has
+            -- already run and the backstop below sees _fakeActive clear and no-ops. If it
+            -- was QUEUED the real switch is still in flight — and if it somehow never
+            -- arrives, the backstop is the only thing standing between us and rows parked
+            -- forever. It costs one no-op timer.
+        end
+
+        C_Timer.After(0, function()
+            if AuraContainer._ownsProviderSwitch then return end
+            if not self._fakeActive then
+                -- Resolved inline. Sweep anyway: that path is the one that can leave a
+                -- container stranded on the sample source, and this is where we stop
+                -- depending on dispatch order to have been kind to us.
+                sweepStranded()
+                return
+            end
+            local reset = C_UnitAuras and C_UnitAuras.ResetAuraDataProvider
+            if reset and pcall(reset) then return end      -- the real-switch branch restores
+            DF:DebugWarn(DBG, "ResetAuraDataProvider unavailable/failed; rebuilding instead")
+            -- Containers cannot be stood up in lockdown; stay parked until the real
+            -- switch arrives (Edit Mode cannot be opened in combat anyway -- this only
+            -- covers another addon switching the provider mid-fight).
+            if InCombatLockdown() then return end
+            rebirthAll(self)
+        end)
     end)
 end
 
@@ -3615,8 +3931,9 @@ function AuraContainer:Create(parent, config)
     else
         h:_build()
     end
-    -- Born during a foreign fake-data period (e.g. roster change while the user
-    -- sits in Edit Mode): start hidden like the rest, restored on the real switch.
+    -- FALLBACK PATH ONLY (_fakeActive never latches once deafening is confirmed):
+    -- born during a foreign fake-data period (e.g. roster change while the user
+    -- sits in Edit Mode), start hidden like the rest, restored on the real switch.
     local watch = AuraContainer._providerWatch
     if watch and watch._fakeActive then
         watch._hidden[h] = true

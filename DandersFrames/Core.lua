@@ -2535,6 +2535,34 @@ function DF:DebugAuraFilters(unit)
     o:Field("AuraUtil.ShouldDisplayBuff", hasSDB and "present" or "absent", hasSDB and "good" or "warn")
     o:Field("AuraUtil.ForEachAura", hasFEA and "present" or "absent", hasFEA and "good" or "warn")
 
+    -- Which Edit Mode strategy is actually live. Deafening the container to
+    -- AURA_DATA_PROVIDER_SWITCH can only be PROVEN at runtime (it is a base widget
+    -- method on a forbidden-table object), so this reports the client's answer
+    -- rather than an assumption — see EDIT-MODE DEAFENING in Frames/AuraContainer.lua.
+    o:Section("Edit Mode isolation")
+    local ac = DF.AuraContainer
+    local deafOK = ac and ac._providerDeafOK
+    if not ac or deafOK == nil then
+        o:Field("strategy", "not probed yet (no container built)", "neutral")
+    elseif deafOK then
+        o:Field("strategy", "deafened container — rows keep live auras", "good")
+    else
+        o:Field("strategy", "rebirth fallback — rebuild on switch (OOC), hide in combat", "warn")
+    end
+    if ac and ac._providerDeafWhy then
+        o:Field("unregister probe", tostring(ac._providerDeafWhy), deafOK and "good" or "neutral")
+    end
+    -- Populated the first time Edit Mode is opened. QUEUED means the client deferred
+    -- our re-entrant switch to after the in-flight dispatch (safe, and the inline reset
+    -- gains nothing); NESTED means it dispatched re-entrantly (zero blip, but containers
+    -- the outer dispatch had not reached can strand on the sample source).
+    if ac and ac._inlineDispatch then
+        o:Field("inline reset dispatch", ac._inlineDispatch,
+                ac._inlineDispatch == "QUEUED" and "good" or "warn")
+    elseif ac then
+        o:Field("inline reset dispatch", "not observed yet (open Edit Mode once)", "neutral")
+    end
+
     o:Section("ShouldDisplayBuff per aura")
     if AuraUtil and AuraUtil.ForEachAura then
         local rows = {}
