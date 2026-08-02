@@ -227,6 +227,26 @@ DF.DebugSubCommands = {}
 -- This lookup is what the dispatcher gate consults so the two halves now match.
 DF.DEBUG_SUB_DEV = {}
 
+-- ☠ EVERY sub() NAME, dev or not. This is what stops "/df debug <word>" loading
+-- the settings addon for a command that lives entirely in this one.
+--
+-- The dispatcher's unknown-word fallback exists because a handful of debug tools
+-- (icons, colorhook, atlas, auraexp, memtest) register their slashes only when
+-- the companion loads, so an unrecognised word has to load it and retry. But
+-- "recognised" was read from DebugSlashBySub, which ONLY RegisterDebugSlash
+-- fills -- so all ~38 commands registered through sub() looked unknown and pulled
+-- in ~3 MB of settings UI before running a branch that never needed it. That is
+-- the whole saving of splitting the addon in two, spent on one diagnostic.
+--
+-- Worse for the probes that exist to MEASURE memory: loading the companion
+-- perturbs exactly what they report.
+--
+-- Safe against shadowing: no sub() name collides with a companion-registered
+-- slash, so this set can never swallow a word that genuinely needs the load. The
+-- sub() branches that DO need the companion (profiler, ...) call
+-- EnsureOptionsLoaded themselves, at the point of need.
+DF.DEBUG_SUB_KNOWN = {}
+
 -- ============================================================
 -- CHAT OUTPUT HOUSE STYLE  (DF:Out)
 -- ============================================================
@@ -526,6 +546,9 @@ function DF:RegisterDebugSub(cmd, desc, devOnly, args, hidden)
     -- command cannot be marked dev in the listing while staying runnable on
     -- release — the two can no longer drift apart.
     if devOnly then DF.DEBUG_SUB_DEV[cmd] = true end
+    -- Registering IS the gate here too: a branch added later is covered on the
+    -- day it is written, with no second list to keep in step.
+    DF.DEBUG_SUB_KNOWN[cmd] = true
 end
 
 -- ============================================================
@@ -5000,15 +5023,23 @@ DF._MainEventDispatcher = function(self, event, arg1)
             local dbgWord, dbgRest = rawMsg:match("^%s*[Dd][Ee][Bb][Uu][Gg]%s+(%S+)%s*(.-)%s*$")
             -- "on"/"off" are the logging toggle, not commands named on/off.
             if dbgWord and dbgWord:lower() ~= "on" and dbgWord:lower() ~= "off" then
-                local dbgKey = DF.DebugSlashBySub[dbgWord:lower()]
+                local dbgLower = dbgWord:lower()
+                local dbgKey = DF.DebugSlashBySub[dbgLower]
                 -- Several debug tools live in the companion and register their
                 -- slashes only when it loads. If the word is unknown and the
                 -- companion is not in yet, load it and retry once -- otherwise
                 -- the first use of /df debug memtest fell through to the final
                 -- else and opened the settings window instead of the tool.
-                if not dbgKey and not DF._optionsAddonLoaded
+                --
+                -- ☠ DEBUG_SUB_KNOWN FIRST. A sub()-registered command is a branch
+                -- in THIS addon; it is recognised, it just is not in the slash
+                -- registry. Without this test every one of them read as unknown
+                -- and loaded the companion for nothing -- see the note at the
+                -- DEBUG_SUB_KNOWN declaration.
+                if not dbgKey and not DF.DEBUG_SUB_KNOWN[dbgLower]
+                        and not DF._optionsAddonLoaded
                         and DF.EnsureOptionsLoaded and DF:EnsureOptionsLoaded() then
-                    dbgKey = DF.DebugSlashBySub[dbgWord:lower()]
+                    dbgKey = DF.DebugSlashBySub[dbgLower]
                 end
                 if dbgKey and SlashCmdList[dbgKey] then
                     SlashCmdList[dbgKey](dbgRest or "")
