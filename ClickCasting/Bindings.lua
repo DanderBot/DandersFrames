@@ -2561,6 +2561,39 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
         end
     end
 
+    -- Mounted / flying suppression.
+    --
+    -- The single-binding builder stamps ",nomounted,noflying" into every clause
+    -- it emits. This builder never computed it at all, so "disable while
+    -- mounted" worked for every key with ONE binding and silently did nothing
+    -- for every key with two or more -- the user sees the option working, right
+    -- up until the key they care about happens to have a friendly/hostile split.
+    --
+    -- Applied as a post-pass over the finished clause list rather than threaded
+    -- through the ten separate concatenations above: one place to be correct,
+    -- and it covers the unconditional [] and terminal always-cast forms that a
+    -- per-site edit would have missed.
+    local mountedStr = ""
+    if self.db and self.db.global and self.db.global.disableWhileMounted then
+        mountedStr = ",nomounted,noflying"
+    elseif self.db and self.db.global and self.db.global.disableWhileFlying then
+        mountedStr = ",noflying"
+    end
+    if mountedStr ~= "" then
+        local bare = mountedStr:sub(2)  -- drop the leading comma
+        for i, part in ipairs(parts) do
+            local cond, rest = part:match("^%[(.-)%]%s*(.*)$")
+            if cond == nil then
+                -- No bracket at all (always-cast with no combat condition).
+                parts[i] = "[" .. bare .. "] " .. part
+            elseif cond == "" then
+                parts[i] = "[" .. bare .. "] " .. rest
+            else
+                parts[i] = "[" .. cond .. mountedStr .. "] " .. rest
+            end
+        end
+    end
+
     -- No clause was produced. Every clause above requires `.spellName`, but
     -- findBestSpell will happily return a MACRO-type binding, which has none --
     -- so a key carrying two macro bindings with different target types built
@@ -2689,8 +2722,31 @@ function CC:BuildUnifiedMacroMap()
             -- 2. Macro-based targeting (/target) does NOT work for cross-instance players
             -- 3. PreClick handlers can't check unit state (UnitIsDeadOrGhost not available in restricted Lua)
             -- Smart res still works on healing spell bindings - click dead player with heal = casts res
+            -- globalMacroText is what the HOVERCAST button binds, and it is a
+            -- separate question from how the action behaves ON a frame.
+            --
+            -- On a frame these use native WoW handling (type="target" etc), so
+            -- macroText stays nil deliberately. But the hovercast script skips
+            -- any entry with no macro text at all, so "focus, with a target
+            -- fallback" worked while hovering a frame and did nothing at all
+            -- while hovering nothing -- despite the fallback being the entire
+            -- reason that key needs a global bind. BuildMacroTextForBinding has
+            -- had working /focus and /assist branches the whole time; nothing
+            -- ever reached them, because this break fires first.
+            --
+            -- Only for the actions that have a macro form. target and menu do
+            -- not: /target cannot reach cross-instance players (the note below)
+            -- and there is no macro equivalent of the unit menu, so those two
+            -- correctly remain frame-only.
+            local specialType = specialBinding.actionType
+            local hasMacroForm = (specialType == "focus" or specialType == "assist"
+                or specialType == self.ACTION_TYPES.FOCUS
+                or specialType == self.ACTION_TYPES.ASSIST)
+
             macroMap[keyString] = {
                 macroText = nil,
+                globalMacroText = hasMacroForm
+                    and self:BuildMacroTextForBinding(specialBinding, true) or nil,
                 templateBinding = specialBinding,
                 keyString = keyString,
                 isSpecialAction = true,
