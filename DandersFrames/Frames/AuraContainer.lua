@@ -1865,16 +1865,34 @@ function NativeBackend:build()
         local testStyleSlots = testStyle and math.min(1, maxCount) or 0
         local testStyleLayout = scaleGroupLayout(groupLayout, testStyle)
         filters = {}   -- the normal declaration loop below is skipped
-        for k = 1, maxCount do
-            local key = "dfTest" .. k
-            local styled = (k <= testStyleSlots) or nil
-            -- pcall(fn, args...) rather than pcall(function() ... end): the closure form
-            -- allocated one closure per group per container per unit frame, purely to
-            -- wrap a call. The options table is unavoidable (the API takes it); the
-            -- closure was not. Protection is unchanged — AddAuraGroup asserts.
+        -- TWO groups, not one per preview slot. Every AddAuraGroup eagerly creates
+        -- FrameCreationBatchSize (10) button frames — before maxFrameCount is even
+        -- applied — so one group per slot cost maxCount × 10 frames per container per
+        -- unit frame. Measured at 40 test frames that was the single largest allocation
+        -- anywhere in the addon: ~530 MB across four toggles, 65% of the test-mode
+        -- trace, and a visible ~1 s freeze on every toggle.
+        --
+        -- The styled slot keeps its OWN group so declaration order still pins it to
+        -- position 1 — that was the point of the original split, one styled icon leading
+        -- a row of plain ones. Every remaining slot now shares a single group and
+        -- numbers itself via seqStart, so each still paints a distinct curated entry.
+        --
+        -- ⚠ TRADE-OFF, and it is a real one: inside the shared group the flow assigns
+        -- auras to buttons in the CONTAINER's order, which is not creation order, so the
+        -- plain entries may appear in a different order than the curated pool lists
+        -- them. It is deterministic (test mode declares no sort, so the same samples
+        -- land the same way on every build) and every entry is still shown. The original
+        -- "Lightning Shield mid-row" failure this shape was built to prevent was about
+        -- the STYLED entry drifting, which declaration order still guarantees, and the
+        -- mismatched-tooltip half is moot now that tooltips are forced off in test mode.
+        local function addTestGroup(key, count, styled, seqStart)
+            if count <= 0 then return end
+            -- pcall(fn, args...) rather than pcall(function() ... end): no wrapper
+            -- closure. Protection is unchanged — AddAuraGroup asserts.
             local okGroup, err = pcall(c.AddAuraGroup, c, key, category, {
-                maxFrameCount = 1,
-                initializeFrame = handle:_makeInitializeFrame(handle._gen, k, nil, styled and testStyle or nil),
+                maxFrameCount = count,
+                initializeFrame = handle:_makeInitializeFrame(handle._gen,
+                    styled and 1 or nil, nil, styled and testStyle or nil, seqStart),
                 layout = styled and testStyleLayout or groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
             })
             if okGroup then
@@ -1884,6 +1902,8 @@ function NativeBackend:build()
                 DF:DebugWarn(DBG, "test group failed: %s", tostring(err))
             end
         end
+        addTestGroup("dfTestStyled", testStyleSlots, true, nil)
+        addTestGroup("dfTestPlain", maxCount - testStyleSlots, false, testStyleSlots + 1)
     end
     for i, rec in ipairs(filters) do
         local f = rec.f
@@ -2069,9 +2089,10 @@ function NativeBackend:applyGroupTuning()
     -- changes exactly which buttons exist. Nothing has exercised that combination, so
     -- it is left alone rather than enabled blind.
     if mode == "missing" then return end
-    -- Test mode declares per-slot PIN groups (maxFrameCount = 1, curated paint) —
-    -- tuning them would break the slot pinning. Handle:ApplyTuning rebuilds the
-    -- preview instead, so this path is never reached in test mode; guard anyway.
+    -- Test mode declares its own groups with curated paint stamped per button at create
+    -- (a styled group pinned first, then one shared plain group) — tuning them in place
+    -- would not re-stamp that paint. Handle:ApplyTuning rebuilds the preview instead, so
+    -- this path is never reached in test mode; guard anyway.
     if AuraContainer._testMode then return end
     -- OVERLAY declares AuraSLOTs, not groups, so groupKeys is empty and the group
     -- setters have nothing to act on — it needs the slot-side setters instead. The
@@ -2861,8 +2882,16 @@ function applyRecordStyle(button, handle, recStyle)
     end
 end
 
-function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle)
+-- seqStart: when set, this group numbers its OWN buttons sequentially from that base
+-- rather than taking a fixed index or the handle-wide creation counter. That is what
+-- lets a SINGLE test group paint a distinct curated entry per button. The handle-wide
+-- counter cannot do it: Blizzard eagerly creates FrameCreationBatchSize frames per
+-- group, so the shared counter runs far past the preview's slot range. Overshoot is
+-- harmless either way — _paintTestSlot wraps the index modulo the pool size, and any
+-- button past maxFrameCount is never displayed.
+function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart)
     local handle = self
+    local seq = seqStart
     return function(button)
         local ok, err = pcall(function()
             if handle._destroyed or handle._gen ~= gen or not button then return end
@@ -2899,8 +2928,15 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle)
                     -- fixedIndex = the per-slot test group's position (creation order
                     -- is NOT layout order; the group key is) — stamped on the button
                     -- so ApplyStyle repaints the same entry.
-                    button._dfTestIndex = fixedIndex or i
-                    handle:_paintTestSlot(button, button._dfTestIndex)
+                    local testIndex
+                    if seq then
+                        testIndex = seq
+                        seq = seq + 1
+                    else
+                        testIndex = fixedIndex or i
+                    end
+                    button._dfTestIndex = testIndex
+                    handle:_paintTestSlot(button, testIndex)
                 else
                     handle:_bindNativeSlot(button)     -- native inbound setters
                     -- Consumer secure init (overlay dispel carriers): runs in THIS
@@ -3226,8 +3262,10 @@ function Handle:ApplyStyle(style, layout)
                     -- Blizzard instantly overwrote the curated icons with the
                     -- sample auras' random art and zero durations (static swipes)
                     -- — until the next rebuild repainted them (Krathe 2026-07-10).
-                    -- _dfTestIndex = the button's per-slot group position (creation
-                    -- order ≠ layout order).
+                    -- _dfTestIndex = the curated entry this button was stamped with at
+                    -- create (fixed for the styled group, sequential within the shared
+                    -- plain group). Repaint the SAME entry — creation order is not
+                    -- layout order, so recomputing it here would reshuffle the preview.
                     self:_paintTestSlot(b, b._dfTestIndex or i)
                 else
                     bindNative(b, self.config)
