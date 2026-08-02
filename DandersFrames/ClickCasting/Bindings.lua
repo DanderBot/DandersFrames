@@ -613,6 +613,14 @@ function CC:ApplyBindings()
         self:RefreshBlizzardClickCastClearing()
     end
 
+    -- Reconcile against the public table before deciding what to sweep. The
+    -- ClickCastFrames metatable structurally cannot see a retry or an opt-out --
+    -- its rawset spends each frame's one __newindex -- so this is the only thing
+    -- that picks up a foreign frame which has since gained a unit, or releases
+    -- one whose owning addon has taken it back. Here because ApplyBindings runs
+    -- on roster churn, which is the same churn that creates and retires them.
+    self:ReconcileClickCastFrames()
+
     -- Apply bindings to all registered frames in batches to avoid "script ran too long".
     -- With ElvUI or other addons, 100-150+ frames can be registered. Each frame requires
     -- ~300+ SetAttribute calls, so processing them all synchronously exceeds Lua's time limit.
