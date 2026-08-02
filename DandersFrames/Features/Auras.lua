@@ -625,8 +625,30 @@ end
 -- PER-INDICATOR setting — DF.Expiration:Unit(cfg) — so one global could not express it:
 -- a glyph revealing at 5 seconds and a border revealing at 30% are both legitimate at the
 -- same time. Use DF:GetDurationRampKey(DF.Expiration:Unit(cfg)) to reach its ramp.)
+-- ☠ MEMOISED PER SCALE, AND THE RETURNED LIST IS SHARED — do not mutate it.
+-- Every call rebuilt the whole ladder: one table for the list, one table per
+-- breakpoint, and a colorToHex string per breakpoint — from account-wide config
+-- that only changes on a Colours-page edit. It runs per aura per tick and was
+-- 6.6% of all trash-fight allocation.
+--
+-- Verified before sharing: all five call sites only READ (ipairs, indexed reads,
+-- breakpointsSig) — none writes into the list or into an entry. A future caller
+-- that needs to mutate must copy first.
+--
+-- Keyed on the resolved DEF TABLE rather than the scale string, so an unrecognised
+-- scale (which falls back to TEXT_SECONDS) shares that entry instead of growing a
+-- duplicate under its own name.
+--
+-- Invalidation is the one that already exists: DF:InvalidateDurationFormatters
+-- wipes this next to the formatter and curve caches, and its own comment already
+-- makes it the required call for anything mutating these stops. Nothing new to
+-- remember, and the PERCENT scale now gets cached too — GetDurationBreakpointsSig
+-- only ever memoised TEXT_SECONDS.
+local durationBreakpointsCache = {}
 local function GetDurationColorBreakpoints(scale)
     local def = COLOR_SCALES[scale] or COLOR_SCALES.TEXT_SECONDS
+    local cached = durationBreakpointsCache[def]
+    if cached then return cached end
     local g = DF.GetGlobalDB and DF:GetGlobalDB()
     local raw = g and g[def.key]
     local out = {}
@@ -638,9 +660,13 @@ local function GetDurationColorBreakpoints(scale)
             end
         end
     end
-    if #out == 0 then return def.fallback end
+    if #out == 0 then
+        durationBreakpointsCache[def] = def.fallback
+        return def.fallback
+    end
     table.sort(out, function(a, b) return a.threshold > b.threshold end)  -- descending
     if out[#out].threshold ~= 0 then out[#out + 1] = { threshold = 0, hex = out[#out].hex, color = out[#out].color } end
+    durationBreakpointsCache[def] = out
     return out
 end
 
@@ -839,6 +865,10 @@ local durationBreakpointsSigCache   -- memoized DF:GetDurationBreakpointsSig() s
 function DF:InvalidateDurationFormatters()
     wipe(durationFormatterCache)
     durationBreakpointsSigCache = nil
+    -- The resolved ladders themselves are cached now (see GetDurationColorBreakpoints);
+    -- without this the memoized signature would rebuild from stale stops and every
+    -- consumer would keep painting the old ramp.
+    wipe(durationBreakpointsCache)
     -- Colour curves are built from the same stops (DF:GetDurationColorSpec) — a stop edit
     -- must drop them too or the cached curve keeps painting the old ramp.
     if DF._wipeDurationCurves then DF:_wipeDurationCurves() end

@@ -423,7 +423,12 @@ end
 local function colSig(c)
     if type(c) ~= "table" then return "" end
     local r, g, b, a = readADColor(c)
-    return tconcat({ tostring(r), tostring(g), tostring(b), tostring(a) }, ",")
+    -- Direct concat, not tconcat over a throwaway array: the four-element table was
+    -- pure garbage, and a single chained concat compiles to ONE concat over a
+    -- register range, so this allocates the result string and nothing else. colSig
+    -- runs several times per indicator per UNIT_AURA (once per border colour key),
+    -- which put it at 3.5% of trash allocation on its own.
+    return tostring(r) .. "," .. tostring(g) .. "," .. tostring(b) .. "," .. tostring(a)
 end
 
 -- Health-bar overlay alpha per mode — the exact semantics of Indicators:ApplyHealthBar
@@ -578,12 +583,22 @@ end
 -- painted with (field-caught: "I can see the gradient but not the colours I set" -- the
 -- direction dropdown worked, because direction is a scalar). spec.shadow.color had the
 -- same latent hole. Depth-capped purely as a cycle guard; real specs are 2-3 deep.
+-- ☠ PER-DEPTH SCRATCH, NOT ONE SHARED PAIR — subSig RECURSES.
+-- The two throwaway tables per call (keys + parts) ran per indicator per
+-- UNIT_AURA inside syncPlacedPool, a walk whose whole point is to be
+-- allocation-free; subSig alone was 2.1% of trash allocation and it recurses up
+-- to four levels, so a single shared scratch would have a nested call wipe its
+-- caller's half-built list. Depth is hard-bounded at 4 by the guard below, so one
+-- pair per level is both sufficient and safe.
+local subSigKeys, subSigParts = {}, {}
 local function subSig(t, depth)
     depth = depth or 1
-    local keys = {}
+    local keys = subSigKeys[depth]
+    if not keys then keys = {}; subSigKeys[depth] = keys else wipe(keys) end
     for kk in pairs(t) do keys[#keys + 1] = kk end
     tsort(keys)
-    local parts = {}
+    local parts = subSigParts[depth]
+    if not parts then parts = {}; subSigParts[depth] = parts else wipe(parts) end
     for _, kk in ipairs(keys) do
         local v = t[kk]
         local tv = type(v)
@@ -806,9 +821,15 @@ local PLACED_BORDER_COLOR_KEYS = {
     "BorderColor", "BorderGradientStartColor", "BorderGradientEndColor", "BorderShadowColor",
     "BorderAnimationColor",
 }
+-- Shared scratch: unlike subSig this CANNOT recurse (it only reaches colSig, which
+-- allocates nothing and calls nothing), so one table is safe. It was 4.8% of trash
+-- allocation on its own -- a fresh array per indicator per UNIT_AURA.
+local placedBorderSigParts = {}
 local function placedBorderRawSig(indicator, borderOn)
     if not borderOn then return "" end
-    local parts = { ppSigToken() }
+    local parts = placedBorderSigParts
+    wipe(parts)
+    parts[1] = ppSigToken()
     for _, kk in ipairs(PLACED_BORDER_KEYS) do
         parts[#parts + 1] = tostring(indicator[kk])
     end
