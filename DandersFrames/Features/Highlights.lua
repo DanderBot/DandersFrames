@@ -216,27 +216,57 @@ end
 -- HIGHLIGHT FRAME CREATION
 -- ============================================================
 
+-- ☠ THESE ARE ABSOLUTE-ERA OFFSETS. They were +9 / +10 / +11, written when a unit
+-- frame's children topped out around +4 and anything above the health bar was
+-- "on top". Since the frame-level rework every DF element carries an ABSOLUTE
+-- offset from the unit frame, and the content stack now runs: resource bar 20,
+-- contentOverlay 25, status icons 30, missing buff 35, buff/debuff rows 40,
+-- defensive 65 -- whose border art reaches 77, because a row is 13 levels thick.
+-- At +10 the hover highlight sat under ALL of that. The reported "resource bar
+-- draws over the hover highlight" is just the shallowest instance of it.
+--
+-- Safe to raise: every mode draws at the frame PERIMETER only (SOLID, CORNERS and
+-- DASHED are edge lines, GLOW is an edge glow), so nothing here can obscure the
+-- name or health text. It only stops frame content covering the frame's own
+-- selection affordance.
+--
+-- Relative order among the three is preserved: aggro < hover < selection.
+--
+-- The numbers: 65 is the highest default in Config (defensiveIconFrameLevel), and
+-- a row's art sits above its baseline -- by +12 or +14 depending on which element
+-- is tallest, so call the real ceiling 79. These sit clear of it rather than on
+-- the boundary, deliberately: land on 78 and a single off-by-one in that estimate
+-- puts the highlight back under the art with no visible reason why.
+-- ⚠ Clears the DEFAULT stack only. The per-element sliders run 0-100, so pushing
+-- an element above these covers the highlight again -- that is the slider doing
+-- what it says, not a regression.
+local HIGHLIGHT_LEVEL = { Aggro = 82, Hover = 83, Selection = 84 }
+
+-- Applied on REUSE as well as creation: the level is absolute, derived from the
+-- owner's level at the time it is set, so a highlight created before the owner's
+-- level changed would otherwise keep a stale one forever.
+local function ApplyHighlightZOrder(ch, frame, highlightType)
+    ch:SetFrameStrata(frame:GetFrameStrata())
+    ch:SetFrameLevel(frame:GetFrameLevel() + (HIGHLIGHT_LEVEL[highlightType] or HIGHLIGHT_LEVEL.Aggro))
+end
+
 local function GetOrCreateHighlight(frame, highlightType)
     local key = "df" .. highlightType .. "Highlight"
-    if frame[key] then 
+    if frame[key] then
         -- Update points on existing frame to ensure proper positioning
         local ch = frame[key]
         ch:ClearAllPoints()
         ch:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
         ch:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+        ApplyHighlightZOrder(ch, frame, highlightType)
         return ch
     end
-    
+
     -- Parent to UIParent to avoid any clipping from ancestors
     local ch = CreateFrame("Frame", nil, UIParent)
     ch:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
     ch:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
-    ch:SetFrameStrata(frame:GetFrameStrata())
-    -- Frame levels: Aggro = +9, Hover = +10, Selection = +11
-    local levelOffset = 9
-    if highlightType == "Hover" then levelOffset = 10
-    elseif highlightType == "Selection" then levelOffset = 11 end
-    ch:SetFrameLevel(frame:GetFrameLevel() + levelOffset)
+    ApplyHighlightZOrder(ch, frame, highlightType)
     ch:Hide()
     
     -- Track the owner frame so we can hide when owner hides
