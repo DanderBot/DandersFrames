@@ -638,6 +638,36 @@ function CC:ApplyBindings()
             end
         end
 
+        -- Hoist the frame under the cursor to the front of the sweep.
+        --
+        -- The header wipe near the top of this function kills the live hover, and
+        -- nothing can put it back until that frame's own snippet has been rebuilt.
+        -- The tail of the batch walker did that -- but the walker yields between
+        -- batches, and `pairs` order is arbitrary, so a hovered frame landing late
+        -- in the iteration stayed dead for the rest of that sweep, and every
+        -- DF-bound key fell through to the action bar meanwhile (the reporter's
+        -- "4" cast their action-bar spell instead of the DF one).
+        --
+        -- Field-measured with ElvUI loaded in LFR, 2026-08-02: 500 registered
+        -- frames per sweep, 240 of them ElvUI's -- worth noting the batching
+        -- below was sized for the "100-150+" its own comment assumes. Two sweeps
+        -- ran seconds apart, ~392 frame-applies each: 12:37:37-38 in about a
+        -- second, then 12:37:49-54 taking about six. So the worst observed dead
+        -- window is ~6s within a single sweep, NOT the whole span between them.
+        -- Processing this frame first collapses it to the synchronous first
+        -- batch either way.
+        local hovered = self.currentHoveredFrame
+        if hovered and hovered.IsMouseOver and hovered:IsMouseOver() then
+            for i = 2, #allFrames do
+                if allFrames[i] == hovered then
+                    allFrames[i], allFrames[1] = allFrames[1], allFrames[i]
+                    break
+                end
+            end
+        else
+            hovered = nil
+        end
+
         if #allFrames > 0 then
             local BATCH_SIZE = 10
             local batchIndex = 0
@@ -655,6 +685,24 @@ function CC:ApplyBindings()
 
                 for i = startIdx, endIdx do
                     CC:ApplyBindingsToFrameUnified(allFrames[i], true)
+                end
+
+                -- The hovered frame is index 1, so this runs in the first batch
+                -- (which is synchronous). Its snippet has to be rebuilt here
+                -- rather than waiting for RefreshKeyboardBindings at the tail:
+                -- the batch passes skipKeyboardUpdate, so the frame is carrying a
+                -- stale snippet at this point and reasserting without rebuilding
+                -- would restore the OUTGOING binds -- silently casting the
+                -- previous profile's spell, which is worse than no bind at all.
+                -- Pass the frame explicitly: ReassertHoverBinds otherwise falls
+                -- back to currentHoveredFrame, and in the field capture all five
+                -- of its successes landed on a different frame than the one that
+                -- had just been cleared.
+                if hovered and startIdx == 1 then
+                    local target = hovered
+                    hovered = nil
+                    CC:UpdateFrameBindingAttributes(target)
+                    CC:ReassertHoverBinds(target)
                 end
 
                 batchIndex = batchIndex + 1
