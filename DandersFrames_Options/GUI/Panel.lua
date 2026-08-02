@@ -589,13 +589,19 @@ function DF:CreateGUI()
     
     -- Function to update test button state (called externally)
     UpdateTestButtonState = function()
-        -- Active toggle look based on whether the test panel is visible.
-        local testActive = DF.TestPanel and DF.TestPanel:IsShown()
-        btnTest:SetActive(testActive)
-        -- Swap the framed-eye glyph: open (preview) when test mode is showing the
-        -- preview frames, slashed (preview_off) when it's off.
+        -- Both cues read the USER's claim -- the same thing the panel's toggle shows
+        -- -- so the two controls the user thinks of as one can never disagree.
+        --
+        -- ⚠ Deliberately NOT "is a preview on screen". Unlocking puts frames up under
+        -- its OWN claim, and driving the glyph off that made a plain unlock look like
+        -- the user had switched test mode on. Frames being visible during an unlock is
+        -- unlock's business; the chat line explains it.
+        local panelOpen = DF.TestPanel and DF.TestPanel:IsShown()
+        local scope = (GUI.SelectedMode == "raid") and "raid" or "party"
+        local userWants = DF.IsTestModeOwnedBy and DF:IsTestModeOwnedBy(scope, "user")
+        btnTest:SetActive(panelOpen)
         btnTest.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-            .. (testActive and "preview" or "preview_off"))
+            .. (userWants and "preview" or "preview_off"))
         -- White text/icon in both states (state shown by the toggle border/fill).
         btnTest.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         btnTest.Icon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
@@ -645,6 +651,9 @@ function DF:CreateGUI()
                 -- and rebuilding it a moment later. Cleared below.
                 DF._testModeHandover = true
                 DF:HideRaidTestFrames(true)  -- silent
+                -- Hides directly rather than through the owners, so drop raid's
+                -- claims to match. carryTest re-claims in the scope we land in.
+                if DF.ClearTestModeOwners then DF:ClearTestModeOwners("raid") end
             end
         end
 
@@ -658,9 +667,11 @@ function DF:CreateGUI()
         GUI:UpdateTabAvailability()
         GUI:RefreshCurrentPage()
 
-        -- Keep test mode active when switching modes (just switch which mode it runs in)
-        if carryTest and DF.ShowTestFrames then
-            DF:ShowTestFrames(true)  -- silent
+        -- Keep test mode active when switching modes (just switch which mode it runs in).
+        -- Carried as the USER's claim: they had a preview up and are still asking for
+        -- one, just in the other scope.
+        if carryTest and DF.SetTestModeOwner then
+            DF:SetTestModeOwner("party", "user", true, true)   -- silent: the mode swap is the visible event
             -- ShowTestFrames (unlike ShowRaidTestFrames) doesn't refresh the GUI,
             -- so the test panel's toggle label would stay on "Enable Test Mode".
             -- Refresh it now that party test mode is active.
@@ -700,6 +711,9 @@ function DF:CreateGUI()
                 -- Hand-over: see the raid->party handler above.
                 DF._testModeHandover = true
                 DF:HideTestFrames(true)  -- silent
+                -- Hides directly rather than through the owners, so drop party's
+                -- claims to match. carryTest re-claims in the scope we land in.
+                if DF.ClearTestModeOwners then DF:ClearTestModeOwners("party") end
             end
         end
 
@@ -713,8 +727,12 @@ function DF:CreateGUI()
         GUI:UpdateTabAvailability()
         GUI:RefreshCurrentPage()
 
-        -- Keep test mode active when switching modes (just switch which mode it runs in)
-        if carryTest and DF.ShowRaidTestFrames then
+        -- Keep test mode active when switching modes (just switch which mode it runs in).
+        -- Carried as the USER's claim: they had a preview up and are still asking for
+        -- one, just in the other scope.
+        if carryTest and DF.SetTestModeOwner then
+            DF:SetTestModeOwner("raid", "user", true, true)    -- silent: the mode swap is the visible event
+        elseif carryTest and DF.ShowRaidTestFrames then
             DF:ShowRaidTestFrames()
         end
         if carryTest then
@@ -734,6 +752,9 @@ function DF:CreateGUI()
                 if DF.LockFrames then DF:LockFrames() end
             end
             if DF.testMode then DF:HideTestFrames(true) end
+            -- Leaving for a tab with no frames: nobody is asking for a preview
+            -- any more, so drop the claims rather than let them outlive it.
+            if DF.ClearTestModeOwners then DF:ClearTestModeOwners("party") end
         elseif GUI.SelectedMode == "raid" then
             local raidDb = DF:GetRaidDB()
             if raidDb and not raidDb.raidLocked then
@@ -741,8 +762,10 @@ function DF:CreateGUI()
                 if DF.LockRaidFrames then DF:LockRaidFrames() end
             end
             if DF.raidTestMode then DF:HideRaidTestFrames(true) end
+            -- As above: no preview is wanted on a tab that has no frames.
+            if DF.ClearTestModeOwners then DF:ClearTestModeOwners("raid") end
         end
-        
+
         GUI.SelectedMode = "clicks"
         if DF.Search then 
             DF.Search:HideResults()

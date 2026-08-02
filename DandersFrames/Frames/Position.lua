@@ -2486,12 +2486,12 @@ function DF:UnlockFrames()
         DF.displayLockButton.Text:SetText(L["Lock Frames"])
     end
 
-    -- Remember whether test mode was already active before this unlock cycle.
-    -- LockFrames reads this to decide whether to keep or hide test frames.
-    DF.partyTestModeBeforeUnlock = DF.testMode
-
-    -- Enable test mode so user can position with full group visible
-    DF:ShowTestFrames(true)
+    -- Unlock claims test frames for as long as it stays unlocked, so there is a
+    -- full group to position against. It deliberately does NOT snapshot what the
+    -- user had -- that is the user's own claim, tracked separately. The old
+    -- snapshot went stale whenever test mode changed mid-session, in both
+    -- directions (see TestMode/Shim.lua).
+    DF:SetTestModeOwner("party", "unlock", true, true)   -- silent: unlock announces itself
 
     -- Sync GUI toolbar buttons
     if DF.GUI then
@@ -2561,12 +2561,9 @@ function DF:LockFrames()
         if DF.GUI.UpdateTestButtonState then DF.GUI.UpdateTestButtonState() end
     end
 
-    -- Only disable test mode if it was not already active before the last unlock.
-    -- Preserves the user's test mode state across the lock/unlock cycle.
-    if not DF.partyTestModeBeforeUnlock then
-        DF:HideTestFrames(true)
-    end
-    DF.partyTestModeBeforeUnlock = nil
+    -- Release unlock's claim. If the user still wants a preview it stays up; if
+    -- nobody does, this is what hides it. Nothing to go stale either way.
+    DF:SetTestModeOwner("party", "unlock", false, true)  -- silent: lock announces itself
 
     DF:Say(L["Frames locked."])
 end
