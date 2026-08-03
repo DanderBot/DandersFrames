@@ -289,7 +289,7 @@ local function BuildGlobalView(parent)
         descText:SetPoint("RIGHT", descFrame, "RIGHT", 0, 0)
         descText:SetJustifyH("LEFT")
         descText:SetWordWrap(true)
-        descText:SetText(L["Standard buff visibility is managed on the Aura Filters S.page."])
+        descText:SetText(L["Standard buff visibility is managed on the Aura Filters page."])
         descText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         g:AddWidget(descFrame, 24)
 

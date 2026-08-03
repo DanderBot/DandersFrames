@@ -1097,15 +1097,27 @@ function DF:UpdatePetGroupLayout()
         end
     end
     
-    -- Fallback: use party container directly
-    if anchor == "BOTTOM" then
-        container:SetPoint("TOP", partyContainer, "BOTTOM", offsetX, offsetY)
-    elseif anchor == "TOP" then
-        container:SetPoint("BOTTOM", partyContainer, "TOP", offsetX, -offsetY)
-    elseif anchor == "LEFT" then
-        container:SetPoint("RIGHT", partyContainer, "LEFT", offsetX, offsetY)
-    elseif anchor == "RIGHT" then
-        container:SetPoint("LEFT", partyContainer, "RIGHT", -offsetX, offsetY)
+    -- Fallback: use party container directly.
+    -- ☠ This was a bare `partyContainer` -- an undefined GLOBAL, never declared anywhere
+    -- in this file, so it resolved to nil and every SetPoint below anchored to the
+    -- container's PARENT instead of the party frames. Parse-clean, silent, and reachable
+    -- whenever grouped pets are on with no visible party frame (solo with a pet, arena).
+    -- The raid twin further down has always carried the `local raidContainer = ...` line
+    -- this branch was missing -- mirror it exactly, including the nil bail.
+    -- Guard the ANCHOR only, not the whole tail: the pet-frame positioning loop below
+    -- still has to run. (The broken version reached it, so returning early here would
+    -- trade a mis-anchored container for unpositioned pets.)
+    local partyContainer = isTestMode and DF.testPartyContainer or DF.partyContainer
+    if partyContainer then
+        if anchor == "BOTTOM" then
+            container:SetPoint("TOP", partyContainer, "BOTTOM", offsetX, offsetY)
+        elseif anchor == "TOP" then
+            container:SetPoint("BOTTOM", partyContainer, "TOP", offsetX, -offsetY)
+        elseif anchor == "LEFT" then
+            container:SetPoint("RIGHT", partyContainer, "LEFT", offsetX, offsetY)
+        elseif anchor == "RIGHT" then
+            container:SetPoint("LEFT", partyContainer, "RIGHT", -offsetX, offsetY)
+        end
     end
     
     -- Position pet frames within container (fallback path)
