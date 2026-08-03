@@ -3753,8 +3753,14 @@ function DF:FullFrameRefresh(frame)
     if DF.UpdateMissingBuffIcon then DF:UpdateMissingBuffIcon(frame) end
     
     -- Overlays
-    if DF.UpdateDispelOverlay then DF:UpdateDispelOverlay(frame) end
-    
+    -- pcall'd: the dispel overlay is the only element here that reaches into the
+    -- native aura container's slot buttons, so it is the one most exposed to a
+    -- forbidden-object / taint throw. Unguarded, such a throw aborts the REST of
+    -- this function -- highlights, status icons, resource bar, absorbs and heal
+    -- prediction all silently stop updating on that frame (bug #1011). One broken
+    -- element must not take the other five down with it.
+    if DF.UpdateDispelOverlay then pcall(DF.UpdateDispelOverlay, DF, frame) end
+
     -- Highlights (selection, aggro, etc.)
     if DF.UpdateHighlights then DF:UpdateHighlights(frame) end
     

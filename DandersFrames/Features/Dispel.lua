@@ -1134,6 +1134,7 @@ local GAME_ICON_ATLAS = {
     Bleed   = "RaidFrame-Icon-DebuffBleed",
 }
 local warnedTintBind = false
+local warnedSlotStyle = false
 
 -- Slot plan from settings. Returns nil when the native classification route is
 -- required but missing (API drift) and no degrade applies.
@@ -1631,6 +1632,40 @@ local function StyleGameEdgeSlot(btn, frame, db, edge)
     ApplySlotPulse(btn.dfDispelEdgeHolder and btn.dfDispelEdgeHolder[edge], db.dispelAnimate)
 end
 
+-- All the styling for ONE slot button. Split out of StyleDispelSlots so the whole
+-- per-button pass can be pcall'd as a unit -- see the caller for why.
+local function StyleOneSlot(btn, frame, db, info)
+    -- IN-PLACE PALETTE RE-BIND (68914): Blizzard securecopy's the colour map at
+    -- bind time, so a Colours-page edit needs the carrier RE-BOUND. That used to
+    -- force a full container rebuild (the palette generation rode the plan
+    -- signature) — a visible teardown/rebuild flicker on every colour tweak.
+    -- AddDispelTypeTexture accepts a re-bind from this tainted pass now (the
+    -- access-constrained rule is gone; /al accessbind + the 68914 validator,
+    -- which only rejects EXPLICITLY forbidden / protected / non-descendant
+    -- objects — our carrier is a descendant that merely INHERITS aspects), so
+    -- re-bind the carrier we already have and skip the rebuild entirely.
+    -- Icon slots bind nothing, so they never go stale. Re-binds the WHOLE
+    -- carrier list for this button in one clear-then-append pass.
+    if btn._dfDispelCarriers and btn._dfDispelCurveGen ~= DF.dispelCurveGen then
+        BindDispelCarriers(btn, btn._dfDispelCarriers, db, info.key)
+    end
+    if info.iconType then
+        StyleGameTypeIconSlot(btn, frame, db, info.iconType)
+    else
+        -- ONE button, every role it owns (see dispelSlotPlan's `roles`).
+        -- StyleGameMainSlot runs UNCONDITIONALLY: besides dressing the gradient
+        -- carrier it owns the shared geometry pass (ApplyOverlayLayout), hides
+        -- the legacy regions, and applies the darken/pulse — all of which the
+        -- pre-consolidation main slot did in every style, EDGE included.
+        StyleGameMainSlot(btn, frame, db)
+        local r = info.roles
+        if r and r.edges then
+            for _, edge in ipairs(r.edges) do StyleGameEdgeSlot(btn, frame, db, edge) end
+        end
+        if r and r.border then StyleGameBorderSlot(btn, frame, db) end
+    end
+end
+
 -- Style every live slot button per the plan. Returns false while no buttons exist
 -- (combat-deferred build / fake backend) so the caller doesn't latch the version.
 local function StyleDispelSlots(frame, db, h, slots)
@@ -1641,35 +1676,32 @@ local function StyleDispelSlots(frame, db, h, slots)
         local info = slots[i]
         local btn = buttons[info.key]
         if btn then
+            -- `styled` means "a button existed and we ran the pass", NOT "the pass
+            -- succeeded". It has to stay true even when the pass throws, or the
+            -- caller never latches the version/generation and re-enters this same
+            -- failing pass on EVERY drive -- i.e. per UNIT_AURA, per frame, forever
+            -- (bug #1011: 68 identical errors from one key). A real change bumps
+            -- ver/gen and retries; a deterministic failure now costs one error, not
+            -- a permanent loop.
             styled = true
-            -- IN-PLACE PALETTE RE-BIND (68914): Blizzard securecopy's the colour map at
-            -- bind time, so a Colours-page edit needs the carrier RE-BOUND. That used to
-            -- force a full container rebuild (the palette generation rode the plan
-            -- signature) — a visible teardown/rebuild flicker on every colour tweak.
-            -- AddDispelTypeTexture accepts a re-bind from this tainted pass now (the
-            -- access-constrained rule is gone; /al accessbind + the 68914 validator,
-            -- which only rejects EXPLICITLY forbidden / protected / non-descendant
-            -- objects — our carrier is a descendant that merely INHERITS aspects), so
-            -- re-bind the carrier we already have and skip the rebuild entirely.
-            -- Icon slots bind nothing, so they never go stale. Re-binds the WHOLE
-            -- carrier list for this button in one clear-then-append pass.
-            if btn._dfDispelCarriers and btn._dfDispelCurveGen ~= DF.dispelCurveGen then
-                BindDispelCarriers(btn, btn._dfDispelCarriers, db, info.key)
-            end
-            if info.iconType then
-                StyleGameTypeIconSlot(btn, frame, db, info.iconType)
-            else
-                -- ONE button, every role it owns (see dispelSlotPlan's `roles`).
-                -- StyleGameMainSlot runs UNCONDITIONALLY: besides dressing the gradient
-                -- carrier it owns the shared geometry pass (ApplyOverlayLayout), hides
-                -- the legacy regions, and applies the darken/pulse — all of which the
-                -- pre-consolidation main slot did in every style, EDGE included.
-                StyleGameMainSlot(btn, frame, db)
-                local r = info.roles
-                if r and r.edges then
-                    for _, edge in ipairs(r.edges) do StyleGameEdgeSlot(btn, frame, db, edge) end
+            -- pcall'd per BUTTON so one bad slot can't skip the others, and -- more
+            -- importantly -- can't propagate out through DriveDispelOverlayFactory
+            -- into FullFrameRefresh, which would abandon every element that runs
+            -- after the dispel overlay (highlights, status icons, resource bar,
+            -- absorbs, heal prediction). Allocation is fine here: this path is gated
+            -- on a version/generation change, so it runs on rebuilds, not per aura.
+            local ok, err = pcall(StyleOneSlot, btn, frame, db, info)
+            if not ok then
+                btn._dfDispelStyleErr = tostring(err)
+                if not warnedSlotStyle then
+                    warnedSlotStyle = true
+                    if DF.DebugWarn then
+                        DF:DebugWarn("DISPEL", "slot style %s failed: %s",
+                            tostring(info.key), tostring(err))
+                    end
                 end
-                if r and r.border then StyleGameBorderSlot(btn, frame, db) end
+            else
+                btn._dfDispelStyleErr = nil
             end
         end
     end
@@ -1677,8 +1709,11 @@ local function StyleDispelSlots(frame, db, h, slots)
     -- hook only fires on health CHANGES, and the layout pass just neutralized the
     -- fill to full — without a seed a tracking bar renders full until the first
     -- health tick. Early-outs when nothing tracks.
+    -- pcall'd for the same reason as the per-button pass: this reaches into the
+    -- slot widgets' StatusBars, so it shares their exposure and must not be able
+    -- to abort the caller.
     if styled and DF.UpdateDispelGradientHealth then
-        DF:UpdateDispelGradientHealth(frame)
+        pcall(DF.UpdateDispelGradientHealth, DF, frame)
     end
     return styled
 end

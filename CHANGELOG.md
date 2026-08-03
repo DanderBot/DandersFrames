@@ -199,6 +199,8 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Click Casting) Fixed hover keybinds dying for the rest of the session on some frames after visiting player housing. (by Krathe)
 * (Click Casting) Fixed cast-on-down silently switching itself off on Blizzard's own raid and party frames after every roster change. (by Krathe)
 * (Pet Frames) Fixed pet frames never appearing in arena (2v2, 3v3 and Solo Shuffle). Arena counts as a raid to the game, so pet frames were being looked for on the raid frames — which arena does not use. They now build alongside the arena frames, and follow your Party pet settings. (by Krathe)
+* (Dispel) Fixed repeating error popups when a dispellable debuff appeared on a frame. The same error was also stopping highlights, status icons, the resource bar, absorbs and heal prediction from updating on that frame. The overlay's own artwork is still being worked on.
+* (Integrations) "Use DF Color Picker" and "Use DF Color Picker for All Addons" are now single settings shared by Party and Raid, applying to your whole account. Ticking them on the Raid tab previously did nothing at all. Your existing choice carries over. They no longer travel with profile imports and exports.
 
 ### Improvements
 
