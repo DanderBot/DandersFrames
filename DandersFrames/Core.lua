@@ -1403,20 +1403,18 @@ function DF:LightweightUpdateDispelOverlay()
         
         local overlay = frame.dfDispelOverlay
         
-        -- Get current color from overlay's stored dispel type
+        -- Get current color from overlay's stored dispel type.
+        -- ☠ This used to build its own table from per-mode `db.dispelMagicColor`-style
+        -- keys. The v5 migration DropDispelCustomMode DELETES all five, and they have no
+        -- Config default, no GUI writer and no export entry -- so every read was nil and
+        -- this always painted the hardcoded fallbacks, which disagreed with the real
+        -- palette (Bleed 1,0,0 vs 0.8,0,0) and omitted Enrage entirely. Since this
+        -- function is what the dispel colour pickers and every dispel slider call, the
+        -- user dragged the colour wheel and got a colour they had not chosen.
+        -- Resolve through the shared resolver instead -- same one the overlay itself uses.
         local r, g, b = 1, 1, 1
         if overlay.currentDispelType then
-            local dispelColors = {
-                Magic = db.dispelMagicColor or {r = 0, g = 0.6, b = 1},
-                Curse = db.dispelCurseColor or {r = 0.6, g = 0, b = 1},
-                Poison = db.dispelPoisonColor or {r = 0, g = 0.6, b = 0},
-                Disease = db.dispelDiseaseColor or {r = 0.6, g = 0.4, b = 0},
-                Bleed = db.dispelBleedColor or {r = 1, g = 0, b = 0},
-            }
-            local color = dispelColors[overlay.currentDispelType]
-            if color then
-                r, g, b = color.r, color.g, color.b
-            end
+            r, g, b = DF:ResolveDispelColor(overlay.currentDispelType)
         end
         
         -- Calculate OOR alpha multiplier for test mode

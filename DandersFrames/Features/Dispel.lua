@@ -56,15 +56,9 @@ local function GetTestDispelColor(dispelType)
     -- The overlay ALWAYS uses the shared account palette (DF.db.dispelColors, edited on
     -- the Colors page, Enrage folding into Bleed). Its defaults ARE the game palette, so
     -- an untouched palette matches the game exactly — there's no game-vs-custom mode.
-    local key = dispelType == "Enrage" and "Bleed" or dispelType
-    if DF.db and type(DF.db.dispelColors) == "table" then
-        local c = DF.db.dispelColors[key]
-        if c and c.r then return c.r, c.g, c.b end
-    end
-    local pal = (DF.GetGameDispelPalette and DF:GetGameDispelPalette()) or DF.DispelDefaultColors
-    local c = pal[key]
-    if c then return c.r, c.g, c.b end
-    return 0.5, 0.5, 1.0
+    -- Body promoted to DF:ResolveDispelColor (Frames/Border.lua) so Core's lightweight
+    -- repaint resolves identically instead of carrying its own drifted copy.
+    return DF:ResolveDispelColor(dispelType)
 end
 
 -- "Keep OUR asset, just recolour it by dispel type" — the style every DF overlay carrier

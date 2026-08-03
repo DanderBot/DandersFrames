@@ -590,6 +590,29 @@ function DF:GetGameDispelTextMap()
     return map
 end
 
+-- Resolve ONE dispel type to r,g,b. The single source of truth for "what colour is a
+-- Magic debuff", shared by the dispel overlay's test path and Core's lightweight
+-- repaint. Order: the shared account palette (DF.db.dispelColors, edited on the Colors
+-- page) -> the game palette -> a neutral. Enrage folds into Bleed, as everywhere else.
+--
+-- ☠ This exists because Core's LightweightUpdateDispelOverlay had its OWN copy of this
+-- table, built from per-mode `db.dispelMagicColor`-style keys that the v5 migration
+-- DELETES. Those reads were always nil, so it always fell through to hardcoded literals
+-- that disagreed with this palette (Bleed 1,0,0 vs 0.8,0,0) -- meaning dragging the
+-- dispel colour wheel repainted the overlay to a colour the user had not picked.
+-- Resolve here, never inline: a second copy is what caused the bug.
+function DF:ResolveDispelColor(dispelType)
+    local key = dispelType == "Enrage" and "Bleed" or dispelType
+    if DF.db and type(DF.db.dispelColors) == "table" then
+        local c = DF.db.dispelColors[key]
+        if c and c.r then return c.r, c.g, c.b end
+    end
+    local pal = (DF.GetGameDispelPalette and DF:GetGameDispelPalette()) or DF.DispelDefaultColors
+    local c = pal and pal[key]
+    if c then return c.r, c.g, c.b end
+    return 0.5, 0.5, 1.0
+end
+
 function DF:GetDispelColorMap()
     if DF.dispelColorMap then return DF.dispelColorMap end
     if not CreateColor then return nil end
