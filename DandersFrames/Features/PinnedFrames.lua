@@ -7,6 +7,13 @@ local addonName, DF = ...
 
 local format = string.format
 
+-- ☠ Secret-value guard. This file reads roster names and unit GUIDs, both of which
+-- go secret in instanced content on 12.1, and it had NO guard anywhere -- the only
+-- feature file in that state. A secret passes `if x then` and `type(x) == "string"`
+-- and then throws when used as a table KEY, concatenated, or compared. Defensive
+-- form (same as Features/FlatRaidFrames.lua) so a client without the API still loads.
+local issecretvalue = issecretvalue or function() return false end
+
 local PinnedFrames = {}
 DF.PinnedFrames = PinnedFrames
 
@@ -421,7 +428,11 @@ local function GetGroupRoster()
         -- Use GetRaidRosterInfo which returns exact name format for nameList
         for i = 1, numMembers do
             local name = GetRaidRosterInfo(i)
-            if name then
+            -- ☠ Must be secret-checked BEFORE the truthiness test: `roster[name]` below
+            -- indexes with it, and a secret table key throws. Dropping an unnameable
+            -- member is correct here -- the roster event that fills the name in
+            -- re-runs this build.
+            if not issecretvalue(name) and name then
                 -- Store both the full name and short name for lookup. Exact names
                 -- always win; a short-name ALIAS must never overwrite an existing
                 -- entry — a same-realm member's exact name IS their short name, so
@@ -1085,8 +1096,14 @@ function PinnedFrames:CreateBossSecureHandler(setIndex, container, bossFrames)
         for i = 1, 8 do
             local f = frames[i]
             if f and f:IsShown() and f.unit then
+                -- ☠ UnitGUID is secret while tainted. The `~=` below is the hazard:
+                -- comparing a secret throws. Guard the fresh read AND the stored
+                -- value -- the stamp at :1101 could have been written before this
+                -- guard existed, so a stale secret can still be sitting on the frame.
+                -- Skipping the refresh is safe: the boss unit event fires again.
                 local guid = UnitGUID(f.unit)
-                if guid and guid ~= f.dfLastBossGUID then
+                if not issecretvalue(guid) and not issecretvalue(f.dfLastBossGUID)
+                   and guid and guid ~= f.dfLastBossGUID then
                     f.dfLastBossGUID = guid
                     if DF.FullFrameRefresh then DF:FullFrameRefresh(f) end
                 end
