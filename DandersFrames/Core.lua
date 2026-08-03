@@ -3075,10 +3075,14 @@ end
 -- adopts a mode-level value into profile-level when profile-level doesn't
 -- already have one set, and only seeds defaults when neither exists. Called
 -- once per ADDON_LOADED after both modes have been migrated.
-function DF:MigrateRoleBorderColors()
-    if not DF.db then return end
-    if not DF.db.roleColors then DF.db.roleColors = {} end
-    local rc = DF.db.roleColors
+-- `profile` defaults to the ACTIVE profile. Takes an argument so the legacy-adopt
+-- pass can run for every stored profile, not just whichever one happened to be
+-- active at the upgrade login -- see RunLegacyKeyAdoption below.
+function DF:MigrateRoleBorderColors(profile)
+    profile = profile or DF.db
+    if not profile then return end
+    if not profile.roleColors then profile.roleColors = {} end
+    local rc = profile.roleColors
 
     local DEFAULTS = {
         TANK    = {r = 0.20, g = 0.55, b = 0.95, a = 1},
@@ -3763,20 +3767,40 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- One-shot copy per mode: if a new key already exists we leave it
         -- (user has already saved with the new key); otherwise we adopt the
         -- old value.
-        if DF.MigrateFrameBorderKeys then
-            DF:MigrateFrameBorderKeys(DF.db.party)
-            DF:MigrateFrameBorderKeys(DF.db.raid)
+        -- ☠ THESE MUST RUN FOR EVERY PROFILE, AND BEFORE THE DEFAULTS BACKFILL.
+        --
+        -- All of these adopt legacy -> canonical keys and are guarded on "only if the
+        -- new key is nil". They used to run on DF.db (the ACTIVE profile) alone, while
+        -- the defaults backfill further down walks EVERY profile and seeds the new keys
+        -- from PartyDefaults/RaidDefaults. So on the first login after the rename, every
+        -- non-active profile got the new key stamped to the shipped default before it
+        -- had ever been migrated -- and the nil-guard can then never pass again. A user
+        -- with two profiles kept their frame borders, resource-bar border + colour mode,
+        -- buff/debuff borders and role colours on whichever profile happened to be
+        -- active, and silently lost them on all the others, permanently.
+        --
+        -- DF.db is itself one of these profiles; the passes are nil-guarded and
+        -- therefore idempotent, so visiting it twice is harmless.
+        local function RunLegacyKeyAdoption(profile)
+            if type(profile) ~= "table" then return end
+            for _, modeDb in ipairs({ profile.party, profile.raid }) do
+                if modeDb then
+                    if DF.MigrateFrameBorderKeys then DF:MigrateFrameBorderKeys(modeDb) end
+                    if DF.MigrateResourceBarBorderKeys then DF:MigrateResourceBarBorderKeys(modeDb) end
+                    if DF.MigrateResourceBarColorMode then DF:MigrateResourceBarColorMode(modeDb) end
+                    if DF.MigrateAuraBorderKeys then DF:MigrateAuraBorderKeys(modeDb) end
+                end
+            end
+            -- Profile-level, and reads both modes itself, so it runs once per profile
+            -- rather than once per mode.
+            if DF.MigrateRoleBorderColors then DF:MigrateRoleBorderColors(profile) end
         end
-        -- Resource Bar: resourceBarBorderEnabled → resourceBarShowBorder
-        -- (Stage 4.2 wire-up to the unified DF.Border helper).
-        if DF.MigrateResourceBarBorderKeys then
-            DF:MigrateResourceBarBorderKeys(DF.db.party)
-            DF:MigrateResourceBarBorderKeys(DF.db.raid)
-        end
-        -- Resource Bar: resourceBarClassColor (bool) → resourceBarColorMode (tri-state).
-        if DF.MigrateResourceBarColorMode then
-            DF:MigrateResourceBarColorMode(DF.db.party)
-            DF:MigrateResourceBarColorMode(DF.db.raid)
+
+        RunLegacyKeyAdoption(DF.db)
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for _, profile in pairs(DandersFramesDB_v2.profiles) do
+                RunLegacyKeyAdoption(profile)
+            end
         end
         -- Pinned frames decouple: strip stale pinned.N.<setting> auto-layout
         -- overrides (everything except the per-set `enabled` flag).
@@ -3788,17 +3812,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
         if DF.MigratePinnedMatchMode then
             DF:MigratePinnedMatchMode()
         end
-        -- Aura icons: buff/debuffBorderEnabled → ShowBorder, BorderThickness →
-        -- BorderSize (Stage 5.5 Phase 2 — full toolkit for buff/debuff borders).
-        if DF.MigrateAuraBorderKeys then
-            DF:MigrateAuraBorderKeys(DF.db.party)
-            DF:MigrateAuraBorderKeys(DF.db.raid)
-        end
-        -- Promote role border colours from per-mode storage to profile-level
-        -- DF.db.roleColors so the global Colors settings page manages them.
-        if DF.MigrateRoleBorderColors then
-            DF:MigrateRoleBorderColors()
-        end
+        -- (Moved) Aura-icon border keys and the role-colour promotion now run inside
+        -- RunLegacyKeyAdoption above, for EVERY profile rather than only the active
+        -- one. They were active-profile-only here, which is the bug that pass exists
+        -- to fix -- leaving these calls would just repeat a subset of it.
         -- Promote the colour-picker override from per-mode profile storage to the
         -- account-wide global DB (it was never really per-mode — see the function).
         if DF.MigrateColorPickerToGlobal then
