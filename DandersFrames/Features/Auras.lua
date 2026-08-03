@@ -82,6 +82,12 @@ end
 -- itself is per-record; only this inner map is shared).
 local DISPEL_TYPES = { Magic = true, Curse = true, Disease = true, Poison = true, Bleed = true }
 
+-- Shared with the dispel OVERLAY (Features/Dispel.lua), which needs the identical
+-- map for its own "All Dispellable" mode. Exported rather than duplicated: a second
+-- copy is exactly the drift hazard that retired DISPEL_ICON_TYPES. Read-only for
+-- every consumer -- see the note above.
+DF.DispelTypeMap = DISPEL_TYPES
+
 -- Build the debuff filter records (native 12.1 category filters).
 -- Returns nil (show all) or an array of records { filter, key, candidateFilters }
 -- — the record form normalizeFilters accepts; each record becomes one container

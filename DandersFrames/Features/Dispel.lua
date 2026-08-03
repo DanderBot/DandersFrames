@@ -1133,9 +1133,12 @@ end
 --   "custom" = one slot per dispel type (includeDispelTypes); type known at declare
 --     time, so the FULL art styles statically from the DF pickers (borders, EDGE
 --     gradients, intensity, type icons). Rare dual-type overlap accepted.
--- Me/all: "HARMFUL|RAID_PLAYER_DISPELLABLE" vs HARMFUL + ProcessAura policy +
--- processedAuraType=Dispel (the native all-dispellable classification; raid-flagged
--- harmful auras with a dispellable dispelName — incl. private auras, natively).
+-- Me/all: "HARMFUL|RAID_PLAYER_DISPELLABLE" vs "HARMFUL" + candidateFilters
+-- includeDispelTypes (the shared DF.DispelTypeMap). ☠ The old route here used a
+-- ProcessAura policy + processedAuraType=Dispel and was described as "the native
+-- all-dispellable classification" — it is NOT. That branch is gated on aura.isRaid
+-- (= curable by YOU), so it was by-me wearing an all-dispellable label. See the
+-- comment in dispelSlotPlan.
 -- ============================================================
 
 -- (Removed) DISPEL_ICON_TYPES and GAME_ICON_ATLAS. The badge no longer picks its own
@@ -1146,21 +1149,39 @@ end
 local warnedTintBind = false
 local warnedSlotStyle = false
 
--- Slot plan from settings. Returns nil when the native classification route is
--- required but missing (API drift) and no degrade applies.
+-- Slot plan from settings.
 local function dispelSlotPlan(db)
     local byMe = (db.dispelOverlayDispelType or 2) == 1
-    local baseFilter = byMe and "HARMFUL|RAID_PLAYER_DISPELLABLE" or "HARMFUL"
 
-    local dispelEnum = AuraUtil and AuraUtil.AuraUpdateChangedType and AuraUtil.AuraUpdateChangedType.Dispel
-    if dispelEnum == nil then
-        -- API drift: no ProcessAura classification — degrade to by-me semantics
-        -- (pure filter string) rather than an unfiltered HARMFUL slot.
-        baseFilter = "HARMFUL|RAID_PLAYER_DISPELLABLE"
+    -- ☠ "All Dispellable" must NOT depend on what the player can dispel.
+    --
+    -- It used to ask for ProcessAura's Dispel classification via
+    -- candidateFilters.processedAuraType. That is player-relative BY DEFINITION:
+    -- AuraUtil.ProcessAura only reaches its Dispel branch under
+    -- `aura.isHarmful and aura.isRaid`, and isRaid is the RAID flag, which for a
+    -- debuff means "curable by YOU". So All rendered identically to By Me --
+    -- a Death Knight saw nothing at all on any spec, and an Evoker saw exactly
+    -- its own spec's types (Preservation 5, Aug/Dev 4, no Magic). Reported on
+    -- alpha 15; the dropdown had no observable effect.
+    --
+    -- Use the explicit dispel-type map instead -- the same one the debuff ROWS
+    -- use for their own ALL mode (Features/Auras.lua). It names the types
+    -- directly, so Blizzard never consults the player's spec.
+    local dispelTypes = DF.DispelTypeMap
+    if not byMe and type(dispelTypes) ~= "table" then
+        -- Loud, not silent: an unfiltered HARMFUL slot would light the overlay
+        -- on EVERY debuff, which reads as a styling bug rather than a missing
+        -- map. By-me is the safe degrade. (The previous version of this guard
+        -- degraded without a word, which is how the ProcessAura route could
+        -- have failed the same way and never been noticed.)
+        if DF.DebugError then
+            DF:DebugError("DISPEL", "DF.DispelTypeMap missing - 'All Dispellable' degraded to 'Dispellable By Me'")
+        end
         byMe = true
     end
-    local needPolicy = not byMe
-    local baseCF = (not byMe) and { processedAuraType = dispelEnum } or nil
+
+    local baseFilter = byMe and "HARMFUL|RAID_PLAYER_DISPELLABLE" or "HARMFUL"
+    local baseCF = (not byMe) and { includeDispelTypes = dispelTypes } or nil
 
     -- One overlay, the game's colours, engine-driven (the Custom Colors mode was
     -- removed 2026-07-11 — per-type slots with the pickers; the irreducible cost
@@ -1206,16 +1227,19 @@ local function dispelSlotPlan(db)
     -- a badge baked in. `Icon` gives the same clean RaidFrame-Icon-Debuff* atlas those
     -- slots drew by hand, on ONE carrier, with Blizzard choosing the type. See the
     -- badge block in DispelSlotSecureInit.
-    return slots, needPolicy
+    return slots
 end
 
 -- Structural signature: me/all, border slot, icon slots — anything that changes
 -- the SLOT SET (topology is add-only, so set changes are a rebuild).
 -- Pure styling (alphas, geometry) hot-applies via the style pass instead.
 local function dispelFactoryPlanAndSig(db)
-    local slots, needPolicy = dispelSlotPlan(db)
+    local slots = dispelSlotPlan(db)
     if not slots then return nil end
-    local parts = { needPolicy and "policy" or "nopolicy" }
+    -- Mode marker. Derived from the PLAN, not the setting, so the by-me degrade
+    -- inside dispelSlotPlan is reflected here too. (Was "policy"/"nopolicy" back
+    -- when All rode a container-level ProcessAura policy.)
+    local parts = { (slots[1] and slots[1].candidateFilters) and "alltypes" or "byme" }
     for i = 1, #slots do
         parts[#parts + 1] = slots[i].key .. "=" .. slots[i].filter
         -- ROLES are structural: the carriers a slot builds are created + bound ONCE in
@@ -1248,7 +1272,7 @@ local function dispelFactoryPlanAndSig(db)
     -- genuinely identical and the rebuild bought nothing.
     parts[#parts + 1] = "gs=" .. tostring(db.dispelGradientStyle or "FULL")
     parts[#parts + 1] = "gh=" .. tostring(db.dispelGradientOnCurrentHealth ~= false)
-    return table.concat(parts, ";"), slots, needPolicy
+    return table.concat(parts, ";"), slots
 end
 
 -- Build the full DF art on a slot button ONCE. Visibility rides the BUTTON (Blizzard
@@ -1884,7 +1908,7 @@ function DF:DriveDispelOverlayFactory(frame, db)
         return
     end
 
-    local sig, slots, needPolicy = dispelFactoryPlanAndSig(db)
+    local sig, slots = dispelFactoryPlanAndSig(db)
     if not sig then return end
 
     if not h or frame.dispelFactorySig ~= sig then
@@ -1904,7 +1928,9 @@ function DF:DriveDispelOverlayFactory(frame, db)
             unit = frame.unit,
             mode = "overlay",
             filter = filterRecords,
-            processingPolicy = needPolicy and { policy = "ProcessAura" } or nil,
+            -- No processingPolicy: the overlay no longer uses ProcessAura's Dispel
+            -- classification for its "All" mode (it was player-relative -- see
+            -- dispelSlotPlan). Filtering is filterString + includeDispelTypes now.
             frameLevelOffset = 0,   -- widget levels are set absolutely (legacy layering)
             enabled = true,
         })
