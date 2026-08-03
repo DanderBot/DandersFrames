@@ -254,6 +254,46 @@ local DRAIN_ORDER = {
     "keyboardRefresh",
 }
 
+-- Per-frame bodies for the set jobs below. File-locals rather than closures
+-- built per drain: the drain runs on every combat end, and a set can hold the
+-- whole roster.
+local function jobRegister(self, frame)
+    self:RegisterFrame(frame)
+end
+
+local function jobUnregister(self, frame)
+    self:UnregisterFrame(frame)
+end
+
+local function jobReassert(self, frame)
+    if self.registeredFrames and self.registeredFrames[frame] then
+        self:ApplyBindingsToFrameUnified(frame)
+    end
+end
+
+-- Run a set job one frame at a time, isolating a failure to the frame that
+-- caused it.
+--
+-- DrainDeferred pcalls the job as a whole, which stops one bad job killing the
+-- jobs after it -- but inside a set that granularity is too coarse: the loop
+-- aborts at the first error and every frame it had not reached yet is silently
+-- dropped. The payload is cleared BEFORE run (see DrainDeferred), so those
+-- frames are not retried at the next drain either; they are simply unregistered
+-- for the session, which is the exact shape of the dead-bind bugs this whole
+-- subsystem exists to prevent.
+--
+-- One frame erroring is survivable. Losing the rest of the roster because of it
+-- is not.
+local function forEachFrameSafe(self, frames, label, fn)
+    for frame in pairs(frames) do
+        local ok, err = pcall(fn, self, frame)
+        if not ok then
+            DF:DebugError("CLICK", "Deferred '%s' errored on one frame (the rest of the set still ran): %s",
+                label, tostring(err))
+        end
+    end
+end
+
 local DEFERRED_JOBS = {
     -- Carries the enabled state SetEnabled could not write during lockdown.
     -- "last" wins: if the user toggled twice in one fight, the final state is
@@ -286,17 +326,13 @@ local DEFERRED_JOBS = {
     register = {
         kind = "set",
         run = function(self, frames)
-            for frame in pairs(frames) do
-                self:RegisterFrame(frame)
-            end
+            forEachFrameSafe(self, frames, "register", jobRegister)
         end,
     },
     unregister = {
         kind = "set",
         run = function(self, frames)
-            for frame in pairs(frames) do
-                self:UnregisterFrame(frame)
-            end
+            forEachFrameSafe(self, frames, "unregister", jobUnregister)
         end,
     },
     reassert = {
@@ -307,11 +343,7 @@ local DEFERRED_JOBS = {
         -- Re-apply our bindings on exactly the frames that were touched.
         kind = "set",
         run = function(self, frames)
-            for frame in pairs(frames) do
-                if self.registeredFrames and self.registeredFrames[frame] then
-                    self:ApplyBindingsToFrameUnified(frame)
-                end
-            end
+            forEachFrameSafe(self, frames, "reassert", jobReassert)
         end,
     },
     fullRegistration = {
