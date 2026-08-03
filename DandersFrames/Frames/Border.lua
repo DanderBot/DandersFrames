@@ -183,12 +183,15 @@ local borderKeyMemo = {}
 -- BuildSpec runs per bordered element per tick (4.6% of trash allocation, 4.3%
 -- of boss).
 --
--- ☠ THE UPVALUES ARE SHARED, which is safe ONLY because BuildSpec cannot
--- re-enter: its body reaches DF:GetClassColor, DF:GetTestUnitData, DF:GetUnitRole
--- and the Border:Resolve* helpers, and none of those calls BuildSpec. Verified
--- against every caller, not assumed. If a resolver ever needs to build a spec it
--- must not do it through here, or this silently starts reading another prefix's
--- keys -- a wrong-border bug with nothing at the call site to explain it.
+-- THE UPVALUES ARE SHARED, so BuildSpec saves and restores them around its body
+-- (see below) and reentrancy is CORRECT rather than merely forbidden. It cannot
+-- currently happen -- the body reaches DF:GetClassColor, DF:GetTestUnitData,
+-- DF:GetUnitRole and the Border:Resolve* helpers, and none of those calls
+-- BuildSpec -- but relying on that was a comment enforcing an invariant nothing
+-- checked. A resolver that ever did build a spec would have started reading
+-- another prefix's keys: a wrong border, silently, with nothing at the call site
+-- to explain it. Stack discipline costs two locals and no allocation, which is
+-- cheaper than the assert that would only have caught it on a debug build.
 local bsMemo, bsPrefix
 local function k(suffix)
     local key = bsMemo[suffix]
@@ -200,6 +203,8 @@ function Border:BuildSpec(dbTable, prefix, ctx)
     if not dbTable or not prefix then return {} end
     local memo = borderKeyMemo[prefix]
     if not memo then memo = {}; borderKeyMemo[prefix] = memo end
+    -- Save/restore rather than plain assignment: see the note above k().
+    local prevMemo, prevPrefix = bsMemo, bsPrefix
     bsMemo, bsPrefix = memo, prefix
 
     -- Style is the top-level choice: SOLID | GRADIENT | TEXTURE.
@@ -330,6 +335,7 @@ function Border:BuildSpec(dbTable, prefix, ctx)
     if ctx and ctx.iconMode then
         self:IconGeometry(spec, spec.size, spec.inset)
     end
+    bsMemo, bsPrefix = prevMemo, prevPrefix
     return spec
 end
 
