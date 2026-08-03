@@ -504,8 +504,26 @@ function CC:RestoreBlizzardDefaults(frame)
 
     -- Clear override bindings
     ClearOverrideBindings(frame)
-    
-    -- Clear the binding snippet so OnEnter won't apply any bindings
+
+    -- Clear the binding snippet so OnEnter won't apply any bindings.
+    --
+    -- If the cursor is ON this frame right now, the header still holds live
+    -- SetBindingClick overrides pointing at the attributes this function has just
+    -- nil'd, and ClearOverrideBindings(frame) above only clears the FRAME's own
+    -- overrides -- the hover binds are owner-owned, so they survive. The keys are
+    -- then eaten: no cast, and no fall-through to the action bar either, until the
+    -- cursor happens to leave. Release the header's set too.
+    if frame.IsMouseOver and frame:IsMouseOver() and CC.header then
+        pcall(ClearOverrideBindings, CC.header)
+        if CC.header.Execute then
+            pcall(function()
+                CC.header:Execute([[ mouseoverbutton = nil mouseovername = nil ]])
+            end)
+        end
+        frame:SetAttribute("dfBindingsActive", nil)
+        frame:SetAttribute("dfIsSecureMouseover", nil)
+    end
+
     frame:SetAttribute("dfBindingSnippet", "")
     
     -- Undo the modified-click suppression from ClearBlizzardClickCastFromFrame.
@@ -616,12 +634,22 @@ function CC:ApplyBindings()
     if self.db and self.db.bindings then
         for _, binding in ipairs(self.db.bindings) do
             if binding.actionType == "macro" or binding.macroId then
-                -- Force macros to have no fallbacks
-                binding.fallback = {
-                    mouseover = false,
-                    target = false,
-                    selfCast = false,
-                }
+                -- Clear the three unit fallbacks -- do NOT replace the table.
+                --
+                -- Replacing it destroyed alwaysCast and stopSpellTarget, and
+                -- self.db.bindings is the live saved-variables table, so the loss
+                -- persisted. This runs on every ApplyBindings, so one roster event
+                -- was enough. The editor hides those two toggles for macros, which
+                -- is why only imported profiles carry them -- and an imported
+                -- profile is exactly the case that reaches here with them set.
+                local fb = binding.fallback
+                if type(fb) ~= "table" then
+                    fb = {}
+                    binding.fallback = fb
+                end
+                fb.mouseover = false
+                fb.target = false
+                fb.selfCast = false
             end
         end
     end
@@ -839,9 +867,25 @@ function CC:CreateHovercastButton()
     end
     
     if not success or not self.hovercastButton then
-        DF:Say("Warning: Could not create hovercast button", nil, "WARN")
+        -- Retry rather than give up for the session.
+        --
+        -- Both CreateFrame attempts are pcall'd, and on failure every global and
+        -- hovercast keybind is dead until reload -- the harder failure had NO
+        -- recovery while the in-combat path above retries indefinitely. Bounded
+        -- so a permanently failing client does not spin forever.
+        self.hovercastCreateTries = (self.hovercastCreateTries or 0) + 1
+        if self.hovercastCreateTries <= 5 then
+            DF:DebugWarn("CLICK", "Hovercast button creation failed (attempt %d/5) -- retrying",
+                self.hovercastCreateTries)
+            CC:DeferAfter("createHovercastButton", 2, function()
+                CC:CreateHovercastButton()
+            end)
+        else
+            DF:Say("Warning: Could not create hovercast button", nil, "WARN")
+        end
         return
     end
+    self.hovercastCreateTries = nil
     
     self.hovercastButton:SetSize(1, 1)
     self.hovercastButton:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -100, -100)
@@ -2904,10 +2948,29 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate, quiet)
     if not hasAnyBindings then
         self:ClearBindingsFromFrame(frame)
         if isDandersFrame then
-            -- For DandersFrames, completely disable clicks when no bindings apply
-            -- Our own frames get type1/type2 set in InitializeHeaderChild as a safety net
-            if frame.RegisterForClicks then
-                frame:RegisterForClicks()  -- Empty = no clicks registered
+            -- Hand our own frames back to plain targeting, exactly as the else
+            -- branch does for everyone else's.
+            --
+            -- This used to call RegisterForClicks() with NO arguments, which
+            -- registers no clicks at all -- so the type1/type2 "safety net" the
+            -- old comment relied on could never fire: the button no longer
+            -- received a click to resolve them with. And the manifest clear
+            -- immediately above had already removed those attributes anyway.
+            --
+            -- Reachable with an "other frames only" profile (every binding with
+            -- frames.dandersFrames unchecked): the user's own party and raid
+            -- frames stopped responding to left-click targeting entirely, with no
+            -- message, until a binding that targets them was re-enabled.
+            --
+            -- RestoreBlizzardDefaults puts back what CaptureOriginalClickBindings
+            -- recorded -- for our frames that is what InitializeHeaderChild set --
+            -- and it re-registers clicks itself, so the cast-on-down preference is
+            -- re-applied AFTER it rather than before, or it would be overwritten
+            -- by its own RegisterForClicks("AnyUp").
+            self:RestoreBlizzardDefaults(frame)
+            local castOnDown = self.profile and self.profile.options and self.profile.options.castOnDown
+            if frame.RegisterForClicks and castOnDown then
+                frame:RegisterForClicks("AnyDown")
             end
         else
             -- For Blizzard frames AND third-party addon frames (QUI, ElvUI, etc.),
@@ -2986,26 +3049,39 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate, quiet)
                 local buttonNum = GetButtonNumber(binding.button)
                 local modPrefix = BuildModifierPrefix(binding.modifiers)
 
-                -- Track base (no modifier) mouse buttons that get a binding on this frame
-                if modPrefix == "" then
-                    coveredBaseButtons[buttonNum] = true
-                end
-                ctx.plainLeftClick = (buttonNum == 1 and modPrefix == "")
+                -- GetButtonNumber returns nil for a button name it cannot parse,
+                -- rather than silently defaulting to 1. Skip the binding instead
+                -- of writing it to a slot the user never asked for -- defaulting
+                -- rewrote plain left-click AND marked button 1 as covered, so the
+                -- restore pass below then skipped putting left-click targeting
+                -- back. Warn, because a binding that shows in the list and does
+                -- nothing is worse than one that says why.
+                if not buttonNum then
+                    DF:DebugWarn("CLICK", "Skipping binding with unrecognised button '%s' on %s",
+                        tostring(binding.button), frameName)
 
-                self:ApplyActionToSlot(frame, MouseSlot(modPrefix, buttonNum), ctx)
+                else
+                    -- Track base (no modifier) mouse buttons that get a binding on this frame
+                    if modPrefix == "" then
+                        coveredBaseButtons[buttonNum] = true
+                    end
+                    ctx.plainLeftClick = (buttonNum == 1 and modPrefix == "")
 
-                -- Named-attribute copy of the same action:
-                --  * meta- (Mac Command) bindings always need one, because meta-
-                --    frame attributes do not work on Mac;
-                --  * third-party frames need one on the DIRECT paths. When
-                --    menu/target go through the gate proxy, only the meta copy
-                --    is made (matching the pre-refactor behavior).
-                local hasMetaMod = binding.modifiers and binding.modifiers:lower():find("meta")
-                local specialViaProxy = isSpecialAction and useProxy and
-                    (actionType == "target" or actionType == "menu" or actionType == self.ACTION_TYPES.MENU)
-                local wantVirtual = hasMetaMod or (not specialViaProxy and isThirdPartyFrame)
-                if wantVirtual then
-                    self:ApplyActionToSlot(frame, VirtualSlot(self:GetVirtualButtonName(binding)), ctx)
+                    self:ApplyActionToSlot(frame, MouseSlot(modPrefix, buttonNum), ctx)
+
+                    -- Named-attribute copy of the same action:
+                    --  * meta- (Mac Command) bindings always need one, because meta-
+                    --    frame attributes do not work on Mac;
+                    --  * third-party frames need one on the DIRECT paths. When
+                    --    menu/target go through the gate proxy, only the meta copy
+                    --    is made (matching the pre-refactor behavior).
+                    local hasMetaMod = binding.modifiers and binding.modifiers:lower():find("meta")
+                    local specialViaProxy = isSpecialAction and useProxy and
+                        (actionType == "target" or actionType == "menu" or actionType == self.ACTION_TYPES.MENU)
+                    local wantVirtual = hasMetaMod or (not specialViaProxy and isThirdPartyFrame)
+                    if wantVirtual then
+                        self:ApplyActionToSlot(frame, VirtualSlot(self:GetVirtualButtonName(binding)), ctx)
+                    end
                 end
 
             elseif bindType == "key" or bindType == "scroll" then

@@ -73,7 +73,14 @@ local function BuildMouseBindingKey(modifiers, button)
         if num then
             buttonKey = "BUTTON" .. num
         else
-            buttonKey = "BUTTON1"
+            -- Unparseable button name -> no key, NOT button 1.
+            --
+            -- Defaulting to BUTTON1 silently rewrote plain left-click with an
+            -- action the user never bound there. The editor constrains this
+            -- field, but profile import does not, so a hand-edited or foreign
+            -- profile could hijack left-click on every frame with no way to see
+            -- why. Returning nil lets the caller skip the binding instead.
+            return nil
         end
     end
     
@@ -113,7 +120,11 @@ local function GetButtonNumber(button)
         if num then
             num = tonumber(num)
         else
-            num = 1
+            -- Unparseable -> nil, NOT 1. See BuildMouseBindingKey above: this
+            -- fed the action into type1/macrotext1 and marked button 1 as
+            -- covered, so the "restore uncovered base button" pass then skipped
+            -- restoring left-click targeting as well.
+            return nil
         end
     end
     return num
