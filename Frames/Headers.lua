@@ -776,8 +776,37 @@ function DF:InitializeHeaderChild(frame)
                     self.index = tonumber(num)
                 elseif actualUnit == "player" then
                     self.index = 0
-                    -- Sync legacy DF.playerFrame for backward compatibility
-                    DF.playerFrame = self
+                    -- Sync legacy DF.playerFrame for backward compatibility --
+                    -- main-frame children ONLY.
+                    --
+                    -- DF.playerFrame is not a generic "whichever frame holds
+                    -- unit=player"; ~50 consumers treat it as the party player
+                    -- frame specifically. SecureSort uses it as party slot 0,
+                    -- setting secure paths and swap frame refs on it, and
+                    -- UpdateAllFrames drives its unit watch and its click-cast
+                    -- registration from it. A pinned frame showing the player was
+                    -- being adopted here, which hands all of that the wrong frame.
+                    --
+                    -- The sibling write fifty lines above already guards exactly
+                    -- this ("Skip for pinned frames - they must not remove main
+                    -- frame entries"); this one never got the same treatment.
+                    if not self.isPinnedFrame then
+                        DF.playerFrame = self
+                    end
+                end
+
+                -- Click casting needs a unit to accept a frame, and this is the
+                -- moment one arrives. A header child is created before the header
+                -- assigns units, so registration at creation is REFUSED for lack
+                -- of a unit -- and the ClickCastFrames metatable cannot retry,
+                -- because its rawset already spent that frame's one __newindex.
+                -- Without this the frame stays unregistered for the session: no
+                -- hooks, no binds, bound keys falling through to the action bar,
+                -- with only a /reload to clear it. Cheap and idempotent --
+                -- EnsureRegistered returns immediately if already registered, and
+                -- honours an explicit opt-out.
+                if DF.ClickCast and DF.ClickCast.EnsureRegistered then
+                    DF.ClickCast:EnsureRegistered(self)
                 end
                 
                 -- No per-frame event registration needed: global headerChildEventFrame

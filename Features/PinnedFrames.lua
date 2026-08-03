@@ -534,8 +534,21 @@ function PinnedFrames:AutoPopulateSet(set, roster)
         return changed
     end
 
-    -- Build name → role map for the removal pass
-    local rosterRoles = {}  -- shortName -> role
+    -- Build name → role map for the removal pass.
+    --
+    -- TWO maps, deliberately. rosterRoles carries the NONE→DAMAGER coercion and
+    -- drives the auto-ADD pass (an unassigned player counts as DPS for adding —
+    -- long-standing behaviour). assignedRoles carries ONLY roles the game has
+    -- actually assigned, and is the one the auto-REMOVE pass reads.
+    --
+    -- Removing on a coerced role is destructive: during zone-in / role assignment
+    -- UnitGroupRolesAssigned returns "NONE" for members whose role data has not
+    -- arrived yet, so a pinned TANK momentarily reads as DAMAGER and a set with
+    -- only autoAddTanks on would drop them from set.players — which is saved
+    -- config, so the pin is gone until something re-adds it. Never remove on
+    -- unknown data (same principle as Fix A/Fix B in CleanOfflinePlayers).
+    local rosterRoles = {}    -- name -> role, NONE coerced to DAMAGER (add pass)
+    local assignedRoles = {}  -- name -> role, only when actually assigned (remove pass)
     local isRaid = IsInRaid()
 
     -- Identify the player for the Exclude Self option (gates auto-add/remove of self).
@@ -551,7 +564,12 @@ function PinnedFrames:AutoPopulateSet(set, roster)
 
         if fullName then
             local shortName = fullName:match("([^%-]+)") or fullName
-            local role = UnitGroupRolesAssigned(unit)
+            local rawRole = UnitGroupRolesAssigned(unit)
+            if rawRole and rawRole ~= "NONE" then
+                assignedRoles[shortName] = rawRole
+                assignedRoles[fullName] = rawRole
+            end
+            local role = rawRole
             if role == "NONE" then role = "DAMAGER" end
             rosterRoles[shortName] = role
             rosterRoles[fullName] = role
@@ -591,9 +609,11 @@ function PinnedFrames:AutoPopulateSet(set, roster)
             if set.manualPlayers[playerName] then
                 -- skip
             else
-                -- Only evaluate players still in the group
-                -- (offline/left players are handled by CleanOfflinePlayers)
-                local role = rosterRoles[playerName]
+                -- Only evaluate players still in the group whose role the game
+                -- has actually assigned (offline/left players are handled by
+                -- CleanOfflinePlayers; unassigned roles are left alone until
+                -- they resolve — see the assignedRoles note above).
+                local role = assignedRoles[playerName]
                 if role then
                     local matchesFilter = false
                     if set.autoAddTanks and role == "TANK" then
@@ -631,9 +651,40 @@ function PinnedFrames:CleanOfflinePlayers(set, roster)
     -- / just-left-the-group — keep the pins for next time rather than wiping them the
     -- instant the group disbands. Real leavers are pruned on the next update once the
     -- roster is non-empty.
-    if GetNumGroupMembers() == 0 then return false end
+    local numMembers = GetNumGroupMembers()
+    if numMembers == 0 then return false end
 
     roster = roster or GetGroupRoster()
+
+    -- Fix C — Fix A's count check is not enough. On a party→raid transition (and
+    -- on zone-in) GetNumGroupMembers() goes live BEFORE GetRaidRosterInfo(i)
+    -- resolves, and the raid branch of GetGroupRoster builds the table purely
+    -- from GetRaidRosterInfo with no player fallback — so the count passes while
+    -- the roster is still completely empty, and every auto-added pin gets pruned
+    -- against it. manualPlayers survives (Fix B), which is why this only ever
+    -- reproduced for people using the auto-add role filters.
+    --
+    -- Field log (2026-08-01 15:37:26, v4.9.0-alpha.1): "Mode changed from party
+    -- to raid — reinitializing" logged "2 players in set, 0 valid" — the 0 valid
+    -- IS the empty roster — and one second later the same set logged "0 players
+    -- in set". The tanks came back 21s later once the roster arrived and the
+    -- auto-add pass re-added them.
+    --
+    -- roster carries a short-name ALIAS per cross-realm member on top of one
+    -- exact entry each, so its size is between numMembers and 2*numMembers when
+    -- healthy; fewer entries than members therefore means "not populated yet"
+    -- with no false positives. Partial population is treated as incomplete too —
+    -- pruning 15 of 20 raiders because only 5 have loaded is the same bug.
+    local rosterCount = 0
+    for _ in pairs(roster) do
+        rosterCount = rosterCount + 1
+    end
+    if rosterCount < numMembers then
+        DF:Debug("PINNED", "CleanOfflinePlayers skipped — roster not populated (%d entries for %d members)",
+            rosterCount, numMembers)
+        return false
+    end
+
     local manual = set.manualPlayers
     local changed = false
 

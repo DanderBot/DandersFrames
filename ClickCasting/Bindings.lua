@@ -336,7 +336,21 @@ function CC:ShouldBindingLoad(binding)
     --
     -- Combat conditions are checked dynamically via state drivers / macro
     -- conditionals, not here.
-    return not not binding.enabled
+    --
+    -- `~= false`, NOT `not not`. A binding with no `enabled` field at all was
+    -- read three different ways: the map grouping and the special-action and
+    -- item paths all treat absent as enabled (`enabled ~= false`), while this
+    -- helper treated it as disabled. So for a key whose bindings ALL lack the
+    -- field, the spell/macro builder dropped every one, produced no macro text,
+    -- and the key got no map entry -- completely dead, while the binding list
+    -- showed it as present and enabled.
+    --
+    -- Reachable because nothing normalizes the field on the way in: the login
+    -- pass fixes up `frames`/`fallback`/`combat` but not `enabled`, and profile
+    -- import inserts bindings verbatim. Absent now means enabled everywhere,
+    -- which matches the majority of the existing paths and the UI's own
+    -- backwards-compatibility default.
+    return binding.enabled ~= false
 end
 
 -- Every modifier prefix combination we ever write, in SecureActionButtonTemplate
@@ -361,7 +375,10 @@ local MODIFIER_COMBOS = {
 -- either identical (rescan/roster reapply, the common case) or one refresh
 -- behind (profile switch), and the batch-end rebuild — deferred to combat end
 -- if interrupted — overwrites it either way.
-function CC:ClearBindingsFromFrame(frame, preserveSnippet)
+-- `quiet` suppresses only the per-frame INFO line, never the hovered-frame WARN.
+-- Set by the ApplyBindings sweep, which walks every registered frame: see the
+-- volume note on ApplyBindings' summary line.
+function CC:ClearBindingsFromFrame(frame, preserveSnippet, quiet)
     if not frame then return end
     -- Combat-safe by contract: only reached from ApplyBindingsToFrameUnified,
     -- which defers "bindingRefresh". Do not add a bare return here without one.
@@ -374,7 +391,7 @@ function CC:ClearBindingsFromFrame(frame, preserveSnippet)
     local frameName = frame:GetName() or "unnamed"
     if isCurrentlyHovered then
         DF:DebugWarn("CLICK", "ClearBindings on HOVERED frame %s (preserving snippet/overrides)", frameName)
-    else
+    elseif not quiet then
         DF:Debug("CLICK", "ClearBindings %s", frameName)
     end
 
@@ -540,12 +557,23 @@ function CC:RestoreBlizzardDefaults(frame)
         frame:SetAttribute("type2", orig.type2)
         frame:SetAttribute("*type1", orig.starType1)
         frame:SetAttribute("*type2", orig.starType2)
+        -- ClearBlizzardClickCastFromFrame nils these; nothing put them back, so
+        -- a frame relying on per-button unit overrides lost that for the session.
+        frame:SetAttribute("unit1", orig.unit1)
+        frame:SetAttribute("unit2", orig.unit2)
     else
         -- type1 = left click = target, type2 = right click = togglemenu
         frame:SetAttribute("type1", "target")
         frame:SetAttribute("type2", "togglemenu")
     end
-    
+
+    -- Put the mousewheel back the way we found it. ApplyBindingsToFrameUnified
+    -- force-enables it on every apply, so without this a frame that shipped with
+    -- the wheel disabled kept swallowing scroll events after we handed it back.
+    if frame.EnableMouseWheel and frame.dfOriginalMouseWheel ~= nil then
+        frame:EnableMouseWheel(frame.dfOriginalMouseWheel)
+    end
+
     -- Reset to standard click registration (AnyUp is default)
     if frame.RegisterForClicks then
         frame:RegisterForClicks("AnyUp")
@@ -617,14 +645,19 @@ function CC:ApplyBindings()
     -- Build unified macro map (all bindings converted to macros)
     self.unifiedMacroMap = self:BuildUnifiedMacroMap()
 
-    -- Set up hovercast button attributes for third-party frame support
-    self:SetupHovercastButtonAttributes()
-
     -- IMPORTANT: Clear Blizzard click-casting BEFORE applying our bindings
     -- This ensures our bindings take precedence and aren't overwritten
     if self.db.enabled then
         self:RefreshBlizzardClickCastClearing()
     end
+
+    -- Reconcile against the public table before deciding what to sweep. The
+    -- ClickCastFrames metatable structurally cannot see a retry or an opt-out --
+    -- its rawset spends each frame's one __newindex -- so this is the only thing
+    -- that picks up a foreign frame which has since gained a unit, or releases
+    -- one whose owning addon has taken it back. Here because ApplyBindings runs
+    -- on roster churn, which is the same churn that creates and retires them.
+    self:ReconcileClickCastFrames()
 
     -- Apply bindings to all registered frames in batches to avoid "script ran too long".
     -- With ElvUI or other addons, 100-150+ frames can be registered. Each frame requires
@@ -638,15 +671,49 @@ function CC:ApplyBindings()
             end
         end
 
+        -- Hoist the frame under the cursor to the front of the sweep.
+        --
+        -- The header wipe near the top of this function kills the live hover, and
+        -- nothing can put it back until that frame's own snippet has been rebuilt.
+        -- The tail of the batch walker did that -- but the walker yields between
+        -- batches, and `pairs` order is arbitrary, so a hovered frame landing late
+        -- in the iteration stayed dead for the rest of that sweep, and every
+        -- DF-bound key fell through to the action bar meanwhile (the reporter's
+        -- "4" cast their action-bar spell instead of the DF one).
+        --
+        -- Field-measured with ElvUI loaded in LFR, 2026-08-02: 500 registered
+        -- frames per sweep, 240 of them ElvUI's -- worth noting the batching
+        -- below was sized for the "100-150+" its own comment assumes. Two sweeps
+        -- ran seconds apart, ~392 frame-applies each: 12:37:37-38 in about a
+        -- second, then 12:37:49-54 taking about six. So the worst observed dead
+        -- window is ~6s within a single sweep, NOT the whole span between them.
+        -- Processing this frame first collapses it to the synchronous first
+        -- batch either way.
+        local hovered = self.currentHoveredFrame
+        if hovered and hovered.IsMouseOver and hovered:IsMouseOver() then
+            for i = 2, #allFrames do
+                if allFrames[i] == hovered then
+                    allFrames[i], allFrames[1] = allFrames[1], allFrames[i]
+                    break
+                end
+            end
+        else
+            hovered = nil
+        end
+
         if #allFrames > 0 then
             local BATCH_SIZE = 10
             local batchIndex = 0
+            local sweepStart = GetTime()
+            local applied = 0
 
             local function ProcessNextBatch()
                 if InCombatLockdown() then
                     -- Combat started during batch - flag for retry after combat
                     CC:Defer("bindingRefresh")
                     CC.batchBindingTimer = nil
+                    DF:Debug("CLICK", "ApplyBindings sweep INTERRUPTED by combat: %d/%d frames in %dms",
+                        applied, #allFrames, (GetTime() - sweepStart) * 1000)
                     return
                 end
 
@@ -654,7 +721,42 @@ function CC:ApplyBindings()
                 local endIdx = math.min(startIdx + BATCH_SIZE - 1, #allFrames)
 
                 for i = startIdx, endIdx do
-                    CC:ApplyBindingsToFrameUnified(allFrames[i], true)
+                    -- skipKeyboardUpdate=FALSE deliberately. Deferring the snippet
+                    -- rebuild to the batch tail left every already-processed frame
+                    -- holding the OUTGOING snippet while its outgoing
+                    -- type-<virtualBtn> attributes had already been erased -- so
+                    -- the keys that snippet binds pointed at cleared attributes:
+                    -- dead AND stolen from the action bar, for the rest of the
+                    -- sweep, or for the whole fight if combat interrupted it. The
+                    -- hovered-frame hoist above repairs exactly one frame.
+                    --
+                    -- Rebuilding inline costs nothing: RefreshKeyboardBindings at
+                    -- the tail already calls UpdateFrameBindingAttributes once per
+                    -- registered frame, so this is the same N calls moved earlier.
+                    -- It also closes the window the old comment worried about --
+                    -- clear and rebuild now happen inside one call with no yield
+                    -- between them, so combat can no longer land in the gap.
+                    -- quiet=true keeps it to one summary line per sweep.
+                    CC:ApplyBindingsToFrameUnified(allFrames[i], false, true)
+                    applied = applied + 1
+                end
+
+                -- The hovered frame is index 1, so this runs in the first batch
+                -- (which is synchronous). Its snippet has to be rebuilt here
+                -- rather than waiting for RefreshKeyboardBindings at the tail:
+                -- the batch passes skipKeyboardUpdate, so the frame is carrying a
+                -- stale snippet at this point and reasserting without rebuilding
+                -- would restore the OUTGOING binds -- silently casting the
+                -- previous profile's spell, which is worse than no bind at all.
+                -- Pass the frame explicitly: ReassertHoverBinds otherwise falls
+                -- back to currentHoveredFrame, and in the field capture all five
+                -- of its successes landed on a different frame than the one that
+                -- had just been cleared.
+                if hovered and startIdx == 1 then
+                    local target = hovered
+                    hovered = nil
+                    CC:UpdateFrameBindingAttributes(target)
+                    CC:ReassertHoverBinds(target)
                 end
 
                 batchIndex = batchIndex + 1
@@ -663,11 +765,34 @@ function CC:ApplyBindings()
                     -- More batches to process
                     CC.batchBindingTimer = C_Timer.NewTimer(0, ProcessNextBatch)
                 else
-                    -- All frames processed - refresh keyboard bindings once for all frames
+                    -- All frames processed.
                     CC.batchBindingTimer = nil
-                    CC:RefreshKeyboardBindings()
+                    -- No RefreshKeyboardBindings here any more. The batch now
+                    -- rebuilds each frame's snippet inline (skipKeyboardUpdate is
+                    -- false above), and RefreshKeyboardBindings does nothing but
+                    -- loop the same registry calling the same builder -- a strict
+                    -- subset, since it additionally gates on
+                    -- dfKeyboardHandlersSetup. Keeping it meant every sweep built
+                    -- every snippet twice. Verified there is no other dependency:
+                    -- the function's whole body is that one loop.
+                    --
                     -- The header wipe above kills a live hover; put it straight back.
                     CC:ReassertHoverBinds()
+
+                    -- ONE line per sweep. This used to be three INFO lines per
+                    -- frame, and a sweep walks every registered frame -- with
+                    -- ElvUI loaded that is ~590 frames, so ~1770 entries in a
+                    -- second or two. At maxLines = 10000 that let a handful of
+                    -- sweeps evict the entire history: two separate attempts to
+                    -- capture a reported bug (2026-08-02) came back holding only
+                    -- sweep noise, having flushed the hover and PreClick lines
+                    -- around the actual failure -- and in one case the reload
+                    -- marker too. A debug log whose loudest writer destroys the
+                    -- evidence is worse than no log. The hovered-frame WARNs and
+                    -- every per-frame warning still fire; only the routine
+                    -- per-frame INFO chatter is folded into this.
+                    DF:Debug("CLICK", "ApplyBindings sweep: %d frames in %dms",
+                        applied, (GetTime() - sweepStart) * 1000)
                 end
             end
 
@@ -761,74 +886,24 @@ function CC:CreateHovercastButton()
     end)
 end
 
--- Set up the hovercast button with spell attributes for third-party frame click casting
--- This is called after bindings are built so the hovercast button can handle redirected clicks
-function CC:SetupHovercastButtonAttributes()
-    if not self.hovercastButton then return end
-    -- Combat-safe by contract: only reached from ApplyBindings, which defers.
-    if InCombatLockdown() then return end
-    
-    local btn = self.hovercastButton
-    
-    -- Clear existing attributes
-    for i = 1, 5 do
-        btn:SetAttribute("type" .. i, nil)
-        btn:SetAttribute("spell" .. i, nil)
-        btn:SetAttribute("macrotext" .. i, nil)
-    end
-    
-    if not self.unifiedMacroMap then return end
-    
-    -- Set up attributes for each mouse binding
-    for keyString, data in pairs(self.unifiedMacroMap) do
-        local binding = data.templateBinding
-        local bindType = binding.bindType or "mouse"
-        
-        if bindType == "mouse" and binding.button then
-            local virtualBtn = self:GetVirtualButtonName(binding)
-            local actionType = binding.actionType or self.ACTION_TYPES.SPELL
-            
-            -- Check if this should be treated as a special action
-            local isSpecialAction = data.isSpecialAction
-            if isSpecialAction == nil then
-                isSpecialAction = (actionType == "menu" or actionType == "target" or 
-                                   actionType == "focus" or actionType == "assist" or
-                                   actionType == self.ACTION_TYPES.MENU or 
-                                   actionType == self.ACTION_TYPES.FOCUS or
-                                   actionType == self.ACTION_TYPES.ASSIST)
-            end
-            
-            if isSpecialAction then
-                if actionType == "menu" or actionType == self.ACTION_TYPES.MENU then
-                    local typeAttr = "type-" .. virtualBtn
-                    btn:SetAttribute(typeAttr, "togglemenu")
-                    -- BUG #10 FIX: state-driver-based combat conditional
-                    local combatCond = GetCombatCondition(binding)
-                    if combatCond then
-                        AddCombatConditional(btn, typeAttr, "togglemenu", combatCond)
-                    end
-                elseif actionType == "target" then
-                    local typeAttr = "type-" .. virtualBtn
-                    btn:SetAttribute(typeAttr, "target")
-                    -- BUG #860 FIX: state-driver-based combat conditional
-                    local combatCond = GetCombatCondition(binding)
-                    if combatCond then
-                        AddCombatConditional(btn, typeAttr, "target", combatCond)
-                    end
-                elseif actionType == "focus" or actionType == self.ACTION_TYPES.FOCUS then
-                    btn:SetAttribute("type-" .. virtualBtn, "focus")
-                elseif actionType == "assist" or actionType == self.ACTION_TYPES.ASSIST then
-                    btn:SetAttribute("type-" .. virtualBtn, "assist")
-                end
-            else
-                -- Use macro for all spell/macro bindings
-                -- This supports smart res, combat conditionals, fallbacks, etc.
-                btn:SetAttribute("type-" .. virtualBtn, "macro")
-                btn:SetAttribute("macrotext-" .. virtualBtn, data.macroText)
-            end
-        end
-    end
-end
+-- SetupHovercastButtonAttributes was removed here (2026-08-02): it wrote
+-- attributes nothing could ever read.
+--
+-- It named its slots with GetVirtualButtonName ("type-shiftmouse3"), while the
+-- bindings that actually reach this button are installed by
+-- BuildHovercastSetupScript using GetHovercastSuffix ("type-dfmouseshift3").
+-- Two disjoint namespaces on one button, so no click or key ever resolved to
+-- anything it set. Its clear loop had the same problem in reverse: it cleared
+-- type1..5 / spell1..5 / macrotext1..5, which nothing on this button writes,
+-- so its own attributes accumulated untouched for the session. The button is
+-- also EnableMouse(false), so it cannot be physically clicked either.
+--
+-- Deleting it also closes an unbounded leak: it called AddCombatConditional on
+-- the hovercast button, appending to a dfAttrDriverList that nothing ever
+-- unregistered or cleared, growing on every ApplyBindings for the whole session.
+--
+-- The real hovercast path is ApplyGlobalBindings -> BuildHovercastSetupScript,
+-- which is unaffected.
 
 -- Get the suffix for a binding (like Clique's GetBindingPrefixSuffix)
 -- For global bindings, returns something like "dfbuttonshiftf" or "dfmouseshift3"
@@ -1112,7 +1187,9 @@ function CC:GetBindingKeyString(binding)
             if num then
                 mapped = "BUTTON" .. num
             else
-                mapped = binding.button:upper():gsub("BUTTON", "BUTTON")
+                -- Was `:gsub("BUTTON", "BUTTON")` — a no-op that read as
+                -- deliberate normalisation. It only ever uppercased.
+                mapped = binding.button:upper()
             end
         end
         key = key .. mapped
@@ -1253,9 +1330,17 @@ function CC:SetEnabled(enabled)
 
     -- Update the header attribute so secure snippets know whether to run
     -- This is critical for allowing Clique/Clicked to work when we're disabled
+    --
+    -- The OnEnter snippet reads this attribute to decide whether to run at all,
+    -- so if the write is skipped the DB says enabled and every hover no-ops. It
+    -- used to be skipped silently in combat with no deferral: toggling click
+    -- casting on during a fight left it dead until something else happened to
+    -- rewrite the attribute, while the UI reported it working.
     if self.header then
         if not InCombatLockdown() then
             self.header:SetAttribute("dfClickCastEnabled", enabled)
+        else
+            self:Defer("headerEnabled", enabled and "on" or "off")
         end
     end
 
@@ -1347,8 +1432,9 @@ function CC:GetBindingActionText(binding)
         return "Open Menu"
     elseif actionType == self.ACTION_TYPES.FOCUS then
         return "Focus Unit"
-    elseif actionType == self.ACTION_TYPES.FOLLOW then
-        return "Follow Unit"
+    -- The FOLLOW branch was removed: ACTION_TYPES has no FOLLOW member, so the
+    -- comparison was `actionType == nil` and a binding with no action type at
+    -- all displayed as "Follow Unit" instead of falling through to "Unknown".
     elseif actionType == self.ACTION_TYPES.ASSIST then
         return "Assist Unit"
     else
@@ -2433,7 +2519,58 @@ function CC:BuildCombinedMacroForBindings(bindings, forGlobalBinding)
         end
     end
 
-    if #parts == 0 then return nil end
+    -- Mounted / flying suppression.
+    --
+    -- The single-binding builder stamps ",nomounted,noflying" into every clause
+    -- it emits. This builder never computed it at all, so "disable while
+    -- mounted" worked for every key with ONE binding and silently did nothing
+    -- for every key with two or more -- the user sees the option working, right
+    -- up until the key they care about happens to have a friendly/hostile split.
+    --
+    -- Applied as a post-pass over the finished clause list rather than threaded
+    -- through the ten separate concatenations above: one place to be correct,
+    -- and it covers the unconditional [] and terminal always-cast forms that a
+    -- per-site edit would have missed.
+    local mountedStr = ""
+    if self.db and self.db.global and self.db.global.disableWhileMounted then
+        mountedStr = ",nomounted,noflying"
+    elseif self.db and self.db.global and self.db.global.disableWhileFlying then
+        mountedStr = ",noflying"
+    end
+    if mountedStr ~= "" then
+        local bare = mountedStr:sub(2)  -- drop the leading comma
+        for i, part in ipairs(parts) do
+            local cond, rest = part:match("^%[(.-)%]%s*(.*)$")
+            if cond == nil then
+                -- No bracket at all (always-cast with no combat condition).
+                parts[i] = "[" .. bare .. "] " .. part
+            elseif cond == "" then
+                parts[i] = "[" .. bare .. "] " .. rest
+            else
+                parts[i] = "[" .. cond .. mountedStr .. "] " .. rest
+            end
+        end
+    end
+
+    -- No clause was produced. Every clause above requires `.spellName`, but
+    -- findBestSpell will happily return a MACRO-type binding, which has none --
+    -- so a key carrying two macro bindings with different target types built
+    -- nothing, returned nil, and got no entry in the unified map at all. That
+    -- key was completely dead while the binding list showed it as configured.
+    -- The single-binding early returns above hide it; it only bites once a key
+    -- has two or more bindings that do not collapse to one category.
+    --
+    -- Fall back to the single-binding builder for the best candidate we have. A
+    -- macro that ignores the friendly/hostile split is a compromise; a key that
+    -- does nothing at all is a bug.
+    if #parts == 0 then
+        local fallbackBinding = anyBinding or friendlyBinding or hostileBinding
+        if fallbackBinding then
+            DF:Debug("CLICK", "Combined macro produced no clauses (macro-type binding); using single-binding build")
+            return self:BuildMacroTextForBinding(fallbackBinding, forGlobalBinding), fallbackBinding
+        end
+        return nil
+    end
 
     -- Check if any contributing binding has stopSpellTarget enabled
     local useStopSpellTarget = false
@@ -2543,8 +2680,31 @@ function CC:BuildUnifiedMacroMap()
             -- 2. Macro-based targeting (/target) does NOT work for cross-instance players
             -- 3. PreClick handlers can't check unit state (UnitIsDeadOrGhost not available in restricted Lua)
             -- Smart res still works on healing spell bindings - click dead player with heal = casts res
+            -- globalMacroText is what the HOVERCAST button binds, and it is a
+            -- separate question from how the action behaves ON a frame.
+            --
+            -- On a frame these use native WoW handling (type="target" etc), so
+            -- macroText stays nil deliberately. But the hovercast script skips
+            -- any entry with no macro text at all, so "focus, with a target
+            -- fallback" worked while hovering a frame and did nothing at all
+            -- while hovering nothing -- despite the fallback being the entire
+            -- reason that key needs a global bind. BuildMacroTextForBinding has
+            -- had working /focus and /assist branches the whole time; nothing
+            -- ever reached them, because this break fires first.
+            --
+            -- Only for the actions that have a macro form. target and menu do
+            -- not: /target cannot reach cross-instance players (the note below)
+            -- and there is no macro equivalent of the unit menu, so those two
+            -- correctly remain frame-only.
+            local specialType = specialBinding.actionType
+            local hasMacroForm = (specialType == "focus" or specialType == "assist"
+                or specialType == self.ACTION_TYPES.FOCUS
+                or specialType == self.ACTION_TYPES.ASSIST)
+
             macroMap[keyString] = {
                 macroText = nil,
+                globalMacroText = hasMacroForm
+                    and self:BuildMacroTextForBinding(specialBinding, true) or nil,
                 templateBinding = specialBinding,
                 keyString = keyString,
                 isSpecialAction = true,
@@ -2721,7 +2881,10 @@ end
 
 -- Apply all bindings to a frame using unified macro approach
 -- skipKeyboardUpdate: when true, skip UpdateFrameBindingAttributes (caller will batch it)
-function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
+-- `quiet` suppresses the two per-frame INFO lines (entry and DONE) and nothing
+-- else -- the hovered-frame WARN below and every warning downstream still fire.
+-- Only the ApplyBindings sweep sets it; see the volume note on its summary line.
+function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate, quiet)
     if not frame then return end
     if self:CombatGuard("bindingRefresh") then return end
     
@@ -2736,7 +2899,9 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
 
     -- Debug: track when bindings are reapplied (helps diagnose unexpected clears)
     local isHovered = (self.currentHoveredFrame == frame) or (frame.IsMouseOver and frame:IsMouseOver())
-    DF:Debug("CLICK", "ApplyBindings %s hovered=%s", frameName, tostring(isHovered))
+    if not quiet then
+        DF:Debug("CLICK", "ApplyBindings %s hovered=%s", frameName, tostring(isHovered))
+    end
     if isHovered then
         DF:DebugWarn("CLICK", "ApplyBindings on HOVERED frame %s — bindings may flicker! caller: %s",
             frameName, debugstack(2, 1, 0) or "unknown")
@@ -2807,7 +2972,7 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
     -- left frames snippet-less for a whole fight (see ClearBindingsFromFrame).
     -- The no-bindings leg above must NOT preserve it -- nothing rewrites the
     -- snippet on a frame with no bindings, so there it has to be cleared.
-    self:ClearBindingsFromFrame(frame, skipKeyboardUpdate)
+    self:ClearBindingsFromFrame(frame, skipKeyboardUpdate, quiet)
 
     -- Register for clicks based on castOnDown option
     if frame.RegisterForClicks then
@@ -2911,10 +3076,12 @@ function CC:ApplyBindingsToFrameUnified(frame, skipKeyboardUpdate)
     end
 
     -- Debug: confirm final attribute state after apply
-    local finalType1 = frame:GetAttribute("type1")
-    local finalMacro1 = frame:GetAttribute("macrotext1")
-    DF:Debug("CLICK", "ApplyBindings DONE %s type1=%s macro1=%s",
-        frameName, tostring(finalType1), finalMacro1 and finalMacro1:sub(1, 50) or "nil")
+    if not quiet then
+        local finalType1 = frame:GetAttribute("type1")
+        local finalMacro1 = frame:GetAttribute("macrotext1")
+        DF:Debug("CLICK", "ApplyBindings DONE %s type1=%s macro1=%s",
+            frameName, tostring(finalType1), finalMacro1 and finalMacro1:sub(1, 50) or "nil")
+    end
 
     -- Update keyboard binding snippet for WrapScript to use
     -- Skip when caller will batch-refresh all frames (e.g. ApplyBindings)
