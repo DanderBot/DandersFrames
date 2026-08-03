@@ -107,8 +107,24 @@ function CC:RegisterEvents()
             if InCombatLockdown() then
                 CC:Defer("bindingRefresh")
             else
-                CC:ReconcileClickCastFrames()
-                CC:ApplyBindings()
+                -- Keyed and delayed, NOT immediate. ApplyBindings cancels any
+                -- in-flight batch walker and re-wipes the header's override
+                -- bindings before restarting from batch 0. Calling it once per
+                -- roster event means a burst -- a raid forming, mass join/leave,
+                -- role assignment, zone-in -- can restart the sweep faster than
+                -- it completes, and every restart kills the live hover binds
+                -- again. That is the same dead-key class this whole change set
+                -- exists to close, reached through a new trigger.
+                --
+                -- Nothing is lost by waiting: frames created during the roster
+                -- event register through EnsureRegistered and the ClickCastFrames
+                -- metatable, not through ApplyBindings, which only refreshes
+                -- bindings on frames already registered. Same keyed-DeferAfter
+                -- shape as zoneSettle, so a burst coalesces into one pass.
+                CC:DeferAfter("rosterSettle", 0.5, function()
+                    CC:ReconcileClickCastFrames()
+                    CC:ApplyBindings()
+                end)
             end
         elseif event == "ARENA_PREP_OPPONENT_SPECIALIZATIONS" then
             -- Arena frames should now exist

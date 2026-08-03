@@ -765,9 +765,17 @@ function CC:ApplyBindings()
                     -- More batches to process
                     CC.batchBindingTimer = C_Timer.NewTimer(0, ProcessNextBatch)
                 else
-                    -- All frames processed - refresh keyboard bindings once for all frames
+                    -- All frames processed.
                     CC.batchBindingTimer = nil
-                    CC:RefreshKeyboardBindings()
+                    -- No RefreshKeyboardBindings here any more. The batch now
+                    -- rebuilds each frame's snippet inline (skipKeyboardUpdate is
+                    -- false above), and RefreshKeyboardBindings does nothing but
+                    -- loop the same registry calling the same builder -- a strict
+                    -- subset, since it additionally gates on
+                    -- dfKeyboardHandlersSetup. Keeping it meant every sweep built
+                    -- every snippet twice. Verified there is no other dependency:
+                    -- the function's whole body is that one loop.
+                    --
                     -- The header wipe above kills a live hover; put it straight back.
                     CC:ReassertHoverBinds()
 
