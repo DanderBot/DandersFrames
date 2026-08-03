@@ -1345,7 +1345,16 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local soloCheck = settingsGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Show in Solo Mode"], "showInSoloMode", function()
             if not DF.PinnedFrames then return end
             -- Re-apply visibility so the solo gate takes effect immediately.
-            DF.PinnedFrames:SetEnabled(activeHighlightTab, GetCurrentSet().enabled)
+            -- ☠ Must be gated on IsEditingActiveMode, exactly like the Enable and
+            -- Show Label siblings above. SetEnabled resolves its target through
+            -- GetSetDB -> GetPinnedModeDB, which picks the mode from IsInRaid() --
+            -- NOT from the mode being edited -- and it PERSISTS (set.enabled = ...).
+            -- Without the guard, ticking this while in a raid but editing Party
+            -- wrote the party set's enabled value over the RAID set's and saved it,
+            -- so a raid pinned header could pop on mid-raid or silently vanish.
+            if IsEditingActiveMode() then
+                DF.PinnedFrames:SetEnabled(activeHighlightTab, GetCurrentSet().enabled)
+            end
             RefreshTestModeIfActive()
         end), 28)
         soloCheck.hideOn = function() return GUI.SelectedMode == "raid" end
