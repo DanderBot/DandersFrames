@@ -620,6 +620,16 @@ function CC:ApplyBindings()
         self.batchBindingTimer = nil
     end
 
+    -- Re-assert the master switch the OnEnter/OnShow snippets gate on. The header
+    -- stamps it at creation (Frames.lua), but that write is `self.db and
+    -- self.db.enabled or false` -- so a header built before the profile is resolved
+    -- pins it to FALSE with nothing to correct it, which would read as click casting
+    -- silently not working at all. ApplyBindings is the "make the world match the DB"
+    -- pass and runs at init and on every profile change, so re-assert here.
+    if self.header then
+        self.header:SetAttribute("dfClickCastEnabled", (self.db and self.db.enabled) and true or false)
+    end
+
     -- Hover keyboard/scroll binds are owned by the click-cast header, so a
     -- full rebuild starts by wiping the header's override bindings — any
     -- bind from the outgoing set that is still active (e.g. the user is
@@ -1340,7 +1350,9 @@ function CC:SetEnabled(enabled)
     -- rewrite the attribute, while the UI reported it working.
     if self.header then
         if not InCombatLockdown() then
-            self.header:SetAttribute("dfClickCastEnabled", enabled)
+            -- Normalise: the snippets gate on `~= true`, so a truthy non-boolean
+            -- (or nil) must not read as enabled.
+            self.header:SetAttribute("dfClickCastEnabled", enabled and true or false)
         else
             self:Defer("headerEnabled", enabled and "on" or "off")
         end

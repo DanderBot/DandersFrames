@@ -498,8 +498,11 @@ function CC:CreateClickCastHeader()
     self.header:SetSize(1, 1)
     self.header:Hide()
     
-    -- Set the enabled attribute (checked by OnEnter snippets to allow Clique/Clicked when disabled)
-    self.header:SetAttribute("dfClickCastEnabled", self.db and self.db.enabled or false)
+    -- Master switch, read by the OnEnter/OnShow snippets so a disabled DF leaves the
+    -- hover free for Clique/Clicked. Normalised to a real boolean: the snippets gate on
+    -- `~= true`, so a truthy non-boolean must not read as enabled.
+    -- ⚠ If the profile is not resolved yet this pins FALSE; ApplyBindings re-asserts it.
+    self.header:SetAttribute("dfClickCastEnabled", (self.db and self.db.enabled) and true or false)
     
     -- Initialize secure environment variables
     -- mouseoverbutton tracks the currently hovered frame (handle, used ONLY
@@ -1892,6 +1895,16 @@ function CC:SetupSecureHandlers(frame)
         -- (the pre-4.7.4 bug #976 abort class). Diagnostics read the
         -- mouseovername string mirror rather than the shared handle.
         local onEnterSnippet = [[
+            -- Phase -1: the master switch. `dfClickCastEnabled` lives on the HEADER
+            -- (owner), written by CC:SetEnabled and by the headerEnabled deferred job
+            -- for the in-combat case. Until this line existed the attribute had three
+            -- writers and NO readers outside two debug prints -- so turning click
+            -- casting off left every hover bind live and still eating keypresses,
+            -- while the UI said off and the Clique/Clicked coexistence comment claimed
+            -- otherwise. Bail BEFORE Phase 3's owner:ClearBindings() so a disabled
+            -- addon also stops wiping bindings another addon may own.
+            if owner:GetAttribute("dfClickCastEnabled") ~= true then return end
+
             -- Phase 0: Reset tracking for this enter cycle
             -- dfBindingsActive is cleared FIRST so a stale true from the previous
             -- enter can't fool us. It only gets set back to true at the very end.
@@ -2039,6 +2052,7 @@ function CC:SetupSecureHandlers(frame)
         -- the hover, and on mouseoverbutton ~= self so a show while already
         -- claimed is a no-op. Mirrors OnEnter's phases 3-6 in the same order.
         local onShowSnippet = [[
+            if owner:GetAttribute("dfClickCastEnabled") ~= true then return end
             if self:IsUnderMouse() and mouseoverbutton ~= self then
                 local snippet = self:GetAttribute("dfBindingSnippet")
                 if snippet and snippet ~= "" then
