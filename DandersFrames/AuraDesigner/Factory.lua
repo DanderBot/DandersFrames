@@ -1226,6 +1226,12 @@ local function buildPlacedConfig(frame, unit, map, indicator, isSquare, borderSp
         unit = unit,
         mode = "row",
         max = 1,
+        -- ONE icon, so declare an AuraSlot rather than a one-icon AuraGroup:
+        -- AddAuraGroup eagerly creates a whole FrameCreationBatchSize batch BEFORE
+        -- maxFrameCount is applied; AddAuraSlot creates exactly one frame. Same
+        -- selection (the slot carries the sort comparator), same size
+        -- (styleButton_regions sizes both paths identically).
+        singleSlot = true,
         filter = poolFilter(indicator, mine),   -- "HELPFUL|PLAYER" on My Buffs; othersOnly rides the other pool (structural)
         candidateFilters = { includeSpellIDs = map },
         testEntries = testEntryForMap(map),
@@ -1497,6 +1503,12 @@ local function buildBarConfig(frame, unit, map, indicator, borderSpec, defs, min
         unit = unit,
         mode = "row",
         max = 1,
+        -- ONE icon, so declare an AuraSlot rather than a one-icon AuraGroup:
+        -- AddAuraGroup eagerly creates a whole FrameCreationBatchSize batch BEFORE
+        -- maxFrameCount is applied; AddAuraSlot creates exactly one frame. Same
+        -- selection (the slot carries the sort comparator), same size
+        -- (styleButton_regions sizes both paths identically).
+        singleSlot = true,
         filter = poolFilter(indicator, mine),   -- "HELPFUL|PLAYER" on My Buffs; othersOnly rides the other pool (structural)
         candidateFilters = { includeSpellIDs = map },
         testEntries = testEntryForMap(map),
@@ -1584,6 +1596,12 @@ local function buildAlertCompanionConfig(unit, map, indicator, layout, mine, geo
         unit = unit,
         mode = "row",
         max = 1,
+        -- ONE icon, so declare an AuraSlot rather than a one-icon AuraGroup:
+        -- AddAuraGroup eagerly creates a whole FrameCreationBatchSize batch BEFORE
+        -- maxFrameCount is applied; AddAuraSlot creates exactly one frame. Same
+        -- selection (the slot carries the sort comparator), same size
+        -- (styleButton_regions sizes both paths identically).
+        singleSlot = true,
         filter = poolFilter(indicator, mine),   -- mirror the indicator: My Buffs alerts only on YOUR cast
         candidateFilters = { includeSpellIDs = map },
         testEntries = testEntryForMap(map),
@@ -1618,6 +1636,12 @@ function Factory:BuildAlertPreviewConfig(indicator, geom, layout, entries)
     return {
         mode = "row",
         max = 1,
+        -- ONE icon, so declare an AuraSlot rather than a one-icon AuraGroup:
+        -- AddAuraGroup eagerly creates a whole FrameCreationBatchSize batch BEFORE
+        -- maxFrameCount is applied; AddAuraSlot creates exactly one frame. Same
+        -- selection (the slot carries the sort comparator), same size
+        -- (styleButton_regions sizes both paths identically).
+        singleSlot = true,
         filter = "HELPFUL",   -- canvas sample: the pool never gates a preview slot
         testEntries = entries,
         tooltips = false,
@@ -1748,7 +1772,7 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defs)
         local layout = buildBarLayout(frame, indicator)
         local geom = alertGeometry(frame, indicator, true)
         local cfg = {
-            mode = "row", max = 1, filter = "HELPFUL",
+            mode = "row", max = 1, singleSlot = true, filter = "HELPFUL",
             adBorderAnim = true,
             layout = layout,
             style = buildBarStyle(indicator, borderSpec, defs),
@@ -1771,7 +1795,7 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defs)
         and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
     local layout = buildPlacedLayout(indicator)
     local cfg = {
-        mode = "row", max = 1, filter = "HELPFUL",
+        mode = "row", max = 1, singleSlot = true, filter = "HELPFUL",
         adBorderAnim = true,
         layout = layout,
         style = buildPlacedStyle(indicator, isSquare, borderSpec, defs),
@@ -1982,7 +2006,7 @@ function Factory:BuildGroupPreviewConfig(frame, group)
         -- filter is inert here (also for debuff groups): the editor always
         -- supplies its own testEntries, so _paintTestSlot's category-pool
         -- fallback — the only preview reader of this string — never runs.
-        mode = "row", max = 1, filter = "HELPFUL",
+        mode = "row", max = 1, singleSlot = true, filter = "HELPFUL",
         adBorderAnim = borderSpec and true or nil,
         layout = { size = math.max(8, tonumber(group.iconSize) or 24) },
         style = buildFilterGroupStyle(group, borderSpec),

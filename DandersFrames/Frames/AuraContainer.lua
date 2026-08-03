@@ -1544,6 +1544,10 @@ local function applyContainerLayout(c, handle)
     -- and protect each call SEPARATELY: pre-68914 this rode the pin pcall above,
     -- so the rename made the first layout call throw and silently dropped
     -- growth/wrap/padding for the whole row.
+    -- Stashed for the SINGLE-SLOT row path: the flow does not lay slots out, so
+    -- build() pins its one button at the corner the flow would have placed
+    -- element 1 at. Kept here so there is ONE derivation of the corner.
+    handle._flowAnchor = G.flowAnchor
     local setFlowAnchor  = c.SetFlowLayoutAnchorPoint or c.SetAuraLayoutAnchorPoint
     local setFlowGrowth  = c.SetFlowLayoutGrowthDirection or c.SetAuraLayoutGrowthDirection
     local setFlowMaxLine = c.SetFlowLayoutMaximumLineSize or c.SetAuraLayoutRowWidth
@@ -1778,6 +1782,21 @@ function NativeBackend:build()
     setContainerProviderDeaf(c, not AuraContainer._testMode)
     local isOverlay = config.mode == "overlay"
     local isMissing = config.mode == "missing"
+    -- SINGLE-SLOT ROW. A row that can only ever show ONE icon declares an AuraSlot
+    -- instead of an AuraGroup: AddAuraGroup hardcodes batchSize =
+    -- CustomAuraContainerConstants.FrameCreationBatchSize and calls CreateFrameBatch()
+    -- BEFORE maxFrameCount is applied, so a max=1 group created a full batch of
+    -- buttons to display one icon. AddAuraSlot calls CreateAuraSlotFrame once.
+    -- Selection is NOT degraded: RegisterAuraSlot builds an auraComparator from
+    -- sortMethod/sortDirection, so the slot shows the same best-ranked match.
+    --
+    -- ☠ OPT-IN ONLY, never inferred from max == 1. AD filter groups derive their max
+    -- from group.maxIcons, which is USER-TUNABLE in place via ApplyTuning — a group
+    -- that happened to sit at 1 would become slot-backed and a later 1 -> 4 edit
+    -- would silently fail, because a slot cannot grow and the tuning path has no
+    -- group to re-max. Keying off an explicit flag keeps container TOPOLOGY
+    -- independent of any tuning value.
+    local isSingleSlot = config.singleSlot and not isOverlay and not isMissing
     if isOverlay then
         c:SetAllPoints(handle.frame)          -- overlay covers the host region
     elseif isMissing then
@@ -1864,7 +1883,9 @@ function NativeBackend:build()
     -- layouts on every restyle and would otherwise reset a scaled group's cell back to
     -- the shared size, so it needs to know which groups are scaled.
     self.groupStyles = {}
-    self.slotButtons = isOverlay and {} or nil   -- overlay: key -> native slot button (consumer styling)
+    -- key -> native slot button (consumer styling). Overlay AND single-slot rows:
+    -- both declare AuraSlots, and both need the button reachable by key afterwards.
+    self.slotButtons = (isOverlay or isSingleSlot) and {} or nil
     handle._idGateVulnerable = nil   -- re-derived from this build's records (see the record loop)
     handle._idGateSourceRelative = nil   -- PLAYER-token / isFromPlayerOrPlayerPet pools (visibility gate)
     if testMode and not isOverlay and not isMissing then
@@ -1935,8 +1956,27 @@ function NativeBackend:build()
                 DF:DebugWarn(DBG, "test group failed: %s", tostring(err))
             end
         end
-        addTestGroup("dfTestStyled", testStyleSlots, true, nil)
-        addTestGroup("dfTestPlain", maxCount - testStyleSlots, false, testStyleSlots + 1)
+        if isSingleSlot then
+            -- SINGLE-SLOT ROW preview. The two-group split above exists to pin a
+            -- styled icon AHEAD of plain ones in a multi-icon row; this row has
+            -- exactly one icon, so it declares the same single AuraSlot the live
+            -- path does and paints curated entry 1 into it. fixedIndex = 1 (not
+            -- the handle-wide counter) because there is only ever one button and
+            -- its paint must be deterministic across rebuilds.
+            local okSlot, btn = pcall(c.AddAuraSlot, c, "dfTestSlot", category,
+                { initializeFrame = handle:_makeInitializeFrame(handle._gen, 1, nil, testStyle) })
+            if okSlot and btn then
+                local fa = handle._flowAnchor or "TOPLEFT"
+                pcall(btn.ClearAllPoints, btn)
+                pcall(btn.SetPoint, btn, fa, c, fa, 0, 0)
+                self.slotButtons["dfTestSlot"] = btn
+            elseif not okSlot then
+                DF:DebugWarn(DBG, "test slot failed: %s", tostring(btn))
+            end
+        else
+            addTestGroup("dfTestStyled", testStyleSlots, true, nil)
+            addTestGroup("dfTestPlain", maxCount - testStyleSlots, false, testStyleSlots + 1)
+        end
     end
     for i, rec in ipairs(filters) do
         local f = rec.f
@@ -1969,6 +2009,28 @@ function NativeBackend:build()
                     pcall(btn.SetAllPoints, btn, handle.frame)
                     self.slotButtons[key] = btn
                 elseif not okSlot then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
+            elseif isSingleSlot then
+                -- Same declaration as the overlay branch, different GEOMETRY: an
+                -- overlay button covers the whole host, a row button is icon-sized
+                -- and sits where the flow would have put element 1.
+                local slotInit = (rec.style or rec.onInit)
+                    and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit, rec.style)
+                    or initFn
+                local okSlot, btn = pcall(c.AddAuraSlot, c, key, f,
+                    { initializeFrame = slotInit, candidateFilters = cf,
+                      sortMethod = sortMethod, sortDirection = sortDirection })
+                if okSlot and btn then
+                    -- Size is NOT set here: styleButton_regions sizes every button
+                    -- from the shared config, group-backed or not, so the icon comes
+                    -- out identical. Only the position the flow would have supplied
+                    -- has to be replaced.
+                    local fa = handle._flowAnchor or "TOPLEFT"
+                    pcall(btn.ClearAllPoints, btn)
+                    pcall(btn.SetPoint, btn, fa, c, fa, 0, 0)
+                    self.slotButtons[key] = btn
+                elseif not okSlot then
+                    DF:DebugWarn(DBG, "AddAuraSlot (single-slot row) failed: %s", tostring(btn))
+                end
             else
                 -- A record carrying its own style (or an onInit) needs its OWN init
                 -- closure — initFn is shared across every group and would apply the
@@ -2078,6 +2140,18 @@ function NativeBackend:applyLayout()
     -- hot re-apply here would overwrite them with row semantics.
     if not c or self.handle.config.mode == "overlay" or self.handle.config.mode == "missing" then return end
     applyContainerLayout(c, self.handle)
+    -- SINGLE-SLOT ROW: the flow does not move slot buttons, so the pin build()
+    -- made has to be re-made here or a growth/anchor change would leave the icon
+    -- at the old corner while the container moved under it. applyContainerLayout
+    -- has just refreshed handle._flowAnchor, so this reads the new corner. Size is
+    -- still styleButton_regions' job (ApplyStyle re-runs it right after this).
+    if self.slotButtons and self.handle.config.singleSlot then
+        local fa = self.handle._flowAnchor or "TOPLEFT"
+        for _, btn in pairs(self.slotButtons) do
+            pcall(btn.ClearAllPoints, btn)
+            pcall(btn.SetPoint, btn, fa, c, fa, 0, 0)
+        end
+    end
     if self.groupKeys and c.SetAuraGroupLayout then
         local groupLayout = buildGroupLayout(self.handle.config)
         for _, key in ipairs(self.groupKeys) do
@@ -2131,8 +2205,14 @@ function NativeBackend:applyGroupTuning()
     -- setters have nothing to act on — it needs the slot-side setters instead. The
     -- cfByKey derivation below is shared: build() keys slots and groups identically
     -- (rec.key or positional "df<i>"), so the same map serves both.
-    local isOverlay = mode == "overlay"
-    if isOverlay then
+    -- SINGLE-SLOT ROWS declare AuraSlots too, so they take the slot-side setters for
+    -- exactly the same reason: groupKeys is empty and the group setters have nothing
+    -- to act on. ☠ Without this a spell-map edit on a placed indicator would silently
+    -- no-op — include/excludeSpellIDs ride the TUNING signature, not the struct one,
+    -- so they never re-enter build(), and the indicator would keep the old spell list
+    -- until some unrelated change happened to rebuild it.
+    local usesSlots = mode == "overlay" or self.handle.config.singleSlot
+    if usesSlots then
         if not (self.slotButtons and c.SetAuraSlotCandidateFilters) then return end
     elseif not (self.groupKeys and c.SetAuraGroupMaxFrameCount) then
         return
@@ -2187,7 +2267,7 @@ function NativeBackend:applyGroupTuning()
     -- per call and has no equality guard of its own, so a container with N groups pays
     -- N full updates here. There is no batch setter; the only real lever is declaring
     -- fewer groups.
-    if isOverlay then
+    if usesSlots then
         -- A slot is a single button: no maxFrameCount and no layout to push, so only
         -- the candidate filters and the sort (which decides WHICH aura wins the one
         -- slot) are tunable. Same nil-CLEARS semantics as the group setter.
