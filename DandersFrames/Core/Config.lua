@@ -1211,8 +1211,10 @@ DF.PartyDefaults = {
     -- groups are declared first, so they already lead the row. These keys style them.
     -- Membership of the group IS the "is this important" test — nothing reads aura data,
     -- which is what makes this expressible at all under the 12.1 secret rules.
-    -- OFF by default: it changes the look of a row every user already has.
-    debuffImportantHighlight = false,         -- master toggle for the treatment below
+    -- ON by default from v5: the aura row is rebuilt on this lane anyway, so there is no
+    -- established look to preserve, and a boss/priority debuff standing out is the
+    -- behaviour most users would pick. Off is one tick away on the Debuffs page.
+    debuffImportantHighlight = true,          -- master toggle for the treatment below
     debuffImportantScale = 1.25,              -- icon size step for important debuffs (1 = same as the rest)
     debuffImportantBadge = true,              -- corner "!" badge
     debuffImportantBadgeSize = 10,            -- badge diameter in px (centred inside the corner, inset by size/4)
