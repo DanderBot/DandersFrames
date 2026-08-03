@@ -235,39 +235,46 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- General > Integrations
     local pageIntegrations = CreateSubTab("general", "general_integrations", L["Integrations"])
     BuildPage(pageIntegrations, function(self, db, Add, AddSpace, AddSyncPoint)
-        Add(CreateCopyButton(self.child, {"colorPicker"}, L["Integrations"], "general_integrations"), 25, 2)
+        -- No copy-to-other-mode button: the only settings on this page are the
+        -- colour-picker toggles, and those are account-wide now (see below), so
+        -- there is nothing per-mode left to copy.
         -- ===== COLOR PICKER GROUP (Column 1) =====
+        -- Bound to the ACCOUNT-WIDE db, not the page's per-mode `db`. These render
+        -- on both the Party and Raid tabs, and when they were per-mode the Raid copy
+        -- was write-only -- the hooks only ever read party, so ticking it on Raid
+        -- looked enabled and did nothing. One setting, one value, both tabs.
+        local pickerDB = DF:GetGlobalDB()
         local colorPickerGroup = GUI:CreateSettingsGroup(self.child, 280)
         colorPickerGroup:AddWidget(GUI:CreateHeader(self.child, L["Color Picker"]), 40)
-        
-        colorPickerGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use DF Color Picker"], db, "colorPickerOverride", function()
-            if db.colorPickerOverride or db.colorPickerGlobalOverride then
+
+        colorPickerGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use DF Color Picker"], pickerDB, "colorPickerOverride", function()
+            if pickerDB.colorPickerOverride or pickerDB.colorPickerGlobalOverride then
                 GUI:InstallColorPickerHook()
             else
                 GUI:UninstallColorPickerHook()
             end
-            if db.colorPickerOverride then
+            if pickerDB.colorPickerOverride then
                 DF:Say("Color picker override enabled")
             else
                 DF:Say("Color picker override disabled", nil, "WARN")
             end
         end), 30)
         colorPickerGroup:AddWidget(GUI:CreateLabel(self.child, L["Replace Blizzard's color picker with the DandersFrames color picker for this addon."], 250), 40)
-        
-        colorPickerGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use DF Color Picker for All Addons"], db, "colorPickerGlobalOverride", function()
-            if db.colorPickerOverride or db.colorPickerGlobalOverride then
+
+        colorPickerGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use DF Color Picker for All Addons"], pickerDB, "colorPickerGlobalOverride", function()
+            if pickerDB.colorPickerOverride or pickerDB.colorPickerGlobalOverride then
                 GUI:InstallColorPickerHook()
             else
                 GUI:UninstallColorPickerHook()
             end
-            if db.colorPickerGlobalOverride then
+            if pickerDB.colorPickerGlobalOverride then
                 DF:Say("Custom color picker enabled for all addons")
             else
                 DF:Say("Custom color picker disabled for all addons", nil, "WARN")
             end
         end), 30)
         colorPickerGroup:AddWidget(GUI:CreateLabel(self.child, L["Show the DF color picker when any addon opens a color picker."], 250), 30)
-        
+
         Add(colorPickerGroup, nil, 1)
         
         -- (Masque Integration group removed on 12.1: Masque cannot skin the

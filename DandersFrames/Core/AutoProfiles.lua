@@ -231,8 +231,7 @@ local function RefreshOverrideTabMap()
     {"selfPosition",        "general_sorting",      L["Sorting"]},
     {"rolePriority",        "general_sorting",      L["Sorting"]},
     {"classPriority",       "general_sorting",      L["Sorting"]},
-    {"colorPickerOverride", "general_integrations", L["Integrations"]},
-    {"colorPickerGlobalOverride", "general_integrations", L["Integrations"]},
+    -- colorPicker* are account-wide now, so an auto profile can't override them.
     -- Bars (specific text keys before generic "health" prefix).
     -- healthTexture MUST precede healthText: it's the health BAR texture, but
     -- a bare prefix match classifies it as health TEXT (and the legacy-text

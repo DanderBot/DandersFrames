@@ -932,8 +932,8 @@ DF.ExportCategories = {
         "aggroHighlightThickness",
         "aggroOnlyTanking",
         "aggroUseCustomColors",
-        "colorPickerGlobalOverride",
-        "colorPickerOverride",
+        -- colorPickerGlobalOverride / colorPickerOverride are account-wide now, so
+        -- they are no longer part of a profile and don't travel with an export.
         "fadeDeadBackground",
         "fadeDeadBackgroundColor",
         "fadeDeadFrames",

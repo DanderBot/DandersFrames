@@ -849,6 +849,14 @@ end
 
 DF.GlobalDefaults = {
     notifyOutdated = true,
+    -- Colour picker. Account-wide, not per-mode: "use DF's picker" is a UI-chrome
+    -- preference with no party/raid meaning, and the hooks that consume it are
+    -- installed once for the whole session. Previously these lived in PartyDefaults,
+    -- which generated an independent (and permanently ignored) raid copy.
+    --   colorPickerOverride       -- DF's own colour swatches use DF's picker
+    --   colorPickerGlobalOverride -- every OTHER addon's picker becomes DF's too
+    colorPickerOverride = true,
+    colorPickerGlobalOverride = false,
     -- Aura duration-text update rate (buff/debuff/defensive rows + Aura Designer).
     -- Stored as a raw key; the mapping to the native binding's updateInterval seconds
     -- lives in Features/Auras.lua (DF:GetAuraDurationUpdateInterval): SMOOTH = 0.1,
@@ -1196,8 +1204,10 @@ DF.PartyDefaults = {
 
     -- Class Color
     classColorAlpha = 1,
-    colorPickerGlobalOverride = false,
-    colorPickerOverride = true,
+    -- colorPickerOverride / colorPickerGlobalOverride moved to GlobalDefaults
+    -- (account-wide). They were never per-mode in practice — both hooks only ever
+    -- read db.party — so a raid-tab tick saved a value nothing read.
+    -- DF:MigrateColorPickerToGlobal carries the old per-mode values forward.
 
     -- Dead/Fade Settings
     fadeDeadAuras = 1,

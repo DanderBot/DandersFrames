@@ -1861,21 +1861,15 @@ local function HookedSetupColorPickerAndShow(self, info)
         return
     end
     
-    -- Use global DandersFrames reference for db access
+    -- Account-wide settings, NOT db.party. These used to read the party table while
+    -- the checkboxes rendered on BOTH mode tabs, so ticking on Raid wrote a value
+    -- nothing ever read. GetGlobalDB seeds its own defaults, so no nil-fixup here.
     local dfGlobal = DandersFrames
-    local db = dfGlobal and dfGlobal.db and dfGlobal.db.party
+    local db = dfGlobal and dfGlobal.GetGlobalDB and dfGlobal:GetGlobalDB()
     if not db then
         return originalSetupColorPickerAndShow(self, info)
     end
-    
-    -- Default settings if not set
-    if db.colorPickerOverride == nil then
-        db.colorPickerOverride = true
-    end
-    if db.colorPickerGlobalOverride == nil then
-        db.colorPickerGlobalOverride = false
-    end
-    
+
     local isFromDF = IsFromDandersFrames()
     
     -- Hide our picker if it's showing (to prevent overlap)
@@ -1909,21 +1903,13 @@ local function HookedOpenColorPicker(info)
         return
     end
     
-    -- Use global DandersFrames reference for db access
+    -- Account-wide settings, NOT db.party -- see HookedSetupColorPickerAndShow.
     local dfGlobal = DandersFrames
-    local db = dfGlobal and dfGlobal.db and dfGlobal.db.party
+    local db = dfGlobal and dfGlobal.GetGlobalDB and dfGlobal:GetGlobalDB()
     if not db then
         return originalOpenColorPicker(info)
     end
-    
-    -- Default settings if not set
-    if db.colorPickerOverride == nil then
-        db.colorPickerOverride = true
-    end
-    if db.colorPickerGlobalOverride == nil then
-        db.colorPickerGlobalOverride = false
-    end
-    
+
     local isFromDF = IsFromDandersFrames()
     
     -- Hide our picker if it's showing (to prevent overlap)
@@ -2049,7 +2035,9 @@ SlashCmdList["DFCOLORHOOK"] = function(arg)
     else
         local isInstalled = GUI:IsColorPickerHookInstalled()
         local dfGlobal = DandersFrames
-        local db = dfGlobal and dfGlobal.db and dfGlobal.db.party
+        -- Same source the hooks read (account-wide), so this dump can't disagree
+        -- with what actually decides which picker opens.
+        local db = dfGlobal and dfGlobal.GetGlobalDB and dfGlobal:GetGlobalDB()
         local o = DF:Out("Colour Picker", "hook status")
         o:Field("Hook installed", isInstalled and "yes" or "no", isInstalled and "good" or "neutral")
         o:Field("Midnight API (SetupColorPickerAndShow)",

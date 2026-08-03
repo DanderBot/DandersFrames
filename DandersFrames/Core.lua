@@ -2965,6 +2965,33 @@ function DF:MigrateFrameBorderKeys(modeDb)
     adoptGradientStyle("defensiveIcon")
 end
 
+-- Promote the colour-picker override out of per-mode profile storage to the
+-- account-wide global DB. Runs once per account (flag lives beside the values).
+--
+-- Both hooks only ever read db.party, so PARTY held the value that was actually
+-- in effect and party is what we carry forward. The one exception is
+-- colorPickerGlobalOverride, where raid is OR'd in: ticking it on the Raid tab
+-- saved a value nothing read, so those users never got the feature they asked
+-- for. OR'ing rescues them instead of silently discarding the tick. Doing the
+-- same for colorPickerOverride would be wrong -- it defaults to TRUE, so an OR
+-- would resurrect it for anyone who had deliberately turned it off.
+function DF:MigrateColorPickerToGlobal()
+    if not DF.db then return end
+    local g = DF:GetGlobalDB()
+    if g._colorPickerGlobalMigrated then return end
+    g._colorPickerGlobalMigrated = true
+
+    local party, raid = DF.db.party, DF.db.raid
+    if type(party) == "table" and party.colorPickerOverride ~= nil then
+        g.colorPickerOverride = party.colorPickerOverride and true or false
+    end
+    local partyGlobal = type(party) == "table" and party.colorPickerGlobalOverride
+    local raidGlobal  = type(raid)  == "table" and raid.colorPickerGlobalOverride
+    if partyGlobal ~= nil or raidGlobal ~= nil then
+        g.colorPickerGlobalOverride = (partyGlobal or raidGlobal) and true or false
+    end
+end
+
 -- Move the role-border colour set from per-mode storage (Stage 2 default
 -- placement) up to profile level under DF.db.roleColors so the global Colors
 -- settings page can manage them alongside class colours. Idempotent: only
@@ -3663,6 +3690,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- DF.db.roleColors so the global Colors settings page manages them.
         if DF.MigrateRoleBorderColors then
             DF:MigrateRoleBorderColors()
+        end
+        -- Promote the colour-picker override from per-mode profile storage to the
+        -- account-wide global DB (it was never really per-mode — see the function).
+        if DF.MigrateColorPickerToGlobal then
+            DF:MigrateColorPickerToGlobal()
         end
         -- Frame Level sliders now store an ABSOLUTE offset from the unit frame
         -- rather than 0-as-sentinel; convert stored values so nothing moves.

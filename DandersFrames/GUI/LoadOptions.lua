@@ -87,8 +87,11 @@ pickerBoot:RegisterEvent("PLAYER_ENTERING_WORLD")
 pickerBoot:SetScript("OnEvent", function(self, _, isInitialLogin, isReloadingUi)
     if not (isInitialLogin or isReloadingUi) then return end
     self:UnregisterEvent("PLAYER_ENTERING_WORLD")
-    local db = DF.db and DF.db.party
-    if db and db.colorPickerGlobalOverride then
+    -- Account-wide, NOT db.party: reading the party table here meant a user who
+    -- ticked the box on the Raid tab never got the companion loaded at login, so
+    -- the override they enabled silently did nothing every session.
+    local g = DF.GetGlobalDB and DF:GetGlobalDB()
+    if g and g.colorPickerGlobalOverride then
         DF:EnsureOptionsLoaded()
     end
 end)
