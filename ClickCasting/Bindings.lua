@@ -770,11 +770,20 @@ function CC:ApplyBindings()
                     -- No RefreshKeyboardBindings here any more. The batch now
                     -- rebuilds each frame's snippet inline (skipKeyboardUpdate is
                     -- false above), and RefreshKeyboardBindings does nothing but
-                    -- loop the same registry calling the same builder -- a strict
-                    -- subset, since it additionally gates on
+                    -- loop the same registry calling the same builder, gated on
                     -- dfKeyboardHandlersSetup. Keeping it meant every sweep built
-                    -- every snippet twice. Verified there is no other dependency:
-                    -- the function's whole body is that one loop.
+                    -- every snippet twice.
+                    --
+                    -- NOT a strict subset, despite the two loops matching shape.
+                    -- ApplyBindingsToFrameUnified early-returns BEFORE its inline
+                    -- rebuild on several paths -- click casting disabled, an
+                    -- unnamed frame, and the no-bindings leg -- where the tail
+                    -- call would still have run the builder. Dropping it is
+                    -- correct on every one of them, and on the no-bindings leg it
+                    -- is a fix rather than a wash: that leg deliberately CLEARS
+                    -- the snippet ("nothing rewrites the snippet on a frame with
+                    -- no bindings"), and the tail call was quietly rewriting it
+                    -- straight afterwards, undoing the clear on every sweep.
                     --
                     -- The header wipe above kills a live hover; put it straight back.
                     CC:ReassertHoverBinds()
