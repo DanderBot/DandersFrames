@@ -254,14 +254,18 @@ local function BuildDirectDebuffFilters(db, claimed)
 
     -- Negation suffix for a group, given which higher-priority token filters
     -- apply to it. ALL-mode dispel dedups via excludeDispelTypes (see cfFor).
-    local function neg(excludeDispel, excludeCC, excludeRaid)
+    -- Token precedence among the NON-important records is dispel > CC > raid, so only
+    -- those two exclusions are ever needed. There is deliberately no raid exclusion:
+    -- raid is the last token record, and the important records above no longer negate
+    -- anything (they subtract via candidateFilters instead — see IMPORTANT-FIRST
+    -- PRECEDENCE below), so nothing is left that would need to exclude it.
+    local function neg(excludeDispel, excludeCC)
         local s = ""
         if excludeDispel then
             if playerMode then s = s .. "|!" .. dispelToken
             elseif anyToken then s = s .. "|!" .. anyToken end
         end
         if excludeCC and ccToken then s = s .. "|!" .. ccToken end
-        if excludeRaid and raidOn then s = s .. "|!RAID" end
         return s
     end
     -- candidateFilters for one record. Hands each record its OWN table (extra
@@ -284,34 +288,63 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- machinery above deliberately keeps reading the RAW enabled flags).
     local effBoss = boss and not (claimed and claimed.boss)
     local effRole = role and not (claimed and claimed.role)
+    -- IMPORTANT-FIRST PRECEDENCE. These records used to carry neg(true, true, true),
+    -- i.e. boss/role and priority EXCLUDED anything dispellable, CC or raid-flagged.
+    -- That made the important categories the LOWEST precedence: a priority debuff that
+    -- also carried the RAID token was pushed out of this styled record and into the
+    -- unstyled "raid" one below, so the Important Debuffs highlight silently did nothing
+    -- for it. Most boss/priority debuffs in group content DO carry RAID, so with the
+    -- Blizzard category filters enabled the highlight looked broken for about half the
+    -- auras it should have covered (field-reported; Show All mode was unaffected).
+    --
+    -- Exclusivity now runs the same direction Show All mode has always used (see the
+    -- ALL-mode block near the top of this file): the important records claim their auras
+    -- FIRST with no negation, and the token records below subtract them via
+    -- candidateFilter flags. Same no-double-render guarantee, correct precedence, and
+    -- important debuffs now genuinely lead the row rather than only sometimes.
+    local importantFlag   -- boss/role flag actually declared; nil if there is no such record
+    local priorityDeclared = false
     if effBoss or effRole then
-        local flag = (effBoss and effRole) and "isBossOrRoleAura" or (effBoss and "isBossAura" or "isRoleAura")
-        filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "bossrole",
-                                  candidateFilters = cfFor(true, { [flag] = true }),
+        importantFlag = (effBoss and effRole) and "isBossOrRoleAura" or (effBoss and "isBossAura" or "isRoleAura")
+        filters[#filters + 1] = { filter = "HARMFUL", key = "bossrole",
+                                  candidateFilters = cfFor(true, { [importantFlag] = true }),
                                   style = importantStyle }
     end
     if db.debuffFilterPriority and not (claimed and claimed.priority) then
-        filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "priority",
-                                  candidateFilters = cfFor(true, { isPriorityAura = true }),
+        priorityDeclared = true
+        local extra = { isPriorityAura = true }
+        -- Only subtract boss/role when that record actually exists, and subtract the
+        -- SAME flag it was declared with (isBossOrRoleAura / isBossAura / isRoleAura).
+        if importantFlag then extra[importantFlag] = false end
+        filters[#filters + 1] = { filter = "HARMFUL", key = "priority",
+                                  candidateFilters = cfFor(true, extra),
                                   style = importantStyle }
     end
+    -- Subtract whichever important records were declared. Returns a FRESH table each
+    -- call because cfFor mutates and returns the table it is handed.
+    local function notImportant(extra)
+        extra = extra or {}
+        if importantFlag then extra[importantFlag] = false end
+        if priorityDeclared then extra.isPriorityAura = false end
+        return extra
+    end
     if ccToken and not (claimed and claimed.crowdControl) then
-        filters[#filters + 1] = { filter = "HARMFUL|" .. ccToken .. neg(true, false, false),
-                                  key = "cc", candidateFilters = cfFor(false) }
+        filters[#filters + 1] = { filter = "HARMFUL|" .. ccToken .. neg(true, false),
+                                  key = "cc", candidateFilters = cfFor(false, notImportant()) }
     end
     if raidOn and not (claimed and claimed.raid) then
-        filters[#filters + 1] = { filter = "HARMFUL|RAID" .. neg(true, true, false),
-                                  key = "raid", candidateFilters = cfFor(false) }
+        filters[#filters + 1] = { filter = "HARMFUL|RAID" .. neg(true, true),
+                                  key = "raid", candidateFilters = cfFor(false, notImportant()) }
     end
     if dispelOn and not (claimed and claimed.dispellable) then
         if playerMode then
             filters[#filters + 1] = { filter = "HARMFUL|" .. dispelToken,
-                                      key = "dispel", candidateFilters = cfFor(false) }
+                                      key = "dispel", candidateFilters = cfFor(false, notImportant()) }
         elseif anyToken then
             filters[#filters + 1] = { filter = "HARMFUL|" .. anyToken,
-                                      key = "dispel", candidateFilters = cfFor(false) }
+                                      key = "dispel", candidateFilters = cfFor(false, notImportant()) }
         else
-            local cf = { includeDispelTypes = DISPEL_TYPES }
+            local cf = notImportant({ includeDispelTypes = DISPEL_TYPES })
             if maxDur then cf.maxDuration = maxDur end
             filters[#filters + 1] = { filter = "HARMFUL", key = "dispel", candidateFilters = cf }
         end
@@ -592,8 +625,30 @@ end
 -- PER-INDICATOR setting — DF.Expiration:Unit(cfg) — so one global could not express it:
 -- a glyph revealing at 5 seconds and a border revealing at 30% are both legitimate at the
 -- same time. Use DF:GetDurationRampKey(DF.Expiration:Unit(cfg)) to reach its ramp.)
+-- ☠ MEMOISED PER SCALE, AND THE RETURNED LIST IS SHARED — do not mutate it.
+-- Every call rebuilt the whole ladder: one table for the list, one table per
+-- breakpoint, and a colorToHex string per breakpoint — from account-wide config
+-- that only changes on a Colours-page edit. It runs per aura per tick and was
+-- 6.6% of all trash-fight allocation.
+--
+-- Verified before sharing: all five call sites only READ (ipairs, indexed reads,
+-- breakpointsSig) — none writes into the list or into an entry. A future caller
+-- that needs to mutate must copy first.
+--
+-- Keyed on the resolved DEF TABLE rather than the scale string, so an unrecognised
+-- scale (which falls back to TEXT_SECONDS) shares that entry instead of growing a
+-- duplicate under its own name.
+--
+-- Invalidation is the one that already exists: DF:InvalidateDurationFormatters
+-- wipes this next to the formatter and curve caches, and its own comment already
+-- makes it the required call for anything mutating these stops. Nothing new to
+-- remember, and the PERCENT scale now gets cached too — GetDurationBreakpointsSig
+-- only ever memoised TEXT_SECONDS.
+local durationBreakpointsCache = {}
 local function GetDurationColorBreakpoints(scale)
     local def = COLOR_SCALES[scale] or COLOR_SCALES.TEXT_SECONDS
+    local cached = durationBreakpointsCache[def]
+    if cached then return cached end
     local g = DF.GetGlobalDB and DF:GetGlobalDB()
     local raw = g and g[def.key]
     local out = {}
@@ -605,9 +660,13 @@ local function GetDurationColorBreakpoints(scale)
             end
         end
     end
-    if #out == 0 then return def.fallback end
+    if #out == 0 then
+        durationBreakpointsCache[def] = def.fallback
+        return def.fallback
+    end
     table.sort(out, function(a, b) return a.threshold > b.threshold end)  -- descending
     if out[#out].threshold ~= 0 then out[#out + 1] = { threshold = 0, hex = out[#out].hex, color = out[#out].color } end
+    durationBreakpointsCache[def] = out
     return out
 end
 
@@ -806,6 +865,10 @@ local durationBreakpointsSigCache   -- memoized DF:GetDurationBreakpointsSig() s
 function DF:InvalidateDurationFormatters()
     wipe(durationFormatterCache)
     durationBreakpointsSigCache = nil
+    -- The resolved ladders themselves are cached now (see GetDurationColorBreakpoints);
+    -- without this the memoized signature would rebuild from stale stops and every
+    -- consumer would keep painting the old ramp.
+    wipe(durationBreakpointsCache)
     -- Colour curves are built from the same stops (DF:GetDurationColorSpec) — a stop edit
     -- must drop them too or the cached curve keeps painting the old ramp.
     if DF._wipeDurationCurves then DF:_wipeDurationCurves() end

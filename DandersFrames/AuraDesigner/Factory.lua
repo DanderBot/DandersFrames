@@ -423,7 +423,12 @@ end
 local function colSig(c)
     if type(c) ~= "table" then return "" end
     local r, g, b, a = readADColor(c)
-    return tconcat({ tostring(r), tostring(g), tostring(b), tostring(a) }, ",")
+    -- Direct concat, not tconcat over a throwaway array: the four-element table was
+    -- pure garbage, and a single chained concat compiles to ONE concat over a
+    -- register range, so this allocates the result string and nothing else. colSig
+    -- runs several times per indicator per UNIT_AURA (once per border colour key),
+    -- which put it at 3.5% of trash allocation on its own.
+    return tostring(r) .. "," .. tostring(g) .. "," .. tostring(b) .. "," .. tostring(a)
 end
 
 -- Health-bar overlay alpha per mode — the exact semantics of Indicators:ApplyHealthBar
@@ -578,12 +583,22 @@ end
 -- painted with (field-caught: "I can see the gradient but not the colours I set" -- the
 -- direction dropdown worked, because direction is a scalar). spec.shadow.color had the
 -- same latent hole. Depth-capped purely as a cycle guard; real specs are 2-3 deep.
+-- ☠ PER-DEPTH SCRATCH, NOT ONE SHARED PAIR — subSig RECURSES.
+-- The two throwaway tables per call (keys + parts) ran per indicator per
+-- UNIT_AURA inside syncPlacedPool, a walk whose whole point is to be
+-- allocation-free; subSig alone was 2.1% of trash allocation and it recurses up
+-- to four levels, so a single shared scratch would have a nested call wipe its
+-- caller's half-built list. Depth is hard-bounded at 4 by the guard below, so one
+-- pair per level is both sufficient and safe.
+local subSigKeys, subSigParts = {}, {}
 local function subSig(t, depth)
     depth = depth or 1
-    local keys = {}
+    local keys = subSigKeys[depth]
+    if not keys then keys = {}; subSigKeys[depth] = keys else wipe(keys) end
     for kk in pairs(t) do keys[#keys + 1] = kk end
     tsort(keys)
-    local parts = {}
+    local parts = subSigParts[depth]
+    if not parts then parts = {}; subSigParts[depth] = parts else wipe(parts) end
     for _, kk in ipairs(keys) do
         local v = t[kk]
         local tv = type(v)
@@ -806,9 +821,15 @@ local PLACED_BORDER_COLOR_KEYS = {
     "BorderColor", "BorderGradientStartColor", "BorderGradientEndColor", "BorderShadowColor",
     "BorderAnimationColor",
 }
+-- Shared scratch: unlike subSig this CANNOT recurse (it only reaches colSig, which
+-- allocates nothing and calls nothing), so one table is safe. It was 4.8% of trash
+-- allocation on its own -- a fresh array per indicator per UNIT_AURA.
+local placedBorderSigParts = {}
 local function placedBorderRawSig(indicator, borderOn)
     if not borderOn then return "" end
-    local parts = { ppSigToken() }
+    local parts = placedBorderSigParts
+    wipe(parts)
+    parts[1] = ppSigToken()
     for _, kk in ipairs(PLACED_BORDER_KEYS) do
         parts[#parts + 1] = tostring(indicator[kk])
     end
@@ -1205,6 +1226,12 @@ local function buildPlacedConfig(frame, unit, map, indicator, isSquare, borderSp
         unit = unit,
         mode = "row",
         max = 1,
+        -- ONE icon, so declare an AuraSlot rather than a one-icon AuraGroup:
+        -- AddAuraGroup eagerly creates a whole FrameCreationBatchSize batch BEFORE
+        -- maxFrameCount is applied; AddAuraSlot creates exactly one frame. Same
+        -- selection (the slot carries the sort comparator), same size
+        -- (styleButton_regions sizes both paths identically).
+        singleSlot = true,
         filter = poolFilter(indicator, mine),   -- "HELPFUL|PLAYER" on My Buffs; othersOnly rides the other pool (structural)
         candidateFilters = { includeSpellIDs = map },
         testEntries = testEntryForMap(map),
@@ -1231,9 +1258,15 @@ end
 -- toggling a region OFF must Rebuild the container to drop it; a plain ApplyStyle would leave
 -- the old region visible. A change here forces a whole-container Rebuild (slots can't be
 -- patched). Cosmetic styling of a live region is coSig.
-local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defs, mine)
-    return includeSig(map)
-        .. "|" .. (isSquare and "sq" or "ic")
+-- STRUCTURAL signature: CREATE-ONLY properties only. A change here costs a full
+-- teardown+recreate -- and teardown can only Hide(), because WoW never destroys frames,
+-- so every rebuild permanently strands the container plus a 10-frame batch per group
+-- (AddAuraGroup always creates FrameCreationBatchSize frames up front). Anything the
+-- native API can mutate live therefore MUST stay out of this sig or it leaks on every
+-- edit. The tracked spell-ID map used to live here; it is live-tunable via
+-- candidateFilters and now rides placedTuningSig.
+local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defs, mine)
+    return (isSquare and "sq" or "ic")
         .. "|" .. (hideIcon and "hi" or "")
         .. "|" .. (showStacks and "st" or "")
         .. "|" .. (showDuration and "du" or "")
@@ -1255,6 +1288,16 @@ local function placedStructSig(map, isSquare, hideIcon, showStacks, showDuration
                 .. tostring(tonumber(indicator.durationBarGap) or 1) .. ":"
                 .. tostring(indicator.durationBarColorMode or "STATIC"))
             or "")
+end
+
+-- TUNING signature: the live-mutable half of what placedStructSig used to carry. The
+-- tracked spell-ID map becomes config.candidateFilters ({ includeSpellIDs = map }), and
+-- the native SetAuraGroupCandidateFilters mutates that in place — so a selection edit is
+-- an ApplyTuning, never a Rebuild. A placed indicator pins max = 1 (buildPlacedConfig)
+-- and has no per-indicator sort, so the map IS the whole tuning sig. Mirrors the
+-- filter-group path's tuningSig, which has worked this way since Wave 1.
+local function placedTuningSig(map)
+    return includeSig(map)
 end
 
 -- COSMETIC signature: size/anchor/offset/scale/alpha, swipe, duration/stack styling, square
@@ -1460,6 +1503,12 @@ local function buildBarConfig(frame, unit, map, indicator, borderSpec, defs, min
         unit = unit,
         mode = "row",
         max = 1,
+        -- ONE icon, so declare an AuraSlot rather than a one-icon AuraGroup:
+        -- AddAuraGroup eagerly creates a whole FrameCreationBatchSize batch BEFORE
+        -- maxFrameCount is applied; AddAuraSlot creates exactly one frame. Same
+        -- selection (the slot carries the sort comparator), same size
+        -- (styleButton_regions sizes both paths identically).
+        singleSlot = true,
         filter = poolFilter(indicator, mine),   -- "HELPFUL|PLAYER" on My Buffs; othersOnly rides the other pool (structural)
         candidateFilters = { includeSpellIDs = map },
         testEntries = testEntryForMap(map),
@@ -1547,6 +1596,12 @@ local function buildAlertCompanionConfig(unit, map, indicator, layout, mine, geo
         unit = unit,
         mode = "row",
         max = 1,
+        -- ONE icon, so declare an AuraSlot rather than a one-icon AuraGroup:
+        -- AddAuraGroup eagerly creates a whole FrameCreationBatchSize batch BEFORE
+        -- maxFrameCount is applied; AddAuraSlot creates exactly one frame. Same
+        -- selection (the slot carries the sort comparator), same size
+        -- (styleButton_regions sizes both paths identically).
+        singleSlot = true,
         filter = poolFilter(indicator, mine),   -- mirror the indicator: My Buffs alerts only on YOUR cast
         candidateFilters = { includeSpellIDs = map },
         testEntries = testEntryForMap(map),
@@ -1581,6 +1636,12 @@ function Factory:BuildAlertPreviewConfig(indicator, geom, layout, entries)
     return {
         mode = "row",
         max = 1,
+        -- ONE icon, so declare an AuraSlot rather than a one-icon AuraGroup:
+        -- AddAuraGroup eagerly creates a whole FrameCreationBatchSize batch BEFORE
+        -- maxFrameCount is applied; AddAuraSlot creates exactly one frame. Same
+        -- selection (the slot carries the sort comparator), same size
+        -- (styleButton_regions sizes both paths identically).
+        singleSlot = true,
         filter = "HELPFUL",   -- canvas sample: the pool never gates a preview slot
         testEntries = entries,
         tooltips = false,
@@ -1589,15 +1650,16 @@ function Factory:BuildAlertPreviewConfig(indicator, geom, layout, entries)
     }
 end
 
--- Companion sigs. STRUCTURAL: identity map + filter (bind at build), EVERY
--- alert key (alertElemStructKey — formatter and placement are creation-frozen
--- -> Rebuild), frame level. COSMETIC (ApplyStyle): the mirrored indicator
--- geometry — dragging / resizing the indicator hot-moves its companion — plus
--- font and alpha. Raw-config, alloc-light, computed per pass like the other
--- placed sigs (FIX C discipline).
-local function alertCompanionStructSig(map, indicator, mine, geom, defs)
-    return includeSig(map)
-        .. "|xalert"
+-- Companion sigs. STRUCTURAL: the filter string (binds at build), EVERY alert key
+-- (alertElemStructKey — formatter and placement are creation-frozen -> Rebuild),
+-- frame level. TUNING: the identity map, via the shared placedTuningSig — it is
+-- config.candidateFilters and mutates live, so it must NOT sit here (a Rebuild
+-- strands frames permanently; see placedStructSig). COSMETIC (ApplyStyle): the
+-- mirrored indicator geometry — dragging / resizing the indicator hot-moves its
+-- companion — plus font and alpha. Raw-config, alloc-light, computed per pass like
+-- the other placed sigs (FIX C discipline).
+local function alertCompanionStructSig(indicator, mine, geom, defs)
+    return "xalert"
         .. "|xa=" .. alertElemStructKey(indicator, geom)
         .. "|fl=" .. tostring(resolveLevel(indicator, defs.level))
         .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")
@@ -1634,10 +1696,12 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
     if not alertElemMode(indicator) then return end
     local akey = key .. ":alert"
     local geom = alertGeometry(frame, indicator, isBar)   -- square (icon) or rect (bar)
-    local structSig = alertCompanionStructSig(map, indicator, mine, geom, defs)
+    local structSig = alertCompanionStructSig(indicator, mine, geom, defs)
+    local tuningSig = placedTuningSig(map)
     local coSig = alertCompanionCoSig(frame, indicator, isBar, alpha)
     local entry = placed[akey]
-    if entry and entry.structSig == structSig and entry.coSig == coSig then
+    if entry and entry.structSig == structSig and entry.tuningSig == tuningSig
+       and entry.coSig == coSig then
         live[akey] = true   -- steady state: no config build, no touch
         return
     end
@@ -1648,18 +1712,28 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
         local handle = DF.AuraContainer:Create(frame, cfg)
         if handle then
             applyPlacedAlpha(handle, alpha)
-            placed[akey] = { handle = handle, structSig = structSig, coSig = coSig }
+            placed[akey] = { handle = handle, structSig = structSig,
+                             tuningSig = tuningSig, coSig = coSig }
             live[akey] = true
         end
     elseif entry.structSig ~= structSig then
-        entry.structSig, entry.coSig = structSig, coSig
+        entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
         entry.handle:Rebuild(cfg)
         applyPlacedAlpha(entry.handle, alpha)
         live[akey] = true
     else
-        entry.coSig = coSig
-        entry.handle:ApplyStyle(cfg.style, cfg.layout)
-        applyPlacedAlpha(entry.handle, alpha)
+        -- Selection edit with the struct sig stable: swap the include map on the live
+        -- container (row mode, so applyGroupTuning runs) instead of recreating it.
+        if entry.tuningSig ~= tuningSig then
+            entry.tuningSig = tuningSig
+            entry.handle.config.testEntries = cfg.testEntries
+            entry.handle:ApplyTuning(cfg)
+        end
+        if entry.coSig ~= coSig then
+            entry.coSig = coSig
+            entry.handle:ApplyStyle(cfg.style, cfg.layout)
+            applyPlacedAlpha(entry.handle, alpha)
+        end
         live[akey] = true
     end
 end
@@ -1698,7 +1772,7 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defs)
         local layout = buildBarLayout(frame, indicator)
         local geom = alertGeometry(frame, indicator, true)
         local cfg = {
-            mode = "row", max = 1, filter = "HELPFUL",
+            mode = "row", max = 1, singleSlot = true, filter = "HELPFUL",
             adBorderAnim = true,
             layout = layout,
             style = buildBarStyle(indicator, borderSpec, defs),
@@ -1721,7 +1795,7 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defs)
         and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
     local layout = buildPlacedLayout(indicator)
     local cfg = {
-        mode = "row", max = 1, filter = "HELPFUL",
+        mode = "row", max = 1, singleSlot = true, filter = "HELPFUL",
         adBorderAnim = true,
         layout = layout,
         style = buildPlacedStyle(indicator, isSquare, borderSpec, defs),
@@ -1743,9 +1817,10 @@ end
 
 -- STRUCTURAL signature: identity, duration-text on/off + format key (SetDurationText / SetDuration
 -- Bar bind ONCE), border on/off, frame level. Cosmetic bar styling is barCoSig.
-local function barStructSig(map, indicator, borderOn, defs, mine)
-    return includeSig(map)
-        .. "|bar"
+-- Create-only properties ONLY; the identity map is live-tunable and rides
+-- placedTuningSig (see placedStructSig for why a needless Rebuild is a leak).
+local function barStructSig(indicator, borderOn, defs, mine)
+    return "bar"
         .. "|df=" .. durationFmtKey(indicator, false, defs.cbt)
         -- (No alert keys: the expiry alert lives on the COMPANION slot, whose own
         -- structSig carries alertElemStructKey — an alert edit rebuilds only it.)
@@ -1931,7 +2006,7 @@ function Factory:BuildGroupPreviewConfig(frame, group)
         -- filter is inert here (also for debuff groups): the editor always
         -- supplies its own testEntries, so _paintTestSlot's category-pool
         -- fallback — the only preview reader of this string — never runs.
-        mode = "row", max = 1, filter = "HELPFUL",
+        mode = "row", max = 1, singleSlot = true, filter = "HELPFUL",
         adBorderAnim = borderSpec and true or nil,
         layout = { size = math.max(8, tonumber(group.iconSize) or 24) },
         style = buildFilterGroupStyle(group, borderSpec),
@@ -2731,7 +2806,8 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local eff = memberEffective(hasMG, key, indicator)
                         local borderOn = placedBorderOn(indicator, false)
                         local alpha = tonumber(indicator.alpha) or 1
-                        local structSig = barStructSig(map, indicator, borderOn, defs, mine)
+                        local structSig = barStructSig(indicator, borderOn, defs, mine)
+                        local tuningSig = placedTuningSig(map)
                         local coSig = barCoSig(frame, eff, borderOn, alpha)
 
                         local entry = placed[key]
@@ -2741,20 +2817,32 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                                 buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
-                                placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
+                                placed[key] = { handle = handle, structSig = structSig,
+                                                tuningSig = tuningSig, coSig = coSig }
                             end
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
-                            entry.structSig, entry.coSig = structSig, coSig
+                            entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                             entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine))
                             applyPlacedAlpha(entry.handle, alpha)
-                        elseif entry.coSig ~= coSig then
-                            local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
-                            entry.coSig = coSig
-                            entry.handle:ApplyStyle(
-                                buildBarStyle(indicator, borderSpec, defs),
-                                buildBarLayout(frame, eff))
-                            applyPlacedAlpha(entry.handle, alpha)
+                        else
+                            if entry.tuningSig ~= tuningSig then
+                                -- Selection edit, struct sig stable: swap the include map on
+                                -- the live container (row mode) rather than recreating it.
+                                -- borderSpec nil on purpose — ApplyTuning reads only the trio.
+                                entry.tuningSig = tuningSig
+                                local cfg = buildBarConfig(frame, frame.unit, map, eff, nil, defs, mine)
+                                entry.handle.config.testEntries = cfg.testEntries
+                                entry.handle:ApplyTuning(cfg)
+                            end
+                            if entry.coSig ~= coSig then
+                                local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
+                                entry.coSig = coSig
+                                entry.handle:ApplyStyle(
+                                    buildBarStyle(indicator, borderSpec, defs),
+                                    buildBarLayout(frame, eff))
+                                applyPlacedAlpha(entry.handle, alpha)
+                            end
                         end
 
                         -- Expiry-alert companion slot (own container, own sigs —
@@ -2860,8 +2948,9 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         -- Sigs are computed from RAW config every tick (no BuildSpec
                         -- alloc — FIX C); the actual border spec is built ONLY inside a
                         -- create/rebuild/restyle branch below, never per pass.
-                        local structSig = placedStructSig(map, isSquare, hideIcon, showStacks,
+                        local structSig = placedStructSig(isSquare, hideIcon, showStacks,
                             showDuration, borderOn, indicator, defs, mine)
+                        local tuningSig = placedTuningSig(map)
                         local coSig = placedCoSig(eff, isSquare, borderOn, alpha)
 
                         local entry = placed[key]
@@ -2871,20 +2960,41 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                                 buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
-                                placed[key] = { handle = handle, structSig = structSig, coSig = coSig }
+                                placed[key] = { handle = handle, structSig = structSig,
+                                                tuningSig = tuningSig, coSig = coSig }
                             end
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
-                            entry.structSig, entry.coSig = structSig, coSig
+                            entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                             entry.handle:Rebuild(buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine))
                             applyPlacedAlpha(entry.handle, alpha)
-                        elseif entry.coSig ~= coSig then
-                            local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
-                            entry.coSig = coSig
-                            entry.handle:ApplyStyle(
-                                buildPlacedStyle(indicator, isSquare, borderSpec, defs),
-                                buildPlacedLayout(eff))
-                            applyPlacedAlpha(entry.handle, alpha)
+                        else
+                            if entry.tuningSig ~= tuningSig then
+                                -- Selection edit with the struct sig stable: swap the include
+                                -- map on the LIVE container instead of recreating it.
+                                -- ApplyTuning replaces the trio wholesale (max/sort/
+                                -- candidateFilters) off the fresh config and self-defers in
+                                -- combat. testEntries rides along so a test-mode rebuild
+                                -- previews the NEW selection, not a stale one — same pairing
+                                -- as the filter-group path. borderSpec is nil here on purpose:
+                                -- ApplyTuning reads only the trio, and the cosmetic branch
+                                -- below owns the style (building a spec here would be thrown
+                                -- away).
+                                entry.tuningSig = tuningSig
+                                local cfg = buildPlacedConfig(frame, frame.unit, map, eff, isSquare, nil, defs, mine)
+                                entry.handle.config.testEntries = cfg.testEntries
+                                entry.handle:ApplyTuning(cfg)
+                            end
+                            if entry.coSig ~= coSig then
+                                local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
+                                entry.coSig = coSig
+                                entry.handle:ApplyStyle(
+                                    buildPlacedStyle(indicator, isSquare, borderSpec, defs),
+                                    buildPlacedLayout(eff))
+                                -- alpha is part of coSig, so it re-applies here and NOT on the
+                                -- steady-state path — this block runs per indicator per tick.
+                                applyPlacedAlpha(entry.handle, alpha)
+                            end
                         end
 
                         -- Expiry-alert companion slot (own container, own sigs —
@@ -3117,7 +3227,12 @@ function Factory:SyncFrame(frame)
             -- replace mode always uses the fill-matched mirror.
             local wholeBar = (mode == "tint") and (bestCfg.tintWholeBar and true or false) or false
 
-            local structSig = includeSig(bestMap) .. "|" .. (wholeBar and "flat" or "mirror") .. "|" .. filt
+            -- The tracked map is live-tunable (overlay slots take
+            -- SetAuraSlotCandidateFilters), so it rides its own sig rather than forcing
+            -- a teardown+recreate. wholeBar STAYS structural: it picks a different
+            -- config builder entirely.
+            local structSig = (wholeBar and "flat" or "mirror") .. "|" .. filt
+            local tuningSig = placedTuningSig(bestMap)
             local entry = hb[bestName]
 
             if wholeBar then
@@ -3128,15 +3243,22 @@ function Factory:SyncFrame(frame)
                     frame.dfADHealthMirror = nil
                     local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
                     if handle then
-                        hb[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
+                        hb[bestName] = { handle = handle, structSig = structSig,
+                                         tuningSig = tuningSig, coSig = coSig }
                     end
                 elseif entry.structSig ~= structSig then
                     frame.dfADHealthMirror = nil
-                    entry.structSig, entry.coSig = structSig, coSig
+                    entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                     entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
-                elseif entry.coSig ~= coSig then
-                    entry.coSig = coSig
-                    entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
+                else
+                    if entry.tuningSig ~= tuningSig then
+                        entry.tuningSig = tuningSig
+                        entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
+                    end
+                    if entry.coSig ~= coSig then
+                        entry.coSig = coSig
+                        entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
+                    end
                 end
             else
                 -- FILLED MIRROR PATH — duplicate StatusBar fed the secret health percent.
@@ -3149,15 +3271,26 @@ function Factory:SyncFrame(frame)
                     frame.dfADHealthMirror = nil   -- onBar re-stashes when the slot builds
                     local handle = DF.AuraContainer:Create(healthBar, buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, onBar, filt))
                     if handle then
-                        hb[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
+                        hb[bestName] = { handle = handle, structSig = structSig,
+                                         tuningSig = tuningSig, coSig = coSig }
                     end
                 elseif entry.structSig ~= structSig then
                     frame.dfADHealthMirror = nil   -- old slot torn down; onBar re-stashes
-                    entry.structSig, entry.coSig = structSig, coSig
+                    entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                     entry.handle:Rebuild(buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, onBar, filt))
-                elseif entry.coSig ~= coSig then
-                    entry.coSig = coSig
-                    entry.handle:ApplyStyle({ overlay = { healthMirror = { texture = tex, color = { r, g, b }, alpha = alpha, onBar = onBar } } })
+                else
+                    if entry.tuningSig ~= tuningSig then
+                        -- ☠ Do NOT clear frame.dfADHealthMirror here. The two branches
+                        -- above clear it because the slot is torn down and onBar re-stashes
+                        -- the new StatusBar; a tuning pass keeps the SAME slot and the same
+                        -- bar, so clearing the ref would strand it (nothing re-stashes).
+                        entry.tuningSig = tuningSig
+                        entry.handle:ApplyTuning(buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, onBar, filt))
+                    end
+                    if entry.coSig ~= coSig then
+                        entry.coSig = coSig
+                        entry.handle:ApplyStyle({ overlay = { healthMirror = { texture = tex, color = { r, g, b }, alpha = alpha, onBar = onBar } } })
+                    end
                 end
             end
           end
@@ -3219,21 +3352,29 @@ function Factory:SyncFrame(frame)
             local mode = slower(bestCfg.mode or "tint")   -- background defaults to tint
             local blend = healthbarBlend(mode, bestCfg.blend, a)
 
-            local structSig = includeSig(bestMap) .. "|" .. filt
+            local structSig = filt
+            local tuningSig = placedTuningSig(bestMap)
             local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
 
             local entry = bg[bestName]
             if not entry then
                 local handle = DF.AuraContainer:Create(bgAnchor, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt))
                 if handle then
-                    bg[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
+                    bg[bestName] = { handle = handle, structSig = structSig,
+                                     tuningSig = tuningSig, coSig = coSig }
                 end
             elseif entry.structSig ~= structSig then
-                entry.structSig, entry.coSig = structSig, coSig
+                entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                 entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt))
-            elseif entry.coSig ~= coSig then
-                entry.coSig = coSig
-                entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
+            else
+                if entry.tuningSig ~= tuningSig then
+                    entry.tuningSig = tuningSig
+                    entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt))
+                end
+                if entry.coSig ~= coSig then
+                    entry.coSig = coSig
+                    entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
+                end
             end
           end
         end
@@ -3290,21 +3431,29 @@ function Factory:SyncFrame(frame)
             -- drawAboveFrameBorder rides the STRUCT sig: it resolves to frameLevelOffset in
             -- buildBorderConfig, which only a Rebuild re-reads (ApplyStyle carries the spec only).
             local drawAbove = bestCfg.drawAboveFrameBorder ~= false
-            local structSig = includeSig(bestMap) .. "|" .. filt .. "|da=" .. tostring(drawAbove)
+            local structSig = filt .. "|da=" .. tostring(drawAbove)
+            local tuningSig = placedTuningSig(bestMap)
             local coSig = borderSpecSig(bestSpec)
 
             local entry = bd[bestName]
             if not entry then
                 local handle = DF.AuraContainer:Create(frame, buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove))
                 if handle then
-                    bd[bestName] = { handle = handle, structSig = structSig, coSig = coSig }
+                    bd[bestName] = { handle = handle, structSig = structSig,
+                                     tuningSig = tuningSig, coSig = coSig }
                 end
             elseif entry.structSig ~= structSig then
-                entry.structSig, entry.coSig = structSig, coSig
+                entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                 entry.handle:Rebuild(buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove))
-            elseif entry.coSig ~= coSig then
-                entry.coSig = coSig
-                entry.handle:ApplyStyle({ border = { spec = bestSpec } })
+            else
+                if entry.tuningSig ~= tuningSig then
+                    entry.tuningSig = tuningSig
+                    entry.handle:ApplyTuning(buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove))
+                end
+                if entry.coSig ~= coSig then
+                    entry.coSig = coSig
+                    entry.handle:ApplyStyle({ border = { spec = bestSpec } })
+                end
             end
           end
         end
@@ -3332,7 +3481,8 @@ function Factory:SyncFrame(frame)
                 local filt = poolFilter(bestCfg, bestPool == 1)
                 local r, g, b, a = readADColor(bestCfg.color)
                 local color = { r = r, g = g, b = b, a = a }
-                local structSig = includeSig(bestMap) .. "|" .. filt
+                local structSig = filt
+                local tuningSig = placedTuningSig(bestMap)
                 local coSig = colSig(bestCfg.color)
                 -- onHost fires on every style pass (create/ApplyStyle/Blizzard re-init):
                 -- stash the host for the TD-teardown recovery below and (re)register the
@@ -3349,11 +3499,22 @@ function Factory:SyncFrame(frame)
                         buildMirrorHostConfig(frame.unit, bestMap, onHost, filt))
                     if handle then
                         st[bestName] = { handle = handle, structSig = structSig,
-                                         coSig = coSig, host = st._lastHost }
+                                         tuningSig = tuningSig, coSig = coSig,
+                                         host = st._lastHost }
                     end
                 elseif entry.structSig ~= structSig then
-                    entry.structSig, entry.coSig = structSig, coSig
+                    entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                     entry.handle:Rebuild(buildMirrorHostConfig(frame.unit, bestMap, onHost, filt))
+                elseif entry.tuningSig ~= tuningSig then
+                    -- Selection edit only: swap the include map on the live slot. Kept as a
+                    -- branch of this elseif chain (rather than folded into the else) so the
+                    -- one-action-per-pass shape the coSig and host-recovery branches below
+                    -- already rely on is preserved — the sync runs every tick, so a second
+                    -- pending change lands on the next one.
+                    -- entry.host is deliberately untouched: the slot survives a tuning pass,
+                    -- so onHost does not re-fire and the stashed host stays valid.
+                    entry.tuningSig = tuningSig
+                    entry.handle:ApplyTuning(buildMirrorHostConfig(frame.unit, bestMap, onHost, filt))
                 elseif entry.coSig ~= coSig then
                     entry.coSig = coSig
                     entry.handle:ApplyStyle({ overlay = { mirrorHost = { onHost = onHost } } })

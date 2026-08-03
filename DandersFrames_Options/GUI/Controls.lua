@@ -1705,7 +1705,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         item:SetScript("OnMouseDown", function(self, button)
             if button == "LeftButton" then
                 draggingItem = self
-                local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+                local cursorY = select(2, GUI:CursorPos(self))
                 local itemTop = self:GetTop()
                 dragOffsetY = itemTop - cursorY
                 
@@ -1719,7 +1719,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         
         item:SetScript("OnMouseUp", function(self, button)
             if button == "LeftButton" and draggingItem == self then
-                local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+                local cursorY = select(2, GUI:CursorPos(self))
                 local dropIndex = GetIndexFromY(cursorY)
                 
                 local order = GetCurrentOrder()
@@ -1745,7 +1745,7 @@ function GUI:CreateRoleOrderList(parent, dbTable, dbKey, callback, separateMelee
         item:SetScript("OnUpdate", function(self)
             if draggingItem ~= self then return end
             
-            local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+            local cursorY = select(2, GUI:CursorPos(self))
             local containerTop = container:GetTop()
             local containerBottom = container:GetBottom()
             
@@ -2028,7 +2028,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         item:SetScript("OnMouseDown", function(self, button)
             if button == "LeftButton" then
                 draggingItem = self
-                local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+                local cursorY = select(2, GUI:CursorPos(self))
                 local itemTop = self:GetTop()
                 dragOffsetY = itemTop - cursorY
                 
@@ -2042,7 +2042,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         
         item:SetScript("OnMouseUp", function(self, button)
             if button == "LeftButton" and draggingItem == self then
-                local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+                local cursorY = select(2, GUI:CursorPos(self))
                 local dropIndex = GetIndexFromY(cursorY)
                 
                 local order = GetCurrentOrder()
@@ -2068,7 +2068,7 @@ function GUI:CreateClassOrderList(parent, dbTable, dbKey, callback)
         item:SetScript("OnUpdate", function(self)
             if draggingItem ~= self then return end
             
-            local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+            local cursorY = select(2, GUI:CursorPos(self))
             local containerTop = container:GetTop()
             local containerBottom = container:GetBottom()
             
@@ -2332,7 +2332,7 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         item:SetScript("OnMouseDown", function(self, button)
             if button == "LeftButton" then
                 draggingItem = self
-                local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+                local cursorY = select(2, GUI:CursorPos(self))
                 local itemTop = self:GetTop()
                 dragOffsetY = itemTop - cursorY
                 
@@ -2346,7 +2346,7 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         
         item:SetScript("OnMouseUp", function(self, button)
             if button == "LeftButton" and draggingItem == self then
-                local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+                local cursorY = select(2, GUI:CursorPos(self))
                 local newIndex = GetIndexFromY(cursorY)
                 
                 -- Reorder
@@ -2372,7 +2372,7 @@ function GUI:CreateGroupOrderList(parent, dbTable, dbKey, callback, playerGroupF
         item:SetScript("OnUpdate", function(self)
             if draggingItem ~= self then return end
             
-            local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+            local cursorY = select(2, GUI:CursorPos(self))
             local containerTop = container:GetTop()
             local containerBottom = container:GetBottom()
             
@@ -2896,7 +2896,7 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         item:SetScript("OnMouseDown", function(self, button)
             if button == "LeftButton" then
                 draggingItem = self
-                local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+                local cursorY = select(2, GUI:CursorPos(self))
                 local itemTop = self:GetTop()
                 dragOffsetY = itemTop - cursorY
                 
@@ -2909,7 +2909,7 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         
         item:SetScript("OnMouseUp", function(self, button)
             if button == "LeftButton" and draggingItem == self then
-                local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+                local cursorY = select(2, GUI:CursorPos(self))
                 local contentTop = rightContent:GetTop()
                 if contentTop then
                     local relativeY = contentTop - cursorY
@@ -2935,7 +2935,7 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
         item:SetScript("OnUpdate", function(self)
             if draggingItem ~= self then return end
             
-            local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+            local cursorY = select(2, GUI:CursorPos(self))
             local contentTop = rightContent:GetTop()
             local contentBottom = rightContent:GetBottom()
             

@@ -33,7 +33,15 @@ function DF:ShouldShowResourceBar(unit, db)
     local hasAnyRoleFilter = db.resourceBarShowHealer or db.resourceBarShowTank or db.resourceBarShowDPS
 
     if hasAnyRoleFilter then
-        local role = UnitGroupRolesAssigned(unit)
+        -- ☠ DF:GetUnitRole, not UnitGroupRolesAssigned. The raw call returns
+        -- "NONE" for the player whenever the group has not assigned a role --
+        -- solo, open world, and inside a delve until a spec change forces one --
+        -- and the NONE arm below reads as DAMAGER. So a solo Holy Paladin was
+        -- gated by the DPS toggle: the Healers checkbox did nothing, and ticking
+        -- DPS showed the bar for every spec. GetUnitRole falls the PLAYER back to
+        -- the spec role; other units have no public spec API and still arrive
+        -- NONE, which is why the arm stays.
+        local role = DF:GetUnitRole(unit)
         local inSoloMode = not IsInGroup() and not IsInRaid()
 
         if inSoloMode and db.resourceBarShowInSoloMode then
@@ -45,7 +53,7 @@ function DF:ShouldShowResourceBar(unit, db)
         elseif role == "DAMAGER" then
             roleAllowed = db.resourceBarShowDPS == true
         elseif not role or role == "NONE" then
-            -- Unassigned role (e.g. delves) — treat as DPS
+            -- Still unresolved: another unit with no assigned role. Treat as DPS.
             roleAllowed = db.resourceBarShowDPS == true
         end
     else
@@ -2249,6 +2257,31 @@ function DF:UpdateName(frame)
     -- consistency with the other live text hooks.
 end
 
+-- The role the role ICON should display for `unit` -- may be nil or "NONE",
+-- both meaning "show nothing".
+--
+-- ☠ THE GROUP TEST IS THE POINT, not a cheap guard. In a group the icon answers
+-- "what is this unit here to do", so the player's spec role is the right answer
+-- when the group has assigned none -- the case throughout a delve, where Brann
+-- makes IsInGroup() true but no role is ever assigned, so the icon stayed hidden
+-- until a spec change forced one. Solo, that question is not being asked at all:
+-- resolving there would put a permanent role icon on your own frame in the open
+-- world, where there has never been one. Hence group-only, deliberately NOT the
+-- same policy as the resource bar, which wants the spec role everywhere.
+--
+-- ☠ ProcessRoleUpdate's dirty check MUST call this, not UnitGroupRolesAssigned.
+-- That cache decides whether UpdateRoleIcon runs at all, so keying it on the raw
+-- value while the icon displays a resolved one makes the resolution unreachable:
+-- across a whole delve the raw value never leaves "NONE", the cache sees no
+-- change, and the icon is never asked to redraw.
+function DF:GetRoleIconRole(unit)
+    if not unit then return nil end
+    if IsInGroup() or IsInRaid() then
+        return DF:GetUnitRole(unit)
+    end
+    return UnitGroupRolesAssigned(unit)
+end
+
 function DF:UpdateRoleIcon(frame, source)
     if DF.RosterDebugCount then 
         DF:RosterDebugCount("UpdateRoleIcon")
@@ -2268,12 +2301,12 @@ function DF:UpdateRoleIcon(frame, source)
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
     
-    local role = UnitGroupRolesAssigned(frame.unit)
-    
+    local role = DF:GetRoleIconRole(frame.unit)
+
     -- Use our tracked combat state (set by PLAYER_REGEN events)
     local inCombat = DF.playerInCombat or false
-    
-    if role == "NONE" then
+
+    if not role or role == "NONE" then
         frame.roleIcon:Hide()
         return
     end

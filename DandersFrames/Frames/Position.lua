@@ -514,8 +514,7 @@ function DF:CreatePermanentMoverPopup()
 
     -- Apply GUI scale
     popup:SetScript("OnShow", function(self)
-        local guiScale = DF.db and DF.db.party and DF.db.party.guiScale or 1.0
-        self:SetScale(guiScale)
+        self:SetScale(DF:GetWindowState().scale or 1.0)
         self.closer:Show()
     end)
 
@@ -1569,8 +1568,7 @@ function DF:CreatePositionPanel()
     
     -- Apply scale from settings when shown
     panel:SetScript("OnShow", function(self)
-        local guiScale = DF.db and DF.db.party and DF.db.party.guiScale or 1.0
-        self:SetScale(guiScale)
+        self:SetScale(DF:GetWindowState().scale or 1.0)
     end)
     
     -- Store for theme updates
@@ -2486,12 +2484,12 @@ function DF:UnlockFrames()
         DF.displayLockButton.Text:SetText(L["Lock Frames"])
     end
 
-    -- Remember whether test mode was already active before this unlock cycle.
-    -- LockFrames reads this to decide whether to keep or hide test frames.
-    DF.partyTestModeBeforeUnlock = DF.testMode
-
-    -- Enable test mode so user can position with full group visible
-    DF:ShowTestFrames(true)
+    -- Unlock claims test frames for as long as it stays unlocked, so there is a
+    -- full group to position against. It deliberately does NOT snapshot what the
+    -- user had -- that is the user's own claim, tracked separately. The old
+    -- snapshot went stale whenever test mode changed mid-session, in both
+    -- directions (see TestMode/Shim.lua).
+    DF:SetTestModeOwner("party", "unlock", true, true)   -- silent: unlock announces itself
 
     -- Sync GUI toolbar buttons
     if DF.GUI then
@@ -2561,13 +2559,59 @@ function DF:LockFrames()
         if DF.GUI.UpdateTestButtonState then DF.GUI.UpdateTestButtonState() end
     end
 
-    -- Only disable test mode if it was not already active before the last unlock.
-    -- Preserves the user's test mode state across the lock/unlock cycle.
-    if not DF.partyTestModeBeforeUnlock then
-        DF:HideTestFrames(true)
-    end
-    DF.partyTestModeBeforeUnlock = nil
+    -- Release unlock's claim. If the user still wants a preview it stays up; if
+    -- nobody does, this is what hides it. Nothing to go stale either way.
+    DF:SetTestModeOwner("party", "unlock", false, true)  -- silent: lock announces itself
 
     DF:Say(L["Frames locked."])
+end
+
+-- ============================================================
+-- BLIZZARD EDIT MODE — stand down while it is open
+-- ============================================================
+-- Entering /edit left DF half-dressed. The game closes DandersFramesGUI and
+-- DandersFramesTestPanel for us -- both are in UISpecialFrames -- but the position
+-- panel is NOT, so it stayed up, and behind it the grid, the movers and the test
+-- preview all kept running: two grids overlapping and fake party frames sitting on
+-- top of Blizzard's own editor. Field-reported.
+--
+-- The actual gap is that DF had no Edit Mode integration at all; the two windows
+-- that did close were closing by accident of UISpecialFrames membership.
+--
+-- Locking is the right response and needs nothing new: LockFrames/LockRaidFrames
+-- already hide the position panel, the grid, the movers and the pinned drag chrome,
+-- and release unlock's test claim.
+--
+-- ⚠ NOT restored on exit, deliberately. Blizzard's Edit Mode does not put anyone
+-- else's windows back either, and silently re-unlocking frames under someone who
+-- has just finished rearranging their UI is worse than making them click Unlock.
+local function standDownForEditMode()
+    if InCombatLockdown() then return end   -- Edit Mode is unreachable in combat; belt anyway
+
+    local partyDb = DF.GetDB and DF:GetDB()
+    if partyDb and not partyDb.locked then
+        partyDb.locked = true
+        if DF.LockFrames then DF:LockFrames() end
+    end
+
+    local raidDb = DF.GetRaidDB and DF:GetRaidDB()
+    if raidDb and not raidDb.raidLocked then
+        raidDb.raidLocked = true
+        if DF.LockRaidFrames then DF:LockRaidFrames() end
+    end
+
+    -- Drop the user's claim too, so no preview survives into Edit Mode. This also
+    -- settles the aura containers: turning test mode off hands the real data
+    -- provider back, which is what keeps Edit Mode's sample auras out of our rows
+    -- (see Frames/AuraContainer.lua -- test mode owns the provider switch while it
+    -- is running, so the usual guard stands aside for it).
+    if DF.SetTestModeOwner then
+        DF:SetTestModeOwner("party", "user", false, true)
+        DF:SetTestModeOwner("raid", "user", false, true)
+    end
+end
+
+if EventRegistry and EventRegistry.RegisterCallback then
+    EventRegistry:RegisterCallback("EditMode.Enter", standDownForEditMode, DF)
 end
 

@@ -7602,7 +7602,11 @@ function DF:ProcessRoleUpdate()
         end
         
         local unit = frame.unit
-        local newRole = UnitGroupRolesAssigned(unit)
+        -- Must match what UpdateRoleIcon will DISPLAY, not the raw assignment --
+        -- see the note on DF:GetRoleIconRole. Keyed on the raw value, this cache
+        -- never fires inside a delve (the raw role stays "NONE" start to finish)
+        -- and the icon never gets a chance to draw the spec-derived role.
+        local newRole = DF:GetRoleIconRole(unit)
         local oldRole = unitRoleCache[unit]
         
         -- Only update if role actually changed (dirty-check pattern)

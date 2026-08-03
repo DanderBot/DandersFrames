@@ -2303,41 +2303,25 @@ function DF:ToggleTestMode()
         return
     end
 
-    local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-
-    if isRaidMode then
-        local db = DF:GetRaidDB()
-        -- Don't allow toggling test mode off while frames are unlocked
-        if not db.raidLocked and DF.raidTestMode then
-            DF:Say(L["Cannot disable test mode while frames are unlocked. Lock frames first."])
-            return
-        end
-
-        -- Toggle raid test mode
-        if DF.raidTestMode then
-            DF:HideRaidTestFrames()
-        else
-            DF:ShowRaidTestFrames()
-        end
-    else
-        local db = DF:GetDB()
-        -- Don't allow toggling test mode off while frames are unlocked
-        if not db.locked and DF.testMode then
-            DF:Say(L["Cannot disable test mode while frames are unlocked. Lock frames first."])
-            return
-        end
-
-        -- Toggle party test mode
-        if DF.testMode then
-            DF:HideTestFrames()
-        else
-            DF:ShowTestFrames()
-        end
-    end
+    -- Flip the USER's claim. Unlock holds its own, so this no longer needs to
+    -- refuse while frames are unlocked: turning the preview off mid-unlock drops
+    -- your claim, unlock keeps the frames it still needs to have something to
+    -- drag, and locking then hides them because nobody is left asking.
+    --
+    -- The old refusal ("Cannot disable test mode while frames are unlocked")
+    -- existed only to stop the snapshot going stale, and it never covered the
+    -- toolbar button — which closes the PANEL without coming through here at
+    -- all. That was the reported repro. See TestMode/Shim.lua.
+    local scope = (DF.GUI and DF.GUI.SelectedMode == "raid") and "raid" or "party"
+    -- The "frames stay visible while unlocked" line is emitted by SetTestModeOwner,
+    -- not here: the toolbar button releases the claim through the panel's OnHide and
+    -- never comes through this function, so a message here reached only one of the
+    -- two buttons the user thinks of as the same control.
+    DF:SetTestModeOwner(scope, "user", not DF:IsTestModeOwnedBy(scope, "user"))
 end
 
 -- Show raid test frames
-function DF:ShowRaidTestFrames()
+function DF:ShowRaidTestFrames(silent)
     if InCombatLockdown() then
         DF:Say(L["Cannot enter test mode during combat."])
         return
@@ -2438,10 +2422,17 @@ function DF:ShowRaidTestFrames()
     if DF.PinnedFrames and DF.PinnedFrames.EnterTestMode then
         DF.PinnedFrames:EnterTestMode()
     end
+
+    -- Same confirmation party mode gives. Raid never announced itself at all, and
+    -- did not even take `silent` -- Panel.lua has been passing one to the Hide half
+    -- for a while, which quietly did nothing.
+    if not silent then
+        DF:Say(L["Test mode enabled."])
+    end
 end
 
 -- Hide raid test frames
-function DF:HideRaidTestFrames()
+function DF:HideRaidTestFrames(silent)
     DF.raidTestMode = false
     -- Restore the real aura provider only when NEITHER test mode remains active
     -- (party + raid share the global data-provider switch).
@@ -2539,6 +2530,11 @@ function DF:HideRaidTestFrames()
     if DF.PinnedFrames and DF.PinnedFrames.ExitTestMode
         and not DF.testMode then
         DF.PinnedFrames:ExitTestMode()
+    end
+
+    -- Same confirmation party mode gives; see ShowRaidTestFrames.
+    if not silent then
+        DF:Say(L["Test mode disabled."])
     end
 end
 
@@ -3550,19 +3546,18 @@ function DF:CreateTestPanel()
     panel:Hide()
 
     local function ApplyScale(self)
-        local guiScale = DF.db and DF.db.party and DF.db.party.guiScale or 1.0
-        self:SetScale(guiScale)
+        self:SetScale(DF:GetWindowState().scale or 1.0)
     end
 
     panel:SetScript("OnHide", function()
-        if DF.testMode then
-            local db = DF:GetDB()
-            if db.locked then DF:HideTestFrames() end
-        end
-        if DF.raidTestMode then
-            local db = DF:GetRaidDB()
-            if db.raidLocked then DF:HideRaidTestFrames() end
-        end
+        -- Closing the panel drops the USER's claim on both scopes -- and only
+        -- that. It used to hide the frames itself, but ONLY when locked, which is
+        -- exactly how the preview got stranded: close the panel while unlocked and
+        -- the frames stayed up with nothing tracking that you had dismissed them.
+        -- Now unlock's own claim decides whether they stay, and the later lock
+        -- takes them down.
+        DF:SetTestModeOwner("party", "user", false)
+        DF:SetTestModeOwner("raid", "user", false)
         if DF.GUI and DF.GUI.UpdateTestButtonState then
             DF.GUI.UpdateTestButtonState()
         end
@@ -3620,7 +3615,20 @@ function DF:CreateTestPanel()
     })
     toggleBtn:SetScript("OnClick", function()
         DF:ToggleTestMode()
-        panel:UpdateState()
+        -- This button and the toolbar's test button are the SAME action: turn the
+        -- preview off and close the panel. Leaving the panel open with test mode off
+        -- was the odd state -- one control closed everything, the other printed a
+        -- line and sat there. So an open panel now always means "the user is asking
+        -- for a preview", which is also what makes the toggle's label unambiguous.
+        --
+        -- Hide() runs OnHide, which releases the user's claim on both scopes; that is
+        -- idempotent with the release ToggleTestMode just did.
+        local scope = (DF.GUI and DF.GUI.SelectedMode == "raid") and "raid" or "party"
+        if not DF:IsTestModeOwnedBy(scope, "user") then
+            panel:Hide()
+        else
+            panel:UpdateState()
+        end
     end)
     panel.toggleBtn = toggleBtn
 
@@ -4452,7 +4460,13 @@ function DF:CreateTestPanel()
         local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
         local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
         local themeColor = GetThemeColor()
-        local testActive = IsTestActive()
+        -- The toggle is the USER's switch, so it reflects the USER's claim, not
+        -- whether a preview is on screen. Those differ while unlocked (unlock holds
+        -- its own claim), and using the preview state there left the button stuck on
+        -- "Disable Test Mode" after a click that had genuinely worked.
+        local scope = isRaidMode and "raid" or "party"
+        local testActive = DF.IsTestModeOwnedBy and DF:IsTestModeOwnedBy(scope, "user")
+            or (not DF.IsTestModeOwnedBy and IsTestActive())
 
         -- Title
         self.title:SetText(L["Test Mode"])
@@ -4589,19 +4603,12 @@ function DF:ToggleTestPanel()
     else
         panel:UpdateState()
         panel:Show()
-        
-        -- Auto-enable test mode when panel opens
-        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
-        if isRaidMode then
-            if not DF.raidTestMode then
-                DF:ShowRaidTestFrames()
-                panel:UpdateState()
-            end
-        else
-            if not DF.testMode then
-                DF:ShowTestFrames()
-                panel:UpdateState()
-            end
-        end
+
+        -- Opening the panel claims the preview for the user (it exists to show
+        -- one). Claiming rather than calling Show* directly means the matching
+        -- release on close is symmetric, and unlock's claim is untouched either way.
+        local scope = (DF.GUI and DF.GUI.SelectedMode == "raid") and "raid" or "party"
+        DF:SetTestModeOwner(scope, "user", true)
+        panel:UpdateState()
     end
 end

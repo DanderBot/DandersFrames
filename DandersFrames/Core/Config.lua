@@ -219,6 +219,11 @@ end
 -- Cache for created font families
 local fontFamilies = {}
 
+-- Raw outline string -> { shadow, flags, slug }. See the ☠ note in DF:SafeSetFont:
+-- the parse allocates a capture string per call and that call is per FontString per
+-- frame. Pure function of the key, so entries never go stale.
+local outlineParseMemo = {}
+
 -- Clear font cache (kept for compatibility)
 function DF:ClearFontCache()
     -- Clear font families when new fonts are registered
@@ -302,13 +307,23 @@ local fontValidationFrame = CreateFrame("Frame")
 fontValidationFrame:Hide()
 local fontValidationString = fontValidationFrame:CreateFontString(nil, "OVERLAY")
 
--- Preload/validate a font to ensure WoW has it loaded
+-- Preload/validate a font to ensure WoW has it loaded.
+--
+-- Memoised per path. This runs on EVERY DF:SafeSetFont call, and SafeSetFont is one of
+-- the hottest functions in the addon (5.7% of a boss trace's allocation just here), but
+-- a path only ever needs loading once -- the file does not unload and the mapping from
+-- path to file never changes. Keyed on ATTEMPTED rather than succeeded, which matches
+-- the old behaviour exactly: the pcall result was discarded, so a failed load was never
+-- retried anyway.
+--
+-- pcall(fn, args...) not pcall(function() ... end): the closure form allocated one
+-- closure per call on that same hot path.
+local preloadedFonts = {}
 local function PreloadFont(fontPath)
-    if not fontPath then return end
+    if not fontPath or preloadedFonts[fontPath] then return end
+    preloadedFonts[fontPath] = true
     -- Attempt to set the font - this forces WoW to load the font file
-    pcall(function()
-        fontValidationString:SetFont(fontPath, 12, "")
-    end)
+    pcall(fontValidationString.SetFont, fontValidationString, fontPath, 12, "")
 end
 
 -- Build font family members for CreateFontFamily
@@ -375,8 +390,30 @@ end
 -- SafeSetFont's broken-family eviction must reproduce it exactly (a mismatched evict
 -- key would strand the broken entry). Shadow stays LAST so RefreshFontFamilyShadows'
 -- "|shadow" suffix check still identifies shadowed families.
+-- ☠ The key STRING is memoised, not just the family it looks up.
+-- GetOrCreateFontFamily calls this on every SafeSetFont to probe its cache, so
+-- the four concats ran on every cache HIT too -- once per FontString per frame.
+-- The input set is tiny (a handful of fonts x a few outlines x quantized sizes),
+-- so a nested table costs three small tables per NEW combination and nothing
+-- ever again, while the returned key stays a plain string: fontFamilies is still
+-- string-keyed and the eviction in SafeSetFont still finds its entry.
+local fontKeyMemo = {}
 local function FontFamilyKey(fontPath, outline, useShadow, quantizedSize)
-    return (fontPath or "default"):lower() .. "|" .. (outline or "") .. "|" .. tostring(quantizedSize) .. "|" .. (useShadow and "shadow" or "noshadow")
+    local p = fontPath or "default"
+    local byOutline = fontKeyMemo[p]
+    if not byOutline then byOutline = {}; fontKeyMemo[p] = byOutline end
+    local o = outline or ""
+    local bySize = byOutline[o]
+    if not bySize then bySize = {}; byOutline[o] = bySize end
+    local byShadow = bySize[quantizedSize]
+    if not byShadow then byShadow = {}; bySize[quantizedSize] = byShadow end
+    local sh = useShadow and true or false
+    local key = byShadow[sh]
+    if not key then
+        key = p:lower() .. "|" .. o .. "|" .. tostring(quantizedSize) .. "|" .. (sh and "shadow" or "noshadow")
+        byShadow[sh] = key
+    end
+    return key
 end
 local fontFamilyCounter = 0
 local function GetOrCreateFontFamily(fontPath, outline, useShadow, size)
@@ -679,6 +716,14 @@ function DF:ComposeOutline(flag, shadow)
     return flag
 end
 
+-- Hoisted out of DF:SafeSetFont so the pcall below takes the allocation-free
+-- pcall(fn, args...) form. It is two statements (the GameFontNormal set first is
+-- deliberate — see the call site), so it cannot be inlined as a bare method reference.
+local function setFontObjectPair(fontString, familyObject)
+    fontString:SetFontObject(GameFontNormal)
+    fontString:SetFontObject(familyObject)
+end
+
 function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     if not fontString then return false end
 
@@ -696,18 +741,35 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
     -- shadow combined with any flag, e.g. "SHADOW;MONOCHROME, OUTLINE"). The legacy
     -- value "SHADOW" on its own means shadow with no outline. Shadow is rendered via
     -- SetShadow* below, never as a font flag, so strip it out of the flag string.
-    local useShadow = false
-    local rest = outline:match("^SHADOW;(.*)$")
-    if rest then
-        useShadow = true
-        outline = rest
-    elseif outline == "SHADOW" then
-        useShadow = true
-        outline = ""
+    --
+    -- ☠ MEMOISED because string.match WITH A CAPTURE ALLOCATES the captured
+    -- substring on every call -- and this runs once per FontString per frame, twice
+    -- over for any element carrying an AD mirror. It was 40.9% of all boss-fight
+    -- allocation. The parse is a pure function of the raw outline string and the
+    -- stored values come from a handful of dropdown options, so the memo fills once
+    -- and never needs invalidating: a given string always parses the same way.
+    local parsed = outlineParseMemo[outline]
+    if not parsed then
+        local shadow, flags = false, outline
+        local rest = outline:match("^SHADOW;(.*)$")
+        if rest then
+            shadow, flags = true, rest
+        elseif outline == "SHADOW" then
+            shadow, flags = true, ""
+        end
+        -- Normalize "NONE" to empty string (NONE is not a valid WoW font flag)
+        if flags == "NONE" then flags = "" end
+        -- The SLUG variant is derived from `flags` alone, so it caches with it --
+        -- the concat below used to run per call for every slug-eligible element.
+        parsed = {
+            shadow = shadow,
+            flags  = flags,
+            slug   = (flags == "") and "SLUG" or (flags .. ", SLUG"),
+        }
+        outlineParseMemo[outline] = parsed
     end
-
-    -- Normalize "NONE" to empty string (NONE is not a valid WoW font flag)
-    if outline == "NONE" then outline = "" end
+    local useShadow = parsed.shadow
+    outline = parsed.flags
 
     local actualOutline = outline
 
@@ -720,7 +782,9 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
         and not useShadow
         and (actualOutline == "" or actualOutline == "OUTLINE")
     if useSlug then
-        actualOutline = (actualOutline == "") and "SLUG" or (actualOutline .. ", SLUG")
+        -- Cached alongside the parse above; fontSlug only selects between the two
+        -- precomputed variants, so toggling it needs no invalidation.
+        actualOutline = parsed.slug
     end
     if fontString.SetScaleAnimationMode and FontStringScaleAnimationMode then
         fontString:SetScaleAnimationMode(useSlug and FontStringScaleAnimationMode.Vertex or FontStringScaleAnimationMode.FontSize)
@@ -754,10 +818,7 @@ function DF:SafeSetFont(fontString, fontNameOrPath, fontSize, outline)
         -- data may not be initialized yet, causing an ACCESS_VIOLATION crash when
         -- SetFontObject tries to read it.  Wrap in pcall to fall through to the
         -- direct SetFont() path if the object is broken.
-        local ok = pcall(function()
-            fontString:SetFontObject(GameFontNormal)
-            fontString:SetFontObject(_G[fontFamilyName])
-        end)
+        local ok = pcall(setFontObjectPair, fontString, _G[fontFamilyName])
         if not ok then
             -- Evict the broken cache entry so it gets recreated later. Shared key
             -- builder + same size quantization as GetOrCreateFontFamily — a
@@ -1158,8 +1219,10 @@ DF.PartyDefaults = {
     -- groups are declared first, so they already lead the row. These keys style them.
     -- Membership of the group IS the "is this important" test — nothing reads aura data,
     -- which is what makes this expressible at all under the 12.1 secret rules.
-    -- OFF by default: it changes the look of a row every user already has.
-    debuffImportantHighlight = false,         -- master toggle for the treatment below
+    -- ON by default from v5: the aura row is rebuilt on this lane anyway, so there is no
+    -- established look to preserve, and a boss/priority debuff standing out is the
+    -- behaviour most users would pick. Off is one tick away on the Debuffs page.
+    debuffImportantHighlight = true,          -- master toggle for the treatment below
     debuffImportantScale = 1.25,              -- icon size step for important debuffs (1 = same as the rest)
     debuffImportantBadge = true,              -- corner "!" badge
     debuffImportantBadgeSize = 10,            -- badge diameter in px (centred inside the corner, inset by size/4)
@@ -1455,10 +1518,11 @@ DF.PartyDefaults = {
     groupLabelOutline = "SHADOW",
     groupLabelPosition = "START",
 
-    -- GUI State
-    guiHeight = 693.33349609375,
-    guiScale = 1,
-    guiWidth = 816.6666259765625,
+    -- (Removed) GUI State: guiHeight / guiScale / guiWidth. Settings-window
+    -- geometry is account-wide machine state now -- DandersFramesDB_v2.windowState,
+    -- reached via DF:GetWindowState. As per-profile DEFAULTS they actively caused
+    -- a bug: a new profile is born from this table, so creating one silently
+    -- reset the window's scale and size while the open window kept the old ones.
 
     -- Heal Absorb Bar
     healAbsorbBarAnchor = "BOTTOM",

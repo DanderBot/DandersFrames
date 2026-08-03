@@ -397,7 +397,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
     -- reflow the other rows to leave a gap at the prospective drop slot.
     local function dragFollow(self)
         if draggingRow ~= self then return end
-        local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+        local cursorY = select(2, GUI:CursorPos(scrollContent))
         local top = scrollContent:GetTop()
         if not top then return end
         local d = NK:GetDB()
@@ -540,7 +540,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
         row:SetScript("OnMouseDown", function(self, button)
             if button ~= "LeftButton" or not self.entryIndex then return end
             draggingRow = self
-            local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+            local cursorY = select(2, GUI:CursorPos(self))
             dragOffsetY = (self:GetTop() or 0) - cursorY
             self:SetFrameLevel(scrollContent:GetFrameLevel() + 10)
             self.dragHL:Show()
@@ -550,7 +550,7 @@ function DF.BuildNicknamesPage(guiRef, pageRef, dbRef, Add, AddSpace)
         row:SetScript("OnMouseUp", function(self, button)
             if button ~= "LeftButton" or draggingRow ~= self then return end
             self:SetScript("OnUpdate", nil)
-            local cursorY = select(2, GetCursorPosition()) / UIParent:GetEffectiveScale()
+            local cursorY = select(2, GUI:CursorPos(self))
             local drop = indexFromY(cursorY)
             local from = self.entryIndex
             draggingRow = nil

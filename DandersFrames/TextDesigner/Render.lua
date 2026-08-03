@@ -19,6 +19,11 @@ local wipe = wipe
 -- Enabled-element id set, rebuilt by UpdateFrame. Module-local and reused
 -- (wipe, not {}) because UpdateFrame runs in the unit-event hot path.
 local enabledScratch = {}
+-- Second scratch for Render:UpdateFrame's delete-sweep. Same reason and same lifetime
+-- as enabledScratch above -- it is filled and consumed inside one call and never
+-- escapes -- but it holds ALL element ids where enabledScratch holds only the enabled
+-- ones, so the two cannot share a table.
+local liveIdScratch = {}
 
 -- ============================================================
 -- HINT CATEGORIES — which content types refresh on which hints
@@ -63,9 +68,40 @@ local CONTENT_HINTS = {
 -- FONT/COLOR RESOLUTION (overrides + globalDefaults)
 -- ============================================================
 
+-- Shared read-only stand-ins for the absent-table cases. Both are ONLY ever indexed
+-- (never written) in the body below, so one shared instance is safe and saves two
+-- throwaway tables per call on elements that carry no overrides -- which is most of
+-- them. Same for the white fallback, which callers only read fields from.
+local EMPTY_APPEARANCE = {}
+local DEFAULT_TEXT_COLOR = { r = 1, g = 1, b = 1, a = 1 }
+
+-- ☠ SHARED SCRATCH — the returned table is the SAME table on every call.
+-- resolveAppearance is #2 in every combat trace and ran once per element per
+-- frame per tick, so this one table was most of what remained after ac55fb85
+-- shared the three fallbacks.
+--
+-- SAFE ONLY WHILE AT MOST ONE RESOLVED APPEARANCE IS LIVE AT A TIME. That holds
+-- by construction today, and all four parts are load-bearing:
+--   1. applyAppearance is resolveAppearance's only caller, and updateOne is
+--      applyAppearance's only caller (both verified, not assumed).
+--   2. updateOne holds the result across applyPosition -> Resolve ->
+--      mirrorElement. None of those re-enters: resolveAppearance is a FILE-LOCAL,
+--      so nothing outside Render.lua can reach it at all.
+--   3. Nothing RETAINS it. mirrorElement reads app.font/fontSize/outline at the
+--      point of use and stores nothing; the result is dead when updateOne returns.
+--   4. Every field is reassigned on every call, so no stale value can carry over.
+--
+-- ☠ WHAT WOULD BREAK IT: a second resolve while a first result is still in scope.
+-- That exact shape existed until ac55fb85 -- the class-colour branch re-resolved
+-- the same element just to read one alpha, while the outer result was still bound
+-- for mirrorElement -- and a shared table then would have aliased the two
+-- silently, which is why that commit declined to share this one. If you add a
+-- caller, give it its own table or pass it the fields it needs.
+local appearanceScratch = {}
+
 local function resolveAppearance(elem, globalDefaults)
-    globalDefaults = globalDefaults or {}
-    local overrides = elem.overrides or {}
+    globalDefaults = globalDefaults or EMPTY_APPEARANCE
+    local overrides = elem.overrides or EMPTY_APPEARANCE
     -- useClassColor is the one boolean field, so the `(override and value) or
     -- global` pattern the others use would swallow an override of FALSE (it
     -- falls through to the global default). Branch on the override flag instead.
@@ -75,13 +111,13 @@ local function resolveAppearance(elem, globalDefaults)
     else
         useClassColor = globalDefaults.useClassColor or false
     end
-    return {
-        font          = (overrides.font          and elem.font)          or globalDefaults.font          or "DF Roboto SemiBold",
-        fontSize      = (overrides.fontSize      and elem.fontSize)      or globalDefaults.fontSize      or 10,
-        color         = (overrides.color         and elem.color)         or globalDefaults.color         or {r=1, g=1, b=1, a=1},
-        outline       = (overrides.outline       and elem.outline)       or globalDefaults.outline       or "SHADOW;NONE",
-        useClassColor = useClassColor,
-    }
+    local app = appearanceScratch
+    app.font          = (overrides.font          and elem.font)          or globalDefaults.font          or "DF Roboto SemiBold"
+    app.fontSize      = (overrides.fontSize      and elem.fontSize)      or globalDefaults.fontSize      or 10
+    app.color         = (overrides.color         and elem.color)         or globalDefaults.color         or DEFAULT_TEXT_COLOR
+    app.outline       = (overrides.outline       and elem.outline)       or globalDefaults.outline       or "SHADOW;NONE"
+    app.useClassColor = useClassColor
+    return app
 end
 
 -- ============================================================
@@ -297,7 +333,11 @@ local function updateOne(frame, elem, source, globalDefaults, enabledById)
         local token = source:GetClassToken()
         local color = token and RAID_CLASS_COLORS and RAID_CLASS_COLORS[token]
         if color then
-            local app = resolveAppearance(elem, globalDefaults)
+            -- Reuse the appearance applyAppearance already resolved above: same elem,
+            -- same globalDefaults, same deterministic function. This used to re-resolve
+            -- the whole thing just to read one alpha, which is a wasted table (up to
+            -- four) per class-coloured element per tick -- resolveAppearance is #2 in
+            -- every combat trace.
             fs:SetTextColor(color.r, color.g, color.b, (app.color and app.color.a) or 1)
         end
     end
@@ -382,12 +422,12 @@ function Render:UpdateFrame(frame, tdDB, source, hint, isPreview)
     -- are intentionally left in place so a subsequent add reusing the id
     -- recovers the same FontString instead of leaking another one.
     if frame._tdFontStrings then
-        local liveIds = {}
+        wipe(liveIdScratch)
         for _, elem in ipairs(tdDB.elements or {}) do
-            liveIds[elem.id] = true
+            liveIdScratch[elem.id] = true
         end
         for id, fs in pairs(frame._tdFontStrings) do
-            if not liveIds[id] then
+            if not liveIdScratch[id] then
                 fs:Hide()
             end
         end

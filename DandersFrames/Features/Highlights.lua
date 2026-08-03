@@ -216,27 +216,57 @@ end
 -- HIGHLIGHT FRAME CREATION
 -- ============================================================
 
+-- ☠ THESE ARE ABSOLUTE-ERA OFFSETS. They were +9 / +10 / +11, written when a unit
+-- frame's children topped out around +4 and anything above the health bar was
+-- "on top". Since the frame-level rework every DF element carries an ABSOLUTE
+-- offset from the unit frame, and the content stack now runs: resource bar 20,
+-- contentOverlay 25, status icons 30, missing buff 35, buff/debuff rows 40,
+-- defensive 65 -- whose border art reaches 77, because a row is 13 levels thick.
+-- At +10 the hover highlight sat under ALL of that. The reported "resource bar
+-- draws over the hover highlight" is just the shallowest instance of it.
+--
+-- Safe to raise: every mode draws at the frame PERIMETER only (SOLID, CORNERS and
+-- DASHED are edge lines, GLOW is an edge glow), so nothing here can obscure the
+-- name or health text. It only stops frame content covering the frame's own
+-- selection affordance.
+--
+-- Relative order among the three is preserved: aggro < hover < selection.
+--
+-- The numbers: 65 is the highest default in Config (defensiveIconFrameLevel), and
+-- a row's art sits above its baseline -- by +12 or +14 depending on which element
+-- is tallest, so call the real ceiling 79. These sit clear of it rather than on
+-- the boundary, deliberately: land on 78 and a single off-by-one in that estimate
+-- puts the highlight back under the art with no visible reason why.
+-- ⚠ Clears the DEFAULT stack only. The per-element sliders run 0-100, so pushing
+-- an element above these covers the highlight again -- that is the slider doing
+-- what it says, not a regression.
+local HIGHLIGHT_LEVEL = { Aggro = 82, Hover = 83, Selection = 84 }
+
+-- Applied on REUSE as well as creation: the level is absolute, derived from the
+-- owner's level at the time it is set, so a highlight created before the owner's
+-- level changed would otherwise keep a stale one forever.
+local function ApplyHighlightZOrder(ch, frame, highlightType)
+    ch:SetFrameStrata(frame:GetFrameStrata())
+    ch:SetFrameLevel(frame:GetFrameLevel() + (HIGHLIGHT_LEVEL[highlightType] or HIGHLIGHT_LEVEL.Aggro))
+end
+
 local function GetOrCreateHighlight(frame, highlightType)
     local key = "df" .. highlightType .. "Highlight"
-    if frame[key] then 
+    if frame[key] then
         -- Update points on existing frame to ensure proper positioning
         local ch = frame[key]
         ch:ClearAllPoints()
         ch:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
         ch:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
+        ApplyHighlightZOrder(ch, frame, highlightType)
         return ch
     end
-    
+
     -- Parent to UIParent to avoid any clipping from ancestors
     local ch = CreateFrame("Frame", nil, UIParent)
     ch:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
     ch:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", 0, 0)
-    ch:SetFrameStrata(frame:GetFrameStrata())
-    -- Frame levels: Aggro = +9, Hover = +10, Selection = +11
-    local levelOffset = 9
-    if highlightType == "Hover" then levelOffset = 10
-    elseif highlightType == "Selection" then levelOffset = 11 end
-    ch:SetFrameLevel(frame:GetFrameLevel() + levelOffset)
+    ApplyHighlightZOrder(ch, frame, highlightType)
     ch:Hide()
     
     -- Track the owner frame so we can hide when owner hides
@@ -283,20 +313,72 @@ end
 -- APPLY HIGHLIGHT STYLE
 -- ============================================================
 
+-- Forget a highlight's cached style so the next ApplyHighlightStyle re-runs in full.
+-- ☠ EVERY path that changes those textures behind this function's back MUST call
+-- this. There are two classes and both are live:
+--   1. DF:LightweightUpdateHighlight (Core.lua) writes size/points/colour straight
+--      onto the four line textures during a slider drag, bypassing this function.
+--   2. The three "not wanted" branches below hide the highlight AND call
+--      SelectionAnimator_Remove. Without invalidation, turning a highlight off and
+--      back on with identical settings would early-out and never re-add it to the
+--      animator -- an ANIMATED highlight that silently stops animating.
+function DF:InvalidateHighlightStyle(ch)
+    if ch then ch._hlSig = nil end
+end
+
+-- ☠ THE SIGNATURE MUST INCLUDE THE THREE IMPLICIT INPUTS, not just the arguments.
+-- This function is 22.4% of trash-fight allocation and target-switch driven, so it
+-- is worth skipping -- but "hide everything then re-apply" means a missed input
+-- leaves stale art with no visible cause. Beyond the eight parameters:
+--   * ch:GetEffectiveScale() -- thickness and inset are pixel-snapped against it,
+--     so a UI-scale change must re-run.
+--   * ch:GetWidth()/GetHeight() -- CORNERS mode derives cornerLen from them, so a
+--     frame resize must re-run.
+--   * db.pixelPerfect -- the only field read off db.
 local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, db)
     if not ch then return end
-    
+
+    local scale = ch:GetEffectiveScale()
+    local w, h = ch:GetWidth(), ch:GetHeight()
+    local pp = (db and db.pixelPerfect) and 1 or 0
+    -- ☠ SHOW FIRST, AHEAD OF THE EARLY-OUT. Showing the highlight is an OUTPUT of
+    -- this function (it used to be the last statement), not part of the styling the
+    -- signature guards -- and several paths hide `ch` WITHOUT touching the signature:
+    -- the owner frame's own OnHide hook (installed in GetOrCreateHighlight), the
+    -- party-frames-while-in-raid branch, and the not-visible branch. With the Show
+    -- below the early-out, a frame that hid and re-showed while every style input
+    -- stayed identical never got shown again -- target a party member, open Test
+    -- Mode, close it, and the selection border was gone until you changed target.
+    -- Hoisting it fixes every such path at once, including any added later, which
+    -- invalidating at the three hide sites would not.
+    -- No flash risk: the styling below runs synchronously in this same call, so
+    -- nothing is drawn between the Show and the restyle.
+    ch:Show()
+    -- Numeric fields compared individually: building a string key here would
+    -- allocate exactly what the early-out exists to avoid.
+    if ch._hlSig
+        and ch._hlMode == mode and ch._hlThick == thickness and ch._hlInset == inset
+        and ch._hlR == r and ch._hlG == g and ch._hlB == b and ch._hlA == alpha
+        and ch._hlPP == pp and ch._hlScale == scale and ch._hlW == w and ch._hlH == h then
+        return
+    end
+    ch._hlSig = true
+    ch._hlMode, ch._hlThick, ch._hlInset = mode, thickness, inset
+    ch._hlR, ch._hlG, ch._hlB, ch._hlA = r, g, b, alpha
+    ch._hlPP, ch._hlScale, ch._hlW, ch._hlH = pp, scale, w, h
+
     local top, bottom, left, right = ch.topLine, ch.bottomLine, ch.leftLine, ch.rightLine
-    
+
     -- Hide all styles first
     top:Hide() bottom:Hide() left:Hide() right:Hide()
     HideAnimatedBorder(ch)
     HideCornerTextures(ch)
     HideGlowLayers(ch)
     SelectionAnimator_Remove(ch)
-    
-    -- Snap thickness to whole screen pixels so every +1 step is visible
-    local scale = ch:GetEffectiveScale()
+
+    -- Snap thickness to whole screen pixels so every +1 step is visible.
+    -- `scale` is the one read above for the signature -- deliberately the same
+    -- value, so what gets cached and what gets applied can never disagree.
     local px = thickness * scale              -- desired thickness in pixels
     px = math.max(1, math.ceil(px - 0.01))    -- round up (with tiny epsilon for exact integers)
     thickness = px / scale
@@ -447,8 +529,7 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
         top:Show()
         left:Show()
     end
-    
-    ch:Show()
+    -- (ch:Show() moved ABOVE the early-out -- see the note there.)
 end
 
 -- Expose for reuse by the Aura Designer border indicator
@@ -739,6 +820,10 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         HideGlowLayers(selectionHighlight)
         selectionHighlight:Hide()
         SelectionAnimator_Remove(selectionHighlight)
+        -- Removing it from the animator undoes what ApplyHighlightStyle set up, so
+        -- the cached style no longer describes reality: without this, re-showing
+        -- with identical settings would early-out and never re-add it.
+        DF:InvalidateHighlightStyle(selectionHighlight)
     end
     
     -- Hover Highlight
@@ -772,6 +857,7 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         HideGlowLayers(hoverHighlight)
         hoverHighlight:Hide()
         SelectionAnimator_Remove(hoverHighlight)
+        DF:InvalidateHighlightStyle(hoverHighlight)
     end
     
     -- Aggro Highlight
@@ -859,6 +945,7 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         HideGlowLayers(aggroHighlight)
         aggroHighlight:Hide()
         SelectionAnimator_Remove(aggroHighlight)
+        DF:InvalidateHighlightStyle(aggroHighlight)
     end
 end
 

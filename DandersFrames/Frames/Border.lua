@@ -135,6 +135,15 @@ function Border:New(parent, opts)
     return border
 end
 
+-- Shared read-only fallbacks for `readColor(anim.color or <default>)`. Seven sites
+-- built one of these two tables inline, so an animation whose colour is unset
+-- allocated a throwaway table on every driver tick. readColor only ever reads its
+-- argument, and nothing downstream retains it, so one instance each is safe.
+-- (ANIM_GOLD is the shared default for the border effects; ANIM_WHITE keeps the
+-- proc atlas's own art untinted -- see the desaturate note in setupProcGlow.)
+local ANIM_GOLD  = { r = 0.95, g = 0.95, b = 0.32, a = 1 }
+local ANIM_WHITE = { r = 1, g = 1, b = 1, a = 1 }
+
 -- Resolve a colour from either an array {r,g,b,a} or a keyed {r=,g=,b=,a=}
 -- table, so consumers can pass whichever they already store.
 local function readColor(color)
@@ -161,9 +170,37 @@ end
 -- Resolvers silently fall through when their required ctx is missing, so a
 -- consumer that only knows the unit can still flip on classColor without
 -- worrying about time/type ctx.
+-- Memoised db-key strings, per prefix. BuildSpec calls k() 37 times and each call
+-- used to concatenate a fresh string -- 37 allocations per BuildSpec, on a function
+-- that shows up in both the steady-state traces (2.7% of a boss run) and the rebuild
+-- traces (2.6%). The prefix set is tiny and fixed, and prefix .. suffix is
+-- deterministic, so the built keys are cached and reused forever.
+local borderKeyMemo = {}
+
+-- Key builder for BuildSpec, hoisted OUT of it so there is no closure per call.
+-- 395af09f killed the 37 string concats but left one allocation behind: `k`
+-- captured memo and prefix, so a fresh closure was built on every call -- and
+-- BuildSpec runs per bordered element per tick (4.6% of trash allocation, 4.3%
+-- of boss).
+--
+-- ☠ THE UPVALUES ARE SHARED, which is safe ONLY because BuildSpec cannot
+-- re-enter: its body reaches DF:GetClassColor, DF:GetTestUnitData, DF:GetUnitRole
+-- and the Border:Resolve* helpers, and none of those calls BuildSpec. Verified
+-- against every caller, not assumed. If a resolver ever needs to build a spec it
+-- must not do it through here, or this silently starts reading another prefix's
+-- keys -- a wrong-border bug with nothing at the call site to explain it.
+local bsMemo, bsPrefix
+local function k(suffix)
+    local key = bsMemo[suffix]
+    if not key then key = bsPrefix .. suffix; bsMemo[suffix] = key end
+    return key
+end
+
 function Border:BuildSpec(dbTable, prefix, ctx)
     if not dbTable or not prefix then return {} end
-    local function k(suffix) return prefix .. suffix end
+    local memo = borderKeyMemo[prefix]
+    if not memo then memo = {}; borderKeyMemo[prefix] = memo end
+    bsMemo, bsPrefix = memo, prefix
 
     -- Style is the top-level choice: SOLID | GRADIENT | TEXTURE.
     -- GRADIENT owns its own colours (start/end pickers) so the colour-source
@@ -362,18 +399,10 @@ function Border:ResolveRoleColor(unit, fallback, roleColors, frame)
     if frame and frame.dfIsTestFrame then
         local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame)
         role = testData and testData.role
-    elseif unit and UnitExists and UnitExists(unit) and UnitGroupRolesAssigned then
-        role = UnitGroupRolesAssigned(unit)
-        -- UnitGroupRolesAssigned returns "NONE" outside instances where roles
-        -- aren't assigned (solo, world content, open-world groups). For the
-        -- player, fall back to the spec role so role colour is meaningful
-        -- regardless of group context. Other units expose no public spec API,
-        -- so they stay on the picker fallback when role is NONE.
-        if (not role or role == "NONE") and UnitIsUnit and UnitIsUnit(unit, "player")
-           and GetSpecialization and GetSpecializationRole then
-            local spec = GetSpecialization()
-            if spec then role = GetSpecializationRole(spec) end
-        end
+    else
+        -- Player falls back to the spec role when the group assigned none;
+        -- other units stay NONE and drop to the picker fallback below.
+        role = DF:GetUnitRole(unit)
     end
 
     local c = role and role ~= "NONE" and (roleColors[role] or roleColors[string.lower(role)])
@@ -825,7 +854,7 @@ local function setupAnimOverlay(border, anim)
     o.right:SetPoint("BOTTOMLEFT", rect, "BOTTOMRIGHT", 0, -th)
     o.right:SetWidth(th)
 
-    local r, g, b, a = readColor(anim.color or { r = 0.95, g = 0.95, b = 0.32, a = 1 })
+    local r, g, b, a = readColor(anim.color or ANIM_GOLD)
     for _, e in ipairs({ o.top, o.bottom, o.left, o.right }) do
         e:SetColorTexture(r, g, b, a)
         e:SetAlpha(0)  -- tick functions raise alpha as the effect plays
@@ -923,7 +952,7 @@ local function setupOrbitParticles(border, anim)
     if N > 16 then N = 16 end
     local total = N * 4
     local scale = anim.scale or 1
-    local r, g, b, a = readColor(anim.color or { r = 0.95, g = 0.95, b = 0.32, a = 1 })
+    local r, g, b, a = readColor(anim.color or ANIM_GOLD)
     border.orbitTex = border.orbitTex or {}
     local tex = border.orbitTex
     for i = 1, total do
@@ -1134,7 +1163,7 @@ local function setupPixelParticles(border, anim)
     if N > 16 then N = 16 end
     local th = anim.thickness or 2; if th < 1 then th = 1 end
     local len = anim.length or 6;   if len < 1 then len = 1 end
-    local r, g, b, a = readColor(anim.color or { r = 0.95, g = 0.95, b = 0.32, a = 1 })
+    local r, g, b, a = readColor(anim.color or ANIM_GOLD)
     border.pixelTex = border.pixelTex or {}
     local tex = border.pixelTex
     for i = 1, N do
@@ -1243,16 +1272,45 @@ local function hideProcGlow(border)
     if border.procStartTex then border.procStartTex:Hide() end
 end
 
+-- ☠ C_Texture.GetAtlasInfo RETURNS A FRESH TABLE ON EVERY CALL, and setupProcGlow
+-- asked for two of them per call — on a path that runs per proc-glowing element
+-- (3.0% of trash allocation, 5.6% of boss). Both atlases are compile-time
+-- constants, so their info is fetched once and shared.
+--
+-- Safe to share: every consumer only READS (.file, and stepProcFlipbook's frame
+-- maths) — swept _procAtlas / _procStartAtlas for writes and there are none
+-- beyond these two assignments.
+--
+-- Resolved lazily rather than at file scope: C_Texture may not be ready when this
+-- file loads, and the old code re-checked it on every call.
+local procAtlasInfo, procStartAtlasInfo, procAtlasResolved
+
 local function setupProcGlow(border, anim)
     local host = ensureAnimRect(border, anim.inset, anim.offsetX, anim.offsetY)
     border._procHost = host
-    local getInfo = C_Texture and C_Texture.GetAtlasInfo
-    border._procAtlas      = getInfo and getInfo(PROC_ATLAS)
-    border._procStartAtlas = getInfo and getInfo(PROC_START_ATLAS)
+    if not procAtlasResolved then
+        local getInfo = C_Texture and C_Texture.GetAtlasInfo
+        if getInfo then
+            procAtlasInfo      = getInfo(PROC_ATLAS)
+            procStartAtlasInfo = getInfo(PROC_START_ATLAS)
+            -- Only latch once the API actually answered; a nil result before the
+            -- texture system is up would otherwise cache "no atlas" permanently
+            -- and the proc glow would never draw for the rest of the session.
+            -- ☠ BOTH atlases, not just the loop one. Latching on procAtlasInfo
+            -- alone let a single nil START result freeze in permanently: the loop
+            -- glow drew normally while the intro burst was silently dead on every
+            -- border for the rest of the session, which reads as a design change
+            -- rather than a fault. The pre-memo code re-fetched both on every
+            -- setup, so it always recovered on the next one.
+            procAtlasResolved = (procAtlasInfo ~= nil) and (procStartAtlasInfo ~= nil)
+        end
+    end
+    border._procAtlas      = procAtlasInfo
+    border._procStartAtlas = procStartAtlasInfo
     -- Colour handling: white keeps the atlas's native golden gradient; any other
     -- colour DESATURATES the art first so the tint reads clean (multiplying a
     -- strong colour over gold goes muddy).
-    local r, g, b, a = readColor(anim.color or { r = 1, g = 1, b = 1, a = 1 })
+    local r, g, b, a = readColor(anim.color or ANIM_WHITE)
     local desat = not (r > 0.985 and g > 0.985 and b > 0.985)
     -- LCG-style hand-off: the LOOP fills the icon, while the intro BURST is a
     -- larger, CENTERED texture whose flipbook art contracts down onto the loop by
@@ -1383,7 +1441,7 @@ local function setupFlashGlow(border, anim)
     border._flashHost = host
     -- Colour handling mirrors DF Proc: white keeps the native golden art; any
     -- other colour desaturates first so the tint reads clean.
-    local r, g, b, a = readColor(anim.color or { r = 1, g = 1, b = 1, a = 1 })
+    local r, g, b, a = readColor(anim.color or ANIM_WHITE)
     local desat = not (r > 0.985 and g > 0.985 and b > 0.985)
     local spark     = flashSheetTexture(border, "flashSpark",     "BACKGROUND", 0, FLASH_UV_SPARK)
     local inner     = flashSheetTexture(border, "flashInner",     "ARTWORK",    0, FLASH_UV_GLOW)
@@ -1559,7 +1617,7 @@ local function applyCornersOnly(border, anim)
     if not length or length <= 0 then length = 8 end
     local rect = ensureAnimRect(border, anim.inset, anim.offsetX, anim.offsetY)
 
-    local r, g, b, a = readColor(anim.color or { r = 0.95, g = 0.95, b = 0.32, a = 1 })
+    local r, g, b, a = readColor(anim.color or ANIM_GOLD)
     local function paint(e)
         e:SetColorTexture(r, g, b, a)
         e:SetAlpha(1)
@@ -1773,7 +1831,7 @@ function Border:StartAnimation(border, spec)
     -- (0 = static "dashed"). Fixed dash length/gap; thickness / inset / colour
     -- from the spec. Dashes clip per edge so the pattern flows around the corners.
     if anim.type == "DF_DASH" then
-        local r, g, b, a = readColor(anim.color or { r = 0.95, g = 0.95, b = 0.32, a = 1 })
+        local r, g, b, a = readColor(anim.color or ANIM_GOLD)
         border._dfDashTh = math.max(1, anim.thickness or 2)
         border._dfDashInset = anim.inset or 0
         border._dfDashR, border._dfDashG, border._dfDashB, border._dfDashA = r, g, b, a

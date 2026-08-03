@@ -29,18 +29,19 @@ function DF:CreateGUI()
     local minWidth, minHeight = 520, 400
     local maxWidth, maxHeight = 1200, 900
     
-    -- Load saved position and size (stored in party db since it's always available)
-    local guiDb = DF.db and DF.db.party or {}
-    local savedScale = guiDb.guiScale or 1.0
-    local savedWidth = guiDb.guiWidth or defaultWidth
-    local savedHeight = guiDb.guiHeight or defaultHeight
+    -- Load saved position and size. Account-wide, NOT per-profile: see
+    -- DF:GetWindowState in Core/Profile.lua for why it must not follow profiles.
+    local guiDb = DF:GetWindowState()
+    local savedScale = guiDb.scale or 1.0
+    local savedWidth = guiDb.width or defaultWidth
+    local savedHeight = guiDb.height or defaultHeight
     
     -- Main frame (matching old addon approach - no BackdropTemplate in CreateFrame)
     local frame = CreateFrame("Frame", "DandersFramesGUI", UIParent)
     frame:SetSize(savedWidth, savedHeight)
     -- Restore saved position, or default to center
-    if guiDb.guiPoint and guiDb.guiX then
-        frame:SetPoint(guiDb.guiPoint, UIParent, guiDb.guiRelPoint or "CENTER", guiDb.guiX, guiDb.guiY)
+    if guiDb.point and guiDb.x then
+        frame:SetPoint(guiDb.point, UIParent, guiDb.relPoint or "CENTER", guiDb.x, guiDb.y)
     else
         frame:SetPoint("CENTER")
     end
@@ -81,12 +82,8 @@ function DF:CreateGUI()
         frame:StopMovingOrSizing()
         -- Save position so it persists across sessions
         local point, _, relPoint, x, y = frame:GetPoint()
-        if DF.db and DF.db.party then
-            DF.db.party.guiPoint = point
-            DF.db.party.guiRelPoint = relPoint
-            DF.db.party.guiX = x
-            DF.db.party.guiY = y
-        end
+        local ws = DF:GetWindowState()
+        ws.point, ws.relPoint, ws.x, ws.y = point, relPoint, x, y
     end)
     titleBar:SetFrameStrata("FULLSCREEN_DIALOG")
     titleBar:SetFrameLevel(200)
@@ -229,8 +226,8 @@ function DF:CreateGUI()
     resizeHandle:SetScript("OnMouseUp", function(self, button)
         frame:StopMovingOrSizing()
         -- Save new size
-        DF.db.party.guiWidth = frame:GetWidth()
-        DF.db.party.guiHeight = frame:GetHeight()
+        local ws = DF:GetWindowState()
+        ws.width, ws.height = frame:GetWidth(), frame:GetHeight()
         -- Update content layout
         if GUI.SelectedMode == "clicks" then
             -- Refresh click casting UI on resize (skip scroll reset)
@@ -495,9 +492,7 @@ function DF:CreateGUI()
     scaleSlider:SetScript("OnMouseUp", function(self)
         local value = math.floor(self:GetValue() * 20 + 0.5) / 20
         frame:SetScale(value)
-        if DF.db and DF.db.party then
-            DF.db.party.guiScale = value
-        end
+        DF:GetWindowState().scale = value
         -- Also update popup panels
         if DF.positionPanel then
             DF.positionPanel:SetScale(value)
@@ -508,7 +503,7 @@ function DF:CreateGUI()
         -- A new scale changes how many device pixels a UI unit covers, so
         -- every border on screen has to be re-derived at the new thickness.
         -- This is the ONLY action that does: nothing else in the GUI writes
-        -- guiScale, and moving or resizing the window leaves it alone.
+        -- windowState.scale, and moving or resizing the window leaves it alone.
         GUI:RefreshPixelBorders()
     end)
 
@@ -589,13 +584,19 @@ function DF:CreateGUI()
     
     -- Function to update test button state (called externally)
     UpdateTestButtonState = function()
-        -- Active toggle look based on whether the test panel is visible.
-        local testActive = DF.TestPanel and DF.TestPanel:IsShown()
-        btnTest:SetActive(testActive)
-        -- Swap the framed-eye glyph: open (preview) when test mode is showing the
-        -- preview frames, slashed (preview_off) when it's off.
+        -- Both cues read the USER's claim -- the same thing the panel's toggle shows
+        -- -- so the two controls the user thinks of as one can never disagree.
+        --
+        -- ⚠ Deliberately NOT "is a preview on screen". Unlocking puts frames up under
+        -- its OWN claim, and driving the glyph off that made a plain unlock look like
+        -- the user had switched test mode on. Frames being visible during an unlock is
+        -- unlock's business; the chat line explains it.
+        local panelOpen = DF.TestPanel and DF.TestPanel:IsShown()
+        local scope = (GUI.SelectedMode == "raid") and "raid" or "party"
+        local userWants = DF.IsTestModeOwnedBy and DF:IsTestModeOwnedBy(scope, "user")
+        btnTest:SetActive(panelOpen)
         btnTest.Icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
-            .. (testActive and "preview" or "preview_off"))
+            .. (userWants and "preview" or "preview_off"))
         -- White text/icon in both states (state shown by the toggle border/fill).
         btnTest.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         btnTest.Icon:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
@@ -645,6 +646,9 @@ function DF:CreateGUI()
                 -- and rebuilding it a moment later. Cleared below.
                 DF._testModeHandover = true
                 DF:HideRaidTestFrames(true)  -- silent
+                -- Hides directly rather than through the owners, so drop raid's
+                -- claims to match. carryTest re-claims in the scope we land in.
+                if DF.ClearTestModeOwners then DF:ClearTestModeOwners("raid") end
             end
         end
 
@@ -658,9 +662,11 @@ function DF:CreateGUI()
         GUI:UpdateTabAvailability()
         GUI:RefreshCurrentPage()
 
-        -- Keep test mode active when switching modes (just switch which mode it runs in)
-        if carryTest and DF.ShowTestFrames then
-            DF:ShowTestFrames(true)  -- silent
+        -- Keep test mode active when switching modes (just switch which mode it runs in).
+        -- Carried as the USER's claim: they had a preview up and are still asking for
+        -- one, just in the other scope.
+        if carryTest and DF.SetTestModeOwner then
+            DF:SetTestModeOwner("party", "user", true, true)   -- silent: the mode swap is the visible event
             -- ShowTestFrames (unlike ShowRaidTestFrames) doesn't refresh the GUI,
             -- so the test panel's toggle label would stay on "Enable Test Mode".
             -- Refresh it now that party test mode is active.
@@ -700,6 +706,9 @@ function DF:CreateGUI()
                 -- Hand-over: see the raid->party handler above.
                 DF._testModeHandover = true
                 DF:HideTestFrames(true)  -- silent
+                -- Hides directly rather than through the owners, so drop party's
+                -- claims to match. carryTest re-claims in the scope we land in.
+                if DF.ClearTestModeOwners then DF:ClearTestModeOwners("party") end
             end
         end
 
@@ -713,8 +722,12 @@ function DF:CreateGUI()
         GUI:UpdateTabAvailability()
         GUI:RefreshCurrentPage()
 
-        -- Keep test mode active when switching modes (just switch which mode it runs in)
-        if carryTest and DF.ShowRaidTestFrames then
+        -- Keep test mode active when switching modes (just switch which mode it runs in).
+        -- Carried as the USER's claim: they had a preview up and are still asking for
+        -- one, just in the other scope.
+        if carryTest and DF.SetTestModeOwner then
+            DF:SetTestModeOwner("raid", "user", true, true)    -- silent: the mode swap is the visible event
+        elseif carryTest and DF.ShowRaidTestFrames then
             DF:ShowRaidTestFrames()
         end
         if carryTest then
@@ -734,6 +747,9 @@ function DF:CreateGUI()
                 if DF.LockFrames then DF:LockFrames() end
             end
             if DF.testMode then DF:HideTestFrames(true) end
+            -- Leaving for a tab with no frames: nobody is asking for a preview
+            -- any more, so drop the claims rather than let them outlive it.
+            if DF.ClearTestModeOwners then DF:ClearTestModeOwners("party") end
         elseif GUI.SelectedMode == "raid" then
             local raidDb = DF:GetRaidDB()
             if raidDb and not raidDb.raidLocked then
@@ -741,8 +757,10 @@ function DF:CreateGUI()
                 if DF.LockRaidFrames then DF:LockRaidFrames() end
             end
             if DF.raidTestMode then DF:HideRaidTestFrames(true) end
+            -- As above: no preview is wanted on a tab that has no frames.
+            if DF.ClearTestModeOwners then DF:ClearTestModeOwners("raid") end
         end
-        
+
         GUI.SelectedMode = "clicks"
         if DF.Search then 
             DF.Search:HideResults()
@@ -908,12 +926,8 @@ function DF:CreateGUI()
     bottomBar:SetScript("OnDragStop", function()
         frame:StopMovingOrSizing()
         local point, _, relPoint, x, y = frame:GetPoint()
-        if DF.db and DF.db.party then
-            DF.db.party.guiPoint = point
-            DF.db.party.guiRelPoint = relPoint
-            DF.db.party.guiX = x
-            DF.db.party.guiY = y
-        end
+        local ws = DF:GetWindowState()
+        ws.point, ws.relPoint, ws.x, ws.y = point, relPoint, x, y
     end)
 
     local footer = CreateFrame("Frame", nil, bottomBar)

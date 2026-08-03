@@ -1666,6 +1666,42 @@ local function StyleOneSlot(btn, frame, db, info)
     end
 end
 
+-- STALE SLOT ART (bug #1004's shape, second consumer). Every widget hung off a slot
+-- button -- the overlay frame, its border StatusBars, the bound carriers -- is a
+-- descendant of the SECRET aura button, and the client can turn that subtree forbidden
+-- underneath us when it reclaims or re-initialises the slot. Nothing ever cleared
+-- btn.dfDispelWidget, so the stash outlived the art: ApplyOverlayLayout's first touch
+-- (borderLeft:ClearAllPoints) then threw on every state-changing refresh, which aborted
+-- the whole style pass for that button and left the overlay dead. Reported 32x after a
+-- dungeon and 98x on one Show Overlay For dropdown -- the same frames, once per refresh,
+-- so it is persistent rather than transient. Frames\Core.lua's health mirror carries the
+-- identical guard for the identical reason; this is that guard for the dispel art.
+--
+-- Read-only, and it touches the object that actually throws (borderLeft) rather than
+-- IsForbidden() -- inside the secret container IsForbidden can hand back a SECRET on a
+-- perfectly healthy widget, and the codebase's guard idiom reads a secret as "skip",
+-- which would silently kill the overlay for everyone. Declared once, not inlined as a
+-- closure, so the pcall below stays allocation-free on a per-slot-per-pass path.
+local function ProbeSlotArt(w)
+    return w:GetFrameLevel() and w.borderLeft:GetFrameLevel()
+end
+
+-- Drop EVERY stash hanging off the button. The tainted painters (icon, and the widget
+-- itself via EnsureSlotWidget) rebuild lazily from nil; the bound carriers do not, which
+-- is why the caller re-runs DispelSlotSecureInit behind this.
+local function ResetSlotArt(btn)
+    btn.dfDispelWidget = nil
+    btn._dfDispelCarriers = nil
+    btn._dfDispelCurveGen = nil
+    btn._dfDispelGradientCarrier = nil
+    btn.dfDispelEdgeTex = nil
+    btn.dfDispelEdgeHolder = nil
+    btn.dfDispelRing = nil
+    btn.dfDispelRingHolder = nil
+    btn.dfDispelIconTex = nil
+    btn.dfDispelIconHolder = nil
+end
+
 -- Style every live slot button per the plan. Returns false while no buttons exist
 -- (combat-deferred build / fake backend) so the caller doesn't latch the version.
 local function StyleDispelSlots(frame, db, h, slots)
@@ -1675,7 +1711,48 @@ local function StyleDispelSlots(frame, db, h, slots)
     for i = 1, #slots do
         local info = slots[i]
         local btn = buttons[info.key]
-        if btn then
+        -- Recover a button whose art went forbidden before anything tries to paint it.
+        -- ONE retry per button: DispelSlotSecureInit rebuilds and re-binds from here
+        -- (tainted create+bind is legal on 68914 -- see the re-bind note below), but if
+        -- the fresh art comes back untouchable too, retrying every pass would trade an
+        -- error spam for a rebuild spam. The latch clears the moment a probe passes, so
+        -- a later reclaim is still recoverable.
+        local artOK = true
+        if btn and btn.dfDispelWidget and not pcall(ProbeSlotArt, btn.dfDispelWidget) then
+            if btn._dfDispelArtStale then
+                artOK = false
+                if not frame.dfDispelArtForbiddenLogged then
+                    frame.dfDispelArtForbiddenLogged = true
+                    DF:DebugWarn("AURACONTAINER",
+                        "StyleDispelSlots: slot art still forbidden after a rebuild, "
+                        .. "skipping the dispel overlay on %s", tostring(frame.unit))
+                end
+            else
+                btn._dfDispelArtStale = true
+                ResetSlotArt(btn)
+                -- pcall'd for the SAME reason as the style pass below (bug #1011):
+                -- this reaches into the slot widgets to create and bind carriers, so
+                -- it shares their exposure. Unprotected, a throw here escapes
+                -- StyleDispelSlots entirely -- past the per-button pcall, which only
+                -- wraps StyleOneSlot -- and out through DriveDispelOverlayFactory into
+                -- FullFrameRefresh, abandoning every element after the dispel overlay.
+                -- That is precisely the failure this recovery path exists to end, and
+                -- it is the likeliest place to throw: the art was just found forbidden.
+                if info.roles then
+                    local okInit, errInit = pcall(DispelSlotSecureInit, btn, info, db, frame)
+                    if not okInit and not warnedSlotStyle then
+                        warnedSlotStyle = true
+                        if DF.DebugWarn then
+                            DF:DebugWarn("DISPEL", "slot re-init %s failed: %s",
+                                tostring(info.key), tostring(errInit))
+                        end
+                    end
+                end
+            end
+        elseif btn then
+            btn._dfDispelArtStale = nil
+        end
+        if btn and artOK then
             -- `styled` means "a button existed and we ran the pass", NOT "the pass
             -- succeeded". It has to stay true even when the pass throws, or the
             -- caller never latches the version/generation and re-enters this same
@@ -1752,6 +1829,20 @@ function DF:DriveDispelOverlayFactory(frame, db)
         end
         return
     end
+
+    -- EMPTY HEADER SLOT. A raid header keeps its whole child set alive and hands
+    -- units out as the roster fills, so outside a full group most children carry
+    -- no unit at all. They are hidden, they can never match a dispellable aura,
+    -- and AuraContainer:Create defaults a nil unit to "player" -- so building
+    -- here stood up a six-slot container per EMPTY slot and pointed each one at
+    -- the wrong unit. UpdateAllDispelOverlays walks IterateAllFrames unfiltered
+    -- (the aura rows come through FullFrameRefresh, which already returns on a
+    -- unitless frame -- that is why they never paid this).
+    -- Measured, login while solo: 41 containers built, 40 of them empty raid
+    -- slots -- 10.8 MB of the 14.1 MB the addon spent standing containers up.
+    -- Existing handles are deliberately LEFT ALONE: the roster churns, and
+    -- SetUnit re-targets a live one for free when a unit lands in this slot.
+    if not frame.unit then return end
 
     -- Fast path (this runs per UNIT_AURA in combat): already built AND styled at
     -- the current layout version + build generation -> only unit upkeep remains.

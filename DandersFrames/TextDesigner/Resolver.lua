@@ -326,19 +326,43 @@ end
 -- groups as just their separator-joined item resolutions. (The real
 -- implementation will deduplicate against per-item rendering once
 -- live rendering ships; preview just shows the static concatenation.)
+-- Scratch tables for RESOLVERS.group. This resolver is the single biggest allocator in
+-- the whole addon -- 38% of a dungeon trace, 44% of a boss trace -- purely because it
+-- rebuilt `parts` plus a 14-field element table PER ITEM on every tick, from config
+-- that only changes when the user edits it.
+--
+-- Reuse is safe because groups CANNOT NEST: the Text Designer's Add Item picker excludes
+-- the "group" type (DandersFrames_Options/TextDesigner/UI/Options.lua passes
+-- excludeKey = "group"), so RESOLVERS[typeKey] below can never route back into this
+-- function and it is never re-entered. No resolver retains its elem argument either --
+-- they read fields, and applyNameTrunc only reads nameLength/truncateMode. This path is
+-- single-threaded with no yields, so one call always completes before the next starts.
+--
+-- ☠ Every field of groupItemElem MUST be assigned on EVERY iteration, nil included, or a
+-- value silently leaks from the previous item into the next.
+local groupParts = {}
+local groupItemElem = {}
+
 RESOLVERS.group = function(elem, source)
     -- groupItems is an array whose entries are either a typeKey string (live
     -- data) or a table { type = "custom_static", text = "..." } for custom text.
     -- Each item resolves as if it were a standalone element (settings cascade
     -- from the group). The group's separator joins the non-empty results.
     if not elem.groupItems or #elem.groupItems == 0 then
-        DF:Debug("TD", "group resolver: elem id=%s has no groupItems", tostring(elem.id))
+        if DF:DebugActive("TD") then
+            DF:Debug("TD", "group resolver: elem id=%s has no groupItems", tostring(elem.id))
+        end
         return ""
     end
-    DF:Debug("TD", "group resolver: elem id=%s items=%d separator=%q",
-        tostring(elem.id), #elem.groupItems, tostring(elem.groupSeparator or " / "))
+    -- Guarded: the tostring() args are evaluated by the CALLER, so an unguarded
+    -- DF:Debug allocated two strings per call even with the trace off.
+    if DF:DebugActive("TD") then
+        DF:Debug("TD", "group resolver: elem id=%s items=%d separator=%q",
+            tostring(elem.id), #elem.groupItems, tostring(elem.groupSeparator or " / "))
+    end
     local MS = getMS()
-    local parts = {}
+    local parts = groupParts
+    for pi = #parts, 1, -1 do parts[pi] = nil end
     for i, rawItem in ipairs(elem.groupItems) do
         -- Each item carries its OWN formatting (per-item, not cascaded from the
         -- group). Missing flags fall back to the standard per-type defaults.
@@ -346,26 +370,27 @@ RESOLVERS.group = function(elem, source)
         local typeKey = item.contentType
         local itemResolver = RESOLVERS[typeKey]
         if not itemResolver then
-            DF:Debug("TD", "  [%d] %s: NO RESOLVER", i, tostring(typeKey))
+            if DF:DebugActive("TD") then
+                DF:Debug("TD", "  [%d] %s: NO RESOLVER", i, tostring(typeKey))
+            end
         else
             local ab = item.abbreviate; if ab == nil then ab = true end
             local hz = item.hideWhenZero; if hz == nil then hz = true end
-            local itemElem = {
-                contentType  = typeKey,
-                abbreviate   = ab,
-                hideWhenZero = hz,
-                hidePercent  = item.hidePercent,
-                decimals     = item.decimals or 0,
-                staticText   = item.staticText,
-                aggroText1   = item.aggroText1,
-                aggroText2   = item.aggroText2,
-                aggroText3   = item.aggroText3,
-                rangeInText  = item.rangeInText,
-                rangeOutText = item.rangeOutText,
-                nameLength   = item.nameLength,
-                truncateMode = item.truncateMode,
-                groupFormat  = item.groupFormat,
-            }
+            local itemElem = groupItemElem
+            itemElem.contentType  = typeKey
+            itemElem.abbreviate   = ab
+            itemElem.hideWhenZero = hz
+            itemElem.hidePercent  = item.hidePercent
+            itemElem.decimals     = item.decimals or 0
+            itemElem.staticText   = item.staticText
+            itemElem.aggroText1   = item.aggroText1
+            itemElem.aggroText2   = item.aggroText2
+            itemElem.aggroText3   = item.aggroText3
+            itemElem.rangeInText  = item.rangeInText
+            itemElem.rangeOutText = item.rangeOutText
+            itemElem.nameLength   = item.nameLength
+            itemElem.truncateMode = item.truncateMode
+            itemElem.groupFormat  = item.groupFormat
             local v = itemResolver(itemElem, source)
             local isSec = MS.IsSecret(v)
             if v then
@@ -388,7 +413,9 @@ RESOLVERS.group = function(elem, source)
             end
         end
     end
-    DF:Debug("TD", "group resolver: parts collected=%d", #parts)
+    if DF:DebugActive("TD") then
+        DF:Debug("TD", "group resolver: parts collected=%d", #parts)
+    end
     -- IMPORTANT: cannot use table.concat() here — it throws on secret-tainted
     -- entries ("invalid value (secret) at index N in table for 'concat'").
     -- Manual `..` concat IS safe with secret strings as long as the final

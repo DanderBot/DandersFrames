@@ -997,12 +997,12 @@ function DF:UnlockRaidFrames()
         end
     end
     
-    -- Remember whether raid test mode was already active before this unlock cycle.
-    -- LockRaidFrames reads this to decide whether to keep or hide test frames.
-    DF.raidTestModeBeforeUnlock = DF.raidTestMode
-
-    -- Enable raid test mode using the proper function
-    DF:ShowRaidTestFrames()
+    -- Unlock claims test frames for as long as it stays unlocked: you need frames
+    -- on screen to have something to drag. It deliberately does NOT snapshot what
+    -- the user had -- that is the user's own claim, tracked separately. The old
+    -- snapshot went stale whenever test mode changed mid-session, in both
+    -- directions (see TestMode/Shim.lua).
+    DF:SetTestModeOwner("raid", "unlock", true, true)   -- silent: unlock announces itself
 
     -- Pinned frames ride the global lock: show their drag chrome too. No mode
     -- gate — SetMoversShown shows the right handles (live movers for the current
@@ -1073,12 +1073,9 @@ function DF:LockRaidFrames()
         DF.PinnedFrames:SetMoversShown(false)
     end
 
-    -- Only disable raid test mode if it was not already active before the last unlock.
-    -- Preserves the user's test mode state across the lock/unlock cycle.
-    if not DF.raidTestModeBeforeUnlock then
-        DF:HideRaidTestFrames()
-    end
-    DF.raidTestModeBeforeUnlock = nil
+    -- Release unlock's claim. If the user still wants a preview it stays up; if
+    -- nobody does, this is what hides it. Nothing to go stale either way.
+    DF:SetTestModeOwner("raid", "unlock", false, true)  -- silent: lock announces itself
     
     -- Hide container if not in raid
     if not IsInRaid() then

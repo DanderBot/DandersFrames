@@ -185,6 +185,103 @@ do
     end)
 end
 
+-- ============================================================
+-- EDIT-MODE DEAFENING — the per-container opt-out
+-- ============================================================
+-- 12.1 build 68569 folded CustomAuraContainer onto the (new in that build)
+-- ManagedAuraContainer, and with it our containers inherited Edit Mode's sample
+-- data. On 68412 CustomAuraContainerPrivateMixin:ParseAllAuras called
+-- C_UnitAuras.GetUnitAuras HARD-CODED, so custom containers were immune by
+-- construction; now parsing runs through GetAuraSources(), which returns
+-- AuraContainerAuraSourceLists.EditMode whenever the container's own flag is set.
+-- Exactly ONE thing sets that flag — the container's own handler:
+--
+--     ManagedAuraContainerPrivateMixin:OnAuraDataProviderSwitch(useRealDataProvider)
+--         self:SetUseEditModeSource(not useRealDataProvider)
+--
+-- The normal source reads C_UnitAuras DIRECTLY — it does NOT go through the
+-- swapped AuraUtil provider — so a container that never HEARS the switch keeps
+-- rendering live auras with Edit Mode open. Probe 33 already proved this from the
+-- other side ("born-deaf containers": one built after a switch stays on the
+-- previous source); the old "the swap is below the container layer" reading was
+-- wrong for this build.
+--
+-- ☠ WHY IT GOES IN THE BUILD PATH: AURA_DATA_PROVIDER_SWITCH is a STATIC event —
+-- registered once in AuraContainerPrivateMixin:OnLoad_Intrinsic, and
+-- UpdateEventRegistrations only ever churns the DYNAMIC lists — so an unregister
+-- sticks for the life of that frame. But only THAT frame: every structural
+-- rebuild creates a brand new container, which registers it afresh. A one-shot
+-- deafening expires silently, which is the likeliest reason probe 34 read as a
+-- false negative. So it is re-applied on every build, at the creation site.
+--
+-- DF's own test mode RIDES this event (the provider bounce is how the curated
+-- preview gets its data), so this is a TOGGLE, not a permanent unregister:
+-- containers are born deaf, and are born hearing while _testMode is on.
+local PROVIDER_EVENT = "AURA_DATA_PROVIDER_SWITCH"
+
+-- AuraContainer._providerDeafOK: nil = not yet probed, true/false = the live
+-- client's answer. The container is a forbidden-table object; base widget methods
+-- ARE reachable (we already call SetScale / SetPoint / SetMouseClickEnabled on
+-- it), but the event methods have to be proven at runtime rather than assumed.
+-- The dangerous case is a SILENT refusal — the unregister does not error but the
+-- event stays registered — which would leave every row showing sample icons, so
+-- it is tested for explicitly. Anything short of a proven success keeps the old
+-- hide-the-rows guard (see EDIT-MODE GUARD below) as the fallback.
+local function setContainerProviderDeaf(c, deaf)
+    if not c then return end
+
+    -- ☠ ANSWERED IN GAME (68914): this is refused, and it is refused BY DESIGN.
+    --   Frame:UnregisterEvent(): Function call not permitted on forbidden aspect
+    --   'EventRegistrations' (execution tainted by 'DandersFrames')
+    -- Enum.ForbiddenAspect.EventRegistrations is documented as "Restricts querying
+    -- or modifying registered script events for this object", every Register* method
+    -- ADDS it, and UnregisterEvent / UnregisterAllEvents / IsEventRegistered CHECK
+    -- it. Blizzard's own OnLoad_Intrinsic registers AURA_DATA_PROVIDER_SWITCH from
+    -- secure code, so the container carries the aspect from birth — there is no
+    -- window before it, and no ordering trick. The REBIRTH FALLBACK below is the
+    -- real mechanism; keep this only as a one-shot capability probe so a future
+    -- build that relaxes the rule is noticed rather than assumed away.
+    if AuraContainer._providerDeafOK ~= nil then return end   -- answered once, never retried
+
+    if not deaf then
+        -- Test mode wants the container to hear the bounce. Nothing to do: a fresh
+        -- container is already registered by OnLoad, and re-registering would hit
+        -- the same forbidden aspect anyway.
+        return
+    end
+
+    -- ⚠ Written as an explicit branch, not `deaf and c.UnregisterEvent or
+    -- c.RegisterEvent`: that idiom falls through to RegisterEvent when
+    -- UnregisterEvent is nil, i.e. it would REGISTER the event while reporting
+    -- that it had deafened the container. Exactly backwards.
+    local why
+    if not c.UnregisterEvent then
+        AuraContainer._providerDeafOK, AuraContainer._providerDeafWhy =
+            false, "UnregisterEvent missing on the container"
+        return
+    end
+    local ok, err = pcall(c.UnregisterEvent, c, PROVIDER_EVENT)
+    if not ok then
+        AuraContainer._providerDeafOK = false
+        AuraContainer._providerDeafWhy = "UnregisterEvent errored: " .. tostring(err)
+        DF:DebugWarn(DBG, "provider deafening refused: %s", tostring(err))
+        return
+    end
+
+    -- "It did not error" is NOT proof it took — a silent refusal is the case that
+    -- error" is NOT proof it took — a silent refusal is the case that matters.
+    local okQ, stillRegistered = pcall(c.IsEventRegistered, c, PROVIDER_EVENT)
+    if not okQ then
+        AuraContainer._providerDeafOK, why = true, "accepted; IsEventRegistered unavailable (UNVERIFIED)"
+    elseif stillRegistered then
+        AuraContainer._providerDeafOK, why = false, "silently refused — still registered after UnregisterEvent"
+    else
+        AuraContainer._providerDeafOK, why = true, "confirmed deaf"
+    end
+    AuraContainer._providerDeafWhy = why
+    DF:Debug(DBG, "provider deafening: %s", why)
+end
+
 -- TEST MODE (P5 hybrid, probe 33 live-proven). A real CustomAuraContainer reads real
 -- unit auras — nothing renders on a fabricated test unit. Instead of faking the
 -- CONTAINER we fake the DATA: the game's own sample provider
@@ -225,9 +322,16 @@ function AuraContainer._queueTestBounce()
         -- never fill, so every badge sits parked in its window — the "missing"
         -- preview. Enabling would fill the groups with sample HELPFUL auras
         -- (spell-ID filters are stripped in test) and push every badge out.
+        -- TEST HANDLES ONLY, matching rebuildAll. "Built DISABLED" above is the
+        -- other half of this pair, and only a container built while _testMode was
+        -- on is disabled (build()'s SetEnabled folds in `not testMode`). Once
+        -- rebuildAll stopped rebuilding live handles they were no longer disabled
+        -- either, so an unscoped loop issued a pointless setEnabled+refresh on
+        -- every live container at test entry — refresh() is a Hide/Show bounce
+        -- that re-arms a full aura parse, so it was not free.
         for h in pairs(AuraContainer._handles or {}) do
-            if not h._destroyed and h.backend and h.config and h.config.enabled ~= false
-               and h.config.mode ~= "missing" then
+            if not h._destroyed and h._testFrame and h.backend and h.config
+               and h.config.enabled ~= false and h.config.mode ~= "missing" then
                 if h.backend.setEnabled then pcall(function() h.backend:setEnabled(true) end) end
                 if h.backend.refresh then pcall(function() h.backend:refresh() end) end
             end
@@ -241,10 +345,56 @@ function AuraContainer.SetTestMode(on)
     AuraContainer._testMode = on
     DF:Debug(DBG, "SetTestMode -> %s", tostring(on))
 
+    -- TEST HANDLES ONLY. A container has to be REBUILT across a test transition
+    -- because the two shapes declare different groups and groups can never be
+    -- removed: test mode declares dfTestStyled/dfTestPlain and skips the real
+    -- filter loop entirely (build(), `filters = {}`), so neither shape can be
+    -- reached from the other in place.
+    --
+    -- But that only ever applied to the handles that RENDER the preview. Live
+    -- frames are hidden for the whole session by SetTestModeStateDrivers, so
+    -- rebuilding them into test shape and back rendered nothing either way.
+    --
+    -- ☠ DO NOT re-justify this with "live containers are built deaf". They are
+    -- NOT. setContainerProviderDeaf (top of this file) is a one-shot CAPABILITY
+    -- PROBE that no-ops after its first call -- UnregisterEvent on the container
+    -- is refused by design (ForbiddenAspect.EventRegistrations, answered in game
+    -- on 68914). Every container hears AURA_DATA_PROVIDER_SWITCH, so a live
+    -- handle left standing does follow the bounce onto the sample provider.
+    -- It is HIDDEN, so that is invisible -- with one pre-existing exception:
+    -- the [combat] state driver reveals live frames the instant combat starts
+    -- (see TestMode.lua's note), and those rows then show sample auras. That
+    -- edge was already wrong before this change (it showed curated TEST paint on
+    -- live frames instead), so this neither introduces nor fixes it. Unverified
+    -- in game; if it matters, the fix is to re-point live handles on reveal, not
+    -- to rebuild every one of them on both transitions.
+    --
+    -- ⚠ It is NOT true that the entry pass can be dropped altogether -- that was
+    -- the first read of the trace and it is wrong. The test frame pool is created
+    -- once (testFramePoolInitialized) and its frames are only HIDDEN on exit, so
+    -- from the SECOND entry onward the test handles already exist here and do
+    -- need the rebuild. On the very first entry this loop legitimately does
+    -- nothing: the pool is built after SetTestMode returns and those handles are
+    -- born in test shape (build() reads _testMode itself).
+    -- ☠ LOAD-BEARING INVARIANT, and it is not local to this function: build() picks
+    -- its SHAPE from the GLOBAL AuraContainer._testMode (the `local testMode` read,
+    -- and SetEnabled's `not testMode`), while the rebuild below is keyed on the
+    -- PER-HANDLE flag. They must agree. A handle built while _testMode is on but
+    -- whose _testFrame is false would be born test-shaped and never rebuilt out of
+    -- it — groups can never be removed, so that container is stuck showing curated
+    -- paint on a live frame forever. What guarantees they agree is that NO live
+    -- handle is ever built during test mode, enforced by the UseFactoryFor* gates
+    -- in Features/Auras.lua, Frames/Icons.lua and AuraDesigner (each excludes
+    -- DF.testMode/raidTestMode). Before this became conditional the unconditional
+    -- rebuild made the invariant unnecessary. The asymmetry is what makes it worth
+    -- naming: a false NEGATIVE silently corrupts what is on screen, a false
+    -- POSITIVE only costs one extra rebuild.
     local function rebuildAll()
         if AuraContainer._handles then
             for h in pairs(AuraContainer._handles) do
-                if not h._destroyed then pcall(function() h:OnTestModeChanged() end) end
+                if not h._destroyed and h._testFrame then
+                    pcall(function() h:OnTestModeChanged() end)
+                end
             end
         end
     end
@@ -997,9 +1147,28 @@ local function bindNative(slot, config)
         -- text beat vertex colour, so a spec never carries both (the row builders send
         -- a curve OR a coloured formatter, never each).
         if durSpec.colorCurve and durSpec.colorProperty ~= nil then
-            opts.textColor = { curve = durSpec.colorCurve, property = durSpec.colorProperty }
+            -- Cached on the config by spec identity, exactly like _dfDurBind above.
+            -- This runs once per BUTTON, so a fresh table here cost one allocation
+            -- per slot per rebuild across every row on every frame.
+            -- ☠ The key is sufficient because a duration spec is never mutated in
+            -- place -- every writer of colorCurve/colorProperty fills a table that
+            -- is still a local (Auras.lua's TextStyle:BuildSpec result, Factory's
+            -- constructor literal), and a curve rebuild copies BY VALUE into a
+            -- brand-new dur table. Do NOT restate this as "a structural Rebuild
+            -- hands over a fresh style table": SetFilter, the test-mode ApplyTuning
+            -- and the deferred regen rebuild all call _rebuild() on the SAME config
+            -- and style, so the cache demonstrably survives a rebuild. It is the
+            -- no-in-place-mutation property that makes it safe, nothing else.
+            if config._dfDurColorSpec ~= durSpec then
+                config._dfDurColorSpec = durSpec
+                config._dfDurColor = { curve = durSpec.colorCurve, property = durSpec.colorProperty }
+            end
+            opts.textColor = config._dfDurColor
         end
-        local ok, err = pcall(function() slot:SetDurationText(slot.dfDur, opts) end)
+        -- pcall(fn, self, args...) rather than pcall(function() ... end): no wrapper
+        -- closure per button (same reason as the AddAuraGroup call in build()).
+        -- Protection is unchanged.
+        local ok, err = pcall(slot.SetDurationText, slot, slot.dfDur, opts)
         if ok then
             slot._boundDur = true
         elseif not warnedCurve then
@@ -1414,6 +1583,19 @@ local function applyContainerLayout(c, handle)
     -- and protect each call SEPARATELY: pre-68914 this rode the pin pcall above,
     -- so the rename made the first layout call throw and silently dropped
     -- growth/wrap/padding for the whole row.
+    -- Stashed for the SINGLE-SLOT row path: the flow does not lay slots out, so
+    -- build() pins its one button at the corner the flow would have placed
+    -- element 1 at. Kept here so there is ONE derivation of the corner.
+    handle._flowAnchor = G.flowAnchor
+    -- ...and the STRIP RESERVATION with it. The reservation reaches a group button
+    -- as flow-layout PADDING (setFlowPadding below), which the flow applies to
+    -- element 1 — a hand-pinned slot button never sees it, so it has to be folded
+    -- into the pin offset instead. Only one of the two can be non-zero (the branch
+    -- above is exclusive), and the anchor corner always matches the growth
+    -- direction, so the difference carries the right sign in WoW's y-up space:
+    -- top strip on downward growth pushes the icon DOWN (-padTop), bottom strip on
+    -- upward growth pushes it UP (+padBottom).
+    handle._flowPadY = padBottom - padTop
     local setFlowAnchor  = c.SetFlowLayoutAnchorPoint or c.SetAuraLayoutAnchorPoint
     local setFlowGrowth  = c.SetFlowLayoutGrowthDirection or c.SetAuraLayoutGrowthDirection
     local setFlowMaxLine = c.SetFlowLayoutMaximumLineSize or c.SetAuraLayoutRowWidth
@@ -1641,8 +1823,28 @@ function NativeBackend:build()
     end
     self.container = c
     AuraContainer.stats.builds = AuraContainer.stats.builds + 1
+    -- Deafen to Blizzard's Edit Mode provider switch FIRST, before anything else can
+    -- fire (see EDIT-MODE DEAFENING). Every build gets its own fresh container, so
+    -- this has to be re-applied here rather than once. Inverted while OUR test mode
+    -- is on: that preview needs to hear the bounce.
+    setContainerProviderDeaf(c, not AuraContainer._testMode)
     local isOverlay = config.mode == "overlay"
     local isMissing = config.mode == "missing"
+    -- SINGLE-SLOT ROW. A row that can only ever show ONE icon declares an AuraSlot
+    -- instead of an AuraGroup: AddAuraGroup hardcodes batchSize =
+    -- CustomAuraContainerConstants.FrameCreationBatchSize and calls CreateFrameBatch()
+    -- BEFORE maxFrameCount is applied, so a max=1 group created a full batch of
+    -- buttons to display one icon. AddAuraSlot calls CreateAuraSlotFrame once.
+    -- Selection is NOT degraded: RegisterAuraSlot builds an auraComparator from
+    -- sortMethod/sortDirection, so the slot shows the same best-ranked match.
+    --
+    -- ☠ OPT-IN ONLY, never inferred from max == 1. AD filter groups derive their max
+    -- from group.maxIcons, which is USER-TUNABLE in place via ApplyTuning — a group
+    -- that happened to sit at 1 would become slot-backed and a later 1 -> 4 edit
+    -- would silently fail, because a slot cannot grow and the tuning path has no
+    -- group to re-max. Keying off an explicit flag keeps container TOPOLOGY
+    -- independent of any tuning value.
+    local isSingleSlot = config.singleSlot and not isOverlay and not isMissing
     if isOverlay then
         c:SetAllPoints(handle.frame)          -- overlay covers the host region
     elseif isMissing then
@@ -1695,6 +1897,17 @@ function NativeBackend:build()
     -- keys are remembered so ApplyStyle can hot-apply per-group layout and ApplyTuning
     -- can hot-apply max/sort/candidateFilters (all live mutators).
     local filters = normalizeFilters(config.filter)
+    -- ☠ SINGLE-SLOT means exactly ONE slot. The declaration loop below runs per
+    -- filter record, and every slot it declares pins to the same corner -- so a
+    -- multi-record config would stack its buttons on top of each other where the
+    -- group path would have flowed them side by side. No current consumer can hit
+    -- this (poolFilter returns one string, which normalizeFilters turns into one
+    -- record), but the flag's name promises something the loop does not enforce.
+    -- Fall back to groups rather than render wrong: correct output, no saving.
+    if isSingleSlot and #filters ~= 1 then
+        DF:DebugWarn(DBG, "singleSlot config has %d filter records; using groups", #filters)
+        isSingleSlot = false
+    end
     local maxCount = handle:_slotCount()
     local groupLayout
     if isMissing then
@@ -1729,7 +1942,9 @@ function NativeBackend:build()
     -- layouts on every restyle and would otherwise reset a scaled group's cell back to
     -- the shared size, so it needs to know which groups are scaled.
     self.groupStyles = {}
-    self.slotButtons = isOverlay and {} or nil   -- overlay: key -> native slot button (consumer styling)
+    -- key -> native slot button (consumer styling). Overlay AND single-slot rows:
+    -- both declare AuraSlots, and both need the button reachable by key afterwards.
+    self.slotButtons = (isOverlay or isSingleSlot) and {} or nil
     handle._idGateVulnerable = nil   -- re-derived from this build's records (see the record loop)
     handle._idGateSourceRelative = nil   -- PLAYER-token / isFromPlayerOrPlayerPet pools (visibility gate)
     if testMode and not isOverlay and not isMissing then
@@ -1763,22 +1978,67 @@ function NativeBackend:build()
         local testStyleSlots = testStyle and math.min(1, maxCount) or 0
         local testStyleLayout = scaleGroupLayout(groupLayout, testStyle)
         filters = {}   -- the normal declaration loop below is skipped
-        for k = 1, maxCount do
-            local key = "dfTest" .. k
-            local styled = (k <= testStyleSlots) or nil
-            local okGroup, err = pcall(function()
-                c:AddAuraGroup(key, category, {
-                    maxFrameCount = 1,
-                    initializeFrame = handle:_makeInitializeFrame(handle._gen, k, nil, styled and testStyle or nil),
-                    layout = styled and testStyleLayout or groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
-                })
-            end)
+        -- TWO groups, not one per preview slot. Every AddAuraGroup eagerly creates
+        -- FrameCreationBatchSize (10) button frames — before maxFrameCount is even
+        -- applied — so one group per slot cost maxCount × 10 frames per container per
+        -- unit frame. Measured at 40 test frames that was the single largest allocation
+        -- anywhere in the addon: ~530 MB across four toggles, 65% of the test-mode
+        -- trace, and a visible ~1 s freeze on every toggle.
+        --
+        -- The styled slot keeps its OWN group so declaration order still pins it to
+        -- position 1 — that was the point of the original split, one styled icon leading
+        -- a row of plain ones. Every remaining slot now shares a single group and
+        -- numbers itself via seqStart, so each still paints a distinct curated entry.
+        --
+        -- ⚠ TRADE-OFF, and it is a real one: inside the shared group the flow assigns
+        -- auras to buttons in the CONTAINER's order, which is not creation order, so the
+        -- plain entries may appear in a different order than the curated pool lists
+        -- them. It is deterministic (test mode declares no sort, so the same samples
+        -- land the same way on every build) and every entry is still shown. The original
+        -- "Lightning Shield mid-row" failure this shape was built to prevent was about
+        -- the STYLED entry drifting, which declaration order still guarantees, and the
+        -- mismatched-tooltip half is moot now that tooltips are forced off in test mode.
+        local function addTestGroup(key, count, styled, seqStart)
+            if count <= 0 then return end
+            -- pcall(fn, args...) rather than pcall(function() ... end): no wrapper
+            -- closure. Protection is unchanged — AddAuraGroup asserts.
+            local okGroup, err = pcall(c.AddAuraGroup, c, key, category, {
+                maxFrameCount = count,
+                initializeFrame = handle:_makeInitializeFrame(handle._gen,
+                    styled and 1 or nil, nil, styled and testStyle or nil, seqStart),
+                layout = styled and testStyleLayout or groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
+            })
             if okGroup then
                 self.groupKeys[#self.groupKeys + 1] = key
                 self.groupStyles[key] = styled and testStyle or nil
             else
                 DF:DebugWarn(DBG, "test group failed: %s", tostring(err))
             end
+        end
+        if isSingleSlot then
+            -- SINGLE-SLOT ROW preview. The two-group split above exists to pin a
+            -- styled icon AHEAD of plain ones in a multi-icon row; this row has
+            -- exactly one icon, so it declares the same single AuraSlot the live
+            -- path does and paints curated entry 1 into it. fixedIndex = 1 (not
+            -- the handle-wide counter) because there is only ever one button and
+            -- its paint must be deterministic across rebuilds.
+            local okSlot, btn = pcall(c.AddAuraSlot, c, "dfTestSlot", category,
+                { initializeFrame = handle:_makeInitializeFrame(handle._gen, 1, nil, testStyle) })
+            if okSlot and btn then
+                -- Same strip-reservation fold as the live pin below: the preview
+                -- must sit where the live icon sits, and _positionTestTip already
+                -- applies this inset to the hover zone — without it the zone and
+                -- the icon would disagree by the reservation in test mode.
+                local fa = handle._flowAnchor or "TOPLEFT"
+                pcall(btn.ClearAllPoints, btn)
+                pcall(btn.SetPoint, btn, fa, c, fa, 0, handle._flowPadY or 0)
+                self.slotButtons["dfTestSlot"] = btn
+            elseif not okSlot then
+                DF:DebugWarn(DBG, "test slot failed: %s", tostring(btn))
+            end
+        else
+            addTestGroup("dfTestStyled", testStyleSlots, true, nil)
+            addTestGroup("dfTestPlain", maxCount - testStyleSlots, false, testStyleSlots + 1)
         end
     end
     for i, rec in ipairs(filters) do
@@ -1805,14 +2065,35 @@ function NativeBackend:build()
                 -- dispel carriers) so it can create+bind SetAuraBorder in secure
                 -- context; else the shared initFn.
                 local slotInit = rec.onInit and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit) or initFn
-                local okSlot, btn = pcall(function()
-                    return c:AddAuraSlot(key, f, { initializeFrame = slotInit, candidateFilters = cf,
-                                                   sortMethod = sortMethod, sortDirection = sortDirection })
-                end)
+                local okSlot, btn = pcall(c.AddAuraSlot, c, key, f,
+                    { initializeFrame = slotInit, candidateFilters = cf,
+                      sortMethod = sortMethod, sortDirection = sortDirection })
                 if okSlot and btn then
-                    pcall(function() btn:SetAllPoints(handle.frame) end)
+                    pcall(btn.SetAllPoints, btn, handle.frame)
                     self.slotButtons[key] = btn
                 elseif not okSlot then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
+            elseif isSingleSlot then
+                -- Same declaration as the overlay branch, different GEOMETRY: an
+                -- overlay button covers the whole host, a row button is icon-sized
+                -- and sits where the flow would have put element 1.
+                local slotInit = (rec.style or rec.onInit)
+                    and handle:_makeInitializeFrame(handle._gen, nil, rec.onInit, rec.style)
+                    or initFn
+                local okSlot, btn = pcall(c.AddAuraSlot, c, key, f,
+                    { initializeFrame = slotInit, candidateFilters = cf,
+                      sortMethod = sortMethod, sortDirection = sortDirection })
+                if okSlot and btn then
+                    -- Size is NOT set here: styleButton_regions sizes every button
+                    -- from the shared config, group-backed or not, so the icon comes
+                    -- out identical. Only the position the flow would have supplied
+                    -- has to be replaced.
+                    local fa = handle._flowAnchor or "TOPLEFT"
+                    pcall(btn.ClearAllPoints, btn)
+                    pcall(btn.SetPoint, btn, fa, c, fa, 0, handle._flowPadY or 0)
+                    self.slotButtons[key] = btn
+                elseif not okSlot then
+                    DF:DebugWarn(DBG, "AddAuraSlot (single-slot row) failed: %s", tostring(btn))
+                end
             else
                 -- A record carrying its own style (or an onInit) needs its OWN init
                 -- closure — initFn is shared across every group and would apply the
@@ -1823,11 +2104,10 @@ function NativeBackend:build()
                     groupInit = handle:_makeInitializeFrame(handle._gen, nil, rec.onInit, rec.style)
                     recLayout = scaleGroupLayout(groupLayout, rec.style)
                 end
-                local okGroup, err = pcall(function()
-                    c:AddAuraGroup(key, f, { maxFrameCount = maxCount, initializeFrame = groupInit,
-                                             layout = recLayout, candidateFilters = cf,
-                                             sortMethod = sortMethod, sortDirection = sortDirection })
-                end)
+                local okGroup, err = pcall(c.AddAuraGroup, c, key, f,
+                    { maxFrameCount = maxCount, initializeFrame = groupInit,
+                      layout = recLayout, candidateFilters = cf,
+                      sortMethod = sortMethod, sortDirection = sortDirection })
                 if okGroup then
                     self.groupKeys[#self.groupKeys + 1] = key
                     self.groupStyles[key] = rec.style
@@ -1923,6 +2203,19 @@ function NativeBackend:applyLayout()
     -- hot re-apply here would overwrite them with row semantics.
     if not c or self.handle.config.mode == "overlay" or self.handle.config.mode == "missing" then return end
     applyContainerLayout(c, self.handle)
+    -- SINGLE-SLOT ROW: the flow does not move slot buttons, so the pin build()
+    -- made has to be re-made here or a growth/anchor change would leave the icon
+    -- at the old corner while the container moved under it. applyContainerLayout
+    -- has just refreshed handle._flowAnchor, so this reads the new corner. Size is
+    -- still styleButton_regions' job (ApplyStyle re-runs it right after this).
+    if self.slotButtons and self.handle.config.singleSlot then
+        local fa = self.handle._flowAnchor or "TOPLEFT"
+        local py = self.handle._flowPadY or 0
+        for _, btn in pairs(self.slotButtons) do
+            pcall(btn.ClearAllPoints, btn)
+            pcall(btn.SetPoint, btn, fa, c, fa, 0, py)
+        end
+    end
     if self.groupKeys and c.SetAuraGroupLayout then
         local groupLayout = buildGroupLayout(self.handle.config)
         for _, key in ipairs(self.groupKeys) do
@@ -1933,7 +2226,7 @@ function NativeBackend:applyLayout()
             -- because AddAuraGroup got the scaled layout there. Button size and reserved
             -- cell are separate things and both have to be re-pushed.
             local gl = scaleGroupLayout(groupLayout, self.groupStyles and self.groupStyles[key])
-            pcall(function() c:SetAuraGroupLayout(key, gl) end)
+            pcall(c.SetAuraGroupLayout, c, key, gl)
         end
     end
     -- ★ PARTITION KICK (live-confirmed 2026-07-09): inbound mutators set the dirty
@@ -1959,12 +2252,35 @@ end
 -- in combat.
 function NativeBackend:applyGroupTuning()
     local c = self.container
-    if not c or self.handle.config.mode == "overlay" or self.handle.config.mode == "missing" then return end
-    -- Test mode declares per-slot PIN groups (maxFrameCount = 1, curated paint) —
-    -- tuning them would break the slot pinning. Handle:ApplyTuning rebuilds the
-    -- preview instead, so this path is never reached in test mode; guard anyway.
+    if not c then return end
+    local mode = self.handle.config.mode
+    -- ☠ MISSING mode stays on the Rebuild path. Its layout-push inversion is
+    -- load-bearing and hard-won (the badge only clears the clip window because ONE
+    -- blank button's layout CELL pushes it out), and a live candidateFilters swap
+    -- changes exactly which buttons exist. Nothing has exercised that combination, so
+    -- it is left alone rather than enabled blind.
+    if mode == "missing" then return end
+    -- Test mode declares its own groups with curated paint stamped per button at create
+    -- (a styled group pinned first, then one shared plain group) — tuning them in place
+    -- would not re-stamp that paint. Handle:ApplyTuning rebuilds the preview instead, so
+    -- this path is never reached in test mode; guard anyway.
     if AuraContainer._testMode then return end
-    if not (self.groupKeys and c.SetAuraGroupMaxFrameCount) then return end
+    -- OVERLAY declares AuraSLOTs, not groups, so groupKeys is empty and the group
+    -- setters have nothing to act on — it needs the slot-side setters instead. The
+    -- cfByKey derivation below is shared: build() keys slots and groups identically
+    -- (rec.key or positional "df<i>"), so the same map serves both.
+    -- SINGLE-SLOT ROWS declare AuraSlots too, so they take the slot-side setters for
+    -- exactly the same reason: groupKeys is empty and the group setters have nothing
+    -- to act on. ☠ Without this a spell-map edit on a placed indicator would silently
+    -- no-op — include/excludeSpellIDs ride the TUNING signature, not the struct one,
+    -- so they never re-enter build(), and the indicator would keep the old spell list
+    -- until some unrelated change happened to rebuild it.
+    local usesSlots = mode == "overlay" or self.handle.config.singleSlot
+    if usesSlots then
+        if not (self.slotButtons and c.SetAuraSlotCandidateFilters) then return end
+    elseif not (self.groupKeys and c.SetAuraGroupMaxFrameCount) then
+        return
+    end
     local config = self.handle.config
     local maxCount = self.handle:_slotCount()
     -- SetAuraGroupSortMethod validates BOTH args as enum members (nil asserts), so an
@@ -2005,13 +2321,35 @@ function NativeBackend:applyGroupTuning()
             self.handle._idGateSourceRelative = true
         end
     end
-    for _, key in ipairs(self.groupKeys) do
-        pcall(function() c:SetAuraGroupMaxFrameCount(key, maxCount) end)
-        -- nil CLEARS: the inbound copy runs over an EMPTY defaults table, so a
-        -- toggled-off filter set doesn't survive (the old Rebuild-merge lesson).
-        pcall(function() c:SetAuraGroupCandidateFilters(key, cfByKey[key]) end)
-        if sortMethod ~= nil and sortDirection ~= nil then
-            pcall(function() c:SetAuraGroupSortMethod(key, sortMethod, sortDirection) end)
+    -- pcall(fn, args...) not pcall(function() ... end): the closure form allocated THREE
+    -- closures per group key per tuning pass. Protection is unchanged.
+    --
+    -- Ordering note (Blizzard source): SetAuraGroupMaxFrameCount and
+    -- SetAuraGroupSortMethod only MarkDirty, and dirty flags coalesce into one
+    -- ProcessDirtyFlags on the next OnUpdate — so those are near-free however many
+    -- groups there are. SetAuraGroupCandidateFilters runs an immediate UpdateAllAuras
+    -- per call and has no equality guard of its own, so a container with N groups pays
+    -- N full updates here. There is no batch setter; the only real lever is declaring
+    -- fewer groups.
+    if usesSlots then
+        -- A slot is a single button: no maxFrameCount and no layout to push, so only
+        -- the candidate filters and the sort (which decides WHICH aura wins the one
+        -- slot) are tunable. Same nil-CLEARS semantics as the group setter.
+        for key in pairs(self.slotButtons) do
+            pcall(c.SetAuraSlotCandidateFilters, c, key, cfByKey[key])
+            if sortMethod ~= nil and sortDirection ~= nil and c.SetAuraSlotSortMethod then
+                pcall(c.SetAuraSlotSortMethod, c, key, sortMethod, sortDirection)
+            end
+        end
+    else
+        for _, key in ipairs(self.groupKeys) do
+            pcall(c.SetAuraGroupMaxFrameCount, c, key, maxCount)
+            -- nil CLEARS: the inbound copy runs over an EMPTY defaults table, so a
+            -- toggled-off filter set doesn't survive (the old Rebuild-merge lesson).
+            pcall(c.SetAuraGroupCandidateFilters, c, key, cfByKey[key])
+            if sortMethod ~= nil and sortDirection ~= nil then
+                pcall(c.SetAuraGroupSortMethod, c, key, sortMethod, sortDirection)
+            end
         end
     end
     -- ★ PARTITION KICK (same mechanism as applyLayout): the inbound mutators mark
@@ -2721,8 +3059,16 @@ function applyRecordStyle(button, handle, recStyle)
     end
 end
 
-function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle)
+-- seqStart: when set, this group numbers its OWN buttons sequentially from that base
+-- rather than taking a fixed index or the handle-wide creation counter. That is what
+-- lets a SINGLE test group paint a distinct curated entry per button. The handle-wide
+-- counter cannot do it: Blizzard eagerly creates FrameCreationBatchSize frames per
+-- group, so the shared counter runs far past the preview's slot range. Overshoot is
+-- harmless either way — _paintTestSlot wraps the index modulo the pool size, and any
+-- button past maxFrameCount is never displayed.
+function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart)
     local handle = self
+    local seq = seqStart
     return function(button)
         local ok, err = pcall(function()
             if handle._destroyed or handle._gen ~= gen or not button then return end
@@ -2759,8 +3105,15 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle)
                     -- fixedIndex = the per-slot test group's position (creation order
                     -- is NOT layout order; the group key is) — stamped on the button
                     -- so ApplyStyle repaints the same entry.
-                    button._dfTestIndex = fixedIndex or i
-                    handle:_paintTestSlot(button, button._dfTestIndex)
+                    local testIndex
+                    if seq then
+                        testIndex = seq
+                        seq = seq + 1
+                    else
+                        testIndex = fixedIndex or i
+                    end
+                    button._dfTestIndex = testIndex
+                    handle:_paintTestSlot(button, testIndex)
                 else
                     handle:_bindNativeSlot(button)     -- native inbound setters
                     -- Consumer secure init (overlay dispel carriers): runs in THIS
@@ -3086,8 +3439,10 @@ function Handle:ApplyStyle(style, layout)
                     -- Blizzard instantly overwrote the curated icons with the
                     -- sample auras' random art and zero durations (static swipes)
                     -- — until the next rebuild repainted them (Krathe 2026-07-10).
-                    -- _dfTestIndex = the button's per-slot group position (creation
-                    -- order ≠ layout order).
+                    -- _dfTestIndex = the curated entry this button was stamped with at
+                    -- create (fixed for the styled group, sequential within the shared
+                    -- plain group). Repaint the SAME entry — creation order is not
+                    -- layout order, so recomputing it here would reshuffle the preview.
                     self:_paintTestSlot(b, b._dfTestIndex or i)
                 else
                     bindNative(b, self.config)
@@ -3441,49 +3796,263 @@ end
 
 -- ============================================================
 -- EDIT-MODE GUARD (shared)
--- Blizzard Edit Mode swaps the ENTIRE aura data layer: AURA_DATA_PROVIDER_SWITCH
--- installs the edit-mode sample provider at the AuraUtil level (AuraUtil.lua:19,
--- AuraUtilDataProvider replaces C_UnitAuras wholesale), so every container in the
--- game re-parses to random-icon fake auras. Per-container opt-out is IMPOSSIBLE —
--- deafening a container to the event was live-disproved (DF_AuraLab probe 34's
--- deaf twin still flipped: the swap is below the container layer). So while a
--- FOREIGN switch is active we HIDE the factory rows (plain anchor frames — the
--- drives' shown-caches keep them from re-showing), and restore + refresh when the
--- real provider returns. DF's own test mode (P5) sets _ownsProviderSwitch around
--- its switches so its curated preview is exempt from the guard.
+-- ============================================================
+-- Blizzard Edit Mode flips every aura container onto its sample-data source. We
+-- cannot stop OUR containers hearing that switch -- the container carries the
+-- EventRegistrations forbidden aspect from birth, so UnregisterEvent is refused
+-- (see EDIT-MODE DEAFENING near the top of this file). But we do not need to.
+--
+-- ★ PRIMARY: hand the real provider straight back. C_UnitAuras.ResetAuraDataProvider
+-- is public and unrestricted (no HasRestrictions in the generated docs; test mode
+-- already drives it), and it re-fires the switch with useRealDataProvider = true, so
+-- every container -- ours and Blizzard's -- returns to the real source. No rebuild,
+-- no teardown, no button pools recreated. The restore is just the real-switch branch.
+--
+-- THE TRADE: this is GLOBAL. Blizzard's own Edit Mode preview loses its sample
+-- auras, so their buff frame and cooldown manager show your REAL auras while you
+-- position them. That is the same class of trade DF test mode already makes in the
+-- other direction, and the alternative is our own rows flashing.
+--
+-- ORDER, and why each step is where it is:
+--   1. PARK synchronously, inside this dispatch. AURA_DATA_PROVIDER_SWITCH is a
+--      SYNCHRONOUS event, so nothing is drawn between the containers' handler and
+--      ours whichever order they run in -- parking here means the sample icons are
+--      never painted at all.
+--   2. RESET one frame later, never inline. An inline reset would nest a dispatch
+--      inside this one, and any container the OUTER fake dispatch had not yet
+--      visited would receive fake AFTER our reset and be stranded on the sample
+--      source. A frame later the outer dispatch has finished and they all flip
+--      together.
+--   3. Only if the reset is unavailable or fails, fall back to REBIRTH: a container
+--      built after a switch never receives it and useEditModeSource initialises
+--      false, so a fresh container is on the real source by construction (probe 33's
+--      born-deaf finding, which test mode's ordering already depends on).
+--
+-- DF's own test mode (P5) sets _ownsProviderSwitch around its switches so its
+-- curated preview is exempt from all of this.
 local function ensureProviderWatch()
     if AuraContainer._providerWatch then return end
     local f = CreateFrame("Frame")
     AuraContainer._providerWatch = f
     f._hidden = setmetatable({}, { __mode = "k" })
     f._fakeActive = false
-    f:RegisterEvent("AURA_DATA_PROVIDER_SWITCH")
+
+    -- Hide every currently-shown row and remember which ones we hid.
+    local function parkAll(watch)
+        watch._fakeActive = true
+        for h in pairs(AuraContainer._handles or {}) do
+            if not h._destroyed and h:GetFrame():IsShown() then
+                watch._hidden[h] = true
+                safeHideWindow(h:GetFrame(), function() return watch._hidden[h] end)
+            end
+        end
+    end
+
+    -- Clear the park BEFORE any restore: _applyVisibility forces a handle hidden
+    -- while _fakeActive and _hidden[h] both hold, so restoring first strands them.
+    local function unpark(watch)
+        watch._fakeActive = false
+        for h in pairs(watch._hidden) do watch._hidden[h] = nil end
+    end
+
+    -- ★ STRANDING SWEEP — the belt to the inline reset's braces.
+    --
+    -- The inline reset leaves one hole, and it is the only way Edit Mode's sample icons
+    -- can still reach a LIVE frame: if the outer fake dispatch had not yet visited some
+    -- container when our reset ran, that container takes fake AFTER the reset and sits
+    -- on the sample source until Edit Mode closes. Measured as not happening on 68914,
+    -- but that rests on an undocumented dispatch order, and this ships to configurations
+    -- we will never test.
+    --
+    -- The sweep removes the need to reason about order at all: bounce the provider
+    -- fake→real BACK TO BACK in one frame. Every container hears both, in that order,
+    -- whatever order it is visited in, and ends on the real source. Nothing paints
+    -- between two consecutive Lua statements.
+    --
+    -- It is near-free: UpdateAllAuras is MarkDirty(FullAuraRebuild), a bit-set, and
+    -- ProcessDirtyFlags runs once on the next OnUpdate — so two marks in one frame
+    -- produce ONE reparse, the same one the reset already scheduled.
+    --
+    -- ☠ THE DANGEROUS HALF: if Switch succeeds and Reset does not, the whole GAME is
+    -- left on the fake provider — every aura display, ours and Blizzard's, showing
+    -- sample icons. So Reset is retried hard, and as a last resort re-armed on a timer.
+    -- Reset is known to work by the time we get here (the inline reset used it moments
+    -- ago), which is why the bounce is safe to attempt at all.
+    local function sweepStranded()
+        -- Only NESTED dispatch can strand: QUEUED means our reset landed after the
+        -- outer dispatch finished, so every container had already taken fake first.
+        if AuraContainer._inlineDispatch ~= "NESTED" then return end
+        if AuraContainer._ownsProviderSwitch then return end
+        local switch = C_UnitAuras and C_UnitAuras.SwitchAuraDataProvider
+        local reset  = C_UnitAuras and C_UnitAuras.ResetAuraDataProvider
+        if not (switch and reset) then return end
+
+        -- Our own handler must ignore both halves; reuse the flag it already honours.
+        AuraContainer._ownsProviderSwitch = true
+        local okS = pcall(switch)
+        local okR = pcall(reset)
+        if okS and not okR then
+            for _ = 1, 3 do
+                if pcall(reset) then okR = true; break end
+            end
+        end
+        AuraContainer._ownsProviderSwitch = false
+
+        if okS and not okR then
+            -- Worst case: the world is on fake data and we could not undo it. Keep
+            -- trying rather than leaving it; a stuck retry is recoverable, a stuck
+            -- fake provider is not.
+            DF:DebugWarn(DBG, "stranding sweep left the fake provider installed — retrying")
+            local function retry(n)
+                if pcall(reset) or n <= 0 then return end
+                C_Timer.After(0.25, function() retry(n - 1) end)
+            end
+            retry(20)
+        elseif not okS then
+            -- Switch refused, so nothing was changed and nothing needs undoing.
+            DF:DebugWarn(DBG, "stranding sweep skipped: SwitchAuraDataProvider refused")
+        end
+    end
+
+    -- LAST RESORT (see step 3 above). Two passes: a raid's worth of teardown +
+    -- CreateFrame + AddAuraGroup in one frame is itself a visible stall, so rebuild
+    -- what is ON SCREEN now and drain the rest 25 per tick. Offscreen handles stay
+    -- flipped for those few frames, which costs nothing because nothing draws them.
+    local function rebirthAll(watch)
+        unpark(watch)
+        local function rebirth(h)
+            if h._destroyed then return end
+            pcall(function() h:_rebuild() end)          -- reborn on the real source
+            pcall(function() h:_applyVisibility() end)  -- and back on screen
+        end
+        local later, n = {}, 0
+        for h in pairs(AuraContainer._handles or {}) do
+            if not h._destroyed then
+                if h:GetFrame():IsShown() then
+                    rebirth(h)
+                else
+                    n = n + 1
+                    later[n] = h
+                end
+            end
+        end
+        if n == 0 then return end
+        local i = 1
+        local function drain()
+            if AuraContainer._ownsProviderSwitch then return end
+            local stop = math.min(i + 24, n)
+            while i <= stop do rebirth(later[i]); i = i + 1 end
+            if i <= n then C_Timer.After(0, drain) end
+        end
+        C_Timer.After(0, drain)
+    end
+
+    f:RegisterEvent(PROVIDER_EVENT)
     f:SetScript("OnEvent", function(self, _, useRealDataProvider)
         if AuraContainer._ownsProviderSwitch then
             self._fakeActive = false   -- P5's own preview manages its rows itself
             return
         end
+
         if useRealDataProvider then
             self._fakeActive = false
             for h in pairs(self._hidden) do
                 self._hidden[h] = nil
                 if not h._destroyed then
-                    -- Restore through the visibility channel: hover-safe, and
-                    -- composes intent + identity gate (a bare Show() re-opened
-                    -- gate-hidden windows on Edit Mode exit).
+                    -- Restore through the visibility channel: hover-safe, and composes
+                    -- intent + identity gate (a bare Show() re-opened gate-hidden
+                    -- windows on Edit Mode exit).
+                    --
+                    -- ⚠ NO Refresh() here. It used to bounce every container
+                    -- (NativeBackend:refresh = Hide+Show), and that bounce was most of
+                    -- the remaining visible delay: N containers each re-registering and
+                    -- re-laying-out. It is redundant twice over —
+                    --   * the real switch already ran SetUseEditModeSource(false) on
+                    --     every container, and that calls UpdateAllAuras itself; and
+                    --   * showing the parent fires the container's OnShow_Intrinsic,
+                    --     which does UpdateEventRegistrations + UpdateAllAuras anyway.
+                    -- The second also closes the only gap worth worrying about: while
+                    -- parked the frame is hidden, so the container drops its UNIT_AURA
+                    -- registration (ShouldRegisterForDynamicEvents = IsVisible and
+                    -- IsEnabled) and would otherwise miss changes made during the park.
                     h:_applyVisibility()
-                    h:Refresh()        -- re-parse real data (Edit Mode exit is OOC)
                 end
             end
-        else
-            self._fakeActive = true
-            for h in pairs(AuraContainer._handles or {}) do
-                if not h._destroyed and h:GetFrame():IsShown() then
-                    self._hidden[h] = true
-                    safeHideWindow(h:GetFrame(), function() return self._hidden[h] end)
-                end
-            end
+            return
         end
+
+        if AuraContainer._providerDeafOK then
+            -- A future build that permits the unregister: our containers never heard
+            -- this switch and are still on the real source. Nothing to do.
+            self._fakeActive = false
+            return
+        end
+
+        parkAll(self)
+
+        -- ⚗ EXPERIMENT (INLINE_PROVIDER_RESET): reset from INSIDE this dispatch rather
+        -- than a frame later. Parking and restoring then both happen before anything is
+        -- drawn, so the remaining sub-50ms blip disappears entirely.
+        --
+        -- ✅ VERIFIED IN GAME on 68914: NESTED, and NOTHING stranded. Confirmed from the
+        -- saved debug log, which also shows neither fallback firing — no reset failure,
+        -- no rebirth. One dispatch, no visible artifact.
+        --
+        -- ⚠ But note WHY that is luck rather than design. The stranding hazard depends on
+        -- where our watch frame sits in the dispatch order, and the obvious prediction was
+        -- wrong: the watch registers before any container exists (ensureProviderWatch runs
+        -- ahead of the first _build), so registration order would have put it FIRST and
+        -- stranded everything. It stranded nothing, so dispatch order is NOT registration
+        -- order — and the real rule is undocumented. Treat this as empirical, not sound.
+        -- If it ever regresses the symptom is rows of random spellbook icons during Edit
+        -- Mode, cleared on exit (Edit Mode's own reset flips every container back), so it
+        -- is self-limiting: no error, no data loss, one toggle to clear.
+        --
+        -- Whether that is safe depends on undocumented dispatch semantics, and the
+        -- outcome is self-reporting — the debug line below says which the client does:
+        --   * QUEUED  — pcall returns with _fakeActive still set, the real switch lands
+        --               later. Identical to the deferred path; safe, no gain.
+        --   * NESTED  — the real switch is dispatched re-entrantly, our restore has
+        --               already run, _fakeActive is clear. Zero blip — BUT any container
+        --               the OUTER fake dispatch had not yet visited receives fake AFTER
+        --               our reset and is stranded on the sample source until Edit Mode
+        --               is toggled again. Visible as rows of random spellbook icons.
+        -- If you see stranded rows, flip this to false; the deferred path below is
+        -- unchanged and known good.
+        local INLINE_PROVIDER_RESET = true
+        local resetNow = C_UnitAuras and C_UnitAuras.ResetAuraDataProvider
+        if INLINE_PROVIDER_RESET and resetNow and pcall(resetNow) then
+            -- Recorded, not just logged: which of the two it is decides whether the
+            -- inline reset is worth keeping, and it is not inferable from "it looked
+            -- fine" — one imperceptible frame and zero frames look identical.
+            AuraContainer._inlineDispatch = self._fakeActive and "QUEUED" or "NESTED"
+            DF:Debug(DBG, "inline provider reset: dispatch was %s",
+                     self._fakeActive and "QUEUED (no gain, safe)" or "NESTED (zero blip; watch for stranded rows)")
+            -- Deliberately NOT returning here. If the dispatch was NESTED the restore has
+            -- already run and the backstop below sees _fakeActive clear and no-ops. If it
+            -- was QUEUED the real switch is still in flight — and if it somehow never
+            -- arrives, the backstop is the only thing standing between us and rows parked
+            -- forever. It costs one no-op timer.
+        end
+
+        C_Timer.After(0, function()
+            if AuraContainer._ownsProviderSwitch then return end
+            if not self._fakeActive then
+                -- Resolved inline. Sweep anyway: that path is the one that can leave a
+                -- container stranded on the sample source, and this is where we stop
+                -- depending on dispatch order to have been kind to us.
+                sweepStranded()
+                return
+            end
+            local reset = C_UnitAuras and C_UnitAuras.ResetAuraDataProvider
+            if reset and pcall(reset) then return end      -- the real-switch branch restores
+            DF:DebugWarn(DBG, "ResetAuraDataProvider unavailable/failed; rebuilding instead")
+            -- Containers cannot be stood up in lockdown; stay parked until the real
+            -- switch arrives (Edit Mode cannot be opened in combat anyway -- this only
+            -- covers another addon switching the provider mid-fight).
+            if InCombatLockdown() then return end
+            rebirthAll(self)
+        end)
     end)
 end
 
@@ -3550,6 +4119,20 @@ function AuraContainer:Create(parent, config)
     -- h.frame is the plain anchor frame DF positions; the backend parents its OWN
     -- CustomAuraContainer to it (one container per consumer).
     h.frame = CreateFrame("Frame", nil, parent)
+    -- TEST-FRAME PROVENANCE, resolved ONCE here rather than per toggle. Only a
+    -- handle that will actually render the preview needs SetTestMode's rebuild;
+    -- see rebuildAll for why the live ones never do. Resolving at Create is safe
+    -- because every test frame carries dfIsTestFrame from its OWN creation --
+    -- TestFramePool.lua stamps it on the pool frames and CreatePlayerTestFrame on
+    -- the pinned ones, both long before any consumer drives a row onto them.
+    -- Bounded walk: the anchor's parent is usually the unit frame, but AD hangs
+    -- containers off the healthBar / background anchor / aura-bar strip instead.
+    local ancestor = parent
+    for _ = 1, 6 do
+        if not ancestor then break end
+        if ancestor.dfIsTestFrame then h._testFrame = true break end
+        ancestor = ancestor.GetParent and ancestor:GetParent() or nil
+    end
     if cfg.mode == "missing" then
         -- MISSING mode (probe 32, live-confirmed 2026-07-10): h.frame is a CLIP WINDOW
         -- exactly the badge's size — the caller positions it. The backend pins its
@@ -3615,8 +4198,9 @@ function AuraContainer:Create(parent, config)
     else
         h:_build()
     end
-    -- Born during a foreign fake-data period (e.g. roster change while the user
-    -- sits in Edit Mode): start hidden like the rest, restored on the real switch.
+    -- FALLBACK PATH ONLY (_fakeActive never latches once deafening is confirmed):
+    -- born during a foreign fake-data period (e.g. roster change while the user
+    -- sits in Edit Mode), start hidden like the rest, restored on the real switch.
     local watch = AuraContainer._providerWatch
     if watch and watch._fakeActive then
         watch._hidden[h] = true

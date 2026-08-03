@@ -227,6 +227,26 @@ DF.DebugSubCommands = {}
 -- This lookup is what the dispatcher gate consults so the two halves now match.
 DF.DEBUG_SUB_DEV = {}
 
+-- ☠ EVERY sub() NAME, dev or not. This is what stops "/df debug <word>" loading
+-- the settings addon for a command that lives entirely in this one.
+--
+-- The dispatcher's unknown-word fallback exists because a handful of debug tools
+-- (icons, colorhook, atlas, auraexp, memtest) register their slashes only when
+-- the companion loads, so an unrecognised word has to load it and retry. But
+-- "recognised" was read from DebugSlashBySub, which ONLY RegisterDebugSlash
+-- fills -- so all ~38 commands registered through sub() looked unknown and pulled
+-- in ~3 MB of settings UI before running a branch that never needed it. That is
+-- the whole saving of splitting the addon in two, spent on one diagnostic.
+--
+-- Worse for the probes that exist to MEASURE memory: loading the companion
+-- perturbs exactly what they report.
+--
+-- Safe against shadowing: no sub() name collides with a companion-registered
+-- slash, so this set can never swallow a word that genuinely needs the load. The
+-- sub() branches that DO need the companion (profiler, ...) call
+-- EnsureOptionsLoaded themselves, at the point of need.
+DF.DEBUG_SUB_KNOWN = {}
+
 -- ============================================================
 -- CHAT OUTPUT HOUSE STYLE  (DF:Out)
 -- ============================================================
@@ -526,6 +546,9 @@ function DF:RegisterDebugSub(cmd, desc, devOnly, args, hidden)
     -- command cannot be marked dev in the listing while staying runnable on
     -- release — the two can no longer drift apart.
     if devOnly then DF.DEBUG_SUB_DEV[cmd] = true end
+    -- Registering IS the gate here too: a branch added later is covered on the
+    -- day it is written, with no second list to keep in step.
+    DF.DEBUG_SUB_KNOWN[cmd] = true
 end
 
 -- ============================================================
@@ -1219,8 +1242,13 @@ function DF:LightweightUpdateHighlight(highlightType)
         end
         
         if highlight and highlight:IsShown() then
+            -- ☠ This function writes the four line textures DIRECTLY, bypassing
+            -- ApplyHighlightStyle, so its cached style is stale the moment we touch
+            -- them. Drop it or the next full update sees a matching signature and
+            -- skips, leaving these drag-time values in place permanently.
+            if DF.InvalidateHighlightStyle then DF:InvalidateHighlightStyle(highlight) end
             highlight:SetAlpha(alpha)
-            
+
             -- Update border textures - check both naming conventions
             local top = highlight.top or highlight.topLine
             local bottom = highlight.bottom or highlight.bottomLine
@@ -1647,6 +1675,36 @@ function DF:GetClassColor(class)
     return RAID_CLASS_COLORS[class] or DEFAULT_CLASS_COLOR
 end
 
+-- ============================================================
+-- UNIT ROLE RESOLUTION
+-- ============================================================
+-- ☠ NEVER CALL UnitGroupRolesAssigned DIRECTLY FOR A GATE. Use this.
+--
+-- UnitGroupRolesAssigned answers "what role did the GROUP assign", not "what
+-- does this player do". It returns "NONE" solo, in the open world, in open-world
+-- groups, and in delves until something forces an assignment -- so a Holy
+-- Paladin standing in Silvermoon reads as NONE, and any caller that maps NONE
+-- onto DAMAGER decides a healer is a DPS. That is what made the resource bar's
+-- Healers toggle inert while solo (the bar answered to the DPS toggle instead),
+-- and why a delve only resolved the role after a spec change.
+--
+-- The player is the one unit we can do better for: GetSpecializationRole is
+-- authoritative and always available. Other units expose no public spec API, so
+-- they stay NONE and the caller keeps whatever fallback it had.
+--
+-- Returns nil for a unit that does not exist, otherwise a role token that may
+-- still be "NONE" -- resolution only, no policy. Callers decide what NONE means.
+function DF:GetUnitRole(unit)
+    if not unit or not UnitExists(unit) then return nil end
+    local role = UnitGroupRolesAssigned and UnitGroupRolesAssigned(unit)
+    if (not role or role == "NONE") and UnitIsUnit and UnitIsUnit(unit, "player")
+       and GetSpecialization and GetSpecializationRole then
+        local spec = GetSpecialization()
+        if spec then role = GetSpecializationRole(spec) or role end
+    end
+    return role
+end
+
 -- Resolve the frame border colour: the static borderColor by default, or
 -- (Stage 2.1+) the unit's class / role colour with its own alpha slider when
 -- the canonical frameBorderColorSource picks one. Non-player / unknown-class
@@ -1701,17 +1759,10 @@ function DF:GetFrameBorderColor(frame, db)
         if frame.dfIsTestFrame then
             local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame)
             role = testData and testData.role
-        elseif frame.unit and UnitExists(frame.unit) and UnitGroupRolesAssigned then
-            role = UnitGroupRolesAssigned(frame.unit)
-            -- UnitGroupRolesAssigned returns "NONE" outside instances where
-            -- roles aren't assigned (solo, world content). For the player,
-            -- fall back to spec role so role colour stays meaningful. Other
-            -- units expose no public spec API; they stay on picker fallback.
-            if (not role or role == "NONE") and UnitIsUnit and UnitIsUnit(frame.unit, "player")
-               and GetSpecialization and GetSpecializationRole then
-                local spec = GetSpecialization()
-                if spec then role = GetSpecializationRole(spec) end
-            end
+        else
+            -- Player falls back to the spec role when the group assigned none;
+            -- other units stay NONE and drop to the picker fallback below.
+            role = DF:GetUnitRole(frame.unit)
         end
         local c = rc and role and role ~= "NONE" and (rc[role] or rc[string.lower(role)])
         if c then
@@ -2534,6 +2585,34 @@ function DF:DebugAuraFilters(unit)
     local hasFEA = AuraUtil and AuraUtil.ForEachAura ~= nil
     o:Field("AuraUtil.ShouldDisplayBuff", hasSDB and "present" or "absent", hasSDB and "good" or "warn")
     o:Field("AuraUtil.ForEachAura", hasFEA and "present" or "absent", hasFEA and "good" or "warn")
+
+    -- Which Edit Mode strategy is actually live. Deafening the container to
+    -- AURA_DATA_PROVIDER_SWITCH can only be PROVEN at runtime (it is a base widget
+    -- method on a forbidden-table object), so this reports the client's answer
+    -- rather than an assumption — see EDIT-MODE DEAFENING in Frames/AuraContainer.lua.
+    o:Section("Edit Mode isolation")
+    local ac = DF.AuraContainer
+    local deafOK = ac and ac._providerDeafOK
+    if not ac or deafOK == nil then
+        o:Field("strategy", "not probed yet (no container built)", "neutral")
+    elseif deafOK then
+        o:Field("strategy", "deafened container — rows keep live auras", "good")
+    else
+        o:Field("strategy", "rebirth fallback — rebuild on switch (OOC), hide in combat", "warn")
+    end
+    if ac and ac._providerDeafWhy then
+        o:Field("unregister probe", tostring(ac._providerDeafWhy), deafOK and "good" or "neutral")
+    end
+    -- Populated the first time Edit Mode is opened. QUEUED means the client deferred
+    -- our re-entrant switch to after the in-flight dispatch (safe, and the inline reset
+    -- gains nothing); NESTED means it dispatched re-entrantly (zero blip, but containers
+    -- the outer dispatch had not reached can strand on the sample source).
+    if ac and ac._inlineDispatch then
+        o:Field("inline reset dispatch", ac._inlineDispatch,
+                ac._inlineDispatch == "QUEUED" and "good" or "warn")
+    elseif ac then
+        o:Field("inline reset dispatch", "not observed yet (open Edit Mode once)", "neutral")
+    end
 
     o:Section("ShouldDisplayBuff per aura")
     if AuraUtil and AuraUtil.ForEachAura then
@@ -3636,6 +3715,37 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Keep both in sync
         DandersFramesCharDB.currentProfile = currentProfile
         DandersFramesDB_v2.currentProfile = currentProfile
+
+        -- Settings-window geometry moves from db.party to account-wide
+        -- windowState (see DF:GetWindowState for why). Seed once from whichever
+        -- profile is active at this login -- that is the window the user last
+        -- sized and scaled, so it is the only correct source.
+        if not DandersFramesDB_v2.windowState then
+            local ws = {}
+            local src = DandersFramesDB_v2.profiles[currentProfile]
+            src = src and src.party
+            if type(src) == "table" then
+                ws.scale, ws.width, ws.height = src.guiScale, src.guiWidth, src.guiHeight
+                ws.point, ws.relPoint, ws.x, ws.y = src.guiPoint, src.guiRelPoint, src.guiX, src.guiY
+            end
+            DandersFramesDB_v2.windowState = ws
+        end
+        -- Clean up the legacy per-profile keys (no longer read anywhere). Same
+        -- shape as the languageOverride strip above: unconditional, so profiles
+        -- that were not the seed source are cleared too. Both modes -- only
+        -- db.party was ever read, but RaidDefaults is copied from PartyDefaults
+        -- so every profile carries a dead db.raid set as well.
+        for _, profile in pairs(DandersFramesDB_v2.profiles) do
+            if type(profile) == "table" then
+                for _, modeKey in ipairs({ "party", "raid" }) do
+                    local m = profile[modeKey]
+                    if type(m) == "table" then
+                        m.guiScale, m.guiWidth, m.guiHeight = nil, nil, nil
+                        m.guiPoint, m.guiRelPoint, m.guiX, m.guiY = nil, nil, nil, nil
+                    end
+                end
+            end
+        end
 
         DF.db = DandersFramesDB_v2.profiles[currentProfile]
         
@@ -4973,15 +5083,23 @@ DF._MainEventDispatcher = function(self, event, arg1)
             local dbgWord, dbgRest = rawMsg:match("^%s*[Dd][Ee][Bb][Uu][Gg]%s+(%S+)%s*(.-)%s*$")
             -- "on"/"off" are the logging toggle, not commands named on/off.
             if dbgWord and dbgWord:lower() ~= "on" and dbgWord:lower() ~= "off" then
-                local dbgKey = DF.DebugSlashBySub[dbgWord:lower()]
+                local dbgLower = dbgWord:lower()
+                local dbgKey = DF.DebugSlashBySub[dbgLower]
                 -- Several debug tools live in the companion and register their
                 -- slashes only when it loads. If the word is unknown and the
                 -- companion is not in yet, load it and retry once -- otherwise
                 -- the first use of /df debug memtest fell through to the final
                 -- else and opened the settings window instead of the tool.
-                if not dbgKey and not DF._optionsAddonLoaded
+                --
+                -- ☠ DEBUG_SUB_KNOWN FIRST. A sub()-registered command is a branch
+                -- in THIS addon; it is recognised, it just is not in the slash
+                -- registry. Without this test every one of them read as unknown
+                -- and loaded the companion for nothing -- see the note at the
+                -- DEBUG_SUB_KNOWN declaration.
+                if not dbgKey and not DF.DEBUG_SUB_KNOWN[dbgLower]
+                        and not DF._optionsAddonLoaded
                         and DF.EnsureOptionsLoaded and DF:EnsureOptionsLoaded() then
-                    dbgKey = DF.DebugSlashBySub[dbgWord:lower()]
+                    dbgKey = DF.DebugSlashBySub[dbgLower]
                 end
                 if dbgKey and SlashCmdList[dbgKey] then
                     SlashCmdList[dbgKey](dbgRest or "")
@@ -5176,15 +5294,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 DF:ResetFullProfile()
             elseif msg == "resetgui" then
                 -- Reset GUI scale, size, and position to defaults
-                if DF.db and DF.db.party then
-                    DF.db.party.guiScale = 1.0
-                    DF.db.party.guiWidth = 760
-                    DF.db.party.guiHeight = 520
-                    DF.db.party.guiPoint = nil
-                    DF.db.party.guiRelPoint = nil
-                    DF.db.party.guiX = nil
-                    DF.db.party.guiY = nil
-                end
+                local ws = DF:GetWindowState()
+                ws.scale = 1.0
+                ws.width = 760
+                ws.height = 520
+                ws.point = nil
+                ws.relPoint = nil
+                ws.x = nil
+                ws.y = nil
                 if DF.GUIFrame then
                     DF.GUIFrame:ClearAllPoints()
                     DF.GUIFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)

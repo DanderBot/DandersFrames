@@ -550,6 +550,9 @@ L["Built-in presets can't be renamed or deleted."] = true
 L["By Power Type"] = true
 L["Cancel Fade on Dispellable Debuff"] = true
 L["Cannot delete Default profile."] = true
+-- Orphaned: test mode is no longer REFUSED while unlocked, it just leaves up the
+-- frames unlock still needs. Superseded by "Test frames stay visible while frames
+-- are unlocked...". Kept until the locale audit sweeps orphans across all locales.
 L["Cannot disable test mode while frames are unlocked. Lock frames first."] = true
 L["Cannot Edit"] = true
 L["Cannot enter test mode during combat."] = true
@@ -1512,6 +1515,7 @@ L["Targeted List is a Party-only feature. Switch to Party mode to configure."] =
 L["Targeted Spells"] = true
 L["Test"] = true
 L["Test Count"] = true
+L["Test frames stay visible while frames are unlocked - they will hide when you lock."] = true
 L["Test mode disabled."] = true
 L["Test mode enabled."] = true
 L["Test mode ended — entering combat."] = true
@@ -1643,6 +1647,7 @@ L["X Mark"] = true
 L["X Size"] = true
 L["Yellow=high, Orange=highest, Red=tanking."] = true
 L["Yes"] = true
+L["You already have a filter with that name. Name the imported filter:"] = true
 L["You already have a filter with these spells: \"%s\". Import a separate copy anyway?"] = true
 L["You can enable or disable the spells shown, but not add new ones. Create a custom filter to add your own."] = true
 L["Your UI Scale is already pixel-perfect for this resolution."] = true

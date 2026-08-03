@@ -110,6 +110,38 @@ local function ChainPopup(fn)
     C_Timer.After(0, fn)
 end
 
+-- Import a decoded payload, asking for a name ONLY if that name is already in the
+-- list. A clean import (nothing clashes) stays a single paste with no extra step;
+-- a clashing one gets Duplicate's treatment -- you see the name, pre-filled with a
+-- suggestion that does not collide, and can change it before anything is saved.
+--
+-- Without this, import was the one path that committed a name you never saw: two
+-- rows reading the same thing, and no way to tell from the Buffs page which one you
+-- had ticked. Worst through "Import as Copy", which promises a distinguishable copy
+-- and produced a row identical in both name AND spells.
+--
+-- ⚠ The prompt is CHAINED. Popups are a singleton here, so opening one from inside
+-- another's handler needs the next frame; the "Import as Copy" route reaches this
+-- from a popup button.
+local function ImportNamed(def)
+    if not R:IsCustomFilterNameTaken(def.name) then
+        SelectFilter("custom", R:ImportFilterPayload(def))
+        return
+    end
+    ChainPopup(function()
+        PromptFilterName(
+            L["You already have a filter with that name. Name the imported filter:"],
+            R:SuggestUniqueFilterName(def.name),
+            L["Import"],
+            function(text)
+                text = Trim(text or "")
+                if text == "" then return end
+                def.name = text     -- decoded payload is ours; safe to retitle
+                SelectFilter("custom", R:ImportFilterPayload(def))
+            end)
+    end)
+end
+
 local function ShowFilterStringError(title, errKey)
     local message = FilterStringError(errKey)
     ChainPopup(function()
@@ -1325,7 +1357,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
                 -- matching the New and Duplicate paths.
                 local match = R:FindContentMatch(def)
                 if not match then
-                    SelectFilter("custom", R:ImportFilterPayload(def))
+                    -- No content match, but the NAME can still collide -- that is the
+                    -- case nothing checked: two rows reading the same thing with
+                    -- different spells behind them. ImportNamed asks only if it does.
+                    ImportNamed(def)
                     return
                 end
                 -- Content-equal filter already present. Profile import silently
@@ -1341,7 +1376,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
                         message = message,
                         buttons = {
                             { label = L["Import as Copy"], onClick = function()
-                                SelectFilter("custom", R:ImportFilterPayload(def))
+                                ImportNamed(def)
                             end },
                             { label = L["Use Existing"], onClick = function()
                                 SelectFilter("custom", match)

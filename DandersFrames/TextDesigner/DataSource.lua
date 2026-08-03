@@ -329,8 +329,22 @@ function LiveSource:IsInRange()
     return getMS().SafeBoolean(UnitInRange(self.unit), true)
 end
 
+-- Cached per frame. This wrapper carries nothing but the frame and its unit, and every
+-- LiveSource method is a pure read -- none of them write to self -- so a fresh table
+-- plus setmetatable on each call was pure churn. It ran once per frame per Text
+-- Designer update and accounted for 100% of DataSource.Live's allocation (520 KB in a
+-- boss trace). The instance never outlives the update either: Render:UpdateFrame only
+-- calls methods on it and never stores it.
+--
+-- Both fields are re-stamped every call, so a retargeted or recycled frame still gets
+-- the correct unit rather than a stale one.
 function DataSource.Live(frame)
-    local instance = setmetatable({}, LiveSource)
+    local instance = frame and frame._tdLiveSource
+    if not instance then
+        instance = setmetatable({}, LiveSource)
+        -- No frame means nothing to hang the cache off; fall back to a one-off.
+        if frame then frame._tdLiveSource = instance end
+    end
     instance.frame = frame
     instance.unit = frame and frame.unit or nil
     return instance
