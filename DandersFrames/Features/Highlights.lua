@@ -1031,7 +1031,7 @@ local function UpdateAllHighlights()
     
     -- Update pinned frame children (they share units with main frames)
     if DF.PinnedFrames and DF.PinnedFrames.initialized then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local header = DF.PinnedFrames.headers[setIndex]
             if header and header:IsShown() then
                 local maxChildren = IsInRaid() and 40 or 5
@@ -1086,7 +1086,7 @@ highlightEventFrame:SetScript("OnEvent", function(self, event, ...)
         end
         -- Also update any pinned frame children showing this unit
         if unit and DF.PinnedFrames and DF.PinnedFrames.initialized then
-            for setIndex = 1, 2 do
+            for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
                 local header = DF.PinnedFrames.headers[setIndex]
                 if header and header:IsShown() then
                     local maxChildren = IsInRaid() and 40 or 5

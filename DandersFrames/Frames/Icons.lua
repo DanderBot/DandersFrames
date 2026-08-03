@@ -219,7 +219,7 @@ function DF:UpdateAllAuras()
     
     -- Pinned frames
     if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local header = DF.PinnedFrames.headers[setIndex]
             if header then
                 for i = 1, 40 do
@@ -234,7 +234,7 @@ function DF:UpdateAllAuras()
 
     -- Also update pinned boss frames
     if DF.PinnedFrames and DF.PinnedFrames.bossFrames then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local frames = DF.PinnedFrames.bossFrames[setIndex]
             if frames then
                 for i = 1, 8 do

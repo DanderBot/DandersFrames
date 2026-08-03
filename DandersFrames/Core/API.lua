@@ -568,7 +568,7 @@ function DandersFrames_GetPinnedFrames()
     if not DF or not DF.PinnedFrames or not DF.PinnedFrames.initialized or not DF.PinnedFrames.headers then
         return frames
     end
-    for setIndex = 1, 2 do
+    for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
         local header = DF.PinnedFrames.headers[setIndex]
         if header and header:IsShown() then
             for i = 1, 40 do
@@ -590,7 +590,7 @@ function DandersFrames_GetPinnedFrameForUnit(unit)
     if not DF or not unit or not DF.PinnedFrames or not DF.PinnedFrames.initialized or not DF.PinnedFrames.headers then
         return nil
     end
-    for setIndex = 1, 2 do
+    for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
         local header = DF.PinnedFrames.headers[setIndex]
         if header and header:IsShown() then
             for i = 1, 40 do

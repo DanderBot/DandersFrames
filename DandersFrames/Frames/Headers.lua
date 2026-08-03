@@ -6790,7 +6790,7 @@ function DF:RefreshAllHeaderChildFrames()
     
     -- Refresh PinnedFrames if active
     if DF.PinnedFrames and DF.PinnedFrames.headers then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local header = DF.PinnedFrames.headers[setIndex]
             if header then
                 for i = 1, 40 do
@@ -7696,7 +7696,7 @@ IteratePinnedFrames = function(callback)
     if not DF.PinnedFrames or not DF.PinnedFrames.initialized or not DF.PinnedFrames.headers then
         return
     end
-    for setIndex = 1, 2 do
+    for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
         local header = DF.PinnedFrames.headers[setIndex]
         if header and header:IsShown() then
             for i = 1, 40 do
@@ -7730,7 +7730,7 @@ local function FindPinnedFrameForUnit(unit)
     end
     -- Player-mode pinned sets: iterate header children
     if DF.PinnedFrames.headers then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local header = DF.PinnedFrames.headers[setIndex]
             if header and header:IsShown() then
                 for i = 1, 40 do
@@ -7744,7 +7744,7 @@ local function FindPinnedFrameForUnit(unit)
     end
     -- Boss-mode pinned sets: iterate standalone boss frames
     if DF.PinnedFrames.bossFrames then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local frames = DF.PinnedFrames.bossFrames[setIndex]
             if frames then
                 for i = 1, 8 do

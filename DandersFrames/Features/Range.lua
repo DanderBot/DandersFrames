@@ -735,7 +735,7 @@ rangeAnimGroup:SetScript("OnLoop", function()
 
         -- Raid pinned frames (only if initialized for raid mode and header is shown/enabled)
         if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.currentMode == "raid" then
-            for setIndex = 1, 2 do
+            for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
                 local header = DF.PinnedFrames.headers[setIndex]
                 if header and header:IsShown() then
                     for i = 1, 40 do
@@ -765,7 +765,7 @@ rangeAnimGroup:SetScript("OnLoop", function()
 
         -- Party pinned frames (only if initialized for party mode and header is shown/enabled)
         if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.currentMode == "party" then
-            for setIndex = 1, 2 do
+            for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
                 local header = DF.PinnedFrames.headers[setIndex]
                 if header and header:IsShown() then
                     for i = 1, 5 do
@@ -804,7 +804,7 @@ rangeAnimGroup:SetScript("OnLoop", function()
     -- Pinned boss frames (work in both raid and party content — independent of group type).
     -- Boss units don't fire UNIT_IN_RANGE_UPDATE, so polling is the only way to detect range.
     if contentType and contentType ~= "arena" and DF.PinnedFrames and DF.PinnedFrames.bossFrames then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local frames = DF.PinnedFrames.bossFrames[setIndex]
             if frames then
                 for i = 1, 8 do
@@ -858,7 +858,7 @@ function rangeSubscriber:OnUnitInRange(event, unit)
 
     -- Pinned frames: may show the same unit on a second frame
     if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local header = DF.PinnedFrames.headers[setIndex]
             if header and header:IsShown() then
                 local maxChildren = DF.PinnedFrames.currentMode == "raid" and 40 or 5
@@ -876,7 +876,7 @@ function rangeSubscriber:OnUnitInRange(event, unit)
     -- Pinned boss frames: UNIT_IN_RANGE_UPDATE doesn't fire for boss units in
     -- practice, but register here as fallback coverage if Blizzard changes behavior.
     if DF.PinnedFrames and DF.PinnedFrames.bossFrames then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local frames = DF.PinnedFrames.bossFrames[setIndex]
             if frames then
                 for i = 1, 8 do
