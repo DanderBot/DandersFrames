@@ -322,9 +322,16 @@ function AuraContainer._queueTestBounce()
         -- never fill, so every badge sits parked in its window — the "missing"
         -- preview. Enabling would fill the groups with sample HELPFUL auras
         -- (spell-ID filters are stripped in test) and push every badge out.
+        -- TEST HANDLES ONLY, matching rebuildAll. "Built DISABLED" above is the
+        -- other half of this pair, and only a container built while _testMode was
+        -- on is disabled (build()'s SetEnabled folds in `not testMode`). Once
+        -- rebuildAll stopped rebuilding live handles they were no longer disabled
+        -- either, so an unscoped loop issued a pointless setEnabled+refresh on
+        -- every live container at test entry — refresh() is a Hide/Show bounce
+        -- that re-arms a full aura parse, so it was not free.
         for h in pairs(AuraContainer._handles or {}) do
-            if not h._destroyed and h.backend and h.config and h.config.enabled ~= false
-               and h.config.mode ~= "missing" then
+            if not h._destroyed and h._testFrame and h.backend and h.config
+               and h.config.enabled ~= false and h.config.mode ~= "missing" then
                 if h.backend.setEnabled then pcall(function() h.backend:setEnabled(true) end) end
                 if h.backend.refresh then pcall(function() h.backend:refresh() end) end
             end
@@ -345,10 +352,22 @@ function AuraContainer.SetTestMode(on)
     -- reached from the other in place.
     --
     -- But that only ever applied to the handles that RENDER the preview. Live
-    -- frames are hidden for the whole session by SetTestModeStateDrivers, and
-    -- their containers are built DEAF (setContainerProviderDeaf), so they ignore
-    -- the global provider bounce and sit on real data untouched from entry to
-    -- exit. Rebuilding them into test shape and back bought nothing.
+    -- frames are hidden for the whole session by SetTestModeStateDrivers, so
+    -- rebuilding them into test shape and back rendered nothing either way.
+    --
+    -- ☠ DO NOT re-justify this with "live containers are built deaf". They are
+    -- NOT. setContainerProviderDeaf (top of this file) is a one-shot CAPABILITY
+    -- PROBE that no-ops after its first call -- UnregisterEvent on the container
+    -- is refused by design (ForbiddenAspect.EventRegistrations, answered in game
+    -- on 68914). Every container hears AURA_DATA_PROVIDER_SWITCH, so a live
+    -- handle left standing does follow the bounce onto the sample provider.
+    -- It is HIDDEN, so that is invisible -- with one pre-existing exception:
+    -- the [combat] state driver reveals live frames the instant combat starts
+    -- (see TestMode.lua's note), and those rows then show sample auras. That
+    -- edge was already wrong before this change (it showed curated TEST paint on
+    -- live frames instead), so this neither introduces nor fixes it. Unverified
+    -- in game; if it matters, the fix is to re-point live handles on reveal, not
+    -- to rebuild every one of them on both transitions.
     --
     -- ⚠ It is NOT true that the entry pass can be dropped altogether -- that was
     -- the first read of the trace and it is wrong. The test frame pool is created
@@ -357,6 +376,19 @@ function AuraContainer.SetTestMode(on)
     -- need the rebuild. On the very first entry this loop legitimately does
     -- nothing: the pool is built after SetTestMode returns and those handles are
     -- born in test shape (build() reads _testMode itself).
+    -- ☠ LOAD-BEARING INVARIANT, and it is not local to this function: build() picks
+    -- its SHAPE from the GLOBAL AuraContainer._testMode (the `local testMode` read,
+    -- and SetEnabled's `not testMode`), while the rebuild below is keyed on the
+    -- PER-HANDLE flag. They must agree. A handle built while _testMode is on but
+    -- whose _testFrame is false would be born test-shaped and never rebuilt out of
+    -- it — groups can never be removed, so that container is stuck showing curated
+    -- paint on a live frame forever. What guarantees they agree is that NO live
+    -- handle is ever built during test mode, enforced by the UseFactoryFor* gates
+    -- in Features/Auras.lua, Frames/Icons.lua and AuraDesigner (each excludes
+    -- DF.testMode/raidTestMode). Before this became conditional the unconditional
+    -- rebuild made the invariant unnecessary. The asymmetry is what makes it worth
+    -- naming: a false NEGATIVE silently corrupts what is on screen, a false
+    -- POSITIVE only costs one extra rebuild.
     local function rebuildAll()
         if AuraContainer._handles then
             for h in pairs(AuraContainer._handles) do
@@ -1115,11 +1147,18 @@ local function bindNative(slot, config)
         -- text beat vertex colour, so a spec never carries both (the row builders send
         -- a curve OR a coloured formatter, never each).
         if durSpec.colorCurve and durSpec.colorProperty ~= nil then
-            -- Cached on the config by spec identity, exactly like _dfDurBind above:
-            -- the pair is derived purely from durSpec, and a structural Rebuild
-            -- hands over a fresh style table, which invalidates it for free. This
-            -- runs once per BUTTON, so a fresh table here cost one allocation per
-            -- slot per rebuild across every row on every frame.
+            -- Cached on the config by spec identity, exactly like _dfDurBind above.
+            -- This runs once per BUTTON, so a fresh table here cost one allocation
+            -- per slot per rebuild across every row on every frame.
+            -- ☠ The key is sufficient because a duration spec is never mutated in
+            -- place -- every writer of colorCurve/colorProperty fills a table that
+            -- is still a local (Auras.lua's TextStyle:BuildSpec result, Factory's
+            -- constructor literal), and a curve rebuild copies BY VALUE into a
+            -- brand-new dur table. Do NOT restate this as "a structural Rebuild
+            -- hands over a fresh style table": SetFilter, the test-mode ApplyTuning
+            -- and the deferred regen rebuild all call _rebuild() on the SAME config
+            -- and style, so the cache demonstrably survives a rebuild. It is the
+            -- no-in-place-mutation property that makes it safe, nothing else.
             if config._dfDurColorSpec ~= durSpec then
                 config._dfDurColorSpec = durSpec
                 config._dfDurColor = { curve = durSpec.colorCurve, property = durSpec.colorProperty }
@@ -1548,6 +1587,15 @@ local function applyContainerLayout(c, handle)
     -- build() pins its one button at the corner the flow would have placed
     -- element 1 at. Kept here so there is ONE derivation of the corner.
     handle._flowAnchor = G.flowAnchor
+    -- ...and the STRIP RESERVATION with it. The reservation reaches a group button
+    -- as flow-layout PADDING (setFlowPadding below), which the flow applies to
+    -- element 1 — a hand-pinned slot button never sees it, so it has to be folded
+    -- into the pin offset instead. Only one of the two can be non-zero (the branch
+    -- above is exclusive), and the anchor corner always matches the growth
+    -- direction, so the difference carries the right sign in WoW's y-up space:
+    -- top strip on downward growth pushes the icon DOWN (-padTop), bottom strip on
+    -- upward growth pushes it UP (+padBottom).
+    handle._flowPadY = padBottom - padTop
     local setFlowAnchor  = c.SetFlowLayoutAnchorPoint or c.SetAuraLayoutAnchorPoint
     local setFlowGrowth  = c.SetFlowLayoutGrowthDirection or c.SetAuraLayoutGrowthDirection
     local setFlowMaxLine = c.SetFlowLayoutMaximumLineSize or c.SetAuraLayoutRowWidth
@@ -1849,6 +1897,17 @@ function NativeBackend:build()
     -- keys are remembered so ApplyStyle can hot-apply per-group layout and ApplyTuning
     -- can hot-apply max/sort/candidateFilters (all live mutators).
     local filters = normalizeFilters(config.filter)
+    -- ☠ SINGLE-SLOT means exactly ONE slot. The declaration loop below runs per
+    -- filter record, and every slot it declares pins to the same corner -- so a
+    -- multi-record config would stack its buttons on top of each other where the
+    -- group path would have flowed them side by side. No current consumer can hit
+    -- this (poolFilter returns one string, which normalizeFilters turns into one
+    -- record), but the flag's name promises something the loop does not enforce.
+    -- Fall back to groups rather than render wrong: correct output, no saving.
+    if isSingleSlot and #filters ~= 1 then
+        DF:DebugWarn(DBG, "singleSlot config has %d filter records; using groups", #filters)
+        isSingleSlot = false
+    end
     local maxCount = handle:_slotCount()
     local groupLayout
     if isMissing then
@@ -1966,9 +2025,13 @@ function NativeBackend:build()
             local okSlot, btn = pcall(c.AddAuraSlot, c, "dfTestSlot", category,
                 { initializeFrame = handle:_makeInitializeFrame(handle._gen, 1, nil, testStyle) })
             if okSlot and btn then
+                -- Same strip-reservation fold as the live pin below: the preview
+                -- must sit where the live icon sits, and _positionTestTip already
+                -- applies this inset to the hover zone — without it the zone and
+                -- the icon would disagree by the reservation in test mode.
                 local fa = handle._flowAnchor or "TOPLEFT"
                 pcall(btn.ClearAllPoints, btn)
-                pcall(btn.SetPoint, btn, fa, c, fa, 0, 0)
+                pcall(btn.SetPoint, btn, fa, c, fa, 0, handle._flowPadY or 0)
                 self.slotButtons["dfTestSlot"] = btn
             elseif not okSlot then
                 DF:DebugWarn(DBG, "test slot failed: %s", tostring(btn))
@@ -2026,7 +2089,7 @@ function NativeBackend:build()
                     -- has to be replaced.
                     local fa = handle._flowAnchor or "TOPLEFT"
                     pcall(btn.ClearAllPoints, btn)
-                    pcall(btn.SetPoint, btn, fa, c, fa, 0, 0)
+                    pcall(btn.SetPoint, btn, fa, c, fa, 0, handle._flowPadY or 0)
                     self.slotButtons[key] = btn
                 elseif not okSlot then
                     DF:DebugWarn(DBG, "AddAuraSlot (single-slot row) failed: %s", tostring(btn))
@@ -2147,9 +2210,10 @@ function NativeBackend:applyLayout()
     -- still styleButton_regions' job (ApplyStyle re-runs it right after this).
     if self.slotButtons and self.handle.config.singleSlot then
         local fa = self.handle._flowAnchor or "TOPLEFT"
+        local py = self.handle._flowPadY or 0
         for _, btn in pairs(self.slotButtons) do
             pcall(btn.ClearAllPoints, btn)
-            pcall(btn.SetPoint, btn, fa, c, fa, 0, 0)
+            pcall(btn.SetPoint, btn, fa, c, fa, 0, py)
         end
     end
     if self.groupKeys and c.SetAuraGroupLayout then

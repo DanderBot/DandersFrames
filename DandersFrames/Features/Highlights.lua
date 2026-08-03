@@ -341,6 +341,19 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
     local scale = ch:GetEffectiveScale()
     local w, h = ch:GetWidth(), ch:GetHeight()
     local pp = (db and db.pixelPerfect) and 1 or 0
+    -- ☠ SHOW FIRST, AHEAD OF THE EARLY-OUT. Showing the highlight is an OUTPUT of
+    -- this function (it used to be the last statement), not part of the styling the
+    -- signature guards -- and several paths hide `ch` WITHOUT touching the signature:
+    -- the owner frame's own OnHide hook (installed in GetOrCreateHighlight), the
+    -- party-frames-while-in-raid branch, and the not-visible branch. With the Show
+    -- below the early-out, a frame that hid and re-showed while every style input
+    -- stayed identical never got shown again -- target a party member, open Test
+    -- Mode, close it, and the selection border was gone until you changed target.
+    -- Hoisting it fixes every such path at once, including any added later, which
+    -- invalidating at the three hide sites would not.
+    -- No flash risk: the styling below runs synchronously in this same call, so
+    -- nothing is drawn between the Show and the restyle.
+    ch:Show()
     -- Numeric fields compared individually: building a string key here would
     -- allocate exactly what the early-out exists to avoid.
     if ch._hlSig
@@ -516,8 +529,7 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
         top:Show()
         left:Show()
     end
-    
-    ch:Show()
+    -- (ch:Show() moved ABOVE the early-out -- see the note there.)
 end
 
 -- Expose for reuse by the Aura Designer border indicator

@@ -1296,7 +1296,13 @@ local function setupProcGlow(border, anim)
             -- Only latch once the API actually answered; a nil result before the
             -- texture system is up would otherwise cache "no atlas" permanently
             -- and the proc glow would never draw for the rest of the session.
-            procAtlasResolved = procAtlasInfo ~= nil
+            -- ☠ BOTH atlases, not just the loop one. Latching on procAtlasInfo
+            -- alone let a single nil START result freeze in permanently: the loop
+            -- glow drew normally while the intro burst was silently dead on every
+            -- border for the rest of the session, which reads as a design change
+            -- rather than a fault. The pre-memo code re-fetched both on every
+            -- setup, so it always recovered on the next one.
+            procAtlasResolved = (procAtlasInfo ~= nil) and (procStartAtlasInfo ~= nil)
         end
     end
     border._procAtlas      = procAtlasInfo
