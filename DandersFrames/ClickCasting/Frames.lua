@@ -2122,10 +2122,25 @@ function CC:SetupSecureHandlers(frame)
             local stateDriverRectKnown = self:GetAttribute("dfStateDriverRectKnown")
             local sdMouseX = self:GetAttribute("dfSDMouseX")
             local sdMouseY = self:GetAttribute("dfSDMouseY")
+            -- showClaimed separates the two ways this frame got its binds, and
+            -- the distinction decides whether a release was even POSSIBLE: a
+            -- claim made by the OnShow wrap can never be released by the secure
+            -- OnLeave, because Wrapped_OnLeave gates on
+            -- `motion and self:GetAttribute("_wrapentered")` and only the motion
+            -- branch of Wrapped_OnEnter sets that attribute. Restricted code
+            -- cannot set it either — HANDLE:SetAttribute rejects any name
+            -- matching ^_ (RestrictedFrames.lua:523, Gethe live 4383ced3). A
+            -- show-claimed frame therefore depends on OnHide, on the next
+            -- frame's claim, on the mouseoverstate driver above, or on the
+            -- backstop below. Without this field the log cannot tell a
+            -- show-claim from a motion-enter after the fact, and the two have
+            -- completely different release paths — a 2026-08-01 user log was
+            -- misread for exactly that reason.
+            local showClaimed = self:GetAttribute("dfShowClaimed") or 0
             DF:DebugError("CLICK", "BINDINGS STILL ACTIVE after OnLeave %s! wrapLeave=%s mouseoverbutton=%s checkPassed=%s isSecureMO=%s postCheck=%s",
                 frameName, tostring(wrapLeaveFired), mouseoverOnLeave, tostring(leaveCheckPassed), tostring(isSecureMouseover), postCheck)
-            DF:DebugError("CLICK", "  clearedBy=%s stateDriverFired=%d underMouse=%s rectKnown=%s mousePos=%s,%s",
-                clearedBy, stateDriverCount, tostring(stateDriverUnderMouse), tostring(stateDriverRectKnown), tostring(sdMouseX), tostring(sdMouseY))
+            DF:DebugError("CLICK", "  clearedBy=%s showClaimed=%d stateDriverFired=%d underMouse=%s rectKnown=%s mousePos=%s,%s",
+                clearedBy, showClaimed, stateDriverCount, tostring(stateDriverUnderMouse), tostring(stateDriverRectKnown), tostring(sdMouseX), tostring(sdMouseY))
 
             -- STUCK-BINDS BACKSTOP: the client sometimes skips the secure
             -- OnLeave wrap (and the mouseoverstate driver has a blind spot
