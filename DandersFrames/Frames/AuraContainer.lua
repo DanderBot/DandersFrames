@@ -696,6 +696,15 @@ local function styleButton_regions(slot, config)
                 slot.dfHealthMirror:SetAllPoints(slot)
                 slot.dfHealthMirror:EnableMouse(false)
                 slot.dfHealthMirror:SetMinMaxValues(0, 100)
+                -- ☠ Seed EMPTY. The only feed (DF.MirrorHealthValue) runs on health
+                -- EVENTS, so between this bar being built and the next health tick it
+                -- renders at its default -- and in the AD's "replace" mode that is
+                -- alpha 1 over the real fill, i.e. a full-width opaque bar hiding the
+                -- unit's health until something damages them. Empty is also the right
+                -- FAILURE state: if the feed never arrives the indicator looks absent
+                -- rather than actively covering the health bar. The consumer feeds the
+                -- real percent immediately via onBar below.
+                slot.dfHealthMirror:SetValue(0)
             end
             local sb = slot.dfHealthMirror
             DF:SafeSetStatusBarTexture(sb, hm.texture)
@@ -703,6 +712,45 @@ local function styleButton_regions(slot, config)
             sb:SetStatusBarColor(cr, cg, cb)
             sb:SetAlpha(hm.alpha or 1)
             if type(hm.onBar) == "function" then hm.onBar(sb) end
+        end
+
+        -- HEALTH FILL COVER — the working replacement for the StatusBar mirror above.
+        --
+        -- ☠ The mirror could never work. Aura frames carry
+        -- Enum.ScriptObjectAccessRestriction.DenyTaintedAccessWhenAurasAreSecret
+        -- (Blizzard_AuraContainerShared.lua:102), applied to every frame the provider
+        -- creates. That denies ALL tainted writes while auras are secret -- so a
+        -- StatusBar parented under the slot cannot be driven from our update path at
+        -- any point, by any route. Field-confirmed: "health mirror bar forbidden" for
+        -- every unit, and the bar rendered at its default, covering the health bar.
+        --
+        -- This needs no writes at all. A plain texture anchored to the REAL bar's fill
+        -- texture inherits that texture's rect, and the fill rect is already driven by
+        -- the bar's value -- so it tracks health exactly, with no per-tick work, no
+        -- feed, and nothing read. Visibility still rides the slot's secret show/hide,
+        -- because the texture is a child of the slot. Anchor-derived geometry is the
+        -- one geometry route that stays legal here (button rects are secret; anchors
+        -- are not).
+        --
+        -- Re-anchored on EVERY style pass, not just creation: the frame's health
+        -- texture can be swapped from the settings panel, which replaces the fill
+        -- region and would stale a create-once anchor.
+        local hf = ov and ov.healthFill
+        if hf and hf.clampTo then
+            if not slot.dfHealthFill then
+                slot.dfHealthFill = slot:CreateTexture(nil, "OVERLAY")
+            end
+            local t = slot.dfHealthFill
+            t:ClearAllPoints()
+            t:SetAllPoints(hf.clampTo)
+            local fr, fg, fb = readColor(hf.color)
+            if hf.texture then
+                DF:SafeSetTexture(t, hf.texture)
+                t:SetVertexColor(fr, fg, fb)
+            else
+                t:SetColorTexture(fr, fg, fb)
+            end
+            t:SetAlpha(hf.alpha or 1)
         end
         -- MIRROR HOST — a plain child frame of the slot handed back to the consumer
         -- (the Aura Designer name/health text colour-by-cover). The consumer parents

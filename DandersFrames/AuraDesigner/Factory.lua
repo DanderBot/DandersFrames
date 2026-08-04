@@ -1,4 +1,4 @@
-local addonName, DF = ...
+﻿local addonName, DF = ...
 
 -- ============================================================
 -- AURA DESIGNER — NATIVE FACTORY BRIDGE (P4.x)
@@ -473,8 +473,13 @@ end
 -- it mirrors the real bar's fill+texture+motion (fixing the flat whole-bar tint patch). Level
 -- offset 1 = healthBar level + 1 (above the real fill, below the +2 power / content overlay),
 -- exactly where the legacy tint sat (Indicators.lua:1299). Colour/texture/alpha are static
--- config; the onBar callback hands the live bar back so SyncFrame can stash it for feeding.
-local function buildHealthMirrorConfig(unit, map, r, g, b, alpha, texture, onBar, filter)
+-- config; nothing is fed at runtime. (Was an onBar hand-back for a StatusBar driven per
+-- health tick -- which the aura frame's access restrictions forbid outright.)
+-- `clampTo` is the REAL health bar's fill texture. The cover anchors to it, so it
+-- inherits the fill's rect and tracks health with no feed and no reads -- see the
+-- HEALTH FILL COVER note in Frames/AuraContainer.lua for why the old StatusBar
+-- mirror could never be driven.
+local function buildHealthMirrorConfig(unit, map, r, g, b, alpha, texture, clampTo, filter)
     return {
         unit = unit,
         mode = "overlay",
@@ -482,7 +487,9 @@ local function buildHealthMirrorConfig(unit, map, r, g, b, alpha, texture, onBar
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
         frameLevelOffset = 1,
-        style = { overlay = { healthMirror = { texture = texture, color = { r, g, b }, alpha = alpha, onBar = onBar } } },
+        style = { overlay = { healthFill = {
+            texture = texture, color = { r, g, b }, alpha = alpha, clampTo = clampTo,
+        } } },
     }
 end
 
@@ -3265,19 +3272,25 @@ function Factory:SyncFrame(frame)
                 local alpha = (mode == "replace") and 1 or healthbarBlend(mode, bestCfg.blend, a)
                 local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
                 local tex = (fdb and fdb.healthTexture) or "Interface\\TargetingFrame\\UI-StatusBar"
-                local onBar = function(sb) frame.dfADHealthMirror = sb end
-                local coSig = tconcat({ "mirror", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex) }, "|")
+                -- Anchor target: the REAL health bar's fill texture. Its rect is already
+                -- driven by the bar's value, so the cover follows health for free --
+                -- no feed, no per-tick work, nothing read, nothing written from our
+                -- (tainted) update path. Resolved fresh each pass: changing the frame's
+                -- health texture from the settings panel replaces this region.
+                local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
+                -- Nothing feeds a bar any more; drop the stash so the dead
+                -- MirrorHealthValue calls in the update paths stay inert.
+                frame.dfADHealthMirror = nil
+                local coSig = tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo) }, "|")
                 if not entry then
-                    frame.dfADHealthMirror = nil   -- onBar re-stashes when the slot builds
-                    local handle = DF.AuraContainer:Create(healthBar, buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, onBar, filt))
+                    local handle = DF.AuraContainer:Create(healthBar, buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
                     if handle then
                         hb[bestName] = { handle = handle, structSig = structSig,
                                          tuningSig = tuningSig, coSig = coSig }
                     end
                 elseif entry.structSig ~= structSig then
-                    frame.dfADHealthMirror = nil   -- old slot torn down; onBar re-stashes
                     entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                    entry.handle:Rebuild(buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, onBar, filt))
+                    entry.handle:Rebuild(buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
                 else
                     if entry.tuningSig ~= tuningSig then
                         -- ☠ Do NOT clear frame.dfADHealthMirror here. The two branches
@@ -3285,11 +3298,11 @@ function Factory:SyncFrame(frame)
                         -- the new StatusBar; a tuning pass keeps the SAME slot and the same
                         -- bar, so clearing the ref would strand it (nothing re-stashes).
                         entry.tuningSig = tuningSig
-                        entry.handle:ApplyTuning(buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, onBar, filt))
+                        entry.handle:ApplyTuning(buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
                     end
                     if entry.coSig ~= coSig then
                         entry.coSig = coSig
-                        entry.handle:ApplyStyle({ overlay = { healthMirror = { texture = tex, color = { r, g, b }, alpha = alpha, onBar = onBar } } })
+                        entry.handle:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo } } })
                     end
                 end
             end
