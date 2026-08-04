@@ -818,15 +818,51 @@ function CC:GetSpellValidityStatus(spellName)
         return "valid_spec"
     end
     
-    -- Check if this spell exists in the player's spellbook at any level
-    if C_SpellBook and C_SpellBook.GetSpellBookItemInfo then
-        for _, bank in ipairs({Enum.SpellBookSpellBank.Player, Enum.SpellBookSpellBank.Pet}) do
-            local numSpells = C_SpellBook.GetNumSpellBookItems(bank) or 0
-            for i = 1, numSpells do
-                local info = C_SpellBook.GetSpellBookItemInfo(i, bank)
-                if info and info.name == spellName then
-                    return "valid_spec"
+    -- Check if this spell exists in the player's spellbook at any level.
+    --
+    -- ☠ This called C_SpellBook.GetNumSpellBookItems(bank), which does not exist —
+    -- C_SpellBook has 40 functions and that is not one of them. The guard above it tested
+    -- GetSpellBookItemInfo, a DIFFERENT function that DOES exist, so the guard passed and
+    -- the call threw "attempt to call a nil value". `or 0` could not save it: the nil
+    -- deref happens at the call, before the fallback is reached. Guard the function you
+    -- are about to CALL, not a neighbour of it.
+    -- Only reachable for a spell that is neither in the spellbook nor usable (both checks
+    -- above return first) — an off-spec, removed or foreign-class binding, i.e. exactly
+    -- when the user is already trying to work out why a binding is dead.
+    --
+    -- The 11.0 spellbook rework replaced flat iteration with SKILL LINES: each line
+    -- carries itemIndexOffset (the slot BEFORE its first item) and numSpellBookItems, and
+    -- the slot indices are absolute within the Player bank. Pet spells are not skill-lined
+    -- at all — C_SpellBook.HasPetSpells() returns their count directly (and returns
+    -- NOTHING when there is no pet, hence the `or 0`).
+    --
+    -- Off-spec skill lines are skipped deliberately: this branch returns "valid_spec", so
+    -- a spell the player cannot currently cast must fall through to the "valid_class"
+    -- talent check below rather than being claimed as castable here.
+    if C_SpellBook and C_SpellBook.GetSpellBookItemInfo
+        and C_SpellBook.GetNumSpellBookSkillLines and C_SpellBook.GetSpellBookSkillLineInfo then
+        for lineIndex = 1, (C_SpellBook.GetNumSpellBookSkillLines() or 0) do
+            -- GetSpellBookSkillLineInfo is MayReturnNothing — nil-check every line.
+            local line = C_SpellBook.GetSpellBookSkillLineInfo(lineIndex)
+            if line and not line.offSpecID then
+                local offset = line.itemIndexOffset or 0
+                for slot = offset + 1, offset + (line.numSpellBookItems or 0) do
+                    local info = C_SpellBook.GetSpellBookItemInfo(slot, Enum.SpellBookSpellBank.Player)
+                    if info and info.name == spellName then
+                        return "valid_spec"
+                    end
                 end
+            end
+        end
+    end
+
+    -- Pet bank: no skill lines, so its count comes from HasPetSpells().
+    if C_SpellBook and C_SpellBook.GetSpellBookItemInfo and C_SpellBook.HasPetSpells then
+        local numPetSpells = C_SpellBook.HasPetSpells()
+        for slot = 1, (numPetSpells or 0) do
+            local info = C_SpellBook.GetSpellBookItemInfo(slot, Enum.SpellBookSpellBank.Pet)
+            if info and info.name == spellName then
+                return "valid_spec"
             end
         end
     end
