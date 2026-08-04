@@ -908,6 +908,17 @@ local function clickCastFrameEligible(frame)
     -- not, there is nothing left to do. A unit-less frame is hidden by
     -- RegisterUnitWatch and cannot be hovered, so its binds never activate until
     -- it actually holds someone.
+    -- Test-mode frames are excluded explicitly. They carry dfIsDandersFrame "for
+    -- consistency with live frames" (TestMode/TestFramePool.lua), but they are
+    -- deliberately plain Buttons rather than secure unit buttons, and they set
+    -- `frame.unit` as a plain field rather than the unit ATTRIBUTE this function
+    -- reads -- so the old test would have refused them anyway. Nothing currently
+    -- registers a test frame (TestMode never calls RegisterFrameWithClickCast,
+    -- and RegisterAllFrames only walks header children), but exempting on the
+    -- shared flag would have left that door held shut by nothing more than the
+    -- absence of a caller.
+    if frame.dfIsTestFrame then return false end
+
     if frame.dfIsDandersFrame == true then return true end
 
     -- Foreign frames keep the strict test: this gate exists to stop click
