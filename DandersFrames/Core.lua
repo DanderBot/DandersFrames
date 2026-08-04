@@ -6748,8 +6748,8 @@ local LDB = LibStub("LibDataBroker-1.1"):NewDataObject("DandersFrames", {
     end,
     OnTooltipShow = function(tooltip)
         tooltip:AddLine("DandersFrames")
-        tooltip:AddLine("|cffffffffLeft-Click:|r Open settings", 0.8, 0.8, 0.8)
-        tooltip:AddLine("|cffffffffRight-Click:|r Toggle solo mode", 0.8, 0.8, 0.8)
+        tooltip:AddLine("|cffffffff" .. L["Left-Click:"] .. "|r " .. L["Open settings"], 0.8, 0.8, 0.8)
+        tooltip:AddLine("|cffffffff" .. L["Right-Click:"] .. "|r " .. L["Toggle solo mode"], 0.8, 0.8, 0.8)
     end,
 })
 

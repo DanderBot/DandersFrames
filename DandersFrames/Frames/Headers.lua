@@ -6111,7 +6111,12 @@ function DF:InitSecurePositioning()
     -- Hook arena children's OnShow/OnHide to trigger counting
     DF:HookArenaChildrenForRepositioning()
     
-    DF:Say("Secure positioning initialized")
+    -- ☠ Was DF:Say — an unconditional chat print on EVERY login, for every user, in
+    -- English only. It also carried no information: it fires at the end of the function
+    -- unconditionally, so it says "this ran", which is true every time. There is no
+    -- failure path that prints the opposite. Routed to the debug console, which is a
+    -- toggle, per the rule: no forced text without the user turning something on.
+    DF:Debug("HEADERS", "Secure positioning initialized")
 end
 
 -- Hook party header children to trigger repositioning on show/hide

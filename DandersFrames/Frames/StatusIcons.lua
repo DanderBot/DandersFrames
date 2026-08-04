@@ -114,16 +114,20 @@ function DF:CreateStatusIcons(frame)
         if not db or not db.tooltipResurrectionEnabled then return end
         local unit = self.unitFrame and self.unitFrame.unit
         local state = unit and resCache[unit]
+        -- Resolved here, not at file scope: the locale table is populated by the
+        -- Locales/*.lua files and this handler runs long after load. Same idiom as
+        -- the other consumer further down this file.
+        local L = DF.L
         GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
         GameTooltip:ClearLines()
         if state == 1 then
-            GameTooltip:AddLine("Resurrection Incoming", 0.2, 1, 0.2)
-            GameTooltip:AddLine("A resurrection is being cast on this player.", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine(L["Resurrection Incoming"], 0.2, 1, 0.2)
+            GameTooltip:AddLine(L["A resurrection is being cast on this player."], 0.8, 0.8, 0.8, true)
         elseif type(state) == "number" then
-            GameTooltip:AddLine("Resurrection Pending", 1, 1, 0)
-            GameTooltip:AddLine("Waiting for this player to accept the resurrection.", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine(L["Resurrection Pending"], 1, 1, 0)
+            GameTooltip:AddLine(L["Waiting for this player to accept the resurrection."], 0.8, 0.8, 0.8, true)
         else
-            GameTooltip:AddLine("Resurrection", 1, 1, 1)
+            GameTooltip:AddLine(L["Resurrection"], 1, 1, 1)
         end
         GameTooltip:Show()
     end)

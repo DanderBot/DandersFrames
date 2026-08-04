@@ -189,8 +189,8 @@ end
 -- "Pinned N" when unnamed) tagged with the mode it belongs to, e.g. "NPC (Raid)".
 local function PinnedSetLabel(set, setIndex, isRaidMode)
     local name = set and set.name
-    if not name or name == "" then name = "Pinned " .. (setIndex or 1) end
-    return name .. " (" .. (isRaidMode and "Raid" or "Party") .. ")"
+    if not name or name == "" then name = format(DF.L["Pinned %d"], setIndex or 1) end
+    return name .. " (" .. (isRaidMode and DF.L["Raid"] or DF.L["Party"]) .. ")"
 end
 
 -- True when instanced PvP has pinned processing disabled (the live default —
@@ -1610,7 +1610,7 @@ function PinnedFrames:CreateSetFrames(setIndex)
     label:SetPoint("BOTTOM", container, "TOP", 0, 2)
     local labelText = set.name
     if not labelText or labelText == "" then
-        labelText = "Pinned " .. setIndex
+        labelText = format(DF.L["Pinned %d"], setIndex)
     end
     label:SetText(labelText)
     label:SetTextColor(0.8, 0.8, 1.0)
@@ -2555,7 +2555,7 @@ function PinnedFrames:UpdateLabel(setIndex)
     
     local labelText = set.name
     if not labelText or labelText == "" then
-        labelText = "Pinned " .. setIndex
+        labelText = format(DF.L["Pinned %d"], setIndex)
     end
     label:SetText(labelText)
 end
@@ -3697,7 +3697,7 @@ function PinnedFrames:EnsureTestContainer(setIndex, set, isRaidMode)
     testLabel:SetPoint("BOTTOM", container, "TOP", 0, 2)
     local labelText = set.name
     if not labelText or labelText == "" then
-        labelText = "Pinned " .. setIndex
+        labelText = format(DF.L["Pinned %d"], setIndex)
     end
     testLabel:SetText(labelText)
     testLabel:SetShown(set.showLabel)

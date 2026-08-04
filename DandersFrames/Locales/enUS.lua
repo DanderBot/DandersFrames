@@ -2296,4 +2296,19 @@ L["Marker Offset X"] = true
 L["Marker Offset Y"] = true
 L["Marker Color"] = true
 L["Marker Symbol Color"] = true
+
+-- Runtime user-visible strings that were hardcoded to English (2026-08-03 pass).
+-- These are seen in normal play, not in the settings panel.
+-- Resurrection icon tooltip (Frames/StatusIcons.lua):
+L["Resurrection Incoming"] = true
+L["Resurrection Pending"] = true
+L["A resurrection is being cast on this player."] = true
+L["Waiting for this player to accept the resurrection."] = true
+-- Targeted List bar, shown on a live interrupt (Features/TargetedSpells.lua):
+L["Interrupted: %s"] = true
+-- Minimap / DataBroker tooltip (Core.lua):
+L["Left-Click:"] = true
+L["Right-Click:"] = true
+L["Open settings"] = true
+L["Toggle solo mode"] = true
 --@end-do-not-package@

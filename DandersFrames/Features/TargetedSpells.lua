@@ -4187,7 +4187,8 @@ local function TargetedList_Render()
                         bar.targetName:Hide()
                         if bar.duration then bar.duration:Hide() end
                         if rec.isTestCast and rec.testInterrupterName then
-                            bar.interruptText:SetText("Interrupted: " .. rec.testInterrupterName)
+                            bar.interruptText:SetFormattedText(DF.L["Interrupted: %s"],
+                                rec.testInterrupterName)
                             -- Class-color the test interrupter name
                             if rec.testInterrupterClass and TL_C_ClassColor
                                and TL_C_ClassColor.GetClassColor then
@@ -4199,7 +4200,7 @@ local function TargetedList_Render()
                         elseif rec.interrupterGuid and TL_UnitNameFromGUID then
                             -- UnitNameFromGUID returns a secret-tainted string,
                             -- piped through SetFormattedText (secret-safe sink)
-                            bar.interruptText:SetFormattedText("Interrupted: %s",
+                            bar.interruptText:SetFormattedText(DF.L["Interrupted: %s"],
                                 TL_UnitNameFromGUID(rec.interrupterGuid) or "")
                             if TL_UnitClassFromGUID and TL_C_ClassColor
                                and TL_C_ClassColor.GetClassColor then
