@@ -1828,10 +1828,13 @@ local function cfSig(cf)
     return table.concat(parts, "&")
 end
 
--- STRUCTURAL half of a filter list: token strings + record keys only — the parts
--- AddAuraGroup freezes (a group's filterString can't be changed live; the record SET
--- defines the groups themselves). Per-record candidateFilters are deliberately
--- EXCLUDED — they're live-tunable (see filterTuningSig).
+-- ☠ CORRECTED 2026-08-04. This used to say "a group's filterString can't be changed
+-- live" and that claim is what put filter strings in the struct sig in the first place.
+-- SetAuraGroupFilterString / SetAuraSlotFilterString have always existed and destroy
+-- nothing — proven in game via the DF_AuraLab /alfilter A/B probe. What AddAuraGroup
+-- really freezes is the record SET: the topology is add-only, so a record appearing or
+-- disappearing needs a new container. Only the KEYS (and per-record style) are
+-- structural now; strings and candidateFilters are both live-tunable (filterTuningSig).
 -- A record's per-button STYLE (important-debuff highlight). STRUCTURAL, not tuning:
 -- it decides whether the group gets its own initializeFrame closure, whether the badge
 -- regions exist at all, and the group's layout cell size — none of which ApplyStyle can
@@ -1848,35 +1851,27 @@ local function recStyleSig(s)
         .. tostring(b.markColor and b.markColor.b)) or "-")
 end
 
+-- STRUCT half of a filter list: the KEY SET and the per-record style, NOT the filter
+-- strings.
+--
+-- ☠ WHY THE KEY SET AND NOT THE STRING (2026-08-04). AddAuraGroup/AddAuraSlot are
+-- add-only — there is no remove — so a record APPEARING or DISAPPEARING genuinely needs
+-- a new container. A record keeping its key while its filter string changes does not:
+-- SetAuraGroup/SlotFilterString mutate that live and destroy nothing, and the engine
+-- pushes it from applyGroupTuning. The string therefore moved to filterTuningSig.
+-- Per-record style STAYS here: it is applied in initializeFrame, which a tuning pass
+-- does not re-run (measured — a filter-string swap leaves initializeFrame counts flat).
+--
+-- Plain-string entries contribute "" rather than the string itself, so a bare
+-- HELPFUL <-> HARMFUL swap is a tuning delta. The ";" separators still encode the
+-- record COUNT, which is the part that has to stay structural.
 local function filterStructSig(f)
-    if type(f) ~= "table" then return tostring(f) end
-    local parts = {}
-    for i = 1, #f do
-        local entry = f[i]
-        if type(entry) == "table" then
-            parts[i] = tostring(entry.filter) .. "#" .. tostring(entry.key) .. recStyleSig(entry.style)
-        else
-            parts[i] = entry
-        end
-    end
-    return table.concat(parts, ";")
-end
-
--- TUNING half of a filter list: each record's candidateFilters (boolean flags,
--- maxDuration, dispel-type maps via cfSig; spell-ID maps via include/excludeSig —
--- records carry none today, but the serializer must not go blind if they appear).
--- Positional, so it stays aligned with filterStructSig's record order.
--- Grammar note: the three "&"-joined components stay disambiguable because cfSig
--- parts always contain "=", includeSig is "I:"-prefixed, and excludeSig is bare
--- digits — any new token must keep its component recognisable within that grammar.
-local function filterTuningSig(f)
     if type(f) ~= "table" then return "" end
     local parts = {}
     for i = 1, #f do
         local entry = f[i]
         if type(entry) == "table" then
-            local cf = entry.candidateFilters
-            parts[i] = cfSig(cf) .. "&" .. includeSig(cf) .. "&" .. excludeSig(cf)
+            parts[i] = tostring(entry.key) .. recStyleSig(entry.style)
         else
             parts[i] = ""
         end
@@ -1884,11 +1879,37 @@ local function filterTuningSig(f)
     return table.concat(parts, ";")
 end
 
+-- TUNING half of a filter list: each record's FILTER STRING plus its candidateFilters
+-- (boolean flags, maxDuration, dispel-type maps via cfSig; spell-ID maps via
+-- include/excludeSig — records carry none today, but the serializer must not go blind
+-- if they appear). Positional, so it stays aligned with filterStructSig's record order.
+-- Grammar note: the four "&"-joined components stay disambiguable because the filter
+-- string is "F:"-prefixed, cfSig parts always contain "=", includeSig is "I:"-prefixed,
+-- and excludeSig is bare digits — any new token must keep its component recognisable
+-- within that grammar.
+-- The filter string joined this half on 2026-08-04; see filterStructSig for why that is
+-- safe while the key set stays structural.
+local function filterTuningSig(f)
+    if type(f) ~= "table" then return "" end
+    local parts = {}
+    for i = 1, #f do
+        local entry = f[i]
+        if type(entry) == "table" then
+            local cf = entry.candidateFilters
+            parts[i] = "F:" .. tostring(entry.filter)
+                .. "&" .. cfSig(cf) .. "&" .. includeSig(cf) .. "&" .. excludeSig(cf)
+        else
+            parts[i] = "F:" .. tostring(entry)
+        end
+    end
+    return table.concat(parts, ";")
+end
+
 -- Public split halves for the AD debuff-group containers (AuraDesigner/Factory.lua,
 -- Wave 1) — the record shape is the same one the row folds into its own signatures,
--- so the groups reuse the exact serializers. Struct half = record strings + keys
--- (a selection edit that changes the record SET Rebuilds); tuning half = per-record
--- candidateFilters (applies in place via ApplyTuning + the config.filter pre-swap).
+-- so the groups reuse the exact serializers. Struct half = record KEYS + per-record
+-- style (a selection edit that changes the record SET Rebuilds); tuning half = each
+-- record's filter string + candidateFilters (applies in place via ApplyTuning).
 -- The combined DF:DebuffFilterRecordsSig above stays as the canonical whole-record
 -- serializer (harness equivalence oracle).
 function DF:DebuffFilterRecordsStructSig(records)
@@ -1901,14 +1922,18 @@ end
 
 -- Row signatures, SPLIT (Wave 1). The old combined buffFactorySig forced a
 -- teardown+recreate for every delta; now:
---   rowStructSig  — changes need a Rebuild (new container): the filter set
---     (token strings + record keys), region-presence toggles (ApplyStyle can't
---     CREATE or REMOVE a region), creation-frozen formatKeys + zeroText
---     (SetDurationText binds both once per slot), tooltips, the native dispel region.
+--   rowStructSig  — changes need a Rebuild (new container): the record KEY SET
+--     (add-only topology — no RemoveAuraGroup) and per-record style, region-presence
+--     toggles (ApplyStyle can't CREATE or REMOVE a region), creation-frozen formatKeys
+--     + zeroText (SetDurationText binds both once per slot), tooltips, the native
+--     dispel region.
 --   rowTuningSig  — changes with the struct sig stable apply IN PLACE via
 --     h:ApplyTuning (OOC immediate, combat defers to regen): max, native sort,
---     and every candidateFilters facet — config-wide include/exclude spell maps,
---     maxDuration, per-record flags/dispel maps.
+--     every candidateFilters facet — config-wide include/exclude spell maps,
+--     maxDuration, per-record flags/dispel maps — and, since 2026-08-04, each
+--     record's FILTER STRING. That last one is what makes buff-row "Only Mine"
+--     (HELPFUL <-> HELPFUL|PLAYER) and the dispel row's All/By-Me token swap free:
+--     same key, different string, no container recreated.
 -- Everything in neither sig is a plain in-place ApplyStyle (cosmetics).
 local function rowStructSig(cfg)
     local s = cfg.style
@@ -2032,10 +2057,11 @@ function DF:DriveBuffFactory(frame, db)
                 DF:Debug("AURAROW", "buff: TUNING - tuning sig %s -> %s (struct unchanged)",
                     tostring(frame.buffFactoryTuningSig), tostring(tuningSig))
                 frame.buffFactoryTuningSig = tuningSig
-                -- Per-record candidateFilters ride cfg.filter; the struct sig pins
-                -- every record's filter string + key, so the fresh list is
-                -- group-identical and applyGroupTuning re-derives per-record
-                -- filters from it (keys line up with the declared groups).
+                -- Per-record filter STRINGS and candidateFilters both ride cfg.filter;
+                -- the struct sig pins every record's KEY, so the fresh list is
+                -- group-identical and applyGroupTuning re-derives both from it (keys
+                -- line up with the declared groups). This is what makes "Only Mine"
+                -- (HELPFUL <-> HELPFUL|PLAYER) a tune rather than a rebuild.
                 h.config.filter = cfg.filter
                 h:ApplyTuning(cfg)              -- max/sort/candidateFilters — in place, no leak
             end

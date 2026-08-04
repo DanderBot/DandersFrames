@@ -2535,7 +2535,13 @@ end
 -- cosmetic restyle, re-positions the window over its region, and hot-resizes on a size change.
 -- parent = the frame the window PARENTS to (must be a Frame); anchorTo = the region it covers
 -- (may be a texture, e.g. frame.background); levelOffset = z-band above parent.
--- filter = the slot filter string (poolFilter(cfg)); structural — bound at build.
+-- ☠ filter = the slot filter string (poolFilter(cfg)), and here it STAYS structural,
+-- unlike every other AD family since 2026-08-04. Not an oversight: NativeBackend
+-- applyGroupTuning returns early for mode == "missing" by design — the layout-push
+-- inversion that makes the badge clear its clip window is load-bearing and hard-won
+-- (10d6048e), and nothing has exercised it against a live candidateFilters/filter swap.
+-- The identity map is structural here for the same reason. Do not move either onto the
+-- tuning path without enabling missing mode in the engine first.
 local function syncFrameLevelMissing(store, keyName, map, frame, parent, anchorTo, w, hgt, levelOffset, coSig, apply, filter)
     w = math.max(1, tonumber(w) or 1); hgt = math.max(1, tonumber(hgt) or 1)
     local structSig = includeSig(map) .. "|miss|" .. (filter or "HELPFUL")
@@ -3682,13 +3688,15 @@ function Factory:SyncFrame(frame)
                             entry.handle:Rebuild(buildDebuffGroupConfig(frame, records, group))
                         else
                             if entry.tuningSig ~= tuningSig then
-                                -- Tunables live in the RECORDS' candidateFilters, so the
-                                -- mandatory consumer PRE-SWAP applies (Handle:ApplyTuning
-                                -- header): replace config.filter with the fresh GROUP-
-                                -- IDENTICAL record list — legal because the struct sig pins
-                                -- every record's filter string + key — then ApplyTuning;
-                                -- the engine flush re-derives per-record cf from
-                                -- config.filter. The full trio rides the fresh config: max,
+                                -- Tunables live in the RECORDS' filter strings and
+                                -- candidateFilters, both re-derived engine-side from
+                                -- config.filter. ApplyTuning now copies that through
+                                -- itself, so the explicit pre-swap below is redundant --
+                                -- kept because it costs nothing and makes the dependency
+                                -- visible at the call site. Legal because the struct sig
+                                -- pins every record's KEY (the add-only topology
+                                -- constraint); the STRINGS are free to move.
+                                -- The full trio rides the fresh config: max,
                                 -- the Wave-2 per-group sort (family default "TIME" =
                                 -- ExpirationOnly, the old hardcode), candidateFilters =
                                 -- nil (dgroups carry no config-wide map).
