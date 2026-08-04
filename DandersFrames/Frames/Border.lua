@@ -1,4 +1,4 @@
-local addonName, DF = ...
+﻿local addonName, DF = ...
 
 -- ============================================================
 -- UNIFIED BORDER BACKEND (DF.Border)
@@ -488,10 +488,28 @@ end
 -- the faithful equivalent of DF's "Atlas" is the badge-LESS variant. `showIcon` no
 -- longer exists on 68914's options, so the style is the only place that intent can
 -- live. Use "BorderWithIcon" here if a corner dispel badge is ever wanted.
-local DISPEL_STYLE_NEW = { Color = "PreserveAsset", Atlas = "Border" }
-local DISPEL_STYLE_LITERAL = { Color = 3, Atlas = 0 }
+-- ★ `Icon` below is that "if": it lets a carrier ask Blizzard for the dispel-type
+-- ART rather than just its colour, which is what lets one badge on the dispel
+-- overlay's slot agree with the overlay by construction -- same aura, Blizzard picks
+-- both -- instead of us guessing a type we cannot read.
+--
+-- The enum's other two art styles, BorderWithIcon and Border, are deliberately NOT
+-- mapped: they are ui-debuff-border-* art meant to frame an aura BUTTON, so on a unit
+-- frame they render as a square box around the symbol (tried live 2026-08-03).
+--
+-- Resolved BY NAME, never by literal: the numbers were renumbered for 68914 (Grid2
+-- still ships `style = 1` meaning "Color" and now draws BorderWithIcon). The literal
+-- table is a last resort for clients without the enum at all.
+local DISPEL_STYLE_NEW = {
+    Color = "PreserveAsset", Atlas = "Border",
+    Icon = "Icon",
+}
+local DISPEL_STYLE_LITERAL = {
+    Color = 3, Atlas = 0,
+    Icon = 2,
+}
 function DF:ResolveDispelTextureStyle(styleName)
-    styleName = (styleName == "Color" or styleName == "Atlas") and styleName or "Atlas"
+    if DISPEL_STYLE_NEW[styleName] == nil then styleName = "Atlas" end
     local newEnum = Enum and Enum.CustomAuraButtonDispelTypeTextureStyle
     local v = newEnum and newEnum[DISPEL_STYLE_NEW[styleName]]
     if v ~= nil then return v end

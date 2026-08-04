@@ -1,4 +1,4 @@
-local addonName, DF = ...
+﻿local addonName, DF = ...
 
 -- ============================================================
 -- DISPEL OVERLAY SYSTEM
@@ -73,6 +73,21 @@ end
 -- DF:ResolveDispelTextureStyle, Frames/Border.lua. Never resolve the enum here.
 local function DispelBorderStyle()
     return DF:ResolveDispelTextureStyle("Color")
+end
+
+-- Options for the type-badge carrier. Style is fixed to Icon -- the clean
+-- RaidFrame-Icon-Debuff* symbol Blizzard picks from the aura. The other two the API
+-- offers (BorderWithIcon / Border) were tried and REMOVED on 2026-08-03: they are
+-- ui-debuff-border-* art meant to frame an aura BUTTON, so on a unit frame they draw
+-- as a square box around the symbol. Wrong tool -- they exist to border an icon, not
+-- a frame. A customDispelAssetMap (dispel name -> our own texture per type) is the
+-- route if DF ever ships badge art of its own; MSUF drives four icon sets through it.
+local function BadgeCarrierOptions()
+    return {
+        style = DF:ResolveDispelTextureStyle("Icon"),
+        showWhenHarmful = true,
+        showWhenHelpful = false,
+    }
 end
 
 -- Dispel-colour map for the overlay: ALWAYS recolour the carriers from the shared
@@ -471,7 +486,7 @@ local function ApplyOverlayLayout(overlay, db, frame)
     local iconOffsetX = db.dispelIconOffsetX or 0
     local iconOffsetY = db.dispelIconOffsetY or 0
     local showIcon = db.dispelShowIcon ~= false
-    
+
     -- Apply pixel-perfect to icon size
     if db.pixelPerfect then
         iconSize = DF:PixelPerfect(iconSize)
@@ -1123,16 +1138,11 @@ end
 -- harmful auras with a dispellable dispelName — incl. private auras, natively).
 -- ============================================================
 
-local DISPEL_ICON_TYPES = { "Magic", "Curse", "Disease", "Poison", "Bleed" }
--- Game-mode icon art: the same clean atlases the DF widget's own icons use (the
--- native SetAuraBorder Atlas style renders a boxed border-with-badge instead).
-local GAME_ICON_ATLAS = {
-    Magic   = "RaidFrame-Icon-DebuffMagic",
-    Curse   = "RaidFrame-Icon-DebuffCurse",
-    Disease = "RaidFrame-Icon-DebuffDisease",
-    Poison  = "RaidFrame-Icon-DebuffPoison",
-    Bleed   = "RaidFrame-Icon-DebuffBleed",
-}
+-- (Removed) DISPEL_ICON_TYPES and GAME_ICON_ATLAS. The badge no longer picks its own
+-- art per type: it is one bound carrier and Blizzard supplies the atlas from the aura,
+-- which is the same RaidFrame-Icon-Debuff* set this table listed by hand. Blizzard's
+-- own copy lives in AuraUtil (dispelIconAtlas), so ours was a duplicate that could
+-- drift. See BadgeCarrierOptions and the badge block in DispelSlotSecureInit.
 local warnedTintBind = false
 local warnedSlotStyle = false
 
@@ -1183,23 +1193,19 @@ local function dispelSlotPlan(db)
         -- border ring). Four separate strip textures, now on one button.
         edges    = (gradientOn and gradientStyle == "EDGE")
                    and { "TOP", "BOTTOM", "LEFT", "RIGHT" } or nil,
+        -- The dispel-type badge rides the SAME slot as the rest of the overlay, so it
+        -- always shows the type of the aura the overlay is showing. It used to be its
+        -- own set of five per-type slots; see the note in DispelSlotSecureInit for why
+        -- that could not be made to show only one.
+        badge    = db.dispelShowIcon ~= false or nil,
     }
     local slots = {}
     slots[#slots + 1] = { key = "main", filter = baseFilter, candidateFilters = baseCF, roles = roles }
-    -- Type icon: per-type slots (includeDispelTypes = type knowledge WITHOUT a
-    -- native bind) carrying DF's clean RaidFrame-Icon atlases. The native Atlas
-    -- style was tried first and rejected: its ui-debuff-border-*-icon art is a
-    -- BUTTON BORDER with a badge — renders as a boxed icon (Krathe, 2026-07-10).
-    -- Bleed self-gates: byMe filter only matches if the player can dispel bleeds;
-    -- all-mode includes it via the classification route.
-    if db.dispelShowIcon ~= false then
-        for i = 1, #DISPEL_ICON_TYPES do
-            local t = DISPEL_ICON_TYPES[i]
-            local cf = { includeDispelTypes = { [t] = true } }
-            if baseCF then cf.processedAuraType = dispelEnum end
-            slots[#slots + 1] = { key = "icon" .. t, filter = baseFilter, candidateFilters = cf, iconType = t }
-        end
-    end
+    -- (Removed) the five per-type icon slots. The 2026-07-10 rejection they existed to
+    -- work around was of the DEFAULT bind style, BorderWithIcon -- a button border with
+    -- a badge baked in. `Icon` gives the same clean RaidFrame-Icon-Debuff* atlas those
+    -- slots drew by hand, on ONE carrier, with Blizzard choosing the type. See the
+    -- badge block in DispelSlotSecureInit.
     return slots, needPolicy
 end
 
@@ -1222,6 +1228,7 @@ local function dispelFactoryPlanAndSig(db)
             parts[#parts + 1] = "r:g=" .. tostring(r.gradient)
                 .. ",b=" .. tostring(r.border and true or false)
                 .. ",e=" .. (r.edges and table.concat(r.edges, "/") or "none")
+                .. ",bg=" .. tostring(r.badge and true or false)
         end
     end
     -- The bound carrier is created in the initializeFrame (DispelSlotSecureInit), so
@@ -1327,7 +1334,11 @@ local function BindDispelCarriers(btn, carriers, db, key)
     -- retried, leaving the overlay on the previous palette (or untinted) until an
     -- unrelated structural change rebuilt the container. warnedTintBind is one-shot
     -- for the whole session, so every later failure was silent too.
-    local opts = {
+    -- The TINT options, used by every carrier that wants Blizzard's dispel colour on
+    -- our own art (gradient, edge strips, ring). A carrier may override them --
+    -- AddDispelTypeTexture takes options PER TEXTURE, which is what lets the type
+    -- badge ask for a different style on the same button (see BadgeCarrierOptions).
+    local tintOpts = {
         style = DispelBorderStyle(),
         customDispelColorMap = DispelBorderMapFor(),
         showWhenHarmful = true,
@@ -1337,9 +1348,12 @@ local function BindDispelCarriers(btn, carriers, db, key)
     local ok, err = pcall(function()
         if btn.AddDispelTypeTexture then
             if btn.ClearDispelTypeTextures then btn:ClearDispelTypeTextures() end
-            for i = 1, #carriers do btn:AddDispelTypeTexture(carriers[i], opts) end
+            for i = 1, #carriers do
+                local c = carriers[i]
+                btn:AddDispelTypeTexture(c.tex, c.opts or tintOpts)
+            end
         else
-            btn:SetAuraBorder(carriers[1], opts)
+            btn:SetAuraBorder(carriers[1].tex, carriers[1].opts or tintOpts)
         end
     end)
     DF._dispelBindErr = DF._dispelBindErr or {}
@@ -1389,19 +1403,19 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         if tracking then
             w.gradient:SetAllPoints(btn)
             w.gradient:SetStatusBarTexture(GRADIENT_TEXTURES.FULL)
-            carriers[#carriers + 1] = w.gradient:GetStatusBarTexture()
+            carriers[#carriers + 1] = { tex = w.gradient:GetStatusBarTexture() }
         else
             if not w.nativeGradient then
                 w.nativeGradient = w:CreateTexture(nil, "ARTWORK", nil, 2)
             end
             w.nativeGradient:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
             w.nativeGradient:SetAllPoints(btn)
-            carriers[#carriers + 1] = w.nativeGradient
+            carriers[#carriers + 1] = { tex = w.nativeGradient }
         end
         -- Name the gradient carrier explicitly. StyleGameMainSlot must dress THIS one;
         -- addressing it as "the bound carrier" only worked while a slot held exactly one,
         -- and would grab the ring on a button whose gradient role is absent (EDGE).
-        btn._dfDispelGradientCarrier = carriers[#carriers]
+        btn._dfDispelGradientCarrier = carriers[#carriers].tex
     end
 
     -- EDGE strips: one carrier per side, keyed BY SIDE (they used to be one field each
@@ -1418,7 +1432,7 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
             tex:SetAllPoints(btn)   -- anchored for the bind; StyleGameEdgeSlot positions the strip
             btn.dfDispelEdgeHolder[edge] = holder
             btn.dfDispelEdgeTex[edge] = tex
-            carriers[#carriers + 1] = tex
+            carriers[#carriers + 1] = { tex = tex }
         end
     end
 
@@ -1432,7 +1446,32 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         ring:SetAllPoints(btn)   -- anchored for the bind; StyleGameBorderSlot crops/insets
         btn.dfDispelRing = ring
         btn.dfDispelRingHolder = holder
-        carriers[#carriers + 1] = ring
+        carriers[#carriers + 1] = { tex = ring }
+    end
+
+    -- TYPE BADGE. One carrier, bound with a style that asks Blizzard for the dispel
+    -- ART and not just a colour, so it shows the type of the SAME aura the overlay is
+    -- showing. They cannot disagree, because neither is our choice.
+    --
+    -- This replaces the old per-type slot set (one slot per dispel type, each with
+    -- includeDispelTypes). Those could NOT be made mutually exclusive: an aura carries
+    -- exactly ONE dispelName, so excluding Magic from the Curse slot removes nothing --
+    -- unlike the debuff records, where one aura can hold several flags at once. And
+    -- presence is Blizzard's (SetShown on the slot button), so we could never tell
+    -- which slots were filled. A unit with two dispellable types lit two slots and drew
+    -- both badges on the same corner. Laying them out was considered and rejected:
+    -- without knowing which are shown, only fixed per-type cells are possible, which
+    -- displaces the badge off the configured corner in the common single-type case.
+    if roles.badge then
+        local holder = CreateFrame("Frame", nil, btn)
+        holder:SetAllPoints(btn)
+        holder:SetFrameLevel(((frame.contentOverlay and frame.contentOverlay:GetFrameLevel())
+            or (frame:GetFrameLevel() + 25)) + 1)
+        local badge = holder:CreateTexture(nil, "OVERLAY")
+        badge:SetAllPoints(btn)   -- anchored for the bind; StyleGameBadge sizes/places it
+        btn.dfDispelBadge = badge
+        btn.dfDispelBadgeHolder = holder
+        carriers[#carriers + 1] = { tex = badge, opts = BadgeCarrierOptions() }
     end
 
     -- ONE bind pass for every carrier (clear-once-then-append; see BindDispelCarriers).
@@ -1520,33 +1559,23 @@ end
 -- icon is a plain DF texture — no native bind at all. Positioned from the DF icon
 -- settings; sits above the name/health text like the legacy icons. Dual-type units
 -- overlap two icons at the same anchor (rare; mirrors the custom-mode trade-off).
-local function StyleGameTypeIconSlot(btn, frame, db, typeName)
-    if not btn.dfDispelIconTex then
-        local holder = CreateFrame("Frame", nil, btn)
-        holder:SetAllPoints(btn)
-        btn.dfDispelIconHolder = holder
-        btn.dfDispelIconTex = holder:CreateTexture(nil, "OVERLAY")
-    end
-    btn.dfDispelIconHolder:SetFrameLevel(((frame.contentOverlay and frame.contentOverlay:GetFrameLevel())
+local function StyleGameBadge(btn, frame, db)
+    -- Badge is created + bound in DispelSlotSecureInit (secure); this tainted pass
+    -- only sizes, places and alphas it. It must NEVER SetAtlas/SetTexture here --
+    -- Blizzard owns the art after the bind, which is the whole point: the badge shows
+    -- the type of the same aura the overlay is showing, and we never read that type.
+    local badge = btn.dfDispelBadge
+    if not badge then return end
+    btn.dfDispelBadgeHolder:SetFrameLevel(((frame.contentOverlay and frame.contentOverlay:GetFrameLevel())
         or (frame:GetFrameLevel() + 25)) + 1)
-    local tex = btn.dfDispelIconTex
-    tex:SetAtlas(GAME_ICON_ATLAS[typeName] or GAME_ICON_ATLAS.Magic)
-    if typeName == "Bleed" then
-        -- The bleed atlas ships untinted (legacy tinted it too) — use the game
-        -- palette's bleed colour to stay "game colours" here.
-        local c = AuraUtil and AuraUtil.GetAuraBorderColor and AuraUtil.GetAuraBorderColor("Bleed")
-        if c then tex:SetVertexColor(c:GetRGB()) else tex:SetVertexColor(1, 0, 0) end
-    else
-        tex:SetVertexColor(1, 1, 1)
-    end
     local size = db.dispelIconSize or 20
     if db.pixelPerfect then size = DF:PixelPerfect(size) end
     local pos = db.dispelIconPosition or "CENTER"
-    tex:ClearAllPoints()
-    tex:SetPoint(pos, btn.dfDispelIconHolder, pos, db.dispelIconOffsetX or 0, db.dispelIconOffsetY or 0)
-    tex:SetSize(size, size)
-    tex:SetAlpha(db.dispelIconAlpha or 1)
-    ApplySlotPulse(btn.dfDispelIconHolder, db.dispelAnimate)
+    badge:ClearAllPoints()
+    badge:SetPoint(pos, btn.dfDispelBadgeHolder, pos, db.dispelIconOffsetX or 0, db.dispelIconOffsetY or 0)
+    badge:SetSize(size, size)
+    badge:SetAlpha(db.dispelIconAlpha or 1)
+    ApplySlotPulse(btn.dfDispelBadgeHolder, db.dispelAnimate)
 end
 
 -- GAME-COLOUR mode, border slot: ONE square-ring texture (solid band, transparent
@@ -1649,10 +1678,10 @@ local function StyleOneSlot(btn, frame, db, info)
     if btn._dfDispelCarriers and btn._dfDispelCurveGen ~= DF.dispelCurveGen then
         BindDispelCarriers(btn, btn._dfDispelCarriers, db, info.key)
     end
-    if info.iconType then
-        StyleGameTypeIconSlot(btn, frame, db, info.iconType)
-    else
-        -- ONE button, every role it owns (see dispelSlotPlan's `roles`).
+    do
+        -- ONE button, every role it owns (see dispelSlotPlan's `roles`). There is only
+        -- the main slot now -- the per-type icon slots are gone, the badge is a role on
+        -- this button like the ring and the strips.
         -- StyleGameMainSlot runs UNCONDITIONALLY: besides dressing the gradient
         -- carrier it owns the shared geometry pass (ApplyOverlayLayout), hides
         -- the legacy regions, and applies the darken/pulse — all of which the
@@ -1663,6 +1692,7 @@ local function StyleOneSlot(btn, frame, db, info)
             for _, edge in ipairs(r.edges) do StyleGameEdgeSlot(btn, frame, db, edge) end
         end
         if r and r.border then StyleGameBorderSlot(btn, frame, db) end
+        if r and r.badge then StyleGameBadge(btn, frame, db) end
     end
 end
 
@@ -1698,8 +1728,8 @@ local function ResetSlotArt(btn)
     btn.dfDispelEdgeHolder = nil
     btn.dfDispelRing = nil
     btn.dfDispelRingHolder = nil
-    btn.dfDispelIconTex = nil
-    btn.dfDispelIconHolder = nil
+    btn.dfDispelBadge = nil
+    btn.dfDispelBadgeHolder = nil
 end
 
 -- Style every live slot button per the plan. Returns false while no buttons exist

@@ -1,4 +1,4 @@
-local addonName, DF = ...
+﻿local addonName, DF = ...
 
 -- Expose as global for other files and external access
 DandersFrames = DF
@@ -1304,6 +1304,17 @@ DF.PartyDefaults = {
     -- Dispel symbol (Wave 5b, colourblind aid): the engine writes the dispel-type
     -- letter into a DF-owned FontString (native SetAuraSymbol; zero aura reads).
     -- Renders in-game ONLY while WoW's colorblindMode CVar is on (GUI tooltip caveat).
+    -- ☠ NAME DIVERGENCE, DELIBERATE -- do not "tidy" these to match the label.
+    -- These drive the feature the UI calls DISPEL TEXT: the two-letter dispel code
+    -- (Ma/Po/Cu) on a debuff icon. The keys still say Symbol because that was the
+    -- pre-68914 API name; Blizzard itself renamed it (SetDispelTypeText is current,
+    -- SetAuraSymbol is the deprecated alias) and the UI followed. Renaming the keys
+    -- would need a migration over everyone's saved data plus import handling for the
+    -- export strings already in the wild -- all for an internal name nobody sees.
+    --
+    -- ⚠ Not to be confused with the DISPEL SYMBOL on the dispel overlay -- the
+    -- Magic/Curse/Poison glyph drawn on the FRAME. That one is keyed dispelIcon*.
+    -- The two features diverge in opposite directions; that is not a mistake.
     debuffDispelSymbolAnchor = "CENTER",
     debuffDispelSymbolColor = {r = 1, g = 1, b = 1},
     debuffDispelSymbolEnabled = false,

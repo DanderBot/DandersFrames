@@ -1,4 +1,4 @@
--- Part 5 of the settings pages, split from Options.lua.
+﻿-- Part 5 of the settings pages, split from Options.lua.
 -- The parts run as a chain so the pages build in their original order.
 -- ☠ Companion addon: `...` yields THIS addon's private table, not the
 -- parent's, so every DF.* read here would be nil. Take the parent's table
@@ -909,7 +909,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         displayGroup:AddWidget(GUI:CreateHeader(self.child, L["Display"]), 40)
         -- Show Border / Show Gradient are the master toggles for their features, so
         -- each one now HEADS its own group below (Border / Gradient) — mirroring the
-        -- Show Dispel Icon toggle that heads the Icon group. Keeps every group's
+        -- Show Dispel Symbol toggle that heads the Symbol group. Keeps every group's
         -- on/off switch at the top of that group.
         -- Boolean toggles GREY their dependent controls in place (addon-wide
         -- convention); hideOn stays for the feature/variant switches only.
@@ -928,18 +928,18 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- ===== ICON GROUP (Column 2) =====
         local iconGroup = GUI:CreateSettingsGroup(self.child, 280)
-        iconGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Type Icon"]), 40)
-        local showIcon = iconGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Dispel Icon"], db, "dispelShowIcon", function()
+        iconGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Symbol"]), 40)
+        local showIcon = iconGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Dispel Symbol"], db, "dispelShowIcon", function()
             ApplyDispelSettings()
             self:RefreshStates()
         end), 30)
         showIcon.hideOn = HideDispelOptions
-        local iconSize = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Size"], 10, 40, 1, db, "dispelIconSize", function()
+        local iconSize = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Symbol Size"], 10, 40, 1, db, "dispelIconSize", function()
             ApplyDispelSettings()
         end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
         iconSize.hideOn = HideDispelOptions
         iconSize.disableOn = DisableIfNoIcon
-        local iconAlpha = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Icon Opacity"], 0.1, 1.0, 0.1, db, "dispelIconAlpha", function()
+        local iconAlpha = iconGroup:AddWidget(GUI:CreateSlider(self.child, L["Symbol Opacity"], 0.1, 1.0, 0.1, db, "dispelIconAlpha", function()
             InvalidateCurves()
         end, function() DF:LightweightUpdateDispelOverlay() end, true), 55)
         iconAlpha.hideOn = HideDispelOptions
@@ -950,7 +950,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             ["TOPLEFT"]= L["Top Left"], ["TOPRIGHT"]= L["Top Right"],
             ["BOTTOMLEFT"]= L["Bottom Left"], ["BOTTOMRIGHT"]= L["Bottom Right"],
         }
-        local iconPos = iconGroup:AddWidget(GUI:CreateDropdown(self.child, L["Icon Position"], iconPositions, db, "dispelIconPosition", function()
+        local iconPos = iconGroup:AddWidget(GUI:CreateDropdown(self.child, L["Symbol Position"], iconPositions, db, "dispelIconPosition", function()
             ApplyDispelSettings()
         end), 55)
         iconPos.hideOn = HideDispelOptions

@@ -1,4 +1,4 @@
--- AceLocale silent mode is ALWAYS on by default. AceLocale's default
+﻿-- AceLocale silent mode is ALWAYS on by default. AceLocale's default
 -- `readmeta` metatable calls geterrorhandler() on missing keys, which
 -- causes spurious errors when external code (BugSack, debug helpers
 -- calling :ToDebugString() etc.) introspects our L table — and also
@@ -703,7 +703,6 @@ L["Dispel Overlay"] = true
 L["Dispel Overlay Alpha"] = true
 L["Dispel Text"] = true
 L["Dispel Type Colors"] = true
-L["Dispel Type Icon"] = true
 L["Dispellable By Me"] = true
 L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled. Any Dispel Type: every debuff with a dispel type, even ones that cannot be dispelled."] = true
 L["Dispellable Debuffs"] = true
@@ -1403,7 +1402,11 @@ L["Show Border"] = true
 L["Show Buffs"] = true
 L["Show Cooldown Swipe"] = true
 L["Show Debuffs"] = true
-L["Show Dispel Icon"] = true
+L["Dispel Symbol"] = true
+L["Show Dispel Symbol"] = true
+L["Symbol Size"] = true
+L["Symbol Opacity"] = true
+L["Symbol Position"] = true
 L["Show Dispel Text"] = true
 L["Show DPS"] = true
 L["Show Duration"] = true
