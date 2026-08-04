@@ -11,13 +11,14 @@
 -- Blizzard drives each slot's secret show/hide — we only attach art. Zero secret reads.
 --
 -- SCOPE (this file, P4.0 scaffold + P4.1 + P4.2 + P4.3 + P4.4): gates, identity->includeSpellIDs,
--- the frame-level indicators that CAN be driven read-free — HEALTH-BAR (filled mirror + flat
+-- the frame-level indicators that CAN be driven read-free — HEALTH-BAR (fill cover + flat
 -- tint), BACKGROUND tint, static BORDER — and the PLACED ICON / SQUARE / BAR indicators (native
 -- SetIcon / solid-colour fill + native cooldown + native stacks + static border for icon/square;
 -- a native SetDurationBar-driven StatusBar for the bar, one 1-slot container per configured
 -- indicator, many coexisting). Placed duration text supports colour-by-time via the #205 discrete
--- BUCKET formatter (C-side |c escapes — no Lua time read). framealpha / nametext / healthtext are
--- 12.1 casualties (see NOTES at the file foot). Sound + showWhenMissing are P4.5. The factory
+-- BUCKET formatter (C-side |c escapes — no Lua time read). nametext / healthtext were recovered
+-- via colour-by-cover; framealpha remains a 12.1 casualty (see NOTES at the file foot).
+-- Sound + showWhenMissing are P4.5. The factory
 -- is the only AD render path now — the legacy read-path engine was removed.
 --
 -- COMBAT / SECRET obligations (delegated to the DF.AuraContainer handle, the #205-proven
@@ -403,8 +404,11 @@ local function poolFilter(cfg, mine)
     return (type(cfg) == "table" and cfg.othersOnly) and "HELPFUL|!PLAYER" or "HELPFUL"
 end
 
--- Stable structural signature of an includeSpellIDs map (sorted IDs). Changing the set
--- is STRUCTURAL (candidateFilters are declared at container build) -> Rebuild, not restyle.
+-- Stable signature of an includeSpellIDs map (sorted IDs). Changing the set is a TUNING
+-- delta, not a structural one: candidateFilters are declared at build but the native
+-- SetAuraGroupCandidateFilters / SetAuraSlotCandidateFilters mutate them in place, so a
+-- selection edit rides ApplyTuning. (It WAS structural before Wave 1; every consumer of
+-- this sig now feeds a tuningSig.)
 local function includeSig(map)
     if not map then return "" end
     local ids = {}
@@ -435,9 +439,9 @@ end
 -- (Indicators.lua:1325-1329), read from CONFIG only:
 --   replace: overlay opacity = the colour picker's alpha.
 --   tint:    overlay opacity = blend slider x colour alpha (so the bar colour shows through).
--- Used by the FLAT whole-bar tint path and to derive the tint-mode mirror's alpha. The
--- filled-mirror path now expresses current-health-fill tracking read-free (a duplicate
--- StatusBar fed the secret percent), so tintWholeBar=false is no longer a divergence.
+-- Used by the FLAT whole-bar tint path and to derive the fill cover's alpha. The cover path
+-- expresses current-health-fill tracking read-free (a texture anchored to the real fill
+-- region), so tintWholeBar=false is no longer a divergence.
 local function healthbarBlend(mode, blendCfg, a)
     if mode == "replace" then return a end
     return (blendCfg or 0.5) * a
@@ -468,18 +472,15 @@ local function buildOverlayTintConfig(unit, map, r, g, b, blend, levelOffset, fi
     }
 end
 
--- Build a FILLED HEALTH-MIRROR container config (health-bar indicator, replace/tint fill).
--- The slot hosts a duplicate StatusBar fed the unit's secret health percent render-side, so
--- it mirrors the real bar's fill+texture+motion (fixing the flat whole-bar tint patch). Level
--- offset 1 = healthBar level + 1 (above the real fill, below the +2 power / content overlay),
--- exactly where the legacy tint sat (Indicators.lua:1299). Colour/texture/alpha are static
--- config; nothing is fed at runtime. (Was an onBar hand-back for a StatusBar driven per
--- health tick -- which the aura frame's access restrictions forbid outright.)
--- `clampTo` is the REAL health bar's fill texture. The cover anchors to it, so it
--- inherits the fill's rect and tracks health with no feed and no reads -- see the
--- HEALTH FILL COVER note in Frames/AuraContainer.lua for why the old StatusBar
--- mirror could never be driven.
-local function buildHealthMirrorConfig(unit, map, r, g, b, alpha, texture, clampTo, filter)
+-- Build a HEALTH FILL COVER container config (health-bar indicator, replace/tint fill).
+-- `clampTo` is the REAL health bar's fill texture. The cover is a plain texture anchored to
+-- it, so it inherits the fill's rect and tracks health with NO feed and NO reads -- the aura
+-- frame's access restrictions (DenyTaintedAccessWhenAurasAreSecret) forbid driving a
+-- duplicate StatusBar outright, which is why the earlier mirror could never work. See the
+-- HEALTH FILL COVER note in Frames/AuraContainer.lua.
+-- Level offset 1 = healthBar level + 1 (above the real fill, below the +2 power / content
+-- overlay), exactly where the legacy tint sat. Colour/texture/alpha are static config.
+local function buildHealthFillConfig(unit, map, r, g, b, alpha, texture, clampTo, filter)
     return {
         unit = unit,
         mode = "overlay",
@@ -3105,7 +3106,8 @@ end
 -- frame-level effect targets ONE region, so per type we pick the SINGLE highest-priority
 -- winner (stacking two of a type conflicts) and stand it up / restyle / tear it down on
 -- its own DF.AuraContainer. Types ported here: healthbar, background, border. framealpha /
--- nametext / healthtext are 12.1 casualties (see the notes below + the P4.7 overlay list).
+-- nametext / healthtext RECOVERED via colour-by-cover (see the NAME / HEALTH TEXT block
+-- below and the foot notes); framealpha stays a 12.1 casualty (P4.7 overlays its controls).
 -- ============================================================
 function Factory:SyncFrame(frame)
     if not frame or not frame.unit then return end
@@ -3190,12 +3192,13 @@ function Factory:SyncFrame(frame)
 
     -- ---- HEALTH BAR (child of frame.healthBar, overlay) -----------------------------
     -- Two render paths, chosen by config:
-    --   * FILLED MIRROR (replace, or tint without "Tint Entire Bar") — a duplicate StatusBar
-    --     fed the secret health percent render-side, matching the real bar's fill/texture/
-    --     motion. replace = opaque cover (alpha 1); tint = fill-matched tint (alpha = blend).
+    --   * FILL COVER (replace, or tint without "Tint Entire Bar") — a texture anchored to the
+    --     real health bar's fill region (healthBar:GetStatusBarTexture()), so it tracks health
+    --     with no feed and no reads. replace = opaque cover (alpha 1); tint = fill-matched
+    --     tint (alpha = blend).
     --   * FLAT WHOLE-BAR TINT (tint + tintWholeBar) — the legacy flat texture overlay covering
     --     the whole bar incl. the missing-health region. Unchanged behaviour.
-    -- Path (flat vs mirror) is folded into structSig so toggling it rebuilds the region fresh.
+    -- Path (flat vs cover) is folded into structSig so toggling it rebuilds the region fresh.
     local healthBar = frame.healthBar
     if healthBar then
         local hb = store.healthbar
@@ -3210,7 +3213,6 @@ function Factory:SyncFrame(frame)
             local wantMissingHB = bestCfg.showWhenMissing and true or false
             if existingHB and (existingHB.missing and true or false) ~= wantMissingHB then
                 existingHB.handle:Destroy(); hb[bestName] = nil
-                frame.dfADHealthMirror = nil
             end
           if wantMissingHB then
             -- SHOW-WHEN-MISSING: a flat tint over the health-bar region while the buff is ABSENT.
@@ -3218,7 +3220,6 @@ function Factory:SyncFrame(frame)
             -- secret on 12.1); single-anchored to the health bar's TOPLEFT so it covers the region
             -- (config-size approximation — precise region + z-order are P4.7 polish). The filled
             -- mirror is a present-only concept, so nil the feed ref while in missing mode.
-            frame.dfADHealthMirror = nil
             local r, g, b, a = readADColor(bestCfg.color)
             local mode = slower(bestCfg.mode or "replace")
             local blend = (mode == "replace") and a or healthbarBlend(mode, bestCfg.blend, a)
@@ -3238,7 +3239,7 @@ function Factory:SyncFrame(frame)
             -- SetAuraSlotCandidateFilters), so it rides its own sig rather than forcing
             -- a teardown+recreate. wholeBar STAYS structural: it picks a different
             -- config builder entirely.
-            local structSig = (wholeBar and "flat" or "mirror") .. "|" .. filt
+            local structSig = (wholeBar and "flat" or "cover") .. "|" .. filt
             local tuningSig = placedTuningSig(bestMap)
             local entry = hb[bestName]
 
@@ -3247,15 +3248,13 @@ function Factory:SyncFrame(frame)
                 local blend = healthbarBlend(mode, bestCfg.blend, a)
                 local coSig = tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
                 if not entry then
-                    frame.dfADHealthMirror = nil
-                    local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
+                        local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
                     if handle then
                         hb[bestName] = { handle = handle, structSig = structSig,
                                          tuningSig = tuningSig, coSig = coSig }
                     end
                 elseif entry.structSig ~= structSig then
-                    frame.dfADHealthMirror = nil
-                    entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
+                        entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                     entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
                 else
                     if entry.tuningSig ~= tuningSig then
@@ -3278,27 +3277,22 @@ function Factory:SyncFrame(frame)
                 -- (tainted) update path. Resolved fresh each pass: changing the frame's
                 -- health texture from the settings panel replaces this region.
                 local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
-                -- Nothing feeds a bar any more; drop the stash so the dead
-                -- MirrorHealthValue calls in the update paths stay inert.
-                frame.dfADHealthMirror = nil
                 local coSig = tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo) }, "|")
                 if not entry then
-                    local handle = DF.AuraContainer:Create(healthBar, buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
+                    local handle = DF.AuraContainer:Create(healthBar, buildHealthFillConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
                     if handle then
                         hb[bestName] = { handle = handle, structSig = structSig,
                                          tuningSig = tuningSig, coSig = coSig }
                     end
                 elseif entry.structSig ~= structSig then
                     entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                    entry.handle:Rebuild(buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
+                    entry.handle:Rebuild(buildHealthFillConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
                 else
                     if entry.tuningSig ~= tuningSig then
-                        -- ☠ Do NOT clear frame.dfADHealthMirror here. The two branches
-                        -- above clear it because the slot is torn down and onBar re-stashes
-                        -- the new StatusBar; a tuning pass keeps the SAME slot and the same
-                        -- bar, so clearing the ref would strand it (nothing re-stashes).
+                        -- A tuning pass keeps the SAME slot and the same cover, so it
+                        -- only needs the style re-applied, not a rebuild.
                         entry.tuningSig = tuningSig
-                        entry.handle:ApplyTuning(buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
+                        entry.handle:ApplyTuning(buildHealthFillConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
                     end
                     if entry.coSig ~= coSig then
                         entry.coSig = coSig
@@ -3310,7 +3304,6 @@ function Factory:SyncFrame(frame)
         end
         teardownExcept(hb, bestName)
         -- No health-bar winner this pass → the mirror bar is gone; drop the ref.
-        if not bestName then frame.dfADHealthMirror = nil end
     end
 
     -- ---- BACKGROUND TINT (child of frame.background, overlay tint) -------------------
@@ -3748,7 +3741,6 @@ function Factory:ClearFrame(frame)
         DF.TextDesigner.Render:DisableMirrors(frame, "health")
     end
     releaseBgAnchor(store)   -- containers gone above; drop the background anchor too
-    frame.dfADHealthMirror = nil   -- health-mirror bar torn down; drop the feed ref
     -- Sound: reconcile to config with AD now off -> unregisters every applied-sound handle
     -- (combat-deferred to regen inside SyncSound). No leaked registrations.
     self:SyncSound(frame)

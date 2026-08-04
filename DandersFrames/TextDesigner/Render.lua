@@ -310,7 +310,7 @@ end
 -- source is a DataSource (Live or Mock).
 local function updateOne(frame, elem, source, globalDefaults, enabledById)
     -- ☠ GUARDED, and this is the most load-bearing guard in the file. This is the
-    -- per-ELEMENT entry point, and TD renders are driven from DF:UpdateHealth —
+    -- per-ELEMENT entry point, and TD renders are driven from DF:UpdateHealthFast —
     -- per unit per health tick in combat. Unguarded, the three tostring() calls
     -- allocated on every element of every frame on every tick. DF:Debug drops the
     -- line, but the CALLER builds the arguments before it can, and `TD` is a

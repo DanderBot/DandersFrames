@@ -98,7 +98,7 @@ local CATEGORY_GROUPS = {
             -- drag, so folding it in would make the whole GUI category noisy.
             { key = "COLORPICKER",  desc = "Colour picker handover to/from Blizzard's picker", noisy = true },
             -- noisy: emits per text ELEMENT per frame per render, and renders are
-            -- driven from DF:UpdateHealth — i.e. per unit per health tick in combat.
+            -- driven from DF:UpdateHealthFast — i.e. per unit per health tick in combat.
             { key = "TD",           desc = "Text Designer render and mirror state", noisy = true },
             { key = "TEXTURE",      desc = "Texture and atlas resolution, including missing-file fallback" },
         },

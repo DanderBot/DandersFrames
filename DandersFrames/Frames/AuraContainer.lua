@@ -1,4 +1,4 @@
-local addonName, DF = ...
+﻿local addonName, DF = ...
 
 -- ============================================================
 -- AURA CONTAINER FACTORY (DF.AuraContainer)
@@ -682,37 +682,12 @@ local function styleButton_regions(slot, config)
             end
             slot.dfTint:SetColorTexture(readColor(ov.tintColor))
         end
-        -- FILLED HEALTH MIRROR — a StatusBar child of the slot fed the unit's SECRET
-        -- health percent render-side (DF.MirrorHealthValue in the Update loop), so it
-        -- matches the real bar's fill / texture / smooth-motion WITHOUT the addon ever
-        -- reading or branching a secret. Identity (texture/colour/alpha) is static config;
-        -- recolour is SetStatusBarColor (render-side). Visibility rides the slot's secret
-        -- show/hide (attach-and-inherit). onBar hands the bar back so the consumer can feed
-        -- it. ADDITIVE: never touches the tintColor path or the #205 buff/debuff rows.
-        local hm = ov and ov.healthMirror
-        if hm then
-            if not slot.dfHealthMirror then
-                slot.dfHealthMirror = CreateFrame("StatusBar", nil, slot)
-                slot.dfHealthMirror:SetAllPoints(slot)
-                slot.dfHealthMirror:EnableMouse(false)
-                slot.dfHealthMirror:SetMinMaxValues(0, 100)
-                -- ☠ Seed EMPTY. The only feed (DF.MirrorHealthValue) runs on health
-                -- EVENTS, so between this bar being built and the next health tick it
-                -- renders at its default -- and in the AD's "replace" mode that is
-                -- alpha 1 over the real fill, i.e. a full-width opaque bar hiding the
-                -- unit's health until something damages them. Empty is also the right
-                -- FAILURE state: if the feed never arrives the indicator looks absent
-                -- rather than actively covering the health bar. The consumer feeds the
-                -- real percent immediately via onBar below.
-                slot.dfHealthMirror:SetValue(0)
-            end
-            local sb = slot.dfHealthMirror
-            DF:SafeSetStatusBarTexture(sb, hm.texture)
-            local cr, cg, cb = readColor(hm.color)
-            sb:SetStatusBarColor(cr, cg, cb)
-            sb:SetAlpha(hm.alpha or 1)
-            if type(hm.onBar) == "function" then hm.onBar(sb) end
-        end
+        -- (Removed 2026-08-04) FILLED HEALTH MIRROR. It was a StatusBar parented under
+        -- the slot, fed the secret health percent per health tick. Aura frames carry
+        -- Enum.ScriptObjectAccessRestriction.DenyTaintedAccessWhenAurasAreSecret, so
+        -- every one of those writes was refused in game -- the bar never moved and
+        -- covered the health bar. Superseded by HEALTH FILL COVER below, which needs
+        -- no writes at all.
 
         -- HEALTH FILL COVER — the working replacement for the StatusBar mirror above.
         --
@@ -759,7 +734,7 @@ local function styleButton_regions(slot, config)
         -- mirrors position themselves by anchoring to the real FontStrings. onHost fires
         -- every style pass (create + ApplyStyle + Blizzard re-init) so the consumer's
         -- EnableMirrors registration is always current. ADDITIVE: only the AD text
-        -- consumer sets it; tintColor/healthMirror and the #205 rows are untouched.
+        -- consumer sets it; tintColor/healthFill and the #205 rows are untouched.
         local mh = ov and ov.mirrorHost
         if mh then
             if not slot.dfMirrorHost then
