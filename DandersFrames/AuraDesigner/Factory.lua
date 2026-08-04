@@ -1273,7 +1273,7 @@ end
 -- native API can mutate live therefore MUST stay out of this sig or it leaks on every
 -- edit. The tracked spell-ID map used to live here; it is live-tunable via
 -- candidateFilters and now rides placedTuningSig.
-local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defs, mine)
+local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defs)
     return (isSquare and "sq" or "ic")
         .. "|" .. (hideIcon and "hi" or "")
         .. "|" .. (showStacks and "st" or "")
@@ -1284,7 +1284,8 @@ local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, bor
         .. "|df=" .. durationFmtKey(indicator, true, defs.cbt)
         -- (No alert keys: the expiry alert lives on the COMPANION slot, whose own
         -- structSig carries alertElemStructKey — an alert edit rebuilds only it.)
-        .. "|f=" .. poolFilter(indicator, mine)   -- filter string binds at build (pool/othersOnly change -> Rebuild)
+        -- (No filter string: it moved to placedTuningSig on 2026-08-04 — a single-record
+        -- consumer cannot change its key set, so the string is live-swappable.)
         -- Duration bar presence + GEOMETRY (mirror groupStyleStructSig): the strip
         -- region is create-once and reserves wrap space outside the button rect, so
         -- enable/position/height/gap/colorMode ride the struct sig (Rebuild). Cosmetics
@@ -1302,10 +1303,17 @@ end
 -- tracked spell-ID map becomes config.candidateFilters ({ includeSpellIDs = map }), and
 -- the native SetAuraGroupCandidateFilters mutates that in place — so a selection edit is
 -- an ApplyTuning, never a Rebuild. A placed indicator pins max = 1 (buildPlacedConfig)
--- and has no per-indicator sort, so the map IS the whole tuning sig. Mirrors the
--- filter-group path's tuningSig, which has worked this way since Wave 1.
-local function placedTuningSig(map)
-    return includeSig(map)
+-- and has no per-indicator sort. Mirrors the filter-group path's tuningSig, which has
+-- worked this way since Wave 1.
+--
+-- ★ `filt` joined the tuning half on 2026-08-04. The filter string used to be
+-- creation-frozen, so "Others Only" cost a teardown+recreate for a string change;
+-- SetAuraGroup/SlotFilterString mutate it live and the engine now pushes it from
+-- applyGroupTuning. Every AD family declares exactly ONE record, so its key set can
+-- never move — which is the condition that makes this legal (add-only topology).
+-- Shared by every AD family, so all seven call sites pass their own poolFilter result.
+local function placedTuningSig(map, filt)
+    return includeSig(map) .. "|f=" .. tostring(filt or "")
 end
 
 -- COSMETIC signature: size/anchor/offset/scale/alpha, swipe, duration/stack styling, square
@@ -1658,20 +1666,18 @@ function Factory:BuildAlertPreviewConfig(indicator, geom, layout, entries)
     }
 end
 
--- Companion sigs. STRUCTURAL: the filter string (binds at build), EVERY alert key
--- (alertElemStructKey — formatter and placement are creation-frozen -> Rebuild),
--- frame level. TUNING: the identity map, via the shared placedTuningSig — it is
--- config.candidateFilters and mutates live, so it must NOT sit here (a Rebuild
--- strands frames permanently; see placedStructSig). COSMETIC (ApplyStyle): the
--- mirrored indicator geometry — dragging / resizing the indicator hot-moves its
--- companion — plus font and alpha. Raw-config, alloc-light, computed per pass like
--- the other placed sigs (FIX C discipline).
-local function alertCompanionStructSig(indicator, mine, geom, defs)
+-- Companion sigs. STRUCTURAL: EVERY alert key (alertElemStructKey — formatter and
+-- placement are creation-frozen -> Rebuild) and frame level. TUNING: the identity map
+-- AND the filter string, via the shared placedTuningSig — both mutate live, so neither
+-- may sit here (a Rebuild strands frames permanently; see placedStructSig).
+-- COSMETIC (ApplyStyle): the mirrored indicator geometry — dragging / resizing the
+-- indicator hot-moves its companion — plus font and alpha. Raw-config, alloc-light,
+-- computed per pass like the other placed sigs (FIX C discipline).
+local function alertCompanionStructSig(indicator, geom, defs)
     return "xalert"
         .. "|xa=" .. alertElemStructKey(indicator, geom)
         .. "|fl=" .. tostring(resolveLevel(indicator, defs.level))
         .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")
-        .. "|f=" .. poolFilter(indicator, mine)
 end
 
 local function alertCompanionCoSig(frame, indicator, isBar, alpha)
@@ -1704,8 +1710,8 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
     if not alertElemMode(indicator) then return end
     local akey = key .. ":alert"
     local geom = alertGeometry(frame, indicator, isBar)   -- square (icon) or rect (bar)
-    local structSig = alertCompanionStructSig(indicator, mine, geom, defs)
-    local tuningSig = placedTuningSig(map)
+    local structSig = alertCompanionStructSig(indicator, geom, defs)
+    local tuningSig = placedTuningSig(map, poolFilter(indicator, mine))
     local coSig = alertCompanionCoSig(frame, indicator, isBar, alpha)
     local entry = placed[akey]
     if entry and entry.structSig == structSig and entry.tuningSig == tuningSig
@@ -1823,11 +1829,11 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defs)
     return cfg, sig
 end
 
--- STRUCTURAL signature: identity, duration-text on/off + format key (SetDurationText / SetDuration
+-- STRUCTURAL signature: duration-text on/off + format key (SetDurationText / SetDuration
 -- Bar bind ONCE), border on/off, frame level. Cosmetic bar styling is barCoSig.
--- Create-only properties ONLY; the identity map is live-tunable and rides
--- placedTuningSig (see placedStructSig for why a needless Rebuild is a leak).
-local function barStructSig(indicator, borderOn, defs, mine)
+-- Create-only properties ONLY; the identity map AND the filter string are live-tunable
+-- and ride placedTuningSig (see placedStructSig for why a needless Rebuild is a leak).
+local function barStructSig(indicator, borderOn, defs)
     return "bar"
         .. "|df=" .. durationFmtKey(indicator, false, defs.cbt)
         -- (No alert keys: the expiry alert lives on the COMPANION slot, whose own
@@ -1835,7 +1841,6 @@ local function barStructSig(indicator, borderOn, defs, mine)
         .. "|" .. (borderOn and "bd" or "")
         .. "|fl=" .. tostring(resolveLevel(indicator, defs.level))
         .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")
-        .. "|f=" .. poolFilter(indicator, mine)   -- filter string binds at build (pool/othersOnly change -> Rebuild)
 end
 
 -- COSMETIC signature: size (width/height + match-frame + the fed frame size), anchor/offset/
@@ -2814,8 +2819,8 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local eff = memberEffective(hasMG, key, indicator)
                         local borderOn = placedBorderOn(indicator, false)
                         local alpha = tonumber(indicator.alpha) or 1
-                        local structSig = barStructSig(indicator, borderOn, defs, mine)
-                        local tuningSig = placedTuningSig(map)
+                        local structSig = barStructSig(indicator, borderOn, defs)
+                        local tuningSig = placedTuningSig(map, poolFilter(indicator, mine))
                         local coSig = barCoSig(frame, eff, borderOn, alpha)
 
                         local entry = placed[key]
@@ -2957,8 +2962,8 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         -- alloc — FIX C); the actual border spec is built ONLY inside a
                         -- create/rebuild/restyle branch below, never per pass.
                         local structSig = placedStructSig(isSquare, hideIcon, showStacks,
-                            showDuration, borderOn, indicator, defs, mine)
-                        local tuningSig = placedTuningSig(map)
+                            showDuration, borderOn, indicator, defs)
+                        local tuningSig = placedTuningSig(map, poolFilter(indicator, mine))
                         local coSig = placedCoSig(eff, isSquare, borderOn, alpha)
 
                         local entry = placed[key]
@@ -3041,11 +3046,14 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
                 live[key] = true
                 -- SPLIT sigs (Wave 1): structural -> Rebuild (recreate), tuning ->
                 -- in-place h:ApplyTuning, cosmetic -> ApplyStyle.
-                local structSig = "f=" .. poolFilter(group, mine)   -- filter string binds at build (pool/othersOnly change -> Rebuild)
-                    .. groupStyleStructSig(group)             -- region set + duration format key (group.style)
+                local structSig = groupStyleStructSig(group)  -- region set + duration format key (group.style)
                 local tuningSig = selSig                      -- selection edits: live include-map swap (config-wide candidateFilters)
                     .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 8))
                     .. groupSortSig(group)                    -- per-group sort (Wave 2): live SetAuraGroupSortMethod
+                    -- Filter string joined the tuning half on 2026-08-04 (Others Only).
+                    -- A filter group declares ONE group off a plain string filter, so its
+                    -- key set is fixed at "df1" and the live swap is safe.
+                    .. "|f=" .. poolFilter(group, mine)
                 local coSig = filterGroupCoSig(group)
 
                 local entry = fg[key]
@@ -3235,12 +3243,12 @@ function Factory:SyncFrame(frame)
             -- replace mode always uses the fill-matched mirror.
             local wholeBar = (mode == "tint") and (bestCfg.tintWholeBar and true or false) or false
 
-            -- The tracked map is live-tunable (overlay slots take
-            -- SetAuraSlotCandidateFilters), so it rides its own sig rather than forcing
-            -- a teardown+recreate. wholeBar STAYS structural: it picks a different
-            -- config builder entirely.
-            local structSig = (wholeBar and "flat" or "cover") .. "|" .. filt
-            local tuningSig = placedTuningSig(bestMap)
+            -- The tracked map AND the filter string are live-tunable (overlay slots take
+            -- SetAuraSlotCandidateFilters / SetAuraSlotFilterString), so both ride the
+            -- tuning sig rather than forcing a teardown+recreate. wholeBar STAYS
+            -- structural: it picks a different config builder entirely.
+            local structSig = (wholeBar and "flat" or "cover")
+            local tuningSig = placedTuningSig(bestMap, filt)
             local entry = hb[bestName]
 
             if wholeBar then
@@ -3358,8 +3366,10 @@ function Factory:SyncFrame(frame)
             local mode = slower(bestCfg.mode or "tint")   -- background defaults to tint
             local blend = healthbarBlend(mode, bestCfg.blend, a)
 
-            local structSig = filt
-            local tuningSig = placedTuningSig(bestMap)
+            -- Nothing structural left: this family declares one overlay slot with a
+            -- fixed region set, and both the map and the filter string tune live.
+            local structSig = "bgtint"
+            local tuningSig = placedTuningSig(bestMap, filt)
             local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
 
             local entry = bg[bestName]
@@ -3437,8 +3447,8 @@ function Factory:SyncFrame(frame)
             -- drawAboveFrameBorder rides the STRUCT sig: it resolves to frameLevelOffset in
             -- buildBorderConfig, which only a Rebuild re-reads (ApplyStyle carries the spec only).
             local drawAbove = bestCfg.drawAboveFrameBorder ~= false
-            local structSig = filt .. "|da=" .. tostring(drawAbove)
-            local tuningSig = placedTuningSig(bestMap)
+            local structSig = "da=" .. tostring(drawAbove)
+            local tuningSig = placedTuningSig(bestMap, filt)
             local coSig = borderSpecSig(bestSpec)
 
             local entry = bd[bestName]
@@ -3487,8 +3497,10 @@ function Factory:SyncFrame(frame)
                 local filt = poolFilter(bestCfg, bestPool == 1)
                 local r, g, b, a = readADColor(bestCfg.color)
                 local color = { r = r, g = g, b = b, a = a }
-                local structSig = filt
-                local tuningSig = placedTuningSig(bestMap)
+                -- Nothing structural: one overlay slot whose only region is the mirror
+                -- host. Map and filter string both tune live.
+                local structSig = "mirrorhost"
+                local tuningSig = placedTuningSig(bestMap, filt)
                 local coSig = colSig(bestCfg.color)
                 -- onHost fires on every style pass (create/ApplyStyle/Blizzard re-init):
                 -- stash the host for the TD-teardown recovery below and (re)register the
