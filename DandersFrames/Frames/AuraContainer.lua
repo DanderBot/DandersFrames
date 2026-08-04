@@ -92,6 +92,10 @@ local warnedCurve, warnedBorder, warnedNativeDispel = false, false, false
 -- (warnedMouse was a third latch here with no warning behind it — removed.)
 local warnedRestyle, warnedRefresh = false, false
 local warnedCreate = false
+-- Filter-string tuning rejected for a key the container does not have. Latched
+-- because applyGroupTuning runs per frame per settings change; one line is enough
+-- to name the offending consumer.
+local warnedFilterString = false
 
 -- Animations SAFE to run on an OVERLAY-mode border (Aura Designer). These render
 -- entirely on DF-owned child regions of the border (edge alpha ticks + DF_DASH's
@@ -2316,10 +2320,25 @@ function NativeBackend:applyGroupTuning()
     if sortDirection == nil and _G.AuraContainerSortDirection then
         sortDirection = _G.AuraContainerSortDirection.Normal
     end
-    -- Per-group candidateFilters: re-derive the SAME records build declared — the
-    -- filter set is structural and unchanged on this path, so keys line up with
+    -- Per-group candidateFilters: re-derive the SAME records build declared. The
+    -- KEY SET is structural and unchanged on this path, so keys line up with
     -- self.groupKeys (rec.key or positional "df<i>").
     local cfByKey = {}
+    -- ★ FILTER STRINGS ride here too (2026-08-04). They used to be creation-frozen,
+    -- which put them in every consumer's STRUCT signature and made "Only Mine",
+    -- AD "Others Only" and the dispel All/By-Me swap cost a whole teardown+recreate
+    -- for a string change. SetAuraGroup/SlotFilterString are live mutators
+    -- (Blizzard_CustomAuraContainer.lua:355 / :423) and destroy nothing.
+    -- ☠ WHAT IS STILL STRUCTURAL: the KEY SET. AddAuraGroup/AddAuraSlot are add-only
+    -- with no remove, so a record appearing or disappearing (the debuff category
+    -- toggles) still needs a Rebuild — only a same-key STRING move is tunable.
+    -- Consumers must keep record keys in their struct sig; the mismatch warn below
+    -- catches one that does not.
+    -- Verified in game 2026-08-04 (DF_AuraLab /alfilter): 10 swaps cost 0 frames on
+    -- the tuned path vs 100 stranded on the rebuild control, button identity and the
+    -- native duration bindings both survive, and a swap does NOT re-fire
+    -- initializeFrame — so nothing needing a re-style may move here.
+    local fsByKey = {}
     -- ★ RE-DERIVE THE IDENTITY-GATE VERDICT. include/excludeSpellIDs live in the
     -- TUNING signature, not the struct one, so every setting that flips a pool's
     -- gate exposure -- Show All Buffs, a filter-category selection, missing-buff
@@ -2337,6 +2356,11 @@ function NativeBackend:applyGroupTuning()
         local key = rec.key or ("df" .. i)
         local cf = recordCandidateFilters(rec, config)
         cfByKey[key] = cf
+        fsByKey[key] = rec.f
+        -- The gate verdict reads the filter STRING as well as the candidate filters,
+        -- so a string-only delta has to land here — which is exactly what moving
+        -- filter strings onto this path makes possible. (Before, a string change
+        -- always rebuilt, and build() recomputed the flag.)
         if filterVulnerableToIdentityGate(rec.f, cf) then
             self.handle._idGateVulnerable = true
         end
@@ -2354,11 +2378,28 @@ function NativeBackend:applyGroupTuning()
     -- per call and has no equality guard of its own, so a container with N groups pays
     -- N full updates here. There is no batch setter; the only real lever is declaring
     -- fewer groups.
+    --
+    -- ☠ FILTER-STRING ORDERING: push the string BEFORE candidateFilters. Both setters
+    -- end in UpdateAllAuras, but the string one also runs RebuildAuraParseFilters, so
+    -- doing it first means the candidate pass runs against the CURRENT parse filters
+    -- rather than one generation behind. Unlike the candidateFilters setter it carries
+    -- its own equality guard (source :357 / :427), so pushing an unchanged string every
+    -- pass is genuinely free — no need to diff it consumer-side.
+    -- A key the container does not have makes GetRequiredAuraGroup/Slot assert; that
+    -- means a consumer let a KEY-SET change reach the tuning path, which is a bug in
+    -- that consumer's struct sig. pcall keeps it from taking the frame down, and the
+    -- mismatch warn below names it instead of failing silently.
+    local fsMissing
     if usesSlots then
         -- A slot is a single button: no maxFrameCount and no layout to push, so only
-        -- the candidate filters and the sort (which decides WHICH aura wins the one
-        -- slot) are tunable. Same nil-CLEARS semantics as the group setter.
+        -- the filter string, candidate filters and the sort (which decides WHICH aura
+        -- wins the one slot) are tunable. Same nil-CLEARS semantics as the group setter.
         for key in pairs(self.slotButtons) do
+            if fsByKey[key] and c.SetAuraSlotFilterString then
+                if not pcall(c.SetAuraSlotFilterString, c, key, fsByKey[key]) then
+                    fsMissing = fsMissing or key
+                end
+            end
             pcall(c.SetAuraSlotCandidateFilters, c, key, cfByKey[key])
             if sortMethod ~= nil and sortDirection ~= nil and c.SetAuraSlotSortMethod then
                 pcall(c.SetAuraSlotSortMethod, c, key, sortMethod, sortDirection)
@@ -2366,6 +2407,11 @@ function NativeBackend:applyGroupTuning()
         end
     else
         for _, key in ipairs(self.groupKeys) do
+            if fsByKey[key] and c.SetAuraGroupFilterString then
+                if not pcall(c.SetAuraGroupFilterString, c, key, fsByKey[key]) then
+                    fsMissing = fsMissing or key
+                end
+            end
             pcall(c.SetAuraGroupMaxFrameCount, c, key, maxCount)
             -- nil CLEARS: the inbound copy runs over an EMPTY defaults table, so a
             -- toggled-off filter set doesn't survive (the old Rebuild-merge lesson).
@@ -2374,6 +2420,11 @@ function NativeBackend:applyGroupTuning()
                 pcall(c.SetAuraGroupSortMethod, c, key, sortMethod, sortDirection)
             end
         end
+    end
+    if fsMissing and not warnedFilterString then
+        warnedFilterString = true
+        DF:DebugWarn(DBG, "filter-string tune rejected for key '%s' (mode=%s) — a consumer let a KEY-SET change onto the tuning path; that must stay structural.",
+            tostring(fsMissing), tostring(mode))
     end
     -- ★ PARTITION KICK (same mechanism as applyLayout): the inbound mutators mark
     -- dirty but cannot ARM the private-side processor — without the bounce the change
@@ -3523,6 +3574,15 @@ function Handle:ApplyTuning(tuning)
         self.config.max = tuning.max
         self.config.sort = tuning.sort
         self.config.candidateFilters = tuning.candidateFilters
+        -- ★ FILTER STRINGS (2026-08-04). applyGroupTuning re-derives records from
+        -- config.filter, so the fresh strings have to land here or the push is a
+        -- no-op. This SUPERSEDES the manual pre-swap the debuff-group consumer
+        -- does (Factory.lua) — that assignment is now redundant, not wrong.
+        -- ☠ nil does NOT clear, unlike the three above. normalizeFilters falls back
+        -- to a bare "HELPFUL" record when config.filter is nil, so a caller passing
+        -- a partial tuning table would silently turn a debuff row into a buff row.
+        -- Only assign what was actually supplied.
+        if tuning.filter ~= nil then self.config.filter = tuning.filter end
     end
     -- Test mode: the preview's per-slot pin groups can't be tuned in place
     -- (maxFrameCount = 1 by design) — rebuild so the preview honours the new cap.
