@@ -910,6 +910,10 @@ end
 
 DF.GlobalDefaults = {
     notifyOutdated = true,
+    -- The one-line greeting printed at login. Account-wide like its Notifications
+    -- sibling above: it is chat chrome, not a per-profile visual. Default ON so a
+    -- new user still learns `/df` exists; anyone who already knows can silence it.
+    showLoginMessage = true,
     -- Colour picker. Account-wide, not per-mode: "use DF's picker" is a UI-chrome
     -- preference with no party/raid meaning, and the hooks that consume it are
     -- installed once for the whole session. Previously these lived in PartyDefaults,

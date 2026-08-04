@@ -4847,7 +4847,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF.DebugConsole:Init()
         end
 
-        print("|cff00ff00DandersFrames|r " .. format(L["v%s loaded. Type %s/df%s for settings, %s/df resetgui%s if window is offscreen."], (DF.VERSION:gsub("^[vV]", "")), "|cffeda55f", "|r", "|cffeda55f", "|r"))
+        -- Login greeting. Opt-out via Options > General > Notifications; the flag is
+        -- account-wide (GlobalDefaults.showLoginMessage). Defaults to ON when the
+        -- global DB is not resolvable yet, so a first-ever login still gets it.
+        local globalDB = DF.GetGlobalDB and DF:GetGlobalDB()
+        if not globalDB or globalDB.showLoginMessage ~= false then
+            print("|cff00ff00DandersFrames|r " .. format(L["v%s loaded. %s/df%s for settings, %s/df help%s for commands."], (DF.VERSION:gsub("^[vV]", "")), "|cffeda55f", "|r", "|cffeda55f", "|r"))
+        end
 
         -- ============================================================
         -- CRITICAL: Initialize frames HERE at ADDON_LOADED

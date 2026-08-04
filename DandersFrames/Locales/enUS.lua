@@ -1621,7 +1621,12 @@ L["Use FrameSort Addon"] = true
 L["Use Group-Based Layout"] = true
 L["Uses party frame settings/position"] = true
 L["Utility"] = true
-L["v%s loaded. Type %s/df%s for settings, %s/df resetgui%s if window is offscreen."] = true
+-- Login greeting. `/df resetgui` was dropped from it: anyone whose window is
+-- offscreen goes looking, and `/df help` lists it. Opt-out lives in
+-- Options > General > Notifications (GlobalDefaults.showLoginMessage).
+L["v%s loaded. %s/df%s for settings, %s/df help%s for commands."] = true
+L["Show the login message"] = true
+L["The one-line greeting printed to chat when you log in. Takes effect at your next login."] = true
 L["Valid range"] = true
 L["Vehicle"] = true
 L["Vehicle Icon"] = true

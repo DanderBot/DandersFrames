@@ -1551,6 +1551,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             DF:GetGlobalDB(), "notifyOutdated", function()
                 -- Setting applies immediately; no extra callback needed.
             end), 30)
+        local loginMsgCheck = notificationsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show the login message"],
+            DF:GetGlobalDB(), "showLoginMessage", function()
+                -- Read once at login; nothing to re-render now.
+            end), 30)
+        loginMsgCheck.tooltip = L["The one-line greeting printed to chat when you log in. Takes effect at your next login."]
         Add(notificationsGroup, nil, 2)
     end)
 
