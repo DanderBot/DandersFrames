@@ -94,6 +94,37 @@ function DF:PetFrameTrackActive(frame)
 end
 
 -- ============================================================
+-- PET ANCHOR INVALIDATION
+-- ============================================================
+-- ☠ HUNG OFF UNIT REASSIGNMENT, NOT OFF SORTING. A pet anchor goes stale for exactly
+-- one reason: the header moved its owner's unit to a different button. Hanging the
+-- re-anchor off a *sorting entry point* looks equivalent and is not — the combat-end
+-- drain deliberately skips DF:ProcessRosterUpdate when FrameSort is active (see
+-- Frames/Headers.lua, the IsFrameSortActive check: FrameSort fires its own combat-end
+-- sort, and our pass would reset nameList to INDEX and undo it, with non-deterministic
+-- handler order between the two addons). Features/FrameSort.lua contains zero pet
+-- references, so FrameSort users kept exactly the "pets under the wrong teammate" bug
+-- the re-anchor exists to fix.
+--
+-- Every sorter finishes by moving units between buttons, so hooking the reassignment
+-- covers our own arena sorting, FrameSort, Blizzard's default and anything added
+-- later, without any of them needing to know pets exist.
+local petAnchorFrame = CreateFrame("Frame")
+petAnchorFrame:Hide()
+petAnchorFrame:SetScript("OnUpdate", function(self)
+    self:Hide()
+    if DF.UpdateAllPetFramePositions then DF:UpdateAllPetFramePositions() end
+end)
+
+-- Coalesced onto the next frame deliberately: a re-sort reassigns many children at
+-- once and every one of them lands here, while the repositioning pass already walks
+-- every pet frame. Reacting per child would be quadratic for one visible result.
+-- Showing an already-shown frame is a no-op, so this dedups for free.
+function DF:InvalidatePetAnchors()
+    petAnchorFrame:Show()
+end
+
+-- ============================================================
 -- PET FRAME CREATION
 -- ============================================================
 

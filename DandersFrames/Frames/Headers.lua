@@ -709,10 +709,15 @@ function DF:InitializeHeaderChild(frame)
                 -- No event re-registration needed: global headerChildEventFrame
                 -- uses unitFrameMap[unit] for dispatch, which we just updated above.
 
+                -- This button now shows a different unit token, so any pet anchored to
+                -- it is pointing at the wrong teammate. Same-GUID path still counts: the
+                -- pet's unit is derived from the slot, not the player. Guarded because
+                -- Pets.lua and this file have no guaranteed load order.
+                if DF.InvalidatePetAnchors then DF:InvalidatePetAnchors() end
 
                 return
             end
-            
+
             DF:RosterDebugCount("OnAttributeChanged(unit)-PROCESSED")
             DF:Debug("ROSTER", "OnAttributeChanged: %s -> %s (isRaid=%s)",
                 tostring(oldUnit), tostring(actualUnit), tostring(self.isRaidFrame))
@@ -736,6 +741,16 @@ function DF:InitializeHeaderChild(frame)
             end
             
             self.unit = actualUnit
+            -- The full reassign path. Same reasoning as the same-GUID path above: this
+            -- button's unit moved, so its pet's anchor is stale.
+            --
+            -- ⚠ NOT conditional on oldUnit. It is tempting to narrow this to "only when
+            -- something was there before", but oldUnit is nil precisely when a child
+            -- receives its FIRST unit — a rebuild burst, which is exactly the case that
+            -- most needs the pets re-anchored. The retail lane shipped a narrowing that
+            -- treated a nil unit as "invalidate everything" and the field log caught it
+            -- degrading straight back to a full sweep during arena entry.
+            if DF.InvalidatePetAnchors then DF:InvalidatePetAnchors() end
             -- Clear background color tracking (unit changed, need fresh colors)
             self.dfCurrentBgKey = nil
             -- Clear stale range state so this slot doesn't inherit the previous
