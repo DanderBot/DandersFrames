@@ -1819,7 +1819,11 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
         end
     elseif entry.structSig ~= structSig then
         entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-        entry.handle:Rebuild(cfg)
+        -- structSig doubles as the container PARKING key (AuraContainer Handle:Rebuild):
+        -- its definition is exactly "changing this needs a new container", which is also
+        -- the condition for safely re-adopting one parked under it. Designer churn --
+        -- preset toggling, profile swaps -- is where this pays.
+        entry.handle:Rebuild(cfg, structSig)
         applyPlacedAlpha(entry.handle, alpha)
         live[akey] = true
     else
@@ -2954,7 +2958,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                             entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                            entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine))
+                            entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine), structSig)
                             applyPlacedAlpha(entry.handle, alpha)
                         else
                             if entry.tuningSig ~= tuningSig then
@@ -3097,7 +3101,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                            entry.handle:Rebuild(buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine))
+                            entry.handle:Rebuild(buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine), structSig)
                             applyPlacedAlpha(entry.handle, alpha)
                         else
                             if entry.tuningSig ~= tuningSig then
@@ -3184,7 +3188,7 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
                     end
                 elseif entry.structSig ~= structSig then
                     entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                    entry.handle:Rebuild(buildFilterGroupConfig(frame, res.map, group, mine))
+                    entry.handle:Rebuild(buildFilterGroupConfig(frame, res.map, group, mine), structSig)
                 else
                     if entry.tuningSig ~= tuningSig then
                         -- Selection edit / maxIcons / per-group sort with the struct sig
@@ -3381,7 +3385,7 @@ function Factory:SyncFrame(frame)
                     end
                 elseif entry.structSig ~= structSig then
                         entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                    entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
+                    entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt), structSig)
                 else
                     if entry.tuningSig ~= tuningSig then
                         entry.tuningSig = tuningSig
@@ -3412,7 +3416,7 @@ function Factory:SyncFrame(frame)
                     end
                 elseif entry.structSig ~= structSig then
                     entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                    entry.handle:Rebuild(buildHealthFillConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
+                    entry.handle:Rebuild(buildHealthFillConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt), structSig)
                 else
                     if entry.tuningSig ~= tuningSig then
                         -- A tuning pass keeps the SAME slot and the same cover, so it
@@ -3499,7 +3503,7 @@ function Factory:SyncFrame(frame)
                 end
             elseif entry.structSig ~= structSig then
                 entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt))
+                entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt), structSig)
             else
                 if entry.tuningSig ~= tuningSig then
                     entry.tuningSig = tuningSig
@@ -3578,7 +3582,7 @@ function Factory:SyncFrame(frame)
                 end
             elseif entry.structSig ~= structSig then
                 entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                entry.handle:Rebuild(buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove))
+                entry.handle:Rebuild(buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove), structSig)
             else
                 if entry.tuningSig ~= tuningSig then
                     entry.tuningSig = tuningSig
@@ -3639,6 +3643,18 @@ function Factory:SyncFrame(frame)
                                          host = st._lastHost }
                     end
                 elseif entry.structSig ~= structSig then
+                    -- ☠ DELIBERATELY NOT PARKED (no structSig passed to Rebuild), for two
+                    -- independent reasons. First, structSig here is the CONSTANT
+                    -- "mirrorhost", so it identifies nothing -- every container this
+                    -- consumer ever built would share one park key. Second, and the
+                    -- general rule: this is the ONLY container config that carries a
+                    -- CLOSURE (onHost). A container's initializeFrame callbacks are bound
+                    -- at AddAuraGroup time, so a re-adopted container would keep invoking
+                    -- the STALE closure -- with the colour and category captured when it
+                    -- was first built -- for every lazily-created button. Any future
+                    -- config that embeds a callback is unparkable on the same grounds
+                    -- unless the callback's captured state is folded into the key.
+                    -- (This branch is unreachable today: a constant sig never differs.)
                     entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                     entry.handle:Rebuild(buildMirrorHostConfig(frame.unit, bestMap, onHost, filt))
                 elseif entry.tuningSig ~= tuningSig then
@@ -3797,7 +3813,7 @@ function Factory:SyncFrame(frame)
                             end
                         elseif entry.structSig ~= structSig then
                             entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                            entry.handle:Rebuild(buildDebuffGroupConfig(frame, records, group))
+                            entry.handle:Rebuild(buildDebuffGroupConfig(frame, records, group), structSig)
                         else
                             if entry.tuningSig ~= tuningSig then
                                 -- Tunables live in the RECORDS' filter strings and
