@@ -409,9 +409,15 @@ function Render:UpdateFrame(frame, tdDB, source, hint, isPreview)
             acquireFontString(frame, elem)
         end
     end
+    -- `hint` is either a single category string, "all", or -- from the coalescing
+    -- wrapper -- a SET of categories accumulated over one frame. The table branch is
+    -- last so the single-string callers (Preview, and any direct
+    -- RenderTextDesignerNow) keep the exact comparison they always had.
+    local hintIsSet = type(hint) == "table"
     for _, elem in ipairs(tdDB.elements or {}) do
         local elemHint = CONTENT_HINTS[elem.contentType]
-        if hint == "all" or elemHint == "all" or elemHint == hint then
+        if hint == "all" or elemHint == "all" or elemHint == hint
+            or (hintIsSet and hint[elemHint]) then
             updateOne(frame, elem, source, globalDefaults, enabledScratch)
         end
     end
@@ -538,7 +544,11 @@ end
 
 -- For Phase C: called from existing update functions to refresh TD elements
 -- on a unit frame. Phase B leaves this stubbed — Phase C will populate it.
-function DF:UpdateTextDesigner(frame, hint)
+-- SYNCHRONOUS render. This is the original UpdateTextDesigner body; the name it used
+-- to have is now the COALESCING wrapper below, which is what callers should use.
+-- Call this directly only when the FontStrings must be correct before the next line
+-- of Lua runs -- nothing in DF needs that today.
+function DF:RenderTextDesignerNow(frame, hint)
     if not frame then
         DF:Debug("TD", "UpdateTextDesigner: no frame")
         return
@@ -607,6 +617,93 @@ function DF:UpdateTextDesigner(frame, hint)
 
     local source = DF.TextDesigner.DataSource.Live(frame)
     Render:UpdateFrame(frame, tdDB, source, hint)
+end
+
+-- ============================================================
+-- RENDER COALESCING
+-- ============================================================
+-- ☠ THE SHAPE OF THE PROBLEM, so nobody "optimises" the wrong half again.
+-- Per-element hint filtering already existed (see the CONTENT_HINTS gate in
+-- Render:UpdateFrame), and the per-resolve cost is already at the floor:
+-- resolveAppearance is pooled, ApplyHighlightStyle early-outs, and
+-- RESOLVERS.hp_current is IRREDUCIBLE because UnitHealth boxes a secret per call.
+-- There is no fat leaf left. The remaining cost is simply that we RENDER TOO OFTEN --
+-- health, power, range and threat can each fire for the same unit inside a single
+-- frame, and each one previously ran the whole pipeline: GetFrameDB,
+-- ResolveTextDesigner, the enabled/acquire sweep, the delete sweep, the OOR block.
+--
+-- So: mark dirty, render ONCE per frame with the union of the hints asked for. A
+-- unit that gets four different hints in one frame now costs one render instead of
+-- four, and a hint union still resolves strictly fewer elements than "all".
+--
+-- The visible cost is that text lands up to one frame (~16 ms) later. Nothing in DF
+-- reads a FontString's contents back after asking for an update, and no caller needs
+-- the render to have happened before its next statement.
+local tdBufA, tdBufB = {}, {}
+local tdPending = tdBufA        -- frame -> "all" | { [hint] = true }
+local tdSetPool = {}            -- recycled hint sets; steady state allocates nothing
+local tdDriver
+
+local function tdFlush()
+    -- ☠ DOUBLE BUFFER, not "iterate and clear". A render can mark another frame
+    -- dirty re-entrantly (the AD colour-override path calls back into
+    -- UpdateTextDesigner), and ADDING a key to the table being iterated is
+    -- undefined in Lua. New marks land in the other buffer and flush next frame.
+    local batch = tdPending
+    tdPending = (batch == tdBufA) and tdBufB or tdBufA
+    for frame, hint in pairs(batch) do
+        DF:RenderTextDesignerNow(frame, hint)
+        if type(hint) == "table" then
+            wipe(hint)
+            tdSetPool[#tdSetPool + 1] = hint
+        end
+    end
+    wipe(batch)
+end
+
+local function ensureTDDriver()
+    if not tdDriver then
+        tdDriver = CreateFrame("Frame")
+        tdDriver:Hide()
+        -- Hide FIRST: one flush per shown-frame, and tdFlush may re-Show us via a
+        -- re-entrant mark, which must schedule the NEXT frame rather than be undone.
+        tdDriver:SetScript("OnUpdate", function(self)
+            self:Hide()
+            tdFlush()
+        end)
+    end
+    tdDriver:Show()
+end
+
+-- Request a Text Designer render. Coalesced: several calls for one frame within the
+-- same frame collapse into a single render carrying the UNION of their hints.
+function DF:UpdateTextDesigner(frame, hint)
+    if not frame then
+        DF:Debug("TD", "UpdateTextDesigner: no frame")
+        return
+    end
+    hint = hint or "all"
+    local cur = tdPending[frame]
+    if cur == "all" then return end          -- already maximal; nothing to widen
+    if hint == "all" then
+        if type(cur) == "table" then
+            wipe(cur)
+            tdSetPool[#tdSetPool + 1] = cur
+        end
+        tdPending[frame] = "all"
+    else
+        if cur == nil then
+            local n = #tdSetPool
+            if n > 0 then
+                cur, tdSetPool[n] = tdSetPool[n], nil
+            else
+                cur = {}
+            end
+            tdPending[frame] = cur
+        end
+        cur[hint] = true
+    end
+    ensureTDDriver()
 end
 
 -- ============================================================
