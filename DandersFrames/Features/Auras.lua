@@ -2078,7 +2078,11 @@ function DF:DriveBuffFactory(frame, db)
                 tostring(frame.buffFactoryStructSig), tostring(structSig))
             frame.buffFactoryStructSig = structSig
             frame.buffFactoryTuningSig = tuningSig
-            h:Rebuild(cfg)                      -- structural (filter set/regions/tooltips) — discrete, leak-safe
+            -- structSig doubles as the container PARKING key: its definition is exactly
+            -- "changing this needs a new container", which is precisely the condition
+            -- for safely re-adopting a parked one. A/B/A (profile swap, preset toggle,
+            -- AutoProfiles zone transition) now reuses instead of stranding.
+            h:Rebuild(cfg, structSig)           -- structural (filter set/regions/tooltips) — discrete, leak-safe
         else
             if frame.buffFactoryTuningSig ~= tuningSig then
                 DF:Debug("AURAROW", "buff: TUNING - tuning sig %s -> %s (struct unchanged)",
@@ -2242,7 +2246,7 @@ function DF:DriveDebuffFactory(frame, db)
                 tostring(frame.debuffFactoryStructSig), tostring(structSig))
             frame.debuffFactoryStructSig = structSig
             frame.debuffFactoryTuningSig = tuningSig
-            h:Rebuild(cfg)                      -- structural — REPLACES the config wholesale
+            h:Rebuild(cfg, structSig)           -- structural — REPLACES the config wholesale (structSig = park key)
         else
             if frame.debuffFactoryTuningSig ~= tuningSig then
                 DF:Debug("AURAROW", "debuff: TUNING - tuning sig %s -> %s (struct unchanged)",
@@ -2472,7 +2476,7 @@ function DF:DriveDefensiveFactory(frame, db)
                 tostring(frame.defensiveFactoryStructSig), tostring(structSig))
             frame.defensiveFactoryStructSig = structSig
             frame.defensiveFactoryTuningSig = tuningSig
-            h:Rebuild(cfg)                      -- structural (filter set/regions/tooltips)
+            h:Rebuild(cfg, structSig)           -- structural (filter set/regions/tooltips); structSig = park key
         else
             if frame.defensiveFactoryTuningSig ~= tuningSig then
                 DF:Debug("AURAROW", "defensive: TUNING - tuning sig %s -> %s (struct unchanged)",

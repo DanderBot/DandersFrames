@@ -2034,6 +2034,17 @@ function NativeBackend:build()
         return
     end
     self.container = c
+    -- Which topology this container was BUILT with. Parking keys off this rather than
+    -- the current _testMode flag: entering the preview rebuilds while _testMode is
+    -- already true, and the container being retired at that moment is the LIVE one --
+    -- exactly the one worth parking, since leaving the preview asks for it straight back.
+    self.builtInTestMode = AuraContainer._testMode and true or false
+    -- ☠ The structural key THIS container was built with, captured here and never read
+    -- from the handle at park time. Handle:Rebuild writes the INCOMING key to
+    -- _structKey before _rebuild runs, so a park that keyed off the handle would file
+    -- the outgoing container under the new key -- and the next rebuild to that key would
+    -- re-adopt a container built for a different structure. Silent and total.
+    self.structKey = handle._structKey
     AuraContainer.stats.builds = AuraContainer.stats.builds + 1
     -- Deafen to Blizzard's Edit Mode provider switch FIRST, before anything else can
     -- fire (see EDIT-MODE DEAFENING). Every build gets its own fresh container, so
@@ -2101,7 +2112,16 @@ function NativeBackend:build()
     -- initializeFrame can fire long after build (incl. mid-combat on pool exhaustion). The
     -- gen token makes a late callback from a torn-down/rebuilt container no-op.
     handle._slotCounter = 0
-    handle._gen = (handle._gen or 0) + 1
+    -- ☠ _genCounter is MONOTONIC and never reused; _gen is merely "which generation is
+    -- live right now". They are separate because container parking RESTORES an older
+    -- _gen when it re-adopts (Handle:_readoptParked): the parked container's groups
+    -- permanently hold initializeFrame closures that captured the gen they were declared
+    -- with, and buttons are created in lazy batches LONG after build, so a re-adopted
+    -- container whose gen was not restored would silently no-op every later button.
+    -- Reusing a raw counter would let a re-adopted gen collide with a newer container's;
+    -- monotonic issue makes every generation token globally distinct for this handle.
+    handle._genCounter = (handle._genCounter or 0) + 1
+    handle._gen = handle._genCounter
     local initFn = handle:_makeInitializeFrame(handle._gen)
 
     -- Declare one AuraGroup per filter (row) / one AuraSlot per filter (overlay). The
@@ -2655,18 +2675,26 @@ end
 -- the ref. The next build creates a fresh container
 -- (topology is add-only — no RemoveAuraGroup/Slot — so recreate IS the sanctioned removal).
 -- Callers gate teardown out of combat (Destroy/_rebuild defer to regen in lockdown).
-function NativeBackend:teardown()
+-- park = true: PARKING teardown (see Handle:_parkContainer). The container is quiesced
+-- exactly as a real teardown quiesces it -- disabled so it stops registering for aura
+-- events, hidden so it draws nothing -- but its frames are NOT released and the backend
+-- keeps its container/slotButtons references, because a matching rebuild is going to
+-- re-adopt this exact object. Releasing here would throw away the button set, which is
+-- the entire saving.
+function NativeBackend:teardown(park)
     local c = self.container
     if c then
         AuraContainer.stats.teardowns = AuraContainer.stats.teardowns + 1
         pcall(function() c:SetEnabled(false) end)
-        if type(c.RemoveAllAuraFrames) == "function" then
+        if not park and type(c.RemoveAllAuraFrames) == "function" then
             pcall(function() c:RemoveAllAuraFrames() end)
         end
         pcall(function() c:Hide() end)
     end
-    self.container = nil
-    self.slotButtons = nil   -- buttons die with the container; consumers re-fetch per drive
+    if not park then
+        self.container = nil
+        self.slotButtons = nil   -- buttons die with the container; consumers re-fetch per drive
+    end
 end
 
 local Handle = {}
@@ -3730,10 +3758,16 @@ end
 -- max-duration filter / sort / blacklist stayed declared on every later rebuild
 -- (the "toggle does nothing until /reload" bug — candidateFilters survived OFF).
 -- A caller with a genuine partial delta must merge into handle.config itself.
-function Handle:Rebuild(config)
+-- structKey (optional): the CONSUMER's structural signature for this config -- the exact
+-- string whose change is what made this a Rebuild rather than an ApplyTuning/ApplyStyle.
+-- Supplying it enables container parking (see Handle:_parkContainer): the outgoing
+-- container is kept quiesced and re-adopted if a later rebuild presents the same key,
+-- instead of being stranded for the session. Omit it and behaviour is exactly as before.
+function Handle:Rebuild(config, structKey)
     if type(config) == "table" then
         self.config = config
     end
+    if structKey ~= nil then self._structKey = structKey end
     self:_rebuild()
 end
 
@@ -3833,8 +3867,19 @@ end
 
 -- Tear down the (secure) container + buttons. Combat-unsafe on its own, so callers
 -- gate it (Destroy defers this to regen in combat).
-function Handle:_teardownContainer()
-    if self.backend then self.backend:teardown(); self.backend = nil end
+-- park = true: quiesce for re-adoption rather than discard (Handle:_parkContainer).
+-- Everything that must stop regardless still stops -- the border animation drivers and
+-- the test duration bindings both tick from OUTSIDE the container subtree, so a parked
+-- container that skipped them would keep them running against hidden textures, which is
+-- the exact bug the driver-stop chokepoint below exists to prevent. What park skips is
+-- only the DISCARD half: the button cache and the slot counter survive, because the
+-- re-adopted container still owns those very buttons and the counter still indexes the
+-- lazily-created batches correctly.
+function Handle:_teardownContainer(park)
+    if self.backend then
+        self.backend:teardown(park)
+        if not park then self.backend = nil end
+    end
     -- Stop each slot border's animation BEFORE dropping the slot refs. Slot
     -- borders are secretRect widgets whose OnUpdate motion driver is hosted on
     -- UIParent (the aura-button subtree disables OnUpdate through descendants),
@@ -3858,8 +3903,10 @@ function Handle:_teardownContainer()
         end
         if slot then slot._dfTestGen = (slot._dfTestGen or 0) + 1 end
     end
-    wipe(self.buttons)
-    self._slotCounter = 0   -- restart the lazy-batch index for the next build
+    if not park then
+        wipe(self.buttons)
+        self._slotCounter = 0   -- restart the lazy-batch index for the next build
+    end
     -- Test-mode hover tips are handle-owned (anchored over the dying buttons):
     -- hide the lot; a test build re-anchors/re-shows the ones it needs.
     if self._testTips then
@@ -3892,13 +3939,146 @@ function Handle:Destroy()
     self._pendingRestyle = nil
     self._pendingTuning = nil
     self:_teardownContainer()
+    self:_releaseParked()
+end
+
+-- Discard the parked container for real. A park is only ever reachable through its
+-- handle, so any path that retires the handle must call this or the park becomes the
+-- very leak parking exists to stop. Both destroy routes use it: Handle:Destroy out of
+-- combat, and the regen handler's deferred "destroy" op.
+function Handle:_releaseParked()
+    local p = self._parked
+    if not p then return end
+    self._parked = nil
+    if p.backend then pcall(function() p.backend:teardown(false) end) end
+end
+
+-- ============================================================
+-- CONTAINER PARKING
+-- ============================================================
+-- WoW never frees a frame. Every structural rebuild used to strand its whole container
+-- -- and, since the release call below is unverified, potentially every button it ever
+-- created (AddAuraGroup allocates in batches of FrameCreationBatchSize) -- permanently,
+-- for the session. That is invisible in a set-and-forget profile and unbounded for
+-- anyone whose config churns: AutoProfiles flipping on zone/combat transitions, preset
+-- toggling in the Designer, profile switching.
+--
+-- Parking keeps ONE quiesced container per handle, keyed by the consumer's own
+-- structural signature. A rebuild whose key matches re-adopts it instead of building
+-- fresh, so A -> B -> A costs one container total rather than three.
+--
+-- ☠ WHY THE CONSUMER'S KEY AND NOT ONE DERIVED HERE. The engine could hash its own
+-- config, but "everything :build() reads" is a moving target and a key that misses a
+-- field re-adopts a subtly WRONG container -- silent, and exactly the bug class this
+-- file has shipped before. The consumers already maintain exact structural sigs
+-- (rowStructSig, placedStructSig, ...) whose entire definition is "changing this needs
+-- a new container". That is the parking key, by construction. No key supplied = no
+-- parking, so an unwired call site keeps today's behaviour exactly.
+--
+-- ⚠ NEVER parks in test mode: the preview declares a completely different group
+-- topology (per-slot groups, fabricated unit), so a live container and a preview
+-- container can share a structural key while being structurally unrelated.
+function Handle:_parkContainer()
+    local be = self.backend
+    if not (be and be.container) then return false end
+    -- ☠ The key the OUTGOING container was BUILT with (backend.structKey), never
+    -- self._structKey -- Rebuild has already overwritten that with the incoming key.
+    local key = be.structKey
+    if type(key) ~= "string" or key == "" then return false end
+    -- Never park a PREVIEW container: its group topology (one group per slot, fabricated
+    -- unit) is unrelated to a live container that could share the same structural key.
+    -- A live container retired by the enter-preview rebuild is still parked, because
+    -- builtInTestMode records how THAT container was built, not where we are now.
+    if be.builtInTestMode then return false end
+
+    -- Only one park per handle. An existing park with a different key is discarded for
+    -- real -- it was already stranded before this feature existed, so nothing regresses.
+    local old = self._parked
+    if old and old.backend and old.backend ~= be then
+        pcall(function() old.backend:teardown(false) end)
+    end
+
+    local buttons = {}
+    for i, slot in pairs(self.buttons) do buttons[i] = slot end
+    self._parked = {
+        key         = key,
+        backend     = be,
+        buttons     = buttons,
+        gen         = self._gen,
+        slotCounter = self._slotCounter,
+        flowAnchor  = self._flowAnchor,
+        flowPadY    = self._flowPadY,
+    }
+    self:_teardownContainer(true)
+    self.backend = nil          -- detached; the park holds the only reference now
+    wipe(self.buttons)
+    return true
+end
+
+-- Re-adopt a parked container whose structural key matches this build. Returns true if
+-- the caller should SKIP the normal build entirely.
+--
+-- Re-arm order mirrors :build()'s proven order exactly -- deafen, anchor, SetUnit,
+-- Show, SetEnabled LAST -- because the same reasoning applies: SetEnabled gates aura
+-- event registration on IsVisible() and IsEnabled(), so enabling before the container
+-- is shown and pointed at a unit leaves the row rendered once and permanently stale.
+function Handle:_readoptParked()
+    local p = self._parked
+    if not p then return false end
+    if AuraContainer._testMode then return false end
+    if InCombatLockdown() then return false end
+    if type(self._structKey) ~= "string" or self._structKey == "" then return false end
+    if p.key ~= self._structKey then return false end
+    local be = p.backend
+    local c  = be and be.container
+    if not c then self._parked = nil; return false end
+
+    self._parked = nil
+    self.backend      = be
+    self._gen         = p.gen           -- ☠ RESTORE, never bump: see _genCounter in :build()
+    self._slotCounter = p.slotCounter or 0
+    self._flowAnchor  = p.flowAnchor
+    self._flowPadY    = p.flowPadY
+    wipe(self.buttons)
+    for i, slot in pairs(p.buttons) do self.buttons[i] = slot end
+
+    local config = self.config
+    -- Re-applied per adoption for the same reason :build() re-applies it per build --
+    -- the deafening lives on the container object and a park does not preserve intent.
+    setContainerProviderDeaf(c, not AuraContainer._testMode)
+
+    if config.mode == "overlay" then
+        pcall(function() c:SetAllPoints(self.frame) end)
+    elseif config.mode == "missing" then
+        pcall(function()
+            c:ClearAllPoints()
+            c:SetPoint("TOPRIGHT", self.frame, "TOPLEFT", -MISSING_PAD, 0)
+        end)
+    else
+        applyContainerLayout(c, self)
+    end
+
+    local unit = config.unit
+    if type(unit) == "string" then pcall(function() c:SetUnit(unit) end) end
+    pcall(function() c:Show() end)
+    pcall(function() c:SetEnabled(config.enabled ~= false) end)
+
+    AuraContainer.stats.readopts = (AuraContainer.stats.readopts or 0) + 1
+
+    -- The key pins only what is STRUCTURAL. Everything else -- max, sort,
+    -- candidateFilters, filter strings, and every cosmetic -- may differ from when this
+    -- container was parked, so both live-apply passes run now. Tuning before style:
+    -- population first, cosmetics second (same order as the regen flush).
+    if be.applyGroupTuning then pcall(function() be:applyGroupTuning() end) end
+    self:ApplyStyle()
+    return true
 end
 
 -- Rebuild the container from scratch (structural changes). Combat-guarded.
 function Handle:_rebuild()
     if self._destroyed then return end
     if InCombatLockdown() then self:_deferRebuild(); return end
-    self:_teardownContainer()
+    if not self:_parkContainer() then self:_teardownContainer() end
     self:_build()
 end
 
@@ -3922,6 +4102,7 @@ function Handle:_registerRegen()
                 -- pcall each handle's op so one failure can't strand the rest.
                 if op == "destroy" then
                     pcall(function() h:_teardownContainer() end)
+                    pcall(function() h:_releaseParked() end)
                 elseif not h._destroyed then
                     if op then
                         pcall(function()
@@ -4040,8 +4221,13 @@ end
 function Handle:_build()
     self:_applyZOrder()        -- level/strata track config changes across Rebuild
     self:_ppPrepare()          -- pp flag + quantized layout BEFORE any geometry runs
-    self.backend = NativeBackend.new(self)
-    self.backend:build()
+    -- A structurally identical container may already be parked from an earlier rebuild
+    -- (profile swap, preset toggle, AutoProfiles transition). Re-adopting it skips the
+    -- CreateFrame, every AddAuraGroup and the whole lazy button batch.
+    if not self:_readoptParked() then
+        self.backend = NativeBackend.new(self)
+        self.backend:build()
+    end
     self:_updateDynRefresh()   -- auto-bounce on target/focus/mouseover change
 end
 
