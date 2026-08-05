@@ -797,6 +797,8 @@ L["Expiration"] = true
 -- alphabetically because the collision strings only make sense read together, and a
 -- translator needs to see that "Expiration" and "Pandemic" are two named features
 -- being contrasted, not two ways of saying the same thing.
+-- Aura Designer bar indicator: the per-side trim on Match Frame Width/Height.
+L["Trims the matched size on every side. Use it to clear an Aura Designer border indicator, which the frame's own border inset does not know about. Negative values push the bar back out past the health bar's edge."] = true
 L["Pandemic"] = true
 L["Highlights an aura once you can refresh it without losing any of its remaining time. The game decides when that is, and it differs per spell — auras that can't be refreshed never light up."] = true
 L["Highlights each icon once the aura can be refreshed without losing time."] = true

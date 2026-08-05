@@ -1442,7 +1442,25 @@ local function resolveBarSize(frame, indicator)
         local padding  = tonumber(fdb.framePadding) or 0
         local border   = (fdb.frameShowBorder ~= false) and (tonumber(fdb.frameBorderSize) or 1) or 0
         if usePP then padding = DF:PixelPerfect(padding); border = DF:PixelPerfect(border) end
-        local edgeInset = math.max(padding, border)
+        -- User inset ON TOP of the frame's own edge band, applied per side to whichever
+        -- axes are matching. Same sign convention as every other Inset in DF: positive
+        -- pulls inward, negative pushes the bar past the health bar's edge.
+        --
+        -- ☠ WHY THIS IS A NUMBER AND NOT "follow the border indicator". The band above is
+        -- everything DF can know statically about how much frame edge is occupied. An AD
+        -- BORDER indicator occupies more of it, but it is conditional on its aura being
+        -- present — and presence is SECRET on 12.1, so the bar can never widen back when
+        -- that border drops off. Any "account for the border" option would therefore be a
+        -- fixed reservation anyway; this is that reservation, without a cross-record
+        -- reference that can be deleted or a hidden thickest-wins rule the panel cannot
+        -- show. (Krathe's call, 2026-08-05 — the alternatives were weighed and dropped.)
+        --
+        -- ★ It composes with Match rather than replacing it, which is the point: unticking
+        -- Match to hand-align also gives up tracking the frame's SIZE, so every hand-set
+        -- bar broke the next time frame dimensions changed.
+        local userInset = tonumber(indicator.matchInset) or 0
+        if usePP then userInset = DF:PixelPerfect(userInset) end
+        local edgeInset = math.max(padding, border) + userInset
         if matchW then
             local fw = tonumber(fdb.frameWidth) or width
             if usePP then fw = DF:PixelPerfect(fw) end
@@ -1934,7 +1952,10 @@ local function barCoSig(frame, indicator, borderOn, alpha)
         "mh=" .. tostring(indicator.matchFrameHeight and 1 or 0) .. ":" .. tostring(fdb.frameHeight),
         -- Match Width/Height now insets by the frame's border+padding (resolveBarSize), so those
         -- feed the cosmetic size too — a frame border/padding change must re-apply the bar layout.
-        "mi=" .. tostring(fdb.framePadding) .. ":" .. tostring(fdb.frameShowBorder) .. ":" .. tostring(fdb.frameBorderSize) .. ":" .. tostring(fdb.pixelPerfect),
+        -- The whole edge-inset input set: the frame's own band, plus the user's Inset
+        -- (cosmetic — resolveBarSize is pure config, so a drag hot-applies via ApplyStyle).
+        "mi=" .. tostring(fdb.framePadding) .. ":" .. tostring(fdb.frameShowBorder) .. ":" .. tostring(fdb.frameBorderSize) .. ":" .. tostring(fdb.pixelPerfect)
+            .. ":" .. tostring(tonumber(indicator.matchInset) or 0),
         "an=" .. tostring(indicator.anchor or "BOTTOM"),
         "ox=" .. tostring(tonumber(indicator.offsetX) or 0),
         "oy=" .. tostring(tonumber(indicator.offsetY) or 0),

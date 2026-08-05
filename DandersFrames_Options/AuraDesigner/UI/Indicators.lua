@@ -580,6 +580,17 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Height"], 1, 30, 1, proxy, "height"), 54)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Match Frame Width"], proxy, "matchFrameWidth"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Match Frame Height"], proxy, "matchFrameHeight"), 28)
+            -- Inset sits directly under the two Match toggles because it only acts on the
+            -- axes they turn on — it trims the matched size rather than setting a size.
+            -- Greyed rather than hidden when neither is on: with Match off you set Width
+            -- and Height directly, so an inset would just be a second way to say the same
+            -- number, but the control staying visible keeps the relationship legible.
+            local matchInset = g:AddWidget(GUI:CreateSlider(parent, L["Inset"], -20, 20, 1, proxy, "matchInset"), 54)
+            matchInset.disableOn = function()
+                local mw = proxy.matchFrameWidth; if mw == nil then mw = true end
+                return not (mw or proxy.matchFrameHeight)
+            end
+            matchInset.tooltip = L["Trims the matched size on every side. Use it to clear an Aura Designer border indicator, which the frame's own border inset does not know about. Negative values push the bar back out past the health bar's edge."]
         end)
         -- Texture & Colors  (group captured to scroll to; the Color Mode widget to flash)
         local colorModeDrop

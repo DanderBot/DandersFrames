@@ -778,6 +778,7 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 -- Size & orientation
                 orientation = "HORIZONTAL", width = 60, height = 6,
                 matchFrameWidth = true, matchFrameHeight = false,
+                matchInset = 0,   -- extra per-side trim on the matched axes (see resolveBarSize)
                 -- Texture & colors
                 texture = "Interface\\TargetingFrame\\UI-StatusBar",
                 fillColor = {r = 1, g = 1, b = 1, a = 1},
@@ -1082,6 +1083,7 @@ local TYPE_DEFAULTS = {
         anchor = "BOTTOM", offsetX = 0, offsetY = 0,
         orientation = "HORIZONTAL", width = 60, height = 6,
         matchFrameWidth = true, matchFrameHeight = false,
+        matchInset = 0,   -- extra per-side trim on the matched axes (see resolveBarSize)
         barColorMode = "STATIC",   -- STATIC / DF / DFSTOPS / CLASSIC (curve = green->red ramp as it drains)
         texture = "Interface\\TargetingFrame\\UI-StatusBar",
         fillColor = {r = 1, g = 1, b = 1, a = 1},
