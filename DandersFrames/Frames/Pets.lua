@@ -472,6 +472,17 @@ function DF:SetPetFrameVisible(frame, visible)
             frame:Hide()
         end
     end
+
+    -- ☠ Under lockdown only the alpha above actually took, so the Shown state is now
+    -- wrong in BOTH directions: a pet that died mid-fight is left as an invisible but
+    -- still CLICKABLE button, and one summoned mid-fight is left Hidden with alpha 1
+    -- (so it stays invisible even once combat ends). Neither self-corrects — nothing
+    -- re-runs this until the next roster or pet event, which may never come.
+    --
+    -- Arena had a deferral for its own pass; this covers every track, per frame.
+    if InCombatLockdown() then
+        DF.pendingPetVisibilityUpdate = true
+    end
 end
 
 function DF:UpdatePetHealth(frame)
@@ -940,9 +951,23 @@ end
 
 function DF:PositionPetFrame(frame)
     if not frame then return end
-    
+
+    -- ☠ GUARDED AT THE FUNCTION, not at each caller. This does ClearAllPoints /
+    -- SetParent / SetPoint on a SecureUnitButtonTemplate, all blocked under lockdown,
+    -- and it is reachable mid-fight from at least three directions: the secure-sort
+    -- completion callback (SecureSort -> NotifySortComplete -> UpdateAllPetFramePositions),
+    -- the Options sliders, which are usable in combat, and UNIT_PET. Guarding the
+    -- callers instead leaves the next new caller to rediscover this.
+    --
+    -- ⚠ Test frames are NOT secure and must keep positioning normally -- test mode is
+    -- routinely entered and left with the lockdown up.
+    if not frame.dfIsTestFrame and InCombatLockdown() then
+        DF.pendingPetPositionUpdate = true
+        return
+    end
+
     local db = DF:GetFrameDB(frame)
-    
+
     -- Check if we're using grouped mode
     if db.petGroupMode == "GROUPED" then
         -- In grouped mode, positioning is handled by UpdatePetGroupLayout
@@ -1001,6 +1026,15 @@ function DF:UpdatePetGroupLayout()
     local petsEnabled = isTestMode and (db.petEnabled and db.testShowPets ~= false) or (not isTestMode and db.petEnabled)
     if db.petGroupMode ~= "GROUPED" or not petsEnabled then
         DF:HidePetGroupContainer(DF.petGroupContainer)
+        return
+    end
+
+    -- ☠ GUARDS ITSELF. PositionPetFrame's guard provably cannot cover this path: it
+    -- returns early for GROUPED by design, so grouped layout is the one arrangement
+    -- whose SetParent / SetPoint calls never pass through it. Test frames are not
+    -- secure, so only the live pass needs holding back.
+    if not isTestMode and InCombatLockdown() then
+        DF.pendingPetPositionUpdate = true
         return
     end
 
@@ -1275,6 +1309,13 @@ function DF:UpdateRaidPetGroupLayout()
         return
     end
 
+    -- ☠ Guards itself, for the same reason as the party layout above — PositionPetFrame
+    -- returns early for GROUPED, so its guard cannot cover this path.
+    if not isTestMode and InCombatLockdown() then
+        DF.pendingPetPositionUpdate = true
+        return
+    end
+
     -- Create container if needed
     if not DF.raidPetGroupContainer then
         DF:CreateRaidPetGroupContainer()
@@ -1478,6 +1519,16 @@ function DF:InitializePetFrames()
         return
     end
 
+    -- ☠ CreatePetFrame does SetSize / SetAttribute / Hide on a secure button, so this
+    -- whole function is a protected path. It is not login-only: HandleUnitPetEvent
+    -- lazily initialises here for anyone who had pets switched off at login, so the
+    -- first pet summoned mid-boss lands right here with the lockdown up.
+    if InCombatLockdown() then
+        DF:DebugWarn("PET", "InitializePetFrames: in combat, deferring")
+        DF.pendingPetVisibilityUpdate = true
+        return
+    end
+
     -- Create player pet frame
     local playerFrame = DF:GetPlayerFrame()
     if not DF.petFrames.player and playerFrame then
@@ -1669,11 +1720,16 @@ local function UpdateArenaPetFrames()
 
     -- Everything below this point touches protected state: CreatePetFrame builds a
     -- SecureUnitButtonTemplate and calls SetSize/SetAttribute, and PositionPetFrame
-    -- does ClearAllPoints/SetParent/SetPoint. The raid track gets away without a
-    -- guard because you only reach it forming a group, out of combat. Arena does
-    -- not: a pet summoned or resurrected mid-match, a Solo Shuffle round
-    -- transition, or Core's PLAYER_REGEN_DISABLED handler ending test mode all
-    -- land here with the lockdown up.
+    -- does ClearAllPoints/SetParent/SetPoint. Arena reaches it constantly: a pet
+    -- summoned or resurrected mid-match, a Solo Shuffle round transition, or Core's
+    -- PLAYER_REGEN_DISABLED handler ending test mode all land here with the lockdown up.
+    --
+    -- ☠ This comment used to claim the raid track "gets away without a guard because
+    -- you only reach it forming a group, out of combat". That was FALSE — the Options
+    -- sliders are usable in combat and reach it. The guard now lives on
+    -- PositionPetFrame and InitializePetFrames themselves, covering every track; this
+    -- one stays because deferring the whole arena pass is cheaper than deferring each
+    -- frame within it.
     --
     -- Defer rather than drop, so the pets appear the moment combat ends instead of
     -- waiting for whatever roster event happens to come next.

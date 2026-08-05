@@ -6160,6 +6160,31 @@ DF._MainEventDispatcher = function(self, event, arg1)
             if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
         end
 
+        -- Pet work the lockdown blocked, on any track. Two flags rather than one
+        -- because they cost differently: a visibility replay only needs the show/hide
+        -- pass re-run, while a position replay re-parents and re-anchors every pet
+        -- frame. Both are set from deep inside the pet paths (SetPetFrameVisible,
+        -- PositionPetFrame, the two GROUPED layouts, InitializePetFrames), which is
+        -- why they are plain booleans and not per-frame lists — by the time we drain,
+        -- the whole pass is cheaper and more correct than replaying individual frames
+        -- against state that has since moved on.
+        --
+        -- Visibility first: InitializePetFrames may need to CREATE frames that the
+        -- position pass then has something to place. Both forced, since the pet
+        -- updates throttle to one run per frame and the arena replay above may
+        -- already have taken this frame's slot.
+        if DF.pendingPetVisibilityUpdate then
+            DF.pendingPetVisibilityUpdate = nil
+            if DF.InitializePetFrames then DF:InitializePetFrames() end
+            if DF.UpdateAllPetFrames then DF:UpdateAllPetFrames(true) end
+            if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
+        end
+
+        if DF.pendingPetPositionUpdate then
+            DF.pendingPetPositionUpdate = nil
+            if DF.UpdateAllPetFramePositions then DF:UpdateAllPetFramePositions() end
+        end
+
         -- Clean up after test mode was interrupted by combat
         if DF.testModeInterruptedByCombat then
             DF.testModeInterruptedByCombat = false
