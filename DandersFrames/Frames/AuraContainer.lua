@@ -1276,6 +1276,11 @@ end
 -- INVARIANT: regions are create-once (styleButton_regions) and never recreated, so each
 -- per-region _boundX flag stays valid for the life of the slot. If any code ever recreates
 -- a region, it MUST also clear that region's _boundX or the new region silently never binds.
+-- Stable stand-in for "this config has no duration spec", so the absent case has a
+-- constant identity too. A fresh {} per call would look like a spec change every pass and
+-- re-bind forever.
+local EMPTY_DUR_SPEC = {}
+
 local function bindNative(slot, config)
     local style = config.style or {}
 
@@ -1289,13 +1294,30 @@ local function bindNative(slot, config)
         slot:SetDurationCooldown(slot.dfCD)
     end
 
-    if slot.dfDur and slot.SetDurationText and not slot._boundDur then
-        -- _boundDur is stamped AFTER the pcall below, not here: this is a
-        -- bind-once flag, so setting it up front meant a failed bind latched
-        -- permanently and the duration text stayed blank for the life of the slot
-        -- with no retry (and warnedCurve is one-shot per session, so the second
-        -- distinct failure was silent too).
-        local durSpec = style.duration or {}
+    -- ☠ NOT BIND-ONCE ANY MORE, and the old claim was factually wrong against Blizzard.
+    -- CustomAuraButtonSharedMixin:SetDurationText is reset-then-apply: it fetches the
+    -- RETAINED binding, does binding:Assign(options.binding) or SetToDefaults() +
+    -- SetFormatter(default), then re-applies fontstring / duration / textFormat /
+    -- textColor and calls UpdateAuraDisplay(). Idempotent on re-call, not additive, and
+    -- OnLoad_Intrinsic states the intent outright: "Retain the duration text binding
+    -- across reconfiguration." The freeze was ours, not the API's.
+    --
+    -- That freeze is why durationFmtKey sits in FOUR structural signatures, and why one
+    -- account-wide setting (GetAuraDurationUpdateInterval) re-keys every container on
+    -- every frame. Re-binding on a spec change lets those become live.
+    --
+    -- Keyed on spec IDENTITY, which is sound for exactly the reason the colour cache
+    -- below already depends on: a duration spec is never mutated in place -- every
+    -- writer fills a fresh table. Worst case if a builder hands us a fresh-but-equal
+    -- table is one extra SetDurationText per button per restyle, which is still orders
+    -- of magnitude cheaper than the container rebuild this replaces.
+    local durSpecKey = style.duration or EMPTY_DUR_SPEC
+    if slot.dfDur and slot.SetDurationText and slot._dfDurSpec ~= durSpecKey then
+        -- _dfDurSpec is stamped AFTER the pcall below, not here: a failed bind must be
+        -- retried rather than latching permanently and leaving the text blank for the
+        -- life of the slot (warnedCurve is one-shot per session, so the second distinct
+        -- failure was silent too).
+        local durSpec = durSpecKey
         -- 68914 RESHAPED the options: SetDurationText now only reads { binding |
         -- textFormat | textFormatter | textColor }; the flat formatter/expiredText/
         -- zeroDurationText/updateInterval keys are silently IGNORED (the
@@ -1359,7 +1381,7 @@ local function bindNative(slot, config)
         -- Protection is unchanged.
         local ok, err = pcall(slot.SetDurationText, slot, slot.dfDur, opts)
         if ok then
-            slot._boundDur = true
+            slot._dfDurSpec = durSpecKey
         elseif not warnedCurve then
             warnedCurve = true
             DF:DebugWarn(DBG, "SetDurationText failed: %s", tostring(err))
