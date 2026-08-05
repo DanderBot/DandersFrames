@@ -236,6 +236,39 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     end
 
     if typeKey == "icon" then
+        -- ── THE CANONICAL CARD ORDER, shared by every indicator type that has the section:
+        --   Show When Missing → Position → Appearance → Border
+        --     → Duration Text → Stack Count → Duration Bar
+        --     → Expiration → Pandemic
+        -- Reads as: does it show → where → what it looks like → what is drawn on it → what
+        -- changes it over time. A type that lacks a section just skips it (the bar card has
+        -- no Stack Count or Duration Bar; only the icon has Show When Missing), so the
+        -- surviving sections still appear in the same relative order on every card.
+        --
+        -- Show When Missing leads because it answers the prior question to all the rest —
+        -- whether the indicator appears at all, rather than how it looks once it does.
+        AddGroup(L["Show When Missing"], function(g)
+            local desatCb
+            local function UpdateDesatState()
+                if not desatCb then return end
+                if proxy.showWhenMissing then
+                    desatCb:SetAlpha(1)
+                    desatCb:EnableMouse(true)
+                else
+                    desatCb:SetAlpha(0.4)
+                    desatCb:EnableMouse(false)
+                end
+            end
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
+                UpdateDesatState()
+                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+            end), 28)
+            desatCb = GUI:CreateCheckbox(parent, L["Desaturate When Missing"], proxy, "missingDesaturate", function()
+                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+            end)
+            g:AddWidget(desatCb, 28)
+            UpdateDesatState()
+        end)
         -- Position
         AddGroup(L["Position"], function(g)
             if layoutGroup then
@@ -264,29 +297,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Icon (Text Only)"], proxy, "hideIcon", function()
                 DF:AuraDesigner_RefreshPage()
             end), 28)
-        end)
-        -- Show When Missing
-        AddGroup(L["Show When Missing"], function(g)
-            local desatCb
-            local function UpdateDesatState()
-                if not desatCb then return end
-                if proxy.showWhenMissing then
-                    desatCb:SetAlpha(1)
-                    desatCb:EnableMouse(true)
-                else
-                    desatCb:SetAlpha(0.4)
-                    desatCb:EnableMouse(false)
-                end
-            end
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
-                UpdateDesatState()
-                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-            end), 28)
-            desatCb = GUI:CreateCheckbox(parent, L["Desaturate When Missing"], proxy, "missingDesaturate", function()
-                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-            end)
-            g:AddWidget(desatCb, 28)
-            UpdateDesatState()
         end)
         -- Border (Stage 5.1c — unified controls via CreateBorderControls).
         -- Show / Thickness / Inset are the same widgets as before; the helper
@@ -397,17 +407,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent"), 28)
             UpdateHideAboveState()
         end)
-        -- Expiration: the frame-anchored Expiry Alert ELEMENT (own section —
-        -- distinct from the sound "Expire Alert" group on the sound card).
-        AddGroup(L["Expiration"], function(g)
-            AddExpiryAlertControls(g, parent, proxy)
-        end)
-        -- Pandemic: the game's refresh window. Directly below Expiration — same shape,
-        -- opposite question (see AddPandemicControls).
-        AddGroup(L["Pandemic"], function(g)
-            AddPandemicControls(g, parent, proxy)
-        end)
-        -- Stack Count
+        -- Stack Count sits with Duration Text: they are the two TEXT elements on an icon,
+        -- and tuning either means reading them as a pair.
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
@@ -419,8 +420,21 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateSlider(parent, L["Offset Y"], -150, 150, 1, proxy, "stackY"), 54)
             g:AddWidget(GUI:CreateColorPicker(parent, L["Stack Text Color"], proxy, "stackColor", true, RPL, RPL, true), 28)
         end)
-        -- Duration Bar (native SetDurationBar strip — shared with the square card)
+        -- Duration Bar (native SetDurationBar strip — shared with the square card). Closes
+        -- the run of things drawn ON the icon, and keeps all three duration/count elements
+        -- together rather than stranding the bar below the conditional reveals.
         AddDurationBarGroup()
+        -- ── THE TWO CONDITIONAL REVEALS, always adjacent, always in this order, and always
+        -- LAST on every indicator card. They answer neighbouring questions ("about to fall
+        -- off" / "worth refreshing now") and are configured against each other, so separating
+        -- them would hide the collision warnings that only make sense read side by side.
+        -- (Expiration is its own section, distinct from the sound card's "Expire Alert".)
+        AddGroup(L["Expiration"], function(g)
+            AddExpiryAlertControls(g, parent, proxy)
+        end)
+        AddGroup(L["Pandemic"], function(g)
+            AddPandemicControls(g, parent, proxy)
+        end)
 
     elseif typeKey == "square" then
         -- Position
@@ -524,17 +538,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Duration on Permanent Auras"], proxy, "durationHideOnPermanent"), 28)
             UpdateHideAboveState()
         end)
-        -- Expiration: the frame-anchored Expiry Alert ELEMENT (own section —
-        -- distinct from the sound "Expire Alert" group on the sound card).
-        AddGroup(L["Expiration"], function(g)
-            AddExpiryAlertControls(g, parent, proxy)
-        end)
-        -- Pandemic: the game's refresh window. Directly below Expiration — same shape,
-        -- opposite question (see AddPandemicControls).
-        AddGroup(L["Pandemic"], function(g)
-            AddPandemicControls(g, parent, proxy)
-        end)
-        -- Stack Count
+        -- Stack Count sits with Duration Text — see the icon card for why.
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Stack Font"], proxy, "stackFont"), 54)
@@ -548,6 +552,14 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
         -- Duration Bar (native SetDurationBar strip — shared with the icon card)
         AddDurationBarGroup()
+        -- The two conditional reveals, adjacent, in the same order and last, as on every
+        -- other card.
+        AddGroup(L["Expiration"], function(g)
+            AddExpiryAlertControls(g, parent, proxy)
+        end)
+        AddGroup(L["Pandemic"], function(g)
+            AddPandemicControls(g, parent, proxy)
+        end)
 
     elseif typeKey == "bar" then
         -- Position
