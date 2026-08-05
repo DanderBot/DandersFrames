@@ -242,7 +242,7 @@ P.AddExpiryAlertControls = AddExpiryAlertControls
 -- size it to the group's inner width up front (the group advances Y by the height we pass).
 -- Built once in GUI:CreateColorsPageLink. NOT for the bar FILL colour (fixed ramp, immutable).
 local function AddDurationColorsLink(g, parent)
-    local innerW = math.max(40, (g:GetWidth() or 260) - 2 * (g.padding or 10))
+    local innerW = GUI:GroupInnerWidth(g)
     local note = GUI:CreateColorsPageLink(parent, innerW)
     g:AddWidget(note, (note.layoutHeight or 16) + 2)
     return note

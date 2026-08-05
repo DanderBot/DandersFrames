@@ -156,7 +156,7 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
     -- Cross-link to the shared Colours-page editor those By-Time breakpoints live in. Frame
     -- modes only (like Color Mode itself) — a rectangular consumer with no Border/Tint (bar)
     -- never reaches here, so its fixed ramp gets no link. Fixed-layout note, so size it up front.
-    local expLinkW = math.max(40, (group:GetWidth() or 260) - 2 * (group.padding or 10))
+    local expLinkW = GUI:GroupInnerWidth(group)
     w.colorsLink = GUI:CreateColorsPageLink(parent, expLinkW)
     group:AddWidget(w.colorsLink, (w.colorsLink.layoutHeight or 16) + 2)
     w.colorsLink.hideOn = hideNonFrame

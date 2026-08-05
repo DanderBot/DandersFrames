@@ -685,7 +685,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             local link = format("|cffffffff|HdfADScroll:texcolors|h%s|h|r", L["Color Mode"])
             -- Fixed-layout note: hand it the group's inner width so its wrapped (2-line) height is
             -- known before AddWidget — else it falls back to a fixed slot the text overflows.
-            local innerW = math.max(40, (g:GetWidth() or 260) - 2 * (g.padding or 10))
+            local innerW = GUI:GroupInnerWidth(g)
             local note = GUI:CreateLink(parent, format(L["For expiry colour, set the %s in Texture & Colors."], link), {
                 width = innerW,
                 onLinkClick = function()

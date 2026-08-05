@@ -23,8 +23,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- section border flash). CreateLink is fixed-layout, so hand it the group's inner width
         -- up front — its wrapped height is then known before AddWidget (the group advances Y by
         -- the height we pass). Defined once in GUI:CreateColorsPageLink; shared with the Aura Designer.
-        local innerW = math.max(40, (group:GetWidth() or 260) - 2 * (group.padding or 10))
-        local note = GUI:CreateColorsPageLink(parent, innerW)
+        local note = GUI:CreateColorsPageLink(parent, GUI:GroupInnerWidth(group))
         group:AddWidget(note, (note.layoutHeight or 16) + 2)
         return note
     end
