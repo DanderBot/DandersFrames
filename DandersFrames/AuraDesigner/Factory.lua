@@ -1618,6 +1618,32 @@ end
 -- configured level. That is why the glyph showed under the icons.
 Factory.ALERT_ROW_LIFT = 13
 
+-- ☠ ...EXCEPT FOR TINT, which wants the opposite. A wash covers the whole icon, so lifting
+-- it a full row puts it over the indicator's own duration text and stack count and makes
+-- both hard to read (Krathe, 2026-08-05 — the same fault the pandemic cue had, same fix).
+-- A wash belongs ABOVE the icon art and BELOW everything carrying information.
+--
+-- ★ +1 is exactly where this started. The comment above records that at +1 "the companion's
+-- button landed at +3, INSIDE its own indicator's band: above that indicator's icon but
+-- under its border" — which was the bug for a GLYPH and is precisely what a TINT wants. The
+-- constant was never wrong, it was MODE-BLIND: +1 is right for a wash and wrong for a
+-- payload, +13 is right for a payload and wrong for a wash.
+--
+-- ⚠ The trade the low lift buys back is that a tint also sits under a SIBLING indicator's
+-- border at the same configured level. That is the correct side of it — a wash is
+-- background — and the alternative is the unreadable timer this fixes.
+Factory.ALERT_TINT_LIFT = 1
+
+-- The lift for one indicator's alert, by reveal type. Shared by the live companion and the
+-- AD canvas so the two can never be nudged apart, which is the whole reason the lift was a
+-- named constant rather than a literal in the first place.
+function Factory.AlertLift(indicator)
+    if DF.Expiration and DF.Expiration:Mode(indicator) == "TINT" then
+        return Factory.ALERT_TINT_LIFT
+    end
+    return Factory.ALERT_ROW_LIFT
+end
+
 -- THE alert's render, as ONE table. The live companion slot and the AD canvas preview
 -- BOTH take their style from here, so the reveal can never be styled two ways. It used to
 -- be built live from BuildDurationSpec and on the canvas from a separate path, and that
@@ -1665,10 +1691,11 @@ local function buildAlertCompanionConfig(unit, map, indicator, layout, mine, geo
         testEntries = testEntryForMap(map),
         enabled = true,
         tooltips = false,   -- companion overlay: see adTooltipsOn (would fight its own indicator)
-        -- A FULL ROW above the indicator's own band (see ALERT_ROW_LIFT), so the alert
-        -- clears its own indicator AND any sibling sharing its configured level. The
-        -- companion subtree carries nothing but the text, so nothing is covered.
-        frameLevelOffset = Factory.ALERT_ROW_LIFT + resolveLevel(indicator, defs.level),
+        -- A FULL ROW above the indicator's own band for a payload reveal, so the alert
+        -- clears its own indicator AND any sibling sharing its configured level — but a
+        -- LOW lift for TINT, which must sit under the timer it would otherwise wash over.
+        -- See Factory.AlertLift.
+        frameLevelOffset = Factory.AlertLift(indicator) + resolveLevel(indicator, defs.level),
         -- MUST mirror the indicator's strata: the level only orders the alert above the
         -- indicator WITHIN a band, so leaving the companion in the frame's band while the
         -- indicator moves to HIGH would strand the alert text underneath it.

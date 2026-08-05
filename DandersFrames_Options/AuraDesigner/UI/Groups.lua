@@ -1405,7 +1405,11 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         ah:ClearAllPoints()
         ah:SetAllPoints(slot)
         ah:SetFrameStrata(slot:GetFrameStrata())
-        ah:SetFrameLevel(slot:GetFrameLevel() + (Factory.ALERT_ROW_LIFT or 13))
+        -- Mode-dependent, exactly like the live companion: a payload reveal clears the
+        -- whole row, a TINT sits under the indicator's own timer. Factory.AlertLift is the
+        -- shared source so the canvas cannot drift from live (see its note).
+        ah:SetFrameLevel(slot:GetFrameLevel()
+            + ((Factory.AlertLift and Factory.AlertLift(indicator)) or Factory.ALERT_ROW_LIFT or 13))
         -- Reuse the indicator slot's duration object (PaintPreviewSlot armed it just above)
         -- so the reveal reacts to the very timer it sits on, not a second one.
         AC.PaintPreviewSlot(ah, ap, 1, slot._dfTestDurObj)
