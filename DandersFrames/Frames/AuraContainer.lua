@@ -4621,6 +4621,28 @@ SlotHandle.__index = SlotHandle
 -- Every slot's regions hang off this, so the consumer can re-level live without ever
 -- touching the sealed button. Created inside initializeFrame -- the only window in which
 -- a tainted write to an aura button is legal.
+-- ☠ POSITION IS THE CONSUMER'S, NOT THE FLOW'S. Slots take no part in dynamic layout
+-- ("they do not take part in dynamic layout and must be manually anchored"), and with a
+-- SHARED container there is no longer a per-indicator container whose own anchoring did
+-- this job. Without it every slot lands on the shared container's corner, stacked on top
+-- of one another -- which reads as "an indicator stopped rendering" when it is really
+-- underneath its neighbour.
+--
+-- Applied at creation AND on every restyle: anchor/offset/scale are cosmetic (a drag
+-- updates them live today), so freezing them at creation would be a regression.
+-- ⚠ pcall'd: this is a tainted write to a button that carries
+-- DenyTaintedAccessWhenAurasAreSecret, so a live re-anchor can be refused while auras are
+-- secret. It re-applies on the next unrestricted restyle, which is the same contract
+-- Handle:ApplyStyle already lives under.
+local function layoutSlotButton(button, config, ownerAnchor)
+    local L = config and config.layout
+    if not (button and L and ownerAnchor) then return end
+    local point = (type(L.anchor) == "string" and L.anchor) or "TOPLEFT"
+    pcall(button.ClearAllPoints, button)
+    pcall(button.SetPoint, button, point, ownerAnchor, point, L.offsetX or 0, L.offsetY or 0)
+    if L.scale then pcall(button.SetScale, button, L.scale) end
+end
+
 local function makeSlotLevelHost(button)
     local ok, host = pcall(CreateFrame, "Frame", nil, button)
     if not ok or not host then return nil end
@@ -4737,6 +4759,8 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
                 if not okR then DF:DebugWarn(DBG, "SlotOwner styleButton_regions: %s", tostring(errR)) end
                 local okB, errB = pcall(bindNative, b, config)
                 if not okB then DF:DebugWarn(DBG, "SlotOwner bindNative: %s", tostring(errB)) end
+                -- After sizing (styleButton_regions owns SetSize), before the seal.
+                layoutSlotButton(b, config, owner.anchor)
             end
             if spec.onInit then
                 local okI, err = pcall(spec.onInit, b, host)
@@ -4834,6 +4858,10 @@ function SlotHandle:ApplyStyle(style, layout)
     if InCombatLockdown() then return false end
     local ok, err = pcall(styleButton_regions, btn, cfg)
     if not ok then DF:DebugWarn(DBG, "SlotHandle:ApplyStyle: %s", tostring(err)) end
+    -- Re-anchor after restyle: anchor/offset/scale are live cosmetics (dragging an
+    -- indicator moves it now, not on the next reload), and styleButton_regions has just
+    -- re-run SetSize, so the pin has to follow it.
+    layoutSlotButton(btn, cfg, self.owner and self.owner.anchor)
     return ok
 end
 

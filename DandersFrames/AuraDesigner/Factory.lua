@@ -1410,6 +1410,71 @@ local function applyPlacedAlpha(handle, alpha)
 end
 
 -- ============================================================
+-- SLOT-OWNER BRIDGE  (container collapse S2b)
+-- ============================================================
+-- Every placed indicator sets singleSlot, so each one used to get a WHOLE AuraContainer
+-- holding exactly ONE slot -- ~120 per unit frame in a heavy profile, uncapped, and every
+-- structural edit stranded one permanently (frames are never freed, and teardown cannot
+-- release buttons because there is no public release). They now share ONE container per
+-- unit frame, via AuraContainer:AcquireSlot.
+--
+-- ☠ THE SLOT KEY CARRIES THE STRUCT SIG. A slot's regions are built in its
+-- initializeFrame, which is frozen at AddAuraSlot, so a structural change cannot mutate a
+-- slot -- it acquires a NEW key and PARKS the old. One button instead of a whole
+-- container, and returning to a previous structure re-adopts the parked slot by key.
+--
+-- ⚠ FALLS BACK ON PURPOSE. AcquireSlot declines test frames (the preview declares its own
+-- topology) and declines while a frame has no owner yet in combat. Those keep the original
+-- per-indicator container, so behaviour is unchanged wherever the shared path says no.
+-- Both handle kinds answer GetFrame/Destroy/ApplyStyle, so the OOR fade and teardownExcept
+-- need no knowledge of which one they hold.
+local function isSlotHandle(h) return h ~= nil and h.GetButton ~= nil end
+
+-- \30 (record separator) cannot appear in an instance key or a struct sig, so the two
+-- halves can never collide into a shared key.
+local function placedSlotKey(key, structSig) return key .. "\30" .. structSig end
+
+local function placedAcquire(frame, key, structSig, cfg)
+    local h
+    if DF.AuraContainer.AcquireSlot then
+        h = DF.AuraContainer:AcquireSlot(frame, placedSlotKey(key, structSig), {
+            unit             = cfg.unit,
+            filter           = cfg.filter,
+            candidateFilters = cfg.candidateFilters,
+            config           = cfg,
+        })
+    end
+    if h then return h end
+    return DF.AuraContainer:Create(frame, cfg)
+end
+
+-- Structural change. A slot cannot be rebuilt: park it and take a new key. A real
+-- container still Rebuilds, still passing structSig as its own parking key.
+local function placedRestructure(entry, frame, key, structSig, cfg)
+    if isSlotHandle(entry.handle) then
+        entry.handle:Park()
+        local h = placedAcquire(frame, key, structSig, cfg)
+        if h then entry.handle = h end
+    else
+        entry.handle:Rebuild(cfg, structSig)
+    end
+    return entry.handle
+end
+
+-- Selection edit. The two kinds take different tuning shapes: a container replaces the
+-- max/sort/candidateFilters trio wholesale off a fresh config; a slot takes the two values
+-- it actually owns. testEntries rides along on both so a test-mode rebuild previews the
+-- NEW selection rather than a stale one.
+local function placedTune(handle, cfg)
+    if handle.config then handle.config.testEntries = cfg.testEntries end
+    if isSlotHandle(handle) then
+        handle:ApplyTuning(cfg.filter, cfg.candidateFilters)
+    else
+        handle:ApplyTuning(cfg)
+    end
+end
+
+-- ============================================================
 -- PLACED BAR INDICATOR  — P4.4
 -- A bar is a placed indicator like icon/square (per-indicator, many coexist, keyed by
 -- instanceKey, torn down by key), but its slot content is a StatusBar bound via native
@@ -1808,7 +1873,7 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
     local cfg = buildAlertCompanionConfig(frame.unit, map, indicator, layout, mine, geom, defs)
     if not cfg then return end   -- formatter unavailable: key stays dead -> sweep
     if not entry then
-        local handle = DF.AuraContainer:Create(frame, cfg)
+        local handle = placedAcquire(frame, akey, structSig, cfg)
         if handle then
             applyPlacedAlpha(handle, alpha)
             placed[akey] = { handle = handle, structSig = structSig,
@@ -1817,11 +1882,11 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
         end
     elseif entry.structSig ~= structSig then
         entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-        -- structSig doubles as the container PARKING key (AuraContainer Handle:Rebuild):
+        -- Slot: park the old key, take a new one (a slot's regions are frozen at
+        -- creation). Container fallback: Rebuild, with structSig as its own parking key --
         -- its definition is exactly "changing this needs a new container", which is also
-        -- the condition for safely re-adopting one parked under it. Designer churn --
-        -- preset toggling, profile swaps -- is where this pays.
-        entry.handle:Rebuild(cfg, structSig)
+        -- the condition for safely re-adopting one parked under it.
+        placedRestructure(entry, frame, akey, structSig, cfg)
         applyPlacedAlpha(entry.handle, alpha)
         live[akey] = true
     else
@@ -1829,8 +1894,7 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
         -- container (row mode, so applyGroupTuning runs) instead of recreating it.
         if entry.tuningSig ~= tuningSig then
             entry.tuningSig = tuningSig
-            entry.handle.config.testEntries = cfg.testEntries
-            entry.handle:ApplyTuning(cfg)
+            placedTune(entry.handle, cfg)
         end
         if entry.coSig ~= coSig then
             entry.coSig = coSig
@@ -2942,7 +3006,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local entry = placed[key]
                         if not entry then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
-                            local handle = DF.AuraContainer:Create(frame,
+                            local handle = placedAcquire(frame, key, structSig,
                                 buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
@@ -2952,7 +3016,8 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                             entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                            entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine), structSig)
+                            placedRestructure(entry, frame, key, structSig,
+                                buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine))
                             applyPlacedAlpha(entry.handle, alpha)
                         else
                             if entry.tuningSig ~= tuningSig then
@@ -2961,8 +3026,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                                 -- borderSpec nil on purpose — ApplyTuning reads only the trio.
                                 entry.tuningSig = tuningSig
                                 local cfg = buildBarConfig(frame, frame.unit, map, eff, nil, defs, mine)
-                                entry.handle.config.testEntries = cfg.testEntries
-                                entry.handle:ApplyTuning(cfg)
+                                placedTune(entry.handle, cfg)
                             end
                             if entry.coSig ~= coSig then
                                 local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
@@ -3085,7 +3149,9 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local entry = placed[key]
                         if not entry then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
-                            local handle = DF.AuraContainer:Create(frame,
+                            -- Shared slot owner (S2b); falls back to a per-indicator
+                            -- container on test frames / in combat before an owner exists.
+                            local handle = placedAcquire(frame, key, structSig,
                                 buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
@@ -3095,7 +3161,10 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                            entry.handle:Rebuild(buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine), structSig)
+                            -- Slot: park the old key and take a new one (a slot's regions
+                            -- are frozen at creation). Container: Rebuild as before.
+                            placedRestructure(entry, frame, key, structSig,
+                                buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine))
                             applyPlacedAlpha(entry.handle, alpha)
                         else
                             if entry.tuningSig ~= tuningSig then
@@ -3111,8 +3180,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                                 -- away).
                                 entry.tuningSig = tuningSig
                                 local cfg = buildPlacedConfig(frame, frame.unit, map, eff, isSquare, nil, defs, mine)
-                                entry.handle.config.testEntries = cfg.testEntries
-                                entry.handle:ApplyTuning(cfg)
+                                placedTune(entry.handle, cfg)
                             end
                             if entry.coSig ~= coSig then
                                 local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
