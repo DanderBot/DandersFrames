@@ -1114,12 +1114,17 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local listGroup = GUI:CreateSettingsGroup(self.child, 280)
         listGroup:AddWidget(GUI:CreateHeader(self.child, L["Available Profiles"]), 40)
         
-        -- Create a container frame for profile list with fixed width and max height
+        -- Container for the profile list. Width comes from the group rather than a
+        -- literal: this used to be a chain of three hardcoded numbers (240 container,
+        -- 210 scroll child, 206 button) inside a 280-wide group, so the rows stopped
+        -- ~54px short of the right edge and the whole block sat inset from everything
+        -- else on the page.
         local maxListHeight = 180
         local contentHeight = #profiles * 28 + 10
         local listHeight = math.min(contentHeight, maxListHeight)
         local listContainer = CreateFrame("Frame", nil, self.child, "BackdropTemplate")
-        listContainer:SetSize(240, listHeight)
+        local listWidth = GUI:GroupInnerWidth(listGroup)
+        listContainer:SetSize(listWidth, listHeight)
         GUI:CreateElementBackdrop(listContainer, { bgColor = {0, 0, 0, 0.3}, borderColor = {0.3, 0.3, 0.3, 1} })
         listGroup:AddWidget(listContainer, listHeight + 5)
         
@@ -1129,14 +1134,22 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         profileScroll:SetPoint("BOTTOMRIGHT", -22, 2)
         
         GUI.StyleScrollBar(profileScroll)
+        -- ☠ The right inset differs by whether the bar is showing, and the scroll
+        -- child has to follow it — a ScrollFrame child needs an explicit width, so it
+        -- cannot just anchor to the frame. Get this wrong and the rows either tuck
+        -- under the scrollbar or leave a fresh gap, and only once you have enough
+        -- profiles to trigger the bar (7+ at 28px in a 180px list), which is exactly
+        -- the case nobody tests.
+        local rightInset = 22
         if contentHeight <= maxListHeight and profileScroll.ScrollBar then
             profileScroll.ScrollBar:Hide()
             profileScroll:SetPoint("BOTTOMRIGHT", -4, 2)
+            rightInset = 4
         end
-        
+
         -- Create scroll child to hold profile buttons
         local profileScrollChild = CreateFrame("Frame", nil, profileScroll)
-        profileScrollChild:SetSize(210, contentHeight)
+        profileScrollChild:SetSize(listWidth - 2 - rightInset, contentHeight)
         profileScroll:SetScrollChild(profileScrollChild)
         
         -- Profile buttons inside scroll child
@@ -1147,10 +1160,14 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- the neutral "this is a place" grey. The "this is the active profile"
             -- cue is SetActive's accent fill + border, which stays visible under
             -- the hover (applyHoverState keeps the active border).
+            -- Anchored on BOTH sides so the row fills the list, matching the click-cast
+            -- profiles panel. StyleButton only calls SetSize when given a width, so
+            -- passing height alone leaves the anchors to drive it.
             local btn = CreateFrame("Button", nil, profileScrollChild, "BackdropTemplate")
             btn:SetPoint("TOPLEFT", 2, py)
+            btn:SetPoint("TOPRIGHT", -2, py)
             DF.GUI:StyleButton(btn, {
-                width = 206, height = 24,
+                height = 24,
                 text = p, font = "DFFontHighlightSmall",
             })
             btn:SetActive(p == currentProfile)
