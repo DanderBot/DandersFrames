@@ -1,4 +1,4 @@
-﻿local addonName, DF = ...
+local addonName, DF = ...
 
 -- ============================================================
 -- AURA CONTAINER FACTORY (DF.AuraContainer)
@@ -1791,8 +1791,10 @@ local function applyContainerLayout(c, handle)
     -- Flow-layout family: 68914 renamed SetAuraLayout* -> SetFlowLayout* (RowWidth
     -- -> MaximumLineSize, same nil = no-wrap contract; padding is growth-relative,
     -- which matches the padTop/padBottom branches above — the named side IS the
-    -- flow's vertical start in both used cases). Dual-detect by method presence,
-    -- and protect each call SEPARATELY: pre-68914 this rode the pin pcall above,
+    -- flow's vertical start in both used cases). The pre-68914 SetAuraLayout* names
+    -- are GONE from the engine (zero hits in the 69111 source), so the dual-detect
+    -- fallbacks that used to sit here were dead and have been removed.
+    -- Each call stays protected SEPARATELY: pre-68914 this rode the pin pcall above,
     -- so the rename made the first layout call throw and silently dropped
     -- growth/wrap/padding for the whole row.
     -- Stashed for the SINGLE-SLOT row path: the flow does not lay slots out, so
@@ -1808,10 +1810,10 @@ local function applyContainerLayout(c, handle)
     -- top strip on downward growth pushes the icon DOWN (-padTop), bottom strip on
     -- upward growth pushes it UP (+padBottom).
     handle._flowPadY = padBottom - padTop
-    local setFlowAnchor  = c.SetFlowLayoutAnchorPoint or c.SetAuraLayoutAnchorPoint
-    local setFlowGrowth  = c.SetFlowLayoutGrowthDirection or c.SetAuraLayoutGrowthDirection
-    local setFlowMaxLine = c.SetFlowLayoutMaximumLineSize or c.SetAuraLayoutRowWidth
-    local setFlowPadding = c.SetFlowLayoutPadding or c.SetAuraLayoutPadding
+    local setFlowAnchor  = c.SetFlowLayoutAnchorPoint
+    local setFlowGrowth  = c.SetFlowLayoutGrowthDirection
+    local setFlowMaxLine = c.SetFlowLayoutMaximumLineSize
+    local setFlowPadding = c.SetFlowLayoutPadding
     if setFlowAnchor then pcall(setFlowAnchor, c, G.flowAnchor) end
     if setFlowGrowth and AnchorUtil and AnchorUtil.FlowDirection then
         local h = resolveEnum(AnchorUtil.FlowDirection, G.hName)
@@ -2080,7 +2082,7 @@ function NativeBackend:build()
         -- mouse-dead so nothing floats over the unit frame.
         c:ClearAllPoints()
         c:SetPoint("TOPRIGHT", handle.frame, "TOPLEFT", -MISSING_PAD, 0)
-        local setFlowAnchor = c.SetFlowLayoutAnchorPoint or c.SetAuraLayoutAnchorPoint
+        local setFlowAnchor = c.SetFlowLayoutAnchorPoint
         if setFlowAnchor then pcall(setFlowAnchor, c, "TOPLEFT") end
         pcall(function() if c.SetMouseClickEnabled then c:SetMouseClickEnabled(false) end end)
         pcall(function() if c.SetMouseMotionEnabled then c:SetMouseMotionEnabled(false) end end)
@@ -2686,9 +2688,13 @@ function NativeBackend:teardown(park)
     if c then
         AuraContainer.stats.teardowns = AuraContainer.stats.teardowns + 1
         pcall(function() c:SetEnabled(false) end)
-        if not park and type(c.RemoveAllAuraFrames) == "function" then
-            pcall(function() c:RemoveAllAuraFrames() end)
-        end
+        -- ☠ There is NO public way to release a container's buttons. RemoveAllAuraFrames
+        -- was guarded for here and never existed -- zero hits across the whole 69111
+        -- Interface source -- so that branch never once ran. The provider's ReleaseFrame
+        -- is real but lives on AuraContainerCustomFrameProviderMixin, which is private
+        -- and unreachable from the inbound surface. Disable + hide is therefore the
+        -- WHOLE of teardown, and a discarded container keeps every button it ever
+        -- created for the session. That is precisely why parking exists.
         pcall(function() c:Hide() end)
     end
     if not park then

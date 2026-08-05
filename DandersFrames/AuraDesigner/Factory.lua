@@ -1316,17 +1316,15 @@ local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, bor
         -- structSig carries alertElemStructKey — an alert edit rebuilds only it.)
         -- (No filter string: it moved to placedTuningSig on 2026-08-04 — a single-record
         -- consumer cannot change its key set, so the string is live-swappable.)
-        -- Duration bar presence + GEOMETRY (mirror groupStyleStructSig): the strip
-        -- region is create-once and reserves wrap space outside the button rect, so
-        -- enable/position/height/gap/colorMode ride the struct sig (Rebuild). Cosmetics
-        -- (texture/colour/reverseFill) hot-apply — they live in placedCoSig. "" when
-        -- disabled/absent, so a bar-less indicator sigs identically to pre-feature.
-        .. "|" .. (indicator.durationBarEnabled == true
-            and ("bar" .. (indicator.durationBarPosition == "TOP" and "TOP" or "BOTTOM") .. ":"
-                .. tostring(tonumber(indicator.durationBarHeight) or 4) .. ":"
-                .. tostring(tonumber(indicator.durationBarGap) or 1) .. ":"
-                .. tostring(indicator.durationBarColorMode or "STATIC"))
-            or "")
+        -- Duration bar PRESENCE only. ☠ The geometry half (position/height/gap) used to
+        -- ride here on the theory that the strip's layout reservation could not
+        -- re-derive live. It already does: ApplyStyle -> backend:applyLayout ->
+        -- buildGroupLayout -> stripReservation -> SetAuraGroupLayout, and
+        -- styleButton_regions re-anchors the strip every pass ("Re-anchored every pass
+        -- so position/gap/height edits apply live via ApplyStyle"). colorMode only picks
+        -- a curve/colour, applied live by styleBarShared, and placedCoSig carries it
+        -- anyway. Only the region's EXISTENCE is create-once.
+        .. "|" .. (indicator.durationBarEnabled == true and "bar" or "")
         -- Pandemic: the region's WIDGET KIND and its AddPandemicRegion bind are both
         -- create-once, so a type change (or the master toggle) rebuilds. Everything else
         -- about it hot-applies and rides placedCoSig. "" when off.
@@ -2106,17 +2104,13 @@ local function groupStyleStructSig(group)
         .. "|" .. ((s.showDuration ~= false) and "du" or "")
         .. "|" .. (s.ShowBorder == true and "bd" or "")
         .. "|df=" .. durationFmtKey(s, true)
-        -- Duration bar presence + GEOMETRY (Wave 3): the region is create-once
-        -- and the strip reserves wrap space outside the button rect, so
-        -- position/height/gap ride the struct sig (mirror rowStructSig's s.bar
-        -- entry). "" when disabled — absent-bar groups sig identically whether
+        -- Duration bar PRESENCE only (mirror placedStructSig, which carries the full
+        -- reasoning): the strip's layout reservation re-derives live through
+        -- ApplyStyle -> applyLayout -> stripReservation -> SetAuraGroupLayout, and
+        -- styleButton_regions re-anchors it every pass, so position/height/gap are NOT
+        -- structural. "" when disabled — absent-bar groups sig identically whether
         -- style is absent, {}, or carries durationBarEnabled = false.
-        .. "|" .. (s.durationBarEnabled == true
-            and ("bar" .. (s.durationBarPosition == "TOP" and "TOP" or "BOTTOM") .. ":"
-                .. tostring(tonumber(s.durationBarHeight) or 4) .. ":"
-                .. tostring(tonumber(s.durationBarGap) or 1) .. ":"
-                .. tostring(s.durationBarColorMode or "STATIC"))
-            or "")
+        .. "|" .. (s.durationBarEnabled == true and "bar" or "")
         -- (No pandemic entry — see buildFilterGroupStyle for why groups don't carry it yet.)
 end
 

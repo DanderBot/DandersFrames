@@ -1967,17 +1967,28 @@ local function rowStructSig(cfg)
         -- updateInterval (duration-text update rate, Wave 5a): creation-frozen the
         -- same way; nil at the NORMAL default, so only a non-default rate moves it.
         tostring(s.duration and s.duration.updateInterval),
-        tostring(s.stacks and s.stacks.formatKey),
+        -- ☠ s.stacks.formatKey used to sit here and was DEAD. Nothing in the addon ever
+        -- assigns it (only dur.formatKey is written anywhere), so it serialised to the
+        -- constant "nil" and could never move the signature. It could not have mattered
+        -- either: bindNative deliberately passes {} to SetApplicationCount and never
+        -- forwards a stacks formatter at all, because a Lua formatter running on a
+        -- secret stack count throws inside the engine's dirty pass.
         tostring(s.border ~= nil), tostring(s.cooldown and s.cooldown.show ~= false),
         tostring(s.dispel ~= nil),          -- native dispel border (region is create-once -> Rebuild)
         -- Wave 5b: the dispel spec hosts TWO independent create-once regions (colour
         -- ring + colourblind symbol) — presence of EACH is structural on its own
         -- (ApplyStyle can't create/remove either; the symbol bind is also bind-once).
         tostring(s.dispel and s.dispel.nativeBorder), tostring(s.dispel and s.dispel.nativeSymbol),
-        -- Duration bar: region is create-once (presence -> Rebuild), and strip geometry
-        -- reserves layout space OUTSIDE the button rect (Wave 3.2), so shape/position/
-        -- height/gap changes are structural too — the reservation must re-derive.
-        tostring(s.bar ~= nil), tostring(s.bar and (tostring(s.bar.fill) .. ":" .. tostring(s.bar.position) .. ":" .. tostring(s.bar.height) .. ":" .. tostring(s.bar.gap))),
+        -- Duration bar: the region is create-once, so PRESENCE is structural. So is the
+        -- fill<->strip flip, which changes which construction is built.
+        -- ☠ position/height/gap were structural on the theory that the strip's layout
+        -- reservation could not re-derive live. It already does, on the live path:
+        -- ApplyStyle -> backend:applyLayout -> buildGroupLayout -> stripReservation ->
+        -- SetAuraGroupLayout, with applyContainerLayout re-deriving the start-side inset
+        -- from the same call (and _dfPadApplied existing precisely to clear a stale inset
+        -- "if a live restyle flips the strip to the far side"). styleButton_regions
+        -- re-anchors the strip every pass for the same reason. They are cosmetics.
+        tostring(s.bar ~= nil), tostring(s.bar and tostring(s.bar.fill)),
         -- Pandemic: the holder frame, its contents (a DF.Border vs a tint texture), the
         -- AddPandemicRegion bind and the flash animation are ALL create-once, so mode and
         -- flash are structural. Read off the built spec rather than the db, so an
