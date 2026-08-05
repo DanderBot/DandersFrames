@@ -4573,6 +4573,317 @@ end
 --                                                     -- a SetTooltipAnchorPoint name; live mixin
 --                                                     -- state, restyles in place (no Rebuild).
 -- }
+-- ============================================================
+-- SLOT OWNER — one shared container per unit frame  (collapse S1)
+-- ============================================================
+-- ☠ ADDITIVE AND UNUSED. Nothing calls this yet; S2 moves the Aura Designer's placed
+-- indicators onto it. Landing it alone keeps the diff reviewable and testable.
+--
+-- WHY. Every AD indicator sets singleSlot, so today each one gets a WHOLE AuraContainer
+-- holding exactly ONE AddAuraSlot = one button. Measured across the 18 Create call sites
+-- that is ~130 containers per unit frame worst case, ~5,200 in a 40-man, uncapped. MSUF
+-- caps at 14 per frame by construction; EllesmereUI runs 3-7. WoW never frees a frame and
+-- teardown cannot release buttons (RemoveAllAuraFrames does not exist -- zero hits at
+-- 69111), so every structural edit strands the lot for the session.
+--
+-- One container per unit frame, one slot per indicator, instead.
+--
+-- ☠ WHY A NEW SLOT PER STRUCTURE, NOT A MUTATED ONE. A slot's regions are built in its
+-- initializeFrame, which is frozen at AddAuraSlot and only ever runs at button creation.
+-- So a structural change cannot mutate a slot -- it declares a NEW one (keyed by the
+-- consumer's struct sig) and PARKS the old. That costs ONE button where today it costs a
+-- container plus a button, and revisiting an earlier structure re-adopts the parked slot
+-- by key. EllesmereUI does the same for their Debuff Manager ("declares a new variant
+-- group and parks the old at 0").
+--
+-- ☠ PARKING IS THE WHOLE MECHANISM, and it is why this could not be built before now.
+-- AddAuraSlot is add-only -- Blizzard's ClearAuraGroups is "intentionally not exposed via
+-- the inbound interface" because pooled frames would become irrecoverable -- and slots
+-- have no maxFrameCount. SetAuraSlotFilterString(key, "") emptying a slot was an
+-- UNVERIFIED assumption in Grid2's code until /alpark proved it in game on 2026-08-05.
+-- A bare re-Set restores it live.
+--
+-- ★ Z-ORDER: the dfLevelHost. Sharing a container means sharing its frame level, but AD
+-- indicators need independent layering. Writing the level on the slot BUTTON is legal
+-- only inside initializeFrame (pre-seal), which would freeze it permanently. So each slot
+-- gets a DF-owned child frame between the button and our regions:
+--     slot button (sealed, never re-levelled)  ->  dfLevelHost (ours, levelled LIVE)
+-- Regions must stay DESCENDANTS of the button (ValidateInboundScriptObject errors
+-- otherwise) and a child frame satisfies that -- MSUF's EnsureAuraTextOverlay technique.
+--
+-- ⚠ Not handled in S1, by design: the identity gate (per-owner now, not per-handle),
+-- test-mode frames (refused outright -- the preview declares its own topology), and
+-- consumer styling, which stays with the caller via GetButton/GetLevelHost.
+
+local SlotHandle = {}
+SlotHandle.__index = SlotHandle
+
+-- Every slot's regions hang off this, so the consumer can re-level live without ever
+-- touching the sealed button. Created inside initializeFrame -- the only window in which
+-- a tainted write to an aura button is legal.
+local function makeSlotLevelHost(button)
+    local ok, host = pcall(CreateFrame, "Frame", nil, button)
+    if not ok or not host then return nil end
+    pcall(host.SetAllPoints, host, button)
+    return host
+end
+
+local function ownerOf(frame)
+    return frame and frame.dfSlotOwner or nil
+end
+
+-- Lazily stand up the per-frame owner. Build order mirrors NativeBackend:build exactly --
+-- create -> anchor -> SetUnit -> (slots) -> SetEnabled -- because the same rules bite:
+-- SetEnabled gates event registration on IsVisible() and IsEnabled(), and anchoring must
+-- precede the first Add* since that stamps UntrustedLayoutScriptExecution on the
+-- container, which propagates to anything anchored to it and cannot be conferred later.
+local function ensureOwner(frame, unit)
+    local owner = ownerOf(frame)
+    if owner then return owner end
+    if not AuraContainer.IsSupported() then return nil end
+    -- Container creation is combat-gated everywhere else in this file; do not diverge.
+    if InCombatLockdown() then return nil end
+
+    local anchor = CreateFrame("Frame", nil, frame)
+    anchor:SetAllPoints(frame)
+
+    local ok, c = pcall(CreateFrame, "AuraContainer", nil, anchor, "CustomAuraContainerTemplate")
+    if not ok or not c then
+        DF:DebugWarn(DBG, "SlotOwner: CreateFrame(AuraContainer) failed: %s", tostring(c))
+        return nil
+    end
+    setContainerProviderDeaf(c, not AuraContainer._testMode)
+    pcall(c.SetAllPoints, c, anchor)
+    if type(unit) == "string" then pcall(c.SetUnit, c, unit) end
+
+    owner = { frame = frame, anchor = anchor, container = c, unit = unit, slots = {}, seq = 0 }
+    frame.dfSlotOwner = owner
+    AuraContainer.stats.slotOwners = (AuraContainer.stats.slotOwners or 0) + 1
+    return owner
+end
+
+-- Acquire (or re-adopt) the slot for `slotKey` on `frame`'s shared owner.
+--
+-- slotKey MUST encode the consumer's structural signature -- "indicatorKey:structSig" --
+-- because a slot's regions are frozen at creation. Same key = same structure = safe to
+-- re-adopt; different structure = different key = a new slot and the old one parked.
+--
+-- spec: { unit, filter, candidateFilters, sortMethod, sortDirection, onInit, config }
+--   config -- a normal container config ({ mode, layout, style, tooltips,
+--     frameLevelOffset, frameStrata, ... }). When given, the slot reuses the ENGINE's own
+--     region pipeline: styleButton_regions + bindNative at create, styleButton_regions
+--     again on ApplyStyle. ☠ This is the seam that makes the collapse possible at all --
+--     consumers like the Aura Designer hand the engine a config and own no rendering
+--     code of their own, so a slot path that could not run that pipeline would have to
+--     reimplement every region, and would drift.
+--   onInit(button, levelHost) runs inside initializeFrame after the pipeline, for
+--     anything the consumer wants to add itself.
+--
+-- ☠ FRAME LEVEL IS SET ON THE BUTTON, INSIDE initializeFrame, and that is correct rather
+-- than a compromise. Buttons on a shared container all sit at container level + 1, so
+-- per-slot layering has to come from somewhere; writing it on the button is legal only
+-- pre-seal, which freezes it. That costs nothing here because level is ALREADY structural
+-- for every consumer of this path (placedStructSig carries `fl=`/`fs=`), so a level change
+-- already produces a new struct sig -> a new slot key -> a new button -> the new level.
+-- Behaviour is identical to today. (dfLevelHost stays available for a future consumer
+-- that wants level to become live, which would need regions reparented onto it.)
+--
+-- Returns a SlotHandle, or nil if unsupported / in combat with no owner yet / test frame.
+function AuraContainer:AcquireSlot(frame, slotKey, spec)
+    if type(slotKey) ~= "string" or slotKey == "" or type(spec) ~= "table" then return nil end
+    if not frame then return nil end
+    -- The preview declares a wholly different topology (per-slot groups, fabricated
+    -- unit); a shared owner has no business serving it. Test frames keep the old path.
+    if frame.dfIsTestFrame or AuraContainer._testMode then return nil end
+
+    local owner = ensureOwner(frame, spec.unit)
+    if not owner then return nil end
+
+    local existing = owner.slots[slotKey]
+    if existing then
+        existing:Restore()
+        return existing
+    end
+
+    local filter = spec.filter or "HELPFUL"
+    local config = spec.config
+    local handle = setmetatable({
+        owner = owner, key = slotKey, liveFilter = filter, parked = false, config = config,
+    }, SlotHandle)
+
+    local okS, btn = pcall(owner.container.AddAuraSlot, owner.container, slotKey, filter, {
+        candidateFilters = spec.candidateFilters,
+        sortMethod       = spec.sortMethod,
+        sortDirection    = spec.sortDirection,
+        initializeFrame  = function(b)
+            -- Pre-seal window. Region creation, the level host, and any button-level
+            -- write must all happen here; after this returns the engine applies
+            -- DenyTaintedAccessWhenAurasAreSecret and later writes are refused exactly
+            -- when auras are secret.
+            local host = makeSlotLevelHost(b)
+            b.dfLevelHost = host
+            if config then
+                -- Per-slot layering, pre-seal (see the header above AcquireSlot).
+                if config.frameStrata then pcall(b.SetFrameStrata, b, config.frameStrata) end
+                if config.frameLevelOffset then
+                    local base = owner.container and owner.container:GetFrameLevel() or 0
+                    pcall(b.SetFrameLevel, b, base + config.frameLevelOffset)
+                end
+                -- ★ The engine's OWN pipeline, unchanged: regions created and styled,
+                -- then the native setters bound. Identical to what Handle:_acceptSlot /
+                -- _bindNativeSlot do for a per-indicator container, so a migrated
+                -- consumer renders byte-identically without owning any render code.
+                local okR, errR = pcall(styleButton_regions, b, config)
+                if not okR then DF:DebugWarn(DBG, "SlotOwner styleButton_regions: %s", tostring(errR)) end
+                local okB, errB = pcall(bindNative, b, config)
+                if not okB then DF:DebugWarn(DBG, "SlotOwner bindNative: %s", tostring(errB)) end
+            end
+            if spec.onInit then
+                local okI, err = pcall(spec.onInit, b, host)
+                if not okI then DF:DebugWarn(DBG, "SlotOwner onInit failed: %s", tostring(err)) end
+            end
+        end,
+    })
+    if not okS or not btn then
+        DF:DebugWarn(DBG, "SlotOwner: AddAuraSlot(%s) failed: %s", slotKey, tostring(btn))
+        return nil
+    end
+
+    handle.button = btn
+    owner.slots[slotKey] = handle
+    owner.seq = owner.seq + 1
+    -- Enabled defaults true on the template, but assert it once the container actually
+    -- has a slot: registration needs HasAnyAuraSlots, which only became true just now.
+    pcall(owner.container.SetEnabled, owner.container, true)
+    return handle
+end
+
+function SlotHandle:GetButton()    return self.button end
+function SlotHandle:GetLevelHost() return self.button and self.button.dfLevelHost or nil end
+function SlotHandle:IsParked()     return self.parked == true end
+
+-- ★ DROP-IN COMPATIBILITY with the two places that already treat an AD handle
+-- generically, so migrating a consumer needs no change to either:
+--
+--   * Features/ElementAppearance.lua's out-of-range fade walks every AD store, does
+--     `local f = h and h.GetFrame and h:GetFrame()`, reads `h._dfADBaseAlpha` and fades
+--     that frame. Returning the button keeps the OOR fade working untouched -- the button
+--     is where a slot's alpha lives now, exactly as the per-indicator container's frame
+--     was before. (_dfADBaseAlpha is a plain field and needs nothing.)
+--   * AuraDesigner/Factory.lua's teardownExcept calls `entry.handle:Destroy()`.
+--
+-- ⚠ Destroy CANNOT destroy: AddAuraSlot is add-only and there is no remove. It parks,
+-- and the key is deliberately retained so a later AcquireSlot with the same structure
+-- re-adopts this button instead of adding a second one.
+function SlotHandle:GetFrame()     return self.button end
+function SlotHandle:Destroy()      return self:Park() end
+
+-- Stop this slot displaying, WITHOUT destroying anything. Proven in game 2026-08-05:
+-- an empty filter string matches nothing (it does NOT fall back to a default).
+-- ⚠ Display only -- the slot keeps its key and its button.
+function SlotHandle:Park()
+    if self.parked then return true end
+    local c = self.owner and self.owner.container
+    if not c then return false end
+    local ok = pcall(c.SetAuraSlotFilterString, c, self.key, "")
+    if ok then self.parked = true end
+    return ok
+end
+
+function SlotHandle:Restore()
+    if not self.parked then return true end
+    local c = self.owner and self.owner.container
+    if not c then return false end
+    local ok = pcall(c.SetAuraSlotFilterString, c, self.key, self.liveFilter)
+    if ok then self.parked = false end
+    return ok
+end
+
+-- Live tuning. All three are real live mutators on the slot; none needs a rebuild.
+-- ⚠ SetAuraSlotCandidateFilters has NO equality check engine-side -- every call clears the
+-- slot's candidates and reparses -- so callers should compare before calling.
+function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirection)
+    local c = self.owner and self.owner.container
+    if not c then return false end
+    if filter ~= nil and filter ~= self.liveFilter then
+        self.liveFilter = filter
+        if not self.parked then pcall(c.SetAuraSlotFilterString, c, self.key, filter) end
+    end
+    if candidateFilters ~= nil then
+        pcall(c.SetAuraSlotCandidateFilters, c, self.key, candidateFilters)
+    end
+    if sortMethod ~= nil then
+        pcall(c.SetAuraSlotSortMethod, c, self.key, sortMethod, sortDirection or 0)
+    end
+    return true
+end
+
+-- In-place cosmetic restyle, mirroring Handle:ApplyStyle. Re-runs the engine's region
+-- pipeline against the updated config -- the same call the per-indicator path makes, so a
+-- migrated consumer keeps every live cosmetic it has today (colours, sizes, fonts,
+-- offsets, bar geometry, tooltip placement).
+--
+-- ⚠ Combat: Handle:ApplyStyle defers to regen because restyling live buttons mid-combat
+-- diverges from the build-once-leave-it pattern. Same rule here -- the caller re-drives
+-- on its own version gate, so dropping the pass is correct rather than lossy.
+function SlotHandle:ApplyStyle(style, layout)
+    local cfg, btn = self.config, self.button
+    if not (cfg and btn) then return false end
+    if type(style) == "table" then cfg.style = style end
+    if type(layout) == "table" then cfg.layout = layout end
+    if InCombatLockdown() then return false end
+    local ok, err = pcall(styleButton_regions, btn, cfg)
+    if not ok then DF:DebugWarn(DBG, "SlotHandle:ApplyStyle: %s", tostring(err)) end
+    return ok
+end
+
+-- Per-indicator alpha. Goes on the BUTTON, which is where the per-indicator container's
+-- frame carried it before. ⚠ Never drive this to 0 as a way of hiding a slot -- park it
+-- instead. MSUF's note applies: a button's shown state is secret-backed and descendant
+-- effects inherit it, so alpha 0 silences those too rather than just hiding the icon.
+function SlotHandle:SetAlpha(alpha)
+    local btn = self.button
+    if not btn or type(alpha) ~= "number" then return false end
+    return pcall(btn.SetAlpha, btn, alpha)
+end
+
+-- Live z-order, on OUR frame — never on the sealed button. Available for a consumer whose
+-- level is NOT already structural; the AD path sets level on the button at create instead
+-- (see the header above AcquireSlot) and does not need this.
+function SlotHandle:SetZOrder(level, strata)
+    local host = self:GetLevelHost()
+    if not host then return false end
+    if strata then pcall(host.SetFrameStrata, host, strata) end
+    if level then pcall(host.SetFrameLevel, host, level) end
+    return true
+end
+
+-- There is no way to remove a slot, so release == park. The key is retained precisely so
+-- a later AcquireSlot with the same structure re-adopts this button instead of adding a
+-- second one.
+function SlotHandle:Release() return self:Park() end
+
+-- Retarget the whole owner. One container, one unit — cheaper than the per-indicator
+-- containers it replaces, which each carried their own.
+function AuraContainer:SetSlotOwnerUnit(frame, unit)
+    local owner = ownerOf(frame)
+    if not (owner and owner.container and type(unit) == "string") then return false end
+    if owner.unit == unit then return true end
+    owner.unit = unit
+    return pcall(owner.container.SetUnit, owner.container, unit)
+end
+
+-- Census hook for the S4 before/after. Returns live slot count, parked count, total.
+function AuraContainer:GetSlotOwnerStats(frame)
+    local owner = ownerOf(frame)
+    if not owner then return 0, 0, 0 end
+    local live, parked = 0, 0
+    for _, h in pairs(owner.slots) do
+        if h.parked then parked = parked + 1 else live = live + 1 end
+    end
+    return live, parked, live + parked
+end
+
 function AuraContainer:Create(parent, config)
     if not AuraContainer.IsSupported() then return nil end
     if not parent or type(config) ~= "table" then
