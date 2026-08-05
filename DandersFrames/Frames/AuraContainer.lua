@@ -468,14 +468,53 @@ end
 -- groups/slots differ per filter (the dispel overlay's per-type slots). A record's
 -- candidateFilters REPLACES config.candidateFilters for that group/slot; its key
 -- replaces the positional "df<i>" key (must be unique within the consumer).
+-- ★ CANONICAL FILTER STRINGS — a free parse win, and the reason is engine-side.
+-- ManagedAuraContainerPrivateMixin:RebuildAuraParseFilters groups every group and slot by
+-- filter string and queries each DISTINCT string once, and Blizzard's own comment is
+-- explicit that the match is textual, not semantic: "We don't go to the lengths of
+-- supporting equivalent strings with different token ordering." So "HELPFUL|PLAYER" and
+-- "PLAYER|HELPFUL" are two full scans of the same data.
+--
+-- Emitting one canonical spelling everywhere makes equivalent filters share a batch. This
+-- is the one thing EllesmereUI centralises that we could not get by calling the API per
+-- consumer -- it needs GLOBAL string discipline, so it goes at the chokepoint every
+-- record passes through rather than in each builder.
+--
+-- Sort is by BARE token, with a token's negation immediately after it, so "!X" can never
+-- drift away from "X". Duplicate tokens collapse. Memoised on the input string: the same
+-- handful of strings recur on every rebuild across every frame.
+-- ⚠ Order-independence is Blizzard's model (AuraUtil tokenises on "|" and space into a
+-- set) and EllesmereUI ships the same normalisation. If a filter ever behaves differently
+-- after this, suspect order-sensitivity here first.
+local filterCanonCache = {}
+local function canonicalFilter(s)
+    if type(s) ~= "string" or s == "" then return s end
+    local hit = filterCanonCache[s]
+    if hit ~= nil then return hit end
+    local toks, seen = {}, {}
+    for tok in s:gmatch("[^|%s]+") do
+        if not seen[tok] then seen[tok] = true; toks[#toks + 1] = tok end
+    end
+    table.sort(toks, function(a, b)
+        local an, bn = a:byte(1) == 33, b:byte(1) == 33          -- 33 = "!"
+        local ab = an and a:sub(2) or a
+        local bb = bn and b:sub(2) or b
+        if ab ~= bb then return ab < bb end
+        return (not an) and bn                                    -- bare before its negation
+    end)
+    local out = table.concat(toks, "|")
+    filterCanonCache[s] = out
+    return out
+end
+
 local function normalizeFilters(filter)
     local out = {}
     if type(filter) == "string" then
-        out[1] = { f = filter }
+        out[1] = { f = canonicalFilter(filter) }
     elseif type(filter) == "table" then
         for _, f in ipairs(filter) do
             if type(f) == "string" then
-                out[#out + 1] = { f = f }
+                out[#out + 1] = { f = canonicalFilter(f) }
             elseif type(f) == "table" and type(f.filter) == "string" then
                 -- onInit: a consumer secure-init hook (overlay dispel carriers) run
                 -- INSIDE initializeFrame so its regions are created in secure context
@@ -483,7 +522,7 @@ local function normalizeFilters(filter)
                 -- children of the secret aura button are access-constrained, cab.lua:15).
                 -- style: per-record button overrides (scale / badge). See applyRecordStyle
                 -- — a group whose membership IS the predicate can be styled unconditionally.
-                out[#out + 1] = { f = f.filter, key = f.key, candidateFilters = f.candidateFilters,
+                out[#out + 1] = { f = canonicalFilter(f.filter), key = f.key, candidateFilters = f.candidateFilters,
                                   onInit = f.onInit, style = f.style }
             end
         end
