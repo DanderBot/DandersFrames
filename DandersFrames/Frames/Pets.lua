@@ -935,8 +935,12 @@ function DF:LightweightUpdatePetFrames()
                 DF:PositionPetFrame(DF.testPetFrames[i])
             end
         end
-    else
-        -- Live mode: update real pet frames
+    elseif DF:ActivePetTrack() == PET_TRACK_PARTY then
+        -- ☠ ONLY WHEN PARTY IS THE ACTIVE TRACK. PositionPetFrame re-resolves the owner
+        -- through GetFrameForUnit, which is arena-aware, so restyling the party set
+        -- while an arena is on screen re-parents it onto the arena header. This is the
+        -- slider path — every pet option change comes through here — which is why
+        -- touching any pet slider in an arena used to drag the party pets into it.
         if DF.petFrames.player then
             DF:ApplyPetFrameStyle(DF.petFrames.player)
             DF:PositionPetFrame(DF.petFrames.player)
@@ -958,19 +962,32 @@ function DF:LightweightUpdatePetFrames()
             end
         end
     else
+        -- ☠ ONE TRACK AT A TIME. This used to walk raidPetFrames AND arenaPetFrames
+        -- unconditionally, which meant that in an arena the hidden raid set was
+        -- restyled and repositioned too -- and PositionPetFrame re-resolves the owner
+        -- through the arena-aware GetFrameForUnit, so it did not just waste work, it
+        -- re-parented the raid pets onto the arena header. That is the whole "dragging
+        -- a pet slider in an arena dragged the raid pets onto the arena frames" bug.
+        local track = DF:ActivePetTrack()
+
         -- Live mode: update real raid pet frames
-        for i = 1, 40 do
-            if DF.raidPetFrames[i] then
-                DF:ApplyPetFrameStyle(DF.raidPetFrames[i])
-                DF:PositionPetFrame(DF.raidPetFrames[i])
+        if track == PET_TRACK_RAID then
+            for i = 1, 40 do
+                if DF.raidPetFrames[i] then
+                    DF:ApplyPetFrameStyle(DF.raidPetFrames[i])
+                    DF:PositionPetFrame(DF.raidPetFrames[i])
+                end
             end
         end
+
         -- Arena pets are a separate set (see UpdateAllRaidPetFrames); without this
         -- they would keep their creation-time look and ignore every settings change.
-        for i = 1, 5 do
-            if DF.arenaPetFrames[i] then
-                DF:ApplyPetFrameStyle(DF.arenaPetFrames[i])
-                DF:PositionPetFrame(DF.arenaPetFrames[i])
+        if track == PET_TRACK_ARENA then
+            for i = 1, 5 do
+                if DF.arenaPetFrames[i] then
+                    DF:ApplyPetFrameStyle(DF.arenaPetFrames[i])
+                    DF:PositionPetFrame(DF.arenaPetFrames[i])
+                end
             end
         end
     end
@@ -1633,7 +1650,16 @@ function DF:UpdateAllPetFrames(force)
         for i = 1, 4 do
             if DF.partyPetFrames[i] then DF:SetPetFrameVisible(DF.partyPetFrames[i], false) end
         end
-        DF:HidePetGroupContainer(DF.petGroupContainer)
+        -- ☠ NOT IN AN ARENA. DF.petGroupContainer is the container GROUPED *arena*
+        -- pets are laid out into — deliberately, because arena reads the party config
+        -- and so uses the party layout. Hiding it as part of the party handover blanked
+        -- the entire arena pet block, and recovery depended on UpdateAllRaidPetFrames
+        -- happening to run in the same tick; several callers invoke UpdateAllPetFrames
+        -- on its own, and those left the arena pets invisible until something else
+        -- redrew them.
+        if not (DF.IsInArena and DF:IsInArena()) then
+            DF:HidePetGroupContainer(DF.petGroupContainer)
+        end
         return
     end
 
@@ -1900,21 +1926,42 @@ function DF:UpdateAllRaidPetFrames(force)
 end
 
 function DF:UpdateAllPetFramePositions()
+    -- ☠ ONLY THE ACTIVE TRACK. Walking all three is not merely wasted work:
+    -- PositionPetFrame re-resolves the owner through GetFrameForUnit, which is
+    -- arena-aware, so repositioning a non-owning set RE-PARENTS it onto whichever
+    -- header is currently visible. That is why dragging any pet slider in an arena
+    -- dragged the hidden raid pets onto the arena frames.
+    local track = DF:ActivePetTrack()
+
     -- Update party pet positions
-    if DF.petFrames.player then
-        DF:PositionPetFrame(DF.petFrames.player)
-    end
-    
-    for i = 1, 4 do
-        if DF.partyPetFrames[i] then
-            DF:PositionPetFrame(DF.partyPetFrames[i])
+    if track == PET_TRACK_PARTY then
+        if DF.petFrames.player then
+            DF:PositionPetFrame(DF.petFrames.player)
+        end
+
+        for i = 1, 4 do
+            if DF.partyPetFrames[i] then
+                DF:PositionPetFrame(DF.partyPetFrames[i])
+            end
         end
     end
-    
+
     -- Update raid pet positions
-    for i = 1, 40 do
-        if DF.raidPetFrames[i] then
-            DF:PositionPetFrame(DF.raidPetFrames[i])
+    if track == PET_TRACK_RAID then
+        for i = 1, 40 do
+            if DF.raidPetFrames[i] then
+                DF:PositionPetFrame(DF.raidPetFrames[i])
+            end
+        end
+    end
+
+    -- ☠ ARENA WAS OMITTED ENTIRELY, so Anchor / Offset X / Offset Y did nothing at
+    -- all in an arena — the sliders wrote to the DB and no arena pet ever moved.
+    if track == PET_TRACK_ARENA then
+        for i = 1, 5 do
+            if DF.arenaPetFrames[i] then
+                DF:PositionPetFrame(DF.arenaPetFrames[i])
+            end
         end
     end
 end
@@ -2023,5 +2070,27 @@ function DF:ApplyPetSettings()
             if DF.raidPetFrames[i] then DF:SetPetFrameVisible(DF.raidPetFrames[i], false) end
         end
         DF:HideAllTestRaidPetFrames()
+    end
+
+    -- ☠ ARENA IS ITS OWN TRACK, and neither branch above covers it. It was gated on
+    -- the RAID config while actually READING the party one, and arenaPetFrames was
+    -- never touched at all — so every pet option was inert in an arena, and turning
+    -- pets off mid-match left them on screen until a zone change.
+    --
+    -- ⚠ TEST MODES EXCLUDED. Without that, raid test mode entered inside an arena
+    -- takes the enabled branch here and leaves all 40 live raid pet frames shown on
+    -- top of the preview.
+    if not (DF.testMode or DF.raidTestMode) and DF.IsInArena and DF:IsInArena() then
+        if db.petEnabled then
+            -- Routes to UpdateArenaPetFrames via the arena branch at the top of it.
+            DF:UpdateAllRaidPetFrames(true)
+        else
+            for i = 1, 5 do
+                if DF.arenaPetFrames[i] then DF:SetPetFrameVisible(DF.arenaPetFrames[i], false) end
+            end
+            -- The PARTY container: GROUPED arena pets are laid out by
+            -- UpdatePetGroupLayout, which owns DF.petGroupContainer.
+            DF:HidePetGroupContainer(DF.petGroupContainer)
+        end
     end
 end
