@@ -915,6 +915,29 @@ local TYPE_DEFAULTS = {
         expiryAlertBorderColorMode = "STATIC", expiryAlertBorderThickness = "MEDIUM",
         expiryAlertBorderAlpha = 1,
         expiryAlertBorderColor = {r = 1, g = 0.2, b = 0.2, a = 1},
+        -- Pandemic (12.1 PTR 8): the GAME's refresh window — no threshold of any kind, by
+        -- design (Features/Pandemic.lua). Green by default so it never reads as the same
+        -- signal as the red expiry alert above; the two are meant to run together.
+        pandemicEnabled = false, pandemicMode = "BORDER",
+        pandemicFlash = false, pandemicFlashSpeed = 1,
+        pandemicTintColor = {r = 0.2, g = 1, b = 0.2, a = 1},
+        pandemicTintAlpha = 0.4, pandemicTintInset = 0,
+        -- BORDER: a real DF.Border under the engine's own key prefix, so
+        -- CreateBorderControls and Border:BuildSpec both drive it unmodified.
+        pandemicShowBorder = true, pandemicBorderStyle = "SOLID",
+        pandemicBorderSize = 2, pandemicBorderInset = 0,
+        pandemicBorderOffsetX = 0, pandemicBorderOffsetY = 0,
+        pandemicBorderColor = {r = 0.2, g = 1, b = 0.2, a = 1},
+        pandemicBorderBlendMode = "BLEND",
+        pandemicBorderTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+        pandemicBorderGradientStartColor = {r = 0, g = 0, b = 0, a = 1},
+        pandemicBorderGradientEndColor = {r = 0.5, g = 0.5, b = 0.5, a = 1},
+        pandemicBorderGradientDirection = "HORIZONTAL",
+        pandemicBorderShadowEnabled = false,
+        pandemicBorderShadowColor = {r = 0, g = 0, b = 0, a = 0.8},
+        pandemicBorderShadowSize = 1,
+        pandemicBorderShadowOffsetX = 1,
+        pandemicBorderShadowOffsetY = -1,
         showStacks = true,
         stackFont = "DF Roboto SemiBold", stackScale = 1.0,
         stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
@@ -1008,6 +1031,29 @@ local TYPE_DEFAULTS = {
         expiryAlertBorderColorMode = "STATIC", expiryAlertBorderThickness = "MEDIUM",
         expiryAlertBorderAlpha = 1,
         expiryAlertBorderColor = {r = 1, g = 0.2, b = 0.2, a = 1},
+        -- Pandemic (12.1 PTR 8): the GAME's refresh window — no threshold of any kind, by
+        -- design (Features/Pandemic.lua). Green by default so it never reads as the same
+        -- signal as the red expiry alert above; the two are meant to run together.
+        pandemicEnabled = false, pandemicMode = "BORDER",
+        pandemicFlash = false, pandemicFlashSpeed = 1,
+        pandemicTintColor = {r = 0.2, g = 1, b = 0.2, a = 1},
+        pandemicTintAlpha = 0.4, pandemicTintInset = 0,
+        -- BORDER: a real DF.Border under the engine's own key prefix, so
+        -- CreateBorderControls and Border:BuildSpec both drive it unmodified.
+        pandemicShowBorder = true, pandemicBorderStyle = "SOLID",
+        pandemicBorderSize = 2, pandemicBorderInset = 0,
+        pandemicBorderOffsetX = 0, pandemicBorderOffsetY = 0,
+        pandemicBorderColor = {r = 0.2, g = 1, b = 0.2, a = 1},
+        pandemicBorderBlendMode = "BLEND",
+        pandemicBorderTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+        pandemicBorderGradientStartColor = {r = 0, g = 0, b = 0, a = 1},
+        pandemicBorderGradientEndColor = {r = 0.5, g = 0.5, b = 0.5, a = 1},
+        pandemicBorderGradientDirection = "HORIZONTAL",
+        pandemicBorderShadowEnabled = false,
+        pandemicBorderShadowColor = {r = 0, g = 0, b = 0, a = 0.8},
+        pandemicBorderShadowSize = 1,
+        pandemicBorderShadowOffsetX = 1,
+        pandemicBorderShadowOffsetY = -1,
         showStacks = true,
         stackFont = "DF Roboto SemiBold", stackScale = 1.0,
         stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
@@ -1091,6 +1137,29 @@ local TYPE_DEFAULTS = {
         expiryAlertText = "", expiryAlertGlyph = "WARNING",
         expiryAlertAnchor = "TOP", expiryAlertOffsetX = 0, expiryAlertOffsetY = 0,
         expiryAlertSize = 14,
+        -- Pandemic — see the icon block above. A bar DOES get Border/Tint (a real texture
+        -- anchored to the bar's edges, not a |T escape), so the default type is the same
+        -- BORDER the other shapes use rather than the bar's Glyph-only expiry fallback.
+        pandemicEnabled = false, pandemicMode = "BORDER",
+        pandemicFlash = false, pandemicFlashSpeed = 1,
+        pandemicTintColor = {r = 0.2, g = 1, b = 0.2, a = 1},
+        pandemicTintAlpha = 0.4, pandemicTintInset = 0,
+        -- BORDER: a real DF.Border under the engine's own key prefix, so
+        -- CreateBorderControls and Border:BuildSpec both drive it unmodified.
+        pandemicShowBorder = true, pandemicBorderStyle = "SOLID",
+        pandemicBorderSize = 2, pandemicBorderInset = 0,
+        pandemicBorderOffsetX = 0, pandemicBorderOffsetY = 0,
+        pandemicBorderColor = {r = 0.2, g = 1, b = 0.2, a = 1},
+        pandemicBorderBlendMode = "BLEND",
+        pandemicBorderTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+        pandemicBorderGradientStartColor = {r = 0, g = 0, b = 0, a = 1},
+        pandemicBorderGradientEndColor = {r = 0.5, g = 0.5, b = 0.5, a = 1},
+        pandemicBorderGradientDirection = "HORIZONTAL",
+        pandemicBorderShadowEnabled = false,
+        pandemicBorderShadowColor = {r = 0, g = 0, b = 0, a = 0.8},
+        pandemicBorderShadowSize = 1,
+        pandemicBorderShadowOffsetX = 1,
+        pandemicBorderShadowOffsetY = -1,
         frameLevel = 40, frameStrata = "INHERIT",
     },
     -- Frame-level types: mirror the inline literals in EnsureTypeConfig so the
@@ -1155,4 +1224,4 @@ local TYPE_DEFAULTS = {
 -- separated from its definition by a split boundary: this one originally
 -- landed in the next part, which then aliased P.TYPE_DEFAULTS before anything
 -- had published it -- nil, and a crash on the first effect card.
-P.TYPE_DEFAULTS = TYPE_DEFAULTS
+P.TYPE_DEFAULTS = TYPE_DEFAULTS

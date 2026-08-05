@@ -325,6 +325,28 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "buffDurationBarReverseFill", BuffBarChanged), 30)
         Add(durBarGroup, nil, 2)
 
+        -- ===== PANDEMIC ===== (12.1 factory rows only, and only on PTR 8+ clients —
+        -- CreatePandemicControls greys itself and says why on an older build.)
+        --
+        -- This is the ROW half of the feature the Aura Designer cards also carry. There is
+        -- deliberately NO Expiration section on this page (the pre-12.1 expiring border was
+        -- removed above and its 12.1 replacement is AD-only so far), so no collision check is
+        -- passed — nothing here can clash with anything.
+        local pandemicGroup = GUI:CreateSettingsGroup(self.child, 280)
+        pandemicGroup.hideOn = HideDurationBar   -- same gate: no factory row, no button to hang it on
+        pandemicGroup:AddWidget(GUI:CreateHeader(self.child, L["Pandemic"]), 40)
+        pandemicGroup:AddWidget(GUI:CreateLabel(self.child, L["Highlights each icon once the aura can be refreshed without losing time."], 250), 30)
+        GUI:CreatePandemicControls(pandemicGroup, db, {
+            parent     = self.child,
+            prefix     = "buff",
+            -- The row has to exist before any of this means anything; the helper folds this
+            -- into both its group gate and its Enable toggle.
+            masterGate = function(d) return not d.showBuffs end,
+            fullUpdate = function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        Add(pandemicGroup, nil, 2)
+
         -- ========================================
         -- ORDER & LIMITS  (moved here from the old Aura Filters page)
         -- ========================================
@@ -734,6 +756,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "debuffDurationBarBGColor", true, DebuffBarChanged), 30)
         durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "debuffDurationBarReverseFill", DebuffBarChanged), 30)
         Add(durBarGroup, nil, 2)
+
+        -- (No Pandemic box here, unlike Buffs. This row shows harmful auras on a FRIENDLY
+        -- unit — cast on your party by something else — which you cannot refresh, so they
+        -- have no refresh window and the cue could never light. Controls wired to an
+        -- impossibility are worse than no controls. See BuildAuraRowConfig in
+        -- Features/Auras.lua for the render-side gate that matches this.)
 
         -- See Also links
         -- ========================================

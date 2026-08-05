@@ -793,6 +793,23 @@ L["Exclamation Mark"] = true
 L["Expiring Threshold (%)"] = true
 L["Expiring Threshold (seconds)"] = true
 L["Expiration"] = true
+-- Pandemic (12.1 PTR 8) — the refresh-window cue. Grouped rather than scattered
+-- alphabetically because the collision strings only make sense read together, and a
+-- translator needs to see that "Expiration" and "Pandemic" are two named features
+-- being contrasted, not two ways of saying the same thing.
+L["Pandemic"] = true
+L["Highlights an aura once you can refresh it without losing any of its remaining time. The game decides when that is, and it differs per spell — auras that can't be refreshed never light up."] = true
+L["Highlights each icon once the aura can be refreshed without losing time."] = true
+L["This game build does not support refresh-window highlights."] = true
+L["How far inside the icon edge the highlight sits. Negative values push it outward, so it rings the icon rather than sitting on it."] = true
+L["Flash"] = true
+L["Flash Speed"] = true
+L["Pulses the highlight in and out instead of holding it steady."] = true
+L["Expiration and Pandemic are both set to Tint. They cover the same area, so only one will ever be seen."] = true
+L["Expiration and Pandemic both draw a border at this inset. Give one of them a different Inset to show both at once."] = true
+-- CreateNote lead words (opts.prefix). "Note" is already defined above.
+L["Tip"] = true
+L["Warning"] = true
 L["Export Failed"] = true
 L["Export Filter"] = true
 L["Export Profile"] = true

@@ -1,4 +1,4 @@
-﻿local addonName, DF = ...
+local addonName, DF = ...
 
 -- ============================================================
 -- AURA DESIGNER — NATIVE FACTORY BRIDGE (P4.x)
@@ -1039,6 +1039,31 @@ local function alertElemStructKey(indicator, geom)
     return DF.Expiration:StructSig(indicator, geom or { baseSize = indicator.size })
 end
 
+-- PANDEMIC (the refresh-window cue, PTR 8). Unlike the expiry alert it needs NO companion
+-- container: AddPandemicRegion attaches a real Region to the indicator's own button, so
+-- this is just another entry in the style table — the same shape as style.bar.
+--
+-- Every AD family stores the block under the SAME bare `pandemic*` keys on its own record,
+-- so they all pass prefix = nil and there is one key vocabulary across the designer.
+-- `ctx` is DF.Border's build context (the cue's Border type is a real DF.Border). No unit
+-- is threaded: the AD border UI never exposes a class/role colour SOURCE (it is always the
+-- static picker — see PLACED_BORDER_KEYS), so the resolver has nothing to resolve and
+-- plumbing a frame down to two style builders that have never needed one would be cost
+-- with no reader. iconMode makes it size as an icon ring rather than a frame edge.
+local PANDEMIC_CTX = { iconMode = true }
+local function pandemicSpec(rec)
+    return DF.Pandemic and DF.Pandemic:BuildSpec(rec, nil, PANDEMIC_CTX) or nil
+end
+-- Region KIND + bind are create-once -> Rebuild; everything else restyles in place. The
+-- engine owns that split (StructSig / CoSig), so these two stay one line each and no
+-- family can disagree with another about which keys are structural.
+local function pandemicStructKey(rec)
+    return DF.Pandemic and DF.Pandemic:StructSig(rec, nil) or ""
+end
+local function pandemicCoKey(rec)
+    return DF.Pandemic and DF.Pandemic:CoSig(rec, nil) or ""
+end
+
 -- Resolve the profile's GLOBAL colour-by-time default for placed/bar duration text:
 -- adDB.defaults.durationColorByTime, nil -> ON (the Midnight baseline — mirrors the
 -- editor's GLOBAL_DEFAULTS_FALLBACK / TYPE_DEFAULTS). Threaded into every placed/bar
@@ -1130,6 +1155,11 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec, defs)
     -- byte-identical to the pre-feature output. Icon AND square both carry it —
     -- the strip hangs off the slot edge regardless of the slot's content shape.
     style.bar = DF.BuildDurationBarSpec and DF:BuildDurationBarSpec(indicator, "durationBar") or nil
+
+    -- Pandemic cue: rendered ON THIS BUTTON (AddPandemicRegion takes a Region, and the
+    -- registrar is a list, so it does not collide with anything else bound here). That is
+    -- the whole difference from the expiry alert below — no companion, no extra container.
+    style.pandemic = pandemicSpec(indicator)
 
     -- Expiry Alert element: rendered by a separate COMPANION SLOT, never by this
     -- button (one duration binding per button — see EXPIRY ALERT COMPANION SLOT).
@@ -1297,6 +1327,10 @@ local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, bor
                 .. tostring(tonumber(indicator.durationBarGap) or 1) .. ":"
                 .. tostring(indicator.durationBarColorMode or "STATIC"))
             or "")
+        -- Pandemic: the region's WIDGET KIND and its AddPandemicRegion bind are both
+        -- create-once, so a type change (or the master toggle) rebuilds. Everything else
+        -- about it hot-applies and rides placedCoSig. "" when off.
+        .. "|pd=" .. pandemicStructKey(indicator)
 end
 
 -- TUNING signature: the live-mutable half of what placedStructSig used to carry. The
@@ -1356,6 +1390,10 @@ local function placedCoSig(indicator, isSquare, borderOn, alpha)
             colSig(indicator.durationBarColor), colSig(indicator.durationBarBGColor),
             tostring(indicator.durationBarReverseFill and 1 or 0),
         }, ",") or ""),
+        -- Pandemic COSMETICS (colour / opacity / thickness / inset / size / payload /
+        -- placement). All plain region writes, so they hot-apply; only the widget kind
+        -- is structural (placedStructSig). "" when off.
+        "pd=" .. pandemicCoKey(indicator),
         -- (No alert entry: the expiry alert renders on its COMPANION slot with
         -- its own struct/cosmetic sigs — this container never carries it.)
     }
@@ -1506,6 +1544,10 @@ local function buildBarStyle(indicator, borderSpec, defs)
     }
     -- Legacy bar default for Show Duration is OFF (unlike icon/square, which default ON).
     style.duration = buildDurationTextSpec(indicator, false, 1.2, defs.cbt)   -- placed bar baseline: 1.2 scale, colour-by-time per adDB.defaults
+    -- Pandemic cue on the bar itself. A frame mode rings/washes the whole bar rect (the
+    -- region anchors to the button, which IS the bar here), so a Tint reads as "this bar
+    -- is refreshable now" without needing the bar's own colours.
+    style.pandemic = pandemicSpec(indicator)
     if borderSpec then style.border = { spec = borderSpec } end
     -- Expiry Alert element: rendered by a separate COMPANION SLOT, never by this
     -- button (one duration binding per button — see EXPIRY ALERT COMPANION SLOT).
@@ -1801,6 +1843,14 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defs)
             .. "|" .. tostring(cfg.style.duration ~= nil)
             .. "|" .. durationFmtKey(indicator, false, defs.cbt)
             .. "|xa=" .. (cfg.alertPreview and alertElemStructKey(indicator, geom) or "")
+            -- ☠ Pandemic MUST be here for the same reason the alert key is: the canvas
+            -- only recreates its slot when this sig moves, and the cue's holder is
+            -- create-once. Without it, turning pandemic on built the holder on the
+            -- existing slot and turning it back off left the holder sitting there shown
+            -- — a permanent green wash over the bar, which is exactly how this was
+            -- reported (Krathe, 2026-08-05). Live was fine throughout because
+            -- barStructSig carries it and a real Rebuild hands over a fresh button.
+            .. "|pd=" .. pandemicStructKey(indicator)
         return cfg, sig
     end
     local isSquare = (typeKey == "square")
@@ -1826,6 +1876,7 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defs)
         .. "|" .. tostring(borderSpec ~= nil)
         .. "|" .. durationFmtKey(indicator, true, defs.cbt)
         .. "|xa=" .. (cfg.alertPreview and alertElemStructKey(indicator) or "")
+        .. "|pd=" .. pandemicStructKey(indicator)   -- see the bar branch above
     return cfg, sig
 end
 
@@ -1841,6 +1892,7 @@ local function barStructSig(indicator, borderOn, defs)
         .. "|" .. (borderOn and "bd" or "")
         .. "|fl=" .. tostring(resolveLevel(indicator, defs.level))
         .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")
+        .. "|pd=" .. pandemicStructKey(indicator)   -- see placedStructSig
 end
 
 -- COSMETIC signature: size (width/height + match-frame + the fed frame size), anchor/offset/
@@ -1880,6 +1932,7 @@ local function barCoSig(frame, indicator, borderOn, alpha)
             colSig(indicator.durationColor),
         }, ","),
         "bd=" .. placedBorderRawSig(indicator, borderOn),
+        "pd=" .. pandemicCoKey(indicator),   -- see placedCoSig
         -- (No alert entry: the expiry alert renders on its COMPANION slot with
         -- its own struct/cosmetic sigs — this container never carries it.)
     }, "|")
@@ -1977,6 +2030,15 @@ local function buildFilterGroupStyle(group, borderSpec)
         -- group.style key block. nil when disabled/absent — style-less groups
         -- stay byte-identical (no style.bar key at all).
         bar      = DF.BuildDurationBarSpec and DF:BuildDurationBarSpec(s, "durationBar") or nil,
+        -- (No pandemic entry. The engine and every other AD family carry it, and the three
+        -- lines needed here are the same three, but the GROUP CARD has no editor for it:
+        -- Cards.lua's AddSection greys imperatively and never runs hideOn/disableOn/
+        -- LayoutChildren, which is the entire mechanism GUI:CreatePandemicControls uses to
+        -- show the right controls per Type. Wiring the render half alone would put settings
+        -- in the profile that nothing can reach. Giving AddSection that seam — or an
+        -- imperative variant of the shared helper — is the prerequisite, and it is a bigger
+        -- job than this feature. Filter groups are arguably where a HoT row wants this most,
+        -- so it is worth doing properly rather than quickly.)
     }
     if borderSpec then style.border = { spec = borderSpec } end
     return style
@@ -2003,6 +2065,7 @@ local function groupStyleStructSig(group)
                 .. tostring(tonumber(s.durationBarGap) or 1) .. ":"
                 .. tostring(s.durationBarColorMode or "STATIC"))
             or "")
+        -- (No pandemic entry — see buildFilterGroupStyle for why groups don't carry it yet.)
 end
 
 -- EDITOR PREVIEW CONFIG for one SAMPLE slot of a filter/debuff group: the same
@@ -2127,6 +2190,7 @@ local function filterGroupCoSig(group, wrapDefault)
             tostring(s.durationBarTexture), colSig(s.durationBarColor),
             colSig(s.durationBarBGColor), tostring(s.durationBarReverseFill and 1 or 0),
         }, ",") or ""),
+        -- (No pandemic entry — see buildFilterGroupStyle for why groups don't carry it yet.)
     }, "|")
 end
 

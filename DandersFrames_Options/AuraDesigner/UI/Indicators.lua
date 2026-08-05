@@ -21,6 +21,7 @@ local OtherPoolDisplayName = P.OtherPoolDisplayName
 local CopyIndicatorAppearance = P.CopyIndicatorAppearance
 local RefreshLiveFramesThrottled = P.RefreshLiveFramesThrottled
 local AddExpiryAlertControls = P.AddExpiryAlertControls
+local AddPandemicControls = P.AddPandemicControls
 local AddDurationColorsLink = P.AddDurationColorsLink
 local CreateProxy = P.CreateProxy
 
@@ -401,6 +402,11 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         AddGroup(L["Expiration"], function(g)
             AddExpiryAlertControls(g, parent, proxy)
         end)
+        -- Pandemic: the game's refresh window. Directly below Expiration — same shape,
+        -- opposite question (see AddPandemicControls).
+        AddGroup(L["Pandemic"], function(g)
+            AddPandemicControls(g, parent, proxy)
+        end)
         -- Stack Count
         AddGroup(L["Stack Count"], function(g)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Stacks"], proxy, "showStacks"), 28)
@@ -522,6 +528,11 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- distinct from the sound "Expire Alert" group on the sound card).
         AddGroup(L["Expiration"], function(g)
             AddExpiryAlertControls(g, parent, proxy)
+        end)
+        -- Pandemic: the game's refresh window. Directly below Expiration — same shape,
+        -- opposite question (see AddPandemicControls).
+        AddGroup(L["Pandemic"], function(g)
+            AddPandemicControls(g, parent, proxy)
         end)
         -- Stack Count
         AddGroup(L["Stack Count"], function(g)
@@ -698,6 +709,13 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             })
             g:AddWidget(note, note.layoutHeight or 34)
             AddExpiryAlertControls(g, parent, proxy, { border = false, tint = false, match = false })
+        end)
+        -- Pandemic: ALL four types are offered on a bar, unlike Expiration above. The reason
+        -- the expiry Border/Tint are withheld here is that they are |T escapes inside a
+        -- fontstring, which distort off-square and collapse on a thin bar. A pandemic region
+        -- is a real texture anchored to the bar's own edges, so a ring or wash fits it exactly.
+        AddGroup(L["Pandemic"], function(g)
+            AddPandemicControls(g, parent, proxy)
         end)
 
     elseif typeKey == "border" then

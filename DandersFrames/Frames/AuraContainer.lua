@@ -96,6 +96,7 @@ local warnedCreate = false
 -- because applyGroupTuning runs per frame per settings change; one line is enough
 -- to name the offending consumer.
 local warnedFilterString = false
+local warnedPandemic = false
 
 -- Animations SAFE to run on an OVERLAY-mode border (Aura Designer). These render
 -- entirely on DF-owned child regions of the border (edge alpha ticks + DF_DASH's
@@ -171,6 +172,34 @@ end
 -- yet honored (no warn — the seams are real config now, not a future-managed no-op).
 function AuraContainer.HasSpellFilter() return AuraContainer.IsSupported() end
 function AuraContainer.HasSort()        return AuraContainer.IsSupported() end
+
+-- PANDEMIC (refresh-window regions) landed in PTR 8 / build 69111, LATER than the rest
+-- of the container surface — so unlike the two above it is NOT implied by IsSupported()
+-- and needs its own probe.
+--
+-- ☠ It does NOT probe CustomAuraButtonSharedMixin.AddPandemicRegion, which is the obvious
+-- check and is WRONG: Blizzard_AuraContainer declares `## UseSecureEnvironment: 1` and
+-- loads its Lua into the secure environment, so that mixin table is not a global we can
+-- read. The method exists on the button INSTANCE (it is explicitly addon-callable) but
+-- there is no cheap instance here, and creating a container to find out is exactly the
+-- combat-fatal probe IsSupported already has to tiptoe around.
+--
+-- So probe the pair of C APIs the window is computed from instead
+-- (Blizzard_CustomAuraButton.lua:612 — UpdatePandemicWindow calls both). They are plain
+-- C_UnitAuras entries, always readable, `SecretArguments = "AllowedWhenTainted"`, and
+-- they shipped in the same build as the registrar. Their absence is the same "older than
+-- PTR 8" answer with none of the caveats.
+--
+-- Consumers must gate the GUI on this, not just the render path. A region built on a
+-- client without the registrar is created, never bound, and therefore never shown — the
+-- feature would be silently absent with every control still live, which is precisely the
+-- silent-capability-skip antipattern.
+function AuraContainer.HasPandemic()
+    return AuraContainer.IsSupported()
+        and C_UnitAuras ~= nil
+        and type(C_UnitAuras.GetRefreshExtendedDuration) == "function"
+        and type(C_UnitAuras.GetAuraBaseDuration) == "function"
+end
 
 -- Warm the support probe once, out of combat, at login — so no consumer's first
 -- IsSupported() call ever lands the probe in combat (the probe creates a live
@@ -1037,6 +1066,139 @@ local function styleButton_regions(slot, config)
             DF.TextStyle:Apply(slot.dfSymbol, dispelSpec.symbol, slot.dfSymbolHolder)
         end
     end
+
+    -- PANDEMIC region (PTR 8 / 69111; the AddPandemicRegion bind is in bindNative).
+    -- The refresh-window cue: DF builds the art, AddPandemicRegion stamps
+    -- Enum.SecretAspect.Shown on it and the engine drives SetShown from its own window
+    -- maths. Attach-and-inherit, same shape as SetIcon — nothing here reads an aura.
+    --
+    -- ☠ NEVER Show()/Hide() this region once it is bound. Blizzard owns its Shown aspect
+    -- from AddPandemicRegion onward (the standing rule at the top of this section), and
+    -- the bind's own UpdateAuraDisplay() sets the correct initial state. That is also why
+    -- the widget is created only when the feature is ON: turning it off is a Rebuild
+    -- (DF.Pandemic:StructSig), not a hide.
+    --
+    -- ☠ WHAT IS REGISTERED IS THE HOLDER FRAME, for both types. Verified in game
+    -- 2026-08-05 that Frame:IsObjectType("Region") is true, so AddPandemicRegion takes
+    -- one. That is load-bearing for BORDER: DF.Border's applyTexPieces calls Show() on
+    -- every edge piece on every Apply, so registering the PIECES would hand their Shown
+    -- aspect to the engine and turn DF.Border's own routine writes into forbidden writes
+    -- on a button child. Registering the holder leaves DF.Border in full control of
+    -- everything inside it. TINT uses the same shape, so there is one code path and one
+    -- place for the flash animation to live.
+    --
+    -- Create-once: the holder, its contents, the bind, and the flash animation. That is
+    -- exactly what DF.Pandemic:StructSig covers. Colours / thickness / inset / offsets all
+    -- re-apply below on every style pass, so they are live through ApplyStyle.
+    local pdSpec = style.pandemic
+    -- ☠ STALE-HOLDER SWEEP, preview slots only. Every other create-once region in this
+    -- function relies on "off = never created", which holds because turning a feature off
+    -- moves the struct sig and a Rebuild hands over a FRESH button. The AD canvas breaks
+    -- that assumption: it reuses one preview slot and only recreates it when its own sig
+    -- moves, so a cue created on a previous pass survives being switched off and stays
+    -- visible — reported as a permanent green wash over a bar indicator (Krathe,
+    -- 2026-08-05). The canvas sig now carries the pandemic key too, which is the real fix;
+    -- this is the backstop, because a silently-stuck overlay is a bad failure mode to have
+    -- one guard against.
+    -- Gated on the registrar being ABSENT: that is what makes the slot a preview and the
+    -- Shown aspect ours. On a native button Blizzard owns it and we must never touch it.
+    if isRow and not pdSpec and slot.dfPandemicHolder and not slot.AddPandemicRegion then
+        slot.dfPandemicHolder:Hide()
+    end
+    if isRow and pdSpec then
+        if not slot.dfPandemicHolder then
+            -- One above the stack count's +14: the refresh cue has to read over every
+            -- other content region, including DF.Border at +10 and the dispel ring at +12.
+            slot.dfPandemicHolder = makeHolder(slot, pdSpec.level or 15)
+            -- Created hidden so a slot never flashes its cue between creation and the
+            -- bind. This is the ONLY legal visibility write on the holder: it happens
+            -- strictly before AddPandemicRegion, while the Shown aspect is still ours.
+            slot.dfPandemicHolder:Hide()
+
+            -- ANIMATION: built and started HERE — inside the secure init pass — and never
+            -- touched again. Driving one from the tainted style pass would be a write to a
+            -- forbidden button child.
+            -- ★ NOT the OnUpdate border animator that is stripped from every container
+            -- border above. That one calls back into tainted Lua every frame to redraw the
+            -- border's pieces, which the lockdown forbids on a button child. These are
+            -- declarative AnimationGroups: started once, run entirely C-side, zero Lua per
+            -- frame. That difference is the whole reason DF.Border's effect set cannot come
+            -- here and these can.
+            -- Animates the HOLDER, so one implementation covers whatever the mode drew.
+            -- ☠ ALPHA ONLY. A Scale-based pulse was built and tried in game (2026-08-05)
+            -- and did nothing — the holder carries SecretAspect.Shown plus the forbidden
+            -- aspects AddPandemicRegion stamps on it, and a scale transform evidently does
+            -- not survive that where an alpha one does. Left at the one effect that
+            -- demonstrably works rather than shipping a dropdown of dead options.
+            if pdSpec.flash then
+                local ag = slot.dfPandemicHolder:CreateAnimationGroup()
+                ag:SetLooping("REPEAT")
+                local half = pdSpec.flash / 2
+                local out = ag:CreateAnimation("Alpha")
+                out:SetFromAlpha(1); out:SetToAlpha(0.25)
+                out:SetDuration(half); out:SetOrder(1)
+                local back = ag:CreateAnimation("Alpha")
+                back:SetFromAlpha(0.25); back:SetToAlpha(1)
+                back:SetDuration(half); back:SetOrder(2)
+                -- No handle kept: the group is owned by the holder and outlives this
+                -- scope on its own, and there is no legal path that would ever stop it
+                -- (touching it later is a tainted write to a button child).
+                ag:Play()
+            end
+        end
+        local holder = slot.dfPandemicHolder
+
+        if pdSpec.mode == "TINT" then
+            if not slot.dfPandemicTint then
+                slot.dfPandemicTint = holder:CreateTexture(nil, "OVERLAY")
+            end
+            local t = slot.dfPandemicTint
+            -- Anchored to the holder's edges rather than sized: the button's rect is
+            -- SECRET on 12.1, and anchor-derived geometry is the one route that stays
+            -- legal. Inset follows the DF.Border sign convention (+ inward, − outward).
+            local ins = tonumber(pdSpec.tintInset) or 0
+            t:ClearAllPoints()
+            t:SetPoint("TOPLEFT", holder, "TOPLEFT", ins, -ins)
+            t:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -ins, ins)
+            local r, g, b = readColor(pdSpec.tintColor)
+            t:SetColorTexture(r, g, b, tonumber(pdSpec.tintAlpha) or 0.4)
+        elseif pdSpec.border then
+            -- The full house border, inside the holder. secretRect routes it through
+            -- DF.Border's anchor-only piece path — a container button has no anchors yet
+            -- when initializeFrame runs and its rect is secret, so the BackdropTemplate
+            -- path would scatter (the same reason style.border above passes it).
+            if not slot.dfPandemicBorder then
+                local ok, w = pcall(function()
+                    return DF.Border:New(holder, { solidOnly = true, secretRect = true })
+                end)
+                if ok then slot.dfPandemicBorder = w end
+            end
+            if slot.dfPandemicBorder then
+                local ok, err = pcall(function()
+                    local bs = pdSpec.border
+                    bs.knownWidth, bs.knownHeight = sx, sy   -- DF_DASH sizes from these, never a rect read
+                    if bs.renderScale == nil then
+                        bs.renderScale = tonumber(config.layout and config.layout.scale) or 1
+                    end
+                    DF.Border:Apply(slot.dfPandemicBorder, bs)
+                end)
+                if not ok and not warnedPandemic then
+                    warnedPandemic = true
+                    DF:DebugWarn(DBG, "pandemic border apply failed: %s", tostring(err))
+                end
+            end
+        end
+
+        -- PREVIEW SLOTS ONLY. A plain frame has no AddPandemicRegion, so nothing will
+        -- ever drive the holder's visibility — that is the Aura Designer canvas, where the
+        -- cue must be visible for the user to style it. On a native button this never
+        -- runs, so the "never Show() a bound region" rule above is not weakened.
+        -- ⚠ In-game TEST MODE is NOT covered: its buttons are real container buttons, so
+        -- the holder binds and the engine drives it — and a test aura has no real
+        -- auraInstanceID, so GetRefreshExtendedDuration cannot resolve and the window
+        -- never opens. The canvas is the surface that previews this.
+        if not slot.AddPandemicRegion then holder:Show() end
+    end
 end
 
 -- How a duration spec's FORMATTER goes onto a binding. Shared by the live template
@@ -1235,6 +1397,29 @@ local function bindNative(slot, config)
     if slot.dfName and slot.SetSpellName and not slot._boundName then
         slot._boundName = true
         slot:SetSpellName(slot.dfName)
+    end
+
+    -- PANDEMIC (PTR 8 / 69111). The registrar is a LIST, not a single slot
+    -- (AddPandemicRegion returns an index; RemovePandemicRegion / ClearPandemicRegions
+    -- take one back) — but DF binds exactly one region per button and treats removal as
+    -- a Rebuild, because re-registering would need secure context again and an
+    -- asymmetric add-live/remove-live pair is how the border/dispel binds have gone
+    -- wrong before.
+    --
+    -- The stamp lands AFTER the pcall, not before: a bind-once flag set up front latches
+    -- a FAILED bind permanently, and warnedPandemic is one-shot per session, so the
+    -- second failure would be silent too. (Same fix the duration-text and dispel binds
+    -- already carry.) A client older than PTR 8 has no AddPandemicRegion, so the gate
+    -- simply never matches and the feature is absent rather than erroring — the region
+    -- is never created either, since the factory/rows only emit a spec when it exists.
+    if slot.dfPandemicHolder and slot.AddPandemicRegion and not slot._boundPandemic then
+        local ok, err = pcall(slot.AddPandemicRegion, slot, slot.dfPandemicHolder)
+        if ok then
+            slot._boundPandemic = true
+        elseif not warnedPandemic then
+            warnedPandemic = true
+            DF:DebugWarn(DBG, "AddPandemicRegion failed (build still ok): %s", tostring(err))
+        end
     end
 
     local dispelSpec = style.dispel

@@ -1789,6 +1789,27 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             -- geometry are structural (rowStructSig's s.bar entry, Wave 3.1);
             -- texture/colours restyle in place.
             bar      = DF:BuildDurationBarSpec(db, prefix .. "DurationBar"),
+            -- Pandemic cue (PTR 8): the game's own refresh window, rendered on each
+            -- button by AddPandemicRegion. Keys are prefixed (buffPandemic*) because the
+            -- row's settings live in the FLAT profile table, unlike the Aura Designer's
+            -- per-indicator records — the engine owns that split so neither surface knows
+            -- the other's key shape. Presence + mode + flash are structural
+            -- (rowStructSig); everything else rides the unconditional ApplyStyle below.
+            --
+            -- ☠ BUFF ROW ONLY, deliberately. The debuff row shows harmful auras on a
+            -- FRIENDLY unit — things cast on your party by something else. You cannot
+            -- refresh those, so they have no refresh window and GetRefreshExtendedDuration
+            -- returns nil for every one of them. A Pandemic section on Debuffs would be a
+            -- panel of live controls wired to a cue that can never light: the
+            -- silent-capability-skip antipattern, with the impossibility coming from the
+            -- game's rules rather than the client build. (Krathe, 2026-08-05.) If DF ever
+            -- grows an enemy-target DoT row, that surface is where this belongs.
+            --
+            -- ctx is DF.Border's build context: the unit for class/role colour sources,
+            -- and iconMode so the border sizes like an icon ring rather than a frame edge.
+            pandemic = (prefix == "buff") and DF.Pandemic
+                and DF.Pandemic:BuildSpec(db, prefix, { unit = opts.unit, iconMode = true })
+                or nil,
             -- Shared TextStyle spec (font/scale/outline/anchor/offsets/justify/colour).
             -- No formatter: forbidden on container rows (secret trap — see the
             -- GetStacksFormatter tombstone above). Native default = counts > 1.
@@ -1957,6 +1978,12 @@ local function rowStructSig(cfg)
         -- reserves layout space OUTSIDE the button rect (Wave 3.2), so shape/position/
         -- height/gap changes are structural too — the reservation must re-derive.
         tostring(s.bar ~= nil), tostring(s.bar and (tostring(s.bar.fill) .. ":" .. tostring(s.bar.position) .. ":" .. tostring(s.bar.height) .. ":" .. tostring(s.bar.gap))),
+        -- Pandemic: the holder frame, its contents (a DF.Border vs a tint texture), the
+        -- AddPandemicRegion bind and the flash animation are ALL create-once, so mode and
+        -- flash are structural. Read off the built spec rather than the db, so an
+        -- unsupported client (no spec) sigs identically to the feature being off.
+        tostring(s.pandemic and s.pandemic.mode),
+        tostring(s.pandemic and s.pandemic.flash),
     }, "|")
 end
 

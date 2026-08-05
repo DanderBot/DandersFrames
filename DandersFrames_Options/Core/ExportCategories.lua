@@ -1,4 +1,4 @@
-﻿-- ☠ Companion addon: `...` yields THIS addon's private table, not the
+-- ☠ Companion addon: `...` yields THIS addon's private table, not the
 -- parent's, so every DF.* read here would be nil. Take the parent's table
 -- from the global it publishes at DandersFrames/Core.lua:9 (`_G[addonName]
 -- = DF`). NOT from ## AllowAddOnTableAccess -- that directive governs
@@ -284,6 +284,31 @@ DF.ExportCategories = {
         "buffOffsetY",
         "buffPaddingX",
         "buffPaddingY",
+        -- Pandemic (refresh-window cue, 12.1 PTR 8)
+        "buffPandemicBorderBlendMode",
+        "buffPandemicBorderColor",
+        "buffPandemicBorderGradientDirection",
+        "buffPandemicBorderGradientEndColor",
+        "buffPandemicBorderGradientStartColor",
+        "buffPandemicBorderInset",
+        "buffPandemicBorderOffsetX",
+        "buffPandemicBorderOffsetY",
+        "buffPandemicBorderShadowColor",
+        "buffPandemicBorderShadowEnabled",
+        "buffPandemicBorderShadowOffsetX",
+        "buffPandemicBorderShadowOffsetY",
+        "buffPandemicBorderShadowSize",
+        "buffPandemicBorderSize",
+        "buffPandemicBorderStyle",
+        "buffPandemicBorderTexture",
+        "buffPandemicEnabled",
+        "buffPandemicFlash",
+        "buffPandemicFlashSpeed",
+        "buffPandemicMode",
+        "buffPandemicShowBorder",
+        "buffPandemicTintAlpha",
+        "buffPandemicTintColor",
+        "buffPandemicTintInset",
         "buffScale",
         "buffShowBorder",
         "buffShowDuration",

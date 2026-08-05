@@ -1,4 +1,4 @@
-﻿local addonName, DF = ...
+local addonName, DF = ...
 
 -- Expose as global for other files and external access
 DandersFrames = DF
@@ -1188,6 +1188,44 @@ DF.PartyDefaults = {
     buffDurationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
     buffDurationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
     buffDurationBarReverseFill = false,
+    -- Pandemic (12.1 PTR 8): the GAME's refresh window — lit while a refresh would
+    -- clip nothing, roughly the last 30% of the base duration. Deliberately has no
+    -- threshold setting of any kind: the window is per spell and Blizzard's to define
+    -- (Features/Pandemic.lua). Off by default; only refreshable auras ever light.
+    buffPandemicEnabled = false,
+    buffPandemicMode = "BORDER",              -- BORDER / TINT
+    -- Flash: a looping alpha pulse on the whole cue. Creation-frozen (the animation is
+    -- built and played in the secure init pass), so both keys are structural.
+    buffPandemicFlash = false,
+    buffPandemicFlashSpeed = 1,               -- seconds per dim-and-back cycle (0.2-3)
+    -- TINT: a solid wash over the icon.
+    buffPandemicTintColor = {r = 0.2, g = 1, b = 0.2, a = 1},
+    buffPandemicTintAlpha = 0.4,
+    buffPandemicTintInset = 0,                -- +inward, -outward halo (DF.Border convention)
+    -- BORDER: a real DF.Border, keyed the standard way (prefix .. "Border*") so
+    -- DF.Border:BuildSpec and GUI:CreateBorderControls both drive it with no special case.
+    -- ☠ SEED THE WHOLE SET, not just the keys the default style uses. CreateBorderControls
+    -- builds every control it was opted into regardless of the current Style, and an unset
+    -- key renders as a dropdown reading "nil" or a slider with an empty value box (Krathe,
+    -- 2026-08-05). Values mirror the AD icon card's Border block so a pandemic ring opens
+    -- on the same numbers any other icon border does.
+    buffPandemicShowBorder = true,            -- the Pandemic Enable toggle is the real master
+    buffPandemicBorderStyle = "SOLID",
+    buffPandemicBorderSize = 2,
+    buffPandemicBorderInset = 0,
+    buffPandemicBorderOffsetX = 0,
+    buffPandemicBorderOffsetY = 0,
+    buffPandemicBorderColor = {r = 0.2, g = 1, b = 0.2, a = 1},
+    buffPandemicBorderBlendMode = "BLEND",
+    buffPandemicBorderTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+    buffPandemicBorderGradientStartColor = {r = 0, g = 0, b = 0, a = 1},
+    buffPandemicBorderGradientEndColor = {r = 0.5, g = 0.5, b = 0.5, a = 1},
+    buffPandemicBorderGradientDirection = "HORIZONTAL",
+    buffPandemicBorderShadowEnabled = false,
+    buffPandemicBorderShadowColor = {r = 0, g = 0, b = 0, a = 0.8},
+    buffPandemicBorderShadowSize = 1,
+    buffPandemicBorderShadowOffsetX = 1,
+    buffPandemicBorderShadowOffsetY = -1,
     -- Expiring Animation (AD-style full toolkit) — replaces the legacy
 
     -- Aura Source Mode

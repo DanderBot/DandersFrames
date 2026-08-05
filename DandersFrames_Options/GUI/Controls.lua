@@ -233,6 +233,227 @@ function GUI:CreateExpirationControls(group, dbTable, opts)
     return w
 end
 
+-- ============================================================
+-- PANDEMIC CONTROLS (shared) — the refresh-window cue. Pairs with the DF.Pandemic engine
+-- (Features/Pandemic.lua) exactly as CreateExpirationControls pairs with DF.Expiration:
+-- the engine turns the pandemic* keys into a region spec, this builds the UI for them, and
+-- every consumer (AD indicator cards, the Buffs/Debuffs pages) gets the same flow.
+--
+-- ☠ NO THRESHOLD CONTROLS, deliberately. The window is the GAME's — it opens exactly when
+-- a refresh would clip nothing, per spell — so there is nothing to tune. A slider here
+-- would be a lie. The explainer note says so where the missing control would have been,
+-- because "why can't I set when this fires" is the obvious first question. It also says
+-- that many auras never light, which is the other obvious first question (a charge-based
+-- aura like Prayer of Mending has no refresh window at all).
+--
+-- ☠ NO COLOUR MODE. The engine reports a boolean window, not a remaining time, so there is
+-- no ramp to walk. That is the one thing Expiration can do and this cannot — and conversely
+-- a static wash is trivial here and impossible there, which is why the two are
+-- complementary rather than redundant. Keep both.
+--
+-- ★ TWO TYPES. Custom Text and Glyph were built and dropped (Krathe, 2026-08-05): a
+-- boolean "now" cue wants to read at a glance from the edge of vision, which is what a ring
+-- or a wash does and what a glyph competes with the icon to do.
+--
+-- ★ THE BORDER IS THE HOUSE BORDER. GUI:CreateBorderControls over the engine's own key
+-- prefix — the same panel the frame border, defensive icon and AD indicators use, with the
+-- same style/thickness/inset/offset/colour controls. Nothing about it is special-cased
+-- here: DF.Pandemic:BorderPrefix resolves to "pandemic" / "buffPandemic", and DF.Border's
+-- standard "<prefix>Border*" keys hang off that.
+--
+-- opts:
+--   parent         REQUIRED — the card/page scroll child.
+--   prefix         "" / nil for per-indicator records (Aura Designer), or a row prefix
+--                  ("buff" / "debuff") for the flat profile table. Same split the engine
+--                  uses; DF.Pandemic:Key is the single source for the resulting names.
+--   fullUpdate     value-change callback (re-render preview + live frames).
+--   refreshStates  relayout callback — MUST re-run hideOn (LayoutChildren) and disableOn
+--                  (RefreshChildStates) plus the sibling reflow, so a Type change collapses
+--                  the now-irrelevant rows. Enable / Type fire it.
+--   expiryCollision  true only where an Expiration section ALSO exists on the same table
+--                  (the AD cards). The rows have no expiry alert at all, so they pass
+--                  nothing and never build the collision notes.
+--   masterGate     optional predicate(db) for a PAGE-level feature switch above this
+--                  section — "Show Buffs" on the row pages. Folded in here rather than
+--                  wrapped by the caller for two reasons: a caller wrapping
+--                  group.disableChildrenOn has to remember to compose with the one this
+--                  helper already installed (drop it and the capability/enable grey stops
+--                  working), and it must ALSO reach inside for w.enable, which carries
+--                  keepEnabled and so is deliberately spared by the group gate. Both are
+--                  easy to get half-right at a call site; there is exactly one correct
+--                  answer, so it belongs in the helper.
+-- Returns the widget table keyed by role.
+-- ============================================================
+function GUI:CreatePandemicControls(group, dbTable, opts)
+    opts = opts or {}
+    local parent        = opts.parent
+    local prefix        = opts.prefix
+    local fullUpdate    = opts.fullUpdate or function() end
+    local refreshStates = opts.refreshStates or function() end
+    local L = DF.L
+    local P = DF.Pandemic
+
+    local function K(suffix) return P:Key(prefix, suffix) end
+    -- Read the STORED type, not the engine's resolved Mode(): Mode returns nil on a client
+    -- without the API, and the editor still has to lay its rows out coherently while the
+    -- whole section sits greyed with the unsupported note showing.
+    -- ☠ The unset fallback comes from the ENGINE's constant, not a literal here. Those two
+    -- diverging is exactly how a dropdown ends up displaying a type the renderer never draws.
+    local function mode() return dbTable[K("Mode")] or DF.Pandemic.DEFAULT_MODE end
+    local function isTint() return mode() == "TINT" end
+    local function isBorder() return mode() == "BORDER" end
+    local function enabled() return dbTable[K("Enabled")] and true or false end
+    local supported = P:IsSupported()
+    local masterGate = opts.masterGate
+    local function gated(db) return masterGate and masterGate(db) or false end
+    local function onStructural() refreshStates(); fullUpdate() end
+
+    local w = {}
+    local noteW = GUI:GroupInnerWidth(group)
+
+    w.enable = group:AddWidget(GUI:CreateCheckbox(parent, L["Enable"], dbTable,
+        K("Enabled"), onStructural), 28)
+    -- keepEnabled spares this toggle from the GROUP gate below (so "Enable off" doesn't grey
+    -- the switch you need to turn it back on) — it does NOT spare it from its own disableOn,
+    -- which is why the two compose here rather than fight.
+    w.enable.keepEnabled = true
+    -- On a client without the registrar the toggle itself must go dead, or a user can switch
+    -- on a feature that provably cannot render (the silent-capability-skip rule). The page's
+    -- master switch greys it too — nothing above it being on means nothing below it applies.
+    w.enable.disableOn = function(db) return not supported or gated(db) end
+
+    -- Says why there is no threshold, and why a given spell may never light. Sits directly
+    -- under Enable, where the Alert Below slider lives in the Expiration section —
+    -- answering both questions in the place the missing control would have occupied.
+    w.explain = group:AddWidget(GUI:CreateNote(parent,
+        L["Highlights an aura once you can refresh it without losing any of its remaining time. The game decides when that is, and it differs per spell — auras that can't be refreshed never light up."],
+        { width = noteW }))
+
+    -- Shown only on a pre-PTR-8 client. Explicit, because the alternative is a section of
+    -- greyed controls with no stated reason.
+    w.unsupported = group:AddWidget(GUI:CreateNote(parent,
+        L["This game build does not support refresh-window highlights."],
+        { tone = "caution", prefix = "Note", width = noteW }))
+    w.unsupported.hideOn = function() return supported end
+
+    w.mode = group:AddWidget(GUI:CreateDropdown(parent, L["Type"],
+        { BORDER = L["Border"], TINT = L["Tint"], _order = { "BORDER", "TINT" } },
+        dbTable, K("Mode"), onStructural), 54)
+
+    -- FLASH: a looping alpha pulse. Structural in the engine (the group is built and
+    -- started in the secure init pass), so BOTH controls rebuild the slot rather than
+    -- restyling — hence onStructural on the toggle and on the speed slider.
+    --
+    -- ☠ ONE EFFECT, and that is the honest ceiling here for now.
+    --   * DF.Border's set (Proc, Wipe, Ripple, Segment Reveal, Sides, Corners, DF Dash)
+    --     cannot attach: every one rides Border.lua's shared per-frame OnUpdate, which
+    --     writes to the border's pieces from tainted Lua and errors on a button child
+    --     while auras are secret.
+    --   * A native Scale animation WAS built and tried in game and did nothing, where the
+    --     Alpha one works — see the note in Features/Pandemic.lua.
+    --   * Blizzard have said pandemic animation is being looked at for 12.1.5, so this is
+    --     not worth working around; a supported version is likely to land.
+    w.flash = group:AddWidget(GUI:CreateCheckbox(parent, L["Flash"], dbTable,
+        K("Flash"), onStructural), 28)
+    w.flash.tooltip = L["Pulses the highlight in and out instead of holding it steady."]
+    w.flashSpeed = group:AddWidget(GUI:CreateSlider(parent, L["Flash Speed"], 0.2, 3, 0.1,
+        dbTable, K("FlashSpeed"), nil, onStructural, true), 54)
+    w.flashSpeed.disableOn = function() return not dbTable[K("Flash")] end
+
+    -- ── TINT: a solid wash. Colour, opacity and inset — three controls, because that is
+    -- genuinely all a wash has.
+    local function hideTint() return not isTint() end
+    w.tintColor = group:AddWidget(GUI:CreateColorPicker(parent, L["Color"], dbTable,
+        K("TintColor"), false, fullUpdate, fullUpdate, true), 28)
+    w.tintColor.hideOn = hideTint
+    w.tintAlpha = group:AddWidget(GUI:CreateSlider(parent, L["Opacity"], 0, 1, 0.05,
+        dbTable, K("TintAlpha")), 54)
+    w.tintAlpha.hideOn = hideTint
+    w.tintInset = group:AddWidget(GUI:CreateSlider(parent, L["Inset"], -10, 10, 1,
+        dbTable, K("TintInset")), 54)
+    w.tintInset.hideOn = hideTint
+    w.tintInset.tooltip = L["How far inside the icon edge the highlight sits. Negative values push it outward, so it rings the icon rather than sitting on it."]
+
+    -- ── BORDER: the house border panel over the engine's key prefix.
+    --   noShowToggle — the section's own Enable IS the master; a second "Show Border"
+    --                  checkbox under it would be a switch that does nothing on its own.
+    --   include      — ☠ EVERY KEY HERE IS OPT-IN. Passing `{ animation = false }` did not
+    --                  drop animations, it dropped Inset, Offset, Blend Mode, Gradient,
+    --                  Shadow and Alpha as well, leaving three controls. This is the same
+    --                  set the AD icon/square/bar border cards pass, so a pandemic ring now
+    --                  offers exactly what any other icon border does.
+    --                  Deliberately NOT opted in:
+    --                    animate     — stripped unconditionally on container borders (it
+    --                                  cannot run on a button child while auras are secret),
+    --                                  so it would be a control that provably never renders.
+    --                    classColor / roleColor — a refresh cue is about the AURA, not who
+    --                                  is wearing it; and the resolver needs a unit the AD
+    --                                  path never threads.
+    --                    colorByTime — there is no ramp: the window is boolean.
+    --                    colorByType — dispel colouring, unrelated.
+    --   hideWhen — collapses the whole border run outside BORDER mode, matching the tint
+    --                  run above. CreateBorderControls applies this to every child it makes,
+    --                  which is exactly why it is passed rather than set per widget here.
+    w.border = GUI:CreateBorderControls(group, dbTable, P:BorderPrefix(prefix), {
+        parent       = parent,
+        noShowToggle = true,
+        include      = {
+            inset = true, offset = true, blendMode = true,
+            gradient = true, shadow = true, alpha = true,
+        },
+        hideWhen     = function() return not isBorder() end,
+        fullUpdate   = fullUpdate,
+        refreshStates = refreshStates,
+    })
+
+    -- ── COLLISION NOTES (only where an Expiration section shares this table).
+    --
+    -- ☠ Warn on the same SPACE, never on the same TIME. The two windows overlapping is the
+    -- POINT: on a 15s HoT the refresh window opens at 4.5s and a 20% expiry threshold at
+    -- 3.0s, so the expiry alert fires INSIDE the refresh window — a user who wants "refresh
+    -- me / now you've lost it" gets exactly that. Warning about that would be warning about
+    -- the feature working. What actually goes wrong is two reveals occupying the same
+    -- pixels, and only in two shapes now that the payload types are gone: two washes, or
+    -- two rings at the same inset. A tint and a border never collide.
+    if opts.expiryCollision then
+        local function bothOn()
+            return (enabled() and dbTable.expiryAlertEnabled and dbTable.expiryAlertMode) and true or false
+        end
+
+        -- Two tints cover the whole icon, so whichever draws second wins outright and the
+        -- other is not merely cluttered — it is gone. No inset can separate them, so this is
+        -- the one case that is always wrong rather than merely worth a nudge.
+        w.tintClash = group:AddWidget(GUI:CreateNote(parent,
+            L["Expiration and Pandemic are both set to Tint. They cover the same area, so only one will ever be seen."],
+            { tone = "caution", prefix = "Warning", width = noteW }))
+        w.tintClash.hideOn = function()
+            return not (bothOn() and isTint() and dbTable.expiryAlertMode == "TINT")
+        end
+
+        -- Two rings at the SAME inset sit on top of each other; at different insets they
+        -- nest, which is a deliberate and rather good look. So this is a hint, not a warning,
+        -- and it names the fix. The pandemic inset here is DF.Border's own key, not a
+        -- pandemic-specific one — the border IS a DF.Border.
+        w.borderClash = group:AddWidget(GUI:CreateNote(parent,
+            L["Expiration and Pandemic both draw a border at this inset. Give one of them a different Inset to show both at once."],
+            { tone = "info", prefix = "Tip", width = noteW }))
+        w.borderClash.hideOn = function()
+            if not (bothOn() and isBorder() and dbTable.expiryAlertMode == "BORDER") then return true end
+            local mine = tonumber(dbTable[P:BorderPrefix(prefix) .. "BorderInset"]) or 0
+            return mine ~= (tonumber(dbTable.expiryAlertBorderInset) or 0)
+        end
+    end
+
+    -- Master gate: an unsupported client, the page's own feature switch, or Enable off greys
+    -- everything below the toggle. Composed here so a caller never has to wrap this and risk
+    -- dropping one of the three.
+    group.disableChildrenOn = function(db)
+        return not supported or gated(db) or not enabled()
+    end
+
+    return w
+end
+
 -- Small dim inline subheader (section divider inside a SettingsGroup), matching
 -- AD's "State Overrides" / "Icon Effects" dividers.
 function GUI:CreateExpiringSubheader(parent, text)
@@ -3367,4 +3588,4 @@ function DF:ToggleGUI()
         end
     end
 end
-
+
