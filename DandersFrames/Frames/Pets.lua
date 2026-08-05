@@ -20,22 +20,110 @@ DF.testPetFrames = DF.testPetFrames or {}       -- [0]=player pet, [1-4]=party p
 DF.testRaidPetFrames = DF.testRaidPetFrames or {} -- [1-40]=raid pets
 
 -- ============================================================
+-- PET TRACK IDENTITY
+-- ============================================================
+-- ☠ THE ROOT FIX for pets resurrecting each other. Three live sets exist (party,
+-- raid, arena) and exactly one may be drawn, but nothing could reliably say which
+-- one owned the display:
+--
+--   * the unit token cannot say  — raid AND arena both use raidpet<N>
+--   * isRaidFrame cannot say     — arena frames are deliberately isRaid = false so
+--                                  their settings resolve to the PARTY config
+--
+-- So after a handover hid one set, that set's own UNIT_HEALTH / UNIT_FLAGS handler
+-- re-showed it moments later. Field evidence from the retail lane, where this was
+-- found: SetPetFrameVisible counts paired EXACTLY — pet 214 / raidpet1 214,
+-- partypet1 161 / raidpet2 161. Four frames drawing two pets.
+--
+-- Every frame now carries the track it was born into, and every live path asks
+-- whether that track is the active one.
+local PET_TRACK_PARTY = "party"
+local PET_TRACK_RAID  = "raid"
+local PET_TRACK_ARENA = "arena"
+
+-- ⚠ Test modes return their OWN pseudo-tracks, which no live frame can ever match.
+-- Live pets keep their event registrations while a test runs, and without this they
+-- re-show themselves on top of the preview.
+local PET_TRACK_TEST_PARTY = "test-party"
+local PET_TRACK_TEST_RAID  = "test-raid"
+
+local activePetTrack, activePetTrackFrameTime
+
+-- ☠ CACHED FOR ONE FRAME, and that is not a micro-optimisation. This sits on the
+-- first line of the per-frame pet event handler, and the arena test resolves through
+-- GetContentType() -> IsInInstance(), sometimes GetInstanceInfo(), PLUS a
+-- SavedVariables write on every call. Uncached that is an instance query per unit
+-- event per pet frame. GetTime() is constant within a frame, so keying on it needs
+-- no invalidation at all.
+function DF:ActivePetTrack()
+    local now = GetTime()
+    if activePetTrackFrameTime == now and activePetTrack then
+        return activePetTrack
+    end
+
+    local track
+    if DF.raidTestMode then
+        track = PET_TRACK_TEST_RAID
+    elseif DF.testMode then
+        track = PET_TRACK_TEST_PARTY
+    elseif DF.IsInArena and DF:IsInArena() then
+        track = PET_TRACK_ARENA
+    elseif IsInRaid() then
+        track = PET_TRACK_RAID
+    else
+        track = PET_TRACK_PARTY
+    end
+
+    activePetTrack = track
+    activePetTrackFrameTime = now
+    return track
+end
+
+-- ☠ GATE ON THE TRACK NAME, never on `not partyTrack` or any other negation.
+-- With the test pseudo-tracks above there are FIVE tracks, not two, so "not party"
+-- is true in party test mode and real pet events start driving live secure frames.
+-- For an arena frame it is worse than a stray show: arena frames are isRaid = false,
+-- so UpdatePetFrame reads DF.testMode as *their* test flag and will fill a live
+-- secure button with fake test health and force it visible.
+function DF:PetFrameTrackActive(frame)
+    if not frame then return false end
+    -- A frame with no track predates this system or is a test frame; treat it as
+    -- always-active rather than silently freezing it.
+    if not frame.dfPetTrack then return true end
+    return frame.dfPetTrack == DF:ActivePetTrack()
+end
+
+-- ============================================================
 -- PET FRAME CREATION
 -- ============================================================
 
-function DF:CreatePetFrame(unit, ownerFrame, isRaid)
+function DF:CreatePetFrame(unit, ownerFrame, isRaid, track)
     local db = isRaid and DF:GetRaidDB() or DF:GetDB()
     local parent = ownerFrame or (isRaid and DF.raidContainer or DF.container)
-    
+
     -- Generate frame name based on unit
-    local frameName = "DandersFrames_Pet_" .. unit:gsub("pet", "Pet")
-    
+    -- ☠ ARENA NEEDS ITS OWN NAMESPACE. Arena pets use the same raidpet<N> tokens as
+    -- the raid track, so both resolved to DandersFrames_Pet_raidPet<N> and whichever
+    -- CreateFrame ran second silently took the global — two Lua frames, one name, and
+    -- anything resolving by name got the wrong one. isRaid cannot disambiguate here
+    -- either: arena frames pass isRaid = false on purpose (party config).
+    local frameName
+    if track == PET_TRACK_ARENA then
+        frameName = "DandersFrames_ArenaPet_" .. unit:gsub("pet", "Pet")
+    else
+        frameName = "DandersFrames_Pet_" .. unit:gsub("pet", "Pet")
+    end
+
     local frame = CreateFrame("Button", frameName, parent, "SecureUnitButtonTemplate,SecureHandlerEnterLeaveTemplate")
     frame:SetSize(db.petFrameWidth or 80, db.petFrameHeight or 20)
     frame.unit = unit
     frame.ownerFrame = ownerFrame
     frame.isPetFrame = true
     frame.isRaidFrame = isRaid
+    -- Which of the three live sets this frame belongs to. Set once, at creation, and
+    -- never recomputed — that is the whole point: it survives the fact that neither
+    -- the unit token nor isRaidFrame can tell raid and arena apart.
+    frame.dfPetTrack = track
     frame.dfIsDandersFrame = true  -- Mark as DandersFrames frame for click casting module
     
     -- Register unit attribute
@@ -275,6 +363,18 @@ end
 -- ============================================================
 
 function DF:OnPetFrameEvent(frame, event, unit, ...)
+    -- ☠ THE GATE. Every branch below can call SetPetFrameVisible(frame, true), and a
+    -- frame belonging to a set that is NOT currently on screen doing that is exactly
+    -- how the three tracks resurrected each other: a handover hid one set, then its
+    -- own UNIT_HEALTH / UNIT_FLAGS arrived a moment later and showed it straight back.
+    -- The frames keep their event registrations through a handover by design (so they
+    -- are current when their track next becomes active), which is why the gate has to
+    -- be here rather than in the registration.
+    --
+    -- One line, first thing, and no negations -- see PetFrameTrackActive for why
+    -- `not partyTrack` is a trap rather than a shortcut.
+    if not DF:PetFrameTrackActive(frame) then return end
+
     -- Handle UNIT_PET event (fires on owner unit when pet changes)
     if event == "UNIT_PET" then
         if unit == frame.ownerUnit then
@@ -1381,7 +1481,7 @@ function DF:InitializePetFrames()
     -- Create player pet frame
     local playerFrame = DF:GetPlayerFrame()
     if not DF.petFrames.player and playerFrame then
-        DF.petFrames.player = DF:CreatePetFrame("pet", playerFrame, false)
+        DF.petFrames.player = DF:CreatePetFrame("pet", playerFrame, false, PET_TRACK_PARTY)
         DF:Debug("PET", "InitializePetFrames: created player pet frame")
     end
     DF:Debug("PET", "InitializePetFrames: playerFrame=%s petFrames.player=%s", tostring(playerFrame ~= nil), tostring(DF.petFrames.player ~= nil))
@@ -1391,7 +1491,7 @@ function DF:InitializePetFrames()
     for i = 1, 4 do
         local partyFrame = DF:GetPartyFrame(i)
         if not DF.partyPetFrames[i] and partyFrame then
-            DF.partyPetFrames[i] = DF:CreatePetFrame("partypet" .. i, partyFrame, false)
+            DF.partyPetFrames[i] = DF:CreatePetFrame("partypet" .. i, partyFrame, false, PET_TRACK_PARTY)
             partyCount = partyCount + 1
         end
     end
@@ -1590,7 +1690,10 @@ local function UpdateArenaPetFrames()
         DF:IterateArenaFrames(function(frame)
             idx = idx + 1
             if frame and not DF.arenaPetFrames[idx] then
-                DF.arenaPetFrames[idx] = DF:CreatePetFrame("raidpet" .. idx, frame, false)
+                -- isRaid = false routes settings to the party config (see the block
+                -- comment above); the track is what says "arena", since raidpet<N> and
+                -- isRaidFrame both read identically to the raid set.
+                DF.arenaPetFrames[idx] = DF:CreatePetFrame("raidpet" .. idx, frame, false, PET_TRACK_ARENA)
             end
         end)
     end
@@ -1690,7 +1793,7 @@ function DF:UpdateAllRaidPetFrames(force)
         DF:IterateRaidFrames(function(frame)
             frameIdx = frameIdx + 1
             if frame and not DF.raidPetFrames[frameIdx] then
-                DF.raidPetFrames[frameIdx] = DF:CreatePetFrame("raidpet" .. frameIdx, frame, true)
+                DF.raidPetFrames[frameIdx] = DF:CreatePetFrame("raidpet" .. frameIdx, frame, true, PET_TRACK_RAID)
             end
         end)
     end
