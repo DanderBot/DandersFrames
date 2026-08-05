@@ -1979,33 +1979,64 @@ local function PetSetForRaidIndex()
     return DF.raidPetFrames
 end
 
+-- Update AND reposition. Every branch below used to call UpdatePetFrame alone, so a
+-- pet arriving through UNIT_PET -- a warlock resummoning mid-arena is the everyday
+-- case -- was SHOWN at whatever anchor it last held. That is the "right pet under the
+-- wrong teammate" symptom for anything that arrives here rather than through a track
+-- pass. Owner death and rez arrive as UNIT_HEALTH / UNIT_FLAGS and never reach here.
+local function RefreshPetFrame(frame)
+    if not frame then return end
+    DF:UpdatePetFrame(frame)
+    -- ⚠ NO combat early-return here, deliberately. PositionPetFrame owns the guard AND
+    -- raises pendingPetPositionUpdate itself; short-circuiting on InCombatLockdown
+    -- here means nothing ever gets flagged, so the anchor stays stale past the end of
+    -- the fight instead of being replayed by the drain. Let the choke point own it.
+    DF:PositionPetFrame(frame)
+end
+
 function DF:OnPetChanged(unit)
+    -- ☠ GATE BY TRACK. UNIT_PET fires for BOTH "player" and "raidN" in an arena --
+    -- one pet reached through two tokens -- so acting on the player branch as well as
+    -- the raid branch re-shows the party-side frame the handover just hid, on every
+    -- pet event for the rest of the match. That is precisely the duplicate-frame bug
+    -- the track system exists to kill, and the retail field capture shows it as counts
+    -- pairing in lockstep (pet 214 / raidpet1 214, partypet1 161 / raidpet2 161). The
+    -- raid branches below already cover the arena case. The same applies to the party
+    -- branches in a live raid.
+    --
+    -- ⚠ Written as explicit track-name comparisons, NOT as `not partySide`. With five
+    -- tracks in play, "not party" is TRUE in party test mode, and real pet events would
+    -- start driving live secure frames -- worse for arena frames, which are
+    -- isRaid = false, so UpdatePetFrame reads DF.testMode as *their* test flag and
+    -- fills a live secure button with fake test health and forces it visible.
+    local track = DF:ActivePetTrack()
+    local partySide = (track == PET_TRACK_PARTY)
+    local raidSide  = (track == PET_TRACK_RAID) or (track == PET_TRACK_ARENA)
+
     -- Determine which pet frame to update based on unit
     if unit == "player" or unit == "pet" then
-        if DF.petFrames.player then
-            DF:UpdatePetFrame(DF.petFrames.player)
+        if partySide and DF.petFrames.player then
+            RefreshPetFrame(DF.petFrames.player)
         end
     elseif unit:match("^party%d$") then
         local index = tonumber(unit:match("party(%d)"))
-        if index and DF.partyPetFrames[index] then
-            DF:UpdatePetFrame(DF.partyPetFrames[index])
+        if partySide and index then
+            RefreshPetFrame(DF.partyPetFrames[index])
         end
     elseif unit:match("^partypet%d$") then
         local index = tonumber(unit:match("partypet(%d)"))
-        if index and DF.partyPetFrames[index] then
-            DF:UpdatePetFrame(DF.partyPetFrames[index])
+        if partySide and index then
+            RefreshPetFrame(DF.partyPetFrames[index])
         end
     elseif unit:match("^raid%d+$") then
         local index = tonumber(unit:match("raid(%d+)"))
-        local set = PetSetForRaidIndex()
-        if index and set[index] then
-            DF:UpdatePetFrame(set[index])
+        if raidSide and index then
+            RefreshPetFrame(PetSetForRaidIndex()[index])
         end
     elseif unit:match("^raidpet%d+$") then
         local index = tonumber(unit:match("raidpet(%d+)"))
-        local set = PetSetForRaidIndex()
-        if index and set[index] then
-            DF:UpdatePetFrame(set[index])
+        if raidSide and index then
+            RefreshPetFrame(PetSetForRaidIndex()[index])
         end
     end
 end
