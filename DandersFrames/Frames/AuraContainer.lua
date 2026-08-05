@@ -3750,8 +3750,17 @@ function Handle:ApplyStyle(style, layout)
 end
 
 -- Structural filter change -> full rebuild (can't mutate a live filter set safely).
+-- ☠ PARKING-UNSAFE BY CONSTRUCTION, so it opts out. This changes the filter set
+-- WITHOUT going through a consumer's structural signature, so _structKey no longer
+-- describes this handle's structure: parking the outgoing container would file it under
+-- a key that has just stopped being true, and a later Rebuild presenting that key would
+-- re-adopt a container built for a different filter set. Dropping the key disables both
+-- halves (no park, no re-adopt) and releasing any existing park stops a stale one being
+-- matched later. Zero callers today -- this is a guard for the next one.
 function Handle:SetFilter(filter)
     self.config.filter = filter
+    self._structKey = nil
+    self:_releaseParked()
     self:_rebuild()
 end
 
@@ -4066,6 +4075,13 @@ function Handle:_readoptParked()
 
     local unit = config.unit
     if type(unit) == "string" then pcall(function() c:SetUnit(unit) end) end
+    -- ☠ The parked container's last identity-gate verdict was computed for whatever
+    -- unit it held when it was parked. :build ends with this for the same reason, and
+    -- Handle:SetUnit re-runs it with the note "the last gate verdict was for the OLD
+    -- unit". Re-adoption writes the unit directly (not via SetUnit), so without this a
+    -- re-adopted container carries a stale verdict until the next idGateWatch sweep --
+    -- i.e. it can fail open on a unit whose auras should be gated.
+    self:_applyIdentityGate()
     pcall(function() c:Show() end)
     pcall(function() c:SetEnabled(config.enabled ~= false) end)
 
