@@ -1960,13 +1960,19 @@ local function rowStructSig(cfg)
     local s = cfg.style
     return table.concat({
         filterStructSig(cfg.filter), tostring(cfg.tooltips),
-        tostring(s.duration ~= nil), tostring(s.duration and s.duration.formatKey),
-        -- zeroText (hide-on-permanent, Wave 4): creation-frozen — SetDurationText
-        -- forwards it to the binding once per slot. "" (on) vs nil (off) must Rebuild.
-        tostring(s.duration and s.duration.zeroText),
-        -- updateInterval (duration-text update rate, Wave 5a): creation-frozen the
-        -- same way; nil at the NORMAL default, so only a non-default rate moves it.
-        tostring(s.duration and s.duration.updateInterval),
+        -- Duration text PRESENCE only. The region is create-once, so whether it exists
+        -- stays structural.
+        -- ☠ formatKey / zeroText / updateInterval used to sit here on the claim that
+        -- "SetDurationText forwards them to the binding once per slot". That is FALSE
+        -- against Blizzard's source: the setter is reset-then-apply and explicitly
+        -- re-callable — OnLoad_Intrinsic says "Retain the duration text binding across
+        -- reconfiguration". The freeze was our own _boundDur flag, now replaced by a
+        -- spec-identity re-bind in bindNative that runs from ApplyStyle on both handle
+        -- kinds. A format edit is a restyle.
+        -- ★ formatKey was the costliest entry in the file: it folds in
+        -- DF:GetAuraDurationUpdateInterval(), so ONE account-wide setting tore down and
+        -- recreated every container on every frame.
+        tostring(s.duration ~= nil),
         -- ☠ s.stacks.formatKey used to sit here and was DEAD. Nothing in the addon ever
         -- assigns it (only dur.formatKey is written anywhere), so it serialised to the
         -- constant "nil" and could never move the signature. It could not have mattered

@@ -1311,7 +1311,11 @@ local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, bor
         .. "|" .. (borderOn and "bd" or "")
         .. "|fl=" .. tostring(resolveLevel(indicator, defs.level))
         .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")   -- strata applies at Create, like the level
-        .. "|df=" .. durationFmtKey(indicator, true, defs.cbt)
+        -- ☠ "|df=" .. durationFmtKey(...) was here. Duration formatting is NOT
+        -- structural: SetDurationText is reset-then-apply and re-callable, and
+        -- bindNative now re-binds on a spec change from ApplyStyle. It also folded
+        -- in DF:GetAuraDurationUpdateInterval(), so one account-wide setting
+        -- rebuilt every container on every frame. It is a restyle now.
         -- (No alert keys: the expiry alert lives on the COMPANION slot, whose own
         -- structSig carries alertElemStructKey — an alert edit rebuilds only it.)
         -- (No filter string: it moved to placedTuningSig on 2026-08-04 — a single-record
@@ -1353,6 +1357,13 @@ end
 -- hot-applies via ApplyStyle(style, layout); the actual border spec is built only then.
 local function placedCoSig(indicator, isSquare, borderOn, alpha)
     local parts = {
+        -- ★ Duration FORMATTING moved here from the struct sig. It has to live in a
+        -- signature somewhere or a format change would move nothing and silently do
+        -- nothing; the cosmetic sig is the right one now that bindNative re-binds on a
+        -- spec change from ApplyStyle. Passing defaultShow/defColorByTime as the struct
+        -- sig did keeps the key identical, so the only thing that changed is WHICH tier
+        -- reacts: restyle instead of teardown-and-recreate.
+        "df=" .. durationFmtKey(indicator, true, nil),
         "sz=" .. tostring(math.max(8, tonumber(indicator.size) or 24)),
         "sc=" .. tostring(tonumber(indicator.scale) or 1),
         "an=" .. tostring(indicator.anchor or "TOPLEFT"),
@@ -1997,7 +2008,11 @@ end
 -- and ride placedTuningSig (see placedStructSig for why a needless Rebuild is a leak).
 local function barStructSig(indicator, borderOn, defs)
     return "bar"
-        .. "|df=" .. durationFmtKey(indicator, false, defs.cbt)
+        -- ☠ "|df=" .. durationFmtKey(...) was here. Duration formatting is NOT
+        -- structural: SetDurationText is reset-then-apply and re-callable, and
+        -- bindNative now re-binds on a spec change from ApplyStyle. It also folded
+        -- in DF:GetAuraDurationUpdateInterval(), so one account-wide setting
+        -- rebuilt every container on every frame. It is a restyle now.
         -- (No alert keys: the expiry alert lives on the COMPANION slot, whose own
         -- structSig carries alertElemStructKey — an alert edit rebuilds only it.)
         .. "|" .. (borderOn and "bd" or "")
@@ -2012,6 +2027,8 @@ end
 local function barCoSig(frame, indicator, borderOn, alpha)
     local fdb = DF:GetFrameDB(frame) or {}
     return tconcat({
+        -- Duration formatting is cosmetic now, not structural — see placedCoSig.
+        "df=" .. durationFmtKey(indicator, false, nil),
         "w="  .. tostring(tonumber(indicator.width)  or 60),
         "h="  .. tostring(tonumber(indicator.height) or 6),
         "mw=" .. tostring(indicator.matchFrameWidth ~= false and 1 or 0) .. ":" .. tostring(fdb.frameWidth),
@@ -2167,7 +2184,11 @@ local function groupStyleStructSig(group)
     return "|" .. ((s.showStacks ~= false) and "st" or "")
         .. "|" .. ((s.showDuration ~= false) and "du" or "")
         .. "|" .. (s.ShowBorder == true and "bd" or "")
-        .. "|df=" .. durationFmtKey(s, true)
+        -- ☠ "|df=" .. durationFmtKey(...) was here. Duration formatting is NOT
+        -- structural: SetDurationText is reset-then-apply and re-callable, and
+        -- bindNative now re-binds on a spec change from ApplyStyle. It also folded
+        -- in DF:GetAuraDurationUpdateInterval(), so one account-wide setting
+        -- rebuilt every container on every frame. It is a restyle now.
         -- Duration bar PRESENCE only (mirror placedStructSig, which carries the full
         -- reasoning): the strip's layout reservation re-derives live through
         -- ApplyStyle -> applyLayout -> stripReservation -> SetAuraGroupLayout, and
@@ -2271,6 +2292,10 @@ local fgroupExcludeWarned = setmetatable({}, { __mode = "k" })
 local function filterGroupCoSig(group, wrapDefault)
     local s = groupStyle(group)
     return tconcat({
+        -- Duration formatting moved out of groupStyleStructSig to here — see placedCoSig.
+        -- It has to sit in SOME signature or a format change would move nothing and
+        -- silently do nothing.
+        "df=" .. durationFmtKey(s, true),
         "sz=" .. tostring(math.max(8, tonumber(group.iconSize) or 24)),
         "an=" .. tostring(group.anchor or "TOPLEFT"),
         "ox=" .. tostring(tonumber(group.offsetX) or 0),
@@ -3230,7 +3255,7 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
                 live[key] = true
                 -- SPLIT sigs (Wave 1): structural -> Rebuild (recreate), tuning ->
                 -- in-place h:ApplyTuning, cosmetic -> ApplyStyle.
-                local structSig = groupStyleStructSig(group)  -- region set + duration format key (group.style)
+                local structSig = groupStyleStructSig(group)  -- region set only (format key is cosmetic now) (group.style)
                 local tuningSig = selSig                      -- selection edits: live include-map swap (config-wide candidateFilters)
                     .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 8))
                     .. groupSortSig(group)                    -- per-group sort (Wave 2): live SetAuraGroupSortMethod
@@ -3859,7 +3884,7 @@ function Factory:SyncFrame(frame)
                         -- SPLIT sigs (Wave 1): structural -> Rebuild (recreate), tuning ->
                         -- in-place h:ApplyTuning, cosmetic -> ApplyStyle.
                         local structSig = recStructSig      -- record strings + keys (the SET defines the groups)
-                            .. groupStyleStructSig(group)   -- region set + duration format key (group.style)
+                            .. groupStyleStructSig(group)   -- region set only; format key is cosmetic (group.style)
                         local tuningSig = recTuningSig      -- per-record candidateFilters (hideLong / keepImportant / dispel maps)
                             .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 4))
                             .. groupSortSig(group)          -- per-group sort (Wave 2): live SetAuraGroupSortMethod

@@ -4880,6 +4880,13 @@ function SlotHandle:ApplyStyle(style, layout)
     if InCombatLockdown() then return false end
     local ok, err = pcall(styleButton_regions, btn, cfg)
     if not ok then DF:DebugWarn(DBG, "SlotHandle:ApplyStyle: %s", tostring(err)) end
+    -- ☠ bindNative too, exactly as Handle:ApplyStyle does. Its binds are keyed on spec
+    -- identity, not bind-once, so this is how a duration-format / zeroText /
+    -- updateInterval / dispel-palette change reaches a LIVE slot. Without it those would
+    -- silently keep the spec they were created with and the signature entries below could
+    -- not be reduced.
+    local okB, errB = pcall(bindNative, btn, cfg)
+    if not okB then DF:DebugWarn(DBG, "SlotHandle:ApplyStyle bindNative: %s", tostring(errB)) end
     -- Re-anchor after restyle: anchor/offset/scale are live cosmetics (dragging an
     -- indicator moves it now, not on the next reload), and styleButton_regions has just
     -- re-run SetSize, so the pin has to follow it.
