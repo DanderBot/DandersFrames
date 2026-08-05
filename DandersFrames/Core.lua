@@ -2990,6 +2990,13 @@ eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")  -- Fires when spec changes
 eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")  -- Fires when talents change
 eventFrame:RegisterEvent("UNIT_PET")  -- Fires when a pet is summoned/dismissed
+-- ☠ THE ONLY THING THAT DRIVES ARENA PETS. ProcessRosterUpdate looks like the owner of
+-- the pet dispatch, but it returns in its arena branch (Headers.lua, the `inArena`
+-- path) ~158 lines ABOVE the UpdateAllPetFrames / UpdateAllRaidPetFrames calls at the
+-- bottom -- so no pet call in that function has ever run in an arena. Zone change is
+-- the one signal that reliably brackets an arena, and it covers LEAVING as well, which
+-- nothing else did.
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_UPDATE_RESTING")  -- Fires when entering/leaving rested area
 
 -- One-shot copy of legacy Frame Border saved-variable keys to the canonical
@@ -6148,6 +6155,41 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF:HandleUnitPetEvent(arg1)
         end
         
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        -- ☠ ARENA PET ENTRY POINT. See the RegisterEvent comment: ProcessRosterUpdate
+        -- returns in its arena branch long before the pet dispatch, so without this
+        -- nothing ever calls the arena pet track and pets simply never appear in
+        -- 2v2 / 3v3 / shuffle, with no error to show for it.
+        --
+        -- ⚠ BOUNDED RETRY, because the arena header's children have no units the
+        -- instant this event lands -- the secure header populates them a moment later,
+        -- and a single pass here finds nothing to attach pets to. Retries are capped
+        -- and stop as soon as a pass finds units, so a genuinely empty zone costs a
+        -- fixed handful of ticks rather than a live ticker.
+        --
+        -- Runs on the way OUT of an arena too: UpdateAllRaidPetFrames hides the arena
+        -- set when it sees we are no longer in one. Nothing else did that, so in
+        -- GROUPED mode the arena pets followed you out as frozen bars.
+        if DF.UpdateAllRaidPetFrames then
+            local tries = 0
+            local function DriveArenaPets()
+                tries = tries + 1
+                DF:UpdateAllRaidPetFrames(true)
+
+                -- Stop once the arena header actually has units, or we run out of
+                -- patience. IterateArenaFrames yields nothing until the header fills.
+                local sawUnit = false
+                if DF.IterateArenaFrames then
+                    DF:IterateArenaFrames(function(frame)
+                        if frame and frame.unit then sawUnit = true end
+                    end)
+                end
+                if sawUnit or tries >= 5 then return end
+                C_Timer.After(0.5, DriveArenaPets)
+            end
+            C_Timer.After(0, DriveArenaPets)
+        end
+
     elseif event == "PLAYER_REGEN_ENABLED" then
         -- Track combat state
         DF.playerInCombat = false
