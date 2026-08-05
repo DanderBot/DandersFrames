@@ -65,6 +65,23 @@ function GUI:RelayoutHost(widget, slotHeight)
     end
     local p = (g or widget):GetParent()
     while p do
+        -- ☠ AD INDICATOR CARDS FIRST. A card stacks its groups by hand at fixed y offsets
+        -- and has no RefreshStates seam, so the walk below used to run past it to the page
+        -- (or off the top) and the card never re-anchored. The group's own LayoutChildren
+        -- had already run, so the group KNEW its new height and its siblings still sat
+        -- where the old one put them — seen as the Duration Bar header overlapping the
+        -- Pandemic section's collapse bar, which cleared the moment anything toggled that
+        -- section and forced a manual reflow.
+        --
+        -- This is the tail of the measured-label path: a wrapped note cannot know its
+        -- height until it has been drawn, so it converges a frame after build and calls
+        -- back here. Pages self-healed; cards did not. dfAD_ReflowWidgets re-anchors the
+        -- whole stack reading each group's calculatedHeight, which is exactly what
+        -- LayoutChildren above just refreshed.
+        if type(p.dfAD_ReflowWidgets) == "function" then
+            p.dfAD_ReflowWidgets()
+            return
+        end
         if type(p.RefreshStates) == "function" and p.children then
             p:RefreshStates()
             return

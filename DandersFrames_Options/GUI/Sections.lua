@@ -458,6 +458,12 @@ function GUI:CreateLabel(parent, text, width, color)
     -- OnSizeChanged binding — that cascade is the Aura Designer indicator-card lockup
     -- documented on CreateInfoBanner; the cost is that a label added with no height does
     -- not re-measure if its width changes again later.
+    -- ☠ Do NOT try to Reflow()+Remeasure() synchronously here to get a correct height at
+    -- creation. Tried 2026-08-05 and it does not work: nothing has been drawn yet at card
+    -- build time, so GetStringHeight still returns 0 whatever the wrap state. Worse, if it
+    -- ever DID succeed it would make the deferred Remeasure below return false (no change),
+    -- which is what arms the RelayoutHost that tells the host its slot moved — so a partial
+    -- success would silently disable the correction. The converge is the mechanism; let it.
     local function Measure()
         Remeasure()
         if C_Timer and C_Timer.After then
