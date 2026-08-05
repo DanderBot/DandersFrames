@@ -2271,6 +2271,20 @@ function PinnedFrames:SetEnabled(setIndex, enabled)
 
     if not container or (not isBoss and not header) then
         if visible then
+            -- ☠ COMBAT GUARD. This on-demand build used to be the rare path — Initialize
+            -- pre-created every defined set, so by the time anyone toggled a set the
+            -- frames already existed and this branch was near-dead. Initialize now
+            -- builds only enabled sets, which makes THIS the normal way a set gets its
+            -- frames, and creating a secure header child under lockdown is blocked.
+            -- CreateSetFrames does check combat itself, but it only warns and returns —
+            -- nothing retried, so the set would silently never appear. Defer instead:
+            -- the PLAYER_REGEN_ENABLED drain re-runs SetEnabled and takes this path again.
+            if InCombatLockdown() then
+                DF:DebugWarn("PINNED", "SetEnabled: in combat, deferring build of set %d", setIndex)
+                self.pendingVisibilityUpdate = self.pendingVisibilityUpdate or {}
+                self.pendingVisibilityUpdate[setIndex] = enabled
+                return
+            end
             self:CreateSetFrames(setIndex)
         end
         return
@@ -2600,12 +2614,24 @@ function PinnedFrames:Initialize()
     end
 
     DF:Debug("PINNED", "Initializing pinned frames (mode=%s)", tostring(self.currentMode))
-    
-    -- Create frames for every defined set (CreateSetFrames no-ops past the last
-    -- defined set, so iterating the cap is safe and also rebuilds correctly when
-    -- the set count changed).
+
+    -- ☠ ENABLED sets only, NOT every defined set. CreateSetFrames force-creates up to
+    -- 40 secure header children per set via the startingIndex trick, and building them
+    -- for sets that are switched off is pure cost — measured on the retail lane at
+    -- 270ms in a single frame for two sets that were empty AND disabled (80 children).
+    -- Arena entry IS a party<->raid transition (IsInRaid() is true there), so every
+    -- arena start paid it; with another addon sorting in the same frame it tipped over
+    -- the "script ran too long" watchdog, which is why it reproduced for some players
+    -- and not others on identical builds.
+    --
+    -- Nothing is lost by deferring: SetEnabled already builds on demand when it finds
+    -- no container/header, it simply was never the normal way in before. Enabling a set
+    -- now goes through that path instead.
     for i = 1, PinnedFrames.MAX_SETS do
-        self:CreateSetFrames(i)
+        local set = GetSetDB(i)
+        if set and set.enabled then
+            self:CreateSetFrames(i)
+        end
     end
     
     self.initialized = true
@@ -2738,7 +2764,36 @@ function PinnedFrames:Reinitialize()
         self.pendingReinitialize = true
         return
     end
-    
+
+    -- ☠ NOTHING ENABLED => NOTHING TO REBUILD. Bail BEFORE the teardown below, not
+    -- after: with Initialize now building only enabled sets, tearing down and calling
+    -- Initialize would walk MAX_SETS twice to arrive back at zero frames. This is the
+    -- other half of the 270ms-per-arena-entry fix.
+    --
+    -- ⚠ currentMode MUST still advance. The mode-change check that called us compares
+    -- against it, so leaving it stale keeps that check true and re-fires Reinitialize
+    -- on every subsequent roster update — a quiet loop instead of a single hitch. The
+    -- log firing once per transition rather than continuously is what proves this line
+    -- is doing its job.
+    --
+    -- A set that was enabled, built, then disabled keeps its (hidden) frames rather
+    -- than having them destroyed here. SetEnabled(false) already hid them, so this
+    -- costs retained hidden frames, not a visual artefact.
+    local anyEnabled = false
+    for i = 1, PinnedFrames.MAX_SETS do
+        local set = GetSetDB(i)
+        if set and set.enabled then
+            anyEnabled = true
+            break
+        end
+    end
+    if not anyEnabled then
+        self.currentMode = GetActualMode()
+        DF:Debug("PINNED", "Reinitialize: skipped - no set enabled (mode now %s)",
+            tostring(self.currentMode))
+        return
+    end
+
     -- Clean up old frames
     for i = 1, PinnedFrames.MAX_SETS do
         if self.bossHandlers[i] then
