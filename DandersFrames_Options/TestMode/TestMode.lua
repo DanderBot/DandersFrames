@@ -3168,8 +3168,9 @@ local TEST_PRESETS = {
         testShowPersonalTargeted = true,
         testShowAggro            = true,
     },
-    -- Auras plus the healing-decision bar layers: absorbs, incoming heals and
-    -- reduced max health. Health stays still so those bars are readable.
+    -- Default plus the healing-decision layers: absorbs, incoming heals, reduced
+    -- max health and the defensive icon. Health stays still so those bars are
+    -- readable, and the aura rows stay off so they do not cover them.
     HEALER = {
         testShowPets             = true,
         testShowAbsorbs          = true,
@@ -3177,10 +3178,7 @@ local TEST_PRESETS = {
         testShowOutOfRange       = true,
         testShowReducedMaxHealth = true,
         testShowTextDesigner     = true,
-        testShowAuras            = true,
-        testShowDispelGlow       = true,
-        testShowMissingBuff      = true,
-        testShowAuraDesigner     = true,
+        testShowExternalDef      = true,
         testShowTargetedList     = true,
         testAnimateTargetedList  = true,
         testShowPersonalTargeted = true,
