@@ -3176,10 +3176,7 @@ local TEST_PRESETS = {
 -- ⚠ Config.lua's test-mode defaults MIRROR THIS TABLE. Change one, change both.
 TEST_PRESETS.DEFAULT = {
     testShowPets             = true,
-    testShowAbsorbs          = true,
-    testShowHealPrediction   = true,
     testShowOutOfRange       = true,
-    testShowReducedMaxHealth = true,
     testShowTextDesigner     = true,
     testShowTargetedList     = true,
     testAnimateTargetedList  = true,
