@@ -3140,12 +3140,13 @@ local TEST_PARTY_ONLY_KEYS = {
 }
 
 local TEST_PRESETS = {
-    -- Default plus the aura surfaces — the rows, the dispel overlay, the
-    -- missing-buff badge and the Aura Designer. For working on aura layout, so the
-    -- bar states, the status icons and the defensive icon stay out of the way.
+    -- The aura surfaces — the rows, the dispel overlay, the missing-buff badge and
+    -- the Aura Designer — on an otherwise quiet frame, for working on aura layout.
+    -- ⚠ The only preset that does NOT contain Default: out-of-range fading dims the
+    -- whole frame, icons included, which is the one thing you cannot have while
+    -- judging icon art.
     AURAS = {
         testShowPets             = true,
-        testShowOutOfRange       = true,
         testShowTextDesigner     = true,
         testShowAuras            = true,
         testShowDispelGlow       = true,
