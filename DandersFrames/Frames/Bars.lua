@@ -2078,7 +2078,19 @@ function DF:UpdateHealPrediction(frame, testIndex)
             local primaryFrac = isSplit and (testHealPercent * 0.5) or testHealPercent
             local healWidth = primaryFrac * barWidth
             local healHeight = primaryFrac * barHeight
-            
+            -- ☠ CLAMP TO THE MISSING HEALTH unless overheal is being shown. Live gets
+            -- this free from the calculator (SetIncomingHealClampMode, driven by the same
+            -- setting) and never does the arithmetic itself; the preview computes widths
+            -- by hand and had no equivalent, so health + prediction could exceed 1 and the
+            -- bar ran off the end of the frame. Invisible while health sits still, which
+            -- is why it surfaced the moment Animate Health pushed a frame near full
+            -- (Krathe, 2026-08-07). Overheal ON keeps the spill: the bar is parented to
+            -- the frame rather than the health bar precisely so it CAN overhang.
+            if not db.healPredictionShowOverheal then
+                healWidth  = math.min(healWidth,  math.max(0, barWidth  - healthWidth))
+                healHeight = math.min(healHeight, math.max(0, barHeight - healthHeight))
+            end
+
             if healthOrient == "HORIZONTAL" then
                 bar:SetOrientation("HORIZONTAL")
                 bar:SetReverseFill(false)
@@ -2166,7 +2178,17 @@ function DF:UpdateHealPrediction(frame, testIndex)
             if isTestMode then
                 -- Others' half of the preview heal; segment width is the amount.
                 local othersFrac = testHealPercent * 0.5
-                AnchorHealPredSegment(seg2, prevTex, healthOrient, othersFrac * barWidth, othersFrac * barHeight)
+                local segW, segH = othersFrac * barWidth, othersFrac * barHeight
+                -- Same clamp as the primary segment above, minus the room the primary
+                -- already took: a split preview overflows twice as easily, since both
+                -- halves chain off the health fill.
+                if not db.healPredictionShowOverheal then
+                    local usedW = (testHealthPercent + othersFrac) * barWidth
+                    local usedH = (testHealthPercent + othersFrac) * barHeight
+                    segW = math.min(segW, math.max(0, barWidth  - usedW))
+                    segH = math.min(segH, math.max(0, barHeight - usedH))
+                end
+                AnchorHealPredSegment(seg2, prevTex, healthOrient, segW, segH)
                 seg2:SetMinMaxValues(0, 1)
                 seg2:SetValue(1)
             else
