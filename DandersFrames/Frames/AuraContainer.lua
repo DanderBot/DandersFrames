@@ -2272,43 +2272,36 @@ function NativeBackend:build()
         local testStyleSlots = testStyle and math.min(1, maxCount) or 0
         local testStyleLayout = scaleGroupLayout(groupLayout, testStyle)
         filters = {}   -- the normal declaration loop below is skipped
-        -- TWO groups, not one per preview slot. Every AddAuraGroup eagerly creates
-        -- FrameCreationBatchSize (10) button frames — before maxFrameCount is even
-        -- applied — so one group per slot cost maxCount × 10 frames per container per
-        -- unit frame. Measured at 40 test frames that was the single largest allocation
-        -- anywhere in the addon: ~530 MB across four toggles, 65% of the test-mode
-        -- trace, and a visible ~1 s freeze on every toggle.
+        -- ☠ ONE GROUP PER PREVIEW SLOT, maxFrameCount = 1, fixedIndex = k. RESTORED
+        -- 2026-08-06 after the two-group split broke the preview outright.
         --
-        -- The styled slot keeps its OWN group so declaration order still pins it to
-        -- position 1 — that was the point of the original split, one styled icon leading
-        -- a row of plain ones. Every remaining slot now shares a single group and
-        -- numbers itself via seqStart, so each still paints a distinct curated entry.
+        -- This is the ONLY shape that makes position and content agree. Groups render
+        -- in DECLARATION order, so group k occupies layout position k, and its single
+        -- button paints curated entry k. Icon, stack count, duration and hover zone all
+        -- derive from the same k, so they cannot drift apart.
         --
-        -- ⚠ TRADE-OFF, and it is a real one: inside the shared group the flow assigns
-        -- auras to buttons in the CONTAINER's order, which is not creation order, so the
-        -- plain entries may appear in a different order than the curated pool lists
-        -- them. It is deterministic (test mode declares no sort, so the same samples
-        -- land the same way on every build) and every entry is still shown. The original
-        -- "Lightning Shield mid-row" failure this shape was built to prevent was about
-        -- the STYLED entry drifting, which declaration order still guarantees, and the
-        -- mismatched-tooltip half is moot now that tooltips are forced off in test mode.
-        local function addTestGroup(key, count, styled, seqStart)
-            if count <= 0 then return end
-            -- pcall(fn, args...) rather than pcall(function() ... end): no wrapper
-            -- closure. Protection is unchanged — AddAuraGroup asserts.
-            local okGroup, err = pcall(c.AddAuraGroup, c, key, category, {
-                maxFrameCount = count,
-                initializeFrame = handle:_makeInitializeFrame(handle._gen,
-                    styled and 1 or nil, nil, styled and testStyle or nil, seqStart),
-                layout = styled and testStyleLayout or groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
-            })
-            if okGroup then
-                self.groupKeys[#self.groupKeys + 1] = key
-                self.groupStyles[key] = styled and testStyle or nil
-            else
-                DF:DebugWarn(DBG, "test group failed: %s", tostring(err))
-            end
-        end
+        -- ☠ DO NOT COLLAPSE THESE INTO A SHARED GROUP TO SAVE FRAMES. That was
+        -- b69239ac, and it shipped in alpha-15 as a preview showing the wrong icon
+        -- under every tooltip. Inside a shared group the flow assigns auras to buttons
+        -- in the CONTAINER's order, which is NOT creation order, while the curated
+        -- entry is chosen by a counter incremented at button-CREATION time -- so entry
+        -- k lands wherever the flow happened to put that button. The comment this
+        -- replaces described that exact failure ("landed them on the wrong buttons --
+        -- live-diagnosed twice: Lightning Shield mid-row, mismatched tooltips") and
+        -- then judged the tooltip half "moot now that tooltips are forced off in test
+        -- mode". The NATIVE tooltips are off; DF's own hover zones are not, and they
+        -- are keyed by the curated index. Confirmed in game by reverting to the build
+        -- before that commit and comparing side by side.
+        --
+        -- ⚠ THE COST IS REAL AND ACCEPTED. Every AddAuraGroup eagerly creates
+        -- FrameCreationBatchSize (10) buttons before maxFrameCount is applied, so this
+        -- is maxCount x 10 frames per container -- the allocation b69239ac set out to
+        -- remove (~530 MB across four toggles at 40 test frames, ~1 s per toggle).
+        -- Krathe's call: "we need our test mode icons and tooltips correct, or they are
+        -- pointless." A cheaper shape has to keep position-to-entry determinism or it
+        -- is not a preview, it is a lie. The pool cap in _slotCount claws some of it
+        -- back by not declaring slots the curated pool cannot fill (the defensive row
+        -- drops from ten groups to four).
         if isSingleSlot then
             -- SINGLE-SLOT ROW preview. The two-group split above exists to pin a
             -- styled icon AHEAD of plain ones in a multi-icon row; this row has
@@ -2331,8 +2324,24 @@ function NativeBackend:build()
                 DF:DebugWarn(DBG, "test slot failed: %s", tostring(btn))
             end
         else
-            addTestGroup("dfTestStyled", testStyleSlots, true, nil)
-            addTestGroup("dfTestPlain", maxCount - testStyleSlots, false, testStyleSlots + 1)
+            for k = 1, maxCount do
+                local key = "dfTest" .. k
+                local styled = (k <= testStyleSlots) or nil
+                -- pcall(fn, args...) rather than pcall(function() ... end): no wrapper
+                -- closure per group. Protection is unchanged — AddAuraGroup asserts.
+                local okGroup, err = pcall(c.AddAuraGroup, c, key, category, {
+                    maxFrameCount = 1,
+                    initializeFrame = handle:_makeInitializeFrame(handle._gen, k, nil,
+                        styled and testStyle or nil),
+                    layout = styled and testStyleLayout or groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
+                })
+                if okGroup then
+                    self.groupKeys[#self.groupKeys + 1] = key
+                    self.groupStyles[key] = styled and testStyle or nil
+                else
+                    DF:DebugWarn(DBG, "test group failed: %s", tostring(err))
+                end
+            end
         end
     end
     for i, rec in ipairs(filters) do
