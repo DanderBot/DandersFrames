@@ -648,9 +648,16 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     local isBoss = frame.isPinnedBossFrame
     local testData = DF:GetTestUnitData(index, isRaid, isBoss)
     if not testData then return end
-    
+
+    -- Stamped rather than re-resolved: the aura drives below (and their bulk
+    -- refresh siblings, which do NOT receive testData) all need it, and
+    -- GetTestUnitData rebuilds the raid class/role/name arrays on every call.
+    -- Index -> data is fixed for a pooled frame's whole life, so it cannot go
+    -- stale. See DF:IsTestFrameDead.
+    frame.dfTestIsDead = (testData.status == "Dead") or nil
+
     local db = DF:GetFrameDB(frame)
-    
+
     -- Set dfInRange for test mode - consumed by the range/alpha systems
     -- If testShowOutOfRange is enabled and this unit is marked as out of range, set false
     -- Otherwise set true (in range)
@@ -1237,7 +1244,8 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- bulk previews can't drift (the legacy Engine:UpdateTestFrame is gone).
     local ADFactory = DF.AuraDesigner and DF.AuraDesigner.Factory
     if ADFactory then
-        if db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame) then
+        if db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame)
+            and not DF:IsTestFrameDead(frame) then
             ADFactory:SyncFrame(frame)
         else
             ADFactory:ClearFrame(frame)
@@ -1802,6 +1810,20 @@ function DF:UpdateTestStatusIcons(frame, testData)
     end
 end
 
+-- ☠ A CORPSE CARRIES NO AURAS, so the preview must not draw any on one. Death
+-- strips buffs and debuffs outright, and the defensive icon and missing-buff badge
+-- describe things that only mean something on a living unit — a dead frame covered
+-- in icons is a shape live play never produces, which makes it a bad reference for
+-- judging layout (Krathe, 2026-08-06). The dispel overlay already did this.
+--
+-- Reads the stamp UpdateTestFrame leaves rather than re-resolving the unit data:
+-- the bulk refreshers (UpdateAllTestAuras / MissingBuff / DefensiveBar /
+-- AuraDesigner) have no testData to hand, and this has to give them the same
+-- answer as the per-frame pass or the two previews drift.
+function DF:IsTestFrameDead(frame)
+    return (frame and frame.dfTestIsDead) == true
+end
+
 -- Test aura preview: drive the real 12.1 container rows on the test frame.
 function DF:UpdateTestAuras(frame)
     if not frame then return end
@@ -1817,7 +1839,7 @@ function DF:UpdateTestAuras(frame)
             -- The test panel's "Show Auras" toggle gates the preview rows on top
             -- of the real row enables. Off -> hide the row frames directly and
             -- keep the drives' shown-caches coherent so re-enabling re-shows.
-            local showAuras = db.testShowAuras ~= false
+            local showAuras = db.testShowAuras ~= false and not DF:IsTestFrameDead(frame)
             if db.showBuffs and showAuras and DF.DriveBuffFactory then
                 DF:DriveBuffFactory(frame, db)
                 -- Test count slider hot-applies (structural: the handle rebuilds).
@@ -3315,6 +3337,15 @@ function DF:UpdateTestMissingBuff(frame)
     -- test session (empty groups park the badges in their windows); the drive's
     -- unit guards are test-bypassed (fabricated units fail every unit API).
     if DF.FactoryOwnsMissingBuff and DF:FactoryOwnsMissingBuff(db) then
+        -- Dead unit: park the strip the same way the toggle-off path does, so
+        -- re-showing goes back through the live drive.
+        if DF:IsTestFrameDead(frame) then
+            if frame.missingBuffStrip and frame.dfMissingStripShown ~= false then
+                frame.dfMissingStripShown = false
+                frame.missingBuffStrip:Hide()
+            end
+            return
+        end
         DF:DriveMissingBuffFactory(frame, db)
         return
     end
@@ -3401,6 +3432,7 @@ function DF:UpdateTestDefensiveBar(frame, testData)
         local role = testData and testData.role
         local show = db.defensiveIconEnabled and db.testShowExternalDef
             and (role == "TANK" or role == "HEALER")
+            and not DF:IsTestFrameDead(frame)
         if show then
             DF:DriveDefensiveFactory(frame, db)
             local h = frame.defensiveFactory
@@ -3545,7 +3577,8 @@ function DF:UpdateAllTestAuraDesigner()
     local function UpdateFrame(frame)
         if not frame or not frame:IsShown() then return end
         local db = DF:GetFrameDB(frame)
-        if db and db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame) then
+        if db and db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame)
+            and not DF:IsTestFrameDead(frame) then
             Factory:SyncFrame(frame)
         else
             Factory:ClearFrame(frame)
