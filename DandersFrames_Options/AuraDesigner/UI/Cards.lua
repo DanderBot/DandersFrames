@@ -2370,8 +2370,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
             -- this list is the three time formats plus Percent.
             NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"], PERCENT = L["Percent"],
             _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" },
-        }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end,
-            { height = 54 })
+        }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end)
         GUI:CreateTextControls(g, proxy, "duration", {
             parent = body,
             include = { color = true },

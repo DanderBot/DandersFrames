@@ -371,8 +371,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 -- Icon surfaces: FULL and the percent composite are bar-only (width).
                 NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"], PERCENT = L["Percent"],
                 _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" },
-            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end,
-                { height = 54 })
+            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)
@@ -504,8 +503,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 -- Icon surfaces: FULL and the percent composite are bar-only (width).
                 NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"], PERCENT = L["Percent"],
                 _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" },
-            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end,
-                { height = 54 })
+            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)
@@ -669,8 +667,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 FULL = L["Full"],
                 PERCENT = L["Percent"], SECONDS_PERCENT = L["Units + %"],
                 _order = { "NUMBER", "SHORT", "TIMER", "FULL", "PERCENT", "SECONDS_PERCENT" },
-            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end,
-                { height = 54 })
+            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)

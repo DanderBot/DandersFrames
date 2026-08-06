@@ -242,9 +242,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local durationFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
             TIMER = L["Timer"], PERCENT = L["Percent"],
             _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }
-        -- ⚠ disableOn is NOT set on the example line: the group gate needs SetEnabled and
-        -- a CreateLabel has none, so it would be a silent no-op. Harmless either way — the
-        -- example describes the chosen format, which stays true while duration text is off.
         local durFormat = GUI:CreateDurationFormatControls(self.child, durationGroup, durationFormatOptions, db, "buffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames(); GUI:RefreshCurrentPage() end)
         durFormat.disableOn = function(d) return not d.buffShowDuration end
         -- Shared TextStyle control block (font/scale/outline/shadow/colour/anchor/
@@ -1340,11 +1337,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local defDurFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
             TIMER = L["Timer"], PERCENT = L["Percent"],
             _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }
-        local defDurFormat, defDurExample = GUI:CreateDurationFormatControls(self.child, durationGroup, defDurFormatOptions, db, "defensiveIconDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end)
+        -- One widget now, so hideOn covers the example too — no second predicate to keep
+        -- in step (see CreateDurationFormatControls).
+        local defDurFormat = GUI:CreateDurationFormatControls(self.child, durationGroup, defDurFormatOptions, db, "defensiveIconDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end)
         defDurFormat.hideOn = HideDefensiveDurationOptions
-        -- hideOn DOES apply to a label (it is a Show/Hide, not SetEnabled), so the example
-        -- follows its dropdown off the page rather than being left stranded behind it.
-        defDurExample.hideOn = HideDefensiveDurationOptions
 
         -- Shared TextStyle control block (font/scale/outline/shadow/colour/anchor/
         -- offsets/justify). The offsets/anchor honor the existing defensiveIconDurationX/Y

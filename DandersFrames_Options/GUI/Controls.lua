@@ -3607,8 +3607,9 @@ end
 --     widget every page depends on, for something you would then have to hover row by
 --     row to compare.
 --
--- The label is self-measuring (CreateLabel with no call-site height), so it sizes to
--- however the example wraps at the current column width instead of a guessed number.
+local DURFMT_EXAMPLE_Y   = -42   -- the opener sits at -16 and is 24 tall, ending at -40
+local DURFMT_EXAMPLE_PAD = 14    -- one line of DFFontHighlightSmall, plus a hair
+
 function GUI:CreateDurationFormatControls(parent, group, options, dbTable, dbKey, callback, opts)
     opts = opts or {}
     local example
@@ -3621,21 +3622,40 @@ function GUI:CreateDurationFormatControls(parent, group, options, dbTable, dbKey
         example:SetText(DF:GetDurationFormatExample(CurrentFormat()) or "")
     end
 
-    local dd = group:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], options,
+    local dd = GUI:CreateDropdown(parent, L["Duration Format"], options,
         dbTable, dbKey, function(...)
             -- Example first: the caller's callback may rebuild the page, and on some
-            -- surfaces that discards `example` before we would have refreshed it.
+            -- surfaces that discards this widget before we would have refreshed it.
             RefreshExample()
             if callback then callback(...) end
-        end, opts.customGet, opts.customSet), opts.height or 55)
+        end, opts.customGet, opts.customSet)
 
-    -- ⚠ No height passed on purpose — see CreateLabel: an explicit number is treated as
-    -- authoritative and disables the measured re-flow, which is what let a wrapped blurb
-    -- overlap the control beneath it on the Colours page.
-    example = group:AddWidget(GUI:CreateLabel(parent,
-        DF:GetDurationFormatExample(CurrentFormat()) or ""))
+    -- ☠ THE EXAMPLE HANGS OFF THE DROPDOWN, NOT A SIBLING ROW. It started as its own
+    -- CreateLabel and read as unrelated ("a bit lost" — Krathe): a group row carries a
+    -- full RowGap above it, so the example floated midway between its own dropdown and
+    -- the next control. On the container it sits right under the opener, and two things
+    -- stop being hand-maintained: hideOn/disableOn now cover both halves because there is
+    -- only one widget (the sibling version needed hideOn duplicated by hand and could not
+    -- honour disableOn at all — the group gate calls SetEnabled, which a label lacks),
+    -- and the example can no longer be added without its dropdown.
+    example = dd:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    example:SetPoint("TOPLEFT", dd, "TOPLEFT", 0, DURFMT_EXAMPLE_Y)
+    example:SetPoint("TOPRIGHT", dd, "TOPRIGHT", 0, DURFMT_EXAMPLE_Y)
+    example:SetJustifyH("LEFT")
+    -- No wrap: one added line is then always the right amount of extra height. A wrapping
+    -- example would silently overlap whatever sits beneath it.
+    example:SetWordWrap(false)
+    example:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
+    RefreshExample()
 
-    dd.dfExampleLabel = example
+    -- ⚠ preferredHeight is THE lever, not the number AddWidget is handed: CreateDropdown
+    -- sets fixedRowHeight, and ResolveRowHeight returns preferredHeight for a fixed-height
+    -- widget and IGNORES the call-site value. (Which also means the 54/55 the AD cards
+    -- have always passed for these was already inert.)
+    dd.preferredHeight = (dd.preferredHeight or GUI.RowHeight.dropdown or 55) + DURFMT_EXAMPLE_PAD
+    group:AddWidget(dd)
+
+    dd.dfExampleText = example
     dd.dfRefreshExample = RefreshExample
-    return dd, example
+    return dd
 end
