@@ -662,12 +662,14 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], {
                 -- ★ The ONLY surface offering RAW ("Seconds"), because it is the only one
                 -- wide enough: RAW never rolls up, so an hour-long aura renders "3599".
-                -- ⚠ SECONDS_PERCENT is labelled "Both", not "Seconds + Percent" — with
-                -- "Seconds" now naming the no-roll-up format, that old label would read as
-                -- raw-seconds + percent, which is not what it shows ("12s (45%)").
+                -- ⚠ SECONDS_PERCENT is labelled "Units + %", not "Seconds + Percent":
+                -- with "Seconds" now naming the no-roll-up format, the old label read as
+                -- raw-seconds + percent, which is not what it renders ("12s (45%)"). It
+                -- names the format it actually composes from — Units is directly above
+                -- it in this list — because "Both" on its own never said both WHAT.
                 NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"],
                 RAW = L["Seconds"], FULL = L["Full"],
-                PERCENT = L["Percent"], SECONDS_PERCENT = L["Both"],
+                PERCENT = L["Percent"], SECONDS_PERCENT = L["Units + %"],
                 _order = { "NUMBER", "SHORT", "TIMER", "RAW", "FULL", "PERCENT", "SECONDS_PERCENT" },
             }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)

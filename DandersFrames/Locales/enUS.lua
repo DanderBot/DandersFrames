@@ -1830,6 +1830,9 @@ L["Seconds"] = true
 L["Standard"] = true
 L["Timer"] = true
 L["Units"] = true
+-- ⚠ Contains a literal %. Safe only because option labels are displayed verbatim
+-- (SetText) and never passed through format(). Do not start formatting them.
+L["Units + %"] = true
 L["Select a spell"] = true
 L["Select indicator..."] = true
 L["Select trigger for %s"] = true
