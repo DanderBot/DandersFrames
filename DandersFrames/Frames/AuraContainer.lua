@@ -3535,18 +3535,8 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
                         testIndex = fixedIndex or i
                     end
                     button._dfTestIndex = testIndex
-                    -- ⚠ TEMPORARY DIAGNOSTIC (test-icon investigation, 2026-08-06).
-                    -- Remove once the cause is found. Says which branch a button took
-                    -- and whether the build shape and the live global agreed at the
-                    -- moment it was created.
-                    DF:Debug(DBG, "TESTICON create: PAINT i=%d testIdx=%s shape=%s global=%s mode=%s",
-                        i, tostring(testIndex), tostring(testShape),
-                        tostring(AuraContainer._testMode), tostring(handle.config.mode))
                     handle:_paintTestSlot(button, testIndex)
                 else
-                    DF:Debug(DBG, "TESTICON create: BIND i=%d shape=%s global=%s mode=%s",
-                        i, tostring(testShape), tostring(AuraContainer._testMode),
-                        tostring(handle.config.mode))
                     handle:_bindNativeSlot(button)     -- native inbound setters
                     -- Consumer secure init (overlay dispel carriers): runs in THIS
                     -- securecallfunction pass, so any texture it creates on the button
