@@ -284,20 +284,17 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         -- Determine if this frame should be dead (frames 9, 17, 29)
         local isDead = (i == 9 or i == 17 or i == 29)
         
-        -- Determine dispel type - pattern designed to overlap with some OOR frames
-        -- OOR frames are 3, 7, 11, 15, 19, 23, 27, 31, 35, 39
-        -- This pattern gives dispels to frames: 1,6,11,16,21,26,31,36 (Magic), 3,8,13,18,23,28,33,38 (Curse), 5,10,15,20,25,30,35,40 (Poison)
+        -- ☠ THE OVERLAY NAMES A DEBUFF THAT IS ACTUALLY ON THE FRAME. This used to be a
+        -- hardcoded index pattern ("i % 5 == 1 -> Magic") while the debuff ICONS came
+        -- from the curated pool — two sources that were never linked, and once the
+        -- per-frame rotation stopped them coinciding a unit showed a Poison overlay with
+        -- three debuffs, none of them Poison. Ask the engine which types the frame's own
+        -- debuff window holds; nil when it holds none, which is how the pool's untyped
+        -- entries set how often an overlay appears at all.
         local dispelType = nil
         if not isDead then  -- Dead frames don't show dispels
-            if i % 5 == 1 then
-                dispelType = "Magic"
-            elseif i % 5 == 3 then
-                dispelType = "Curse"
-            elseif i % 5 == 0 then
-                dispelType = "Poison"
-            elseif i % 7 == 0 then
-                dispelType = "Disease"  -- Frames 7, 14, 21, 28, 35
-            end
+            dispelType = DF.GetTestDebuffDispelType
+                and DF:GetTestDebuffDispelType("raid" .. i, (DF:GetRaidDB() or {}).testDebuffCount or 2)
         end
         
         local result = {
@@ -370,7 +367,12 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         isLeader = data.isLeader,
         isAssist = data.isAssist,
         raidTarget = data.raidTarget,
-        dispelType = data.dispelType,
+        -- Same rule as raid: the type comes from THIS frame's debuff window, not from the
+        -- unit table's hardcoded value, so the overlay can never name a debuff the frame
+        -- is not showing. data.dispelType is left in the table above as scenario notes.
+        dispelType = (data.status ~= "Dead") and DF.GetTestDebuffDispelType
+            and DF:GetTestDebuffDispelType((index == 0) and "player" or ("party" .. index),
+                (DF:GetDB() or {}).testDebuffCount or 2) or nil,
         centerStatus = data.centerStatus,
         -- New icon states
         isMainTank = data.isMainTank,

@@ -5606,3 +5606,32 @@ function AuraContainer.PaintPreviewSlot(slot, config, index, sharedDur)
     -- formatter inside it).
     Handle._paintTestSlot({ config = config }, slot, index or 1)
 end
+
+-- ============================================================
+-- TEST MODE: the dispel type a frame's debuff window actually contains
+-- ============================================================
+-- ☠ THE OVERLAY MUST NAME A DEBUFF THAT IS ON THE FRAME. The frame overlay used to take
+-- its type from a hardcoded frame-index pattern in the test data ("i % 5 == 1 -> Magic")
+-- while the debuff ICONS came from the curated pool — two sources that were never linked.
+-- They agreed by accident while every frame drew pool entries 1-2 (always Magic + Poison),
+-- and the per-frame rotation broke the coincidence: a unit showed a Poison overlay with
+-- three debuffs, none of them Poison (Krathe, 2026-08-06).
+--
+-- Reuses testPoolOffset — the SAME function the painter uses to choose entries — rather
+-- than recomputing the window here, so the two cannot drift apart. That is the whole
+-- point of this living in this file instead of in TestMode.lua.
+--
+-- Returns the first dispellable type in the unit's window, or nil when the window holds
+-- none (which is how the pool's untyped entries set how often an overlay appears at all).
+function DF:GetTestDebuffDispelType(unitToken, count)
+    local pool = DF.TestData and DF.TestData.debuffs
+    if not (pool and #pool > 0) then return nil end
+    local cfg = { unit = unitToken }
+    local n = math.max(1, math.min(tonumber(count) or 1, #pool))
+    local off = testPoolOffset(cfg, #pool, n)
+    for i = 1, n do
+        local e = pool[((off + i - 1) % #pool) + 1]
+        if e and e.debuffType then return e.debuffType end
+    end
+    return nil
+end
