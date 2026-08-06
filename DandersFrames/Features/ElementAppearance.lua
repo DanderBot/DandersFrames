@@ -1074,8 +1074,11 @@ function DF:UpdateAuraDesignerAppearance(frame)
                 -- carries DenyTaintedAccessWhenAurasAreSecret: this loop runs from the
                 -- range update, which is tainted, so every call threw the moment auras
                 -- went secret (43 errors, "forbidden object", reported 2026-08-06).
-                -- GetAlphaHost returns nil for a slot, so those skip until the regions
-                -- are reparented onto a DF-owned host. See SlotHandle:GetAlphaHost.
+                -- GetAlphaHost answers with the DF-owned frame that every one of that
+                -- indicator's regions hangs off — its own anchor frame for a container,
+                -- dfLevelHost for a collapsed slot — so fading it fades the indicator
+                -- whole. Nil only if host creation failed, hence the guard.
+                -- See SlotHandle:GetAlphaHost.
                 local f = h and h.GetAlphaHost and h:GetAlphaHost()
                 if f then
                     local base = h._dfADBaseAlpha or 1.0

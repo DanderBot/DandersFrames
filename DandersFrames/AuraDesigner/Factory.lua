@@ -1413,12 +1413,16 @@ local function placedCoSig(indicator, isSquare, borderOn, alpha)
     return tconcat(parts, "|")
 end
 
--- Placed base alpha rides the plain anchor frame (combat-safe; alpha is not a secret).
--- ☠ GetAlphaHost, not GetFrame. A container handle's host is DF's own anchor frame; a
--- collapsed slot has none and returns nil, because its GetFrame() is the aura BUTTON and
--- every tainted write to that is refused once auras are secret. The pcall here was
--- swallowing exactly that failure silently -- the same fault surfaced loudly in the
--- out-of-range fade, which is not pcall'd. See SlotHandle:GetAlphaHost.
+-- Placed base alpha rides a DF-owned frame (combat-safe; alpha is not a secret).
+-- ☠ GetAlphaHost, not GetFrame. A container handle's host is its own anchor frame; a
+-- collapsed slot's is dfLevelHost, the frame its regions hang off. GetFrame() for a slot
+-- is the aura BUTTON, and every tainted write to that is refused once auras are secret --
+-- the pcall here was swallowing exactly that failure silently, while the same fault
+-- surfaced loudly in the out-of-range fade, which is not pcall'd.
+-- ⚠ The stash below is not just for the fade: a slot's button is created in a LAZY BATCH,
+-- so this very often runs before there is any host to write to. AcquireSlot's
+-- initializeFrame re-asserts _dfADBaseAlpha once the host exists.
+-- See SlotHandle:GetAlphaHost.
 local function applyPlacedAlpha(handle, alpha)
     handle._dfADBaseAlpha = alpha   -- read by the OOR fade (ElementAppearance)
     local f = handle and handle.GetAlphaHost and handle:GetAlphaHost()

@@ -723,6 +723,28 @@ end
 -- ============================================================
 local function styleButton_regions(slot, config)
     local style = config.style or {}
+    -- ★ THE REGION HOST — everything this function creates hangs off `host`, never `slot`.
+    --
+    -- For a CONTAINER button there is no host and this resolves to the button itself, so
+    -- every line below is byte-identical to what it always did. For a collapsed SLOT
+    -- (AcquireSlot) it is the DF-owned frame stood up pre-seal by makeSlotLevelHost, and
+    -- that indirection is what gives a slot per-indicator ALPHA back:
+    --
+    --   * The aura button carries DenyTaintedAccessWhenAurasAreSecret, applied by
+    --     ApplyAccessRestrictions to the auraFrame ALONE (a single AddAccessRestrictions
+    --     call — unlike forbidden aspects, which the source says propagate through the
+    --     parent chain). So a DF-created child frame is NOT restricted and a tainted
+    --     SetAlpha on it is legal, which the button itself refuses.
+    --   * Blizzard's inbound setters accept it. ValidateInboundScriptObject requires only
+    --     that a registered region be "a direct child or indirect descendent of owner"
+    --     (RegionUtil.IsDescendantOf) — one level deeper still passes. Already proven in
+    --     the field by dfAuraBorder (on dfDispelHolder) and dfDur (on dfDurHolder).
+    --
+    -- ⚠ CREATION-TIME ONLY. InitializeInboundScriptObject stamps ForbiddenAspect
+    -- ChangeParent on every region it registers, so a region CANNOT be reparented after
+    -- its native bind. The parent has to be right the first time — which is why this is a
+    -- host at creation rather than a reparent pass.
+    local host = slot.dfLevelHost or slot
     -- Overlay = a presence box (tint + border + native dispel only); the icon and all
     -- icon-content regions (cooldown/duration/stacks/bar/spellName) are ROW-only.
     local isRow = config.mode ~= "overlay"
@@ -748,8 +770,8 @@ local function styleButton_regions(slot, config)
         local ov = style.overlay
         if ov and ov.tintColor then
             if not slot.dfTint then
-                slot.dfTint = slot:CreateTexture(nil, "OVERLAY")
-                slot.dfTint:SetAllPoints(slot)
+                slot.dfTint = host:CreateTexture(nil, "OVERLAY")
+                slot.dfTint:SetAllPoints(host)
             end
             slot.dfTint:SetColorTexture(readColor(ov.tintColor))
         end
@@ -784,7 +806,7 @@ local function styleButton_regions(slot, config)
         local hf = ov and ov.healthFill
         if hf and hf.clampTo then
             if not slot.dfHealthFill then
-                slot.dfHealthFill = slot:CreateTexture(nil, "OVERLAY")
+                slot.dfHealthFill = host:CreateTexture(nil, "OVERLAY")
             end
             local t = slot.dfHealthFill
             t:ClearAllPoints()
@@ -809,8 +831,8 @@ local function styleButton_regions(slot, config)
         local mh = ov and ov.mirrorHost
         if mh then
             if not slot.dfMirrorHost then
-                slot.dfMirrorHost = CreateFrame("Frame", nil, slot)
-                slot.dfMirrorHost:SetAllPoints(slot)
+                slot.dfMirrorHost = CreateFrame("Frame", nil, host)
+                slot.dfMirrorHost:SetAllPoints(host)
                 slot.dfMirrorHost:EnableMouse(false)
             end
             if type(mh.onHost) == "function" then mh.onHost(slot.dfMirrorHost) end
@@ -834,7 +856,7 @@ local function styleButton_regions(slot, config)
                 if slot.dfSquare then slot.dfSquare:Hide() end
             else
                 if not slot.dfSquare then
-                    slot.dfSquare = slot:CreateTexture(nil, "BACKGROUND")
+                    slot.dfSquare = host:CreateTexture(nil, "BACKGROUND")
                 end
                 local inset = squareSpec.inset or 0
                 slot.dfSquare:ClearAllPoints()
@@ -847,7 +869,7 @@ local function styleButton_regions(slot, config)
         local iconSpec = style.icon
         if not squareSpec and (iconSpec == nil or iconSpec.show ~= false) then
             if not slot.dfIcon then
-                slot.dfIcon = slot:CreateTexture(nil, "BACKGROUND")
+                slot.dfIcon = host:CreateTexture(nil, "BACKGROUND")
             end
             -- Art inset: 1px default; pass icon.inset=0 for full-bleed art (matches the
             -- legacy Direct-row icons). Re-applied here (not create-once) so it's live.
@@ -874,7 +896,7 @@ local function styleButton_regions(slot, config)
     local borderSpec = style.border
     if borderSpec and DF.Border then
         if not slot.dfBorder then
-            local ok, w = pcall(function() return DF.Border:New(slot, { solidOnly = true, secretRect = true }) end)
+            local ok, w = pcall(function() return DF.Border:New(host, { solidOnly = true, secretRect = true }) end)
             if ok then slot.dfBorder = w end
         end
         if slot.dfBorder then
@@ -925,9 +947,9 @@ local function styleButton_regions(slot, config)
     local cdSpec = style.cooldown
     if isRow and (cdSpec == nil or cdSpec.show ~= false) then
         if not slot.dfCD then
-            slot.dfCD = CreateFrame("Cooldown", nil, slot, "CooldownFrameTemplate")
+            slot.dfCD = CreateFrame("Cooldown", nil, host, "CooldownFrameTemplate")
         end
-        slot.dfCD:SetAllPoints(slot.dfIcon or slot.dfSquare or slot)
+        slot.dfCD:SetAllPoints(slot.dfIcon or slot.dfSquare or host)
         -- Swipe on by default; cdSpec.swipe=false hides it (AD "Hide Cooldown Swipe").
         local wantSwipe = (cdSpec == nil or cdSpec.swipe ~= false)
 
@@ -965,7 +987,7 @@ local function styleButton_regions(slot, config)
             -- Holder ABOVE the +10 DF.Border (and the +12 dispel ring): content text
             -- must draw ON TOP of the icon border, never under it. See the dispel-border
             -- holder note below for the same +10-clearance rationale.
-            slot.dfDurHolder = makeHolder(slot, durSpec.level or 13)
+            slot.dfDurHolder = makeHolder(host, durSpec.level or 13)
             slot.dfDur = slot.dfDurHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         end
         DF.TextStyle:Apply(slot.dfDur, durSpec, slot.dfDurHolder)
@@ -978,7 +1000,7 @@ local function styleButton_regions(slot, config)
             -- Holder ABOVE the +10 DF.Border and +12 dispel ring (one above the duration
             -- text): the stack count is the top-most content and was rendering UNDER the
             -- icon border at the old +7 (Krathe 2026-07-15).
-            slot.dfStackHolder = makeHolder(slot, stackSpec.level or 14)
+            slot.dfStackHolder = makeHolder(host, stackSpec.level or 14)
             slot.dfStack = slot.dfStackHolder:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
         end
         DF.TextStyle:Apply(slot.dfStack, stackSpec, slot.dfStackHolder)
@@ -998,7 +1020,7 @@ local function styleButton_regions(slot, config)
     local barSpec = style.bar
     if isRow and barSpec and barSpec.show then
         if not slot.dfBar then
-            slot.dfBar = CreateFrame("StatusBar", nil, slot)
+            slot.dfBar = CreateFrame("StatusBar", nil, host)
             slot.dfBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
             slot.dfBar:SetMinMaxValues(0, 1)   -- native SetDurationBar drives SetValue in [0,1]
         end
@@ -1006,7 +1028,7 @@ local function styleButton_regions(slot, config)
         if barSpec.fill then
             -- FILL geometry: re-anchor to fill the slot every pass (idempotent; safe on ApplyStyle).
             sb:ClearAllPoints()
-            sb:SetAllPoints(slot)
+            sb:SetAllPoints(host)
         else
             -- STRIP geometry: width follows the button via left+right edge anchors;
             -- gap/height are CONFIG values (relative SetPoint only — the slot rect is
@@ -1015,11 +1037,11 @@ local function styleButton_regions(slot, config)
             local gap = tonumber(barSpec.gap) or 2
             sb:ClearAllPoints()
             if barSpec.position == "TOP" then
-                sb:SetPoint("BOTTOMLEFT", slot, "TOPLEFT", 0, gap)
-                sb:SetPoint("BOTTOMRIGHT", slot, "TOPRIGHT", 0, gap)
+                sb:SetPoint("BOTTOMLEFT", host, "TOPLEFT", 0, gap)
+                sb:SetPoint("BOTTOMRIGHT", host, "TOPRIGHT", 0, gap)
             else   -- default BOTTOM: hang below the icon
-                sb:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -gap)
-                sb:SetPoint("TOPRIGHT", slot, "BOTTOMRIGHT", 0, -gap)
+                sb:SetPoint("TOPLEFT", host, "BOTTOMLEFT", 0, -gap)
+                sb:SetPoint("TOPRIGHT", host, "BOTTOMRIGHT", 0, -gap)
             end
             sb:SetHeight(barSpec.height or 4)
         end
@@ -1037,7 +1059,7 @@ local function styleButton_regions(slot, config)
         if not slot.dfName then
             -- Above the +10 border / +12 dispel ring (see duration holder) so the spell
             -- name never renders under the icon border.
-            slot.dfNameHolder = makeHolder(slot, 13)
+            slot.dfNameHolder = makeHolder(host, 13)
             slot.dfName = slot.dfNameHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         end
         slot.dfName:ClearAllPoints()
@@ -1053,7 +1075,7 @@ local function styleButton_regions(slot, config)
             -- would render UNDER the static border and the dispel colour would be
             -- invisible behind it. (Holder-hosted regions are registrar-legal — the
             -- duration text binds from a holder the same way.)
-            slot.dfDispelHolder = makeHolder(slot, dispelSpec.level or 12)
+            slot.dfDispelHolder = makeHolder(host, dispelSpec.level or 12)
             slot.dfAuraBorder = slot.dfDispelHolder:CreateTexture(nil, "OVERLAY")
             -- The native Color style only VERTEX-TINTS the region (SetAuraBorderColor →
             -- SetVertexColor; no file is ever assigned) — a blank texture renders
@@ -1091,7 +1113,7 @@ local function styleButton_regions(slot, config)
         if dispelSpec.nativeSymbol and not slot.dfSymbol then
             -- Above the +10 border / +12 dispel ring (see duration holder) so the dispel
             -- symbol glyph sits on top of the icon border, not under it.
-            slot.dfSymbolHolder = makeHolder(slot, 13)
+            slot.dfSymbolHolder = makeHolder(host, 13)
             slot.dfSymbol = slot.dfSymbolHolder:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
             slot.dfSymbol:SetPoint("CENTER")
         end
@@ -1147,7 +1169,7 @@ local function styleButton_regions(slot, config)
         if not slot.dfPandemicHolder then
             -- One above the stack count's +14: the refresh cue has to read over every
             -- other content region, including DF.Border at +10 and the dispel ring at +12.
-            slot.dfPandemicHolder = makeHolder(slot, pdSpec.level or 15)
+            slot.dfPandemicHolder = makeHolder(host, pdSpec.level or 15)
             -- Created hidden so a slot never flashes its cue between creation and the
             -- bind. This is the ONLY legal visibility write on the holder: it happens
             -- strictly before AddPandemicRegion, while the Shown aspect is still ours.
@@ -4799,10 +4821,34 @@ local function layoutSlotButton(button, config, ownerAnchor)
     if L.scale then pcall(button.SetScale, button, L.scale) end
 end
 
+-- ★ LEVEL host AND ALPHA host. styleButton_regions parents every region it creates onto
+-- this frame (see the `host` local at its top), which is what lets a slot take a tainted
+-- SetAlpha: the button refuses one, a DF-owned child frame does not.
+--
+-- ☠ THE EXPLICIT SetFrameLevel IS NOT COSMETIC — WITHOUT IT EVERY SLOT SHIFTS A LEVEL.
+-- A new child frame defaults to its parent's level + 1. Interposing this host would
+-- therefore push all of a slot's content up one level relative to everything else on the
+-- frame, and AD levels are ABSOLUTE (the z-order map: a row is 13 levels thick, measured)
+-- — a uniform +1 walks a slot's content into the next band. Pinning the host to the
+-- BUTTON's own level keeps every offset below it arithmetically identical to when the
+-- regions hung off the button directly: makeHolder(host, n) resolves to the same level
+-- makeHolder(button, n) did, and dfCD lands at button+1 exactly as before. Nothing is
+-- left on the button to compete for draw order, so relative ordering is preserved whole.
+-- ⚠ CALL AFTER ANY SetFrameLevel ON THE BUTTON. The host tracks the button's level, so
+-- pinning it while the button is still at its default and only then applying
+-- config.frameLevelOffset would strand the host — and every region on it — a band below
+-- where the consumer asked the slot to sit. Idempotent, so calling it twice is free.
+local function syncSlotHostLevel(button, host)
+    if not host then return end
+    local okLvl, lvl = pcall(button.GetFrameLevel, button)
+    if okLvl and type(lvl) == "number" then pcall(host.SetFrameLevel, host, lvl) end
+end
+
 local function makeSlotLevelHost(button)
     local ok, host = pcall(CreateFrame, "Frame", nil, button)
     if not ok or not host then return nil end
     pcall(host.SetAllPoints, host, button)
+    syncSlotHostLevel(button, host)
     return host
 end
 
@@ -4922,6 +4968,8 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
                 if config.frameLevelOffset then
                     local base = owner.container and owner.container:GetFrameLevel() or 0
                     pcall(b.SetFrameLevel, b, base + config.frameLevelOffset)
+                    -- The host tracks the button's level and the line above just moved it.
+                    syncSlotHostLevel(b, host)
                 end
                 -- ★ The engine's OWN pipeline, unchanged: regions created and styled,
                 -- then the native setters bound. Identical to what Handle:_acceptSlot /
@@ -4933,6 +4981,17 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
                 if not okB then DF:DebugWarn(DBG, "SlotOwner bindNative: %s", tostring(errB)) end
                 -- After sizing (styleButton_regions owns SetSize), before the seal.
                 layoutSlotButton(b, config, owner.anchor)
+            end
+            -- ☠ RE-ASSERT THE CONSUMER'S BASE ALPHA. Buttons are created in LAZY BATCHES
+            -- long after AcquireSlot returns, so applyPlacedAlpha has very often already
+            -- run against a handle whose GetAlphaHost was still nil -- it stashed the
+            -- value on the handle and had nowhere to put it. Without this the Alpha
+            -- slider would appear to work only when it happened to be moved AFTER the
+            -- button materialised, which is the kind of intermittent that reads as a
+            -- different bug entirely. The OOR fade recovers on its own (it runs on every
+            -- range update); a base alpha set once does not.
+            if host and handle._dfADBaseAlpha then
+                pcall(host.SetAlpha, host, handle._dfADBaseAlpha)
             end
             if spec.onInit then
                 local okI, err = pcall(spec.onInit, b, host)
@@ -4977,12 +5036,13 @@ function SlotHandle:IsParked()     return self.parked == true end
 function SlotHandle:GetFrame()     return self.button end
 function SlotHandle:Destroy()      return self:Park() end
 
--- ☠ ALPHA HOST — a SLOT HAS NONE, AND RETURNING THE BUTTON IS A LIVE ERROR.
+-- ☠ ALPHA HOST — NEVER THE BUTTON. RETURNING THE BUTTON IS A LIVE ERROR.
 --
 -- A per-indicator CONTAINER handle answers this with its own plain anchor frame
 -- (Handle.frame, created by AuraContainer:Create), which is DF-owned and therefore a
--- legal write target from tainted code. A collapsed slot has no such frame: the button's
--- parent is the SHARED container, so there is nothing per-indicator above it to fade.
+-- legal write target from tainted code. A collapsed slot answers with dfLevelHost, the
+-- DF-owned frame interposed between the button and every region styleButton_regions
+-- creates. Fading it fades the whole slot, because nothing renders outside it.
 --
 -- The button itself is NOT a substitute. It carries DenyTaintedAccessWhenAurasAreSecret,
 -- so any method call on it from a tainted path is refused the moment auras go secret --
@@ -4991,15 +5051,19 @@ function SlotHandle:Destroy()      return self:Park() end
 --     from code tainted by an AddOn)
 -- SlotHandle:GetFrame returns the button on purpose (identity, and the OOR fade's old
 -- `h:GetFrame()` probe), so consumers MUST ask for the alpha host separately rather than
--- assuming the two are the same object. Returning nil here is what makes them skip.
+-- assuming the two are the same object.
 --
--- ⚠ THIS IS A KNOWN GAP, NOT A DESIGN: per-indicator alpha (the Alpha slider and the
--- out-of-range fade) does not apply to Aura Designer indicators while they share a
--- container. DF-created CHILD frames of the button ARE writable -- makeHolder does
--- exactly that and the pandemic cue and dispel badge both render through one -- so the
--- fix is to parent the slot's regions onto dfLevelHost and fade that. Until then this
--- returns nil so the consumer skips instead of erroring.
-function SlotHandle:GetAlphaHost() return nil end
+-- ★ WHY A CHILD FRAME IS WRITABLE WHERE THE BUTTON IS NOT, from the 12.1 source:
+-- the restriction is applied by ApplyAccessRestrictions(auraFrame, ...) as a single
+-- AddAccessRestrictions call on the BUTTON ALONE. Unlike forbidden aspects -- which
+-- ValidateInboundScriptObject's own comment says "propagate through parent/child
+-- hierarchies" -- access restrictions do not descend. Blizzard's setters still accept
+-- our regions from one level deeper because IsDescendantOf allows "a direct child or
+-- indirect descendent of owner".
+--
+-- ⚠ Still nil if host creation failed (pcall'd, pre-seal): consumers skip rather than
+-- reach for the button, which is the behaviour that stopped the error storm.
+function SlotHandle:GetAlphaHost() return self.button and self.button.dfLevelHost or nil end
 
 -- Stop this slot displaying, WITHOUT destroying anything. Proven in game 2026-08-05:
 -- an empty filter string matches nothing (it does NOT fall back to a default).
@@ -5071,14 +5135,22 @@ function SlotHandle:ApplyStyle(style, layout)
     return ok
 end
 
--- Per-indicator alpha. Goes on the BUTTON, which is where the per-indicator container's
--- frame carried it before. ⚠ Never drive this to 0 as a way of hiding a slot -- park it
--- instead. A button's shown state is secret-backed and descendant effects inherit it, so
--- alpha 0 silences those too rather than just hiding the icon.
+-- Per-indicator alpha, on the alpha host.
+-- ☠ THIS USED TO WRITE THE BUTTON, AND THE pcall HID THAT IT COULDN'T. Its comment
+-- claimed the button "is where the per-indicator container's frame carried it before" —
+-- it is not: that frame was DF's own, the button is Blizzard's and carries
+-- DenyTaintedAccessWhenAurasAreSecret. The identical mistake in applyPlacedAlpha was
+-- equally silent, and only surfaced because the out-of-range fade makes the same call
+-- WITHOUT a pcall (43 errors in one session). Route through GetAlphaHost like everything
+-- else, and report failure instead of swallowing it.
+-- ⚠ Never drive this to 0 as a way of hiding a slot -- park it instead. A button's shown
+-- state is secret-backed and descendant effects inherit it, so alpha 0 silences those too
+-- rather than just hiding the icon.
 function SlotHandle:SetAlpha(alpha)
-    local btn = self.button
-    if not btn or type(alpha) ~= "number" then return false end
-    return pcall(btn.SetAlpha, btn, alpha)
+    if type(alpha) ~= "number" then return false end
+    local f = self:GetAlphaHost()
+    if not f then return false end
+    return pcall(f.SetAlpha, f, alpha)
 end
 
 -- Live z-order, on OUR frame — never on the sealed button. Available for a consumer whose
