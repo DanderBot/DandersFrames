@@ -1771,39 +1771,58 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- Get values - either from test data or real unit
     local maxHealth, incomingHeals
     local myHeals, othersHeals          -- Per-source breakdown (SPLIT mode)
-    local isTestMode = false
-    local testHealthPercent, testHealPercent  -- Only for test mode
-    
+    -- ⚠ There is deliberately NO isTestMode flag any more. It existed only to pick
+    -- a different render path, and every one of those forks was a bug waiting to
+    -- happen. If you find yourself wanting it back, the answer is almost certainly
+    -- to feed the shared path a different NUMBER instead.
+
+    -- ★★ THE PREVIEW SUPPLIES AMOUNTS, NEVER GEOMETRY. Everything below this block
+    -- is shared with live: same anchors, same StatusBar values, same clamp.
+    --
+    -- ☠ IT USED TO FORK AT THE RENDER, and that is what this replaced. The overlay
+    -- had a whole parallel geometry branch computing widths from
+    -- healthBar:GetWidth() minus the border inset -- which is NOT the basis the
+    -- health FILL uses (the fill spans the bar's full width). The two therefore
+    -- disagreed by inset * (1 - 2 * health): a hidden overlap at a static health,
+    -- and a visible gap between health and prediction the moment Animate Health
+    -- swung it the other way (Krathe, 2026-08-07). The clamp added hours earlier had
+    -- gone into that same duplicated geometry rather than onto the amount, where
+    -- live's calculator puts it -- the fourth divergence of this shape in two days.
+    --
+    -- ★ Nothing in live's path is secret-bound here, so there is no reason to fork:
+    -- test values are plain numbers, and a StatusBar fed a plain value behaves the
+    -- same as one fed a secret. Standing rule -- test follows live wherever it can.
+    local function applyTestHeals(testData)
+        maxHealth = (testData and testData.maxHealth) or 100000
+        local healthPct = (testData and testData.healthPercent) or 0.75
+        local healPct = (testData and testData.healPredictionPercent) or 0
+        local total = healPct * maxHealth   -- safe: nothing is secret in test
+        -- Mirrors SetIncomingHealClampMode. With overheal off the calculator would
+        -- never report more than the missing health, so neither may the preview;
+        -- with it on the overhang is the point and the bar is parented to the frame
+        -- rather than the health bar so it can spill.
+        if not db.healPredictionShowOverheal then
+            total = math.min(total, math.max(0, maxHealth - healthPct * maxHealth))
+        end
+        -- The breakdown live gets from the calculator. An even split is the only
+        -- honest preview: there is no real healer to attribute to.
+        myHeals, othersHeals = total * 0.5, total * 0.5
+        frame.dfTotalHeals, frame.dfMyHeals, frame.dfOthersHeals = total, myHeals, othersHeals
+        if showMode == "MINE" or showMode == "SPLIT" then
+            incomingHeals = myHeals
+        elseif showMode == "OTHERS" then
+            incomingHeals = othersHeals
+        else
+            incomingHeals = total
+        end
+    end
+
     if DF.testMode and testIndex ~= nil then
-        isTestMode = true
         -- testIndex may be a numeric index or a ready testData TABLE (the
         -- TestMode render/animation loop passes its per-tick data directly)
-        local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex)
-        if testData then
-            maxHealth = testData.maxHealth
-            testHealthPercent = testData.healthPercent
-            testHealPercent = testData.healPredictionPercent or 0
-            incomingHeals = testHealPercent * maxHealth  -- Safe in test mode
-        else
-            maxHealth = 100000
-            testHealthPercent = 0.75
-            testHealPercent = 0
-            incomingHeals = 0
-        end
+        applyTestHeals(type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex))
     elseif DF.raidTestMode and testIndex ~= nil then
-        isTestMode = true
-        local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true)
-        if testData then
-            maxHealth = testData.maxHealth
-            testHealthPercent = testData.healthPercent
-            testHealPercent = testData.healPredictionPercent or 0
-            incomingHeals = testHealPercent * maxHealth
-        else
-            maxHealth = 100000
-            testHealthPercent = 0.75
-            testHealPercent = 0
-            incomingHeals = 0
-        end
+        applyTestHeals(type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true))
     else
         -- Only process valid units for real data
         if not unit or (unit ~= "player" and not unit:match("^party%d$") and not unit:match("^raid%d+$")) then
@@ -2008,14 +2027,14 @@ function DF:UpdateHealPrediction(frame, testIndex)
             bar.bg:SetColorTexture(bgC.r, bgC.g, bgC.b, bgC.a)
         end
 
-        -- Use secret-aware SetBarValue. In test split, the primary segment shows
-        -- half the preview heal (bar2 the other half).
-        local seg1Val = (isSplit and isTestMode) and ((testHealPercent * 0.5) * maxHealth) or incomingHeals
-        DF.SetBarValue(bar, seg1Val, frame)
+        -- Use secret-aware SetBarValue. SPLIT already halved incomingHeals upstream
+        -- (live via the calculator's per-healer breakdown, preview via
+        -- applyTestHeals), so there is nothing test-specific left to do here.
+        DF.SetBarValue(bar, incomingHeals, frame)
         bar:Show()
 
         -- SPLIT: others' segment, chained after the primary within the floating bar.
-        if isSplit and (isTestMode or othersHeals) then
+        if isSplit and othersHeals then
             local seg2 = GetOrCreateHealPredSegment2(frame)
             StyleHealPredSegment(seg2, tex, blendMode, othersColor)
             seg2:SetParent(frame)
@@ -2033,8 +2052,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
             -- whichever (width for horizontal, height for vertical).
             AnchorHealPredSegment(seg2, bar:GetStatusBarTexture(), segOrient, w, w)
             seg2:SetMinMaxValues(0, maxHealth)
-            local seg2Val = isTestMode and ((testHealPercent * 0.5) * maxHealth) or othersHeals
-            DF.SetBarValue(seg2, seg2Val, frame)
+            DF.SetBarValue(seg2, othersHeals, frame)
             seg2:Show()
         elseif frame.dfHealPredictionBar2 then
             frame.dfHealPredictionBar2:Hide()
@@ -2066,96 +2084,46 @@ function DF:UpdateHealPrediction(frame, testIndex)
         end
         if db.pixelPerfect and DF.PixelPerfect then inset = DF:PixelPerfect(inset) end
         
-        -- For test mode, we can use calculated positions
-        -- For live mode, we anchor to the health fill texture
-        if isTestMode then
-            -- Test mode: calculate position (safe, not secret)
-            local barWidth = frame.healthBar:GetWidth() - (inset * 2)
-            local barHeight = frame.healthBar:GetHeight() - (inset * 2)
-            local healthWidth = testHealthPercent * barWidth
-            local healthHeight = testHealthPercent * barHeight
-            -- Split preview: primary (my) segment takes half, bar2 the other half.
-            local primaryFrac = isSplit and (testHealPercent * 0.5) or testHealPercent
-            local healWidth = primaryFrac * barWidth
-            local healHeight = primaryFrac * barHeight
-            -- ☠ CLAMP TO THE MISSING HEALTH unless overheal is being shown. Live gets
-            -- this free from the calculator (SetIncomingHealClampMode, driven by the same
-            -- setting) and never does the arithmetic itself; the preview computes widths
-            -- by hand and had no equivalent, so health + prediction could exceed 1 and the
-            -- bar ran off the end of the frame. Invisible while health sits still, which
-            -- is why it surfaced the moment Animate Health pushed a frame near full
-            -- (Krathe, 2026-08-07). Overheal ON keeps the spill: the bar is parented to
-            -- the frame rather than the health bar precisely so it CAN overhang.
-            if not db.healPredictionShowOverheal then
-                healWidth  = math.min(healWidth,  math.max(0, barWidth  - healthWidth))
-                healHeight = math.min(healHeight, math.max(0, barHeight - healthHeight))
-            end
+        -- ★ ONE PATH, TEST AND LIVE. Anchoring to the health FILL TEXTURE is what
+        -- makes the prediction start exactly where health ends, at any health value
+        -- and in any orientation, without knowing the value at all. The preview used
+        -- to compute the same position from healthBar:GetWidth() minus the border
+        -- inset -- a different basis to the one the fill actually uses -- and the two
+        -- drifted apart by inset * (1 - 2 * health): overlap below half health, a
+        -- visible gap above it. See the note on the test-data block above.
+        local barWidth = frame.healthBar:GetWidth() - (inset * 2)
+        local barHeight = frame.healthBar:GetHeight() - (inset * 2)
 
-            if healthOrient == "HORIZONTAL" then
-                bar:SetOrientation("HORIZONTAL")
-                bar:SetReverseFill(false)
-                bar:SetWidth(healWidth)
-                -- Use two-point anchoring to match health bar fill height exactly
-                bar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset + healthWidth, -inset)
-                bar:SetPoint("BOTTOMLEFT", frame.healthBar, "BOTTOMLEFT", inset + healthWidth, inset)
-            elseif healthOrient == "HORIZONTAL_INV" then
-                bar:SetOrientation("HORIZONTAL")
-                bar:SetReverseFill(true)
-                bar:SetWidth(healWidth)
-                bar:SetPoint("TOPRIGHT", frame.healthBar, "TOPRIGHT", -inset - healthWidth, -inset)
-                bar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset - healthWidth, inset)
-            elseif healthOrient == "VERTICAL" then
-                bar:SetOrientation("VERTICAL")
-                bar:SetReverseFill(false)
-                bar:SetHeight(healHeight)
-                bar:SetPoint("BOTTOMLEFT", frame.healthBar, "BOTTOMLEFT", inset, inset + healthHeight)
-                bar:SetPoint("BOTTOMRIGHT", frame.healthBar, "BOTTOMRIGHT", -inset, inset + healthHeight)
-            elseif healthOrient == "VERTICAL_INV" then
-                bar:SetOrientation("VERTICAL")
-                bar:SetReverseFill(true)
-                bar:SetHeight(healHeight)
-                bar:SetPoint("TOPLEFT", frame.healthBar, "TOPLEFT", inset, -inset - healthHeight)
-                bar:SetPoint("TOPRIGHT", frame.healthBar, "TOPRIGHT", -inset, -inset - healthHeight)
-            end
-            
-            bar:SetMinMaxValues(0, 1)
-            bar:SetValue(1)  -- Fill completely since width represents the heal
-        else
-            -- Live mode: Use StatusBar API to handle proportional fill - no manual division needed
-            local barWidth = frame.healthBar:GetWidth() - (inset * 2)
-            local barHeight = frame.healthBar:GetHeight() - (inset * 2)
-            
-            if healthOrient == "HORIZONTAL" then
-                bar:SetOrientation("HORIZONTAL")
-                bar:SetReverseFill(false)
-                bar:SetWidth(barWidth)
-                -- Use two-point anchoring to match health fill texture height exactly
-                bar:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, 0)
-                bar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
-            elseif healthOrient == "HORIZONTAL_INV" then
-                bar:SetOrientation("HORIZONTAL")
-                bar:SetReverseFill(true)
-                bar:SetWidth(barWidth)
-                bar:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, 0)
-                bar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-            elseif healthOrient == "VERTICAL" then
-                bar:SetOrientation("VERTICAL")
-                bar:SetReverseFill(false)
-                bar:SetHeight(barHeight)
-                bar:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                bar:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
-            elseif healthOrient == "VERTICAL_INV" then
-                bar:SetOrientation("VERTICAL")
-                bar:SetReverseFill(true)
-                bar:SetHeight(barHeight)
-                bar:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                bar:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
-            end
-            
-            -- Let WoW's StatusBar handle the percentage calculation internally
-            bar:SetMinMaxValues(0, maxHealth)
-            DF.SetBarValue(bar, incomingHeals, frame)
+        if healthOrient == "HORIZONTAL" then
+            bar:SetOrientation("HORIZONTAL")
+            bar:SetReverseFill(false)
+            bar:SetWidth(barWidth)
+            -- Use two-point anchoring to match health fill texture height exactly
+            bar:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, 0)
+            bar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+        elseif healthOrient == "HORIZONTAL_INV" then
+            bar:SetOrientation("HORIZONTAL")
+            bar:SetReverseFill(true)
+            bar:SetWidth(barWidth)
+            bar:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, 0)
+            bar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, 0)
+        elseif healthOrient == "VERTICAL" then
+            bar:SetOrientation("VERTICAL")
+            bar:SetReverseFill(false)
+            bar:SetHeight(barHeight)
+            bar:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", 0, 0)
+            bar:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
+        elseif healthOrient == "VERTICAL_INV" then
+            bar:SetOrientation("VERTICAL")
+            bar:SetReverseFill(true)
+            bar:SetHeight(barHeight)
+            bar:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
+            bar:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
         end
+
+        -- Let WoW's StatusBar handle the percentage calculation internally
+        bar:SetMinMaxValues(0, maxHealth)
+        DF.SetBarValue(bar, incomingHeals, frame)
 
         bar:Show()
 
@@ -2166,7 +2134,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         -- ============================================================
         -- othersHeals is only available from the calculator path; if absent
         -- (no calculator), there's no breakdown to draw a second segment from.
-        if isSplit and (isTestMode or othersHeals) then
+        if isSplit and othersHeals then
             local seg2 = GetOrCreateHealPredSegment2(frame)
             StyleHealPredSegment(seg2, tex, blendMode, othersColor)
             seg2:SetParent(frame)
@@ -2175,28 +2143,13 @@ function DF:UpdateHealPrediction(frame, testIndex)
             local prevTex = bar:GetStatusBarTexture()
             local barWidth = frame.healthBar:GetWidth() - (inset * 2)
             local barHeight = frame.healthBar:GetHeight() - (inset * 2)
-            if isTestMode then
-                -- Others' half of the preview heal; segment width is the amount.
-                local othersFrac = testHealPercent * 0.5
-                local segW, segH = othersFrac * barWidth, othersFrac * barHeight
-                -- Same clamp as the primary segment above, minus the room the primary
-                -- already took: a split preview overflows twice as easily, since both
-                -- halves chain off the health fill.
-                if not db.healPredictionShowOverheal then
-                    local usedW = (testHealthPercent + othersFrac) * barWidth
-                    local usedH = (testHealthPercent + othersFrac) * barHeight
-                    segW = math.min(segW, math.max(0, barWidth  - usedW))
-                    segH = math.min(segH, math.max(0, barHeight - usedH))
-                end
-                AnchorHealPredSegment(seg2, prevTex, healthOrient, segW, segH)
-                seg2:SetMinMaxValues(0, 1)
-                seg2:SetValue(1)
-            else
-                -- Full-width segment; StatusBar fills the others' proportion.
-                AnchorHealPredSegment(seg2, prevTex, healthOrient, barWidth, barHeight)
-                seg2:SetMinMaxValues(0, maxHealth)
-                DF.SetBarValue(seg2, othersHeals, frame)
-            end
+            -- Full-width segment; StatusBar fills the others' proportion. The preview
+            -- reaches here with othersHeals already set (applyTestHeals), so it takes
+            -- the same path -- it used to size the segment by hand and inherited the
+            -- primary's drift on top of its own.
+            AnchorHealPredSegment(seg2, prevTex, healthOrient, barWidth, barHeight)
+            seg2:SetMinMaxValues(0, maxHealth)
+            DF.SetBarValue(seg2, othersHeals, frame)
             seg2:Show()
         elseif frame.dfHealPredictionBar2 then
             frame.dfHealPredictionBar2:Hide()
