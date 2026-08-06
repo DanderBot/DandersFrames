@@ -2384,8 +2384,15 @@ function DF:BuildDefensiveRowConfig(db, unit)
             return { method = "BigDefensive" }
         end)(),
         -- P5 preview: HELPFUL category alone would page the buff pool — show
-        -- curated defensives instead (TestMode drives testMax per role).
+        -- curated defensives instead.
         testPool = "defensives",
+        -- ☠ The line above used to end "(TestMode drives testMax per role)". It did
+        -- NOT — nothing ever set testMax here, so the preview fell through to the row's
+        -- full `max` and declared one AuraGroup per icon, each eagerly allocating ten
+        -- buttons, for a curated pool of FOUR defensives. Another comment asserting a
+        -- behaviour no code implemented. Capped like the buff row now: this is a
+        -- HELPFUL row, so the Buffs count is the one the user set for it.
+        testMax = db.testBuffCount or 2,
         tooltips = db.tooltipDefensiveEnabled ~= false,
         -- Z-order: an ABSOLUTE offset from the unit frame. Highest of the aura surfaces, so a
         -- defensive cue is never buried. Applied via h:ApplyZOrder(cfg) at Create + re-apply.

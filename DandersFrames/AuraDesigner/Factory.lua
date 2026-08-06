@@ -2264,13 +2264,40 @@ end
 -- Takes the FRAME (not unit): the border spec needs the frame db (pixelPerfect).
 -- adBorderAnim (the placed containers' DF-owned border-animation opt-in) is set
 -- only when a border exists, keeping style-less configs byte-identical.
+-- ☠ THE TEST PANEL'S COUNT APPLIES TO EVERY PREVIEW SURFACE, NOT JUST THE ROWS.
+-- Features/Auras.lua was the only place that set testMax, and only for the buff and
+-- debuff rows -- so an AD group fell through to its own maxIcons and previewed up to
+-- TEN icons while the row beside it previewed two.
+--
+-- That is not a cosmetic difference. The preview declares ONE AuraGroup per icon (the
+-- only shape that keeps entry k at position k), and every AuraGroup eagerly allocates
+-- FrameCreationBatchSize (10) buttons before maxFrameCount is applied. So each surplus
+-- preview icon costs TEN frames, permanently -- WoW never frees them. Ten icons instead
+-- of two is 100 frames instead of 20, per container, per unit frame.
+--
+-- Measured from the debug log 2026-08-06: containers painting indices 1..10 and 1..11
+-- with testBuffCount / testDebuffCount both set to 2.
+--
+-- Categorised off the resolved filter string, the same way _paintTestSlot picks its
+-- pool, so a debuff group honours the Debuffs slider and a buff group the Buffs one.
+local function adTestMax(frame, filterStr)
+    local db = DF:GetFrameDB(frame) or {}
+    if type(filterStr) == "string" and filterStr:find("HARMFUL") then
+        return db.testDebuffCount or 2
+    end
+    return db.testBuffCount or 2
+end
+
 local function buildFilterGroupConfig(frame, map, group, mine)
     local borderSpec = buildGroupBorderSpec(frame, group)
+    local filt = poolFilter(group, mine)
     return {
         unit = frame.unit,
         mode = "row",
         max = math.max(1, tonumber(group.maxIcons) or 8),
-        filter = poolFilter(group, mine),
+        filter = filt,
+        -- Preview-only cap. Live still renders `max`; only test mode clamps.
+        testMax = adTestMax(frame, filt),
         sort = groupSort(group, "DEFAULT"),
         candidateFilters = { includeSpellIDs = map },
         testEntries = filterGroupTestEntries(map),
