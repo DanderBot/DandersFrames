@@ -1149,7 +1149,6 @@ L["None active (using global settings)"] = true
 L["Normal"] = true
 L["Normal (BLEND)"] = true
 L["Not in a raid group"] = true
-L["Number"] = true
 L["not in database"] = true
 -- 12.1 unsupported-version guard popup (Core.lua)
 L["Unsupported Game Version"] = true
@@ -1824,8 +1823,13 @@ L["Replace Buffs"] = true
 L["Reset"] = true
 L["Reset All Aura Configs"] = true
 L["Right-click"] = true
+-- Duration Format labels. ⚠ "Seconds" now names the NO-ROLL-UP format ("152"); the
+-- format that shows "45s" and rolls up to minutes is "Units". The Color by Time scale
+-- tab also uses L["Seconds"] and still means seconds, so the key is legitimately shared.
 L["Seconds"] = true
-L["Seconds + Percent"] = true
+L["Standard"] = true
+L["Timer"] = true
+L["Units"] = true
 L["Select a spell"] = true
 L["Select indicator..."] = true
 L["Select trigger for %s"] = true

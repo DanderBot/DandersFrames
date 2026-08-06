@@ -237,8 +237,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- FULL ("14 Seconds") overflows a 20px icon (never fit, delisted with #5's
         -- percent work — a saved FULL still renders until the user re-picks); the
         -- combined "12s (45%)" is AD-bar-only for the same reason.
-        local durationFormatOptions = { NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
-            _order = { "NUMBER", "SHORT", "PERCENT" } }
+        -- RAW ("Seconds") is AD-bar-only for the same reason FULL is: it never rolls up,
+        -- so an hour-long buff renders "3599" — four glyphs an icon cannot hold.
+        local durationFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
+            TIMER = L["Timer"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }
         local durFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], durationFormatOptions, db, "buffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames(); GUI:RefreshCurrentPage() end), 55)
         durFormat.disableOn = function(d) return not d.buffShowDuration end
         -- Shared TextStyle control block (font/scale/outline/shadow/colour/anchor/
@@ -668,8 +671,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Cooldown swipe (radial time-remaining) lives with Duration Text, not Border.
         durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Cooldown Swipe"], db, "debuffHideSwipe", nil), 30)
         -- Icon-sized formats only (see the buff page's Duration Format note).
-        local debuffDurationFormatOptions = { NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
-            _order = { "NUMBER", "SHORT", "PERCENT" } }
+        local debuffDurationFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
+            TIMER = L["Timer"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }
         local durFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], debuffDurationFormatOptions, db, "debuffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames(); GUI:RefreshCurrentPage() end), 55)
         durFormat.disableOn = function(d) return not d.debuffShowDuration end
         local durFont = durationGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "debuffDurationFont", nil), 55)
@@ -1330,8 +1334,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Duration Format (PTR-7 #5): previously hardcoded NUMBER; icon-sized
         -- formats only (see the buff page's Duration Format note). No Hide Above
         -- on this page, so no percent-grey needed.
-        local defDurFormatOptions = { NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
-            _order = { "NUMBER", "SHORT", "PERCENT" } }
+        local defDurFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
+            TIMER = L["Timer"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }
         local defDurFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], defDurFormatOptions, db, "defensiveIconDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
         defDurFormat.hideOn = HideDefensiveDurationOptions
 

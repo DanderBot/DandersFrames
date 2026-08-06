@@ -740,7 +740,8 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
     -- know the total, so absolute-seconds bands are the 12.1 equivalent.)
     if hideAboveT or colorByTime or alertT then
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
-        local secFmt = (format == "SHORT" and "%.0fs") or (format == "FULL" and "%.0f Seconds") or "%.0f"
+        local secFmt = (format == "SHORT" and "%.0fs") or (format == "FULL" and "%.0f Seconds")
+                        or ((format == "TIMER" or format == "RAW") and "%d") or "%.0f"
         local minFmt = (format == "FULL") and "%.0f Minutes" or "%.0fm"
         local hrFmt  = (format == "FULL") and "%.0f Hours"   or "%.0fh"
         local bps = colorByTime and GetDurationColorBreakpoints() or nil
@@ -801,21 +802,69 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
                 end
             end
             table.sort(sorted)   -- ascending
+            -- ☠ EVERY FORMAT NEEDS A SHAPE HERE, not just the ones that had one. This
+            -- branch owns hide-above and colour-by-time, so a format missing from it does
+            -- not fail loudly — it silently renders as NUMBER the moment either is
+            -- switched on, which reads as "the format setting stopped working".
+            -- RAW deliberately returns the SAME shape at every threshold: never rolling
+            -- up is the format, so a band above 60 must still print raw seconds.
+            local function bandShape(t)
+                if format == "RAW" then return secFmt, nil end
+                if format == "TIMER" then
+                    if t >= 3600 then return "%d:%02d", { { div = 3600 }, { div = 60, mod = 60 } } end
+                    if t >= 60   then return "%d:%02d", { { div = 60 }, { mod = 60 } } end
+                    return secFmt, nil
+                end
+                if t >= 3600 then return hrFmt,  { { div = 3600, step = 1, rounding = down } } end
+                if t >= 60   then return minFmt, { { div = 60,   step = 1, rounding = down } } end
+                return secFmt, nil
+            end
             for _, t in ipairs(sorted) do
                 local hex = colorByTime and colorHexAt(bps, t) or nil
-                if t >= 3600 then
-                    add(t, hrFmt,  hex, { { div = 3600, step = 1, rounding = down } })
-                elseif t >= 60 then
-                    add(t, minFmt, hex, { { div = 60,   step = 1, rounding = down } })
-                else
-                    add(t, secFmt, hex)
-                end
+                local f, comps = bandShape(t)
+                add(t, f, hex, comps)
             end
             if blankAt then
                 bands[#bands + 1] = { threshold = blankAt, step = 1, rounding = down, format = "" }
             end
             table.sort(bands, function(a, b) return a.threshold < b.threshold end)
             for i = 1, #bands do fmt:AddBreakpoint(bands[i]) end
+            return fmt
+        end)
+        return ok and f or nil
+    end
+    -- TIMER — "5:32". The only format needing a SECOND component: `div` yields the
+    -- minutes, `mod` the leftover seconds. Nothing in DF used `mod` before this, and no
+    -- other format here can express a clock without it.
+    -- ⚠ `%d` (truncates), not `%.0f` (rounds to nearest). At 5m32s the minute component
+    -- is 5.53 and `%.0f` would render "6:32". NUMBER and the banded path below still use
+    -- `%.0f` and therefore print "2m" at 1m59s remaining — flagged to Krathe, and
+    -- deliberately NOT changed here: a rounding change to a shipped format does not
+    -- belong in the commit that adds new ones.
+    if format == "TIMER" then
+        if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
+        local ok, f = pcall(function()
+            local down = Enum.NumericRuleFormatRounding.Down
+            local fmt = C_StringUtil.CreateNumericRuleFormatter()
+            fmt:AddBreakpoint({ threshold = 0,    step = 1, rounding = down, min = 1, format = "%d" })
+            fmt:AddBreakpoint({ threshold = 60,   step = 1, rounding = down, format = "%d:%02d",
+                                components = { { div = 60 }, { mod = 60 } } })
+            fmt:AddBreakpoint({ threshold = 3600, step = 1, rounding = down, format = "%d:%02d",
+                                components = { { div = 3600 }, { div = 60, mod = 60 } } })
+            return fmt
+        end)
+        return ok and f or nil
+    end
+    -- RAW — "152". Deliberately has NO minute breakpoint; never rolling up IS the format,
+    -- and it is the one the other three are measured against. Offered on BARS ONLY
+    -- (Krathe's call): an hour-long buff renders "3599", four glyphs that a 20px icon
+    -- cannot hold but a bar reads fine.
+    if format == "RAW" then
+        if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
+        local ok, f = pcall(function()
+            local down = Enum.NumericRuleFormatRounding.Down
+            local fmt = C_StringUtil.CreateNumericRuleFormatter()
+            fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = down, min = 1, format = "%d" })
             return fmt
         end)
         return ok and f or nil

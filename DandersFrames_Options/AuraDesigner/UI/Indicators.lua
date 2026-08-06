@@ -368,8 +368,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- Hide Above (percent formats can't compose with it), assigned below.
             local UpdateHideAboveState
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], {
-                NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
-                _order = { "NUMBER", "SHORT", "PERCENT" },
+                -- ⚠ No RAW on icon surfaces — see the bar list below for why.
+                NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"], PERCENT = L["Percent"],
+                _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" },
             }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
@@ -499,8 +500,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- Icon-sized formats only (see the icon card's Duration Format note).
             local UpdateHideAboveState
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], {
-                NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
-                _order = { "NUMBER", "SHORT", "PERCENT" },
+                -- ⚠ No RAW on icon surfaces — see the bar list below for why.
+                NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"], PERCENT = L["Percent"],
+                _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" },
             }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
@@ -658,9 +660,15 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- Seconds + Percent ("12s (45%)" — 68914 multi-component text, #5).
             local UpdateHideAboveState
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], {
-                NUMBER = L["Number"], SHORT = L["Seconds"], FULL = L["Full"],
-                PERCENT = L["Percent"], SECONDS_PERCENT = L["Seconds + Percent"],
-                _order = { "NUMBER", "SHORT", "FULL", "PERCENT", "SECONDS_PERCENT" },
+                -- ★ The ONLY surface offering RAW ("Seconds"), because it is the only one
+                -- wide enough: RAW never rolls up, so an hour-long aura renders "3599".
+                -- ⚠ SECONDS_PERCENT is labelled "Both", not "Seconds + Percent" — with
+                -- "Seconds" now naming the no-roll-up format, that old label would read as
+                -- raw-seconds + percent, which is not what it shows ("12s (45%)").
+                NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"],
+                RAW = L["Seconds"], FULL = L["Full"],
+                PERCENT = L["Percent"], SECONDS_PERCENT = L["Both"],
+                _order = { "NUMBER", "SHORT", "TIMER", "RAW", "FULL", "PERCENT", "SECONDS_PERCENT" },
             }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)

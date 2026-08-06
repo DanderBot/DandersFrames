@@ -2366,8 +2366,10 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         -- compose with the percent-family formats.
         local UpdateHideAboveState
         g:AddWidget(GUI:CreateDropdown(body, L["Duration Format"], {
-            NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
-            _order = { "NUMBER", "SHORT", "PERCENT" },
+            -- ⚠ No RAW on icon surfaces: it never rolls up, so an hour-long aura reads
+            -- "3599" — readable on a bar, four glyphs too many on a 20px icon.
+            NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" },
         }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
         GUI:CreateTextControls(g, proxy, "duration", {
             parent = body,
