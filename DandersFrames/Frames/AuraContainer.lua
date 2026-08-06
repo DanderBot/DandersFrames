@@ -2771,8 +2771,26 @@ function Handle:_slotCount()
     if mode == "overlay" or mode == "missing" then return 1 end
     -- Test mode: the preview honours the test panel's count slider (config.testMax),
     -- still capped by the row's own max — mirrors the legacy painter's min() chain.
-    if AuraContainer._testMode and self.config.testMax then
-        return math.min(self.config.testMax, self.config.max or self.config.testMax)
+    --
+    -- ☠ AND BY THE CURATED POOL. The preview paints one distinct sample per slot, so
+    -- asking for more slots than the pool holds cannot produce more distinct icons —
+    -- it can only repeat, and repeats read as a rendering bug rather than as "we ran
+    -- out of samples". The defensive pool holds FOUR entries against a row that
+    -- happily previews eight or more; the debuff pool holds ten against an eleven-icon
+    -- row, whose last slot landed back on entry 1 and duplicated the styled slot.
+    -- Confirmed from the debug log 2026-08-06: idx=11 over a 10-entry debuff pool, and
+    -- the defensive pool cycling 1-4 across ten indices.
+    --
+    -- Capping HERE rather than clamping only in the painter is what actually fixes it:
+    -- the count decides how many buttons the flow lays out, so an uncapped count draws
+    -- duplicate icons no matter what the painter does with the index.
+    if AuraContainer._testMode then
+        local n = self.config.testMax
+            and math.min(self.config.testMax, self.config.max or self.config.testMax)
+            or (self.config.max or 1)
+        local pool = self:_testPool()
+        if pool and #pool > 0 then n = math.min(n, #pool) end
+        return math.max(1, n)
     end
     return self.config.max or 1
 end
@@ -2926,30 +2944,36 @@ end
 -- live, so the preview is styling-true (borders, fonts, insets, swipe). Harmful
 -- rows page through the debuff pool (dispel-typed edges), everything else the
 -- buff pool. Regions are unbound in test mode, so their Shown state is OURS here.
-function Handle:_paintTestSlot(slot, index)
+-- The curated preview pool for this container. Extracted so the SLOT COUNT and the
+-- PAINT agree on one answer: they used to resolve it independently, and the count could
+-- ask for more icons than the pool has entries.
+function Handle:_testPool()
     local recs = normalizeFilters(self.config.filter)
     local harmful = recs[1] and recs[1].f:find("HARMFUL")
     local td = DF.TestData
-    -- config.testEntries carries per-container curated entries (the Aura
-    -- Designer's placed indicators preview their own configured spell);
-    -- config.testPool names a curated TestData pool for rows whose category
-    -- filter alone would mispreview (the defensive row is HELPFUL but must show
-    -- defensives, not raid buffs). Falls back to the category pools.
+    -- config.testEntries carries per-container curated entries (the Aura Designer's
+    -- placed indicators preview their own configured spell); config.testPool names a
+    -- curated TestData pool for rows whose category filter alone would mispreview (the
+    -- defensive row is HELPFUL but must show defensives, not raid buffs). Falls back to
+    -- the category pools.
     local pool = self.config.testEntries
         or (td and ((self.config.testPool and td[self.config.testPool])
         or (harmful and td.debuffs or td.buffs)))
+    return pool, harmful
+end
+
+function Handle:_paintTestSlot(slot, index)
+    local pool = self:_testPool()
     if not pool or #pool == 0 then return end
-    local e = pool[((index - 1) % #pool) + 1]
-    -- ⚠ TEMPORARY DIAGNOSTIC (test-icon investigation, 2026-08-06). Remove once the
-    -- cause is found. If this prints the RIGHT entry for each slot and the art on
-    -- screen is still wrong, the paint is being overwritten after us and the search
-    -- moves to who repaints; if the entries themselves are wrong or repeated, the
-    -- pool or the index is the fault.
-    DF:Debug(DBG, "TESTICON paint: idx=%d -> [%s] id=%s icon=%s pool=%s(%d) src=%s",
-        index, tostring(e and e.name), tostring(e and e.spellID), tostring(e and e.icon),
-        tostring(self.config.testEntries and "testEntries"
-            or self.config.testPool or (harmful and "debuffs" or "buffs")),
-        #pool, tostring(self.config.mode))
+    -- ☠ CLAMP, DO NOT WRAP. This was `((index - 1) % #pool) + 1`, which silently
+    -- recycled the pool once the preview asked for more icons than it holds — the
+    -- defensive pool has FOUR entries against a row that previews eight or more, so
+    -- every icon past the fourth was a repeat, and an 11-icon debuff row wrapped its
+    -- last slot back onto entry 1, duplicating whatever the styled slot was already
+    -- showing. _slotCount caps the preview to the pool now, so an out-of-range index
+    -- should be unreachable; clamping rather than wrapping means that if one ever does
+    -- arrive it repeats the LAST entry visibly instead of impersonating the first.
+    local e = pool[math.max(1, math.min(index, #pool))]
     -- Belt-and-braces: native hover must NEVER win in test mode (it tooltips the
     -- hidden SAMPLE aura). Re-asserted every paint pass, not just at creation.
     if slot.SetMouseMotionEnabled then pcall(function() slot:SetMouseMotionEnabled(false) end) end
@@ -3442,13 +3466,17 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
     -- time, and more arrive on later aura events). Any test transition between build and
     -- a batch firing flipped the branch underneath a container that cannot change shape.
     --
-    -- The failure is one-directional and silent: a test-shaped container whose later
-    -- batches land while the global reads false runs _bindNativeSlot, so Blizzard's
-    -- SetIcon takes over and repaints the curated preview art with the hidden SAMPLE
-    -- aura's icon -- the same "sample auras' random art" failure the P5 note in
-    -- ApplyStyle describes. The tooltip is unaffected, because _testTips is DF-owned and
-    -- keyed by the curated index, so the two visibly disagree. Reported in game
-    -- 2026-08-06: buff, debuff and defensive rows all showing one repeated icon.
+    -- The failure would be one-directional and silent: a test-shaped container whose
+    -- later batches land while the global reads false would run _bindNativeSlot, and
+    -- Blizzard's SetIcon would repaint the curated art with the hidden SAMPLE aura's.
+    --
+    -- ⚠ THEORETICAL, and honestly so. This was written as the fix for the 2026-08-06
+    -- repeated-icon report and it was NOT the cause: the debug log for that session has
+    -- 195 creates with shape=true global=true and 225 with shape=false global=false --
+    -- they agreed every single time. The real cause was the preview asking for more
+    -- slots than the curated pool holds (see Handle:_slotCount). Kept because reading a
+    -- mutable global to decide something the container fixed at build time is wrong
+    -- regardless, but do not cite it as a fixed bug.
     --
     -- Captured, not read through handle.backend at call time: a re-adopted park swaps
     -- the backend out from under closures that belong to a different container.
