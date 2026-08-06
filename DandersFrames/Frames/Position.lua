@@ -2615,3 +2615,122 @@ if EventRegistry and EventRegistry.RegisterCallback then
     EventRegistry:RegisterCallback("EditMode.Enter", standDownForEditMode, DF)
 end
 
+
+-- ============================================================
+-- POSITION TARGETS — the resolver behind the public API
+-- ============================================================
+-- Core/API.lua's DandersFrames_GetPositionTargets / GetPosition / SetPosition are thin
+-- shells over this. The logic lives HERE because POSITION_MODES is a file-local and this
+-- is the file that owns what "a position" means; API.lua stays what it already is, a
+-- documented wall of global wrappers.
+--
+-- Written for MSUF's Edit Mode (Mapko, 2026-08-06), which wants to drag DF's frames from
+-- its own editor without touching DandersFramesDB_v2.
+--
+-- ☠ THE ID SPACE IS PUBLIC THE MOMENT AN ADDON SHIPS AGAINST IT. "party", "raid",
+-- "pinned1".."pinnedN". Renaming one silently breaks an integration that has no way to
+-- detect the change — ADD ids, never rename or repurpose them.
+--
+-- ⚠ Scoped deliberately to what was asked for: party, raid, and pinned sets. The panel
+-- also moves Personal Targeted and the Targeted List, and those can be added later
+-- without breaking anyone (adding an id is safe; removing one is not). They are out of v1
+-- because each needs its own enabled-state question answered, and a public API is a bad
+-- place to guess.
+--
+-- ⚠ TWO STORAGE SHAPES behind one API. party/raid keep a flat CENTER offset in
+-- db[xField]/db[yField]; a pinned set keeps {point, x, y} nested in set.position and may
+-- ALSO be glued to the frames container (position.anchorTo), in which case x/y are a fine
+-- offset from that corner rather than a screen position. GetPosition reports anchorTo so a
+-- caller can tell the difference instead of assuming screen coordinates.
+
+local API_PINNED_PREFIX = "pinned"
+
+-- Resolve an id to everything the public wrappers need, or nil if the id is unknown /
+-- the subsystem is not loaded. Never creates anything: an id for a pinned set that does
+-- not exist resolves to nil rather than conjuring one.
+function DF:ResolvePositionTarget(id)
+    if type(id) ~= "string" then return nil end
+
+    if id == "party" or id == "raid" then
+        local mode = POSITION_MODES[id]
+        if not mode then return nil end
+        local db = mode.getDB and mode.getDB()
+        if not db then return nil end
+        return {
+            id      = id,
+            kind    = id,
+            label   = (id == "raid") and "Raid Frames" or "Party Frames",
+            enabled = true,   -- DF always manages these two; there is no per-target toggle
+            point   = "CENTER",   -- both are stored as an offset from UIParent CENTER
+            read    = function()
+                local d = mode.getDB()
+                return tonumber(d[mode.xField]) or 0, tonumber(d[mode.yField]) or 0
+            end,
+            -- ☠ RAID MUST OFFER THE WRITE TO AutoProfilesUI FIRST, exactly as the drag
+            -- handler does. While an auto layout drives the frames it OWNS the position,
+            -- and writing raidAnchorX/Y straight to the db moves the BASE anchors
+            -- underneath it — the frames do not move, and the user's base position is
+            -- quietly corrupted instead. Fall through to the base write only when the
+            -- routing declines (no active layout, or mid-edit where the preview path
+            -- captures it). This mirrors DragMover:OnDragStop — keep the two in step.
+            write   = function(x, y)
+                if id == "raid" then
+                    local routed = DF.AutoProfilesUI and DF.AutoProfilesUI.SetActiveLayoutRaidPosition
+                        and DF.AutoProfilesUI:SetActiveLayoutRaidPosition(x, y)
+                    if routed then return end
+                end
+                local d = mode.getDB()
+                d[mode.xField], d[mode.yField] = x, y
+                if mode.apply then mode.apply() end
+            end,
+        }
+    end
+
+    local setIndex = id:match("^" .. API_PINNED_PREFIX .. "(%d+)$")
+    if setIndex then
+        setIndex = tonumber(setIndex)
+        local pf = DF.PinnedFrames
+        if not (pf and pf.GetSetForPosition) then return nil end
+        if not setIndex or setIndex < 1 or setIndex > (pf.MAX_SETS or 0) then return nil end
+        local set = pf:GetSetForPosition(setIndex)
+        if not set then return nil end
+        set.position = set.position or { point = "CENTER", x = 0, y = 0 }
+        local label = pf.GetPositionPanelLabel and pf:GetPositionPanelLabel(setIndex)
+        return {
+            id       = id,
+            kind     = "pinned",
+            setIndex = setIndex,
+            label    = label or ("Pinned " .. setIndex),
+            enabled  = set.enabled and true or false,
+            point    = set.position.point or "CENTER",
+            anchorTo = set.position.anchorTo,  -- nil = free screen placement
+            read     = function()
+                local p = set.position
+                return tonumber(p.x) or 0, tonumber(p.y) or 0
+            end,
+            write    = function(x, y)
+                set.position.x, set.position.y = x, y
+                if pf.ApplySetPosition then pf:ApplySetPosition(setIndex) end
+            end,
+        }
+    end
+
+    return nil
+end
+
+-- Every target id DF currently offers, in a stable order: party, raid, then pinned sets
+-- ascending. Pinned ids appear for sets that EXIST, enabled or not — the caller decides
+-- whether to show a disabled one, and a list that changed shape when a set was toggled
+-- would be far harder to drive an editor from.
+function DF:ListPositionTargets()
+    local out = { "party", "raid" }
+    local pf = DF.PinnedFrames
+    if pf and pf.GetSetForPosition then
+        for i = 1, (pf.MAX_SETS or 0) do
+            if pf:GetSetForPosition(i) then
+                out[#out + 1] = API_PINNED_PREFIX .. i
+            end
+        end
+    end
+    return out
+end
