@@ -1213,6 +1213,16 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             return
         end
         local idNum = tonumber(text)
+        -- ☠ CAP ON VALUE, NOT DIGIT COUNT -- the length check above is not the guard it
+        -- looks like. 2147483647 is itself ten digits, so everything from 2147483648 to
+        -- 9999999999 got through and then threw "integer overflow attempting to store
+        -- <n>" the moment the list tried to draw it, because string.format("%d", n)
+        -- cannot represent it. #1111111111 was accepted silently for the same reason:
+        -- ten digits, but under the ceiling. Reported by Aphoex on alpha 15.
+        if not idNum or idNum < 1 or idNum > R.MAX_SPELL_ID then
+            Echo(L["Enter a valid spell ID."])
+            return
+        end
         local result = R:AddSpellToCustom(selKey, idNum)
         if result == "spell" then
             local rec = R.ByID[idNum]
@@ -2396,7 +2406,12 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
                     end
                 end
             end
-            local nm = name or format("#%d", id)
+            -- ☠ NOT format("#%d", id). This renders whatever is STORED, and the input
+            -- cap cannot reach an id that arrived in an imported filter string or was
+            -- saved before that cap existed -- those still have to draw rather than
+            -- take the page down. R:FormatSpellID is overflow-safe. This exact line was
+            -- the traceback in the #2222222222 report.
+            local nm = name or ("#" .. R:FormatSpellID(id))
             if matches(nm) then
                 put("ALL", {
                     id = id, name = nm, icon = icon or FALLBACK_ICON,

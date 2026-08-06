@@ -256,6 +256,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Pinned Frames) Fixed pinning yourself while hiding yourself from the party frames pointing about fifty internal consumers — including the frame sorter's party slot 0 — at the pinned frame instead of the party one.
 * (Aura Designer) Fixed the Duration Bar section overlapping the section above it on indicator cards until something in it was toggled.
 * (Interface) Fixed the profile rows on the Manage page stopping short of the right edge of their list.
+* (Aura Filters) **Fixed a 10-digit spell ID erroring and jamming the filter.** Adding an ID above 2147483647 — `2222222222`, say — threw "Integer overflow attempting to store …" and left the filter in a state where Delete stopped responding until you clicked away to another filter and back. The add box was checking the *number of digits* and rejecting anything over ten, but the largest usable spell ID is itself ten digits, so IDs just above it slipped through and then couldn't be drawn. It now checks the value, so those are refused with the normal "Enter a valid spell ID." message. `1111111111` was accepted quietly for the same reason and still is — it's under the limit. A filter that already contains an oversized ID from before this fix will display and can be deleted normally.
 
 ### Improvements
 
