@@ -3118,9 +3118,9 @@ local TEST_PARTY_ONLY_KEYS = {
 }
 
 local TEST_PRESETS = {
-    -- Default plus every aura surface at once — the rows, the dispel overlay, the
-    -- missing-buff badge, the Aura Designer and the defensive icon. For working on
-    -- aura layout, so the bar states and the status icons stay out of the way.
+    -- Default plus the aura surfaces — the rows, the dispel overlay, the
+    -- missing-buff badge and the Aura Designer. For working on aura layout, so the
+    -- bar states, the status icons and the defensive icon stay out of the way.
     AURAS = {
         testShowPets             = true,
         testShowOutOfRange       = true,
@@ -3129,7 +3129,6 @@ local TEST_PRESETS = {
         testShowDispelGlow       = true,
         testShowMissingBuff      = true,
         testShowAuraDesigner     = true,
-        testShowExternalDef      = true,
         testShowTargetedList     = true,
         testAnimateTargetedList  = true,
         testShowPersonalTargeted = true,
