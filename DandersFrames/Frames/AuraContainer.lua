@@ -2869,6 +2869,20 @@ local function testPoolOffset(config, poolSize, count)
     if type(u) ~= "string" then return 0 end
     local n = tonumber(u:match("(%d+)$")) or 0   -- "player" has none -> 0
     local step = math.max(1, count or 1)
+    -- ☠ SCRAMBLE THE SLOT, DO NOT WALK IT. When the count divides the pool the windows
+    -- tile into `slots` disjoint runs, and handing them out as (n * step) makes the offset
+    -- PERIODIC IN n with period `slots`. Raid frames lay out 5 across, so with 5 slots
+    -- every unit in a column drew the identical window — Krathe: "there is still entire
+    -- columns that carry each type". The same periodicity lit two ADJACENT party frames
+    -- instead of three spread out.
+    -- Walking the slots by (slots - 1) is coprime with `slots` at any size, so it still
+    -- visits every slot exactly once; the floor(n / slots) term shifts each row so the
+    -- sequence stops aligning with the grid. Offsets stay on the same disjoint runs, so
+    -- the dispel density that rides on that tiling is unchanged.
+    if poolSize % step == 0 and (poolSize / step) >= 2 then
+        local slots = poolSize / step
+        return (((n * (slots - 1)) + math.floor(n / slots)) % slots) * step
+    end
     if poolSize / gcd(step, poolSize) < 4 then step = 7 end
     return (n * step) % poolSize
 end
