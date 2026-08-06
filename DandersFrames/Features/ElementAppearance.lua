@@ -1068,7 +1068,15 @@ function DF:UpdateAuraDesignerAppearance(frame)
         if t then
             for _, entry in pairs(t) do
                 local h = entry and entry.handle
-                local f = h and h.GetFrame and h:GetFrame()
+                -- ☠ ASK FOR THE ALPHA HOST, NEVER GetFrame(). This used to fade
+                -- h:GetFrame(), which for a per-indicator container is DF's own anchor
+                -- frame -- fine. A collapsed slot's GetFrame() is the aura BUTTON, which
+                -- carries DenyTaintedAccessWhenAurasAreSecret: this loop runs from the
+                -- range update, which is tainted, so every call threw the moment auras
+                -- went secret (43 errors, "forbidden object", reported 2026-08-06).
+                -- GetAlphaHost returns nil for a slot, so those skip until the regions
+                -- are reparented onto a DF-owned host. See SlotHandle:GetAlphaHost.
+                local f = h and h.GetAlphaHost and h:GetAlphaHost()
                 if f then
                     local base = h._dfADBaseAlpha or 1.0
                     if oorOn then

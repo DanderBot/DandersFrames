@@ -1414,9 +1414,14 @@ local function placedCoSig(indicator, isSquare, borderOn, alpha)
 end
 
 -- Placed base alpha rides the plain anchor frame (combat-safe; alpha is not a secret).
+-- ☠ GetAlphaHost, not GetFrame. A container handle's host is DF's own anchor frame; a
+-- collapsed slot has none and returns nil, because its GetFrame() is the aura BUTTON and
+-- every tainted write to that is refused once auras are secret. The pcall here was
+-- swallowing exactly that failure silently -- the same fault surfaced loudly in the
+-- out-of-range fade, which is not pcall'd. See SlotHandle:GetAlphaHost.
 local function applyPlacedAlpha(handle, alpha)
     handle._dfADBaseAlpha = alpha   -- read by the OOR fade (ElementAppearance)
-    local f = handle and handle.GetFrame and handle:GetFrame()
+    local f = handle and handle.GetAlphaHost and handle:GetAlphaHost()
     if f then pcall(function() f:SetAlpha(alpha) end) end
 end
 

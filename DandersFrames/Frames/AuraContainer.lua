@@ -3487,6 +3487,10 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
 end
 
 function Handle:GetFrame() return self.frame end
+-- The legal target for a tainted alpha write. For a per-indicator container that is its
+-- own plain anchor frame, which DF created and owns. See SlotHandle:GetAlphaHost for why
+-- this is asked for separately from GetFrame rather than being assumed the same object.
+function Handle:GetAlphaHost() return self.frame end
 -- OVERLAY mode only: the live native slot buttons, keyed by the filter record's key
 -- (positional "df<i>" when unkeyed). Consumers decorate these directly (build DF art
 -- on them, register native SetAuraBorder regions). EMPTY until a native build lands
@@ -4867,18 +4871,45 @@ function SlotHandle:IsParked()     return self.parked == true end
 -- ★ DROP-IN COMPATIBILITY with the two places that already treat an AD handle
 -- generically, so migrating a consumer needs no change to either:
 --
---   * Features/ElementAppearance.lua's out-of-range fade walks every AD store, does
---     `local f = h and h.GetFrame and h:GetFrame()`, reads `h._dfADBaseAlpha` and fades
---     that frame. Returning the button keeps the OOR fade working untouched -- the button
---     is where a slot's alpha lives now, exactly as the per-indicator container's frame
---     was before. (_dfADBaseAlpha is a plain field and needs nothing.)
 --   * AuraDesigner/Factory.lua's teardownExcept calls `entry.handle:Destroy()`.
+--
+-- ☠ THE OOR FADE IS *NOT* ONE OF THEM, AND CLAIMING IT WAS SHIPPED A BUG. This comment
+-- used to say returning the button "keeps the OOR fade working untouched -- the button is
+-- where a slot's alpha lives now, exactly as the per-indicator container's frame was
+-- before". Both halves were wrong. The container's frame is DF-OWNED (a plain anchor
+-- CreateFrame'd by AuraContainer:Create); the button is Blizzard's and carries
+-- DenyTaintedAccessWhenAurasAreSecret, so it is not equivalent and not writable from the
+-- fade's tainted path. It threw 43 times in one session. The fade asks GetAlphaHost now.
 --
 -- ⚠ Destroy CANNOT destroy: AddAuraSlot is add-only and there is no remove. It parks,
 -- and the key is deliberately retained so a later AcquireSlot with the same structure
 -- re-adopts this button instead of adding a second one.
 function SlotHandle:GetFrame()     return self.button end
 function SlotHandle:Destroy()      return self:Park() end
+
+-- ☠ ALPHA HOST — a SLOT HAS NONE, AND RETURNING THE BUTTON IS A LIVE ERROR.
+--
+-- A per-indicator CONTAINER handle answers this with its own plain anchor frame
+-- (Handle.frame, created by AuraContainer:Create), which is DF-owned and therefore a
+-- legal write target from tainted code. A collapsed slot has no such frame: the button's
+-- parent is the SHARED container, so there is nothing per-indicator above it to fade.
+--
+-- The button itself is NOT a substitute. It carries DenyTaintedAccessWhenAurasAreSecret,
+-- so any method call on it from a tainted path is refused the moment auras go secret --
+-- field-confirmed as 43 errors from the out-of-range fade:
+--     calling 'SetAlphaFromBoolean' on bad self (Attempt to access forbidden object
+--     from code tainted by an AddOn)
+-- SlotHandle:GetFrame returns the button on purpose (identity, and the OOR fade's old
+-- `h:GetFrame()` probe), so consumers MUST ask for the alpha host separately rather than
+-- assuming the two are the same object. Returning nil here is what makes them skip.
+--
+-- ⚠ THIS IS A KNOWN GAP, NOT A DESIGN: per-indicator alpha (the Alpha slider and the
+-- out-of-range fade) does not apply to Aura Designer indicators while they share a
+-- container. DF-created CHILD frames of the button ARE writable -- makeHolder does
+-- exactly that and the pandemic cue and dispel badge both render through one -- so the
+-- fix is to parent the slot's regions onto dfLevelHost and fade that. Until then this
+-- returns nil so the consumer skips instead of erroring.
+function SlotHandle:GetAlphaHost() return nil end
 
 -- Stop this slot displaying, WITHOUT destroying anything. Proven in game 2026-08-05:
 -- an empty filter string matches nothing (it does NOT fall back to a default).
