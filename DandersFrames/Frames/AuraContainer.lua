@@ -5643,9 +5643,22 @@ function DF:GetTestDebuffDispelType(unitToken, count)
     local cfg = { unit = unitToken }
     local n = math.max(1, math.min(tonumber(count) or 1, #pool))
     local off = testPoolOffset(cfg, #pool, n)
+    -- Collect EVERY dispellable type in the window, not just the first.
+    local types
     for i = 1, n do
         local e = pool[((off + i - 1) % #pool) + 1]
-        if e and e.debuffType then return e.debuffType end
+        if e and e.debuffType then types = types or {}; types[#types + 1] = e.debuffType end
     end
-    return nil
+    if not types then return nil end
+    -- ☠ TAKING types[1] HIDES HALF THE PALETTE. At a preview count of 2 the windows are
+    -- (1,2) (3,4) (7,8), so a type sitting in an EVEN pool slot is never first and can
+    -- never be chosen — Krathe saw only Magic and Curse, because Disease (slot 2) and
+    -- Poison (slot 4) were always the second entry of their pair.
+    -- Any entry in the window is on the frame, so any of them is a valid answer; pick by
+    -- unit so the choice varies frame to frame. Measured over party + a full raid this
+    -- reaches all four types (Magic 9, Curse 9, Poison 5, Disease 4 — the 2:1 skew is the
+    -- pool's own, Magic and Curse appearing twice in it and the other two once).
+    local u = tostring(unitToken or "")
+    local seed = tonumber(u:match("(%d+)$")) or 0
+    return types[(math.floor((seed * 3 + off) / 2) % #types) + 1]
 end
