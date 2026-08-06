@@ -2261,33 +2261,33 @@ DF.PartyDefaults = {
     -- test mode. There is no raid-mode equivalent because the
     -- Targeted List itself is party-only.
     --
-    -- The toggle defaults below MIRROR TEST_PRESETS.STATIC (TestMode/TestMode.lua),
+    -- The toggle defaults below MIRROR TEST_PRESETS.DEFAULT (TestMode/TestMode.lua),
     -- so a fresh profile actually matches the preset the panel shows as selected
-    -- (testPreset = "STATIC"). They drifted apart once; if STATIC changes, change
+    -- (testPreset = "DEFAULT"). They drifted apart once; if DEFAULT changes, change
     -- these to match. The sliders (testBuffCount/testDebuffCount/testFrameCount)
     -- are deliberately outside the preset - a working preference, not part of its
-    -- visual identity - so they have no STATIC counterpart.
+    -- visual identity - so they have no DEFAULT counterpart.
     testShowTargetedList = true,
     testAnimateTargetedList = true,
     testAnimateHealth = false,
     testBuffCount = 2,
     testDebuffCount = 2,
     testFrameCount = 5,
-    testPreset = "STATIC",
-    testShowAbsorbs = false,
+    testPreset = "DEFAULT",
+    testShowAbsorbs = true,
     testShowAggro = false,
-    testShowAuras = true,
-    testShowDispelGlow = true,
+    testShowAuras = false,
+    testShowDispelGlow = false,
     testShowExternalDef = false,
-    testShowHealPrediction = false,
+    testShowHealPrediction = true,
     testShowMissingBuff = false,
-    testShowOutOfRange = false,
+    testShowOutOfRange = true,
     testShowPets = true,
-    testShowReducedMaxHealth = false,
+    testShowReducedMaxHealth = true,
     testShowSelection = false,
-    testShowStatusIcons = true,
+    testShowStatusIcons = false,
     testShowPersonalTargeted = true,
-    testShowAuraDesigner = true,
+    testShowAuraDesigner = false,
     testShowTextDesigner = true,
 
     -- Tooltip settings

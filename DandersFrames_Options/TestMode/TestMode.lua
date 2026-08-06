@@ -3164,13 +3164,27 @@ local TEST_PRESETS = {
     },
 }
 
--- None = every toggle off — the bare frame, for judging frame style, size and
--- colour without auras, icons or overlays on top of it. Empty rather than a key
--- list because applying a preset already forces every unlisted key off, so the
--- empty set IS "all off" and picks up new toggles for free, same as Full does.
--- ⚠ It does not leave test mode: the preview stays up, it just draws nothing but
--- the frame itself.
-TEST_PRESETS.NONE = {}
+-- Default = what a fresh profile ships with, and the preset the panel shows as
+-- selected on first open. The bars and the frame's own text, with the aura and
+-- icon layers off so the frame itself is what you are looking at.
+--
+-- ☠ testShowTextDesigner IS NOT OPTIONAL IN A MINIMAL PRESET. It does not gate a
+-- decorative layer: Render.lua hides EVERY TD font string when it is off, and the
+-- unit name and health text are TD elements — so a preset without it previews
+-- nameless blank bars. This shipped for a few minutes as an empty "None" for
+-- exactly that reason and was unusable (Krathe, 2026-08-06).
+-- ⚠ Config.lua's test-mode defaults MIRROR THIS TABLE. Change one, change both.
+TEST_PRESETS.DEFAULT = {
+    testShowPets             = true,
+    testShowAbsorbs          = true,
+    testShowHealPrediction   = true,
+    testShowOutOfRange       = true,
+    testShowReducedMaxHealth = true,
+    testShowTextDesigner     = true,
+    testShowTargetedList     = true,
+    testAnimateTargetedList  = true,
+    testShowPersonalTargeted = true,
+}
 
 -- Full = every toggle on. Built from the key list so a newly added toggle is
 -- picked up automatically instead of quietly staying off.
@@ -4494,9 +4508,10 @@ function DF:CreateTestPanel()
     presetLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
     panel.presetLabel = presetLabel
 
-    -- Ordered least-to-most: the bare frame, then what each preset layers on.
-    local presets = {"NONE", "STATIC", "COMBAT", "HEALER", "FULL"}
-    local presetNames = {NONE = L["None"], STATIC = L["Static"], COMBAT = L["Combat"],
+    -- Default first — it is the shipped baseline, so it reads as the starting
+    -- point the others move away from.
+    local presets = {"DEFAULT", "STATIC", "COMBAT", "HEALER", "FULL"}
+    local presetNames = {DEFAULT = L["Default"], STATIC = L["Static"], COMBAT = L["Combat"],
         HEALER = L["Healer"], FULL = L["Full"]}
     local btnSpacing = 4
     local btnCount = #presets
