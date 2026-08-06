@@ -962,6 +962,54 @@ local function GetDurationFormatter(format, hideAboveT, colorByTime, alertMode, 
     return durationFormatterCache[key] or nil
 end
 
+-- ★ WHAT EACH FORMAT PRINTS — shown under the Duration Format dropdown.
+--
+-- Three samples, straddling BOTH promote points (45s · 2m32s · 1h02m), because a single
+-- value cannot show a roll-up and the roll-up is the part people get wrong: "Standard
+-- (45)" would have explained nothing about the report that started this.
+--
+-- ☠ HAND-MAINTAINED, AND DELIBERATELY IN THIS FILE. NumericRuleFormatter exposes no
+-- Format method — only Add/Set/GetBreakpoints — so NUMBER, TIMER and PERCENT can only be
+-- evaluated by the C-side duration binding, never from Lua. Their strings therefore
+-- cannot be generated and can only be kept true by hand, so they live against the
+-- breakpoints they describe rather than in the options pages. Change a breakpoint above,
+-- change these.
+-- These three are safe to hardcode in English: their unit suffixes come from DF's own
+-- format strings ("%dm"/"%dh"), which are not locale-aware in any locale.
+local DURATION_FORMAT_EXAMPLES = {
+    NUMBER          = "45 · 2m · 62m",
+    TIMER           = "45 · 2:32 · 62:05",
+    PERCENT         = "75%",
+    SECONDS_PERCENT = "45s (75%)",
+    -- Fallbacks only — SHORT/FULL are generated live below.
+    SHORT           = "45s · 2m · 62m",
+    FULL            = "45 Seconds · 2 Minutes",
+}
+
+-- ⚠ SHORT and FULL are NOT hardcoded. They render through a SecondsFormatter, whose
+-- output IS locale-aware (deDE keeps its space, FULL spells the unit out in the client
+-- language), so an English constant would be wrong for most users. SecondsFormatter has
+-- a Format method — the rule formatters do not — so theirs comes from the REAL formatter
+-- and can neither drift from the code nor be wrong in a locale.
+local EXAMPLE_SAMPLES = { 45, 152, 3725 }
+
+function DF:GetDurationFormatExample(format)
+    format = format or "NUMBER"
+    if format == "SHORT" or format == "FULL" then
+        local f = GetDurationFormatter(format, nil, false)
+        if f and f.Format then
+            local parts, ok = {}, true
+            for i = 1, #EXAMPLE_SAMPLES do
+                local got, s = pcall(f.Format, f, EXAMPLE_SAMPLES[i])
+                if not (got and type(s) == "string" and s ~= "") then ok = false break end
+                parts[i] = s
+            end
+            if ok then return table.concat(parts, " · ") end
+        end
+    end
+    return DURATION_FORMAT_EXAMPLES[format]
+end
+
 -- The account-wide colour-by-time breakpoints signature. Folded into the STRUCTURAL
 -- duration format keys (dur.formatKey here + the AD durationFmtKey) so a breakpoint edit
 -- changes the row signature and forces a Rebuild — SetDurationText binds the formatter

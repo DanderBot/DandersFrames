@@ -2365,12 +2365,13 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         -- UpdateHideAboveState (assigned below): re-greys Hide Above, which can't
         -- compose with the percent-family formats.
         local UpdateHideAboveState
-        g:AddWidget(GUI:CreateDropdown(body, L["Duration Format"], {
+        GUI:CreateDurationFormatControls(body, g, {
             -- Icon surfaces: FULL and the percent composite stay bar-only (width), so
             -- this list is the three time formats plus Percent.
             NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"], PERCENT = L["Percent"],
             _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" },
-        }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
+        }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end,
+            { height = 54 })
         GUI:CreateTextControls(g, proxy, "duration", {
             parent = body,
             include = { color = true },

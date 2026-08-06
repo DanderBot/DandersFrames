@@ -3589,3 +3589,53 @@ function DF:ToggleGUI()
     end
 end
 
+
+-- ============================================================
+-- DURATION FORMAT: dropdown + live example line
+-- ============================================================
+-- One helper for all seven Duration Format dropdowns (buff/debuff/defensive rows, AD
+-- indicator/square/group cards, AD bar), because the example only earns its place if it
+-- appears on every one of them — a format list explained in some places and not others
+-- is worse than one explained nowhere.
+--
+-- ★ WHY A LINE UNDER THE CONTROL, not examples in the labels or a per-row tooltip:
+--   * A label example can only show ONE duration, and what people get wrong is the
+--     ROLL-UP — "Standard (45)" says nothing about what happens past a minute. Three
+--     samples is the minimum that explains the difference, and that is far too wide for
+--     a dropdown row (and would sit in the closed control forever).
+--   * CreateDropdown has no per-row tooltip support, so that route means changing a
+--     widget every page depends on, for something you would then have to hover row by
+--     row to compare.
+--
+-- The label is self-measuring (CreateLabel with no call-site height), so it sizes to
+-- however the example wraps at the current column width instead of a guessed number.
+function GUI:CreateDurationFormatControls(parent, group, options, dbTable, dbKey, callback, opts)
+    opts = opts or {}
+    local example
+    local function CurrentFormat()
+        if opts.get then return opts.get() end
+        return dbTable and dbTable[dbKey] or "NUMBER"
+    end
+    local function RefreshExample()
+        if not example then return end
+        example:SetText(DF:GetDurationFormatExample(CurrentFormat()) or "")
+    end
+
+    local dd = group:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], options,
+        dbTable, dbKey, function(...)
+            -- Example first: the caller's callback may rebuild the page, and on some
+            -- surfaces that discards `example` before we would have refreshed it.
+            RefreshExample()
+            if callback then callback(...) end
+        end, opts.customGet, opts.customSet), opts.height or 55)
+
+    -- ⚠ No height passed on purpose — see CreateLabel: an explicit number is treated as
+    -- authoritative and disables the measured re-flow, which is what let a wrapped blurb
+    -- overlap the control beneath it on the Colours page.
+    example = group:AddWidget(GUI:CreateLabel(parent,
+        DF:GetDurationFormatExample(CurrentFormat()) or ""))
+
+    dd.dfExampleLabel = example
+    dd.dfRefreshExample = RefreshExample
+    return dd, example
+end

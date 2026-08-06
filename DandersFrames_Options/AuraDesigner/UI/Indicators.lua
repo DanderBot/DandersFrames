@@ -367,11 +367,12 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- width. Forward-declared UpdateHideAboveState: the dropdown re-greys
             -- Hide Above (percent formats can't compose with it), assigned below.
             local UpdateHideAboveState
-            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], {
+            GUI:CreateDurationFormatControls(parent, g, {
                 -- Icon surfaces: FULL and the percent composite are bar-only (width).
                 NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"], PERCENT = L["Percent"],
                 _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" },
-            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
+            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end,
+                { height = 54 })
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)
@@ -499,11 +500,12 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:CreateCheckbox(parent, L["Show Duration"], proxy, "showDuration"), 28)
             -- Icon-sized formats only (see the icon card's Duration Format note).
             local UpdateHideAboveState
-            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], {
+            GUI:CreateDurationFormatControls(parent, g, {
                 -- Icon surfaces: FULL and the percent composite are bar-only (width).
                 NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"], PERCENT = L["Percent"],
                 _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" },
-            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
+            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end,
+                { height = 54 })
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)
@@ -659,7 +661,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- the icon-sized three plus FULL ("14 Seconds") and the combined
             -- Seconds + Percent ("12s (45%)" — 68914 multi-component text, #5).
             local UpdateHideAboveState
-            g:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], {
+            GUI:CreateDurationFormatControls(parent, g, {
                 -- ⚠ SECONDS_PERCENT is labelled "Units + %", not "Seconds + Percent" —
                 -- it names the format it composes from (Units is directly above it), and
                 -- "Both" on its own never said both WHAT.
@@ -667,7 +669,8 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 FULL = L["Full"],
                 PERCENT = L["Percent"], SECONDS_PERCENT = L["Units + %"],
                 _order = { "NUMBER", "SHORT", "TIMER", "FULL", "PERCENT", "SECONDS_PERCENT" },
-            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
+            }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end,
+                { height = 54 })
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
             g:AddWidget(GUI:CreateOutlineDropdown(parent, L["Outline"], proxy, "durationOutline"), 54)
