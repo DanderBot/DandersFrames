@@ -4784,7 +4784,23 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
 
     local existing = owner.slots[slotKey]
     if existing then
+        -- ☠ RE-ADOPTION MUST TAKE THE FRESH SPEC, not just un-park. The key pins only
+        -- what is STRUCTURAL; everything else — filter, candidateFilters, and every
+        -- cosmetic in the config — may have changed while this slot sat parked
+        -- (disable an indicator, recolour it in the editor, re-enable: same key, new
+        -- config). Restore() alone would render the pre-park state, and the Factory
+        -- stamps its tuning/cosmetic sigs with the NEW values on this very pass, so
+        -- the catch-up branches would never fire — stale until the next structural
+        -- edit. Same contract as Handle:_readoptParked, same order: tuning before
+        -- style (population first, cosmetics second). The redundant filter re-set
+        -- after Restore is free — the engine's string setter has an equality guard.
         existing:Restore()
+        if spec.config then existing.config = spec.config end
+        existing:ApplyTuning(spec.filter, spec.candidateFilters,
+            spec.sortMethod, spec.sortDirection)
+        if spec.config then
+            existing:ApplyStyle(spec.config.style, spec.config.layout)
+        end
         return existing
     end
 
