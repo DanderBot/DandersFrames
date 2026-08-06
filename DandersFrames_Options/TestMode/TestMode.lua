@@ -105,7 +105,7 @@ DF.TestData = {
         -- partner is already DRUID (Rake at 6), so a druid bleed fits without breaking
         -- the class spacing. Converting Rake or Rend instead would have been simpler and
         -- was rejected: they are two of the four untyped slots that set the 60% density.
-        {icon = "Interface\Icons\Ability_BackStab", name = "Deep Wounds", duration = 6, stacks = 0, debuffType = "Bleed", spellID = 115767},
+        {icon = "Interface\Icons\Ability_Gouge", name = "Rend", duration = 15, stacks = 0, debuffType = "Bleed", spellID = 772},
         {icon = "Interface\Icons\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 0, debuffType = "Disease", spellID = 55095},
         {icon = "Interface\Icons\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
         -- 2818 = the DoT. NOT 2823, which is the weapon imbue of the same name, and the
