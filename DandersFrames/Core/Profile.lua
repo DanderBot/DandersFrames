@@ -1199,9 +1199,20 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         if importData.roleColors then
             DF.db.roleColors = importData.roleColors
         end
-        -- Import dispel colours if present (profile-root, like roleColors)
+        -- Import dispel colours if present (profile-root, like roleColors).
+        -- ☠ A v4 STRING HAS NO dispelColors. v4 kept two separate per-mode families
+        -- (debuffBorderColor* for the icon border, dispel<Type>Color for the overlay),
+        -- both of which ride v4's export; v5 merged them onto this one account-wide
+        -- table. Without the else-branch the import silently landed nothing and the
+        -- user's dispel colours were gone -- and the login migration could not save
+        -- them either, because it only fires when dispelColors is absent and it reads
+        -- the mode tables, which by then have had the overlay half stripped.
+        -- Same resolver as the login migration, so both paths agree exactly.
         if importData.dispelColors then
             DF.db.dispelColors = importData.dispelColors
+        elseif DF.BuildDispelColorsFromLegacy then
+            local legacy = DF:BuildDispelColorsFromLegacy(importData.party, importData.raid)
+            if legacy then DF.db.dispelColors = legacy end
         end
         -- Import auto layout profiles if present
         if importData.raidAutoProfiles then

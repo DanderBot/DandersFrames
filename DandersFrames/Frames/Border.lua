@@ -590,6 +590,91 @@ function DF:GetGameDispelTextMap()
     return map
 end
 
+-- ============================================================
+-- LEGACY (v4) DISPEL COLOURS -> the shared account palette
+-- ============================================================
+-- v4 shipped TWO independent, separately-editable sets of dispel colours, each with its
+-- own pickers and its own Reset:
+--
+--   debuffBorderColor{Magic,Curse,Disease,Poison,Bleed}  -- the debuff ICON BORDER
+--   dispel{Magic,Curse,Disease,Poison,Bleed}Color        -- the DISPEL OVERLAY
+--
+-- v5 collapses both onto ONE account-wide table (DF.db.dispelColors, edited on the
+-- Colors page), so a profile carrying both has to resolve to a single value per type.
+--
+-- ☠ RESOLUTION IS PER TYPE, AND "SET" MEANS "DIFFERS FROM THE v4 DEFAULT" -- NOT
+-- "EXISTS". v4's Config seeds BOTH families into every profile, so both keys are
+-- present on essentially every v4 profile whether or not the user ever opened that
+-- picker. A presence test would hand the overlay family the win for everybody and
+-- silently discard the border customisation of every user who only ever touched the
+-- border -- the same data loss as doing nothing, pointed the other way.
+--
+-- Order per type: OVERLAY if customised -> BORDER if customised -> game palette.
+-- Krathe's call (2026-08-06). The conflict case is narrow by construction -- it needs
+-- BOTH families customised to DIFFERENT colours -- and the overlay is the more visible
+-- element of the two, so it takes the tiebreak.
+--
+-- Party is read before raid because v5's palette is account-wide and party is the
+-- surface a solo/party user configures; a raid-only customiser would otherwise be lost
+-- entirely, which is why raid is a fallback rather than being ignored.
+DF.LegacyDispelDefaults = {   -- v4's shipped defaults; IDENTICAL across both families
+    Magic   = { r = 0.2, g = 0.6, b = 1 },
+    Curse   = { r = 0.6, g = 0,   b = 1 },
+    Disease = { r = 0.6, g = 0.4, b = 0 },
+    Poison  = { r = 0,   g = 0.6, b = 0 },
+    Bleed   = { r = 1,   g = 0,   b = 0 },
+}
+
+-- Deliberately loose (1e-3): a colour-picker round-trip can perturb the low bits, and a
+-- user who nudged a slider and put it back should read as untouched. A false "untouched"
+-- costs nothing here -- it falls through to the other family or the game palette, which
+-- for an at-default value is the same colour either way.
+local function dispelColorCustomised(c, def)
+    if type(c) ~= "table" or type(c.r) ~= "number" then return false end
+    return math.abs(c.r - def.r) > 1e-3
+        or math.abs(c.g - def.g) > 1e-3
+        or math.abs(c.b - def.b) > 1e-3
+end
+
+-- Build a v5 dispelColors table from a v4 profile's per-mode tables. Returns a fresh
+-- table, always fully populated. Shared by the login migration (Core.lua) and the
+-- profile IMPORT path (Core/Profile.lua) -- an import string written by v4 carries the
+-- legacy keys and no dispelColors, so without this the import silently lands nothing.
+-- ☠ Candidates are passed as VARARGS, not as a table walked with ipairs. Any of them
+-- can legitimately be nil -- a v5-native profile has no legacy keys at all, and a
+-- partial import may carry one mode and not the other -- and ipairs STOPS at the first
+-- nil, which would have silently skipped every later candidate. Missing the first one
+-- would have meant the border fallback was never reached.
+local function pickDispelColor(def, ...)
+    for i = 1, select("#", ...) do
+        local c = select(i, ...)
+        if dispelColorCustomised(c, def) then
+            return { r = c.r, g = c.g, b = c.b }
+        end
+    end
+end
+
+function DF:BuildDispelColorsFromLegacy(party, raid)
+    party, raid = party or {}, raid or {}
+    local game = (DF.GetGameDispelPalette and DF:GetGameDispelPalette()) or DF.DispelDefaultColors
+    local out = {}
+    for _, t in ipairs({ "Magic", "Curse", "Disease", "Poison", "Bleed" }) do
+        local def = DF.LegacyDispelDefaults[t]
+        -- Overlay first, then border; party before raid within each.
+        local picked = pickDispelColor(def,
+            party["dispel" .. t .. "Color"],
+            raid["dispel" .. t .. "Color"],
+            party["debuffBorderColor" .. t],
+            raid["debuffBorderColor" .. t])
+        if not picked then
+            local g = (game and game[t]) or def
+            picked = { r = g.r, g = g.g, b = g.b }
+        end
+        out[t] = picked
+    end
+    return out
+end
+
 -- Resolve ONE dispel type to r,g,b. The single source of truth for "what colour is a
 -- Magic debuff", shared by the dispel overlay's test path and Core's lightweight
 -- repaint. Order: the shared account palette (DF.db.dispelColors, edited on the Colors

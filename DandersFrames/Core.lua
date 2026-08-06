@@ -3911,26 +3911,28 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 end
                 -- Dispel colours are account-wide (per profile, mode-independent —
                 -- edited on the Colors page; sibling of classColors). Seed ONCE from
-                -- the profile's existing per-mode debuff-border palette so any
-                -- customisations carry over; otherwise the game palette. The per-mode
-                -- debuffBorderColor* keys are left in place.
-                if type(profile.dispelColors) ~= "table" then
-                    local src = profile.party or {}
-                    -- Defaults = Blizzard's live game palette (GetGameDispelPalette). No
-                    -- None key — the None/Physical border is hidden on no-dispel-type auras.
-                    local D = (DF.GetGameDispelPalette and DF:GetGameDispelPalette()) or DF.DispelDefaultColors
-                    local function seedColor(key, d)
-                        local c = src[key]
-                        if type(c) == "table" and c.r then return { r = c.r, g = c.g, b = c.b } end
-                        return { r = d.r, g = d.g, b = d.b }
-                    end
-                    profile.dispelColors = {
-                        Magic   = seedColor("debuffBorderColorMagic",   D.Magic),
-                        Curse   = seedColor("debuffBorderColorCurse",   D.Curse),
-                        Disease = seedColor("debuffBorderColorDisease", D.Disease),
-                        Poison  = seedColor("debuffBorderColorPoison",  D.Poison),
-                        Bleed   = seedColor("debuffBorderColorBleed",   D.Bleed),
-                    }
+                -- the profile's v4 colours so any customisation carries over; otherwise
+                -- the game palette. No None key — the None/Physical border is hidden on
+                -- no-dispel-type auras. The legacy per-mode keys are left in place here;
+                -- DropDispelCustomMode below clears the overlay half AFTER this has read
+                -- it (see the ordering note there).
+                --
+                -- ☠ This used to read ONLY debuffBorderColor* (the icon-border family),
+                -- from party alone. v4 also shipped a SECOND, separately-edited family
+                -- for the dispel overlay (dispel<Type>Color) which nothing here looked
+                -- at and DropDispelCustomMode then deleted — so anyone who had customised
+                -- the overlay lost those colours silently, on upgrade AND on import.
+                -- DF:BuildDispelColorsFromLegacy owns the resolution now (Border.lua):
+                -- per type, overlay-if-customised -> border-if-customised -> game
+                -- palette, with "customised" meaning "differs from the v4 default"
+                -- rather than "exists", because v4 seeded both families into every
+                -- profile. Shared with the import path so both behave identically.
+                -- Guarded: the builder lives in Frames/Border.lua, which loads AFTER
+                -- this file. Both callers of this migration are runtime (login, profile
+                -- switch) so it is always there by then -- but guard the function we
+                -- actually call, not a neighbour of it.
+                if type(profile.dispelColors) ~= "table" and DF.BuildDispelColorsFromLegacy then
+                    profile.dispelColors = DF:BuildDispelColorsFromLegacy(profile.party, profile.raid)
                 end
                 -- Ensure mode-enable flags exist on every profile
                 if profile.partyEnabled == nil then profile.partyEnabled = true end
@@ -4748,11 +4750,18 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
-        -- v5.0 (12.1): the dispel overlay's Custom Colors mode was removed during
-        -- the alpha (never in any distributed build — belt-and-braces for alpha
-        -- profiles only): drop the mode selector, the per-type pickers and the
-        -- intensity multiplier. No-op on fresh defaults (none of these keys exist
-        -- there any more).
+        -- v5.0 (12.1): the dispel overlay's Custom Colors mode is gone — its colours
+        -- now come from the one shared account palette on the Colors page. Drop the
+        -- mode selector, the per-type pickers and the intensity multiplier. No-op on
+        -- fresh defaults (none of these keys exist there any more).
+        --
+        -- ☠ MUST RUN AFTER THE dispelColors SEED ABOVE, and that ordering is the whole
+        -- fix for a real data-loss bug. dispel<Type>Color is NOT an alpha-only key --
+        -- it shipped in v4's Config with live pickers and its own Reset, and rides v4's
+        -- `dispel` export category. The comment here used to claim it was "never in any
+        -- distributed build", and on the strength of that this deleted a shipped,
+        -- user-editable setting that nothing had migrated. A comment is not evidence:
+        -- the keys were in v4's Config.lua the whole time.
         local function DropDispelCustomMode(modeDb)
             if modeDb._dispelCustomRemovedV5 then return end
             modeDb.dispelOverlayColorSource = nil
