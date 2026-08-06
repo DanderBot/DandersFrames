@@ -3133,19 +3133,19 @@ local TEST_PRESETS = {
         testAnimateTargetedList  = true,
         testShowPersonalTargeted = true,
     },
-    -- A frame mid-pull: the aura rows and status icons a fight actually shows,
-    -- plus health movement and threat.
+    -- Auras plus what a pull adds: health movement and threat.
     COMBAT = {
         testShowPets             = true,
         testAnimateHealth        = true,
+        testShowOutOfRange       = true,
         testShowTextDesigner     = true,
         testShowAuras            = true,
         testShowDispelGlow       = true,
+        testShowMissingBuff      = true,
         testShowAuraDesigner     = true,
         testShowTargetedList     = true,
         testAnimateTargetedList  = true,
         testShowPersonalTargeted = true,
-        testShowStatusIcons      = true,
         testShowAggro            = true,
     },
     -- The healing-decision layers (absorbs, incoming heals, reduced max health,
