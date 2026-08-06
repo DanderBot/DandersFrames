@@ -3118,20 +3118,24 @@ local TEST_PARTY_ONLY_KEYS = {
 }
 
 local TEST_PRESETS = {
-    -- At rest: everything the frame draws when nothing is happening. No health
-    -- motion and no conditional bar states (absorbs / heal prediction / range).
-    STATIC = {
+    -- Default plus every aura surface at once — the rows, the dispel overlay, the
+    -- missing-buff badge, the Aura Designer and the defensive icon. For working on
+    -- aura layout, so the bar states and the status icons stay out of the way.
+    AURAS = {
         testShowPets             = true,
+        testShowOutOfRange       = true,
         testShowTextDesigner     = true,
         testShowAuras            = true,
         testShowDispelGlow       = true,
+        testShowMissingBuff      = true,
         testShowAuraDesigner     = true,
+        testShowExternalDef      = true,
         testShowTargetedList     = true,
         testAnimateTargetedList  = true,
         testShowPersonalTargeted = true,
-        testShowStatusIcons      = true,
     },
-    -- Static plus what a pull adds: health movement and threat.
+    -- A frame mid-pull: the aura rows and status icons a fight actually shows,
+    -- plus health movement and threat.
     COMBAT = {
         testShowPets             = true,
         testAnimateHealth        = true,
@@ -4507,8 +4511,8 @@ function DF:CreateTestPanel()
 
     -- Default first — it is the shipped baseline, so it reads as the starting
     -- point the others move away from.
-    local presets = {"DEFAULT", "STATIC", "COMBAT", "HEALER", "FULL"}
-    local presetNames = {DEFAULT = L["Default"], STATIC = L["Static"], COMBAT = L["Combat"],
+    local presets = {"DEFAULT", "AURAS", "COMBAT", "HEALER", "FULL"}
+    local presetNames = {DEFAULT = L["Default"], AURAS = L["Auras"], COMBAT = L["Combat"],
         HEALER = L["Healer"], FULL = L["Full"]}
     local btnSpacing = 4
     local btnCount = #presets
