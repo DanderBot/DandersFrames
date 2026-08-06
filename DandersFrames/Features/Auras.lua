@@ -769,6 +769,10 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
         if blankAt and alertT and alertT > blankAt then blankAt = alertT end
         local ok, f = pcall(function()
             local down = Enum.NumericRuleFormatRounding.Down
+            -- ⚠ Needed by bandShape below. Without it `up` would resolve to a nil GLOBAL
+            -- and the field would silently fall back to the default rounding — legal Lua
+            -- that parses clean and quietly renders the wrong number.
+            local up   = Enum.NumericRuleFormatRounding.Up
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
             -- GLYPH alert: fixed 16px atlas escape prepended to every band that starts
             -- inside the alert region. Fixed size: the formatter is CACHED + bind-frozen
@@ -832,8 +836,12 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
                     if t >= PROMOTE_MIN  then return "%d:%02d", { { div = 60 }, { mod = 60 } } end
                     return secFmt, nil
                 end
-                if t >= PROMOTE_HOUR then return hrFmt,  { { div = 3600 } } end
-                if t >= PROMOTE_MIN  then return minFmt, { { div = 60 } } end
+                -- Quotient rounds UP here too, matching the plain path and the game (see
+                -- the NUMBER branch). TIMER above is deliberately excluded: its minute
+                -- component is the left half of "2:32" and must truncate, or 2m32s would
+                -- render "3:32".
+                if t >= PROMOTE_HOUR then return hrFmt,  { { div = 3600, rounding = up } } end
+                if t >= PROMOTE_MIN  then return minFmt, { { div = 60,   rounding = up } } end
                 return secFmt, nil
             end
             for _, t in ipairs(sorted) do
@@ -880,12 +888,26 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
         local ok, f = pcall(function()
             local down = Enum.NumericRuleFormatRounding.Down
+            local up   = Enum.NumericRuleFormatRounding.Up
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
+            -- Seconds band truncates: 45.6s remaining is "45", same as the game.
             fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = down, min = 1, format = "%d" })
+            -- ☠ THE QUOTIENT ROUNDS UP, and that is Blizzard's behaviour, not a preference.
+            -- Their formatter sets SetCanRoundUpLastUnit(true), so 2m32s reads "3m" and
+            -- 1h03m reads "63m" -- odd-looking, but it is what the game's own frames show,
+            -- and Units (a real SecondsFormatter) already did it. Standard truncated, so
+            -- the two disagreed at every duration with a fractional minute: "2m" against
+            -- "3m" on the same buff, which is the inconsistency this closes.
+            -- ⚠ Rounding on the COMPONENT is the only place that can affect the quotient --
+            -- breakpoint-level rounding applies to the input SECONDS, before the divide.
+            -- Whether the validator honours it is unproven (the one shipping 12.1 addon
+            -- using this API puts step/rounding only at breakpoint level), so it has a
+            -- visible tell: if the Duration Format example still reads "2m · 62m" against
+            -- Units' "3m · 63m", it was ignored and this needs another approach.
             fmt:AddBreakpoint({ threshold = PROMOTE_MIN,  step = 1, rounding = down, min = 1, format = "%dm",
-                                components = { { div = 60 } } })
+                                components = { { div = 60, rounding = up } } })
             fmt:AddBreakpoint({ threshold = PROMOTE_HOUR, step = 1, rounding = down, min = 1, format = "%dh",
-                                components = { { div = 3600 } } })
+                                components = { { div = 3600, rounding = up } } })
             return fmt
         end)
         return ok and f or nil
