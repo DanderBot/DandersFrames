@@ -3133,16 +3133,14 @@ local TEST_PRESETS = {
         testAnimateTargetedList  = true,
         testShowPersonalTargeted = true,
     },
-    -- Auras plus what a pull adds: health movement and threat.
+    -- Default plus what a pull adds: health movement and threat. The aura layers
+    -- stay off — this one is for watching the bars move, and Auras is where you go
+    -- to look at icons.
     COMBAT = {
         testShowPets             = true,
         testAnimateHealth        = true,
         testShowOutOfRange       = true,
         testShowTextDesigner     = true,
-        testShowAuras            = true,
-        testShowDispelGlow       = true,
-        testShowMissingBuff      = true,
-        testShowAuraDesigner     = true,
         testShowTargetedList     = true,
         testAnimateTargetedList  = true,
         testShowPersonalTargeted = true,
