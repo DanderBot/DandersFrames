@@ -27,29 +27,47 @@ DF.TestData = {
     -- Test aura data - expanded for testing layouts. spellID (where a stable,
     -- still-live spell matches) lets the 12.1 container preview show the REAL
     -- spell tooltip on hover; entries without one fall back to a name tooltip.
+    -- ☠ THE `name` IS THE SOURCE OF TRUTH, NOT THE ID. _paintTestSlot only keeps
+    -- spellID when `C_Spell.GetSpellName(id) == name`, and resolves by name when it
+    -- doesn't — so a stale ID self-heals. The one thing that gate CANNOT catch is a
+    -- different spell sharing the name: `Deadly Poison` shipped as 2823, the rogue's
+    -- one-hour WEAPON IMBUE, and previewed with the imbue's tooltip on a party frame
+    -- for exactly that reason (2818 is the DoT). If two spells share a name, name the
+    -- one you mean with its ID and check the tooltip in game.
+    --
+    -- ⚠ ORDER IS MEANINGFUL. Entries are handed out in pool order from a per-frame
+    -- rotation (testPoolOffset), so ADJACENT entries appear together on one frame.
+    -- Buffs alternate duration classes and debuffs run a repeating 5-cycle of dispel
+    -- types (Magic → Poison → Curse → Disease → none), so any two neighbours differ
+    -- and any five cover every dispel colour. Reordering silently degrades that.
     buffs = {
         {icon = "Interface\\Icons\\Spell_Holy_PowerWordShield", name = "Power Word: Shield", duration = 30, stacks = 0, spellID = 17},
+        -- Stacks are REAL here (charges remaining) — the previous stack case was
+        -- "Heal" with 2 stacks, a direct heal that applies no aura at all.
+        {icon = "Interface\\Icons\\spell_holy_prayerofmending", name = "Prayer of Mending", duration = 30, stacks = 5, spellID = 41635},
         {icon = "Interface\\Icons\\Spell_Nature_Rejuvenation", name = "Rejuvenation", duration = 12, stacks = 0, spellID = 774},
-        {icon = "Interface\\Icons\\Spell_Holy_Renew", name = "Renew", duration = 15, stacks = 3, spellID = 139},
-        {icon = "Interface\\Icons\\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0, spellID = 1022},
-        {icon = "Interface\\Icons\\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
-        {icon = "Interface\\Icons\\Spell_Nature_Riptide", name = "Riptide", duration = 8, stacks = 0, spellID = 61295},
-        {icon = "Interface\\Icons\\Spell_Holy_GreaterHeal", name = "Heal", duration = 6, stacks = 2, spellID = 2060},
-        {icon = "Interface\\Icons\\Spell_Nature_LightningShield", name = "Lightning Shield", duration = 600, stacks = 9, spellID = 192106},
-        {icon = "Interface\\Icons\\Spell_Holy_DivineShield", name = "Divine Shield", duration = 8, stacks = 0, spellID = 642},
+        -- duration = 0 is the PERMANENT case ("Hide Duration on Permanent Auras").
         {icon = "Interface\\Icons\\Spell_Holy_WordFortitude", name = "Power Word: Fortitude", duration = 0, stacks = 0, spellID = 21562},
+        {icon = "Interface\\Icons\\Spell_Nature_Riptide", name = "Riptide", duration = 8, stacks = 0, spellID = 61295},
+        {icon = "Interface\\Icons\\Spell_Holy_Renew", name = "Renew", duration = 15, stacks = 0, spellID = 139},
+        {icon = "Interface\\Icons\\Ability_Paladin_BeaconofLight", name = "Beacon of Light", duration = 300, stacks = 0, spellID = 53563},
+        {icon = "Interface\\Icons\\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
+        {icon = "Interface\\Icons\\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0, spellID = 1022},
+        {icon = "Interface\\Icons\\ability_monk_renewingmists", name = "Renewing Mist", duration = 20, stacks = 0, spellID = 119611},
     },
     debuffs = {
         {icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain", name = "Shadow Word: Pain", duration = 18, stacks = 0, debuffType = "Magic", spellID = 589},
-        {icon = "Interface\\Icons\\Spell_Nature_NullifyPoison", name = "Deadly Poison", duration = 8, stacks = 2, debuffType = "Poison", spellID = 2823},
+        {icon = "Interface\\Icons\\Ability_PoisonSting", name = "Crippling Poison", duration = 12, stacks = 0, debuffType = "Poison", spellID = 3409},
         {icon = "Interface\\Icons\\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
-        {icon = "Interface\\Icons\\Ability_Rogue_Garrote", name = "Garrote", duration = 18, stacks = 0, debuffType = nil, spellID = 703},
+        {icon = "Interface\\Icons\\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 0, debuffType = "Disease", spellID = 55095},
+        {icon = "Interface\\Icons\\Ability_ShockWave", name = "Hamstring", duration = 15, stacks = 0, debuffType = nil, spellID = 1715},
+        {icon = "Interface\\Icons\\Spell_Nature_Polymorph", name = "Polymorph", duration = 8, stacks = 0, debuffType = "Magic", spellID = 118},
+        -- 2818 = the DoT. NOT 2823, which is the weapon imbue of the same name.
+        -- Deadly Poison genuinely stacks to 5, so this is an honest stack case.
+        {icon = "Interface\\Icons\\Spell_Nature_NullifyPoison", name = "Deadly Poison", duration = 12, stacks = 5, debuffType = "Poison", spellID = 2818},
+        {icon = "Interface\\Icons\\Spell_Shaman_Hex", name = "Hex", duration = 8, stacks = 0, debuffType = "Curse", spellID = 51514},
         {icon = "Interface\\Icons\\Spell_Shadow_AbominationExplosion", name = "Blood Plague", duration = 21, stacks = 0, debuffType = "Disease", spellID = 55078},
-        {icon = "Interface\\Icons\\Spell_Fire_Immolation", name = "Immolate", duration = 15, stacks = 0, debuffType = "Magic", spellID = 348},
-        {icon = "Interface\\Icons\\Ability_Druid_Rake", name = "Rake", duration = 15, stacks = 0, debuffType = nil, spellID = 1822},
-        {icon = "Interface\\Icons\\Spell_Nature_Slow", name = "Slow", duration = 12, stacks = 0, debuffType = "Magic", spellID = 31589},
-        {icon = "Interface\\Icons\\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 3, debuffType = "Disease", spellID = 55095},
-        {icon = "Interface\\Icons\\Spell_Shadow_Possession", name = "Fear", duration = 8, stacks = 0, debuffType = "Magic", spellID = 5782},
+        {icon = "Interface\\Icons\\Ability_Gouge", name = "Rend", duration = 15, stacks = 0, debuffType = nil, spellID = 772},
     },
     -- Defensive externals for the 12.1 container preview (config.testPool =
     -- "defensives" on the defensive row). Same spells the legacy test painter

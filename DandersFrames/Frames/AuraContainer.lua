@@ -2819,6 +2819,60 @@ local function testPoolFor(config)
         or (harmful and td.debuffs or td.buffs)))
 end
 
+-- How many sample icons this preview draws. A function OF CONFIG for the same reason
+-- testPoolFor is (PaintPreviewSlot's duck-typed handle has no methods) — and shared so
+-- the slot count and the rotation step can never disagree about the window size.
+local function testSlotCount(config, pool)
+    local n = config.testMax
+        and math.min(config.testMax, config.max or config.testMax)
+        or (config.max or 1)
+    if pool and #pool > 0 then n = math.min(n, #pool) end
+    return math.max(1, n)
+end
+
+-- ★ PER-FRAME POOL ROTATION — why every frame used to show the same two icons.
+--
+-- The pools hold ten entries but a preview only draws as many as the count slider
+-- allows, and every container asked for indices 1..N, so all five party frames drew
+-- entries 1 and 2 and the other eight were never seen by anyone. Rotating the START
+-- per frame shows the whole pool at once across a group.
+--
+-- ☠ DETERMINISTIC, NOT RANDOM. `math.random` here would re-roll on every repaint, and
+-- the preview repaints on any restyle — icons would churn while you drag a slider,
+-- which reads as a rendering bug. The unit token is stable for a frame's whole life
+-- (TestFramePool stamps "raid7"/"party2"/"player"), so it is the seed.
+--
+-- ☠ THE STEP IS THE ICON COUNT, NOT 1 AND NOT A FIXED PRIME. Stepping by 1 makes
+-- neighbours overlap almost entirely (frames showing 1-2, 2-3, 3-4…). Stepping by the
+-- COUNT tiles the pool instead: at 2 icons, five party frames take 1-2, 3-4, 5-6, 7-8,
+-- 9-10 — the whole pool on screen at once, nothing repeated. A fixed prime was tried
+-- first and measured worse (8 of 10 entries, 2 repeats), because coprime-ness spreads
+-- the STARTS without stopping the windows overlapping.
+--
+-- The fallback matters though: stepping by the count degenerates when the count divides
+-- the pool too evenly — at 5 icons over 10 entries the offsets are 0,5,0,5,0 and every
+-- other frame is identical, which is the exact complaint this is fixing. distinct starts
+-- = poolSize / gcd(step, poolSize), so when that drops below 4 fall back to 7, which is
+-- coprime with both live pool sizes (10 rows, 4 defensives) and therefore always spreads.
+--
+-- ⚠ NEVER rotates config.testEntries. Those are the Aura Designer's OWN configured
+-- spells for that indicator, not a sample pool — rotating them would preview a spell
+-- the user did not choose.
+local function gcd(a, b)
+    while b ~= 0 do a, b = b, a % b end
+    return a
+end
+
+local function testPoolOffset(config, poolSize, count)
+    if config.testEntries or not poolSize or poolSize < 2 then return 0 end
+    local u = config.unit
+    if type(u) ~= "string" then return 0 end
+    local n = tonumber(u:match("(%d+)$")) or 0   -- "player" has none -> 0
+    local step = math.max(1, count or 1)
+    if poolSize / gcd(step, poolSize) < 4 then step = 7 end
+    return (n * step) % poolSize
+end
+
 local Handle = {}
 Handle.__index = Handle
 
@@ -2841,12 +2895,7 @@ function Handle:_slotCount()
     -- the count decides how many buttons the flow lays out, so an uncapped count draws
     -- duplicate icons no matter what the painter does with the index.
     if AuraContainer._testMode then
-        local n = self.config.testMax
-            and math.min(self.config.testMax, self.config.max or self.config.testMax)
-            or (self.config.max or 1)
-        local pool = testPoolFor(self.config)
-        if pool and #pool > 0 then n = math.min(n, #pool) end
-        return math.max(1, n)
+        return testSlotCount(self.config, testPoolFor(self.config))
     end
     return self.config.max or 1
 end
@@ -3011,7 +3060,13 @@ function Handle:_paintTestSlot(slot, index)
     -- showing. _slotCount caps the preview to the pool now, so an out-of-range index
     -- should be unreachable; clamping rather than wrapping means that if one ever does
     -- arrive it repeats the LAST entry visibly instead of impersonating the first.
-    local e = pool[math.max(1, math.min(index, #pool))]
+    -- Clamp FIRST, then rotate: the clamp is the out-of-range defence above, and the
+    -- rotation only moves where the pool starts for this frame. Composing them this way
+    -- keeps entries distinct within a container (guaranteed while _slotCount caps the
+    -- count to #pool) while differing between containers.
+    local idx = math.max(1, math.min(index, #pool))
+    local off = testPoolOffset(self.config, #pool, testSlotCount(self.config, pool))
+    local e = pool[((off + idx - 1) % #pool) + 1]
     -- Belt-and-braces: native hover must NEVER win in test mode (it tooltips the
     -- hidden SAMPLE aura). Re-asserted every paint pass, not just at creation.
     if slot.SetMouseMotionEnabled then pcall(function() slot:SetMouseMotionEnabled(false) end) end
