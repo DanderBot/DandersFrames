@@ -112,12 +112,12 @@ DF.TestData = {
         -- reason a party frame once previewed "Requires One-Handed Melee Weapon".
         -- Deadly Poison genuinely stacks to 5, so this is an honest stack case.
         {icon = "Interface\Icons\Spell_Nature_NullifyPoison", name = "Deadly Poison", duration = 12, stacks = 5, debuffType = "Poison", spellID = 2818},
-        {icon = "Interface\Icons\Spell_Nature_BloodLust", name = "Sated", duration = 600, stacks = 0, debuffType = nil, spellID = 57724},
+        {icon = "Interface\Icons\Spell_Holy_RemoveCurse", name = "Forbearance", duration = 30, stacks = 0, debuffType = nil, spellID = 25771},
         {icon = "Interface\Icons\Ability_Warrior_SavageBlow", name = "Mortal Wounds", duration = 10, stacks = 0, debuffType = nil, spellID = 115804},
         {icon = "Interface\Icons\Spell_Shadow_ShadowWordPain", name = "Shadow Word: Pain", duration = 18, stacks = 0, debuffType = "Magic", spellID = 589},
         {icon = "Interface\Icons\Spell_Shaman_Hex", name = "Hex", duration = 8, stacks = 0, debuffType = "Curse", spellID = 51514},
-        {icon = "Interface\Icons\Spell_Shadow_SoulLeech_3", name = "Deserter", duration = 900, stacks = 0, debuffType = nil, spellID = 71041},
-        {icon = "Interface\Icons\Spell_Shaman_Bloodlust", name = "Exhaustion", duration = 600, stacks = 0, debuffType = nil, spellID = 57723},
+        {icon = "Interface\Icons\Ability_CheapShot", name = "Dazed", duration = 4, stacks = 0, debuffType = nil, spellID = 1604},
+        {icon = "Interface\Icons\Spell_Holy_Resurrection", name = "Resurrection Sickness", duration = 600, stacks = 0, debuffType = nil, spellID = 15007},
     },
     -- Defensive externals for the 12.1 container preview (config.testPool =
     -- "defensives" on the defensive row). Same spells the legacy test painter
