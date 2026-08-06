@@ -46,11 +46,19 @@ DF.TestData = {
         -- "Heal" with 2 stacks, a direct heal that applies no aura at all.
         {icon = "Interface\\Icons\\spell_holy_prayerofmending", name = "Prayer of Mending", duration = 30, stacks = 5, spellID = 41635},
         {icon = "Interface\\Icons\\Spell_Nature_Rejuvenation", name = "Rejuvenation", duration = 12, stacks = 0, spellID = 774},
-        -- duration = 0 is the PERMANENT case ("Hide Duration on Permanent Auras").
-        {icon = "Interface\\Icons\\Spell_Holy_WordFortitude", name = "Power Word: Fortitude", duration = 0, stacks = 0, spellID = 21562},
+        -- 1 hour, like every modern raid buff — NOT permanent. This shipped as
+        -- duration = 0 and was the preview's "permanent aura" case, which was wrong on
+        -- both counts: Fortitude does expire, and the permanent case belongs on Beacon
+        -- of Light below, which genuinely has no duration. Also the long-duration case,
+        -- so the countdown formats get exercised above the minutes/hours boundary.
+        {icon = "Interface\\Icons\\Spell_Holy_WordFortitude", name = "Power Word: Fortitude", duration = 3600, stacks = 0, spellID = 21562},
         {icon = "Interface\\Icons\\Spell_Nature_Riptide", name = "Riptide", duration = 8, stacks = 0, spellID = 61295},
         {icon = "Interface\\Icons\\Spell_Holy_Renew", name = "Renew", duration = 15, stacks = 0, spellID = 139},
-        {icon = "Interface\\Icons\\Ability_Paladin_BeaconofLight", name = "Beacon of Light", duration = 300, stacks = 0, spellID = 53563},
+        -- duration = 0 is the PERMANENT case, and it drives "Hide Duration on Permanent
+        -- Auras". Beacon holds until the paladin moves it, so it is a real one rather
+        -- than a made-up zero. ⚠ If a patch ever gives Beacon a timer this stops
+        -- exercising that setting — the pool then needs another duration-less buff.
+        {icon = "Interface\\Icons\\Ability_Paladin_BeaconofLight", name = "Beacon of Light", duration = 0, stacks = 0, spellID = 53563},
         {icon = "Interface\\Icons\\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
         {icon = "Interface\\Icons\\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0, spellID = 1022},
         {icon = "Interface\\Icons\\ability_monk_renewingmists", name = "Renewing Mist", duration = 20, stacks = 0, spellID = 119611},
