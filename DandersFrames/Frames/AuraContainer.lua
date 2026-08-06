@@ -2772,6 +2772,31 @@ function NativeBackend:teardown(park)
     end
 end
 
+-- The curated preview pool for a container config. Shared so the SLOT COUNT and the
+-- PAINT agree on one answer: they used to resolve it independently, and the count could
+-- ask for more icons than the pool has entries.
+--
+-- ☠ A PLAIN FUNCTION OF CONFIG, NOT A Handle METHOD, AND THAT IS LOAD-BEARING.
+-- AuraContainer.PaintPreviewSlot drives the paint core with a DUCK-TYPED handle --
+-- literally `{ config = config }`, no metatable -- because the AD editor canvas paints
+-- slots it owns outright, with no container behind them. Anything the paint path reaches
+-- for via `self:` is therefore nil there. This was first written as `Handle:_testPool`
+-- and broke opening the Aura Designer instantly ("attempt to call a nil value").
+-- Keep every shared preview helper a function OF CONFIG for the same reason.
+local function testPoolFor(config)
+    local recs = normalizeFilters(config.filter)
+    local harmful = recs[1] and recs[1].f:find("HARMFUL")
+    local td = DF.TestData
+    -- config.testEntries carries per-container curated entries (the Aura Designer's
+    -- placed indicators preview their own configured spell); config.testPool names a
+    -- curated TestData pool for rows whose category filter alone would mispreview (the
+    -- defensive row is HELPFUL but must show defensives, not raid buffs). Falls back to
+    -- the category pools.
+    return config.testEntries
+        or (td and ((config.testPool and td[config.testPool])
+        or (harmful and td.debuffs or td.buffs)))
+end
+
 local Handle = {}
 Handle.__index = Handle
 
@@ -2797,7 +2822,7 @@ function Handle:_slotCount()
         local n = self.config.testMax
             and math.min(self.config.testMax, self.config.max or self.config.testMax)
             or (self.config.max or 1)
-        local pool = self:_testPool()
+        local pool = testPoolFor(self.config)
         if pool and #pool > 0 then n = math.min(n, #pool) end
         return math.max(1, n)
     end
@@ -2953,26 +2978,8 @@ end
 -- live, so the preview is styling-true (borders, fonts, insets, swipe). Harmful
 -- rows page through the debuff pool (dispel-typed edges), everything else the
 -- buff pool. Regions are unbound in test mode, so their Shown state is OURS here.
--- The curated preview pool for this container. Extracted so the SLOT COUNT and the
--- PAINT agree on one answer: they used to resolve it independently, and the count could
--- ask for more icons than the pool has entries.
-function Handle:_testPool()
-    local recs = normalizeFilters(self.config.filter)
-    local harmful = recs[1] and recs[1].f:find("HARMFUL")
-    local td = DF.TestData
-    -- config.testEntries carries per-container curated entries (the Aura Designer's
-    -- placed indicators preview their own configured spell); config.testPool names a
-    -- curated TestData pool for rows whose category filter alone would mispreview (the
-    -- defensive row is HELPFUL but must show defensives, not raid buffs). Falls back to
-    -- the category pools.
-    local pool = self.config.testEntries
-        or (td and ((self.config.testPool and td[self.config.testPool])
-        or (harmful and td.debuffs or td.buffs)))
-    return pool, harmful
-end
-
 function Handle:_paintTestSlot(slot, index)
-    local pool = self:_testPool()
+    local pool = testPoolFor(self.config)
     if not pool or #pool == 0 then return end
     -- ☠ CLAMP, DO NOT WRAP. This was `((index - 1) % #pool) + 1`, which silently
     -- recycled the pool once the preview asked for more icons than it holds — the
@@ -3181,7 +3188,15 @@ function Handle:_paintTestSlot(slot, index)
     -- LAST in the paint so any residual error can't take other art down.
     -- Index-keyed + handle-owned: rebuilds reposition instead of leaking;
     -- _teardownContainer hides the lot. Clicks pass through.
-    if self.config.tooltips == true then
+    -- ☠ CONTAINER-ONLY BLOCK, AND THE GUARD IS self.frame, NOT the tooltips flag.
+    -- Everything below needs a REAL handle: self.frame to parent and level the hover
+    -- frame against, and self:_positionTestTip (which in turn calls self:_slotCount).
+    -- The duck-typed preview handle from PaintPreviewSlot has none of them — see
+    -- testPoolFor. Today's preview configs never set `tooltips`, so this is unreachable
+    -- from that path; the guard is here so ADDING the key is a no-op rather than three
+    -- nil-value errors, which is exactly how the `_testPool` extraction broke opening
+    -- the Aura Designer. The canvas does its own hover handling, so skipping is right.
+    if self.config.tooltips == true and self.frame then
         self._testTips = self._testTips or {}
         local tip = self._testTips[index]
         if not tip then
