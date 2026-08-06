@@ -3422,6 +3422,28 @@ end
 function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart)
     local handle = self
     local seq = seqStart
+    -- ☠ THE CONTAINER'S BUILD-TIME SHAPE, CAPTURED HERE — never the live global.
+    --
+    -- build() picks its SHAPE from AuraContainer._testMode: a test container declares
+    -- dfTestStyled/dfTestPlain and skips the real filter loop, and groups can never be
+    -- removed, so that shape is fixed for the container's whole life. This closure used
+    -- to decide paint-vs-bind by reading the GLOBAL again -- but buttons are created in
+    -- LAZY BATCHES long after build (AddAuraGroup allocates FrameCreationBatchSize at a
+    -- time, and more arrive on later aura events). Any test transition between build and
+    -- a batch firing flipped the branch underneath a container that cannot change shape.
+    --
+    -- The failure is one-directional and silent: a test-shaped container whose later
+    -- batches land while the global reads false runs _bindNativeSlot, so Blizzard's
+    -- SetIcon takes over and repaints the curated preview art with the hidden SAMPLE
+    -- aura's icon -- the same "sample auras' random art" failure the P5 note in
+    -- ApplyStyle describes. The tooltip is unaffected, because _testTips is DF-owned and
+    -- keyed by the curated index, so the two visibly disagree. Reported in game
+    -- 2026-08-06: buff, debuff and defensive rows all showing one repeated icon.
+    --
+    -- Captured, not read through handle.backend at call time: a re-adopted park swaps
+    -- the backend out from under closures that belong to a different container.
+    local testShape = self.backend and self.backend.builtInTestMode
+    if testShape == nil then testShape = AuraContainer._testMode end
     return function(button)
         local ok, err = pcall(function()
             if handle._destroyed or handle._gen ~= gen or not button then return end
@@ -3451,7 +3473,7 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
                 -- on every later restyle, so the override is not lost the moment
                 -- anything else re-styles the row.
                 handle:_acceptSlot(button, i, recStyle)   -- size + regions + per-group overrides
-                if AuraContainer._testMode then
+                if testShape then
                     -- P5 hybrid preview: the sample provider drives presence and the
                     -- real flow drives geometry, but the sample auras' own data is
                     -- never shown — no native binds; paint the curated pool instead.
@@ -3789,7 +3811,13 @@ function Handle:ApplyStyle(style, layout)
             -- was always downstream, never in the style itself.
             applyRecordStyle(b, self, b.dfImpRecStyle)
             if native then
-                if AuraContainer._testMode then
+                -- ☠ BUILD-TIME SHAPE, not the live global — same reason as
+                -- _makeInitializeFrame. A test-shaped container restyled while the global
+                -- reads false would bind the native setters onto preview buttons, and
+                -- Blizzard's SetIcon then repaints the curated art with the hidden sample
+                -- aura's. A container cannot change shape (groups are add-only), so the
+                -- shape it was BUILT with is the only correct answer here.
+                if (self.backend and self.backend.builtInTestMode) then
                     -- TEST MODE: re-PAINT, never bind. Binding here was the P5
                     -- preview killer: any settings refresh re-ran this loop and
                     -- registered the native setters on the preview buttons, so
