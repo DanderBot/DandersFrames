@@ -75,7 +75,7 @@ end
 -- ui-debuff-border-* art meant to frame an aura BUTTON, so on a unit frame they draw
 -- as a square box around the symbol. Wrong tool -- they exist to border an icon, not
 -- a frame. A customDispelAssetMap (dispel name -> our own texture per type) is the
--- route if DF ever ships badge art of its own; MSUF drives four icon sets through it.
+-- route if DF ever ships badge art of its own -- it takes a full set, one per type.
 local function BadgeCarrierOptions()
     return {
         style = DF:ResolveDispelTextureStyle("Icon"),

@@ -476,16 +476,15 @@ end
 -- "PLAYER|HELPFUL" are two full scans of the same data.
 --
 -- Emitting one canonical spelling everywhere makes equivalent filters share a batch. This
--- is the one thing EllesmereUI centralises that we could not get by calling the API per
--- consumer -- it needs GLOBAL string discipline, so it goes at the chokepoint every
--- record passes through rather than in each builder.
+-- is the one saving that cannot be had per consumer -- it needs GLOBAL string discipline,
+-- so it goes at the chokepoint every record passes through rather than in each builder.
 --
 -- Sort is by BARE token, with a token's negation immediately after it, so "!X" can never
 -- drift away from "X". Duplicate tokens collapse. Memoised on the input string: the same
 -- handful of strings recur on every rebuild across every frame.
 -- ⚠ Order-independence is Blizzard's model (AuraUtil tokenises on "|" and space into a
--- set) and EllesmereUI ships the same normalisation. If a filter ever behaves differently
--- after this, suspect order-sensitivity here first.
+-- set). If a filter ever behaves differently after this, suspect order-sensitivity here
+-- first.
 local filterCanonCache = {}
 local function canonicalFilter(s)
     if type(s) ~= "string" or s == "" then return s end
@@ -4642,10 +4641,10 @@ end
 --
 -- WHY. Every AD indicator sets singleSlot, so today each one gets a WHOLE AuraContainer
 -- holding exactly ONE AddAuraSlot = one button. Measured across the 18 Create call sites
--- that is ~130 containers per unit frame worst case, ~5,200 in a 40-man, uncapped. MSUF
--- caps at 14 per frame by construction; EllesmereUI runs 3-7. WoW never frees a frame and
--- teardown cannot release buttons (RemoveAllAuraFrames does not exist -- zero hits at
--- 69111), so every structural edit strands the lot for the session.
+-- that is ~130 containers per unit frame worst case, ~5,200 in a 40-man, uncapped -- an
+-- order of magnitude above what a fixed, enumerated set of slots would cost. WoW never
+-- frees a frame and teardown cannot release buttons (RemoveAllAuraFrames does not exist
+-- -- zero hits at 69111), so every structural edit strands the lot for the session.
 --
 -- One container per unit frame, one slot per indicator, instead.
 --
@@ -4654,15 +4653,17 @@ end
 -- So a structural change cannot mutate a slot -- it declares a NEW one (keyed by the
 -- consumer's struct sig) and PARKS the old. That costs ONE button where today it costs a
 -- container plus a button, and revisiting an earlier structure re-adopts the parked slot
--- by key. EllesmereUI does the same for their Debuff Manager ("declares a new variant
--- group and parks the old at 0").
+-- by key. Declare-a-new-variant-and-park-the-old is the standard shape for this under an
+-- add-only topology; there is no other correct one.
 --
 -- ☠ PARKING IS THE WHOLE MECHANISM, and it is why this could not be built before now.
 -- AddAuraSlot is add-only -- Blizzard's ClearAuraGroups is "intentionally not exposed via
 -- the inbound interface" because pooled frames would become irrecoverable -- and slots
--- have no maxFrameCount. SetAuraSlotFilterString(key, "") emptying a slot was an
--- UNVERIFIED assumption in Grid2's code until /alpark proved it in game on 2026-08-05.
--- A bare re-Set restores it live.
+-- have no maxFrameCount. That SetAuraSlotFilterString(key, "") empties a slot is not
+-- determinable from the Lua source -- AuraUtil.IsValidFilterString("") returns true
+-- because every component is skipped, but what the engine does with an empty predicate is
+-- invisible. Proved in game with /alpark on 2026-08-05: it matches nothing (it does NOT
+-- fall back to a default), and a bare re-Set restores it live.
 --
 -- ★ Z-ORDER: the dfLevelHost. Sharing a container means sharing its frame level, but AD
 -- indicators need independent layering. Writing the level on the slot BUTTON is legal
@@ -4670,7 +4671,7 @@ end
 -- gets a DF-owned child frame between the button and our regions:
 --     slot button (sealed, never re-levelled)  ->  dfLevelHost (ours, levelled LIVE)
 -- Regions must stay DESCENDANTS of the button (ValidateInboundScriptObject errors
--- otherwise) and a child frame satisfies that -- MSUF's EnsureAuraTextOverlay technique.
+-- otherwise) and an interposed child frame satisfies that while staying levellable.
 --
 -- ⚠ Not handled in S1, by design: the identity gate (per-owner now, not per-handle),
 -- test-mode frames (refused outright -- the preview declares its own topology), and
@@ -4951,8 +4952,8 @@ end
 
 -- Per-indicator alpha. Goes on the BUTTON, which is where the per-indicator container's
 -- frame carried it before. ⚠ Never drive this to 0 as a way of hiding a slot -- park it
--- instead. MSUF's note applies: a button's shown state is secret-backed and descendant
--- effects inherit it, so alpha 0 silences those too rather than just hiding the icon.
+-- instead. A button's shown state is secret-backed and descendant effects inherit it, so
+-- alpha 0 silences those too rather than just hiding the icon.
 function SlotHandle:SetAlpha(alpha)
     local btn = self.button
     if not btn or type(alpha) ~= "number" then return false end

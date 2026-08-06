@@ -497,9 +497,9 @@ end
 -- mapped: they are ui-debuff-border-* art meant to frame an aura BUTTON, so on a unit
 -- frame they render as a square box around the symbol (tried live 2026-08-03).
 --
--- Resolved BY NAME, never by literal: the numbers were renumbered for 68914 (Grid2
--- still ships `style = 1` meaning "Color" and now draws BorderWithIcon). The literal
--- table is a last resort for clients without the enum at all.
+-- Resolved BY NAME, never by literal: the numbers were RENUMBERED for 68914, so any
+-- hardcoded `style = 1` that used to mean "Color" now draws BorderWithIcon instead. The
+-- literal table is a last resort for clients without the enum at all.
 local DISPEL_STYLE_NEW = {
     Color = "PreserveAsset", Atlas = "Border",
     Icon = "Icon",

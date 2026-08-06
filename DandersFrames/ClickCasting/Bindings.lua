@@ -703,9 +703,10 @@ function CC:ApplyBindings()
         -- DF-bound key fell through to the action bar meanwhile (the reporter's
         -- "4" cast their action-bar spell instead of the DF one).
         --
-        -- Field-measured with ElvUI loaded in LFR, 2026-08-02: 500 registered
-        -- frames per sweep, 240 of them ElvUI's -- worth noting the batching
-        -- below was sized for the "100-150+" its own comment assumes. Two sweeps
+        -- Field-measured in LFR with a full third-party frame suite loaded,
+        -- 2026-08-02: 500 registered frames per sweep, 240 of them from a single
+        -- other addon -- worth noting the batching below was sized for the
+        -- "100-150+" its own comment assumes. Two sweeps
         -- ran seconds apart, ~392 frame-applies each: 12:37:37-38 in about a
         -- second, then 12:37:49-54 taking about six. So the worst observed dead
         -- window is ~6s within a single sweep, NOT the whole span between them.
@@ -802,8 +803,8 @@ function CC:ApplyBindings()
                     CC:ReassertHoverBinds()
 
                     -- ONE line per sweep. This used to be three INFO lines per
-                    -- frame, and a sweep walks every registered frame -- with
-                    -- ElvUI loaded that is ~590 frames, so ~1770 entries in a
+                    -- frame, and a sweep walks every registered frame -- with a
+                    -- full UI suite loaded that is ~590 frames, so ~1770 entries in a
                     -- second or two. At maxLines = 10000 that let a handful of
                     -- sweeps evict the entire history: two separate attempts to
                     -- capture a reported bug (2026-08-02) came back holding only
