@@ -5637,7 +5637,17 @@ end
 --
 -- Returns the first dispellable type in the unit's window, or nil when the window holds
 -- none (which is how the pool's untyped entries set how often an overlay appears at all).
-function DF:GetTestDebuffDispelType(unitToken, count)
+-- ⚠ DISPEL COLOURS THAT VANISH INTO A CLASS COLOUR. The overlay tints the whole frame,
+-- so a type whose colour matches the unit's class bar reads as one flat wash — Krathe on
+-- Magic (blue) landing on a MAGE (blue): "the blue overlay and class and icon clash."
+-- Preview-only cosmetics: the pairing is legal and happens constantly in live play, it
+-- just makes a poor demonstration of the feature. Extend when another pair reads badly.
+local TEST_DISPEL_CLASH = {
+    MAGE    = "Magic",    -- both blue
+    WARLOCK = "Curse",    -- both purple
+}
+
+function DF:GetTestDebuffDispelType(unitToken, count, class)
     local pool = DF.TestData and DF.TestData.debuffs
     if not (pool and #pool > 0) then return nil end
     local cfg = { unit = unitToken }
@@ -5660,5 +5670,16 @@ function DF:GetTestDebuffDispelType(unitToken, count)
     -- pool's own, Magic and Curse appearing twice in it and the other two once).
     local u = tostring(unitToken or "")
     local seed = tonumber(u:match("(%d+)$")) or 0
+    -- Drop a type that would disappear into this unit's class colour, but only while the
+    -- window still offers an alternative: falling through to nil instead would quietly
+    -- thin the overlay density that the pool's untyped slots are tuned to produce.
+    local clash = class and TEST_DISPEL_CLASH[class]
+    if clash and #types > 1 then
+        local keep
+        for i = 1, #types do
+            if types[i] ~= clash then keep = keep or {}; keep[#keep + 1] = types[i] end
+        end
+        if keep then types = keep end
+    end
     return types[(math.floor((seed * 3 + off) / 2) % #types) + 1]
 end

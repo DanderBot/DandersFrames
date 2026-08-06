@@ -301,7 +301,8 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         local dispelType = nil
         if not isDead then  -- Dead frames don't show dispels
             dispelType = DF.GetTestDebuffDispelType
-                and DF:GetTestDebuffDispelType("raid" .. i, (DF:GetRaidDB() or {}).testDebuffCount or 2)
+                and DF:GetTestDebuffDispelType("raid" .. i, (DF:GetRaidDB() or {}).testDebuffCount or 2,
+                    testClasses[i])
         end
         
         local result = {
@@ -379,7 +380,7 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         -- is not showing. data.dispelType is left in the table above as scenario notes.
         dispelType = (data.status ~= "Dead") and DF.GetTestDebuffDispelType
             and DF:GetTestDebuffDispelType((index == 0) and "player" or ("party" .. index),
-                (DF:GetDB() or {}).testDebuffCount or 2) or nil,
+                (DF:GetDB() or {}).testDebuffCount or 2, data.class) or nil,
         centerStatus = data.centerStatus,
         -- New icon states
         isMainTank = data.isMainTank,
