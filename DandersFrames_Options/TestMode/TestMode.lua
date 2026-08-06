@@ -105,15 +105,15 @@ DF.TestData = {
         -- partner is already DRUID (Rake at 6), so a druid bleed fits without breaking
         -- the class spacing. Converting Rake or Rend instead would have been simpler and
         -- was rejected: they are two of the four untyped slots that set the 60% density.
-        {icon = "Interface\Icons\Ability_GhoulFrenzy", name = "Rip", duration = 16, stacks = 0, debuffType = "Bleed", spellID = 1079},
+        {icon = "Interface\Icons\Ability_BackStab", name = "Deep Wounds", duration = 6, stacks = 0, debuffType = "Bleed", spellID = 115767},
         {icon = "Interface\Icons\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 0, debuffType = "Disease", spellID = 55095},
         {icon = "Interface\Icons\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
         -- 2818 = the DoT. NOT 2823, which is the weapon imbue of the same name, and the
         -- reason a party frame once previewed "Requires One-Handed Melee Weapon".
         -- Deadly Poison genuinely stacks to 5, so this is an honest stack case.
         {icon = "Interface\Icons\Spell_Nature_NullifyPoison", name = "Deadly Poison", duration = 12, stacks = 5, debuffType = "Poison", spellID = 2818},
-        {icon = "Interface\Icons\Ability_Warrior_SavageBlow", name = "Mortal Wounds", duration = 10, stacks = 0, debuffType = nil, spellID = 115804},
         {icon = "Interface\Icons\Spell_Nature_BloodLust", name = "Sated", duration = 600, stacks = 0, debuffType = nil, spellID = 57724},
+        {icon = "Interface\Icons\Ability_Warrior_SavageBlow", name = "Mortal Wounds", duration = 10, stacks = 0, debuffType = nil, spellID = 115804},
         {icon = "Interface\Icons\Spell_Shadow_ShadowWordPain", name = "Shadow Word: Pain", duration = 18, stacks = 0, debuffType = "Magic", spellID = 589},
         {icon = "Interface\Icons\Spell_Shaman_Hex", name = "Hex", duration = 8, stacks = 0, debuffType = "Curse", spellID = 51514},
         {icon = "Interface\Icons\Spell_Shadow_SoulLeech_3", name = "Deserter", duration = 900, stacks = 0, debuffType = nil, spellID = 71041},
