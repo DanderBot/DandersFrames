@@ -97,6 +97,9 @@ local warnedCreate = false
 -- to name the offending consumer.
 local warnedFilterString = false
 local warnedPandemic = false
+-- Test hover zone could not anchor to its button (see _paintTestSlot). One line: the
+-- fallback still works, it just cannot follow the flow's ordering.
+local warnedTestTipAnchor = false
 
 -- Animations SAFE to run on an OVERLAY-mode border (Aura Designer). These render
 -- entirely on DF-owned child regions of the border (edge alpha ticks + DF_DASH's
@@ -3215,7 +3218,44 @@ function Handle:_paintTestSlot(slot, index)
             end)
             tip:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
         end
-        self:_positionTestTip(tip, index)
+        -- ☠ ANCHOR THE ZONE TO ITS BUTTON. It used to be positioned by
+        -- _positionTestTip(tip, index), which rebuilt the grid cell from the layout --
+        -- anchor, growth, wrap, spacing, strip reservation -- purely from the index.
+        -- That gave the hover zone and the icon TWO INDEPENDENT position sources, and
+        -- they only agree while creation order matches layout order.
+        --
+        -- Since the styled/plain group split (b69239ac, shipped in alpha-15) they do
+        -- not: the flow assigns auras to a shared group's buttons in the CONTAINER's
+        -- order, which the split's own comment records is not creation order. So entry
+        -- N's zone sat in grid cell N while entry N's icon was on whatever button the
+        -- flow put elsewhere -- correct tooltips over the wrong art, exactly as
+        -- reported (2026-08-06, and reproduced by an alpha-15 user).
+        --
+        -- `slot` is the button this very call is painting, so anchoring to it makes the
+        -- two share ONE source by construction and stay correct however the flow
+        -- reorders. Anchor-derived geometry is also the only legal route here: a
+        -- button's rect is secret on 12.1, its anchors are not (the same rule the
+        -- health-fill cover relies on).
+        -- ⚠ FALLS BACK, and the fallback is not decoration. _positionTestTip's own
+        -- header claims "the buttons' own rects are off-limits to insecure anchors".
+        -- Anchoring is not a rect READ -- makeHolder does SetAllPoints(button) and the
+        -- pandemic cue and dispel badge both render through one -- but makeHolder runs
+        -- inside initializeFrame, where writes to a button are still legal, and this
+        -- function also runs from the TAINTED restyle. If the anchor is refused there,
+        -- an unanchored zone would collapse onto its parent's origin and kill hover
+        -- entirely, which is worse than the mismatch being fixed. So: try the anchor,
+        -- keep the settings-derived grid as the safety net, and say so once.
+        local okAnchor = pcall(function()
+            tip:ClearAllPoints()
+            tip:SetAllPoints(slot)
+        end)
+        if not okAnchor then
+            if not warnedTestTipAnchor then
+                warnedTestTipAnchor = true
+                DF:DebugWarn(DBG, "test hover zone could not anchor to its button; falling back to grid placement (zones may not track the flow's ordering)")
+            end
+            self:_positionTestTip(tip, index)
+        end
         tip:SetFrameLevel(self.frame:GetFrameLevel() + 60)   -- above the buttons for hover
         tip._name = dispName            -- override-resolved, matches the icon
         tip._spellID = sid              -- validated + override-resolved up top
@@ -3287,10 +3327,20 @@ function AuraContainer._stopTestTicker()
     end
 end
 
--- Place a test hover tip over button `index` from the layout SETTINGS (the same
--- vocabulary applyContainerLayout translates onto the native flow, so the zones
--- land on the rendered buttons; layoutRow is the reference math). Settings-derived
--- by necessity — the buttons' own rects are off-limits to insecure anchors.
+-- FALLBACK ONLY as of 2026-08-06. Places a test hover tip over button `index` from
+-- the layout SETTINGS (the same vocabulary applyContainerLayout translates onto the
+-- native flow; layoutRow is the reference math).
+--
+-- ☠ THIS IS NO LONGER THE PRIMARY PATH, because deriving the position from the INDEX
+-- is what let the hover zone and the icon disagree: the flow orders a shared group's
+-- buttons by container order, not creation order, so entry N's zone sat in grid cell N
+-- while entry N's icon was on a button the flow had put somewhere else. _paintTestSlot
+-- anchors the zone to its own button now and only falls back here if that is refused.
+--
+-- ⚠ Its old header claimed settings-derivation was "by necessity — the buttons' own
+-- rects are off-limits to insecure anchors". Anchoring is not a rect read, and it is
+-- legal; the necessity was never real. Left in place as the safety net, not as the
+-- model to copy.
 function Handle:_positionTestTip(tip, index)
     local L = self.config.layout or {}
     local G = resolveGrowthLayout(L)
