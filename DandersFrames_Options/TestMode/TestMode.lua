@@ -40,40 +40,50 @@ DF.TestData = {
     -- Buffs alternate duration classes and debuffs run a repeating 5-cycle of dispel
     -- types (Magic → Poison → Curse → Disease → none), so any two neighbours differ
     -- and any five cover every dispel colour. Reordering silently degrades that.
-    -- ☠ NEVER PUT TWO SPELLS THAT SPEC-OVERRIDE INTO EACH OTHER NEAR EACH OTHER.
-    -- _paintTestSlot adopts the player's override wholesale so icon, name and tooltip
-    -- move together — deliberate, and correct. But it means two entries can COLLAPSE to
-    -- the same spell for one class: Power Word: Shield and Prayer of Mending shipped as
-    -- entries 1 and 2, which is exactly one frame's window at a preview count of 2, and
-    -- a priest saw Prayer of Mending twice on the same frame (Krathe, 2026-08-06 — he
-    -- spotted the disc/holy swap as the cause).
-    -- The rule is per WINDOW, not per pool: with the per-frame rotation, a frame shows a
-    -- run of consecutive entries, so it is ADJACENCY that has to be safe. This order
-    -- keeps no two same-class spells next to each other.
+    -- ☠ ONE SPELL PER CLASS IN ANY WINDOW, AND THAT IS AN ARITHMETIC CONSTRAINT.
+    --
+    -- _paintTestSlot adopts the player's SPEC OVERRIDE wholesale so icon, name and
+    -- tooltip move together (deliberate, and correct). The consequence is that two
+    -- entries can COLLAPSE onto one spell for one class — a priest saw Prayer of Mending
+    -- twice, because Power Word: Shield and PoM swap between Disc and Holy.
+    --
+    -- ⚠ SEPARATING THEM IS NOT ENOUGH, which is how the first fix failed. Each frame
+    -- draws a WRAPPING run of `count` consecutive entries, so over a 10-entry pool with
+    -- a 5-icon preview the only pairs that never share a window are those EXACTLY 5
+    -- apart. PW:S was moved to 9 against PoM at 2 — distance 3 — and offset 7 hands a
+    -- frame entries 8,9,10,1,2, containing both. (Krathe again: "we do random from the
+    -- 1-10? so it can still pull PW:S and PoM on one set of 5 buffs".)
+    --
+    -- Which caps it at TWO spells per class, at i and i+5. Four priest spells cannot be
+    -- made safe at any ordering, so the pool now runs one class per slot in the first
+    -- five and repeats that order in the second five:
+    --     1-5  PALADIN PRIEST DRUID SHAMAN MONK
+    --     6-10 PALADIN PRIEST DRUID MAGE   WARRIOR
+    -- Every window of 5 therefore holds five DIFFERENT classes, so no override can merge
+    -- two of them. Verified for every offset the rotation produces.
+    -- ⚠ Adding an entry breaks the arithmetic. Keep the pool at 10 and swap, or redo the
+    -- spacing for the new size.
     buffs = {
-        {icon = "Interface\\Icons\\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0, spellID = 1022},
-        -- Stacks are REAL here (charges remaining) — the previous stack case was
-        -- "Heal" with 2 stacks, a direct heal that applies no aura at all.
-        {icon = "Interface\\Icons\\spell_holy_prayerofmending", name = "Prayer of Mending", duration = 30, stacks = 5, spellID = 41635},
-        {icon = "Interface\\Icons\\Spell_Nature_Rejuvenation", name = "Rejuvenation", duration = 12, stacks = 0, spellID = 774},
-        -- 1 hour, like every modern raid buff — NOT permanent. This shipped as
-        -- duration = 0 and was the preview's "permanent aura" case, which was wrong on
-        -- both counts: Fortitude does expire, and the permanent case belongs on Beacon
-        -- of Light below, which genuinely has no duration. Also the long-duration case,
-        -- so the countdown formats get exercised above the minutes/hours boundary.
-        {icon = "Interface\\Icons\\Spell_Holy_WordFortitude", name = "Power Word: Fortitude", duration = 3600, stacks = 0, spellID = 21562},
-        {icon = "Interface\\Icons\\Spell_Nature_Riptide", name = "Riptide", duration = 8, stacks = 0, spellID = 61295},
-        {icon = "Interface\\Icons\\Spell_Holy_Renew", name = "Renew", duration = 15, stacks = 0, spellID = 139},
+        {icon = "Interface\Icons\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0, spellID = 1022},
+        -- Stacks are REAL here (charges remaining), which is why PoM keeps its slot: the
+        -- previous stack case was "Heal" with 2 stacks, a spell that applies no aura.
+        {icon = "Interface\Icons\spell_holy_prayerofmending", name = "Prayer of Mending", duration = 30, stacks = 5, spellID = 41635},
+        {icon = "Interface\Icons\Spell_Nature_Rejuvenation", name = "Rejuvenation", duration = 12, stacks = 0, spellID = 774},
+        {icon = "Interface\Icons\Spell_Nature_Riptide", name = "Riptide", duration = 8, stacks = 0, spellID = 61295},
+        {icon = "Interface\Icons\ability_monk_renewingmists", name = "Renewing Mist", duration = 20, stacks = 0, spellID = 119611},
         -- duration = 0 is the PERMANENT case, and it drives "Hide Duration on Permanent
         -- Auras". Beacon holds until the paladin moves it, so it is a real one rather
         -- than a made-up zero. ⚠ If a patch ever gives Beacon a timer this stops
         -- exercising that setting — the pool then needs another duration-less buff.
-        {icon = "Interface\\Icons\\Ability_Paladin_BeaconofLight", name = "Beacon of Light", duration = 0, stacks = 0, spellID = 53563},
-        {icon = "Interface\\Icons\\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
-        -- Priest, and safe here: its neighbours are a druid HoT and a monk HoT, so
-        -- nothing in this window can override into it.
-        {icon = "Interface\\Icons\\Spell_Holy_PowerWordShield", name = "Power Word: Shield", duration = 30, stacks = 0, spellID = 17},
-        {icon = "Interface\\Icons\\ability_monk_renewingmists", name = "Renewing Mist", duration = 20, stacks = 0, spellID = 119611},
+        {icon = "Interface\Icons\Ability_Paladin_BeaconofLight", name = "Beacon of Light", duration = 0, stacks = 0, spellID = 53563},
+        -- 1 hour, like every modern raid buff — NOT permanent. This shipped as
+        -- duration = 0 and was the preview's "permanent aura" case, which was wrong on
+        -- both counts. Also the long-duration case, so the countdown formats get
+        -- exercised above the minutes/hours boundary.
+        {icon = "Interface\Icons\Spell_Holy_WordFortitude", name = "Power Word: Fortitude", duration = 3600, stacks = 0, spellID = 21562},
+        {icon = "Interface\Icons\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
+        {icon = "Interface\Icons\Spell_Holy_MagicalSentry", name = "Arcane Intellect", duration = 3600, stacks = 0, spellID = 1459},
+        {icon = "Interface\Icons\Ability_Warrior_BattleShout", name = "Battle Shout", duration = 3600, stacks = 0, spellID = 6673},
     },
     debuffs = {
         {icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain", name = "Shadow Word: Pain", duration = 18, stacks = 0, debuffType = "Magic", spellID = 589},
