@@ -1823,9 +1823,9 @@ L["Replace Buffs"] = true
 L["Reset"] = true
 L["Reset All Aura Configs"] = true
 L["Right-click"] = true
--- Duration Format labels. ⚠ "Seconds" now names the NO-ROLL-UP format ("152"); the
--- format that shows "45s" and rolls up to minutes is "Units". The Color by Time scale
--- tab also uses L["Seconds"] and still means seconds, so the key is legitimately shared.
+-- ⚠ L["Seconds"] is the Color by Time scale tab ONLY. It briefly also labelled a
+-- no-roll-up duration format; that format was dropped before shipping, so do not read
+-- this key as a Duration Format label — those are Standard / Units / Timer below.
 L["Seconds"] = true
 L["Standard"] = true
 L["Timer"] = true

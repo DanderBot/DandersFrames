@@ -696,6 +696,20 @@ end
 -- the whole output — payload band below the threshold, EMPTY band above (no countdown,
 -- no colour-by-time, no hide-above; the indicator's own duration text is untouched and
 -- keeps its own formatter). format/hideAboveT/colorByTime are ignored in this variant.
+-- ★ BLIZZARD'S PROMOTE POINTS, and they are not the round numbers you would guess.
+-- DefaultAuraDurationFormatter (Blizzard_AuraContainerShared.lua) keeps a duration in
+-- each interval for 1.5x its normal range, so 90 seconds still renders as seconds and a
+-- 62-minute buff still renders as minutes. Their comment explains the +1: "Curve points
+-- promote on exact matches, so each point is offset by one to keep the upper whole-second
+-- value in its current band."
+--
+-- ☠ NUMBER USED TO PROMOTE AT 60 AND 3600, i.e. 31 seconds and 30 minutes earlier than
+-- the game's own frames sitting next to it. That is the whole of the "it says Number but
+-- shows me minutes" report — at 61s the game says "61s" and DF said "1m". Both paths
+-- below now key off these, so the plain and banded builders cannot drift apart either.
+local PROMOTE_MIN  = 1 + 1.5 * SECONDS_PER_MIN    -- 91
+local PROMOTE_HOUR = 1 + 1.5 * SECONDS_PER_HOUR   -- 5401
+
 local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertAtlas, alertElem, alertElemSize, alertGlyphKey)
     format = format or "NUMBER"
     local alertT
@@ -740,10 +754,13 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
     -- know the total, so absolute-seconds bands are the 12.1 equivalent.)
     if hideAboveT or colorByTime or alertT then
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
-        local secFmt = (format == "SHORT" and "%.0fs") or (format == "FULL" and "%.0f Seconds")
-                        or ((format == "TIMER" or format == "RAW") and "%d") or "%.0f"
-        local minFmt = (format == "FULL") and "%.0f Minutes" or "%.0fm"
-        local hrFmt  = (format == "FULL") and "%.0f Hours"   or "%.0fh"
+        -- %d throughout, matching the plain path and Blizzard's Truncate: %.0f rounds to
+        -- NEAREST, so 152s rendered "3m" and 3599s rendered "60m" one tick before flipping
+        -- to "1h".
+        local secFmt = (format == "SHORT" and "%ds") or (format == "FULL" and "%d Seconds")
+                        or (format == "TIMER" and "%d") or "%d"
+        local minFmt = (format == "FULL") and "%d Minutes" or "%dm"
+        local hrFmt  = (format == "FULL") and "%d Hours"   or "%dh"
         local bps = colorByTime and GetDurationColorBreakpoints() or nil
         -- Blank-band start: hide-above unchanged, EXCEPT the alert region [0, alertT)
         -- always renders — an explicit alert outranks blanking, so when the user sets
@@ -806,17 +823,17 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
             -- branch owns hide-above and colour-by-time, so a format missing from it does
             -- not fail loudly — it silently renders as NUMBER the moment either is
             -- switched on, which reads as "the format setting stopped working".
-            -- RAW deliberately returns the SAME shape at every threshold: never rolling
-            -- up is the format, so a band above 60 must still print raw seconds.
+            -- ⚠ The thresholds are PROMOTE_MIN / PROMOTE_HOUR, not 60 / 3600, so a band
+            -- straddling 61-90s still prints seconds exactly as the plain path does.
+            -- Using the round numbers here was how the two builders disagreed.
             local function bandShape(t)
-                if format == "RAW" then return secFmt, nil end
                 if format == "TIMER" then
-                    if t >= 3600 then return "%d:%02d", { { div = 3600 }, { div = 60, mod = 60 } } end
-                    if t >= 60   then return "%d:%02d", { { div = 60 }, { mod = 60 } } end
+                    if t >= PROMOTE_HOUR then return "%dh", { { div = 3600 } } end
+                    if t >= PROMOTE_MIN  then return "%d:%02d", { { div = 60 }, { mod = 60 } } end
                     return secFmt, nil
                 end
-                if t >= 3600 then return hrFmt,  { { div = 3600, step = 1, rounding = down } } end
-                if t >= 60   then return minFmt, { { div = 60,   step = 1, rounding = down } } end
+                if t >= PROMOTE_HOUR then return hrFmt,  { { div = 3600 } } end
+                if t >= PROMOTE_MIN  then return minFmt, { { div = 60 } } end
                 return secFmt, nil
             end
             for _, t in ipairs(sorted) do
@@ -836,49 +853,39 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
     -- TIMER — "5:32". The only format needing a SECOND component: `div` yields the
     -- minutes, `mod` the leftover seconds. Nothing in DF used `mod` before this, and no
     -- other format here can express a clock without it.
-    -- ⚠ `%d` (truncates), not `%.0f` (rounds to nearest). At 5m32s the minute component
-    -- is 5.53 and `%.0f` would render "6:32". NUMBER and the banded path below still use
-    -- `%.0f` and therefore print "2m" at 1m59s remaining — flagged to Krathe, and
-    -- deliberately NOT changed here: a rounding change to a shipped format does not
-    -- belong in the commit that adds new ones.
+    -- ☠ ABOVE AN HOUR IT STOPS BEING A CLOCK. An h:mm reading of "1:02" is
+    -- indistinguishable from 1m02s, which is worse than useless on a frame showing both,
+    -- so past the hour it hands off to "1h" — the same shape the SecondsFormatter path
+    -- uses, and the same call the one 12.1 addon shipping this format makes.
     if format == "TIMER" then
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
         local ok, f = pcall(function()
             local down = Enum.NumericRuleFormatRounding.Down
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
             fmt:AddBreakpoint({ threshold = 0,    step = 1, rounding = down, min = 1, format = "%d" })
-            fmt:AddBreakpoint({ threshold = 60,   step = 1, rounding = down, format = "%d:%02d",
+            fmt:AddBreakpoint({ threshold = PROMOTE_MIN, step = 1, rounding = down, format = "%d:%02d",
                                 components = { { div = 60 }, { mod = 60 } } })
-            fmt:AddBreakpoint({ threshold = 3600, step = 1, rounding = down, format = "%d:%02d",
-                                components = { { div = 3600 }, { div = 60, mod = 60 } } })
+            fmt:AddBreakpoint({ threshold = PROMOTE_HOUR, step = 1, rounding = down, format = "%dh",
+                                components = { { div = 3600 } } })
             return fmt
         end)
         return ok and f or nil
     end
-    -- RAW — "152". Deliberately has NO minute breakpoint; never rolling up IS the format,
-    -- and it is the one the other three are measured against. Offered on BARS ONLY
-    -- (Krathe's call): an hour-long buff renders "3599", four glyphs that a 20px icon
-    -- cannot hold but a bar reads fine.
-    if format == "RAW" then
-        if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
-        local ok, f = pcall(function()
-            local down = Enum.NumericRuleFormatRounding.Down
-            local fmt = C_StringUtil.CreateNumericRuleFormatter()
-            fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = down, min = 1, format = "%d" })
-            return fmt
-        end)
-        return ok and f or nil
-    end
+    -- NUMBER — "45" -> "2m" -> "1h". Blizzard's DefaultAuraDurationFormatter WITHOUT the
+    -- unit letter, which is the only reason it cannot simply BE that formatter: the
+    -- SecondsFormatterAbbreviation enum has no suffix-less mode (None spells the word
+    -- out, OneLetter gives "45s"), so a rule formatter is the only way to get a bare
+    -- number. Everything else about it now matches Blizzard — see PROMOTE_MIN.
     if format == "NUMBER" then
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
         local ok, f = pcall(function()
             local down = Enum.NumericRuleFormatRounding.Down
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
-            fmt:AddBreakpoint({ threshold = 0,    step = 1, rounding = down, min = 1, format = "%.0f" })
-            fmt:AddBreakpoint({ threshold = 60,   step = 1, rounding = down, min = 1, format = "%.0fm",
-                                components = { { div = 60,   step = 1, rounding = down } } })
-            fmt:AddBreakpoint({ threshold = 3600, step = 1, rounding = down, min = 1, format = "%.0fh",
-                                components = { { div = 3600, step = 1, rounding = down } } })
+            fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = down, min = 1, format = "%d" })
+            fmt:AddBreakpoint({ threshold = PROMOTE_MIN,  step = 1, rounding = down, min = 1, format = "%dm",
+                                components = { { div = 60 } } })
+            fmt:AddBreakpoint({ threshold = PROMOTE_HOUR, step = 1, rounding = down, min = 1, format = "%dh",
+                                components = { { div = 3600 } } })
             return fmt
         end)
         return ok and f or nil
@@ -895,6 +902,15 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
         curve:AddPoint(1 + mult * SECONDS_PER_HOUR, Enum.SecondsFormatterInterval.Hours)
         curve:AddPoint(1 + mult * SECONDS_PER_DAY,  Enum.SecondsFormatterInterval.Days)
         fmt:SetDefaultAbbreviation(abbrev)
+        -- ☠ THE TWO CALLS THIS PATH USED TO OMIT. Blizzard's own aura formatter sets
+        -- both; without them a SecondsFormatter defaults to SecondsFormatterRounding
+        -- .RoundUp (enum 0 — and Blizzard setting Truncate explicitly is itself evidence
+        -- the default is not Truncate), so 44.6s remaining rendered "45s" here while the
+        -- game's frames rendered "44s". Guarded: the setters are newer than the type.
+        if fmt.SetRounding and Enum.SecondsFormatterRounding then
+            fmt:SetRounding(Enum.SecondsFormatterRounding.Truncate)
+        end
+        if fmt.SetCanRoundUpLastUnit then fmt:SetCanRoundUpLastUnit(true) end
         fmt:SetMinInterval(Enum.SecondsFormatterInterval.Seconds)
         fmt:SetMaxIntervalCurve(curve)
         fmt:SetDesiredUnitCount(1)

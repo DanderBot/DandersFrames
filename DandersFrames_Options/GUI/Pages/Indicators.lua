@@ -237,8 +237,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- FULL ("14 Seconds") overflows a 20px icon (never fit, delisted with #5's
         -- percent work — a saved FULL still renders until the user re-picks); the
         -- combined "12s (45%)" is AD-bar-only for the same reason.
-        -- RAW ("Seconds") is AD-bar-only for the same reason FULL is: it never rolls up,
-        -- so an hour-long buff renders "3599" — four glyphs an icon cannot hold.
+        -- The icon rows carry the three time formats plus Percent; FULL and the percent
+        -- composite stay on the Aura Designer bar, which has the width for them.
         local durationFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
             TIMER = L["Timer"], PERCENT = L["Percent"],
             _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }

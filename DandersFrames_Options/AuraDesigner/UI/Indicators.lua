@@ -368,7 +368,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- Hide Above (percent formats can't compose with it), assigned below.
             local UpdateHideAboveState
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], {
-                -- ⚠ No RAW on icon surfaces — see the bar list below for why.
+                -- Icon surfaces: FULL and the percent composite are bar-only (width).
                 NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"], PERCENT = L["Percent"],
                 _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" },
             }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
@@ -500,7 +500,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- Icon-sized formats only (see the icon card's Duration Format note).
             local UpdateHideAboveState
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], {
-                -- ⚠ No RAW on icon surfaces — see the bar list below for why.
+                -- Icon surfaces: FULL and the percent composite are bar-only (width).
                 NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"], PERCENT = L["Percent"],
                 _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" },
             }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
@@ -660,17 +660,13 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- Seconds + Percent ("12s (45%)" — 68914 multi-component text, #5).
             local UpdateHideAboveState
             g:AddWidget(GUI:CreateDropdown(parent, L["Duration Format"], {
-                -- ★ The ONLY surface offering RAW ("Seconds"), because it is the only one
-                -- wide enough: RAW never rolls up, so an hour-long aura renders "3599".
-                -- ⚠ SECONDS_PERCENT is labelled "Units + %", not "Seconds + Percent":
-                -- with "Seconds" now naming the no-roll-up format, the old label read as
-                -- raw-seconds + percent, which is not what it renders ("12s (45%)"). It
-                -- names the format it actually composes from — Units is directly above
-                -- it in this list — because "Both" on its own never said both WHAT.
+                -- ⚠ SECONDS_PERCENT is labelled "Units + %", not "Seconds + Percent" —
+                -- it names the format it composes from (Units is directly above it), and
+                -- "Both" on its own never said both WHAT.
                 NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"],
-                RAW = L["Seconds"], FULL = L["Full"],
+                FULL = L["Full"],
                 PERCENT = L["Percent"], SECONDS_PERCENT = L["Units + %"],
-                _order = { "NUMBER", "SHORT", "TIMER", "RAW", "FULL", "PERCENT", "SECONDS_PERCENT" },
+                _order = { "NUMBER", "SHORT", "TIMER", "FULL", "PERCENT", "SECONDS_PERCENT" },
             }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
             g:AddWidget(GUI:CreateFontDropdown(parent, L["Duration Font"], proxy, "durationFont"), 54)
             g:AddWidget(GUI:CreateSlider(parent, L["Duration Scale"], 0.5, 2.0, 0.1, proxy, "durationScale"), 54)
