@@ -3607,8 +3607,10 @@ end
 --     widget every page depends on, for something you would then have to hover row by
 --     row to compare.
 --
-local DURFMT_EXAMPLE_Y   = -42   -- the opener sits at -16 and is 24 tall, ending at -40
-local DURFMT_EXAMPLE_PAD = 14    -- one line of DFFontHighlightSmall, plus a hair
+-- Gap between the "Duration Format" caption and the example sharing its line. Wide
+-- enough to clear the override-changed indicator, which AddOverrideIndicators pins just
+-- past the caption.
+local DURFMT_EXAMPLE_GAP = 16
 
 function GUI:CreateDurationFormatControls(parent, group, options, dbTable, dbKey, callback, opts)
     opts = opts or {}
@@ -3630,29 +3632,27 @@ function GUI:CreateDurationFormatControls(parent, group, options, dbTable, dbKey
             if callback then callback(...) end
         end, opts.customGet, opts.customSet)
 
-    -- ☠ THE EXAMPLE HANGS OFF THE DROPDOWN, NOT A SIBLING ROW. It started as its own
-    -- CreateLabel and read as unrelated ("a bit lost" — Krathe): a group row carries a
-    -- full RowGap above it, so the example floated midway between its own dropdown and
-    -- the next control. On the container it sits right under the opener, and two things
-    -- stop being hand-maintained: hideOn/disableOn now cover both halves because there is
-    -- only one widget (the sibling version needed hideOn duplicated by hand and could not
-    -- honour disableOn at all — the group gate calls SetEnabled, which a label lacks),
-    -- and the example can no longer be added without its dropdown.
+    -- ☠ THE EXAMPLE SHARES THE CAPTION'S LINE, right-aligned against the control's right
+    -- edge. It was tried twice BELOW the opener — first as its own group row, then pinned
+    -- tight underneath — and read as "a bit lost" both times (Krathe). Distance was never
+    -- the problem: "45s · 3m · 63m" on its own is a fragment with no grammar, so wherever
+    -- it sat the eye had nothing to attach it to. Pairing it with the caption gives it the
+    -- one thing it lacked — caption-left / value-right is a settings idiom people already
+    -- read — and it costs NO extra height, because the caption row is already there.
+    --
+    -- It also stays one widget with the dropdown, so hideOn and disableOn cover it for
+    -- free; as a sibling row hideOn had to be duplicated by hand and disableOn could not
+    -- work at all (the group gate calls SetEnabled, which a FontString/label lacks).
     example = dd:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    example:SetPoint("TOPLEFT", dd, "TOPLEFT", 0, DURFMT_EXAMPLE_Y)
-    example:SetPoint("TOPRIGHT", dd, "TOPRIGHT", 0, DURFMT_EXAMPLE_Y)
-    example:SetJustifyH("LEFT")
-    -- No wrap: one added line is then always the right amount of extra height. A wrapping
-    -- example would silently overlap whatever sits beneath it.
+    example:SetPoint("TOPRIGHT", dd, "TOPRIGHT", 0, 0)
+    example:SetPoint("LEFT", dd.label, "RIGHT", DURFMT_EXAMPLE_GAP, 0)
+    example:SetJustifyH("RIGHT")
+    -- No wrap: the two horizontal anchors bound the width, so a narrow column clips the
+    -- example quietly instead of wrapping it into the opener below.
     example:SetWordWrap(false)
     example:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
     RefreshExample()
 
-    -- ⚠ preferredHeight is THE lever, not the number AddWidget is handed: CreateDropdown
-    -- sets fixedRowHeight, and ResolveRowHeight returns preferredHeight for a fixed-height
-    -- widget and IGNORES the call-site value. (Which also means the 54/55 the AD cards
-    -- have always passed for these was already inert.)
-    dd.preferredHeight = (dd.preferredHeight or GUI.RowHeight.dropdown or 55) + DURFMT_EXAMPLE_PAD
     group:AddWidget(dd)
 
     dd.dfExampleText = example
