@@ -981,9 +981,10 @@ local DURATION_FORMAT_EXAMPLES = {
     TIMER           = "45 · 2:32 · 62:05",
     PERCENT         = "75%",
     SECONDS_PERCENT = "45s (75%)",
-    -- Fallbacks only — SHORT/FULL are generated live below.
-    SHORT           = "45s · 2m · 62m",
-    FULL            = "45 Seconds · 2 Minutes",
+    -- Fallbacks only — SHORT/FULL are generated live below, and FULL takes a single
+    -- sample so its spelled-out unit fits beside the caption on the narrow bar card.
+    SHORT           = "45s · 3m · 63m",
+    FULL            = "45 Seconds",
 }
 
 -- ⚠ SHORT and FULL are NOT hardcoded. They render through a SecondsFormatter, whose
@@ -992,15 +993,23 @@ local DURATION_FORMAT_EXAMPLES = {
 -- a Format method — the rule formatters do not — so theirs comes from the REAL formatter
 -- and can neither drift from the code nor be wrong in a locale.
 local EXAMPLE_SAMPLES = { 45, 152, 3725 }
+-- ⚠ FULL SPELLS THE UNIT OUT, and it is offered ONLY on the Aura Designer bar card —
+-- the narrowest surface carrying this control. Three samples clipped there ("45 Seconds ·
+-- 3 Minutes · 6…"); two measure close enough to the caption that they would probably clip
+-- too, so it gets one. That is not a real loss: Full's only difference from Units is that
+-- it spells the unit out, which one sample shows, and Units sits directly above it in the
+-- same dropdown already demonstrating the roll-up.
+local EXAMPLE_SAMPLES_VERBOSE = { 45 }
 
 function DF:GetDurationFormatExample(format)
     format = format or "NUMBER"
     if format == "SHORT" or format == "FULL" then
         local f = GetDurationFormatter(format, nil, false)
         if f and f.Format then
+            local samples = (format == "FULL") and EXAMPLE_SAMPLES_VERBOSE or EXAMPLE_SAMPLES
             local parts, ok = {}, true
-            for i = 1, #EXAMPLE_SAMPLES do
-                local got, s = pcall(f.Format, f, EXAMPLE_SAMPLES[i])
+            for i = 1, #samples do
+                local got, s = pcall(f.Format, f, samples[i])
                 if not (got and type(s) == "string" and s ~= "") then ok = false break end
                 parts[i] = s
             end
