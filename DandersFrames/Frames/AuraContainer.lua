@@ -5665,9 +5665,14 @@ function DF:GetTestDebuffDispelType(unitToken, count, class)
     -- never be chosen — Krathe saw only Magic and Curse, because Disease (slot 2) and
     -- Poison (slot 4) were always the second entry of their pair.
     -- Any entry in the window is on the frame, so any of them is a valid answer; pick by
-    -- unit so the choice varies frame to frame. Measured over party + a full raid this
-    -- reaches all four types (Magic 9, Curse 9, Poison 5, Disease 4 — the 2:1 skew is the
-    -- pool's own, Magic and Curse appearing twice in it and the other two once).
+    -- unit so the choice varies frame to frame. Measured at count 2 over party + a full
+    -- raid this reaches all five types (Curse 8, Magic 5, Poison 6, Disease 4, Bleed 4);
+    -- the Curse skew is the pool's own — it is the one type appearing twice (slots 3
+    -- and 8), every other type appears once.
+    -- ⚠ ONLY THE COUNT-2 SPREAD IS TUNED. At count 5 the pool splits into just two
+    -- windows (1-5 and 6-10), so the reachable palette collapses to Bleed/Curse/Magic and
+    -- every frame lights. Same trade-off as the density note on the pool itself: the
+    -- overlay is bound to the icons it must agree with, so it inherits the window's shape.
     local u = tostring(unitToken or "")
     local seed = tonumber(u:match("(%d+)$")) or 0
     -- Drop a type that would disappear into this unit's class colour, but only while the

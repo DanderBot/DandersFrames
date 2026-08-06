@@ -37,9 +37,10 @@ DF.TestData = {
     --
     -- ⚠ ORDER IS MEANINGFUL. Entries are handed out in pool order from a per-frame
     -- rotation (testPoolOffset), so ADJACENT entries appear together on one frame.
-    -- Buffs alternate duration classes and debuffs run a repeating 5-cycle of dispel
-    -- types (Magic → Poison → Curse → Disease → none), so any two neighbours differ
-    -- and any five cover every dispel colour. Reordering silently degrades that.
+    -- Buffs alternate duration classes; the debuff pool front-loads the four dispellable
+    -- colours (Bleed → Disease → Curse → Poison) then runs none/none/Magic/Curse/none/none,
+    -- so no two neighbours share a type and the untyped slots pair off into the density
+    -- dial described on the pool below. Reordering silently degrades both.
     -- ☠ ONE SPELL PER CLASS IN ANY WINDOW, AND THAT IS AN ARITHMETIC CONSTRAINT.
     --
     -- _paintTestSlot adopts the player's SPEC OVERRIDE wholesale so icon, name and
