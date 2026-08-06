@@ -3164,6 +3164,14 @@ local TEST_PRESETS = {
     },
 }
 
+-- None = every toggle off — the bare frame, for judging frame style, size and
+-- colour without auras, icons or overlays on top of it. Empty rather than a key
+-- list because applying a preset already forces every unlisted key off, so the
+-- empty set IS "all off" and picks up new toggles for free, same as Full does.
+-- ⚠ It does not leave test mode: the preview stays up, it just draws nothing but
+-- the frame itself.
+TEST_PRESETS.NONE = {}
+
 -- Full = every toggle on. Built from the key list so a newly added toggle is
 -- picked up automatically instead of quietly staying off.
 TEST_PRESETS.FULL = {}
@@ -4486,8 +4494,10 @@ function DF:CreateTestPanel()
     presetLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
     panel.presetLabel = presetLabel
 
-    local presets = {"STATIC", "COMBAT", "HEALER", "FULL"}
-    local presetNames = {STATIC = L["Static"], COMBAT = L["Combat"], HEALER = L["Healer"], FULL = L["Full"]}
+    -- Ordered least-to-most: the bare frame, then what each preset layers on.
+    local presets = {"NONE", "STATIC", "COMBAT", "HEALER", "FULL"}
+    local presetNames = {NONE = L["None"], STATIC = L["Static"], COMBAT = L["Combat"],
+        HEALER = L["Healer"], FULL = L["Full"]}
     local btnSpacing = 4
     local btnCount = #presets
     local btnWidth = math.floor((CONTENT_WIDTH - (btnSpacing * (btnCount - 1))) / btnCount)
