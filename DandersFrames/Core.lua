@@ -3415,6 +3415,30 @@ function DF:MigrateAbsoluteFrameLevels()
             end
             profile._defensiveBaselineV2 = true
         end
+
+        -- V3 (missing-buff baseline). Same shape as V2, and the same reason: 35 was
+        -- never a level anyone SAW. buildMissingCellConfig omitted frameLevelOffset,
+        -- so ApplyZOrder's `or 40` fallback stacked a second +40 on top of the strip
+        -- and the badges actually rendered at 75 -- over the defensive row at 65.
+        -- With that fixed the stored 35 becomes real for the first time, which drops
+        -- the badges UNDER the aura rows: a row is 13 levels thick, so buff/debuff
+        -- art at base 40 reaches 56 and AD indicators reach ~59.
+        --
+        -- 60 clears both and still sits below defensive (measured 69 anchor / 81
+        -- border on a level-4 frame), keeping "defensive is always highest". Krathe's
+        -- call after seeing it in game: the badge belongs above the Aura Designer.
+        --
+        -- Only the exact 35 moves, so a deliberate choice is left alone; a fresh
+        -- profile already ships 60 and is stamped in the fresh-profile flag list.
+        if type(profile) == "table" and not profile._missingBuffBaselineV3 then
+            for _, mode in ipairs({ "party", "raid" }) do
+                local modeDb = profile[mode]
+                if type(modeDb) == "table" and modeDb.missingBuffIconFrameLevel == 35 then
+                    modeDb.missingBuffIconFrameLevel = 60
+                end
+            end
+            profile._missingBuffBaselineV3 = true
+        end
     end
 end
 
@@ -3439,8 +3463,9 @@ end
 -- Any future migration that cannot derive its answer from a legacy value must list
 -- its flag here as well as writing it.
 local FRESH_PROFILE_MIGRATION_FLAGS = {
-    _absoluteFrameLevelsV1 = true,
-    _defensiveBaselineV2   = true,
+    _absoluteFrameLevelsV1  = true,
+    _defensiveBaselineV2    = true,
+    _missingBuffBaselineV3  = true,
 }
 local FRESH_PROFILE_PARTY_MIGRATION_FLAGS = {
     _personalContainerCenterMigrated = true,
@@ -5296,11 +5321,45 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     end
                 end
 
+                -- MISSING BUFF. Absent from this dump until 2026-08-07, which is exactly
+                -- why "missing buff draws over the defensive icon" could not be settled
+                -- from it — the badges were rendering 40 levels above their setting and
+                -- nothing here would have shown that. The strip is DF's own frame and the
+                -- cells are containers parented to it, so BOTH lines matter: a cell whose
+                -- anchor is not equal to the strip's level means an offset is leaking in.
+                o:Section("Missing Buff")
+                local mStrip = frame.missingBuffStrip
+                if not mStrip then
+                    print("  |cff888888(no strip on this frame)|r")
+                else
+                    print(("  %-10s level=%d  shown=%s")
+                        :format("strip", mStrip:GetFrameLevel(), tostring(mStrip:IsShown())))
+                    -- ⚠ pairs, not ipairs: DriveMissingBuffFactory keys the cell table by
+                    -- the tracked buff's id (cells[info[2]] = h), not 1..n.
+                    local cells = frame.missingFactory
+                    if type(cells) == "table" then
+                        for key, h in pairs(cells) do
+                            local hf = h and h.GetFrame and h:GetFrame()
+                            local badge = h and h.GetBadgeFrame and h:GetBadgeFrame()
+                            print(("    %-12s anchor=%s  badge=%s  cfgOffset=%s")
+                                :format(tostring(key):sub(1, 12),
+                                    hf and tostring(hf:GetFrameLevel()) or "-",
+                                    badge and tostring(badge:GetFrameLevel()) or "-",
+                                    tostring(h and h.config and h.config.frameLevelOffset or "nil(->40)")))
+                            local bw = badge and badge.dfBorder
+                            if bw and bw.GetFrameLevel then
+                                print(("      .%-14s level=%d"):format("dfBorder", bw:GetFrameLevel()))
+                            end
+                        end
+                    end
+                end
+
                 -- The CONFIGURED values, so the dump shows setting-vs-reality side by side.
                 -- That is the whole question in an "it says 30 but behaves like more" report.
                 o:Section("Configured")
                 local zdb = DF.GetDB and DF:GetDB()
                 o:Field("defensiveIconFrameLevel", tostring(zdb and zdb.defensiveIconFrameLevel), "NEUTRAL")
+                o:Field("missingBuffIconFrameLevel", tostring(zdb and zdb.missingBuffIconFrameLevel), "NEUTRAL")
                 -- DF:ResolveAuraDesigner is the RENDER-side resolver (the same one
                 -- Factory:SyncFrame uses). Options.lua's GetAuraDesignerDB is a file-local
                 -- and is the EDITOR's view — reading that here would report the wrong table

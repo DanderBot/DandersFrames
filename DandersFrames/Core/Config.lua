@@ -1720,7 +1720,12 @@ DF.PartyDefaults = {
     missingBuffIconBorderStyle = "SOLID",
     missingBuffIconBorderTexture = "SOLID",
     missingBuffIconEnabled = true,
-    missingBuffIconFrameLevel = 35,
+    -- Above the aura band, below defensive. A row is 13 levels thick, so buff/debuff
+    -- art at base 40 reaches 56 and AD indicators reach ~59; defensive sits at 65.
+    -- Was 35, which only ever looked right because buildMissingCellConfig omitted
+    -- frameLevelOffset and ApplyZOrder's `or 40` fallback silently added 40. Existing
+    -- profiles move by _missingBuffBaselineV3 (Core.lua), value-targeted on 35.
+    missingBuffIconFrameLevel = 60,
     missingBuffIconScale = 1.2000000476837,
     missingBuffIconShowBorder = true,
     missingBuffIconSize = 24,
