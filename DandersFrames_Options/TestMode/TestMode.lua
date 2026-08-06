@@ -40,8 +40,18 @@ DF.TestData = {
     -- Buffs alternate duration classes and debuffs run a repeating 5-cycle of dispel
     -- types (Magic → Poison → Curse → Disease → none), so any two neighbours differ
     -- and any five cover every dispel colour. Reordering silently degrades that.
+    -- ☠ NEVER PUT TWO SPELLS THAT SPEC-OVERRIDE INTO EACH OTHER NEAR EACH OTHER.
+    -- _paintTestSlot adopts the player's override wholesale so icon, name and tooltip
+    -- move together — deliberate, and correct. But it means two entries can COLLAPSE to
+    -- the same spell for one class: Power Word: Shield and Prayer of Mending shipped as
+    -- entries 1 and 2, which is exactly one frame's window at a preview count of 2, and
+    -- a priest saw Prayer of Mending twice on the same frame (Krathe, 2026-08-06 — he
+    -- spotted the disc/holy swap as the cause).
+    -- The rule is per WINDOW, not per pool: with the per-frame rotation, a frame shows a
+    -- run of consecutive entries, so it is ADJACENCY that has to be safe. This order
+    -- keeps no two same-class spells next to each other.
     buffs = {
-        {icon = "Interface\\Icons\\Spell_Holy_PowerWordShield", name = "Power Word: Shield", duration = 30, stacks = 0, spellID = 17},
+        {icon = "Interface\\Icons\\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0, spellID = 1022},
         -- Stacks are REAL here (charges remaining) — the previous stack case was
         -- "Heal" with 2 stacks, a direct heal that applies no aura at all.
         {icon = "Interface\\Icons\\spell_holy_prayerofmending", name = "Prayer of Mending", duration = 30, stacks = 5, spellID = 41635},
@@ -60,7 +70,9 @@ DF.TestData = {
         -- exercising that setting — the pool then needs another duration-less buff.
         {icon = "Interface\\Icons\\Ability_Paladin_BeaconofLight", name = "Beacon of Light", duration = 0, stacks = 0, spellID = 53563},
         {icon = "Interface\\Icons\\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
-        {icon = "Interface\\Icons\\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0, spellID = 1022},
+        -- Priest, and safe here: its neighbours are a druid HoT and a monk HoT, so
+        -- nothing in this window can override into it.
+        {icon = "Interface\\Icons\\Spell_Holy_PowerWordShield", name = "Power Word: Shield", duration = 30, stacks = 0, spellID = 17},
         {icon = "Interface\\Icons\\ability_monk_renewingmists", name = "Renewing Mist", duration = 20, stacks = 0, spellID = 119611},
     },
     debuffs = {
