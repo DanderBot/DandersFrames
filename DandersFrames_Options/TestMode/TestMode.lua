@@ -831,6 +831,15 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     local iconsAlpha = 1.0
     local powerBarAlpha = 1.0
     local dispelAlpha = 1.0
+    -- ☠ THE MISSING-BUFF STRIP AND THE DEFENSIVE ROW HAVE THEIR OWN OOR KEYS and
+    -- are NOT covered by aurasAlpha. Live fades them in
+    -- UpdateMissingBuffAppearance / UpdateDefensiveIconAppearance, both of which
+    -- early-return in test mode — so the preview left them at full opacity on an
+    -- out-of-range frame while everything around them dimmed (Krathe, 2026-08-06).
+    -- Anything given an oor*Alpha key in ElementAppearance.lua needs a counterpart
+    -- here, or it silently stops fading in the preview.
+    local missingBuffAlpha = 1.0
+    local defensiveAlpha = 1.0
     -- Border stays 1.0 in whole-frame mode (the frame's SetAlpha cascade fades
     -- it); only element-specific mode needs its own border alpha.
     local borderAlpha = 1.0
@@ -846,6 +855,10 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             iconsAlpha = db.oorIconsAlpha or 0.55
             powerBarAlpha = db.oorPowerBarAlpha or 0.55
             dispelAlpha = db.oorDispelOverlayAlpha or 0.55
+            -- ⚠ 0.5, not 0.55: these two mirror ElementAppearance.lua's OWN
+            -- fallbacks so preview and live agree when the key is absent.
+            missingBuffAlpha = db.oorMissingBuffAlpha or 0.5
+            defensiveAlpha = db.oorDefensiveIconAlpha or 0.5
             borderAlpha = db.oorBorderAlpha or 0.55
         else
             -- Simple frame-level alpha mode
@@ -858,6 +871,8 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             iconsAlpha = alpha
             powerBarAlpha = alpha
             dispelAlpha = alpha
+            missingBuffAlpha = alpha
+            defensiveAlpha = alpha
         end
     end
 
@@ -1238,7 +1253,16 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- testShowExternalDef itself (it must also hide the 12.1 container row
     -- when the toggle is off, not just the legacy icon).
     DF:UpdateTestDefensiveBar(frame, testData)
-    
+
+    -- ⚠ AFTER the two drives above, not up with the aura-row alphas. Both widgets
+    -- are created LAZILY by those drives, so at the row-alpha block they are still
+    -- nil on a frame's first pass and the fade would not land until some later
+    -- repaint. Neither drive touches alpha, so setting it here sticks.
+    local missingStrip = frame.missingBuffStrip
+    if missingStrip then missingStrip:SetAlpha(isOutOfRange and missingBuffAlpha or 1) end
+    local defRow = frame.defensiveFactory and frame.defensiveFactory:GetFrame()
+    if defRow then defRow:SetAlpha(isOutOfRange and defensiveAlpha or 1) end
+
     -- Update Aura Designer test indicators through the factory containers — the
     -- SAME path as the bulk DF:UpdateAllTestAuraDesigner, so the per-frame and
     -- bulk previews can't drift (the legacy Engine:UpdateTestFrame is gone).
