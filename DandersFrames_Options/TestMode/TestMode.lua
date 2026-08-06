@@ -98,7 +98,14 @@ DF.TestData = {
         -- than decoupling the overlay from the icons again, which is the bug being fixed.
         -- ⚠ Same-class entries must still sit EXACTLY 5 apart (see the buff pool):
         -- ROGUE at 4/9 and WARRIOR at 5/10.
-        {icon = "Interface\Icons\Spell_Nature_Polymorph", name = "Polymorph", duration = 8, stacks = 0, debuffType = "Magic", spellID = 118},
+        -- ★ THE ONLY Bleed ENTRY, and it has to live in slot 1. DF ships five dispel
+        -- colours (Border.lua: Magic, Curse, Disease, Poison, Bleed, with Enrage sharing
+        -- Bleed's red) and the pool had no Bleed at all, so that colour could be set on
+        -- the Colors page and never previewed. Slot 1 is the one TYPED slot whose 5-apart
+        -- partner is already DRUID (Rake at 6), so a druid bleed fits without breaking
+        -- the class spacing. Converting Rake or Rend instead would have been simpler and
+        -- was rejected: they are two of the four untyped slots that set the 60% density.
+        {icon = "Interface\Icons\Ability_GhoulFrenzy", name = "Rip", duration = 16, stacks = 0, debuffType = "Bleed", spellID = 1079},
         {icon = "Interface\Icons\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 0, debuffType = "Disease", spellID = 55095},
         {icon = "Interface\Icons\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
         -- 2818 = the DoT. NOT 2823, which is the weapon imbue of the same name, and the
