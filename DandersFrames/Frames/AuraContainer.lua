@@ -2940,6 +2940,16 @@ function Handle:_paintTestSlot(slot, index)
         or (harmful and td.debuffs or td.buffs)))
     if not pool or #pool == 0 then return end
     local e = pool[((index - 1) % #pool) + 1]
+    -- ⚠ TEMPORARY DIAGNOSTIC (test-icon investigation, 2026-08-06). Remove once the
+    -- cause is found. If this prints the RIGHT entry for each slot and the art on
+    -- screen is still wrong, the paint is being overwritten after us and the search
+    -- moves to who repaints; if the entries themselves are wrong or repeated, the
+    -- pool or the index is the fault.
+    DF:Debug(DBG, "TESTICON paint: idx=%d -> [%s] id=%s icon=%s pool=%s(%d) src=%s",
+        index, tostring(e and e.name), tostring(e and e.spellID), tostring(e and e.icon),
+        tostring(self.config.testEntries and "testEntries"
+            or self.config.testPool or (harmful and "debuffs" or "buffs")),
+        #pool, tostring(self.config.mode))
     -- Belt-and-braces: native hover must NEVER win in test mode (it tooltips the
     -- hidden SAMPLE aura). Re-asserted every paint pass, not just at creation.
     if slot.SetMouseMotionEnabled then pcall(function() slot:SetMouseMotionEnabled(false) end) end
@@ -3488,8 +3498,18 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
                         testIndex = fixedIndex or i
                     end
                     button._dfTestIndex = testIndex
+                    -- ⚠ TEMPORARY DIAGNOSTIC (test-icon investigation, 2026-08-06).
+                    -- Remove once the cause is found. Says which branch a button took
+                    -- and whether the build shape and the live global agreed at the
+                    -- moment it was created.
+                    DF:Debug(DBG, "TESTICON create: PAINT i=%d testIdx=%s shape=%s global=%s mode=%s",
+                        i, tostring(testIndex), tostring(testShape),
+                        tostring(AuraContainer._testMode), tostring(handle.config.mode))
                     handle:_paintTestSlot(button, testIndex)
                 else
+                    DF:Debug(DBG, "TESTICON create: BIND i=%d shape=%s global=%s mode=%s",
+                        i, tostring(testShape), tostring(AuraContainer._testMode),
+                        tostring(handle.config.mode))
                     handle:_bindNativeSlot(button)     -- native inbound setters
                     -- Consumer secure init (overlay dispel carriers): runs in THIS
                     -- securecallfunction pass, so any texture it creates on the button
