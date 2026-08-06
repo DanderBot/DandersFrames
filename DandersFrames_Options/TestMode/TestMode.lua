@@ -840,6 +840,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- here, or it silently stops fading in the preview.
     local missingBuffAlpha = 1.0
     local defensiveAlpha = 1.0
+    local auraDesignerAlpha = 1.0
     -- Border stays 1.0 in whole-frame mode (the frame's SetAlpha cascade fades
     -- it); only element-specific mode needs its own border alpha.
     local borderAlpha = 1.0
@@ -859,6 +860,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             -- fallbacks so preview and live agree when the key is absent.
             missingBuffAlpha = db.oorMissingBuffAlpha or 0.5
             defensiveAlpha = db.oorDefensiveIconAlpha or 0.5
+            auraDesignerAlpha = db.oorAuraDesignerAlpha or 0.2
             borderAlpha = db.oorBorderAlpha or 0.55
         else
             -- Simple frame-level alpha mode
@@ -873,6 +875,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             dispelAlpha = alpha
             missingBuffAlpha = alpha
             defensiveAlpha = alpha
+            auraDesignerAlpha = alpha
         end
     end
 
@@ -1271,6 +1274,16 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         if db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame)
             and not DF:IsTestFrameDead(frame) then
             ADFactory:SyncFrame(frame)
+            -- Fade the indicators out of range, same as live. Without this they were
+            -- the only thing on an out-of-range frame still at full opacity, so a
+            -- bright AD icon read straight through the dimmed missing-buff badge
+            -- above it (Krathe, 2026-08-07). Shares ElementAppearance's walk rather
+            -- than repeating it — see ForEachAuraDesignerAlphaHost.
+            if DF.ForEachAuraDesignerAlphaHost then
+                DF:ForEachAuraDesignerAlphaHost(frame, function(f, base)
+                    f:SetAlpha(base * auraDesignerAlpha)
+                end)
+            end
         else
             ADFactory:ClearFrame(frame)
         end

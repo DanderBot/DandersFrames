@@ -2725,6 +2725,17 @@ local function buildMissingCellConfig(info, unit, size)
         filter = "HELPFUL",
         candidateFilters = { includeSpellIDs = map },
         badge = { w = size, h = size },
+        -- ☠ MUST BE EXPLICIT, AND MUST BE 0. ApplyZOrder does
+        -- `parent:GetFrameLevel() + (frameLevelOffset or 40)`, and this is the ONE
+        -- Create site whose parent is not the unit frame but an already-offset
+        -- child of it: the strip, which layoutMissingStrip puts at
+        -- frame + missingBuffIconFrameLevel. Omitting the key therefore stacked a
+        -- SECOND +40 on top — at the default 35 the badges rendered at frame+75 and
+        -- drew over the defensive row at 65, and the Frame Level slider was off by
+        -- 40 at every setting (Krathe, 2026-08-07). 0 puts the cells on the strip's
+        -- own level, which is what the setting says. Every other Create with a
+        -- non-frame parent already passes an explicit offset — swept 2026-08-07.
+        frameLevelOffset = 0,
         enabled = true,
     }
 end

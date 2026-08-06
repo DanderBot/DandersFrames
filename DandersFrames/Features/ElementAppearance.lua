@@ -1044,14 +1044,49 @@ end
 -- Handles OOR alpha for placed AD indicators (icons, squares, bars)
 -- ============================================================
 
+-- Walk every Aura Designer indicator on a frame, handing the caller the region to
+-- set alpha on plus that indicator's own base alpha.
+--
+-- ★ SHARED WITH TEST MODE ON PURPOSE. The preview cannot just call
+-- UpdateAuraDesignerAppearance: it computes its own per-element alphas because it has
+-- no whole-frame SetAlpha cascade to fall back on in simple range-fade mode. Copying
+-- the walk over there is exactly how the missing-buff strip and defensive row
+-- silently stopped fading in the preview. One walk, two alpha policies.
+--
+-- ☠ ASK FOR THE ALPHA HOST, NEVER GetFrame(). This used to fade h:GetFrame(), which
+-- for a per-indicator container is DF's own anchor frame -- fine. A collapsed slot's
+-- GetFrame() is the aura BUTTON, which carries DenyTaintedAccessWhenAurasAreSecret:
+-- this walk runs from the range update, which is tainted, so every call threw the
+-- moment auras went secret (43 errors, "forbidden object", reported 2026-08-06).
+-- GetAlphaHost answers with the DF-owned frame that every one of that indicator's
+-- regions hangs off — its own anchor frame for a container, dfLevelHost for a
+-- collapsed slot — so fading it fades the indicator whole. Nil only if host creation
+-- failed, hence the guard. See SlotHandle:GetAlphaHost.
+local AD_STORE_KEYS = { "healthbar", "background", "border", "placed",
+                        "nametext", "healthtext" }
+
+function DF:ForEachAuraDesignerAlphaHost(frame, fn)
+    local store = frame and frame.dfADFactory
+    if not (store and fn) then return end
+    for _, storeKey in ipairs(AD_STORE_KEYS) do
+        local t = store[storeKey]
+        if t then
+            for _, entry in pairs(t) do
+                local h = entry and entry.handle
+                local f = h and h.GetAlphaHost and h:GetAlphaHost()
+                if f then fn(f, h._dfADBaseAlpha or 1.0) end
+            end
+        end
+    end
+end
+
 function DF:UpdateAuraDesignerAppearance(frame)
     if not IsDandersFrame(frame) then return end
 
     -- 12.1: AD indicators are factory containers; fade each container's plain
     -- anchor frame (base config alpha times the OOR fade — alpha is ours even
     -- though the slot geometry is secret).
-    local store = frame.dfADFactory
-    if not store then return end
+    if not frame.dfADFactory then return end
 
     local db = GetDB(frame)
     if not db then return end
@@ -1062,35 +1097,13 @@ function DF:UpdateAuraDesignerAppearance(frame)
     local oorOn = db.oorEnabled
     local oorAlpha = db.oorAuraDesignerAlpha or 0.2
 
-    for _, storeKey in ipairs({ "healthbar", "background", "border", "placed",
-                                "nametext", "healthtext" }) do
-        local t = store[storeKey]
-        if t then
-            for _, entry in pairs(t) do
-                local h = entry and entry.handle
-                -- ☠ ASK FOR THE ALPHA HOST, NEVER GetFrame(). This used to fade
-                -- h:GetFrame(), which for a per-indicator container is DF's own anchor
-                -- frame -- fine. A collapsed slot's GetFrame() is the aura BUTTON, which
-                -- carries DenyTaintedAccessWhenAurasAreSecret: this loop runs from the
-                -- range update, which is tainted, so every call threw the moment auras
-                -- went secret (43 errors, "forbidden object", reported 2026-08-06).
-                -- GetAlphaHost answers with the DF-owned frame that every one of that
-                -- indicator's regions hangs off — its own anchor frame for a container,
-                -- dfLevelHost for a collapsed slot — so fading it fades the indicator
-                -- whole. Nil only if host creation failed, hence the guard.
-                -- See SlotHandle:GetAlphaHost.
-                local f = h and h.GetAlphaHost and h:GetAlphaHost()
-                if f then
-                    local base = h._dfADBaseAlpha or 1.0
-                    if oorOn then
-                        ApplyOORAlpha(f, inRange, base, oorAlpha)
-                    else
-                        f:SetAlpha(base)
-                    end
-                end
-            end
+    DF:ForEachAuraDesignerAlphaHost(frame, function(f, base)
+        if oorOn then
+            ApplyOORAlpha(f, inRange, base, oorAlpha)
+        else
+            f:SetAlpha(base)
         end
-    end
+    end)
 end
 
 -- ============================================================
