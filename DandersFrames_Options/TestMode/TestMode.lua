@@ -86,18 +86,31 @@ DF.TestData = {
         {icon = "Interface\Icons\Ability_Warrior_BattleShout", name = "Battle Shout", duration = 3600, stacks = 0, spellID = 6673},
     },
     debuffs = {
-        {icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain", name = "Shadow Word: Pain", duration = 18, stacks = 0, debuffType = "Magic", spellID = 589},
-        {icon = "Interface\\Icons\\Ability_PoisonSting", name = "Crippling Poison", duration = 12, stacks = 0, debuffType = "Poison", spellID = 3409},
-        {icon = "Interface\\Icons\\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
-        {icon = "Interface\\Icons\\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 0, debuffType = "Disease", spellID = 55095},
-        {icon = "Interface\\Icons\\Ability_ShockWave", name = "Hamstring", duration = 15, stacks = 0, debuffType = nil, spellID = 1715},
-        {icon = "Interface\\Icons\\Spell_Nature_Polymorph", name = "Polymorph", duration = 8, stacks = 0, debuffType = "Magic", spellID = 118},
-        -- 2818 = the DoT. NOT 2823, which is the weapon imbue of the same name.
+        -- ☠ POSITIONS 5, 6, 9 AND 10 CARRY NO DISPEL TYPE, AND THAT IS THE DENSITY DIAL.
+        -- The frame overlay now takes its type from the SAME window the icons draw, so
+        -- how often an overlay appears is decided here rather than by a hardcoded
+        -- frame-index pattern. At a preview count of 2 the windows tile into five
+        -- disjoint pairs -- (1,2) (3,4) (5,6) (7,8) (9,10) -- and raid offsets land on
+        -- the same pairs, so two undispellable pairs give 3 of 5 = 60% on BOTH party and
+        -- raid. Krathe's spec.
+        -- ⚠ Exact at count 2 only. At higher counts a window spans more of the pool and
+        -- catches a dispellable entry more often, so the rate climbs; accepted rather
+        -- than decoupling the overlay from the icons again, which is the bug being fixed.
+        -- ⚠ Same-class entries must still sit EXACTLY 5 apart (see the buff pool):
+        -- ROGUE at 4/9 and WARRIOR at 5/10.
+        {icon = "Interface\Icons\Spell_Nature_Polymorph", name = "Polymorph", duration = 8, stacks = 0, debuffType = "Magic", spellID = 118},
+        {icon = "Interface\Icons\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 0, debuffType = "Disease", spellID = 55095},
+        {icon = "Interface\Icons\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
+        -- 2818 = the DoT. NOT 2823, which is the weapon imbue of the same name, and the
+        -- reason a party frame once previewed "Requires One-Handed Melee Weapon".
         -- Deadly Poison genuinely stacks to 5, so this is an honest stack case.
-        {icon = "Interface\\Icons\\Spell_Nature_NullifyPoison", name = "Deadly Poison", duration = 12, stacks = 5, debuffType = "Poison", spellID = 2818},
-        {icon = "Interface\\Icons\\Spell_Shaman_Hex", name = "Hex", duration = 8, stacks = 0, debuffType = "Curse", spellID = 51514},
-        {icon = "Interface\\Icons\\Spell_Shadow_AbominationExplosion", name = "Blood Plague", duration = 21, stacks = 0, debuffType = "Disease", spellID = 55078},
-        {icon = "Interface\\Icons\\Ability_Gouge", name = "Rend", duration = 15, stacks = 0, debuffType = nil, spellID = 772},
+        {icon = "Interface\Icons\Spell_Nature_NullifyPoison", name = "Deadly Poison", duration = 12, stacks = 5, debuffType = "Poison", spellID = 2818},
+        {icon = "Interface\Icons\Ability_ShockWave", name = "Hamstring", duration = 15, stacks = 0, debuffType = nil, spellID = 1715},
+        {icon = "Interface\Icons\Ability_Druid_Rake", name = "Rake", duration = 15, stacks = 0, debuffType = nil, spellID = 1822},
+        {icon = "Interface\Icons\Spell_Shadow_ShadowWordPain", name = "Shadow Word: Pain", duration = 18, stacks = 0, debuffType = "Magic", spellID = 589},
+        {icon = "Interface\Icons\Spell_Shaman_Hex", name = "Hex", duration = 8, stacks = 0, debuffType = "Curse", spellID = 51514},
+        {icon = "Interface\Icons\Ability_Rogue_Garrote", name = "Garrote", duration = 18, stacks = 0, debuffType = nil, spellID = 703},
+        {icon = "Interface\Icons\Ability_Gouge", name = "Rend", duration = 15, stacks = 0, debuffType = nil, spellID = 772},
     },
     -- Defensive externals for the 12.1 container preview (config.testPool =
     -- "defensives" on the defensive row). Same spells the legacy test painter
