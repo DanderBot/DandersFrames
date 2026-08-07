@@ -1506,6 +1506,7 @@ L["Sync: %s"] = true
 L["Synced with %s"] = true
 L["Synced: %s"] = true
 L["Tank"] = true
+L["Tank Cooldowns"] = true
 L["Tanking (Red)"] = true
 L["Tanking Text"] = true
 L["Tanks"] = true

@@ -3,9 +3,12 @@ local addonName, DF = ...
 -- ============================================================
 -- FILTER REGISTRY — SHIPPED SPELL DATABASE
 -- Curated spell records for the buff filter presets. Source:
--- WCL harvest v2, 2026-07-12 (lab discussion
--- ee16e59f-d4c9-4680-b2ca-17a754a3e102), 353 spells / 13
--- categories. One record per SPELL; alts carry every other known
+-- WCL harvest v2, 2026-07-12 + the tank pass of 2026-08-06 (lab
+-- discussion ee16e59f-d4c9-4680-b2ca-17a754a3e102), 14 categories.
+-- NOTE: upstream's 2026-07-16 v3 buff additions are NOT in here -
+-- upstream published no Lua map after v2, so only the tank delta
+-- could be folded in. A full v4 re-sync is still outstanding.
+-- One record per SPELL; alts carry every other known
 -- spellID for the same spell — but IDs are merged into one record
 -- ONLY when they share the identical category set (per-ID category
 -- divergences ship as separate records). `n` is an English
@@ -20,7 +23,7 @@ local pairs, ipairs = pairs, ipairs
 DF.FilterRegistry = DF.FilterRegistry or {}
 local R = DF.FilterRegistry
 
-R.DBStamp = { harvest = "2026-07-12", gameBuild = 68569 }
+R.DBStamp = { harvest = "2026-08-06", gameBuild = 68569 }
 
 -- Hand-maintained exclusion list — harvest ids DF refuses to carry, with the
 -- reason. Regeneration (/update-spelldb) DROPS these ids from records (a record
@@ -71,7 +74,7 @@ R.CategoryPatch = {
     [453112]  = { healing = true },
     -- Moved into Healing (Holy Paladin healing-adjacent auras):
     [1241717] = { healing = true },  -- Seraphic Barrier
-    [378412]  = { healing = true },  -- Light of the Titans
+    [378412]  = { healing = true, tankCooldowns = true },  -- Light of the Titans (tank pass 2026-08-06)
     [157128]  = { healing = true },  -- Saved by the Light
     [370889]  = { utility = true, movement = true },  -- Twin Guardian (moved off External Defensives)
     [370888]  = { utility = true, movement = true },
@@ -106,6 +109,7 @@ R.Categories = {
     { key = "raidDefensives",     name = "Raid Cooldowns" },
     { key = "externalDefensives", name = "External Defensives" },
     { key = "defensives",         name = "Defensives" },
+    { key = "tankCooldowns",      name = "Tank Cooldowns" },
     { key = "powerExternals",     name = "Power Externals" },
     { key = "movement",           name = "Movement" },
     { key = "utility",            name = "Utility" },
@@ -312,20 +316,20 @@ R.Spells = {
     -- ------------------------------------------------------------
     -- Defensives
     -- ------------------------------------------------------------
-    { id = 190456,   alts = { 1277297 }, n = "Ignore Pain", class = "WARRIOR", cats = { defensives = true } },
+    { id = 190456,   alts = { 1277297 }, n = "Ignore Pain", class = "WARRIOR", cats = { defensives = true, tankCooldowns = true } },
     { id = 118038,   n = "Die by the Sword",          class = "WARRIOR",       cats = { defensives = true } },
     { id = 23920,    alts = { 385391 }, n = "Spell Reflection", class = "WARRIOR", cats = { defensives = true } },
-    { id = 386208,   alts = { 1261776, 1243856 }, n = "Defensive Stance", class = "WARRIOR", off = true, cats = { defensives = true } },
+    { id = 386208,   alts = { 1261776, 1243856 }, n = "Defensive Stance", class = "WARRIOR", off = true, cats = { defensives = true, tankCooldowns = true } },
     { id = 184364,   n = "Enraged Regeneration",      class = "WARRIOR",       cats = { defensives = true } },
     { id = 147833,   n = "Intervene",                 class = "WARRIOR",       cats = { defensives = true } },
     { id = 642,      n = "Divine Shield",             class = "PALADIN",       cats = { defensives = true } },
     { id = 498,      alts = { 403876 }, n = "Divine Protection", class = "PALADIN", cats = { defensives = true } },
     { id = 184662,   n = "Shield of Vengeance",       class = "PALADIN",       cats = { defensives = true } },
-    { id = 461867,   n = "Sacrosanct Crusade",        class = "PALADIN",       off = true, cats = { defensives = true } },
-    { id = 209388,   alts = { 453043 }, n = "Bulwark of Order", class = "PALADIN", off = true, cats = { defensives = true } },
+    { id = 461867,   n = "Sacrosanct Crusade",        class = "PALADIN",       off = true, cats = { defensives = true, tankCooldowns = true } },
+    { id = 209388,   alts = { 453043 }, n = "Bulwark of Order", class = "PALADIN", off = true, cats = { defensives = true, tankCooldowns = true } },
     { id = 157128,   n = "Saved by the Light",        class = "PALADIN",       off = true, cats = { healing = true } },
-    { id = 48792,    n = "Icebound Fortitude",        class = "DEATHKNIGHT",   cats = { defensives = true } },
-    { id = 48707,    alts = { 444741 }, n = "Anti-Magic Shell", class = "DEATHKNIGHT", cats = { defensives = true } },
+    { id = 48792,    n = "Icebound Fortitude",        class = "DEATHKNIGHT",   cats = { defensives = true, tankCooldowns = true } },
+    { id = 48707,    alts = { 444741 }, n = "Anti-Magic Shell", class = "DEATHKNIGHT", cats = { defensives = true, tankCooldowns = true } },
     { id = 49039,    n = "Lichborne",                 class = "DEATHKNIGHT",   cats = { defensives = true } },
     { id = 45438,    n = "Ice Block",                 class = "MAGE",          cats = { defensives = true } },
     { id = 414658,   n = "Ice Cold",                  class = "MAGE",          cats = { defensives = true } },
@@ -341,14 +345,14 @@ R.Spells = {
     { id = 45242,    alts = { 426401 }, n = "Focused Will", class = "PRIEST", off = true, cats = { defensives = true } },
     { id = 193065,   n = "Protective Light",          class = "PRIEST",        off = true, cats = { defensives = true } },
     { id = 114216,   alts = { 114214 }, n = "Angelic Bulwark", class = "PRIEST", cats = { defensives = true } },
-    { id = 22812,    n = "Barkskin",                  class = "DRUID",         cats = { defensives = true } },
-    { id = 61336,    n = "Survival Instincts",        class = "DRUID",         cats = { defensives = true } },
-    { id = 22842,    n = "Frenzied Regeneration",     class = "DRUID",         cats = { defensives = true } },
-    { id = 192081,   n = "Ironfur",                   class = "DRUID",         off = true, cats = { defensives = true } },
+    { id = 22812,    n = "Barkskin",                  class = "DRUID",         cats = { defensives = true, tankCooldowns = true } },
+    { id = 61336,    n = "Survival Instincts",        class = "DRUID",         cats = { defensives = true, tankCooldowns = true } },
+    { id = 22842,    n = "Frenzied Regeneration",     class = "DRUID",         cats = { defensives = true, tankCooldowns = true } },
+    { id = 192081,   n = "Ironfur",                   class = "DRUID",         off = true, cats = { defensives = true, tankCooldowns = true } },
     { id = 393903,   n = "Ursine Vigor",              class = "DRUID",         off = true, cats = { defensives = true } },
     { id = 5487,     n = "Bear Form",                 class = "DRUID",         off = true, cats = { defensives = true } },
     { id = 363916,   n = "Obsidian Scales",           class = "EVOKER",        cats = { defensives = true } },
-    { id = 115203,   alts = { 120954 }, n = "Fortifying Brew", class = "MONK", cats = { defensives = true } },
+    { id = 115203,   alts = { 120954 }, n = "Fortifying Brew", class = "MONK", cats = { defensives = true, tankCooldowns = true } },
     { id = 122783,   n = "Diffuse Magic",             class = "MONK",          cats = { defensives = true } },
     { id = 108271,   n = "Astral Shift",              class = "SHAMAN",        cats = { defensives = true } },
     { id = 457387,   n = "Wind Barrier",              class = "SHAMAN",        cats = { defensives = true } },
@@ -369,8 +373,35 @@ R.Spells = {
     { id = 434107,   alts = { 434105 }, n = "Vampiric Aura", class = "DEATHKNIGHT", off = true, cats = { defensives = true } },
     { id = 404381,   n = "Defy Fate",                 class = "EVOKER",        cats = { defensives = true } },
     { id = 374349,   n = "Renewing Blaze",            class = "EVOKER",        cats = { defensives = true } },
-    { id = 455179,   n = "Elixir of Determination",   class = "MONK",          cats = { defensives = true } },
-    { id = 378412,   n = "Light of the Titans",       class = "PALADIN",       cats = { healing = true } },
+    { id = 455179,   n = "Elixir of Determination",   class = "MONK",          cats = { defensives = true, tankCooldowns = true } },
+    { id = 378412,   n = "Light of the Titans",       class = "PALADIN",       cats = { healing = true, tankCooldowns = true } },
+
+    -- ------------------------------------------------------------
+    -- Tank Cooldowns
+    -- Tank pass 2026-08-06 (curation by Krathe). Real cooldowns are
+    -- multi-homed here and in Defensives; rotational mitigation lives
+    -- here only and ships disabled by default.
+    -- ------------------------------------------------------------
+    { id = 871,      n = "Shield Wall",                class = "WARRIOR",       cats = { defensives = true, tankCooldowns = true } },
+    { id = 12975,    n = "Last Stand",                 class = "WARRIOR",       cats = { defensives = true, tankCooldowns = true } },
+    { id = 31850,    n = "Ardent Defender",            class = "PALADIN",       cats = { defensives = true, tankCooldowns = true } },
+    { id = 86659,    alts = { 393108 }, n = "Guardian of Ancient Kings", class = "PALADIN", cats = { defensives = true, tankCooldowns = true } },
+    { id = 389539,   n = "Sentinel",                   class = "PALADIN",       cats = { defensives = true, tankCooldowns = true } },
+    { id = 55233,    n = "Vampiric Blood",             class = "DEATHKNIGHT",   cats = { defensives = true, tankCooldowns = true } },
+    { id = 81256,    n = "Dancing Rune Weapon",        class = "DEATHKNIGHT",   cats = { defensives = true, tankCooldowns = true } },
+    { id = 187827,   n = "Metamorphosis",              class = "DEMONHUNTER",   cats = { defensives = true, tankCooldowns = true } },
+    { id = 263648,   n = "Soul Barrier",               class = "DEMONHUNTER",   cats = { defensives = true, tankCooldowns = true } },
+    { id = 207771,   n = "Fiery Brand",                class = "DEMONHUNTER",   cats = { defensives = true, tankCooldowns = true } },
+    { id = 322507,   alts = { 425965 }, n = "Celestial Brew", class = "MONK",   cats = { defensives = true, tankCooldowns = true } },
+    { id = 132578,   n = "Invoke Niuzao, the Black Ox", class = "MONK",         cats = { defensives = true, tankCooldowns = true } },
+    { id = 102558,   n = "Incarnation: Guardian of Ursoc", class = "DRUID",     cats = { defensives = true, tankCooldowns = true } },
+    -- rotational mitigation - this section only, off by default
+    { id = 195181,   n = "Bone Shield",                class = "DEATHKNIGHT",   off = true, cats = { tankCooldowns = true } },
+    { id = 273947,   n = "Hemostasis",                 class = "DEATHKNIGHT",   off = true, cats = { tankCooldowns = true } },
+    { id = 77535,    n = "Blood Shield",               class = "DEATHKNIGHT",   off = true, cats = { tankCooldowns = true } },
+    { id = 132404,   n = "Shield Block",               class = "WARRIOR",       off = true, cats = { tankCooldowns = true } },
+    { id = 215479,   n = "Shuffle",                    class = "MONK",          off = true, cats = { tankCooldowns = true } },
+    { id = 203819,   n = "Demon Spikes",               class = "DEMONHUNTER",   off = true, cats = { tankCooldowns = true } },
 
     -- ------------------------------------------------------------
     -- Utility
