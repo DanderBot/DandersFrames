@@ -156,6 +156,14 @@ local STATUS_ICON_NO_OOR_FADE = {
     resurrectionIcon  = true,
 }
 
+-- The eight status icons, by config prefix. The frame field is the same name
+-- (frame.summonIcon <-> "summonIcon"), which is what lets the refresh below stay a
+-- plain list rather than a mapping.
+local STATUS_ICON_PREFIXES = {
+    "summonIcon", "resurrectionIcon", "phasedIcon", "afkIcon",
+    "vehicleIcon", "raidRoleIcon", "bgCarrierIcon", "combatIcon",
+}
+
 function DF:GetStatusIconFadeAlpha(frame, prefix)
     if not frame then return 1.0 end
     local db = GetDB(frame)
@@ -183,6 +191,45 @@ function DF:GetStatusIconFadeAlpha(frame, prefix)
         end
     end
     return alpha
+end
+
+-- ☠ RE-APPLY THE STATUS-ICON FADE ON A RANGE CHANGE.
+--
+-- GetStatusIconFadeAlpha above is correct, and ApplyIconSettings (Frames/StatusIcons.lua)
+-- multiplies by it -- but ApplyIconSettings only runs from each icon's own Update*Icon
+-- path. NOTHING re-ran it when range changed: UpdateAllElementAppearances drove 22
+-- appearance functions and named none of the eight icons, and UpdateAllStatusIcons is
+-- reachable only from the full-frame refresh in Headers.lua. CreateStatusIcon also sets
+-- SetIgnoreParentAlpha(true), so the whole-frame cascade cannot reach them either.
+--
+-- Net effect: an icon only faded when it happened to re-render for its own reason. AFK
+-- and BG-carrier self-heal off their own tickers; summon, resurrection, phased, vehicle,
+-- raid-role and combat did not -- so a unit walking out of range kept a bright icon on an
+-- otherwise dimmed frame, and walking back in left a dim one. The changelog says this was
+-- fixed; only half of it was.
+--
+-- ⚠ This is deliberately ALPHA ONLY and reuses ApplyIconSettings' exact expression.
+-- StatusIcons.lua calls itself "THE ONE PLACE THESE ICONS' ALPHA IS SET, so the fade
+-- belongs here rather than in a second pass that would fight it" -- the hazard it names is
+-- a second pass computing something DIFFERENT. This computes the same product, so the two
+-- always agree; it just makes the range path able to trigger it. Do not grow this into a
+-- general icon-settings pass.
+function DF:UpdateStatusIconsAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
+
+    local db = GetDB(frame)
+    if not db then return end
+
+    for i = 1, #STATUS_ICON_PREFIXES do
+        local prefix = STATUS_ICON_PREFIXES[i]
+        local icon = frame[prefix]
+        -- Hidden icons cost nothing to skip and will be re-alpha'd by
+        -- ApplyIconSettings when their own path shows them.
+        if icon and icon.IsShown and icon:IsShown() then
+            icon:SetAlpha((db[prefix .. "Alpha"] or 1) * DF:GetStatusIconFadeAlpha(frame, prefix))
+        end
+    end
 end
 
 -- Check if unit is specifically offline (not just dead)
@@ -1378,6 +1425,10 @@ function DF:UpdateAllElementAppearances(frame)
     DF:UpdateHealAbsorbBarAppearance(frame)
     DF:UpdateHealPredictionBarAppearance(frame)
     DF:UpdateDefensiveIconAppearance(frame)
+    -- The eight status icons. They were absent from this list entirely, which is why
+    -- their range/dead fade never fired on a range change -- see
+    -- DF:UpdateStatusIconsAppearance for the full reasoning.
+    DF:UpdateStatusIconsAppearance(frame)
 end
 
 -- ============================================================
