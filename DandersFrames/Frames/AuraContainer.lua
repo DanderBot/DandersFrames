@@ -5383,7 +5383,42 @@ function SlotHandle:ApplyStyle(style, layout)
     if not (cfg and btn) then return false end
     if type(style) == "table" then cfg.style = style end
     if type(layout) == "table" then cfg.layout = layout end
-    if InCombatLockdown() then return false end
+    -- ☠ DEFER AND REPLAY -- returning false alone LOSES the edit.
+    -- The new style/layout are already stored on cfg above, so the config is right; only
+    -- the paint is skipped. But AuraDesigner/Factory.lua stamps entry.coSig BEFORE calling
+    -- this, so the next SyncFrame pass sees no delta and never retries, and nothing else
+    -- re-drives AD at combat end. Net: a cosmetic edit made in combat -- a border colour,
+    -- an alpha drag, a group offset -- was saved to the profile and never appeared until
+    -- the user touched some unrelated setting or reloaded. This is the DEFAULT path, since
+    -- every placed indicator goes through the shared slot.
+    --
+    -- Handle:ApplyStyle already does exactly this (_pendingRestyle + _registerRegen); the
+    -- slot side never got an equivalent. Replaying with NO arguments is correct: the
+    -- `type(...) == "table"` guards above mean a bare call re-paints from stored cfg.
+    if InCombatLockdown() then
+        self._pendingRestyle = true
+        local reg = AuraContainer._slotRegen
+        if not reg then
+            reg = CreateFrame("Frame")
+            -- Weak keys: a slot torn down before regen must not be kept alive by this.
+            reg._pending = setmetatable({}, { __mode = "k" })
+            reg:RegisterEvent("PLAYER_REGEN_ENABLED")
+            reg:SetScript("OnEvent", function(selfFrame)
+                for h in pairs(selfFrame._pending) do
+                    selfFrame._pending[h] = nil
+                    if h._pendingRestyle then
+                        h._pendingRestyle = nil
+                        -- pcall per slot so one failure cannot strand the rest, matching
+                        -- the container-side regen drain.
+                        pcall(h.ApplyStyle, h)
+                    end
+                end
+            end)
+            AuraContainer._slotRegen = reg
+        end
+        reg._pending[self] = true
+        return false
+    end
     -- ☠ REFUSE TO STYLE A SLOT WHOSE LEVEL HOST DOES NOT EXIST YET, and the damage is
     -- PERMANENT if we don't. styleButton_regions resolves `local host = slot.dfLevelHost
     -- or slot` -- a fallback that is right for a CONTAINER button (which never has a
