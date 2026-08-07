@@ -1128,14 +1128,19 @@ function DF:CreatePartyHeader()
 
     -- Layout attributes
     -- ☠ WAS db.growHorizontal, WHICH NOTHING EVER WRITES. Three reads, zero writes,
-    -- absent from Config -- so it was always nil and every one of these sites took
-    -- the VERTICAL branch regardless of what the user chose. The rest of the addon
-    -- spells this `growDirection == "HORIZONTAL"` (:1526, :1711, :3079).
-    -- ★ LIVE-ONLY BUG: the preview reads growDirection correctly via
-    -- SecureSort:UpdateLayoutParams, so the preview was right and live was wrong.
-    -- It bites hardest through UpdatePartyHeaderLayout, which runs from the combat
-    -- queue on PLAYER_REGEN_ENABLED and so clobbers SetPartyOrientation's correct
-    -- work on leaving combat. Found by the test-vs-live audit, 2026-08-07.
+    -- absent from Config -- so it was always nil and all three sites took the VERTICAL
+    -- branch whatever the user chose. The rest of the addon spells this
+    -- `growDirection == "HORIZONTAL"` (:1526, :1711, :3079).
+    --
+    -- ⚠ SCOPE: this was NOT "party frames are always vertical". DF:ApplyHeaderSettings
+    -- reads growDirection correctly and calls SetPartyOrientation, so on the normal path
+    -- the wrong orientation these two CREATE sites set is corrected straight afterwards.
+    -- The one that could stand was UpdatePartyHeaderLayout: both its callers live in
+    -- DF:ProcessHeaderCombatQueue, so it runs LAST on leaving combat with nothing
+    -- re-applying the correct value behind it. Symptom: a party layout change queued
+    -- during combat flips you to vertical when combat ends.
+    -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
+    -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
     local horizontal = (db.growDirection == "HORIZONTAL")
     local spacing = db.frameSpacing or 2
     DF.partyHeader:SetAttribute("point", horizontal and "LEFT" or "TOP")
@@ -1220,14 +1225,19 @@ function DF:CreateArenaHeader()
     
     -- Layout attributes - SAME as party
     -- ☠ WAS db.growHorizontal, WHICH NOTHING EVER WRITES. Three reads, zero writes,
-    -- absent from Config -- so it was always nil and every one of these sites took
-    -- the VERTICAL branch regardless of what the user chose. The rest of the addon
-    -- spells this `growDirection == "HORIZONTAL"` (:1526, :1711, :3079).
-    -- ★ LIVE-ONLY BUG: the preview reads growDirection correctly via
-    -- SecureSort:UpdateLayoutParams, so the preview was right and live was wrong.
-    -- It bites hardest through UpdatePartyHeaderLayout, which runs from the combat
-    -- queue on PLAYER_REGEN_ENABLED and so clobbers SetPartyOrientation's correct
-    -- work on leaving combat. Found by the test-vs-live audit, 2026-08-07.
+    -- absent from Config -- so it was always nil and all three sites took the VERTICAL
+    -- branch whatever the user chose. The rest of the addon spells this
+    -- `growDirection == "HORIZONTAL"` (:1526, :1711, :3079).
+    --
+    -- ⚠ SCOPE: this was NOT "party frames are always vertical". DF:ApplyHeaderSettings
+    -- reads growDirection correctly and calls SetPartyOrientation, so on the normal path
+    -- the wrong orientation these two CREATE sites set is corrected straight afterwards.
+    -- The one that could stand was UpdatePartyHeaderLayout: both its callers live in
+    -- DF:ProcessHeaderCombatQueue, so it runs LAST on leaving combat with nothing
+    -- re-applying the correct value behind it. Symptom: a party layout change queued
+    -- during combat flips you to vertical when combat ends.
+    -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
+    -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
     local horizontal = (db.growDirection == "HORIZONTAL")
     local spacing = db.frameSpacing or 2
     DF.arenaHeader:SetAttribute("point", horizontal and "LEFT" or "TOP")
@@ -4964,14 +4974,19 @@ function DF:UpdatePartyHeaderLayout()
     local db = DF:GetDB()
     
     -- ☠ WAS db.growHorizontal, WHICH NOTHING EVER WRITES. Three reads, zero writes,
-    -- absent from Config -- so it was always nil and every one of these sites took
-    -- the VERTICAL branch regardless of what the user chose. The rest of the addon
-    -- spells this `growDirection == "HORIZONTAL"` (:1526, :1711, :3079).
-    -- ★ LIVE-ONLY BUG: the preview reads growDirection correctly via
-    -- SecureSort:UpdateLayoutParams, so the preview was right and live was wrong.
-    -- It bites hardest through UpdatePartyHeaderLayout, which runs from the combat
-    -- queue on PLAYER_REGEN_ENABLED and so clobbers SetPartyOrientation's correct
-    -- work on leaving combat. Found by the test-vs-live audit, 2026-08-07.
+    -- absent from Config -- so it was always nil and all three sites took the VERTICAL
+    -- branch whatever the user chose. The rest of the addon spells this
+    -- `growDirection == "HORIZONTAL"` (:1526, :1711, :3079).
+    --
+    -- ⚠ SCOPE: this was NOT "party frames are always vertical". DF:ApplyHeaderSettings
+    -- reads growDirection correctly and calls SetPartyOrientation, so on the normal path
+    -- the wrong orientation these two CREATE sites set is corrected straight afterwards.
+    -- The one that could stand was UpdatePartyHeaderLayout: both its callers live in
+    -- DF:ProcessHeaderCombatQueue, so it runs LAST on leaving combat with nothing
+    -- re-applying the correct value behind it. Symptom: a party layout change queued
+    -- during combat flips you to vertical when combat ends.
+    -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
+    -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
     local horizontal = (db.growDirection == "HORIZONTAL")
     local spacing = db.frameSpacing or 2
     
