@@ -404,12 +404,19 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
     end
     
     -- Apply animation if enabled (only for alive units) - health only, not absorbs
+    -- ☠ WAS `0.65 + (wave * 0.35)`, WHICH THREW AWAY THE UNIT'S CONFIGURED HEALTH.
+    -- Every party scenario collapsed onto one curve centred at 65%, so switching
+    -- Animate Health on erased the five frames' distinct levels (100 / 95 / 60 / 30)
+    -- and switching it off brought them back. The raid and boss branches always did
+    -- this correctly -- `baseHealth + wave * 0.15` -- and this now matches them, so
+    -- the three agree and the scenarios survive the toggle. (Audit, 2026-08-07.)
     if db.testAnimateHealth and DF.TestData.animationPhase then
         local phase = DF.TestData.animationPhase
         local offset = (index * 0.2) % 1
         local wave = math.sin((phase + offset) * math.pi * 2)
-        
-        result.healthPercent = 0.65 + (wave * 0.35)
+        local baseHealth = result.healthPercent or 0.75
+
+        result.healthPercent = math.max(0.1, math.min(1, baseHealth + wave * 0.15))
         result.currentHealth = math.floor(result.healthPercent * result.maxHealth)
         -- Note: Absorbs use static values from test data, not animated
     end
@@ -487,12 +494,19 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
         return
     end
     
-    -- Calculate animated health (alive units only)
-    local baseHealth = testData.healthPercent or testData.health or 0.75
-    local phase = DF.TestData.animationPhase or 0
-    local variation = math.sin(phase * math.pi * 2 + (index or 0)) * 0.15
-    local health = math.max(0.1, math.min(1.0, baseHealth + variation))
-    
+    -- ☠ THIS USED TO ADD A SECOND SINE ON TOP OF AN ALREADY-ANIMATED VALUE.
+    -- GetTestUnitData applies the animation itself (see its party/raid/boss
+    -- branches), so testData.healthPercent arrives animated -- and this then added
+    -- its OWN wave, with a different per-frame phase offset (`index` radians rather
+    -- than 2*pi*(0.2*index % 1)). Two waves at different phases summed to an
+    -- amplitude near 0.5 and clamped flat at a full bar once per cycle, and because
+    -- any settings change re-renders through GetTestUnitData's formula alone, the
+    -- bar visibly jumped between the two whenever anything was touched.
+    --
+    -- ★ One formula now: the ticker advances animationPhase and simply RENDERS what
+    -- GetTestUnitData produced. Do not reintroduce a wave here. (Audit, 2026-08-07.)
+    local health = testData.healthPercent or testData.health or 0.75
+
     -- Store animated health for bar updates
     frame.testAnimatedHealth = health
     
