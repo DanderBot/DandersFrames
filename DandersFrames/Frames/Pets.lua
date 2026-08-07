@@ -561,10 +561,58 @@ function DF:UpdatePetHealth(frame)
 
     if DF.UpdateTextDesigner then DF:UpdateTextDesigner(frame, "health") end
 
-    -- Color health bar based on settings
+    -- Colour health bar based on settings — shared with the preview.
+    DF:ApplyPetHealthColor(frame, db, ownerUnit, unit)
+end
+
+-- ★★ PET HEALTH BAR COLOUR — ONE IMPLEMENTATION, LIVE AND PREVIEW.
+--
+-- ☠ THE PREVIEW USED TO HARDCODE ONE COLOUR: SetStatusBarColor(0.2, 0.8, 0.2), a
+-- flat green that is not even live's default green (0, 0.8, 0). Every pet
+-- health-colour setting was therefore invisible in test -- and the shipped default
+-- mode is HEALTH, so out of the box live drew a red->yellow->green gradient while
+-- the preview drew flat green. (Audit, 2026-08-07.)
+--
+-- `test` is the only fork and it is pure DATA: { pct = 0..1, class = "MAGE" }.
+-- Live resolves those two from unit APIs, which fabricated pet tokens fail.
+--   * CLASS  -- needs the OWNER's class token.
+--   * HEALTH -- live takes the colour straight out of UnitHealthPercent(unit, true,
+--     curve), which is secret-safe and needs a real unit; the preview interpolates
+--     the same stops in Lua. Safe to restate the ramp because it is hardcoded on
+--     both sides -- GetPetHealthGradientCurve builds it from constants, not from db,
+--     so there is no user setting here that could drift.
+--   * CUSTOM and the default arm are pure db reads, shared verbatim.
+local PET_HEALTH_STOPS = {
+    { pos = 0.0, r = 1, g = 0,   b = 0 },
+    { pos = 0.5, r = 1, g = 0.8, b = 0 },
+    { pos = 1.0, r = 0, g = 0.8, b = 0 },
+}
+
+local function PetGradientRGB(pct)
+    pct = math.max(0, math.min(1, pct or 1))
+    for i = 1, #PET_HEALTH_STOPS - 1 do
+        local a, b = PET_HEALTH_STOPS[i], PET_HEALTH_STOPS[i + 1]
+        if pct <= b.pos then
+            local span = b.pos - a.pos
+            local t = span > 0 and ((pct - a.pos) / span) or 0
+            return a.r + (b.r - a.r) * t,
+                   a.g + (b.g - a.g) * t,
+                   a.b + (b.b - a.b) * t
+        end
+    end
+    local last = PET_HEALTH_STOPS[#PET_HEALTH_STOPS]
+    return last.r, last.g, last.b
+end
+
+function DF:ApplyPetHealthColor(frame, db, ownerUnit, unit, test)
+    if not (frame and frame.healthBar and db) then return end
+
     if db.petHealthColorMode == "CLASS" then
-        -- Try to get pet owner's class color
-        local _, class = UnitClass(ownerUnit)
+        local class = test and test.class
+        if not class and ownerUnit then
+            local _, c = UnitClass(ownerUnit)
+            class = c
+        end
         if class then
             local color = DF:GetClassColor(class)
             if color then
@@ -573,24 +621,31 @@ function DF:UpdatePetHealth(frame)
             end
         end
     elseif db.petHealthColorMode == "HEALTH" then
-        -- Use gradient curve to get color based on health percentage
-        -- UnitHealthPercent with a color curve returns the color directly
-        local curve = DF:GetPetHealthGradientCurve()
-        if curve then
-            local success = pcall(function()
-                local color = UnitHealthPercent(unit, true, curve)
-                if color and color.GetRGB then
-                    local tex = frame.healthBar:GetStatusBarTexture()
-                    if tex then
-                        tex:SetVertexColor(color:GetRGB())
-                    end
-                end
-            end)
-            if success then
+        if test then
+            local tex = frame.healthBar:GetStatusBarTexture()
+            if tex then
+                tex:SetVertexColor(PetGradientRGB(test.pct))
                 return
             end
+        else
+            -- UnitHealthPercent with a colour curve returns the colour directly
+            local curve = DF:GetPetHealthGradientCurve()
+            if curve then
+                local success = pcall(function()
+                    local color = UnitHealthPercent(unit, true, curve)
+                    if color and color.GetRGB then
+                        local tex = frame.healthBar:GetStatusBarTexture()
+                        if tex then
+                            tex:SetVertexColor(color:GetRGB())
+                        end
+                    end
+                end)
+                if success then
+                    return
+                end
+            end
         end
-        -- Fallback if curve not available or failed - just use green
+        -- Fallback if the curve is unavailable or failed - just use green
         frame.healthBar:SetStatusBarColor(0, 0.8, 0)
         return
     elseif db.petHealthColorMode == "CUSTOM" then
@@ -598,7 +653,7 @@ function DF:UpdatePetHealth(frame)
         frame.healthBar:SetStatusBarColor(c.r, c.g, c.b)
         return
     end
-    
+
     -- Default green
     frame.healthBar:SetStatusBarColor(0, 0.8, 0)
 end
@@ -893,8 +948,14 @@ function DF:UpdatePetFrameTestMode(frame)
     frame.healthBar:SetMinMaxValues(0, 1)
     frame.healthBar:SetValue(healthPercent)
 
-    -- Set health bar color (green)
-    frame.healthBar:SetStatusBarColor(0.2, 0.8, 0.2)
+    -- Colour through the LIVE renderer, supplying only the two values a fabricated
+    -- pet token cannot answer: the health fraction and the owner's class. This used
+    -- to hardcode a flat green and every pet health-colour setting was invisible here.
+    local ownerTest = frame.ownerFrame and DF.GetTestUnitData
+        and DF:GetTestUnitData(frame.ownerFrame.index, frame.ownerFrame.isRaidFrame,
+            frame.ownerFrame.isPinnedBossFrame)
+    DF:ApplyPetHealthColor(frame, DF:GetFrameDB(frame), frame.ownerUnit, frame.unit,
+        { pct = healthPercent, class = ownerTest and ownerTest.class })
 
     -- Fake power bar (geometry/visibility already set by ApplyPetFrameStyle)
     if frame.powerBar then
