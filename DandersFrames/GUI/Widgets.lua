@@ -1795,6 +1795,11 @@ function GUI:CreateSlider(parent, label, minVal, maxVal, step, dbTable, dbKey, c
     -- SEARCH: Register this setting with slider metadata
     if DF.Search and dbKey and type(dbKey) == "string" then
         container.searchEntry = DF.Search:RegisterSlider(label, dbKey, minVal, maxVal, step, nil, callback)
+        -- Hand the entry a reference back so the inline search result can read the
+        -- tooltip this caller sets on us after we return.
+        -- ⚠ Guard the METHOD, not just DF.Search: Search lives in the companion
+        -- addon, so a mismatched pair would find the table and not the function.
+        if DF.Search.LinkSourceWidget then DF.Search:LinkSourceWidget(container) end
     end
     
     -- Expose label for dynamic updates
@@ -2316,6 +2321,8 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     -- SEARCH: Register this setting
     if DF.Search and dbKey and type(dbKey) == "string" then
         container.searchEntry = DF.Search:RegisterDropdown(label, dbKey, options, nil, callback)
+        -- See CreateSlider: method-guarded because Search is companion-side.
+        if DF.Search.LinkSourceWidget then DF.Search:LinkSourceWidget(container) end
     end
 
     return container

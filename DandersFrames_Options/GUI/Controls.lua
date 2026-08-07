@@ -1184,6 +1184,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
     if DF.Search and dbKey and type(dbKey) == "string" then
         local currentOptions = customOptions or DF:GetTextureList()
         container.searchEntry = DF.Search:RegisterDropdown(label, dbKey, currentOptions, nil, callback)
+        DF.Search:LinkSourceWidget(container)
     end
 
     -- Tooltip: shared attach on the LABEL only. Hand-rolled preview dropdown, so
@@ -1501,6 +1502,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
     -- SEARCH: Register this setting (use current font list)
     if DF.Search and dbKey and type(dbKey) == "string" then
         container.searchEntry = DF.Search:RegisterDropdown(label, dbKey, DF:GetFontList(), nil, callback)
+        DF.Search:LinkSourceWidget(container)
     end
 
     -- Tooltip: shared attach on the LABEL only. Hand-rolled preview dropdown, so

@@ -1147,6 +1147,9 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
         elseif hasCustomGetSet then
             container.searchEntry = DF.Search:RegisterCheckbox(label, nil, nil, true, callback)
         end
+        -- Hand the entry a reference back, so the inline search result can read
+        -- the tooltip this caller is about to set on us.
+        DF.Search:LinkSourceWidget(container)
     end
     
     return container
@@ -1934,6 +1937,7 @@ function GUI:CreateColorPicker(parent, label, dbTable, dbKey, hasAlpha, callback
     -- SEARCH: Register this setting
     if DF.Search and dbKey and type(dbKey) == "string" then
         container.searchEntry = DF.Search:RegisterColorPicker(label, dbKey, hasAlpha, nil, callback)
+        DF.Search:LinkSourceWidget(container)
     end
     
     return container
