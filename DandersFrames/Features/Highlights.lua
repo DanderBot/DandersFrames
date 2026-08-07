@@ -672,6 +672,9 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
     if debugHighlights then
         print("  inTestMode:", inTestMode and "true" or "false")
     end
+    -- forceThreat: the preview's threat STATUS (0-3), fed into live's own derivation
+    -- below. Declared here so it is a local, not an accidental global.
+    local forceThreat
     if inTestMode and forceSelection == nil and forceAggro == nil then
         -- Determine frame index for test mode
         local frameIndex = nil
@@ -721,7 +724,17 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
                 forceSelection = (frameIndex == 0)  -- First frame gets selection
             end
             if db.testShowAggro then
-                forceAggro = (frameIndex == 1)  -- Second frame gets aggro
+                -- ☠ WAS A BOOLEAN, WHICH MADE TWO OF THE THREE AGGRO COLOURS
+                -- UNPREVIEWABLE. The live path derives everything from a THREAT STATUS
+                -- (3 tanking / 2 highest / 1 high), and a bare true forced the status
+                -- to a hardcoded 3, so High Threat and Highest Threat could never
+                -- appear in the preview and aggroOnlyTanking / aggroHideOnTanks were
+                -- skipped entirely. Supplying the number instead lets live's own code
+                -- cover all three colours and both toggles. (Audit, 2026-08-07.)
+                forceThreat = (frameIndex == 1 and 3)
+                    or (frameIndex == 2 and 2)
+                    or (frameIndex == 3 and 1)
+                    or nil
             end
         end
         
@@ -737,11 +750,13 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         isSelected = unit and UnitIsUnit(unit, "target")
     end
     
-    -- Check aggro status via threat API - can be overridden for test mode
+    -- Check aggro status via threat API - the preview supplies the STATUS, not a verdict
     local isAggro = forceAggro
-    local status = 3  -- Default to red (tanking) for test mode
+    local status = 0
     if isAggro == nil then
-        status = unit and UnitThreatSituation(unit) or 0
+        -- forceThreat is the preview's only input here; everything below is live's own
+        -- derivation, so the two agree on colour, aggroOnlyTanking and aggroHideOnTanks.
+        status = forceThreat or (unit and UnitThreatSituation(unit)) or 0
         -- If "Only Show When Tanking" is enabled, only show for status 3 (actually tanking)
         if db.aggroOnlyTanking then
             isAggro = status and status == 3
