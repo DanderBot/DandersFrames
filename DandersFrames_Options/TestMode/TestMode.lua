@@ -1283,13 +1283,19 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.combatIcon.texture:SetTexture("Interface\\CharacterFrame\\UI-StateIcon")
             frame.combatIcon.texture:SetTexCoord(0.5, 1.0, 0, 0.49)
 
-            local scale = db.combatIconScale or 1.0
-            local anchor = db.combatIconAnchor or "TOPLEFT"
-            local x = db.combatIconX or 2
-            local y = db.combatIconY or -2
-            frame.combatIcon:SetScale(scale)
-            frame.combatIcon:ClearAllPoints()
-            frame.combatIcon:SetPoint(anchor, frame, anchor, x, y)
+            -- ☠ THE LIVE APPLIER, like the other seven icons. This block used to
+            -- hand-roll scale/anchor/x/y, and the commit that converted the rest
+            -- ("preview uses the live geometry applier") deleted this one's SetAlpha and
+            -- SetFrameLevel WITHOUT converting it -- so it lost combatIconAlpha, lost
+            -- combatIconFrameLevel, and lost the out-of-range/dead fade that
+            -- ApplyStatusIconSettings folds in via GetStatusIconFadeAlpha. A new
+            -- preview-vs-live fork, created by the change that was removing forks, and
+            -- invisible at default settings because combatIconAlpha seeds to 1.
+            -- The hand-rolled fallbacks disagreed with live's as well ("TOPLEFT"/2/-2
+            -- against CENTER/0/0), which is another reason not to keep a second copy.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.combatIcon, db, "combatIcon")
+            end
             frame.combatIcon:Show()
 
         else

@@ -48,7 +48,15 @@ DFBindingTooltipTextLeft1:SetFontObject(GameTooltipText)
 -- ============================================================
 
 function DF:CreateFrameBorder(frame, db)
-    frame.border = DF.Border:New(frame)
+    -- ☠ MUST be explicit. DF.Border defaults to parent+2, which is sized for a leaf
+    -- parent; this one stacks child FRAMES over its own rect. Measured here: health
+    -- +3 (SetAllPoints, and framePadding defaults to 0, so it covers the whole frame),
+    -- power +5, absorb +7, heal-absorb +8, contentOverlay +25. +10 is the free band
+    -- above every bar and below the text/icon layer. Take the default and the health
+    -- bar buries the border completely at full health -- which is what alpha 15 did.
+    -- Frames/Bars.lua:180 states this +10 as fact when it places the resource bar, so
+    -- the two must not drift apart.
+    frame.border = DF.Border:New(frame, { frameLevelOffset = 10 })
     DF:ApplyFrameBorder(frame, db)
     return frame.border
 end

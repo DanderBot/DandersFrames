@@ -444,7 +444,15 @@ function DF:UpdateBackgroundAppearance(frame)
         local c = db.fadeDeadBackgroundColor or DEFAULT_COLOR_DEAD_BG
         r, g, b = c.r, c.g, c.b
         baseAlpha = 0.8
-    elseif bgMode == "CLASS" and unit and UnitExists(unit) then
+    -- ⚠ The gate must accept the STAMP, because the body already does. GetClassColor
+    -- reads frame.dfClassToken first and only falls back to UnitClass -- but a raw
+    -- `unit and UnitExists(unit)` gate rejected test frames before it could. Test
+    -- frames carry REAL tokens ("raid1"), so solo the token does not exist, this branch
+    -- was skipped and the background fell through to db.backgroundColor; inside a real
+    -- raid the token resolves and it worked, which is why it read as intermittent.
+    -- Same shape as Frames/Core.lua:230, which had it right.
+    elseif bgMode == "CLASS"
+        and ((frame and frame.dfClassToken) or (unit and UnitExists(unit))) then
         local classColor = GetClassColor(frame)
         r, g, b = classColor.r, classColor.g, classColor.b
         baseAlpha = db.backgroundClassAlpha or 0.3
@@ -972,7 +980,11 @@ function DF:UpdateDispelOverlayAppearance(frame)
     -- hardcodes. Until that function is updated to read the user settings, using
     -- db.dispelBorderAlpha/db.dispelIconAlpha here would cause ~5Hz flicker
     -- (ShowOverlayWithSecretColor sets 1.0, range ticker dims them back).
-    local gradAlpha = math.min((db.dispelGradientAlpha or 0.5) * (db.dispelGradientIntensity or 1.0), 1.0) * deadAlpha
+    -- ⚠ Shared resolver, not a fourth inline copy. This line WAS the copy that made the
+    -- "all four sites share it" claim in Features/Dispel.lua false, and it carried a
+    -- different fallback (0.5 vs Config's 1) so the two disagreed on an unset profile.
+    local gradAlpha = (DF.ResolveDispelGradientAlpha
+        and DF:ResolveDispelGradientAlpha(db) or 1.0) * deadAlpha
     local brdAlpha  = 1.0 * deadAlpha
     local icnAlpha  = 1.0 * deadAlpha
 

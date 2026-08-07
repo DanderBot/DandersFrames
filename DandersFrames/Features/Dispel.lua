@@ -790,8 +790,24 @@ end
 -- all four sites share it. (Audit, 2026-08-07.)
 --
 -- Clamped: alpha above 1 is meaningless and would silently cap on one lane only.
+--
+-- ☠ EXPORTED, because "this hoists that one line so all four sites share it" was not
+-- true as written: a file LOCAL cannot be shared across files, and ElementAppearance.lua
+-- kept its own inline copy of this expression with a DIFFERENT fallback (0.5, against
+-- Core/Config.lua's actual default of 1). Hoisting within one file only looks like
+-- consolidation. Fallback corrected to 1 to match Config.
+--
+-- ⚠ The intensity term stays even though Core's migration now folds that key into the
+-- alpha and nils it in the same pass. It costs nothing and it is the safe side of the
+-- trade: a profile that somehow reaches here unmigrated keeps v4's brightness instead of
+-- silently dimming. It cannot double-apply -- the fold and the nil are one call.
+function DF:ResolveDispelGradientAlpha(db)
+    if not db then return 1.0 end
+    return math.min((db.dispelGradientAlpha or 1) * (db.dispelGradientIntensity or 1.0), 1.0)
+end
+
 local function ResolveGradientAlpha(db)
-    return math.min((db.dispelGradientAlpha or 0.5) * (db.dispelGradientIntensity or 1.0), 1.0)
+    return DF:ResolveDispelGradientAlpha(db)
 end
 
 function DF:ApplyDispelOverlayAppearance(frame)

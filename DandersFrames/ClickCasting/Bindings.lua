@@ -790,14 +790,32 @@ function CC:ApplyBindings()
                 else
                     -- All frames processed.
                     CC.batchBindingTimer = nil
-                    -- No RefreshKeyboardBindings here any more. The batch now
-                    -- rebuilds each frame's snippet inline (skipKeyboardUpdate is
-                    -- false above), and RefreshKeyboardBindings does nothing but
-                    -- loop the same registry calling the same builder -- a strict
-                    -- subset, since it additionally gates on
-                    -- dfKeyboardHandlersSetup. Keeping it meant every sweep built
-                    -- every snippet twice. Verified there is no other dependency:
-                    -- the function's whole body is that one loop.
+                    -- No full RefreshKeyboardBindings here: the batch already rebuilt
+                    -- each registered frame's snippet inline (skipKeyboardUpdate is
+                    -- false above), so calling it would build every snippet twice.
+                    --
+                    -- ☠ BUT IT HAS A SECOND LOOP, and dropping the call dropped that
+                    -- too. The claim that used to sit here -- "the function's whole
+                    -- body is that one loop" -- was simply false: after the
+                    -- registeredFrames pass it also walks DF:IterateAllFrames, and the
+                    -- comment on that loop (ClickCasting/Frames.lua, unchanged since
+                    -- before this branch) records WHY: RegisterAllFrames has no
+                    -- arena-header walk while IterateAllFrames special-cases arena.
+                    --
+                    -- The gap it leaves is narrow but real: a frame that still carries
+                    -- dfKeyboardHandlersSetup but is no longer in registeredFrames.
+                    -- That set is reachable -- UnregisterFrame clears the registry entry
+                    -- and dfClickCastRegistered but NOT dfKeyboardHandlersSetup. Run
+                    -- just the second loop, skipping anything the batch already did, so
+                    -- the coverage comes back without the double build.
+                    if DF and DF.IterateAllFrames then
+                        DF:IterateAllFrames(function(f)
+                            if f and f.dfKeyboardHandlersSetup
+                                and not (CC.registeredFrames and CC.registeredFrames[f]) then
+                                CC:UpdateFrameBindingAttributes(f)
+                            end
+                        end)
+                    end
                     --
                     -- The header wipe above kills a live hover; put it straight back.
                     CC:ReassertHoverBinds()

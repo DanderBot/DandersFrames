@@ -5162,6 +5162,24 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
     handle.button = btn
     owner.slots[slotKey] = handle
     owner.seq = owner.seq + 1
+
+    -- ☠ REGISTER FOR THE IDENTITY-GATE SWEEP. A slot is NOT in AuraContainer._handles
+    -- (that registry is Handle-shaped -- the sweep and the debug dump both read
+    -- h.config.unit and call Handle methods), so it needs its own weak-keyed list or the
+    -- gate only ever runs at tuning time and never re-evaluates when the roster, phase or
+    -- target changes. Weak keys so a dropped slot GCs with its owner.
+    AuraContainer._slotHandles = AuraContainer._slotHandles
+        or setmetatable({}, { __mode = "k" })
+    AuraContainer._slotHandles[handle] = true
+
+    -- Seed the gate's inputs from the spec this slot was built with, then evaluate once.
+    -- Without this a slot is ungated until its first ApplyTuning, and the AD path can
+    -- reach a first paint before then.
+    handle._idGateVulnerable    = filterVulnerableToIdentityGate(filter, spec.candidateFilters)
+    handle._idGateSourceRelative = filterSourceRelative(filter, spec.candidateFilters)
+    handle._lastCandidateFilters = spec.candidateFilters
+    handle:_applyIdentityGate()
+
     -- Enabled defaults true on the template, but assert it once the container actually
     -- has a slot: registration needs HasAnyAuraSlots, which only became true just now.
     pcall(owner.container.SetEnabled, owner.container, true)
@@ -5223,22 +5241,72 @@ function SlotHandle:GetAlphaHost() return self.button and self.button.dfLevelHos
 -- Stop this slot displaying, WITHOUT destroying anything. Proven in game 2026-08-05:
 -- an empty filter string matches nothing (it does NOT fall back to a default).
 -- ⚠ Display only -- the slot keeps its key and its button.
-function SlotHandle:Park()
-    if self.parked then return true end
+-- ☠ TWO INDEPENDENT REASONS A SLOT CAN BE DARK, and they must not clobber each other:
+-- `parked` is the CONSUMER's decision (indicator disabled, structural swap) and
+-- `_gateHidden` is the IDENTITY GATE's. Before this there was only `parked`, so whichever
+-- wrote last won -- a consumer Restore would have un-hidden a gated slot and leaked the
+-- auras the gate exists to suppress. One writer, one resolution.
+function SlotHandle:_pushFilter()
     local c = self.owner and self.owner.container
     if not c then return false end
-    local ok = pcall(c.SetAuraSlotFilterString, c, self.key, "")
-    if ok then self.parked = true end
-    return ok
+    local want = (self.parked or self._gateHidden) and "" or self.liveFilter
+    return pcall(c.SetAuraSlotFilterString, c, self.key, want)
+end
+
+function SlotHandle:Park()
+    if self.parked then return true end
+    self.parked = true
+    return self:_pushFilter()
 end
 
 function SlotHandle:Restore()
     if not self.parked then return true end
-    local c = self.owner and self.owner.container
-    if not c then return false end
-    local ok = pcall(c.SetAuraSlotFilterString, c, self.key, self.liveFilter)
-    if ok then self.parked = false end
-    return ok
+    self.parked = false
+    return self:_pushFilter()
+end
+
+-- ☠ THE IDENTITY GATE, WHICH THIS PATH HAD NONE OF. Every Aura Designer placed config
+-- carries candidateFilters.includeSpellIDs, which is precisely what makes a filter
+-- vulnerable -- so on a cross-faction arena opponent, or a party member in a different
+-- instance or phase, includeSpellIDs FAILS OPEN engine-side and every AD indicator lights
+-- for every aura on the target. That is the same class as the bugs the Handle gate was
+-- written to fix, and migrating the consumers onto slots quietly bypassed it: SlotHandle
+-- had no gate, no vulnerability flags, and was not in AuraContainer._handles, so
+-- IdentityGateSweep never visited it.
+--
+-- Verdict logic is deliberately identical to Handle:_applyIdentityGate -- fail-open on
+-- UnitCanAssist (hide only on a definite false), fail-safe on UnitIsVisible -- because
+-- two gates that disagree are worse than one. What differs is the ACTUATION: a Handle
+-- hides its frame, a slot has no frame of its own, so it parks. Parking is already the
+-- right primitive (an empty filter string matches nothing, proven in game).
+function SlotHandle:_applyIdentityGate()
+    local hide = false
+    if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
+        local unit = self.owner and self.owner.unit
+        if type(unit) == "string" and unit ~= "player" and UnitExists(unit) then
+            if self._idGateVulnerable then
+                local ok, can = pcall(UnitCanAssist, "player", unit)
+                if ok then
+                    if issecretvalue and issecretvalue(can) then can = true end
+                    if not can then hide = true end
+                end
+            end
+            if not hide and self._idGateSourceRelative then
+                local okv, vis = pcall(UnitIsVisible, unit)
+                if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
+                    hide = true
+                end
+            end
+        end
+    end
+    local newHidden = hide or nil
+    if self._gateHidden ~= newHidden then
+        self._gateHidden = newHidden
+        DF:Debug(DBG, "slot identity gate %s for key=%s unit=%s",
+            newHidden and "HIDING" or "showing", tostring(self.key),
+            tostring(self.owner and self.owner.unit))
+        self:_pushFilter()
+    end
 end
 
 -- Live tuning. All three are real live mutators on the slot; none needs a rebuild.
@@ -5247,13 +5315,27 @@ end
 function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirection)
     local c = self.owner and self.owner.container
     if not c then return false end
+    local filterChanged = false
     if filter ~= nil and filter ~= self.liveFilter then
         self.liveFilter = filter
-        if not self.parked then pcall(c.SetAuraSlotFilterString, c, self.key, filter) end
+        filterChanged = true
     end
     if candidateFilters ~= nil then
+        self._lastCandidateFilters = candidateFilters
         pcall(c.SetAuraSlotCandidateFilters, c, self.key, candidateFilters)
     end
+    -- Recompute the gate's INPUTS whenever either half of the filter moves -- the verdict
+    -- depends on the filter string AND the candidateFilters together, so recomputing on
+    -- only one of them leaves a slot flagged from its previous configuration.
+    if filterChanged or candidateFilters ~= nil then
+        local cf = self._lastCandidateFilters
+        self._idGateVulnerable    = filterVulnerableToIdentityGate(self.liveFilter, cf)
+        self._idGateSourceRelative = filterSourceRelative(self.liveFilter, cf)
+    end
+    -- Re-evaluate before pushing, so a slot that just became vulnerable is dark on the
+    -- very first pass rather than showing one frame of the wrong player's auras.
+    self:_applyIdentityGate()
+    if filterChanged then self:_pushFilter() end
     if sortMethod ~= nil then
         pcall(c.SetAuraSlotSortMethod, c, self.key, sortMethod, sortDirection or 0)
     end
@@ -5324,14 +5406,78 @@ end
 -- second one.
 function SlotHandle:Release() return self:Park() end
 
+-- ☠ GetUnit/SetUnit ARE THE RETARGET CONTRACT, and their absence was a live bug.
+-- Factory:SyncFrame walks every stored handle with
+--     if h and h.GetUnit and h:GetUnit() ~= u and h.SetUnit then h:SetUnit(u) end
+-- which is nil-guarded, so a handle missing these two methods is SILENTLY SKIPPED --
+-- no error, no warning, just a container still pointed at whoever used to occupy that
+-- frame. Handle has both (that is why the pre-collapse code worked); SlotHandle was
+-- migrated into the same stores without them, so after any roster change -- someone
+-- leaves, a sort reorders, party->raid, arena entry -- every Aura Designer placed
+-- icon, bar and alert rendered ANOTHER PLAYER'S auras until /reload.
+--
+-- All slots on a frame share one owner and therefore one unit, so the loop's repeated
+-- calls collapse: the first retargets, the rest hit the equality guard below.
+function SlotHandle:GetUnit()
+    return self.owner and self.owner.unit or nil
+end
+
+function SlotHandle:SetUnit(unit)
+    if not (self.owner and self.owner.frame) then return false end
+    return AuraContainer:SetSlotOwnerUnit(self.owner.frame, unit)
+end
+
+-- Owners whose retarget was blocked by combat. Weak-keyed, like the handle list: if the
+-- frame and its owner go away, the entry goes with them rather than pinning them alive.
+local function registerOwnerRegen(owner)
+    if not AuraContainer._ownerRegen then
+        AuraContainer._ownerRegen = CreateFrame("Frame")
+        AuraContainer._ownerRegen._owners = setmetatable({}, { __mode = "k" })
+        AuraContainer._ownerRegen:RegisterEvent("PLAYER_REGEN_ENABLED")
+        AuraContainer._ownerRegen:SetScript("OnEvent", function(self)
+            for o in pairs(self._owners) do
+                self._owners[o] = nil
+                local u = o.pendingUnit
+                o.pendingUnit = nil
+                -- Re-check: the owner may have been retargeted again, or torn down,
+                -- between the defer and now.
+                if u and o.container and o.unit ~= u then
+                    o.unit = u
+                    pcall(o.container.SetUnit, o.container, u)
+                end
+            end
+        end)
+    end
+    AuraContainer._ownerRegen._owners[owner] = true
+end
+
 -- Retarget the whole owner. One container, one unit — cheaper than the per-indicator
 -- containers it replaces, which each carried their own.
 function AuraContainer:SetSlotOwnerUnit(frame, unit)
     local owner = ownerOf(frame)
     if not (owner and owner.container and type(unit) == "string") then return false end
     if owner.unit == unit then return true end
+    -- ⚠ Defer in combat, same as Handle:SetUnit's "retarget" op. owner.unit is left on
+    -- the OLD token deliberately, so GetUnit stays truthful about what is on screen and
+    -- a repeat call simply re-queues rather than reporting a retarget that has not
+    -- happened. The regen drain applies it.
+    if InCombatLockdown() then
+        owner.pendingUnit = unit
+        registerOwnerRegen(owner)
+        return false
+    end
     owner.unit = unit
-    return pcall(owner.container.SetUnit, owner.container, unit)
+    local ok = pcall(owner.container.SetUnit, owner.container, unit)
+    -- ⚠ The stored gate verdict was computed for the OLD unit. Re-run it for every slot
+    -- on this owner, exactly as Handle:SetUnit re-runs its own gate on retarget --
+    -- otherwise a slot that was hidden for a cross-faction opponent stays hidden after
+    -- the frame is reused for a friendly, and vice versa.
+    for _, h in pairs(owner.slots) do
+        if h._idGateVulnerable or h._idGateSourceRelative then
+            pcall(function() h:_applyIdentityGate() end)
+        end
+    end
+    return ok
 end
 
 -- Census hook for the S4 before/after. Returns live slot count, parked count, total.
@@ -5492,6 +5638,14 @@ local gateSweepQueued
 local function IdentityGateSweep()
     gateSweepQueued = nil
     for h in pairs(AuraContainer._handles or {}) do
+        if h._idGateVulnerable or h._idGateSourceRelative then
+            pcall(function() h:_applyIdentityGate() end)
+        end
+    end
+    -- ⚠ Slots sweep too. They live in their own registry (see AcquireSlot) because this
+    -- one is Handle-shaped; forgetting them is exactly how the collapsed AD path ended up
+    -- with no gate at all despite every placed config being vulnerable.
+    for h in pairs(AuraContainer._slotHandles or {}) do
         if h._idGateVulnerable or h._idGateSourceRelative then
             pcall(function() h:_applyIdentityGate() end)
         end

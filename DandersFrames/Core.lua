@@ -4639,6 +4639,30 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- user-editable setting that nothing had migrated. A comment is not evidence:
         -- the keys were in v4's Config.lua the whole time.
         local function DropDispelCustomMode(modeDb)
+            -- ☠ FOLD THE INTENSITY FORWARD BEFORE NILLING IT, and do it OUTSIDE the
+            -- _dispelCustomRemovedV5 early return below.
+            --
+            -- v4 rendered the overlay at min(dispelGradientAlpha * dispelGradientIntensity, 1)
+            -- with intensity DEFAULTING TO 2.6, so the slider was effectively a 0..1 scale
+            -- with a 2.6x boost baked in. v5 keeps only the alpha and renders it raw.
+            -- Default users are unaffected (min(1 * 2.6, 1) == 1 == min(1, 1)), which is
+            -- why this hid -- but anyone who had TURNED THE SLIDER DOWN loses their boost:
+            -- 0.4 rendered as min(1.04, 1) = 1.0 in v4 and renders as 0.4 now. Their
+            -- overlay visibly fades on upgrade, with no setting left to put it back.
+            --
+            -- ⚠ SEPARATE FLAG, deliberately. The key deletion shipped in an earlier v5
+            -- alpha, so every existing alpha tester already has _dispelCustomRemovedV5 =
+            -- true AND dispelGradientIntensity = nil. Gating the fold on that flag would
+            -- skip exactly the profiles it exists to repair; gating it on its own flag
+            -- keeps it idempotent while still reaching a v4 profile that arrives later
+            -- (fresh install, import, or a profile that has never been loaded on v5).
+            if not modeDb._dispelGradientIntensityFoldedV5 then
+                if type(modeDb.dispelGradientIntensity) == "number" then
+                    modeDb.dispelGradientAlpha = math.min(
+                        (modeDb.dispelGradientAlpha or 1) * modeDb.dispelGradientIntensity, 1.0)
+                end
+                modeDb._dispelGradientIntensityFoldedV5 = true
+            end
             if modeDb._dispelCustomRemovedV5 then return end
             modeDb.dispelOverlayColorSource = nil
             modeDb.dispelGradientIntensity = nil

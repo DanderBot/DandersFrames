@@ -193,7 +193,15 @@ function DF:CreatePetFrame(unit, ownerFrame, isRaid, track)
     
     -- Border via the unified DF.Border backend (Stage 4.3).
     -- ApplyPetFrameStyle drives BuildSpec + Apply on each update.
-    frame.border = DF.Border:New(frame)
+    --
+    -- ⚠ Offset is explicit, matching Frames/Create.lua's unit-frame border. A pet's
+    -- healthBar is SetAllPoints and covers the whole rect, exactly like the unit
+    -- frame's -- it only survives DF.Border's leaf-sized default because nothing in
+    -- this file calls SetFrameLevel, so it sits at the child default frame+1 and a
+    -- border at +2 happens to clear it. That is luck, not design: level the health bar
+    -- for any reason and the border silently disappears, which is precisely what
+    -- happened on the unit frame in alpha 15. Pin it above the whole bar stack.
+    frame.border = DF.Border:New(frame, { frameLevelOffset = 10 })
     
     -- Name text — do NOT use SetFont() directly; use SetFontObject so that
     -- later SafeSetFont calls with font families can properly override
@@ -320,7 +328,15 @@ function DF:CreateTestPetFrame(unit, ownerTestFrame, isRaid)
 
     -- Border via the unified DF.Border backend (Stage 4.3).
     -- ApplyPetFrameStyle drives BuildSpec + Apply on each update.
-    frame.border = DF.Border:New(frame)
+    --
+    -- ⚠ Offset is explicit, matching Frames/Create.lua's unit-frame border. A pet's
+    -- healthBar is SetAllPoints and covers the whole rect, exactly like the unit
+    -- frame's -- it only survives DF.Border's leaf-sized default because nothing in
+    -- this file calls SetFrameLevel, so it sits at the child default frame+1 and a
+    -- border at +2 happens to clear it. That is luck, not design: level the health bar
+    -- for any reason and the border silently disappears, which is precisely what
+    -- happened on the unit frame in alpha 15. Pin it above the whole bar stack.
+    frame.border = DF.Border:New(frame, { frameLevelOffset = 10 })
 
     -- Name text — do NOT use SetFont() directly; use SafeSetFont or SetFontObject
     -- so that later SafeSetFont calls with font families can properly override
@@ -1962,12 +1978,32 @@ function DF:UpdateAllRaidPetFrames(force)
 
     -- Live mode: use real raid pet frames
     -- Initialize if needed (deferred creation)
+    --
+    -- ☠ CREATION IS COMBAT-BLOCKED, AND THIS FUNCTION IS REACHABLE IN COMBAT.
+    -- CreatePetFrame does CreateFrame(..., "SecureUnitButtonTemplate") + SetSize +
+    -- SetAttribute("unit", ...), none of which are legal once the lockdown is up. The
+    -- reachable caller is the auto-profile refresh, which fires on combat ENTRY and
+    -- calls UpdateAllRaidPetFrames(true) -- so a profile that switches on pull would
+    -- throw here for anyone who had not already been in a raid this session. The
+    -- guards elsewhere in this file (InitializePetFrames, UpdateArenaPetFrames) sit on
+    -- sibling entry points and do not dominate this one.
+    --
+    -- ⚠ Guard the CREATION only, NOT the whole function. A blanket early return would
+    -- also skip the visibility and update passes below, and those are combat-safe by
+    -- design -- SetPetFrameVisible degrades to alpha-only under lockdown rather than
+    -- calling Show/Hide. Anything skipped here is picked up by the regen drain, which
+    -- raises exactly this flag and re-runs UpdateAllRaidPetFrames(true).
     local frameIdx = 0
     if DF.IterateRaidFrames then
+        local inCombat = InCombatLockdown()
         DF:IterateRaidFrames(function(frame)
             frameIdx = frameIdx + 1
             if frame and not DF.raidPetFrames[frameIdx] then
-                DF.raidPetFrames[frameIdx] = DF:CreatePetFrame("raidpet" .. frameIdx, frame, true, PET_TRACK_RAID)
+                if inCombat then
+                    DF.pendingPetVisibilityUpdate = true
+                else
+                    DF.raidPetFrames[frameIdx] = DF:CreatePetFrame("raidpet" .. frameIdx, frame, true, PET_TRACK_RAID)
+                end
             end
         end)
     end

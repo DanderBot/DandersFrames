@@ -66,15 +66,26 @@ function Border:New(parent, opts)
     -- replaces it with two SetPoint calls translated by the offset).
     border.anchorTo = opts.anchorTo or parent
     border:SetAllPoints(border.anchorTo)
-    -- ☠ DEFAULT +2, NOT +10. A border is a CHILD of what it borders, so at the parent's
-    -- own level it already draws above every region on that parent — the offset only buys
-    -- anything when the border must clear a SIBLING frame (a status-bar fill, a cooldown
-    -- swipe), and +2 clears both. +10 was pure headroom, and it inflated every band it
-    -- touched: an aura button's border reached button+10, and the Pandemic border — sitting
-    -- on an already-offset holder — reached button+25, inside the defensive icon's band.
-    -- That is how a Pandemic cue ended up drawing over the defensive icon.
-    -- User-facing levels are multiples of 5 with 20-level bands; a 10-level border bump
-    -- does not fit that budget. (Z-order review, 2026-08-07.)
+    -- DEFAULT +2. Sized for a LEAF parent — an aura button, a badge, an icon — whose own
+    -- content is regions (textures/fontstrings) rather than child frames. At parent+2 the
+    -- border clears the parent's regions and a cooldown swipe, and stays inside the tight
+    -- band the aura rows budget for it (Factory.ALERT_ROW_LIFT is measured against this
+    -- number — re-measure it if this moves).
+    --
+    -- ☠ THIS DEFAULT IS WRONG FOR A FRAME THAT STACKS CHILD FRAMES OVER ITS OWN RECT, and
+    -- such a parent MUST pass frameLevelOffset explicitly. The comment that used to sit here
+    -- claimed "+2 clears both" because it reasoned about regions on the parent and about
+    -- SIBLING frames, and never considered a CHILD frame covering the same rect. A unit
+    -- frame is exactly that: healthBar is a child at frame+3 with SetAllPoints and
+    -- framePadding defaulting to 0, so it covers the whole rect and buries a border at +2 —
+    -- completely at 100% health, half of it at 50%. Shipped that way briefly in alpha 15;
+    -- caught in review, never released. The measured unit-frame stack is health +3, power
+    -- +5, absorb +7, heal-absorb +8, contentOverlay +25 — hence the explicit +10 those
+    -- consumers now pass, which is the free band between the bars and the text/icon layer.
+    --
+    -- ⚠ The rule, for anyone adding a consumer: read the PARENT's children, not its regions,
+    -- and not its siblings. If any child covers the parent's rect, this default will hide
+    -- your border and nothing will error.
     border:SetFrameLevel(parent:GetFrameLevel() + (opts.frameLevelOffset or 2))
 
     local layer = opts.layer or "BORDER"
@@ -638,8 +649,17 @@ DF.LegacyDispelDefaults = {   -- v4's shipped defaults; IDENTICAL across both fa
 -- user who nudged a slider and put it back should read as untouched. A false "untouched"
 -- costs nothing here -- it falls through to the other family or the game palette, which
 -- for an at-default value is the same colour either way.
+-- ☠ ALL THREE CHANNELS ARE TYPE-CHECKED, not just r. This used to guard `c.r` alone and
+-- then read c.g and c.b in the `or` chain below, so a partial table -- {r = <default>},
+-- which reaches the second term because the first compares equal -- threw "attempt to
+-- perform arithmetic on a nil value". That throw lands inside ADDON_LOADED, which aborts
+-- the rest of the migration chain for that login and leaves a half-migrated profile with
+-- no recovery path. Guarding the one field you happen to read first is not a guard.
 local function dispelColorCustomised(c, def)
-    if type(c) ~= "table" or type(c.r) ~= "number" then return false end
+    if type(c) ~= "table" then return false end
+    if type(c.r) ~= "number" or type(c.g) ~= "number" or type(c.b) ~= "number" then
+        return false
+    end
     return math.abs(c.r - def.r) > 1e-3
         or math.abs(c.g - def.g) > 1e-3
         or math.abs(c.b - def.b) > 1e-3

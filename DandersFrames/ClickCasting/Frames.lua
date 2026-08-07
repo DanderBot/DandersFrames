@@ -1164,7 +1164,12 @@ function CC:ScanForThirdPartyFrames()
                 -- Bail if secret value (can't do boolean operations on it)
                 if issecretvalue(isProtected) then
                     -- Skip this frame
-                elseif isProtected then
+                elseif isProtected and ClickCastFrames[frame] ~= false then
+                    -- ⚠ The `~= false` matters twice over. RegisterFrame now refuses an
+                    -- opted-out frame on its own, but the rawset below would still
+                    -- ERASE the sentinel -- and ReconcileClickCastFrames' revoke pass
+                    -- reads that same sentinel, so destroying it here made the opt-out
+                    -- unrecoverable rather than merely ignored.
                     self:RegisterFrame(frame)
                     rawset(ClickCastFrames, frame, true)
                     registered = registered + 1
@@ -1196,7 +1201,14 @@ end
 -- Check if any binding requires Blizzard frames (now "Other Frames")
 function CC:AnyBindingNeedsBlizzardFrames()
     for _, binding in ipairs(self.db.bindings) do
-        if binding.enabled and self:ShouldBindingLoad(binding) then
+        -- ☠ ShouldBindingLoad IS the enabled test (`binding.enabled ~= false`), so a
+        -- leading `binding.enabled and` was not redundant, it was WRONG: it demanded a
+        -- truthy field where the rest of the addon treats nil as enabled. Nothing
+        -- normalises `enabled` on the way in -- the login pass fixes frames/fallback/
+        -- combat but not this, and profile import inserts bindings verbatim -- so an
+        -- imported binding built macros in BuildUnifiedMacroMap while this returned
+        -- false, and the frames those macros needed were never registered.
+        if self:ShouldBindingLoad(binding) then
             -- Check if binding applies to other frames
             local frames = binding.frames or { dandersFrames = true, otherFrames = true }
             if frames.otherFrames then
@@ -1216,7 +1228,9 @@ end
 -- Check if any binding applies to Other Frames (non-DandersFrames)
 function CC:AnyBindingNeedsOtherFrames()
     for _, binding in ipairs(self.db.bindings) do
-        if binding.enabled and self:ShouldBindingLoad(binding) then
+        -- See AnyBindingNeedsBlizzardFrames: ShouldBindingLoad already carries the
+        -- `enabled ~= false` semantics; a leading truthiness test breaks imports.
+        if self:ShouldBindingLoad(binding) then
             local frames = binding.frames or { dandersFrames = true, otherFrames = true }
             if frames.otherFrames then
                 return true
@@ -1633,6 +1647,16 @@ function CC:RegisterFrame(frame)
     end
 
     if self.registeredFrames[frame] then return end
+
+    -- ☠ EXPLICIT OPT-OUT, honoured HERE and not only in EnsureRegistered. The
+    -- documented Clique-convention opt-out is `ClickCastFrames[frame] = false`, and
+    -- DF:UnregisterFrameWithClickCast writes exactly that. Testing it only in
+    -- EnsureRegistered left every DIRECT caller of this function bypassing it --
+    -- RegisterAllFrames' party/separated-raid/flat-raid/pet header walks, the
+    -- third-party scan, and two event paths -- so a frame the user had opted out of
+    -- was silently re-adopted on the next full sweep. Guard the entry point that
+    -- actually registers, not one of the several routes into it.
+    if ClickCastFrames and ClickCastFrames[frame] == false then return end
 
     -- An unnamed frame can never be a click-cast target. HANDLE:SetBindingClick
     -- resolves its target through GetName() and errors on a nil name
