@@ -1362,177 +1362,26 @@ function DF:LightweightUpdateDispelOverlay()
     if not db then return end
 
     -- TEST MODE: route the drag tick through the REAL paint — UpdateDispelOverlay's
-    -- test branch carries the mode-aware pieces (game-palette proxy, intensity
-    -- frozen at 1 in game mode, borders/EDGE custom-only, the clip-proof anchor
-    -- proxy). The hand-rolled repaint below predates the Game/Custom split and
-    -- had drifted mode-blind: dragging Opacity in Game mode flashed the custom
-    -- picker colours × intensity and re-showed the borders until release
-    -- (live-caught). Test previews never carry their own copy of styling or
-    -- geometry (mirrors LightweightUpdateDefensiveIcons); the loop below stays
-    -- for pre-12.1 LIVE drags only, where avoiding a full aura re-scan per tick
-    -- is the reason this lightweight path exists.
+    -- test branch carries the mode-aware pieces (game-palette proxy, the clip-proof
+    -- anchor proxy). Test previews never carry their own copy of styling or geometry
+    -- (mirrors LightweightUpdateDefensiveIcons).
     if DF.testMode or DF.raidTestMode then
         if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
         return
     end
 
-    -- 12.1 factory overlay: re-drive immediately so colour/alpha/geometry tweaks
-    -- apply live (mirrors LightweightUpdateDefensiveIcons). The legacy loop below
-    -- only touches the hidden legacy overlays.
-    if DF.UseFactoryForDispelOverlay and DF:UseFactoryForDispelOverlay(nil, db) then
-        DF:InvalidateAuraLayout()
-    end
-
-    local borderSize = db.dispelBorderSize or 2
-    local borderInset = db.dispelBorderInset or 0
-    local borderAlpha = db.dispelBorderAlpha or 1
-    local gradientAlpha = db.dispelGradientAlpha or 0.5
-    local gradientIntensity = db.dispelGradientIntensity or 1.0
-    local gradientStyle = db.dispelGradientStyle or "FULL"
-    local gradientSize = db.dispelGradientSize or 0.3
-    local blendMode = db.dispelGradientBlendMode or "ADD"
-    local darkenAlpha = db.dispelGradientDarkenAlpha or 0.5
-    local iconSize = db.dispelIconSize or 20
-    local iconAlpha = db.dispelIconAlpha or 1
-    local iconPosition = db.dispelIconPosition or "CENTER"
-    local iconOffsetX = db.dispelIconOffsetX or 0
-    local iconOffsetY = db.dispelIconOffsetY or 0
-    
-    local function UpdateDispel(frame)
-        if not frame or not frame.dfDispelOverlay then return end
-        
-        local overlay = frame.dfDispelOverlay
-        
-        -- Get current color from overlay's stored dispel type.
-        -- ☠ This used to build its own table from per-mode `db.dispelMagicColor`-style
-        -- keys. The v5 migration DropDispelCustomMode DELETES all five, and they have no
-        -- Config default, no GUI writer and no export entry -- so every read was nil and
-        -- this always painted the hardcoded fallbacks, which disagreed with the real
-        -- palette (Bleed 1,0,0 vs 0.8,0,0) and omitted Enrage entirely. Since this
-        -- function is what the dispel colour pickers and every dispel slider call, the
-        -- user dragged the colour wheel and got a colour they had not chosen.
-        -- Resolve through the shared resolver instead -- same one the overlay itself uses.
-        local r, g, b = 1, 1, 1
-        if overlay.currentDispelType then
-            r, g, b = DF:ResolveDispelColor(overlay.currentDispelType)
-        end
-        
-        -- ☠ THE OOR MULTIPLIER THAT WAS HERE READ frame.testData, WHICH NOTHING
-        -- EVER WRITES ON A FRAME (only on Sort entries), so it was always nil and
-        -- the multiplier was always 1.0. Unreachable anyway -- this function
-        -- early-returns for test mode further up. Removed rather than repointed at
-        -- dfInRange: the dispel fade belongs in ONE place, and that place is
-        -- ElementAppearance. (Audit, 2026-08-07.)
-        local oorMultiplier = 1.0
-        
-        local effectiveBorderAlpha = borderAlpha * oorMultiplier
-        local effectiveGradientAlpha = gradientAlpha * oorMultiplier
-        
-        -- Update border positions, sizes, and alpha
-        if overlay.borderLeft then
-            overlay.borderLeft:ClearAllPoints()
-            overlay.borderLeft:SetPoint("TOPLEFT", overlay, "TOPLEFT", -borderInset, borderInset)
-            overlay.borderLeft:SetPoint("BOTTOMLEFT", overlay, "BOTTOMLEFT", -borderInset, -borderInset)
-            overlay.borderLeft:SetWidth(borderSize)
-            local tex = overlay.borderLeft:GetStatusBarTexture()
-            if tex then tex:SetVertexColor(r, g, b, effectiveBorderAlpha) end
-        end
-        
-        if overlay.borderRight then
-            overlay.borderRight:ClearAllPoints()
-            overlay.borderRight:SetPoint("TOPRIGHT", overlay, "TOPRIGHT", borderInset, borderInset)
-            overlay.borderRight:SetPoint("BOTTOMRIGHT", overlay, "BOTTOMRIGHT", borderInset, -borderInset)
-            overlay.borderRight:SetWidth(borderSize)
-            local tex = overlay.borderRight:GetStatusBarTexture()
-            if tex then tex:SetVertexColor(r, g, b, effectiveBorderAlpha) end
-        end
-        
-        if overlay.borderTop then
-            overlay.borderTop:ClearAllPoints()
-            overlay.borderTop:SetPoint("TOPLEFT", overlay, "TOPLEFT", -borderInset + borderSize, borderInset)
-            overlay.borderTop:SetPoint("TOPRIGHT", overlay, "TOPRIGHT", borderInset - borderSize, borderInset)
-            overlay.borderTop:SetHeight(borderSize)
-            local tex = overlay.borderTop:GetStatusBarTexture()
-            if tex then tex:SetVertexColor(r, g, b, effectiveBorderAlpha) end
-        end
-        
-        if overlay.borderBottom then
-            overlay.borderBottom:ClearAllPoints()
-            overlay.borderBottom:SetPoint("BOTTOMLEFT", overlay, "BOTTOMLEFT", -borderInset + borderSize, -borderInset)
-            overlay.borderBottom:SetPoint("BOTTOMRIGHT", overlay, "BOTTOMRIGHT", borderInset - borderSize, -borderInset)
-            overlay.borderBottom:SetHeight(borderSize)
-            local tex = overlay.borderBottom:GetStatusBarTexture()
-            if tex then tex:SetVertexColor(r, g, b, effectiveBorderAlpha) end
-        end
-        
-        -- Update gradient alpha and edge gradients
-        if gradientStyle == "EDGE" then
-            -- Update EDGE style gradient textures
-            local ri, gi, bi = r * gradientIntensity, g * gradientIntensity, b * gradientIntensity
-            local gradientParent = overlay.gradient and overlay.gradient:GetParent()
-            local parentHeight = gradientParent and gradientParent:GetHeight() or 40
-            local parentWidth = gradientParent and gradientParent:GetWidth() or 80
-            local edgeSize = parentHeight * gradientSize
-            local edgeWidth = parentWidth * gradientSize
-            
-            if overlay.gradientTop then
-                overlay.gradientTop:SetVertexColor(ri, gi, bi, effectiveGradientAlpha)
-                overlay.gradientTop:SetBlendMode(blendMode)
-                overlay.gradientTop:ClearAllPoints()
-                overlay.gradientTop:SetPoint("TOPLEFT", gradientParent, "TOPLEFT", 0, 0)
-                overlay.gradientTop:SetPoint("TOPRIGHT", gradientParent, "TOPRIGHT", 0, 0)
-                overlay.gradientTop:SetHeight(edgeSize)
-            end
-            if overlay.gradientBottom then
-                overlay.gradientBottom:SetVertexColor(ri, gi, bi, effectiveGradientAlpha)
-                overlay.gradientBottom:SetBlendMode(blendMode)
-                overlay.gradientBottom:ClearAllPoints()
-                overlay.gradientBottom:SetPoint("BOTTOMLEFT", gradientParent, "BOTTOMLEFT", 0, 0)
-                overlay.gradientBottom:SetPoint("BOTTOMRIGHT", gradientParent, "BOTTOMRIGHT", 0, 0)
-                overlay.gradientBottom:SetHeight(edgeSize)
-            end
-            if overlay.gradientLeft then
-                overlay.gradientLeft:SetVertexColor(ri, gi, bi, effectiveGradientAlpha)
-                overlay.gradientLeft:SetBlendMode(blendMode)
-                overlay.gradientLeft:ClearAllPoints()
-                overlay.gradientLeft:SetPoint("TOPLEFT", gradientParent, "TOPLEFT", 0, 0)
-                overlay.gradientLeft:SetPoint("BOTTOMLEFT", gradientParent, "BOTTOMLEFT", 0, 0)
-                overlay.gradientLeft:SetWidth(edgeWidth)
-            end
-            if overlay.gradientRight then
-                overlay.gradientRight:SetVertexColor(ri, gi, bi, effectiveGradientAlpha)
-                overlay.gradientRight:SetBlendMode(blendMode)
-                overlay.gradientRight:ClearAllPoints()
-                overlay.gradientRight:SetPoint("TOPRIGHT", gradientParent, "TOPRIGHT", 0, 0)
-                overlay.gradientRight:SetPoint("BOTTOMRIGHT", gradientParent, "BOTTOMRIGHT", 0, 0)
-                overlay.gradientRight:SetWidth(edgeWidth)
-            end
-        elseif overlay.gradient then
-            -- Non-EDGE styles - update main gradient
-            local tex = overlay.gradient:GetStatusBarTexture()
-            if tex then
-                -- Apply intensity boost via vertex color (matching ShowOverlayWithRGB logic)
-                local intensityBoost = math.max(1.0, gradientIntensity)
-                tex:SetVertexColor(r * intensityBoost, g * intensityBoost, b * intensityBoost, effectiveGradientAlpha)
-            end
-            -- Update darken alpha
-            if overlay.gradientDarken and overlay.gradientDarken:IsShown() then
-                overlay.gradientDarken:SetColorTexture(0, 0, 0, darkenAlpha * oorMultiplier)
-            end
-        end
-        
-        -- Update icons
-        if overlay.icons then
-            for _, icon in pairs(overlay.icons) do
-                icon:ClearAllPoints()
-                icon:SetPoint(iconPosition, overlay, iconPosition, iconOffsetX, iconOffsetY)
-                icon:SetSize(iconSize, iconSize)
-                icon:SetAlpha(iconAlpha)
-            end
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateDispel)
+    -- ☠ A THIRD COPY OF THE DISPEL STYLING USED TO LIVE HERE (~145 lines: border
+    -- strips, EDGE strips, gradient, darken, icons) and it had DRIFTED -- it still
+    -- multiplied Gradient Intensity into RGB, which the real paths stopped doing when
+    -- intensity moved onto alpha. It was also unreachable: the only writer of
+    -- frame.dfDispelOverlay is CreateDispelOverlay, whose one caller is the TEST branch
+    -- of UpdateDispelOverlay -- and the test bounce above returns before this. So the
+    -- loop repainted hidden widgets on live frames that never had one.
+    --
+    -- Now the same one-liner as LightweightUpdateDefensiveIcons and
+    -- LightweightUpdateMissingBuff: bump the layout version and let the container rows
+    -- re-drive (sig-gated, cheap when nothing changed). (Audit, 2026-08-07.)
+    DF:InvalidateAuraLayout()
 end
 
 -- Update defensive icon settings

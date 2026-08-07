@@ -176,39 +176,22 @@ local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     -- Auras - frame level +50
     overlay:SetFrameLevel(host:GetFrameLevel() + 6)
     
-    -- Create StatusBars for borders - their textures CAN handle secret colors
-    -- Top border
-    overlay.borderTop = CreateFrame("StatusBar", nil, overlay)
-    overlay.borderTop:SetFrameLevel(overlay:GetFrameLevel() + 1)  -- Just above gradient
-    overlay.borderTop:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
-    overlay.borderTop:SetMinMaxValues(0, 1)
-    overlay.borderTop:SetValue(1)
-    overlay.borderTop:GetStatusBarTexture():SetBlendMode("BLEND")  -- Opaque, not additive
-    
-    -- Bottom border
-    overlay.borderBottom = CreateFrame("StatusBar", nil, overlay)
-    overlay.borderBottom:SetFrameLevel(overlay:GetFrameLevel() + 1)
-    overlay.borderBottom:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
-    overlay.borderBottom:SetMinMaxValues(0, 1)
-    overlay.borderBottom:SetValue(1)
-    overlay.borderBottom:GetStatusBarTexture():SetBlendMode("BLEND")  -- Opaque, not additive
-    
-    -- Left border
-    overlay.borderLeft = CreateFrame("StatusBar", nil, overlay)
-    overlay.borderLeft:SetFrameLevel(overlay:GetFrameLevel() + 1)
-    overlay.borderLeft:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
-    overlay.borderLeft:SetMinMaxValues(0, 1)
-    overlay.borderLeft:SetValue(1)
-    overlay.borderLeft:GetStatusBarTexture():SetBlendMode("BLEND")  -- Opaque, not additive
-    
-    -- Right border
-    overlay.borderRight = CreateFrame("StatusBar", nil, overlay)
-    overlay.borderRight:SetFrameLevel(overlay:GetFrameLevel() + 1)
-    overlay.borderRight:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
-    overlay.borderRight:SetMinMaxValues(0, 1)
-    overlay.borderRight:SetValue(1)
-    overlay.borderRight:GetStatusBarTexture():SetBlendMode("BLEND")  -- Opaque, not additive
-    
+    -- ☠ THE BORDER WAS TWO DIFFERENT SHAPES. This widget drew FOUR StatusBar
+    -- strips; the live slot path draws ONE nine-sliced square ring
+    -- (Media/DF_SquareBorder) with an asymmetric TexCoord crop, so corners and
+    -- effective thickness did not match between what a user configured in the
+    -- preview and what they got in a group. Same art now, same geometry helper
+    -- (ApplyDispelRingGeometry). The ring hangs off its own holder frame so the
+    -- widget still has a probe-able child at the border's draw level.
+    -- (Audit, 2026-08-07.)
+    overlay.borderRingHost = CreateFrame("Frame", nil, overlay)
+    overlay.borderRingHost:SetAllPoints(overlay)
+    overlay.borderRingHost:SetFrameLevel(overlay:GetFrameLevel() + 1)  -- just above gradient
+    overlay.borderRing = overlay.borderRingHost:CreateTexture(nil, "ARTWORK")
+    overlay.borderRing:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_SquareBorder")
+    overlay.borderRing:SetBlendMode("BLEND")   -- opaque, not additive
+    overlay.borderRingHost:Hide()
+
     -- Dark background behind gradient (helps gradient show on light class colors)
     -- Parent to the gradient host (healthBar on unit frames) for proper layering.
     -- When a SEPARATE gradient host is supplied (legacy unit-frame path), the
@@ -437,6 +420,45 @@ local function CacheLayoutState(overlay, db)
     overlay.dfL_parentW                 = parentW or 80
 end
 
+-- ★ THE ONE PLACE THE DISPEL RING'S GEOMETRY LIVES. Both the preview widget and
+-- the live slot ring call this, so a border configured in Test Mode is the border
+-- that renders in a group.
+--
+-- Uniform thickness via ASYMMETRIC TexCoord crop: zoom into the art independently
+-- per axis so the 25% art band renders at exactly `thickness` px on every edge
+-- regardless of the frame's aspect ratio. Solve (B - c)/(1 - 2c) = t/dim per axis.
+-- (SetTextureSliceMargins was tried first and rejected: its margins cut the SOURCE
+-- texture, so any margin below the art band leaves band pixels in the stretchable
+-- centre -- the border blew up to a quarter of the frame, live-caught.)
+--
+-- ☠ THE INSET WAS PIXEL-SNAPPED ON ONE SIDE ONLY. ApplyOverlayLayout snapped it,
+-- StyleGameBorderSlot did not -- so with Pixel Perfect on, a fractional Border Inset
+-- sat on the grid in the preview and off it in a group. Snapped in both now.
+-- (Audit, 2026-08-07.)
+local RING_ART_BAND = 0.25   -- 32px of the 128px file
+local function ApplyDispelRingGeometry(ring, anchorTo, db, rectW, rectH)
+    if not ring then return end
+    local thickness = db.dispelBorderSize or 2
+    local inset = db.dispelBorderInset or 0
+    if db.pixelPerfect then
+        thickness = DF:PixelPerfect(thickness)
+        inset = DF:PixelPerfect(inset)
+    end
+    -- Positive inset EXPANDS outward -- the convention the strips used.
+    ring:ClearAllPoints()
+    ring:SetPoint("TOPLEFT", anchorTo, "TOPLEFT", -inset, inset)
+    ring:SetPoint("BOTTOMRIGHT", anchorTo, "BOTTOMRIGHT", inset, -inset)
+    local rw = (rectW or 80) + 2 * inset
+    local rh = (rectH or 40) + 2 * inset
+    local function cropFor(dim)
+        local f = thickness / math.max(dim, 1)
+        if f >= RING_ART_BAND then return 0 end   -- degenerate (tiny frame): draw uncropped
+        return (RING_ART_BAND - f) / (1 - 2 * f)
+    end
+    local cx, cy = cropFor(rw), cropFor(rh)
+    ring:SetTexCoord(cx, 1 - cx, cy, 1 - cy)
+end
+
 local function ApplyOverlayLayout(overlay, db, frame)
     if not overlay then return end
 
@@ -444,35 +466,10 @@ local function ApplyOverlayLayout(overlay, db, frame)
     -- it has changed since last call. Typical in-combat outcome.
     if not LayoutStateChanged(overlay, db) then return end
 
-    local borderSize = db.dispelBorderSize or 2
-    local borderInset = db.dispelBorderInset or 0
+    ApplyDispelRingGeometry(overlay.borderRing, overlay, db,
+        (frame and frame:GetWidth()) or overlay:GetWidth(),
+        (frame and frame:GetHeight()) or overlay:GetHeight())
 
-    -- Apply pixel-perfect adjustments
-    if db.pixelPerfect then
-        borderSize = DF:PixelPerfect(borderSize)
-        borderInset = DF:PixelPerfect(borderInset)
-    end
-    
-    overlay.borderLeft:ClearAllPoints()
-    overlay.borderLeft:SetPoint("TOPLEFT", overlay, "TOPLEFT", -borderInset, borderInset)
-    overlay.borderLeft:SetPoint("BOTTOMLEFT", overlay, "BOTTOMLEFT", -borderInset, -borderInset)
-    overlay.borderLeft:SetWidth(borderSize)
-    
-    overlay.borderRight:ClearAllPoints()
-    overlay.borderRight:SetPoint("TOPRIGHT", overlay, "TOPRIGHT", borderInset, borderInset)
-    overlay.borderRight:SetPoint("BOTTOMRIGHT", overlay, "BOTTOMRIGHT", borderInset, -borderInset)
-    overlay.borderRight:SetWidth(borderSize)
-    
-    overlay.borderTop:ClearAllPoints()
-    overlay.borderTop:SetPoint("TOPLEFT", overlay, "TOPLEFT", -borderInset + borderSize, borderInset)
-    overlay.borderTop:SetPoint("TOPRIGHT", overlay, "TOPRIGHT", borderInset - borderSize, borderInset)
-    overlay.borderTop:SetHeight(borderSize)
-    
-    overlay.borderBottom:ClearAllPoints()
-    overlay.borderBottom:SetPoint("BOTTOMLEFT", overlay, "BOTTOMLEFT", -borderInset + borderSize, -borderInset)
-    overlay.borderBottom:SetPoint("BOTTOMRIGHT", overlay, "BOTTOMRIGHT", borderInset - borderSize, -borderInset)
-    overlay.borderBottom:SetHeight(borderSize)
-    
     -- Icon positioning
     local iconSize = db.dispelIconSize or 20
     local iconAlpha = db.dispelIconAlpha or 1.0
@@ -871,9 +868,9 @@ local GRADIENT_TEXTURES = {
 
 -- (DISPEL NAME TEXT COLORING removed 2026-07-25. The pair of Apply/Revert helpers and
 -- the dispelNameText setting are gone: the only caller was ShowOverlayWithRGB, which is
--- the LEGACY test-mode show path -- the 12.1 slot path styles via StyleOverlayRegions
--- alone and never tinted the name. So the toggle coloured the name in the preview and
--- did nothing on a live frame, which is worse than inert. Re-adding it needs an
+-- the LEGACY test-mode show path -- the 12.1 slot path styles via StyleOneSlot ->
+-- StyleGame*Slot and never tinted the name. So the toggle coloured the name in the
+-- preview and did nothing on a live frame, which is worse than inert. Re-adding it needs an
 -- occlusion-safe name tint on the slot overlay, not this.)
 
 -- ============================================================
@@ -905,28 +902,15 @@ local function StyleOverlayRegions(overlay, r, g, b, db, dispelType, oorAlphaMul
     
     ApplyOverlayLayout(overlay, db, frame)
     
-    if showBorder then
-        -- StatusBars use GetStatusBarTexture():SetVertexColor()
-        local tex = overlay.borderTop:GetStatusBarTexture()
-        tex:SetVertexColor(r, g, b, borderAlpha)
-        overlay.borderTop:Show()
-        
-        tex = overlay.borderBottom:GetStatusBarTexture()
-        tex:SetVertexColor(r, g, b, borderAlpha)
-        overlay.borderBottom:Show()
-        
-        tex = overlay.borderLeft:GetStatusBarTexture()
-        tex:SetVertexColor(r, g, b, borderAlpha)
-        overlay.borderLeft:Show()
-        
-        tex = overlay.borderRight:GetStatusBarTexture()
-        tex:SetVertexColor(r, g, b, borderAlpha)
-        overlay.borderRight:Show()
-    else
-        overlay.borderTop:Hide()
-        overlay.borderBottom:Hide()
-        overlay.borderLeft:Hide()
-        overlay.borderRight:Hide()
+    -- The ring carries the colour on its vertex (the live slot ring gets its RGB
+    -- from Blizzard after the bind and rides SetAlpha instead -- same result).
+    if overlay.borderRingHost then
+        if showBorder then
+            overlay.borderRing:SetVertexColor(r, g, b, borderAlpha)
+            overlay.borderRingHost:Show()
+        else
+            overlay.borderRingHost:Hide()
+        end
     end
     
     if showGradient then
@@ -1047,7 +1031,8 @@ local function StyleOverlayRegions(overlay, r, g, b, db, dispelType, oorAlphaMul
 end
 
 -- Legacy show path: full styling + the widget lifecycle (Show, test-mode health
--- value, name tint). The 12.1 slot path uses StyleOverlayRegions alone.
+-- value). ⚠ The 12.1 slot path does NOT come through here at all -- it styles via
+-- StyleOneSlot -> StyleGame*Slot. This whole path is test-only.
 local function ShowOverlayWithRGB(overlay, r, g, b, db, dispelType, oorAlphaMultiplier, frame, testData)
     if not overlay then return end
 
@@ -1081,11 +1066,7 @@ local function HideOverlay(overlay)
     -- three groups are built to keep, and leaking a running AnimationGroup per frame.
     SetLegacyOverlayPulse(overlay, false)
 
-    -- Hide all border textures
-    overlay.borderTop:Hide()
-    overlay.borderBottom:Hide()
-    overlay.borderLeft:Hide()
-    overlay.borderRight:Hide()
+    if overlay.borderRingHost then overlay.borderRingHost:Hide() end
     
     -- Hide gradient and its darken background
     overlay.gradient:Hide()
@@ -1310,10 +1291,7 @@ local function EnsureSlotWidget(btn, frame)
         -- above so its fill is never level-tied with its own parent.
         w:SetFrameLevel(hbLvl + 7)
         w.gradient:SetFrameLevel(hbLvl + 8)
-        w.borderTop:SetFrameLevel(base + 7)    -- legacy overlay(+6)+1
-        w.borderBottom:SetFrameLevel(base + 7)
-        w.borderLeft:SetFrameLevel(base + 7)
-        w.borderRight:SetFrameLevel(base + 7)
+        if w.borderRingHost then w.borderRingHost:SetFrameLevel(base + 7) end   -- legacy overlay(+6)+1
         local iconLevel = ((frame.contentOverlay and frame.contentOverlay:GetFrameLevel())
             or (base + 25)) + 1                -- legacy contentOverlay+26
         for _, icon in pairs(w.icons) do icon:SetFrameLevel(iconLevel) end
@@ -1524,7 +1502,7 @@ local function StyleGameMainSlot(btn, frame, db)
 
     -- Shared geometry pass (borders/icons/gradient rects + gradientTracksHealth).
     ApplyOverlayLayout(w, db, frame)
-    w.borderTop:Hide(); w.borderBottom:Hide(); w.borderLeft:Hide(); w.borderRight:Hide()
+    if w.borderRingHost then w.borderRingHost:Hide() end   -- the slot draws its own bound ring
     if w.gradientTop then w.gradientTop:Hide() end
     if w.gradientBottom then w.gradientBottom:Hide() end
     if w.gradientLeft then w.gradientLeft:Hide() end
@@ -1619,37 +1597,16 @@ end
 -- semantics-proof — any margin ≤ the 32px art band samples solid white.
 local function StyleGameBorderSlot(btn, frame, db)
     -- Ring is created + bound in DispelSlotSecureInit (secure); this tainted pass only
-    -- crops/positions it. If onInit hasn't populated it yet, skip — it always runs first.
+    -- crops/positions it. If onInit hasn't populated it yet, skip -- it always runs first.
     local ring = btn.dfDispelRing
     if not ring then return end
-    local thickness = db.dispelBorderSize or 2
-    if db.pixelPerfect then thickness = DF:PixelPerfect(thickness) end
-    local inset = db.dispelBorderInset or 0
-    -- Positive inset EXPANDS outward — same convention as the legacy borders.
-    ring:ClearAllPoints()
-    ring:SetPoint("TOPLEFT", btn, "TOPLEFT", -inset, inset)
-    ring:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", inset, -inset)
+    -- Anchor to `btn`, not `frame`: the button is SetAllPoints(frame) so the rect is
+    -- identical, but the chain must terminate at the aura button for 68824's
+    -- SetAuraBorder validation. The frame rect is OURS (readable); style re-runs on
+    -- layout-version bumps, so a resize catches up on the next dispel pass.
+    ApplyDispelRingGeometry(ring, btn, db, frame:GetWidth(), frame:GetHeight())
     ring:SetAlpha(db.dispelBorderAlpha or 0.8)
     ring:SetBlendMode("BLEND")
-    -- Uniform thickness via ASYMMETRIC TexCoord crop (the DF_SquareRing
-    -- technique): zoom into the art independently per axis so the 25% art band
-    -- renders at exactly `thickness` px on every edge regardless of the frame's
-    -- aspect ratio. Solve (B - c)/(1 - 2c) = t/dim for the crop c per axis.
-    -- (SetTextureSliceMargins was tried first and rejected: its margins cut the
-    -- SOURCE texture, so any margin below the art band leaves band pixels in
-    -- the stretchable centre — the border blew up to a quarter of the frame,
-    -- live-caught.) The frame rect is OURS (readable); style re-runs on layout
-    -- version bumps, so a frame resize catches up on the next dispel pass.
-    local rw = (frame:GetWidth() or 80) + 2 * inset
-    local rh = (frame:GetHeight() or 40) + 2 * inset
-    local B = 0.25   -- art band fraction (32px of the 128px file)
-    local function cropFor(dim)
-        local f = thickness / math.max(dim, 1)
-        if f >= B then return 0 end   -- degenerate (tiny frame): draw the art uncropped
-        return (B - f) / (1 - 2 * f)
-    end
-    local cx, cy = cropFor(rw), cropFor(rh)
-    ring:SetTexCoord(cx, 1 - cx, cy, 1 - cy)
     ApplySlotPulse(btn.dfDispelRingHolder, db.dispelAnimate)
 end
 
@@ -1734,19 +1691,19 @@ end
 -- descendant of the SECRET aura button, and the client can turn that subtree forbidden
 -- underneath us when it reclaims or re-initialises the slot. Nothing ever cleared
 -- btn.dfDispelWidget, so the stash outlived the art: ApplyOverlayLayout's first touch
--- (borderLeft:ClearAllPoints) then threw on every state-changing refresh, which aborted
+-- (the border host's first touch) then threw on every state-changing refresh, which aborted
 -- the whole style pass for that button and left the overlay dead. Reported 32x after a
 -- dungeon and 98x on one Show Overlay For dropdown -- the same frames, once per refresh,
 -- so it is persistent rather than transient. Frames\Core.lua's health mirror carries the
 -- identical guard for the identical reason; this is that guard for the dispel art.
 --
--- Read-only, and it touches the object that actually throws (borderLeft) rather than
+-- Read-only, and it touches the object that actually throws (the border host) rather than
 -- IsForbidden() -- inside the secret container IsForbidden can hand back a SECRET on a
 -- perfectly healthy widget, and the codebase's guard idiom reads a secret as "skip",
 -- which would silently kill the overlay for everyone. Declared once, not inlined as a
 -- closure, so the pcall below stays allocation-free on a per-slot-per-pass path.
 local function ProbeSlotArt(w)
-    return w:GetFrameLevel() and w.borderLeft:GetFrameLevel()
+    return w:GetFrameLevel() and w.borderRingHost:GetFrameLevel()
 end
 
 -- Drop EVERY stash hanging off the button. The tainted painters (icon, and the widget
@@ -2224,8 +2181,8 @@ function DF:DebugDispel(unit)
             o:Field("Overlay shown", overlay:IsShown() and "yes" or "no",
                 overlay:IsShown() and "GOOD" or "NEUTRAL")
             o:Field("Overlay alpha", string.format("%.2f", overlay:GetAlpha()))
-            if overlay.borderTop then
-                o:Field("BorderTop shown", tostring(overlay.borderTop:IsShown()))
+            if overlay.borderRingHost then
+                o:Field("Border ring shown", tostring(overlay.borderRingHost:IsShown()))
             end
             if overlay.icons then
                 local iconsShown = {}
