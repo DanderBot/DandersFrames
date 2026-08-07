@@ -1417,11 +1417,13 @@ function DF:LightweightUpdateDispelOverlay()
             r, g, b = DF:ResolveDispelColor(overlay.currentDispelType)
         end
         
-        -- Calculate OOR alpha multiplier for test mode
+        -- ☠ THE OOR MULTIPLIER THAT WAS HERE READ frame.testData, WHICH NOTHING
+        -- EVER WRITES ON A FRAME (only on Sort entries), so it was always nil and
+        -- the multiplier was always 1.0. Unreachable anyway -- this function
+        -- early-returns for test mode further up. Removed rather than repointed at
+        -- dfInRange: the dispel fade belongs in ONE place, and that place is
+        -- ElementAppearance. (Audit, 2026-08-07.)
         local oorMultiplier = 1.0
-        if (DF.testMode or DF.raidTestMode) and frame.testData and frame.testData.outOfRange then
-            oorMultiplier = db.oorDispelOverlayAlpha or 0.55
-        end
         
         local effectiveBorderAlpha = borderAlpha * oorMultiplier
         local effectiveGradientAlpha = gradientAlpha * oorMultiplier

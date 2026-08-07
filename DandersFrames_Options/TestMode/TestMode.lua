@@ -1195,7 +1195,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             frame.healthText:Hide()
         end
         DF:ApplyDeadFade(frame, testData.status, true)  -- true = forceApply for test mode
-        frame.dfTestOutOfRange = false
     else
         if frame.statusText then
             frame.statusText:Hide()
@@ -1214,11 +1213,9 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         if isOutOfRange then
             if buffRow then buffRow:SetAlpha(aurasAlpha * buffAlpha) end
             if debuffRow then debuffRow:SetAlpha(aurasAlpha * debuffAlpha) end
-            frame.dfTestOutOfRange = true
         else
             if buffRow then buffRow:SetAlpha(buffAlpha) end
             if debuffRow then debuffRow:SetAlpha(debuffAlpha) end
-            frame.dfTestOutOfRange = false
         end
     end
 
@@ -1331,10 +1328,13 @@ function DF:UpdateTestIcons(frame, testData)
         -- coord table for a roleless test unit).
         local shouldShow = (role == "TANK" or role == "HEALER" or role == "DAMAGER")
 
-        -- In test mode (out of combat), if "Only Apply Settings in Combat" is checked, show all icons
-        local applySettings = not db.roleIconOnlyInCombat
-
-        if shouldShow and applySettings then
+        -- ☠ WAS GATED ON db.roleIconOnlyInCombat, A KEY THAT DOES NOT EXIST -- one
+        -- read, no writes, absent from Config, so it was always nil and the gate
+        -- was always open. The real key is roleIconHideInCombat, and wiring it
+        -- here would be pointless: test mode is torn down on
+        -- PLAYER_REGEN_DISABLED, so the preview can never be on screen in combat.
+        -- Removed rather than repointed. (Audit, 2026-08-07.)
+        if shouldShow then
             if role == "TANK" then
                 shouldShow = db.roleIconShowTank ~= false
             elseif role == "HEALER" then
