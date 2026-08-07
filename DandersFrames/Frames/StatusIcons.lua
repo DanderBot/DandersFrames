@@ -284,6 +284,10 @@ end
 -- ============================================================
 -- HELPER: Apply icon positioning from settings
 -- ============================================================
+-- ★ EXPOSED so the preview uses this exact geometry rather than restating it.
+-- UpdateTestStatusIcons hand-rolled scale / anchor / x / y / alpha / frameLevel for
+-- all eight icons -- pure db maths with no unit reads, i.e. no reason to fork.
+-- (Audit, 2026-08-07.)
 local function ApplyIconSettings(icon, db, prefix)
     if not icon or not db then return end
     
@@ -341,6 +345,8 @@ local function ApplyIconSettings(icon, db, prefix)
         DF:ApplyTimerTextSettings(icon, db, prefix)
     end
 end
+
+DF.ApplyStatusIconSettings = ApplyIconSettings
 
 -- ============================================================
 -- UPDATE SUMMON ICON

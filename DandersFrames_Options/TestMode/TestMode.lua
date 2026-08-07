@@ -1411,7 +1411,6 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.readyCheckIcon:SetScale(scale)
             frame.readyCheckIcon:ClearAllPoints()
             frame.readyCheckIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.readyCheckIcon:SetAlpha(db.readyCheckIconAlpha or 1)
             frame.readyCheckIcon:Show()
             
             -- Apply frame level
@@ -1428,20 +1427,15 @@ function DF:UpdateTestStatusIcons(frame, testData)
         elseif testData.centerStatus == "summon" then
             DF:SetUpgradedStatusIcon(frame.summonIcon.texture, "Interface\\RaidFrame\\Raid-Icon-SummonPending")
             
-            local scale = db.summonIconScale or 1.0
-            local anchor = db.summonIconAnchor or "CENTER"
-            local x = db.summonIconX or 0
-            local y = db.summonIconY or 0
-            frame.summonIcon:SetScale(scale)
-            frame.summonIcon:ClearAllPoints()
-            frame.summonIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.summonIcon:SetAlpha(db.summonIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.summonIcon, db, "summonIcon")
+            end
             
             -- Show as text or icon (with font and color settings)
             ShowTestIconAsText(frame.summonIcon, db.summonIconTextPending or "Summon", db.summonIconShowText, db, "summonIcon")
             frame.summonIcon:Show()
             
-            frame.summonIcon:SetFrameLevel(frame:GetFrameLevel() + (db.summonIconFrameLevel or 30))
         else
             frame.summonIcon:Hide()
         end
@@ -1454,19 +1448,14 @@ function DF:UpdateTestStatusIcons(frame, testData)
         elseif testData.isBGCarrier then
             DF:SetUpgradedStatusIcon(frame.bgCarrierIcon.texture, "Interface\\Icons\\inv_bannerpvp_02")
 
-            local scale = db.bgCarrierIconScale or 1.0
-            local anchor = db.bgCarrierIconAnchor or "CENTER"
-            local x = db.bgCarrierIconX or 0
-            local y = db.bgCarrierIconY or 0
-            frame.bgCarrierIcon:SetScale(scale)
-            frame.bgCarrierIcon:ClearAllPoints()
-            frame.bgCarrierIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.bgCarrierIcon:SetAlpha(db.bgCarrierIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.bgCarrierIcon, db, "bgCarrierIcon")
+            end
 
             ShowTestIconAsText(frame.bgCarrierIcon, db.bgCarrierIconText or "FC", db.bgCarrierIconShowText, db, "bgCarrierIcon")
             frame.bgCarrierIcon:Show()
 
-            frame.bgCarrierIcon:SetFrameLevel(frame:GetFrameLevel() + (db.bgCarrierIconFrameLevel or 30))
         else
             frame.bgCarrierIcon:Hide()
         end
@@ -1487,10 +1476,8 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.combatIcon:SetScale(scale)
             frame.combatIcon:ClearAllPoints()
             frame.combatIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.combatIcon:SetAlpha(db.combatIconAlpha or 1)
             frame.combatIcon:Show()
 
-            frame.combatIcon:SetFrameLevel(frame:GetFrameLevel() + (db.combatIconFrameLevel or 30))
         else
             frame.combatIcon:Hide()
         end
@@ -1504,20 +1491,15 @@ function DF:UpdateTestStatusIcons(frame, testData)
             DF:SetUpgradedStatusIcon(frame.resurrectionIcon.texture, "Interface\\RaidFrame\\Raid-Icon-Rez")
             frame.resurrectionIcon.texture:SetVertexColor(0, 1, 0)  -- Green = being cast
             
-            local scale = db.resurrectionIconScale or 1.0
-            local anchor = db.resurrectionIconAnchor or "CENTER"
-            local x = db.resurrectionIconX or 0
-            local y = db.resurrectionIconY or 0
-            frame.resurrectionIcon:SetScale(scale)
-            frame.resurrectionIcon:ClearAllPoints()
-            frame.resurrectionIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.resurrectionIcon:SetAlpha(db.resurrectionIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.resurrectionIcon, db, "resurrectionIcon")
+            end
             
             -- Show as text or icon (with font and color settings)
             ShowTestIconAsText(frame.resurrectionIcon, db.resurrectionIconTextCasting or "Res...", db.resurrectionIconShowText, db, "resurrectionIcon")
             frame.resurrectionIcon:Show()
             
-            frame.resurrectionIcon:SetFrameLevel(frame:GetFrameLevel() + (db.resurrectionIconFrameLevel or 30))
         else
             frame.resurrectionIcon:Hide()
         end
@@ -1530,20 +1512,15 @@ function DF:UpdateTestStatusIcons(frame, testData)
         elseif testData.isPhased then
             DF:SetUpgradedStatusIcon(frame.phasedIcon.texture, "Interface\\TargetingFrame\\UI-PhasingIcon")
             
-            local scale = db.phasedIconScale or 1.0
-            local anchor = db.phasedIconAnchor or "TOPRIGHT"
-            local x = db.phasedIconX or 0
-            local y = db.phasedIconY or 0
-            frame.phasedIcon:SetScale(scale)
-            frame.phasedIcon:ClearAllPoints()
-            frame.phasedIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.phasedIcon:SetAlpha(db.phasedIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.phasedIcon, db, "phasedIcon")
+            end
             
             -- Show as text or icon (with font and color settings)
             ShowTestIconAsText(frame.phasedIcon, db.phasedIconText or "Phased", db.phasedIconShowText, db, "phasedIcon")
             frame.phasedIcon:Show()
             
-            frame.phasedIcon:SetFrameLevel(frame:GetFrameLevel() + (db.phasedIconFrameLevel or 30))
         else
             frame.phasedIcon:Hide()
         end
@@ -1557,14 +1534,10 @@ function DF:UpdateTestStatusIcons(frame, testData)
         elseif testData.isAFK then
             DF:SetUpgradedStatusIcon(frame.afkIcon.texture, "Interface\\FriendsFrame\\StatusIcon-Away")
             
-            local scale = db.afkIconScale or 1.0
-            local anchor = db.afkIconAnchor or "CENTER"
-            local x = db.afkIconX or 0
-            local y = db.afkIconY or 0
-            frame.afkIcon:SetScale(scale)
-            frame.afkIcon:ClearAllPoints()
-            frame.afkIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.afkIcon:SetAlpha(db.afkIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.afkIcon, db, "afkIcon")
+            end
             
             -- Track AFK start time for test mode
             local frameKey = tostring(frame)
@@ -1604,7 +1577,6 @@ function DF:UpdateTestStatusIcons(frame, testData)
             end
             frame.afkIcon:Show()
             
-            frame.afkIcon:SetFrameLevel(frame:GetFrameLevel() + (db.afkIconFrameLevel or 30))
         else
             frame.afkIcon:Hide()
             if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
@@ -1620,20 +1592,15 @@ function DF:UpdateTestStatusIcons(frame, testData)
         elseif testData.inVehicle then
             DF:SetUpgradedStatusIcon(frame.vehicleIcon.texture, "Interface\\Vehicles\\UI-Vehicles-Raid-Icon")
             
-            local scale = db.vehicleIconScale or 1.0
-            local anchor = db.vehicleIconAnchor or "BOTTOMRIGHT"
-            local x = db.vehicleIconX or 0
-            local y = db.vehicleIconY or 0
-            frame.vehicleIcon:SetScale(scale)
-            frame.vehicleIcon:ClearAllPoints()
-            frame.vehicleIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.vehicleIcon:SetAlpha(db.vehicleIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.vehicleIcon, db, "vehicleIcon")
+            end
             
             -- Show as text or icon (with font and color settings)
             ShowTestIconAsText(frame.vehicleIcon, db.vehicleIconText or "Vehicle", db.vehicleIconShowText, db, "vehicleIcon")
             frame.vehicleIcon:Show()
             
-            frame.vehicleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.vehicleIconFrameLevel or 30))
         else
             frame.vehicleIcon:Hide()
         end
@@ -1646,37 +1613,27 @@ function DF:UpdateTestStatusIcons(frame, testData)
         elseif testData.isMainTank and db.raidRoleIconShowTank ~= false then
             DF:SetUpgradedStatusIcon(frame.raidRoleIcon.texture, "Interface\\GroupFrame\\UI-Group-MainTankIcon")
             
-            local scale = db.raidRoleIconScale or 1.0
-            local anchor = db.raidRoleIconAnchor or "BOTTOMLEFT"
-            local x = db.raidRoleIconX or 0
-            local y = db.raidRoleIconY or 0
-            frame.raidRoleIcon:SetScale(scale)
-            frame.raidRoleIcon:ClearAllPoints()
-            frame.raidRoleIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.raidRoleIcon:SetAlpha(db.raidRoleIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.raidRoleIcon, db, "raidRoleIcon")
+            end
             
             -- Show as text or icon (with font and color settings)
             ShowTestIconAsText(frame.raidRoleIcon, db.raidRoleIconTextTank or "MT", db.raidRoleIconShowText, db, "raidRoleIcon")
             frame.raidRoleIcon:Show()
             
-            frame.raidRoleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.raidRoleIconFrameLevel or 30))
         elseif testData.isMainAssist and db.raidRoleIconShowAssist ~= false then
             DF:SetUpgradedStatusIcon(frame.raidRoleIcon.texture, "Interface\\GroupFrame\\UI-Group-MainAssistIcon")
             
-            local scale = db.raidRoleIconScale or 1.0
-            local anchor = db.raidRoleIconAnchor or "BOTTOMLEFT"
-            local x = db.raidRoleIconX or 0
-            local y = db.raidRoleIconY or 0
-            frame.raidRoleIcon:SetScale(scale)
-            frame.raidRoleIcon:ClearAllPoints()
-            frame.raidRoleIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.raidRoleIcon:SetAlpha(db.raidRoleIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.raidRoleIcon, db, "raidRoleIcon")
+            end
             
             -- Show as text or icon (with font and color settings)
             ShowTestIconAsText(frame.raidRoleIcon, db.raidRoleIconTextAssist or "MA", db.raidRoleIconShowText, db, "raidRoleIcon")
             frame.raidRoleIcon:Show()
             
-            frame.raidRoleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.raidRoleIconFrameLevel or 30))
         else
             frame.raidRoleIcon:Hide()
         end
@@ -1694,35 +1651,11 @@ function DF:UpdateTestStatusIcons(frame, testData)
         alpha = frame.dfTestOORAlphas.icons
     end
     
-    -- Apply fade alpha to all status icons
-    if frame.readyCheckIcon and frame.readyCheckIcon:IsShown() then
-        frame.readyCheckIcon:SetAlpha((db.readyCheckIconAlpha or 1)
-            * (DF.GetStatusIconFadeAlpha and DF:GetStatusIconFadeAlpha(frame, "readyCheckIcon") or 1))
-    end
-    if frame.summonIcon and frame.summonIcon:IsShown() then
-        frame.summonIcon:SetAlpha((db.summonIconAlpha or 1)
-            * (DF.GetStatusIconFadeAlpha and DF:GetStatusIconFadeAlpha(frame, "summonIcon") or 1))
-    end
-    if frame.resurrectionIcon and frame.resurrectionIcon:IsShown() then
-        frame.resurrectionIcon:SetAlpha((db.resurrectionIconAlpha or 1)
-            * (DF.GetStatusIconFadeAlpha and DF:GetStatusIconFadeAlpha(frame, "resurrectionIcon") or 1))
-    end
-    if frame.phasedIcon and frame.phasedIcon:IsShown() then
-        frame.phasedIcon:SetAlpha((db.phasedIconAlpha or 1)
-            * (DF.GetStatusIconFadeAlpha and DF:GetStatusIconFadeAlpha(frame, "phasedIcon") or 1))
-    end
-    if frame.afkIcon and frame.afkIcon:IsShown() then
-        frame.afkIcon:SetAlpha((db.afkIconAlpha or 1)
-            * (DF.GetStatusIconFadeAlpha and DF:GetStatusIconFadeAlpha(frame, "afkIcon") or 1))
-    end
-    if frame.vehicleIcon and frame.vehicleIcon:IsShown() then
-        frame.vehicleIcon:SetAlpha((db.vehicleIconAlpha or 1)
-            * (DF.GetStatusIconFadeAlpha and DF:GetStatusIconFadeAlpha(frame, "vehicleIcon") or 1))
-    end
-    if frame.raidRoleIcon and frame.raidRoleIcon:IsShown() then
-        frame.raidRoleIcon:SetAlpha((db.raidRoleIconAlpha or 1)
-            * (DF.GetStatusIconFadeAlpha and DF:GetStatusIconFadeAlpha(frame, "raidRoleIcon") or 1))
-    end
+    -- ★ NO SECOND ALPHA PASS. DF:ApplyStatusIconSettings (StatusIcons.lua) already
+    -- folds DF:GetStatusIconFadeAlpha into each icon's alpha, and every icon above
+    -- now goes through it. Re-applying here would square the fade -- the same
+    -- mistake the range and health fades made before ef3c56e0.
+    -- (Audit, 2026-08-07.)
 end
 
 -- ☠ A CORPSE CARRIES NO AURAS, so the preview must not draw any on one. Death
