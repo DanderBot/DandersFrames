@@ -679,6 +679,10 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     frame.dfIsDead = (testData.status == "Dead") or (testData.status == "Offline") or false
     frame.dfIsOffline = (testData.status == "Offline") or false
     frame.dfClassToken = testData.class
+    -- The health fraction, so the three curve-driven appearance functions can run
+    -- on a preview frame. Live gets this from UnitHealthPercent(unit, true, curve),
+    -- which is secret-safe and needs a REAL unit; the preview has a plain number.
+    frame.dfHealthPct = testData.healthPercent or 1
 
     local db = DF:GetFrameDB(frame)
 
@@ -847,8 +851,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     local isOutOfRange = db.testShowOutOfRange and testData.outOfRange
     
     -- Calculate per-element alphas for out-of-range
-    local healthBarAlpha = 1.0
-    local backgroundAlpha = 1.0
     local iconsAlpha = 1.0
     local powerBarAlpha = 1.0
     local dispelAlpha = 1.0
@@ -868,8 +870,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             -- by 5.5x. Invisible today because Config seeds all six, so it only bites
             -- a profile missing a key (an old import, a hand-edited SavedVariables).
             -- If you add an oor*Alpha, copy live's fallback, do not invent one.
-            healthBarAlpha = db.oorHealthBarAlpha or 0.2
-            backgroundAlpha = db.oorBackgroundAlpha or 0.1
             iconsAlpha = db.oorIconsAlpha or 0.5
             powerBarAlpha = db.oorPowerBarAlpha or 0.2
             dispelAlpha = db.oorDispelOverlayAlpha or 0.2
@@ -930,8 +930,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         -- because there the frame stays at 1.0.
         local hfAlpha = db.healthFadeAlpha or 0.5
         if db.oorEnabled then
-            healthBarAlpha = hfAlpha
-            backgroundAlpha = hfAlpha
             iconsAlpha = hfAlpha
             powerBarAlpha = hfAlpha
             dispelAlpha = hfAlpha
@@ -949,142 +947,18 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- writes colour at alpha 1.0 and controls opacity through SetAlpha, so that
     -- SetAlphaFromBoolean keeps working). Applied by the shared pass further down.
     
-    -- Update health bar color based on mode
-    -- Use RGB only (no alpha in SetStatusBarColor) so we can control alpha externally
-    -- Skip if aggro color override is active
-    local classColorAlpha = db.classColorAlpha or 1.0
-    if not frame.dfAggroActive then
-        if db.healthColorMode == "CLASS" then
-            local classColor = DF:GetClassColor(testData.class)
-            if classColor then
-                frame.healthBar:SetStatusBarColor(classColor.r, classColor.g, classColor.b)
-            end
-        elseif db.healthColorMode == "PERCENT" then
-            local color = DF:GetHealthGradientColor(healthValue, db, testData.class)
-            if color then
-                frame.healthBar:SetStatusBarColor(color.r, color.g, color.b)
-            end
-        elseif db.healthColorMode == "CUSTOM" then
-            local c = db.healthColor or {r=0, g=1, b=0}
-            frame.healthBar:SetStatusBarColor(c.r, c.g, c.b)
-        end
-    end
-    
-    -- Apply combined alpha to health bar texture (classColorAlpha * OOR alpha)
-    -- Dead fade overrides health bar alpha if applicable
-    if frame.healthBar then
-        local tex = frame.healthBar:GetStatusBarTexture()
-        if tex then 
-            local finalAlpha = classColorAlpha * healthBarAlpha
-            if applyDeadFade then
-                finalAlpha = db.fadeDeadHealthBar or 0.4
-            end
-            tex:SetAlpha(finalAlpha) 
-        end
-    end
-    
-    -- Update background color and texture
-    local bgMode = db.backgroundColorMode or "CUSTOM"
-    local bgTexture = db.backgroundTexture or "Solid"
-    
-    -- Determine background color for dead fade
-    local deadBgColor = nil
-    local deadBgAlpha = db.fadeDeadBackground or 0.4
-    if applyDeadFade and db.fadeDeadUseCustomColor then
-        deadBgColor = db.fadeDeadBackgroundColor or {r = 0.3, g = 0, b = 0}
-    end
-    
-    if frame.background then
-        -- In test mode, ALWAYS force-apply the texture to avoid cache inconsistencies
-        -- Test mode doesn't update as frequently so performance is not a concern
-        if bgTexture == "Solid" or bgTexture == "" then
-            -- Solid color mode - use SetColorTexture
-            frame.dfCurrentBgTexture = "Solid"
-            
-            if applyDeadFade and deadBgColor then
-                -- Dead fade with custom color
-                frame.background:SetColorTexture(deadBgColor.r, deadBgColor.g, deadBgColor.b, deadBgAlpha)
-            elseif applyDeadFade then
-                -- Dead fade without custom color - use normal color but with dead fade alpha
-                if bgMode == "CUSTOM" then
-                    local c = db.backgroundColor or {r=0.1, g=0.1, b=0.1, a=0.8}
-                    frame.background:SetColorTexture(c.r, c.g, c.b, deadBgAlpha)
-                elseif bgMode == "CLASS" then
-                    local classColor = DF:GetClassColor(testData.class)
-                    if classColor then
-                        frame.background:SetColorTexture(classColor.r, classColor.g, classColor.b, deadBgAlpha)
-                    else
-                        frame.background:SetColorTexture(0, 0, 0, deadBgAlpha)
-                    end
-                else
-                    frame.background:SetColorTexture(0, 0, 0, deadBgAlpha)
-                end
-            elseif bgMode == "CUSTOM" then
-                local c = db.backgroundColor or {r=0.1, g=0.1, b=0.1, a=0.8}
-                -- Multiply configured alpha by OOR alpha
-                local finalAlpha = (c.a or 0.8) * backgroundAlpha
-                frame.background:SetColorTexture(c.r, c.g, c.b, finalAlpha)
-            elseif bgMode == "CLASS" then
-                local classColor = DF:GetClassColor(testData.class)
-                local bgAlpha = db.backgroundClassAlpha or 0.3
-                local finalAlpha = bgAlpha * backgroundAlpha
-                if classColor then
-                    frame.background:SetColorTexture(classColor.r, classColor.g, classColor.b, finalAlpha)
-                else
-                    frame.background:SetColorTexture(0, 0, 0, 0.8 * backgroundAlpha)
-                end
-            else
-                frame.background:SetColorTexture(0, 0, 0, 0.8 * backgroundAlpha)
-            end
-        else
-            -- Textured background
-            -- ALWAYS apply the texture in test mode (no caching) to ensure it's set correctly
-            frame.background:SetTexture(bgTexture)
-            frame.background:SetHorizTile(false)
-            frame.background:SetVertTile(false)
-            frame.dfCurrentBgTexture = bgTexture
-            
-            -- For textured backgrounds, SetAlpha MUST be 1.0 so vertex color alpha works
-            frame.background:SetAlpha(1.0)
-            
-            -- Control alpha ONLY via SetVertexColor
-            if applyDeadFade and deadBgColor then
-                -- Dead fade with custom color
-                frame.background:SetVertexColor(deadBgColor.r, deadBgColor.g, deadBgColor.b, deadBgAlpha)
-            elseif applyDeadFade then
-                -- Dead fade without custom color - use normal color but with dead fade alpha
-                if bgMode == "CUSTOM" then
-                    local c = db.backgroundColor or {r=0.1, g=0.1, b=0.1, a=0.8}
-                    frame.background:SetVertexColor(c.r, c.g, c.b, deadBgAlpha)
-                elseif bgMode == "CLASS" then
-                    local classColor = DF:GetClassColor(testData.class)
-                    if classColor then
-                        frame.background:SetVertexColor(classColor.r, classColor.g, classColor.b, deadBgAlpha)
-                    else
-                        frame.background:SetVertexColor(0, 0, 0, deadBgAlpha)
-                    end
-                else
-                    frame.background:SetVertexColor(0, 0, 0, deadBgAlpha)
-                end
-            elseif bgMode == "CUSTOM" then
-                local c = db.backgroundColor or {r=0.1, g=0.1, b=0.1, a=0.8}
-                local finalAlpha = (c.a or 0.8) * backgroundAlpha
-                frame.background:SetVertexColor(c.r, c.g, c.b, finalAlpha)
-            elseif bgMode == "CLASS" then
-                local classColor = DF:GetClassColor(testData.class)
-                local bgAlpha = db.backgroundClassAlpha or 0.3
-                local finalAlpha = bgAlpha * backgroundAlpha
-                if classColor then
-                    frame.background:SetVertexColor(classColor.r, classColor.g, classColor.b, finalAlpha)
-                else
-                    frame.background:SetVertexColor(0, 0, 0, 0.8 * backgroundAlpha)
-                end
-            else
-                frame.background:SetVertexColor(0, 0, 0, 0.8 * backgroundAlpha)
-            end
-        end
-    end
-    
+    -- ☠ THE HEALTH-BAR AND BACKGROUND COLOUR BLOCKS USED TO LIVE HERE (~135 lines).
+    -- DF:UpdateHealthBarAppearance and DF:UpdateBackgroundAppearance own both now and
+    -- accept test frames, so the shared appearance pass at the end of this function
+    -- applies them. The copy was not merely redundant, it was WRONG in two ways:
+    --   * it MULTIPLIED the OOR alpha into the base (classColorAlpha * healthBarAlpha)
+    --     where live REPLACES it -- so at Health Bar Alpha 0.5 with the stock OOR 0.2
+    --     the preview rendered 0.10 against live's 0.20, and the background, which
+    --     multiplies twice, rendered 0.03 against live's 0.10;
+    --   * its PERCENT-mode gradient took the raw class token from testData while live
+    --     resolves through the same stops with the frame's own colour weights.
+    -- (Audit, 2026-08-07.)
+
     -- Frame-level alpha when not using element-specific OOR (same as live UpdateFrameAppearance)
     if not db.oorEnabled then
         if isOutOfRange then

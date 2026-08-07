@@ -226,7 +226,10 @@ function DF:UpdateHealthBarAppearance(frame)
     if not db then return end
     
     -- Skip during test mode (test mode handles its own appearance)
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through. The curve-driven colour below takes the stamped
+    -- health fraction instead of UnitHealthPercent -- a DATA fork; the rendering,
+    -- the colour stops and the mode branching are all shared.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local unit = frame.unit
     local deadOrOffline = IsDeadOrOffline(frame)
@@ -284,7 +287,20 @@ function DF:UpdateHealthBarAppearance(frame)
     else
         -- Priority 3: Normal color based on mode
         if colorMode == "PERCENT" then
-            -- PERCENT mode: Use UnitHealthPercent with curve - returns ColorMixin
+            -- PERCENT mode: Use UnitHealthPercent with curve - returns ColorMixin.
+            -- ☠ TEST FRAMES TAKE DF:GetHealthGradientColor INSTEAD -- the same stops,
+            -- interpolated in Lua. Live cannot do that (the health value is secret and
+            -- may never be compared), and test cannot use the curve (it needs a real
+            -- unit). Verified equivalent point-for-point during the 2026-08-07 audit:
+            -- same positions, same weight flooring, same percent == 1 boundary.
+            local testPct = frame.dfHealthPct
+            if testPct and DF.GetHealthGradientColor then
+                local c = DF:GetHealthGradientColor(testPct, db, frame.dfClassToken, "healthColor")
+                if c then
+                    tex:SetVertexColor(c.r, c.g, c.b)
+                    return
+                end
+            end
             local curve = DF:GetCurveForUnit(unit, db)
             if curve and unit and UnitHealthPercent then
                 local color = UnitHealthPercent(unit, true, curve)
@@ -390,7 +406,10 @@ function DF:UpdateBackgroundAppearance(frame)
     if not db then return end
     
     -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through. The curve-driven colour below takes the stamped
+    -- health fraction instead of UnitHealthPercent -- a DATA fork; the rendering,
+    -- the colour stops and the mode branching are all shared.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     -- Skip if actively adjusting background color in options (prevents flicker)
     if DF.isAdjustingBackgroundColor then return end
@@ -1246,7 +1265,10 @@ function DF:UpdateFrameAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
     
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through. The curve-driven colour below takes the stamped
+    -- health fraction instead of UnitHealthPercent -- a DATA fork; the rendering,
+    -- the colour stops and the mode branching are all shared.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     if db.oorEnabled then
         ApplyOORAlpha(frame, true, 1.0, 1.0)
