@@ -2801,6 +2801,71 @@ TEST_PRESETS.DEFAULT = {
 TEST_PRESETS.FULL = {}
 for _, k in ipairs(TEST_TOGGLE_KEYS) do TEST_PRESETS.FULL[k] = true end
 
+-- Display order of the quick-preset buttons. The matcher below walks this rather than
+-- pairs(TEST_PRESETS) so its answer is DETERMINISTIC: pairs order is undefined, and if two
+-- presets ever describe the same state the highlight would otherwise flicker between them
+-- from one refresh to the next.
+local TEST_PRESET_ORDER = { "DEFAULT", "AURAS", "COMBAT", "HEALER", "FULL" }
+
+-- ☠ TOGGLES DO NOT ALL DEFAULT THE SAME WAY WHEN UNSET, and the matcher has to resolve
+-- them EXACTLY as the checkboxes do or the highlight will contradict the boxes the user is
+-- looking at. These are the keys the panel reads as `db.key ~= false`, i.e. nil means ON;
+-- every other key is read plain, so nil means OFF.
+--
+-- In practice Config.lua seeds all of them explicitly (and its values are exactly the
+-- DEFAULT preset, so a fresh profile genuinely matches Default). This exists for the
+-- profile that predates a newly added toggle, where the key really is nil.
+local TEST_TOGGLE_DEFAULT_ON = {
+    testShowPets             = true,
+    testShowHealPrediction   = true,
+    testShowReducedMaxHealth = true,
+    testShowTextDesigner     = true,
+    testShowPersonalTargeted = true,
+    testShowStatusIcons      = true,
+}
+
+local function TestToggleOn(db, key)
+    local v = db[key]
+    if v == nil then return TEST_TOGGLE_DEFAULT_ON[key] == true end
+    return v == true
+end
+
+-- Which preset, if any, the CURRENT toggles actually describe -- nil when they describe
+-- none of them.
+--
+-- ☠ DERIVED, NEVER READ FROM db.testPreset. That key records the last preset CLICKED, which
+-- stops being true the moment any toggle is flipped afterwards: click Default, turn on
+-- Auras, and the panel went on highlighting Default while the settings were no longer
+-- Default (Krathe, 2026-08-07). A preset button is a claim about state, so it has to be
+-- answered from state. db.testPreset is still written by ApplyTestPreset -- it is a useful
+-- record of intent -- but nothing may drive UI from it.
+--
+-- ⚠ Party-only keys are skipped in raid mode, mirroring ApplyTestPreset, which does not
+-- write them there. Comparing keys a raid preset never sets would mean no raid state could
+-- ever match anything.
+function DF:GetActiveTestPreset()
+    local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
+    local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
+    if not db then return nil end
+
+    for _, name in ipairs(TEST_PRESET_ORDER) do
+        local set = TEST_PRESETS[name]
+        if set then
+            local match = true
+            for _, key in ipairs(TEST_TOGGLE_KEYS) do
+                if not (isRaidMode and TEST_PARTY_ONLY_KEYS[key]) then
+                    if TestToggleOn(db, key) ~= (set[key] == true) then
+                        match = false
+                        break
+                    end
+                end
+            end
+            if match then return name end
+        end
+    end
+    return nil
+end
+
 -- Repaint every test surface. The panel's per-checkbox callbacks each poke their
 -- own painter, so a preset — which can flip any of them at once — has to run the
 -- lot or a toggle only lands once the box is clicked by hand.
@@ -3543,6 +3608,12 @@ function DF:CreateTestPanel()
             if container.section and container.section.UpdateBadge then
                 container.section:UpdateBadge()
             end
+            -- ☠ RE-EVALUATE THE PRESET HIGHLIGHT. Flipping a toggle can make the state
+            -- stop matching the highlighted preset -- or start matching another one --
+            -- and nothing here used to tell the footer that. The full panel refresh is
+            -- not usable from inside a checkbox handler (it re-runs SetChecked on every
+            -- box, including this one, mid-click), so refresh just the preset row.
+            if panel.RefreshPresetHighlight then panel:RefreshPresetHighlight() end
         end)
 
         -- Hover on whole container toggles too
@@ -4196,9 +4267,10 @@ function DF:CreateTestPanel()
     for i, preset in ipairs(presets) do
         local btn = CreateFrame("Button", nil, presetsFooter, "BackdropTemplate")
         btn:SetPoint("TOPLEFT", 12 + (i - 1) * (btnWidth + btnSpacing), -26)
-        -- Segmented quick-preset cell: one active at a time, driven by SetActive
-        -- in UpdateStateInternal (mirrors db.testPreset). OnClick applies the
-        -- preset and refreshes.
+        -- Segmented quick-preset cell: at most ONE active, and possibly none.
+        -- panel:RefreshPresetHighlight derives which from the live toggles, so the
+        -- highlight is a statement about the current state rather than about which
+        -- button was last pressed. OnClick applies the preset and refreshes.
         DF.GUI:StyleButton(btn, { width = btnWidth, height = 24, text = presetNames[preset] })
         btn.preset = preset
         btn:SetScript("OnClick", function(self)
@@ -4328,23 +4400,37 @@ function DF:CreateTestPanel()
             sec:UpdateBadge()
         end
 
-        -- Preset buttons: SetActive on the one matching db.testPreset (accent
-        -- fill + border via the shared toggle look); accent the active label.
-        for _, btn in ipairs(self.presetBtns) do
-            local isActive = btn.preset == db.testPreset
-            btn:SetActive(isActive)
-            if isActive then
-                btn.Text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
-            else
-                btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            end
-        end
+        self:RefreshPresetHighlight()
 
         -- Recalculate layout
         self:RecalculateLayout()
 
         if callbackEnabled and DF.GUI and DF.GUI.UpdateTestButtonState then
             DF.GUI.UpdateTestButtonState()
+        end
+    end
+
+-- Light the quick-preset button whose definition the current toggles actually match, and
+-- none if they match nothing (accent fill + border via the shared toggle look; the active
+-- label takes the accent too).
+--
+-- ☠ SEPARATE FROM THE FULL REFRESH ON PURPOSE, and it is not an optimisation. A checkbox
+-- handler cannot call UpdateState: that re-runs SetChecked on every box in the panel,
+-- including the one being clicked, in the middle of its own OnClick. This touches only the
+-- footer, so it is safe from inside a toggle -- which is exactly where it is needed, since
+-- flipping a toggle is what makes the previous highlight wrong.
+    function panel:RefreshPresetHighlight()
+        if not self.presetBtns then return end
+        local themeColor = GetThemeColor()
+        local activePreset = DF.GetActiveTestPreset and DF:GetActiveTestPreset() or nil
+        for _, btn in ipairs(self.presetBtns) do
+            local isActive = btn.preset == activePreset
+            btn:SetActive(isActive)
+            if isActive then
+                btn.Text:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
+            else
+                btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            end
         end
     end
 
