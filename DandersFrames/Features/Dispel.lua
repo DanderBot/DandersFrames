@@ -2047,11 +2047,18 @@ function DF:UpdateDispelOverlay(frame)
             -- so the override made the preview lie about live. Never re-add it.
             local r, g, b = GetTestDispelColor(testData.dispelType, db)
 
-            -- Calculate OOR alpha multiplier for test mode
+            -- Out-of-range multiplier.
+            -- ☠ TWO THINGS WERE WRONG HERE. It gated on db.testShowOutOfRange alone, so
+            -- the preview dimmed the overlay even in SIMPLE range-fade mode -- where
+            -- live leaves the dispel container at 1.0 and lets the whole-frame cascade
+            -- do it, meaning the preview applied the fade twice. And the fallback was
+            -- 0.55 against ElementAppearance's 0.2, so a profile missing the key
+            -- disagreed by nearly 3x. Now gated on oorEnabled like live, with live's
+            -- fallback. (Audit, 2026-08-07.)
             local oorMultiplier = 1.0
-            if db.testShowOutOfRange and testData.outOfRange and not testData.status then
-                local oorDispelAlpha = db.oorDispelOverlayAlpha or 0.55
-                oorMultiplier = oorDispelAlpha
+            if db.oorEnabled and db.testShowOutOfRange
+                and testData.outOfRange and not testData.status then
+                oorMultiplier = db.oorDispelOverlayAlpha or 0.2
             end
 
             ShowOverlayWithRGB(overlay, r, g, b, db, testData.dispelType, oorMultiplier, frame, testData)
