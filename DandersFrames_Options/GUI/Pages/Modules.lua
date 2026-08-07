@@ -1766,7 +1766,16 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                         label = L["Import"],
                         onClick = function()
                             if not importData then return end
-                            DF:ApplyImportedProfile(importData, selectedCats, selectedFrameTypes, profileName, createNew)
+                            -- ☠ PCALL the apply. It creates the profile and switches to it
+                            -- BEFORE merging the payload, so a mid-apply throw used to leave
+                            -- the user sitting in a half-imported profile with no message and
+                            -- FullProfileRefresh never reached. Shape validation upstream makes
+                            -- that unlikely; this makes it survivable and says so.
+                            local ok = pcall(DF.ApplyImportedProfile, DF, importData,
+                                selectedCats, selectedFrameTypes, profileName, createNew)
+                            if not ok then
+                                DF:Err(L["Import failed. Please try again or check for errors."])
+                            end
                             if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
                         end,
                     },

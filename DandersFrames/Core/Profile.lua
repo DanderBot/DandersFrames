@@ -806,6 +806,42 @@ function DF:ExportProfile(categories, frameTypes, profileName)
     return "!DFP1!" .. encoded  -- DFP1 = DandersFrames Profile v1
 end
 
+-- ☠ SHAPE-CHECK THE PAYLOAD, NOT JUST ITS PRESENCE.
+--
+-- Validation used to be `type(data) == "table" and (data.party or data.raid)` -- a
+-- TRUTHINESS test. `party = "x"` passed, merged nothing, and still reported "Profile
+-- imported successfully!"; `party = 5` passed and threw halfway through the apply,
+-- AFTER the profile had been created and switched to. An import string is untrusted
+-- input from Discord or a whisper, and DF:ApplyImportedProfile assigns these straight
+-- into the saved variables.
+--
+-- Every key below is assigned to DF.db.<key> by the apply, so each must be a table if
+-- present. Absent is always fine -- a selective export legitimately carries only some.
+--
+-- R:DecodeFilterString (FilterRegistry/Registry.lua) is the model this follows: check
+-- the type, then interpret. Deliberately shallow -- deep validation of every setting
+-- would reject payloads from a NEWER build, which must stay forward-compatible.
+local PAYLOAD_TABLE_KEYS = {
+    "party", "raid", "raidAutoProfiles", "auraBlacklist", "linkedSections",
+    "classColors", "powerColors", "roleColors", "dispelColors",
+    "filterPresetOverrides", "customAuraFilters",
+    "auraDesignerPresets", "textDesignerPresets",
+}
+
+local function ValidatePayloadShape(data)
+    if type(data) ~= "table" then return nil, "Corrupt data" end
+    for _, key in ipairs(PAYLOAD_TABLE_KEYS) do
+        local v = data[key]
+        if v ~= nil and type(v) ~= "table" then
+            return nil, "Corrupt data"
+        end
+    end
+    if type(data.party) ~= "table" and type(data.raid) ~= "table" then
+        return nil, "No profile data found"
+    end
+    return data, nil
+end
+
 -- Validate an import string and return the parsed data if valid
 function DF:ValidateImportString(str)
     local LibSerialize = LibStub and LibStub("LibSerialize", true)
@@ -839,11 +875,7 @@ function DF:ValidateImportString(str)
             return nil, "Deserialization failed"
         end
         
-        if type(data) ~= "table" or (not data.party and not data.raid) then
-            return nil, "No profile data found"
-        end
-        
-        return data, nil
+        return ValidatePayloadShape(data)
     end
     
     -- Legacy format support (!DF1! - old LibDeflate with DF:Serialize)
@@ -890,11 +922,7 @@ function DF:ValidateImportString(str)
             return nil, "Corrupt data"
         end
         
-        if not data.party and not data.raid then
-            return nil, "No profile data found"
-        end
-        
-        return data, nil
+        return ValidatePayloadShape(data)
     end
     
     -- Other legacy formats
@@ -919,8 +947,9 @@ function DF:ValidateImportString(str)
                 pcall(setfenv, func, {})
             end
             local success, data = pcall(func)
-            if success and type(data) == "table" and (data.party or data.raid) then
-                return data, nil
+            if success then
+                local ok = ValidatePayloadShape(data)
+                if ok then return ok, nil end
             end
         end
     end
@@ -1032,6 +1061,23 @@ end
 function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTypes, newProfileName, createNewProfile, allowOverwrite)
     local L = DF.L
     if not importData then return false end
+
+    -- ☠ TAKE OUR OWN COPY OF THE PAYLOAD BEFORE ANYTHING TOUCHES IT.
+    --
+    -- A dozen sites below do `DF.db.<key> = importData.<key>` -- storing the payload's
+    -- tables BY REFERENCE into the saved variables. Two consequences, both real:
+    --
+    --   * The GUI never clears self.parsedImportData, so parse once, import as "A",
+    --     rename, import as "B" left BOTH profiles sharing the same party/raid/preset
+    --     tables. Editing one silently edited the other until logout flattened them.
+    --   * Anything the caller still holds a reference to could mutate a live profile.
+    --
+    -- Only filterPresetOverrides was being copied. Copying the whole payload once here
+    -- fixes every site at a stroke and, more importantly, keeps fixing them: a new
+    -- `DF.db.x = importData.x` added later is safe without anyone remembering this.
+    -- One deep copy per import is nothing -- this is a deliberate user action, not a
+    -- hot path.
+    importData = DF:DeepCopy(importData)
 
     -- A SELECTIVE payload (importData.categories set) merges through the
     -- category tables in the companion. Import is a deliberate user action --

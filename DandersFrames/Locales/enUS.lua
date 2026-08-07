@@ -313,6 +313,7 @@ L["Delete profile '%s'?\n\nThis cannot be undone."] = true
 L["Enter name for copy of '%s':"] = true
 L["Enter new name for '%s':"] = true
 L["Export failed. Please try again or check for errors."] = true
+L["Import failed. Please try again or check for errors."] = true
 L["OK"] = true
 L["Paste a profile string to import:"] = true
 L["Reset all bindings to defaults?\n\nThis will set:\n• Left Click = Target Unit\n• Right Click = Open Menu\n\n%sThis cannot be undone.%s"] = true

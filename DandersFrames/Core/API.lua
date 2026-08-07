@@ -28,18 +28,31 @@ function DandersFrames_Export(profileKey)
             return nil  -- Profile doesn't exist
         end
         
-        -- Save current db reference
+        -- ☠ THE RESTORE MUST BE UNCONDITIONAL. This borrows DF.db to export a profile
+        -- the user is not on. The restore used to be the next plain statement, so any
+        -- throw inside ExportProfile skipped it and left DF.db pointing at the OTHER
+        -- profile's raw table -- unproxied, while DF._realProfile and DF._realRaidDB
+        -- still referenced the original. The two then disagree: every later settings
+        -- write lands in the wrong profile's saved variables, silently, and at logout
+        -- that is what gets written to disk.
+        --
+        -- Reachable throws inside the window: next() on a non-table colour/linkedSections
+        -- table (legacy or import-corrupted profiles), DF:DeepCopy (no cycle guard), and
+        -- LibSerialize on an unserializable value.
+        --
+        -- pcall, then restore, then re-raise nothing -- a failed export returns nil, which
+        -- is this function's documented failure value.
         local originalDB = DF.db
-        
-        -- Temporarily switch to the requested profile's data
+
         DF.db = DandersFramesDB_v2.profiles[profileKey]
-        
-        -- Export with the profile name
-        local str = DF:ExportProfile(nil, {party = true, raid = true}, profileKey)
-        
-        -- Restore original db reference
+        local ok, str = pcall(DF.ExportProfile, DF, nil, {party = true, raid = true}, profileKey)
+
+        -- Restore FIRST, before anything can early-return.
         DF.db = originalDB
-        
+
+        if not ok then
+            return nil
+        end
         return str
     end
     
@@ -85,7 +98,16 @@ function DandersFrames_Import(str, profileKey)
         -- independent table. Without this, the second import mutates DF.db
         -- which still points to the first imported profile's table.
         -- allowOverwrite=true lets Wago packs re-import into the same profile name.
-        local success = DF:ApplyImportedProfile(importData, nil, nil, targetName, true, true)
+        -- ☠ PCALL: this is a PUBLIC API and it must not throw into a third-party addon.
+        -- ApplyImportedProfile is ~350 lines that create a profile, switch to it, and
+        -- then merge the payload -- so a mid-apply error left the caller's stack unwound
+        -- AND the user switched into a half-imported profile. Shape validation upstream
+        -- makes that far less likely; this makes it survivable, and keeps the documented
+        -- `false, errMsg` contract instead of an error.
+        local ok, success = pcall(DF.ApplyImportedProfile, DF, importData, nil, nil, targetName, true, true)
+        if not ok then
+            return false, "Import failed while applying the profile"
+        end
 
         if success then
             
