@@ -961,16 +961,35 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
         end
     end
     
-    -- Persist a lightweight recovery flag so a crash/disconnect during editing
-    -- can be detected on next login and contaminated values reset to defaults
-    local recoveryKeys = {}
-    for key in pairs(self.globalSnapshot) do
+    -- ☠ PERSIST THE VALUES, NOT JUST THE KEY NAMES.
+    --
+    -- EnterEditing writes every stored override straight into the REAL serialized raid
+    -- table (SetRaidValue -> DF._realRaidDB, which IS
+    -- DandersFramesDB_v2.profiles[current].raid). The user's true globals live only in
+    -- the in-memory self.globalSnapshot. There is NO PLAYER_LOGOUT handler anywhere in
+    -- either addon -- verified, zero hits -- so a /reload or a crash mid-edit saves the
+    -- PREVIEW as the user's real settings.
+    --
+    -- This used to persist only the key NAMES, so the recovery pass on next login could
+    -- do nothing better than DF.db.raid[key] = DF.RaidDefaults[key]: a user whose raid
+    -- frameWidth was 150, editing a layout that overrides it to 110, got the FACTORY 125
+    -- back and a message saying settings were recovered. Persisting the values makes the
+    -- recovery exact.
+    --
+    -- Snapshot values are already deep-copied by DeepCopyValue above, so this is a plain
+    -- reference to data we own; it is dropped in ExitEditing along with the flag.
+    local recoveryKeys, recoveryValues = {}, {}
+    for key, value in pairs(self.globalSnapshot) do
         recoveryKeys[#recoveryKeys + 1] = key
+        recoveryValues[key] = value
     end
     DF.db.raidAutoEditingRecovery = {
         contentType = contentType,
         profileIndex = profileIndex,
         snapshotKeys = recoveryKeys,
+        -- Keys whose true global value was nil are absent here (Lua cannot store a nil
+        -- value), which is why snapshotKeys is still the authoritative list to walk.
+        snapshotValues = recoveryValues,
     }
 
     -- Apply existing overrides to db.raid for live preview.

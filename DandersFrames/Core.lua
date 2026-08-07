@@ -4335,18 +4335,43 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
             if profile and profile.overrides and recovery.snapshotKeys then
                 local recovered = 0
+                local snapshotValues = recovery.snapshotValues
                 for _, key in ipairs(recovery.snapshotKeys) do
                     local overrideVal = profile.overrides[key]
                     if overrideVal ~= nil and DeepEquals(DF.db.raid[key], overrideVal) then
-                        -- This value matches the override — reset to default
-                        local default = DF.RaidDefaults[key]
-                        if default ~= nil then
-                            if type(default) == "table" then
-                                DF.db.raid[key] = DF:DeepCopy(default)
+                        -- The live value still matches the layout's override, i.e. the
+                        -- preview was baked in by a /reload or crash mid-edit.
+                        --
+                        -- ☠ RESTORE THE USER'S OWN VALUE WHEN WE HAVE IT. This used to
+                        -- only ever write DF.RaidDefaults[key] -- so someone whose raid
+                        -- frameWidth was 150, editing a layout that overrides it to 110,
+                        -- was handed the FACTORY 125 and told their settings had been
+                        -- recovered. EnterEditing now persists the true pre-edit values
+                        -- alongside the key names, so the restore is exact.
+                        --
+                        -- The defaults path stays as the fallback for a recovery record
+                        -- written by a build before snapshotValues existed, and for a key
+                        -- whose true value was nil (absent from the value map, since Lua
+                        -- cannot store nil) -- resetting that to default is still the
+                        -- closest available answer.
+                        local snapVal = snapshotValues and snapshotValues[key]
+                        if snapVal ~= nil then
+                            if type(snapVal) == "table" then
+                                DF.db.raid[key] = DF:DeepCopy(snapVal)
                             else
-                                DF.db.raid[key] = default
+                                DF.db.raid[key] = snapVal
                             end
                             recovered = recovered + 1
+                        else
+                            local default = DF.RaidDefaults[key]
+                            if default ~= nil then
+                                if type(default) == "table" then
+                                    DF.db.raid[key] = DF:DeepCopy(default)
+                                else
+                                    DF.db.raid[key] = default
+                                end
+                                recovered = recovered + 1
+                            end
                         end
                     end
                 end
