@@ -1957,8 +1957,14 @@ local function applyContainerLayout(c, handle)
             local live = handle.backend and handle.backend.container == c
             -- GetLeft on our plain window is expected non-secret; guard anyway —
             -- truthiness on a secret number is the 12.1 taint trap.
+            -- ☠ The SECRET CHECK MUST COME FIRST. This read `gl and issecretvalue(gl)`,
+            -- which truthiness-tests gl before establishing it is safe to touch — the exact
+            -- trap the line above warns about, one line under the warning. issecretvalue(nil)
+            -- is safe (Blizzard's own RestrictedInfrastructure does `pos = tonumber(pos)`
+            -- then `issecretvalue(pos)` with no nil guard), so the leading test bought
+            -- nothing. The `issecretvalue and` short-circuit stays for older clients.
             local gl = fr:GetLeft()
-            if gl and issecretvalue and issecretvalue(gl) then gl = nil end
+            if issecretvalue and issecretvalue(gl) then gl = nil end
             if not live or gl or tries > 600 then
                 fr:SetScript("OnUpdate", nil)
                 if live and gl then applyContainerLayout(c, handle) end

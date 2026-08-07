@@ -2462,7 +2462,9 @@ local function adTestMax(frame, filterStr)
     return db.testBuffCount or 2
 end
 
-local function buildFilterGroupConfig(frame, map, group, mine)
+-- defs: the global AD defaults. Its `level` is the account-wide "Default Frame Level" —
+-- see the frameLevelOffset note below for why a group must follow it.
+local function buildFilterGroupConfig(frame, map, group, mine, defs)
     local borderSpec = buildGroupBorderSpec(frame, group)
     local filt = poolFilter(group, mine)
     return {
@@ -2478,7 +2480,16 @@ local function buildFilterGroupConfig(frame, map, group, mine)
         enabled = true,
         tooltips = adTooltipsOn(frame, "tooltipADGroupsEnabled"),
         adBorderAnim = borderSpec and true or nil,
-        frameLevelOffset = 40,
+        -- ☠ Was a hardcoded 40, which is only coincidentally the default of the account-wide
+        -- "Default Frame Level" (adDB.defaults.indicatorFrameLevel -> defs.level). The control
+        -- is labelled generically and every placed indicator resolves through it, so raising
+        -- the slider lifted the indicators and left the groups pinned at 40 — AD's own output
+        -- split across two planes, with the groups stranded underneath their own indicators.
+        -- Tracking defs.level keeps the two co-planar at EVERY slider value, not just at 40,
+        -- and is a no-op for anyone who never moved it.
+        -- Groups have no per-group level key (GLOBAL_DEFAULT_MAP has no `group` entry), so
+        -- there is nothing to override it with — the global is the whole chain here.
+        frameLevelOffset = (defs and defs.level) or 40,
         layout = buildFilterGroupLayout(group),
         style = buildFilterGroupStyle(group, borderSpec),
     }
@@ -2614,7 +2625,7 @@ end
 -- sort identically to before. No testEntries: the test paint's HARMFUL
 -- fallback pool (TestData.debuffs) previews these rows, same as the main
 -- debuff row's preview data.
-local function buildDebuffGroupConfig(frame, records, group)
+local function buildDebuffGroupConfig(frame, records, group, defs)
     local borderSpec = buildGroupBorderSpec(frame, group)
     return {
         unit = frame.unit,
@@ -2625,7 +2636,7 @@ local function buildDebuffGroupConfig(frame, records, group)
         enabled = true,
         tooltips = adTooltipsOn(frame, "tooltipADGroupsEnabled"),
         adBorderAnim = borderSpec and true or nil,
-        frameLevelOffset = 40,
+        frameLevelOffset = (defs and defs.level) or 40,   -- see buildFilterGroupConfig
         layout = buildFilterGroupLayout(group, 4),
         style = buildFilterGroupStyle(group, borderSpec),
     }
@@ -3357,8 +3368,12 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                                     local tries = 0
                                     f:SetScript("OnUpdate", function(fr)
                                         tries = tries + 1
+                                        -- ☠ Secret check FIRST — see the twin guard in
+                                        -- AuraContainer's applyContainerLayout pin retry.
+                                        -- `gl and issecretvalue(gl)` truthiness-tests gl
+                                        -- before proving it safe to touch.
                                         local gl = fr:GetLeft()
-                                        if gl and issecretvalue and issecretvalue(gl) then gl = nil end
+                                        if issecretvalue and issecretvalue(gl) then gl = nil end
                                         if gl or tries > 600 then
                                             fr:SetScript("OnUpdate", nil)
                                             DF:SnapPointToPixelGrid(fr, true)
@@ -3473,7 +3488,7 @@ end
 -- the per-aura-event hot path allocation-free; body otherwise identical to
 -- the pre-split A5 loop.
 -- ============================================================
-local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
+local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix, defs)
     -- Spec-keyed groups (My Buffs) = player-cast only; otherLayoutGroups unchanged.
     local mine = keyPrefix == ""
     if not groups then return end
@@ -3487,7 +3502,14 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
                 live[key] = true
                 -- SPLIT sigs (Wave 1): structural -> Rebuild (recreate), tuning ->
                 -- in-place h:ApplyTuning, cosmetic -> ApplyStyle.
+                -- ☠ "|fl=" is not decoration. frameLevelOffset is a CREATE-time container
+                -- property, so the account-wide Default Frame Level must ride the STRUCT sig
+                -- or moving the slider changes the config and rebuilds nothing. Placed
+                -- indicators already carry it (placedStructSig's own "|fl="); the group sigs
+                -- never did, because the level was a hardcoded 40 until it started tracking
+                -- defs.level. Constant at defaults, so this is a no-op unless the user moves it.
                 local structSig = groupStyleStructSig(group)  -- region set only (format key is cosmetic now) (group.style)
+                    .. "|fl=" .. tostring((defs and defs.level) or 40)
                 local tuningSig = selSig                      -- selection edits: live include-map swap (config-wide candidateFilters)
                     .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 8))
                     .. groupSortSig(group)                    -- per-group sort (Wave 2): live SetAuraGroupSortMethod
@@ -3500,14 +3522,14 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
                 local entry = fg[key]
                 if not entry then
                     local handle = DF.AuraContainer:Create(frame,
-                        buildFilterGroupConfig(frame, res.map, group, mine))
+                        buildFilterGroupConfig(frame, res.map, group, mine, defs))
                     if handle then
                         fg[key] = { handle = handle, structSig = structSig,
                                     tuningSig = tuningSig, coSig = coSig }
                     end
                 elseif entry.structSig ~= structSig then
                     entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                    entry.handle:Rebuild(buildFilterGroupConfig(frame, res.map, group, mine), structSig)
+                    entry.handle:Rebuild(buildFilterGroupConfig(frame, res.map, group, mine, defs), structSig)
                 else
                     if entry.tuningSig ~= tuningSig then
                         -- Selection edit / maxIcons / per-group sort with the struct sig
@@ -3520,7 +3542,7 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
                         -- testEntries onto the handle config too, so a test-mode rebuild
                         -- previews the NEW selection instead of a stale one.
                         entry.tuningSig = tuningSig
-                        local cfg = buildFilterGroupConfig(frame, res.map, group, mine)
+                        local cfg = buildFilterGroupConfig(frame, res.map, group, mine, defs)
                         entry.handle.config.testEntries = cfg.testEntries
                         entry.handle:ApplyTuning(cfg)
                     end
@@ -4073,8 +4095,8 @@ function Factory:SyncFrame(frame)
 
         local R = DF.FilterRegistry
         if R then
-            syncFilterGroupList(frame, fg, live, R, adDB.layoutGroups and adDB.layoutGroups[spec], "")
-            syncFilterGroupList(frame, fg, live, R, adDB.otherLayoutGroups, OTHER_PREFIX)
+            syncFilterGroupList(frame, fg, live, R, adDB.layoutGroups and adDB.layoutGroups[spec], "", defs)
+            syncFilterGroupList(frame, fg, live, R, adDB.otherLayoutGroups, OTHER_PREFIX, defs)
         end
 
         -- Tear down groups gone / hidden / emptied / off-spec.
@@ -4117,6 +4139,7 @@ function Factory:SyncFrame(frame)
                         -- in-place h:ApplyTuning, cosmetic -> ApplyStyle.
                         local structSig = recStructSig      -- record strings + keys (the SET defines the groups)
                             .. groupStyleStructSig(group)   -- region set only; format key is cosmetic (group.style)
+                            .. "|fl=" .. tostring((defs and defs.level) or 40)   -- see syncFilterGroupList
                         local tuningSig = recTuningSig      -- per-record candidateFilters (hideLong / keepImportant / dispel maps)
                             .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 4))
                             .. groupSortSig(group)          -- per-group sort (Wave 2): live SetAuraGroupSortMethod
@@ -4125,14 +4148,14 @@ function Factory:SyncFrame(frame)
                         local entry = dg[key]
                         if not entry then
                             local handle = DF.AuraContainer:Create(frame,
-                                buildDebuffGroupConfig(frame, records, group))
+                                buildDebuffGroupConfig(frame, records, group, defs))
                             if handle then
                                 dg[key] = { handle = handle, structSig = structSig,
                                             tuningSig = tuningSig, coSig = coSig }
                             end
                         elseif entry.structSig ~= structSig then
                             entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                            entry.handle:Rebuild(buildDebuffGroupConfig(frame, records, group), structSig)
+                            entry.handle:Rebuild(buildDebuffGroupConfig(frame, records, group, defs), structSig)
                         else
                             if entry.tuningSig ~= tuningSig then
                                 -- Tunables live in the RECORDS' filter strings and
@@ -4148,7 +4171,7 @@ function Factory:SyncFrame(frame)
                                 -- ExpirationOnly, the old hardcode), candidateFilters =
                                 -- nil (dgroups carry no config-wide map).
                                 entry.tuningSig = tuningSig
-                                local cfg = buildDebuffGroupConfig(frame, records, group)
+                                local cfg = buildDebuffGroupConfig(frame, records, group, defs)
                                 entry.handle.config.filter = cfg.filter
                                 entry.handle:ApplyTuning(cfg)
                             end

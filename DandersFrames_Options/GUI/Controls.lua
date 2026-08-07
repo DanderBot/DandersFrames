@@ -2823,7 +2823,16 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
                 if isRaid then
                     local raidIndex = UnitInRaid(unit)
                     if raidIndex then
-                        local _, _, subgroup = GetRaidRosterInfo(raidIndex + 1)
+                        -- ☠ NO `+ 1`. UnitInRaid already returns an index that feeds
+                        -- GetRaidRosterInfo directly — Blizzard passes it straight through in
+                        -- both CompactUnitFrame (GetUnitFrameRaidRole) and
+                        -- CompactRaidFrameManager. The +1 read the NEXT member's subgroup, so
+                        -- every unit reported its neighbour's group and the last member in the
+                        -- raid got nil and silently fell back to group 1. DF's three other
+                        -- UnitInRaid consumers (TextDesigner/DataSource GetGroupNumber and both
+                        -- Frames/Init sites) already pass it through unmodified; this was the
+                        -- only site that disagreed.
+                        local _, _, subgroup = GetRaidRosterInfo(raidIndex)
                         group = subgroup or 1
                     end
                 end

@@ -352,7 +352,27 @@ end
 -- CONFIGURE FOR ALERT
 -- ============================================================
 
+-- ☠ SINGLETON HANDOVER. There is exactly ONE popup frame, so a second Show* while a
+-- dialog is still open does not stack — it takes the frame over. The OnHide hook that
+-- delivers an unresolved input's onCancel only fires when the frame actually HIDES, and a
+-- re-entrant show never hides it: the new config simply overwrote inputConfig/inputResolved
+-- and the outgoing dialog's onCancel was dropped. Any caller using onCancel to release
+-- state (a pending rename, a held selection, a setting to restore) leaked it. Switching to
+-- ALERT mode stranded it the same way, because the OnHide guard is gated on
+-- popupMode == "input".
+-- Resolve-then-notify order matters: a cancel handler may legally open another popup, and
+-- the flag must already be set so this cannot recurse.
+local inputConfig, inputResolved   -- assigned by the INPUT MODE section below
+local function ResolveOutgoingInput()
+    if popupMode == "input" and not inputResolved and inputConfig then
+        inputResolved = true
+        local prev = inputConfig
+        if prev.onCancel then prev.onCancel() end
+    end
+end
+
 local function ConfigureForAlert(config)
+    ResolveOutgoingInput()
     local f = CreatePopupFrame()
 
     -- Re-tint the top accent stripe to the live theme (party purple / raid
@@ -501,8 +521,10 @@ local INPUT_WIDTH_WIDE = 500   -- blobs: export / import strings
 local INPUT_FIELD_H    = 24
 local INPUT_AREA_H     = 96
 
-local inputConfig = nil
-local inputResolved = false
+-- (inputConfig / inputResolved are declared ABOVE ConfigureForAlert so the shared
+-- ResolveOutgoingInput handover can see them. Re-declaring them here would shadow those,
+-- leaving the handover permanently looking at two nils.)
+inputResolved = false
 
 local function EnsureInputWidgets(f)
     if f.InputBox then return end
@@ -547,6 +569,7 @@ function DF:ShowPopupInput(config)
         DF:DebugError("POPUP", "ShowPopupInput: config is required")
         return
     end
+    ResolveOutgoingInput()   -- singleton handover — see ResolveOutgoingInput
     local f = CreatePopupFrame()
     EnsureInputWidgets(f)
 
