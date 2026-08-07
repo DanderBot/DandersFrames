@@ -676,26 +676,17 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         -- Determine frame index for test mode
         local frameIndex = nil
         
-        -- For test frames, check the test frame arrays directly
+        -- ★ frame.index is stamped at creation (TestFramePool.CreateTestFrame), so the
+        -- answer is already on the frame. This used to LINEAR-SCAN both test arrays --
+        -- up to 45 identity comparisons per frame per highlight update -- to recover a
+        -- value it was already holding. Party frames are 0-based in the pool and this
+        -- consumer wants 0-based; raid frames are 1-based, hence the shift.
+        -- (Audit, 2026-08-07.)
         if frame.dfIsTestFrame then
-            -- Check party test frames (index 0 = player, 1-4 = party members)
-            if DF.testPartyFrames then
-                for i = 0, 4 do
-                    if DF.testPartyFrames[i] == frame then
-                        frameIndex = i
-                        break
-                    end
-                end
-            end
-            
-            -- Check raid test frames (1-40)
-            if frameIndex == nil and DF.testRaidFrames then
-                for i = 1, 40 do
-                    if DF.testRaidFrames[i] == frame then
-                        frameIndex = i - 1  -- 0-based for consistency (first raid frame = 0)
-                        break
-                    end
-                end
+            if frame.isRaidFrame then
+                frameIndex = (frame.index or 1) - 1
+            else
+                frameIndex = frame.index
             end
         else
             -- For live frames during test mode (shouldn't happen but just in case)
