@@ -866,16 +866,21 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
 
     if isOutOfRange then
         if db.oorEnabled then
-            -- Element-specific alpha mode
-            healthBarAlpha = db.oorHealthBarAlpha or 0.55
-            backgroundAlpha = db.oorBackgroundAlpha or 0.55
+            -- Element-specific alpha mode.
+            -- ⚠ EVERY FALLBACK HERE MIRRORS ElementAppearance.lua's OWN. Six of them
+            -- used to be a blanket 0.55 against live's 0.1-0.5 -- background was out
+            -- by 5.5x. Invisible today because Config seeds all six, so it only bites
+            -- a profile missing a key (an old import, a hand-edited SavedVariables).
+            -- If you add an oor*Alpha, copy live's fallback, do not invent one.
+            healthBarAlpha = db.oorHealthBarAlpha or 0.2
+            backgroundAlpha = db.oorBackgroundAlpha or 0.1
             nameAlpha = db.oorTextAlpha or 0.55
             healthTextAlpha = db.oorTextAlpha or 0.55
-            aurasAlpha = db.oorAurasAlpha or 0.55
-            iconsAlpha = db.oorIconsAlpha or 0.55
-            powerBarAlpha = db.oorPowerBarAlpha or 0.55
-            dispelAlpha = db.oorDispelOverlayAlpha or 0.55
-            borderAlpha = db.oorBorderAlpha or 0.55
+            aurasAlpha = db.oorAurasAlpha or 0.2
+            iconsAlpha = db.oorIconsAlpha or 0.5
+            powerBarAlpha = db.oorPowerBarAlpha or 0.2
+            dispelAlpha = db.oorDispelOverlayAlpha or 0.2
+            borderAlpha = db.oorBorderAlpha or 0.2
         end
         -- ☠ NO `else` BRANCH, DELIBERATELY. Simple range-fade mode fades the WHOLE
         -- FRAME with one SetAlpha further down -- exactly as live's
@@ -1107,7 +1112,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- Frame-level alpha when not using element-specific OOR (same as live UpdateFrameAppearance)
     if not db.oorEnabled then
         if isOutOfRange then
-            frame:SetAlpha(db.rangeFadeAlpha or db.rangeAlpha or 0.55)
+            frame:SetAlpha(db.rangeFadeAlpha or db.rangeAlpha or 0.4)
         elseif isAboveHealthThreshold then
             frame:SetAlpha(db.healthFadeAlpha or 0.5)
         else

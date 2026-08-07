@@ -179,7 +179,7 @@ function DF:GetStatusIconFadeAlpha(frame, prefix)
             -- SetIgnoreParentAlpha(true), so the cascade never reaches them and an
             -- explicit multiply is the only route either way.
             alpha = alpha * (db.oorEnabled and (db.oorIconsAlpha or 0.5)
-                or (db.rangeFadeAlpha or db.rangeAlpha or 0.55))
+                or (db.rangeFadeAlpha or db.rangeAlpha or 0.4))
         end
     end
     return alpha
