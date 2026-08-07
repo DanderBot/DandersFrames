@@ -979,10 +979,8 @@ function DF:UpdateDispelOverlayAppearance(frame)
     if db.oorEnabled then
         local oorAlpha = db.oorDispelOverlayAlpha or 0.2
         ApplyOORAlpha(overlay.gradient,     inRange, gradAlpha, gradAlpha * oorAlpha)
-        ApplyOORAlpha(overlay.borderTop,    inRange, brdAlpha,  brdAlpha  * oorAlpha)
-        ApplyOORAlpha(overlay.borderBottom, inRange, brdAlpha,  brdAlpha  * oorAlpha)
-        ApplyOORAlpha(overlay.borderLeft,   inRange, brdAlpha,  brdAlpha  * oorAlpha)
-        ApplyOORAlpha(overlay.borderRight,  inRange, brdAlpha,  brdAlpha  * oorAlpha)
+        -- One ring host now, not four strips (see BuildDispelOverlayWidget).
+        ApplyOORAlpha(overlay.borderRingHost, inRange, brdAlpha, brdAlpha * oorAlpha)
         if overlay.icons then
             for _, icon in pairs(overlay.icons) do
                 ApplyOORAlpha(icon, inRange, icnAlpha, icnAlpha * oorAlpha)
@@ -993,10 +991,7 @@ function DF:UpdateDispelOverlayAppearance(frame)
         end
     else
         if overlay.gradient     then overlay.gradient:SetAlpha(gradAlpha) end
-        if overlay.borderTop    then overlay.borderTop:SetAlpha(brdAlpha) end
-        if overlay.borderBottom then overlay.borderBottom:SetAlpha(brdAlpha) end
-        if overlay.borderLeft   then overlay.borderLeft:SetAlpha(brdAlpha) end
-        if overlay.borderRight  then overlay.borderRight:SetAlpha(brdAlpha) end
+        if overlay.borderRingHost then overlay.borderRingHost:SetAlpha(brdAlpha) end
         if overlay.icons then
             for _, icon in pairs(overlay.icons) do
                 icon:SetAlpha(icnAlpha)
