@@ -1160,7 +1160,17 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     else
         if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
     end
-    
+
+    -- ★ OUT-OF-RANGE FADE FOR THE FOUR BARS, straight from the live functions. The
+    -- preview had NO counterpart for oorAbsorbBarAlpha or oorMissingHealthAlpha, so
+    -- the absorb, heal-absorb, heal-prediction and missing-health bars never dimmed
+    -- out of range here while live dimmed all four. Nothing was deleted to make room:
+    -- these are keys the preview simply never implemented. (Audit, 2026-08-07.)
+    if DF.UpdateAbsorbBarAppearance then DF:UpdateAbsorbBarAppearance(frame) end
+    if DF.UpdateHealAbsorbBarAppearance then DF:UpdateHealAbsorbBarAppearance(frame) end
+    if DF.UpdateHealPredictionBarAppearance then DF:UpdateHealPredictionBarAppearance(frame) end
+    if DF.UpdateMissingHealthBarAppearance then DF:UpdateMissingHealthBarAppearance(frame) end
+
     -- Update power/resource bar
     DF:UpdateTestPowerBar(frame, testData)
     
