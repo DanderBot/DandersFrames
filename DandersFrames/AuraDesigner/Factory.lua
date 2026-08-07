@@ -2958,7 +2958,21 @@ local function reconcileSoundNow(frame)
     local owns = DF.FactoryOwnsAD and DF:FactoryOwnsAD(db)
     if enabled and owns and frame.unit then
         local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
-        if adDB and adDB.enabled then
+        -- ☠ soundEnabled IS THE MASTER MUTE, and it had no reader anywhere in the render
+        -- path. The Global tab's "Sound Alerts -> Enabled" checkbox wrote adDB.soundEnabled;
+        -- this gate tested adDB.enabled (the AD master) and each indicator's own
+        -- sound.enabled, and never this one. The only other thing the checkbox did was call
+        -- SoundEngine:StopAll(), which is itself inert -- STATE_PLAYING is declared and
+        -- compared but never assigned, so every state stays IDLE and both stop functions are
+        -- unconditional no-ops.
+        --
+        -- So unticking it did nothing at all: every AddAuraSound registration stayed live
+        -- and kept firing, this session and every session after, and the only way to silence
+        -- alerts was to untick each indicator one at a time.
+        --
+        -- Tests ~= false, not truthiness: nil means ON (the shipped default is true, and a
+        -- profile predating the key must keep its alerts).
+        if adDB and adDB.enabled and adDB.soundEnabled ~= false then
             local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
             local spec = Engine and Engine.ResolveSpec and Engine:ResolveSpec(adDB)
             -- Spec gate matches SyncFrame (spec nil = AD renders nothing, sounds included).

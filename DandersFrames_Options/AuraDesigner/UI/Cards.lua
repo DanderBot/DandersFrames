@@ -164,8 +164,24 @@ local function BuildGlobalView(parent)
             function(v)                                                        -- customSet
                 local adDB = GetAuraDesignerDB()
                 adDB.soundEnabled = v and true or false
-                if not adDB.soundEnabled and DF.AuraDesigner.SoundEngine then
+                -- ☠ RE-RECONCILE, don't just write the flag. reconcileSoundNow now honours
+                -- soundEnabled, but nothing here asked it to run -- so a mute would not have
+                -- taken effect until the next UNIT_AURA happened to re-sync each frame,
+                -- which in a quiet moment is never. SyncSound registers/unregisters the
+                -- native handles, which is exactly what muting has to do.
+                --
+                -- StopAll is deliberately NOT relied on: it is inert (SoundEngine's
+                -- STATE_PLAYING is never assigned, so every state stays IDLE and the stop
+                -- functions are no-ops). Kept only because it is harmless and the state
+                -- machine may be revived later.
+                if DF.AuraDesigner.SoundEngine and not adDB.soundEnabled then
                     DF.AuraDesigner.SoundEngine:StopAll()
+                end
+                local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
+                if Factory and Factory.SyncSound and DF.IterateAllFrames then
+                    DF:IterateAllFrames(function(frame)
+                        if frame and frame.dfADFactory then Factory:SyncSound(frame) end
+                    end)
                 end
             end), 24)
         g:AddWidget(GUI:CreateDropdown(parent, L["Channel"], SOUND_CHANNELS,
