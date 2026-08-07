@@ -1,4 +1,4 @@
-local addonName, DF = ...
+﻿local addonName, DF = ...
 
 -- Local caching of frequently used globals for performance
 local pairs, ipairs, type, tonumber, tostring = pairs, ipairs, type, tonumber, tostring
@@ -4845,140 +4845,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
         end
 
     elseif event == "PLAYER_LOGIN" then
-        -- Check for NephUI
-        -- NOTE: NephUI previously contained stolen DandersFrames code. A compatibility
-        -- popup was added to warn users. The copyright-infringing code has since been
-        -- removed from NephUI, so the popup is disabled and compatibility is restored.
-        -- Keeping this code in case it's needed again in the future.
-        local nephUIPopupEnabled = false
-        local nephUILoaded = false
-        if C_AddOns and C_AddOns.IsAddOnLoaded then
-            nephUILoaded = C_AddOns.IsAddOnLoaded("NephUI")
-        elseif IsAddOnLoaded then
-            nephUILoaded = IsAddOnLoaded("NephUI")
-        end
-        
-        if nephUILoaded and nephUIPopupEnabled then
-            -- Theme color for popup
-            local themeColor = { r = 0.2, g = 0.8, b = 0.2 }
-            
-            -- Helper function to create styled buttons (routed through GUI:StyleButton)
-            local function CreatePopupButton(parent, text, yOffset, isPrimary)
-                local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-                if isPrimary then
-                    DF.GUI:StyleButton(btn, { width = 220, height = 32, text = text, primary = true })
-                else
-                    DF.GUI:StyleButton(btn, { width = 220, height = 32, text = text })
-                end
-                btn:SetPoint("TOP", parent.warning, "BOTTOM", 0, yOffset)
-                btn.label = btn.Text
-
-                return btn
-            end
-            
-            -- Create the popup frame
-            local popup = CreateFrame("Frame", "DFNephUIPopup", UIParent, "BackdropTemplate")
-            popup:SetSize(420, 240)
-            popup:SetPoint("CENTER")
-            DF.GUI:CreateElementBackdrop(popup, {
-                edgeSize    = 2,
-                bgColor     = { 0.1, 0.1, 0.1, 0.98 },
-                borderColor = { themeColor.r, themeColor.g, themeColor.b, 1 },
-            })
-            popup:SetFrameStrata("FULLSCREEN_DIALOG")
-            popup:SetFrameLevel(200)
-            popup:EnableMouse(true)
-            popup:SetMovable(true)
-            popup:RegisterForDrag("LeftButton")
-            popup:SetScript("OnDragStart", popup.StartMoving)
-            popup:SetScript("OnDragStop", popup.StopMovingOrSizing)
-            
-            -- Title
-            local title = popup:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
-            title:SetPoint("TOP", 0, -15)
-            title:SetText("Addon Conflict Detected")
-            title:SetTextColor(1, 0.3, 0.3)
-            popup.title = title
-            
-            -- Warning icons on either side of title
-            local leftWarning = popup:CreateTexture(nil, "OVERLAY")
-            leftWarning:SetSize(20, 20)
-            leftWarning:SetPoint("RIGHT", title, "LEFT", -8, 0)
-            leftWarning:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning")
-            leftWarning:SetVertexColor(1, 0.3, 0.3)
-            popup.leftWarning = leftWarning
-            
-            local rightWarning = popup:CreateTexture(nil, "OVERLAY")
-            rightWarning:SetSize(20, 20)
-            rightWarning:SetPoint("LEFT", title, "RIGHT", 8, 0)
-            rightWarning:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\warning")
-            rightWarning:SetVertexColor(1, 0.3, 0.3)
-            popup.rightWarning = rightWarning
-            
-            -- Message
-            local msg = popup:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
-            msg:SetPoint("TOP", title, "BOTTOM", 0, -15)
-            msg:SetPoint("LEFT", 25, 0)
-            msg:SetPoint("RIGHT", -25, 0)
-            msg:SetJustifyH("CENTER")
-            msg:SetText("Both |cff00ff00DandersFrames|r and |cffff6666NephUI|r are loaded.\n\nWhich addon would you like to use?")
-            msg:SetTextColor(1, 1, 1)
-            popup.msg = msg
-            
-            -- Warning text
-            local warning = popup:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-            warning:SetPoint("TOP", msg, "BOTTOM", 0, -10)
-            warning:SetPoint("LEFT", 25, 0)
-            warning:SetPoint("RIGHT", -25, 0)
-            warning:SetJustifyH("CENTER")
-            warning:SetText("Selecting an option will disable the other addon\nand reload your UI.")
-            warning:SetTextColor(0.7, 0.7, 0.7)
-            popup.warning = warning
-            
-            -- DandersFrames button (primary)
-            local dfBtn = CreatePopupButton(popup, "Use DandersFrames", -20, true)
-            dfBtn:SetScript("OnClick", function()
-                if C_AddOns and C_AddOns.DisableAddOn then
-                    C_AddOns.DisableAddOn("NephUI")
-                elseif DisableAddOn then
-                    DisableAddOn("NephUI")
-                end
-                ReloadUI()
-            end)
-            popup.dfBtn = dfBtn
-            
-            -- NephUI button (secondary - triggers wrong choice)
-            local nephBtn = CreatePopupButton(popup, "Use NephUI", -57, false)
-            nephBtn:SetScript("OnClick", function()
-                -- Switch to "wrong choice" state
-                title:SetText("That's the wrong choice!")
-                title:SetTextColor(1, 0.4, 0.2)
-                
-                -- Hide warning icons for this screen
-                leftWarning:Hide()
-                rightWarning:Hide()
-                
-                msg:SetText("|cffff6666NephUI|r has stolen and copied |cff00ff00DandersFrames|r.\n\nThere is only one correct option here.")
-                
-                warning:SetText("")
-                
-                -- Hide the NephUI button
-                nephBtn:Hide()
-                
-                -- Update DandersFrames button
-                dfBtn.label:SetText("Use DandersFrames (The Original)")
-                dfBtn:SetSize(260, 32)
-                dfBtn:ClearAllPoints()
-                dfBtn:SetPoint("TOP", msg, "BOTTOM", 0, -25)
-            end)
-            popup.nephBtn = nephBtn
-            
-            -- Store reference
-            DF.nephUIPopup = popup
-            
-            -- Don't initialize DandersFrames if NephUI is loaded
-            return
-        end
+        -- (Removed) a disabled third-party compatibility popup that ran here. It had been
+        -- gated off behind a literal `false` once the issue it existed for was resolved, and
+        -- kept in case it were ever needed again — but git keeps it perfectly well, and the
+        -- dead flag did not stop its text shipping in readable addon Lua.
+        -- Restore with: git log -S nephUIPopupEnabled
+        -- ⚠ The remaining mentions of that addon elsewhere are INTEROPERABILITY, not this:
+        -- ClickCasting/Core.lua names it among addons that register into ClickCastFrames,
+        -- and Frames.lua carries its frame-name patterns so click casting works with it.
+        -- Those stay.
         
         -- Enable raid buff filtering now that we're past ADDON_LOADED
         -- (avoids "secret value" errors during combat reload initialization)
