@@ -123,7 +123,26 @@ end
 -- ⚠ The prompt is CHAINED. Popups are a singleton here, so opening one from inside
 -- another's handler needs the next frame; the "Import as Copy" route reaches this
 -- from a popup button.
+-- ☠ THIS FUNCTION IS AT FILE SCOPE, so it can see NEITHER of the two things it needs.
+-- `R` (local R = DF.FilterRegistry) and `SelectFilter` are both declared INSIDE
+-- DF:BuildFilterDesignerPage, hundreds of lines below -- a local declared later, in an
+-- inner block, is not an upvalue of a function defined earlier at file scope. Both
+-- therefore compiled as nil globals and every route through single-filter import died on
+-- "attempt to index a nil value (global 'R')": a clean import, and "Import as Copy".
+--
+-- The regression came from hoisting the body OUT of BuildFilterDesignerPage to chain the
+-- rename prompt; the references came with it and the scope did not. This file already
+-- warns about the identical hazard for `GUI` a hundred lines above -- same trap, second
+-- name.
+--
+-- Fixed by resolving R at call time (DF.FilterRegistry is the main addon's, resident
+-- before this companion file ever runs) and by promoting SelectFilter to a file-scope
+-- forward declaration that BuildFilterDesignerPage assigns into.
+local SelectFilter   -- forward declaration; assigned in DF:BuildFilterDesignerPage
+
 local function ImportNamed(def)
+    local R = DF.FilterRegistry
+    if not R or not SelectFilter then return end
     if not R:IsCustomFilterNameTaken(def.name) then
         SelectFilter("custom", R:ImportFilterPayload(def))
         return
@@ -1285,7 +1304,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     -- rather than another list row.
     local ACT_BTN_W = (LEFT_W - 12 - 4) / 2
 
-    local function SelectFilter(kind, key)
+    -- NOT `local function` -- assigns the file-scope forward declaration above, so
+    -- ImportNamed (hoisted out of this function to chain the rename prompt) can reach it.
+    -- Still an upvalue of this closure, so selKind/selKey/searchBox bind exactly as before.
+    function SelectFilter(kind, key)
         selKind, selKey = kind, key
         -- Clear the search when switching filters (SetText fires
         -- OnTextChanged, which syncs searchText and refreshes the list)
