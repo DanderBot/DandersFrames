@@ -2392,6 +2392,14 @@ end
 -- commits; caching them here keeps the hot path zero-lookup.
 local TL_UnitSpellTargetName = UnitSpellTargetName
 local TL_UnitSpellTargetClass = UnitSpellTargetClass
+-- ☠ THE GATE FOR THE TWO ABOVE. Both of those are `SecretReturns = true` in
+-- Blizzard_APIDocumentationGenerated/UnitDocumentation.lua, so their results can never be
+-- truth-tested, compared or concatenated -- only forwarded to a sink.
+-- UnitShouldDisplaySpellTargetName is the API that exists to answer "is there a target
+-- name to show?" WITHOUT touching the secret: it has no SecretReturns and returns a plain
+-- bool. Blizzard's own CastingBarFrame (Blizzard_UIPanels_Game/Shared/CastingBarFrame.lua)
+-- gates on it and then hands the secrets straight to SetText / GetClassColor.
+local TL_UnitShouldDisplaySpellTargetName = UnitShouldDisplaySpellTargetName
 local TL_UnitCastingInfo = UnitCastingInfo
 local TL_UnitChannelInfo = UnitChannelInfo
 local TL_UnitCastingDuration = UnitCastingDuration
@@ -3707,8 +3715,17 @@ local function TargetedList_ApplyBarContent(bar, activeRec)
     if isTest and activeRec.testTargetName then
         bar.targetName:SetText(arrowPrefix .. activeRec.testTargetName .. arrowSuffix)
     else
-        local targetName = TL_UnitSpellTargetName(casterUnit)
-        if targetName then
+        -- ☠ ASK THE GATE, NEVER THE VALUE. This used to read the name and then do
+        -- `if targetName then` -- a truth test on a SecretReturns value, which throws in
+        -- restricted content. It sits inside the render pass, so the throw would abort the
+        -- whole list mid-pull and repeat on every cast. It has not bitten because the value
+        -- only actually goes secret in the contexts this gate exists to describe; outside
+        -- them it comes back plain and the test worked by luck.
+        --
+        -- UnitShouldDisplaySpellTargetName returns a plain bool, so it is safe to test. The
+        -- name is then forwarded to a FontString sink without ever being inspected.
+        if TL_UnitShouldDisplaySpellTargetName and TL_UnitShouldDisplaySpellTargetName(casterUnit) then
+            local targetName = TL_UnitSpellTargetName(casterUnit)
             if arrowPrefix ~= "" or arrowSuffix ~= "" then
                 bar.targetName:SetFormattedText("%s%s%s", arrowPrefix, targetName, arrowSuffix)
             else
@@ -3723,17 +3740,21 @@ local function TargetedList_ApplyBarContent(bar, activeRec)
     -- records use UnitSpellTargetClass (secret, through Blizzard sink).
     local useClassColor = party and party.targetedListTargetNameClassColor
     if useClassColor and TL_C_ClassColor and TL_C_ClassColor.GetClassColor then
-        local targetClass
+        -- Same rule as the name above: UnitSpellTargetClass is SecretReturns, so it is
+        -- gated rather than tested, and handed straight to GetClassColor -- which is what
+        -- Blizzard's cast bar does with it. A TEST record carries a plain string, so that
+        -- branch keeps its ordinary nil check.
+        local color
         if isTest then
-            targetClass = activeRec.testTargetClass
-        else
-            targetClass = TL_UnitSpellTargetClass(casterUnit)
-        end
-        if targetClass then
-            local color = TL_C_ClassColor.GetClassColor(targetClass)
-            if color then
-                bar.targetName:SetTextColor(color.r, color.g, color.b, 1)
+            local targetClass = activeRec.testTargetClass
+            if targetClass then
+                color = TL_C_ClassColor.GetClassColor(targetClass)
             end
+        elseif TL_UnitShouldDisplaySpellTargetName and TL_UnitShouldDisplaySpellTargetName(casterUnit) then
+            color = TL_C_ClassColor.GetClassColor(TL_UnitSpellTargetClass(casterUnit))
+        end
+        if color then
+            bar.targetName:SetTextColor(color.r, color.g, color.b, 1)
         else
             bar.targetName:SetTextColor(1, 1, 1, 1)
         end
