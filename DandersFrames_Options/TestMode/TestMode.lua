@@ -2151,89 +2151,26 @@ end
 
 -- Apply layout/style settings to a test frame (fonts, sizes, textures, borders, etc.)
 -- This should be called when visual settings change, not just when data changes
+-- ☠ THIS USED TO RE-IMPLEMENT DF:ApplyFrameLayout AND THEN CALL IT. ~80 lines of
+-- frame size, health-bar texture/orientation, missing-health orientation, border and
+-- resource-bar layout -- every one of them already done inside ApplyFrameLayout,
+-- which it invoked at the end via the ApplyFrameStyle alias (Update.lua: that alias
+-- is a one-line forward). So the copy ran first and the real thing overwrote it.
+--
+-- Two things the copy got WRONG while it was there:
+--   * raw SetSize instead of DF:SetPixelPerfectSize, and it read db.frameWidth where
+--     live reads frame.dfPinnedWidth or db.frameWidth -- so it would have sized a
+--     pinned frame by the global width. Inert only because it was never called on one.
+--   * a missing-health TEXTURE write, which looked unique but is not: both test
+--     update paths already set it (see the SafeSetStatusBarTexture calls in
+--     UpdateTestFrame and UpdateTestFrameHealthOnly), as live does inside
+--     SetMissingHealthBarValue.
+--
+-- Kept as a named function rather than deleted because call sites pair it with
+-- UpdateTestFrame and the pairing reads clearly. (Audit, 2026-08-07.)
 function DF:ApplyTestFrameLayout(frame)
     if not frame then return end
-    
-    local db = DF:GetFrameDB(frame)
-    
-    -- Apply frame size
-    local frameWidth = db.frameWidth or 120
-    local frameHeight = db.frameHeight or 50
-    if db.pixelPerfect then
-        frameWidth = DF:PixelPerfect(frameWidth)
-        frameHeight = DF:PixelPerfect(frameHeight)
-    end
-    frame:SetSize(frameWidth, frameHeight)
-    
-    -- Apply health bar settings
-    if frame.healthBar then
-        -- Texture
-        local healthTex = db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
-        DF:SafeSetStatusBarTexture(frame.healthBar, healthTex)
-        
-        -- Orientation
-        local orientation = db.healthOrientation or "HORIZONTAL"
-        if orientation == "HORIZONTAL" then
-            frame.healthBar:SetOrientation("HORIZONTAL")
-            frame.healthBar:SetReverseFill(false)
-            frame.healthBar:SetRotatesTexture(false)
-        elseif orientation == "HORIZONTAL_INV" then
-            frame.healthBar:SetOrientation("HORIZONTAL")
-            frame.healthBar:SetReverseFill(true)
-            frame.healthBar:SetRotatesTexture(false)
-        elseif orientation == "VERTICAL" then
-            frame.healthBar:SetOrientation("VERTICAL")
-            frame.healthBar:SetReverseFill(false)
-            frame.healthBar:SetRotatesTexture(true)
-        elseif orientation == "VERTICAL_INV" then
-            frame.healthBar:SetOrientation("VERTICAL")
-            frame.healthBar:SetReverseFill(true)
-            frame.healthBar:SetRotatesTexture(true)
-        end
-        
-        -- Also apply to missing health bar
-        if frame.missingHealthBar then
-            local missingTex = db.missingHealthTexture
-            if not missingTex or missingTex == "" then
-                missingTex = healthTex
-            end
-            DF:SafeSetStatusBarTexture(frame.missingHealthBar, missingTex)
-            
-            if orientation == "HORIZONTAL" then
-                frame.missingHealthBar:SetOrientation("HORIZONTAL")
-                frame.missingHealthBar:SetReverseFill(true)
-                frame.missingHealthBar:SetRotatesTexture(false)
-            elseif orientation == "HORIZONTAL_INV" then
-                frame.missingHealthBar:SetOrientation("HORIZONTAL")
-                frame.missingHealthBar:SetReverseFill(false)
-                frame.missingHealthBar:SetRotatesTexture(false)
-            elseif orientation == "VERTICAL" then
-                frame.missingHealthBar:SetOrientation("VERTICAL")
-                frame.missingHealthBar:SetReverseFill(true)
-                frame.missingHealthBar:SetRotatesTexture(true)
-            elseif orientation == "VERTICAL_INV" then
-                frame.missingHealthBar:SetOrientation("VERTICAL")
-                frame.missingHealthBar:SetReverseFill(false)
-                frame.missingHealthBar:SetRotatesTexture(true)
-            end
-        end
-    end
-    
-    -- Apply frame border
-    if frame.border then
-        DF:ApplyFrameBorder(frame, db)
-    end
-    
-    -- Apply fonts using ApplyFrameStyle (handles name, health, status text fonts)
-    if DF.ApplyFrameStyle then
-        DF:ApplyFrameStyle(frame)
-    end
-    
-    -- Apply power bar layout (delegate to shared function which handles
-    -- match-width, role filtering, background, border, frame level, etc.)
-    if DF.ApplyResourceBarLayout then
-        DF:ApplyResourceBarLayout(frame)
-    end
+    if DF.ApplyFrameLayout then DF:ApplyFrameLayout(frame) end
 end
 
 -- Full refresh with layout application (use on test mode start or when settings change)
