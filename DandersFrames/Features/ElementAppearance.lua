@@ -367,14 +367,13 @@ function DF:UpdateMissingHealthBarAppearance(frame)
     if not IsDandersFrame(frame) then return end
     if not frame.missingHealthBar then return end
 
-    -- ★ TEST FRAMES PASS THROUGH FOR THE ALPHA, NOT THE VALUE. The fade is pure
-    -- db + GetInRange and the preview had NO counterpart for oorMissingHealthAlpha, so
-    -- the bar never dimmed out of range there. The VALUE write below is a different
-    -- matter: SetMissingHealthBarValue reads the unit's real health, and a test frame's
-    -- token resolves to a REAL player in a group -- the preview sets its own value.
-    -- (Audit, 2026-08-07.)
-    local isTest = frame.dfIsTestFrame
-    if (DF.testMode or DF.raidTestMode) and not isTest then return end
+    -- ★ TEST FRAMES PASS THROUGH. The fade is pure db + GetInRange and the preview had
+    -- NO counterpart for oorMissingHealthAlpha, so the bar never dimmed out of range
+    -- there. SetMissingHealthBarValue is stamp-aware now (it takes the fraction, the
+    -- dead state and the class from the frame when they are stamped), so the VALUE write
+    -- is shared too -- it no longer resolves a test frame's REAL token to whoever is
+    -- standing next to you. (Audit, 2026-08-07.)
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local unit = frame.unit
     if not unit then return end
@@ -386,8 +385,6 @@ function DF:UpdateMissingHealthBarAppearance(frame)
         local oorAlpha = db.oorMissingHealthAlpha or 0.2
         ApplyOORAlpha(frame.missingHealthBar, inRange, 1.0, oorAlpha)
     end
-
-    if isTest then return end
 
     -- SetMissingHealthBarValue handles the dead color override internally
     DF.SetMissingHealthBarValue(frame.missingHealthBar, unit, frame)

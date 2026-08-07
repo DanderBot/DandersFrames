@@ -516,117 +516,31 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     -- Update health bar
     frame.healthBar:SetValue(health)
 
-    -- Re-evaluate health fade threshold with animated health value
-    if db.healthFadeEnabled then
-        local healthPct = health * 100
-        local threshold = db.healthFadeThreshold or 100
-        local isAbove = (healthPct >= threshold - 0.5)
-        if isAbove and db.hfCancelOnDispel and frame.dfDispelOverlay and frame.dfDispelOverlay:IsShown() then
-            isAbove = false
-        end
-        if not db.oorEnabled then
-            frame:SetAlpha(isAbove and (db.healthFadeAlpha or 0.5) or 1.0)
-        end
+    -- ☠ A THIRD HEALTH-FADE RULE LIVED HERE and it disagreed with the real one on
+    -- both counts: it crossed at `>= threshold - 0.5` where DF:ApplyHealthFadeAlpha
+    -- crosses at `>` (matching the curve's threshold/100 -/+ 0.001 points), and its
+    -- below-threshold alpha was a flat 1.0, ignoring rangeFadeAlpha -- so an
+    -- out-of-range unit under the threshold dimmed live and did not in the preview.
+    -- Stamping the ANIMATED fraction and calling the real function fixes both, and
+    -- keeps every other dfHealthPct consumer honest mid-animation. (Audit, 2026-08-07.)
+    frame.dfHealthPct = health
+    frame.dfTestMaxHealth = testData.maxHealth
+    frame.dfTestCurrentHealth = math.floor((testData.maxHealth or 100000) * health)
+    if DF.ApplyHealthFadeAlpha then DF:ApplyHealthFadeAlpha(frame) end
+
+    -- ★ LIVE'S MISSING-HEALTH RENDERER, not a copy of it. Two near-identical ~55-line
+    -- restatements (value, texture, all four colour modes, the dead-colour override)
+    -- lived in this file. DF.SetMissingHealthBarValue now reads the frame stamps, so
+    -- there is one renderer; it also owns the BACKGROUND-mode hide, so no branch is
+    -- needed here. (Audit, 2026-08-07.)
+    if frame.missingHealthBar then
+        DF.SetMissingHealthBarValue(frame.missingHealthBar, frame.unit, frame)
     end
 
-    -- Update missing health bar if enabled
-    if frame.missingHealthBar then
-        local backgroundMode = db.backgroundMode or "BACKGROUND"
-        if backgroundMode == "MISSING_HEALTH" or backgroundMode == "BOTH" then
-            local missingHealth = 1 - health  -- In test mode, we can calculate directly
-            frame.missingHealthBar:SetMinMaxValues(0, 1)
-            frame.missingHealthBar:SetValue(missingHealth)
-            
-            -- Handle color mode
-            local colorMode = db.missingHealthColorMode or "CUSTOM"
-            local r, g, b, a
-            if colorMode == "PERCENT" then
-                local color = DF:GetHealthGradientColor(health, db, testData.class, "missingHealthColor")
-                if color then
-                    r, g, b = color.r, color.g, color.b
-                else
-                    r, g, b = 0.5, 0, 0
-                end
-                a = db.missingHealthGradientAlpha or 0.8
-            elseif colorMode == "CLASS" and testData.class then
-                local classColor = DF:GetClassColor(testData.class)
-                if classColor then
-                    r, g, b = classColor.r, classColor.g, classColor.b
-                else
-                    r, g, b = 0.5, 0, 0
-                end
-                a = db.missingHealthClassAlpha or 0.8
-            else
-                local missingColor = db.missingHealthColor or {r = 0.5, g = 0, b = 0, a = 0.8}
-                r, g, b, a = missingColor.r, missingColor.g, missingColor.b, missingColor.a or 0.8
-            end
-            frame.missingHealthBar:SetStatusBarColor(r, g, b, a)
-            
-            -- Handle texture
-            local texture = db.missingHealthTexture
-            if not texture or texture == "" then
-                texture = db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
-            end
-            DF:SafeSetStatusBarTexture(frame.missingHealthBar, texture)
-            
-            frame.missingHealthBar:Show()
-        else
-            frame.missingHealthBar:Hide()
-        end
-    end
-    
-    -- Update health bar color if using PERCENT (gradient) mode
-    -- Only update RGB, alpha is managed by UpdateTestFrame
-    -- Skip if aggro color override is active
-    if db.healthColorMode == "PERCENT" and not frame.dfAggroActive then
-        local color = DF:GetHealthGradientColor(health, db, testData.class)
-        if color then
-            frame.healthBar:SetStatusBarColor(color.r, color.g, color.b)
-        end
-    end
-    
-    -- Update health text if visible
-    if frame.healthText and frame.healthText:IsShown() then
-        local maxHP = testData.maxHealth or 100000
-        local currentHP = math.floor(maxHP * health)
-        local deficit = currentHP - maxHP
-        local pct = health * 100
-        -- ☠ DEFAULT WAS "DEFICIT" HERE AND "PERCENT" EVERYWHERE ELSE (UpdateTestFrame
-        -- and live's two Update.lua sites). A profile without the key showed one format
-        -- while animating and another the instant any setting changed. (Audit, 2026-08-07.)
-        local format = db.healthTextFormat or "PERCENT"
-        -- ☠ AND THE PERCENT BRANCH HARDCODED "%.0f%%", ignoring Hide % Symbol -- so with
-        -- that ticked and Animate Health on, the % was present 20x a second in the
-        -- preview and never present live.
-        local pctFmt = db.healthTextHidePercent and "%.0f" or "%.0f%%"
-        local abbreviate = db.healthTextAbbreviate
-        
-        local function FormatVal(val)
-            if abbreviate then
-                return DF:FormatNumber(val)
-            end
-            return tostring(val)
-        end
-        
-        local text = ""
-        if format == "CURRENT" then
-            text = FormatVal(currentHP)
-        elseif format == "PERCENT" then
-            text = string.format(pctFmt, pct)
-        elseif format == "DEFICIT" then
-            if deficit < 0 then
-                text = FormatVal(deficit)
-            else
-                text = ""
-            end
-        elseif format == "CURRENT_MAX" or format == "CURRENTMAX" then
-            text = FormatVal(currentHP) .. "/" .. FormatVal(maxHP)
-        elseif format == "CURRENT_PERCENT" then
-            text = FormatVal(currentHP) .. " " .. string.format("%.0f%%", pct)
-        end
-        frame.healthText:SetText(text)
-    end
-    
+    -- ★ Live's formatter, driven by the stamps above -- the preview kept two of its
+    -- own, both of which disagreed with live. (Audit, 2026-08-07.)
+    DF:ApplyHealthText(frame, db, DF.IsLegacyTextHidden and DF:IsLegacyTextHidden(frame))
+
     -- Update bars to follow animated health (use animated health value)
     local animatedTestData = {}
     for k, v in pairs(testData) do
@@ -700,6 +614,9 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- on a preview frame. Live gets this from UnitHealthPercent(unit, true, curve),
     -- which is secret-safe and needs a REAL unit; the preview has a plain number.
     frame.dfHealthPct = testData.healthPercent or 1
+    -- Absolute health, for the current / current-max / deficit text formats.
+    frame.dfTestMaxHealth = testData.maxHealth
+    frame.dfTestCurrentHealth = testData.currentHealth
 
     local db = DF:GetFrameDB(frame)
 
@@ -743,110 +660,17 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     end
     if DF.UpdateReducedMaxHealth then DF:UpdateReducedMaxHealth(frame) end
 
-    -- Update missing health bar if enabled
+    -- ★ LIVE'S MISSING-HEALTH RENDERER, not a copy of it. Two near-identical ~55-line
+    -- restatements (value, texture, all four colour modes, the dead-colour override)
+    -- lived in this file. DF.SetMissingHealthBarValue now reads the frame stamps, so
+    -- there is one renderer; it also owns the BACKGROUND-mode hide, so no branch is
+    -- needed here. (Audit, 2026-08-07.)
     if frame.missingHealthBar then
-        local backgroundMode = db.backgroundMode or "BACKGROUND"
-        if backgroundMode == "MISSING_HEALTH" or backgroundMode == "BOTH" then
-            local missingHealth = 1 - healthValue  -- In test mode, we can calculate directly
-            frame.missingHealthBar:SetMinMaxValues(0, 1)
-            if db.smoothBars and Enum and Enum.StatusBarInterpolation then
-                frame.missingHealthBar:SetValue(missingHealth, Enum.StatusBarInterpolation.ExponentialEaseOut)
-            else
-                frame.missingHealthBar:SetValue(missingHealth)
-            end
-            
-            -- Handle color mode
-            local colorMode = db.missingHealthColorMode or "CUSTOM"
-            local r, g, b, a
-            
-            -- Check for dead/offline with custom dead color (same as Core.lua)
-            local isDeadOrOfflineForColor = testData.status == "Dead" or testData.status == "Offline"
-            local useDeadColor = isDeadOrOfflineForColor and db.fadeDeadFrames and db.fadeDeadUseCustomColor
-            
-            if useDeadColor then
-                -- Use custom dead color (same as background uses)
-                local c = db.fadeDeadBackgroundColor or {r = 0.3, g = 0, b = 0}
-                r, g, b = c.r, c.g, c.b
-                a = db.fadeDeadBackground or 0.4
-            elseif colorMode == "PERCENT" then
-                local color = DF:GetHealthGradientColor(healthValue, db, testData.class, "missingHealthColor")
-                if color then
-                    r, g, b = color.r, color.g, color.b
-                else
-                    r, g, b = 0.5, 0, 0
-                end
-                a = db.missingHealthGradientAlpha or 0.8
-            elseif colorMode == "CLASS" and testData.class then
-                local classColor = DF:GetClassColor(testData.class)
-                if classColor then
-                    r, g, b = classColor.r, classColor.g, classColor.b
-                else
-                    r, g, b = 0.5, 0, 0
-                end
-                a = db.missingHealthClassAlpha or 0.8
-            else
-                local missingColor = db.missingHealthColor or {r = 0.5, g = 0, b = 0, a = 0.8}
-                r, g, b, a = missingColor.r, missingColor.g, missingColor.b, missingColor.a or 0.8
-            end
-            frame.missingHealthBar:SetStatusBarColor(r, g, b, a)
-            
-            -- Handle texture
-            local texture = db.missingHealthTexture
-            if not texture or texture == "" then
-                texture = db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
-            end
-            DF:SafeSetStatusBarTexture(frame.missingHealthBar, texture)
-            
-            frame.missingHealthBar:Show()
-        else
-            frame.missingHealthBar:Hide()
-        end
+        DF.SetMissingHealthBarValue(frame.missingHealthBar, frame.unit, frame)
     end
-    
-    -- Update health text with proper formatting
-    local format = db.healthTextFormat or "PERCENT"
-    local currentHealth = testData.currentHealth
-    local maxHealth = testData.maxHealth
-    local deficit = maxHealth - currentHealth
-    local abbreviate = db.healthTextAbbreviate
-    
-    local function FormatValue(val)
-        if abbreviate then
-            if AbbreviateNumbers then
-                return AbbreviateNumbers(val)
-            elseif AbbreviateLargeNumbers then
-                return AbbreviateLargeNumbers(val)
-            end
-            -- Manual abbreviation fallback when abbreviate is true
-            if val >= 1000000 then
-                return string.format("%.1fM", val / 1000000)
-            elseif val >= 1000 then
-                return string.format("%.0fK", val / 1000)
-            end
-        end
-        -- No abbreviation - return full number with comma formatting
-        return tostring(val)
-    end
-    
-    local pctFmt = db.healthTextHidePercent and "%.0f" or "%.0f%%"
-    if format == "PERCENT" then
-        frame.healthText:SetFormattedText(pctFmt, healthValue * 100)
-    elseif format == "CURRENT" then
-        frame.healthText:SetText(FormatValue(currentHealth))
-    elseif format == "CURRENTMAX" then
-        frame.healthText:SetText(FormatValue(currentHealth) .. "/" .. FormatValue(maxHealth))
-    elseif format == "DEFICIT" then
-        if deficit > 0 then
-            frame.healthText:SetText("-" .. FormatValue(deficit))
-        else
-            frame.healthText:SetText("")
-        end
-    elseif format == "NONE" then
-        frame.healthText:SetText("")
-    else
-        frame.healthText:SetFormattedText(pctFmt, healthValue * 100)
-    end
-    
+
+    DF:ApplyHealthText(frame, db, DF.IsLegacyTextHidden and DF:IsLegacyTextHidden(frame))
+
     -- Update name
     local displayName = testData.name
     if displayName then
