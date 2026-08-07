@@ -49,7 +49,18 @@ Sort.UnitCache = {}
 -- ============================================================
 
 -- Get the role for a unit (TANK, HEALER, MELEE, RANGED, or DAMAGER)
-function Sort:GetUnitRole(unit)
+-- ⚠ PREVIEW-ONLY COMPARATOR PATH. Live party/raid ordering is decided by the
+-- SECURE SNIPPET's roleFilter (Features/SecureSort.lua), not by this file: every
+-- caller of SortFrameList passes isTestMode = true. So this Lua comparator exists
+-- to make the preview show the order the snippet WOULD produce, and the two have to
+-- be kept in step by hand -- there is no way to run a secure snippet against the
+-- non-secure test frames. Treat any change to the snippet's ordering as a change
+-- here as well. (Audit, 2026-08-07.)
+--
+-- `db` is the mode's DB. ☠ It used to be resolved here as DF:GetDB(), which is
+-- ALWAYS the party table -- so Separate Melee/Ranged set on the Raid page was
+-- ignored when sorting raid frames, and the party setting silently drove them.
+function Sort:GetUnitRole(unit, db)
     if not unit or not UnitExists(unit) then return "DAMAGER" end
     
     -- Check cache first. The GUID can be a secret value that can't be used as
@@ -68,7 +79,7 @@ function Sort:GetUnitRole(unit)
     
     -- For DPS, determine if melee or ranged
     if role == "DAMAGER" or role == "NONE" then
-        local db = DF:GetDB()
+        db = db or DF:GetDB()
         if db.sortSeparateMeleeRanged then
             local specID = nil
             
@@ -79,18 +90,12 @@ function Sort:GetUnitRole(unit)
                 -- For other players, try to get from inspection cache or guess from class
                 -- Note: In a full implementation, you'd use NotifyInspect/INSPECT_READY
                 -- For now, we'll use class-based guessing
+                -- ☠ A FOURTH HAND-WRITTEN MELEE TABLE lived here, missed by 20174c23.
+                -- It happened to agree with DF.MELEE_CLASSES, but agreement by copy is
+                -- what produced the earlier three-way disagreement in the first place.
                 local _, class = UnitClass(unit)
                 if class then
-                    -- Classes that are primarily melee (DPS specs are all melee)
-                    if class == "WARRIOR" or class == "ROGUE" or class == "DEATHKNIGHT" or class == "DEMONHUNTER" or class == "PALADIN" then
-                        role = "MELEE"
-                    -- Classes that are primarily ranged
-                    elseif class == "MAGE" or class == "WARLOCK" then
-                        role = "RANGED"
-                    -- Classes with both melee and ranged DPS specs - default to ranged
-                    else
-                        role = "RANGED"
-                    end
+                    role = DF.MELEE_CLASSES[class] and "MELEE" or "RANGED"
                 else
                     role = "DAMAGER"
                 end
@@ -157,8 +162,8 @@ end
 
 -- Compare function for sorting frames
 function Sort:CompareUnits(unitA, unitB, db)
-    local roleA = self:GetUnitRole(unitA)
-    local roleB = self:GetUnitRole(unitB)
+    local roleA = self:GetUnitRole(unitA, db)
+    local roleB = self:GetUnitRole(unitB, db)
     
     local prioA = self:GetRolePriority(roleA, db)
     local prioB = self:GetRolePriority(roleB, db)

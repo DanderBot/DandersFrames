@@ -626,7 +626,13 @@ function DF:UpdateRaidGroupLabels(activeGroupsTable, db, horizontal)
                 -- Determine anchor frame and points based on mode and layout
                 local anchorFrame
                 if isTestMode then
-                    anchorFrame = groupFirstFrame[g]
+                    -- The group's EXTENT (first..last), not its first frame -- live
+                    -- anchors to the separated header, which spans the group, so END
+                    -- and CENTER only agree if the preview anchors to a span too.
+                    -- Falls back to the first frame for the one pass before
+                    -- UpdateTestGroupExtents has run. (Audit, 2026-08-07.)
+                    anchorFrame = (DF.testGroupExtent and DF.testGroupExtent[g])
+                        or groupFirstFrame[g]
                 else
                     anchorFrame = DF.raidSeparatedHeaders and DF.raidSeparatedHeaders[g]
                 end

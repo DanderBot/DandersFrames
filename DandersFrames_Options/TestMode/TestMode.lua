@@ -2627,9 +2627,18 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
     DF.testRaidContainer:SetSize(totalWidth, totalHeight)
     DF:SyncRaidMoverToContainer()
 
-    -- Track which frame lands in the first slot of each group (for group label anchoring)
+    -- Track the first AND last frame of each group.
+    -- ☠ THE GROUP LABEL ANCHORED TO THE FIRST FRAME. Live anchors it to the group's
+    -- separated HEADER, which spans the whole group -- so Label Position = END put the
+    -- label past the end of the group live, but only past the FIRST FRAME in the
+    -- preview, i.e. inside the group; CENTER centred on the first frame instead of the
+    -- group. START happened to agree, which is why it went unnoticed. The preview now
+    -- builds a per-group extent frame spanning first..last and anchors to that, so all
+    -- three positions read the same geometry live does. (Audit, 2026-08-07.)
     DF.testGroupFirstFrame = DF.testGroupFirstFrame or {}
+    DF.testGroupLastFrame = DF.testGroupLastFrame or {}
     wipe(DF.testGroupFirstFrame)
+    wipe(DF.testGroupLastFrame)
 
     -- Position each frame in sorted order (this applies sorting within groups)
     for _, entry in ipairs(frameList) do
@@ -2641,10 +2650,11 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
         local posInGroup = groupCurrentPos[groupNum] or 0
         groupCurrentPos[groupNum] = posInGroup + 1
 
-        -- Store the first frame of each group for label anchoring
+        -- Store the first and last frame of each group for label anchoring
         if posInGroup == 0 then
             DF.testGroupFirstFrame[groupNum] = frame
         end
+        DF.testGroupLastFrame[groupNum] = frame
 
         -- Position using shared function
         SecureSort:PositionRaidFrameToGroupSlot(
@@ -2656,6 +2666,35 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
             lp,
             DF.testRaidContainer
         )
+    end
+
+    DF:UpdateTestGroupExtents()
+end
+
+-- One invisible frame per active group, spanning its first slot's TOPLEFT to its last
+-- slot's BOTTOMRIGHT. This is the preview's stand-in for a live separated header: the
+-- object group labels anchor to. Positions within a group only ever increase in x and
+-- decrease in y (PositionRaidFrameToGroupSlot walks posInGroup one way), so first and
+-- last really are the two opposite corners in both grow directions.
+function DF:UpdateTestGroupExtents()
+    if not DF.testRaidContainer then return end
+    DF.testGroupExtent = DF.testGroupExtent or {}
+    for g = 1, 8 do
+        local first = DF.testGroupFirstFrame and DF.testGroupFirstFrame[g]
+        local last = DF.testGroupLastFrame and DF.testGroupLastFrame[g]
+        local extent = DF.testGroupExtent[g]
+        if first and last then
+            if not extent then
+                extent = CreateFrame("Frame", nil, DF.testRaidContainer)
+                DF.testGroupExtent[g] = extent
+            end
+            extent:ClearAllPoints()
+            extent:SetPoint("TOPLEFT", first, "TOPLEFT", 0, 0)
+            extent:SetPoint("BOTTOMRIGHT", last, "BOTTOMRIGHT", 0, 0)
+            extent:Show()
+        elseif extent then
+            extent:Hide()
+        end
     end
 end
 
