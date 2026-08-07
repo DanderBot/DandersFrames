@@ -2842,6 +2842,40 @@ end
 -- TEST MODE HELPER FUNCTIONS
 -- ============================================================
 
+-- ☠ REBUILD WITHOUT REPAINT. Each of these bulk refreshers tears down and rebuilds
+-- its surface -- the aura-container rows, the AD indicators, the defensive icon, the
+-- missing-buff strip -- and the fresh widgets come back at ALPHA 1.0 carrying none of
+-- the fade the appearance pass had applied. They run AFTER UpdateTestFrame's appearance
+-- pass (ApplyTestPreset: UpdateAllFrames, then RefreshAllTestSurfaces), so flipping a
+-- preset left every rebuilt surface at full opacity while the rest of the frame stayed
+-- faded -- which is why a faded defensive icon had a full-brightness AD indicator
+-- showing through it, and why toggling Out of Range off and on "fixed" it (that path
+-- re-runs the appearance pass with nothing rebuilding behind it).
+--
+-- ★ Whoever rebuilds a surface repaints it, per frame, for that surface only. Putting
+-- it here rather than at the call sites means the individual panel toggles (Aura
+-- Designer, Defensive Icon, Missing Buff, Dispel Overlay), which rebuild without going
+-- through RefreshAllTestSurfaces at all, are covered by the same fix.
+-- (Audit follow-up, 2026-08-07.)
+local function RepaintTestSurface(frame, which)
+    if not frame then return end
+    if which == "auras" then
+        if DF.UpdateBuffIconsAppearance then DF:UpdateBuffIconsAppearance(frame) end
+        if DF.UpdateDebuffIconsAppearance then DF:UpdateDebuffIconsAppearance(frame) end
+    elseif which == "missingBuff" then
+        if DF.UpdateMissingBuffAppearance then DF:UpdateMissingBuffAppearance(frame) end
+    elseif which == "defensive" then
+        if DF.UpdateDefensiveIconAppearance then DF:UpdateDefensiveIconAppearance(frame) end
+    elseif which == "dispel" then
+        if DF.UpdateDispelOverlayAppearance then DF:UpdateDispelOverlayAppearance(frame) end
+    elseif which == "auraDesigner" then
+        -- Order matters: UpdateAuraDesignerAppearance writes healthbarEffectiveBlend,
+        -- which UpdateHealthBarAppearance reads (see UpdateAllElementAppearances).
+        if DF.UpdateAuraDesignerAppearance then DF:UpdateAuraDesignerAppearance(frame) end
+        if DF.UpdateHealthBarAppearance then DF:UpdateHealthBarAppearance(frame) end
+    end
+end
+
 function DF:UpdateAllTestDispelGlow()
     -- Safety check - Dispel module may not be loaded yet
     if not DF.UpdateDispelOverlay then return end
@@ -2852,6 +2886,7 @@ function DF:UpdateAllTestDispelGlow()
             local frame = DF.testPartyFrames[i]
             if frame then
                 DF:UpdateDispelOverlay(frame)
+                RepaintTestSurface(frame, "dispel")
             end
         end
     end
@@ -2862,6 +2897,7 @@ function DF:UpdateAllTestDispelGlow()
             local frame = DF.testRaidFrames[i]
             if frame then
                 DF:UpdateDispelOverlay(frame)
+                RepaintTestSurface(frame, "dispel")
             end
         end
     end
@@ -2934,13 +2970,19 @@ function DF:UpdateAllTestAuras()
     if DF.testMode and DF.testPartyFrames then
         for i = 0, 4 do
             local frame = DF.testPartyFrames[i]
-            if frame then DF:UpdateTestAuras(frame) end
+            if frame then
+                DF:UpdateTestAuras(frame)
+                RepaintTestSurface(frame, "auras")
+            end
         end
     end
     if DF.raidTestMode and DF.testRaidFrames then
         for i = 1, 40 do
             local frame = DF.testRaidFrames[i]
-            if frame then DF:UpdateTestAuras(frame) end
+            if frame then
+                DF:UpdateTestAuras(frame)
+                RepaintTestSurface(frame, "auras")
+            end
         end
     end
 end
@@ -2952,6 +2994,7 @@ function DF:UpdateAllTestMissingBuff()
 
         if db.testShowMissingBuff then
             DF:UpdateTestMissingBuff(frame)
+            RepaintTestSurface(frame, "missingBuff")
         else
             -- 12.1 factory strip: hide via the shown-cache the live drive keys on.
             if frame.missingBuffStrip and frame.dfMissingStripShown ~= false then
@@ -3044,6 +3087,7 @@ function DF:UpdateAllTestDefensiveBar()
         -- Unconditional: the painter reads testShowExternalDef itself and
         -- hides the container row when it's off.
         DF:UpdateTestDefensiveBar(frame, testData)
+        RepaintTestSurface(frame, "defensive")
     end
     
     -- Update party test frames
@@ -3161,6 +3205,7 @@ function DF:UpdateAllTestAuraDesigner()
         else
             Factory:ClearFrame(frame)
         end
+        RepaintTestSurface(frame, "auraDesigner")
     end
 
     if DF.testMode then
