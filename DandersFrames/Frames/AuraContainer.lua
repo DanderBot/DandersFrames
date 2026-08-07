@@ -1249,24 +1249,27 @@ local function styleButton_regions(slot, config)
             end
         end
 
-        -- PREVIEW SLOTS. Nothing will ever drive the holder's visibility on these, so
-        -- DF still owns the Shown aspect and showing it is legal. Two kinds:
-        --   * a plain frame (Aura Designer canvas) — no AddPandemicRegion at all;
-        --   * an in-game TEST slot — a real container button, but the test lane paints
-        --     instead of binding (_paintTestSlot, not _bindNativeSlot), so
-        --     AddPandemicRegion is never called on it.
-        -- On a LIVE button this stays false and the engine drives visibility, so the
-        -- "never Show() a bound region" rule above is not weakened.
+        -- AURA DESIGNER CANVAS ONLY. A plain frame has no AddPandemicRegion, so nothing
+        -- will ever drive the holder's visibility there — and the canvas is where the
+        -- user styles the cue, so it has to be visible. On a real container button this
+        -- stays false and the engine drives visibility, so the "never Show() a bound
+        -- region" rule above is not weakened.
         --
-        -- ☠ THE OLD TEST WAS `not slot.AddPandemicRegion`, WHICH TESTED THE WRONG
-        -- OBJECT — the method exists on every real container button whether or not the
-        -- bind ran, so test slots fell through and the cue was built, animated and left
-        -- permanently invisible. The comment here asserted the opposite ("the holder
-        -- binds and the engine drives it"); it does not bind. Invisible either way, so
-        -- it read as intended. The buff row emits Pandemic and has no canvas, so that
-        -- row's cue was unpreviewable anywhere — against this file's own rule that
-        -- every native-driven region must render in test. (Audit, 2026-08-07.)
-        if not slot.AddPandemicRegion or slot._dfTestSlot then holder:Show() end
+        -- ☠ DO NOT EXTEND THIS TO IN-GAME TEST SLOTS. That was tried (07804854, on the
+        -- true observation that the buff row's cue was previewable nowhere) and it is
+        -- what put a permanent Pandemic border on every previewed icon: a test slot
+        -- paints instead of binding, so nothing ever HIDES the holder again and the cue
+        -- sat on forever. Reported as an Aura Designer indicator drawing a border it
+        -- does not have live, bleeding over the defensive icon — the border is
+        -- DF.Border:New(holder, ...), which sits at holder + 10.
+        --
+        -- Pandemic is DURATION-DRIVEN: "always on" is not a preview of it, it is a
+        -- different picture that happens to be visible. In-game test slots get the cue
+        -- from armTestPandemicWindow instead, driven off the same fake duration as the
+        -- bar, swipe and text — it opens near the end of each cycle and closes when the
+        -- cycle re-arms, so it previews as a window rather than a decoration.
+        -- (Audit follow-up, 2026-08-07.)
+        if not slot.AddPandemicRegion then holder:Show() end
     end
 end
 
@@ -3054,6 +3057,42 @@ local function armTestDuration(handle, slot, d, offset)
     return ok
 end
 
+-- ★ PANDEMIC PREVIEW. Live, AddPandemicRegion binds the holder and the ENGINE shows it
+-- inside the refresh window. A test slot paints instead of binding, so nothing drives
+-- it — and simply showing it (07804854) is not a preview of a duration cue, it is a
+-- permanent border on every previewed icon, which is what it turned out to be.
+--
+-- So drive it from the SAME fake duration everything else in the preview runs on: open
+-- the window near the end of the cycle, close it when the cycle re-arms. The cue then
+-- blinks in and out where a real refresh window sits, and a user can see and style it.
+--
+-- ⚠ THE FRACTION IS A PREVIEW CONVENTION, NOT THE GAME'S RULE. Live's window is
+-- "a refresh would clip nothing", computed engine-side from the aura's own base
+-- duration — DF never sees it and must never pretend to. 0.7 is chosen only because
+-- the classic pandemic window is the last 30% of a buff, so the preview lands where a
+-- user expects to see it. Do not wire a setting to this: it is not a threshold the
+-- user owns. (Audit follow-up, 2026-08-07.)
+local PANDEMIC_PREVIEW_OPEN_AT = 0.7
+
+-- `elapsed` is how far into the cycle we already are (armTestDuration starts the
+-- duration in the past by the per-slot stagger), so the first window lands in phase
+-- with the bar and swipe instead of a full cycle late.
+local function armTestPandemicWindow(handle, slot, d, gen, elapsed)
+    local holder = slot.dfPandemicHolder
+    if not holder then return end
+    holder:Hide()
+    if not (d and d > 0) then return end
+    local openIn = d * PANDEMIC_PREVIEW_OPEN_AT - (elapsed or 0)
+    if openIn <= 0 then holder:Show() return end
+    C_Timer.After(openIn, function()
+        -- Same gen guard as the re-arm: a repaint or teardown must not leave a stale
+        -- closure showing the cue on a slot that has moved on.
+        if handle._destroyed or slot._dfTestGen ~= gen then return end
+        if not AuraContainer._testMode then return end
+        holder:Show()
+    end)
+end
+
 -- One re-arm per aura cycle, scheduled exactly at expiry — no polling. Mutating the
 -- shared duration restarts bar, swipe and text together (proven in the lab), so this
 -- is the ONLY Lua the native preview costs. `gen` invalidates pending re-arms across
@@ -3063,7 +3102,11 @@ local function scheduleTestRearm(handle, slot, d, gen, delay)
         if handle._destroyed or slot._dfTestGen ~= gen then return end
         if not AuraContainer._testMode or not slot._dfTestDurObj then return end
         local ok = pcall(function() slot._dfTestDurObj:SetTimeFromStart(GetTime(), d) end)
-        if ok then scheduleTestRearm(handle, slot, d, gen, d) end
+        if ok then
+            -- The cycle restarted, so the refresh window closed with it.
+            armTestPandemicWindow(handle, slot, d, gen, 0)
+            scheduleTestRearm(handle, slot, d, gen, d)
+        end
     end)
 end
 
@@ -3174,11 +3217,17 @@ function Handle:_paintTestSlot(slot, index)
                 slot._dfTestText, slot._dfTestTextAt = nil, nil
                 slot._dfTestTimed = true
                 nativeBar = slot.dfBar and true or false
+                armTestPandemicWindow(self, slot, d, slot._dfTestGen, offset)
                 scheduleTestRearm(self, slot, d, slot._dfTestGen, d - offset)
             else
                 -- FALLBACK (no C_DurationUtil / a setter threw): the faked ticker path.
                 slot._dfTestDur = d
                 slot._dfTestExpiry = GetTime() + (d - offset)
+                -- The pandemic window is pure timing, so it works on this path too --
+                -- it never touched the duration object. Only the first cycle, though:
+                -- this lane has no re-arm hook, so the cue opens once and stays. Better
+                -- than never showing it, and the native lane above is the real path.
+                armTestPandemicWindow(self, slot, d, slot._dfTestGen, offset)
                 if slot.dfCD and slot.dfCD.SetCooldown then
                     slot.dfCD:SetCooldown(GetTime() - offset, d)
                 end
@@ -3634,13 +3683,12 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
                 -- recStyle is stashed on the button by _acceptSlot and re-applied by it
                 -- on every later restyle, so the override is not lost the moment
                 -- anything else re-styles the row.
-                -- ☠ STAMP BEFORE _acceptSlot, which is what creates the regions.
-                -- styleButton_regions needs to know whether this slot WILL be bound,
-                -- and it runs before the testShape branch below — so "have we bound
-                -- yet" is nil on both lanes at that moment and cannot be the test.
-                -- Build-time shape, per the rule at ApplyStyle: a container cannot
-                -- change shape, so this is fixed for the button's life.
-                button._dfTestSlot = testShape or nil
+                -- (Removed) a button._dfTestSlot stamp read by styleButton_regions to
+                -- force the Pandemic cue visible on preview slots. Its one consumer is
+                -- gone — see the Pandemic block in styleButton_regions for why a
+                -- permanently-shown duration cue is not a preview of one. Re-add it if
+                -- that cue is ever driven properly from armTestDuration; nothing else
+                -- wanted it.
                 handle:_acceptSlot(button, i, recStyle)   -- size + regions + per-group overrides
                 if testShape then
                     -- P5 hybrid preview: the sample provider drives presence and the
