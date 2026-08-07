@@ -3988,6 +3988,18 @@ function PinnedFrames:EnterTestMode()
             if pool then
                 for i = 1, n do
                     if pool[i] and DF.UpdateTestFrame then
+                        -- ☠ RE-RUN THE LAYOUT, as every main-pool call site does.
+                        -- The pinned pool only ever got ApplyFrameStyle once, at
+                        -- creation: EnsurePlayerTestFramePool's REUSE branch skips
+                        -- it, and pinned test frames are excluded from
+                        -- FullProfileRefresh (which walks PinnedFrames.headers).
+                        -- So changing Health Bar Orientation or Texture updated the
+                        -- main preview and left the pinned preview frozen until a
+                        -- reload. ApplyFrameLayout, NOT ApplyTestFrameLayout: the
+                        -- latter reads db.frameWidth where live reads
+                        -- frame.dfPinnedWidth or db.frameWidth, which is exactly the
+                        -- override a pinned frame carries. (Audit, 2026-08-07.)
+                        if DF.ApplyFrameLayout then DF:ApplyFrameLayout(pool[i]) end
                         DF:UpdateTestFrame(pool[i], i, true)
                     end
                 end
@@ -4030,6 +4042,12 @@ function PinnedFrames:RefreshTestMode(withLayout)
             if n > cap then n = cap end
             for i = 1, n do
                 if pool[i] and DF.UpdateTestFrame then
+                    -- Same reason as EnterTestMode: the pinned pool never re-runs
+                    -- the frame layout otherwise. `withLayout` gates it because a
+                    -- pure data refresh does not need the geometry pass.
+                    if withLayout and DF.ApplyFrameLayout then
+                        DF:ApplyFrameLayout(pool[i])
+                    end
                     DF:UpdateTestFrame(pool[i], i, withLayout and true or false)
                 end
             end
