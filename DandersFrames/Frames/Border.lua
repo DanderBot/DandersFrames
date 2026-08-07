@@ -66,7 +66,16 @@ function Border:New(parent, opts)
     -- replaces it with two SetPoint calls translated by the offset).
     border.anchorTo = opts.anchorTo or parent
     border:SetAllPoints(border.anchorTo)
-    border:SetFrameLevel(parent:GetFrameLevel() + (opts.frameLevelOffset or 10))
+    -- ☠ DEFAULT +2, NOT +10. A border is a CHILD of what it borders, so at the parent's
+    -- own level it already draws above every region on that parent — the offset only buys
+    -- anything when the border must clear a SIBLING frame (a status-bar fill, a cooldown
+    -- swipe), and +2 clears both. +10 was pure headroom, and it inflated every band it
+    -- touched: an aura button's border reached button+10, and the Pandemic border — sitting
+    -- on an already-offset holder — reached button+25, inside the defensive icon's band.
+    -- That is how a Pandemic cue ended up drawing over the defensive icon.
+    -- User-facing levels are multiples of 5 with 20-level bands; a 10-level border bump
+    -- does not fit that budget. (Z-order review, 2026-08-07.)
+    border:SetFrameLevel(parent:GetFrameLevel() + (opts.frameLevelOffset or 2))
 
     local layer = opts.layer or "BORDER"
     border._layer = layer   -- texture-piece renderer creates on the same layer

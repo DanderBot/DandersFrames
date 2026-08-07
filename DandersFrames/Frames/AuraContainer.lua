@@ -984,10 +984,19 @@ local function styleButton_regions(slot, config)
     local durSpec = style.duration
     if isRow and durSpec and durSpec.show then
         if not slot.dfDur then
-            -- Holder ABOVE the +10 DF.Border (and the +12 dispel ring): content text
-            -- must draw ON TOP of the icon border, never under it. See the dispel-border
-            -- holder note below for the same +10-clearance rationale.
-            slot.dfDurHolder = makeHolder(host, durSpec.level or 13)
+            -- ★★ THE PER-BUTTON HOLDER LADDER, in one place so it stays orderable at a
+            -- glance. These only need to be above the icon and correctly ordered among
+            -- THEMSELVES — they are all children of the same button, so nothing outside
+            -- competes with them:
+            --     1 dispel ring   2 duration text / name   3 dispel symbol
+            --     4 stack count   5 pandemic cue
+            -- ☠ THEY USED TO BE 12/13/13/13/14/15, sized to clear a +10 DF.Border. The
+            -- border default is +2 now, so the whole ladder collapses — and it had to,
+            -- because a button at frame+42 with a +15 holder and a +10 border on top of
+            -- that reached frame+67, i.e. inside the DEFENSIVE icon's band at 65. Bands
+            -- are the budget: an aura container must fit between its own level and the
+            -- next user-facing one. Keep this ladder ≤ 5. (Z-order review, 2026-08-07.)
+            slot.dfDurHolder = makeHolder(host, durSpec.level or 2)
             slot.dfDur = slot.dfDurHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         end
         DF.TextStyle:Apply(slot.dfDur, durSpec, slot.dfDurHolder)
@@ -997,10 +1006,11 @@ local function styleButton_regions(slot, config)
     local stackSpec = style.stacks
     if isRow and stackSpec and stackSpec.show then
         if not slot.dfStack then
-            -- Holder ABOVE the +10 DF.Border and +12 dispel ring (one above the duration
-            -- text): the stack count is the top-most content and was rendering UNDER the
-            -- icon border at the old +7 (Krathe 2026-07-15).
-            slot.dfStackHolder = makeHolder(host, stackSpec.level or 14)
+            -- Rung 4 of the holder ladder (see the duration holder): the stack count is
+            -- the top-most TEXT, above the ring, duration and symbol. It rendered UNDER
+            -- the icon border once before (Krathe 2026-07-15) -- that was at +7 against a
+            -- +10 border; the border is +2 now, so any rung above 2 clears it.
+            slot.dfStackHolder = makeHolder(host, stackSpec.level or 4)
             slot.dfStack = slot.dfStackHolder:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
         end
         DF.TextStyle:Apply(slot.dfStack, stackSpec, slot.dfStackHolder)
@@ -1057,9 +1067,9 @@ local function styleButton_regions(slot, config)
     local nameSpec = style.spellName
     if isRow and nameSpec and nameSpec.show then
         if not slot.dfName then
-            -- Above the +10 border / +12 dispel ring (see duration holder) so the spell
-            -- name never renders under the icon border.
-            slot.dfNameHolder = makeHolder(host, 13)
+            -- Rung 2, level with the duration text (see the duration holder): both are
+            -- content text and never occupy the same corner.
+            slot.dfNameHolder = makeHolder(host, 2)
             slot.dfName = slot.dfNameHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         end
         slot.dfName:ClearAllPoints()
@@ -1075,7 +1085,7 @@ local function styleButton_regions(slot, config)
             -- would render UNDER the static border and the dispel colour would be
             -- invisible behind it. (Holder-hosted regions are registrar-legal — the
             -- duration text binds from a holder the same way.)
-            slot.dfDispelHolder = makeHolder(host, dispelSpec.level or 12)
+            slot.dfDispelHolder = makeHolder(host, dispelSpec.level or 1)
             slot.dfAuraBorder = slot.dfDispelHolder:CreateTexture(nil, "OVERLAY")
             -- The native Color style only VERTEX-TINTS the region (SetAuraBorderColor →
             -- SetVertexColor; no file is ever assigned) — a blank texture renders
@@ -1111,9 +1121,9 @@ local function styleButton_regions(slot, config)
             slot.dfAuraBorder:SetTexCoord(aX, 1 - aX, aY, 1 - aY)
         end
         if dispelSpec.nativeSymbol and not slot.dfSymbol then
-            -- Above the +10 border / +12 dispel ring (see duration holder) so the dispel
-            -- symbol glyph sits on top of the icon border, not under it.
-            slot.dfSymbolHolder = makeHolder(host, 13)
+            -- Rung 3 (see the duration holder): above the dispel RING it belongs to, so
+            -- the glyph sits on the ring rather than under it.
+            slot.dfSymbolHolder = makeHolder(host, 3)
             slot.dfSymbol = slot.dfSymbolHolder:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
             slot.dfSymbol:SetPoint("CENTER")
         end
@@ -1167,9 +1177,9 @@ local function styleButton_regions(slot, config)
     end
     if isRow and pdSpec then
         if not slot.dfPandemicHolder then
-            -- One above the stack count's +14: the refresh cue has to read over every
-            -- other content region, including DF.Border at +10 and the dispel ring at +12.
-            slot.dfPandemicHolder = makeHolder(host, pdSpec.level or 15)
+            -- Rung 5, the top of the ladder (see the duration holder): the refresh cue
+            -- has to read over every other content region on the button.
+            slot.dfPandemicHolder = makeHolder(host, pdSpec.level or 5)
             -- Created hidden so a slot never flashes its cue between creation and the
             -- bind. This is the ONLY legal visibility write on the holder: it happens
             -- strictly before AddPandemicRegion, while the Shown aspect is still ours.
@@ -1229,7 +1239,19 @@ local function styleButton_regions(slot, config)
             -- path would scatter (the same reason style.border above passes it).
             if not slot.dfPandemicBorder then
                 local ok, w = pcall(function()
-                    return DF.Border:New(holder, { solidOnly = true, secretRect = true })
+                    -- ☠ frameLevelOffset = 0, NOT the default 10. The holder is already
+                    -- host + (pdSpec.level or 15); another +10 put this border at host + 25,
+                    -- which on an aura button lands inside the DEFENSIVE ICON's band
+                    -- (defensiveIconFrameLevel 65) — the cue drew over an icon two bands
+                    -- above it, reported as an Aura Designer indicator bleeding onto the
+                    -- defensive icon. A border does not need the bump: it is a CHILD of the
+                    -- holder, so at the holder's own level it already draws above every
+                    -- region on it. The offset only buys anything when a border has to clear
+                    -- a SIBLING frame (a bar fill, a swipe), which this one does not — the
+                    -- same reason the AD badge borders and the missing-buff badge all pass 0.
+                    -- (Audit follow-up, 2026-08-07.)
+                    return DF.Border:New(holder, { solidOnly = true, secretRect = true,
+                                                   frameLevelOffset = 0 })
                 end)
                 if ok then slot.dfPandemicBorder = w end
             end

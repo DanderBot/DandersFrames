@@ -165,16 +165,26 @@ end
 local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     local overlay = CreateFrame("Frame", nil, host)
     overlay:SetAllPoints(host)
-    -- Frame level hierarchy (low to high):
-    -- Base frame elements (health bar, absorbs, etc.) - frame level +0 to +5
-    -- Dispel gradient - parented to healthBar, level healthBar+2
-    -- Dispel overlay - frame level +6
-    -- Dispel borders - frame level +7
-    -- Frame border - frame level +10
-    -- Content overlay (text) - frame level +25
-    -- Dispel icon - parented to contentOverlay, level +26
-    -- Auras - frame level +50
-    overlay:SetFrameLevel(host:GetFrameLevel() + 6)
+    -- ★ THE FRAME'S LEVEL LADDER, as it actually stands (offsets from the unit frame):
+    --   +0..+8   background, health/missing +3, power +5, heal-absorb +8
+    --   +11      absorb bar         (absorbBarFrameLevel)
+    --   +12      heal prediction    (healPredictionFrameLevel)
+    --   +16/+17  dispel overlay / gradient + ring   <- HERE
+    --   +20      resource bar       (resourceBarFrameLevel)
+    --   +25      content overlay,   +26 dispel badge
+    --   +30      status icons
+    --   +32..39  buff / debuff rows
+    --   +40..55  Aura Designer indicators (its alert row at +48)
+    --   +60..63  missing buff
+    --   +65..72  defensive icon
+    --
+    -- ☠ +16, WAS +6. This widget is the PREVIEW of the slot path, and the slot path moved
+    -- to hbLvl+13 (= frame+16) to stop tying the absorb bar and heal prediction. Leaving
+    -- this at +6 would have the preview render two bands below what live does — the exact
+    -- divergence the test-vs-live audit exists to prevent. The list above also replaces a
+    -- comment that was stale in three places (gradient at healthBar+2, frame border at
+    -- +10, auras at +50). (Z-order review, 2026-08-07.)
+    overlay:SetFrameLevel(host:GetFrameLevel() + 16)
     
     -- ☠ THE BORDER WAS TWO DIFFERENT SHAPES. This widget drew FOUR StatusBar
     -- strips; the live slot path draws ONE nine-sliced square ring
@@ -215,12 +225,16 @@ local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     -- Gradient - use a StatusBar with gradient texture
     -- The texture has built-in alpha gradient, so we just tint it with color
     -- Parent to healthBar to ensure proper layering above health bar content.
-    -- +7 clears the WHOLE health-content band: fill (healthBar itself), absorb
-    -- (+4), heal-absorb (+5), overflow (+3) and reduced-max-health (+6) — the
-    -- dispel wash tints all of it (Krathe's call: the alert renders on top;
-    -- the old +2 left it under absorbs and the reduced-max region).
+    -- The wash tints the WHOLE health-content band (Krathe's call: the alert renders on
+    -- top; the original +2 left it under absorbs and the reduced-max region).
+    -- ☠ +14, WAS +7. gradientParent is the healthBar at frame+3, so +7 put this at
+    -- frame+10 — and the band it is supposed to clear does NOT end at healthBar+6: the
+    -- absorb bar is re-levelled to frame + absorbBarFrameLevel (11) and heal prediction
+    -- sits at frame + healPredictionFrameLevel (12), both ABOVE where the wash was. +14
+    -- puts it at frame+17, one above the overlay, clearing the real band.
+    -- (Z-order review, 2026-08-07.)
     overlay.gradient = CreateFrame("StatusBar", nil, gradientParent)
-    overlay.gradient:SetFrameLevel(gradientParent:GetFrameLevel() + 7)
+    overlay.gradient:SetFrameLevel(gradientParent:GetFrameLevel() + 14)
     overlay.gradient:SetMinMaxValues(0, 1)
     overlay.gradient:SetValue(1)
     
@@ -1284,13 +1298,18 @@ local function EnsureSlotWidget(btn, frame)
         -- the overlay only showed across the missing-health area (live-caught:
         -- Top Edge covering the deficit only).
         local hbLvl = (frame.healthBar and frame.healthBar:GetFrameLevel()) or (base + 3)
-        -- +7/+8 clear the whole health-content band (fill, absorb +4, heal-absorb
-        -- +5, overflow +3, reduced-max +6) — matches the legacy widget's gradient
-        -- at healthBar+7. w carries the game-mode tint CARRIER (and darken/edge
-        -- textures), which must clear the band too; the gradient bar sits one
-        -- above so its fill is never level-tied with its own parent.
-        w:SetFrameLevel(hbLvl + 7)
-        w.gradient:SetFrameLevel(hbLvl + 8)
+        -- ☠ +13/+14, WAS +7/+8. The old numbers were derived from the health-content
+        -- band as it stood at CREATION time — "absorb +4, heal-absorb +5, overflow +3,
+        -- reduced-max +6" — but the absorb bar does not stay at healthBar+4: Core.lua
+        -- and Bars.lua both re-level it to frame + absorbBarFrameLevel (11), and heal
+        -- prediction sits at frame + healPredictionFrameLevel (12). Against healthBar at
+        -- frame+3 that put the dispel wash at frame+10 and its gradient at frame+11 —
+        -- level-TIED with the absorb bar, and the ring holder below tied with heal
+        -- prediction. Ties draw in creation order, i.e. arbitrarily.
+        -- +13/+14 clears both (frame+16/+17) and still sits under the resource bar at 20
+        -- and the content overlay at 25. (Z-order review, 2026-08-07.)
+        w:SetFrameLevel(hbLvl + 13)
+        w.gradient:SetFrameLevel(hbLvl + 14)
         if w.borderRingHost then w.borderRingHost:SetFrameLevel(base + 7) end   -- legacy overlay(+6)+1
         local iconLevel = ((frame.contentOverlay and frame.contentOverlay:GetFrameLevel())
             or (base + 25)) + 1                -- legacy contentOverlay+26
@@ -1436,7 +1455,7 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         for _, edge in ipairs(roles.edges) do
             local holder = CreateFrame("Frame", nil, btn)
             holder:SetAllPoints(btn)
-            holder:SetFrameLevel(hbLvl + 7)
+            holder:SetFrameLevel(hbLvl + 13)   -- level with the wash; see EnsureSlotWidget
             local tex = holder:CreateTexture(nil, "ARTWORK", nil, 2)
             tex:SetTexture(EDGE_GRADIENT_TEXTURES[edge])
             tex:SetAllPoints(btn)   -- anchored for the bind; StyleGameEdgeSlot positions the strip
@@ -1450,7 +1469,7 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
     if roles.border then
         local holder = CreateFrame("Frame", nil, btn)
         holder:SetAllPoints(btn)
-        holder:SetFrameLevel(hbLvl + 9)
+        holder:SetFrameLevel(hbLvl + 15)   -- above the strips; see EnsureSlotWidget
         local ring = holder:CreateTexture(nil, "ARTWORK")
         ring:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_SquareBorder")
         ring:SetAllPoints(btn)   -- anchored for the bind; StyleGameBorderSlot crops/insets

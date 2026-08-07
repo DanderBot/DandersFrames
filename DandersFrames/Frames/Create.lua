@@ -916,6 +916,13 @@ function DF:CreateFrameElementsExtended(frame, db)
     frame.dfAbsorbBar:SetStatusBarTexture("Interface\\RaidFrame\\Shield-Fill")
     frame.dfAbsorbBar:SetMinMaxValues(0, 1)
     frame.dfAbsorbBar:SetValue(0)
+    -- ⚠ SEED ONLY. UpdateAbsorb (Bars.lua) and the settings callback (Core.lua) both
+    -- re-level this to frame + absorbBarFrameLevel (11) the first time they run, so
+    -- healthBar+4 is what it looks like for a fraction of a second and never after.
+    -- Kept so the bar is ordered before the first update rather than defaulting to
+    -- parent+1, but do NOT reason from it: the dispel wash used to derive its own
+    -- level from "absorb is at healthBar+4" and ended up tied with the real one.
+    -- (Z-order review, 2026-08-07.)
     frame.dfAbsorbBar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 4)
     frame.dfAbsorbBar:Hide()
 
@@ -1292,6 +1299,13 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     frame.dfAbsorbBar:SetStatusBarTexture("Interface\\RaidFrame\\Shield-Fill")
     frame.dfAbsorbBar:SetMinMaxValues(0, 1)
     frame.dfAbsorbBar:SetValue(0)
+    -- ⚠ SEED ONLY. UpdateAbsorb (Bars.lua) and the settings callback (Core.lua) both
+    -- re-level this to frame + absorbBarFrameLevel (11) the first time they run, so
+    -- healthBar+4 is what it looks like for a fraction of a second and never after.
+    -- Kept so the bar is ordered before the first update rather than defaulting to
+    -- parent+1, but do NOT reason from it: the dispel wash used to derive its own
+    -- level from "absorb is at healthBar+4" and ended up tied with the real one.
+    -- (Z-order review, 2026-08-07.)
     frame.dfAbsorbBar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 4)
     frame.dfAbsorbBar:Hide()
 

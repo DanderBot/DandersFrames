@@ -1711,13 +1711,18 @@ end
 -- ============================================================
 -- How far the alert is lifted above the thing it annotates. ONE constant, used by the live
 -- companion (over its indicator's container) and by the AD canvas (over its preview slot),
--- so the two can never be nudged apart by editing one literal. A container row is 13 levels
--- thick — measured: container +0, button +2, cooldown +3, border +12 — the same constant
--- the Important Debuffs badge host uses in AuraContainer. At the +1 this used to be, the
--- companion's button landed at +3, INSIDE its own indicator's band: above that indicator's
--- icon but under its border, and under every sibling indicator's border at the same
--- configured level. That is why the glyph showed under the icons.
-Factory.ALERT_ROW_LIFT = 13
+-- so the two can never be nudged apart by editing one literal. At the +1 this used to be,
+-- the companion's button landed at +3, INSIDE its own indicator's band: above that
+-- indicator's icon but under its border, and under every sibling indicator's border at the
+-- same configured level. That is why the glyph showed under the icons.
+--
+-- ☠ 13 -> 8 (Z-order review, 2026-08-07). "A container row is 13 levels thick" was measured
+-- when DF.Border defaulted to +10 and the per-button holder ladder ran to +15. Both shrank:
+-- the border default is +2 and the ladder tops out at +5, so a row is 7 thick — container
+-- +0, button +2, border +4, holders +3..+7. 8 clears it with a level spare, and keeps an
+-- indicator plus its alert inside 16 levels, which is what lets the user-facing bands sit
+-- 20 apart. RE-MEASURE THIS if the border default or the holder ladder moves again.
+Factory.ALERT_ROW_LIFT = 8
 
 -- ☠ ...EXCEPT FOR TINT, which wants the opposite. A wash covers the whole icon, so lifting
 -- it a full row puts it over the indicator's own duration text and stack count and makes

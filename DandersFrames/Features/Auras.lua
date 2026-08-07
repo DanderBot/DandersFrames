@@ -1897,6 +1897,18 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         mode     = "row",
         filter   = filter,
         max      = g("Max") or 5,
+        -- ☠ EXPLICIT 32, not ApplyZOrder's `or 40` default. The buff/debuff rows and the
+        -- AURA DESIGNER indicators were both landing on 40 — identical anchor, container
+        -- and button levels — so which drew on top was decided by creation order, i.e. by
+        -- nothing. An AD indicator placed over the aura row is meant to annotate it and
+        -- must win; at equal levels it sometimes did not.
+        -- 32 puts the rows in their own band: above the status icons at 30 (single frames,
+        -- no children of their own) and clear below the AD band at 40. The rows have no
+        -- user-facing level slider, so this moves nothing a user configured — which is why
+        -- the fix goes here rather than shifting the AD default and forcing a migration.
+        -- Span: 32..39 (container +1, button +2, border +4, holders +3..+7).
+        -- (Z-order review, 2026-08-07.)
+        frameLevelOffset = 32,
         -- Test-mode preview cap: the test panel's Buffs/Debuffs count sliders
         -- (hot-applied via Handle:SetTestMax from the test drive seam).
         testMax  = (prefix == "buff" and (db.testBuffCount or 2))
@@ -2873,7 +2885,14 @@ local function layoutMissingStrip(frame, db, strip, cellCount)
     strip:ClearAllPoints()
     strip:SetPoint(anchor, frame, anchor, db.missingBuffIconX or 0, db.missingBuffIconY or 0)
     DF:SnapPointToPixelGrid(strip, db.pixelPerfect)
-    strip:SetFrameLevel(math.max(0, frame:GetFrameLevel() + (db.missingBuffIconFrameLevel or 35)))
+    -- ☠ FALLBACK 60, NOT 35. 35 was the PRE-MIGRATION default and it survived here after
+    -- the key moved to 60 (_missingBuffBaselineV3) — so a db missing the key put the strip
+    -- at frame+35, INSIDE the aura band (40) instead of above it, and the badges rendered
+    -- under the very icons they exist to sit over. Same drifted-fallback shape as the
+    -- oor*Alpha constants: invisible while Config seeds the key, wrong the moment it does
+    -- not (an old import, a hand-edited SavedVariables). Keep equal to Config's
+    -- missingBuffIconFrameLevel. (Z-order review, 2026-08-07.)
+    strip:SetFrameLevel(math.max(0, frame:GetFrameLevel() + (db.missingBuffIconFrameLevel or 60)))
 end
 
 -- Drive the missing-buff strip for one frame. Mirrors the row drives: lazy create,
