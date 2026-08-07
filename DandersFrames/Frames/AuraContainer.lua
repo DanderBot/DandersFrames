@@ -1249,15 +1249,24 @@ local function styleButton_regions(slot, config)
             end
         end
 
-        -- PREVIEW SLOTS ONLY. A plain frame has no AddPandemicRegion, so nothing will
-        -- ever drive the holder's visibility — that is the Aura Designer canvas, where the
-        -- cue must be visible for the user to style it. On a native button this never
-        -- runs, so the "never Show() a bound region" rule above is not weakened.
-        -- ⚠ In-game TEST MODE is NOT covered: its buttons are real container buttons, so
-        -- the holder binds and the engine drives it — and a test aura has no real
-        -- auraInstanceID, so GetRefreshExtendedDuration cannot resolve and the window
-        -- never opens. The canvas is the surface that previews this.
-        if not slot.AddPandemicRegion then holder:Show() end
+        -- PREVIEW SLOTS. Nothing will ever drive the holder's visibility on these, so
+        -- DF still owns the Shown aspect and showing it is legal. Two kinds:
+        --   * a plain frame (Aura Designer canvas) — no AddPandemicRegion at all;
+        --   * an in-game TEST slot — a real container button, but the test lane paints
+        --     instead of binding (_paintTestSlot, not _bindNativeSlot), so
+        --     AddPandemicRegion is never called on it.
+        -- On a LIVE button this stays false and the engine drives visibility, so the
+        -- "never Show() a bound region" rule above is not weakened.
+        --
+        -- ☠ THE OLD TEST WAS `not slot.AddPandemicRegion`, WHICH TESTED THE WRONG
+        -- OBJECT — the method exists on every real container button whether or not the
+        -- bind ran, so test slots fell through and the cue was built, animated and left
+        -- permanently invisible. The comment here asserted the opposite ("the holder
+        -- binds and the engine drives it"); it does not bind. Invisible either way, so
+        -- it read as intended. The buff row emits Pandemic and has no canvas, so that
+        -- row's cue was unpreviewable anywhere — against this file's own rule that
+        -- every native-driven region must render in test. (Audit, 2026-08-07.)
+        if not slot.AddPandemicRegion or slot._dfTestSlot then holder:Show() end
     end
 end
 
@@ -3625,6 +3634,13 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
                 -- recStyle is stashed on the button by _acceptSlot and re-applied by it
                 -- on every later restyle, so the override is not lost the moment
                 -- anything else re-styles the row.
+                -- ☠ STAMP BEFORE _acceptSlot, which is what creates the regions.
+                -- styleButton_regions needs to know whether this slot WILL be bound,
+                -- and it runs before the testShape branch below — so "have we bound
+                -- yet" is nil on both lanes at that moment and cannot be the test.
+                -- Build-time shape, per the rule at ApplyStyle: a container cannot
+                -- change shape, so this is fixed for the button's life.
+                button._dfTestSlot = testShape or nil
                 handle:_acceptSlot(button, i, recStyle)   -- size + regions + per-group overrides
                 if testShape then
                     -- P5 hybrid preview: the sample provider drives presence and the
