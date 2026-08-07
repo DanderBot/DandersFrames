@@ -1,4 +1,4 @@
-﻿-- AceLocale silent mode is ALWAYS on by default. AceLocale's default
+-- AceLocale silent mode is ALWAYS on by default. AceLocale's default
 -- `readmeta` metatable calls geterrorhandler() on missing keys, which
 -- causes spurious errors when external code (BugSack, debug helpers
 -- calling :ToDebugString() etc.) introspects our L table — and also
@@ -2338,8 +2338,11 @@ L["Waiting for this player to accept the resurrection."] = true
 -- Targeted List bar, shown on a live interrupt (Features/TargetedSpells.lua):
 L["Interrupted: %s"] = true
 -- Minimap / DataBroker tooltip (Core.lua):
+-- ⚠ The action halves are NOT declared here: the tooltip reuses the existing
+-- L["Open Settings"] and L["Toggle Solo Mode"]. Sentence-case twins of both were added
+-- here and have been removed -- two keys for one string is a translation trap, since a
+-- locale can fill one and silently miss the other. Only the colon-suffixed labels below
+-- are unique to this tooltip.
 L["Left-Click:"] = true
 L["Right-Click:"] = true
-L["Open settings"] = true
-L["Toggle solo mode"] = true
 --@end-do-not-package@

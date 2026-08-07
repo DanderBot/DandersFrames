@@ -1,4 +1,4 @@
-﻿-- Part 5 of the settings pages, split from Options.lua.
+-- Part 5 of the settings pages, split from Options.lua.
 -- The parts run as a chain so the pages build in their original order.
 -- ☠ Companion addon: `...` yields THIS addon's private table, not the
 -- parent's, so every DF.* read here would be nil. Take the parent's table

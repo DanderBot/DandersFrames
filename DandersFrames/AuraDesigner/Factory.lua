@@ -1355,7 +1355,7 @@ end
 -- COSMETIC signature: size/anchor/offset/scale/alpha, swipe, duration/stack styling, square
 -- colour, and the RAW-config border sig (no BuildSpec alloc — FIX C). A change here
 -- hot-applies via ApplyStyle(style, layout); the actual border spec is built only then.
-local function placedCoSig(indicator, isSquare, borderOn, alpha)
+local function placedCoSig(indicator, isSquare, borderOn, alpha, defs)
     local parts = {
         -- ★ Duration FORMATTING moved here from the struct sig. It has to live in a
         -- signature somewhere or a format change would move nothing and silently do
@@ -1363,7 +1363,16 @@ local function placedCoSig(indicator, isSquare, borderOn, alpha)
         -- spec change from ApplyStyle. Passing defaultShow/defColorByTime as the struct
         -- sig did keeps the key identical, so the only thing that changed is WHICH tier
         -- reacts: restyle instead of teardown-and-recreate.
-        "df=" .. durationFmtKey(indicator, true, nil),
+        -- ☠ defs.cbt, NOT nil. durationFmtKey resolves colour-by-time with whatever
+        -- default it is handed, and buildDurationTextSpec resolves it with defs.cbt --
+        -- so passing nil here made ResolveDurationColorMode(nil) answer "OFF" while the
+        -- spec that actually renders answered from the profile default. An indicator
+        -- left on the default then had a COLOURED formatter and a sig that said OFF, so
+        -- editing the breakpoints moved nothing, no re-bind happened, and the colours
+        -- stayed stale until /reload. The struct sigs already pass defs.cbt; the two
+        -- cosmetic sigs were the ones that lost it. The function's own comment warns
+        -- about exactly this -- it just was not being obeyed here.
+        "df=" .. durationFmtKey(indicator, true, defs and defs.cbt),
         "sz=" .. tostring(math.max(8, tonumber(indicator.size) or 24)),
         "sc=" .. tostring(tonumber(indicator.scale) or 1),
         "an=" .. tostring(indicator.anchor or "TOPLEFT"),
@@ -2038,11 +2047,12 @@ end
 -- COSMETIC signature: size (width/height + match-frame + the fed frame size), anchor/offset/
 -- scale/alpha, texture/fill/bg/orientation/reverse, duration-text styling, and the raw-config
 -- border sig (no BuildSpec alloc). A change hot-applies via ApplyStyle(style, layout).
-local function barCoSig(frame, indicator, borderOn, alpha)
+local function barCoSig(frame, indicator, borderOn, alpha, defs)
     local fdb = DF:GetFrameDB(frame) or {}
     return tconcat({
         -- Duration formatting is cosmetic now, not structural — see placedCoSig.
-        "df=" .. durationFmtKey(indicator, false, nil),
+        -- ☠ defs.cbt, NOT nil — same reasoning as placedCoSig.
+        "df=" .. durationFmtKey(indicator, false, defs and defs.cbt),
         "w="  .. tostring(tonumber(indicator.width)  or 60),
         "h="  .. tostring(tonumber(indicator.height) or 6),
         "mw=" .. tostring(indicator.matchFrameWidth ~= false and 1 or 0) .. ":" .. tostring(fdb.frameWidth),
@@ -3067,7 +3077,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local alpha = tonumber(indicator.alpha) or 1
                         local structSig = barStructSig(indicator, borderOn, defs)
                         local tuningSig = placedTuningSig(map, poolFilter(indicator, mine))
-                        local coSig = barCoSig(frame, eff, borderOn, alpha)
+                        local coSig = barCoSig(frame, eff, borderOn, alpha, defs)
 
                         local entry = placed[key]
                         if not entry then
@@ -3210,7 +3220,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local structSig = placedStructSig(isSquare, hideIcon, showStacks,
                             showDuration, borderOn, indicator, defs)
                         local tuningSig = placedTuningSig(map, poolFilter(indicator, mine))
-                        local coSig = placedCoSig(eff, isSquare, borderOn, alpha)
+                        local coSig = placedCoSig(eff, isSquare, borderOn, alpha, defs)
 
                         local entry = placed[key]
                         if not entry then

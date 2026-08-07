@@ -6285,7 +6285,19 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Runs on the way OUT of an arena too: UpdateAllRaidPetFrames hides the arena
         -- set when it sees we are no longer in one. Nothing else did that, so in
         -- GROUPED mode the arena pets followed you out as frozen bars.
+        -- ☠ GATED ON ACTUALLY BEING IN AN ARENA. Without this the chain is unsatisfiable
+        -- outside one: sawUnit comes from IterateArenaFrames, which yields nothing when
+        -- there is no arena header, so the early exit can never fire and all five tries
+        -- burn over 2.5s on EVERY PLAYER_ENTERING_WORLD -- every loading screen, portal,
+        -- hearth and reload. `tries` is a per-fire closure local, so overlapping fires
+        -- stack their own chains and nothing cancels on zone-out. Re-checked each tick,
+        -- not just at entry, so leaving mid-chain stops it.
+        --
+        -- ⚠ The single unconditional pass stays: leaving an arena is exactly when the
+        -- arena pet set needs hiding, and UpdateAllRaidPetFrames does that when it sees
+        -- we are no longer in one. Only the RETRY is arena-gated.
         if DF.UpdateAllRaidPetFrames then
+            local inArena = DF.IsInArena and DF:IsInArena()
             local tries = 0
             local function DriveArenaPets()
                 tries = tries + 1
@@ -6293,6 +6305,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
 
                 -- Stop once the arena header actually has units, or we run out of
                 -- patience. IterateArenaFrames yields nothing until the header fills.
+                if not (DF.IsInArena and DF:IsInArena()) then return end
                 local sawUnit = false
                 if DF.IterateArenaFrames then
                     DF:IterateArenaFrames(function(frame)
@@ -6302,7 +6315,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 if sawUnit or tries >= 5 then return end
                 C_Timer.After(0.5, DriveArenaPets)
             end
-            C_Timer.After(0, DriveArenaPets)
+            if inArena then
+                C_Timer.After(0, DriveArenaPets)
+            else
+                -- Not an arena: one pass, no chain. This is the hide-on-the-way-out case.
+                C_Timer.After(0, function() DF:UpdateAllRaidPetFrames(true) end)
+            end
         end
 
     elseif event == "PLAYER_REGEN_ENABLED" then
@@ -6936,8 +6954,12 @@ local LDB = LibStub("LibDataBroker-1.1"):NewDataObject("DandersFrames", {
     end,
     OnTooltipShow = function(tooltip)
         tooltip:AddLine("DandersFrames")
-        tooltip:AddLine("|cffffffff" .. L["Left-Click:"] .. "|r " .. L["Open settings"], 0.8, 0.8, 0.8)
-        tooltip:AddLine("|cffffffff" .. L["Right-Click:"] .. "|r " .. L["Toggle solo mode"], 0.8, 0.8, 0.8)
+        -- ⚠ Title Case on purpose: L["Open Settings"] and L["Toggle Solo Mode"] already
+        -- existed, and these two lines had introduced sentence-case twins of both. Two
+        -- keys for one string is a translation trap -- a locale can fill one and miss the
+        -- other, and nothing errors.
+        tooltip:AddLine("|cffffffff" .. L["Left-Click:"] .. "|r " .. L["Open Settings"], 0.8, 0.8, 0.8)
+        tooltip:AddLine("|cffffffff" .. L["Right-Click:"] .. "|r " .. L["Toggle Solo Mode"], 0.8, 0.8, 0.8)
     end,
 })
 

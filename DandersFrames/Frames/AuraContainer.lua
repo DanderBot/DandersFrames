@@ -5007,6 +5007,10 @@ local function makeSlotLevelHost(button)
     return host
 end
 
+-- Slots per frame at which the add-only growth stops looking like normal use. A busy
+-- Aura Designer profile lands well under this; a slider drag blows straight through it.
+local SLOT_OWNER_WARN_AT = 48
+
 local function ownerOf(frame)
     return frame and frame.dfSlotOwner or nil
 end
@@ -5098,6 +5102,30 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
             existing:ApplyStyle(spec.config.style, spec.config.layout)
         end
         return existing
+    end
+
+    -- ☠ THE PARK TABLE IS UNBOUNDED AND CANNOT BE FREED. AddAuraSlot is add-only -- the
+    -- engine exposes no remove -- so every distinct slotKey ever seen on this frame is a
+    -- permanent button. That is tolerable while keys are stable, and it is NOT stable
+    -- today: placedStructSig carries `fl=`, the Frame Level slider, so dragging that
+    -- slider across its range mints one button per intermediate value, per frame, times
+    -- the raid. The collapse relocated the old per-indicator container leak; it did not
+    -- cap it, which is the claim this warning exists to keep honest.
+    --
+    -- ⚠ MITIGATION, NOT A CURE. We cannot evict, so all this does is make the growth
+    -- visible once instead of silent forever. The real fix is to stop level being
+    -- STRUCTURAL: dfLevelHost is DF-owned and already interposed under every region, so
+    -- levelling the host instead of the sealed button would make `fl=` cosmetic and the
+    -- key stable. That is a behavioural change to the seal path and wants an in-game
+    -- pass, so it is deliberately not being done blind here.
+    local slotCount = 0
+    for _ in pairs(owner.slots) do slotCount = slotCount + 1 end
+    if slotCount >= SLOT_OWNER_WARN_AT and not owner._warnedSlotGrowth then
+        owner._warnedSlotGrowth = true
+        DF:DebugWarn(DBG,
+            "SlotOwner: %d slots on one frame (unit=%s). Slots are add-only and never "
+            .. "freed -- if this climbs with a slider drag, the Frame Level struct key "
+            .. "is minting them.", slotCount, tostring(owner.unit))
     end
 
     local filter = spec.filter or "HELPFUL"
@@ -5356,6 +5384,24 @@ function SlotHandle:ApplyStyle(style, layout)
     if type(style) == "table" then cfg.style = style end
     if type(layout) == "table" then cfg.layout = layout end
     if InCombatLockdown() then return false end
+    -- ☠ REFUSE TO STYLE A SLOT WHOSE LEVEL HOST DOES NOT EXIST YET, and the damage is
+    -- PERMANENT if we don't. styleButton_regions resolves `local host = slot.dfLevelHost
+    -- or slot` -- a fallback that is right for a CONTAINER button (which never has a
+    -- host) and catastrophic for a slot: it would create dfIcon, dfBorder and every
+    -- holder parented to the Blizzard aura button instead of our own frame. Blizzard's
+    -- InitializeInboundScriptObject stamps ForbiddenAspect.ChangeParent on that button,
+    -- so those regions can never be reparented afterwards -- the slot is stuck with an
+    -- empty alpha host for its whole life, and GetAlphaHost then returns nothing, which
+    -- silently kills the per-indicator Alpha slider and the out-of-range fade for that
+    -- indicator alone. Intermittent by batch timing, which is the worst way to find it.
+    --
+    -- Dropping the pass is safe: the caller re-drives on its own version gate, and the
+    -- config we just stored above is what initializeFrame will style from when it runs.
+    if not btn.dfLevelHost then
+        DF:Debug(DBG, "SlotHandle:ApplyStyle deferred -- no dfLevelHost yet (key=%s)",
+            tostring(self.key))
+        return false
+    end
     local ok, err = pcall(styleButton_regions, btn, cfg)
     if not ok then DF:DebugWarn(DBG, "SlotHandle:ApplyStyle: %s", tostring(err)) end
     -- ☠ bindNative too, exactly as Handle:ApplyStyle does. Its binds are keyed on spec
