@@ -3,11 +3,8 @@ local addonName, DF = ...
 -- ============================================================
 -- FILTER REGISTRY — SHIPPED SPELL DATABASE
 -- Curated spell records for the buff filter presets. Source:
--- WCL harvest v2, 2026-07-12 + the tank pass of 2026-08-06 (lab
--- discussion ee16e59f-d4c9-4680-b2ca-17a754a3e102), 14 categories.
--- NOTE: upstream's 2026-07-16 v3 buff additions are NOT in here -
--- upstream published no Lua map after v2, so only the tank delta
--- could be folded in. A full v4 re-sync is still outstanding.
+-- WCL harvest v4, 2026-08-07 (lab discussion
+-- ee16e59f-d4c9-4680-b2ca-17a754a3e102), 14 categories / 529 ids.
 -- One record per SPELL; alts carry every other known
 -- spellID for the same spell — but IDs are merged into one record
 -- ONLY when they share the identical category set (per-ID category
@@ -23,7 +20,7 @@ local pairs, ipairs = pairs, ipairs
 DF.FilterRegistry = DF.FilterRegistry or {}
 local R = DF.FilterRegistry
 
-R.DBStamp = { harvest = "2026-08-06", gameBuild = 68569 }
+R.DBStamp = { harvest = "2026-08-07", gameBuild = 68569 }
 
 -- Hand-maintained exclusion list — harvest ids DF refuses to carry, with the
 -- reason. Regeneration (/update-spelldb) DROPS these ids from records (a record
@@ -133,6 +130,8 @@ R.Spells = {
     { id = 48438,    alts = { 419344 }, n = "Wild Growth", class = "DRUID", cats = { healing = true } },
     { id = 474754,   alts = { 474750 }, n = "Symbiotic Relationship", class = "DRUID", cats = { healing = true } },
     { id = 439530,   n = "Symbiotic Blooms",          class = "DRUID",         cats = { healing = true } },
+    { id = 428737,   n = "Harmony of the Grove",       class = "DRUID",         cats = { healing = true } },
+    { id = 428866,   n = "Power of Nature",            class = "DRUID",         cats = { healing = true } },
     { id = 102342,   n = "Ironbark",                  class = "DRUID",         cats = { externalDefensives = true } },
     { id = 17,       alts = { 1246768, 1254306, 1300008 }, n = "Power Word: Shield", class = "PRIEST", cats = { healing = true } },
     { id = 194384,   n = "Atonement",                 class = "PRIEST",        cats = { healing = true } },
@@ -170,6 +169,7 @@ R.Spells = {
     { id = 376788,   n = "Echo: Dream Breath",        class = "EVOKER",        cats = { healing = true } },
     { id = 373267,   n = "Lifebind",                  class = "EVOKER",        cats = { healing = true } },
     { id = 357170,   n = "Time Dilation",             class = "EVOKER",        cats = { externalDefensives = true } },
+    { id = 410651,   n = "Molten Blood",               class = "EVOKER",        cats = { externalDefensives = true } },
     { id = 363534,   n = "Rewind",                    class = "EVOKER",        cats = { raidDefensives = true } },
     { id = 409895,   n = "Verdant Embrace",           class = "EVOKER",        cats = { healing = true } },
     { id = 445740,   n = "Enkindle",                  class = "EVOKER",        off = true, cats = { healing = true } },
@@ -234,7 +234,7 @@ R.Spells = {
     { id = 325197,   n = "Invoke Chi-Ji",             class = "MONK",          off = true, cats = { raidDefensives = true } },
     { id = 443028,   alts = { 1248992 }, n = "Celestial Conduit", class = "MONK", cats = { raidDefensives = true } },
     { id = 462568,   n = "Elemental Resistance",      class = "SHAMAN",        off = true, cats = { raidDefensives = true } },
-    { id = 1260681,  alts = { 406139, 406220, 451299 }, n = "Chi Cocoon", class = "MONK", cats = { raidDefensives = true } },
+    { id = 1260681,  alts = { 406139, 406220, 451299, 432772 }, n = "Chi Cocoon", class = "MONK", cats = { raidDefensives = true } },
     { id = 211210,   n = "Protection of Tyr",         class = "PALADIN",       cats = { raidDefensives = true } },
 
     -- ------------------------------------------------------------
@@ -329,7 +329,7 @@ R.Spells = {
     { id = 209388,   alts = { 453043 }, n = "Bulwark of Order", class = "PALADIN", off = true, cats = { defensives = true, tankCooldowns = true } },
     { id = 157128,   n = "Saved by the Light",        class = "PALADIN",       off = true, cats = { healing = true } },
     { id = 48792,    n = "Icebound Fortitude",        class = "DEATHKNIGHT",   cats = { defensives = true, tankCooldowns = true } },
-    { id = 48707,    alts = { 444741 }, n = "Anti-Magic Shell", class = "DEATHKNIGHT", cats = { defensives = true, tankCooldowns = true } },
+    { id = 48707,    alts = { 444741, 410358 }, n = "Anti-Magic Shell", class = "DEATHKNIGHT", cats = { defensives = true, tankCooldowns = true } },
     { id = 49039,    n = "Lichborne",                 class = "DEATHKNIGHT",   cats = { defensives = true } },
     { id = 45438,    n = "Ice Block",                 class = "MAGE",          cats = { defensives = true } },
     { id = 414658,   n = "Ice Cold",                  class = "MAGE",          cats = { defensives = true } },
@@ -372,7 +372,7 @@ R.Spells = {
     { id = 212800,   n = "Blur",                      class = "DEMONHUNTER",   cats = { defensives = true } },
     { id = 434107,   alts = { 434105 }, n = "Vampiric Aura", class = "DEATHKNIGHT", off = true, cats = { defensives = true } },
     { id = 404381,   n = "Defy Fate",                 class = "EVOKER",        cats = { defensives = true } },
-    { id = 374349,   n = "Renewing Blaze",            class = "EVOKER",        cats = { defensives = true } },
+    { id = 374349,   alts = { 374348 }, n = "Renewing Blaze", class = "EVOKER", cats = { defensives = true } },
     { id = 455179,   n = "Elixir of Determination",   class = "MONK",          cats = { defensives = true, tankCooldowns = true } },
     { id = 378412,   n = "Light of the Titans",       class = "PALADIN",       cats = { healing = true, tankCooldowns = true } },
 
@@ -406,15 +406,15 @@ R.Spells = {
     -- ------------------------------------------------------------
     -- Utility
     -- ------------------------------------------------------------
-    { id = 2825,     n = "Bloodlust",                 class = "SHAMAN",        cats = { utility = true } },
-    { id = 32182,    n = "Heroism",                   class = "SHAMAN",        cats = { utility = true } },
+    { id = 2825,     alts = { 204361 }, n = "Bloodlust", class = "SHAMAN", cats = { utility = true } },
+    { id = 32182,    alts = { 204362 }, n = "Heroism", class = "SHAMAN", cats = { utility = true } },
     { id = 80353,    n = "Time Warp",                 class = "MAGE",          cats = { utility = true } },
     { id = 390386,   n = "Fury of the Aspects",       class = "EVOKER",        cats = { utility = true } },
     { id = 264667,   alts = { 357650 }, n = "Primal Rage", class = "HUNTER", cats = { utility = true } },
     { id = 466904,   n = "Harrier's Cry",             class = "HUNTER",        cats = { utility = true } },
     { id = 115834,   alts = { 114018 }, n = "Shroud of Concealment", class = "ROGUE", cats = { utility = true } },
     { id = 34477,    alts = { 35079 }, n = "Misdirection", class = "HUNTER", cats = { utility = true } },
-    { id = 1224098,  alts = { 57934, 59628 }, n = "Tricks of the Trade", class = "ROGUE", cats = { utility = true } },
+    { id = 1224098,  alts = { 57934, 59628, 221630 }, n = "Tricks of the Trade", class = "ROGUE", cats = { utility = true } },
     { id = 20707,    n = "Soulstone",                 class = "WARLOCK",       cats = { utility = true } },
     { id = 3714,     n = "Path of Frost",             class = "DEATHKNIGHT",   cats = { utility = true } },
     { id = 410318,   n = "Bestow Weyrnstone",         class = "EVOKER",        cats = { utility = true } },
@@ -460,7 +460,7 @@ R.Spells = {
     { id = 1297365,  n = "Freezing Tempest",          class = "DEATHKNIGHT",   cats = { tierSetAuras = true } },
     { id = 1302255,  n = "Genesis",                   class = "DRUID",         cats = { tierSetAuras = true } },
     { id = 1301286,  n = "Gorestained Claws",         class = "DRUID",         cats = { tierSetAuras = true } },
-    { id = 1301600,  n = "Halazzi's Fury",            class = "DRUID",         cats = { tierSetAuras = true } },
+    { id = 1265479,  alts = { 1301600 }, n = "Halazzi's Fury", class = "DRUID", cats = { tierSetAuras = true } },  -- canonical moved to the 10s aura (v4); 1301600 is the 1s trigger pulse
     { id = 1247577,  alts = { 1301768 }, n = "Akil'zon's Clarity", class = "DRUID", cats = { tierSetAuras = true } },
     { id = 1297728,  n = "Magnified Fate",            class = "EVOKER",        cats = { tierSetAuras = true } },
     { id = 1299389,  n = "Cobra Fang",                class = "HUNTER",        cats = { tierSetAuras = true } },
@@ -485,6 +485,7 @@ R.Spells = {
     { id = 1236998,  n = "Draught of Rampant Abandon", class = "ALL",           cats = { consumables = true } },
     { id = 1236616,  n = "Light's Potential",         class = "ALL",           cats = { consumables = true } },
     { id = 1235568,  n = "Light's Preservation",      class = "ALL",           cats = { consumables = true } },
+    { id = 1295132,  alts = { 1295147 }, n = "Liquid Luster", class = "ALL",    cats = { consumables = true } },
     { id = 1239479,  n = "Potion of Devoured Dreams", class = "ALL",           cats = { consumables = true } },
     { id = 1236994,  n = "Potion of Recklessness",    class = "ALL",           cats = { consumables = true } },
 
@@ -493,9 +494,11 @@ R.Spells = {
     -- ------------------------------------------------------------
     { id = 1250587,  n = "Binding Flame",             class = "ALL",           cats = { trinketsItems = true } },
     { id = 1272482,  n = "Cosmic Bell",               class = "ALL",           cats = { trinketsItems = true } },
+    { id = 1263447,  n = "Duskwraith's Infusion",      class = "ALL",           cats = { trinketsItems = true } },
     { id = 1250533,  n = "Freightrunner's Flask",     class = "ALL",           cats = { trinketsItems = true } },
     { id = 1295885,  alts = { 1307470 }, n = "Hex Lord's Dooming Idol", class = "ALL", cats = { trinketsItems = true } },
     { id = 1262496,  n = "Light Company Guidon",      class = "ALL",           cats = { trinketsItems = true } },
+    { id = 1254577,  n = "Refueling Orb",              class = "ALL",           cats = { trinketsItems = true } },
     { id = 1295275,  alts = { 1294745 }, n = "The King's Unyielding Wind", class = "ALL", cats = { trinketsItems = true } },
     { id = 1272460,  n = "Ultradon Cuirass",          class = "ALL",           cats = { trinketsItems = true } },
     { id = 1250557,  n = "Void Execution Mandate",    class = "ALL",           cats = { trinketsItems = true } },
