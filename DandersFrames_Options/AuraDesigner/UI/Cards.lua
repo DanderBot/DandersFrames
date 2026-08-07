@@ -871,26 +871,43 @@ P.CreateFramePreview = CreateFramePreview
 
 -- (S.spellPickerBlockedIDs declared on the state table)
                                    -- cross-tab block; rebuilt per picker open)
-local spellPickerBlockCache = {}   -- auraName -> bool memo over S.spellPickerBlockedIDs
-                                   -- (wiped whenever the set is rebuilt) so blocked
-                                   -- checks don't re-resolve identity per row bind
+local spellPickerBlockCache = {}   -- (effective spec, auraName) -> bool memo over
+                                   -- S.spellPickerBlockedIDs (wiped whenever the set is
+                                   -- rebuilt) so blocked checks don't re-resolve identity
+                                   -- per row bind
 
 -- Cross-tab used check for one picker candidate: any of its identity IDs
 -- (nil-spec identity on the Other tab — the naming contract's resolver —
 -- else the spec identity) already tracked by the opposite pool.
 local function IsCandidateCrossBlocked(auraName, spec)
     if not S.spellPickerBlockedIDs or not next(S.spellPickerBlockedIDs) then return false end
-    local cached = spellPickerBlockCache[auraName]
+
+    -- ☠ THE SPEC IS AN INPUT TO THE ANSWER, SO IT BELONGS IN THE KEY. This memoised on
+    -- auraName alone while the value came from BuildADIdentityFilters(spec, ...), and the
+    -- memo is only wiped when the picker OPENS (OpenADPicker) -- but the spec dropdown
+    -- lives on buffTabBar, parented to S.mainFrame, which the picker does NOT hide (it
+    -- hides S.tabBar and S.tabScrollFrame). So the spec really can change underneath an
+    -- open picker, and a candidate resolved before that change kept the previous spec's
+    -- verdict: an add wrongly refused with "Already tracked in ...", or a genuine
+    -- cross-tab clash let through.
+    --
+    -- On the Other tab the resolver is passed nil, so the answer there genuinely is
+    -- spec-independent -- fold that into the key instead of branching on it twice, so the
+    -- key and the value can never be computed from different specs.
+    local effSpec = (not IsOtherTab()) and spec or nil
+    local key = tostring(effSpec) .. "\0" .. tostring(auraName)
+
+    local cached = spellPickerBlockCache[key]
     if cached ~= nil then return cached end
     local blocked = false
-    local f = DF:BuildADIdentityFilters(IsOtherTab() and nil or spec, auraName)
+    local f = DF:BuildADIdentityFilters(effSpec, auraName)
     local map = f and f.includeSpellIDs
     if map then
         for id in pairs(map) do
             if S.spellPickerBlockedIDs[id] then blocked = true; break end
         end
     end
-    spellPickerBlockCache[auraName] = blocked
+    spellPickerBlockCache[key] = blocked
     return blocked
 end
 
