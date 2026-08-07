@@ -2948,12 +2948,22 @@ function PinnedFrames:RemoveSet(setIndex, mode)
 
     if mode ~= GetActualMode() then return true end  -- inactive mode: DB only
     if InCombatLockdown() then
+        -- ☠ THE CONTAINER AND HEADER ARE PROTECTED -- this used to :Hide() them directly.
+        -- hideContainerSafe exists precisely for this: the containers are implicitly
+        -- protected because the SecureGroupHeaderTemplate is a child, so container and
+        -- header hides must be deferred to PLAYER_REGEN_ENABLED. Clicking the x on a
+        -- pinned set tab mid-pull (the settings window is usable in combat, and DoRemoveSet
+        -- in Pages/Frames.lua has no combat guard of its own) raised a blocked-action error.
+        --
+        -- The mover and the label are plain frames parented to UIParent, so those two hides
+        -- were always fine and stay direct. pendingReinitialize already covers the recovery
+        -- at combat end -- the defect was the error, not stuck state.
         local c = self.containers[setIndex]
         if c then
             if c.mover then c.mover:Hide() end
-            c:Hide()
+            hideContainerSafe(self, c)
         end
-        if self.headers[setIndex] then self.headers[setIndex]:Hide() end
+        hideContainerSafe(self, self.headers[setIndex])
         if self.labels[setIndex] then self.labels[setIndex]:Hide() end
         self.pendingReinitialize = true
         return true

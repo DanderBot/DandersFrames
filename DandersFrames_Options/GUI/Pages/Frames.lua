@@ -1857,8 +1857,21 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         autoPopGroup:AddWidget(GUI:CreateHeader(self.child, L["Auto-Populate"]), 40)
         autoPopGroup:AddWidget(GUI:CreateLabel(self.child, L["Automatically add players by role when they join your group."], 510), 20)
 
+        -- ☠ ALL FOUR AUTO-POPULATE HANDLERS NEED IsEditingActiveMode.
+        -- AutoPopulateSet reads the LIVE roster (`local isRaid = IsInRaid()`, then raidN /
+        -- partyN tokens) and writes the names it finds into GetCurrentSet() -- which is the
+        -- set for the mode being EDITED, not the mode you are in. So sitting in a 20-man
+        -- raid, switching the mode selector to Party to tidy the party set, and ticking
+        -- "Auto-add Healers" wrote five raid healers' names into the PARTY set and saved it.
+        --
+        -- The Enable / Show Label / Show in Solo Mode siblings ~500 lines above are all
+        -- gated on IsEditingActiveMode, and the solo one carries a note describing this
+        -- exact failure in the other direction. These four were missed.
+        --
+        -- The checkbox VALUE still saves either way (that is just config); only the live
+        -- roster scrape is suppressed when you are editing the mode you are not in.
         autoPopGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Auto-add Tanks"], "autoAddTanks", function()
-            if GetCurrentSet().autoAddTanks and DF.PinnedFrames then
+            if IsEditingActiveMode() and GetCurrentSet().autoAddTanks and DF.PinnedFrames then
                 DF.PinnedFrames:AutoPopulateSet(GetCurrentSet())
                 DF.PinnedFrames:UpdateHeaderNameList(activeHighlightTab)
                 if rosterWidget then rosterWidget:Refresh() end
@@ -1866,7 +1879,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
         end), 28)
         autoPopGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Auto-add Healers"], "autoAddHealers", function()
-            if GetCurrentSet().autoAddHealers and DF.PinnedFrames then
+            if IsEditingActiveMode() and GetCurrentSet().autoAddHealers and DF.PinnedFrames then
                 DF.PinnedFrames:AutoPopulateSet(GetCurrentSet())
                 DF.PinnedFrames:UpdateHeaderNameList(activeHighlightTab)
                 if rosterWidget then rosterWidget:Refresh() end
@@ -1874,7 +1887,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end
         end), 28)
         autoPopGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Auto-add DPS"], "autoAddDPS", function()
-            if GetCurrentSet().autoAddDPS and DF.PinnedFrames then
+            if IsEditingActiveMode() and GetCurrentSet().autoAddDPS and DF.PinnedFrames then
                 DF.PinnedFrames:AutoPopulateSet(GetCurrentSet())
                 DF.PinnedFrames:UpdateHeaderNameList(activeHighlightTab)
                 if rosterWidget then rosterWidget:Refresh() end
@@ -1884,7 +1897,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Exclude Self: keep the player out of this set's auto-add (e.g. Aug Evoker
         -- who buffs others). Re-runs auto-populate so self is added/removed live.
         autoPopGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Exclude Self"], "excludeSelf", function()
-            if DF.PinnedFrames then
+            if IsEditingActiveMode() and DF.PinnedFrames then
                 DF.PinnedFrames:AutoPopulateSet(GetCurrentSet())
                 DF.PinnedFrames:UpdateHeaderNameList(activeHighlightTab)
                 if rosterWidget then rosterWidget:Refresh() end
