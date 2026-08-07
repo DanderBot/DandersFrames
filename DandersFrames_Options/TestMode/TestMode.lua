@@ -2994,83 +2994,13 @@ function DF:LightweightPositionPartyTestFrames(testFrameCount)
         end
         return
     end
-    
-    -- Fallback: Old positioning code if SecureSort not available
-    local frameWidth = db.frameWidth or 100
-    local frameHeight = db.frameHeight or 50
-    local spacing = db.frameSpacing or 2
-    local growDirection = db.growDirection or "VERTICAL"
-    local growthAnchor = db.growthAnchor or "START"
-    
-    -- Apply pixel-perfect adjustments
-    if db.pixelPerfect then
-        frameWidth = DF:PixelPerfect(frameWidth)
-        frameHeight = DF:PixelPerfect(frameHeight)
-        spacing = DF:PixelPerfect(spacing)
-    end
-    
-    local horizontal = (growDirection == "HORIZONTAL")
-    
-    -- Calculate total size needed for visible frames
-    local totalWidth, totalHeight
-    if horizontal then
-        totalWidth = testFrameCount * frameWidth + (testFrameCount - 1) * spacing
-        totalHeight = frameHeight
-    else
-        totalWidth = frameWidth
-        totalHeight = testFrameCount * frameHeight + (testFrameCount - 1) * spacing
-    end
-    
-    -- Calculate container size (max possible size for 5 frames)
-    local containerWidth, containerHeight
-    if horizontal then
-        containerWidth = 5 * frameWidth + 4 * spacing
-        containerHeight = frameHeight
-    else
-        containerWidth = frameWidth
-        containerHeight = 5 * frameHeight + 4 * spacing
-    end
-    
-    -- Update container size
-    DF.testPartyContainer:SetSize(containerWidth, containerHeight)
-    
-    -- Calculate starting offset based on growthAnchor
-    local startX, startY = 0, 0
-    if horizontal then
-        -- Horizontal layout - growthAnchor controls left/center/right alignment
-        if growthAnchor == "START" then
-            startX = 0
-        elseif growthAnchor == "CENTER" then
-            startX = (containerWidth - totalWidth) / 2
-        else -- END
-            startX = containerWidth - totalWidth
-        end
-    else
-        -- Vertical layout - growthAnchor controls top/center/bottom alignment
-        if growthAnchor == "START" then
-            startY = 0
-        elseif growthAnchor == "CENTER" then
-            startY = -(containerHeight - totalHeight) / 2
-        else -- END
-            startY = -(containerHeight - totalHeight)
-        end
-    end
-    
-    -- Position test frames
-    for i = 0, 4 do
-        local frame = DF.testPartyFrames[i]
-        if frame and i < testFrameCount then
-            frame:ClearAllPoints()
-            if horizontal then
-                local x = startX + i * (frameWidth + spacing)
-                frame:SetPoint("TOPLEFT", DF.testPartyContainer, "TOPLEFT", x, 0)
-            else
-                local y = startY - i * (frameHeight + spacing)
-                frame:SetPoint("TOPLEFT", DF.testPartyContainer, "TOPLEFT", 0, y)
-            end
-            frame:SetSize(frameWidth, frameHeight)
-        end
-    end
+
+    -- ☠ A SECOND, UNREACHABLE PARTY LAYOUT USED TO LIVE HERE -- ~76 lines behind
+    -- 'Fallback: if SecureSort not available'. Features/SecureSort.lua is
+    -- unconditional in the .toc (line 124) and assigns DF.SecureSort at load, so the
+    -- branch above always returns and this never ran. It also used a DIFFERENT
+    -- growthAnchor formula to CalculateSlotPosition -- a third statement of the same
+    -- geometry that no longer had to agree with anything. (Audit, 2026-08-07.)
 end
 
 -- Throttled version of UpdateRaidTestFrames for slider callbacks
