@@ -4930,7 +4930,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- entry survives for the drift check but appears once.
         sub("headers",      "secure header state dump, or a /dfheaders subcommand", nil, "[cmd]", true)
         sub("attached",     "foreign frames anchored to ours")
-        sub("zorder",       "frame level / strata map")
+        sub("zorder",       "frame level / strata / alpha map (add a test frame index)", nil, "[index]")
         sub("mousefoci",    "identify the frame under the cursor after 2s")
         -- Auras (12.1 container era)
         sub("auradata",     "live aura data enumeration (add a unit token)", nil, "[unit]")
@@ -5076,21 +5076,52 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- the first shown frame. Static reading says defensive (+51) must draw over
             -- debuffs (+40); when the screen disagrees, this says which link in the chain
             -- (anchor frame -> CustomAuraContainer -> button -> DF art host) breaks it.
-            if msg == "zorder" then
+            local zorderArg = msg:match("^zorder%s+(%d+)$")
+            if msg == "zorder" or zorderArg then
                 -- unitFrameMap is the addon-wide unit -> frame index (Headers.lua);
                 -- prefer a frame that actually has a defensive row to report on.
+                -- ☠ TEST FRAMES FIRST WHILE PREVIEWING. This walked DF.unitFrameMap only,
+                -- which is the LIVE unit -> frame map -- so with test mode open it reported
+                -- the hidden live frame sitting behind the preview, and every number in the
+                -- dump described an object the user was not looking at.
+                --
+                -- ☠ AND IT ONLY EVER REPORTED ONE FRAME, WHICH IS USELESS FOR A RANGE BUG.
+                -- Every preview frame has a defensiveFactory, so the auto-pick was arbitrary
+                -- and it kept landing on an in-range frame while the broken one was two along.
+                -- "/df debug zorder 4" names the frame (party index, or raid index while
+                -- previewing raid) so a specific frame can be interrogated directly.
                 local frame
-                for _, f in pairs(DF.unitFrameMap or {}) do
-                    if f and f:IsShown() then
-                        frame = frame or f
-                        if f.defensiveFactory then frame = f break end
+                local function consider(f)
+                    if not (f and f:IsShown()) then return end
+                    frame = frame or f
+                    if f.defensiveFactory then frame = f end
+                end
+                local wantIdx = tonumber(zorderArg)
+                if wantIdx then
+                    local pool = (DF.raidTestMode and DF.testRaidFrames) or DF.testPartyFrames
+                    local f = pool and pool[wantIdx]
+                    if not f then
+                        DF:Say("no test frame at index " .. wantIdx .. ".", nil, "WARN")
+                        return
+                    end
+                    frame = f
+                else
+                    if DF.testMode and DF.testPartyFrames then
+                        for i = 0, 4 do consider(DF.testPartyFrames[i]) end
+                    end
+                    if DF.raidTestMode and DF.testRaidFrames then
+                        for i = 1, 40 do consider(DF.testRaidFrames[i]) end
+                    end
+                    if not frame then
+                        for _, f in pairs(DF.unitFrameMap or {}) do consider(f) end
                     end
                 end
                 if not frame then
                     DF:Say("no shown frame — enable test mode first.", nil, "WARN")
                     return
                 end
-                local o = DF:Out("Z-Order", "unit " .. tostring(frame.unit))
+                local o = DF:Out("Z-Order", "unit " .. tostring(frame.unit)
+                    .. (frame.dfIsTestFrame and "  [TEST FRAME]" or "  [live frame]"))
                 o:Section("Frame")
                 o:Field("level", frame:GetFrameLevel(), "NEUTRAL")
                 o:Field("strata", tostring(frame:GetFrameStrata()), "NEUTRAL")
@@ -5163,6 +5194,28 @@ DF._MainEventDispatcher = function(self, event, arg1)
                                             end
                                         end
                                     end
+                                    -- ☠ THE BADGE, AND ITS BORDER. A placed indicator's border is
+                                    -- badge.dfADBorder -- created on the BADGE, not the button --
+                                    -- and this dump only ever walked btn[...], so the one region
+                                    -- that visibly draws over the defensive icon was the one region
+                                    -- never reported. Border:New with frameLevelOffset = 0 pins it
+                                    -- to the badge's own level, so the badge's level IS the border's:
+                                    -- print both, and the strata, since a border that clears an icon
+                                    -- 25 levels above it has left the band entirely.
+                                    local badge = h.GetBadgeFrame and h:GetBadgeFrame()
+                                    if badge and badge.GetFrameLevel then
+                                        print(("      .%-14s level=%d  strata=%s"):format("badge",
+                                            badge:GetFrameLevel(), tostring(badge:GetFrameStrata())))
+                                        local bb = badge.dfADBorder
+                                        local bf = bb and ((bb.GetFrameLevel and bb)
+                                            or (bb.frame and bb.frame.GetFrameLevel and bb.frame)
+                                            or (bb.host and bb.host.GetFrameLevel and bb.host))
+                                        if bf then
+                                            print(("      .%-14s level=%d  strata=%s"):format(
+                                                "badge.dfADBorder", bf:GetFrameLevel(),
+                                                tostring(bf:GetFrameStrata())))
+                                        end
+                                    end
                                 end
                             end
                         end
@@ -5219,6 +5272,125 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 local zdef = zad and zad.defaults
                 o:Field("AD indicatorFrameLevel", tostring(zdef and zdef.indicatorFrameLevel), "NEUTRAL")
                 o:Field("AD indicatorFrameStrata", tostring(zdef and zdef.indicatorFrameStrata), "NEUTRAL")
+
+                -- ☠ ALPHA, NEXT TO THE LEVELS. A faded thing on top of a bright thing reads
+                -- EXACTLY like a z-order fault: an indicator "bleeding through" the icon above
+                -- it is the same picture whether that icon dropped a band or merely went
+                -- transparent. Levels alone cannot tell those apart, and guessing between them
+                -- cost three wrong fixes on one report. The dump answers both questions now.
+                --
+                -- Read-only, and every object here is DF-owned (anchor frames, alpha hosts,
+                -- the row frame) -- never a secret aura button.
+                local function A(v)
+                    if type(v) ~= "number" then return "-" end
+                    return string.format("%.2f", v)
+                end
+                o:Section("Alpha")
+                o:Field("frame", A(frame:GetAlpha()), "NEUTRAL")
+                o:Field("dfInRange", tostring(frame.dfInRange), "NEUTRAL")
+                o:Field("dfIsDead", tostring(frame.dfIsDead), "NEUTRAL")
+                o:Field("oorEnabled", tostring(zdb and zdb.oorEnabled), "NEUTRAL")
+                o:Field("testShowOutOfRange", tostring(zdb and zdb.testShowOutOfRange), "NEUTRAL")
+                o:Field("rangeFadeAlpha", tostring(zdb and zdb.rangeFadeAlpha), "NEUTRAL")
+                o:Field("oorDefensiveIconAlpha", tostring(zdb and zdb.oorDefensiveIconAlpha), "NEUTRAL")
+                o:Field("oorAuraDesignerAlpha", tostring(zdb and zdb.oorAuraDesignerAlpha), "NEUTRAL")
+                for _, r in ipairs(rows) do
+                    local h = r[2]
+                    local rf = h and h.GetFrame and h:GetFrame()
+                    if rf then o:Field(r[1] .. " row", A(rf:GetAlpha()), "NEUTRAL") end
+                end
+                if frame.missingBuffStrip then
+                    o:Field("missingBuff strip", A(frame.missingBuffStrip:GetAlpha()), "NEUTRAL")
+                end
+                local adN = 0
+                if DF.ForEachAuraDesignerAlphaHost then
+                    DF:ForEachAuraDesignerAlphaHost(frame, function(host, base)
+                        adN = adN + 1
+                        o:Field("AD host " .. adN,
+                            A(host:GetAlpha()) .. "  (base " .. A(base) .. ")", "NEUTRAL")
+                    end)
+                end
+                if adN == 0 then
+                    -- ⚠ NOT the same as "no indicators placed". UpdateAuraDesignerAppearance
+                    -- bails on a nil frame.dfADFactory, so a zero here with an indicator on
+                    -- screen means the AD fade is a silent no-op, not that it ran and went stale.
+                    o:Field("AD hosts", "NONE WALKED (dfADFactory="
+                        .. tostring(frame.dfADFactory ~= nil) .. ")", "WARN")
+                end
+
+                -- ☠ DOES THE WRITE LAND? An AD host reading 1.00 on an out-of-range frame has
+                -- two completely different causes -- the fade never ran, or it ran and was
+                -- overwritten afterwards -- and they need opposite fixes. Re-running the
+                -- appearance function here and re-reading the same host separates them in one
+                -- shot: a value that changes means the write works and something downstream
+                -- undoes it; a value that does not means the write itself is the fault.
+                -- UpdateAuraDesignerAppearance is idempotent (it recomputes from db + stamps
+                -- and writes an alpha), so calling it from a read-only dump is safe.
+                if DF.UpdateAuraDesignerAppearance and DF.ForEachAuraDesignerAlphaHost then
+                    local before, after = {}, {}
+                    DF:ForEachAuraDesignerAlphaHost(frame, function(h) before[#before + 1] = h:GetAlpha() end)
+                    DF:UpdateAuraDesignerAppearance(frame)
+                    DF:ForEachAuraDesignerAlphaHost(frame, function(h)
+                        after[#after + 1] = h:GetAlpha()
+                        -- The parent chain matters as much as the number: fading an anchor
+                        -- frame the visible art does NOT descend from writes a correct alpha
+                        -- onto the wrong object, and only the chain shows that.
+                        local p, chain, hops = h:GetParent(), "", 0
+                        while p and hops < 4 do
+                            chain = chain .. "<-" .. tostring(p:GetFrameLevel())
+                            p, hops = p:GetParent(), hops + 1
+                        end
+                        o:Field("AD host parents", tostring(h:GetFrameLevel()) .. chain, "NEUTRAL")
+                    end)
+                    for i = 1, #before do
+                        o:Field("AD host " .. i .. " re-applied",
+                            A(before[i]) .. "  ->  " .. A(after[i]),
+                            (before[i] ~= after[i]) and "GOOD" or "WARN")
+                    end
+                end
+
+                -- ☠ ONE FRAME CANNOT ANSWER A RANGE QUESTION. "The out-of-range one is not
+                -- fading" is a COMPARISON: it only means anything against a frame that is in
+                -- range under the same settings. Dumping a single frame turned every check
+                -- into a round trip. One compact line per preview frame instead -- the answer
+                -- is the row whose dfInRange is false but whose alphas match the rows above it.
+                if DF.testMode or DF.raidTestMode then
+                    o:Section("Alpha per test frame")
+                    local function line(f, label)
+                        if not (f and f:IsShown()) then return end
+                        local defRow = f.defensiveFactory and f.defensiveFactory.GetFrame
+                            and f.defensiveFactory:GetFrame()
+                        local ad = "-"
+                        if DF.ForEachAuraDesignerAlphaHost then
+                            DF:ForEachAuraDesignerAlphaHost(f, function(host)
+                                ad = (ad == "-") and A(host:GetAlpha())
+                                    or (ad .. "/" .. A(host:GetAlpha()))
+                            end)
+                        end
+                        -- ⚠ The BUFF ROW is the control. It fades through the same
+                        -- ApplyOORAlpha -> SetAlphaFromBoolean call the AD host does, so a
+                        -- row that faded next to an AD host that did not narrows this to the
+                        -- AD path; both at 1.00 on an out-of-range frame means element-mode
+                        -- fading is not landing at all. Without it the dump cannot tell those
+                        -- apart, which cost a round trip.
+                        local buffRow = f.buffFactory and f.buffFactory.GetFrame
+                            and f.buffFactory:GetFrame()
+                        local debuffRow = f.debuffFactory and f.debuffFactory.GetFrame
+                            and f.debuffFactory:GetFrame()
+                        o:Field(label, string.format(
+                            "inRange=%-5s frame=%s  buff=%s  debuff=%s  def=%s  AD=%s",
+                            tostring(f.dfInRange), A(f:GetAlpha()),
+                            buffRow and A(buffRow:GetAlpha()) or "-",
+                            debuffRow and A(debuffRow:GetAlpha()) or "-",
+                            defRow and A(defRow:GetAlpha()) or "-", ad), "NEUTRAL")
+                    end
+                    if DF.testMode and DF.testPartyFrames then
+                        for i = 0, 4 do line(DF.testPartyFrames[i], "party " .. i) end
+                    end
+                    if DF.raidTestMode and DF.testRaidFrames then
+                        for i = 1, 10 do line(DF.testRaidFrames[i], "raid " .. i) end
+                    end
+                end
                 return
             end
             if msg == "unlock" then
