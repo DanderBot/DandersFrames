@@ -1,5 +1,5 @@
 local addonName, DF = ...
-DF.BUILD_DATE = "2026-08-03T15:00:42Z"
+DF.BUILD_DATE = "2026-08-07T15:38:34Z"
 DF.RELEASE_CHANNEL = "alpha"
 -- The changelog text itself lives in DandersFrames_Options/Changelog.lua:
 -- it is a ~180 KB string only the settings panel ever reads, and holding it
