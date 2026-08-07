@@ -2313,6 +2313,15 @@ function Border:Apply(border, spec)
         -- the LCG glow keeps rendering around the unit with no visible
         -- border underneath it.
         self:StopAnimation(border)
+        -- ☠ AND THE SHADOW. Same reasoning as the glow above, and it was missed:
+        -- border.shadow is a lazily-created frame parented to border:GetParent(), not to
+        -- the border, so hiding the edges leaves it drawn. Its only teardown lives ~280
+        -- lines below in the normal path, which this early return skips entirely.
+        --
+        -- Symptom: tick "Border Shadow", then untick "Show Border" -- the border goes and a
+        -- solid black ring stays around the frame or icon. Recoverable only by working out
+        -- that the still-enabled Shadow checkbox is the culprit.
+        if border.shadow then border.shadow:Hide() end
         return
     end
 
