@@ -588,7 +588,14 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
         local currentHP = math.floor(maxHP * health)
         local deficit = currentHP - maxHP
         local pct = health * 100
-        local format = db.healthTextFormat or "DEFICIT"
+        -- ☠ DEFAULT WAS "DEFICIT" HERE AND "PERCENT" EVERYWHERE ELSE (UpdateTestFrame
+        -- and live's two Update.lua sites). A profile without the key showed one format
+        -- while animating and another the instant any setting changed. (Audit, 2026-08-07.)
+        local format = db.healthTextFormat or "PERCENT"
+        -- ☠ AND THE PERCENT BRANCH HARDCODED "%.0f%%", ignoring Hide % Symbol -- so with
+        -- that ticked and Animate Health on, the % was present 20x a second in the
+        -- preview and never present live.
+        local pctFmt = db.healthTextHidePercent and "%.0f" or "%.0f%%"
         local abbreviate = db.healthTextAbbreviate
         
         local function FormatVal(val)
@@ -602,7 +609,7 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
         if format == "CURRENT" then
             text = FormatVal(currentHP)
         elseif format == "PERCENT" then
-            text = string.format("%.0f%%", pct)
+            text = string.format(pctFmt, pct)
         elseif format == "DEFICIT" then
             if deficit < 0 then
                 text = FormatVal(deficit)
@@ -624,6 +631,13 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     end
     animatedTestData.healthPercent = health
     
+    -- ☠ REDUCED MAX HEALTH MUST RE-RUN ON EVERY HEALTH CHANGE. Live's UpdateHealthFast
+    -- calls it explicitly for exactly that reason; this ticker never did, so with
+    -- Reduced Max Health + Clip Health Bar on, the clipped edge was set once by
+    -- UpdateTestFrame and then stayed put while the bar animated underneath it.
+    -- (Audit, 2026-08-07.)
+    if DF.UpdateReducedMaxHealth then DF:UpdateReducedMaxHealth(frame) end
+
     -- Update absorb bars if enabled
     if db.testShowAbsorbs then
         DF:UpdateAbsorb(frame, animatedTestData)
