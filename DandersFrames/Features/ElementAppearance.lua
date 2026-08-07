@@ -726,10 +726,27 @@ function DF:UpdateBorderAppearance(frame)
     if db.oorEnabled then
         local oorAlpha = db.oorBorderAlpha or 0.2
         ApplyOORAlpha(frame.border, inRange, alpha, oorAlpha)
+        -- ☠ HAND THE ANIMATION DRIVER WHAT IT NEEDS TO RESPECT THIS.
+        -- DF_PULSATE drives the border's OWN alpha every frame, so it overwrites the
+        -- SetAlpha above and an out-of-range border keeps pulsing at full strength. Its
+        -- tick tried to compensate by multiplying by `dfRangeAlpha` -- but nothing has
+        -- ever written that field (two hits addon-wide, both inside that one expression),
+        -- so the multiplier was permanently 1 and the comment claiming this pass sets it
+        -- was false.
+        --
+        -- It cannot be a plain number: `inRange` may be a SECRET boolean, so the tick
+        -- cannot compute `pulse * (inRange and 1 or oor)` in Lua at all. Stamp the secret
+        -- itself PLUS a plain companion flag, and let the tick push the choice into
+        -- SetAlphaFromBoolean -- the same move ApplyOORAlpha makes. The plain flag is what
+        -- the tick is allowed to test; the secret is only ever forwarded to the setter.
+        frame.border.dfOORActive  = true
+        frame.border.dfOORInRange = inRange
+        frame.border.dfOORAlpha   = oorAlpha
     else
         -- Whole-frame mode: reset to full so a stale element-specific fade
         -- doesn't linger; the frame's alpha cascade handles the OOR dim.
         frame.border:SetAlpha(alpha)
+        frame.border.dfOORActive = false
     end
 end
 

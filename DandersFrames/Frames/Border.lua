@@ -1871,7 +1871,21 @@ function Border:StopAnimation(border)
     -- glow), and activeAnimation still holds the prior effect here (it's cleared
     -- just below), so gate the reset on it.
     if border.activeAnimation == "DF_PULSATE" and border.SetAlpha then
-        border:SetAlpha(1)
+        -- ⚠ RESTORE THE OOR FADE, NOT FULL OPACITY. This block already exists because a
+        -- blanket reset flashed out-of-range borders to full on every re-render; gating it
+        -- on DF_PULSATE narrowed that to the one effect that owns wrapper alpha, but the
+        -- value written was still a hard 1 -- so stopping a pulse on an OUT-OF-RANGE border
+        -- did exactly what the comment above says this guard was added to prevent, just in
+        -- a narrower case.
+        --
+        -- Same mechanism as the tick: test the plain flag, forward the (possibly secret)
+        -- boolean, let SetAlphaFromBoolean choose. Falls back to 1 when the OOR pass has
+        -- not stamped this border (whole-frame mode, or never range-checked).
+        if border.dfOORActive and border.dfOORAlpha and border.SetAlphaFromBoolean then
+            border:SetAlphaFromBoolean(border.dfOORInRange, 1, border.dfOORAlpha)
+        else
+            border:SetAlpha(1)
+        end
     end
     border.activeAnimation = nil
     border._animHash = nil  -- ensure the next StartAnimation runs the full path
@@ -2091,12 +2105,24 @@ function Border:StartAnimation(border, spec)
             border._dfPulsatePhase = ph
             local wave = (1 - math.cos(ph * 2 * math.pi)) * 0.5
             -- Fade between 0.05 (dim trough) and 1.0 (full) — a gentle pulse.
-            -- DF_PULSATE is the one effect that drives the widget's OWN alpha each
-            -- frame, so it would clobber the range system's out-of-range fade
-            -- (which dims the widget via SetAlpha). Multiply by dfRangeAlpha (set
-            -- by the OOR appearance pass; defaults to 1 when in range / unset) so
-            -- the pulse rides on top of the OOR dim instead of overwriting it.
-            border:SetAlpha((0.05 + 0.95 * wave) * (border.dfRangeAlpha or 1))
+            --
+            -- ☠ DF_PULSATE is the one effect that drives the widget's OWN alpha every
+            -- frame, so it clobbers the out-of-range fade unless it folds it in itself.
+            -- This used to multiply by `border.dfRangeAlpha`, which NOTHING ever wrote --
+            -- the multiplier was permanently 1 and the OOR dim was simply overwritten.
+            --
+            -- It cannot be a number, because `inRange` may be SECRET: a secret boolean
+            -- can't be tested here, so `pulse * (inRange and 1 or oor)` is impossible in
+            -- Lua. DF:UpdateBorderAppearance instead stamps the secret plus a PLAIN
+            -- companion flag; test the flag, forward the secret, and let
+            -- SetAlphaFromBoolean pick between the two pre-multiplied values C-side.
+            local pulse = 0.05 + 0.95 * wave
+            local oor = border.dfOORAlpha
+            if border.dfOORActive and oor and border.SetAlphaFromBoolean then
+                border:SetAlphaFromBoolean(border.dfOORInRange, pulse, pulse * oor)
+            else
+                border:SetAlpha(pulse)
+            end
         end)
         border.activeAnimation = anim.type
         return
