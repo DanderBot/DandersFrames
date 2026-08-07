@@ -190,7 +190,16 @@ function DF:UpdatePetHealthFade(frame)
     local db = DF:GetFrameDB(frame)
     if not db or not db.healthFadeEnabled then
         frame.dfHealthFadeActive = false
-        frame:SetAlpha(1.0)
+        -- ☠ DO NOT STAMP 1.0 OVER THE RANGE FADE. healthFadeEnabled is FALSE by default,
+        -- and Range.lua's OnLoop calls DF:UpdatePetRange(frame) and then
+        -- DF:UpdatePetHealthFade(frame) on the same frame in the same pass -- so this
+        -- unconditional reset erased the range fade the line before had just applied.
+        -- UpdatePetRange early-returns on a cache hit, so it never re-applied it: at stock
+        -- settings an out-of-range pet's frame sat at full opacity indefinitely.
+        --
+        -- With health fade off this function has no opinion about alpha, so leaving it alone
+        -- is correct. The range path is the only other writer of pet frame alpha and always
+        -- sets an explicit value (1.0 when in range), so nothing here needs to reset it.
         return
     end
 
