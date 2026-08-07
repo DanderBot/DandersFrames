@@ -550,19 +550,10 @@ local InCombatLockdown = InCombatLockdown
 local RegisterStateDriver = RegisterStateDriver
 local UnregisterStateDriver = UnregisterStateDriver
 
--- ============================================================
--- SHARED SECURE POSITIONING SNIPPET
--- This is the ONLY function that moves headers
--- All positioning scenarios use this one function
--- ============================================================
-
-DF.POSITION_HEADER_SNIPPET = [[
-    local function PositionHeader(header, container, point, x, y)
-        if not header or not container then return end
-        header:ClearAllPoints()
-        header:SetPoint(point, container, point, x, y)
-    end
-]]
+-- (Removed) DF.POSITION_HEADER_SNIPPET, a secure-snippet string never handed to any
+-- restricted environment — one hit in the whole repo, its own definition. Its banner read
+-- "This is the ONLY function that moves headers", which was actively misleading: nothing
+-- ever executed it, and header positioning is done by the plain-Lua functions in this file.
 
 -- ============================================================
 -- HEADER CHILD INITIALIZATION

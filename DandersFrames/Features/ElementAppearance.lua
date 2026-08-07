@@ -1463,30 +1463,8 @@ function DF:UpdateAllFrameAppearances()
     end
 end
 
--- ============================================================
--- BACKWARD COMPATIBILITY
--- These functions redirect to the new appearance functions
--- for code that still calls the old alpha-only functions
--- ============================================================
-
--- Redirect old alpha functions to new appearance functions
-DF.UpdateAllElementAlphas = DF.UpdateAllElementAppearances
-DF.UpdateAllSecureFrameAlphas = DF.UpdateAllFrameAppearances
-
--- Individual redirects (in case any code calls these directly)
-DF.UpdateHealthBarAlpha = DF.UpdateHealthBarAppearance
-DF.UpdateBackgroundAlpha = DF.UpdateBackgroundAppearance
-DF.UpdateNameTextAlpha = DF.UpdateNameTextAppearance
-DF.UpdateHealthTextAlpha = DF.UpdateHealthTextAppearance
-DF.UpdateStatusTextAlpha = DF.UpdateStatusTextAppearance
-DF.UpdatePowerBarAlpha = DF.UpdatePowerBarAppearance
-DF.UpdateBuffIconsAlpha = DF.UpdateBuffIconsAppearance
-DF.UpdateDebuffIconsAlpha = DF.UpdateDebuffIconsAppearance
-DF.UpdateRoleIconAlpha = DF.UpdateRoleIconAppearance
-DF.UpdateLeaderIconAlpha = DF.UpdateLeaderIconAppearance
-DF.UpdateRaidTargetIconAlpha = DF.UpdateRaidTargetIconAppearance
-DF.UpdateReadyCheckIconAlpha = DF.UpdateReadyCheckIconAppearance
-DF.UpdateDispelOverlayAlpha = DF.UpdateDispelOverlayAppearance
-DF.UpdateMissingBuffAlpha = DF.UpdateMissingBuffAppearance
-DF.UpdateDefensiveIconAlpha = DF.UpdateDefensiveIconAppearance
-DF.UpdateFrameAlpha = DF.UpdateFrameAppearance
+-- (Removed) the 18-name DF.Update*Alpha back-compat alias block. It dated from the
+-- alpha-only -> full-appearance rename and redirected every old name at the new function
+-- "in case any code calls these directly". Nothing did: all 18, plus UpdateAllElementAlphas
+-- and UpdateAllSecureFrameAlphas, had exactly one hit each across BOTH addons — their own
+-- definition. They were never part of the published DandersFrames_* API surface either.

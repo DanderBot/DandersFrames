@@ -535,85 +535,18 @@ end
 -- Expose for reuse by the Aura Designer border indicator
 DF.ApplyHighlightStyle = ApplyHighlightStyle
 
--- ============================================================
--- UPDATE HIGHLIGHT STYLE COLOR (lightweight recolor)
--- ============================================================
+-- (Removed) UpdateHighlightStyleColor, a per-style colour-only fast path that skipped
+-- ApplyHighlightStyle's full tear-down. Its only consumer was the pre-12.1 Aura Designer
+-- EXPIRING ticker (~3 Hz), which was deliberately retired this cycle, so the helper and its
+-- DF.UpdateHighlightStyleColor export were left with zero callers across both addons.
 --
--- Changes the color/alpha of a highlight without touching geometry.
--- Used by the Aura Designer expiring ticker (~3 Hz) so it can animate
--- a color curve as an aura approaches expiration without calling the
--- full ApplyHighlightStyle each tick.
---
--- ApplyHighlightStyle is expensive because it tears everything down:
--- hides all edge textures, hides every dash in the animated border
--- (80 Hide ops), removes the frame from the shared animator, and then
--- rebuilds whichever style was requested — even if the only thing that
--- changed was the color. For an animated border with expiring enabled,
--- that tear-down happens 3 times per second per frame on top of the
--- 30 Hz animation, which is pure waste.
---
--- This helper matches each style exactly and only calls the subset of
--- APIs needed to change colors:
---
---   NONE:     no-op
---   SOLID:    4x SetColorTexture on the edge lines
---   GLOW:     4x SetBackdropBorderColor on the glow layers (same per-
---             layer alpha falloff as the original style code)
---   CORNERS:  8x SetColorTexture on the corner textures
---   ANIMATED: just mutate ch.animR/G/B/A. The next animator tick picks
---             up the new color via the per-dash color cache in
---             DrawHorizontalEdge / DrawVerticalEdge and calls
---             SetColorTexture only on dashes whose cached color differs.
---             Zero work on *this* tick.
---   DASHED:   same as ANIMATED but there's no animator redrawing it,
---             so we call UpdateAnimatedBorder(ch, 0) once to push the
---             new colors to the dashes. Still far cheaper than the
---             full tear-down.
---
--- IMPORTANT: only call this when the style has NOT changed from what
--- was last set via ApplyHighlightStyle. If the style changes, call
--- ApplyHighlightStyle instead — this helper does not create, move,
--- or resize geometry.
-local function UpdateHighlightStyleColor(ch, mode, r, g, b, alpha)
-    if not ch or mode == "NONE" then return end
-
-    if mode == "SOLID" then
-        if ch.topLine    then ch.topLine:SetColorTexture(r, g, b, alpha) end
-        if ch.bottomLine then ch.bottomLine:SetColorTexture(r, g, b, alpha) end
-        if ch.leftLine   then ch.leftLine:SetColorTexture(r, g, b, alpha) end
-        if ch.rightLine  then ch.rightLine:SetColorTexture(r, g, b, alpha) end
-
-    elseif mode == "ANIMATED" then
-        -- Animator picks up the new color on its next tick. Zero ops here.
-        ch.animR, ch.animG, ch.animB, ch.animA = r, g, b, alpha
-
-    elseif mode == "DASHED" then
-        -- No animator; push the new color through via a one-shot redraw.
-        ch.animR, ch.animG, ch.animB, ch.animA = r, g, b, alpha
-        DF:UpdateAnimatedBorder(ch, 0)
-
-    elseif mode == "GLOW" then
-        if ch.glowLayers then
-            for i, layer in ipairs(ch.glowLayers) do
-                -- Matches the alpha falloff in ApplyHighlightStyle's GLOW branch
-                local layerAlpha = alpha * (1.1 - (i * 0.25))
-                layer:SetBackdropBorderColor(r, g, b, math.max(0, layerAlpha))
-            end
-        end
-
-    elseif mode == "CORNERS" then
-        if ch.topLine     then ch.topLine:SetColorTexture(r, g, b, alpha) end
-        if ch.leftLine    then ch.leftLine:SetColorTexture(r, g, b, alpha) end
-        if ch.topRight    then ch.topRight:SetColorTexture(r, g, b, alpha) end
-        if ch.rightTop    then ch.rightTop:SetColorTexture(r, g, b, alpha) end
-        if ch.bottomLeft  then ch.bottomLeft:SetColorTexture(r, g, b, alpha) end
-        if ch.leftBottom  then ch.leftBottom:SetColorTexture(r, g, b, alpha) end
-        if ch.bottomRight then ch.bottomRight:SetColorTexture(r, g, b, alpha) end
-        if ch.rightBottom then ch.rightBottom:SetColorTexture(r, g, b, alpha) end
-    end
-end
-
-DF.UpdateHighlightStyleColor = UpdateHighlightStyleColor
+-- ⚠ KEEP THE REASON IT EXISTED. ApplyHighlightStyle is a full rebuild: it hides every edge
+-- texture, hides every dash in the animated border (~80 Hide ops), drops the frame from the
+-- shared animator, then re-creates whichever style was asked for — even when only the COLOUR
+-- changed. If anything is ever wired to recolour a highlight on a timer again, it must not
+-- call ApplyHighlightStyle per tick; SOLID/CORNERS need only SetColorTexture on the existing
+-- textures, GLOW only SetBackdropBorderColor per layer, and ANIMATED/DASHED only need
+-- ch.animR/G/B/A mutated (the animator's per-dash colour cache picks it up on its next tick).
 
 -- ============================================================
 -- UPDATE HIGHLIGHTS FOR A FRAME
