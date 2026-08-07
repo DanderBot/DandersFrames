@@ -960,27 +960,22 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- ⚠ AFTER the two drives above, not before: both widgets are created LAZILY by
     -- those drives, so earlier in the pass they are still nil on a frame's first
     -- paint. Neither drive touches alpha, so setting it here sticks.
-    -- ★★ ONE SHARED APPEARANCE PASS, after every lazy drive above has had its chance
-    -- to create widgets. ElementAppearance owns colour AND alpha for the border, the
-    -- name/health/status text, the power bar, the four header icons, the dispel
-    -- overlay, the aura rows, the four bars, missing buff, defensive and the Aura
-    -- Designer -- 16 of its 19 functions accept test frames now. The three that still
-    -- bail (health bar, background, frame-level health fade) need a health stamp that
-    -- does not exist yet, and keep their own blocks above.
-    --
-    -- ☠ THIS IS THE FIX FOR A WHOLE CLASS OF BUG. The pattern was: an oor*Alpha or
-    -- fadeDead* key gets added to ElementAppearance and silently not to the copy that
-    -- used to live here, and the preview quietly stops matching live. That happened to
-    -- the missing-buff strip, the defensive row and the AD indicators in three separate
-    -- reports over two days. ADD NOTHING HERE THAT ElementAppearance ALREADY APPLIES.
-    -- (Audit, 2026-08-07.)
-    if DF.UpdateAllElementAppearances then
-        DF:UpdateAllElementAppearances(frame)
-    end
-
     -- Update Aura Designer test indicators through the factory containers — the
     -- SAME path as the bulk DF:UpdateAllTestAuraDesigner, so the per-frame and
     -- bulk previews can't drift (the legacy Engine:UpdateTestFrame is gone).
+    --
+    -- ☠ THIS MUST RUN *BEFORE* THE APPEARANCE PASS, NOT AFTER. SyncFrame re-styles
+    -- each indicator, which resets its alpha host to the indicator's BASE alpha --
+    -- so with it below, every out-of-range AD fade the appearance pass had just
+    -- applied was wiped a few lines later. It is signature-gated, which is what made
+    -- the bug look intermittent and sent three fixes to the wrong place: toggling a
+    -- setting that changes nothing structural makes SyncFrame a no-op, the fade
+    -- survives, and the preview looks correct -- while a fresh Test Mode open or a
+    -- Quick Preset swap DOES change the signature, re-styles, and drops the AD
+    -- indicator back to full opacity on an out-of-range frame. Measured with
+    -- /df debug zorder: buff 0.20, debuff 0.20, missing-buff 0.50, AD 1.00, and one
+    -- re-run of UpdateAuraDesignerAppearance took it straight to 0.20.
+    -- (Audit follow-up, 2026-08-07.)
     local ADFactory = DF.AuraDesigner and DF.AuraDesigner.Factory
     if ADFactory then
         if db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame)
@@ -989,6 +984,26 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         else
             ADFactory:ClearFrame(frame)
         end
+    end
+
+    -- ★★ ONE SHARED APPEARANCE PASS, and it goes LAST. Everything that BUILDS or
+    -- RE-STYLES a surface runs above; this is the only thing that decides what any of
+    -- it looks like under range / dead / health fade, so nothing may run after it.
+    -- ElementAppearance owns colour AND alpha for the border, the name/health/status
+    -- text, the power bar, the four header icons, the dispel overlay, the aura rows,
+    -- the four bars, missing buff, defensive and the Aura Designer -- 16 of its 19
+    -- functions accept test frames now. The three that still bail (health bar,
+    -- background, frame-level health fade) need a health stamp that does not exist
+    -- yet, and keep their own blocks above.
+    --
+    -- ☠ THIS IS THE FIX FOR A WHOLE CLASS OF BUG. The pattern was: an oor*Alpha or
+    -- fadeDead* key gets added to ElementAppearance and silently not to the copy that
+    -- used to live here, and the preview quietly stops matching live. That happened to
+    -- the missing-buff strip, the defensive row and the AD indicators in three separate
+    -- reports over two days. ADD NOTHING HERE THAT ElementAppearance ALREADY APPLIES,
+    -- and ADD NOTHING BELOW IT that touches alpha. (Audit, 2026-08-07.)
+    if DF.UpdateAllElementAppearances then
+        DF:UpdateAllElementAppearances(frame)
     end
 
     -- Update selection and aggro highlights for test mode
