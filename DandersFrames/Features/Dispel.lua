@@ -1258,9 +1258,33 @@ local function dispelFactoryPlanAndSig(db)
     -- Mode marker. Derived from the PLAN, not the setting, so the by-me degrade
     -- inside dispelSlotPlan is reflected here too. (Was "policy"/"nopolicy" back
     -- when All rode a container-level ProcessAura policy.)
-    local parts = { (slots[1] and slots[1].candidateFilters) and "alltypes" or "byme" }
+    -- ☠ SPLIT SIGNATURE. This was ONE signature driving Destroy+Create, so the
+    -- All <-> By-Me dropdown -- a pure filter-string + candidate-filter change -- tore
+    -- down and rebuilt a container PER FRAME. AddAuraSlot is add-only with no remove, so
+    -- every teardown strands its button permanently: one flip in a 40-man raid stranded
+    -- 40, and a user trying the two modes back and forth leaked until /reload.
+    --
+    -- AuraContainer's tuning path has handled exactly this since 2026-08-04, and its own
+    -- comment names this case: SetAuraSlotFilterString / SetAuraSlotCandidateFilters are
+    -- live mutators, applyGroupTuning routes overlay mode through the slot-side setters,
+    -- and it was proven in game (DF_AuraLab /alfilter -- 10 swaps cost 0 stranded frames
+    -- on the tuned path vs 100 on the rebuild control). The engine was already ready;
+    -- this consumer just never stopped bundling the mode into its rebuild key.
+    --
+    -- STRUCTURAL (st) -> Destroy+Create. The slot KEY SET, because AddAuraSlot cannot
+    -- remove; plus everything the secure initializeFrame bakes in, because a tuning swap
+    -- deliberately does NOT re-fire it -- so anything needing a re-style may not move to
+    -- the tuning half.
+    -- TUNING (tu) -> ApplyTuning in place, no teardown: the All/By-Me marker and the
+    -- per-slot filter string.
+    local st = {}
+    -- Mode marker. Derived from the PLAN, not the setting, so the by-me degrade
+    -- inside dispelSlotPlan is reflected here too. (Was "policy"/"nopolicy" back
+    -- when All rode a container-level ProcessAura policy.)
+    local tu = { (slots[1] and slots[1].candidateFilters) and "alltypes" or "byme" }
     for i = 1, #slots do
-        parts[#parts + 1] = slots[i].key .. "=" .. slots[i].filter
+        st[#st + 1] = slots[i].key                             -- key set: structural
+        tu[#tu + 1] = slots[i].key .. "=" .. slots[i].filter    -- string: tunable
         -- ROLES are structural: the carriers a slot builds are created + bound ONCE in
         -- the secure init, so toggling the ring / gradient / EDGE strips must rebuild.
         -- They used to be separate slot keys (and so rode the loop above); now that one
@@ -1268,7 +1292,7 @@ local function dispelFactoryPlanAndSig(db)
         -- silently no-op until the next unrelated rebuild.
         local r = slots[i].roles
         if r then
-            parts[#parts + 1] = "r:g=" .. tostring(r.gradient)
+            st[#st + 1] = "r:g=" .. tostring(r.gradient)
                 .. ",b=" .. tostring(r.border and true or false)
                 .. ",e=" .. (r.edges and table.concat(r.edges, "/") or "none")
                 .. ",bg=" .. tostring(r.badge and true or false)
@@ -1289,9 +1313,9 @@ local function dispelFactoryPlanAndSig(db)
     -- container — a visible teardown flicker — for a colour tweak that now costs one
     -- re-bind. WHICH carrier is bound is unchanged by a palette edit, so the plan is
     -- genuinely identical and the rebuild bought nothing.
-    parts[#parts + 1] = "gs=" .. tostring(db.dispelGradientStyle or "FULL")
-    parts[#parts + 1] = "gh=" .. tostring(db.dispelGradientOnCurrentHealth ~= false)
-    return table.concat(parts, ";"), slots
+    st[#st + 1] = "gs=" .. tostring(db.dispelGradientStyle or "FULL")
+    st[#st + 1] = "gh=" .. tostring(db.dispelGradientOnCurrentHealth ~= false)
+    return table.concat(st, ";"), slots, table.concat(tu, ";")
 end
 
 -- Build the full DF art on a slot button ONCE. Visibility rides the BUTTON (Blizzard
@@ -1863,10 +1887,34 @@ function DF:UseFactoryForDispelOverlay(frame, db)
 end
 
 
+-- The container's filter records, built from the plan. ONE builder for both the create
+-- and the tune path.
+-- ☠ THE onInit CLOSURES MUST BE HERE ON BOTH PATHS. Handle:ApplyTuning PERSISTS whatever
+-- it is handed into config.filter, and a later _rebuild() -- a regen-deferred build, a
+-- test-mode round trip -- rebuilds from exactly that. Hand the tune path a stripped record
+-- set and the rebuild would declare the slot with no initializeFrame, so the secure
+-- carriers would never be created and the overlay would come back invisible with no error.
+-- Tuning itself does not re-fire onInit (that is why roles/gs/gh stay structural); this is
+-- purely about what the stored config says the next REBUILD should do.
+local function dispelFilterRecords(slots, db, frame)
+    local recs = {}
+    for i = 1, #slots do
+        local si = slots[i]   -- fresh per-iteration capture for the onInit closure
+        recs[i] = { filter = si.filter, key = si.key,
+                    candidateFilters = si.candidateFilters,
+                    -- SECURE carrier create + SetAuraBorder bind, run inside the
+                    -- container's initializeFrame (the only context where a texture child
+                    -- of the secret button isn't access-constrained). Geometry/alpha stay
+                    -- in StyleGame*Slot.
+                    onInit = function(btn) DispelSlotSecureInit(btn, si, db, frame) end }
+    end
+    return recs
+end
+
 -- Drive the factory overlay for one frame. Mirrors the row drives: lazy create,
--- recreate on a structural signature change, keep the container on the frame's unit,
--- re-style on a layout-version bump (out of combat). Cheap when nothing changed —
--- this runs per UNIT_AURA via UpdateDispelOverlay.
+-- recreate on a STRUCTURAL signature change, TUNE IN PLACE on a filter-only change,
+-- keep the container on the frame's unit, re-style on a layout-version bump (out of
+-- combat). Cheap when nothing changed — this runs per UNIT_AURA via UpdateDispelOverlay.
 function DF:DriveDispelOverlayFactory(frame, db)
     -- No double render: the legacy overlay stays hidden while the factory owns.
     if frame.dfDispelOverlay and frame.dfDispelOverlay:IsShown() then
@@ -1881,6 +1929,7 @@ function DF:DriveDispelOverlayFactory(frame, db)
             h:Destroy()   -- self-defers to regen in lockdown
             frame.dispelFactory = nil
             frame.dispelFactorySig = nil
+            frame.dispelFactoryTuneSig = nil
         end
         return
     end
@@ -1909,22 +1958,22 @@ function DF:DriveDispelOverlayFactory(frame, db)
         return
     end
 
-    local sig, slots = dispelFactoryPlanAndSig(db)
+    local sig, slots, tuneSig = dispelFactoryPlanAndSig(db)
     if not sig then return end
 
-    if not h or frame.dispelFactorySig ~= sig then
+    if h and frame.dispelFactorySig == sig and frame.dispelFactoryTuneSig ~= tuneSig then
+        -- ☠ TUNE, DO NOT REBUILD. The structural half is identical, so only the filter
+        -- string and the dispel-type candidate filter moved — the All <-> By-Me dropdown.
+        -- This used to fall into the branch below and Destroy+Create per frame, stranding
+        -- one button each time (AddAuraSlot is add-only). ApplyTuning routes overlay mode
+        -- through the live slot-side setters, carries its own combat deferral, and rebuilds
+        -- itself under test mode. Records carry onInit — see dispelFilterRecords.
+        frame.dispelFactoryTuneSig = tuneSig
+        h:ApplyTuning({ filter = dispelFilterRecords(slots, db, frame) })
+        -- Fall through: the unit upkeep and style pass below still apply.
+    elseif not h or frame.dispelFactorySig ~= sig then
         if h then h:Destroy() end
-        local filterRecords = {}
-        for i = 1, #slots do
-            local si = slots[i]   -- fresh per-iteration capture for the onInit closure
-            filterRecords[i] = { filter = si.filter, key = si.key,
-                                 candidateFilters = si.candidateFilters,
-                                 -- SECURE carrier create + SetAuraBorder bind, run inside
-                                 -- the container's initializeFrame (the only context where
-                                 -- a texture child of the secret button isn't access-
-                                 -- constrained). Geometry/alpha stay in StyleGame*Slot.
-                                 onInit = function(btn) DispelSlotSecureInit(btn, si, db, frame) end }
-        end
+        local filterRecords = dispelFilterRecords(slots, db, frame)
         h = DF.AuraContainer:Create(frame, {
             unit = frame.unit,
             mode = "overlay",
@@ -1937,6 +1986,10 @@ function DF:DriveDispelOverlayFactory(frame, db)
         })
         frame.dispelFactory = h
         frame.dispelFactorySig = h and sig or nil
+        -- Stamp the TUNE sig too. A fresh container is already built at this plan, so
+        -- leaving it nil made the very next drive pass see a tuning delta and fire one
+        -- pointless ApplyTuning per container — 40 needless UpdateAllAuras on a raid login.
+        frame.dispelFactoryTuneSig = h and tuneSig or nil
         frame.dfDispelFactoryVersion = nil   -- force a style pass on the new buttons
     end
     if not h then return end
