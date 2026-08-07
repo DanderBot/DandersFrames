@@ -3473,8 +3473,17 @@ function DF:UpdateTestDefensiveBar(frame, testData)
             DF:DriveDefensiveFactory(frame, db)
             local h = frame.defensiveFactory
             if h then
+                -- ☠ ONE SOURCE FOR THE PREVIEW COUNT. This used to override with a
+                -- role-scaled 3-on-tanks / 1-on-everyone-else AFTER the drive had
+                -- already applied BuildDefensiveRowConfig's `testMax = testBuffCount`.
+                -- Two values fighting: the Buffs count slider appeared to do nothing
+                -- on the defensive row, and since SetTestMax rebuilds on any change,
+                -- every defensive tweak in test paid an extra container rebuild while
+                -- they argued. The config's own comment states the intent -- this is a
+                -- HELPFUL row, so the Buffs count is the one the user set for it -- and
+                -- wins; the role scaling was a leftover of the legacy preview's shape.
                 if h.SetTestMax then
-                    h:SetTestMax(math.min(role == "TANK" and 3 or 1, db.defensiveBarMax or 4))
+                    h:SetTestMax(math.min(db.testBuffCount or 2, db.defensiveBarMax or 4))
                 end
                 if frame.dfDefFactoryShown ~= true then
                     frame.dfDefFactoryShown = true
