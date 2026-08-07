@@ -60,6 +60,10 @@ local function CreateStatusIcon(parent, size)
 end
 
 -- Helper to show icon as text or texture
+-- ★ EXPOSED. The preview kept its own ShowTestIconAsText, which additionally
+-- re-applied the font and the text colour -- work ApplyIconSettings already does,
+-- and re-applying it AFTER meant any per-state tint (the AFK icon's DND red) was
+-- silently overwritten in the preview but not live. (Audit, 2026-08-07.)
 local function ShowIconAsText(icon, text, showText)
     if showText then
         icon.texture:Hide()
@@ -347,6 +351,9 @@ local function ApplyIconSettings(icon, db, prefix)
 end
 
 DF.ApplyStatusIconSettings = ApplyIconSettings
+function DF:ShowStatusIconAsText(icon, text, showText)
+    ShowIconAsText(icon, text, showText)
+end
 
 -- ============================================================
 -- UPDATE SUMMON ICON
@@ -492,6 +499,12 @@ function DF:UpdateResurrectionIcon(frame)
             DF:SetUpgradedStatusIcon(frame.resurrectionIcon.texture, "Interface\\RaidFrame\\Raid-Icon-Rez")
             frame.resurrectionIcon.texture:SetVertexColor(0, 1, 0, 1)
             ApplyIconSettings(frame.resurrectionIcon, db, "resurrectionIcon")
+            -- ☠ THIS CALL WAS MISSING LIVE. Every other status icon routes its show
+            -- through ShowIconAsText; the resurrection icon did not, so Show Text and
+            -- Casting Text were inert here and the fontstring kept whatever visibility
+            -- it was last left with. The preview did honour them, which is how the
+            -- divergence surfaced. (Audit, 2026-08-07.)
+            ShowIconAsText(frame.resurrectionIcon, db.resurrectionIconTextCasting or "Res...", db.resurrectionIconShowText)
             frame.resurrectionIcon:Show()
             return
         elseif resCache[unit] == 1 then
@@ -501,6 +514,8 @@ function DF:UpdateResurrectionIcon(frame)
             DF:SetUpgradedStatusIcon(frame.resurrectionIcon.texture, "Interface\\RaidFrame\\Raid-Icon-Rez")
             frame.resurrectionIcon.texture:SetVertexColor(1, 1, 0, 0.75)
             ApplyIconSettings(frame.resurrectionIcon, db, "resurrectionIcon")
+            -- See the note on the casting branch above.
+            ShowIconAsText(frame.resurrectionIcon, db.resurrectionIconTextCasting or "Res...", db.resurrectionIconShowText)
             frame.resurrectionIcon:Show()
             return
         elseif resCache[unit] and resCache[unit] ~= 1 then
@@ -509,6 +524,8 @@ function DF:UpdateResurrectionIcon(frame)
                 DF:SetUpgradedStatusIcon(frame.resurrectionIcon.texture, "Interface\\RaidFrame\\Raid-Icon-Rez")
                 frame.resurrectionIcon.texture:SetVertexColor(1, 1, 0, 0.75)
                 ApplyIconSettings(frame.resurrectionIcon, db, "resurrectionIcon")
+                -- See the note on the casting branch above.
+                ShowIconAsText(frame.resurrectionIcon, db.resurrectionIconTextCasting or "Res...", db.resurrectionIconShowText)
                 frame.resurrectionIcon:Show()
                 return
             else
@@ -1017,7 +1034,9 @@ end
 -- UnitPvpClassification returns an Enum.PvPUnitClassification value
 -- (or -1 outside objective PvP); we only render flags + orbs.
 -- ============================================================
-local PVP_CARRIER_TEXTURES = {
+-- ★ Exposed: the preview used to hardcode inv_bannerpvp_02, so the per-classification
+-- art (Horde/Alliance/Neutral flags, the four orbs) was unpreviewable.
+DF.PVP_CARRIER_TEXTURES = {
     [0]  = "Interface\\Icons\\inv_bannerpvp_01",  -- FlagCarrierHorde
     [1]  = "Interface\\Icons\\inv_bannerpvp_02",  -- FlagCarrierAlliance
     [2]  = "Interface\\Icons\\inv_bannerpvp_03",  -- FlagCarrierNeutral
@@ -1051,7 +1070,7 @@ function DF:UpdateBGCarrierIcon(frame)
         return
     end
 
-    local texture = PVP_CARRIER_TEXTURES[classification]
+    local texture = DF.PVP_CARRIER_TEXTURES[classification]
     if not texture then
         frame.bgCarrierIcon:Hide()
         return

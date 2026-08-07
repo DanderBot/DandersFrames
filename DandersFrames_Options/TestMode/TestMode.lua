@@ -173,6 +173,7 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             isMainTank = false,
             isMainAssist = false,
             isAFK = false,
+            isDND = false,
             isPhased = false,
             inVehicle = false,
         }
@@ -329,7 +330,8 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             -- New icon states
             isMainTank = (i == 1 or i == 25),  -- First frame and frame 25
             isMainAssist = (i == 2 or i == 26),  -- Second frame and frame 26
-            isAFK = (i == 3 or i == 15),  -- Frames 3 and 15
+            isAFK = (i == 3),             -- Frame 3 is away
+            isDND = (i == 15),            -- Frame 15 is busy (the AFK icon's other state)
             isPhased = (i == 4 or i == 20),  -- Frames 4 and 20
             inVehicle = (i == 5 or i == 30),  -- Frames 5 and 30
             isBGCarrier = (i == 2 or i == 10),  -- Frames 2 and 10 carry an objective
@@ -387,6 +389,7 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         isMainTank = data.isMainTank,
         isMainAssist = data.isMainAssist,
         isAFK = data.isAFK,
+        isDND = data.isDND,
         isPhased = data.isPhased,
         inVehicle = data.inVehicle,
         isBGCarrier = data.isBGCarrier,
@@ -1334,47 +1337,12 @@ function DF:UpdateTestIcons(frame, testData)
 end
 
 -- Helper function to show icon as text or texture in test mode
-local function ShowTestIconAsText(icon, text, showText, db, prefix)
-    if not icon then return end
-    if showText then
-        if icon.texture then icon.texture:Hide() end
-        if icon.text then
-            icon.text:SetText(text)
-            
-            -- Apply font settings if db is provided
-            if db then
-                local font = db.statusIconFont or "Fonts\\FRIZQT__.TTF"
-                local fontSize = db.statusIconFontSize or 12
-                local outline = db.statusIconFontOutline or "OUTLINE"
-
-                -- Route through SafeSetFont (font-family path) so the shadow renders
-                -- on 12.0.7. SetFontObject resets vertex colour — capture + restore.
-                local cr, cg, cb, ca = icon.text:GetTextColor()
-                DF:SafeSetFont(icon.text, font, fontSize, outline)
-
-                -- Apply text color if prefix is provided (else keep captured colour)
-                local textColor = prefix and db[prefix .. "TextColor"]
-                if textColor then
-                    icon.text:SetTextColor(textColor.r or 1, textColor.g or 1, textColor.b or 1, 1)
-                else
-                    icon.text:SetTextColor(cr, cg, cb, ca)
-                end
-            end
-            
-            icon.text:Show()
-        end
-    else
-        if icon.text then icon.text:Hide() end
-        if icon.texture then icon.texture:Show() end
-    end
-end
-
--- Also apply font/color to timer text (for AFK icon)
-local function ApplyTestIconTimerFont(icon, db, prefix)
-    -- Shared with the live render so Test Mode previews the dedicated timer
-    -- text controls (font / size / outline / colour / position) exactly.
-    if DF.ApplyTimerTextSettings then DF:ApplyTimerTextSettings(icon, db, prefix) end
-end
+-- ★ ShowTestIconAsText and ApplyTestIconTimerFont are GONE. The first restated
+-- live's ShowIconAsText and then re-applied the font and text colour on top --
+-- work DF:ApplyStatusIconSettings already does, and doing it a second time AFTERWARDS
+-- clobbered any per-state tint. The second was already a one-line forward to
+-- DF:ApplyTimerTextSettings, which ApplyStatusIconSettings also calls. The preview now
+-- uses DF:ShowStatusIconAsText, which IS live's function. (Audit, 2026-08-07.)
 
 -- Format seconds as M:SS for AFK timer
 local function FormatTestAFKTime(seconds)
@@ -1433,7 +1401,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             end
             
             -- Show as text or icon (with font and color settings)
-            ShowTestIconAsText(frame.summonIcon, db.summonIconTextPending or "Summon", db.summonIconShowText, db, "summonIcon")
+            DF:ShowStatusIconAsText(frame.summonIcon, db.summonIconTextPending or "Summon", db.summonIconShowText)
             frame.summonIcon:Show()
             
         else
@@ -1446,14 +1414,21 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.bgCarrierIconEnabled or db.testShowStatusIcons == false then
             frame.bgCarrierIcon:Hide()
         elseif testData.isBGCarrier then
-            DF:SetUpgradedStatusIcon(frame.bgCarrierIcon.texture, "Interface\\Icons\\inv_bannerpvp_02")
+            -- ☠ WAS HARDCODED inv_bannerpvp_02, so the per-classification art was
+            -- unpreviewable -- and it did not even match CreateStatusIcons' _03 default.
+            -- Live picks from PVP_CARRIER_TEXTURES by UnitPvpClassification; the preview
+            -- walks the same table so each variant can be seen and styled.
+            local carrierArt = DF.PVP_CARRIER_TEXTURES
+                and DF.PVP_CARRIER_TEXTURES[(frame.index or 0) % 3]
+            DF:SetUpgradedStatusIcon(frame.bgCarrierIcon.texture,
+                carrierArt or "Interface\\Icons\\inv_bannerpvp_02")
 
             -- Geometry, base alpha and frame level from the LIVE applier.
             if DF.ApplyStatusIconSettings then
                 DF:ApplyStatusIconSettings(frame.bgCarrierIcon, db, "bgCarrierIcon")
             end
 
-            ShowTestIconAsText(frame.bgCarrierIcon, db.bgCarrierIconText or "FC", db.bgCarrierIconShowText, db, "bgCarrierIcon")
+            DF:ShowStatusIconAsText(frame.bgCarrierIcon, db.bgCarrierIconText or "FC", db.bgCarrierIconShowText)
             frame.bgCarrierIcon:Show()
 
         else
@@ -1489,7 +1464,15 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.resurrectionIcon:Hide()
         elseif testData.centerStatus == "resurrect" then
             DF:SetUpgradedStatusIcon(frame.resurrectionIcon.texture, "Interface\\RaidFrame\\Raid-Icon-Rez")
-            frame.resurrectionIcon.texture:SetVertexColor(0, 1, 0)  -- Green = being cast
+            -- ☠ ONLY THE CASTING GREEN WAS PREVIEWABLE. Live also renders the
+            -- PENDING-ACCEPT state at (1, 1, 0, 0.75) -- a different colour AND a
+            -- different alpha -- which a user could never see in order to judge it.
+            -- Alternate by frame so both states are on screen at once.
+            if ((frame.index or 0) % 2) == 1 then
+                frame.resurrectionIcon.texture:SetVertexColor(1, 1, 0, 0.75)  -- pending accept
+            else
+                frame.resurrectionIcon.texture:SetVertexColor(0, 1, 0, 1)     -- being cast
+            end
             
             -- Geometry, base alpha and frame level from the LIVE applier.
             if DF.ApplyStatusIconSettings then
@@ -1497,7 +1480,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             end
             
             -- Show as text or icon (with font and color settings)
-            ShowTestIconAsText(frame.resurrectionIcon, db.resurrectionIconTextCasting or "Res...", db.resurrectionIconShowText, db, "resurrectionIcon")
+            DF:ShowStatusIconAsText(frame.resurrectionIcon, db.resurrectionIconTextCasting or "Res...", db.resurrectionIconShowText)
             frame.resurrectionIcon:Show()
             
         else
@@ -1510,7 +1493,12 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.phasedIconEnabled or db.testShowStatusIcons == false then
             frame.phasedIcon:Hide()
         elseif testData.isPhased then
-            DF:SetUpgradedStatusIcon(frame.phasedIcon.texture, "Interface\\TargetingFrame\\UI-PhasingIcon")
+            -- ☠ phasedIconShowLFGEye DID NOTHING IN THE PREVIEW -- it always drew the
+            -- phasing icon, so the setting could not be judged. Live swaps to the LFG
+            -- eye for a unit who is in another party's instance.
+            DF:SetUpgradedStatusIcon(frame.phasedIcon.texture,
+                db.phasedIconShowLFGEye and "Interface\\LFGFrame\\LFG-Eye"
+                or "Interface\\TargetingFrame\\UI-PhasingIcon")
             
             -- Geometry, base alpha and frame level from the LIVE applier.
             if DF.ApplyStatusIconSettings then
@@ -1518,7 +1506,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             end
             
             -- Show as text or icon (with font and color settings)
-            ShowTestIconAsText(frame.phasedIcon, db.phasedIconText or "Phased", db.phasedIconShowText, db, "phasedIcon")
+            DF:ShowStatusIconAsText(frame.phasedIcon, db.phasedIconText or "Phased", db.phasedIconShowText)
             frame.phasedIcon:Show()
             
         else
@@ -1531,7 +1519,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.afkIconEnabled or db.testShowStatusIcons == false then
             frame.afkIcon:Hide()
             if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-        elseif testData.isAFK then
+        elseif testData.isAFK or testData.isDND then
             DF:SetUpgradedStatusIcon(frame.afkIcon.texture, "Interface\\FriendsFrame\\StatusIcon-Away")
             
             -- Geometry, base alpha and frame level from the LIVE applier.
@@ -1541,37 +1529,49 @@ function DF:UpdateTestStatusIcons(frame, testData)
             
             -- Track AFK start time for test mode
             local frameKey = tostring(frame)
-            if not testAFKStartTimes[frameKey] then
+            if testData.isAFK and not testAFKStartTimes[frameKey] then
                 testAFKStartTimes[frameKey] = GetTime()
             end
             
-            local statusText = db.afkIconText or "AFK"
-            local showTimer = db.afkIconShowTimer ~= false
-            
-            -- Calculate timer if enabled
-            if showTimer and testAFKStartTimes[frameKey] then
-                local elapsed = math.floor(GetTime() - testAFKStartTimes[frameKey])
-                local timerStr = FormatTestAFKTime(elapsed)
-
-                if db.afkIconShowText then
-                    -- Text mode: show "AFK 1:23"
-                    statusText = statusText .. " " .. timerStr
-                    if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-                else
-                    -- Icon mode: show timer below icon
-                    if frame.afkIcon.timerText then
-                        frame.afkIcon.timerText:SetText(timerStr)
-                        frame.afkIcon.timerText:Show()
-                        -- Apply font/color to timer text
-                        ApplyTestIconTimerFont(frame.afkIcon, db, "afkIcon")
-                    end
+            -- ☠ DND WAS UNPREVIEWABLE. Live renders it on this same icon with a
+            -- different label and a red tint, and with the timer suppressed (a DND
+            -- flag has no start time). Neither the label nor the colour could be
+            -- judged from the preview. (Audit, 2026-08-07.)
+            local statusText
+            if testData.isDND then
+                statusText = DF.L["DND"]
+                if frame.afkIcon.text then
+                    frame.afkIcon.text:SetTextColor(1, 0.2, 0.2, 1)
                 end
-            else
                 if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
+                testAFKStartTimes[frameKey] = nil
+            else
+                statusText = db.afkIconText or "AFK"
+                local showTimer = db.afkIconShowTimer ~= false
+
+                -- Calculate timer if enabled
+                if showTimer and testAFKStartTimes[frameKey] then
+                    local elapsed = math.floor(GetTime() - testAFKStartTimes[frameKey])
+                    local timerStr = FormatTestAFKTime(elapsed)
+
+                    if db.afkIconShowText then
+                        -- Text mode: show "AFK 1:23"
+                        statusText = statusText .. " " .. timerStr
+                        if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
+                    else
+                        -- Icon mode: show timer below icon
+                        if frame.afkIcon.timerText then
+                            frame.afkIcon.timerText:SetText(timerStr)
+                            frame.afkIcon.timerText:Show()
+                        end
+                    end
+                else
+                    if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
+                end
             end
             
-            -- Show as text or icon (with font and color settings)
-            ShowTestIconAsText(frame.afkIcon, statusText, db.afkIconShowText, db, "afkIcon")
+            -- Show as text or icon
+            DF:ShowStatusIconAsText(frame.afkIcon, statusText, db.afkIconShowText)
             if db.afkIconShowText and frame.afkIcon.text and DF.ApplyStableTextAnchor then
                 DF:ApplyStableTextAnchor(frame.afkIcon.text, frame.afkIcon)
             end
@@ -1598,7 +1598,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             end
             
             -- Show as text or icon (with font and color settings)
-            ShowTestIconAsText(frame.vehicleIcon, db.vehicleIconText or "Vehicle", db.vehicleIconShowText, db, "vehicleIcon")
+            DF:ShowStatusIconAsText(frame.vehicleIcon, db.vehicleIconText or "Vehicle", db.vehicleIconShowText)
             frame.vehicleIcon:Show()
             
         else
@@ -1610,7 +1610,11 @@ function DF:UpdateTestStatusIcons(frame, testData)
     if frame.raidRoleIcon then
         if not db.raidRoleIconEnabled or db.testShowStatusIcons == false then
             frame.raidRoleIcon:Hide()
-        elseif testData.isMainTank and db.raidRoleIconShowTank ~= false then
+        -- ☠ WAS `~= false`, which shows the icon when the key is nil; live tests
+        -- it plainly, so a nil key hides it. Config seeds both to true, so the two
+        -- only disagree on a profile predating the keys -- exactly where a preview
+        -- is most likely to be trusted. Match live. (Audit, 2026-08-07.)
+        elseif testData.isMainTank and db.raidRoleIconShowTank then
             DF:SetUpgradedStatusIcon(frame.raidRoleIcon.texture, "Interface\\GroupFrame\\UI-Group-MainTankIcon")
             
             -- Geometry, base alpha and frame level from the LIVE applier.
@@ -1619,10 +1623,10 @@ function DF:UpdateTestStatusIcons(frame, testData)
             end
             
             -- Show as text or icon (with font and color settings)
-            ShowTestIconAsText(frame.raidRoleIcon, db.raidRoleIconTextTank or "MT", db.raidRoleIconShowText, db, "raidRoleIcon")
+            DF:ShowStatusIconAsText(frame.raidRoleIcon, db.raidRoleIconTextTank or "MT", db.raidRoleIconShowText)
             frame.raidRoleIcon:Show()
             
-        elseif testData.isMainAssist and db.raidRoleIconShowAssist ~= false then
+        elseif testData.isMainAssist and db.raidRoleIconShowAssist then
             DF:SetUpgradedStatusIcon(frame.raidRoleIcon.texture, "Interface\\GroupFrame\\UI-Group-MainAssistIcon")
             
             -- Geometry, base alpha and frame level from the LIVE applier.
@@ -1631,24 +1635,12 @@ function DF:UpdateTestStatusIcons(frame, testData)
             end
             
             -- Show as text or icon (with font and color settings)
-            ShowTestIconAsText(frame.raidRoleIcon, db.raidRoleIconTextAssist or "MA", db.raidRoleIconShowText, db, "raidRoleIcon")
+            DF:ShowStatusIconAsText(frame.raidRoleIcon, db.raidRoleIconTextAssist or "MA", db.raidRoleIconShowText)
             frame.raidRoleIcon:Show()
             
         else
             frame.raidRoleIcon:Hide()
         end
-    end
-    
-    -- Apply alpha to status icons based on dead / health-based / OOR fade
-    local alpha = 1.0
-    if frame.dfTestDeadFadeAlphas and frame.dfTestDeadFadeAlphas.icons then
-        alpha = frame.dfTestDeadFadeAlphas.icons
-    elseif frame.dfDeadFadeApplied then
-        return
-    elseif frame.dfTestHealthFadeAlphas and frame.dfTestHealthFadeAlphas.icons then
-        alpha = frame.dfTestHealthFadeAlphas.icons
-    elseif frame.dfTestOORAlphas and frame.dfTestOORAlphas.icons then
-        alpha = frame.dfTestOORAlphas.icons
     end
     
     -- ★ NO SECOND ALPHA PASS. DF:ApplyStatusIconSettings (StatusIcons.lua) already
