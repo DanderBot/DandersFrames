@@ -350,7 +350,13 @@ local function ApplyIconSettings(icon, db, prefix)
     end
 end
 
-DF.ApplyStatusIconSettings = ApplyIconSettings
+-- ⚠ A METHOD, not a bare alias. The eight preview call sites use `DF:` (colon), so a
+-- plain `DF.ApplyStatusIconSettings = ApplyIconSettings` shifted every argument by one
+-- and blew up on `prefix .. "Scale"` with prefix = the db table. Live keeps calling the
+-- local directly.
+function DF:ApplyStatusIconSettings(icon, db, prefix)
+    ApplyIconSettings(icon, db, prefix)
+end
 function DF:ShowStatusIconAsText(icon, text, showText)
     ShowIconAsText(icon, text, showText)
 end
