@@ -4,6 +4,40 @@ local addonName, DF = ...
 DandersFrames = DF
 
 -- ============================================================
+-- MELEE / RANGED CLASSIFICATION — ONE TABLE, THREE FORMER COPIES
+-- ============================================================
+-- Used by "Separate Melee & Ranged DPS". Only consulted when role == DAMAGER, so
+-- the tank specs listed below are inert and kept only so the set reads complete.
+--
+-- ☠ THIS EXISTED THREE TIMES AND THE COPIES DISAGREED, one of them live:
+--   * Frames/Headers.lua  (live party + grouped raid) -- omitted PALADIN from the
+--     class fallback AND [255] Survival Hunter from the spec table
+--   * Features/FlatRaidFrames.lua (live flat raid)    -- had both
+--   * Features/Sort.lua   (test preview)              -- had both, under a comment
+--     claiming it "matches live fallback". It did not.
+-- So a Ret Paladin whose spec was not yet inspected sorted MELEE in the preview and
+-- in flat raid, and RANGED in live party and grouped raid. A Survival Hunter split
+-- the same way. Headers was the outlier and the wrong one: a Paladin DAMAGER is
+-- Retribution, which is melee. (Audit, 2026-08-07.)
+DF.MELEE_SPECS = {
+    [250] = true, [251] = true, [252] = true,   -- Death Knight (Blood/Frost/Unholy)
+    [577] = true, [581] = true,                 -- Demon Hunter (Havoc/Vengeance)
+    [103] = true,                               -- Druid    Feral
+    [255] = true,                               -- Hunter   Survival
+    [269] = true,                               -- Monk     Windwalker
+    [70]  = true,                               -- Paladin  Retribution
+    [259] = true, [260] = true, [261] = true,   -- Rogue
+    [263] = true,                               -- Shaman   Enhancement
+    [71]  = true, [72]  = true,                 -- Warrior  Arms/Fury
+}
+
+-- Class fallback for a DAMAGER whose spec is not known yet: only classes whose
+-- damage spec is ALWAYS melee.
+DF.MELEE_CLASSES = {
+    DEATHKNIGHT = true, DEMONHUNTER = true, ROGUE = true, WARRIOR = true, PALADIN = true,
+}
+
+-- ============================================================
 -- SHARED MEDIA SUPPORT
 -- ============================================================
 
@@ -910,6 +944,10 @@ end
 
 DF.GlobalDefaults = {
     notifyOutdated = true,
+    -- The one-line greeting printed at login. Account-wide like its Notifications
+    -- sibling above: it is chat chrome, not a per-profile visual. Default ON so a
+    -- new user still learns `/df` exists; anyone who already knows can silence it.
+    showLoginMessage = true,
     -- Colour picker. Account-wide, not per-mode: "use DF's picker" is a UI-chrome
     -- preference with no party/raid meaning, and the hooks that consume it are
     -- installed once for the whole session. Previously these lived in PartyDefaults,
@@ -1184,6 +1222,44 @@ DF.PartyDefaults = {
     buffDurationBarColor = {r = 0.2, g = 0.9, b = 0.3, a = 1},
     buffDurationBarBGColor = {r = 0, g = 0, b = 0, a = 0.8},
     buffDurationBarReverseFill = false,
+    -- Pandemic (12.1 PTR 8): the GAME's refresh window — lit while a refresh would
+    -- clip nothing, roughly the last 30% of the base duration. Deliberately has no
+    -- threshold setting of any kind: the window is per spell and Blizzard's to define
+    -- (Features/Pandemic.lua). Off by default; only refreshable auras ever light.
+    buffPandemicEnabled = false,
+    buffPandemicMode = "BORDER",              -- BORDER / TINT
+    -- Flash: a looping alpha pulse on the whole cue. Creation-frozen (the animation is
+    -- built and played in the secure init pass), so both keys are structural.
+    buffPandemicFlash = false,
+    buffPandemicFlashSpeed = 1,               -- seconds per dim-and-back cycle (0.2-3)
+    -- TINT: a solid wash over the icon.
+    buffPandemicTintColor = {r = 0.2, g = 1, b = 0.2, a = 1},
+    buffPandemicTintAlpha = 0.4,
+    buffPandemicTintInset = 0,                -- +inward, -outward halo (DF.Border convention)
+    -- BORDER: a real DF.Border, keyed the standard way (prefix .. "Border*") so
+    -- DF.Border:BuildSpec and GUI:CreateBorderControls both drive it with no special case.
+    -- ☠ SEED THE WHOLE SET, not just the keys the default style uses. CreateBorderControls
+    -- builds every control it was opted into regardless of the current Style, and an unset
+    -- key renders as a dropdown reading "nil" or a slider with an empty value box (Krathe,
+    -- 2026-08-05). Values mirror the AD icon card's Border block so a pandemic ring opens
+    -- on the same numbers any other icon border does.
+    buffPandemicShowBorder = true,            -- the Pandemic Enable toggle is the real master
+    buffPandemicBorderStyle = "SOLID",
+    buffPandemicBorderSize = 2,
+    buffPandemicBorderInset = 0,
+    buffPandemicBorderOffsetX = 0,
+    buffPandemicBorderOffsetY = 0,
+    buffPandemicBorderColor = {r = 0.2, g = 1, b = 0.2, a = 1},
+    buffPandemicBorderBlendMode = "BLEND",
+    buffPandemicBorderTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+    buffPandemicBorderGradientStartColor = {r = 0, g = 0, b = 0, a = 1},
+    buffPandemicBorderGradientEndColor = {r = 0.5, g = 0.5, b = 0.5, a = 1},
+    buffPandemicBorderGradientDirection = "HORIZONTAL",
+    buffPandemicBorderShadowEnabled = false,
+    buffPandemicBorderShadowColor = {r = 0, g = 0, b = 0, a = 0.8},
+    buffPandemicBorderShadowSize = 1,
+    buffPandemicBorderShadowOffsetX = 1,
+    buffPandemicBorderShadowOffsetY = -1,
     -- Expiring Animation (AD-style full toolkit) — replaces the legacy
 
     -- Aura Source Mode
@@ -1304,6 +1380,17 @@ DF.PartyDefaults = {
     -- Dispel symbol (Wave 5b, colourblind aid): the engine writes the dispel-type
     -- letter into a DF-owned FontString (native SetAuraSymbol; zero aura reads).
     -- Renders in-game ONLY while WoW's colorblindMode CVar is on (GUI tooltip caveat).
+    -- ☠ NAME DIVERGENCE, DELIBERATE -- do not "tidy" these to match the label.
+    -- These drive the feature the UI calls DISPEL TEXT: the two-letter dispel code
+    -- (Ma/Po/Cu) on a debuff icon. The keys still say Symbol because that was the
+    -- pre-68914 API name; Blizzard itself renamed it (SetDispelTypeText is current,
+    -- SetAuraSymbol is the deprecated alias) and the UI followed. Renaming the keys
+    -- would need a migration over everyone's saved data plus import handling for the
+    -- export strings already in the wild -- all for an internal name nobody sees.
+    --
+    -- ⚠ Not to be confused with the DISPEL SYMBOL on the dispel overlay -- the
+    -- Magic/Curse/Poison glyph drawn on the FRAME. That one is keyed dispelIcon*.
+    -- The two features diverge in opposite directions; that is not a mistake.
     debuffDispelSymbolAnchor = "CENTER",
     debuffDispelSymbolColor = {r = 1, g = 1, b = 1},
     debuffDispelSymbolEnabled = false,
@@ -1667,7 +1754,12 @@ DF.PartyDefaults = {
     missingBuffIconBorderStyle = "SOLID",
     missingBuffIconBorderTexture = "SOLID",
     missingBuffIconEnabled = true,
-    missingBuffIconFrameLevel = 35,
+    -- Above the aura band, below defensive. A row is 13 levels thick, so buff/debuff
+    -- art at base 40 reaches 56 and AD indicators reach ~59; defensive sits at 65.
+    -- Was 35, which only ever looked right because buildMissingCellConfig omitted
+    -- frameLevelOffset and ApplyZOrder's `or 40` fallback silently added 40. Existing
+    -- profiles move by _missingBuffBaselineV3 (Core.lua), value-targeted on 35.
+    missingBuffIconFrameLevel = 60,
     missingBuffIconScale = 1.2000000476837,
     missingBuffIconShowBorder = true,
     missingBuffIconSize = 24,
@@ -2208,33 +2300,33 @@ DF.PartyDefaults = {
     -- test mode. There is no raid-mode equivalent because the
     -- Targeted List itself is party-only.
     --
-    -- The toggle defaults below MIRROR TEST_PRESETS.STATIC (TestMode/TestMode.lua),
+    -- The toggle defaults below MIRROR TEST_PRESETS.DEFAULT (TestMode/TestMode.lua),
     -- so a fresh profile actually matches the preset the panel shows as selected
-    -- (testPreset = "STATIC"). They drifted apart once; if STATIC changes, change
+    -- (testPreset = "DEFAULT"). They drifted apart once; if DEFAULT changes, change
     -- these to match. The sliders (testBuffCount/testDebuffCount/testFrameCount)
     -- are deliberately outside the preset - a working preference, not part of its
-    -- visual identity - so they have no STATIC counterpart.
+    -- visual identity - so they have no DEFAULT counterpart.
     testShowTargetedList = true,
     testAnimateTargetedList = true,
     testAnimateHealth = false,
     testBuffCount = 2,
     testDebuffCount = 2,
     testFrameCount = 5,
-    testPreset = "STATIC",
+    testPreset = "DEFAULT",
     testShowAbsorbs = false,
     testShowAggro = false,
-    testShowAuras = true,
-    testShowDispelGlow = true,
+    testShowAuras = false,
+    testShowDispelGlow = false,
     testShowExternalDef = false,
     testShowHealPrediction = false,
     testShowMissingBuff = false,
-    testShowOutOfRange = false,
+    testShowOutOfRange = true,
     testShowPets = true,
     testShowReducedMaxHealth = false,
     testShowSelection = false,
-    testShowStatusIcons = true,
+    testShowStatusIcons = false,
     testShowPersonalTargeted = true,
-    testShowAuraDesigner = true,
+    testShowAuraDesigner = false,
     testShowTextDesigner = true,
 
     -- Tooltip settings

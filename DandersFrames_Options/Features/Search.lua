@@ -23,13 +23,30 @@ local C_BACKGROUND = {r = 0.11, g = 0.11, b = 0.11, a = 0.98}
 local C_BORDER     = {r = 0, g = 0, b = 0, a = 1}
 local C_ACCENT     = {r = 0.2, g = 0.6, b = 1.0, a = 1}
 local C_RAID       = {r = 1.0, g = 0.4, b = 0.2, a = 1}
-local C_HOVER      = {r = 0.25, g = 0.25, b = 0.25, a = 1}
+
+-- Result-card geometry. The control's own height is NOT here on purpose -- it
+-- comes from the widget's preferredHeight (GUI.RowHeight owns that slot). These
+-- are only the card's own chrome: the breadcrumb strip above the control, and
+-- the padding around it.
+local CARD_PAD_X     = 10
+local CARD_CONTENT_Y = 28   -- top of the control, below the breadcrumb button
+local CARD_CHROME    = 38   -- breadcrumb strip + top and bottom padding
+
+-- The empty-results prompt. A function, not a constant: L is populated at load
+-- and this file's locals are evaluated then too, so reading it lazily keeps the
+-- string correct if the locale table is finished after this file runs.
+local function EmptyMessage()
+    return L["No settings found.\nTry different keywords."]
+end
 
 local function GetThemeColor()
-    -- Follow the active mode theme (party purple / raid orange) so the search box
-    -- focus highlight + results header match the rest of the GUI. Search's blue
-    -- C_ACCENT stays only on the deliberate blue-identity controls (slider thumbs,
-    -- dropdowns, breadcrumb) that pass it directly.
+    -- Follow the active mode theme (party purple / raid orange) so the whole
+    -- search surface matches the rest of the GUI. Search used to pin its own blue
+    -- on the sliders, dropdowns and breadcrumb while the header followed the
+    -- theme; that half-and-half state read as a bug rather than as identity, so
+    -- the controls now inherit the theme like every other page (Krathe,
+    -- 2026-08-07). C_ACCENT survives only as the party-side fallback below, for a
+    -- GUI too early in its bootstrap to answer.
     if DF.GUI and DF.GUI.GetThemeColor then return DF.GUI.GetThemeColor() end
     if DF.GUI and DF.GUI.SelectedMode == "raid" then return C_RAID else return C_ACCENT end
 end
@@ -147,6 +164,22 @@ function Search:Register(entry)
     
     table.insert(self.Registry, entry)
     return entry
+end
+
+-- Link a page's widget to the search entry it registered.
+--
+-- Tooltips are the reason this exists. A page sets `container.tooltip` AFTER the
+-- factory returns, so it cannot be captured at registration time -- but a live
+-- reference can be, and CreateResultWidget reads `.tooltip` off it when it builds
+-- the row. That keeps one source of truth: the result shows exactly the tooltip
+-- the real setting shows, with nothing duplicated into the registry.
+--
+-- Safe against a nil searchEntry: registration returns early for keyless entries
+-- and for anything registered after the registry was built.
+function Search:LinkSourceWidget(container)
+    if container and container.searchEntry then
+        container.searchEntry.sourceWidget = container
+    end
 end
 
 function Search:InvalidateRegistry()
@@ -519,52 +552,47 @@ end
 -- ============================================================
 
 function Search:CreateInlineCheckbox(parent, entry)
-    local container = CreateFrame("Frame", nil, parent)
-    container:SetSize(340, 30)
-    
-    -- Check if this is a custom checkbox (no dbKey, uses custom get/set)
+    -- A custom checkbox has no dbKey to bind, so there is nothing for the shared
+    -- builder to drive -- show the label and point at the real page instead.
     if entry.isCustom or not entry.dbKey then
-        -- For custom checkboxes, just show the label with a note to use the settings page
-        local text = container:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
+        local container = CreateFrame("Frame", nil, parent)
+        container:SetSize(340, 30)
+        container.preferredHeight = DF.GUI.RowHeight.checkbox
+
+        local text = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         text:SetPoint("LEFT", 0, 0)
         text:SetText(entry.label)
-        text:SetTextColor(0.8, 0.8, 0.8)
-        
+        local ct = DF.GUI.Colors.text
+        text:SetTextColor(ct.r, ct.g, ct.b)
+
         local note = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         note:SetPoint("LEFT", text, "RIGHT", 10, 0)
-        note:SetText("|cff888888" .. L["(click header to edit)"] .. "|r")
-        
+        note:SetText(L["(click header to edit)"])
+        local cd = DF.GUI.Colors.textDim
+        note:SetTextColor(cd.r, cd.g, cd.b)
+
         return container
     end
-    
+
+    -- Delegate to the shared checkbox builder, exactly as the slider and dropdown
+    -- already do. It brings the themed box, the factory row height, the override
+    -- indicators and the label-only tooltip -- all of which the hand-rolled copy
+    -- here lacked. Re-registration is not a concern: Search:Register early-returns
+    -- once RegistryBuilt is set, and Find() sets it before any result is built.
     local db = DF.db[DF.GUI.SelectedMode]
-    local dbKey = entry.dbKey
-    
-    local cb = CreateFrame("CheckButton", nil, container, "BackdropTemplate")
-    cb:SetPoint("LEFT", 0, 0)
-    DF.GUI:StyleCheckButton(cb, { size = 20, checkSize = 12, themeRoot = container })
-    
-    local text = container:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
-    text:SetPoint("LEFT", cb, "RIGHT", 8, 0)
-    text:SetText(entry.label)
-    
-    cb:SetChecked(db[dbKey] or false)
-    
-    cb:SetScript("OnClick", function(self)
-        db[dbKey] = self:GetChecked()
-        if entry.callback then entry.callback() end
-        DF:UpdateAll()
-    end)
-    
-    return container
+    return DF.GUI:CreateCheckbox(parent, entry.label, db, entry.dbKey, entry.callback)
 end
 
 function Search:CreateInlineSlider(parent, entry)
     -- Delegate to the shared slider builder so the inline search editor stays in
     -- sync with the canonical slider (drag/throttle/profile-override behaviour).
     -- db[dbKey] maps directly onto CreateSlider's dbTable/dbKey get/set, and
-    -- entry.callback onto its callback. C_ACCENT pins the intentional blue thumb/
-    -- fill so this drifted Search surface does NOT track the mode theme.
+    -- entry.callback onto its callback.
+    --
+    -- accentColor is left nil ON PURPOSE: CreateSlider falls back to
+    -- GetThemeColor(), so the thumb and fill track party purple / raid orange like
+    -- every other slider. This used to pin Search's blue, which read as a bug
+    -- rather than as identity once the results header started following the theme.
     local db = DF.db[DF.GUI.SelectedMode]
     local minVal = entry.minVal or 0
     local maxVal = entry.maxVal or 100
@@ -573,89 +601,20 @@ function Search:CreateInlineSlider(parent, entry)
     -- Returns CreateSlider's container Frame (exposes .slider). The caller only
     -- repositions it via :SetPoint, so the Frame return shape is preserved.
     return DF.GUI:CreateSlider(parent, entry.label, minVal, maxVal, step,
-        db, entry.dbKey, entry.callback, nil, nil, nil, nil, C_ACCENT)
+        db, entry.dbKey, entry.callback)
 end
 
 function Search:CreateInlineColorPicker(parent, entry)
+    -- Delegate to the shared colour picker. The copy that used to live here drove
+    -- ColorPickerFrame itself, and had drifted from the canonical one in ways that
+    -- mattered: it fired the change callbacks on the spurious swatchFunc Blizzard
+    -- raises during setup (so merely OPENING the picker committed an override and
+    -- ran a full refresh), and it rebuilt db[dbKey] as a fresh table on every
+    -- change rather than mutating in place. The shared builder handles both, plus
+    -- the themed swatch, the factory row height and the label-only tooltip.
     local db = DF.db[DF.GUI.SelectedMode]
-    local dbKey = entry.dbKey
-    local hasAlpha = entry.hasAlpha
-    
-    local container = CreateFrame("Frame", nil, parent)
-    container:SetSize(340, 30)
-    
-    local btn = CreateFrame("Button", nil, container)
-    btn:SetSize(200, 24)
-    btn:SetPoint("LEFT", 0, 0)
-    CreateBackdrop(btn)
-    btn:SetBackdropColor(0, 0, 0, 0.3)
-    
-    local swatch = btn:CreateTexture(nil, "OVERLAY")
-    swatch:SetSize(20, 16)
-    swatch:SetPoint("RIGHT", -4, 0)
-    
-    local txt = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    txt:SetPoint("LEFT", 5, 0)
-    txt:SetText(entry.label)
-    
-    local function UpdateSwatch()
-        if db[dbKey] then
-            local c = db[dbKey]
-            swatch:SetColorTexture(c.r or 1, c.g or 1, c.b or 1, c.a or 1)
-        else
-            swatch:SetColorTexture(1, 1, 1, 1)
-        end
-    end
-    UpdateSwatch()
-    
-    btn:SetScript("OnClick", function()
-        local c = db[dbKey] or {r=1, g=1, b=1, a=1}
-        
-        local info = {
-            swatchFunc = function()
-                local r, g, b = ColorPickerFrame:GetColorRGB()
-                local a = hasAlpha and ColorPickerFrame:GetColorAlpha() or (c.a or 1)
-                db[dbKey] = {r = r, g = g, b = b, a = a}
-                UpdateSwatch()
-                if entry.callback then entry.callback() end
-                DF:UpdateAll()
-            end,
-            hasOpacity = hasAlpha,
-            opacityFunc = function()
-                local a = ColorPickerFrame:GetColorAlpha()
-                if a and db[dbKey] then
-                    db[dbKey].a = a
-                    UpdateSwatch()
-                    if entry.callback then entry.callback() end
-                    DF:UpdateAll()
-                end
-            end,
-            cancelFunc = function(restore)
-                if restore then
-                    db[dbKey] = {r = restore.r, g = restore.g, b = restore.b, a = restore.a or restore.opacity or 1}
-                    UpdateSwatch()
-                    if entry.callback then entry.callback() end
-                    DF:UpdateAll()
-                end
-            end,
-            r = c.r or 1, g = c.g or 1, b = c.b or 1, opacity = c.a or 1,
-        }
-        
-        -- Mark this as a DandersFrames color picker call
-        if DF.GUI and DF.GUI.MarkColorPickerCall then
-            DF.GUI:MarkColorPickerCall()
-        end
-        ColorPickerFrame:SetupColorPickerAndShow(info)
-    end)
-    
-    btn:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
-    end)
-    btn:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(0, 0, 0, 0.3)
-    end)
-    
-    return container
+    return DF.GUI:CreateColorPicker(parent, entry.label, db, entry.dbKey,
+        entry.hasAlpha, entry.callback)
 end
 
 function Search:CreateInlineDropdown(parent, entry)
@@ -664,9 +623,7 @@ function Search:CreateInlineDropdown(parent, entry)
     -- behaviour). db[dbKey] maps directly onto CreateDropdown's dbTable/dbKey
     -- get/set, and entry.callback onto its callback. entry.values is the same
     -- keyed value->display table (with optional _order) that was registered, so
-    -- it passes straight through as the builder's options arg. opts.inline gives
-    -- the compact label-less opener; opts.accent pins the intentional blue so this
-    -- drifted Search surface does NOT track the mode theme.
+    -- it passes straight through as the builder's options arg.
     local db = DF.db[DF.GUI.SelectedMode]
     local values = entry.values or {}
 
@@ -675,10 +632,10 @@ function Search:CreateInlineDropdown(parent, entry)
     -- return shape is preserved.
     -- NOT inline: inline mode hides the dropdown's own label, but this is a
     -- labeled setting in the search results, so keep the label (matches the
-    -- slider/checkbox search widgets). Keep the blue Search accent.
+    -- slider/checkbox search widgets). No opts.accent -- the dropdown follows the
+    -- mode theme like every other one (see CreateInlineSlider for the why).
     return DF.GUI:CreateDropdown(parent, entry.label, values,
-        db, entry.dbKey, entry.callback, nil, nil,
-        { accent = C_ACCENT })
+        db, entry.dbKey, entry.callback)
 end
 
 -- ============================================================
@@ -686,17 +643,23 @@ end
 -- ============================================================
 function Search:CreateResultWidget(parent, entry, index)
     local widget = CreateFrame("Frame", nil, parent)
-    widget:SetSize(parent:GetWidth() - 20, 75)
-    
+    widget:SetSize(parent:GetWidth() - 20, CARD_CHROME + DF.GUI.RowHeight.checkbox)
+
+    -- Card chrome from the shared palette. These were three retyped literals
+    -- (0.14 fill, 0.25 border) that matched nothing -- the panel token is the
+    -- surface every other card sits on.
+    local cP, cB = DF.GUI.Colors.panel, DF.GUI.Colors.border
     CreateBackdrop(widget)
-    widget:SetBackdropColor(0.14, 0.14, 0.14, 1)
-    widget:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
-    
+    widget:SetBackdropColor(cP.r, cP.g, cP.b, 1)
+    widget:SetBackdropBorderColor(cB.r, cB.g, cB.b, 1)
+
     -- Clickable Breadcrumb (Tab > Section)
     local tabDisplay = entry.tabLabel or entry.tab or "Unknown"
     local sectionDisplay = entry.section or ""
-    
-    -- Create breadcrumb as a styled clickable button (shared GUI chrome, Search blue accent)
+
+    -- Create breadcrumb as a styled clickable button (shared GUI chrome). No
+    -- accent override -- StyleButton falls back to the mode theme, so the
+    -- breadcrumb wash matches the controls below it.
     local breadcrumb = CreateFrame("Button", nil, widget, "BackdropTemplate")
     breadcrumb:SetPoint("TOPLEFT", 8, -5)
 
@@ -704,7 +667,6 @@ function Search:CreateResultWidget(parent, entry, index)
     DF.GUI:StyleButton(breadcrumb, {
         height = 18,
         text = fullPath,
-        accent = C_ACCENT,
         align = "left",
         leftPad = 8,
     })
@@ -730,31 +692,48 @@ function Search:CreateResultWidget(parent, entry, index)
     
     -- Create the actual editable widget based on type
     local inlineWidget
-    local widgetHeight = 30
-    
+
     if entry.widgetType == "checkbox" then
         inlineWidget = self:CreateInlineCheckbox(widget, entry)
-        widgetHeight = 30
     elseif entry.widgetType == "slider" then
         inlineWidget = self:CreateInlineSlider(widget, entry)
-        widgetHeight = 50
     elseif entry.widgetType == "colorpicker" then
         inlineWidget = self:CreateInlineColorPicker(widget, entry)
-        widgetHeight = 30
     elseif entry.widgetType == "dropdown" then
         inlineWidget = self:CreateInlineDropdown(widget, entry)
-        widgetHeight = 55
     end
+
+    -- ☠ Take the slot height from the WIDGET, never from a number typed here.
+    -- Every shared builder stamps container.preferredHeight from GUI.RowHeight,
+    -- which owns the slot for its type (see GUI.RowHeight). The four literals
+    -- that used to live here -- 30 checkbox, 50 slider, 30 colourpicker, 55
+    -- dropdown -- disagreed with that table on all four counts (35/46/38/54),
+    -- which is why the rows read as too tall and unevenly spaced against the
+    -- real settings pages. Reading preferredHeight means a future change to
+    -- GUI.RowHeight reaches the search results for free.
+    local widgetHeight = (inlineWidget and inlineWidget.preferredHeight)
+        or DF.GUI.RowHeight.checkbox
     
     if inlineWidget then
-        inlineWidget:SetPoint("TOPLEFT", 10, -28)
+        inlineWidget:SetPoint("TOPLEFT", CARD_PAD_X, -CARD_CONTENT_Y)
+        -- The shared builders anchor by two corners in a real page column; here
+        -- the card is the column, so give the control the card's width minus the
+        -- padding it is inset by on both sides.
+        inlineWidget:SetWidth(widget:GetWidth() - CARD_PAD_X * 2)
+        -- Tooltip text lives on the page's widget, not on the search entry --
+        -- ResolveTooltipSpec reads .tooltip off the container it was attached to.
+        -- Forward it so a result explains itself exactly as the real setting does.
+        local src = entry.sourceWidget
+        if src and src.tooltip ~= nil then
+            inlineWidget.tooltip = src.tooltip
+        end
     end
-    
-    -- Adjust widget height based on content
-    widget:SetHeight(widgetHeight + 38)
-    
+
+    local cardHeight = CARD_CHROME + widgetHeight
+    widget:SetHeight(cardHeight)
+
     widget.entry = entry
-    widget.calculatedHeight = widgetHeight + 38
+    widget.calculatedHeight = cardHeight
     return widget
 end
 
@@ -943,8 +922,12 @@ function Search:CreateResultsPanel(parent)
     panel:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", 0, 0)
     
     CreateBackdrop(panel)
-    panel:SetBackdropColor(0.12, 0.12, 0.12, 1)
-    panel:SetBackdropBorderColor(0, 0, 0, 1)
+    -- ⚠ These two calls are not redundant with CreateBackdrop's own colours:
+    -- SetBackdrop resets a frame's piece vertex colours, so the fill and border
+    -- have to be (re)stated after it. Tokens, not the literals that were here.
+    local pB, pBorder = DF.GUI.Colors.background, DF.GUI.Colors.border
+    panel:SetBackdropColor(pB.r, pB.g, pB.b, 1)
+    panel:SetBackdropBorderColor(pBorder.r, pBorder.g, pBorder.b, 1)
     panel:Hide()
     
     local header = panel:CreateFontString(nil, "OVERLAY", "DFFontNormalLarge")
@@ -961,8 +944,9 @@ function Search:CreateResultsPanel(parent)
     
     local noResults = panel:CreateFontString(nil, "OVERLAY", "DFFontHighlight")
     noResults:SetPoint("CENTER", panel, "CENTER", 0, 0)
-    noResults:SetText(L["No settings found.\nTry different keywords."])
-    noResults:SetTextColor(0.5, 0.5, 0.5)
+    noResults:SetText(EmptyMessage())
+    local cd = DF.GUI.Colors.textDim
+    noResults:SetTextColor(cd.r, cd.g, cd.b)
     noResults:Hide()
     panel.noResults = noResults
     
@@ -1035,9 +1019,14 @@ end
 function Search:HideResults()
     if self.ResultsPanel then
         self.ResultsPanel:Hide()
-        -- Reset the no results text in case it was changed to combat message
+        -- Reset the no-results text in case it was changed to the combat message.
+        -- ☠ Must restore the SAME string the panel was built with. This used to
+        -- put back a different, terser one, and it runs on every hide rather than
+        -- only after a combat message -- so the helpful two-line prompt was only
+        -- ever seen until the first time search was closed, then gone for the
+        -- session. EmptyMessage() is the single source for both.
         if self.ResultsPanel.noResults then
-            self.ResultsPanel.noResults:SetText(L["No results found"])
+            self.ResultsPanel.noResults:SetText(EmptyMessage())
         end
     end
     

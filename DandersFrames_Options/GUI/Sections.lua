@@ -382,6 +382,20 @@ function GUI:CreateSettingsGroup(parent, width, opts)
     return group
 end
 
+-- The usable width INSIDE a settings group / AD card group — what a variable-width child
+-- (label, note, link) must be told before AddWidget, because those honour a passed width and
+-- measure their wrapped height from it.
+--
+-- Exists because this exact expression had been copy-pasted to five call sites across three
+-- files, which is precisely the per-site fork the factory contract forbids. The 260 fallback
+-- covers a group asked for its width before layout has run (AD cards build their contents
+-- before the card is sized); the floor keeps a mid-relayout zero from producing a negative
+-- wrap width, which renders as a single unwrapped line running off the panel.
+function GUI:GroupInnerWidth(group)
+    if not group then return 260 end
+    return math.max(40, (group:GetWidth() or 260) - 2 * (group.padding or 10))
+end
+
 function GUI:CreateLabel(parent, text, width, color)
     local frame = CreateFrame("Frame", nil, parent)
     frame:SetSize(width or 380, 40)
@@ -444,6 +458,12 @@ function GUI:CreateLabel(parent, text, width, color)
     -- OnSizeChanged binding — that cascade is the Aura Designer indicator-card lockup
     -- documented on CreateInfoBanner; the cost is that a label added with no height does
     -- not re-measure if its width changes again later.
+    -- ☠ Do NOT try to Reflow()+Remeasure() synchronously here to get a correct height at
+    -- creation. Tried 2026-08-05 and it does not work: nothing has been drawn yet at card
+    -- build time, so GetStringHeight still returns 0 whatever the wrap state. Worse, if it
+    -- ever DID succeed it would make the deferred Remeasure below return false (no change),
+    -- which is what arms the RelayoutHost that tells the host its slot moved — so a partial
+    -- success would silently disable the correction. The converge is the mechanism; let it.
     local function Measure()
         Remeasure()
         if C_Timer and C_Timer.After then

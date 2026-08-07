@@ -345,8 +345,7 @@ local PROFILED_FUNCTIONS = {
     -- Core per-unit updates (event hot path)
     -- ----------------------------------------------------------
     "UpdateUnitFrame",
-    "UpdateHealthFast",        -- Lean UNIT_HEALTH hot path
-    "UpdateHealth",
+    "UpdateHealthFast",        -- Lean UNIT_HEALTH hot path; the ONLY health driver
     "UpdatePower",
     "UpdateName",
     "UpdateFrame",

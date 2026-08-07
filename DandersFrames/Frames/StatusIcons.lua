@@ -60,6 +60,10 @@ local function CreateStatusIcon(parent, size)
 end
 
 -- Helper to show icon as text or texture
+-- ★ EXPOSED. The preview kept its own ShowTestIconAsText, which additionally
+-- re-applied the font and the text colour -- work ApplyIconSettings already does,
+-- and re-applying it AFTER meant any per-state tint (the AFK icon's DND red) was
+-- silently overwritten in the preview but not live. (Audit, 2026-08-07.)
 local function ShowIconAsText(icon, text, showText)
     if showText then
         icon.texture:Hide()
@@ -114,16 +118,20 @@ function DF:CreateStatusIcons(frame)
         if not db or not db.tooltipResurrectionEnabled then return end
         local unit = self.unitFrame and self.unitFrame.unit
         local state = unit and resCache[unit]
+        -- Resolved here, not at file scope: the locale table is populated by the
+        -- Locales/*.lua files and this handler runs long after load. Same idiom as
+        -- the other consumer further down this file.
+        local L = DF.L
         GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
         GameTooltip:ClearLines()
         if state == 1 then
-            GameTooltip:AddLine("Resurrection Incoming", 0.2, 1, 0.2)
-            GameTooltip:AddLine("A resurrection is being cast on this player.", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine(L["Resurrection Incoming"], 0.2, 1, 0.2)
+            GameTooltip:AddLine(L["A resurrection is being cast on this player."], 0.8, 0.8, 0.8, true)
         elseif type(state) == "number" then
-            GameTooltip:AddLine("Resurrection Pending", 1, 1, 0)
-            GameTooltip:AddLine("Waiting for this player to accept the resurrection.", 0.8, 0.8, 0.8, true)
+            GameTooltip:AddLine(L["Resurrection Pending"], 1, 1, 0)
+            GameTooltip:AddLine(L["Waiting for this player to accept the resurrection."], 0.8, 0.8, 0.8, true)
         else
-            GameTooltip:AddLine("Resurrection", 1, 1, 1)
+            GameTooltip:AddLine(L["Resurrection"], 1, 1, 1)
         end
         GameTooltip:Show()
     end)
@@ -280,6 +288,10 @@ end
 -- ============================================================
 -- HELPER: Apply icon positioning from settings
 -- ============================================================
+-- ★ EXPOSED so the preview uses this exact geometry rather than restating it.
+-- UpdateTestStatusIcons hand-rolled scale / anchor / x / y / alpha / frameLevel for
+-- all eight icons -- pure db maths with no unit reads, i.e. no reason to fork.
+-- (Audit, 2026-08-07.)
 local function ApplyIconSettings(icon, db, prefix)
     if not icon or not db then return end
     
@@ -292,10 +304,23 @@ local function ApplyIconSettings(icon, db, prefix)
     
     icon:SetScale(scale)
     icon:ClearAllPoints()
-    icon:SetPoint(anchor, icon:GetParent():GetParent(), anchor, x, y)
+    -- icon -> contentOverlay -> unit frame.
+    local frame = icon:GetParent() and icon:GetParent():GetParent()
+    icon:SetPoint(anchor, frame, anchor, x, y)
+    -- ★ THE ONE PLACE THESE ICONS' ALPHA IS SET, so the out-of-range / dead fade
+    -- belongs here rather than in a second pass that would fight it.
+    -- ☠ Before this they could not fade LIVE at all: CreateStatusIcon sets
+    -- SetIgnoreParentAlpha(true) so the whole-frame cascade cannot reach them, and
+    -- ElementAppearance never named any of the eight. Only the preview dimmed them,
+    -- off its own hand-written table -- the preview showing something live was
+    -- structurally incapable of. Summon and resurrection are exempt from the RANGE
+    -- half (not the dead half); DF:GetStatusIconFadeAlpha holds the reasoning.
+    if DF.GetStatusIconFadeAlpha then
+        alpha = alpha * DF:GetStatusIconFadeAlpha(frame, prefix)
+    end
     icon:SetAlpha(alpha)
-    
-    icon:SetFrameLevel(icon:GetParent():GetParent():GetFrameLevel() + frameLevel)
+
+    icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
     
     -- Apply status icon font settings to text. Route through SafeSetFont so the
     -- shadow lands on the font-family's per-alphabet font objects — 12.0.7 no
@@ -323,6 +348,17 @@ local function ApplyIconSettings(icon, db, prefix)
     if icon.timerText then
         DF:ApplyTimerTextSettings(icon, db, prefix)
     end
+end
+
+-- ⚠ A METHOD, not a bare alias. The eight preview call sites use `DF:` (colon), so a
+-- plain `DF.ApplyStatusIconSettings = ApplyIconSettings` shifted every argument by one
+-- and blew up on `prefix .. "Scale"` with prefix = the db table. Live keeps calling the
+-- local directly.
+function DF:ApplyStatusIconSettings(icon, db, prefix)
+    ApplyIconSettings(icon, db, prefix)
+end
+function DF:ShowStatusIconAsText(icon, text, showText)
+    ShowIconAsText(icon, text, showText)
 end
 
 -- ============================================================
@@ -469,6 +505,12 @@ function DF:UpdateResurrectionIcon(frame)
             DF:SetUpgradedStatusIcon(frame.resurrectionIcon.texture, "Interface\\RaidFrame\\Raid-Icon-Rez")
             frame.resurrectionIcon.texture:SetVertexColor(0, 1, 0, 1)
             ApplyIconSettings(frame.resurrectionIcon, db, "resurrectionIcon")
+            -- ☠ THIS CALL WAS MISSING LIVE. Every other status icon routes its show
+            -- through ShowIconAsText; the resurrection icon did not, so Show Text and
+            -- Casting Text were inert here and the fontstring kept whatever visibility
+            -- it was last left with. The preview did honour them, which is how the
+            -- divergence surfaced. (Audit, 2026-08-07.)
+            ShowIconAsText(frame.resurrectionIcon, db.resurrectionIconTextCasting or "Res...", db.resurrectionIconShowText)
             frame.resurrectionIcon:Show()
             return
         elseif resCache[unit] == 1 then
@@ -478,6 +520,8 @@ function DF:UpdateResurrectionIcon(frame)
             DF:SetUpgradedStatusIcon(frame.resurrectionIcon.texture, "Interface\\RaidFrame\\Raid-Icon-Rez")
             frame.resurrectionIcon.texture:SetVertexColor(1, 1, 0, 0.75)
             ApplyIconSettings(frame.resurrectionIcon, db, "resurrectionIcon")
+            -- See the note on the casting branch above.
+            ShowIconAsText(frame.resurrectionIcon, db.resurrectionIconTextCasting or "Res...", db.resurrectionIconShowText)
             frame.resurrectionIcon:Show()
             return
         elseif resCache[unit] and resCache[unit] ~= 1 then
@@ -486,6 +530,8 @@ function DF:UpdateResurrectionIcon(frame)
                 DF:SetUpgradedStatusIcon(frame.resurrectionIcon.texture, "Interface\\RaidFrame\\Raid-Icon-Rez")
                 frame.resurrectionIcon.texture:SetVertexColor(1, 1, 0, 0.75)
                 ApplyIconSettings(frame.resurrectionIcon, db, "resurrectionIcon")
+                -- See the note on the casting branch above.
+                ShowIconAsText(frame.resurrectionIcon, db.resurrectionIconTextCasting or "Res...", db.resurrectionIconShowText)
                 frame.resurrectionIcon:Show()
                 return
             else
@@ -994,7 +1040,9 @@ end
 -- UnitPvpClassification returns an Enum.PvPUnitClassification value
 -- (or -1 outside objective PvP); we only render flags + orbs.
 -- ============================================================
-local PVP_CARRIER_TEXTURES = {
+-- ★ Exposed: the preview used to hardcode inv_bannerpvp_02, so the per-classification
+-- art (Horde/Alliance/Neutral flags, the four orbs) was unpreviewable.
+DF.PVP_CARRIER_TEXTURES = {
     [0]  = "Interface\\Icons\\inv_bannerpvp_01",  -- FlagCarrierHorde
     [1]  = "Interface\\Icons\\inv_bannerpvp_02",  -- FlagCarrierAlliance
     [2]  = "Interface\\Icons\\inv_bannerpvp_03",  -- FlagCarrierNeutral
@@ -1028,7 +1076,7 @@ function DF:UpdateBGCarrierIcon(frame)
         return
     end
 
-    local texture = PVP_CARRIER_TEXTURES[classification]
+    local texture = DF.PVP_CARRIER_TEXTURES[classification]
     if not texture then
         frame.bgCarrierIcon:Hide()
         return

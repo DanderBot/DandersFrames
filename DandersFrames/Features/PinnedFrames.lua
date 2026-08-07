@@ -7,6 +7,13 @@ local addonName, DF = ...
 
 local format = string.format
 
+-- ☠ Secret-value guard. This file reads roster names and unit GUIDs, both of which
+-- go secret in instanced content on 12.1, and it had NO guard anywhere -- the only
+-- feature file in that state. A secret passes `if x then` and `type(x) == "string"`
+-- and then throws when used as a table KEY, concatenated, or compared. Defensive
+-- form (same as Features/FlatRaidFrames.lua) so a client without the API still loads.
+local issecretvalue = issecretvalue or function() return false end
+
 local PinnedFrames = {}
 DF.PinnedFrames = PinnedFrames
 
@@ -182,8 +189,8 @@ end
 -- "Pinned N" when unnamed) tagged with the mode it belongs to, e.g. "NPC (Raid)".
 local function PinnedSetLabel(set, setIndex, isRaidMode)
     local name = set and set.name
-    if not name or name == "" then name = "Pinned " .. (setIndex or 1) end
-    return name .. " (" .. (isRaidMode and "Raid" or "Party") .. ")"
+    if not name or name == "" then name = format(DF.L["Pinned %d"], setIndex or 1) end
+    return name .. " (" .. (isRaidMode and DF.L["Raid"] or DF.L["Party"]) .. ")"
 end
 
 -- True when instanced PvP has pinned processing disabled (the live default —
@@ -421,7 +428,11 @@ local function GetGroupRoster()
         -- Use GetRaidRosterInfo which returns exact name format for nameList
         for i = 1, numMembers do
             local name = GetRaidRosterInfo(i)
-            if name then
+            -- ☠ Must be secret-checked BEFORE the truthiness test: `roster[name]` below
+            -- indexes with it, and a secret table key throws. Dropping an unnameable
+            -- member is correct here -- the roster event that fills the name in
+            -- re-runs this build.
+            if not issecretvalue(name) and name then
                 -- Store both the full name and short name for lookup. Exact names
                 -- always win; a short-name ALIAS must never overwrite an existing
                 -- entry — a same-realm member's exact name IS their short name, so
@@ -541,8 +552,21 @@ function PinnedFrames:AutoPopulateSet(set, roster)
         return changed
     end
 
-    -- Build name → role map for the removal pass
-    local rosterRoles = {}  -- shortName -> role
+    -- Build name → role map for the removal pass.
+    --
+    -- TWO maps, deliberately. rosterRoles carries the NONE→DAMAGER coercion and
+    -- drives the auto-ADD pass (an unassigned player counts as DPS for adding —
+    -- long-standing behaviour). assignedRoles carries ONLY roles the game has
+    -- actually assigned, and is the one the auto-REMOVE pass reads.
+    --
+    -- Removing on a coerced role is destructive: during zone-in / role assignment
+    -- UnitGroupRolesAssigned returns "NONE" for members whose role data has not
+    -- arrived yet, so a pinned TANK momentarily reads as DAMAGER and a set with
+    -- only autoAddTanks on would drop them from set.players — which is saved
+    -- config, so the pin is gone until something re-adds it. Never remove on
+    -- unknown data (same principle as Fix A/Fix B in CleanOfflinePlayers).
+    local rosterRoles = {}    -- name -> role, NONE coerced to DAMAGER (add pass)
+    local assignedRoles = {}  -- name -> role, only when actually assigned (remove pass)
     local isRaid = IsInRaid()
 
     -- Identify the player for the Exclude Self option (gates auto-add/remove of self).
@@ -558,7 +582,12 @@ function PinnedFrames:AutoPopulateSet(set, roster)
 
         if fullName then
             local shortName = fullName:match("([^%-]+)") or fullName
-            local role = UnitGroupRolesAssigned(unit)
+            local rawRole = UnitGroupRolesAssigned(unit)
+            if rawRole and rawRole ~= "NONE" then
+                assignedRoles[shortName] = rawRole
+                assignedRoles[fullName] = rawRole
+            end
+            local role = rawRole
             if role == "NONE" then role = "DAMAGER" end
             rosterRoles[shortName] = role
             rosterRoles[fullName] = role
@@ -598,9 +627,11 @@ function PinnedFrames:AutoPopulateSet(set, roster)
             if set.manualPlayers[playerName] then
                 -- skip
             else
-                -- Only evaluate players still in the group
-                -- (offline/left players are handled by CleanOfflinePlayers)
-                local role = rosterRoles[playerName]
+                -- Only evaluate players still in the group whose role the game
+                -- has actually assigned (offline/left players are handled by
+                -- CleanOfflinePlayers; unassigned roles are left alone until
+                -- they resolve — see the assignedRoles note above).
+                local role = assignedRoles[playerName]
                 if role then
                     local matchesFilter = false
                     if set.autoAddTanks and role == "TANK" then
@@ -638,9 +669,40 @@ function PinnedFrames:CleanOfflinePlayers(set, roster)
     -- / just-left-the-group — keep the pins for next time rather than wiping them the
     -- instant the group disbands. Real leavers are pruned on the next update once the
     -- roster is non-empty.
-    if GetNumGroupMembers() == 0 then return false end
+    local numMembers = GetNumGroupMembers()
+    if numMembers == 0 then return false end
 
     roster = roster or GetGroupRoster()
+
+    -- Fix C — Fix A's count check is not enough. On a party→raid transition (and
+    -- on zone-in) GetNumGroupMembers() goes live BEFORE GetRaidRosterInfo(i)
+    -- resolves, and the raid branch of GetGroupRoster builds the table purely
+    -- from GetRaidRosterInfo with no player fallback — so the count passes while
+    -- the roster is still completely empty, and every auto-added pin gets pruned
+    -- against it. manualPlayers survives (Fix B), which is why this only ever
+    -- reproduced for people using the auto-add role filters.
+    --
+    -- Field log (2026-08-01 15:37:26, v4.9.0-alpha.1): "Mode changed from party
+    -- to raid — reinitializing" logged "2 players in set, 0 valid" — the 0 valid
+    -- IS the empty roster — and one second later the same set logged "0 players
+    -- in set". The tanks came back 21s later once the roster arrived and the
+    -- auto-add pass re-added them.
+    --
+    -- roster carries a short-name ALIAS per cross-realm member on top of one
+    -- exact entry each, so its size is between numMembers and 2*numMembers when
+    -- healthy; fewer entries than members therefore means "not populated yet"
+    -- with no false positives. Partial population is treated as incomplete too —
+    -- pruning 15 of 20 raiders because only 5 have loaded is the same bug.
+    local rosterCount = 0
+    for _ in pairs(roster) do
+        rosterCount = rosterCount + 1
+    end
+    if rosterCount < numMembers then
+        DF:Debug("PINNED", "CleanOfflinePlayers skipped — roster not populated (%d entries for %d members)",
+            rosterCount, numMembers)
+        return false
+    end
+
     local manual = set.manualPlayers
     local changed = false
 
@@ -1034,8 +1096,14 @@ function PinnedFrames:CreateBossSecureHandler(setIndex, container, bossFrames)
         for i = 1, 8 do
             local f = frames[i]
             if f and f:IsShown() and f.unit then
+                -- ☠ UnitGUID is secret while tainted. The `~=` below is the hazard:
+                -- comparing a secret throws. Guard the fresh read AND the stored
+                -- value -- the stamp at :1101 could have been written before this
+                -- guard existed, so a stale secret can still be sitting on the frame.
+                -- Skipping the refresh is safe: the boss unit event fires again.
                 local guid = UnitGUID(f.unit)
-                if guid and guid ~= f.dfLastBossGUID then
+                if not issecretvalue(guid) and not issecretvalue(f.dfLastBossGUID)
+                   and guid and guid ~= f.dfLastBossGUID then
                     f.dfLastBossGUID = guid
                     if DF.FullFrameRefresh then DF:FullFrameRefresh(f) end
                 end
@@ -1542,7 +1610,7 @@ function PinnedFrames:CreateSetFrames(setIndex)
     label:SetPoint("BOTTOM", container, "TOP", 0, 2)
     local labelText = set.name
     if not labelText or labelText == "" then
-        labelText = "Pinned " .. setIndex
+        labelText = format(DF.L["Pinned %d"], setIndex)
     end
     label:SetText(labelText)
     label:SetTextColor(0.8, 0.8, 1.0)
@@ -2203,6 +2271,20 @@ function PinnedFrames:SetEnabled(setIndex, enabled)
 
     if not container or (not isBoss and not header) then
         if visible then
+            -- ☠ COMBAT GUARD. This on-demand build used to be the rare path — Initialize
+            -- pre-created every defined set, so by the time anyone toggled a set the
+            -- frames already existed and this branch was near-dead. Initialize now
+            -- builds only enabled sets, which makes THIS the normal way a set gets its
+            -- frames, and creating a secure header child under lockdown is blocked.
+            -- CreateSetFrames does check combat itself, but it only warns and returns —
+            -- nothing retried, so the set would silently never appear. Defer instead:
+            -- the PLAYER_REGEN_ENABLED drain re-runs SetEnabled and takes this path again.
+            if InCombatLockdown() then
+                DF:DebugWarn("PINNED", "SetEnabled: in combat, deferring build of set %d", setIndex)
+                self.pendingVisibilityUpdate = self.pendingVisibilityUpdate or {}
+                self.pendingVisibilityUpdate[setIndex] = enabled
+                return
+            end
             self:CreateSetFrames(setIndex)
         end
         return
@@ -2487,7 +2569,7 @@ function PinnedFrames:UpdateLabel(setIndex)
     
     local labelText = set.name
     if not labelText or labelText == "" then
-        labelText = "Pinned " .. setIndex
+        labelText = format(DF.L["Pinned %d"], setIndex)
     end
     label:SetText(labelText)
 end
@@ -2532,12 +2614,24 @@ function PinnedFrames:Initialize()
     end
 
     DF:Debug("PINNED", "Initializing pinned frames (mode=%s)", tostring(self.currentMode))
-    
-    -- Create frames for every defined set (CreateSetFrames no-ops past the last
-    -- defined set, so iterating the cap is safe and also rebuilds correctly when
-    -- the set count changed).
+
+    -- ☠ ENABLED sets only, NOT every defined set. CreateSetFrames force-creates up to
+    -- 40 secure header children per set via the startingIndex trick, and building them
+    -- for sets that are switched off is pure cost — measured on the retail lane at
+    -- 270ms in a single frame for two sets that were empty AND disabled (80 children).
+    -- Arena entry IS a party<->raid transition (IsInRaid() is true there), so every
+    -- arena start paid it; with another addon sorting in the same frame it tipped over
+    -- the "script ran too long" watchdog, which is why it reproduced for some players
+    -- and not others on identical builds.
+    --
+    -- Nothing is lost by deferring: SetEnabled already builds on demand when it finds
+    -- no container/header, it simply was never the normal way in before. Enabling a set
+    -- now goes through that path instead.
     for i = 1, PinnedFrames.MAX_SETS do
-        self:CreateSetFrames(i)
+        local set = GetSetDB(i)
+        if set and set.enabled then
+            self:CreateSetFrames(i)
+        end
     end
     
     self.initialized = true
@@ -2670,7 +2764,36 @@ function PinnedFrames:Reinitialize()
         self.pendingReinitialize = true
         return
     end
-    
+
+    -- ☠ NOTHING ENABLED => NOTHING TO REBUILD. Bail BEFORE the teardown below, not
+    -- after: with Initialize now building only enabled sets, tearing down and calling
+    -- Initialize would walk MAX_SETS twice to arrive back at zero frames. This is the
+    -- other half of the 270ms-per-arena-entry fix.
+    --
+    -- ⚠ currentMode MUST still advance. The mode-change check that called us compares
+    -- against it, so leaving it stale keeps that check true and re-fires Reinitialize
+    -- on every subsequent roster update — a quiet loop instead of a single hitch. The
+    -- log firing once per transition rather than continuously is what proves this line
+    -- is doing its job.
+    --
+    -- A set that was enabled, built, then disabled keeps its (hidden) frames rather
+    -- than having them destroyed here. SetEnabled(false) already hid them, so this
+    -- costs retained hidden frames, not a visual artefact.
+    local anyEnabled = false
+    for i = 1, PinnedFrames.MAX_SETS do
+        local set = GetSetDB(i)
+        if set and set.enabled then
+            anyEnabled = true
+            break
+        end
+    end
+    if not anyEnabled then
+        self.currentMode = GetActualMode()
+        DF:Debug("PINNED", "Reinitialize: skipped - no set enabled (mode now %s)",
+            tostring(self.currentMode))
+        return
+    end
+
     -- Clean up old frames
     for i = 1, PinnedFrames.MAX_SETS do
         if self.bossHandlers[i] then
@@ -3629,7 +3752,7 @@ function PinnedFrames:EnsureTestContainer(setIndex, set, isRaidMode)
     testLabel:SetPoint("BOTTOM", container, "TOP", 0, 2)
     local labelText = set.name
     if not labelText or labelText == "" then
-        labelText = "Pinned " .. setIndex
+        labelText = format(DF.L["Pinned %d"], setIndex)
     end
     testLabel:SetText(labelText)
     testLabel:SetShown(set.showLabel)
@@ -3865,6 +3988,18 @@ function PinnedFrames:EnterTestMode()
             if pool then
                 for i = 1, n do
                     if pool[i] and DF.UpdateTestFrame then
+                        -- ☠ RE-RUN THE LAYOUT, as every main-pool call site does.
+                        -- The pinned pool only ever got ApplyFrameStyle once, at
+                        -- creation: EnsurePlayerTestFramePool's REUSE branch skips
+                        -- it, and pinned test frames are excluded from
+                        -- FullProfileRefresh (which walks PinnedFrames.headers).
+                        -- So changing Health Bar Orientation or Texture updated the
+                        -- main preview and left the pinned preview frozen until a
+                        -- reload. ApplyFrameLayout, NOT ApplyTestFrameLayout: the
+                        -- latter reads db.frameWidth where live reads
+                        -- frame.dfPinnedWidth or db.frameWidth, which is exactly the
+                        -- override a pinned frame carries. (Audit, 2026-08-07.)
+                        if DF.ApplyFrameLayout then DF:ApplyFrameLayout(pool[i]) end
                         DF:UpdateTestFrame(pool[i], i, true)
                     end
                 end
@@ -3907,6 +4042,12 @@ function PinnedFrames:RefreshTestMode(withLayout)
             if n > cap then n = cap end
             for i = 1, n do
                 if pool[i] and DF.UpdateTestFrame then
+                    -- Same reason as EnterTestMode: the pinned pool never re-runs
+                    -- the frame layout otherwise. `withLayout` gates it because a
+                    -- pure data refresh does not need the geometry pass.
+                    if withLayout and DF.ApplyFrameLayout then
+                        DF:ApplyFrameLayout(pool[i])
+                    end
                     DF:UpdateTestFrame(pool[i], i, withLayout and true or false)
                 end
             end

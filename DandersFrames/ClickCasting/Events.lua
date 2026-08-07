@@ -12,7 +12,14 @@ function CC:RegisterEvents()
     
     eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
-    eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+    -- Unit-filtered to "player". This event carries a unit and fires for every
+    -- party/raid member, and the handler runs CheckLoadoutProfileSwitch plus a
+    -- full ApplyBindings -- the ~500-frame batched sweep. Unfiltered, every
+    -- raid member respeccing cost a full sweep and the hover-bind window that
+    -- comes with it, for a profile decision that only ever concerns us.
+    eventFrame:RegisterUnitEvent("PLAYER_SPECIALIZATION_CHANGED", "player")
+    -- Roster churn is when frames are created and retired; see the handler.
+    eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
     eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     eventFrame:RegisterEvent("PLAYER_LEVEL_UP")
     eventFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
@@ -91,9 +98,81 @@ function CC:RegisterEvents()
                 CC:RefreshSpellGrid()
             end
         elseif event == "PLAYER_ENTERING_WORLD" then
-            -- Initial load or reload. Keyed: back-to-back loading screens
-            -- would otherwise stack several settle passes over each other.
-            CC:DeferAfter("zoneSettle", 0.5, function()
+            CC:ScheduleZoneSettle()
+        elseif event == "GROUP_ROSTER_UPDATE" then
+            -- Roster churn creates and retires frames -- including third-party
+            -- ones, whose only route in is the ClickCastFrames table that cannot
+            -- report a retry (see ReconcileClickCastFrames). This module used to
+            -- register no roster event at all and relied entirely on the
+            -- SecureUnitButton_OnLoad hook plus a login-only scan, which is how a
+            -- party->raid change could leave frames dead until a /reload.
+            if InCombatLockdown() then
+                CC:Defer("bindingRefresh")
+            else
+                -- Keyed and delayed, NOT immediate. ApplyBindings cancels any
+                -- in-flight batch walker and re-wipes the header's override
+                -- bindings before restarting from batch 0. Calling it once per
+                -- roster event means a burst -- a raid forming, mass join/leave,
+                -- role assignment, zone-in -- can restart the sweep faster than
+                -- it completes, and every restart kills the live hover binds
+                -- again. That is the same dead-key class this whole change set
+                -- exists to close, reached through a new trigger.
+                --
+                -- Nothing is lost by waiting: frames created during the roster
+                -- event register through EnsureRegistered and the ClickCastFrames
+                -- metatable, not through ApplyBindings, which only refreshes
+                -- bindings on frames already registered. Same keyed-DeferAfter
+                -- shape as zoneSettle, so a burst coalesces into one pass.
+                CC:DeferAfter("rosterSettle", 0.5, function()
+                    CC:ReconcileClickCastFrames()
+                    CC:ApplyBindings()
+                end)
+            end
+        elseif event == "ARENA_PREP_OPPONENT_SPECIALIZATIONS" then
+            -- Arena frames should now exist
+            -- Belt: never enter an arena on an unresolved cold-start profile
+            CC:ResolveColdStartProfile("arena-prep")
+            CC:OnArenaPrep()
+        elseif event == "INSTANCE_ENCOUNTER_ENGAGE_UNIT" then
+            -- Boss frames should now exist
+            CC:OnBossEngage()
+        elseif event == "NAME_PLATE_UNIT_ADDED" then
+            -- A nameplate was added
+            local unitToken = ...
+            CC:OnNamePlateAdded(unitToken)
+        elseif event == "NAME_PLATE_UNIT_REMOVED" then
+            -- A nameplate was removed
+            local unitToken = ...
+            CC:OnNamePlateRemoved(unitToken)
+        elseif event == "HOUSE_EDITOR_MODE_CHANGED" then
+            -- Housing mode transitions can kill secure wraps; the repair
+            -- re-wraps every frame (self-defers in combat, cooldown-limited)
+            CC:RequestBindingRepair("housing-mode")
+        end
+    end)
+
+    -- Our own PLAYER_ENTERING_WORLD registration happens INSIDE the dispatch of
+    -- that very event (Initialize is driven from a PEW handler elsewhere, which
+    -- calls InitializeSecureFrames -> RegisterEvents), so this frame never
+    -- receives the login PEW. Everything in the settle pass was therefore absent
+    -- at login and first ran on the next loading screen: nameplate registration,
+    -- the zone-in binding repair, and the cold-start profile resolve that exists
+    -- specifically for "none of my binds work in my first arena of the day".
+    -- Kick it once here; the key makes it idempotent against a real PEW landing
+    -- immediately after.
+    self:ScheduleZoneSettle()
+end
+
+-- The post-loading-screen settle pass, factored out so it can also be kicked
+-- once at init (see the note at the end of RegisterEvents). Keyed: back-to-back
+-- loading screens reuse one pending pass rather than stacking several.
+function CC:ScheduleZoneSettle()
+    CC:DeferAfter("zoneSettle", 0.5, function()
+                -- NOTE (12.1 lane): the retail original also called
+                -- CC:MigrateBindingsToRootSpells() here. That one-time rewrite was
+                -- REMOVED on this lane (ClickCasting/Bindings.lua:300), so the call
+                -- is deliberately dropped rather than ported -- it would be a nil
+                -- call on every zone-in.
                 CC:RegisterAllFrames()
                 -- Register Blizzard frames if any binding needs them
                 if CC:AnyBindingNeedsBlizzardFrames() then
@@ -132,28 +211,6 @@ function CC:RegisterEvents()
                     CC:CheckLoadoutProfileSwitch()
                 end)
             end)
-        elseif event == "ARENA_PREP_OPPONENT_SPECIALIZATIONS" then
-            -- Arena frames should now exist
-            -- Belt: never enter an arena on an unresolved cold-start profile
-            CC:ResolveColdStartProfile("arena-prep")
-            CC:OnArenaPrep()
-        elseif event == "INSTANCE_ENCOUNTER_ENGAGE_UNIT" then
-            -- Boss frames should now exist
-            CC:OnBossEngage()
-        elseif event == "NAME_PLATE_UNIT_ADDED" then
-            -- A nameplate was added
-            local unitToken = ...
-            CC:OnNamePlateAdded(unitToken)
-        elseif event == "NAME_PLATE_UNIT_REMOVED" then
-            -- A nameplate was removed
-            local unitToken = ...
-            CC:OnNamePlateRemoved(unitToken)
-        elseif event == "HOUSE_EDITOR_MODE_CHANGED" then
-            -- Housing mode transitions can kill secure wraps; the repair
-            -- re-wraps every frame (self-defers in combat, cooldown-limited)
-            CC:RequestBindingRepair("housing-mode")
-        end
-    end)
 end
 
 -- ============================================================
@@ -181,6 +238,9 @@ end
 -- binding refresh that walks registered frames).
 
 local DRAIN_ORDER = {
+    -- First: the OnEnter snippet reads dfClickCastEnabled to decide whether to
+    -- run at all, so a stale value makes everything below it pointless.
+    "headerEnabled",
     "profileSwitch",
     "loadoutCheck",
     "register",
@@ -194,7 +254,59 @@ local DRAIN_ORDER = {
     "keyboardRefresh",
 }
 
+-- Per-frame bodies for the set jobs below. File-locals rather than closures
+-- built per drain: the drain runs on every combat end, and a set can hold the
+-- whole roster.
+local function jobRegister(self, frame)
+    self:RegisterFrame(frame)
+end
+
+local function jobUnregister(self, frame)
+    self:UnregisterFrame(frame)
+end
+
+local function jobReassert(self, frame)
+    if self.registeredFrames and self.registeredFrames[frame] then
+        self:ApplyBindingsToFrameUnified(frame)
+    end
+end
+
+-- Run a set job one frame at a time, isolating a failure to the frame that
+-- caused it.
+--
+-- DrainDeferred pcalls the job as a whole, which stops one bad job killing the
+-- jobs after it -- but inside a set that granularity is too coarse: the loop
+-- aborts at the first error and every frame it had not reached yet is silently
+-- dropped. The payload is cleared BEFORE run (see DrainDeferred), so those
+-- frames are not retried at the next drain either; they are simply unregistered
+-- for the session, which is the exact shape of the dead-bind bugs this whole
+-- subsystem exists to prevent.
+--
+-- One frame erroring is survivable. Losing the rest of the roster because of it
+-- is not.
+local function forEachFrameSafe(self, frames, label, fn)
+    for frame in pairs(frames) do
+        local ok, err = pcall(fn, self, frame)
+        if not ok then
+            DF:DebugError("CLICK", "Deferred '%s' errored on one frame (the rest of the set still ran): %s",
+                label, tostring(err))
+        end
+    end
+end
+
 local DEFERRED_JOBS = {
+    -- Carries the enabled state SetEnabled could not write during lockdown.
+    -- "last" wins: if the user toggled twice in one fight, the final state is
+    -- the one they meant. Stored as a string because Defer treats a nil payload
+    -- as "nothing queued", which would silently drop a toggle to OFF.
+    headerEnabled = {
+        kind = "value", policy = "last",
+        run = function(self, state)
+            if self.header then
+                self.header:SetAttribute("dfClickCastEnabled", state == "on")
+            end
+        end,
+    },
     profileSwitch = {
         kind = "value", policy = "last",
         run = function(self, profileName)
@@ -214,17 +326,13 @@ local DEFERRED_JOBS = {
     register = {
         kind = "set",
         run = function(self, frames)
-            for frame in pairs(frames) do
-                self:RegisterFrame(frame)
-            end
+            forEachFrameSafe(self, frames, "register", jobRegister)
         end,
     },
     unregister = {
         kind = "set",
         run = function(self, frames)
-            for frame in pairs(frames) do
-                self:UnregisterFrame(frame)
-            end
+            forEachFrameSafe(self, frames, "unregister", jobUnregister)
         end,
     },
     reassert = {
@@ -235,11 +343,7 @@ local DEFERRED_JOBS = {
         -- Re-apply our bindings on exactly the frames that were touched.
         kind = "set",
         run = function(self, frames)
-            for frame in pairs(frames) do
-                if self.registeredFrames and self.registeredFrames[frame] then
-                    self:ApplyBindingsToFrameUnified(frame)
-                end
-            end
+            forEachFrameSafe(self, frames, "reassert", jobReassert)
         end,
     },
     fullRegistration = {
@@ -285,6 +389,25 @@ local DEFERRED_JOBS = {
 -- job name must not read as "queued", or the caller aborts and the work is lost
 -- with only an INFO line to show for it -- and INFO is exactly what the log's
 -- eviction policy discards first.
+-- Jobs that mean the opposite of each other. Queueing one must CANCEL the other
+-- for that payload, because the queue is otherwise order-blind: both entries
+-- survive, and DRAIN_ORDER alone decides the outcome -- so the later intent
+-- loses whenever it happens to sit earlier in the order.
+--
+-- The case that bites is nameplates. Blizzard recycles a fixed pool of plate
+-- frames, so within one fight the SAME frame object is legitimately removed and
+-- re-added for different units. Both sets end up holding it, `register` drains
+-- at slot 3 and `unregister` at slot 4, and the drain tears down a plate that is
+-- on screen showing a live unit. The Blizzard-frame pair has the same shape from
+-- a user toggling the option twice in combat: whatever they picked last, off
+-- wins.
+local OPPOSED_JOBS = {
+    register          = "unregister",
+    unregister        = "register",
+    blizzardRegister  = "blizzardUnregister",
+    blizzardUnregister = "blizzardRegister",
+}
+
 function CC:Defer(job, payload)
     local def = DEFERRED_JOBS[job]
     if not def then
@@ -293,6 +416,22 @@ function CC:Defer(job, payload)
     end
 
     self.deferred = self.deferred or {}
+
+    -- Latest intent wins: drop the contradicting entry rather than letting
+    -- DRAIN_ORDER arbitrate between two things the caller never asked for both of.
+    local opposite = OPPOSED_JOBS[job]
+    if opposite and self.deferred[opposite] ~= nil then
+        local other = self.deferred[opposite]
+        if type(other) == "table" then
+            if payload ~= nil and other[payload] then
+                other[payload] = nil
+                DF:Debug("CLICK", "Defer: '%s' cancels queued '%s' for the same frame", job, opposite)
+            end
+        else
+            self.deferred[opposite] = nil
+            DF:Debug("CLICK", "Defer: '%s' cancels queued '%s'", job, opposite)
+        end
+    end
 
     if def.kind == "set" then
         local set = self.deferred[job]

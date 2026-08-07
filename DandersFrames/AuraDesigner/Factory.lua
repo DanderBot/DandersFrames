@@ -11,13 +11,14 @@ local addonName, DF = ...
 -- Blizzard drives each slot's secret show/hide — we only attach art. Zero secret reads.
 --
 -- SCOPE (this file, P4.0 scaffold + P4.1 + P4.2 + P4.3 + P4.4): gates, identity->includeSpellIDs,
--- the frame-level indicators that CAN be driven read-free — HEALTH-BAR (filled mirror + flat
+-- the frame-level indicators that CAN be driven read-free — HEALTH-BAR (fill cover + flat
 -- tint), BACKGROUND tint, static BORDER — and the PLACED ICON / SQUARE / BAR indicators (native
 -- SetIcon / solid-colour fill + native cooldown + native stacks + static border for icon/square;
 -- a native SetDurationBar-driven StatusBar for the bar, one 1-slot container per configured
 -- indicator, many coexisting). Placed duration text supports colour-by-time via the #205 discrete
--- BUCKET formatter (C-side |c escapes — no Lua time read). framealpha / nametext / healthtext are
--- 12.1 casualties (see NOTES at the file foot). Sound + showWhenMissing are P4.5. The factory
+-- BUCKET formatter (C-side |c escapes — no Lua time read). nametext / healthtext were recovered
+-- via colour-by-cover; framealpha remains a 12.1 casualty (see NOTES at the file foot).
+-- Sound + showWhenMissing are P4.5. The factory
 -- is the only AD render path now — the legacy read-path engine was removed.
 --
 -- COMBAT / SECRET obligations (delegated to the DF.AuraContainer handle, the #205-proven
@@ -403,8 +404,11 @@ local function poolFilter(cfg, mine)
     return (type(cfg) == "table" and cfg.othersOnly) and "HELPFUL|!PLAYER" or "HELPFUL"
 end
 
--- Stable structural signature of an includeSpellIDs map (sorted IDs). Changing the set
--- is STRUCTURAL (candidateFilters are declared at container build) -> Rebuild, not restyle.
+-- Stable signature of an includeSpellIDs map (sorted IDs). Changing the set is a TUNING
+-- delta, not a structural one: candidateFilters are declared at build but the native
+-- SetAuraGroupCandidateFilters / SetAuraSlotCandidateFilters mutate them in place, so a
+-- selection edit rides ApplyTuning. (It WAS structural before Wave 1; every consumer of
+-- this sig now feeds a tuningSig.)
 local function includeSig(map)
     if not map then return "" end
     local ids = {}
@@ -435,9 +439,9 @@ end
 -- (Indicators.lua:1325-1329), read from CONFIG only:
 --   replace: overlay opacity = the colour picker's alpha.
 --   tint:    overlay opacity = blend slider x colour alpha (so the bar colour shows through).
--- Used by the FLAT whole-bar tint path and to derive the tint-mode mirror's alpha. The
--- filled-mirror path now expresses current-health-fill tracking read-free (a duplicate
--- StatusBar fed the secret percent), so tintWholeBar=false is no longer a divergence.
+-- Used by the FLAT whole-bar tint path and to derive the fill cover's alpha. The cover path
+-- expresses current-health-fill tracking read-free (a texture anchored to the real fill
+-- region), so tintWholeBar=false is no longer a divergence.
 local function healthbarBlend(mode, blendCfg, a)
     if mode == "replace" then return a end
     return (blendCfg or 0.5) * a
@@ -468,13 +472,15 @@ local function buildOverlayTintConfig(unit, map, r, g, b, blend, levelOffset, fi
     }
 end
 
--- Build a FILLED HEALTH-MIRROR container config (health-bar indicator, replace/tint fill).
--- The slot hosts a duplicate StatusBar fed the unit's secret health percent render-side, so
--- it mirrors the real bar's fill+texture+motion (fixing the flat whole-bar tint patch). Level
--- offset 1 = healthBar level + 1 (above the real fill, below the +2 power / content overlay),
--- exactly where the legacy tint sat (Indicators.lua:1299). Colour/texture/alpha are static
--- config; the onBar callback hands the live bar back so SyncFrame can stash it for feeding.
-local function buildHealthMirrorConfig(unit, map, r, g, b, alpha, texture, onBar, filter)
+-- Build a HEALTH FILL COVER container config (health-bar indicator, replace/tint fill).
+-- `clampTo` is the REAL health bar's fill texture. The cover is a plain texture anchored to
+-- it, so it inherits the fill's rect and tracks health with NO feed and NO reads -- the aura
+-- frame's access restrictions (DenyTaintedAccessWhenAurasAreSecret) forbid driving a
+-- duplicate StatusBar outright, which is why the earlier mirror could never work. See the
+-- HEALTH FILL COVER note in Frames/AuraContainer.lua.
+-- Level offset 1 = healthBar level + 1 (above the real fill, below the +2 power / content
+-- overlay), exactly where the legacy tint sat. Colour/texture/alpha are static config.
+local function buildHealthFillConfig(unit, map, r, g, b, alpha, texture, clampTo, filter)
     return {
         unit = unit,
         mode = "overlay",
@@ -482,7 +488,9 @@ local function buildHealthMirrorConfig(unit, map, r, g, b, alpha, texture, onBar
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
         frameLevelOffset = 1,
-        style = { overlay = { healthMirror = { texture = texture, color = { r, g, b }, alpha = alpha, onBar = onBar } } },
+        style = { overlay = { healthFill = {
+            texture = texture, color = { r, g, b }, alpha = alpha, clampTo = clampTo,
+        } } },
     }
 end
 
@@ -1031,6 +1039,31 @@ local function alertElemStructKey(indicator, geom)
     return DF.Expiration:StructSig(indicator, geom or { baseSize = indicator.size })
 end
 
+-- PANDEMIC (the refresh-window cue, PTR 8). Unlike the expiry alert it needs NO companion
+-- container: AddPandemicRegion attaches a real Region to the indicator's own button, so
+-- this is just another entry in the style table — the same shape as style.bar.
+--
+-- Every AD family stores the block under the SAME bare `pandemic*` keys on its own record,
+-- so they all pass prefix = nil and there is one key vocabulary across the designer.
+-- `ctx` is DF.Border's build context (the cue's Border type is a real DF.Border). No unit
+-- is threaded: the AD border UI never exposes a class/role colour SOURCE (it is always the
+-- static picker — see PLACED_BORDER_KEYS), so the resolver has nothing to resolve and
+-- plumbing a frame down to two style builders that have never needed one would be cost
+-- with no reader. iconMode makes it size as an icon ring rather than a frame edge.
+local PANDEMIC_CTX = { iconMode = true }
+local function pandemicSpec(rec)
+    return DF.Pandemic and DF.Pandemic:BuildSpec(rec, nil, PANDEMIC_CTX) or nil
+end
+-- Region KIND + bind are create-once -> Rebuild; everything else restyles in place. The
+-- engine owns that split (StructSig / CoSig), so these two stay one line each and no
+-- family can disagree with another about which keys are structural.
+local function pandemicStructKey(rec)
+    return DF.Pandemic and DF.Pandemic:StructSig(rec, nil) or ""
+end
+local function pandemicCoKey(rec)
+    return DF.Pandemic and DF.Pandemic:CoSig(rec, nil) or ""
+end
+
 -- Resolve the profile's GLOBAL colour-by-time default for placed/bar duration text:
 -- adDB.defaults.durationColorByTime, nil -> ON (the Midnight baseline — mirrors the
 -- editor's GLOBAL_DEFAULTS_FALLBACK / TYPE_DEFAULTS). Threaded into every placed/bar
@@ -1122,6 +1155,11 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec, defs)
     -- byte-identical to the pre-feature output. Icon AND square both carry it —
     -- the strip hangs off the slot edge regardless of the slot's content shape.
     style.bar = DF.BuildDurationBarSpec and DF:BuildDurationBarSpec(indicator, "durationBar") or nil
+
+    -- Pandemic cue: rendered ON THIS BUTTON (AddPandemicRegion takes a Region, and the
+    -- registrar is a list, so it does not collide with anything else bound here). That is
+    -- the whole difference from the expiry alert below — no companion, no extra container.
+    style.pandemic = pandemicSpec(indicator)
 
     -- Expiry Alert element: rendered by a separate COMPANION SLOT, never by this
     -- button (one duration binding per button — see EXPIRY ALERT COMPANION SLOT).
@@ -1265,7 +1303,7 @@ end
 -- native API can mutate live therefore MUST stay out of this sig or it leaks on every
 -- edit. The tracked spell-ID map used to live here; it is live-tunable via
 -- candidateFilters and now rides placedTuningSig.
-local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defs, mine)
+local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, borderOn, indicator, defs)
     return (isSquare and "sq" or "ic")
         .. "|" .. (hideIcon and "hi" or "")
         .. "|" .. (showStacks and "st" or "")
@@ -1273,38 +1311,68 @@ local function placedStructSig(isSquare, hideIcon, showStacks, showDuration, bor
         .. "|" .. (borderOn and "bd" or "")
         .. "|fl=" .. tostring(resolveLevel(indicator, defs.level))
         .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")   -- strata applies at Create, like the level
-        .. "|df=" .. durationFmtKey(indicator, true, defs.cbt)
+        -- ☠ "|df=" .. durationFmtKey(...) was here. Duration formatting is NOT
+        -- structural: SetDurationText is reset-then-apply and re-callable, and
+        -- bindNative now re-binds on a spec change from ApplyStyle. It also folded
+        -- in DF:GetAuraDurationUpdateInterval(), so one account-wide setting
+        -- rebuilt every container on every frame. It is a restyle now.
         -- (No alert keys: the expiry alert lives on the COMPANION slot, whose own
         -- structSig carries alertElemStructKey — an alert edit rebuilds only it.)
-        .. "|f=" .. poolFilter(indicator, mine)   -- filter string binds at build (pool/othersOnly change -> Rebuild)
-        -- Duration bar presence + GEOMETRY (mirror groupStyleStructSig): the strip
-        -- region is create-once and reserves wrap space outside the button rect, so
-        -- enable/position/height/gap/colorMode ride the struct sig (Rebuild). Cosmetics
-        -- (texture/colour/reverseFill) hot-apply — they live in placedCoSig. "" when
-        -- disabled/absent, so a bar-less indicator sigs identically to pre-feature.
-        .. "|" .. (indicator.durationBarEnabled == true
-            and ("bar" .. (indicator.durationBarPosition == "TOP" and "TOP" or "BOTTOM") .. ":"
-                .. tostring(tonumber(indicator.durationBarHeight) or 4) .. ":"
-                .. tostring(tonumber(indicator.durationBarGap) or 1) .. ":"
-                .. tostring(indicator.durationBarColorMode or "STATIC"))
-            or "")
+        -- (No filter string: it moved to placedTuningSig on 2026-08-04 — a single-record
+        -- consumer cannot change its key set, so the string is live-swappable.)
+        -- Duration bar PRESENCE only. ☠ The geometry half (position/height/gap) used to
+        -- ride here on the theory that the strip's layout reservation could not
+        -- re-derive live. It already does: ApplyStyle -> backend:applyLayout ->
+        -- buildGroupLayout -> stripReservation -> SetAuraGroupLayout, and
+        -- styleButton_regions re-anchors the strip every pass ("Re-anchored every pass
+        -- so position/gap/height edits apply live via ApplyStyle"). colorMode only picks
+        -- a curve/colour, applied live by styleBarShared, and placedCoSig carries it
+        -- anyway. Only the region's EXISTENCE is create-once.
+        .. "|" .. (indicator.durationBarEnabled == true and "bar" or "")
+        -- Pandemic: the region's WIDGET KIND and its AddPandemicRegion bind are both
+        -- create-once, so a type change (or the master toggle) rebuilds. Everything else
+        -- about it hot-applies and rides placedCoSig. "" when off.
+        .. "|pd=" .. pandemicStructKey(indicator)
 end
 
 -- TUNING signature: the live-mutable half of what placedStructSig used to carry. The
 -- tracked spell-ID map becomes config.candidateFilters ({ includeSpellIDs = map }), and
 -- the native SetAuraGroupCandidateFilters mutates that in place — so a selection edit is
 -- an ApplyTuning, never a Rebuild. A placed indicator pins max = 1 (buildPlacedConfig)
--- and has no per-indicator sort, so the map IS the whole tuning sig. Mirrors the
--- filter-group path's tuningSig, which has worked this way since Wave 1.
-local function placedTuningSig(map)
-    return includeSig(map)
+-- and has no per-indicator sort. Mirrors the filter-group path's tuningSig, which has
+-- worked this way since Wave 1.
+--
+-- ★ `filt` joined the tuning half on 2026-08-04. The filter string used to be
+-- creation-frozen, so "Others Only" cost a teardown+recreate for a string change;
+-- SetAuraGroup/SlotFilterString mutate it live and the engine now pushes it from
+-- applyGroupTuning. Every AD family declares exactly ONE record, so its key set can
+-- never move — which is the condition that makes this legal (add-only topology).
+-- Shared by every AD family, so all seven call sites pass their own poolFilter result.
+local function placedTuningSig(map, filt)
+    return includeSig(map) .. "|f=" .. tostring(filt or "")
 end
 
 -- COSMETIC signature: size/anchor/offset/scale/alpha, swipe, duration/stack styling, square
 -- colour, and the RAW-config border sig (no BuildSpec alloc — FIX C). A change here
 -- hot-applies via ApplyStyle(style, layout); the actual border spec is built only then.
-local function placedCoSig(indicator, isSquare, borderOn, alpha)
+local function placedCoSig(indicator, isSquare, borderOn, alpha, defs)
     local parts = {
+        -- ★ Duration FORMATTING moved here from the struct sig. It has to live in a
+        -- signature somewhere or a format change would move nothing and silently do
+        -- nothing; the cosmetic sig is the right one now that bindNative re-binds on a
+        -- spec change from ApplyStyle. Passing defaultShow/defColorByTime as the struct
+        -- sig did keeps the key identical, so the only thing that changed is WHICH tier
+        -- reacts: restyle instead of teardown-and-recreate.
+        -- ☠ defs.cbt, NOT nil. durationFmtKey resolves colour-by-time with whatever
+        -- default it is handed, and buildDurationTextSpec resolves it with defs.cbt --
+        -- so passing nil here made ResolveDurationColorMode(nil) answer "OFF" while the
+        -- spec that actually renders answered from the profile default. An indicator
+        -- left on the default then had a COLOURED formatter and a sig that said OFF, so
+        -- editing the breakpoints moved nothing, no re-bind happened, and the colours
+        -- stayed stale until /reload. The struct sigs already pass defs.cbt; the two
+        -- cosmetic sigs were the ones that lost it. The function's own comment warns
+        -- about exactly this -- it just was not being obeyed here.
+        "df=" .. durationFmtKey(indicator, true, defs and defs.cbt),
         "sz=" .. tostring(math.max(8, tonumber(indicator.size) or 24)),
         "sc=" .. tostring(tonumber(indicator.scale) or 1),
         "an=" .. tostring(indicator.anchor or "TOPLEFT"),
@@ -1340,6 +1408,10 @@ local function placedCoSig(indicator, isSquare, borderOn, alpha)
             colSig(indicator.durationBarColor), colSig(indicator.durationBarBGColor),
             tostring(indicator.durationBarReverseFill and 1 or 0),
         }, ",") or ""),
+        -- Pandemic COSMETICS (colour / opacity / thickness / inset / size / payload /
+        -- placement). All plain region writes, so they hot-apply; only the widget kind
+        -- is structural (placedStructSig). "" when off.
+        "pd=" .. pandemicCoKey(indicator),
         -- (No alert entry: the expiry alert renders on its COMPANION slot with
         -- its own struct/cosmetic sigs — this container never carries it.)
     }
@@ -1350,11 +1422,85 @@ local function placedCoSig(indicator, isSquare, borderOn, alpha)
     return tconcat(parts, "|")
 end
 
--- Placed base alpha rides the plain anchor frame (combat-safe; alpha is not a secret).
+-- Placed base alpha rides a DF-owned frame (combat-safe; alpha is not a secret).
+-- ☠ GetAlphaHost, not GetFrame. A container handle's host is its own anchor frame; a
+-- collapsed slot's is dfLevelHost, the frame its regions hang off. GetFrame() for a slot
+-- is the aura BUTTON, and every tainted write to that is refused once auras are secret --
+-- the pcall here was swallowing exactly that failure silently, while the same fault
+-- surfaced loudly in the out-of-range fade, which is not pcall'd.
+-- ⚠ The stash below is not just for the fade: a slot's button is created in a LAZY BATCH,
+-- so this very often runs before there is any host to write to. AcquireSlot's
+-- initializeFrame re-asserts _dfADBaseAlpha once the host exists.
+-- See SlotHandle:GetAlphaHost.
 local function applyPlacedAlpha(handle, alpha)
     handle._dfADBaseAlpha = alpha   -- read by the OOR fade (ElementAppearance)
-    local f = handle and handle.GetFrame and handle:GetFrame()
+    local f = handle and handle.GetAlphaHost and handle:GetAlphaHost()
     if f then pcall(function() f:SetAlpha(alpha) end) end
+end
+
+-- ============================================================
+-- SLOT-OWNER BRIDGE  (container collapse S2b)
+-- ============================================================
+-- Every placed indicator sets singleSlot, so each one used to get a WHOLE AuraContainer
+-- holding exactly ONE slot -- ~120 per unit frame in a heavy profile, uncapped, and every
+-- structural edit stranded one permanently (frames are never freed, and teardown cannot
+-- release buttons because there is no public release). They now share ONE container per
+-- unit frame, via AuraContainer:AcquireSlot.
+--
+-- ☠ THE SLOT KEY CARRIES THE STRUCT SIG. A slot's regions are built in its
+-- initializeFrame, which is frozen at AddAuraSlot, so a structural change cannot mutate a
+-- slot -- it acquires a NEW key and PARKS the old. One button instead of a whole
+-- container, and returning to a previous structure re-adopts the parked slot by key.
+--
+-- ⚠ FALLS BACK ON PURPOSE. AcquireSlot declines test frames (the preview declares its own
+-- topology) and declines while a frame has no owner yet in combat. Those keep the original
+-- per-indicator container, so behaviour is unchanged wherever the shared path says no.
+-- Both handle kinds answer GetFrame/Destroy/ApplyStyle, so the OOR fade and teardownExcept
+-- need no knowledge of which one they hold.
+local function isSlotHandle(h) return h ~= nil and h.GetButton ~= nil end
+
+-- \30 (record separator) cannot appear in an instance key or a struct sig, so the two
+-- halves can never collide into a shared key.
+local function placedSlotKey(key, structSig) return key .. "\30" .. structSig end
+
+local function placedAcquire(frame, key, structSig, cfg)
+    local h
+    if DF.AuraContainer.AcquireSlot then
+        h = DF.AuraContainer:AcquireSlot(frame, placedSlotKey(key, structSig), {
+            unit             = cfg.unit,
+            filter           = cfg.filter,
+            candidateFilters = cfg.candidateFilters,
+            config           = cfg,
+        })
+    end
+    if h then return h end
+    return DF.AuraContainer:Create(frame, cfg)
+end
+
+-- Structural change. A slot cannot be rebuilt: park it and take a new key. A real
+-- container still Rebuilds, still passing structSig as its own parking key.
+local function placedRestructure(entry, frame, key, structSig, cfg)
+    if isSlotHandle(entry.handle) then
+        entry.handle:Park()
+        local h = placedAcquire(frame, key, structSig, cfg)
+        if h then entry.handle = h end
+    else
+        entry.handle:Rebuild(cfg, structSig)
+    end
+    return entry.handle
+end
+
+-- Selection edit. The two kinds take different tuning shapes: a container replaces the
+-- max/sort/candidateFilters trio wholesale off a fresh config; a slot takes the two values
+-- it actually owns. testEntries rides along on both so a test-mode rebuild previews the
+-- NEW selection rather than a stale one.
+local function placedTune(handle, cfg)
+    if handle.config then handle.config.testEntries = cfg.testEntries end
+    if isSlotHandle(handle) then
+        handle:ApplyTuning(cfg.filter, cfg.candidateFilters)
+    else
+        handle:ApplyTuning(cfg)
+    end
 end
 
 -- ============================================================
@@ -1388,7 +1534,25 @@ local function resolveBarSize(frame, indicator)
         local padding  = tonumber(fdb.framePadding) or 0
         local border   = (fdb.frameShowBorder ~= false) and (tonumber(fdb.frameBorderSize) or 1) or 0
         if usePP then padding = DF:PixelPerfect(padding); border = DF:PixelPerfect(border) end
-        local edgeInset = math.max(padding, border)
+        -- User inset ON TOP of the frame's own edge band, applied per side to whichever
+        -- axes are matching. Same sign convention as every other Inset in DF: positive
+        -- pulls inward, negative pushes the bar past the health bar's edge.
+        --
+        -- ☠ WHY THIS IS A NUMBER AND NOT "follow the border indicator". The band above is
+        -- everything DF can know statically about how much frame edge is occupied. An AD
+        -- BORDER indicator occupies more of it, but it is conditional on its aura being
+        -- present — and presence is SECRET on 12.1, so the bar can never widen back when
+        -- that border drops off. Any "account for the border" option would therefore be a
+        -- fixed reservation anyway; this is that reservation, without a cross-record
+        -- reference that can be deleted or a hidden thickest-wins rule the panel cannot
+        -- show. (Krathe's call, 2026-08-05 — the alternatives were weighed and dropped.)
+        --
+        -- ★ It composes with Match rather than replacing it, which is the point: unticking
+        -- Match to hand-align also gives up tracking the frame's SIZE, so every hand-set
+        -- bar broke the next time frame dimensions changed.
+        local userInset = tonumber(indicator.matchInset) or 0
+        if usePP then userInset = DF:PixelPerfect(userInset) end
+        local edgeInset = math.max(padding, border) + userInset
         if matchW then
             local fw = tonumber(fdb.frameWidth) or width
             if usePP then fw = DF:PixelPerfect(fw) end
@@ -1490,6 +1654,10 @@ local function buildBarStyle(indicator, borderSpec, defs)
     }
     -- Legacy bar default for Show Duration is OFF (unlike icon/square, which default ON).
     style.duration = buildDurationTextSpec(indicator, false, 1.2, defs.cbt)   -- placed bar baseline: 1.2 scale, colour-by-time per adDB.defaults
+    -- Pandemic cue on the bar itself. A frame mode rings/washes the whole bar rect (the
+    -- region anchors to the button, which IS the bar here), so a Tint reads as "this bar
+    -- is refreshable now" without needing the bar's own colours.
+    style.pandemic = pandemicSpec(indicator)
     if borderSpec then style.border = { spec = borderSpec } end
     -- Expiry Alert element: rendered by a separate COMPANION SLOT, never by this
     -- button (one duration binding per button — see EXPIRY ALERT COMPANION SLOT).
@@ -1552,13 +1720,44 @@ end
 -- ============================================================
 -- How far the alert is lifted above the thing it annotates. ONE constant, used by the live
 -- companion (over its indicator's container) and by the AD canvas (over its preview slot),
--- so the two can never be nudged apart by editing one literal. A container row is 13 levels
--- thick — measured: container +0, button +2, cooldown +3, border +12 — the same constant
--- the Important Debuffs badge host uses in AuraContainer. At the +1 this used to be, the
--- companion's button landed at +3, INSIDE its own indicator's band: above that indicator's
--- icon but under its border, and under every sibling indicator's border at the same
--- configured level. That is why the glyph showed under the icons.
-Factory.ALERT_ROW_LIFT = 13
+-- so the two can never be nudged apart by editing one literal. At the +1 this used to be,
+-- the companion's button landed at +3, INSIDE its own indicator's band: above that
+-- indicator's icon but under its border, and under every sibling indicator's border at the
+-- same configured level. That is why the glyph showed under the icons.
+--
+-- ☠ 13 -> 8 (Z-order review, 2026-08-07). "A container row is 13 levels thick" was measured
+-- when DF.Border defaulted to +10 and the per-button holder ladder ran to +15. Both shrank:
+-- the border default is +2 and the ladder tops out at +5, so a row is 7 thick — container
+-- +0, button +2, border +4, holders +3..+7. 8 clears it with a level spare, and keeps an
+-- indicator plus its alert inside 16 levels, which is what lets the user-facing bands sit
+-- 20 apart. RE-MEASURE THIS if the border default or the holder ladder moves again.
+Factory.ALERT_ROW_LIFT = 8
+
+-- ☠ ...EXCEPT FOR TINT, which wants the opposite. A wash covers the whole icon, so lifting
+-- it a full row puts it over the indicator's own duration text and stack count and makes
+-- both hard to read (Krathe, 2026-08-05 — the same fault the pandemic cue had, same fix).
+-- A wash belongs ABOVE the icon art and BELOW everything carrying information.
+--
+-- ★ +1 is exactly where this started. The comment above records that at +1 "the companion's
+-- button landed at +3, INSIDE its own indicator's band: above that indicator's icon but
+-- under its border" — which was the bug for a GLYPH and is precisely what a TINT wants. The
+-- constant was never wrong, it was MODE-BLIND: +1 is right for a wash and wrong for a
+-- payload, +13 is right for a payload and wrong for a wash.
+--
+-- ⚠ The trade the low lift buys back is that a tint also sits under a SIBLING indicator's
+-- border at the same configured level. That is the correct side of it — a wash is
+-- background — and the alternative is the unreadable timer this fixes.
+Factory.ALERT_TINT_LIFT = 1
+
+-- The lift for one indicator's alert, by reveal type. Shared by the live companion and the
+-- AD canvas so the two can never be nudged apart, which is the whole reason the lift was a
+-- named constant rather than a literal in the first place.
+function Factory.AlertLift(indicator)
+    if DF.Expiration and DF.Expiration:Mode(indicator) == "TINT" then
+        return Factory.ALERT_TINT_LIFT
+    end
+    return Factory.ALERT_ROW_LIFT
+end
 
 -- THE alert's render, as ONE table. The live companion slot and the AD canvas preview
 -- BOTH take their style from here, so the reveal can never be styled two ways. It used to
@@ -1607,10 +1806,11 @@ local function buildAlertCompanionConfig(unit, map, indicator, layout, mine, geo
         testEntries = testEntryForMap(map),
         enabled = true,
         tooltips = false,   -- companion overlay: see adTooltipsOn (would fight its own indicator)
-        -- A FULL ROW above the indicator's own band (see ALERT_ROW_LIFT), so the alert
-        -- clears its own indicator AND any sibling sharing its configured level. The
-        -- companion subtree carries nothing but the text, so nothing is covered.
-        frameLevelOffset = Factory.ALERT_ROW_LIFT + resolveLevel(indicator, defs.level),
+        -- A FULL ROW above the indicator's own band for a payload reveal, so the alert
+        -- clears its own indicator AND any sibling sharing its configured level — but a
+        -- LOW lift for TINT, which must sit under the timer it would otherwise wash over.
+        -- See Factory.AlertLift.
+        frameLevelOffset = Factory.AlertLift(indicator) + resolveLevel(indicator, defs.level),
         -- MUST mirror the indicator's strata: the level only orders the alert above the
         -- indicator WITHIN a band, so leaving the companion in the frame's band while the
         -- indicator moves to HIGH would strand the alert text underneath it.
@@ -1650,20 +1850,18 @@ function Factory:BuildAlertPreviewConfig(indicator, geom, layout, entries)
     }
 end
 
--- Companion sigs. STRUCTURAL: the filter string (binds at build), EVERY alert key
--- (alertElemStructKey — formatter and placement are creation-frozen -> Rebuild),
--- frame level. TUNING: the identity map, via the shared placedTuningSig — it is
--- config.candidateFilters and mutates live, so it must NOT sit here (a Rebuild
--- strands frames permanently; see placedStructSig). COSMETIC (ApplyStyle): the
--- mirrored indicator geometry — dragging / resizing the indicator hot-moves its
--- companion — plus font and alpha. Raw-config, alloc-light, computed per pass like
--- the other placed sigs (FIX C discipline).
-local function alertCompanionStructSig(indicator, mine, geom, defs)
+-- Companion sigs. STRUCTURAL: EVERY alert key (alertElemStructKey — formatter and
+-- placement are creation-frozen -> Rebuild) and frame level. TUNING: the identity map
+-- AND the filter string, via the shared placedTuningSig — both mutate live, so neither
+-- may sit here (a Rebuild strands frames permanently; see placedStructSig).
+-- COSMETIC (ApplyStyle): the mirrored indicator geometry — dragging / resizing the
+-- indicator hot-moves its companion — plus font and alpha. Raw-config, alloc-light,
+-- computed per pass like the other placed sigs (FIX C discipline).
+local function alertCompanionStructSig(indicator, geom, defs)
     return "xalert"
         .. "|xa=" .. alertElemStructKey(indicator, geom)
         .. "|fl=" .. tostring(resolveLevel(indicator, defs.level))
         .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")
-        .. "|f=" .. poolFilter(indicator, mine)
 end
 
 local function alertCompanionCoSig(frame, indicator, isBar, alpha)
@@ -1696,8 +1894,8 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
     if not alertElemMode(indicator) then return end
     local akey = key .. ":alert"
     local geom = alertGeometry(frame, indicator, isBar)   -- square (icon) or rect (bar)
-    local structSig = alertCompanionStructSig(indicator, mine, geom, defs)
-    local tuningSig = placedTuningSig(map)
+    local structSig = alertCompanionStructSig(indicator, geom, defs)
+    local tuningSig = placedTuningSig(map, poolFilter(indicator, mine))
     local coSig = alertCompanionCoSig(frame, indicator, isBar, alpha)
     local entry = placed[akey]
     if entry and entry.structSig == structSig and entry.tuningSig == tuningSig
@@ -1709,7 +1907,7 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
     local cfg = buildAlertCompanionConfig(frame.unit, map, indicator, layout, mine, geom, defs)
     if not cfg then return end   -- formatter unavailable: key stays dead -> sweep
     if not entry then
-        local handle = DF.AuraContainer:Create(frame, cfg)
+        local handle = placedAcquire(frame, akey, structSig, cfg)
         if handle then
             applyPlacedAlpha(handle, alpha)
             placed[akey] = { handle = handle, structSig = structSig,
@@ -1718,7 +1916,11 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
         end
     elseif entry.structSig ~= structSig then
         entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-        entry.handle:Rebuild(cfg)
+        -- Slot: park the old key, take a new one (a slot's regions are frozen at
+        -- creation). Container fallback: Rebuild, with structSig as its own parking key --
+        -- its definition is exactly "changing this needs a new container", which is also
+        -- the condition for safely re-adopting one parked under it.
+        placedRestructure(entry, frame, akey, structSig, cfg)
         applyPlacedAlpha(entry.handle, alpha)
         live[akey] = true
     else
@@ -1726,8 +1928,7 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
         -- container (row mode, so applyGroupTuning runs) instead of recreating it.
         if entry.tuningSig ~= tuningSig then
             entry.tuningSig = tuningSig
-            entry.handle.config.testEntries = cfg.testEntries
-            entry.handle:ApplyTuning(cfg)
+            placedTune(entry.handle, cfg)
         end
         if entry.coSig ~= coSig then
             entry.coSig = coSig
@@ -1787,6 +1988,14 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defs)
             .. "|" .. tostring(cfg.style.duration ~= nil)
             .. "|" .. durationFmtKey(indicator, false, defs.cbt)
             .. "|xa=" .. (cfg.alertPreview and alertElemStructKey(indicator, geom) or "")
+            -- ☠ Pandemic MUST be here for the same reason the alert key is: the canvas
+            -- only recreates its slot when this sig moves, and the cue's holder is
+            -- create-once. Without it, turning pandemic on built the holder on the
+            -- existing slot and turning it back off left the holder sitting there shown
+            -- — a permanent green wash over the bar, which is exactly how this was
+            -- reported (Krathe, 2026-08-05). Live was fine throughout because
+            -- barStructSig carries it and a real Rebuild hands over a fresh button.
+            .. "|pd=" .. pandemicStructKey(indicator)
         return cfg, sig
     end
     local isSquare = (typeKey == "square")
@@ -1812,37 +2021,48 @@ function Factory:BuildPreviewConfig(frame, indicator, typeKey, spellID, defs)
         .. "|" .. tostring(borderSpec ~= nil)
         .. "|" .. durationFmtKey(indicator, true, defs.cbt)
         .. "|xa=" .. (cfg.alertPreview and alertElemStructKey(indicator) or "")
+        .. "|pd=" .. pandemicStructKey(indicator)   -- see the bar branch above
     return cfg, sig
 end
 
--- STRUCTURAL signature: identity, duration-text on/off + format key (SetDurationText / SetDuration
+-- STRUCTURAL signature: duration-text on/off + format key (SetDurationText / SetDuration
 -- Bar bind ONCE), border on/off, frame level. Cosmetic bar styling is barCoSig.
--- Create-only properties ONLY; the identity map is live-tunable and rides
--- placedTuningSig (see placedStructSig for why a needless Rebuild is a leak).
-local function barStructSig(indicator, borderOn, defs, mine)
+-- Create-only properties ONLY; the identity map AND the filter string are live-tunable
+-- and ride placedTuningSig (see placedStructSig for why a needless Rebuild is a leak).
+local function barStructSig(indicator, borderOn, defs)
     return "bar"
-        .. "|df=" .. durationFmtKey(indicator, false, defs.cbt)
+        -- ☠ "|df=" .. durationFmtKey(...) was here. Duration formatting is NOT
+        -- structural: SetDurationText is reset-then-apply and re-callable, and
+        -- bindNative now re-binds on a spec change from ApplyStyle. It also folded
+        -- in DF:GetAuraDurationUpdateInterval(), so one account-wide setting
+        -- rebuilt every container on every frame. It is a restyle now.
         -- (No alert keys: the expiry alert lives on the COMPANION slot, whose own
         -- structSig carries alertElemStructKey — an alert edit rebuilds only it.)
         .. "|" .. (borderOn and "bd" or "")
         .. "|fl=" .. tostring(resolveLevel(indicator, defs.level))
         .. "|fs=" .. tostring(resolveStrata(indicator, defs.strata) or "")
-        .. "|f=" .. poolFilter(indicator, mine)   -- filter string binds at build (pool/othersOnly change -> Rebuild)
+        .. "|pd=" .. pandemicStructKey(indicator)   -- see placedStructSig
 end
 
 -- COSMETIC signature: size (width/height + match-frame + the fed frame size), anchor/offset/
 -- scale/alpha, texture/fill/bg/orientation/reverse, duration-text styling, and the raw-config
 -- border sig (no BuildSpec alloc). A change hot-applies via ApplyStyle(style, layout).
-local function barCoSig(frame, indicator, borderOn, alpha)
+local function barCoSig(frame, indicator, borderOn, alpha, defs)
     local fdb = DF:GetFrameDB(frame) or {}
     return tconcat({
+        -- Duration formatting is cosmetic now, not structural — see placedCoSig.
+        -- ☠ defs.cbt, NOT nil — same reasoning as placedCoSig.
+        "df=" .. durationFmtKey(indicator, false, defs and defs.cbt),
         "w="  .. tostring(tonumber(indicator.width)  or 60),
         "h="  .. tostring(tonumber(indicator.height) or 6),
         "mw=" .. tostring(indicator.matchFrameWidth ~= false and 1 or 0) .. ":" .. tostring(fdb.frameWidth),
         "mh=" .. tostring(indicator.matchFrameHeight and 1 or 0) .. ":" .. tostring(fdb.frameHeight),
         -- Match Width/Height now insets by the frame's border+padding (resolveBarSize), so those
         -- feed the cosmetic size too — a frame border/padding change must re-apply the bar layout.
-        "mi=" .. tostring(fdb.framePadding) .. ":" .. tostring(fdb.frameShowBorder) .. ":" .. tostring(fdb.frameBorderSize) .. ":" .. tostring(fdb.pixelPerfect),
+        -- The whole edge-inset input set: the frame's own band, plus the user's Inset
+        -- (cosmetic — resolveBarSize is pure config, so a drag hot-applies via ApplyStyle).
+        "mi=" .. tostring(fdb.framePadding) .. ":" .. tostring(fdb.frameShowBorder) .. ":" .. tostring(fdb.frameBorderSize) .. ":" .. tostring(fdb.pixelPerfect)
+            .. ":" .. tostring(tonumber(indicator.matchInset) or 0),
         "an=" .. tostring(indicator.anchor or "BOTTOM"),
         "ox=" .. tostring(tonumber(indicator.offsetX) or 0),
         "oy=" .. tostring(tonumber(indicator.offsetY) or 0),
@@ -1867,6 +2087,7 @@ local function barCoSig(frame, indicator, borderOn, alpha)
             colSig(indicator.durationColor),
         }, ","),
         "bd=" .. placedBorderRawSig(indicator, borderOn),
+        "pd=" .. pandemicCoKey(indicator),   -- see placedCoSig
         -- (No alert entry: the expiry alert renders on its COMPANION slot with
         -- its own struct/cosmetic sigs — this container never carries it.)
     }, "|")
@@ -1964,6 +2185,15 @@ local function buildFilterGroupStyle(group, borderSpec)
         -- group.style key block. nil when disabled/absent — style-less groups
         -- stay byte-identical (no style.bar key at all).
         bar      = DF.BuildDurationBarSpec and DF:BuildDurationBarSpec(s, "durationBar") or nil,
+        -- (No pandemic entry. The engine and every other AD family carry it, and the three
+        -- lines needed here are the same three, but the GROUP CARD has no editor for it:
+        -- Cards.lua's AddSection greys imperatively and never runs hideOn/disableOn/
+        -- LayoutChildren, which is the entire mechanism GUI:CreatePandemicControls uses to
+        -- show the right controls per Type. Wiring the render half alone would put settings
+        -- in the profile that nothing can reach. Giving AddSection that seam — or an
+        -- imperative variant of the shared helper — is the prerequisite, and it is a bigger
+        -- job than this feature. Filter groups are arguably where a HoT row wants this most,
+        -- so it is worth doing properly rather than quickly.)
     }
     if borderSpec then style.border = { spec = borderSpec } end
     return style
@@ -1978,18 +2208,19 @@ local function groupStyleStructSig(group)
     return "|" .. ((s.showStacks ~= false) and "st" or "")
         .. "|" .. ((s.showDuration ~= false) and "du" or "")
         .. "|" .. (s.ShowBorder == true and "bd" or "")
-        .. "|df=" .. durationFmtKey(s, true)
-        -- Duration bar presence + GEOMETRY (Wave 3): the region is create-once
-        -- and the strip reserves wrap space outside the button rect, so
-        -- position/height/gap ride the struct sig (mirror rowStructSig's s.bar
-        -- entry). "" when disabled — absent-bar groups sig identically whether
+        -- ☠ "|df=" .. durationFmtKey(...) was here. Duration formatting is NOT
+        -- structural: SetDurationText is reset-then-apply and re-callable, and
+        -- bindNative now re-binds on a spec change from ApplyStyle. It also folded
+        -- in DF:GetAuraDurationUpdateInterval(), so one account-wide setting
+        -- rebuilt every container on every frame. It is a restyle now.
+        -- Duration bar PRESENCE only (mirror placedStructSig, which carries the full
+        -- reasoning): the strip's layout reservation re-derives live through
+        -- ApplyStyle -> applyLayout -> stripReservation -> SetAuraGroupLayout, and
+        -- styleButton_regions re-anchors it every pass, so position/height/gap are NOT
+        -- structural. "" when disabled — absent-bar groups sig identically whether
         -- style is absent, {}, or carries durationBarEnabled = false.
-        .. "|" .. (s.durationBarEnabled == true
-            and ("bar" .. (s.durationBarPosition == "TOP" and "TOP" or "BOTTOM") .. ":"
-                .. tostring(tonumber(s.durationBarHeight) or 4) .. ":"
-                .. tostring(tonumber(s.durationBarGap) or 1) .. ":"
-                .. tostring(s.durationBarColorMode or "STATIC"))
-            or "")
+        .. "|" .. (s.durationBarEnabled == true and "bar" or "")
+        -- (No pandemic entry — see buildFilterGroupStyle for why groups don't carry it yet.)
 end
 
 -- EDITOR PREVIEW CONFIG for one SAMPLE slot of a filter/debuff group: the same
@@ -2052,13 +2283,40 @@ end
 -- Takes the FRAME (not unit): the border spec needs the frame db (pixelPerfect).
 -- adBorderAnim (the placed containers' DF-owned border-animation opt-in) is set
 -- only when a border exists, keeping style-less configs byte-identical.
+-- ☠ THE TEST PANEL'S COUNT APPLIES TO EVERY PREVIEW SURFACE, NOT JUST THE ROWS.
+-- Features/Auras.lua was the only place that set testMax, and only for the buff and
+-- debuff rows -- so an AD group fell through to its own maxIcons and previewed up to
+-- TEN icons while the row beside it previewed two.
+--
+-- That is not a cosmetic difference. The preview declares ONE AuraGroup per icon (the
+-- only shape that keeps entry k at position k), and every AuraGroup eagerly allocates
+-- FrameCreationBatchSize (10) buttons before maxFrameCount is applied. So each surplus
+-- preview icon costs TEN frames, permanently -- WoW never frees them. Ten icons instead
+-- of two is 100 frames instead of 20, per container, per unit frame.
+--
+-- Measured from the debug log 2026-08-06: containers painting indices 1..10 and 1..11
+-- with testBuffCount / testDebuffCount both set to 2.
+--
+-- Categorised off the resolved filter string, the same way _paintTestSlot picks its
+-- pool, so a debuff group honours the Debuffs slider and a buff group the Buffs one.
+local function adTestMax(frame, filterStr)
+    local db = DF:GetFrameDB(frame) or {}
+    if type(filterStr) == "string" and filterStr:find("HARMFUL") then
+        return db.testDebuffCount or 2
+    end
+    return db.testBuffCount or 2
+end
+
 local function buildFilterGroupConfig(frame, map, group, mine)
     local borderSpec = buildGroupBorderSpec(frame, group)
+    local filt = poolFilter(group, mine)
     return {
         unit = frame.unit,
         mode = "row",
         max = math.max(1, tonumber(group.maxIcons) or 8),
-        filter = poolFilter(group, mine),
+        filter = filt,
+        -- Preview-only cap. Live still renders `max`; only test mode clamps.
+        testMax = adTestMax(frame, filt),
         sort = groupSort(group, "DEFAULT"),
         candidateFilters = { includeSpellIDs = map },
         testEntries = filterGroupTestEntries(map),
@@ -2085,6 +2343,10 @@ local fgroupExcludeWarned = setmetatable({}, { __mode = "k" })
 local function filterGroupCoSig(group, wrapDefault)
     local s = groupStyle(group)
     return tconcat({
+        -- Duration formatting moved out of groupStyleStructSig to here — see placedCoSig.
+        -- It has to sit in SOME signature or a format change would move nothing and
+        -- silently do nothing.
+        "df=" .. durationFmtKey(s, true),
         "sz=" .. tostring(math.max(8, tonumber(group.iconSize) or 24)),
         "an=" .. tostring(group.anchor or "TOPLEFT"),
         "ox=" .. tostring(tonumber(group.offsetX) or 0),
@@ -2114,6 +2376,7 @@ local function filterGroupCoSig(group, wrapDefault)
             tostring(s.durationBarTexture), colSig(s.durationBarColor),
             colSig(s.durationBarBGColor), tostring(s.durationBarReverseFill and 1 or 0),
         }, ",") or ""),
+        -- (No pandemic entry — see buildFilterGroupStyle for why groups don't carry it yet.)
     }, "|")
 end
 
@@ -2522,7 +2785,13 @@ end
 -- cosmetic restyle, re-positions the window over its region, and hot-resizes on a size change.
 -- parent = the frame the window PARENTS to (must be a Frame); anchorTo = the region it covers
 -- (may be a texture, e.g. frame.background); levelOffset = z-band above parent.
--- filter = the slot filter string (poolFilter(cfg)); structural — bound at build.
+-- ☠ filter = the slot filter string (poolFilter(cfg)), and here it STAYS structural,
+-- unlike every other AD family since 2026-08-04. Not an oversight: NativeBackend
+-- applyGroupTuning returns early for mode == "missing" by design — the layout-push
+-- inversion that makes the badge clear its clip window is load-bearing and hard-won
+-- (10d6048e), and nothing has exercised it against a live candidateFilters/filter swap.
+-- The identity map is structural here for the same reason. Do not move either onto the
+-- tuning path without enabling missing mode in the engine first.
 local function syncFrameLevelMissing(store, keyName, map, frame, parent, anchorTo, w, hgt, levelOffset, coSig, apply, filter)
     w = math.max(1, tonumber(w) or 1); hgt = math.max(1, tonumber(hgt) or 1)
     local structSig = includeSig(map) .. "|miss|" .. (filter or "HELPFUL")
@@ -2806,14 +3075,14 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local eff = memberEffective(hasMG, key, indicator)
                         local borderOn = placedBorderOn(indicator, false)
                         local alpha = tonumber(indicator.alpha) or 1
-                        local structSig = barStructSig(indicator, borderOn, defs, mine)
-                        local tuningSig = placedTuningSig(map)
-                        local coSig = barCoSig(frame, eff, borderOn, alpha)
+                        local structSig = barStructSig(indicator, borderOn, defs)
+                        local tuningSig = placedTuningSig(map, poolFilter(indicator, mine))
+                        local coSig = barCoSig(frame, eff, borderOn, alpha, defs)
 
                         local entry = placed[key]
                         if not entry then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
-                            local handle = DF.AuraContainer:Create(frame,
+                            local handle = placedAcquire(frame, key, structSig,
                                 buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
@@ -2823,7 +3092,8 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
                             entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                            entry.handle:Rebuild(buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine))
+                            placedRestructure(entry, frame, key, structSig,
+                                buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine))
                             applyPlacedAlpha(entry.handle, alpha)
                         else
                             if entry.tuningSig ~= tuningSig then
@@ -2832,8 +3102,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                                 -- borderSpec nil on purpose — ApplyTuning reads only the trio.
                                 entry.tuningSig = tuningSig
                                 local cfg = buildBarConfig(frame, frame.unit, map, eff, nil, defs, mine)
-                                entry.handle.config.testEntries = cfg.testEntries
-                                entry.handle:ApplyTuning(cfg)
+                                placedTune(entry.handle, cfg)
                             end
                             if entry.coSig ~= coSig then
                                 local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
@@ -2949,14 +3218,16 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         -- alloc — FIX C); the actual border spec is built ONLY inside a
                         -- create/rebuild/restyle branch below, never per pass.
                         local structSig = placedStructSig(isSquare, hideIcon, showStacks,
-                            showDuration, borderOn, indicator, defs, mine)
-                        local tuningSig = placedTuningSig(map)
-                        local coSig = placedCoSig(eff, isSquare, borderOn, alpha)
+                            showDuration, borderOn, indicator, defs)
+                        local tuningSig = placedTuningSig(map, poolFilter(indicator, mine))
+                        local coSig = placedCoSig(eff, isSquare, borderOn, alpha, defs)
 
                         local entry = placed[key]
                         if not entry then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
-                            local handle = DF.AuraContainer:Create(frame,
+                            -- Shared slot owner (S2b); falls back to a per-indicator
+                            -- container on test frames / in combat before an owner exists.
+                            local handle = placedAcquire(frame, key, structSig,
                                 buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine))
                             if handle then
                                 applyPlacedAlpha(handle, alpha)
@@ -2966,7 +3237,10 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         elseif entry.structSig ~= structSig then
                             local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
                             entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                            entry.handle:Rebuild(buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine))
+                            -- Slot: park the old key and take a new one (a slot's regions
+                            -- are frozen at creation). Container: Rebuild as before.
+                            placedRestructure(entry, frame, key, structSig,
+                                buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine))
                             applyPlacedAlpha(entry.handle, alpha)
                         else
                             if entry.tuningSig ~= tuningSig then
@@ -2982,8 +3256,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                                 -- away).
                                 entry.tuningSig = tuningSig
                                 local cfg = buildPlacedConfig(frame, frame.unit, map, eff, isSquare, nil, defs, mine)
-                                entry.handle.config.testEntries = cfg.testEntries
-                                entry.handle:ApplyTuning(cfg)
+                                placedTune(entry.handle, cfg)
                             end
                             if entry.coSig ~= coSig then
                                 local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon) or nil
@@ -3033,11 +3306,14 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
                 live[key] = true
                 -- SPLIT sigs (Wave 1): structural -> Rebuild (recreate), tuning ->
                 -- in-place h:ApplyTuning, cosmetic -> ApplyStyle.
-                local structSig = "f=" .. poolFilter(group, mine)   -- filter string binds at build (pool/othersOnly change -> Rebuild)
-                    .. groupStyleStructSig(group)             -- region set + duration format key (group.style)
+                local structSig = groupStyleStructSig(group)  -- region set only (format key is cosmetic now) (group.style)
                 local tuningSig = selSig                      -- selection edits: live include-map swap (config-wide candidateFilters)
                     .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 8))
                     .. groupSortSig(group)                    -- per-group sort (Wave 2): live SetAuraGroupSortMethod
+                    -- Filter string joined the tuning half on 2026-08-04 (Others Only).
+                    -- A filter group declares ONE group off a plain string filter, so its
+                    -- key set is fixed at "df1" and the live swap is safe.
+                    .. "|f=" .. poolFilter(group, mine)
                 local coSig = filterGroupCoSig(group)
 
                 local entry = fg[key]
@@ -3050,7 +3326,7 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix)
                     end
                 elseif entry.structSig ~= structSig then
                     entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                    entry.handle:Rebuild(buildFilterGroupConfig(frame, res.map, group, mine))
+                    entry.handle:Rebuild(buildFilterGroupConfig(frame, res.map, group, mine), structSig)
                 else
                     if entry.tuningSig ~= tuningSig then
                         -- Selection edit / maxIcons / per-group sort with the struct sig
@@ -3098,7 +3374,8 @@ end
 -- frame-level effect targets ONE region, so per type we pick the SINGLE highest-priority
 -- winner (stacking two of a type conflicts) and stand it up / restyle / tear it down on
 -- its own DF.AuraContainer. Types ported here: healthbar, background, border. framealpha /
--- nametext / healthtext are 12.1 casualties (see the notes below + the P4.7 overlay list).
+-- nametext / healthtext RECOVERED via colour-by-cover (see the NAME / HEALTH TEXT block
+-- below and the foot notes); framealpha stays a 12.1 casualty (P4.7 overlays its controls).
 -- ============================================================
 function Factory:SyncFrame(frame)
     if not frame or not frame.unit then return end
@@ -3183,12 +3460,13 @@ function Factory:SyncFrame(frame)
 
     -- ---- HEALTH BAR (child of frame.healthBar, overlay) -----------------------------
     -- Two render paths, chosen by config:
-    --   * FILLED MIRROR (replace, or tint without "Tint Entire Bar") — a duplicate StatusBar
-    --     fed the secret health percent render-side, matching the real bar's fill/texture/
-    --     motion. replace = opaque cover (alpha 1); tint = fill-matched tint (alpha = blend).
+    --   * FILL COVER (replace, or tint without "Tint Entire Bar") — a texture anchored to the
+    --     real health bar's fill region (healthBar:GetStatusBarTexture()), so it tracks health
+    --     with no feed and no reads. replace = opaque cover (alpha 1); tint = fill-matched
+    --     tint (alpha = blend).
     --   * FLAT WHOLE-BAR TINT (tint + tintWholeBar) — the legacy flat texture overlay covering
     --     the whole bar incl. the missing-health region. Unchanged behaviour.
-    -- Path (flat vs mirror) is folded into structSig so toggling it rebuilds the region fresh.
+    -- Path (flat vs cover) is folded into structSig so toggling it rebuilds the region fresh.
     local healthBar = frame.healthBar
     if healthBar then
         local hb = store.healthbar
@@ -3203,7 +3481,6 @@ function Factory:SyncFrame(frame)
             local wantMissingHB = bestCfg.showWhenMissing and true or false
             if existingHB and (existingHB.missing and true or false) ~= wantMissingHB then
                 existingHB.handle:Destroy(); hb[bestName] = nil
-                frame.dfADHealthMirror = nil
             end
           if wantMissingHB then
             -- SHOW-WHEN-MISSING: a flat tint over the health-bar region while the buff is ABSENT.
@@ -3211,7 +3488,6 @@ function Factory:SyncFrame(frame)
             -- secret on 12.1); single-anchored to the health bar's TOPLEFT so it covers the region
             -- (config-size approximation — precise region + z-order are P4.7 polish). The filled
             -- mirror is a present-only concept, so nil the feed ref while in missing mode.
-            frame.dfADHealthMirror = nil
             local r, g, b, a = readADColor(bestCfg.color)
             local mode = slower(bestCfg.mode or "replace")
             local blend = (mode == "replace") and a or healthbarBlend(mode, bestCfg.blend, a)
@@ -3227,12 +3503,12 @@ function Factory:SyncFrame(frame)
             -- replace mode always uses the fill-matched mirror.
             local wholeBar = (mode == "tint") and (bestCfg.tintWholeBar and true or false) or false
 
-            -- The tracked map is live-tunable (overlay slots take
-            -- SetAuraSlotCandidateFilters), so it rides its own sig rather than forcing
-            -- a teardown+recreate. wholeBar STAYS structural: it picks a different
-            -- config builder entirely.
-            local structSig = (wholeBar and "flat" or "mirror") .. "|" .. filt
-            local tuningSig = placedTuningSig(bestMap)
+            -- The tracked map AND the filter string are live-tunable (overlay slots take
+            -- SetAuraSlotCandidateFilters / SetAuraSlotFilterString), so both ride the
+            -- tuning sig rather than forcing a teardown+recreate. wholeBar STAYS
+            -- structural: it picks a different config builder entirely.
+            local structSig = (wholeBar and "flat" or "cover")
+            local tuningSig = placedTuningSig(bestMap, filt)
             local entry = hb[bestName]
 
             if wholeBar then
@@ -3240,16 +3516,14 @@ function Factory:SyncFrame(frame)
                 local blend = healthbarBlend(mode, bestCfg.blend, a)
                 local coSig = tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
                 if not entry then
-                    frame.dfADHealthMirror = nil
-                    local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
+                        local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
                     if handle then
                         hb[bestName] = { handle = handle, structSig = structSig,
                                          tuningSig = tuningSig, coSig = coSig }
                     end
                 elseif entry.structSig ~= structSig then
-                    frame.dfADHealthMirror = nil
-                    entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                    entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
+                        entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
+                    entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt), structSig)
                 else
                     if entry.tuningSig ~= tuningSig then
                         entry.tuningSig = tuningSig
@@ -3265,31 +3539,32 @@ function Factory:SyncFrame(frame)
                 local alpha = (mode == "replace") and 1 or healthbarBlend(mode, bestCfg.blend, a)
                 local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
                 local tex = (fdb and fdb.healthTexture) or "Interface\\TargetingFrame\\UI-StatusBar"
-                local onBar = function(sb) frame.dfADHealthMirror = sb end
-                local coSig = tconcat({ "mirror", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex) }, "|")
+                -- Anchor target: the REAL health bar's fill texture. Its rect is already
+                -- driven by the bar's value, so the cover follows health for free --
+                -- no feed, no per-tick work, nothing read, nothing written from our
+                -- (tainted) update path. Resolved fresh each pass: changing the frame's
+                -- health texture from the settings panel replaces this region.
+                local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
+                local coSig = tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo) }, "|")
                 if not entry then
-                    frame.dfADHealthMirror = nil   -- onBar re-stashes when the slot builds
-                    local handle = DF.AuraContainer:Create(healthBar, buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, onBar, filt))
+                    local handle = DF.AuraContainer:Create(healthBar, buildHealthFillConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
                     if handle then
                         hb[bestName] = { handle = handle, structSig = structSig,
                                          tuningSig = tuningSig, coSig = coSig }
                     end
                 elseif entry.structSig ~= structSig then
-                    frame.dfADHealthMirror = nil   -- old slot torn down; onBar re-stashes
                     entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                    entry.handle:Rebuild(buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, onBar, filt))
+                    entry.handle:Rebuild(buildHealthFillConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt), structSig)
                 else
                     if entry.tuningSig ~= tuningSig then
-                        -- ☠ Do NOT clear frame.dfADHealthMirror here. The two branches
-                        -- above clear it because the slot is torn down and onBar re-stashes
-                        -- the new StatusBar; a tuning pass keeps the SAME slot and the same
-                        -- bar, so clearing the ref would strand it (nothing re-stashes).
+                        -- A tuning pass keeps the SAME slot and the same cover, so it
+                        -- only needs the style re-applied, not a rebuild.
                         entry.tuningSig = tuningSig
-                        entry.handle:ApplyTuning(buildHealthMirrorConfig(frame.unit, bestMap, r, g, b, alpha, tex, onBar, filt))
+                        entry.handle:ApplyTuning(buildHealthFillConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
                     end
                     if entry.coSig ~= coSig then
                         entry.coSig = coSig
-                        entry.handle:ApplyStyle({ overlay = { healthMirror = { texture = tex, color = { r, g, b }, alpha = alpha, onBar = onBar } } })
+                        entry.handle:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo } } })
                     end
                 end
             end
@@ -3297,7 +3572,6 @@ function Factory:SyncFrame(frame)
         end
         teardownExcept(hb, bestName)
         -- No health-bar winner this pass → the mirror bar is gone; drop the ref.
-        if not bestName then frame.dfADHealthMirror = nil end
     end
 
     -- ---- BACKGROUND TINT (child of frame.background, overlay tint) -------------------
@@ -3352,8 +3626,10 @@ function Factory:SyncFrame(frame)
             local mode = slower(bestCfg.mode or "tint")   -- background defaults to tint
             local blend = healthbarBlend(mode, bestCfg.blend, a)
 
-            local structSig = filt
-            local tuningSig = placedTuningSig(bestMap)
+            -- Nothing structural left: this family declares one overlay slot with a
+            -- fixed region set, and both the map and the filter string tune live.
+            local structSig = "bgtint"
+            local tuningSig = placedTuningSig(bestMap, filt)
             local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
 
             local entry = bg[bestName]
@@ -3365,7 +3641,7 @@ function Factory:SyncFrame(frame)
                 end
             elseif entry.structSig ~= structSig then
                 entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt))
+                entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt), structSig)
             else
                 if entry.tuningSig ~= tuningSig then
                     entry.tuningSig = tuningSig
@@ -3431,8 +3707,8 @@ function Factory:SyncFrame(frame)
             -- drawAboveFrameBorder rides the STRUCT sig: it resolves to frameLevelOffset in
             -- buildBorderConfig, which only a Rebuild re-reads (ApplyStyle carries the spec only).
             local drawAbove = bestCfg.drawAboveFrameBorder ~= false
-            local structSig = filt .. "|da=" .. tostring(drawAbove)
-            local tuningSig = placedTuningSig(bestMap)
+            local structSig = "da=" .. tostring(drawAbove)
+            local tuningSig = placedTuningSig(bestMap, filt)
             local coSig = borderSpecSig(bestSpec)
 
             local entry = bd[bestName]
@@ -3444,7 +3720,7 @@ function Factory:SyncFrame(frame)
                 end
             elseif entry.structSig ~= structSig then
                 entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                entry.handle:Rebuild(buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove))
+                entry.handle:Rebuild(buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove), structSig)
             else
                 if entry.tuningSig ~= tuningSig then
                     entry.tuningSig = tuningSig
@@ -3481,8 +3757,10 @@ function Factory:SyncFrame(frame)
                 local filt = poolFilter(bestCfg, bestPool == 1)
                 local r, g, b, a = readADColor(bestCfg.color)
                 local color = { r = r, g = g, b = b, a = a }
-                local structSig = filt
-                local tuningSig = placedTuningSig(bestMap)
+                -- Nothing structural: one overlay slot whose only region is the mirror
+                -- host. Map and filter string both tune live.
+                local structSig = "mirrorhost"
+                local tuningSig = placedTuningSig(bestMap, filt)
                 local coSig = colSig(bestCfg.color)
                 -- onHost fires on every style pass (create/ApplyStyle/Blizzard re-init):
                 -- stash the host for the TD-teardown recovery below and (re)register the
@@ -3503,6 +3781,18 @@ function Factory:SyncFrame(frame)
                                          host = st._lastHost }
                     end
                 elseif entry.structSig ~= structSig then
+                    -- ☠ DELIBERATELY NOT PARKED (no structSig passed to Rebuild), for two
+                    -- independent reasons. First, structSig here is the CONSTANT
+                    -- "mirrorhost", so it identifies nothing -- every container this
+                    -- consumer ever built would share one park key. Second, and the
+                    -- general rule: this is the ONLY container config that carries a
+                    -- CLOSURE (onHost). A container's initializeFrame callbacks are bound
+                    -- at AddAuraGroup time, so a re-adopted container would keep invoking
+                    -- the STALE closure -- with the colour and category captured when it
+                    -- was first built -- for every lazily-created button. Any future
+                    -- config that embeds a callback is unparkable on the same grounds
+                    -- unless the callback's captured state is folded into the key.
+                    -- (This branch is unreachable today: a constant sig never differs.)
                     entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
                     entry.handle:Rebuild(buildMirrorHostConfig(frame.unit, bestMap, onHost, filt))
                 elseif entry.tuningSig ~= tuningSig then
@@ -3645,7 +3935,7 @@ function Factory:SyncFrame(frame)
                         -- SPLIT sigs (Wave 1): structural -> Rebuild (recreate), tuning ->
                         -- in-place h:ApplyTuning, cosmetic -> ApplyStyle.
                         local structSig = recStructSig      -- record strings + keys (the SET defines the groups)
-                            .. groupStyleStructSig(group)   -- region set + duration format key (group.style)
+                            .. groupStyleStructSig(group)   -- region set only; format key is cosmetic (group.style)
                         local tuningSig = recTuningSig      -- per-record candidateFilters (hideLong / keepImportant / dispel maps)
                             .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 4))
                             .. groupSortSig(group)          -- per-group sort (Wave 2): live SetAuraGroupSortMethod
@@ -3661,16 +3951,18 @@ function Factory:SyncFrame(frame)
                             end
                         elseif entry.structSig ~= structSig then
                             entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                            entry.handle:Rebuild(buildDebuffGroupConfig(frame, records, group))
+                            entry.handle:Rebuild(buildDebuffGroupConfig(frame, records, group), structSig)
                         else
                             if entry.tuningSig ~= tuningSig then
-                                -- Tunables live in the RECORDS' candidateFilters, so the
-                                -- mandatory consumer PRE-SWAP applies (Handle:ApplyTuning
-                                -- header): replace config.filter with the fresh GROUP-
-                                -- IDENTICAL record list — legal because the struct sig pins
-                                -- every record's filter string + key — then ApplyTuning;
-                                -- the engine flush re-derives per-record cf from
-                                -- config.filter. The full trio rides the fresh config: max,
+                                -- Tunables live in the RECORDS' filter strings and
+                                -- candidateFilters, both re-derived engine-side from
+                                -- config.filter. ApplyTuning now copies that through
+                                -- itself, so the explicit pre-swap below is redundant --
+                                -- kept because it costs nothing and makes the dependency
+                                -- visible at the call site. Legal because the struct sig
+                                -- pins every record's KEY (the add-only topology
+                                -- constraint); the STRINGS are free to move.
+                                -- The full trio rides the fresh config: max,
                                 -- the Wave-2 per-group sort (family default "TIME" =
                                 -- ExpirationOnly, the old hardcode), candidateFilters =
                                 -- nil (dgroups carry no config-wide map).
@@ -3735,7 +4027,6 @@ function Factory:ClearFrame(frame)
         DF.TextDesigner.Render:DisableMirrors(frame, "health")
     end
     releaseBgAnchor(store)   -- containers gone above; drop the background anchor too
-    frame.dfADHealthMirror = nil   -- health-mirror bar torn down; drop the feed ref
     -- Sound: reconcile to config with AD now off -> unregisters every applied-sound handle
     -- (combat-deferred to regen inside SyncSound). No leaked registrations.
     self:SyncSound(frame)

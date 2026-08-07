@@ -27,29 +27,98 @@ DF.TestData = {
     -- Test aura data - expanded for testing layouts. spellID (where a stable,
     -- still-live spell matches) lets the 12.1 container preview show the REAL
     -- spell tooltip on hover; entries without one fall back to a name tooltip.
+    -- ☠ THE `name` IS THE SOURCE OF TRUTH, NOT THE ID. _paintTestSlot only keeps
+    -- spellID when `C_Spell.GetSpellName(id) == name`, and resolves by name when it
+    -- doesn't — so a stale ID self-heals. The one thing that gate CANNOT catch is a
+    -- different spell sharing the name: `Deadly Poison` shipped as 2823, the rogue's
+    -- one-hour WEAPON IMBUE, and previewed with the imbue's tooltip on a party frame
+    -- for exactly that reason (2818 is the DoT). If two spells share a name, name the
+    -- one you mean with its ID and check the tooltip in game.
+    --
+    -- ⚠ ORDER IS MEANINGFUL. Entries are handed out in pool order from a per-frame
+    -- rotation (testPoolOffset), so ADJACENT entries appear together on one frame.
+    -- Buffs alternate duration classes; the debuff pool front-loads the four dispellable
+    -- colours (Bleed → Disease → Curse → Poison) then runs none/none/Magic/Curse/none/none,
+    -- so no two neighbours share a type and the untyped slots pair off into the density
+    -- dial described on the pool below. Reordering silently degrades both.
+    -- ☠ ONE SPELL PER CLASS IN ANY WINDOW, AND THAT IS AN ARITHMETIC CONSTRAINT.
+    --
+    -- _paintTestSlot adopts the player's SPEC OVERRIDE wholesale so icon, name and
+    -- tooltip move together (deliberate, and correct). The consequence is that two
+    -- entries can COLLAPSE onto one spell for one class — a priest saw Prayer of Mending
+    -- twice, because Power Word: Shield and PoM swap between Disc and Holy.
+    --
+    -- ⚠ SEPARATING THEM IS NOT ENOUGH, which is how the first fix failed. Each frame
+    -- draws a WRAPPING run of `count` consecutive entries, so over a 10-entry pool with
+    -- a 5-icon preview the only pairs that never share a window are those EXACTLY 5
+    -- apart. PW:S was moved to 9 against PoM at 2 — distance 3 — and offset 7 hands a
+    -- frame entries 8,9,10,1,2, containing both. (Krathe again: "we do random from the
+    -- 1-10? so it can still pull PW:S and PoM on one set of 5 buffs".)
+    --
+    -- Which caps it at TWO spells per class, at i and i+5. Four priest spells cannot be
+    -- made safe at any ordering, so the pool now runs one class per slot in the first
+    -- five and repeats that order in the second five:
+    --     1-5  PALADIN PRIEST DRUID SHAMAN MONK
+    --     6-10 PALADIN PRIEST DRUID MAGE   WARRIOR
+    -- Every window of 5 therefore holds five DIFFERENT classes, so no override can merge
+    -- two of them. Verified for every offset the rotation produces.
+    -- ⚠ Adding an entry breaks the arithmetic. Keep the pool at 10 and swap, or redo the
+    -- spacing for the new size.
     buffs = {
-        {icon = "Interface\\Icons\\Spell_Holy_PowerWordShield", name = "Power Word: Shield", duration = 30, stacks = 0, spellID = 17},
-        {icon = "Interface\\Icons\\Spell_Nature_Rejuvenation", name = "Rejuvenation", duration = 12, stacks = 0, spellID = 774},
-        {icon = "Interface\\Icons\\Spell_Holy_Renew", name = "Renew", duration = 15, stacks = 3, spellID = 139},
-        {icon = "Interface\\Icons\\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0, spellID = 1022},
-        {icon = "Interface\\Icons\\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
-        {icon = "Interface\\Icons\\Spell_Nature_Riptide", name = "Riptide", duration = 8, stacks = 0, spellID = 61295},
-        {icon = "Interface\\Icons\\Spell_Holy_GreaterHeal", name = "Heal", duration = 6, stacks = 2, spellID = 2060},
-        {icon = "Interface\\Icons\\Spell_Nature_LightningShield", name = "Lightning Shield", duration = 600, stacks = 9, spellID = 192106},
-        {icon = "Interface\\Icons\\Spell_Holy_DivineShield", name = "Divine Shield", duration = 8, stacks = 0, spellID = 642},
-        {icon = "Interface\\Icons\\Spell_Holy_WordFortitude", name = "Power Word: Fortitude", duration = 0, stacks = 0, spellID = 21562},
+        {icon = "Interface\Icons\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0, spellID = 1022},
+        -- Stacks are REAL here (charges remaining), which is why PoM keeps its slot: the
+        -- previous stack case was "Heal" with 2 stacks, a spell that applies no aura.
+        {icon = "Interface\Icons\spell_holy_prayerofmending", name = "Prayer of Mending", duration = 30, stacks = 5, spellID = 41635},
+        {icon = "Interface\Icons\Spell_Nature_Rejuvenation", name = "Rejuvenation", duration = 12, stacks = 0, spellID = 774},
+        {icon = "Interface\Icons\Spell_Nature_Riptide", name = "Riptide", duration = 8, stacks = 0, spellID = 61295},
+        {icon = "Interface\Icons\ability_monk_renewingmists", name = "Renewing Mist", duration = 20, stacks = 0, spellID = 119611},
+        -- duration = 0 is the PERMANENT case, and it drives "Hide Duration on Permanent
+        -- Auras". Beacon holds until the paladin moves it, so it is a real one rather
+        -- than a made-up zero. ⚠ If a patch ever gives Beacon a timer this stops
+        -- exercising that setting — the pool then needs another duration-less buff.
+        {icon = "Interface\Icons\Ability_Paladin_BeaconofLight", name = "Beacon of Light", duration = 0, stacks = 0, spellID = 53563},
+        -- 1 hour, like every modern raid buff — NOT permanent. This shipped as
+        -- duration = 0 and was the preview's "permanent aura" case, which was wrong on
+        -- both counts. Also the long-duration case, so the countdown formats get
+        -- exercised above the minutes/hours boundary.
+        {icon = "Interface\Icons\Spell_Holy_WordFortitude", name = "Power Word: Fortitude", duration = 3600, stacks = 0, spellID = 21562},
+        {icon = "Interface\Icons\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
+        {icon = "Interface\Icons\Spell_Holy_MagicalSentry", name = "Arcane Intellect", duration = 3600, stacks = 0, spellID = 1459},
+        {icon = "Interface\Icons\Ability_Warrior_BattleShout", name = "Battle Shout", duration = 3600, stacks = 0, spellID = 6673},
     },
     debuffs = {
-        {icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain", name = "Shadow Word: Pain", duration = 18, stacks = 0, debuffType = "Magic", spellID = 589},
-        {icon = "Interface\\Icons\\Spell_Nature_NullifyPoison", name = "Deadly Poison", duration = 8, stacks = 2, debuffType = "Poison", spellID = 2823},
-        {icon = "Interface\\Icons\\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
-        {icon = "Interface\\Icons\\Ability_Rogue_Garrote", name = "Garrote", duration = 18, stacks = 0, debuffType = nil, spellID = 703},
-        {icon = "Interface\\Icons\\Spell_Shadow_AbominationExplosion", name = "Blood Plague", duration = 21, stacks = 0, debuffType = "Disease", spellID = 55078},
-        {icon = "Interface\\Icons\\Spell_Fire_Immolation", name = "Immolate", duration = 15, stacks = 0, debuffType = "Magic", spellID = 348},
-        {icon = "Interface\\Icons\\Ability_Druid_Rake", name = "Rake", duration = 15, stacks = 0, debuffType = nil, spellID = 1822},
-        {icon = "Interface\\Icons\\Spell_Nature_Slow", name = "Slow", duration = 12, stacks = 0, debuffType = "Magic", spellID = 31589},
-        {icon = "Interface\\Icons\\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 3, debuffType = "Disease", spellID = 55095},
-        {icon = "Interface\\Icons\\Spell_Shadow_Possession", name = "Fear", duration = 8, stacks = 0, debuffType = "Magic", spellID = 5782},
+        -- ☠ POSITIONS 5, 6, 9 AND 10 CARRY NO DISPEL TYPE, AND THAT IS THE DENSITY DIAL.
+        -- The frame overlay now takes its type from the SAME window the icons draw, so
+        -- how often an overlay appears is decided here rather than by a hardcoded
+        -- frame-index pattern. At a preview count of 2 the windows tile into five
+        -- disjoint pairs -- (1,2) (3,4) (5,6) (7,8) (9,10) -- and raid offsets land on
+        -- the same pairs, so two undispellable pairs give 3 of 5 = 60% on BOTH party and
+        -- raid. Krathe's spec.
+        -- ⚠ Exact at count 2 only. At higher counts a window spans more of the pool and
+        -- catches a dispellable entry more often, so the rate climbs; accepted rather
+        -- than decoupling the overlay from the icons again, which is the bug being fixed.
+        -- ⚠ Same-class entries must still sit EXACTLY 5 apart (see the buff pool):
+        -- ROGUE at 4/9 and WARRIOR at 5/10.
+        -- ★ THE ONLY Bleed ENTRY, and it has to live in slot 1. DF ships five dispel
+        -- colours (Border.lua: Magic, Curse, Disease, Poison, Bleed, with Enrage sharing
+        -- Bleed's red) and the pool had no Bleed at all, so that colour could be set on
+        -- the Colors page and never previewed. Slot 1 is the one TYPED slot whose 5-apart
+        -- partner is already DRUID (Rake at 6), so a druid bleed fits without breaking
+        -- the class spacing. Converting Rake or Rend instead would have been simpler and
+        -- was rejected: they are two of the four untyped slots that set the 60% density.
+        {icon = "Interface\Icons\Ability_Gouge", name = "Rend", duration = 15, stacks = 0, debuffType = "Bleed", spellID = 772},
+        {icon = "Interface\Icons\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 0, debuffType = "Disease", spellID = 55095},
+        {icon = "Interface\Icons\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
+        -- 2818 = the DoT. NOT 2823, which is the weapon imbue of the same name, and the
+        -- reason a party frame once previewed "Requires One-Handed Melee Weapon".
+        -- Deadly Poison genuinely stacks to 5, so this is an honest stack case.
+        {icon = "Interface\Icons\Spell_Nature_NullifyPoison", name = "Deadly Poison", duration = 12, stacks = 5, debuffType = "Poison", spellID = 2818},
+        {icon = "Interface\Icons\Spell_Holy_RemoveCurse", name = "Forbearance", duration = 30, stacks = 0, debuffType = nil, spellID = 25771},
+        {icon = "Interface\Icons\Ability_Warrior_SavageBlow", name = "Mortal Wounds", duration = 10, stacks = 0, debuffType = nil, spellID = 115804},
+        {icon = "Interface\Icons\Spell_Shadow_ShadowWordPain", name = "Shadow Word: Pain", duration = 18, stacks = 0, debuffType = "Magic", spellID = 589},
+        {icon = "Interface\Icons\Spell_Shaman_Hex", name = "Hex", duration = 8, stacks = 0, debuffType = "Curse", spellID = 51514},
+        {icon = "Interface\Icons\Ability_CheapShot", name = "Dazed", duration = 4, stacks = 0, debuffType = nil, spellID = 1604},
+        {icon = "Interface\Icons\Spell_Holy_Resurrection", name = "Resurrection Sickness", duration = 600, stacks = 0, debuffType = nil, spellID = 15007},
     },
     -- Defensive externals for the 12.1 container preview (config.testPool =
     -- "defensives" on the defensive row). Same spells the legacy test painter
@@ -104,6 +173,7 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             isMainTank = false,
             isMainAssist = false,
             isAFK = false,
+            isDND = false,
             isPhased = false,
             inVehicle = false,
         }
@@ -223,20 +293,18 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         -- Determine if this frame should be dead (frames 9, 17, 29)
         local isDead = (i == 9 or i == 17 or i == 29)
         
-        -- Determine dispel type - pattern designed to overlap with some OOR frames
-        -- OOR frames are 3, 7, 11, 15, 19, 23, 27, 31, 35, 39
-        -- This pattern gives dispels to frames: 1,6,11,16,21,26,31,36 (Magic), 3,8,13,18,23,28,33,38 (Curse), 5,10,15,20,25,30,35,40 (Poison)
+        -- ☠ THE OVERLAY NAMES A DEBUFF THAT IS ACTUALLY ON THE FRAME. This used to be a
+        -- hardcoded index pattern ("i % 5 == 1 -> Magic") while the debuff ICONS came
+        -- from the curated pool — two sources that were never linked, and once the
+        -- per-frame rotation stopped them coinciding a unit showed a Poison overlay with
+        -- three debuffs, none of them Poison. Ask the engine which types the frame's own
+        -- debuff window holds; nil when it holds none, which is how the pool's untyped
+        -- entries set how often an overlay appears at all.
         local dispelType = nil
         if not isDead then  -- Dead frames don't show dispels
-            if i % 5 == 1 then
-                dispelType = "Magic"
-            elseif i % 5 == 3 then
-                dispelType = "Curse"
-            elseif i % 5 == 0 then
-                dispelType = "Poison"
-            elseif i % 7 == 0 then
-                dispelType = "Disease"  -- Frames 7, 14, 21, 28, 35
-            end
+            dispelType = DF.GetTestDebuffDispelType
+                and DF:GetTestDebuffDispelType("raid" .. i, (DF:GetRaidDB() or {}).testDebuffCount or 2,
+                    testClasses[i])
         end
         
         local result = {
@@ -262,7 +330,8 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             -- New icon states
             isMainTank = (i == 1 or i == 25),  -- First frame and frame 25
             isMainAssist = (i == 2 or i == 26),  -- Second frame and frame 26
-            isAFK = (i == 3 or i == 15),  -- Frames 3 and 15
+            isAFK = (i == 3),             -- Frame 3 is away
+            isDND = (i == 15),            -- Frame 15 is busy (the AFK icon's other state)
             isPhased = (i == 4 or i == 20),  -- Frames 4 and 20
             inVehicle = (i == 5 or i == 30),  -- Frames 5 and 30
             isBGCarrier = (i == 2 or i == 10),  -- Frames 2 and 10 carry an objective
@@ -309,12 +378,18 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         isLeader = data.isLeader,
         isAssist = data.isAssist,
         raidTarget = data.raidTarget,
-        dispelType = data.dispelType,
+        -- Same rule as raid: the type comes from THIS frame's debuff window, not from the
+        -- unit table's hardcoded value, so the overlay can never name a debuff the frame
+        -- is not showing. data.dispelType is left in the table above as scenario notes.
+        dispelType = (data.status ~= "Dead") and DF.GetTestDebuffDispelType
+            and DF:GetTestDebuffDispelType((index == 0) and "player" or ("party" .. index),
+                (DF:GetDB() or {}).testDebuffCount or 2, data.class) or nil,
         centerStatus = data.centerStatus,
         -- New icon states
         isMainTank = data.isMainTank,
         isMainAssist = data.isMainAssist,
         isAFK = data.isAFK,
+        isDND = data.isDND,
         isPhased = data.isPhased,
         inVehicle = data.inVehicle,
         isBGCarrier = data.isBGCarrier,
@@ -332,12 +407,19 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
     end
     
     -- Apply animation if enabled (only for alive units) - health only, not absorbs
+    -- ☠ WAS `0.65 + (wave * 0.35)`, WHICH THREW AWAY THE UNIT'S CONFIGURED HEALTH.
+    -- Every party scenario collapsed onto one curve centred at 65%, so switching
+    -- Animate Health on erased the five frames' distinct levels (100 / 95 / 60 / 30)
+    -- and switching it off brought them back. The raid and boss branches always did
+    -- this correctly -- `baseHealth + wave * 0.15` -- and this now matches them, so
+    -- the three agree and the scenarios survive the toggle. (Audit, 2026-08-07.)
     if db.testAnimateHealth and DF.TestData.animationPhase then
         local phase = DF.TestData.animationPhase
         local offset = (index * 0.2) % 1
         local wave = math.sin((phase + offset) * math.pi * 2)
-        
-        result.healthPercent = 0.65 + (wave * 0.35)
+        local baseHealth = result.healthPercent or 0.75
+
+        result.healthPercent = math.max(0.1, math.min(1, baseHealth + wave * 0.15))
         result.currentHealth = math.floor(result.healthPercent * result.maxHealth)
         -- Note: Absorbs use static values from test data, not animated
     end
@@ -415,122 +497,50 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
         return
     end
     
-    -- Calculate animated health (alive units only)
-    local baseHealth = testData.healthPercent or testData.health or 0.75
-    local phase = DF.TestData.animationPhase or 0
-    local variation = math.sin(phase * math.pi * 2 + (index or 0)) * 0.15
-    local health = math.max(0.1, math.min(1.0, baseHealth + variation))
-    
+    -- ☠ THIS USED TO ADD A SECOND SINE ON TOP OF AN ALREADY-ANIMATED VALUE.
+    -- GetTestUnitData applies the animation itself (see its party/raid/boss
+    -- branches), so testData.healthPercent arrives animated -- and this then added
+    -- its OWN wave, with a different per-frame phase offset (`index` radians rather
+    -- than 2*pi*(0.2*index % 1)). Two waves at different phases summed to an
+    -- amplitude near 0.5 and clamped flat at a full bar once per cycle, and because
+    -- any settings change re-renders through GetTestUnitData's formula alone, the
+    -- bar visibly jumped between the two whenever anything was touched.
+    --
+    -- ★ One formula now: the ticker advances animationPhase and simply RENDERS what
+    -- GetTestUnitData produced. Do not reintroduce a wave here. (Audit, 2026-08-07.)
+    local health = testData.healthPercent or testData.health or 0.75
+
     -- Store animated health for bar updates
     frame.testAnimatedHealth = health
     
     -- Update health bar
     frame.healthBar:SetValue(health)
 
-    -- Re-evaluate health fade threshold with animated health value
-    if db.healthFadeEnabled then
-        local healthPct = health * 100
-        local threshold = db.healthFadeThreshold or 100
-        local isAbove = (healthPct >= threshold - 0.5)
-        if isAbove and db.hfCancelOnDispel and frame.dfDispelOverlay and frame.dfDispelOverlay:IsShown() then
-            isAbove = false
-        end
-        if not db.oorEnabled then
-            frame:SetAlpha(isAbove and (db.healthFadeAlpha or 0.5) or 1.0)
-        end
+    -- ☠ A THIRD HEALTH-FADE RULE LIVED HERE and it disagreed with the real one on
+    -- both counts: it crossed at `>= threshold - 0.5` where DF:ApplyHealthFadeAlpha
+    -- crosses at `>` (matching the curve's threshold/100 -/+ 0.001 points), and its
+    -- below-threshold alpha was a flat 1.0, ignoring rangeFadeAlpha -- so an
+    -- out-of-range unit under the threshold dimmed live and did not in the preview.
+    -- Stamping the ANIMATED fraction and calling the real function fixes both, and
+    -- keeps every other dfHealthPct consumer honest mid-animation. (Audit, 2026-08-07.)
+    frame.dfHealthPct = health
+    frame.dfTestMaxHealth = testData.maxHealth
+    frame.dfTestCurrentHealth = math.floor((testData.maxHealth or 100000) * health)
+    if DF.ApplyHealthFadeAlpha then DF:ApplyHealthFadeAlpha(frame) end
+
+    -- ★ LIVE'S MISSING-HEALTH RENDERER, not a copy of it. Two near-identical ~55-line
+    -- restatements (value, texture, all four colour modes, the dead-colour override)
+    -- lived in this file. DF.SetMissingHealthBarValue now reads the frame stamps, so
+    -- there is one renderer; it also owns the BACKGROUND-mode hide, so no branch is
+    -- needed here. (Audit, 2026-08-07.)
+    if frame.missingHealthBar then
+        DF.SetMissingHealthBarValue(frame.missingHealthBar, frame.unit, frame)
     end
 
-    -- Update missing health bar if enabled
-    if frame.missingHealthBar then
-        local backgroundMode = db.backgroundMode or "BACKGROUND"
-        if backgroundMode == "MISSING_HEALTH" or backgroundMode == "BOTH" then
-            local missingHealth = 1 - health  -- In test mode, we can calculate directly
-            frame.missingHealthBar:SetMinMaxValues(0, 1)
-            frame.missingHealthBar:SetValue(missingHealth)
-            
-            -- Handle color mode
-            local colorMode = db.missingHealthColorMode or "CUSTOM"
-            local r, g, b, a
-            if colorMode == "PERCENT" then
-                local color = DF:GetHealthGradientColor(health, db, testData.class, "missingHealthColor")
-                if color then
-                    r, g, b = color.r, color.g, color.b
-                else
-                    r, g, b = 0.5, 0, 0
-                end
-                a = db.missingHealthGradientAlpha or 0.8
-            elseif colorMode == "CLASS" and testData.class then
-                local classColor = DF:GetClassColor(testData.class)
-                if classColor then
-                    r, g, b = classColor.r, classColor.g, classColor.b
-                else
-                    r, g, b = 0.5, 0, 0
-                end
-                a = db.missingHealthClassAlpha or 0.8
-            else
-                local missingColor = db.missingHealthColor or {r = 0.5, g = 0, b = 0, a = 0.8}
-                r, g, b, a = missingColor.r, missingColor.g, missingColor.b, missingColor.a or 0.8
-            end
-            frame.missingHealthBar:SetStatusBarColor(r, g, b, a)
-            
-            -- Handle texture
-            local texture = db.missingHealthTexture
-            if not texture or texture == "" then
-                texture = db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
-            end
-            DF:SafeSetStatusBarTexture(frame.missingHealthBar, texture)
-            
-            frame.missingHealthBar:Show()
-        else
-            frame.missingHealthBar:Hide()
-        end
-    end
-    
-    -- Update health bar color if using PERCENT (gradient) mode
-    -- Only update RGB, alpha is managed by UpdateTestFrame
-    -- Skip if aggro color override is active
-    if db.healthColorMode == "PERCENT" and not frame.dfAggroActive then
-        local color = DF:GetHealthGradientColor(health, db, testData.class)
-        if color then
-            frame.healthBar:SetStatusBarColor(color.r, color.g, color.b)
-        end
-    end
-    
-    -- Update health text if visible
-    if frame.healthText and frame.healthText:IsShown() then
-        local maxHP = testData.maxHealth or 100000
-        local currentHP = math.floor(maxHP * health)
-        local deficit = currentHP - maxHP
-        local pct = health * 100
-        local format = db.healthTextFormat or "DEFICIT"
-        local abbreviate = db.healthTextAbbreviate
-        
-        local function FormatVal(val)
-            if abbreviate then
-                return DF:FormatNumber(val)
-            end
-            return tostring(val)
-        end
-        
-        local text = ""
-        if format == "CURRENT" then
-            text = FormatVal(currentHP)
-        elseif format == "PERCENT" then
-            text = string.format("%.0f%%", pct)
-        elseif format == "DEFICIT" then
-            if deficit < 0 then
-                text = FormatVal(deficit)
-            else
-                text = ""
-            end
-        elseif format == "CURRENT_MAX" or format == "CURRENTMAX" then
-            text = FormatVal(currentHP) .. "/" .. FormatVal(maxHP)
-        elseif format == "CURRENT_PERCENT" then
-            text = FormatVal(currentHP) .. " " .. string.format("%.0f%%", pct)
-        end
-        frame.healthText:SetText(text)
-    end
-    
+    -- ★ Live's formatter, driven by the stamps above -- the preview kept two of its
+    -- own, both of which disagreed with live. (Audit, 2026-08-07.)
+    DF:ApplyHealthText(frame, db, DF.IsLegacyTextHidden and DF:IsLegacyTextHidden(frame))
+
     -- Update bars to follow animated health (use animated health value)
     local animatedTestData = {}
     for k, v in pairs(testData) do
@@ -538,6 +548,13 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     end
     animatedTestData.healthPercent = health
     
+    -- ☠ REDUCED MAX HEALTH MUST RE-RUN ON EVERY HEALTH CHANGE. Live's UpdateHealthFast
+    -- calls it explicitly for exactly that reason; this ticker never did, so with
+    -- Reduced Max Health + Clip Health Bar on, the clipped edge was set once by
+    -- UpdateTestFrame and then stayed put while the bar animated underneath it.
+    -- (Audit, 2026-08-07.)
+    if DF.UpdateReducedMaxHealth then DF:UpdateReducedMaxHealth(frame) end
+
     -- Update absorb bars if enabled
     if db.testShowAbsorbs then
         DF:UpdateAbsorb(frame, animatedTestData)
@@ -576,9 +593,33 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     local isBoss = frame.isPinnedBossFrame
     local testData = DF:GetTestUnitData(index, isRaid, isBoss)
     if not testData then return end
-    
+
+    -- Stamped rather than re-resolved: the aura drives below (and their bulk
+    -- refresh siblings, which do NOT receive testData) all need it, and
+    -- GetTestUnitData rebuilds the raid class/role/name arrays on every call.
+    -- Index -> data is fixed for a pooled frame's whole life, so it cannot go
+    -- stale. See DF:IsTestFrameDead.
+    frame.dfTestIsDead = (testData.status == "Dead") or nil
+
+    -- ★ THE SHARED STAMPS ElementAppearance's helpers prefer. Test frames carry REAL
+    -- unit tokens ("raid1", "player"), so in an actual group UnitIsDeadOrGhost /
+    -- UnitClass would answer about a real player standing next to you rather than
+    -- about this scenario -- which is what forced those helpers to be walled off from
+    -- test mode in the first place. Stamping is what lets the live appearance code run
+    -- on a preview frame at all. (Audit, 2026-08-07.)
+    frame.dfIsDead = (testData.status == "Dead") or (testData.status == "Offline") or false
+    frame.dfIsOffline = (testData.status == "Offline") or false
+    frame.dfClassToken = testData.class
+    -- The health fraction, so the three curve-driven appearance functions can run
+    -- on a preview frame. Live gets this from UnitHealthPercent(unit, true, curve),
+    -- which is secret-safe and needs a REAL unit; the preview has a plain number.
+    frame.dfHealthPct = testData.healthPercent or 1
+    -- Absolute health, for the current / current-max / deficit text formats.
+    frame.dfTestMaxHealth = testData.maxHealth
+    frame.dfTestCurrentHealth = testData.currentHealth
+
     local db = DF:GetFrameDB(frame)
-    
+
     -- Set dfInRange for test mode - consumed by the range/alpha systems
     -- If testShowOutOfRange is enabled and this unit is marked as out of range, set false
     -- Otherwise set true (in range)
@@ -619,110 +660,17 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     end
     if DF.UpdateReducedMaxHealth then DF:UpdateReducedMaxHealth(frame) end
 
-    -- Update missing health bar if enabled
+    -- ★ LIVE'S MISSING-HEALTH RENDERER, not a copy of it. Two near-identical ~55-line
+    -- restatements (value, texture, all four colour modes, the dead-colour override)
+    -- lived in this file. DF.SetMissingHealthBarValue now reads the frame stamps, so
+    -- there is one renderer; it also owns the BACKGROUND-mode hide, so no branch is
+    -- needed here. (Audit, 2026-08-07.)
     if frame.missingHealthBar then
-        local backgroundMode = db.backgroundMode or "BACKGROUND"
-        if backgroundMode == "MISSING_HEALTH" or backgroundMode == "BOTH" then
-            local missingHealth = 1 - healthValue  -- In test mode, we can calculate directly
-            frame.missingHealthBar:SetMinMaxValues(0, 1)
-            if db.smoothBars and Enum and Enum.StatusBarInterpolation then
-                frame.missingHealthBar:SetValue(missingHealth, Enum.StatusBarInterpolation.ExponentialEaseOut)
-            else
-                frame.missingHealthBar:SetValue(missingHealth)
-            end
-            
-            -- Handle color mode
-            local colorMode = db.missingHealthColorMode or "CUSTOM"
-            local r, g, b, a
-            
-            -- Check for dead/offline with custom dead color (same as Core.lua)
-            local isDeadOrOfflineForColor = testData.status == "Dead" or testData.status == "Offline"
-            local useDeadColor = isDeadOrOfflineForColor and db.fadeDeadFrames and db.fadeDeadUseCustomColor
-            
-            if useDeadColor then
-                -- Use custom dead color (same as background uses)
-                local c = db.fadeDeadBackgroundColor or {r = 0.3, g = 0, b = 0}
-                r, g, b = c.r, c.g, c.b
-                a = db.fadeDeadBackground or 0.4
-            elseif colorMode == "PERCENT" then
-                local color = DF:GetHealthGradientColor(healthValue, db, testData.class, "missingHealthColor")
-                if color then
-                    r, g, b = color.r, color.g, color.b
-                else
-                    r, g, b = 0.5, 0, 0
-                end
-                a = db.missingHealthGradientAlpha or 0.8
-            elseif colorMode == "CLASS" and testData.class then
-                local classColor = DF:GetClassColor(testData.class)
-                if classColor then
-                    r, g, b = classColor.r, classColor.g, classColor.b
-                else
-                    r, g, b = 0.5, 0, 0
-                end
-                a = db.missingHealthClassAlpha or 0.8
-            else
-                local missingColor = db.missingHealthColor or {r = 0.5, g = 0, b = 0, a = 0.8}
-                r, g, b, a = missingColor.r, missingColor.g, missingColor.b, missingColor.a or 0.8
-            end
-            frame.missingHealthBar:SetStatusBarColor(r, g, b, a)
-            
-            -- Handle texture
-            local texture = db.missingHealthTexture
-            if not texture or texture == "" then
-                texture = db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
-            end
-            DF:SafeSetStatusBarTexture(frame.missingHealthBar, texture)
-            
-            frame.missingHealthBar:Show()
-        else
-            frame.missingHealthBar:Hide()
-        end
+        DF.SetMissingHealthBarValue(frame.missingHealthBar, frame.unit, frame)
     end
-    
-    -- Update health text with proper formatting
-    local format = db.healthTextFormat or "PERCENT"
-    local currentHealth = testData.currentHealth
-    local maxHealth = testData.maxHealth
-    local deficit = maxHealth - currentHealth
-    local abbreviate = db.healthTextAbbreviate
-    
-    local function FormatValue(val)
-        if abbreviate then
-            if AbbreviateNumbers then
-                return AbbreviateNumbers(val)
-            elseif AbbreviateLargeNumbers then
-                return AbbreviateLargeNumbers(val)
-            end
-            -- Manual abbreviation fallback when abbreviate is true
-            if val >= 1000000 then
-                return string.format("%.1fM", val / 1000000)
-            elseif val >= 1000 then
-                return string.format("%.0fK", val / 1000)
-            end
-        end
-        -- No abbreviation - return full number with comma formatting
-        return tostring(val)
-    end
-    
-    local pctFmt = db.healthTextHidePercent and "%.0f" or "%.0f%%"
-    if format == "PERCENT" then
-        frame.healthText:SetFormattedText(pctFmt, healthValue * 100)
-    elseif format == "CURRENT" then
-        frame.healthText:SetText(FormatValue(currentHealth))
-    elseif format == "CURRENTMAX" then
-        frame.healthText:SetText(FormatValue(currentHealth) .. "/" .. FormatValue(maxHealth))
-    elseif format == "DEFICIT" then
-        if deficit > 0 then
-            frame.healthText:SetText("-" .. FormatValue(deficit))
-        else
-            frame.healthText:SetText("")
-        end
-    elseif format == "NONE" then
-        frame.healthText:SetText("")
-    else
-        frame.healthText:SetFormattedText(pctFmt, healthValue * 100)
-    end
-    
+
+    DF:ApplyHealthText(frame, db, DF.IsLegacyTextHidden and DF:IsLegacyTextHidden(frame))
+
     -- Update name
     local displayName = testData.name
     if displayName then
@@ -744,42 +692,40 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     local isOutOfRange = db.testShowOutOfRange and testData.outOfRange
     
     -- Calculate per-element alphas for out-of-range
-    local healthBarAlpha = 1.0
-    local backgroundAlpha = 1.0
-    local nameAlpha = 1.0
-    local healthTextAlpha = 1.0
-    local aurasAlpha = 1.0
     local iconsAlpha = 1.0
     local powerBarAlpha = 1.0
     local dispelAlpha = 1.0
+    -- ⚠ NO missingBuff / defensive / auraDesigner ALPHAS HERE ANY MORE. Those three
+    -- surfaces fade through ElementAppearance's own functions now (called after the
+    -- drives, further down) rather than being hand-mirrored into this block -- which
+    -- is how each of them shipped a silent no-fade bug in turn. Add nothing here
+    -- that ElementAppearance already owns. (Audit, 2026-08-07.)
     -- Border stays 1.0 in whole-frame mode (the frame's SetAlpha cascade fades
     -- it); only element-specific mode needs its own border alpha.
-    local borderAlpha = 1.0
 
     if isOutOfRange then
         if db.oorEnabled then
-            -- Element-specific alpha mode
-            healthBarAlpha = db.oorHealthBarAlpha or 0.55
-            backgroundAlpha = db.oorBackgroundAlpha or 0.55
-            nameAlpha = db.oorTextAlpha or 0.55
-            healthTextAlpha = db.oorTextAlpha or 0.55
-            aurasAlpha = db.oorAurasAlpha or 0.55
-            iconsAlpha = db.oorIconsAlpha or 0.55
-            powerBarAlpha = db.oorPowerBarAlpha or 0.55
-            dispelAlpha = db.oorDispelOverlayAlpha or 0.55
-            borderAlpha = db.oorBorderAlpha or 0.55
-        else
-            -- Simple frame-level alpha mode
-            local alpha = db.rangeFadeAlpha or db.rangeAlpha or 0.55
-            healthBarAlpha = alpha
-            backgroundAlpha = alpha
-            nameAlpha = alpha
-            healthTextAlpha = alpha
-            aurasAlpha = alpha
-            iconsAlpha = alpha
-            powerBarAlpha = alpha
-            dispelAlpha = alpha
+            -- Element-specific alpha mode.
+            -- ⚠ EVERY FALLBACK HERE MIRRORS ElementAppearance.lua's OWN. Six of them
+            -- used to be a blanket 0.55 against live's 0.1-0.5 -- background was out
+            -- by 5.5x. Invisible today because Config seeds all six, so it only bites
+            -- a profile missing a key (an old import, a hand-edited SavedVariables).
+            -- If you add an oor*Alpha, copy live's fallback, do not invent one.
+            iconsAlpha = db.oorIconsAlpha or 0.5
+            powerBarAlpha = db.oorPowerBarAlpha or 0.2
+            dispelAlpha = db.oorDispelOverlayAlpha or 0.2
         end
+        -- ☠ NO `else` BRANCH, DELIBERATELY. Simple range-fade mode fades the WHOLE
+        -- FRAME with one SetAlpha further down -- exactly as live's
+        -- UpdateFrameAppearance does, and that is live's ONLY alpha write in this
+        -- mode. This block used to ALSO push rangeFadeAlpha into every per-element
+        -- variable, so the preview applied the fade twice and rendered
+        -- rangeFadeAlpha SQUARED: 0.16 against live's 0.40 at the stock 0.4, with no
+        -- setting needed to hit it. Every element left at 1.0 here is the fix -- the
+        -- cascade supplies the dim. (Audit, 2026-08-07.)
+        -- ⚠ The status icons are the one exception and are handled separately: they
+        -- set SetIgnoreParentAlpha(true), so the cascade cannot reach them and
+        -- DF:GetStatusIconFadeAlpha applies their fade explicitly in both modes.
     end
 
     -- Store alpha values for use by UpdateTestIcons and UpdateTestPowerBar
@@ -816,15 +762,19 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     end
     
     if isAboveHealthThreshold then
+        -- ☠ SAME DOUBLE-APPLY AS THE RANGE FADE ABOVE, and the same fix. Live has no
+        -- per-element health fade at all: ApplyHealthFadeAlpha resolves ONE alpha and
+        -- writes it to the FRAME (ElementAppearance references health fade in exactly
+        -- one place, inside UpdateFrameAppearance). The preview pushed healthFadeAlpha
+        -- into every element AND set the frame, rendering 0.25 against live's 0.50 at
+        -- the stock 0.5. Only the element-specific mode needs per-element values,
+        -- because there the frame stays at 1.0.
         local hfAlpha = db.healthFadeAlpha or 0.5
-        healthBarAlpha = hfAlpha
-        backgroundAlpha = hfAlpha
-        nameAlpha = hfAlpha
-        healthTextAlpha = hfAlpha
-        aurasAlpha = hfAlpha
-        iconsAlpha = hfAlpha
-        powerBarAlpha = hfAlpha
-        dispelAlpha = hfAlpha
+        if db.oorEnabled then
+            iconsAlpha = hfAlpha
+            powerBarAlpha = hfAlpha
+            dispelAlpha = hfAlpha
+        end
         frame.dfTestHealthFadeAlphas = {
             icons = iconsAlpha,
             power = powerBarAlpha,
@@ -834,163 +784,26 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         frame.dfTestHealthFadeAlphas = nil
     end
     
-    -- Update name color with appropriate alpha
-    -- Priority: OOR > dead fade > health-based fade
-    local finalNameAlpha = nameAlpha
-    if not isOutOfRange and applyDeadFade then
-        finalNameAlpha = db.fadeDeadName or 1.0
-    end
+    -- Name text colour + alpha: DF:UpdateNameTextAppearance owns both (it deliberately
+    -- writes colour at alpha 1.0 and controls opacity through SetAlpha, so that
+    -- SetAlphaFromBoolean keeps working). Applied by the shared pass further down.
     
-    if db.nameTextUseClassColor then
-        local classColor = DF:GetClassColor(testData.class)
-        if classColor then
-            frame.nameText:SetTextColor(classColor.r, classColor.g, classColor.b, finalNameAlpha)
-        end
-    else
-        local c = db.nameTextColor or {r=1, g=1, b=1}
-        frame.nameText:SetTextColor(c.r, c.g, c.b, finalNameAlpha)
-    end
-    
-    -- Update health bar color based on mode
-    -- Use RGB only (no alpha in SetStatusBarColor) so we can control alpha externally
-    -- Skip if aggro color override is active
-    local classColorAlpha = db.classColorAlpha or 1.0
-    if not frame.dfAggroActive then
-        if db.healthColorMode == "CLASS" then
-            local classColor = DF:GetClassColor(testData.class)
-            if classColor then
-                frame.healthBar:SetStatusBarColor(classColor.r, classColor.g, classColor.b)
-            end
-        elseif db.healthColorMode == "PERCENT" then
-            local color = DF:GetHealthGradientColor(healthValue, db, testData.class)
-            if color then
-                frame.healthBar:SetStatusBarColor(color.r, color.g, color.b)
-            end
-        elseif db.healthColorMode == "CUSTOM" then
-            local c = db.healthColor or {r=0, g=1, b=0}
-            frame.healthBar:SetStatusBarColor(c.r, c.g, c.b)
-        end
-    end
-    
-    -- Apply combined alpha to health bar texture (classColorAlpha * OOR alpha)
-    -- Dead fade overrides health bar alpha if applicable
-    if frame.healthBar then
-        local tex = frame.healthBar:GetStatusBarTexture()
-        if tex then 
-            local finalAlpha = classColorAlpha * healthBarAlpha
-            if applyDeadFade then
-                finalAlpha = db.fadeDeadHealthBar or 0.4
-            end
-            tex:SetAlpha(finalAlpha) 
-        end
-    end
-    
-    -- Update background color and texture
-    local bgMode = db.backgroundColorMode or "CUSTOM"
-    local bgTexture = db.backgroundTexture or "Solid"
-    
-    -- Determine background color for dead fade
-    local deadBgColor = nil
-    local deadBgAlpha = db.fadeDeadBackground or 0.4
-    if applyDeadFade and db.fadeDeadUseCustomColor then
-        deadBgColor = db.fadeDeadBackgroundColor or {r = 0.3, g = 0, b = 0}
-    end
-    
-    if frame.background then
-        -- In test mode, ALWAYS force-apply the texture to avoid cache inconsistencies
-        -- Test mode doesn't update as frequently so performance is not a concern
-        if bgTexture == "Solid" or bgTexture == "" then
-            -- Solid color mode - use SetColorTexture
-            frame.dfCurrentBgTexture = "Solid"
-            
-            if applyDeadFade and deadBgColor then
-                -- Dead fade with custom color
-                frame.background:SetColorTexture(deadBgColor.r, deadBgColor.g, deadBgColor.b, deadBgAlpha)
-            elseif applyDeadFade then
-                -- Dead fade without custom color - use normal color but with dead fade alpha
-                if bgMode == "CUSTOM" then
-                    local c = db.backgroundColor or {r=0.1, g=0.1, b=0.1, a=0.8}
-                    frame.background:SetColorTexture(c.r, c.g, c.b, deadBgAlpha)
-                elseif bgMode == "CLASS" then
-                    local classColor = DF:GetClassColor(testData.class)
-                    if classColor then
-                        frame.background:SetColorTexture(classColor.r, classColor.g, classColor.b, deadBgAlpha)
-                    else
-                        frame.background:SetColorTexture(0, 0, 0, deadBgAlpha)
-                    end
-                else
-                    frame.background:SetColorTexture(0, 0, 0, deadBgAlpha)
-                end
-            elseif bgMode == "CUSTOM" then
-                local c = db.backgroundColor or {r=0.1, g=0.1, b=0.1, a=0.8}
-                -- Multiply configured alpha by OOR alpha
-                local finalAlpha = (c.a or 0.8) * backgroundAlpha
-                frame.background:SetColorTexture(c.r, c.g, c.b, finalAlpha)
-            elseif bgMode == "CLASS" then
-                local classColor = DF:GetClassColor(testData.class)
-                local bgAlpha = db.backgroundClassAlpha or 0.3
-                local finalAlpha = bgAlpha * backgroundAlpha
-                if classColor then
-                    frame.background:SetColorTexture(classColor.r, classColor.g, classColor.b, finalAlpha)
-                else
-                    frame.background:SetColorTexture(0, 0, 0, 0.8 * backgroundAlpha)
-                end
-            else
-                frame.background:SetColorTexture(0, 0, 0, 0.8 * backgroundAlpha)
-            end
-        else
-            -- Textured background
-            -- ALWAYS apply the texture in test mode (no caching) to ensure it's set correctly
-            frame.background:SetTexture(bgTexture)
-            frame.background:SetHorizTile(false)
-            frame.background:SetVertTile(false)
-            frame.dfCurrentBgTexture = bgTexture
-            
-            -- For textured backgrounds, SetAlpha MUST be 1.0 so vertex color alpha works
-            frame.background:SetAlpha(1.0)
-            
-            -- Control alpha ONLY via SetVertexColor
-            if applyDeadFade and deadBgColor then
-                -- Dead fade with custom color
-                frame.background:SetVertexColor(deadBgColor.r, deadBgColor.g, deadBgColor.b, deadBgAlpha)
-            elseif applyDeadFade then
-                -- Dead fade without custom color - use normal color but with dead fade alpha
-                if bgMode == "CUSTOM" then
-                    local c = db.backgroundColor or {r=0.1, g=0.1, b=0.1, a=0.8}
-                    frame.background:SetVertexColor(c.r, c.g, c.b, deadBgAlpha)
-                elseif bgMode == "CLASS" then
-                    local classColor = DF:GetClassColor(testData.class)
-                    if classColor then
-                        frame.background:SetVertexColor(classColor.r, classColor.g, classColor.b, deadBgAlpha)
-                    else
-                        frame.background:SetVertexColor(0, 0, 0, deadBgAlpha)
-                    end
-                else
-                    frame.background:SetVertexColor(0, 0, 0, deadBgAlpha)
-                end
-            elseif bgMode == "CUSTOM" then
-                local c = db.backgroundColor or {r=0.1, g=0.1, b=0.1, a=0.8}
-                local finalAlpha = (c.a or 0.8) * backgroundAlpha
-                frame.background:SetVertexColor(c.r, c.g, c.b, finalAlpha)
-            elseif bgMode == "CLASS" then
-                local classColor = DF:GetClassColor(testData.class)
-                local bgAlpha = db.backgroundClassAlpha or 0.3
-                local finalAlpha = bgAlpha * backgroundAlpha
-                if classColor then
-                    frame.background:SetVertexColor(classColor.r, classColor.g, classColor.b, finalAlpha)
-                else
-                    frame.background:SetVertexColor(0, 0, 0, 0.8 * backgroundAlpha)
-                end
-            else
-                frame.background:SetVertexColor(0, 0, 0, 0.8 * backgroundAlpha)
-            end
-        end
-    end
-    
+    -- ☠ THE HEALTH-BAR AND BACKGROUND COLOUR BLOCKS USED TO LIVE HERE (~135 lines).
+    -- DF:UpdateHealthBarAppearance and DF:UpdateBackgroundAppearance own both now and
+    -- accept test frames, so the shared appearance pass at the end of this function
+    -- applies them. The copy was not merely redundant, it was WRONG in two ways:
+    --   * it MULTIPLIED the OOR alpha into the base (classColorAlpha * healthBarAlpha)
+    --     where live REPLACES it -- so at Health Bar Alpha 0.5 with the stock OOR 0.2
+    --     the preview rendered 0.10 against live's 0.20, and the background, which
+    --     multiplies twice, rendered 0.03 against live's 0.10;
+    --   * its PERCENT-mode gradient took the raw class token from testData while live
+    --     resolves through the same stops with the frame's own colour weights.
+    -- (Audit, 2026-08-07.)
+
     -- Frame-level alpha when not using element-specific OOR (same as live UpdateFrameAppearance)
     if not db.oorEnabled then
         if isOutOfRange then
-            frame:SetAlpha(db.rangeFadeAlpha or db.rangeAlpha or 0.55)
+            frame:SetAlpha(db.rangeFadeAlpha or db.rangeAlpha or 0.4)
         elseif isAboveHealthThreshold then
             frame:SetAlpha(db.healthFadeAlpha or 0.5)
         else
@@ -1000,25 +813,9 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         frame:SetAlpha(1)
     end
 
-    -- Frame border OOR fade (mirrors live DF:UpdateBorderAppearance). borderAlpha
-    -- is 1.0 in whole-frame mode so this is a no-op there (the frame cascade fades
-    -- it); in element-specific mode it carries the border's own OOR alpha.
-    if frame.border then
-        frame.border:SetAlpha(borderAlpha)
-    end
 
-    -- Apply alpha to health text
-    if frame.healthText then
-        if db.healthTextUseClassColor then
-            local classColor = DF:GetClassColor(testData.class)
-            if classColor then
-                frame.healthText:SetTextColor(classColor.r, classColor.g, classColor.b, healthTextAlpha)
-            end
-        else
-            local htc = db.healthTextColor or {r=1, g=1, b=1}
-            frame.healthText:SetTextColor(htc.r, htc.g, htc.b, healthTextAlpha)
-        end
-    end
+    -- Health text colour + alpha: DF:UpdateHealthTextAppearance owns both, same as the
+    -- name text. Applied by the shared pass below.
     
     -- Update absorb bars
     if db.testShowAbsorbs then
@@ -1043,7 +840,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     else
         if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
     end
-    
+
     -- Update power/resource bar
     DF:UpdateTestPowerBar(frame, testData)
     
@@ -1078,7 +875,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             frame.healthText:Hide()
         end
         DF:ApplyDeadFade(frame, testData.status, true)  -- true = forceApply for test mode
-        frame.dfTestOutOfRange = false
     else
         if frame.statusText then
             frame.statusText:Hide()
@@ -1090,19 +886,12 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         
         -- Apply out of range effect to auras: the container rows fade as one
         -- (alpha on the row's plain anchor frame is ours to set).
-        local buffAlpha = db.buffAlpha or 1
-        local debuffAlpha = db.debuffAlpha or 1
-        local buffRow = frame.buffFactory and frame.buffFactory:GetFrame()
-        local debuffRow = frame.debuffFactory and frame.debuffFactory:GetFrame()
-        if isOutOfRange then
-            if buffRow then buffRow:SetAlpha(aurasAlpha * buffAlpha) end
-            if debuffRow then debuffRow:SetAlpha(aurasAlpha * debuffAlpha) end
-            frame.dfTestOutOfRange = true
-        else
-            if buffRow then buffRow:SetAlpha(buffAlpha) end
-            if debuffRow then debuffRow:SetAlpha(debuffAlpha) end
-            frame.dfTestOutOfRange = false
-        end
+        -- ★ Row fades through the live functions now. They compose the same three
+        -- inputs this used to (row opacity x dead fade x out-of-range) and, since
+        -- 2026-08-07, use the row's own opacity as the BASE -- which live had been
+        -- dropping. One implementation, so the slider cannot mean two things.
+        if DF.UpdateBuffIconsAppearance then DF:UpdateBuffIconsAppearance(frame) end
+        if DF.UpdateDebuffIconsAppearance then DF:UpdateDebuffIconsAppearance(frame) end
     end
 
     -- Text Designer: render TD text on this test frame using its simulated
@@ -1159,17 +948,62 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- testShowExternalDef itself (it must also hide the 12.1 container row
     -- when the toggle is off, not just the legacy icon).
     DF:UpdateTestDefensiveBar(frame, testData)
-    
+
+    -- ★ FADES NOW COME FROM THE LIVE FUNCTIONS. These three used to be hand-mirrored
+    -- here -- and each one shipped a bug first (the missing-buff strip, the defensive
+    -- row and the AD indicators all silently stopped fading out of range, one at a
+    -- time, because each had an oor*Alpha key in ElementAppearance with no counterpart
+    -- in this file). ElementAppearance's own functions now accept test frames: every
+    -- unit read they make goes through GetInRange / IsDeadOrOffline, both of which
+    -- prefer the stamps set at the top of this function. One policy, one place.
+    --
+    -- ⚠ AFTER the two drives above, not before: both widgets are created LAZILY by
+    -- those drives, so earlier in the pass they are still nil on a frame's first
+    -- paint. Neither drive touches alpha, so setting it here sticks.
     -- Update Aura Designer test indicators through the factory containers — the
     -- SAME path as the bulk DF:UpdateAllTestAuraDesigner, so the per-frame and
     -- bulk previews can't drift (the legacy Engine:UpdateTestFrame is gone).
+    --
+    -- ☠ THIS MUST RUN *BEFORE* THE APPEARANCE PASS, NOT AFTER. SyncFrame re-styles
+    -- each indicator, which resets its alpha host to the indicator's BASE alpha --
+    -- so with it below, every out-of-range AD fade the appearance pass had just
+    -- applied was wiped a few lines later. It is signature-gated, which is what made
+    -- the bug look intermittent and sent three fixes to the wrong place: toggling a
+    -- setting that changes nothing structural makes SyncFrame a no-op, the fade
+    -- survives, and the preview looks correct -- while a fresh Test Mode open or a
+    -- Quick Preset swap DOES change the signature, re-styles, and drops the AD
+    -- indicator back to full opacity on an out-of-range frame. Measured with
+    -- /df debug zorder: buff 0.20, debuff 0.20, missing-buff 0.50, AD 1.00, and one
+    -- re-run of UpdateAuraDesignerAppearance took it straight to 0.20.
+    -- (Audit follow-up, 2026-08-07.)
     local ADFactory = DF.AuraDesigner and DF.AuraDesigner.Factory
     if ADFactory then
-        if db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame) then
+        if db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame)
+            and not DF:IsTestFrameDead(frame) then
             ADFactory:SyncFrame(frame)
         else
             ADFactory:ClearFrame(frame)
         end
+    end
+
+    -- ★★ ONE SHARED APPEARANCE PASS, and it goes LAST. Everything that BUILDS or
+    -- RE-STYLES a surface runs above; this is the only thing that decides what any of
+    -- it looks like under range / dead / health fade, so nothing may run after it.
+    -- ElementAppearance owns colour AND alpha for the border, the name/health/status
+    -- text, the power bar, the four header icons, the dispel overlay, the aura rows,
+    -- the four bars, missing buff, defensive and the Aura Designer -- 16 of its 19
+    -- functions accept test frames now. The three that still bail (health bar,
+    -- background, frame-level health fade) need a health stamp that does not exist
+    -- yet, and keep their own blocks above.
+    --
+    -- ☠ THIS IS THE FIX FOR A WHOLE CLASS OF BUG. The pattern was: an oor*Alpha or
+    -- fadeDead* key gets added to ElementAppearance and silently not to the copy that
+    -- used to live here, and the preview quietly stops matching live. That happened to
+    -- the missing-buff strip, the defensive row and the AD indicators in three separate
+    -- reports over two days. ADD NOTHING HERE THAT ElementAppearance ALREADY APPLIES,
+    -- and ADD NOTHING BELOW IT that touches alpha. (Audit, 2026-08-07.)
+    if DF.UpdateAllElementAppearances then
+        DF:UpdateAllElementAppearances(frame)
     end
 
     -- Update selection and aggro highlights for test mode
@@ -1194,10 +1028,13 @@ function DF:UpdateTestIcons(frame, testData)
         -- coord table for a roleless test unit).
         local shouldShow = (role == "TANK" or role == "HEALER" or role == "DAMAGER")
 
-        -- In test mode (out of combat), if "Only Apply Settings in Combat" is checked, show all icons
-        local applySettings = not db.roleIconOnlyInCombat
-
-        if shouldShow and applySettings then
+        -- ☠ WAS GATED ON db.roleIconOnlyInCombat, A KEY THAT DOES NOT EXIST -- one
+        -- read, no writes, absent from Config, so it was always nil and the gate
+        -- was always open. The real key is roleIconHideInCombat, and wiring it
+        -- here would be pointless: test mode is torn down on
+        -- PLAYER_REGEN_DISABLED, so the preview can never be on screen in combat.
+        -- Removed rather than repointed. (Audit, 2026-08-07.)
+        if shouldShow then
             if role == "TANK" then
                 shouldShow = db.roleIconShowTank ~= false
             elseif role == "HEALER" then
@@ -1339,47 +1176,12 @@ function DF:UpdateTestIcons(frame, testData)
 end
 
 -- Helper function to show icon as text or texture in test mode
-local function ShowTestIconAsText(icon, text, showText, db, prefix)
-    if not icon then return end
-    if showText then
-        if icon.texture then icon.texture:Hide() end
-        if icon.text then
-            icon.text:SetText(text)
-            
-            -- Apply font settings if db is provided
-            if db then
-                local font = db.statusIconFont or "Fonts\\FRIZQT__.TTF"
-                local fontSize = db.statusIconFontSize or 12
-                local outline = db.statusIconFontOutline or "OUTLINE"
-
-                -- Route through SafeSetFont (font-family path) so the shadow renders
-                -- on 12.0.7. SetFontObject resets vertex colour — capture + restore.
-                local cr, cg, cb, ca = icon.text:GetTextColor()
-                DF:SafeSetFont(icon.text, font, fontSize, outline)
-
-                -- Apply text color if prefix is provided (else keep captured colour)
-                local textColor = prefix and db[prefix .. "TextColor"]
-                if textColor then
-                    icon.text:SetTextColor(textColor.r or 1, textColor.g or 1, textColor.b or 1, 1)
-                else
-                    icon.text:SetTextColor(cr, cg, cb, ca)
-                end
-            end
-            
-            icon.text:Show()
-        end
-    else
-        if icon.text then icon.text:Hide() end
-        if icon.texture then icon.texture:Show() end
-    end
-end
-
--- Also apply font/color to timer text (for AFK icon)
-local function ApplyTestIconTimerFont(icon, db, prefix)
-    -- Shared with the live render so Test Mode previews the dedicated timer
-    -- text controls (font / size / outline / colour / position) exactly.
-    if DF.ApplyTimerTextSettings then DF:ApplyTimerTextSettings(icon, db, prefix) end
-end
+-- ★ ShowTestIconAsText and ApplyTestIconTimerFont are GONE. The first restated
+-- live's ShowIconAsText and then re-applied the font and text colour on top --
+-- work DF:ApplyStatusIconSettings already does, and doing it a second time AFTERWARDS
+-- clobbered any per-state tint. The second was already a one-line forward to
+-- DF:ApplyTimerTextSettings, which ApplyStatusIconSettings also calls. The preview now
+-- uses DF:ShowStatusIconAsText, which IS live's function. (Audit, 2026-08-07.)
 
 -- Format seconds as M:SS for AFK timer
 local function FormatTestAFKTime(seconds)
@@ -1416,7 +1218,6 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.readyCheckIcon:SetScale(scale)
             frame.readyCheckIcon:ClearAllPoints()
             frame.readyCheckIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.readyCheckIcon:SetAlpha(db.readyCheckIconAlpha or 1)
             frame.readyCheckIcon:Show()
             
             -- Apply frame level
@@ -1433,20 +1234,15 @@ function DF:UpdateTestStatusIcons(frame, testData)
         elseif testData.centerStatus == "summon" then
             DF:SetUpgradedStatusIcon(frame.summonIcon.texture, "Interface\\RaidFrame\\Raid-Icon-SummonPending")
             
-            local scale = db.summonIconScale or 1.0
-            local anchor = db.summonIconAnchor or "CENTER"
-            local x = db.summonIconX or 0
-            local y = db.summonIconY or 0
-            frame.summonIcon:SetScale(scale)
-            frame.summonIcon:ClearAllPoints()
-            frame.summonIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.summonIcon:SetAlpha(db.summonIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.summonIcon, db, "summonIcon")
+            end
             
             -- Show as text or icon (with font and color settings)
-            ShowTestIconAsText(frame.summonIcon, db.summonIconTextPending or "Summon", db.summonIconShowText, db, "summonIcon")
+            DF:ShowStatusIconAsText(frame.summonIcon, db.summonIconTextPending or "Summon", db.summonIconShowText)
             frame.summonIcon:Show()
             
-            frame.summonIcon:SetFrameLevel(frame:GetFrameLevel() + (db.summonIconFrameLevel or 30))
         else
             frame.summonIcon:Hide()
         end
@@ -1457,21 +1253,23 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.bgCarrierIconEnabled or db.testShowStatusIcons == false then
             frame.bgCarrierIcon:Hide()
         elseif testData.isBGCarrier then
-            DF:SetUpgradedStatusIcon(frame.bgCarrierIcon.texture, "Interface\\Icons\\inv_bannerpvp_02")
+            -- ☠ WAS HARDCODED inv_bannerpvp_02, so the per-classification art was
+            -- unpreviewable -- and it did not even match CreateStatusIcons' _03 default.
+            -- Live picks from PVP_CARRIER_TEXTURES by UnitPvpClassification; the preview
+            -- walks the same table so each variant can be seen and styled.
+            local carrierArt = DF.PVP_CARRIER_TEXTURES
+                and DF.PVP_CARRIER_TEXTURES[(frame.index or 0) % 3]
+            DF:SetUpgradedStatusIcon(frame.bgCarrierIcon.texture,
+                carrierArt or "Interface\\Icons\\inv_bannerpvp_02")
 
-            local scale = db.bgCarrierIconScale or 1.0
-            local anchor = db.bgCarrierIconAnchor or "CENTER"
-            local x = db.bgCarrierIconX or 0
-            local y = db.bgCarrierIconY or 0
-            frame.bgCarrierIcon:SetScale(scale)
-            frame.bgCarrierIcon:ClearAllPoints()
-            frame.bgCarrierIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.bgCarrierIcon:SetAlpha(db.bgCarrierIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.bgCarrierIcon, db, "bgCarrierIcon")
+            end
 
-            ShowTestIconAsText(frame.bgCarrierIcon, db.bgCarrierIconText or "FC", db.bgCarrierIconShowText, db, "bgCarrierIcon")
+            DF:ShowStatusIconAsText(frame.bgCarrierIcon, db.bgCarrierIconText or "FC", db.bgCarrierIconShowText)
             frame.bgCarrierIcon:Show()
 
-            frame.bgCarrierIcon:SetFrameLevel(frame:GetFrameLevel() + (db.bgCarrierIconFrameLevel or 30))
         else
             frame.bgCarrierIcon:Hide()
         end
@@ -1485,17 +1283,21 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.combatIcon.texture:SetTexture("Interface\\CharacterFrame\\UI-StateIcon")
             frame.combatIcon.texture:SetTexCoord(0.5, 1.0, 0, 0.49)
 
-            local scale = db.combatIconScale or 1.0
-            local anchor = db.combatIconAnchor or "TOPLEFT"
-            local x = db.combatIconX or 2
-            local y = db.combatIconY or -2
-            frame.combatIcon:SetScale(scale)
-            frame.combatIcon:ClearAllPoints()
-            frame.combatIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.combatIcon:SetAlpha(db.combatIconAlpha or 1)
+            -- ☠ THE LIVE APPLIER, like the other seven icons. This block used to
+            -- hand-roll scale/anchor/x/y, and the commit that converted the rest
+            -- ("preview uses the live geometry applier") deleted this one's SetAlpha and
+            -- SetFrameLevel WITHOUT converting it -- so it lost combatIconAlpha, lost
+            -- combatIconFrameLevel, and lost the out-of-range/dead fade that
+            -- ApplyStatusIconSettings folds in via GetStatusIconFadeAlpha. A new
+            -- preview-vs-live fork, created by the change that was removing forks, and
+            -- invisible at default settings because combatIconAlpha seeds to 1.
+            -- The hand-rolled fallbacks disagreed with live's as well ("TOPLEFT"/2/-2
+            -- against CENTER/0/0), which is another reason not to keep a second copy.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.combatIcon, db, "combatIcon")
+            end
             frame.combatIcon:Show()
 
-            frame.combatIcon:SetFrameLevel(frame:GetFrameLevel() + (db.combatIconFrameLevel or 30))
         else
             frame.combatIcon:Hide()
         end
@@ -1507,22 +1309,25 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.resurrectionIcon:Hide()
         elseif testData.centerStatus == "resurrect" then
             DF:SetUpgradedStatusIcon(frame.resurrectionIcon.texture, "Interface\\RaidFrame\\Raid-Icon-Rez")
-            frame.resurrectionIcon.texture:SetVertexColor(0, 1, 0)  -- Green = being cast
+            -- ☠ ONLY THE CASTING GREEN WAS PREVIEWABLE. Live also renders the
+            -- PENDING-ACCEPT state at (1, 1, 0, 0.75) -- a different colour AND a
+            -- different alpha -- which a user could never see in order to judge it.
+            -- Alternate by frame so both states are on screen at once.
+            if ((frame.index or 0) % 2) == 1 then
+                frame.resurrectionIcon.texture:SetVertexColor(1, 1, 0, 0.75)  -- pending accept
+            else
+                frame.resurrectionIcon.texture:SetVertexColor(0, 1, 0, 1)     -- being cast
+            end
             
-            local scale = db.resurrectionIconScale or 1.0
-            local anchor = db.resurrectionIconAnchor or "CENTER"
-            local x = db.resurrectionIconX or 0
-            local y = db.resurrectionIconY or 0
-            frame.resurrectionIcon:SetScale(scale)
-            frame.resurrectionIcon:ClearAllPoints()
-            frame.resurrectionIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.resurrectionIcon:SetAlpha(db.resurrectionIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.resurrectionIcon, db, "resurrectionIcon")
+            end
             
             -- Show as text or icon (with font and color settings)
-            ShowTestIconAsText(frame.resurrectionIcon, db.resurrectionIconTextCasting or "Res...", db.resurrectionIconShowText, db, "resurrectionIcon")
+            DF:ShowStatusIconAsText(frame.resurrectionIcon, db.resurrectionIconTextCasting or "Res...", db.resurrectionIconShowText)
             frame.resurrectionIcon:Show()
             
-            frame.resurrectionIcon:SetFrameLevel(frame:GetFrameLevel() + (db.resurrectionIconFrameLevel or 30))
         else
             frame.resurrectionIcon:Hide()
         end
@@ -1533,22 +1338,22 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.phasedIconEnabled or db.testShowStatusIcons == false then
             frame.phasedIcon:Hide()
         elseif testData.isPhased then
-            DF:SetUpgradedStatusIcon(frame.phasedIcon.texture, "Interface\\TargetingFrame\\UI-PhasingIcon")
+            -- ☠ phasedIconShowLFGEye DID NOTHING IN THE PREVIEW -- it always drew the
+            -- phasing icon, so the setting could not be judged. Live swaps to the LFG
+            -- eye for a unit who is in another party's instance.
+            DF:SetUpgradedStatusIcon(frame.phasedIcon.texture,
+                db.phasedIconShowLFGEye and "Interface\\LFGFrame\\LFG-Eye"
+                or "Interface\\TargetingFrame\\UI-PhasingIcon")
             
-            local scale = db.phasedIconScale or 1.0
-            local anchor = db.phasedIconAnchor or "TOPRIGHT"
-            local x = db.phasedIconX or 0
-            local y = db.phasedIconY or 0
-            frame.phasedIcon:SetScale(scale)
-            frame.phasedIcon:ClearAllPoints()
-            frame.phasedIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.phasedIcon:SetAlpha(db.phasedIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.phasedIcon, db, "phasedIcon")
+            end
             
             -- Show as text or icon (with font and color settings)
-            ShowTestIconAsText(frame.phasedIcon, db.phasedIconText or "Phased", db.phasedIconShowText, db, "phasedIcon")
+            DF:ShowStatusIconAsText(frame.phasedIcon, db.phasedIconText or "Phased", db.phasedIconShowText)
             frame.phasedIcon:Show()
             
-            frame.phasedIcon:SetFrameLevel(frame:GetFrameLevel() + (db.phasedIconFrameLevel or 30))
         else
             frame.phasedIcon:Hide()
         end
@@ -1559,57 +1364,64 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.afkIconEnabled or db.testShowStatusIcons == false then
             frame.afkIcon:Hide()
             if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-        elseif testData.isAFK then
+        elseif testData.isAFK or testData.isDND then
             DF:SetUpgradedStatusIcon(frame.afkIcon.texture, "Interface\\FriendsFrame\\StatusIcon-Away")
             
-            local scale = db.afkIconScale or 1.0
-            local anchor = db.afkIconAnchor or "CENTER"
-            local x = db.afkIconX or 0
-            local y = db.afkIconY or 0
-            frame.afkIcon:SetScale(scale)
-            frame.afkIcon:ClearAllPoints()
-            frame.afkIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.afkIcon:SetAlpha(db.afkIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.afkIcon, db, "afkIcon")
+            end
             
             -- Track AFK start time for test mode
             local frameKey = tostring(frame)
-            if not testAFKStartTimes[frameKey] then
+            if testData.isAFK and not testAFKStartTimes[frameKey] then
                 testAFKStartTimes[frameKey] = GetTime()
             end
             
-            local statusText = db.afkIconText or "AFK"
-            local showTimer = db.afkIconShowTimer ~= false
-            
-            -- Calculate timer if enabled
-            if showTimer and testAFKStartTimes[frameKey] then
-                local elapsed = math.floor(GetTime() - testAFKStartTimes[frameKey])
-                local timerStr = FormatTestAFKTime(elapsed)
-
-                if db.afkIconShowText then
-                    -- Text mode: show "AFK 1:23"
-                    statusText = statusText .. " " .. timerStr
-                    if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-                else
-                    -- Icon mode: show timer below icon
-                    if frame.afkIcon.timerText then
-                        frame.afkIcon.timerText:SetText(timerStr)
-                        frame.afkIcon.timerText:Show()
-                        -- Apply font/color to timer text
-                        ApplyTestIconTimerFont(frame.afkIcon, db, "afkIcon")
-                    end
+            -- ☠ DND WAS UNPREVIEWABLE. Live renders it on this same icon with a
+            -- different label and a red tint, and with the timer suppressed (a DND
+            -- flag has no start time). Neither the label nor the colour could be
+            -- judged from the preview. (Audit, 2026-08-07.)
+            local statusText
+            if testData.isDND then
+                statusText = DF.L["DND"]
+                if frame.afkIcon.text then
+                    frame.afkIcon.text:SetTextColor(1, 0.2, 0.2, 1)
                 end
-            else
                 if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
+                testAFKStartTimes[frameKey] = nil
+            else
+                statusText = db.afkIconText or "AFK"
+                local showTimer = db.afkIconShowTimer ~= false
+
+                -- Calculate timer if enabled
+                if showTimer and testAFKStartTimes[frameKey] then
+                    local elapsed = math.floor(GetTime() - testAFKStartTimes[frameKey])
+                    local timerStr = FormatTestAFKTime(elapsed)
+
+                    if db.afkIconShowText then
+                        -- Text mode: show "AFK 1:23"
+                        statusText = statusText .. " " .. timerStr
+                        if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
+                    else
+                        -- Icon mode: show timer below icon
+                        if frame.afkIcon.timerText then
+                            frame.afkIcon.timerText:SetText(timerStr)
+                            frame.afkIcon.timerText:Show()
+                        end
+                    end
+                else
+                    if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
+                end
             end
             
-            -- Show as text or icon (with font and color settings)
-            ShowTestIconAsText(frame.afkIcon, statusText, db.afkIconShowText, db, "afkIcon")
+            -- Show as text or icon
+            DF:ShowStatusIconAsText(frame.afkIcon, statusText, db.afkIconShowText)
             if db.afkIconShowText and frame.afkIcon.text and DF.ApplyStableTextAnchor then
                 DF:ApplyStableTextAnchor(frame.afkIcon.text, frame.afkIcon)
             end
             frame.afkIcon:Show()
             
-            frame.afkIcon:SetFrameLevel(frame:GetFrameLevel() + (db.afkIconFrameLevel or 30))
         else
             frame.afkIcon:Hide()
             if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
@@ -1625,20 +1437,15 @@ function DF:UpdateTestStatusIcons(frame, testData)
         elseif testData.inVehicle then
             DF:SetUpgradedStatusIcon(frame.vehicleIcon.texture, "Interface\\Vehicles\\UI-Vehicles-Raid-Icon")
             
-            local scale = db.vehicleIconScale or 1.0
-            local anchor = db.vehicleIconAnchor or "BOTTOMRIGHT"
-            local x = db.vehicleIconX or 0
-            local y = db.vehicleIconY or 0
-            frame.vehicleIcon:SetScale(scale)
-            frame.vehicleIcon:ClearAllPoints()
-            frame.vehicleIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.vehicleIcon:SetAlpha(db.vehicleIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.vehicleIcon, db, "vehicleIcon")
+            end
             
             -- Show as text or icon (with font and color settings)
-            ShowTestIconAsText(frame.vehicleIcon, db.vehicleIconText or "Vehicle", db.vehicleIconShowText, db, "vehicleIcon")
+            DF:ShowStatusIconAsText(frame.vehicleIcon, db.vehicleIconText or "Vehicle", db.vehicleIconShowText)
             frame.vehicleIcon:Show()
             
-            frame.vehicleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.vehicleIconFrameLevel or 30))
         else
             frame.vehicleIcon:Hide()
         end
@@ -1648,86 +1455,58 @@ function DF:UpdateTestStatusIcons(frame, testData)
     if frame.raidRoleIcon then
         if not db.raidRoleIconEnabled or db.testShowStatusIcons == false then
             frame.raidRoleIcon:Hide()
-        elseif testData.isMainTank and db.raidRoleIconShowTank ~= false then
+        -- ☠ WAS `~= false`, which shows the icon when the key is nil; live tests
+        -- it plainly, so a nil key hides it. Config seeds both to true, so the two
+        -- only disagree on a profile predating the keys -- exactly where a preview
+        -- is most likely to be trusted. Match live. (Audit, 2026-08-07.)
+        elseif testData.isMainTank and db.raidRoleIconShowTank then
             DF:SetUpgradedStatusIcon(frame.raidRoleIcon.texture, "Interface\\GroupFrame\\UI-Group-MainTankIcon")
             
-            local scale = db.raidRoleIconScale or 1.0
-            local anchor = db.raidRoleIconAnchor or "BOTTOMLEFT"
-            local x = db.raidRoleIconX or 0
-            local y = db.raidRoleIconY or 0
-            frame.raidRoleIcon:SetScale(scale)
-            frame.raidRoleIcon:ClearAllPoints()
-            frame.raidRoleIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.raidRoleIcon:SetAlpha(db.raidRoleIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.raidRoleIcon, db, "raidRoleIcon")
+            end
             
             -- Show as text or icon (with font and color settings)
-            ShowTestIconAsText(frame.raidRoleIcon, db.raidRoleIconTextTank or "MT", db.raidRoleIconShowText, db, "raidRoleIcon")
+            DF:ShowStatusIconAsText(frame.raidRoleIcon, db.raidRoleIconTextTank or "MT", db.raidRoleIconShowText)
             frame.raidRoleIcon:Show()
             
-            frame.raidRoleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.raidRoleIconFrameLevel or 30))
-        elseif testData.isMainAssist and db.raidRoleIconShowAssist ~= false then
+        elseif testData.isMainAssist and db.raidRoleIconShowAssist then
             DF:SetUpgradedStatusIcon(frame.raidRoleIcon.texture, "Interface\\GroupFrame\\UI-Group-MainAssistIcon")
             
-            local scale = db.raidRoleIconScale or 1.0
-            local anchor = db.raidRoleIconAnchor or "BOTTOMLEFT"
-            local x = db.raidRoleIconX or 0
-            local y = db.raidRoleIconY or 0
-            frame.raidRoleIcon:SetScale(scale)
-            frame.raidRoleIcon:ClearAllPoints()
-            frame.raidRoleIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.raidRoleIcon:SetAlpha(db.raidRoleIconAlpha or 1)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.raidRoleIcon, db, "raidRoleIcon")
+            end
             
             -- Show as text or icon (with font and color settings)
-            ShowTestIconAsText(frame.raidRoleIcon, db.raidRoleIconTextAssist or "MA", db.raidRoleIconShowText, db, "raidRoleIcon")
+            DF:ShowStatusIconAsText(frame.raidRoleIcon, db.raidRoleIconTextAssist or "MA", db.raidRoleIconShowText)
             frame.raidRoleIcon:Show()
             
-            frame.raidRoleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.raidRoleIconFrameLevel or 30))
         else
             frame.raidRoleIcon:Hide()
         end
     end
     
-    -- Apply alpha to status icons based on dead / health-based / OOR fade
-    local alpha = 1.0
-    if frame.dfTestDeadFadeAlphas and frame.dfTestDeadFadeAlphas.icons then
-        alpha = frame.dfTestDeadFadeAlphas.icons
-    elseif frame.dfDeadFadeApplied then
-        return
-    elseif frame.dfTestHealthFadeAlphas and frame.dfTestHealthFadeAlphas.icons then
-        alpha = frame.dfTestHealthFadeAlphas.icons
-    elseif frame.dfTestOORAlphas and frame.dfTestOORAlphas.icons then
-        alpha = frame.dfTestOORAlphas.icons
-    end
-    
-    -- Apply fade alpha to all status icons
-    if frame.readyCheckIcon and frame.readyCheckIcon:IsShown() then
-        local baseAlpha = db.readyCheckIconAlpha or 1
-        frame.readyCheckIcon:SetAlpha(baseAlpha * alpha)
-    end
-    if frame.summonIcon and frame.summonIcon:IsShown() then
-        local baseAlpha = db.summonIconAlpha or 1
-        frame.summonIcon:SetAlpha(baseAlpha * alpha)
-    end
-    if frame.resurrectionIcon and frame.resurrectionIcon:IsShown() then
-        local baseAlpha = db.resurrectionIconAlpha or 1
-        frame.resurrectionIcon:SetAlpha(baseAlpha * alpha)
-    end
-    if frame.phasedIcon and frame.phasedIcon:IsShown() then
-        local baseAlpha = db.phasedIconAlpha or 1
-        frame.phasedIcon:SetAlpha(baseAlpha * alpha)
-    end
-    if frame.afkIcon and frame.afkIcon:IsShown() then
-        local baseAlpha = db.afkIconAlpha or 1
-        frame.afkIcon:SetAlpha(baseAlpha * alpha)
-    end
-    if frame.vehicleIcon and frame.vehicleIcon:IsShown() then
-        local baseAlpha = db.vehicleIconAlpha or 1
-        frame.vehicleIcon:SetAlpha(baseAlpha * alpha)
-    end
-    if frame.raidRoleIcon and frame.raidRoleIcon:IsShown() then
-        local baseAlpha = db.raidRoleIconAlpha or 1
-        frame.raidRoleIcon:SetAlpha(baseAlpha * alpha)
-    end
+    -- ★ NO SECOND ALPHA PASS. DF:ApplyStatusIconSettings (StatusIcons.lua) already
+    -- folds DF:GetStatusIconFadeAlpha into each icon's alpha, and every icon above
+    -- now goes through it. Re-applying here would square the fade -- the same
+    -- mistake the range and health fades made before ef3c56e0.
+    -- (Audit, 2026-08-07.)
+end
+
+-- ☠ A CORPSE CARRIES NO AURAS, so the preview must not draw any on one. Death
+-- strips buffs and debuffs outright, and the defensive icon and missing-buff badge
+-- describe things that only mean something on a living unit — a dead frame covered
+-- in icons is a shape live play never produces, which makes it a bad reference for
+-- judging layout (Krathe, 2026-08-06). The dispel overlay already did this.
+--
+-- Reads the stamp UpdateTestFrame leaves rather than re-resolving the unit data:
+-- the bulk refreshers (UpdateAllTestAuras / MissingBuff / DefensiveBar /
+-- AuraDesigner) have no testData to hand, and this has to give them the same
+-- answer as the per-frame pass or the two previews drift.
+function DF:IsTestFrameDead(frame)
+    return (frame and frame.dfTestIsDead) == true
 end
 
 -- Test aura preview: drive the real 12.1 container rows on the test frame.
@@ -1745,7 +1524,7 @@ function DF:UpdateTestAuras(frame)
             -- The test panel's "Show Auras" toggle gates the preview rows on top
             -- of the real row enables. Off -> hide the row frames directly and
             -- keep the drives' shown-caches coherent so re-enabling re-shows.
-            local showAuras = db.testShowAuras ~= false
+            local showAuras = db.testShowAuras ~= false and not DF:IsTestFrameDead(frame)
             if db.showBuffs and showAuras and DF.DriveBuffFactory then
                 DF:DriveBuffFactory(frame, db)
                 -- Test count slider hot-applies (structural: the handle rebuilds).
@@ -2000,89 +1779,26 @@ end
 
 -- Apply layout/style settings to a test frame (fonts, sizes, textures, borders, etc.)
 -- This should be called when visual settings change, not just when data changes
+-- ☠ THIS USED TO RE-IMPLEMENT DF:ApplyFrameLayout AND THEN CALL IT. ~80 lines of
+-- frame size, health-bar texture/orientation, missing-health orientation, border and
+-- resource-bar layout -- every one of them already done inside ApplyFrameLayout,
+-- which it invoked at the end via the ApplyFrameStyle alias (Update.lua: that alias
+-- is a one-line forward). So the copy ran first and the real thing overwrote it.
+--
+-- Two things the copy got WRONG while it was there:
+--   * raw SetSize instead of DF:SetPixelPerfectSize, and it read db.frameWidth where
+--     live reads frame.dfPinnedWidth or db.frameWidth -- so it would have sized a
+--     pinned frame by the global width. Inert only because it was never called on one.
+--   * a missing-health TEXTURE write, which looked unique but is not: both test
+--     update paths already set it (see the SafeSetStatusBarTexture calls in
+--     UpdateTestFrame and UpdateTestFrameHealthOnly), as live does inside
+--     SetMissingHealthBarValue.
+--
+-- Kept as a named function rather than deleted because call sites pair it with
+-- UpdateTestFrame and the pairing reads clearly. (Audit, 2026-08-07.)
 function DF:ApplyTestFrameLayout(frame)
     if not frame then return end
-    
-    local db = DF:GetFrameDB(frame)
-    
-    -- Apply frame size
-    local frameWidth = db.frameWidth or 120
-    local frameHeight = db.frameHeight or 50
-    if db.pixelPerfect then
-        frameWidth = DF:PixelPerfect(frameWidth)
-        frameHeight = DF:PixelPerfect(frameHeight)
-    end
-    frame:SetSize(frameWidth, frameHeight)
-    
-    -- Apply health bar settings
-    if frame.healthBar then
-        -- Texture
-        local healthTex = db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
-        DF:SafeSetStatusBarTexture(frame.healthBar, healthTex)
-        
-        -- Orientation
-        local orientation = db.healthOrientation or "HORIZONTAL"
-        if orientation == "HORIZONTAL" then
-            frame.healthBar:SetOrientation("HORIZONTAL")
-            frame.healthBar:SetReverseFill(false)
-            frame.healthBar:SetRotatesTexture(false)
-        elseif orientation == "HORIZONTAL_INV" then
-            frame.healthBar:SetOrientation("HORIZONTAL")
-            frame.healthBar:SetReverseFill(true)
-            frame.healthBar:SetRotatesTexture(false)
-        elseif orientation == "VERTICAL" then
-            frame.healthBar:SetOrientation("VERTICAL")
-            frame.healthBar:SetReverseFill(false)
-            frame.healthBar:SetRotatesTexture(true)
-        elseif orientation == "VERTICAL_INV" then
-            frame.healthBar:SetOrientation("VERTICAL")
-            frame.healthBar:SetReverseFill(true)
-            frame.healthBar:SetRotatesTexture(true)
-        end
-        
-        -- Also apply to missing health bar
-        if frame.missingHealthBar then
-            local missingTex = db.missingHealthTexture
-            if not missingTex or missingTex == "" then
-                missingTex = healthTex
-            end
-            DF:SafeSetStatusBarTexture(frame.missingHealthBar, missingTex)
-            
-            if orientation == "HORIZONTAL" then
-                frame.missingHealthBar:SetOrientation("HORIZONTAL")
-                frame.missingHealthBar:SetReverseFill(true)
-                frame.missingHealthBar:SetRotatesTexture(false)
-            elseif orientation == "HORIZONTAL_INV" then
-                frame.missingHealthBar:SetOrientation("HORIZONTAL")
-                frame.missingHealthBar:SetReverseFill(false)
-                frame.missingHealthBar:SetRotatesTexture(false)
-            elseif orientation == "VERTICAL" then
-                frame.missingHealthBar:SetOrientation("VERTICAL")
-                frame.missingHealthBar:SetReverseFill(true)
-                frame.missingHealthBar:SetRotatesTexture(true)
-            elseif orientation == "VERTICAL_INV" then
-                frame.missingHealthBar:SetOrientation("VERTICAL")
-                frame.missingHealthBar:SetReverseFill(false)
-                frame.missingHealthBar:SetRotatesTexture(true)
-            end
-        end
-    end
-    
-    -- Apply frame border
-    if frame.border then
-        DF:ApplyFrameBorder(frame, db)
-    end
-    
-    -- Apply fonts using ApplyFrameStyle (handles name, health, status text fonts)
-    if DF.ApplyFrameStyle then
-        DF:ApplyFrameStyle(frame)
-    end
-    
-    -- Apply power bar layout (delegate to shared function which handles
-    -- match-width, role filtering, background, border, frame level, etc.)
-    if DF.ApplyResourceBarLayout then
-        DF:ApplyResourceBarLayout(frame)
-    end
+    if DF.ApplyFrameLayout then DF:ApplyFrameLayout(frame) end
 end
 
 -- Full refresh with layout application (use on test mode start or when settings change)
@@ -2756,9 +2472,18 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
     DF.testRaidContainer:SetSize(totalWidth, totalHeight)
     DF:SyncRaidMoverToContainer()
 
-    -- Track which frame lands in the first slot of each group (for group label anchoring)
+    -- Track the first AND last frame of each group.
+    -- ☠ THE GROUP LABEL ANCHORED TO THE FIRST FRAME. Live anchors it to the group's
+    -- separated HEADER, which spans the whole group -- so Label Position = END put the
+    -- label past the end of the group live, but only past the FIRST FRAME in the
+    -- preview, i.e. inside the group; CENTER centred on the first frame instead of the
+    -- group. START happened to agree, which is why it went unnoticed. The preview now
+    -- builds a per-group extent frame spanning first..last and anchors to that, so all
+    -- three positions read the same geometry live does. (Audit, 2026-08-07.)
     DF.testGroupFirstFrame = DF.testGroupFirstFrame or {}
+    DF.testGroupLastFrame = DF.testGroupLastFrame or {}
     wipe(DF.testGroupFirstFrame)
+    wipe(DF.testGroupLastFrame)
 
     -- Position each frame in sorted order (this applies sorting within groups)
     for _, entry in ipairs(frameList) do
@@ -2770,10 +2495,11 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
         local posInGroup = groupCurrentPos[groupNum] or 0
         groupCurrentPos[groupNum] = posInGroup + 1
 
-        -- Store the first frame of each group for label anchoring
+        -- Store the first and last frame of each group for label anchoring
         if posInGroup == 0 then
             DF.testGroupFirstFrame[groupNum] = frame
         end
+        DF.testGroupLastFrame[groupNum] = frame
 
         -- Position using shared function
         SecureSort:PositionRaidFrameToGroupSlot(
@@ -2785,6 +2511,35 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
             lp,
             DF.testRaidContainer
         )
+    end
+
+    DF:UpdateTestGroupExtents()
+end
+
+-- One invisible frame per active group, spanning its first slot's TOPLEFT to its last
+-- slot's BOTTOMRIGHT. This is the preview's stand-in for a live separated header: the
+-- object group labels anchor to. Positions within a group only ever increase in x and
+-- decrease in y (PositionRaidFrameToGroupSlot walks posInGroup one way), so first and
+-- last really are the two opposite corners in both grow directions.
+function DF:UpdateTestGroupExtents()
+    if not DF.testRaidContainer then return end
+    DF.testGroupExtent = DF.testGroupExtent or {}
+    for g = 1, 8 do
+        local first = DF.testGroupFirstFrame and DF.testGroupFirstFrame[g]
+        local last = DF.testGroupLastFrame and DF.testGroupLastFrame[g]
+        local extent = DF.testGroupExtent[g]
+        if first and last then
+            if not extent then
+                extent = CreateFrame("Frame", nil, DF.testRaidContainer)
+                DF.testGroupExtent[g] = extent
+            end
+            extent:ClearAllPoints()
+            extent:SetPoint("TOPLEFT", first, "TOPLEFT", 0, 0)
+            extent:SetPoint("BOTTOMRIGHT", last, "BOTTOMRIGHT", 0, 0)
+            extent:Show()
+        elseif extent then
+            extent:Hide()
+        end
     end
 end
 
@@ -2906,83 +2661,13 @@ function DF:LightweightPositionPartyTestFrames(testFrameCount)
         end
         return
     end
-    
-    -- Fallback: Old positioning code if SecureSort not available
-    local frameWidth = db.frameWidth or 100
-    local frameHeight = db.frameHeight or 50
-    local spacing = db.frameSpacing or 2
-    local growDirection = db.growDirection or "VERTICAL"
-    local growthAnchor = db.growthAnchor or "START"
-    
-    -- Apply pixel-perfect adjustments
-    if db.pixelPerfect then
-        frameWidth = DF:PixelPerfect(frameWidth)
-        frameHeight = DF:PixelPerfect(frameHeight)
-        spacing = DF:PixelPerfect(spacing)
-    end
-    
-    local horizontal = (growDirection == "HORIZONTAL")
-    
-    -- Calculate total size needed for visible frames
-    local totalWidth, totalHeight
-    if horizontal then
-        totalWidth = testFrameCount * frameWidth + (testFrameCount - 1) * spacing
-        totalHeight = frameHeight
-    else
-        totalWidth = frameWidth
-        totalHeight = testFrameCount * frameHeight + (testFrameCount - 1) * spacing
-    end
-    
-    -- Calculate container size (max possible size for 5 frames)
-    local containerWidth, containerHeight
-    if horizontal then
-        containerWidth = 5 * frameWidth + 4 * spacing
-        containerHeight = frameHeight
-    else
-        containerWidth = frameWidth
-        containerHeight = 5 * frameHeight + 4 * spacing
-    end
-    
-    -- Update container size
-    DF.testPartyContainer:SetSize(containerWidth, containerHeight)
-    
-    -- Calculate starting offset based on growthAnchor
-    local startX, startY = 0, 0
-    if horizontal then
-        -- Horizontal layout - growthAnchor controls left/center/right alignment
-        if growthAnchor == "START" then
-            startX = 0
-        elseif growthAnchor == "CENTER" then
-            startX = (containerWidth - totalWidth) / 2
-        else -- END
-            startX = containerWidth - totalWidth
-        end
-    else
-        -- Vertical layout - growthAnchor controls top/center/bottom alignment
-        if growthAnchor == "START" then
-            startY = 0
-        elseif growthAnchor == "CENTER" then
-            startY = -(containerHeight - totalHeight) / 2
-        else -- END
-            startY = -(containerHeight - totalHeight)
-        end
-    end
-    
-    -- Position test frames
-    for i = 0, 4 do
-        local frame = DF.testPartyFrames[i]
-        if frame and i < testFrameCount then
-            frame:ClearAllPoints()
-            if horizontal then
-                local x = startX + i * (frameWidth + spacing)
-                frame:SetPoint("TOPLEFT", DF.testPartyContainer, "TOPLEFT", x, 0)
-            else
-                local y = startY - i * (frameHeight + spacing)
-                frame:SetPoint("TOPLEFT", DF.testPartyContainer, "TOPLEFT", 0, y)
-            end
-            frame:SetSize(frameWidth, frameHeight)
-        end
-    end
+
+    -- ☠ A SECOND, UNREACHABLE PARTY LAYOUT USED TO LIVE HERE -- ~76 lines behind
+    -- 'Fallback: if SecureSort not available'. Features/SecureSort.lua is
+    -- unconditional in the .toc (line 124) and assigns DF.SecureSort at load, so the
+    -- branch above always returns and this never ran. It also used a DIFFERENT
+    -- growthAnchor formula to CalculateSlotPosition -- a third statement of the same
+    -- geometry that no longer had to agree with anything. (Audit, 2026-08-07.)
 end
 
 -- Throttled version of UpdateRaidTestFrames for slider callbacks
@@ -3046,50 +2731,69 @@ local TEST_PARTY_ONLY_KEYS = {
 }
 
 local TEST_PRESETS = {
-    -- At rest: everything the frame draws when nothing is happening. No health
-    -- motion and no conditional bar states (absorbs / heal prediction / range).
-    STATIC = {
+    -- The aura surfaces — the rows, the dispel overlay, the missing-buff badge and
+    -- the Aura Designer — on an otherwise quiet frame, for working on aura layout.
+    -- ⚠ The only preset that does NOT contain Default: out-of-range fading dims the
+    -- whole frame, icons included, which is the one thing you cannot have while
+    -- judging icon art.
+    AURAS = {
         testShowPets             = true,
         testShowTextDesigner     = true,
         testShowAuras            = true,
         testShowDispelGlow       = true,
+        testShowMissingBuff      = true,
         testShowAuraDesigner     = true,
         testShowTargetedList     = true,
         testAnimateTargetedList  = true,
         testShowPersonalTargeted = true,
-        testShowStatusIcons      = true,
     },
-    -- Static plus what a pull adds: health movement and threat.
+    -- Default plus what a pull adds: health movement and threat. The aura layers
+    -- stay off — this one is for watching the bars move, and Auras is where you go
+    -- to look at icons.
     COMBAT = {
         testShowPets             = true,
         testAnimateHealth        = true,
+        testShowOutOfRange       = true,
         testShowTextDesigner     = true,
-        testShowAuras            = true,
-        testShowDispelGlow       = true,
-        testShowAuraDesigner     = true,
         testShowTargetedList     = true,
         testAnimateTargetedList  = true,
         testShowPersonalTargeted = true,
-        testShowStatusIcons      = true,
         testShowAggro            = true,
     },
-    -- The healing-decision layers (absorbs, incoming heals, reduced max health,
-    -- defensives) on a still frame, so the bars stay readable.
+    -- Default plus the healing-decision layers: absorbs, incoming heals, reduced
+    -- max health and the defensive icon. Health stays still so those bars are
+    -- readable, and the aura rows stay off so they do not cover them.
     HEALER = {
         testShowPets             = true,
         testShowAbsorbs          = true,
         testShowHealPrediction   = true,
+        testShowOutOfRange       = true,
         testShowReducedMaxHealth = true,
         testShowTextDesigner     = true,
-        testShowAuras            = true,
-        testShowDispelGlow       = true,
-        testShowAuraDesigner     = true,
         testShowExternalDef      = true,
         testShowTargetedList     = true,
         testAnimateTargetedList  = true,
         testShowPersonalTargeted = true,
-        testShowStatusIcons      = true,
     },
+}
+
+-- Default = what a fresh profile ships with, and the preset the panel shows as
+-- selected on first open. The bars and the frame's own text, with the aura and
+-- icon layers off so the frame itself is what you are looking at.
+--
+-- ☠ testShowTextDesigner IS NOT OPTIONAL IN A MINIMAL PRESET. It does not gate a
+-- decorative layer: Render.lua hides EVERY TD font string when it is off, and the
+-- unit name and health text are TD elements — so a preset without it previews
+-- nameless blank bars. This shipped for a few minutes as an empty "None" for
+-- exactly that reason and was unusable (Krathe, 2026-08-06).
+-- ⚠ Config.lua's test-mode defaults MIRROR THIS TABLE. Change one, change both.
+TEST_PRESETS.DEFAULT = {
+    testShowPets             = true,
+    testShowOutOfRange       = true,
+    testShowTextDesigner     = true,
+    testShowTargetedList     = true,
+    testAnimateTargetedList  = true,
+    testShowPersonalTargeted = true,
 }
 
 -- Full = every toggle on. Built from the key list so a newly added toggle is
@@ -3159,6 +2863,40 @@ end
 -- TEST MODE HELPER FUNCTIONS
 -- ============================================================
 
+-- ☠ REBUILD WITHOUT REPAINT. Each of these bulk refreshers tears down and rebuilds
+-- its surface -- the aura-container rows, the AD indicators, the defensive icon, the
+-- missing-buff strip -- and the fresh widgets come back at ALPHA 1.0 carrying none of
+-- the fade the appearance pass had applied. They run AFTER UpdateTestFrame's appearance
+-- pass (ApplyTestPreset: UpdateAllFrames, then RefreshAllTestSurfaces), so flipping a
+-- preset left every rebuilt surface at full opacity while the rest of the frame stayed
+-- faded -- which is why a faded defensive icon had a full-brightness AD indicator
+-- showing through it, and why toggling Out of Range off and on "fixed" it (that path
+-- re-runs the appearance pass with nothing rebuilding behind it).
+--
+-- ★ Whoever rebuilds a surface repaints it, per frame, for that surface only. Putting
+-- it here rather than at the call sites means the individual panel toggles (Aura
+-- Designer, Defensive Icon, Missing Buff, Dispel Overlay), which rebuild without going
+-- through RefreshAllTestSurfaces at all, are covered by the same fix.
+-- (Audit follow-up, 2026-08-07.)
+local function RepaintTestSurface(frame, which)
+    if not frame then return end
+    if which == "auras" then
+        if DF.UpdateBuffIconsAppearance then DF:UpdateBuffIconsAppearance(frame) end
+        if DF.UpdateDebuffIconsAppearance then DF:UpdateDebuffIconsAppearance(frame) end
+    elseif which == "missingBuff" then
+        if DF.UpdateMissingBuffAppearance then DF:UpdateMissingBuffAppearance(frame) end
+    elseif which == "defensive" then
+        if DF.UpdateDefensiveIconAppearance then DF:UpdateDefensiveIconAppearance(frame) end
+    elseif which == "dispel" then
+        if DF.UpdateDispelOverlayAppearance then DF:UpdateDispelOverlayAppearance(frame) end
+    elseif which == "auraDesigner" then
+        -- Order matters: UpdateAuraDesignerAppearance writes healthbarEffectiveBlend,
+        -- which UpdateHealthBarAppearance reads (see UpdateAllElementAppearances).
+        if DF.UpdateAuraDesignerAppearance then DF:UpdateAuraDesignerAppearance(frame) end
+        if DF.UpdateHealthBarAppearance then DF:UpdateHealthBarAppearance(frame) end
+    end
+end
+
 function DF:UpdateAllTestDispelGlow()
     -- Safety check - Dispel module may not be loaded yet
     if not DF.UpdateDispelOverlay then return end
@@ -3169,6 +2907,7 @@ function DF:UpdateAllTestDispelGlow()
             local frame = DF.testPartyFrames[i]
             if frame then
                 DF:UpdateDispelOverlay(frame)
+                RepaintTestSurface(frame, "dispel")
             end
         end
     end
@@ -3179,6 +2918,7 @@ function DF:UpdateAllTestDispelGlow()
             local frame = DF.testRaidFrames[i]
             if frame then
                 DF:UpdateDispelOverlay(frame)
+                RepaintTestSurface(frame, "dispel")
             end
         end
     end
@@ -3223,6 +2963,15 @@ function DF:UpdateTestMissingBuff(frame)
     -- test session (empty groups park the badges in their windows); the drive's
     -- unit guards are test-bypassed (fabricated units fail every unit API).
     if DF.FactoryOwnsMissingBuff and DF:FactoryOwnsMissingBuff(db) then
+        -- Dead unit: park the strip the same way the toggle-off path does, so
+        -- re-showing goes back through the live drive.
+        if DF:IsTestFrameDead(frame) then
+            if frame.missingBuffStrip and frame.dfMissingStripShown ~= false then
+                frame.dfMissingStripShown = false
+                frame.missingBuffStrip:Hide()
+            end
+            return
+        end
         DF:DriveMissingBuffFactory(frame, db)
         return
     end
@@ -3242,13 +2991,19 @@ function DF:UpdateAllTestAuras()
     if DF.testMode and DF.testPartyFrames then
         for i = 0, 4 do
             local frame = DF.testPartyFrames[i]
-            if frame then DF:UpdateTestAuras(frame) end
+            if frame then
+                DF:UpdateTestAuras(frame)
+                RepaintTestSurface(frame, "auras")
+            end
         end
     end
     if DF.raidTestMode and DF.testRaidFrames then
         for i = 1, 40 do
             local frame = DF.testRaidFrames[i]
-            if frame then DF:UpdateTestAuras(frame) end
+            if frame then
+                DF:UpdateTestAuras(frame)
+                RepaintTestSurface(frame, "auras")
+            end
         end
     end
 end
@@ -3260,6 +3015,7 @@ function DF:UpdateAllTestMissingBuff()
 
         if db.testShowMissingBuff then
             DF:UpdateTestMissingBuff(frame)
+            RepaintTestSurface(frame, "missingBuff")
         else
             -- 12.1 factory strip: hide via the shown-cache the live drive keys on.
             if frame.missingBuffStrip and frame.dfMissingStripShown ~= false then
@@ -3309,12 +3065,22 @@ function DF:UpdateTestDefensiveBar(frame, testData)
         local role = testData and testData.role
         local show = db.defensiveIconEnabled and db.testShowExternalDef
             and (role == "TANK" or role == "HEALER")
+            and not DF:IsTestFrameDead(frame)
         if show then
             DF:DriveDefensiveFactory(frame, db)
             local h = frame.defensiveFactory
             if h then
+                -- ☠ ONE SOURCE FOR THE PREVIEW COUNT. This used to override with a
+                -- role-scaled 3-on-tanks / 1-on-everyone-else AFTER the drive had
+                -- already applied BuildDefensiveRowConfig's `testMax = testBuffCount`.
+                -- Two values fighting: the Buffs count slider appeared to do nothing
+                -- on the defensive row, and since SetTestMax rebuilds on any change,
+                -- every defensive tweak in test paid an extra container rebuild while
+                -- they argued. The config's own comment states the intent -- this is a
+                -- HELPFUL row, so the Buffs count is the one the user set for it -- and
+                -- wins; the role scaling was a leftover of the legacy preview's shape.
                 if h.SetTestMax then
-                    h:SetTestMax(math.min(role == "TANK" and 3 or 1, db.defensiveBarMax or 4))
+                    h:SetTestMax(math.min(db.testBuffCount or 2, db.defensiveBarMax or 4))
                 end
                 if frame.dfDefFactoryShown ~= true then
                     frame.dfDefFactoryShown = true
@@ -3342,6 +3108,7 @@ function DF:UpdateAllTestDefensiveBar()
         -- Unconditional: the painter reads testShowExternalDef itself and
         -- hides the container row when it's off.
         DF:UpdateTestDefensiveBar(frame, testData)
+        RepaintTestSurface(frame, "defensive")
     end
     
     -- Update party test frames
@@ -3453,11 +3220,13 @@ function DF:UpdateAllTestAuraDesigner()
     local function UpdateFrame(frame)
         if not frame or not frame:IsShown() then return end
         local db = DF:GetFrameDB(frame)
-        if db and db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame) then
+        if db and db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame)
+            and not DF:IsTestFrameDead(frame) then
             Factory:SyncFrame(frame)
         else
             Factory:ClearFrame(frame)
         end
+        RepaintTestSurface(frame, "auraDesigner")
     end
 
     if DF.testMode then
@@ -4414,8 +4183,11 @@ function DF:CreateTestPanel()
     presetLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
     panel.presetLabel = presetLabel
 
-    local presets = {"STATIC", "COMBAT", "HEALER", "FULL"}
-    local presetNames = {STATIC = L["Static"], COMBAT = L["Combat"], HEALER = L["Healer"], FULL = L["Full"]}
+    -- Default first — it is the shipped baseline, so it reads as the starting
+    -- point the others move away from.
+    local presets = {"DEFAULT", "AURAS", "COMBAT", "HEALER", "FULL"}
+    local presetNames = {DEFAULT = L["Default"], AURAS = L["Auras"], COMBAT = L["Combat"],
+        HEALER = L["Healer"], FULL = L["Full"]}
     local btnSpacing = 4
     local btnCount = #presets
     local btnWidth = math.floor((CONTENT_WIDTH - (btnSpacing * (btnCount - 1))) / btnCount)

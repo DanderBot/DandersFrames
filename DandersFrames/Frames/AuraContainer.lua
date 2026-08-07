@@ -92,6 +92,11 @@ local warnedCurve, warnedBorder, warnedNativeDispel = false, false, false
 -- (warnedMouse was a third latch here with no warning behind it — removed.)
 local warnedRestyle, warnedRefresh = false, false
 local warnedCreate = false
+-- Filter-string tuning rejected for a key the container does not have. Latched
+-- because applyGroupTuning runs per frame per settings change; one line is enough
+-- to name the offending consumer.
+local warnedFilterString = false
+local warnedPandemic = false
 
 -- Animations SAFE to run on an OVERLAY-mode border (Aura Designer). These render
 -- entirely on DF-owned child regions of the border (edge alpha ticks + DF_DASH's
@@ -167,6 +172,34 @@ end
 -- yet honored (no warn — the seams are real config now, not a future-managed no-op).
 function AuraContainer.HasSpellFilter() return AuraContainer.IsSupported() end
 function AuraContainer.HasSort()        return AuraContainer.IsSupported() end
+
+-- PANDEMIC (refresh-window regions) landed in PTR 8 / build 69111, LATER than the rest
+-- of the container surface — so unlike the two above it is NOT implied by IsSupported()
+-- and needs its own probe.
+--
+-- ☠ It does NOT probe CustomAuraButtonSharedMixin.AddPandemicRegion, which is the obvious
+-- check and is WRONG: Blizzard_AuraContainer declares `## UseSecureEnvironment: 1` and
+-- loads its Lua into the secure environment, so that mixin table is not a global we can
+-- read. The method exists on the button INSTANCE (it is explicitly addon-callable) but
+-- there is no cheap instance here, and creating a container to find out is exactly the
+-- combat-fatal probe IsSupported already has to tiptoe around.
+--
+-- So probe the pair of C APIs the window is computed from instead
+-- (Blizzard_CustomAuraButton.lua:612 — UpdatePandemicWindow calls both). They are plain
+-- C_UnitAuras entries, always readable, `SecretArguments = "AllowedWhenTainted"`, and
+-- they shipped in the same build as the registrar. Their absence is the same "older than
+-- PTR 8" answer with none of the caveats.
+--
+-- Consumers must gate the GUI on this, not just the render path. A region built on a
+-- client without the registrar is created, never bound, and therefore never shown — the
+-- feature would be silently absent with every control still live, which is precisely the
+-- silent-capability-skip antipattern.
+function AuraContainer.HasPandemic()
+    return AuraContainer.IsSupported()
+        and C_UnitAuras ~= nil
+        and type(C_UnitAuras.GetRefreshExtendedDuration) == "function"
+        and type(C_UnitAuras.GetAuraBaseDuration) == "function"
+end
 
 -- Warm the support probe once, out of combat, at login — so no consumer's first
 -- IsSupported() call ever lands the probe in combat (the probe creates a live
@@ -435,14 +468,52 @@ end
 -- groups/slots differ per filter (the dispel overlay's per-type slots). A record's
 -- candidateFilters REPLACES config.candidateFilters for that group/slot; its key
 -- replaces the positional "df<i>" key (must be unique within the consumer).
+-- ★ CANONICAL FILTER STRINGS — a free parse win, and the reason is engine-side.
+-- ManagedAuraContainerPrivateMixin:RebuildAuraParseFilters groups every group and slot by
+-- filter string and queries each DISTINCT string once, and Blizzard's own comment is
+-- explicit that the match is textual, not semantic: "We don't go to the lengths of
+-- supporting equivalent strings with different token ordering." So "HELPFUL|PLAYER" and
+-- "PLAYER|HELPFUL" are two full scans of the same data.
+--
+-- Emitting one canonical spelling everywhere makes equivalent filters share a batch. This
+-- is the one saving that cannot be had per consumer -- it needs GLOBAL string discipline,
+-- so it goes at the chokepoint every record passes through rather than in each builder.
+--
+-- Sort is by BARE token, with a token's negation immediately after it, so "!X" can never
+-- drift away from "X". Duplicate tokens collapse. Memoised on the input string: the same
+-- handful of strings recur on every rebuild across every frame.
+-- ⚠ Order-independence is Blizzard's model (AuraUtil tokenises on "|" and space into a
+-- set). If a filter ever behaves differently after this, suspect order-sensitivity here
+-- first.
+local filterCanonCache = {}
+local function canonicalFilter(s)
+    if type(s) ~= "string" or s == "" then return s end
+    local hit = filterCanonCache[s]
+    if hit ~= nil then return hit end
+    local toks, seen = {}, {}
+    for tok in s:gmatch("[^|%s]+") do
+        if not seen[tok] then seen[tok] = true; toks[#toks + 1] = tok end
+    end
+    table.sort(toks, function(a, b)
+        local an, bn = a:byte(1) == 33, b:byte(1) == 33          -- 33 = "!"
+        local ab = an and a:sub(2) or a
+        local bb = bn and b:sub(2) or b
+        if ab ~= bb then return ab < bb end
+        return (not an) and bn                                    -- bare before its negation
+    end)
+    local out = table.concat(toks, "|")
+    filterCanonCache[s] = out
+    return out
+end
+
 local function normalizeFilters(filter)
     local out = {}
     if type(filter) == "string" then
-        out[1] = { f = filter }
+        out[1] = { f = canonicalFilter(filter) }
     elseif type(filter) == "table" then
         for _, f in ipairs(filter) do
             if type(f) == "string" then
-                out[#out + 1] = { f = f }
+                out[#out + 1] = { f = canonicalFilter(f) }
             elseif type(f) == "table" and type(f.filter) == "string" then
                 -- onInit: a consumer secure-init hook (overlay dispel carriers) run
                 -- INSIDE initializeFrame so its regions are created in secure context
@@ -450,7 +521,7 @@ local function normalizeFilters(filter)
                 -- children of the secret aura button are access-constrained, cab.lua:15).
                 -- style: per-record button overrides (scale / badge). See applyRecordStyle
                 -- — a group whose membership IS the predicate can be styled unconditionally.
-                out[#out + 1] = { f = f.filter, key = f.key, candidateFilters = f.candidateFilters,
+                out[#out + 1] = { f = canonicalFilter(f.filter), key = f.key, candidateFilters = f.candidateFilters,
                                   onInit = f.onInit, style = f.style }
             end
         end
@@ -652,6 +723,28 @@ end
 -- ============================================================
 local function styleButton_regions(slot, config)
     local style = config.style or {}
+    -- ★ THE REGION HOST — everything this function creates hangs off `host`, never `slot`.
+    --
+    -- For a CONTAINER button there is no host and this resolves to the button itself, so
+    -- every line below is byte-identical to what it always did. For a collapsed SLOT
+    -- (AcquireSlot) it is the DF-owned frame stood up pre-seal by makeSlotLevelHost, and
+    -- that indirection is what gives a slot per-indicator ALPHA back:
+    --
+    --   * The aura button carries DenyTaintedAccessWhenAurasAreSecret, applied by
+    --     ApplyAccessRestrictions to the auraFrame ALONE (a single AddAccessRestrictions
+    --     call — unlike forbidden aspects, which the source says propagate through the
+    --     parent chain). So a DF-created child frame is NOT restricted and a tainted
+    --     SetAlpha on it is legal, which the button itself refuses.
+    --   * Blizzard's inbound setters accept it. ValidateInboundScriptObject requires only
+    --     that a registered region be "a direct child or indirect descendent of owner"
+    --     (RegionUtil.IsDescendantOf) — one level deeper still passes. Already proven in
+    --     the field by dfAuraBorder (on dfDispelHolder) and dfDur (on dfDurHolder).
+    --
+    -- ⚠ CREATION-TIME ONLY. InitializeInboundScriptObject stamps ForbiddenAspect
+    -- ChangeParent on every region it registers, so a region CANNOT be reparented after
+    -- its native bind. The parent has to be right the first time — which is why this is a
+    -- host at creation rather than a reparent pass.
+    local host = slot.dfLevelHost or slot
     -- Overlay = a presence box (tint + border + native dispel only); the icon and all
     -- icon-content regions (cooldown/duration/stacks/bar/spellName) are ROW-only.
     local isRow = config.mode ~= "overlay"
@@ -677,32 +770,55 @@ local function styleButton_regions(slot, config)
         local ov = style.overlay
         if ov and ov.tintColor then
             if not slot.dfTint then
-                slot.dfTint = slot:CreateTexture(nil, "OVERLAY")
-                slot.dfTint:SetAllPoints(slot)
+                slot.dfTint = host:CreateTexture(nil, "OVERLAY")
+                slot.dfTint:SetAllPoints(host)
             end
             slot.dfTint:SetColorTexture(readColor(ov.tintColor))
         end
-        -- FILLED HEALTH MIRROR — a StatusBar child of the slot fed the unit's SECRET
-        -- health percent render-side (DF.MirrorHealthValue in the Update loop), so it
-        -- matches the real bar's fill / texture / smooth-motion WITHOUT the addon ever
-        -- reading or branching a secret. Identity (texture/colour/alpha) is static config;
-        -- recolour is SetStatusBarColor (render-side). Visibility rides the slot's secret
-        -- show/hide (attach-and-inherit). onBar hands the bar back so the consumer can feed
-        -- it. ADDITIVE: never touches the tintColor path or the #205 buff/debuff rows.
-        local hm = ov and ov.healthMirror
-        if hm then
-            if not slot.dfHealthMirror then
-                slot.dfHealthMirror = CreateFrame("StatusBar", nil, slot)
-                slot.dfHealthMirror:SetAllPoints(slot)
-                slot.dfHealthMirror:EnableMouse(false)
-                slot.dfHealthMirror:SetMinMaxValues(0, 100)
+        -- (Removed 2026-08-04) FILLED HEALTH MIRROR. It was a StatusBar parented under
+        -- the slot, fed the secret health percent per health tick. Aura frames carry
+        -- Enum.ScriptObjectAccessRestriction.DenyTaintedAccessWhenAurasAreSecret, so
+        -- every one of those writes was refused in game -- the bar never moved and
+        -- covered the health bar. Superseded by HEALTH FILL COVER below, which needs
+        -- no writes at all.
+
+        -- HEALTH FILL COVER — the working replacement for the StatusBar mirror above.
+        --
+        -- ☠ The mirror could never work. Aura frames carry
+        -- Enum.ScriptObjectAccessRestriction.DenyTaintedAccessWhenAurasAreSecret
+        -- (Blizzard_AuraContainerShared.lua:102), applied to every frame the provider
+        -- creates. That denies ALL tainted writes while auras are secret -- so a
+        -- StatusBar parented under the slot cannot be driven from our update path at
+        -- any point, by any route. Field-confirmed: "health mirror bar forbidden" for
+        -- every unit, and the bar rendered at its default, covering the health bar.
+        --
+        -- This needs no writes at all. A plain texture anchored to the REAL bar's fill
+        -- texture inherits that texture's rect, and the fill rect is already driven by
+        -- the bar's value -- so it tracks health exactly, with no per-tick work, no
+        -- feed, and nothing read. Visibility still rides the slot's secret show/hide,
+        -- because the texture is a child of the slot. Anchor-derived geometry is the
+        -- one geometry route that stays legal here (button rects are secret; anchors
+        -- are not).
+        --
+        -- Re-anchored on EVERY style pass, not just creation: the frame's health
+        -- texture can be swapped from the settings panel, which replaces the fill
+        -- region and would stale a create-once anchor.
+        local hf = ov and ov.healthFill
+        if hf and hf.clampTo then
+            if not slot.dfHealthFill then
+                slot.dfHealthFill = host:CreateTexture(nil, "OVERLAY")
             end
-            local sb = slot.dfHealthMirror
-            DF:SafeSetStatusBarTexture(sb, hm.texture)
-            local cr, cg, cb = readColor(hm.color)
-            sb:SetStatusBarColor(cr, cg, cb)
-            sb:SetAlpha(hm.alpha or 1)
-            if type(hm.onBar) == "function" then hm.onBar(sb) end
+            local t = slot.dfHealthFill
+            t:ClearAllPoints()
+            t:SetAllPoints(hf.clampTo)
+            local fr, fg, fb = readColor(hf.color)
+            if hf.texture then
+                DF:SafeSetTexture(t, hf.texture)
+                t:SetVertexColor(fr, fg, fb)
+            else
+                t:SetColorTexture(fr, fg, fb)
+            end
+            t:SetAlpha(hf.alpha or 1)
         end
         -- MIRROR HOST — a plain child frame of the slot handed back to the consumer
         -- (the Aura Designer name/health text colour-by-cover). The consumer parents
@@ -711,12 +827,12 @@ local function styleButton_regions(slot, config)
         -- mirrors position themselves by anchoring to the real FontStrings. onHost fires
         -- every style pass (create + ApplyStyle + Blizzard re-init) so the consumer's
         -- EnableMirrors registration is always current. ADDITIVE: only the AD text
-        -- consumer sets it; tintColor/healthMirror and the #205 rows are untouched.
+        -- consumer sets it; tintColor/healthFill and the #205 rows are untouched.
         local mh = ov and ov.mirrorHost
         if mh then
             if not slot.dfMirrorHost then
-                slot.dfMirrorHost = CreateFrame("Frame", nil, slot)
-                slot.dfMirrorHost:SetAllPoints(slot)
+                slot.dfMirrorHost = CreateFrame("Frame", nil, host)
+                slot.dfMirrorHost:SetAllPoints(host)
                 slot.dfMirrorHost:EnableMouse(false)
             end
             if type(mh.onHost) == "function" then mh.onHost(slot.dfMirrorHost) end
@@ -740,7 +856,7 @@ local function styleButton_regions(slot, config)
                 if slot.dfSquare then slot.dfSquare:Hide() end
             else
                 if not slot.dfSquare then
-                    slot.dfSquare = slot:CreateTexture(nil, "BACKGROUND")
+                    slot.dfSquare = host:CreateTexture(nil, "BACKGROUND")
                 end
                 local inset = squareSpec.inset or 0
                 slot.dfSquare:ClearAllPoints()
@@ -753,7 +869,7 @@ local function styleButton_regions(slot, config)
         local iconSpec = style.icon
         if not squareSpec and (iconSpec == nil or iconSpec.show ~= false) then
             if not slot.dfIcon then
-                slot.dfIcon = slot:CreateTexture(nil, "BACKGROUND")
+                slot.dfIcon = host:CreateTexture(nil, "BACKGROUND")
             end
             -- Art inset: 1px default; pass icon.inset=0 for full-bleed art (matches the
             -- legacy Direct-row icons). Re-applied here (not create-once) so it's live.
@@ -780,7 +896,7 @@ local function styleButton_regions(slot, config)
     local borderSpec = style.border
     if borderSpec and DF.Border then
         if not slot.dfBorder then
-            local ok, w = pcall(function() return DF.Border:New(slot, { solidOnly = true, secretRect = true }) end)
+            local ok, w = pcall(function() return DF.Border:New(host, { solidOnly = true, secretRect = true }) end)
             if ok then slot.dfBorder = w end
         end
         if slot.dfBorder then
@@ -831,9 +947,9 @@ local function styleButton_regions(slot, config)
     local cdSpec = style.cooldown
     if isRow and (cdSpec == nil or cdSpec.show ~= false) then
         if not slot.dfCD then
-            slot.dfCD = CreateFrame("Cooldown", nil, slot, "CooldownFrameTemplate")
+            slot.dfCD = CreateFrame("Cooldown", nil, host, "CooldownFrameTemplate")
         end
-        slot.dfCD:SetAllPoints(slot.dfIcon or slot.dfSquare or slot)
+        slot.dfCD:SetAllPoints(slot.dfIcon or slot.dfSquare or host)
         -- Swipe on by default; cdSpec.swipe=false hides it (AD "Hide Cooldown Swipe").
         local wantSwipe = (cdSpec == nil or cdSpec.swipe ~= false)
 
@@ -868,10 +984,19 @@ local function styleButton_regions(slot, config)
     local durSpec = style.duration
     if isRow and durSpec and durSpec.show then
         if not slot.dfDur then
-            -- Holder ABOVE the +10 DF.Border (and the +12 dispel ring): content text
-            -- must draw ON TOP of the icon border, never under it. See the dispel-border
-            -- holder note below for the same +10-clearance rationale.
-            slot.dfDurHolder = makeHolder(slot, durSpec.level or 13)
+            -- ★★ THE PER-BUTTON HOLDER LADDER, in one place so it stays orderable at a
+            -- glance. These only need to be above the icon and correctly ordered among
+            -- THEMSELVES — they are all children of the same button, so nothing outside
+            -- competes with them:
+            --     1 dispel ring   2 duration text / name   3 dispel symbol
+            --     4 stack count   5 pandemic cue
+            -- ☠ THEY USED TO BE 12/13/13/13/14/15, sized to clear a +10 DF.Border. The
+            -- border default is +2 now, so the whole ladder collapses — and it had to,
+            -- because a button at frame+42 with a +15 holder and a +10 border on top of
+            -- that reached frame+67, i.e. inside the DEFENSIVE icon's band at 65. Bands
+            -- are the budget: an aura container must fit between its own level and the
+            -- next user-facing one. Keep this ladder ≤ 5. (Z-order review, 2026-08-07.)
+            slot.dfDurHolder = makeHolder(host, durSpec.level or 2)
             slot.dfDur = slot.dfDurHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         end
         DF.TextStyle:Apply(slot.dfDur, durSpec, slot.dfDurHolder)
@@ -881,10 +1006,11 @@ local function styleButton_regions(slot, config)
     local stackSpec = style.stacks
     if isRow and stackSpec and stackSpec.show then
         if not slot.dfStack then
-            -- Holder ABOVE the +10 DF.Border and +12 dispel ring (one above the duration
-            -- text): the stack count is the top-most content and was rendering UNDER the
-            -- icon border at the old +7 (Krathe 2026-07-15).
-            slot.dfStackHolder = makeHolder(slot, stackSpec.level or 14)
+            -- Rung 4 of the holder ladder (see the duration holder): the stack count is
+            -- the top-most TEXT, above the ring, duration and symbol. It rendered UNDER
+            -- the icon border once before (Krathe 2026-07-15) -- that was at +7 against a
+            -- +10 border; the border is +2 now, so any rung above 2 clears it.
+            slot.dfStackHolder = makeHolder(host, stackSpec.level or 4)
             slot.dfStack = slot.dfStackHolder:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
         end
         DF.TextStyle:Apply(slot.dfStack, stackSpec, slot.dfStackHolder)
@@ -904,7 +1030,7 @@ local function styleButton_regions(slot, config)
     local barSpec = style.bar
     if isRow and barSpec and barSpec.show then
         if not slot.dfBar then
-            slot.dfBar = CreateFrame("StatusBar", nil, slot)
+            slot.dfBar = CreateFrame("StatusBar", nil, host)
             slot.dfBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
             slot.dfBar:SetMinMaxValues(0, 1)   -- native SetDurationBar drives SetValue in [0,1]
         end
@@ -912,7 +1038,7 @@ local function styleButton_regions(slot, config)
         if barSpec.fill then
             -- FILL geometry: re-anchor to fill the slot every pass (idempotent; safe on ApplyStyle).
             sb:ClearAllPoints()
-            sb:SetAllPoints(slot)
+            sb:SetAllPoints(host)
         else
             -- STRIP geometry: width follows the button via left+right edge anchors;
             -- gap/height are CONFIG values (relative SetPoint only — the slot rect is
@@ -921,11 +1047,11 @@ local function styleButton_regions(slot, config)
             local gap = tonumber(barSpec.gap) or 2
             sb:ClearAllPoints()
             if barSpec.position == "TOP" then
-                sb:SetPoint("BOTTOMLEFT", slot, "TOPLEFT", 0, gap)
-                sb:SetPoint("BOTTOMRIGHT", slot, "TOPRIGHT", 0, gap)
+                sb:SetPoint("BOTTOMLEFT", host, "TOPLEFT", 0, gap)
+                sb:SetPoint("BOTTOMRIGHT", host, "TOPRIGHT", 0, gap)
             else   -- default BOTTOM: hang below the icon
-                sb:SetPoint("TOPLEFT", slot, "BOTTOMLEFT", 0, -gap)
-                sb:SetPoint("TOPRIGHT", slot, "BOTTOMRIGHT", 0, -gap)
+                sb:SetPoint("TOPLEFT", host, "BOTTOMLEFT", 0, -gap)
+                sb:SetPoint("TOPRIGHT", host, "BOTTOMRIGHT", 0, -gap)
             end
             sb:SetHeight(barSpec.height or 4)
         end
@@ -941,9 +1067,9 @@ local function styleButton_regions(slot, config)
     local nameSpec = style.spellName
     if isRow and nameSpec and nameSpec.show then
         if not slot.dfName then
-            -- Above the +10 border / +12 dispel ring (see duration holder) so the spell
-            -- name never renders under the icon border.
-            slot.dfNameHolder = makeHolder(slot, 13)
+            -- Rung 2, level with the duration text (see the duration holder): both are
+            -- content text and never occupy the same corner.
+            slot.dfNameHolder = makeHolder(host, 2)
             slot.dfName = slot.dfNameHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         end
         slot.dfName:ClearAllPoints()
@@ -959,7 +1085,7 @@ local function styleButton_regions(slot, config)
             -- would render UNDER the static border and the dispel colour would be
             -- invisible behind it. (Holder-hosted regions are registrar-legal — the
             -- duration text binds from a holder the same way.)
-            slot.dfDispelHolder = makeHolder(slot, dispelSpec.level or 12)
+            slot.dfDispelHolder = makeHolder(host, dispelSpec.level or 1)
             slot.dfAuraBorder = slot.dfDispelHolder:CreateTexture(nil, "OVERLAY")
             -- The native Color style only VERTEX-TINTS the region (SetAuraBorderColor →
             -- SetVertexColor; no file is ever assigned) — a blank texture renders
@@ -995,9 +1121,9 @@ local function styleButton_regions(slot, config)
             slot.dfAuraBorder:SetTexCoord(aX, 1 - aX, aY, 1 - aY)
         end
         if dispelSpec.nativeSymbol and not slot.dfSymbol then
-            -- Above the +10 border / +12 dispel ring (see duration holder) so the dispel
-            -- symbol glyph sits on top of the icon border, not under it.
-            slot.dfSymbolHolder = makeHolder(slot, 13)
+            -- Rung 3 (see the duration holder): above the dispel RING it belongs to, so
+            -- the glyph sits on the ring rather than under it.
+            slot.dfSymbolHolder = makeHolder(host, 3)
             slot.dfSymbol = slot.dfSymbolHolder:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
             slot.dfSymbol:SetPoint("CENTER")
         end
@@ -1009,6 +1135,163 @@ local function styleButton_regions(slot, config)
             -- after ours on each aura update — probe P-SYMBOL settles which wins.)
             DF.TextStyle:Apply(slot.dfSymbol, dispelSpec.symbol, slot.dfSymbolHolder)
         end
+    end
+
+    -- PANDEMIC region (PTR 8 / 69111; the AddPandemicRegion bind is in bindNative).
+    -- The refresh-window cue: DF builds the art, AddPandemicRegion stamps
+    -- Enum.SecretAspect.Shown on it and the engine drives SetShown from its own window
+    -- maths. Attach-and-inherit, same shape as SetIcon — nothing here reads an aura.
+    --
+    -- ☠ NEVER Show()/Hide() this region once it is bound. Blizzard owns its Shown aspect
+    -- from AddPandemicRegion onward (the standing rule at the top of this section), and
+    -- the bind's own UpdateAuraDisplay() sets the correct initial state. That is also why
+    -- the widget is created only when the feature is ON: turning it off is a Rebuild
+    -- (DF.Pandemic:StructSig), not a hide.
+    --
+    -- ☠ WHAT IS REGISTERED IS THE HOLDER FRAME, for both types. Verified in game
+    -- 2026-08-05 that Frame:IsObjectType("Region") is true, so AddPandemicRegion takes
+    -- one. That is load-bearing for BORDER: DF.Border's applyTexPieces calls Show() on
+    -- every edge piece on every Apply, so registering the PIECES would hand their Shown
+    -- aspect to the engine and turn DF.Border's own routine writes into forbidden writes
+    -- on a button child. Registering the holder leaves DF.Border in full control of
+    -- everything inside it. TINT uses the same shape, so there is one code path and one
+    -- place for the flash animation to live.
+    --
+    -- Create-once: the holder, its contents, the bind, and the flash animation. That is
+    -- exactly what DF.Pandemic:StructSig covers. Colours / thickness / inset / offsets all
+    -- re-apply below on every style pass, so they are live through ApplyStyle.
+    local pdSpec = style.pandemic
+    -- ☠ STALE-HOLDER SWEEP, preview slots only. Every other create-once region in this
+    -- function relies on "off = never created", which holds because turning a feature off
+    -- moves the struct sig and a Rebuild hands over a FRESH button. The AD canvas breaks
+    -- that assumption: it reuses one preview slot and only recreates it when its own sig
+    -- moves, so a cue created on a previous pass survives being switched off and stays
+    -- visible — reported as a permanent green wash over a bar indicator (Krathe,
+    -- 2026-08-05). The canvas sig now carries the pandemic key too, which is the real fix;
+    -- this is the backstop, because a silently-stuck overlay is a bad failure mode to have
+    -- one guard against.
+    -- Gated on the registrar being ABSENT: that is what makes the slot a preview and the
+    -- Shown aspect ours. On a native button Blizzard owns it and we must never touch it.
+    if isRow and not pdSpec and slot.dfPandemicHolder and not slot.AddPandemicRegion then
+        slot.dfPandemicHolder:Hide()
+    end
+    if isRow and pdSpec then
+        if not slot.dfPandemicHolder then
+            -- Rung 5, the top of the ladder (see the duration holder): the refresh cue
+            -- has to read over every other content region on the button.
+            slot.dfPandemicHolder = makeHolder(host, pdSpec.level or 5)
+            -- Created hidden so a slot never flashes its cue between creation and the
+            -- bind. This is the ONLY legal visibility write on the holder: it happens
+            -- strictly before AddPandemicRegion, while the Shown aspect is still ours.
+            slot.dfPandemicHolder:Hide()
+
+            -- ANIMATION: built and started HERE — inside the secure init pass — and never
+            -- touched again. Driving one from the tainted style pass would be a write to a
+            -- forbidden button child.
+            -- ★ NOT the OnUpdate border animator that is stripped from every container
+            -- border above. That one calls back into tainted Lua every frame to redraw the
+            -- border's pieces, which the lockdown forbids on a button child. These are
+            -- declarative AnimationGroups: started once, run entirely C-side, zero Lua per
+            -- frame. That difference is the whole reason DF.Border's effect set cannot come
+            -- here and these can.
+            -- Animates the HOLDER, so one implementation covers whatever the mode drew.
+            -- ☠ ALPHA ONLY. A Scale-based pulse was built and tried in game (2026-08-05)
+            -- and did nothing — the holder carries SecretAspect.Shown plus the forbidden
+            -- aspects AddPandemicRegion stamps on it, and a scale transform evidently does
+            -- not survive that where an alpha one does. Left at the one effect that
+            -- demonstrably works rather than shipping a dropdown of dead options.
+            if pdSpec.flash then
+                local ag = slot.dfPandemicHolder:CreateAnimationGroup()
+                ag:SetLooping("REPEAT")
+                local half = pdSpec.flash / 2
+                local out = ag:CreateAnimation("Alpha")
+                out:SetFromAlpha(1); out:SetToAlpha(0.25)
+                out:SetDuration(half); out:SetOrder(1)
+                local back = ag:CreateAnimation("Alpha")
+                back:SetFromAlpha(0.25); back:SetToAlpha(1)
+                back:SetDuration(half); back:SetOrder(2)
+                -- No handle kept: the group is owned by the holder and outlives this
+                -- scope on its own, and there is no legal path that would ever stop it
+                -- (touching it later is a tainted write to a button child).
+                ag:Play()
+            end
+        end
+        local holder = slot.dfPandemicHolder
+
+        if pdSpec.mode == "TINT" then
+            if not slot.dfPandemicTint then
+                slot.dfPandemicTint = holder:CreateTexture(nil, "OVERLAY")
+            end
+            local t = slot.dfPandemicTint
+            -- Anchored to the holder's edges rather than sized: the button's rect is
+            -- SECRET on 12.1, and anchor-derived geometry is the one route that stays
+            -- legal. Inset follows the DF.Border sign convention (+ inward, − outward).
+            local ins = tonumber(pdSpec.tintInset) or 0
+            t:ClearAllPoints()
+            t:SetPoint("TOPLEFT", holder, "TOPLEFT", ins, -ins)
+            t:SetPoint("BOTTOMRIGHT", holder, "BOTTOMRIGHT", -ins, ins)
+            local r, g, b = readColor(pdSpec.tintColor)
+            t:SetColorTexture(r, g, b, tonumber(pdSpec.tintAlpha) or 0.4)
+        elseif pdSpec.border then
+            -- The full house border, inside the holder. secretRect routes it through
+            -- DF.Border's anchor-only piece path — a container button has no anchors yet
+            -- when initializeFrame runs and its rect is secret, so the BackdropTemplate
+            -- path would scatter (the same reason style.border above passes it).
+            if not slot.dfPandemicBorder then
+                local ok, w = pcall(function()
+                    -- ☠ frameLevelOffset = 0, NOT the default 10. The holder is already
+                    -- host + (pdSpec.level or 15); another +10 put this border at host + 25,
+                    -- which on an aura button lands inside the DEFENSIVE ICON's band
+                    -- (defensiveIconFrameLevel 65) — the cue drew over an icon two bands
+                    -- above it, reported as an Aura Designer indicator bleeding onto the
+                    -- defensive icon. A border does not need the bump: it is a CHILD of the
+                    -- holder, so at the holder's own level it already draws above every
+                    -- region on it. The offset only buys anything when a border has to clear
+                    -- a SIBLING frame (a bar fill, a swipe), which this one does not — the
+                    -- same reason the AD badge borders and the missing-buff badge all pass 0.
+                    -- (Audit follow-up, 2026-08-07.)
+                    return DF.Border:New(holder, { solidOnly = true, secretRect = true,
+                                                   frameLevelOffset = 0 })
+                end)
+                if ok then slot.dfPandemicBorder = w end
+            end
+            if slot.dfPandemicBorder then
+                local ok, err = pcall(function()
+                    local bs = pdSpec.border
+                    bs.knownWidth, bs.knownHeight = sx, sy   -- DF_DASH sizes from these, never a rect read
+                    if bs.renderScale == nil then
+                        bs.renderScale = tonumber(config.layout and config.layout.scale) or 1
+                    end
+                    DF.Border:Apply(slot.dfPandemicBorder, bs)
+                end)
+                if not ok and not warnedPandemic then
+                    warnedPandemic = true
+                    DF:DebugWarn(DBG, "pandemic border apply failed: %s", tostring(err))
+                end
+            end
+        end
+
+        -- AURA DESIGNER CANVAS ONLY. A plain frame has no AddPandemicRegion, so nothing
+        -- will ever drive the holder's visibility there — and the canvas is where the
+        -- user styles the cue, so it has to be visible. On a real container button this
+        -- stays false and the engine drives visibility, so the "never Show() a bound
+        -- region" rule above is not weakened.
+        --
+        -- ☠ DO NOT EXTEND THIS TO IN-GAME TEST SLOTS. That was tried (07804854, on the
+        -- true observation that the buff row's cue was previewable nowhere) and it is
+        -- what put a permanent Pandemic border on every previewed icon: a test slot
+        -- paints instead of binding, so nothing ever HIDES the holder again and the cue
+        -- sat on forever. Reported as an Aura Designer indicator drawing a border it
+        -- does not have live, bleeding over the defensive icon — the border is
+        -- DF.Border:New(holder, ...), which sits at holder + 10.
+        --
+        -- Pandemic is DURATION-DRIVEN: "always on" is not a preview of it, it is a
+        -- different picture that happens to be visible. In-game test slots get the cue
+        -- from armTestPandemicWindow instead, driven off the same fake duration as the
+        -- bar, swipe and text — it opens near the end of each cycle and closes when the
+        -- cycle re-arms, so it previews as a window rather than a decoration.
+        -- (Audit follow-up, 2026-08-07.)
+        if not slot.AddPandemicRegion then holder:Show() end
     end
 end
 
@@ -1087,6 +1370,11 @@ end
 -- INVARIANT: regions are create-once (styleButton_regions) and never recreated, so each
 -- per-region _boundX flag stays valid for the life of the slot. If any code ever recreates
 -- a region, it MUST also clear that region's _boundX or the new region silently never binds.
+-- Stable stand-in for "this config has no duration spec", so the absent case has a
+-- constant identity too. A fresh {} per call would look like a spec change every pass and
+-- re-bind forever.
+local EMPTY_DUR_SPEC = {}
+
 local function bindNative(slot, config)
     local style = config.style or {}
 
@@ -1100,13 +1388,30 @@ local function bindNative(slot, config)
         slot:SetDurationCooldown(slot.dfCD)
     end
 
-    if slot.dfDur and slot.SetDurationText and not slot._boundDur then
-        -- _boundDur is stamped AFTER the pcall below, not here: this is a
-        -- bind-once flag, so setting it up front meant a failed bind latched
-        -- permanently and the duration text stayed blank for the life of the slot
-        -- with no retry (and warnedCurve is one-shot per session, so the second
-        -- distinct failure was silent too).
-        local durSpec = style.duration or {}
+    -- ☠ NOT BIND-ONCE ANY MORE, and the old claim was factually wrong against Blizzard.
+    -- CustomAuraButtonSharedMixin:SetDurationText is reset-then-apply: it fetches the
+    -- RETAINED binding, does binding:Assign(options.binding) or SetToDefaults() +
+    -- SetFormatter(default), then re-applies fontstring / duration / textFormat /
+    -- textColor and calls UpdateAuraDisplay(). Idempotent on re-call, not additive, and
+    -- OnLoad_Intrinsic states the intent outright: "Retain the duration text binding
+    -- across reconfiguration." The freeze was ours, not the API's.
+    --
+    -- That freeze is why durationFmtKey sits in FOUR structural signatures, and why one
+    -- account-wide setting (GetAuraDurationUpdateInterval) re-keys every container on
+    -- every frame. Re-binding on a spec change lets those become live.
+    --
+    -- Keyed on spec IDENTITY, which is sound for exactly the reason the colour cache
+    -- below already depends on: a duration spec is never mutated in place -- every
+    -- writer fills a fresh table. Worst case if a builder hands us a fresh-but-equal
+    -- table is one extra SetDurationText per button per restyle, which is still orders
+    -- of magnitude cheaper than the container rebuild this replaces.
+    local durSpecKey = style.duration or EMPTY_DUR_SPEC
+    if slot.dfDur and slot.SetDurationText and slot._dfDurSpec ~= durSpecKey then
+        -- _dfDurSpec is stamped AFTER the pcall below, not here: a failed bind must be
+        -- retried rather than latching permanently and leaving the text blank for the
+        -- life of the slot (warnedCurve is one-shot per session, so the second distinct
+        -- failure was silent too).
+        local durSpec = durSpecKey
         -- 68914 RESHAPED the options: SetDurationText now only reads { binding |
         -- textFormat | textFormatter | textColor }; the flat formatter/expiredText/
         -- zeroDurationText/updateInterval keys are silently IGNORED (the
@@ -1170,7 +1475,7 @@ local function bindNative(slot, config)
         -- Protection is unchanged.
         local ok, err = pcall(slot.SetDurationText, slot, slot.dfDur, opts)
         if ok then
-            slot._boundDur = true
+            slot._dfDurSpec = durSpecKey
         elseif not warnedCurve then
             warnedCurve = true
             DF:DebugWarn(DBG, "SetDurationText failed: %s", tostring(err))
@@ -1208,6 +1513,29 @@ local function bindNative(slot, config)
     if slot.dfName and slot.SetSpellName and not slot._boundName then
         slot._boundName = true
         slot:SetSpellName(slot.dfName)
+    end
+
+    -- PANDEMIC (PTR 8 / 69111). The registrar is a LIST, not a single slot
+    -- (AddPandemicRegion returns an index; RemovePandemicRegion / ClearPandemicRegions
+    -- take one back) — but DF binds exactly one region per button and treats removal as
+    -- a Rebuild, because re-registering would need secure context again and an
+    -- asymmetric add-live/remove-live pair is how the border/dispel binds have gone
+    -- wrong before.
+    --
+    -- The stamp lands AFTER the pcall, not before: a bind-once flag set up front latches
+    -- a FAILED bind permanently, and warnedPandemic is one-shot per session, so the
+    -- second failure would be silent too. (Same fix the duration-text and dispel binds
+    -- already carry.) A client older than PTR 8 has no AddPandemicRegion, so the gate
+    -- simply never matches and the feature is absent rather than erroring — the region
+    -- is never created either, since the factory/rows only emit a spec when it exists.
+    if slot.dfPandemicHolder and slot.AddPandemicRegion and not slot._boundPandemic then
+        local ok, err = pcall(slot.AddPandemicRegion, slot, slot.dfPandemicHolder)
+        if ok then
+            slot._boundPandemic = true
+        elseif not warnedPandemic then
+            warnedPandemic = true
+            DF:DebugWarn(DBG, "AddPandemicRegion failed (build still ok): %s", tostring(err))
+        end
     end
 
     local dispelSpec = style.dispel
@@ -1579,8 +1907,10 @@ local function applyContainerLayout(c, handle)
     -- Flow-layout family: 68914 renamed SetAuraLayout* -> SetFlowLayout* (RowWidth
     -- -> MaximumLineSize, same nil = no-wrap contract; padding is growth-relative,
     -- which matches the padTop/padBottom branches above — the named side IS the
-    -- flow's vertical start in both used cases). Dual-detect by method presence,
-    -- and protect each call SEPARATELY: pre-68914 this rode the pin pcall above,
+    -- flow's vertical start in both used cases). The pre-68914 SetAuraLayout* names
+    -- are GONE from the engine (zero hits in the 69111 source), so the dual-detect
+    -- fallbacks that used to sit here were dead and have been removed.
+    -- Each call stays protected SEPARATELY: pre-68914 this rode the pin pcall above,
     -- so the rename made the first layout call throw and silently dropped
     -- growth/wrap/padding for the whole row.
     -- Stashed for the SINGLE-SLOT row path: the flow does not lay slots out, so
@@ -1596,10 +1926,10 @@ local function applyContainerLayout(c, handle)
     -- top strip on downward growth pushes the icon DOWN (-padTop), bottom strip on
     -- upward growth pushes it UP (+padBottom).
     handle._flowPadY = padBottom - padTop
-    local setFlowAnchor  = c.SetFlowLayoutAnchorPoint or c.SetAuraLayoutAnchorPoint
-    local setFlowGrowth  = c.SetFlowLayoutGrowthDirection or c.SetAuraLayoutGrowthDirection
-    local setFlowMaxLine = c.SetFlowLayoutMaximumLineSize or c.SetAuraLayoutRowWidth
-    local setFlowPadding = c.SetFlowLayoutPadding or c.SetAuraLayoutPadding
+    local setFlowAnchor  = c.SetFlowLayoutAnchorPoint
+    local setFlowGrowth  = c.SetFlowLayoutGrowthDirection
+    local setFlowMaxLine = c.SetFlowLayoutMaximumLineSize
+    local setFlowPadding = c.SetFlowLayoutPadding
     if setFlowAnchor then pcall(setFlowAnchor, c, G.flowAnchor) end
     if setFlowGrowth and AnchorUtil and AnchorUtil.FlowDirection then
         local h = resolveEnum(AnchorUtil.FlowDirection, G.hName)
@@ -1822,6 +2152,17 @@ function NativeBackend:build()
         return
     end
     self.container = c
+    -- Which topology this container was BUILT with. Parking keys off this rather than
+    -- the current _testMode flag: entering the preview rebuilds while _testMode is
+    -- already true, and the container being retired at that moment is the LIVE one --
+    -- exactly the one worth parking, since leaving the preview asks for it straight back.
+    self.builtInTestMode = AuraContainer._testMode and true or false
+    -- ☠ The structural key THIS container was built with, captured here and never read
+    -- from the handle at park time. Handle:Rebuild writes the INCOMING key to
+    -- _structKey before _rebuild runs, so a park that keyed off the handle would file
+    -- the outgoing container under the new key -- and the next rebuild to that key would
+    -- re-adopt a container built for a different structure. Silent and total.
+    self.structKey = handle._structKey
     AuraContainer.stats.builds = AuraContainer.stats.builds + 1
     -- Deafen to Blizzard's Edit Mode provider switch FIRST, before anything else can
     -- fire (see EDIT-MODE DEAFENING). Every build gets its own fresh container, so
@@ -1857,7 +2198,7 @@ function NativeBackend:build()
         -- mouse-dead so nothing floats over the unit frame.
         c:ClearAllPoints()
         c:SetPoint("TOPRIGHT", handle.frame, "TOPLEFT", -MISSING_PAD, 0)
-        local setFlowAnchor = c.SetFlowLayoutAnchorPoint or c.SetAuraLayoutAnchorPoint
+        local setFlowAnchor = c.SetFlowLayoutAnchorPoint
         if setFlowAnchor then pcall(setFlowAnchor, c, "TOPLEFT") end
         pcall(function() if c.SetMouseClickEnabled then c:SetMouseClickEnabled(false) end end)
         pcall(function() if c.SetMouseMotionEnabled then c:SetMouseMotionEnabled(false) end end)
@@ -1889,7 +2230,16 @@ function NativeBackend:build()
     -- initializeFrame can fire long after build (incl. mid-combat on pool exhaustion). The
     -- gen token makes a late callback from a torn-down/rebuilt container no-op.
     handle._slotCounter = 0
-    handle._gen = (handle._gen or 0) + 1
+    -- ☠ _genCounter is MONOTONIC and never reused; _gen is merely "which generation is
+    -- live right now". They are separate because container parking RESTORES an older
+    -- _gen when it re-adopts (Handle:_readoptParked): the parked container's groups
+    -- permanently hold initializeFrame closures that captured the gen they were declared
+    -- with, and buttons are created in lazy batches LONG after build, so a re-adopted
+    -- container whose gen was not restored would silently no-op every later button.
+    -- Reusing a raw counter would let a re-adopted gen collide with a newer container's;
+    -- monotonic issue makes every generation token globally distinct for this handle.
+    handle._genCounter = (handle._genCounter or 0) + 1
+    handle._gen = handle._genCounter
     local initFn = handle:_makeInitializeFrame(handle._gen)
 
     -- Declare one AuraGroup per filter (row) / one AuraSlot per filter (overlay). The
@@ -1978,43 +2328,36 @@ function NativeBackend:build()
         local testStyleSlots = testStyle and math.min(1, maxCount) or 0
         local testStyleLayout = scaleGroupLayout(groupLayout, testStyle)
         filters = {}   -- the normal declaration loop below is skipped
-        -- TWO groups, not one per preview slot. Every AddAuraGroup eagerly creates
-        -- FrameCreationBatchSize (10) button frames — before maxFrameCount is even
-        -- applied — so one group per slot cost maxCount × 10 frames per container per
-        -- unit frame. Measured at 40 test frames that was the single largest allocation
-        -- anywhere in the addon: ~530 MB across four toggles, 65% of the test-mode
-        -- trace, and a visible ~1 s freeze on every toggle.
+        -- ☠ ONE GROUP PER PREVIEW SLOT, maxFrameCount = 1, fixedIndex = k. RESTORED
+        -- 2026-08-06 after the two-group split broke the preview outright.
         --
-        -- The styled slot keeps its OWN group so declaration order still pins it to
-        -- position 1 — that was the point of the original split, one styled icon leading
-        -- a row of plain ones. Every remaining slot now shares a single group and
-        -- numbers itself via seqStart, so each still paints a distinct curated entry.
+        -- This is the ONLY shape that makes position and content agree. Groups render
+        -- in DECLARATION order, so group k occupies layout position k, and its single
+        -- button paints curated entry k. Icon, stack count, duration and hover zone all
+        -- derive from the same k, so they cannot drift apart.
         --
-        -- ⚠ TRADE-OFF, and it is a real one: inside the shared group the flow assigns
-        -- auras to buttons in the CONTAINER's order, which is not creation order, so the
-        -- plain entries may appear in a different order than the curated pool lists
-        -- them. It is deterministic (test mode declares no sort, so the same samples
-        -- land the same way on every build) and every entry is still shown. The original
-        -- "Lightning Shield mid-row" failure this shape was built to prevent was about
-        -- the STYLED entry drifting, which declaration order still guarantees, and the
-        -- mismatched-tooltip half is moot now that tooltips are forced off in test mode.
-        local function addTestGroup(key, count, styled, seqStart)
-            if count <= 0 then return end
-            -- pcall(fn, args...) rather than pcall(function() ... end): no wrapper
-            -- closure. Protection is unchanged — AddAuraGroup asserts.
-            local okGroup, err = pcall(c.AddAuraGroup, c, key, category, {
-                maxFrameCount = count,
-                initializeFrame = handle:_makeInitializeFrame(handle._gen,
-                    styled and 1 or nil, nil, styled and testStyle or nil, seqStart),
-                layout = styled and testStyleLayout or groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
-            })
-            if okGroup then
-                self.groupKeys[#self.groupKeys + 1] = key
-                self.groupStyles[key] = styled and testStyle or nil
-            else
-                DF:DebugWarn(DBG, "test group failed: %s", tostring(err))
-            end
-        end
+        -- ☠ DO NOT COLLAPSE THESE INTO A SHARED GROUP TO SAVE FRAMES. That was
+        -- b69239ac, and it shipped in alpha-15 as a preview showing the wrong icon
+        -- under every tooltip. Inside a shared group the flow assigns auras to buttons
+        -- in the CONTAINER's order, which is NOT creation order, while the curated
+        -- entry is chosen by a counter incremented at button-CREATION time -- so entry
+        -- k lands wherever the flow happened to put that button. The comment this
+        -- replaces described that exact failure ("landed them on the wrong buttons --
+        -- live-diagnosed twice: Lightning Shield mid-row, mismatched tooltips") and
+        -- then judged the tooltip half "moot now that tooltips are forced off in test
+        -- mode". The NATIVE tooltips are off; DF's own hover zones are not, and they
+        -- are keyed by the curated index. Confirmed in game by reverting to the build
+        -- before that commit and comparing side by side.
+        --
+        -- ⚠ THE COST IS REAL AND ACCEPTED. Every AddAuraGroup eagerly creates
+        -- FrameCreationBatchSize (10) buttons before maxFrameCount is applied, so this
+        -- is maxCount x 10 frames per container -- the allocation b69239ac set out to
+        -- remove (~530 MB across four toggles at 40 test frames, ~1 s per toggle).
+        -- Krathe's call: "we need our test mode icons and tooltips correct, or they are
+        -- pointless." A cheaper shape has to keep position-to-entry determinism or it
+        -- is not a preview, it is a lie. The pool cap in _slotCount claws some of it
+        -- back by not declaring slots the curated pool cannot fill (the defensive row
+        -- drops from ten groups to four).
         if isSingleSlot then
             -- SINGLE-SLOT ROW preview. The two-group split above exists to pin a
             -- styled icon AHEAD of plain ones in a multi-icon row; this row has
@@ -2037,8 +2380,24 @@ function NativeBackend:build()
                 DF:DebugWarn(DBG, "test slot failed: %s", tostring(btn))
             end
         else
-            addTestGroup("dfTestStyled", testStyleSlots, true, nil)
-            addTestGroup("dfTestPlain", maxCount - testStyleSlots, false, testStyleSlots + 1)
+            for k = 1, maxCount do
+                local key = "dfTest" .. k
+                local styled = (k <= testStyleSlots) or nil
+                -- pcall(fn, args...) rather than pcall(function() ... end): no wrapper
+                -- closure per group. Protection is unchanged — AddAuraGroup asserts.
+                local okGroup, err = pcall(c.AddAuraGroup, c, key, category, {
+                    maxFrameCount = 1,
+                    initializeFrame = handle:_makeInitializeFrame(handle._gen, k, nil,
+                        styled and testStyle or nil),
+                    layout = styled and testStyleLayout or groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
+                })
+                if okGroup then
+                    self.groupKeys[#self.groupKeys + 1] = key
+                    self.groupStyles[key] = styled and testStyle or nil
+                else
+                    DF:DebugWarn(DBG, "test group failed: %s", tostring(err))
+                end
+            end
         end
     end
     for i, rec in ipairs(filters) do
@@ -2293,10 +2652,25 @@ function NativeBackend:applyGroupTuning()
     if sortDirection == nil and _G.AuraContainerSortDirection then
         sortDirection = _G.AuraContainerSortDirection.Normal
     end
-    -- Per-group candidateFilters: re-derive the SAME records build declared — the
-    -- filter set is structural and unchanged on this path, so keys line up with
+    -- Per-group candidateFilters: re-derive the SAME records build declared. The
+    -- KEY SET is structural and unchanged on this path, so keys line up with
     -- self.groupKeys (rec.key or positional "df<i>").
     local cfByKey = {}
+    -- ★ FILTER STRINGS ride here too (2026-08-04). They used to be creation-frozen,
+    -- which put them in every consumer's STRUCT signature and made "Only Mine",
+    -- AD "Others Only" and the dispel All/By-Me swap cost a whole teardown+recreate
+    -- for a string change. SetAuraGroup/SlotFilterString are live mutators
+    -- (Blizzard_CustomAuraContainer.lua:355 / :423) and destroy nothing.
+    -- ☠ WHAT IS STILL STRUCTURAL: the KEY SET. AddAuraGroup/AddAuraSlot are add-only
+    -- with no remove, so a record appearing or disappearing (the debuff category
+    -- toggles) still needs a Rebuild — only a same-key STRING move is tunable.
+    -- Consumers must keep record keys in their struct sig; the mismatch warn below
+    -- catches one that does not.
+    -- Verified in game 2026-08-04 (DF_AuraLab /alfilter): 10 swaps cost 0 frames on
+    -- the tuned path vs 100 stranded on the rebuild control, button identity and the
+    -- native duration bindings both survive, and a swap does NOT re-fire
+    -- initializeFrame — so nothing needing a re-style may move here.
+    local fsByKey = {}
     -- ★ RE-DERIVE THE IDENTITY-GATE VERDICT. include/excludeSpellIDs live in the
     -- TUNING signature, not the struct one, so every setting that flips a pool's
     -- gate exposure -- Show All Buffs, a filter-category selection, missing-buff
@@ -2314,6 +2688,11 @@ function NativeBackend:applyGroupTuning()
         local key = rec.key or ("df" .. i)
         local cf = recordCandidateFilters(rec, config)
         cfByKey[key] = cf
+        fsByKey[key] = rec.f
+        -- The gate verdict reads the filter STRING as well as the candidate filters,
+        -- so a string-only delta has to land here — which is exactly what moving
+        -- filter strings onto this path makes possible. (Before, a string change
+        -- always rebuilt, and build() recomputed the flag.)
         if filterVulnerableToIdentityGate(rec.f, cf) then
             self.handle._idGateVulnerable = true
         end
@@ -2331,11 +2710,28 @@ function NativeBackend:applyGroupTuning()
     -- per call and has no equality guard of its own, so a container with N groups pays
     -- N full updates here. There is no batch setter; the only real lever is declaring
     -- fewer groups.
+    --
+    -- ☠ FILTER-STRING ORDERING: push the string BEFORE candidateFilters. Both setters
+    -- end in UpdateAllAuras, but the string one also runs RebuildAuraParseFilters, so
+    -- doing it first means the candidate pass runs against the CURRENT parse filters
+    -- rather than one generation behind. Unlike the candidateFilters setter it carries
+    -- its own equality guard (source :357 / :427), so pushing an unchanged string every
+    -- pass is genuinely free — no need to diff it consumer-side.
+    -- A key the container does not have makes GetRequiredAuraGroup/Slot assert; that
+    -- means a consumer let a KEY-SET change reach the tuning path, which is a bug in
+    -- that consumer's struct sig. pcall keeps it from taking the frame down, and the
+    -- mismatch warn below names it instead of failing silently.
+    local fsMissing
     if usesSlots then
         -- A slot is a single button: no maxFrameCount and no layout to push, so only
-        -- the candidate filters and the sort (which decides WHICH aura wins the one
-        -- slot) are tunable. Same nil-CLEARS semantics as the group setter.
+        -- the filter string, candidate filters and the sort (which decides WHICH aura
+        -- wins the one slot) are tunable. Same nil-CLEARS semantics as the group setter.
         for key in pairs(self.slotButtons) do
+            if fsByKey[key] and c.SetAuraSlotFilterString then
+                if not pcall(c.SetAuraSlotFilterString, c, key, fsByKey[key]) then
+                    fsMissing = fsMissing or key
+                end
+            end
             pcall(c.SetAuraSlotCandidateFilters, c, key, cfByKey[key])
             if sortMethod ~= nil and sortDirection ~= nil and c.SetAuraSlotSortMethod then
                 pcall(c.SetAuraSlotSortMethod, c, key, sortMethod, sortDirection)
@@ -2343,6 +2739,11 @@ function NativeBackend:applyGroupTuning()
         end
     else
         for _, key in ipairs(self.groupKeys) do
+            if fsByKey[key] and c.SetAuraGroupFilterString then
+                if not pcall(c.SetAuraGroupFilterString, c, key, fsByKey[key]) then
+                    fsMissing = fsMissing or key
+                end
+            end
             pcall(c.SetAuraGroupMaxFrameCount, c, key, maxCount)
             -- nil CLEARS: the inbound copy runs over an EMPTY defaults table, so a
             -- toggled-off filter set doesn't survive (the old Rebuild-merge lesson).
@@ -2351,6 +2752,11 @@ function NativeBackend:applyGroupTuning()
                 pcall(c.SetAuraGroupSortMethod, c, key, sortMethod, sortDirection)
             end
         end
+    end
+    if fsMissing and not warnedFilterString then
+        warnedFilterString = true
+        DF:DebugWarn(DBG, "filter-string tune rejected for key '%s' (mode=%s) — a consumer let a KEY-SET change onto the tuning path; that must stay structural.",
+            tostring(fsMissing), tostring(mode))
     end
     -- ★ PARTITION KICK (same mechanism as applyLayout): the inbound mutators mark
     -- dirty but cannot ARM the private-side processor — without the bounce the change
@@ -2396,18 +2802,123 @@ end
 -- the ref. The next build creates a fresh container
 -- (topology is add-only — no RemoveAuraGroup/Slot — so recreate IS the sanctioned removal).
 -- Callers gate teardown out of combat (Destroy/_rebuild defer to regen in lockdown).
-function NativeBackend:teardown()
+-- park = true: PARKING teardown (see Handle:_parkContainer). The container is quiesced
+-- exactly as a real teardown quiesces it -- disabled so it stops registering for aura
+-- events, hidden so it draws nothing -- but its frames are NOT released and the backend
+-- keeps its container/slotButtons references, because a matching rebuild is going to
+-- re-adopt this exact object. Releasing here would throw away the button set, which is
+-- the entire saving.
+function NativeBackend:teardown(park)
     local c = self.container
     if c then
         AuraContainer.stats.teardowns = AuraContainer.stats.teardowns + 1
         pcall(function() c:SetEnabled(false) end)
-        if type(c.RemoveAllAuraFrames) == "function" then
-            pcall(function() c:RemoveAllAuraFrames() end)
-        end
+        -- ☠ There is NO public way to release a container's buttons. RemoveAllAuraFrames
+        -- was guarded for here and never existed -- zero hits across the whole 69111
+        -- Interface source -- so that branch never once ran. The provider's ReleaseFrame
+        -- is real but lives on AuraContainerCustomFrameProviderMixin, which is private
+        -- and unreachable from the inbound surface. Disable + hide is therefore the
+        -- WHOLE of teardown, and a discarded container keeps every button it ever
+        -- created for the session. That is precisely why parking exists.
         pcall(function() c:Hide() end)
     end
-    self.container = nil
-    self.slotButtons = nil   -- buttons die with the container; consumers re-fetch per drive
+    if not park then
+        self.container = nil
+        self.slotButtons = nil   -- buttons die with the container; consumers re-fetch per drive
+    end
+end
+
+-- The curated preview pool for a container config. Shared so the SLOT COUNT and the
+-- PAINT agree on one answer: they used to resolve it independently, and the count could
+-- ask for more icons than the pool has entries.
+--
+-- ☠ A PLAIN FUNCTION OF CONFIG, NOT A Handle METHOD, AND THAT IS LOAD-BEARING.
+-- AuraContainer.PaintPreviewSlot drives the paint core with a DUCK-TYPED handle --
+-- literally `{ config = config }`, no metatable -- because the AD editor canvas paints
+-- slots it owns outright, with no container behind them. Anything the paint path reaches
+-- for via `self:` is therefore nil there. This was first written as `Handle:_testPool`
+-- and broke opening the Aura Designer instantly ("attempt to call a nil value").
+-- Keep every shared preview helper a function OF CONFIG for the same reason.
+local function testPoolFor(config)
+    local recs = normalizeFilters(config.filter)
+    local harmful = recs[1] and recs[1].f:find("HARMFUL")
+    local td = DF.TestData
+    -- config.testEntries carries per-container curated entries (the Aura Designer's
+    -- placed indicators preview their own configured spell); config.testPool names a
+    -- curated TestData pool for rows whose category filter alone would mispreview (the
+    -- defensive row is HELPFUL but must show defensives, not raid buffs). Falls back to
+    -- the category pools.
+    return config.testEntries
+        or (td and ((config.testPool and td[config.testPool])
+        or (harmful and td.debuffs or td.buffs)))
+end
+
+-- How many sample icons this preview draws. A function OF CONFIG for the same reason
+-- testPoolFor is (PaintPreviewSlot's duck-typed handle has no methods) — and shared so
+-- the slot count and the rotation step can never disagree about the window size.
+local function testSlotCount(config, pool)
+    local n = config.testMax
+        and math.min(config.testMax, config.max or config.testMax)
+        or (config.max or 1)
+    if pool and #pool > 0 then n = math.min(n, #pool) end
+    return math.max(1, n)
+end
+
+-- ★ PER-FRAME POOL ROTATION — why every frame used to show the same two icons.
+--
+-- The pools hold ten entries but a preview only draws as many as the count slider
+-- allows, and every container asked for indices 1..N, so all five party frames drew
+-- entries 1 and 2 and the other eight were never seen by anyone. Rotating the START
+-- per frame shows the whole pool at once across a group.
+--
+-- ☠ DETERMINISTIC, NOT RANDOM. `math.random` here would re-roll on every repaint, and
+-- the preview repaints on any restyle — icons would churn while you drag a slider,
+-- which reads as a rendering bug. The unit token is stable for a frame's whole life
+-- (TestFramePool stamps "raid7"/"party2"/"player"), so it is the seed.
+--
+-- ☠ THE STEP IS THE ICON COUNT, NOT 1 AND NOT A FIXED PRIME. Stepping by 1 makes
+-- neighbours overlap almost entirely (frames showing 1-2, 2-3, 3-4…). Stepping by the
+-- COUNT tiles the pool instead: at 2 icons, five party frames take 1-2, 3-4, 5-6, 7-8,
+-- 9-10 — the whole pool on screen at once, nothing repeated. A fixed prime was tried
+-- first and measured worse (8 of 10 entries, 2 repeats), because coprime-ness spreads
+-- the STARTS without stopping the windows overlapping.
+--
+-- The fallback matters though: stepping by the count degenerates when the count divides
+-- the pool too evenly — at 5 icons over 10 entries the offsets are 0,5,0,5,0 and every
+-- other frame is identical, which is the exact complaint this is fixing. distinct starts
+-- = poolSize / gcd(step, poolSize), so when that drops below 4 fall back to 7, which is
+-- coprime with both live pool sizes (10 rows, 4 defensives) and therefore always spreads.
+--
+-- ⚠ NEVER rotates config.testEntries. Those are the Aura Designer's OWN configured
+-- spells for that indicator, not a sample pool — rotating them would preview a spell
+-- the user did not choose.
+local function gcd(a, b)
+    while b ~= 0 do a, b = b, a % b end
+    return a
+end
+
+local function testPoolOffset(config, poolSize, count)
+    if config.testEntries or not poolSize or poolSize < 2 then return 0 end
+    local u = config.unit
+    if type(u) ~= "string" then return 0 end
+    local n = tonumber(u:match("(%d+)$")) or 0   -- "player" has none -> 0
+    local step = math.max(1, count or 1)
+    -- ☠ SCRAMBLE THE SLOT, DO NOT WALK IT. When the count divides the pool the windows
+    -- tile into `slots` disjoint runs, and handing them out as (n * step) makes the offset
+    -- PERIODIC IN n with period `slots`. Raid frames lay out 5 across, so with 5 slots
+    -- every unit in a column drew the identical window — Krathe: "there is still entire
+    -- columns that carry each type". The same periodicity lit two ADJACENT party frames
+    -- instead of three spread out.
+    -- Walking the slots by (slots - 1) is coprime with `slots` at any size, so it still
+    -- visits every slot exactly once; the floor(n / slots) term shifts each row so the
+    -- sequence stops aligning with the grid. Offsets stay on the same disjoint runs, so
+    -- the dispel density that rides on that tiling is unchanged.
+    if poolSize % step == 0 and (poolSize / step) >= 2 then
+        local slots = poolSize / step
+        return (((n * (slots - 1)) + math.floor(n / slots)) % slots) * step
+    end
+    if poolSize / gcd(step, poolSize) < 4 then step = 7 end
+    return (n * step) % poolSize
 end
 
 local Handle = {}
@@ -2418,8 +2929,21 @@ function Handle:_slotCount()
     if mode == "overlay" or mode == "missing" then return 1 end
     -- Test mode: the preview honours the test panel's count slider (config.testMax),
     -- still capped by the row's own max — mirrors the legacy painter's min() chain.
-    if AuraContainer._testMode and self.config.testMax then
-        return math.min(self.config.testMax, self.config.max or self.config.testMax)
+    --
+    -- ☠ AND BY THE CURATED POOL. The preview paints one distinct sample per slot, so
+    -- asking for more slots than the pool holds cannot produce more distinct icons —
+    -- it can only repeat, and repeats read as a rendering bug rather than as "we ran
+    -- out of samples". The defensive pool holds FOUR entries against a row that
+    -- happily previews eight or more; the debuff pool holds ten against an eleven-icon
+    -- row, whose last slot landed back on entry 1 and duplicated the styled slot.
+    -- Confirmed from the debug log 2026-08-06: idx=11 over a 10-entry debuff pool, and
+    -- the defensive pool cycling 1-4 across ten indices.
+    --
+    -- Capping HERE rather than clamping only in the painter is what actually fixes it:
+    -- the count decides how many buttons the flow lays out, so an uncapped count draws
+    -- duplicate icons no matter what the painter does with the index.
+    if AuraContainer._testMode then
+        return testSlotCount(self.config, testPoolFor(self.config))
     end
     return self.config.max or 1
 end
@@ -2555,6 +3079,42 @@ local function armTestDuration(handle, slot, d, offset)
     return ok
 end
 
+-- ★ PANDEMIC PREVIEW. Live, AddPandemicRegion binds the holder and the ENGINE shows it
+-- inside the refresh window. A test slot paints instead of binding, so nothing drives
+-- it — and simply showing it (07804854) is not a preview of a duration cue, it is a
+-- permanent border on every previewed icon, which is what it turned out to be.
+--
+-- So drive it from the SAME fake duration everything else in the preview runs on: open
+-- the window near the end of the cycle, close it when the cycle re-arms. The cue then
+-- blinks in and out where a real refresh window sits, and a user can see and style it.
+--
+-- ⚠ THE FRACTION IS A PREVIEW CONVENTION, NOT THE GAME'S RULE. Live's window is
+-- "a refresh would clip nothing", computed engine-side from the aura's own base
+-- duration — DF never sees it and must never pretend to. 0.7 is chosen only because
+-- the classic pandemic window is the last 30% of a buff, so the preview lands where a
+-- user expects to see it. Do not wire a setting to this: it is not a threshold the
+-- user owns. (Audit follow-up, 2026-08-07.)
+local PANDEMIC_PREVIEW_OPEN_AT = 0.7
+
+-- `elapsed` is how far into the cycle we already are (armTestDuration starts the
+-- duration in the past by the per-slot stagger), so the first window lands in phase
+-- with the bar and swipe instead of a full cycle late.
+local function armTestPandemicWindow(handle, slot, d, gen, elapsed)
+    local holder = slot.dfPandemicHolder
+    if not holder then return end
+    holder:Hide()
+    if not (d and d > 0) then return end
+    local openIn = d * PANDEMIC_PREVIEW_OPEN_AT - (elapsed or 0)
+    if openIn <= 0 then holder:Show() return end
+    C_Timer.After(openIn, function()
+        -- Same gen guard as the re-arm: a repaint or teardown must not leave a stale
+        -- closure showing the cue on a slot that has moved on.
+        if handle._destroyed or slot._dfTestGen ~= gen then return end
+        if not AuraContainer._testMode then return end
+        holder:Show()
+    end)
+end
+
 -- One re-arm per aura cycle, scheduled exactly at expiry — no polling. Mutating the
 -- shared duration restarts bar, swipe and text together (proven in the lab), so this
 -- is the ONLY Lua the native preview costs. `gen` invalidates pending re-arms across
@@ -2564,7 +3124,11 @@ local function scheduleTestRearm(handle, slot, d, gen, delay)
         if handle._destroyed or slot._dfTestGen ~= gen then return end
         if not AuraContainer._testMode or not slot._dfTestDurObj then return end
         local ok = pcall(function() slot._dfTestDurObj:SetTimeFromStart(GetTime(), d) end)
-        if ok then scheduleTestRearm(handle, slot, d, gen, d) end
+        if ok then
+            -- The cycle restarted, so the refresh window closed with it.
+            armTestPandemicWindow(handle, slot, d, gen, 0)
+            scheduleTestRearm(handle, slot, d, gen, d)
+        end
     end)
 end
 
@@ -2574,19 +3138,23 @@ end
 -- rows page through the debuff pool (dispel-typed edges), everything else the
 -- buff pool. Regions are unbound in test mode, so their Shown state is OURS here.
 function Handle:_paintTestSlot(slot, index)
-    local recs = normalizeFilters(self.config.filter)
-    local harmful = recs[1] and recs[1].f:find("HARMFUL")
-    local td = DF.TestData
-    -- config.testEntries carries per-container curated entries (the Aura
-    -- Designer's placed indicators preview their own configured spell);
-    -- config.testPool names a curated TestData pool for rows whose category
-    -- filter alone would mispreview (the defensive row is HELPFUL but must show
-    -- defensives, not raid buffs). Falls back to the category pools.
-    local pool = self.config.testEntries
-        or (td and ((self.config.testPool and td[self.config.testPool])
-        or (harmful and td.debuffs or td.buffs)))
+    local pool = testPoolFor(self.config)
     if not pool or #pool == 0 then return end
-    local e = pool[((index - 1) % #pool) + 1]
+    -- ☠ CLAMP, DO NOT WRAP. This was `((index - 1) % #pool) + 1`, which silently
+    -- recycled the pool once the preview asked for more icons than it holds — the
+    -- defensive pool has FOUR entries against a row that previews eight or more, so
+    -- every icon past the fourth was a repeat, and an 11-icon debuff row wrapped its
+    -- last slot back onto entry 1, duplicating whatever the styled slot was already
+    -- showing. _slotCount caps the preview to the pool now, so an out-of-range index
+    -- should be unreachable; clamping rather than wrapping means that if one ever does
+    -- arrive it repeats the LAST entry visibly instead of impersonating the first.
+    -- Clamp FIRST, then rotate: the clamp is the out-of-range defence above, and the
+    -- rotation only moves where the pool starts for this frame. Composing them this way
+    -- keeps entries distinct within a container (guaranteed while _slotCount caps the
+    -- count to #pool) while differing between containers.
+    local idx = math.max(1, math.min(index, #pool))
+    local off = testPoolOffset(self.config, #pool, testSlotCount(self.config, pool))
+    local e = pool[((off + idx - 1) % #pool) + 1]
     -- Belt-and-braces: native hover must NEVER win in test mode (it tooltips the
     -- hidden SAMPLE aura). Re-asserted every paint pass, not just at creation.
     if slot.SetMouseMotionEnabled then pcall(function() slot:SetMouseMotionEnabled(false) end) end
@@ -2671,11 +3239,17 @@ function Handle:_paintTestSlot(slot, index)
                 slot._dfTestText, slot._dfTestTextAt = nil, nil
                 slot._dfTestTimed = true
                 nativeBar = slot.dfBar and true or false
+                armTestPandemicWindow(self, slot, d, slot._dfTestGen, offset)
                 scheduleTestRearm(self, slot, d, slot._dfTestGen, d - offset)
             else
                 -- FALLBACK (no C_DurationUtil / a setter threw): the faked ticker path.
                 slot._dfTestDur = d
                 slot._dfTestExpiry = GetTime() + (d - offset)
+                -- The pandemic window is pure timing, so it works on this path too --
+                -- it never touched the duration object. Only the first cycle, though:
+                -- this lane has no re-arm hook, so the cue opens once and stays. Better
+                -- than never showing it, and the native lane above is the real path.
+                armTestPandemicWindow(self, slot, d, slot._dfTestGen, offset)
                 if slot.dfCD and slot.dfCD.SetCooldown then
                     slot.dfCD:SetCooldown(GetTime() - offset, d)
                 end
@@ -2785,7 +3359,15 @@ function Handle:_paintTestSlot(slot, index)
     -- LAST in the paint so any residual error can't take other art down.
     -- Index-keyed + handle-owned: rebuilds reposition instead of leaking;
     -- _teardownContainer hides the lot. Clicks pass through.
-    if self.config.tooltips == true then
+    -- ☠ CONTAINER-ONLY BLOCK, AND THE GUARD IS self.frame, NOT the tooltips flag.
+    -- Everything below needs a REAL handle: self.frame to parent and level the hover
+    -- frame against, and self:_positionTestTip (which in turn calls self:_slotCount).
+    -- The duck-typed preview handle from PaintPreviewSlot has none of them — see
+    -- testPoolFor. Today's preview configs never set `tooltips`, so this is unreachable
+    -- from that path; the guard is here so ADDING the key is a no-op rather than three
+    -- nil-value errors, which is exactly how the `_testPool` extraction broke opening
+    -- the Aura Designer. The canvas does its own hover handling, so skipping is right.
+    if self.config.tooltips == true and self.frame then
         self._testTips = self._testTips or {}
         local tip = self._testTips[index]
         if not tip then
@@ -3069,6 +3651,32 @@ end
 function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart)
     local handle = self
     local seq = seqStart
+    -- ☠ THE CONTAINER'S BUILD-TIME SHAPE, CAPTURED HERE — never the live global.
+    --
+    -- build() picks its SHAPE from AuraContainer._testMode: a test container declares
+    -- dfTestStyled/dfTestPlain and skips the real filter loop, and groups can never be
+    -- removed, so that shape is fixed for the container's whole life. This closure used
+    -- to decide paint-vs-bind by reading the GLOBAL again -- but buttons are created in
+    -- LAZY BATCHES long after build (AddAuraGroup allocates FrameCreationBatchSize at a
+    -- time, and more arrive on later aura events). Any test transition between build and
+    -- a batch firing flipped the branch underneath a container that cannot change shape.
+    --
+    -- The failure would be one-directional and silent: a test-shaped container whose
+    -- later batches land while the global reads false would run _bindNativeSlot, and
+    -- Blizzard's SetIcon would repaint the curated art with the hidden SAMPLE aura's.
+    --
+    -- ⚠ THEORETICAL, and honestly so. This was written as the fix for the 2026-08-06
+    -- repeated-icon report and it was NOT the cause: the debug log for that session has
+    -- 195 creates with shape=true global=true and 225 with shape=false global=false --
+    -- they agreed every single time. The real cause was the preview asking for more
+    -- slots than the curated pool holds (see Handle:_slotCount). Kept because reading a
+    -- mutable global to decide something the container fixed at build time is wrong
+    -- regardless, but do not cite it as a fixed bug.
+    --
+    -- Captured, not read through handle.backend at call time: a re-adopted park swaps
+    -- the backend out from under closures that belong to a different container.
+    local testShape = self.backend and self.backend.builtInTestMode
+    if testShape == nil then testShape = AuraContainer._testMode end
     return function(button)
         local ok, err = pcall(function()
             if handle._destroyed or handle._gen ~= gen or not button then return end
@@ -3097,8 +3705,14 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
                 -- recStyle is stashed on the button by _acceptSlot and re-applied by it
                 -- on every later restyle, so the override is not lost the moment
                 -- anything else re-styles the row.
+                -- (Removed) a button._dfTestSlot stamp read by styleButton_regions to
+                -- force the Pandemic cue visible on preview slots. Its one consumer is
+                -- gone — see the Pandemic block in styleButton_regions for why a
+                -- permanently-shown duration cue is not a preview of one. Re-add it if
+                -- that cue is ever driven properly from armTestDuration; nothing else
+                -- wanted it.
                 handle:_acceptSlot(button, i, recStyle)   -- size + regions + per-group overrides
-                if AuraContainer._testMode then
+                if testShape then
                     -- P5 hybrid preview: the sample provider drives presence and the
                     -- real flow drives geometry, but the sample auras' own data is
                     -- never shown — no native binds; paint the curated pool instead.
@@ -3134,6 +3748,10 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
 end
 
 function Handle:GetFrame() return self.frame end
+-- The legal target for a tainted alpha write. For a per-indicator container that is its
+-- own plain anchor frame, which DF created and owns. See SlotHandle:GetAlphaHost for why
+-- this is asked for separately from GetFrame rather than being assumed the same object.
+function Handle:GetAlphaHost() return self.frame end
 -- OVERLAY mode only: the live native slot buttons, keyed by the filter record's key
 -- (positional "df<i>" when unkeyed). Consumers decorate these directly (build DF art
 -- on them, register native SetAuraBorder regions). EMPTY until a native build lands
@@ -3432,7 +4050,13 @@ function Handle:ApplyStyle(style, layout)
             -- was always downstream, never in the style itself.
             applyRecordStyle(b, self, b.dfImpRecStyle)
             if native then
-                if AuraContainer._testMode then
+                -- ☠ BUILD-TIME SHAPE, not the live global — same reason as
+                -- _makeInitializeFrame. A test-shaped container restyled while the global
+                -- reads false would bind the native setters onto preview buttons, and
+                -- Blizzard's SetIcon then repaints the curated art with the hidden sample
+                -- aura's. A container cannot change shape (groups are add-only), so the
+                -- shape it was BUILT with is the only correct answer here.
+                if (self.backend and self.backend.builtInTestMode) then
                     -- TEST MODE: re-PAINT, never bind. Binding here was the P5
                     -- preview killer: any settings refresh re-ran this loop and
                     -- registered the native setters on the preview buttons, so
@@ -3457,8 +4081,17 @@ function Handle:ApplyStyle(style, layout)
 end
 
 -- Structural filter change -> full rebuild (can't mutate a live filter set safely).
+-- ☠ PARKING-UNSAFE BY CONSTRUCTION, so it opts out. This changes the filter set
+-- WITHOUT going through a consumer's structural signature, so _structKey no longer
+-- describes this handle's structure: parking the outgoing container would file it under
+-- a key that has just stopped being true, and a later Rebuild presenting that key would
+-- re-adopt a container built for a different filter set. Dropping the key disables both
+-- halves (no park, no re-adopt) and releasing any existing park stops a stale one being
+-- matched later. Zero callers today -- this is a guard for the next one.
 function Handle:SetFilter(filter)
     self.config.filter = filter
+    self._structKey = nil
+    self:_releaseParked()
     self:_rebuild()
 end
 
@@ -3471,10 +4104,16 @@ end
 -- max-duration filter / sort / blacklist stayed declared on every later rebuild
 -- (the "toggle does nothing until /reload" bug — candidateFilters survived OFF).
 -- A caller with a genuine partial delta must merge into handle.config itself.
-function Handle:Rebuild(config)
+-- structKey (optional): the CONSUMER's structural signature for this config -- the exact
+-- string whose change is what made this a Rebuild rather than an ApplyTuning/ApplyStyle.
+-- Supplying it enables container parking (see Handle:_parkContainer): the outgoing
+-- container is kept quiesced and re-adopted if a later rebuild presents the same key,
+-- instead of being stranded for the session. Omit it and behaviour is exactly as before.
+function Handle:Rebuild(config, structKey)
     if type(config) == "table" then
         self.config = config
     end
+    if structKey ~= nil then self._structKey = structKey end
     self:_rebuild()
 end
 
@@ -3500,6 +4139,15 @@ function Handle:ApplyTuning(tuning)
         self.config.max = tuning.max
         self.config.sort = tuning.sort
         self.config.candidateFilters = tuning.candidateFilters
+        -- ★ FILTER STRINGS (2026-08-04). applyGroupTuning re-derives records from
+        -- config.filter, so the fresh strings have to land here or the push is a
+        -- no-op. This SUPERSEDES the manual pre-swap the debuff-group consumer
+        -- does (Factory.lua) — that assignment is now redundant, not wrong.
+        -- ☠ nil does NOT clear, unlike the three above. normalizeFilters falls back
+        -- to a bare "HELPFUL" record when config.filter is nil, so a caller passing
+        -- a partial tuning table would silently turn a debuff row into a buff row.
+        -- Only assign what was actually supplied.
+        if tuning.filter ~= nil then self.config.filter = tuning.filter end
     end
     -- Test mode: the preview's per-slot pin groups can't be tuned in place
     -- (maxFrameCount = 1 by design) — rebuild so the preview honours the new cap.
@@ -3565,8 +4213,19 @@ end
 
 -- Tear down the (secure) container + buttons. Combat-unsafe on its own, so callers
 -- gate it (Destroy defers this to regen in combat).
-function Handle:_teardownContainer()
-    if self.backend then self.backend:teardown(); self.backend = nil end
+-- park = true: quiesce for re-adoption rather than discard (Handle:_parkContainer).
+-- Everything that must stop regardless still stops -- the border animation drivers and
+-- the test duration bindings both tick from OUTSIDE the container subtree, so a parked
+-- container that skipped them would keep them running against hidden textures, which is
+-- the exact bug the driver-stop chokepoint below exists to prevent. What park skips is
+-- only the DISCARD half: the button cache and the slot counter survive, because the
+-- re-adopted container still owns those very buttons and the counter still indexes the
+-- lazily-created batches correctly.
+function Handle:_teardownContainer(park)
+    if self.backend then
+        self.backend:teardown(park)
+        if not park then self.backend = nil end
+    end
     -- Stop each slot border's animation BEFORE dropping the slot refs. Slot
     -- borders are secretRect widgets whose OnUpdate motion driver is hosted on
     -- UIParent (the aura-button subtree disables OnUpdate through descendants),
@@ -3590,8 +4249,10 @@ function Handle:_teardownContainer()
         end
         if slot then slot._dfTestGen = (slot._dfTestGen or 0) + 1 end
     end
-    wipe(self.buttons)
-    self._slotCounter = 0   -- restart the lazy-batch index for the next build
+    if not park then
+        wipe(self.buttons)
+        self._slotCounter = 0   -- restart the lazy-batch index for the next build
+    end
     -- Test-mode hover tips are handle-owned (anchored over the dying buttons):
     -- hide the lot; a test build re-anchors/re-shows the ones it needs.
     if self._testTips then
@@ -3624,13 +4285,153 @@ function Handle:Destroy()
     self._pendingRestyle = nil
     self._pendingTuning = nil
     self:_teardownContainer()
+    self:_releaseParked()
+end
+
+-- Discard the parked container for real. A park is only ever reachable through its
+-- handle, so any path that retires the handle must call this or the park becomes the
+-- very leak parking exists to stop. Both destroy routes use it: Handle:Destroy out of
+-- combat, and the regen handler's deferred "destroy" op.
+function Handle:_releaseParked()
+    local p = self._parked
+    if not p then return end
+    self._parked = nil
+    if p.backend then pcall(function() p.backend:teardown(false) end) end
+end
+
+-- ============================================================
+-- CONTAINER PARKING
+-- ============================================================
+-- WoW never frees a frame. Every structural rebuild used to strand its whole container
+-- -- and, since the release call below is unverified, potentially every button it ever
+-- created (AddAuraGroup allocates in batches of FrameCreationBatchSize) -- permanently,
+-- for the session. That is invisible in a set-and-forget profile and unbounded for
+-- anyone whose config churns: AutoProfiles flipping on zone/combat transitions, preset
+-- toggling in the Designer, profile switching.
+--
+-- Parking keeps ONE quiesced container per handle, keyed by the consumer's own
+-- structural signature. A rebuild whose key matches re-adopts it instead of building
+-- fresh, so A -> B -> A costs one container total rather than three.
+--
+-- ☠ WHY THE CONSUMER'S KEY AND NOT ONE DERIVED HERE. The engine could hash its own
+-- config, but "everything :build() reads" is a moving target and a key that misses a
+-- field re-adopts a subtly WRONG container -- silent, and exactly the bug class this
+-- file has shipped before. The consumers already maintain exact structural sigs
+-- (rowStructSig, placedStructSig, ...) whose entire definition is "changing this needs
+-- a new container". That is the parking key, by construction. No key supplied = no
+-- parking, so an unwired call site keeps today's behaviour exactly.
+--
+-- ⚠ NEVER parks in test mode: the preview declares a completely different group
+-- topology (per-slot groups, fabricated unit), so a live container and a preview
+-- container can share a structural key while being structurally unrelated.
+function Handle:_parkContainer()
+    local be = self.backend
+    if not (be and be.container) then return false end
+    -- ☠ The key the OUTGOING container was BUILT with (backend.structKey), never
+    -- self._structKey -- Rebuild has already overwritten that with the incoming key.
+    local key = be.structKey
+    if type(key) ~= "string" or key == "" then return false end
+    -- Never park a PREVIEW container: its group topology (one group per slot, fabricated
+    -- unit) is unrelated to a live container that could share the same structural key.
+    -- A live container retired by the enter-preview rebuild is still parked, because
+    -- builtInTestMode records how THAT container was built, not where we are now.
+    if be.builtInTestMode then return false end
+
+    -- Only one park per handle. An existing park with a different key is discarded for
+    -- real -- it was already stranded before this feature existed, so nothing regresses.
+    local old = self._parked
+    if old and old.backend and old.backend ~= be then
+        pcall(function() old.backend:teardown(false) end)
+    end
+
+    local buttons = {}
+    for i, slot in pairs(self.buttons) do buttons[i] = slot end
+    self._parked = {
+        key         = key,
+        backend     = be,
+        buttons     = buttons,
+        gen         = self._gen,
+        slotCounter = self._slotCounter,
+        flowAnchor  = self._flowAnchor,
+        flowPadY    = self._flowPadY,
+    }
+    self:_teardownContainer(true)
+    self.backend = nil          -- detached; the park holds the only reference now
+    wipe(self.buttons)
+    return true
+end
+
+-- Re-adopt a parked container whose structural key matches this build. Returns true if
+-- the caller should SKIP the normal build entirely.
+--
+-- Re-arm order mirrors :build()'s proven order exactly -- deafen, anchor, SetUnit,
+-- Show, SetEnabled LAST -- because the same reasoning applies: SetEnabled gates aura
+-- event registration on IsVisible() and IsEnabled(), so enabling before the container
+-- is shown and pointed at a unit leaves the row rendered once and permanently stale.
+function Handle:_readoptParked()
+    local p = self._parked
+    if not p then return false end
+    if AuraContainer._testMode then return false end
+    if InCombatLockdown() then return false end
+    if type(self._structKey) ~= "string" or self._structKey == "" then return false end
+    if p.key ~= self._structKey then return false end
+    local be = p.backend
+    local c  = be and be.container
+    if not c then self._parked = nil; return false end
+
+    self._parked = nil
+    self.backend      = be
+    self._gen         = p.gen           -- ☠ RESTORE, never bump: see _genCounter in :build()
+    self._slotCounter = p.slotCounter or 0
+    self._flowAnchor  = p.flowAnchor
+    self._flowPadY    = p.flowPadY
+    wipe(self.buttons)
+    for i, slot in pairs(p.buttons) do self.buttons[i] = slot end
+
+    local config = self.config
+    -- Re-applied per adoption for the same reason :build() re-applies it per build --
+    -- the deafening lives on the container object and a park does not preserve intent.
+    setContainerProviderDeaf(c, not AuraContainer._testMode)
+
+    if config.mode == "overlay" then
+        pcall(function() c:SetAllPoints(self.frame) end)
+    elseif config.mode == "missing" then
+        pcall(function()
+            c:ClearAllPoints()
+            c:SetPoint("TOPRIGHT", self.frame, "TOPLEFT", -MISSING_PAD, 0)
+        end)
+    else
+        applyContainerLayout(c, self)
+    end
+
+    local unit = config.unit
+    if type(unit) == "string" then pcall(function() c:SetUnit(unit) end) end
+    -- ☠ The parked container's last identity-gate verdict was computed for whatever
+    -- unit it held when it was parked. :build ends with this for the same reason, and
+    -- Handle:SetUnit re-runs it with the note "the last gate verdict was for the OLD
+    -- unit". Re-adoption writes the unit directly (not via SetUnit), so without this a
+    -- re-adopted container carries a stale verdict until the next idGateWatch sweep --
+    -- i.e. it can fail open on a unit whose auras should be gated.
+    self:_applyIdentityGate()
+    pcall(function() c:Show() end)
+    pcall(function() c:SetEnabled(config.enabled ~= false) end)
+
+    AuraContainer.stats.readopts = (AuraContainer.stats.readopts or 0) + 1
+
+    -- The key pins only what is STRUCTURAL. Everything else -- max, sort,
+    -- candidateFilters, filter strings, and every cosmetic -- may differ from when this
+    -- container was parked, so both live-apply passes run now. Tuning before style:
+    -- population first, cosmetics second (same order as the regen flush).
+    if be.applyGroupTuning then pcall(function() be:applyGroupTuning() end) end
+    self:ApplyStyle()
+    return true
 end
 
 -- Rebuild the container from scratch (structural changes). Combat-guarded.
 function Handle:_rebuild()
     if self._destroyed then return end
     if InCombatLockdown() then self:_deferRebuild(); return end
-    self:_teardownContainer()
+    if not self:_parkContainer() then self:_teardownContainer() end
     self:_build()
 end
 
@@ -3654,6 +4455,7 @@ function Handle:_registerRegen()
                 -- pcall each handle's op so one failure can't strand the rest.
                 if op == "destroy" then
                     pcall(function() h:_teardownContainer() end)
+                    pcall(function() h:_releaseParked() end)
                 elseif not h._destroyed then
                     if op then
                         pcall(function()
@@ -3772,8 +4574,13 @@ end
 function Handle:_build()
     self:_applyZOrder()        -- level/strata track config changes across Rebuild
     self:_ppPrepare()          -- pp flag + quantized layout BEFORE any geometry runs
-    self.backend = NativeBackend.new(self)
-    self.backend:build()
+    -- A structurally identical container may already be parked from an earlier rebuild
+    -- (profile swap, preset toggle, AutoProfiles transition). Re-adopting it skips the
+    -- CreateFrame, every AddAuraGroup and the whole lazy button batch.
+    if not self:_readoptParked() then
+        self.backend = NativeBackend.new(self)
+        self.backend:build()
+    end
     self:_updateDynRefresh()   -- auto-bounce on target/focus/mouseover change
 end
 
@@ -4097,6 +4904,639 @@ end
 --                                                     -- a SetTooltipAnchorPoint name; live mixin
 --                                                     -- state, restyles in place (no Rebuild).
 -- }
+-- ============================================================
+-- SLOT OWNER — one shared container per unit frame  (collapse S1)
+-- ============================================================
+-- ☠ ADDITIVE AND UNUSED. Nothing calls this yet; S2 moves the Aura Designer's placed
+-- indicators onto it. Landing it alone keeps the diff reviewable and testable.
+--
+-- WHY. Every AD indicator sets singleSlot, so today each one gets a WHOLE AuraContainer
+-- holding exactly ONE AddAuraSlot = one button. Measured across the 18 Create call sites
+-- that is ~130 containers per unit frame worst case, ~5,200 in a 40-man, uncapped -- an
+-- order of magnitude above what a fixed, enumerated set of slots would cost. WoW never
+-- frees a frame and teardown cannot release buttons (RemoveAllAuraFrames does not exist
+-- -- zero hits at 69111), so every structural edit strands the lot for the session.
+--
+-- One container per unit frame, one slot per indicator, instead.
+--
+-- ☠ WHY A NEW SLOT PER STRUCTURE, NOT A MUTATED ONE. A slot's regions are built in its
+-- initializeFrame, which is frozen at AddAuraSlot and only ever runs at button creation.
+-- So a structural change cannot mutate a slot -- it declares a NEW one (keyed by the
+-- consumer's struct sig) and PARKS the old. That costs ONE button where today it costs a
+-- container plus a button, and revisiting an earlier structure re-adopts the parked slot
+-- by key. Declare-a-new-variant-and-park-the-old is the standard shape for this under an
+-- add-only topology; there is no other correct one.
+--
+-- ☠ PARKING IS THE WHOLE MECHANISM, and it is why this could not be built before now.
+-- AddAuraSlot is add-only -- Blizzard's ClearAuraGroups is "intentionally not exposed via
+-- the inbound interface" because pooled frames would become irrecoverable -- and slots
+-- have no maxFrameCount. That SetAuraSlotFilterString(key, "") empties a slot is not
+-- determinable from the Lua source -- AuraUtil.IsValidFilterString("") returns true
+-- because every component is skipped, but what the engine does with an empty predicate is
+-- invisible. Proved in game with /alpark on 2026-08-05: it matches nothing (it does NOT
+-- fall back to a default), and a bare re-Set restores it live.
+--
+-- ★ Z-ORDER: the dfLevelHost. Sharing a container means sharing its frame level, but AD
+-- indicators need independent layering. Writing the level on the slot BUTTON is legal
+-- only inside initializeFrame (pre-seal), which would freeze it permanently. So each slot
+-- gets a DF-owned child frame between the button and our regions:
+--     slot button (sealed, never re-levelled)  ->  dfLevelHost (ours, levelled LIVE)
+-- Regions must stay DESCENDANTS of the button (ValidateInboundScriptObject errors
+-- otherwise) and an interposed child frame satisfies that while staying levellable.
+--
+-- ⚠ Not handled in S1, by design: the identity gate (per-owner now, not per-handle),
+-- test-mode frames (refused outright -- the preview declares its own topology), and
+-- consumer styling, which stays with the caller via GetButton/GetLevelHost.
+
+local SlotHandle = {}
+SlotHandle.__index = SlotHandle
+
+-- Every slot's regions hang off this, so the consumer can re-level live without ever
+-- touching the sealed button. Created inside initializeFrame -- the only window in which
+-- a tainted write to an aura button is legal.
+-- ☠ POSITION IS THE CONSUMER'S, NOT THE FLOW'S. Slots take no part in dynamic layout
+-- ("they do not take part in dynamic layout and must be manually anchored"), and with a
+-- SHARED container there is no longer a per-indicator container whose own anchoring did
+-- this job. Without it every slot lands on the shared container's corner, stacked on top
+-- of one another -- which reads as "an indicator stopped rendering" when it is really
+-- underneath its neighbour.
+--
+-- Applied at creation AND on every restyle: anchor/offset/scale are cosmetic (a drag
+-- updates them live today), so freezing them at creation would be a regression.
+-- ⚠ pcall'd: this is a tainted write to a button that carries
+-- DenyTaintedAccessWhenAurasAreSecret, so a live re-anchor can be refused while auras are
+-- secret. It re-applies on the next unrestricted restyle, which is the same contract
+-- Handle:ApplyStyle already lives under.
+local function layoutSlotButton(button, config, ownerAnchor)
+    local L = config and config.layout
+    if not (button and L and ownerAnchor) then return end
+    local point = (type(L.anchor) == "string" and L.anchor) or "TOPLEFT"
+    pcall(button.ClearAllPoints, button)
+    pcall(button.SetPoint, button, point, ownerAnchor, point, L.offsetX or 0, L.offsetY or 0)
+    if L.scale then pcall(button.SetScale, button, L.scale) end
+end
+
+-- ★ LEVEL host AND ALPHA host. styleButton_regions parents every region it creates onto
+-- this frame (see the `host` local at its top), which is what lets a slot take a tainted
+-- SetAlpha: the button refuses one, a DF-owned child frame does not.
+--
+-- ☠ THE EXPLICIT SetFrameLevel IS NOT COSMETIC — WITHOUT IT EVERY SLOT SHIFTS A LEVEL.
+-- A new child frame defaults to its parent's level + 1. Interposing this host would
+-- therefore push all of a slot's content up one level relative to everything else on the
+-- frame, and AD levels are ABSOLUTE (the z-order map: a row is 13 levels thick, measured)
+-- — a uniform +1 walks a slot's content into the next band. Pinning the host to the
+-- BUTTON's own level keeps every offset below it arithmetically identical to when the
+-- regions hung off the button directly: makeHolder(host, n) resolves to the same level
+-- makeHolder(button, n) did, and dfCD lands at button+1 exactly as before. Nothing is
+-- left on the button to compete for draw order, so relative ordering is preserved whole.
+-- ⚠ CALL AFTER ANY SetFrameLevel ON THE BUTTON. The host tracks the button's level, so
+-- pinning it while the button is still at its default and only then applying
+-- config.frameLevelOffset would strand the host — and every region on it — a band below
+-- where the consumer asked the slot to sit. Idempotent, so calling it twice is free.
+local function syncSlotHostLevel(button, host)
+    if not host then return end
+    local okLvl, lvl = pcall(button.GetFrameLevel, button)
+    if okLvl and type(lvl) == "number" then pcall(host.SetFrameLevel, host, lvl) end
+end
+
+local function makeSlotLevelHost(button)
+    local ok, host = pcall(CreateFrame, "Frame", nil, button)
+    if not ok or not host then return nil end
+    pcall(host.SetAllPoints, host, button)
+    syncSlotHostLevel(button, host)
+    return host
+end
+
+-- Slots per frame at which the add-only growth stops looking like normal use. A busy
+-- Aura Designer profile lands well under this; a slider drag blows straight through it.
+local SLOT_OWNER_WARN_AT = 48
+
+local function ownerOf(frame)
+    return frame and frame.dfSlotOwner or nil
+end
+
+-- Lazily stand up the per-frame owner. Build order mirrors NativeBackend:build exactly --
+-- create -> anchor -> SetUnit -> (slots) -> SetEnabled -- because the same rules bite:
+-- SetEnabled gates event registration on IsVisible() and IsEnabled(), and anchoring must
+-- precede the first Add* since that stamps UntrustedLayoutScriptExecution on the
+-- container, which propagates to anything anchored to it and cannot be conferred later.
+local function ensureOwner(frame, unit)
+    local owner = ownerOf(frame)
+    if owner then return owner end
+    if not AuraContainer.IsSupported() then return nil end
+    -- Container creation is combat-gated everywhere else in this file; do not diverge.
+    if InCombatLockdown() then return nil end
+
+    local anchor = CreateFrame("Frame", nil, frame)
+    anchor:SetAllPoints(frame)
+
+    local ok, c = pcall(CreateFrame, "AuraContainer", nil, anchor, "CustomAuraContainerTemplate")
+    if not ok or not c then
+        DF:DebugWarn(DBG, "SlotOwner: CreateFrame(AuraContainer) failed: %s", tostring(c))
+        return nil
+    end
+    setContainerProviderDeaf(c, not AuraContainer._testMode)
+    pcall(c.SetAllPoints, c, anchor)
+    if type(unit) == "string" then pcall(c.SetUnit, c, unit) end
+
+    owner = { frame = frame, anchor = anchor, container = c, unit = unit, slots = {}, seq = 0 }
+    frame.dfSlotOwner = owner
+    AuraContainer.stats.slotOwners = (AuraContainer.stats.slotOwners or 0) + 1
+    return owner
+end
+
+-- Acquire (or re-adopt) the slot for `slotKey` on `frame`'s shared owner.
+--
+-- slotKey MUST encode the consumer's structural signature -- "indicatorKey:structSig" --
+-- because a slot's regions are frozen at creation. Same key = same structure = safe to
+-- re-adopt; different structure = different key = a new slot and the old one parked.
+--
+-- spec: { unit, filter, candidateFilters, sortMethod, sortDirection, onInit, config }
+--   config -- a normal container config ({ mode, layout, style, tooltips,
+--     frameLevelOffset, frameStrata, ... }). When given, the slot reuses the ENGINE's own
+--     region pipeline: styleButton_regions + bindNative at create, styleButton_regions
+--     again on ApplyStyle. ☠ This is the seam that makes the collapse possible at all --
+--     consumers like the Aura Designer hand the engine a config and own no rendering
+--     code of their own, so a slot path that could not run that pipeline would have to
+--     reimplement every region, and would drift.
+--   onInit(button, levelHost) runs inside initializeFrame after the pipeline, for
+--     anything the consumer wants to add itself.
+--
+-- ☠ FRAME LEVEL IS SET ON THE BUTTON, INSIDE initializeFrame, and that is correct rather
+-- than a compromise. Buttons on a shared container all sit at container level + 1, so
+-- per-slot layering has to come from somewhere; writing it on the button is legal only
+-- pre-seal, which freezes it. That costs nothing here because level is ALREADY structural
+-- for every consumer of this path (placedStructSig carries `fl=`/`fs=`), so a level change
+-- already produces a new struct sig -> a new slot key -> a new button -> the new level.
+-- Behaviour is identical to today. (dfLevelHost stays available for a future consumer
+-- that wants level to become live, which would need regions reparented onto it.)
+--
+-- Returns a SlotHandle, or nil if unsupported / in combat with no owner yet / test frame.
+function AuraContainer:AcquireSlot(frame, slotKey, spec)
+    if type(slotKey) ~= "string" or slotKey == "" or type(spec) ~= "table" then return nil end
+    if not frame then return nil end
+    -- The preview declares a wholly different topology (per-slot groups, fabricated
+    -- unit); a shared owner has no business serving it. Test frames keep the old path.
+    if frame.dfIsTestFrame or AuraContainer._testMode then return nil end
+
+    local owner = ensureOwner(frame, spec.unit)
+    if not owner then return nil end
+
+    local existing = owner.slots[slotKey]
+    if existing then
+        -- ☠ RE-ADOPTION MUST TAKE THE FRESH SPEC, not just un-park. The key pins only
+        -- what is STRUCTURAL; everything else — filter, candidateFilters, and every
+        -- cosmetic in the config — may have changed while this slot sat parked
+        -- (disable an indicator, recolour it in the editor, re-enable: same key, new
+        -- config). Restore() alone would render the pre-park state, and the Factory
+        -- stamps its tuning/cosmetic sigs with the NEW values on this very pass, so
+        -- the catch-up branches would never fire — stale until the next structural
+        -- edit. Same contract as Handle:_readoptParked, same order: tuning before
+        -- style (population first, cosmetics second). The redundant filter re-set
+        -- after Restore is free — the engine's string setter has an equality guard.
+        existing:Restore()
+        if spec.config then existing.config = spec.config end
+        existing:ApplyTuning(spec.filter, spec.candidateFilters,
+            spec.sortMethod, spec.sortDirection)
+        if spec.config then
+            existing:ApplyStyle(spec.config.style, spec.config.layout)
+        end
+        return existing
+    end
+
+    -- ☠ THE PARK TABLE IS UNBOUNDED AND CANNOT BE FREED. AddAuraSlot is add-only -- the
+    -- engine exposes no remove -- so every distinct slotKey ever seen on this frame is a
+    -- permanent button. That is tolerable while keys are stable, and it is NOT stable
+    -- today: placedStructSig carries `fl=`, the Frame Level slider, so dragging that
+    -- slider across its range mints one button per intermediate value, per frame, times
+    -- the raid. The collapse relocated the old per-indicator container leak; it did not
+    -- cap it, which is the claim this warning exists to keep honest.
+    --
+    -- ⚠ MITIGATION, NOT A CURE. We cannot evict, so all this does is make the growth
+    -- visible once instead of silent forever. The real fix is to stop level being
+    -- STRUCTURAL: dfLevelHost is DF-owned and already interposed under every region, so
+    -- levelling the host instead of the sealed button would make `fl=` cosmetic and the
+    -- key stable. That is a behavioural change to the seal path and wants an in-game
+    -- pass, so it is deliberately not being done blind here.
+    local slotCount = 0
+    for _ in pairs(owner.slots) do slotCount = slotCount + 1 end
+    if slotCount >= SLOT_OWNER_WARN_AT and not owner._warnedSlotGrowth then
+        owner._warnedSlotGrowth = true
+        DF:DebugWarn(DBG,
+            "SlotOwner: %d slots on one frame (unit=%s). Slots are add-only and never "
+            .. "freed -- if this climbs with a slider drag, the Frame Level struct key "
+            .. "is minting them.", slotCount, tostring(owner.unit))
+    end
+
+    local filter = spec.filter or "HELPFUL"
+    local config = spec.config
+    local handle = setmetatable({
+        owner = owner, key = slotKey, liveFilter = filter, parked = false, config = config,
+    }, SlotHandle)
+
+    local okS, btn = pcall(owner.container.AddAuraSlot, owner.container, slotKey, filter, {
+        candidateFilters = spec.candidateFilters,
+        sortMethod       = spec.sortMethod,
+        sortDirection    = spec.sortDirection,
+        initializeFrame  = function(b)
+            -- Pre-seal window. Region creation, the level host, and any button-level
+            -- write must all happen here; after this returns the engine applies
+            -- DenyTaintedAccessWhenAurasAreSecret and later writes are refused exactly
+            -- when auras are secret.
+            local host = makeSlotLevelHost(b)
+            b.dfLevelHost = host
+            if config then
+                -- Per-slot layering, pre-seal (see the header above AcquireSlot).
+                if config.frameStrata then pcall(b.SetFrameStrata, b, config.frameStrata) end
+                if config.frameLevelOffset then
+                    local base = owner.container and owner.container:GetFrameLevel() or 0
+                    pcall(b.SetFrameLevel, b, base + config.frameLevelOffset)
+                    -- The host tracks the button's level and the line above just moved it.
+                    syncSlotHostLevel(b, host)
+                end
+                -- ★ The engine's OWN pipeline, unchanged: regions created and styled,
+                -- then the native setters bound. Identical to what Handle:_acceptSlot /
+                -- _bindNativeSlot do for a per-indicator container, so a migrated
+                -- consumer renders byte-identically without owning any render code.
+                local okR, errR = pcall(styleButton_regions, b, config)
+                if not okR then DF:DebugWarn(DBG, "SlotOwner styleButton_regions: %s", tostring(errR)) end
+                local okB, errB = pcall(bindNative, b, config)
+                if not okB then DF:DebugWarn(DBG, "SlotOwner bindNative: %s", tostring(errB)) end
+                -- After sizing (styleButton_regions owns SetSize), before the seal.
+                layoutSlotButton(b, config, owner.anchor)
+            end
+            -- ☠ RE-ASSERT THE CONSUMER'S BASE ALPHA. Buttons are created in LAZY BATCHES
+            -- long after AcquireSlot returns, so applyPlacedAlpha has very often already
+            -- run against a handle whose GetAlphaHost was still nil -- it stashed the
+            -- value on the handle and had nowhere to put it. Without this the Alpha
+            -- slider would appear to work only when it happened to be moved AFTER the
+            -- button materialised, which is the kind of intermittent that reads as a
+            -- different bug entirely. The OOR fade recovers on its own (it runs on every
+            -- range update); a base alpha set once does not.
+            if host and handle._dfADBaseAlpha then
+                pcall(host.SetAlpha, host, handle._dfADBaseAlpha)
+            end
+            if spec.onInit then
+                local okI, err = pcall(spec.onInit, b, host)
+                if not okI then DF:DebugWarn(DBG, "SlotOwner onInit failed: %s", tostring(err)) end
+            end
+        end,
+    })
+    if not okS or not btn then
+        DF:DebugWarn(DBG, "SlotOwner: AddAuraSlot(%s) failed: %s", slotKey, tostring(btn))
+        return nil
+    end
+
+    handle.button = btn
+    owner.slots[slotKey] = handle
+    owner.seq = owner.seq + 1
+
+    -- ☠ REGISTER FOR THE IDENTITY-GATE SWEEP. A slot is NOT in AuraContainer._handles
+    -- (that registry is Handle-shaped -- the sweep and the debug dump both read
+    -- h.config.unit and call Handle methods), so it needs its own weak-keyed list or the
+    -- gate only ever runs at tuning time and never re-evaluates when the roster, phase or
+    -- target changes. Weak keys so a dropped slot GCs with its owner.
+    AuraContainer._slotHandles = AuraContainer._slotHandles
+        or setmetatable({}, { __mode = "k" })
+    AuraContainer._slotHandles[handle] = true
+
+    -- Seed the gate's inputs from the spec this slot was built with, then evaluate once.
+    -- Without this a slot is ungated until its first ApplyTuning, and the AD path can
+    -- reach a first paint before then.
+    handle._idGateVulnerable    = filterVulnerableToIdentityGate(filter, spec.candidateFilters)
+    handle._idGateSourceRelative = filterSourceRelative(filter, spec.candidateFilters)
+    handle._lastCandidateFilters = spec.candidateFilters
+    handle:_applyIdentityGate()
+
+    -- Enabled defaults true on the template, but assert it once the container actually
+    -- has a slot: registration needs HasAnyAuraSlots, which only became true just now.
+    pcall(owner.container.SetEnabled, owner.container, true)
+    return handle
+end
+
+function SlotHandle:GetButton()    return self.button end
+function SlotHandle:GetLevelHost() return self.button and self.button.dfLevelHost or nil end
+function SlotHandle:IsParked()     return self.parked == true end
+
+-- ★ DROP-IN COMPATIBILITY with the two places that already treat an AD handle
+-- generically, so migrating a consumer needs no change to either:
+--
+--   * AuraDesigner/Factory.lua's teardownExcept calls `entry.handle:Destroy()`.
+--
+-- ☠ THE OOR FADE IS *NOT* ONE OF THEM, AND CLAIMING IT WAS SHIPPED A BUG. This comment
+-- used to say returning the button "keeps the OOR fade working untouched -- the button is
+-- where a slot's alpha lives now, exactly as the per-indicator container's frame was
+-- before". Both halves were wrong. The container's frame is DF-OWNED (a plain anchor
+-- CreateFrame'd by AuraContainer:Create); the button is Blizzard's and carries
+-- DenyTaintedAccessWhenAurasAreSecret, so it is not equivalent and not writable from the
+-- fade's tainted path. It threw 43 times in one session. The fade asks GetAlphaHost now.
+--
+-- ⚠ Destroy CANNOT destroy: AddAuraSlot is add-only and there is no remove. It parks,
+-- and the key is deliberately retained so a later AcquireSlot with the same structure
+-- re-adopts this button instead of adding a second one.
+function SlotHandle:GetFrame()     return self.button end
+function SlotHandle:Destroy()      return self:Park() end
+
+-- ☠ ALPHA HOST — NEVER THE BUTTON. RETURNING THE BUTTON IS A LIVE ERROR.
+--
+-- A per-indicator CONTAINER handle answers this with its own plain anchor frame
+-- (Handle.frame, created by AuraContainer:Create), which is DF-owned and therefore a
+-- legal write target from tainted code. A collapsed slot answers with dfLevelHost, the
+-- DF-owned frame interposed between the button and every region styleButton_regions
+-- creates. Fading it fades the whole slot, because nothing renders outside it.
+--
+-- The button itself is NOT a substitute. It carries DenyTaintedAccessWhenAurasAreSecret,
+-- so any method call on it from a tainted path is refused the moment auras go secret --
+-- field-confirmed as 43 errors from the out-of-range fade:
+--     calling 'SetAlphaFromBoolean' on bad self (Attempt to access forbidden object
+--     from code tainted by an AddOn)
+-- SlotHandle:GetFrame returns the button on purpose (identity, and the OOR fade's old
+-- `h:GetFrame()` probe), so consumers MUST ask for the alpha host separately rather than
+-- assuming the two are the same object.
+--
+-- ★ WHY A CHILD FRAME IS WRITABLE WHERE THE BUTTON IS NOT, from the 12.1 source:
+-- the restriction is applied by ApplyAccessRestrictions(auraFrame, ...) as a single
+-- AddAccessRestrictions call on the BUTTON ALONE. Unlike forbidden aspects -- which
+-- ValidateInboundScriptObject's own comment says "propagate through parent/child
+-- hierarchies" -- access restrictions do not descend. Blizzard's setters still accept
+-- our regions from one level deeper because IsDescendantOf allows "a direct child or
+-- indirect descendent of owner".
+--
+-- ⚠ Still nil if host creation failed (pcall'd, pre-seal): consumers skip rather than
+-- reach for the button, which is the behaviour that stopped the error storm.
+function SlotHandle:GetAlphaHost() return self.button and self.button.dfLevelHost or nil end
+
+-- Stop this slot displaying, WITHOUT destroying anything. Proven in game 2026-08-05:
+-- an empty filter string matches nothing (it does NOT fall back to a default).
+-- ⚠ Display only -- the slot keeps its key and its button.
+-- ☠ TWO INDEPENDENT REASONS A SLOT CAN BE DARK, and they must not clobber each other:
+-- `parked` is the CONSUMER's decision (indicator disabled, structural swap) and
+-- `_gateHidden` is the IDENTITY GATE's. Before this there was only `parked`, so whichever
+-- wrote last won -- a consumer Restore would have un-hidden a gated slot and leaked the
+-- auras the gate exists to suppress. One writer, one resolution.
+function SlotHandle:_pushFilter()
+    local c = self.owner and self.owner.container
+    if not c then return false end
+    local want = (self.parked or self._gateHidden) and "" or self.liveFilter
+    return pcall(c.SetAuraSlotFilterString, c, self.key, want)
+end
+
+function SlotHandle:Park()
+    if self.parked then return true end
+    self.parked = true
+    return self:_pushFilter()
+end
+
+function SlotHandle:Restore()
+    if not self.parked then return true end
+    self.parked = false
+    return self:_pushFilter()
+end
+
+-- ☠ THE IDENTITY GATE, WHICH THIS PATH HAD NONE OF. Every Aura Designer placed config
+-- carries candidateFilters.includeSpellIDs, which is precisely what makes a filter
+-- vulnerable -- so on a cross-faction arena opponent, or a party member in a different
+-- instance or phase, includeSpellIDs FAILS OPEN engine-side and every AD indicator lights
+-- for every aura on the target. That is the same class as the bugs the Handle gate was
+-- written to fix, and migrating the consumers onto slots quietly bypassed it: SlotHandle
+-- had no gate, no vulnerability flags, and was not in AuraContainer._handles, so
+-- IdentityGateSweep never visited it.
+--
+-- Verdict logic is deliberately identical to Handle:_applyIdentityGate -- fail-open on
+-- UnitCanAssist (hide only on a definite false), fail-safe on UnitIsVisible -- because
+-- two gates that disagree are worse than one. What differs is the ACTUATION: a Handle
+-- hides its frame, a slot has no frame of its own, so it parks. Parking is already the
+-- right primitive (an empty filter string matches nothing, proven in game).
+function SlotHandle:_applyIdentityGate()
+    local hide = false
+    if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
+        local unit = self.owner and self.owner.unit
+        if type(unit) == "string" and unit ~= "player" and UnitExists(unit) then
+            if self._idGateVulnerable then
+                local ok, can = pcall(UnitCanAssist, "player", unit)
+                if ok then
+                    if issecretvalue and issecretvalue(can) then can = true end
+                    if not can then hide = true end
+                end
+            end
+            if not hide and self._idGateSourceRelative then
+                local okv, vis = pcall(UnitIsVisible, unit)
+                if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
+                    hide = true
+                end
+            end
+        end
+    end
+    local newHidden = hide or nil
+    if self._gateHidden ~= newHidden then
+        self._gateHidden = newHidden
+        DF:Debug(DBG, "slot identity gate %s for key=%s unit=%s",
+            newHidden and "HIDING" or "showing", tostring(self.key),
+            tostring(self.owner and self.owner.unit))
+        self:_pushFilter()
+    end
+end
+
+-- Live tuning. All three are real live mutators on the slot; none needs a rebuild.
+-- ⚠ SetAuraSlotCandidateFilters has NO equality check engine-side -- every call clears the
+-- slot's candidates and reparses -- so callers should compare before calling.
+function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirection)
+    local c = self.owner and self.owner.container
+    if not c then return false end
+    local filterChanged = false
+    if filter ~= nil and filter ~= self.liveFilter then
+        self.liveFilter = filter
+        filterChanged = true
+    end
+    if candidateFilters ~= nil then
+        self._lastCandidateFilters = candidateFilters
+        pcall(c.SetAuraSlotCandidateFilters, c, self.key, candidateFilters)
+    end
+    -- Recompute the gate's INPUTS whenever either half of the filter moves -- the verdict
+    -- depends on the filter string AND the candidateFilters together, so recomputing on
+    -- only one of them leaves a slot flagged from its previous configuration.
+    if filterChanged or candidateFilters ~= nil then
+        local cf = self._lastCandidateFilters
+        self._idGateVulnerable    = filterVulnerableToIdentityGate(self.liveFilter, cf)
+        self._idGateSourceRelative = filterSourceRelative(self.liveFilter, cf)
+    end
+    -- Re-evaluate before pushing, so a slot that just became vulnerable is dark on the
+    -- very first pass rather than showing one frame of the wrong player's auras.
+    self:_applyIdentityGate()
+    if filterChanged then self:_pushFilter() end
+    if sortMethod ~= nil then
+        pcall(c.SetAuraSlotSortMethod, c, self.key, sortMethod, sortDirection or 0)
+    end
+    return true
+end
+
+-- In-place cosmetic restyle, mirroring Handle:ApplyStyle. Re-runs the engine's region
+-- pipeline against the updated config -- the same call the per-indicator path makes, so a
+-- migrated consumer keeps every live cosmetic it has today (colours, sizes, fonts,
+-- offsets, bar geometry, tooltip placement).
+--
+-- ⚠ Combat: Handle:ApplyStyle defers to regen because restyling live buttons mid-combat
+-- diverges from the build-once-leave-it pattern. Same rule here -- the caller re-drives
+-- on its own version gate, so dropping the pass is correct rather than lossy.
+function SlotHandle:ApplyStyle(style, layout)
+    local cfg, btn = self.config, self.button
+    if not (cfg and btn) then return false end
+    if type(style) == "table" then cfg.style = style end
+    if type(layout) == "table" then cfg.layout = layout end
+    if InCombatLockdown() then return false end
+    -- ☠ REFUSE TO STYLE A SLOT WHOSE LEVEL HOST DOES NOT EXIST YET, and the damage is
+    -- PERMANENT if we don't. styleButton_regions resolves `local host = slot.dfLevelHost
+    -- or slot` -- a fallback that is right for a CONTAINER button (which never has a
+    -- host) and catastrophic for a slot: it would create dfIcon, dfBorder and every
+    -- holder parented to the Blizzard aura button instead of our own frame. Blizzard's
+    -- InitializeInboundScriptObject stamps ForbiddenAspect.ChangeParent on that button,
+    -- so those regions can never be reparented afterwards -- the slot is stuck with an
+    -- empty alpha host for its whole life, and GetAlphaHost then returns nothing, which
+    -- silently kills the per-indicator Alpha slider and the out-of-range fade for that
+    -- indicator alone. Intermittent by batch timing, which is the worst way to find it.
+    --
+    -- Dropping the pass is safe: the caller re-drives on its own version gate, and the
+    -- config we just stored above is what initializeFrame will style from when it runs.
+    if not btn.dfLevelHost then
+        DF:Debug(DBG, "SlotHandle:ApplyStyle deferred -- no dfLevelHost yet (key=%s)",
+            tostring(self.key))
+        return false
+    end
+    local ok, err = pcall(styleButton_regions, btn, cfg)
+    if not ok then DF:DebugWarn(DBG, "SlotHandle:ApplyStyle: %s", tostring(err)) end
+    -- ☠ bindNative too, exactly as Handle:ApplyStyle does. Its binds are keyed on spec
+    -- identity, not bind-once, so this is how a duration-format / zeroText /
+    -- updateInterval / dispel-palette change reaches a LIVE slot. Without it those would
+    -- silently keep the spec they were created with and the signature entries below could
+    -- not be reduced.
+    local okB, errB = pcall(bindNative, btn, cfg)
+    if not okB then DF:DebugWarn(DBG, "SlotHandle:ApplyStyle bindNative: %s", tostring(errB)) end
+    -- Re-anchor after restyle: anchor/offset/scale are live cosmetics (dragging an
+    -- indicator moves it now, not on the next reload), and styleButton_regions has just
+    -- re-run SetSize, so the pin has to follow it.
+    layoutSlotButton(btn, cfg, self.owner and self.owner.anchor)
+    return ok
+end
+
+-- Per-indicator alpha, on the alpha host.
+-- ☠ THIS USED TO WRITE THE BUTTON, AND THE pcall HID THAT IT COULDN'T. Its comment
+-- claimed the button "is where the per-indicator container's frame carried it before" —
+-- it is not: that frame was DF's own, the button is Blizzard's and carries
+-- DenyTaintedAccessWhenAurasAreSecret. The identical mistake in applyPlacedAlpha was
+-- equally silent, and only surfaced because the out-of-range fade makes the same call
+-- WITHOUT a pcall (43 errors in one session). Route through GetAlphaHost like everything
+-- else, and report failure instead of swallowing it.
+-- ⚠ Never drive this to 0 as a way of hiding a slot -- park it instead. A button's shown
+-- state is secret-backed and descendant effects inherit it, so alpha 0 silences those too
+-- rather than just hiding the icon.
+function SlotHandle:SetAlpha(alpha)
+    if type(alpha) ~= "number" then return false end
+    local f = self:GetAlphaHost()
+    if not f then return false end
+    return pcall(f.SetAlpha, f, alpha)
+end
+
+-- Live z-order, on OUR frame — never on the sealed button. Available for a consumer whose
+-- level is NOT already structural; the AD path sets level on the button at create instead
+-- (see the header above AcquireSlot) and does not need this.
+function SlotHandle:SetZOrder(level, strata)
+    local host = self:GetLevelHost()
+    if not host then return false end
+    if strata then pcall(host.SetFrameStrata, host, strata) end
+    if level then pcall(host.SetFrameLevel, host, level) end
+    return true
+end
+
+-- There is no way to remove a slot, so release == park. The key is retained precisely so
+-- a later AcquireSlot with the same structure re-adopts this button instead of adding a
+-- second one.
+function SlotHandle:Release() return self:Park() end
+
+-- ☠ GetUnit/SetUnit ARE THE RETARGET CONTRACT, and their absence was a live bug.
+-- Factory:SyncFrame walks every stored handle with
+--     if h and h.GetUnit and h:GetUnit() ~= u and h.SetUnit then h:SetUnit(u) end
+-- which is nil-guarded, so a handle missing these two methods is SILENTLY SKIPPED --
+-- no error, no warning, just a container still pointed at whoever used to occupy that
+-- frame. Handle has both (that is why the pre-collapse code worked); SlotHandle was
+-- migrated into the same stores without them, so after any roster change -- someone
+-- leaves, a sort reorders, party->raid, arena entry -- every Aura Designer placed
+-- icon, bar and alert rendered ANOTHER PLAYER'S auras until /reload.
+--
+-- All slots on a frame share one owner and therefore one unit, so the loop's repeated
+-- calls collapse: the first retargets, the rest hit the equality guard below.
+function SlotHandle:GetUnit()
+    return self.owner and self.owner.unit or nil
+end
+
+function SlotHandle:SetUnit(unit)
+    if not (self.owner and self.owner.frame) then return false end
+    return AuraContainer:SetSlotOwnerUnit(self.owner.frame, unit)
+end
+
+-- Owners whose retarget was blocked by combat. Weak-keyed, like the handle list: if the
+-- frame and its owner go away, the entry goes with them rather than pinning them alive.
+local function registerOwnerRegen(owner)
+    if not AuraContainer._ownerRegen then
+        AuraContainer._ownerRegen = CreateFrame("Frame")
+        AuraContainer._ownerRegen._owners = setmetatable({}, { __mode = "k" })
+        AuraContainer._ownerRegen:RegisterEvent("PLAYER_REGEN_ENABLED")
+        AuraContainer._ownerRegen:SetScript("OnEvent", function(self)
+            for o in pairs(self._owners) do
+                self._owners[o] = nil
+                local u = o.pendingUnit
+                o.pendingUnit = nil
+                -- Re-check: the owner may have been retargeted again, or torn down,
+                -- between the defer and now.
+                if u and o.container and o.unit ~= u then
+                    o.unit = u
+                    pcall(o.container.SetUnit, o.container, u)
+                end
+            end
+        end)
+    end
+    AuraContainer._ownerRegen._owners[owner] = true
+end
+
+-- Retarget the whole owner. One container, one unit — cheaper than the per-indicator
+-- containers it replaces, which each carried their own.
+function AuraContainer:SetSlotOwnerUnit(frame, unit)
+    local owner = ownerOf(frame)
+    if not (owner and owner.container and type(unit) == "string") then return false end
+    if owner.unit == unit then return true end
+    -- ⚠ Defer in combat, same as Handle:SetUnit's "retarget" op. owner.unit is left on
+    -- the OLD token deliberately, so GetUnit stays truthful about what is on screen and
+    -- a repeat call simply re-queues rather than reporting a retarget that has not
+    -- happened. The regen drain applies it.
+    if InCombatLockdown() then
+        owner.pendingUnit = unit
+        registerOwnerRegen(owner)
+        return false
+    end
+    owner.unit = unit
+    local ok = pcall(owner.container.SetUnit, owner.container, unit)
+    -- ⚠ The stored gate verdict was computed for the OLD unit. Re-run it for every slot
+    -- on this owner, exactly as Handle:SetUnit re-runs its own gate on retarget --
+    -- otherwise a slot that was hidden for a cross-faction opponent stays hidden after
+    -- the frame is reused for a friendly, and vice versa.
+    for _, h in pairs(owner.slots) do
+        if h._idGateVulnerable or h._idGateSourceRelative then
+            pcall(function() h:_applyIdentityGate() end)
+        end
+    end
+    return ok
+end
+
+-- Census hook for the S4 before/after. Returns live slot count, parked count, total.
+function AuraContainer:GetSlotOwnerStats(frame)
+    local owner = ownerOf(frame)
+    if not owner then return 0, 0, 0 end
+    local live, parked = 0, 0
+    for _, h in pairs(owner.slots) do
+        if h.parked then parked = parked + 1 else live = live + 1 end
+    end
+    return live, parked, live + parked
+end
+
 function AuraContainer:Create(parent, config)
     if not AuraContainer.IsSupported() then return nil end
     if not parent or type(config) ~= "table" then
@@ -4244,6 +5684,14 @@ local gateSweepQueued
 local function IdentityGateSweep()
     gateSweepQueued = nil
     for h in pairs(AuraContainer._handles or {}) do
+        if h._idGateVulnerable or h._idGateSourceRelative then
+            pcall(function() h:_applyIdentityGate() end)
+        end
+    end
+    -- ⚠ Slots sweep too. They live in their own registry (see AcquireSlot) because this
+    -- one is Handle-shaped; forgetting them is exactly how the collapsed AD path ended up
+    -- with no gate at all despite every placed config being vulnerable.
+    for h in pairs(AuraContainer._slotHandles or {}) do
         if h._idGateVulnerable or h._idGateSourceRelative then
             pcall(function() h:_applyIdentityGate() end)
         end
@@ -4457,4 +5905,72 @@ function AuraContainer.PaintPreviewSlot(slot, config, index, sharedDur)
     -- Duck-typed handle: the paint core only reads .config (and the duration
     -- formatter inside it).
     Handle._paintTestSlot({ config = config }, slot, index or 1)
+end
+
+-- ============================================================
+-- TEST MODE: the dispel type a frame's debuff window actually contains
+-- ============================================================
+-- ☠ THE OVERLAY MUST NAME A DEBUFF THAT IS ON THE FRAME. The frame overlay used to take
+-- its type from a hardcoded frame-index pattern in the test data ("i % 5 == 1 -> Magic")
+-- while the debuff ICONS came from the curated pool — two sources that were never linked.
+-- They agreed by accident while every frame drew pool entries 1-2 (always Magic + Poison),
+-- and the per-frame rotation broke the coincidence: a unit showed a Poison overlay with
+-- three debuffs, none of them Poison (Krathe, 2026-08-06).
+--
+-- Reuses testPoolOffset — the SAME function the painter uses to choose entries — rather
+-- than recomputing the window here, so the two cannot drift apart. That is the whole
+-- point of this living in this file instead of in TestMode.lua.
+--
+-- Returns the first dispellable type in the unit's window, or nil when the window holds
+-- none (which is how the pool's untyped entries set how often an overlay appears at all).
+-- ⚠ DISPEL COLOURS THAT VANISH INTO A CLASS COLOUR. The overlay tints the whole frame,
+-- so a type whose colour matches the unit's class bar reads as one flat wash — Krathe on
+-- Magic (blue) landing on a MAGE (blue): "the blue overlay and class and icon clash."
+-- Preview-only cosmetics: the pairing is legal and happens constantly in live play, it
+-- just makes a poor demonstration of the feature. Extend when another pair reads badly.
+local TEST_DISPEL_CLASH = {
+    MAGE    = "Magic",    -- both blue
+    WARLOCK = "Curse",    -- both purple
+}
+
+function DF:GetTestDebuffDispelType(unitToken, count, class)
+    local pool = DF.TestData and DF.TestData.debuffs
+    if not (pool and #pool > 0) then return nil end
+    local cfg = { unit = unitToken }
+    local n = math.max(1, math.min(tonumber(count) or 1, #pool))
+    local off = testPoolOffset(cfg, #pool, n)
+    -- Collect EVERY dispellable type in the window, not just the first.
+    local types
+    for i = 1, n do
+        local e = pool[((off + i - 1) % #pool) + 1]
+        if e and e.debuffType then types = types or {}; types[#types + 1] = e.debuffType end
+    end
+    if not types then return nil end
+    -- ☠ TAKING types[1] HIDES HALF THE PALETTE. At a preview count of 2 the windows are
+    -- (1,2) (3,4) (7,8), so a type sitting in an EVEN pool slot is never first and can
+    -- never be chosen — Krathe saw only Magic and Curse, because Disease (slot 2) and
+    -- Poison (slot 4) were always the second entry of their pair.
+    -- Any entry in the window is on the frame, so any of them is a valid answer; pick by
+    -- unit so the choice varies frame to frame. Measured at count 2 over party + a full
+    -- raid this reaches all five types (Curse 8, Magic 5, Poison 6, Disease 4, Bleed 4);
+    -- the Curse skew is the pool's own — it is the one type appearing twice (slots 3
+    -- and 8), every other type appears once.
+    -- ⚠ ONLY THE COUNT-2 SPREAD IS TUNED. At count 5 the pool splits into just two
+    -- windows (1-5 and 6-10), so the reachable palette collapses to Bleed/Curse/Magic and
+    -- every frame lights. Same trade-off as the density note on the pool itself: the
+    -- overlay is bound to the icons it must agree with, so it inherits the window's shape.
+    local u = tostring(unitToken or "")
+    local seed = tonumber(u:match("(%d+)$")) or 0
+    -- Drop a type that would disappear into this unit's class colour, but only while the
+    -- window still offers an alternative: falling through to nil instead would quietly
+    -- thin the overlay density that the pool's untyped slots are tuned to produce.
+    local clash = class and TEST_DISPEL_CLASH[class]
+    if clash and #types > 1 then
+        local keep
+        for i = 1, #types do
+            if types[i] ~= clash then keep = keep or {}; keep[#keep + 1] = types[i] end
+        end
+        if keep then types = keep end
+    end
+    return types[(math.floor((seed * 3 + off) / 2) % #types) + 1]
 end

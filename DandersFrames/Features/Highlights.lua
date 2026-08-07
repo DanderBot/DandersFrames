@@ -672,30 +672,24 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
     if debugHighlights then
         print("  inTestMode:", inTestMode and "true" or "false")
     end
+    -- forceThreat: the preview's threat STATUS (0-3), fed into live's own derivation
+    -- below. Declared here so it is a local, not an accidental global.
+    local forceThreat
     if inTestMode and forceSelection == nil and forceAggro == nil then
         -- Determine frame index for test mode
         local frameIndex = nil
         
-        -- For test frames, check the test frame arrays directly
+        -- ★ frame.index is stamped at creation (TestFramePool.CreateTestFrame), so the
+        -- answer is already on the frame. This used to LINEAR-SCAN both test arrays --
+        -- up to 45 identity comparisons per frame per highlight update -- to recover a
+        -- value it was already holding. Party frames are 0-based in the pool and this
+        -- consumer wants 0-based; raid frames are 1-based, hence the shift.
+        -- (Audit, 2026-08-07.)
         if frame.dfIsTestFrame then
-            -- Check party test frames (index 0 = player, 1-4 = party members)
-            if DF.testPartyFrames then
-                for i = 0, 4 do
-                    if DF.testPartyFrames[i] == frame then
-                        frameIndex = i
-                        break
-                    end
-                end
-            end
-            
-            -- Check raid test frames (1-40)
-            if frameIndex == nil and DF.testRaidFrames then
-                for i = 1, 40 do
-                    if DF.testRaidFrames[i] == frame then
-                        frameIndex = i - 1  -- 0-based for consistency (first raid frame = 0)
-                        break
-                    end
-                end
+            if frame.isRaidFrame then
+                frameIndex = (frame.index or 1) - 1
+            else
+                frameIndex = frame.index
             end
         else
             -- For live frames during test mode (shouldn't happen but just in case)
@@ -730,7 +724,17 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
                 forceSelection = (frameIndex == 0)  -- First frame gets selection
             end
             if db.testShowAggro then
-                forceAggro = (frameIndex == 1)  -- Second frame gets aggro
+                -- ☠ WAS A BOOLEAN, WHICH MADE TWO OF THE THREE AGGRO COLOURS
+                -- UNPREVIEWABLE. The live path derives everything from a THREAT STATUS
+                -- (3 tanking / 2 highest / 1 high), and a bare true forced the status
+                -- to a hardcoded 3, so High Threat and Highest Threat could never
+                -- appear in the preview and aggroOnlyTanking / aggroHideOnTanks were
+                -- skipped entirely. Supplying the number instead lets live's own code
+                -- cover all three colours and both toggles. (Audit, 2026-08-07.)
+                forceThreat = (frameIndex == 1 and 3)
+                    or (frameIndex == 2 and 2)
+                    or (frameIndex == 3 and 1)
+                    or nil
             end
         end
         
@@ -746,11 +750,13 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         isSelected = unit and UnitIsUnit(unit, "target")
     end
     
-    -- Check aggro status via threat API - can be overridden for test mode
+    -- Check aggro status via threat API - the preview supplies the STATUS, not a verdict
     local isAggro = forceAggro
-    local status = 3  -- Default to red (tanking) for test mode
+    local status = 0
     if isAggro == nil then
-        status = unit and UnitThreatSituation(unit) or 0
+        -- forceThreat is the preview's only input here; everything below is live's own
+        -- derivation, so the two agree on colour, aggroOnlyTanking and aggroHideOnTanks.
+        status = forceThreat or (unit and UnitThreatSituation(unit)) or 0
         -- If "Only Show When Tanking" is enabled, only show for status 3 (actually tanking)
         if db.aggroOnlyTanking then
             isAggro = status and status == 3
@@ -1031,7 +1037,7 @@ local function UpdateAllHighlights()
     
     -- Update pinned frame children (they share units with main frames)
     if DF.PinnedFrames and DF.PinnedFrames.initialized then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local header = DF.PinnedFrames.headers[setIndex]
             if header and header:IsShown() then
                 local maxChildren = IsInRaid() and 40 or 5
@@ -1086,7 +1092,7 @@ highlightEventFrame:SetScript("OnEvent", function(self, event, ...)
         end
         -- Also update any pinned frame children showing this unit
         if unit and DF.PinnedFrames and DF.PinnedFrames.initialized then
-            for setIndex = 1, 2 do
+            for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
                 local header = DF.PinnedFrames.headers[setIndex]
                 if header and header:IsShown() then
                     local maxChildren = IsInRaid() and 40 or 5

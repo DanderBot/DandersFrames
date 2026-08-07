@@ -626,7 +626,13 @@ function DF:UpdateRaidGroupLabels(activeGroupsTable, db, horizontal)
                 -- Determine anchor frame and points based on mode and layout
                 local anchorFrame
                 if isTestMode then
-                    anchorFrame = groupFirstFrame[g]
+                    -- The group's EXTENT (first..last), not its first frame -- live
+                    -- anchors to the separated header, which spans the group, so END
+                    -- and CENTER only agree if the preview anchors to a span too.
+                    -- Falls back to the first frame for the one pass before
+                    -- UpdateTestGroupExtents has run. (Audit, 2026-08-07.)
+                    anchorFrame = (DF.testGroupExtent and DF.testGroupExtent[g])
+                        or groupFirstFrame[g]
                 else
                     anchorFrame = DF.raidSeparatedHeaders and DF.raidSeparatedHeaders[g]
                 end
@@ -1144,6 +1150,13 @@ function DF:RegisterFrameWithClickCast(frame)
 
     if DF.clickCastReady and ClickCastFrames then
         ClickCastFrames[frame] = true
+        -- Do not rely on the table write alone. __newindex fires only for keys the
+        -- table does not already hold, so a frame that has been through here before
+        -- (or was rawset while ineligible) gets no metamethod at all and would be
+        -- silently skipped -- while the flag below claims success. Go direct.
+        if DF.ClickCast and DF.ClickCast.EnsureRegistered then
+            DF.ClickCast:EnsureRegistered(frame)
+        end
         frame.dfClickCastRegistered = true
     else
         -- Mark for deferred registration
@@ -1230,7 +1243,7 @@ function DF:CommitAllClickCastRegistrations()
 
     -- Pinned frames headers
     if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local header = DF.PinnedFrames.headers[setIndex]
             if header then
                 for i = 1, 40 do
@@ -1242,7 +1255,7 @@ function DF:CommitAllClickCastRegistrations()
 
     -- Pinned boss frames
     if DF.PinnedFrames and DF.PinnedFrames.bossFrames then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local frames = DF.PinnedFrames.bossFrames[setIndex]
             if frames then
                 for i = 1, 8 do
@@ -1782,8 +1795,14 @@ function DF:UpdateAllFrames()
         end
     end
     
-    -- Handle test mode player frame visibility
-    if DF.testMode and not (testFrameCount >= 1) then
+    -- Handle test mode player frame visibility.
+    --
+    -- DF.playerFrame is legitimately nil at times -- the OnAttributeChanged
+    -- handler clears it when the frame holding unit=player gives it up, and with
+    -- "hide self from party frames" the header may never assign a main-frame
+    -- child that unit at all. The two lines below dereference it unguarded, so
+    -- this could throw. The sibling block above already tests it first.
+    if DF.testMode and not (testFrameCount >= 1) and DF.playerFrame then
         UnregisterUnitWatch(DF.playerFrame)
         DF.playerFrame:Hide()
         DF:UnregisterFrameWithClickCast(DF.playerFrame)

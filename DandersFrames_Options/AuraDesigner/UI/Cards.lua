@@ -289,7 +289,7 @@ local function BuildGlobalView(parent)
         descText:SetPoint("RIGHT", descFrame, "RIGHT", 0, 0)
         descText:SetJustifyH("LEFT")
         descText:SetWordWrap(true)
-        descText:SetText(L["Standard buff visibility is managed on the Aura Filters S.page."])
+        descText:SetText(L["Standard buff visibility is managed on the Aura Filters page."])
         descText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         g:AddWidget(descFrame, 24)
 
@@ -2365,10 +2365,12 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         -- UpdateHideAboveState (assigned below): re-greys Hide Above, which can't
         -- compose with the percent-family formats.
         local UpdateHideAboveState
-        g:AddWidget(GUI:CreateDropdown(body, L["Duration Format"], {
-            NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
-            _order = { "NUMBER", "SHORT", "PERCENT" },
-        }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end), 54)
+        GUI:CreateDurationFormatControls(body, g, {
+            -- Icon surfaces: FULL and the percent composite stay bar-only (width), so
+            -- this list is the three time formats plus Percent.
+            NUMBER = L["Standard"], SHORT = L["Units"], TIMER = L["Timer"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" },
+        }, proxy, "durationFormat", function() if UpdateHideAboveState then UpdateHideAboveState() end end)
         GUI:CreateTextControls(g, proxy, "duration", {
             parent = body,
             include = { color = true },

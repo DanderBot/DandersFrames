@@ -709,10 +709,15 @@ function DF:InitializeHeaderChild(frame)
                 -- No event re-registration needed: global headerChildEventFrame
                 -- uses unitFrameMap[unit] for dispatch, which we just updated above.
 
+                -- This button now shows a different unit token, so any pet anchored to
+                -- it is pointing at the wrong teammate. Same-GUID path still counts: the
+                -- pet's unit is derived from the slot, not the player. Guarded because
+                -- Pets.lua and this file have no guaranteed load order.
+                if DF.InvalidatePetAnchors then DF:InvalidatePetAnchors() end
 
                 return
             end
-            
+
             DF:RosterDebugCount("OnAttributeChanged(unit)-PROCESSED")
             DF:Debug("ROSTER", "OnAttributeChanged: %s -> %s (isRaid=%s)",
                 tostring(oldUnit), tostring(actualUnit), tostring(self.isRaidFrame))
@@ -736,6 +741,16 @@ function DF:InitializeHeaderChild(frame)
             end
             
             self.unit = actualUnit
+            -- The full reassign path. Same reasoning as the same-GUID path above: this
+            -- button's unit moved, so its pet's anchor is stale.
+            --
+            -- ⚠ NOT conditional on oldUnit. It is tempting to narrow this to "only when
+            -- something was there before", but oldUnit is nil precisely when a child
+            -- receives its FIRST unit — a rebuild burst, which is exactly the case that
+            -- most needs the pets re-anchored. The retail lane shipped a narrowing that
+            -- treated a nil unit as "invalidate everything" and the field log caught it
+            -- degrading straight back to a full sweep during arena entry.
+            if DF.InvalidatePetAnchors then DF:InvalidatePetAnchors() end
             -- Clear background color tracking (unit changed, need fresh colors)
             self.dfCurrentBgKey = nil
             -- Clear stale range state so this slot doesn't inherit the previous
@@ -768,8 +783,37 @@ function DF:InitializeHeaderChild(frame)
                     self.index = tonumber(num)
                 elseif actualUnit == "player" then
                     self.index = 0
-                    -- Sync legacy DF.playerFrame for backward compatibility
-                    DF.playerFrame = self
+                    -- Sync legacy DF.playerFrame for backward compatibility --
+                    -- main-frame children ONLY.
+                    --
+                    -- DF.playerFrame is not a generic "whichever frame holds
+                    -- unit=player"; ~50 consumers treat it as the party player
+                    -- frame specifically. SecureSort uses it as party slot 0,
+                    -- setting secure paths and swap frame refs on it, and
+                    -- UpdateAllFrames drives its unit watch and its click-cast
+                    -- registration from it. A pinned frame showing the player was
+                    -- being adopted here, which hands all of that the wrong frame.
+                    --
+                    -- The sibling write fifty lines above already guards exactly
+                    -- this ("Skip for pinned frames - they must not remove main
+                    -- frame entries"); this one never got the same treatment.
+                    if not self.isPinnedFrame then
+                        DF.playerFrame = self
+                    end
+                end
+
+                -- Click casting needs a unit to accept a frame, and this is the
+                -- moment one arrives. A header child is created before the header
+                -- assigns units, so registration at creation is REFUSED for lack
+                -- of a unit -- and the ClickCastFrames metatable cannot retry,
+                -- because its rawset already spent that frame's one __newindex.
+                -- Without this the frame stays unregistered for the session: no
+                -- hooks, no binds, bound keys falling through to the action bar,
+                -- with only a /reload to clear it. Cheap and idempotent --
+                -- EnsureRegistered returns immediately if already registered, and
+                -- honours an explicit opt-out.
+                if DF.ClickCast and DF.ClickCast.EnsureRegistered then
+                    DF.ClickCast:EnsureRegistered(self)
                 end
                 
                 -- No per-frame event registration needed: global headerChildEventFrame
@@ -1083,7 +1127,21 @@ function DF:CreatePartyHeader()
     DF.partyHeader:SetAttribute("template", "DandersUnitButtonTemplate")
 
     -- Layout attributes
-    local horizontal = db.growHorizontal
+    -- ☠ WAS db.growHorizontal, WHICH NOTHING EVER WRITES. Three reads, zero writes,
+    -- absent from Config -- so it was always nil and all three sites took the VERTICAL
+    -- branch whatever the user chose. The rest of the addon spells this
+    -- `growDirection == "HORIZONTAL"` (:1526, :1711, :3079).
+    --
+    -- ⚠ SCOPE: this was NOT "party frames are always vertical". DF:ApplyHeaderSettings
+    -- reads growDirection correctly and calls SetPartyOrientation, so on the normal path
+    -- the wrong orientation these two CREATE sites set is corrected straight afterwards.
+    -- The one that could stand was UpdatePartyHeaderLayout: both its callers live in
+    -- DF:ProcessHeaderCombatQueue, so it runs LAST on leaving combat with nothing
+    -- re-applying the correct value behind it. Symptom: a party layout change queued
+    -- during combat flips you to vertical when combat ends.
+    -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
+    -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
+    local horizontal = (db.growDirection == "HORIZONTAL")
     local spacing = db.frameSpacing or 2
     DF.partyHeader:SetAttribute("point", horizontal and "LEFT" or "TOP")
     -- IMPORTANT: Don't use Lua ternary with 0! (0 is falsy)
@@ -1166,7 +1224,21 @@ function DF:CreateArenaHeader()
     DF.arenaHeader:SetAttribute("template", "DandersUnitButtonTemplate")
     
     -- Layout attributes - SAME as party
-    local horizontal = db.growHorizontal
+    -- ☠ WAS db.growHorizontal, WHICH NOTHING EVER WRITES. Three reads, zero writes,
+    -- absent from Config -- so it was always nil and all three sites took the VERTICAL
+    -- branch whatever the user chose. The rest of the addon spells this
+    -- `growDirection == "HORIZONTAL"` (:1526, :1711, :3079).
+    --
+    -- ⚠ SCOPE: this was NOT "party frames are always vertical". DF:ApplyHeaderSettings
+    -- reads growDirection correctly and calls SetPartyOrientation, so on the normal path
+    -- the wrong orientation these two CREATE sites set is corrected straight afterwards.
+    -- The one that could stand was UpdatePartyHeaderLayout: both its callers live in
+    -- DF:ProcessHeaderCombatQueue, so it runs LAST on leaving combat with nothing
+    -- re-applying the correct value behind it. Symptom: a party layout change queued
+    -- during combat flips you to vertical when combat ends.
+    -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
+    -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
+    local horizontal = (db.growDirection == "HORIZONTAL")
     local spacing = db.frameSpacing or 2
     DF.arenaHeader:SetAttribute("point", horizontal and "LEFT" or "TOP")
     if horizontal then
@@ -4042,22 +4114,11 @@ function DF:BuildSortedNameList(members, db, selfPosition, includesPlayer)
         classPriority[className] = i
     end
     
-    -- Melee specs by specID
-    local meleeSpecs = {
-        [250] = true, [251] = true, [252] = true,  -- Death Knight
-        [577] = true, [581] = true,                 -- Demon Hunter
-        [103] = true,                               -- Druid Feral
-        [269] = true,                               -- Monk Windwalker
-        [70] = true,                                -- Paladin Ret
-        [259] = true, [260] = true, [261] = true,  -- Rogue
-        [263] = true,                               -- Shaman Enh
-        [71] = true, [72] = true,                   -- Warrior Arms/Fury
-    }
+    -- ★ ONE SHARED TABLE (Core/Config.lua). This used to be a local copy; see the
+    -- header there for the three-way disagreement it caused.
+    local meleeSpecs = DF.MELEE_SPECS
     
-    -- Class-based melee fallback
-    local meleeClasses = {
-        DEATHKNIGHT = true, DEMONHUNTER = true, ROGUE = true, WARRIOR = true
-    }
+    local meleeClasses = DF.MELEE_CLASSES
     
     -- Get melee/ranged type for a unit.
     -- Priority: SecureSort.specCache (persistent across INSPECT_READY) → game's inspect cache → class fallback.
@@ -4912,7 +4973,21 @@ function DF:UpdatePartyHeaderLayout()
     
     local db = DF:GetDB()
     
-    local horizontal = db.growHorizontal
+    -- ☠ WAS db.growHorizontal, WHICH NOTHING EVER WRITES. Three reads, zero writes,
+    -- absent from Config -- so it was always nil and all three sites took the VERTICAL
+    -- branch whatever the user chose. The rest of the addon spells this
+    -- `growDirection == "HORIZONTAL"` (:1526, :1711, :3079).
+    --
+    -- ⚠ SCOPE: this was NOT "party frames are always vertical". DF:ApplyHeaderSettings
+    -- reads growDirection correctly and calls SetPartyOrientation, so on the normal path
+    -- the wrong orientation these two CREATE sites set is corrected straight afterwards.
+    -- The one that could stand was UpdatePartyHeaderLayout: both its callers live in
+    -- DF:ProcessHeaderCombatQueue, so it runs LAST on leaving combat with nothing
+    -- re-applying the correct value behind it. Symptom: a party layout change queued
+    -- during combat flips you to vertical when combat ends.
+    -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
+    -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
+    local horizontal = (db.growDirection == "HORIZONTAL")
     local spacing = db.frameSpacing or 2
     
     -- ============================================================
@@ -6082,7 +6157,12 @@ function DF:InitSecurePositioning()
     -- Hook arena children's OnShow/OnHide to trigger counting
     DF:HookArenaChildrenForRepositioning()
     
-    DF:Say("Secure positioning initialized")
+    -- ☠ Was DF:Say — an unconditional chat print on EVERY login, for every user, in
+    -- English only. It also carried no information: it fires at the end of the function
+    -- unconditionally, so it says "this ran", which is true every time. There is no
+    -- failure path that prints the opposite. Routed to the debug console, which is a
+    -- toggle, per the rule: no forced text without the user turning something on.
+    DF:Debug("HEADERS", "Secure positioning initialized")
 end
 
 -- Hook party header children to trigger repositioning on show/hide
@@ -6761,7 +6841,7 @@ function DF:RefreshAllHeaderChildFrames()
     
     -- Refresh PinnedFrames if active
     if DF.PinnedFrames and DF.PinnedFrames.headers then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local header = DF.PinnedFrames.headers[setIndex]
             if header then
                 for i = 1, 40 do
@@ -7667,7 +7747,7 @@ IteratePinnedFrames = function(callback)
     if not DF.PinnedFrames or not DF.PinnedFrames.initialized or not DF.PinnedFrames.headers then
         return
     end
-    for setIndex = 1, 2 do
+    for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
         local header = DF.PinnedFrames.headers[setIndex]
         if header and header:IsShown() then
             for i = 1, 40 do
@@ -7701,7 +7781,7 @@ local function FindPinnedFrameForUnit(unit)
     end
     -- Player-mode pinned sets: iterate header children
     if DF.PinnedFrames.headers then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local header = DF.PinnedFrames.headers[setIndex]
             if header and header:IsShown() then
                 for i = 1, 40 do
@@ -7715,7 +7795,7 @@ local function FindPinnedFrameForUnit(unit)
     end
     -- Boss-mode pinned sets: iterate standalone boss frames
     if DF.PinnedFrames.bossFrames then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local frames = DF.PinnedFrames.bossFrames[setIndex]
             if frames then
                 for i = 1, 8 do

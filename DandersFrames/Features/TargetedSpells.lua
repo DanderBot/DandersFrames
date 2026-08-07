@@ -3602,6 +3602,29 @@ local targetedListBarPool = {
     Release = function(self, bar) return TargetedList_ReleaseBar(bar) end,
 }
 
+-- ☠ The ONLY way a Targeted List bar may be made visible.
+--
+-- "Important Spells Only" is driven by a SECRET boolean: C_Spell.IsSpellImportant on a
+-- secret spellId returns a secret, which Lua may never read, so the verdict can only be
+-- piped into SetShownFromBoolean and consumed inside the engine. That means a plain
+-- bar:Show() elsewhere silently OVERRIDES the filter -- and three of them did (the
+-- layout pass and both sort branches), which is why the filter has never worked for
+-- anyone who enabled it.
+--
+-- Every show must therefore re-assert the secret verdict rather than force-showing.
+-- With the filter off this is just bar:Show().
+local function TargetedList_ShowBar(bar, db)
+    if not bar then return end
+    if db and db.targetedListImportantOnly
+       and TL_C_Spell_IsSpellImportant
+       and bar.SetShownFromBoolean
+       and bar.spellId ~= nil then
+        bar:SetShownFromBoolean(TL_C_Spell_IsSpellImportant(bar.spellId), true, false)
+    else
+        bar:Show()
+    end
+end
+
 local function TargetedList_EnsureBarPool()
     TargetedList_EnsureContainer()
     return targetedListBarPool
@@ -3656,6 +3679,10 @@ local function TargetedList_ApplyBarContent(bar, activeRec)
     -- Store casterUnit on the bar for lightweight progress lookups
     -- (the test ticker reads this to find the matching record).
     bar.casterUnit = casterUnit
+    -- And the spellId, so TargetedList_ShowBar can re-assert the secret
+    -- important-only verdict on every later show. The release path already
+    -- cleared this field; nothing had ever assigned it.
+    bar.spellId = spellId
 
     -- Spell name: test records store a clean string; live records
     -- pipe the (possibly secret) result through SetText.
@@ -3900,7 +3927,7 @@ local function TargetedList_LayoutBars()
             end
             TargetedList_ApplyBarAppearance(bar, db)
             TargetedList_ApplyTextLayout(bar, db)
-            bar:Show()
+            TargetedList_ShowBar(bar, db)
         end
     end
 end
@@ -4160,7 +4187,8 @@ local function TargetedList_Render()
                         bar.targetName:Hide()
                         if bar.duration then bar.duration:Hide() end
                         if rec.isTestCast and rec.testInterrupterName then
-                            bar.interruptText:SetText("Interrupted: " .. rec.testInterrupterName)
+                            bar.interruptText:SetFormattedText(DF.L["Interrupted: %s"],
+                                rec.testInterrupterName)
                             -- Class-color the test interrupter name
                             if rec.testInterrupterClass and TL_C_ClassColor
                                and TL_C_ClassColor.GetClassColor then
@@ -4172,7 +4200,7 @@ local function TargetedList_Render()
                         elseif rec.interrupterGuid and TL_UnitNameFromGUID then
                             -- UnitNameFromGUID returns a secret-tainted string,
                             -- piped through SetFormattedText (secret-safe sink)
-                            bar.interruptText:SetFormattedText("Interrupted: %s",
+                            bar.interruptText:SetFormattedText(DF.L["Interrupted: %s"],
                                 TL_UnitNameFromGUID(rec.interrupterGuid) or "")
                             if TL_UnitClassFromGUID and TL_C_ClassColor
                                and TL_C_ClassColor.GetClassColor then
@@ -4222,7 +4250,7 @@ local function TargetedList_Render()
             local bar = casterToBar[unit]
             if bar and slot and slot <= maxBars then
                 activeBars[slot] = bar
-                bar:Show()
+                TargetedList_ShowBar(bar, db)
                 if slot > count then count = slot end
             elseif bar then
                 bar:Hide()
@@ -4248,7 +4276,7 @@ local function TargetedList_Render()
                 count = count + 1
                 if count <= maxBars then
                     activeBars[count] = bar
-                    bar:Show()
+                    TargetedList_ShowBar(bar, db)
                 else
                     bar:Hide()
                 end

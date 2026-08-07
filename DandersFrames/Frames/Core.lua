@@ -121,76 +121,29 @@ DF.SetHealthBarValue = SetHealthBarValue
 -- health-threshold fading (UpdateHealthFade). Smoothing mirrors the real bar's per-mode
 -- smoothBars setting so the mirror's fill motion tracks the real bar. Used by the Aura
 -- Designer filled health-mirror overlay (AuraDesigner/Factory.lua). A nil bar is a no-op.
-local function MirrorHealthValue(bar, unit, frame)
-    if not bar then return end
-
-    -- The mirror is NOT ours: it is a StatusBar child of the secret aura button
-    -- (AuraContainer's slot), handed back through the container's onBar callback and
-    -- stashed on the frame. Children of that button are access-constrained, and the
-    -- client can turn this one forbidden underneath us — a slot reclaimed or
-    -- re-initialised without the addon observing it leaves the stash pointing at an
-    -- object we may no longer touch. Every health event then throws, which is bug
-    -- #1004: 999x "SetMinMaxValues on bad self (forbidden object)" in a follower
-    -- dungeon, where roster churn rebuilds containers constantly.
-    --
-    -- Probed with the first render call rather than IsForbidden(): this bar lives
-    -- inside the secret container, so IsForbidden can itself hand back a SECRET on a
-    -- perfectly healthy bar, and the codebase's guard idiom treats a secret result as
-    -- "skip" (ClickCasting/Frames.lua:1157). That would silently kill the feature for
-    -- everyone. Probing the real call cannot false-positive: if it succeeds the bar is
-    -- drivable, and SetValue below goes to the same object on the same tick.
-    if not pcall(bar.SetMinMaxValues, bar, 0, 100) then
-        -- One-shot per frame: a persistently forbidden bar must not trade a 999x
-        -- error spam for a 999x debug spam. The stash is deliberately NOT cleared —
-        -- Factory owns that reference and nils it on its own teardown paths, and
-        -- dropping it here would fight the container over a bar that may just be
-        -- transiently unavailable.
-        if frame and not frame.dfMirrorForbiddenLogged then
-            frame.dfMirrorForbiddenLogged = true
-            DF:DebugWarn("AURACONTAINER",
-                "MirrorHealthValue: health mirror bar forbidden, skipping its updates on %s",
-                tostring(unit))
-        end
-        return
-    end
-    if frame and frame.dfMirrorForbiddenLogged then
-        frame.dfMirrorForbiddenLogged = nil   -- recovered; allow one log if it happens again
-    end
-
-    local pct = GetSafeHealthPercent(unit)
-
-    local db
-    if frame and frame.isRaidFrame then
-        db = DF.GetRaidDB and DF:GetRaidDB()
-    else
-        db = DF.GetDB and DF:GetDB()
-    end
-    local smoothEnabled = db and db.smoothBars
-
-    if smoothEnabled and Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut then
-        bar:SetValue(pct, Enum.StatusBarInterpolation.ExponentialEaseOut)
-    else
-        bar:SetValue(pct)
-    end
-end
-
--- Export for use in other files
-DF.MirrorHealthValue = MirrorHealthValue
+-- (Removed 2026-08-04) MirrorHealthValue + its export. It fed a StatusBar parented
+-- under an aura slot, which DenyTaintedAccessWhenAurasAreSecret forbids outright --
+-- every call was refused in game. The AD health-bar indicator now anchors a texture
+-- to the real bar's fill texture instead, which needs no feed at all. See the HEALTH
+-- FILL COVER note in Frames/AuraContainer.lua.
 
 -- Helper to set missing health bar value safely
 -- Uses UnitHealthMissing API which is safe with secret values
 -- IMPORTANT: We pass values directly to StatusBar APIs without arithmetic
+-- ★ SHARED WITH THE PREVIEW. UpdateTestFrame used to restate this whole function
+-- (~55 lines: value, texture, all four colour modes) because every read here is a
+-- unit API and a test frame carries a REAL token, so live's reads would answer about
+-- an actual group member. The preview stamps (dfHealthPct / dfIsDead / dfClassToken)
+-- replace exactly those reads and nothing else -- a DATA fork, not a second renderer.
+-- (Audit, 2026-08-07.)
 local function SetMissingHealthBarValue(bar, unit, frame)
     if not bar then return end
-    
-    -- Get the appropriate db for this frame
-    local db
-    if frame and frame.isRaidFrame then
-        db = DF.GetRaidDB and DF:GetRaidDB()
-    else
-        db = DF.GetDB and DF:GetDB()
-    end
-    
+
+    -- ☠ WAS isRaidFrame ? raidDB : partyDB, which skips the pinned-set resolution
+    -- every other renderer goes through. GetFrameDB is that resolver.
+    local db = (frame and DF.GetFrameDB and DF:GetFrameDB(frame))
+        or (DF.GetDB and DF:GetDB())
+
     local backgroundMode = db and db.backgroundMode or "BACKGROUND"
     
     -- Only show if mode includes missing health
@@ -199,16 +152,19 @@ local function SetMissingHealthBarValue(bar, unit, frame)
         return
     end
     
-    -- Use UnitHealthMissing API - safe with secret values
-    -- Second param true means use predicted/displayable value
-    -- CRITICAL: Do NOT do arithmetic on these values - pass directly to StatusBar
-    local missingHealth = UnitHealthMissing(unit, true)
-    local maxHealth = UnitHealthMax(unit)
-    
-    -- Set bar range using maxHealth, value using missingHealth
-    -- StatusBar handles the math internally (safe with secret values)
-    bar:SetMinMaxValues(0, maxHealth)
-    
+    -- The preview has a plain fraction; live has secret values.
+    -- CRITICAL on the live branch: do NOT do arithmetic on these -- pass them straight
+    -- to the StatusBar, which does the math internally.
+    local testPct = frame and frame.dfHealthPct
+    local missingHealth
+    if testPct then
+        bar:SetMinMaxValues(0, 1)
+        missingHealth = 1 - testPct
+    else
+        missingHealth = UnitHealthMissing(unit, true)
+        bar:SetMinMaxValues(0, UnitHealthMax(unit))
+    end
+
     local smoothEnabled = db and db.smoothBars
     if smoothEnabled and Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut then
         bar:SetValue(missingHealth, Enum.StatusBarInterpolation.ExponentialEaseOut)
@@ -228,7 +184,13 @@ local function SetMissingHealthBarValue(bar, unit, frame)
     local r, g, b, a
     
     -- Check for dead/offline state with custom dead color enabled
-    local isDeadOrOffline = unit and UnitExists(unit) and (UnitIsDeadOrGhost(unit) or not UnitIsConnected(unit))
+    local isDeadOrOffline
+    if frame and frame.dfIsDead ~= nil then
+        isDeadOrOffline = frame.dfIsDead
+    else
+        isDeadOrOffline = unit and UnitExists(unit)
+            and (UnitIsDeadOrGhost(unit) or not UnitIsConnected(unit))
+    end
     local useDeadColor = isDeadOrOffline and db.fadeDeadFrames and db.fadeDeadUseCustomColor
     
     if useDeadColor then
@@ -236,6 +198,18 @@ local function SetMissingHealthBarValue(bar, unit, frame)
         local c = db.fadeDeadBackgroundColor or {r = 0.3, g = 0, b = 0}
         r, g, b = c.r, c.g, c.b
         a = db.fadeDeadBackground or 0.4
+    elseif colorMode == "PERCENT" and testPct then
+        -- Preview: the same gradient, resolved from the stamped fraction. The live
+        -- branch below cannot run here -- GetCurveForUnit + UnitHealthPercent need a
+        -- real unit, and a test frame's token points at someone else.
+        local color = DF:GetHealthGradientColor(testPct, db,
+            frame and frame.dfClassToken, "missingHealthColor")
+        if color then
+            r, g, b = color.r, color.g, color.b
+        else
+            r, g, b = 0.5, 0, 0
+        end
+        a = db.missingHealthGradientAlpha or 0.8
     elseif colorMode == "PERCENT" and unit and UnitExists(unit) then
         -- Use health gradient curve
         local applied = false
@@ -253,9 +227,10 @@ local function SetMissingHealthBarValue(bar, unit, frame)
             r, g, b = 0.5, 0, 0
             a = db.missingHealthGradientAlpha or 0.8
         end
-    elseif colorMode == "CLASS" and unit and UnitExists(unit) then
+    elseif colorMode == "CLASS" and ((frame and frame.dfClassToken) or (unit and UnitExists(unit))) then
         -- Use class color
-        local _, class = UnitClass(unit)
+        local class = frame and frame.dfClassToken
+        if not class then class = select(2, UnitClass(unit)) end
         local classColor = DF:GetClassColor(class)
         if classColor then
             r, g, b = classColor.r, classColor.g, classColor.b
@@ -277,6 +252,100 @@ end
 
 -- Export for use in other files
 DF.SetMissingHealthBarValue = SetMissingHealthBarValue
+
+-- ============================================================
+-- HEALTH TEXT
+-- ============================================================
+-- ★ THE ONE LEGACY HEALTH-TEXT FORMATTER. There were FOUR: Frames/Update.lua wrote
+-- it out twice verbatim, and TestMode wrote two more that disagreed with them and with
+-- each other -- different default format, a hardcoded "%%" that ignored Hide % Symbol,
+-- a different DEFICIT sign test, and two format aliases (CURRENT_MAX, CURRENT_PERCENT)
+-- that only the preview rendered even though old profiles can still hold them.
+--
+-- ⚠ The whole subsystem is parked, not dead: DF:IsLegacyTextHidden returns a hardcoded
+-- true for every non-pet frame, so nothing here reaches the screen today. The per-profile
+-- expression it replaced is commented out directly above it. Parked code that exists in
+-- four disagreeing copies is exactly what comes back wrong when the switch flips.
+--
+-- The preview supplies numbers through stamps; live reads the unit. Values from the unit
+-- APIs may be SECRET -- pass them straight to SetFormattedText("%%s", ...), never compare
+-- or do arithmetic on them. (Audit, 2026-08-07.)
+function DF:ApplyHealthText(frame, db, hideLegacyText)
+    local fs = frame and frame.healthText
+    if not fs then return end
+
+    local fmt = db.healthTextFormat or "PERCENT"
+    if hideLegacyText or fmt == "NONE" then
+        fs:Hide()
+        return
+    end
+
+    local unit = frame.unit
+    local testPct = frame.dfHealthPct
+    local abbreviate = db.healthTextAbbreviate and AbbreviateNumbers
+
+    if fmt == "PERCENT" then
+        local pct = testPct and (testPct * 100) or DF.GetSafeHealthPercent(unit)
+        fs:SetFormattedText(db.healthTextHidePercent and "%.0f" or "%.0f%%", pct)
+
+    elseif fmt == "CURRENT" then
+        local curr = testPct and frame.dfTestCurrentHealth or UnitHealth(unit, true)
+        if curr then
+            if abbreviate then
+                fs:SetText(AbbreviateNumbers(curr))
+            else
+                fs:SetFormattedText("%s", curr)
+            end
+        end
+
+    elseif fmt == "DEFICIT" then
+        local deficit
+        if testPct then
+            deficit = (frame.dfTestMaxHealth or 0) - (frame.dfTestCurrentHealth or 0)
+            if deficit <= 0 then deficit = nil end
+        else
+            deficit = UnitHealthMissing(unit, true)
+        end
+        if deficit then
+            if not testPct and C_StringUtil and C_StringUtil.TruncateWhenZero and C_StringUtil.WrapString then
+                fs:SetText(C_StringUtil.WrapString(C_StringUtil.TruncateWhenZero(deficit), "-"))
+                if abbreviate and fs:GetText() then
+                    fs:SetFormattedText("-%s", AbbreviateNumbers(deficit))
+                end
+            elseif abbreviate then
+                fs:SetFormattedText("-%s", AbbreviateNumbers(deficit))
+            else
+                fs:SetFormattedText("-%s", deficit)
+            end
+        else
+            fs:SetText("")
+        end
+
+    elseif fmt == "CURRENTMAX" or fmt == "CURRENT_MAX" then
+        local curr = testPct and frame.dfTestCurrentHealth or UnitHealth(unit, true)
+        local maxHp = testPct and frame.dfTestMaxHealth or UnitHealthMax(unit, true)
+        if curr and maxHp then
+            if abbreviate then
+                fs:SetFormattedText("%s/%s", AbbreviateNumbers(curr), AbbreviateNumbers(maxHp))
+            else
+                fs:SetFormattedText("%s/%s", curr, maxHp)
+            end
+        end
+
+    elseif fmt == "CURRENT_PERCENT" then
+        -- Legacy stored value; TextDesigner/Migration.lua still translates it, so a
+        -- profile can hold it. Live used to fall through and leave whatever text was
+        -- there from the previous format.
+        local curr = testPct and frame.dfTestCurrentHealth or UnitHealth(unit, true)
+        local pct = testPct and (testPct * 100) or DF.GetSafeHealthPercent(unit)
+        local pctFmt = db.healthTextHidePercent and " %.0f" or " %.0f%%"
+        if curr then
+            fs:SetFormattedText("%s" .. pctFmt, abbreviate and AbbreviateNumbers(curr) or curr, pct)
+        end
+    end
+
+    fs:Show()
+end
 
 -- ============================================================
 -- PIXEL-PERFECT SCALING

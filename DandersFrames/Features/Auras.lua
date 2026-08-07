@@ -82,6 +82,12 @@ end
 -- itself is per-record; only this inner map is shared).
 local DISPEL_TYPES = { Magic = true, Curse = true, Disease = true, Poison = true, Bleed = true }
 
+-- Shared with the dispel OVERLAY (Features/Dispel.lua), which needs the identical
+-- map for its own "All Dispellable" mode. Exported rather than duplicated: a second
+-- copy is exactly the drift hazard that retired DISPEL_ICON_TYPES. Read-only for
+-- every consumer -- see the note above.
+DF.DispelTypeMap = DISPEL_TYPES
+
 -- Build the debuff filter records (native 12.1 category filters).
 -- Returns nil (show all) or an array of records { filter, key, candidateFilters }
 -- — the record form normalizeFilters accepts; each record becomes one container
@@ -690,6 +696,20 @@ end
 -- the whole output — payload band below the threshold, EMPTY band above (no countdown,
 -- no colour-by-time, no hide-above; the indicator's own duration text is untouched and
 -- keeps its own formatter). format/hideAboveT/colorByTime are ignored in this variant.
+-- ★ BLIZZARD'S PROMOTE POINTS, and they are not the round numbers you would guess.
+-- DefaultAuraDurationFormatter (Blizzard_AuraContainerShared.lua) keeps a duration in
+-- each interval for 1.5x its normal range, so 90 seconds still renders as seconds and a
+-- 62-minute buff still renders as minutes. Their comment explains the +1: "Curve points
+-- promote on exact matches, so each point is offset by one to keep the upper whole-second
+-- value in its current band."
+--
+-- ☠ NUMBER USED TO PROMOTE AT 60 AND 3600, i.e. 31 seconds and 30 minutes earlier than
+-- the game's own frames sitting next to it. That is the whole of the "it says Number but
+-- shows me minutes" report — at 61s the game says "61s" and DF said "1m". Both paths
+-- below now key off these, so the plain and banded builders cannot drift apart either.
+local PROMOTE_MIN  = 1 + 1.5 * SECONDS_PER_MIN    -- 91
+local PROMOTE_HOUR = 1 + 1.5 * SECONDS_PER_HOUR   -- 5401
+
 local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertAtlas, alertElem, alertElemSize, alertGlyphKey)
     format = format or "NUMBER"
     local alertT
@@ -734,9 +754,13 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
     -- know the total, so absolute-seconds bands are the 12.1 equivalent.)
     if hideAboveT or colorByTime or alertT then
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
-        local secFmt = (format == "SHORT" and "%.0fs") or (format == "FULL" and "%.0f Seconds") or "%.0f"
-        local minFmt = (format == "FULL") and "%.0f Minutes" or "%.0fm"
-        local hrFmt  = (format == "FULL") and "%.0f Hours"   or "%.0fh"
+        -- %d throughout, matching the plain path and Blizzard's Truncate: %.0f rounds to
+        -- NEAREST, so 152s rendered "3m" and 3599s rendered "60m" one tick before flipping
+        -- to "1h".
+        local secFmt = (format == "SHORT" and "%ds") or (format == "FULL" and "%d Seconds")
+                        or (format == "TIMER" and "%d") or "%d"
+        local minFmt = (format == "FULL") and "%d Minutes" or "%dm"
+        local hrFmt  = (format == "FULL") and "%d Hours"   or "%dh"
         local bps = colorByTime and GetDurationColorBreakpoints() or nil
         -- Blank-band start: hide-above unchanged, EXCEPT the alert region [0, alertT)
         -- always renders — an explicit alert outranks blanking, so when the user sets
@@ -745,6 +769,10 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
         if blankAt and alertT and alertT > blankAt then blankAt = alertT end
         local ok, f = pcall(function()
             local down = Enum.NumericRuleFormatRounding.Down
+            -- ⚠ Needed by bandShape below. Without it `up` would resolve to a nil GLOBAL
+            -- and the field would silently fall back to the default rounding — legal Lua
+            -- that parses clean and quietly renders the wrong number.
+            local up   = Enum.NumericRuleFormatRounding.Up
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
             -- GLYPH alert: fixed 16px atlas escape prepended to every band that starts
             -- inside the alert region. Fixed size: the formatter is CACHED + bind-frozen
@@ -795,15 +823,31 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
                 end
             end
             table.sort(sorted)   -- ascending
+            -- ☠ EVERY FORMAT NEEDS A SHAPE HERE, not just the ones that had one. This
+            -- branch owns hide-above and colour-by-time, so a format missing from it does
+            -- not fail loudly — it silently renders as NUMBER the moment either is
+            -- switched on, which reads as "the format setting stopped working".
+            -- ⚠ The thresholds are PROMOTE_MIN / PROMOTE_HOUR, not 60 / 3600, so a band
+            -- straddling 61-90s still prints seconds exactly as the plain path does.
+            -- Using the round numbers here was how the two builders disagreed.
+            local function bandShape(t)
+                if format == "TIMER" then
+                    if t >= PROMOTE_HOUR then return "%dh", { { div = 3600 } } end
+                    if t >= PROMOTE_MIN  then return "%d:%02d", { { div = 60 }, { mod = 60 } } end
+                    return secFmt, nil
+                end
+                -- Quotient rounds UP here too, matching the plain path and the game (see
+                -- the NUMBER branch). TIMER above is deliberately excluded: its minute
+                -- component is the left half of "2:32" and must truncate, or 2m32s would
+                -- render "3:32".
+                if t >= PROMOTE_HOUR then return hrFmt,  { { div = 3600, rounding = up } } end
+                if t >= PROMOTE_MIN  then return minFmt, { { div = 60,   rounding = up } } end
+                return secFmt, nil
+            end
             for _, t in ipairs(sorted) do
                 local hex = colorByTime and colorHexAt(bps, t) or nil
-                if t >= 3600 then
-                    add(t, hrFmt,  hex, { { div = 3600, step = 1, rounding = down } })
-                elseif t >= 60 then
-                    add(t, minFmt, hex, { { div = 60,   step = 1, rounding = down } })
-                else
-                    add(t, secFmt, hex)
-                end
+                local f, comps = bandShape(t)
+                add(t, f, hex, comps)
             end
             if blankAt then
                 bands[#bands + 1] = { threshold = blankAt, step = 1, rounding = down, format = "" }
@@ -814,16 +858,56 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
         end)
         return ok and f or nil
     end
-    if format == "NUMBER" then
+    -- TIMER — "5:32". The only format needing a SECOND component: `div` yields the
+    -- minutes, `mod` the leftover seconds. Nothing in DF used `mod` before this, and no
+    -- other format here can express a clock without it.
+    -- ☠ ABOVE AN HOUR IT STOPS BEING A CLOCK. An h:mm reading of "1:02" is
+    -- indistinguishable from 1m02s, which is worse than useless on a frame showing both,
+    -- so past the hour it hands off to "1h" — the same shape the SecondsFormatter path
+    -- uses, and the same call the one 12.1 addon shipping this format makes.
+    if format == "TIMER" then
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
         local ok, f = pcall(function()
             local down = Enum.NumericRuleFormatRounding.Down
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
-            fmt:AddBreakpoint({ threshold = 0,    step = 1, rounding = down, min = 1, format = "%.0f" })
-            fmt:AddBreakpoint({ threshold = 60,   step = 1, rounding = down, min = 1, format = "%.0fm",
-                                components = { { div = 60,   step = 1, rounding = down } } })
-            fmt:AddBreakpoint({ threshold = 3600, step = 1, rounding = down, min = 1, format = "%.0fh",
-                                components = { { div = 3600, step = 1, rounding = down } } })
+            fmt:AddBreakpoint({ threshold = 0,    step = 1, rounding = down, min = 1, format = "%d" })
+            fmt:AddBreakpoint({ threshold = PROMOTE_MIN, step = 1, rounding = down, format = "%d:%02d",
+                                components = { { div = 60 }, { mod = 60 } } })
+            fmt:AddBreakpoint({ threshold = PROMOTE_HOUR, step = 1, rounding = down, format = "%dh",
+                                components = { { div = 3600 } } })
+            return fmt
+        end)
+        return ok and f or nil
+    end
+    -- NUMBER — "45" -> "2m" -> "1h". Blizzard's DefaultAuraDurationFormatter WITHOUT the
+    -- unit letter, which is the only reason it cannot simply BE that formatter: the
+    -- SecondsFormatterAbbreviation enum has no suffix-less mode (None spells the word
+    -- out, OneLetter gives "45s"), so a rule formatter is the only way to get a bare
+    -- number. Everything else about it now matches Blizzard — see PROMOTE_MIN.
+    if format == "NUMBER" then
+        if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
+        local ok, f = pcall(function()
+            local down = Enum.NumericRuleFormatRounding.Down
+            local up   = Enum.NumericRuleFormatRounding.Up
+            local fmt = C_StringUtil.CreateNumericRuleFormatter()
+            -- Seconds band truncates: 45.6s remaining is "45", same as the game.
+            fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = down, min = 1, format = "%d" })
+            -- ☠ THE QUOTIENT ROUNDS UP, and that is Blizzard's behaviour, not a preference.
+            -- Their formatter sets SetCanRoundUpLastUnit(true), so 2m32s reads "3m" and
+            -- 1h03m reads "63m" -- odd-looking, but it is what the game's own frames show,
+            -- and Units (a real SecondsFormatter) already did it. Standard truncated, so
+            -- the two disagreed at every duration with a fractional minute: "2m" against
+            -- "3m" on the same buff, which is the inconsistency this closes.
+            -- ⚠ Rounding on the COMPONENT is the only place that can affect the quotient --
+            -- breakpoint-level rounding applies to the input SECONDS, before the divide.
+            -- Whether the validator honours it is unproven (the one shipping 12.1 addon
+            -- using this API puts step/rounding only at breakpoint level), so it has a
+            -- visible tell: if the Duration Format example still reads "2m · 62m" against
+            -- Units' "3m · 63m", it was ignored and this needs another approach.
+            fmt:AddBreakpoint({ threshold = PROMOTE_MIN,  step = 1, rounding = down, min = 1, format = "%dm",
+                                components = { { div = 60, rounding = up } } })
+            fmt:AddBreakpoint({ threshold = PROMOTE_HOUR, step = 1, rounding = down, min = 1, format = "%dh",
+                                components = { { div = 3600, rounding = up } } })
             return fmt
         end)
         return ok and f or nil
@@ -840,6 +924,15 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
         curve:AddPoint(1 + mult * SECONDS_PER_HOUR, Enum.SecondsFormatterInterval.Hours)
         curve:AddPoint(1 + mult * SECONDS_PER_DAY,  Enum.SecondsFormatterInterval.Days)
         fmt:SetDefaultAbbreviation(abbrev)
+        -- ☠ THE TWO CALLS THIS PATH USED TO OMIT. Blizzard's own aura formatter sets
+        -- both; without them a SecondsFormatter defaults to SecondsFormatterRounding
+        -- .RoundUp (enum 0 — and Blizzard setting Truncate explicitly is itself evidence
+        -- the default is not Truncate), so 44.6s remaining rendered "45s" here while the
+        -- game's frames rendered "44s". Guarded: the setters are newer than the type.
+        if fmt.SetRounding and Enum.SecondsFormatterRounding then
+            fmt:SetRounding(Enum.SecondsFormatterRounding.Truncate)
+        end
+        if fmt.SetCanRoundUpLastUnit then fmt:SetCanRoundUpLastUnit(true) end
         fmt:SetMinInterval(Enum.SecondsFormatterInterval.Seconds)
         fmt:SetMaxIntervalCurve(curve)
         fmt:SetDesiredUnitCount(1)
@@ -889,6 +982,63 @@ local function GetDurationFormatter(format, hideAboveT, colorByTime, alertMode, 
         durationFormatterCache[key] = BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode, alertThreshold, alertText, alertAtlas) or false
     end
     return durationFormatterCache[key] or nil
+end
+
+-- ★ WHAT EACH FORMAT PRINTS — shown under the Duration Format dropdown.
+--
+-- Three samples, straddling BOTH promote points (45s · 2m32s · 1h02m), because a single
+-- value cannot show a roll-up and the roll-up is the part people get wrong: "Standard
+-- (45)" would have explained nothing about the report that started this.
+--
+-- ☠ HAND-MAINTAINED, AND DELIBERATELY IN THIS FILE. NumericRuleFormatter exposes no
+-- Format method — only Add/Set/GetBreakpoints — so NUMBER, TIMER and PERCENT can only be
+-- evaluated by the C-side duration binding, never from Lua. Their strings therefore
+-- cannot be generated and can only be kept true by hand, so they live against the
+-- breakpoints they describe rather than in the options pages. Change a breakpoint above,
+-- change these.
+-- These three are safe to hardcode in English: their unit suffixes come from DF's own
+-- format strings ("%dm"/"%dh"), which are not locale-aware in any locale.
+local DURATION_FORMAT_EXAMPLES = {
+    NUMBER          = "45 · 2m · 62m",
+    TIMER           = "45 · 2:32 · 62:05",
+    PERCENT         = "75%",
+    SECONDS_PERCENT = "45s (75%)",
+    -- Fallbacks only — SHORT/FULL are generated live below, and FULL takes a single
+    -- sample so its spelled-out unit fits beside the caption on the narrow bar card.
+    SHORT           = "45s · 3m · 63m",
+    FULL            = "45 Seconds",
+}
+
+-- ⚠ SHORT and FULL are NOT hardcoded. They render through a SecondsFormatter, whose
+-- output IS locale-aware (deDE keeps its space, FULL spells the unit out in the client
+-- language), so an English constant would be wrong for most users. SecondsFormatter has
+-- a Format method — the rule formatters do not — so theirs comes from the REAL formatter
+-- and can neither drift from the code nor be wrong in a locale.
+local EXAMPLE_SAMPLES = { 45, 152, 3725 }
+-- ⚠ FULL SPELLS THE UNIT OUT, and it is offered ONLY on the Aura Designer bar card —
+-- the narrowest surface carrying this control. Three samples clipped there ("45 Seconds ·
+-- 3 Minutes · 6…"); two measure close enough to the caption that they would probably clip
+-- too, so it gets one. That is not a real loss: Full's only difference from Units is that
+-- it spells the unit out, which one sample shows, and Units sits directly above it in the
+-- same dropdown already demonstrating the roll-up.
+local EXAMPLE_SAMPLES_VERBOSE = { 45 }
+
+function DF:GetDurationFormatExample(format)
+    format = format or "NUMBER"
+    if format == "SHORT" or format == "FULL" then
+        local f = GetDurationFormatter(format, nil, false)
+        if f and f.Format then
+            local samples = (format == "FULL") and EXAMPLE_SAMPLES_VERBOSE or EXAMPLE_SAMPLES
+            local parts, ok = {}, true
+            for i = 1, #samples do
+                local got, s = pcall(f.Format, f, samples[i])
+                if not (got and type(s) == "string" and s ~= "") then ok = false break end
+                parts[i] = s
+            end
+            if ok then return table.concat(parts, " · ") end
+        end
+    end
+    return DURATION_FORMAT_EXAMPLES[format]
 end
 
 -- The account-wide colour-by-time breakpoints signature. Folded into the STRUCTURAL
@@ -1747,6 +1897,18 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
         mode     = "row",
         filter   = filter,
         max      = g("Max") or 5,
+        -- ☠ EXPLICIT 32, not ApplyZOrder's `or 40` default. The buff/debuff rows and the
+        -- AURA DESIGNER indicators were both landing on 40 — identical anchor, container
+        -- and button levels — so which drew on top was decided by creation order, i.e. by
+        -- nothing. An AD indicator placed over the aura row is meant to annotate it and
+        -- must win; at equal levels it sometimes did not.
+        -- 32 puts the rows in their own band: above the status icons at 30 (single frames,
+        -- no children of their own) and clear below the AD band at 40. The rows have no
+        -- user-facing level slider, so this moves nothing a user configured — which is why
+        -- the fix goes here rather than shifting the AD default and forcing a migration.
+        -- Span: 32..39 (container +1, button +2, border +4, holders +3..+7).
+        -- (Z-order review, 2026-08-07.)
+        frameLevelOffset = 32,
         -- Test-mode preview cap: the test panel's Buffs/Debuffs count sliders
         -- (hot-applied via Handle:SetTestMax from the test drive seam).
         testMax  = (prefix == "buff" and (db.testBuffCount or 2))
@@ -1783,6 +1945,27 @@ function DF:BuildAuraRowConfig(db, prefix, opts)
             -- geometry are structural (rowStructSig's s.bar entry, Wave 3.1);
             -- texture/colours restyle in place.
             bar      = DF:BuildDurationBarSpec(db, prefix .. "DurationBar"),
+            -- Pandemic cue (PTR 8): the game's own refresh window, rendered on each
+            -- button by AddPandemicRegion. Keys are prefixed (buffPandemic*) because the
+            -- row's settings live in the FLAT profile table, unlike the Aura Designer's
+            -- per-indicator records — the engine owns that split so neither surface knows
+            -- the other's key shape. Presence + mode + flash are structural
+            -- (rowStructSig); everything else rides the unconditional ApplyStyle below.
+            --
+            -- ☠ BUFF ROW ONLY, deliberately. The debuff row shows harmful auras on a
+            -- FRIENDLY unit — things cast on your party by something else. You cannot
+            -- refresh those, so they have no refresh window and GetRefreshExtendedDuration
+            -- returns nil for every one of them. A Pandemic section on Debuffs would be a
+            -- panel of live controls wired to a cue that can never light: the
+            -- silent-capability-skip antipattern, with the impossibility coming from the
+            -- game's rules rather than the client build. (Krathe, 2026-08-05.) If DF ever
+            -- grows an enemy-target DoT row, that surface is where this belongs.
+            --
+            -- ctx is DF.Border's build context: the unit for class/role colour sources,
+            -- and iconMode so the border sizes like an icon ring rather than a frame edge.
+            pandemic = (prefix == "buff") and DF.Pandemic
+                and DF.Pandemic:BuildSpec(db, prefix, { unit = opts.unit, iconMode = true })
+                or nil,
             -- Shared TextStyle spec (font/scale/outline/anchor/offsets/justify/colour).
             -- No formatter: forbidden on container rows (secret trap — see the
             -- GetStacksFormatter tombstone above). Native default = counts > 1.
@@ -1822,10 +2005,13 @@ local function cfSig(cf)
     return table.concat(parts, "&")
 end
 
--- STRUCTURAL half of a filter list: token strings + record keys only — the parts
--- AddAuraGroup freezes (a group's filterString can't be changed live; the record SET
--- defines the groups themselves). Per-record candidateFilters are deliberately
--- EXCLUDED — they're live-tunable (see filterTuningSig).
+-- ☠ CORRECTED 2026-08-04. This used to say "a group's filterString can't be changed
+-- live" and that claim is what put filter strings in the struct sig in the first place.
+-- SetAuraGroupFilterString / SetAuraSlotFilterString have always existed and destroy
+-- nothing — proven in game via the DF_AuraLab /alfilter A/B probe. What AddAuraGroup
+-- really freezes is the record SET: the topology is add-only, so a record appearing or
+-- disappearing needs a new container. Only the KEYS (and per-record style) are
+-- structural now; strings and candidateFilters are both live-tunable (filterTuningSig).
 -- A record's per-button STYLE (important-debuff highlight). STRUCTURAL, not tuning:
 -- it decides whether the group gets its own initializeFrame closure, whether the badge
 -- regions exist at all, and the group's layout cell size — none of which ApplyStyle can
@@ -1842,35 +2028,27 @@ local function recStyleSig(s)
         .. tostring(b.markColor and b.markColor.b)) or "-")
 end
 
+-- STRUCT half of a filter list: the KEY SET and the per-record style, NOT the filter
+-- strings.
+--
+-- ☠ WHY THE KEY SET AND NOT THE STRING (2026-08-04). AddAuraGroup/AddAuraSlot are
+-- add-only — there is no remove — so a record APPEARING or DISAPPEARING genuinely needs
+-- a new container. A record keeping its key while its filter string changes does not:
+-- SetAuraGroup/SlotFilterString mutate that live and destroy nothing, and the engine
+-- pushes it from applyGroupTuning. The string therefore moved to filterTuningSig.
+-- Per-record style STAYS here: it is applied in initializeFrame, which a tuning pass
+-- does not re-run (measured — a filter-string swap leaves initializeFrame counts flat).
+--
+-- Plain-string entries contribute "" rather than the string itself, so a bare
+-- HELPFUL <-> HARMFUL swap is a tuning delta. The ";" separators still encode the
+-- record COUNT, which is the part that has to stay structural.
 local function filterStructSig(f)
-    if type(f) ~= "table" then return tostring(f) end
-    local parts = {}
-    for i = 1, #f do
-        local entry = f[i]
-        if type(entry) == "table" then
-            parts[i] = tostring(entry.filter) .. "#" .. tostring(entry.key) .. recStyleSig(entry.style)
-        else
-            parts[i] = entry
-        end
-    end
-    return table.concat(parts, ";")
-end
-
--- TUNING half of a filter list: each record's candidateFilters (boolean flags,
--- maxDuration, dispel-type maps via cfSig; spell-ID maps via include/excludeSig —
--- records carry none today, but the serializer must not go blind if they appear).
--- Positional, so it stays aligned with filterStructSig's record order.
--- Grammar note: the three "&"-joined components stay disambiguable because cfSig
--- parts always contain "=", includeSig is "I:"-prefixed, and excludeSig is bare
--- digits — any new token must keep its component recognisable within that grammar.
-local function filterTuningSig(f)
     if type(f) ~= "table" then return "" end
     local parts = {}
     for i = 1, #f do
         local entry = f[i]
         if type(entry) == "table" then
-            local cf = entry.candidateFilters
-            parts[i] = cfSig(cf) .. "&" .. includeSig(cf) .. "&" .. excludeSig(cf)
+            parts[i] = tostring(entry.key) .. recStyleSig(entry.style)
         else
             parts[i] = ""
         end
@@ -1878,11 +2056,37 @@ local function filterTuningSig(f)
     return table.concat(parts, ";")
 end
 
+-- TUNING half of a filter list: each record's FILTER STRING plus its candidateFilters
+-- (boolean flags, maxDuration, dispel-type maps via cfSig; spell-ID maps via
+-- include/excludeSig — records carry none today, but the serializer must not go blind
+-- if they appear). Positional, so it stays aligned with filterStructSig's record order.
+-- Grammar note: the four "&"-joined components stay disambiguable because the filter
+-- string is "F:"-prefixed, cfSig parts always contain "=", includeSig is "I:"-prefixed,
+-- and excludeSig is bare digits — any new token must keep its component recognisable
+-- within that grammar.
+-- The filter string joined this half on 2026-08-04; see filterStructSig for why that is
+-- safe while the key set stays structural.
+local function filterTuningSig(f)
+    if type(f) ~= "table" then return "" end
+    local parts = {}
+    for i = 1, #f do
+        local entry = f[i]
+        if type(entry) == "table" then
+            local cf = entry.candidateFilters
+            parts[i] = "F:" .. tostring(entry.filter)
+                .. "&" .. cfSig(cf) .. "&" .. includeSig(cf) .. "&" .. excludeSig(cf)
+        else
+            parts[i] = "F:" .. tostring(entry)
+        end
+    end
+    return table.concat(parts, ";")
+end
+
 -- Public split halves for the AD debuff-group containers (AuraDesigner/Factory.lua,
 -- Wave 1) — the record shape is the same one the row folds into its own signatures,
--- so the groups reuse the exact serializers. Struct half = record strings + keys
--- (a selection edit that changes the record SET Rebuilds); tuning half = per-record
--- candidateFilters (applies in place via ApplyTuning + the config.filter pre-swap).
+-- so the groups reuse the exact serializers. Struct half = record KEYS + per-record
+-- style (a selection edit that changes the record SET Rebuilds); tuning half = each
+-- record's filter string + candidateFilters (applies in place via ApplyTuning).
 -- The combined DF:DebuffFilterRecordsSig above stays as the canonical whole-record
 -- serializer (harness equivalence oracle).
 function DF:DebuffFilterRecordsStructSig(records)
@@ -1895,37 +2099,64 @@ end
 
 -- Row signatures, SPLIT (Wave 1). The old combined buffFactorySig forced a
 -- teardown+recreate for every delta; now:
---   rowStructSig  — changes need a Rebuild (new container): the filter set
---     (token strings + record keys), region-presence toggles (ApplyStyle can't
---     CREATE or REMOVE a region), creation-frozen formatKeys + zeroText
---     (SetDurationText binds both once per slot), tooltips, the native dispel region.
+--   rowStructSig  — changes need a Rebuild (new container): the record KEY SET
+--     (add-only topology — no RemoveAuraGroup) and per-record style, region-presence
+--     toggles (ApplyStyle can't CREATE or REMOVE a region), creation-frozen formatKeys
+--     + zeroText (SetDurationText binds both once per slot), tooltips, the native
+--     dispel region.
 --   rowTuningSig  — changes with the struct sig stable apply IN PLACE via
 --     h:ApplyTuning (OOC immediate, combat defers to regen): max, native sort,
---     and every candidateFilters facet — config-wide include/exclude spell maps,
---     maxDuration, per-record flags/dispel maps.
+--     every candidateFilters facet — config-wide include/exclude spell maps,
+--     maxDuration, per-record flags/dispel maps — and, since 2026-08-04, each
+--     record's FILTER STRING. That last one is what makes buff-row "Only Mine"
+--     (HELPFUL <-> HELPFUL|PLAYER) and the dispel row's All/By-Me token swap free:
+--     same key, different string, no container recreated.
 -- Everything in neither sig is a plain in-place ApplyStyle (cosmetics).
 local function rowStructSig(cfg)
     local s = cfg.style
     return table.concat({
         filterStructSig(cfg.filter), tostring(cfg.tooltips),
-        tostring(s.duration ~= nil), tostring(s.duration and s.duration.formatKey),
-        -- zeroText (hide-on-permanent, Wave 4): creation-frozen — SetDurationText
-        -- forwards it to the binding once per slot. "" (on) vs nil (off) must Rebuild.
-        tostring(s.duration and s.duration.zeroText),
-        -- updateInterval (duration-text update rate, Wave 5a): creation-frozen the
-        -- same way; nil at the NORMAL default, so only a non-default rate moves it.
-        tostring(s.duration and s.duration.updateInterval),
-        tostring(s.stacks and s.stacks.formatKey),
+        -- Duration text PRESENCE only. The region is create-once, so whether it exists
+        -- stays structural.
+        -- ☠ formatKey / zeroText / updateInterval used to sit here on the claim that
+        -- "SetDurationText forwards them to the binding once per slot". That is FALSE
+        -- against Blizzard's source: the setter is reset-then-apply and explicitly
+        -- re-callable — OnLoad_Intrinsic says "Retain the duration text binding across
+        -- reconfiguration". The freeze was our own _boundDur flag, now replaced by a
+        -- spec-identity re-bind in bindNative that runs from ApplyStyle on both handle
+        -- kinds. A format edit is a restyle.
+        -- ★ formatKey was the costliest entry in the file: it folds in
+        -- DF:GetAuraDurationUpdateInterval(), so ONE account-wide setting tore down and
+        -- recreated every container on every frame.
+        tostring(s.duration ~= nil),
+        -- ☠ s.stacks.formatKey used to sit here and was DEAD. Nothing in the addon ever
+        -- assigns it (only dur.formatKey is written anywhere), so it serialised to the
+        -- constant "nil" and could never move the signature. It could not have mattered
+        -- either: bindNative deliberately passes {} to SetApplicationCount and never
+        -- forwards a stacks formatter at all, because a Lua formatter running on a
+        -- secret stack count throws inside the engine's dirty pass.
         tostring(s.border ~= nil), tostring(s.cooldown and s.cooldown.show ~= false),
         tostring(s.dispel ~= nil),          -- native dispel border (region is create-once -> Rebuild)
         -- Wave 5b: the dispel spec hosts TWO independent create-once regions (colour
         -- ring + colourblind symbol) — presence of EACH is structural on its own
         -- (ApplyStyle can't create/remove either; the symbol bind is also bind-once).
         tostring(s.dispel and s.dispel.nativeBorder), tostring(s.dispel and s.dispel.nativeSymbol),
-        -- Duration bar: region is create-once (presence -> Rebuild), and strip geometry
-        -- reserves layout space OUTSIDE the button rect (Wave 3.2), so shape/position/
-        -- height/gap changes are structural too — the reservation must re-derive.
-        tostring(s.bar ~= nil), tostring(s.bar and (tostring(s.bar.fill) .. ":" .. tostring(s.bar.position) .. ":" .. tostring(s.bar.height) .. ":" .. tostring(s.bar.gap))),
+        -- Duration bar: the region is create-once, so PRESENCE is structural. So is the
+        -- fill<->strip flip, which changes which construction is built.
+        -- ☠ position/height/gap were structural on the theory that the strip's layout
+        -- reservation could not re-derive live. It already does, on the live path:
+        -- ApplyStyle -> backend:applyLayout -> buildGroupLayout -> stripReservation ->
+        -- SetAuraGroupLayout, with applyContainerLayout re-deriving the start-side inset
+        -- from the same call (and _dfPadApplied existing precisely to clear a stale inset
+        -- "if a live restyle flips the strip to the far side"). styleButton_regions
+        -- re-anchors the strip every pass for the same reason. They are cosmetics.
+        tostring(s.bar ~= nil), tostring(s.bar and tostring(s.bar.fill)),
+        -- Pandemic: the holder frame, its contents (a DF.Border vs a tint texture), the
+        -- AddPandemicRegion bind and the flash animation are ALL create-once, so mode and
+        -- flash are structural. Read off the built spec rather than the db, so an
+        -- unsupported client (no spec) sigs identically to the feature being off.
+        tostring(s.pandemic and s.pandemic.mode),
+        tostring(s.pandemic and s.pandemic.flash),
     }, "|")
 end
 
@@ -2020,16 +2251,21 @@ function DF:DriveBuffFactory(frame, db)
                 tostring(frame.buffFactoryStructSig), tostring(structSig))
             frame.buffFactoryStructSig = structSig
             frame.buffFactoryTuningSig = tuningSig
-            h:Rebuild(cfg)                      -- structural (filter set/regions/tooltips) — discrete, leak-safe
+            -- structSig doubles as the container PARKING key: its definition is exactly
+            -- "changing this needs a new container", which is precisely the condition
+            -- for safely re-adopting a parked one. A/B/A (profile swap, preset toggle,
+            -- AutoProfiles zone transition) now reuses instead of stranding.
+            h:Rebuild(cfg, structSig)           -- structural (filter set/regions/tooltips) — discrete, leak-safe
         else
             if frame.buffFactoryTuningSig ~= tuningSig then
                 DF:Debug("AURAROW", "buff: TUNING - tuning sig %s -> %s (struct unchanged)",
                     tostring(frame.buffFactoryTuningSig), tostring(tuningSig))
                 frame.buffFactoryTuningSig = tuningSig
-                -- Per-record candidateFilters ride cfg.filter; the struct sig pins
-                -- every record's filter string + key, so the fresh list is
-                -- group-identical and applyGroupTuning re-derives per-record
-                -- filters from it (keys line up with the declared groups).
+                -- Per-record filter STRINGS and candidateFilters both ride cfg.filter;
+                -- the struct sig pins every record's KEY, so the fresh list is
+                -- group-identical and applyGroupTuning re-derives both from it (keys
+                -- line up with the declared groups). This is what makes "Only Mine"
+                -- (HELPFUL <-> HELPFUL|PLAYER) a tune rather than a rebuild.
                 h.config.filter = cfg.filter
                 h:ApplyTuning(cfg)              -- max/sort/candidateFilters — in place, no leak
             end
@@ -2183,7 +2419,7 @@ function DF:DriveDebuffFactory(frame, db)
                 tostring(frame.debuffFactoryStructSig), tostring(structSig))
             frame.debuffFactoryStructSig = structSig
             frame.debuffFactoryTuningSig = tuningSig
-            h:Rebuild(cfg)                      -- structural — REPLACES the config wholesale
+            h:Rebuild(cfg, structSig)           -- structural — REPLACES the config wholesale (structSig = park key)
         else
             if frame.debuffFactoryTuningSig ~= tuningSig then
                 DF:Debug("AURAROW", "debuff: TUNING - tuning sig %s -> %s (struct unchanged)",
@@ -2304,8 +2540,15 @@ function DF:BuildDefensiveRowConfig(db, unit)
             return { method = "BigDefensive" }
         end)(),
         -- P5 preview: HELPFUL category alone would page the buff pool — show
-        -- curated defensives instead (TestMode drives testMax per role).
+        -- curated defensives instead.
         testPool = "defensives",
+        -- ☠ The line above used to end "(TestMode drives testMax per role)". It did
+        -- NOT — nothing ever set testMax here, so the preview fell through to the row's
+        -- full `max` and declared one AuraGroup per icon, each eagerly allocating ten
+        -- buttons, for a curated pool of FOUR defensives. Another comment asserting a
+        -- behaviour no code implemented. Capped like the buff row now: this is a
+        -- HELPFUL row, so the Buffs count is the one the user set for it.
+        testMax = db.testBuffCount or 2,
         tooltips = db.tooltipDefensiveEnabled ~= false,
         -- Z-order: an ABSOLUTE offset from the unit frame. Highest of the aura surfaces, so a
         -- defensive cue is never buried. Applied via h:ApplyZOrder(cfg) at Create + re-apply.
@@ -2413,7 +2656,7 @@ function DF:DriveDefensiveFactory(frame, db)
                 tostring(frame.defensiveFactoryStructSig), tostring(structSig))
             frame.defensiveFactoryStructSig = structSig
             frame.defensiveFactoryTuningSig = tuningSig
-            h:Rebuild(cfg)                      -- structural (filter set/regions/tooltips)
+            h:Rebuild(cfg, structSig)           -- structural (filter set/regions/tooltips); structSig = park key
         else
             if frame.defensiveFactoryTuningSig ~= tuningSig then
                 DF:Debug("AURAROW", "defensive: TUNING - tuning sig %s -> %s (struct unchanged)",
@@ -2494,6 +2737,17 @@ local function buildMissingCellConfig(info, unit, size)
         filter = "HELPFUL",
         candidateFilters = { includeSpellIDs = map },
         badge = { w = size, h = size },
+        -- ☠ MUST BE EXPLICIT, AND MUST BE 0. ApplyZOrder does
+        -- `parent:GetFrameLevel() + (frameLevelOffset or 40)`, and this is the ONE
+        -- Create site whose parent is not the unit frame but an already-offset
+        -- child of it: the strip, which layoutMissingStrip puts at
+        -- frame + missingBuffIconFrameLevel. Omitting the key therefore stacked a
+        -- SECOND +40 on top — at the default 35 the badges rendered at frame+75 and
+        -- drew over the defensive row at 65, and the Frame Level slider was off by
+        -- 40 at every setting (Krathe, 2026-08-07). 0 puts the cells on the strip's
+        -- own level, which is what the setting says. Every other Create with a
+        -- non-frame parent already passes an explicit offset — swept 2026-08-07.
+        frameLevelOffset = 0,
         enabled = true,
     }
 end
@@ -2631,7 +2885,14 @@ local function layoutMissingStrip(frame, db, strip, cellCount)
     strip:ClearAllPoints()
     strip:SetPoint(anchor, frame, anchor, db.missingBuffIconX or 0, db.missingBuffIconY or 0)
     DF:SnapPointToPixelGrid(strip, db.pixelPerfect)
-    strip:SetFrameLevel(math.max(0, frame:GetFrameLevel() + (db.missingBuffIconFrameLevel or 35)))
+    -- ☠ FALLBACK 60, NOT 35. 35 was the PRE-MIGRATION default and it survived here after
+    -- the key moved to 60 (_missingBuffBaselineV3) — so a db missing the key put the strip
+    -- at frame+35, INSIDE the aura band (40) instead of above it, and the badges rendered
+    -- under the very icons they exist to sit over. Same drifted-fallback shape as the
+    -- oor*Alpha constants: invisible while Config seeds the key, wrong the moment it does
+    -- not (an old import, a hand-edited SavedVariables). Keep equal to Config's
+    -- missingBuffIconFrameLevel. (Z-order review, 2026-08-07.)
+    strip:SetFrameLevel(math.max(0, frame:GetFrameLevel() + (db.missingBuffIconFrameLevel or 60)))
 end
 
 -- Drive the missing-buff strip for one frame. Mirrors the row drives: lazy create,

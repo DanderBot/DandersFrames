@@ -153,24 +153,11 @@ function FlatRaidFrames:BuildSortedNameList()
     local sortByClass = db.sortByClass
     local sortAlphabetical = db.sortAlphabetical
     
-    -- Melee specs by specID (for melee/ranged separation)
-    local meleeSpecs = {
-        [250] = true, [251] = true, [252] = true,  -- Death Knight
-        [577] = true, [581] = true,                 -- Demon Hunter
-        [103] = true,                               -- Druid Feral
-        [255] = true,                               -- Hunter Survival
-        [269] = true,                               -- Monk Windwalker
-        [70] = true,                                -- Paladin Ret
-        [259] = true, [260] = true, [261] = true,  -- Rogue
-        [263] = true,                               -- Shaman Enh
-        [71] = true, [72] = true,                   -- Warrior Arms/Fury
-    }
+    -- ★ ONE SHARED TABLE (Core/Config.lua). This used to be a local copy; see the
+    -- header there for the three-way disagreement it caused.
+    local meleeSpecs = DF.MELEE_SPECS
     
-    -- Class-based melee fallback (when spec not available)
-    -- Only classes whose DPS spec is always melee
-    local meleeClasses = {
-        DEATHKNIGHT = true, DEMONHUNTER = true, ROGUE = true, WARRIOR = true, PALADIN = true
-    }
+    local meleeClasses = DF.MELEE_CLASSES
     
     -- Get melee/ranged type for a unit
     local function GetMeleeRangedType(unit, role, class)

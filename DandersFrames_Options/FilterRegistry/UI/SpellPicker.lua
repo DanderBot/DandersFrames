@@ -526,11 +526,23 @@ local function SubmitAddByID(inst, action)
         return
     end
     text = text:match("^0*(%d+)$") or text
+    -- Digit cap first, purely so tonumber() is never handed an absurd string; the real
+    -- test is the VALUE one below.
     if #text > 10 then
         inst:Echo(L["Enter a valid spell ID."])
         return
     end
-    if opts.onAddByID(tonumber(text), action, inst, text) then
+    -- ☠ CAP ON VALUE, NOT DIGIT COUNT. 2147483647 is itself ten digits, so the length
+    -- check above passes every id from 2147483648 to 9999999999 -- and those cannot be
+    -- rendered at all: string.format("%d", n) throws "integer overflow attempting to
+    -- store <n>". That is the whole of the #2222222222 bug, and why #1111111111 (also
+    -- ten digits, but under the ceiling) was accepted without complaint.
+    local idNum = tonumber(text)
+    if not idNum or idNum < 1 or idNum > (DF.FilterRegistry and DF.FilterRegistry.MAX_SPELL_ID or 2147483647) then
+        inst:Echo(L["Enter a valid spell ID."])
+        return
+    end
+    if opts.onAddByID(idNum, action, inst, text) then
         inst.addBox.EditBox:SetText("")
     end
 end

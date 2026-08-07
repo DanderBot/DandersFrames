@@ -42,8 +42,19 @@ local function patternLabel(e)
         if e.wild == "suffix" then return "*" .. e.pattern end
         return "*" .. e.pattern .. "*"
     end
-    if e.realm and e.realm ~= "" then
-        return e.pattern .. "-" .. e.realm
+    -- ☠ Do NOT unconditionally append the realm. buildExact (Features/Nicknames.lua)
+    -- stores `pattern` = the RAW input, which already includes "-Realm", and also
+    -- splits the realm out into `realm`. Appending it again rendered
+    -- "Bob-Draenor-Draenor" -- and this label is what the editor loads into the
+    -- Character box, so Save re-parsed it into matchRealm "draenor-draenor", which
+    -- can never match any unit. A pure view -> edit -> save round trip silently
+    -- destroyed the rule. Only append when the pattern does not already carry it,
+    -- so any entry that stored the two separately still labels correctly.
+    if e.realm and e.realm ~= "" and e.pattern then
+        local suffix = "-" .. e.realm
+        if e.pattern:sub(-#suffix) ~= suffix then
+            return e.pattern .. suffix
+        end
     end
     return e.pattern
 end

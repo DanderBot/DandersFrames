@@ -1362,177 +1362,26 @@ function DF:LightweightUpdateDispelOverlay()
     if not db then return end
 
     -- TEST MODE: route the drag tick through the REAL paint — UpdateDispelOverlay's
-    -- test branch carries the mode-aware pieces (game-palette proxy, intensity
-    -- frozen at 1 in game mode, borders/EDGE custom-only, the clip-proof anchor
-    -- proxy). The hand-rolled repaint below predates the Game/Custom split and
-    -- had drifted mode-blind: dragging Opacity in Game mode flashed the custom
-    -- picker colours × intensity and re-showed the borders until release
-    -- (live-caught). Test previews never carry their own copy of styling or
-    -- geometry (mirrors LightweightUpdateDefensiveIcons); the loop below stays
-    -- for pre-12.1 LIVE drags only, where avoiding a full aura re-scan per tick
-    -- is the reason this lightweight path exists.
+    -- test branch carries the mode-aware pieces (game-palette proxy, the clip-proof
+    -- anchor proxy). Test previews never carry their own copy of styling or geometry
+    -- (mirrors LightweightUpdateDefensiveIcons).
     if DF.testMode or DF.raidTestMode then
         if DF.UpdateAllDispelOverlays then DF:UpdateAllDispelOverlays() end
         return
     end
 
-    -- 12.1 factory overlay: re-drive immediately so colour/alpha/geometry tweaks
-    -- apply live (mirrors LightweightUpdateDefensiveIcons). The legacy loop below
-    -- only touches the hidden legacy overlays.
-    if DF.UseFactoryForDispelOverlay and DF:UseFactoryForDispelOverlay(nil, db) then
-        DF:InvalidateAuraLayout()
-    end
-
-    local borderSize = db.dispelBorderSize or 2
-    local borderInset = db.dispelBorderInset or 0
-    local borderAlpha = db.dispelBorderAlpha or 1
-    local gradientAlpha = db.dispelGradientAlpha or 0.5
-    local gradientIntensity = db.dispelGradientIntensity or 1.0
-    local gradientStyle = db.dispelGradientStyle or "FULL"
-    local gradientSize = db.dispelGradientSize or 0.3
-    local blendMode = db.dispelGradientBlendMode or "ADD"
-    local darkenAlpha = db.dispelGradientDarkenAlpha or 0.5
-    local iconSize = db.dispelIconSize or 20
-    local iconAlpha = db.dispelIconAlpha or 1
-    local iconPosition = db.dispelIconPosition or "CENTER"
-    local iconOffsetX = db.dispelIconOffsetX or 0
-    local iconOffsetY = db.dispelIconOffsetY or 0
-    
-    local function UpdateDispel(frame)
-        if not frame or not frame.dfDispelOverlay then return end
-        
-        local overlay = frame.dfDispelOverlay
-        
-        -- Get current color from overlay's stored dispel type
-        local r, g, b = 1, 1, 1
-        if overlay.currentDispelType then
-            local dispelColors = {
-                Magic = db.dispelMagicColor or {r = 0, g = 0.6, b = 1},
-                Curse = db.dispelCurseColor or {r = 0.6, g = 0, b = 1},
-                Poison = db.dispelPoisonColor or {r = 0, g = 0.6, b = 0},
-                Disease = db.dispelDiseaseColor or {r = 0.6, g = 0.4, b = 0},
-                Bleed = db.dispelBleedColor or {r = 1, g = 0, b = 0},
-            }
-            local color = dispelColors[overlay.currentDispelType]
-            if color then
-                r, g, b = color.r, color.g, color.b
-            end
-        end
-        
-        -- Calculate OOR alpha multiplier for test mode
-        local oorMultiplier = 1.0
-        if (DF.testMode or DF.raidTestMode) and frame.testData and frame.testData.outOfRange then
-            oorMultiplier = db.oorDispelOverlayAlpha or 0.55
-        end
-        
-        local effectiveBorderAlpha = borderAlpha * oorMultiplier
-        local effectiveGradientAlpha = gradientAlpha * oorMultiplier
-        
-        -- Update border positions, sizes, and alpha
-        if overlay.borderLeft then
-            overlay.borderLeft:ClearAllPoints()
-            overlay.borderLeft:SetPoint("TOPLEFT", overlay, "TOPLEFT", -borderInset, borderInset)
-            overlay.borderLeft:SetPoint("BOTTOMLEFT", overlay, "BOTTOMLEFT", -borderInset, -borderInset)
-            overlay.borderLeft:SetWidth(borderSize)
-            local tex = overlay.borderLeft:GetStatusBarTexture()
-            if tex then tex:SetVertexColor(r, g, b, effectiveBorderAlpha) end
-        end
-        
-        if overlay.borderRight then
-            overlay.borderRight:ClearAllPoints()
-            overlay.borderRight:SetPoint("TOPRIGHT", overlay, "TOPRIGHT", borderInset, borderInset)
-            overlay.borderRight:SetPoint("BOTTOMRIGHT", overlay, "BOTTOMRIGHT", borderInset, -borderInset)
-            overlay.borderRight:SetWidth(borderSize)
-            local tex = overlay.borderRight:GetStatusBarTexture()
-            if tex then tex:SetVertexColor(r, g, b, effectiveBorderAlpha) end
-        end
-        
-        if overlay.borderTop then
-            overlay.borderTop:ClearAllPoints()
-            overlay.borderTop:SetPoint("TOPLEFT", overlay, "TOPLEFT", -borderInset + borderSize, borderInset)
-            overlay.borderTop:SetPoint("TOPRIGHT", overlay, "TOPRIGHT", borderInset - borderSize, borderInset)
-            overlay.borderTop:SetHeight(borderSize)
-            local tex = overlay.borderTop:GetStatusBarTexture()
-            if tex then tex:SetVertexColor(r, g, b, effectiveBorderAlpha) end
-        end
-        
-        if overlay.borderBottom then
-            overlay.borderBottom:ClearAllPoints()
-            overlay.borderBottom:SetPoint("BOTTOMLEFT", overlay, "BOTTOMLEFT", -borderInset + borderSize, -borderInset)
-            overlay.borderBottom:SetPoint("BOTTOMRIGHT", overlay, "BOTTOMRIGHT", borderInset - borderSize, -borderInset)
-            overlay.borderBottom:SetHeight(borderSize)
-            local tex = overlay.borderBottom:GetStatusBarTexture()
-            if tex then tex:SetVertexColor(r, g, b, effectiveBorderAlpha) end
-        end
-        
-        -- Update gradient alpha and edge gradients
-        if gradientStyle == "EDGE" then
-            -- Update EDGE style gradient textures
-            local ri, gi, bi = r * gradientIntensity, g * gradientIntensity, b * gradientIntensity
-            local gradientParent = overlay.gradient and overlay.gradient:GetParent()
-            local parentHeight = gradientParent and gradientParent:GetHeight() or 40
-            local parentWidth = gradientParent and gradientParent:GetWidth() or 80
-            local edgeSize = parentHeight * gradientSize
-            local edgeWidth = parentWidth * gradientSize
-            
-            if overlay.gradientTop then
-                overlay.gradientTop:SetVertexColor(ri, gi, bi, effectiveGradientAlpha)
-                overlay.gradientTop:SetBlendMode(blendMode)
-                overlay.gradientTop:ClearAllPoints()
-                overlay.gradientTop:SetPoint("TOPLEFT", gradientParent, "TOPLEFT", 0, 0)
-                overlay.gradientTop:SetPoint("TOPRIGHT", gradientParent, "TOPRIGHT", 0, 0)
-                overlay.gradientTop:SetHeight(edgeSize)
-            end
-            if overlay.gradientBottom then
-                overlay.gradientBottom:SetVertexColor(ri, gi, bi, effectiveGradientAlpha)
-                overlay.gradientBottom:SetBlendMode(blendMode)
-                overlay.gradientBottom:ClearAllPoints()
-                overlay.gradientBottom:SetPoint("BOTTOMLEFT", gradientParent, "BOTTOMLEFT", 0, 0)
-                overlay.gradientBottom:SetPoint("BOTTOMRIGHT", gradientParent, "BOTTOMRIGHT", 0, 0)
-                overlay.gradientBottom:SetHeight(edgeSize)
-            end
-            if overlay.gradientLeft then
-                overlay.gradientLeft:SetVertexColor(ri, gi, bi, effectiveGradientAlpha)
-                overlay.gradientLeft:SetBlendMode(blendMode)
-                overlay.gradientLeft:ClearAllPoints()
-                overlay.gradientLeft:SetPoint("TOPLEFT", gradientParent, "TOPLEFT", 0, 0)
-                overlay.gradientLeft:SetPoint("BOTTOMLEFT", gradientParent, "BOTTOMLEFT", 0, 0)
-                overlay.gradientLeft:SetWidth(edgeWidth)
-            end
-            if overlay.gradientRight then
-                overlay.gradientRight:SetVertexColor(ri, gi, bi, effectiveGradientAlpha)
-                overlay.gradientRight:SetBlendMode(blendMode)
-                overlay.gradientRight:ClearAllPoints()
-                overlay.gradientRight:SetPoint("TOPRIGHT", gradientParent, "TOPRIGHT", 0, 0)
-                overlay.gradientRight:SetPoint("BOTTOMRIGHT", gradientParent, "BOTTOMRIGHT", 0, 0)
-                overlay.gradientRight:SetWidth(edgeWidth)
-            end
-        elseif overlay.gradient then
-            -- Non-EDGE styles - update main gradient
-            local tex = overlay.gradient:GetStatusBarTexture()
-            if tex then
-                -- Apply intensity boost via vertex color (matching ShowOverlayWithRGB logic)
-                local intensityBoost = math.max(1.0, gradientIntensity)
-                tex:SetVertexColor(r * intensityBoost, g * intensityBoost, b * intensityBoost, effectiveGradientAlpha)
-            end
-            -- Update darken alpha
-            if overlay.gradientDarken and overlay.gradientDarken:IsShown() then
-                overlay.gradientDarken:SetColorTexture(0, 0, 0, darkenAlpha * oorMultiplier)
-            end
-        end
-        
-        -- Update icons
-        if overlay.icons then
-            for _, icon in pairs(overlay.icons) do
-                icon:ClearAllPoints()
-                icon:SetPoint(iconPosition, overlay, iconPosition, iconOffsetX, iconOffsetY)
-                icon:SetSize(iconSize, iconSize)
-                icon:SetAlpha(iconAlpha)
-            end
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateDispel)
+    -- ☠ A THIRD COPY OF THE DISPEL STYLING USED TO LIVE HERE (~145 lines: border
+    -- strips, EDGE strips, gradient, darken, icons) and it had DRIFTED -- it still
+    -- multiplied Gradient Intensity into RGB, which the real paths stopped doing when
+    -- intensity moved onto alpha. It was also unreachable: the only writer of
+    -- frame.dfDispelOverlay is CreateDispelOverlay, whose one caller is the TEST branch
+    -- of UpdateDispelOverlay -- and the test bounce above returns before this. So the
+    -- loop repainted hidden widgets on live frames that never had one.
+    --
+    -- Now the same one-liner as LightweightUpdateDefensiveIcons and
+    -- LightweightUpdateMissingBuff: bump the layout version and let the container rows
+    -- re-drive (sig-gated, cheap when nothing changed). (Audit, 2026-08-07.)
+    DF:InvalidateAuraLayout()
 end
 
 -- Update defensive icon settings
@@ -1740,7 +1589,7 @@ function DF:GetFrameBorderColor(frame, db)
     if source == "CLASS" then
         local class
         if frame.dfIsTestFrame then
-            local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame)
+            local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame, frame.isPinnedBossFrame)
             class = testData and testData.class
         elseif frame.unit and UnitExists(frame.unit) then
             -- No UnitIsPlayer gate: class-based NPC party members (e.g.
@@ -1757,7 +1606,7 @@ function DF:GetFrameBorderColor(frame, db)
         local rc = DF.db and DF.db.roleColors
         local role
         if frame.dfIsTestFrame then
-            local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame)
+            local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame, frame.isPinnedBossFrame)
             role = testData and testData.role
         else
             -- Player falls back to the spec role when the group assigned none;
@@ -2992,6 +2841,13 @@ eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 eventFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")  -- Fires when spec changes
 eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")  -- Fires when talents change
 eventFrame:RegisterEvent("UNIT_PET")  -- Fires when a pet is summoned/dismissed
+-- ☠ THE ONLY THING THAT DRIVES ARENA PETS. ProcessRosterUpdate looks like the owner of
+-- the pet dispatch, but it returns in its arena branch (Headers.lua, the `inArena`
+-- path) ~158 lines ABOVE the UpdateAllPetFrames / UpdateAllRaidPetFrames calls at the
+-- bottom -- so no pet call in that function has ever run in an arena. Zone change is
+-- the one signal that reliably brackets an arena, and it covers LEAVING as well, which
+-- nothing else did.
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_UPDATE_RESTING")  -- Fires when entering/leaving rested area
 
 -- One-shot copy of legacy Frame Border saved-variable keys to the canonical
@@ -3077,10 +2933,14 @@ end
 -- adopts a mode-level value into profile-level when profile-level doesn't
 -- already have one set, and only seeds defaults when neither exists. Called
 -- once per ADDON_LOADED after both modes have been migrated.
-function DF:MigrateRoleBorderColors()
-    if not DF.db then return end
-    if not DF.db.roleColors then DF.db.roleColors = {} end
-    local rc = DF.db.roleColors
+-- `profile` defaults to the ACTIVE profile. Takes an argument so the legacy-adopt
+-- pass can run for every stored profile, not just whichever one happened to be
+-- active at the upgrade login -- see RunLegacyKeyAdoption below.
+function DF:MigrateRoleBorderColors(profile)
+    profile = profile or DF.db
+    if not profile then return end
+    if not profile.roleColors then profile.roleColors = {} end
+    local rc = profile.roleColors
 
     local DEFAULTS = {
         TANK    = {r = 0.20, g = 0.55, b = 0.95, a = 1},
@@ -3406,6 +3266,30 @@ function DF:MigrateAbsoluteFrameLevels()
             end
             profile._defensiveBaselineV2 = true
         end
+
+        -- V3 (missing-buff baseline). Same shape as V2, and the same reason: 35 was
+        -- never a level anyone SAW. buildMissingCellConfig omitted frameLevelOffset,
+        -- so ApplyZOrder's `or 40` fallback stacked a second +40 on top of the strip
+        -- and the badges actually rendered at 75 -- over the defensive row at 65.
+        -- With that fixed the stored 35 becomes real for the first time, which drops
+        -- the badges UNDER the aura rows: a row is 13 levels thick, so buff/debuff
+        -- art at base 40 reaches 56 and AD indicators reach ~59.
+        --
+        -- 60 clears both and still sits below defensive (measured 69 anchor / 81
+        -- border on a level-4 frame), keeping "defensive is always highest". Krathe's
+        -- call after seeing it in game: the badge belongs above the Aura Designer.
+        --
+        -- Only the exact 35 moves, so a deliberate choice is left alone; a fresh
+        -- profile already ships 60 and is stamped in the fresh-profile flag list.
+        if type(profile) == "table" and not profile._missingBuffBaselineV3 then
+            for _, mode in ipairs({ "party", "raid" }) do
+                local modeDb = profile[mode]
+                if type(modeDb) == "table" and modeDb.missingBuffIconFrameLevel == 35 then
+                    modeDb.missingBuffIconFrameLevel = 60
+                end
+            end
+            profile._missingBuffBaselineV3 = true
+        end
     end
 end
 
@@ -3430,8 +3314,9 @@ end
 -- Any future migration that cannot derive its answer from a legacy value must list
 -- its flag here as well as writing it.
 local FRESH_PROFILE_MIGRATION_FLAGS = {
-    _absoluteFrameLevelsV1 = true,
-    _defensiveBaselineV2   = true,
+    _absoluteFrameLevelsV1  = true,
+    _defensiveBaselineV2    = true,
+    _missingBuffBaselineV3  = true,
 }
 local FRESH_PROFILE_PARTY_MIGRATION_FLAGS = {
     _personalContainerCenterMigrated = true,
@@ -3765,20 +3650,40 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- One-shot copy per mode: if a new key already exists we leave it
         -- (user has already saved with the new key); otherwise we adopt the
         -- old value.
-        if DF.MigrateFrameBorderKeys then
-            DF:MigrateFrameBorderKeys(DF.db.party)
-            DF:MigrateFrameBorderKeys(DF.db.raid)
+        -- ☠ THESE MUST RUN FOR EVERY PROFILE, AND BEFORE THE DEFAULTS BACKFILL.
+        --
+        -- All of these adopt legacy -> canonical keys and are guarded on "only if the
+        -- new key is nil". They used to run on DF.db (the ACTIVE profile) alone, while
+        -- the defaults backfill further down walks EVERY profile and seeds the new keys
+        -- from PartyDefaults/RaidDefaults. So on the first login after the rename, every
+        -- non-active profile got the new key stamped to the shipped default before it
+        -- had ever been migrated -- and the nil-guard can then never pass again. A user
+        -- with two profiles kept their frame borders, resource-bar border + colour mode,
+        -- buff/debuff borders and role colours on whichever profile happened to be
+        -- active, and silently lost them on all the others, permanently.
+        --
+        -- DF.db is itself one of these profiles; the passes are nil-guarded and
+        -- therefore idempotent, so visiting it twice is harmless.
+        local function RunLegacyKeyAdoption(profile)
+            if type(profile) ~= "table" then return end
+            for _, modeDb in ipairs({ profile.party, profile.raid }) do
+                if modeDb then
+                    if DF.MigrateFrameBorderKeys then DF:MigrateFrameBorderKeys(modeDb) end
+                    if DF.MigrateResourceBarBorderKeys then DF:MigrateResourceBarBorderKeys(modeDb) end
+                    if DF.MigrateResourceBarColorMode then DF:MigrateResourceBarColorMode(modeDb) end
+                    if DF.MigrateAuraBorderKeys then DF:MigrateAuraBorderKeys(modeDb) end
+                end
+            end
+            -- Profile-level, and reads both modes itself, so it runs once per profile
+            -- rather than once per mode.
+            if DF.MigrateRoleBorderColors then DF:MigrateRoleBorderColors(profile) end
         end
-        -- Resource Bar: resourceBarBorderEnabled → resourceBarShowBorder
-        -- (Stage 4.2 wire-up to the unified DF.Border helper).
-        if DF.MigrateResourceBarBorderKeys then
-            DF:MigrateResourceBarBorderKeys(DF.db.party)
-            DF:MigrateResourceBarBorderKeys(DF.db.raid)
-        end
-        -- Resource Bar: resourceBarClassColor (bool) → resourceBarColorMode (tri-state).
-        if DF.MigrateResourceBarColorMode then
-            DF:MigrateResourceBarColorMode(DF.db.party)
-            DF:MigrateResourceBarColorMode(DF.db.raid)
+
+        RunLegacyKeyAdoption(DF.db)
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for _, profile in pairs(DandersFramesDB_v2.profiles) do
+                RunLegacyKeyAdoption(profile)
+            end
         end
         -- Pinned frames decouple: strip stale pinned.N.<setting> auto-layout
         -- overrides (everything except the per-set `enabled` flag).
@@ -3790,17 +3695,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
         if DF.MigratePinnedMatchMode then
             DF:MigratePinnedMatchMode()
         end
-        -- Aura icons: buff/debuffBorderEnabled → ShowBorder, BorderThickness →
-        -- BorderSize (Stage 5.5 Phase 2 — full toolkit for buff/debuff borders).
-        if DF.MigrateAuraBorderKeys then
-            DF:MigrateAuraBorderKeys(DF.db.party)
-            DF:MigrateAuraBorderKeys(DF.db.raid)
-        end
-        -- Promote role border colours from per-mode storage to profile-level
-        -- DF.db.roleColors so the global Colors settings page manages them.
-        if DF.MigrateRoleBorderColors then
-            DF:MigrateRoleBorderColors()
-        end
+        -- (Moved) Aura-icon border keys and the role-colour promotion now run inside
+        -- RunLegacyKeyAdoption above, for EVERY profile rather than only the active
+        -- one. They were active-profile-only here, which is the bug that pass exists
+        -- to fix -- leaving these calls would just repeat a subset of it.
         -- Promote the colour-picker override from per-mode profile storage to the
         -- account-wide global DB (it was never really per-mode — see the function).
         if DF.MigrateColorPickerToGlobal then
@@ -3889,26 +3787,28 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 end
                 -- Dispel colours are account-wide (per profile, mode-independent —
                 -- edited on the Colors page; sibling of classColors). Seed ONCE from
-                -- the profile's existing per-mode debuff-border palette so any
-                -- customisations carry over; otherwise the game palette. The per-mode
-                -- debuffBorderColor* keys are left in place.
-                if type(profile.dispelColors) ~= "table" then
-                    local src = profile.party or {}
-                    -- Defaults = Blizzard's live game palette (GetGameDispelPalette). No
-                    -- None key — the None/Physical border is hidden on no-dispel-type auras.
-                    local D = (DF.GetGameDispelPalette and DF:GetGameDispelPalette()) or DF.DispelDefaultColors
-                    local function seedColor(key, d)
-                        local c = src[key]
-                        if type(c) == "table" and c.r then return { r = c.r, g = c.g, b = c.b } end
-                        return { r = d.r, g = d.g, b = d.b }
-                    end
-                    profile.dispelColors = {
-                        Magic   = seedColor("debuffBorderColorMagic",   D.Magic),
-                        Curse   = seedColor("debuffBorderColorCurse",   D.Curse),
-                        Disease = seedColor("debuffBorderColorDisease", D.Disease),
-                        Poison  = seedColor("debuffBorderColorPoison",  D.Poison),
-                        Bleed   = seedColor("debuffBorderColorBleed",   D.Bleed),
-                    }
+                -- the profile's v4 colours so any customisation carries over; otherwise
+                -- the game palette. No None key — the None/Physical border is hidden on
+                -- no-dispel-type auras. The legacy per-mode keys are left in place here;
+                -- DropDispelCustomMode below clears the overlay half AFTER this has read
+                -- it (see the ordering note there).
+                --
+                -- ☠ This used to read ONLY debuffBorderColor* (the icon-border family),
+                -- from party alone. v4 also shipped a SECOND, separately-edited family
+                -- for the dispel overlay (dispel<Type>Color) which nothing here looked
+                -- at and DropDispelCustomMode then deleted — so anyone who had customised
+                -- the overlay lost those colours silently, on upgrade AND on import.
+                -- DF:BuildDispelColorsFromLegacy owns the resolution now (Border.lua):
+                -- per type, overlay-if-customised -> border-if-customised -> game
+                -- palette, with "customised" meaning "differs from the v4 default"
+                -- rather than "exists", because v4 seeded both families into every
+                -- profile. Shared with the import path so both behave identically.
+                -- Guarded: the builder lives in Frames/Border.lua, which loads AFTER
+                -- this file. Both callers of this migration are runtime (login, profile
+                -- switch) so it is always there by then -- but guard the function we
+                -- actually call, not a neighbour of it.
+                if type(profile.dispelColors) ~= "table" and DF.BuildDispelColorsFromLegacy then
+                    profile.dispelColors = DF:BuildDispelColorsFromLegacy(profile.party, profile.raid)
                 end
                 -- Ensure mode-enable flags exist on every profile
                 if profile.partyEnabled == nil then profile.partyEnabled = true end
@@ -4726,12 +4626,43 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
-        -- v5.0 (12.1): the dispel overlay's Custom Colors mode was removed during
-        -- the alpha (never in any distributed build — belt-and-braces for alpha
-        -- profiles only): drop the mode selector, the per-type pickers and the
-        -- intensity multiplier. No-op on fresh defaults (none of these keys exist
-        -- there any more).
+        -- v5.0 (12.1): the dispel overlay's Custom Colors mode is gone — its colours
+        -- now come from the one shared account palette on the Colors page. Drop the
+        -- mode selector, the per-type pickers and the intensity multiplier. No-op on
+        -- fresh defaults (none of these keys exist there any more).
+        --
+        -- ☠ MUST RUN AFTER THE dispelColors SEED ABOVE, and that ordering is the whole
+        -- fix for a real data-loss bug. dispel<Type>Color is NOT an alpha-only key --
+        -- it shipped in v4's Config with live pickers and its own Reset, and rides v4's
+        -- `dispel` export category. The comment here used to claim it was "never in any
+        -- distributed build", and on the strength of that this deleted a shipped,
+        -- user-editable setting that nothing had migrated. A comment is not evidence:
+        -- the keys were in v4's Config.lua the whole time.
         local function DropDispelCustomMode(modeDb)
+            -- ☠ FOLD THE INTENSITY FORWARD BEFORE NILLING IT, and do it OUTSIDE the
+            -- _dispelCustomRemovedV5 early return below.
+            --
+            -- v4 rendered the overlay at min(dispelGradientAlpha * dispelGradientIntensity, 1)
+            -- with intensity DEFAULTING TO 2.6, so the slider was effectively a 0..1 scale
+            -- with a 2.6x boost baked in. v5 keeps only the alpha and renders it raw.
+            -- Default users are unaffected (min(1 * 2.6, 1) == 1 == min(1, 1)), which is
+            -- why this hid -- but anyone who had TURNED THE SLIDER DOWN loses their boost:
+            -- 0.4 rendered as min(1.04, 1) = 1.0 in v4 and renders as 0.4 now. Their
+            -- overlay visibly fades on upgrade, with no setting left to put it back.
+            --
+            -- ⚠ SEPARATE FLAG, deliberately. The key deletion shipped in an earlier v5
+            -- alpha, so every existing alpha tester already has _dispelCustomRemovedV5 =
+            -- true AND dispelGradientIntensity = nil. Gating the fold on that flag would
+            -- skip exactly the profiles it exists to repair; gating it on its own flag
+            -- keeps it idempotent while still reaching a v4 profile that arrives later
+            -- (fresh install, import, or a profile that has never been loaded on v5).
+            if not modeDb._dispelGradientIntensityFoldedV5 then
+                if type(modeDb.dispelGradientIntensity) == "number" then
+                    modeDb.dispelGradientAlpha = math.min(
+                        (modeDb.dispelGradientAlpha or 1) * modeDb.dispelGradientIntensity, 1.0)
+                end
+                modeDb._dispelGradientIntensityFoldedV5 = true
+            end
             if modeDb._dispelCustomRemovedV5 then return end
             modeDb.dispelOverlayColorSource = nil
             modeDb.dispelGradientIntensity = nil
@@ -4832,7 +4763,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF.DebugConsole:Init()
         end
 
-        print("|cff00ff00DandersFrames|r " .. format(L["v%s loaded. Type %s/df%s for settings, %s/df resetgui%s if window is offscreen."], (DF.VERSION:gsub("^[vV]", "")), "|cffeda55f", "|r", "|cffeda55f", "|r"))
+        -- Login greeting. Opt-out via Options > General > Notifications; the flag is
+        -- account-wide (GlobalDefaults.showLoginMessage). Defaults to ON when the
+        -- global DB is not resolvable yet, so a first-ever login still gets it.
+        local globalDB = DF.GetGlobalDB and DF:GetGlobalDB()
+        if not globalDB or globalDB.showLoginMessage ~= false then
+            print("|cff00ff00DandersFrames|r " .. format(L["v%s loaded. %s/df%s for settings, %s/df help%s for commands."], (DF.VERSION:gsub("^[vV]", "")), "|cffeda55f", "|r", "|cffeda55f", "|r"))
+        end
 
         -- ============================================================
         -- CRITICAL: Initialize frames HERE at ADDON_LOADED
@@ -5017,7 +4954,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- entry survives for the drift check but appears once.
         sub("headers",      "secure header state dump, or a /dfheaders subcommand", nil, "[cmd]", true)
         sub("attached",     "foreign frames anchored to ours")
-        sub("zorder",       "frame level / strata map")
+        sub("zorder",       "frame level / strata / alpha map (add a test frame index)", nil, "[index]")
         sub("mousefoci",    "identify the frame under the cursor after 2s")
         -- Auras (12.1 container era)
         sub("auradata",     "live aura data enumeration (add a unit token)", nil, "[unit]")
@@ -5163,21 +5100,52 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- the first shown frame. Static reading says defensive (+51) must draw over
             -- debuffs (+40); when the screen disagrees, this says which link in the chain
             -- (anchor frame -> CustomAuraContainer -> button -> DF art host) breaks it.
-            if msg == "zorder" then
+            local zorderArg = msg:match("^zorder%s+(%d+)$")
+            if msg == "zorder" or zorderArg then
                 -- unitFrameMap is the addon-wide unit -> frame index (Headers.lua);
                 -- prefer a frame that actually has a defensive row to report on.
+                -- ☠ TEST FRAMES FIRST WHILE PREVIEWING. This walked DF.unitFrameMap only,
+                -- which is the LIVE unit -> frame map -- so with test mode open it reported
+                -- the hidden live frame sitting behind the preview, and every number in the
+                -- dump described an object the user was not looking at.
+                --
+                -- ☠ AND IT ONLY EVER REPORTED ONE FRAME, WHICH IS USELESS FOR A RANGE BUG.
+                -- Every preview frame has a defensiveFactory, so the auto-pick was arbitrary
+                -- and it kept landing on an in-range frame while the broken one was two along.
+                -- "/df debug zorder 4" names the frame (party index, or raid index while
+                -- previewing raid) so a specific frame can be interrogated directly.
                 local frame
-                for _, f in pairs(DF.unitFrameMap or {}) do
-                    if f and f:IsShown() then
-                        frame = frame or f
-                        if f.defensiveFactory then frame = f break end
+                local function consider(f)
+                    if not (f and f:IsShown()) then return end
+                    frame = frame or f
+                    if f.defensiveFactory then frame = f end
+                end
+                local wantIdx = tonumber(zorderArg)
+                if wantIdx then
+                    local pool = (DF.raidTestMode and DF.testRaidFrames) or DF.testPartyFrames
+                    local f = pool and pool[wantIdx]
+                    if not f then
+                        DF:Say("no test frame at index " .. wantIdx .. ".", nil, "WARN")
+                        return
+                    end
+                    frame = f
+                else
+                    if DF.testMode and DF.testPartyFrames then
+                        for i = 0, 4 do consider(DF.testPartyFrames[i]) end
+                    end
+                    if DF.raidTestMode and DF.testRaidFrames then
+                        for i = 1, 40 do consider(DF.testRaidFrames[i]) end
+                    end
+                    if not frame then
+                        for _, f in pairs(DF.unitFrameMap or {}) do consider(f) end
                     end
                 end
                 if not frame then
                     DF:Say("no shown frame — enable test mode first.", nil, "WARN")
                     return
                 end
-                local o = DF:Out("Z-Order", "unit " .. tostring(frame.unit))
+                local o = DF:Out("Z-Order", "unit " .. tostring(frame.unit)
+                    .. (frame.dfIsTestFrame and "  [TEST FRAME]" or "  [live frame]"))
                 o:Section("Frame")
                 o:Field("level", frame:GetFrameLevel(), "NEUTRAL")
                 o:Field("strata", tostring(frame:GetFrameStrata()), "NEUTRAL")
@@ -5250,6 +5218,28 @@ DF._MainEventDispatcher = function(self, event, arg1)
                                             end
                                         end
                                     end
+                                    -- ☠ THE BADGE, AND ITS BORDER. A placed indicator's border is
+                                    -- badge.dfADBorder -- created on the BADGE, not the button --
+                                    -- and this dump only ever walked btn[...], so the one region
+                                    -- that visibly draws over the defensive icon was the one region
+                                    -- never reported. Border:New with frameLevelOffset = 0 pins it
+                                    -- to the badge's own level, so the badge's level IS the border's:
+                                    -- print both, and the strata, since a border that clears an icon
+                                    -- 25 levels above it has left the band entirely.
+                                    local badge = h.GetBadgeFrame and h:GetBadgeFrame()
+                                    if badge and badge.GetFrameLevel then
+                                        print(("      .%-14s level=%d  strata=%s"):format("badge",
+                                            badge:GetFrameLevel(), tostring(badge:GetFrameStrata())))
+                                        local bb = badge.dfADBorder
+                                        local bf = bb and ((bb.GetFrameLevel and bb)
+                                            or (bb.frame and bb.frame.GetFrameLevel and bb.frame)
+                                            or (bb.host and bb.host.GetFrameLevel and bb.host))
+                                        if bf then
+                                            print(("      .%-14s level=%d  strata=%s"):format(
+                                                "badge.dfADBorder", bf:GetFrameLevel(),
+                                                tostring(bf:GetFrameStrata())))
+                                        end
+                                    end
                                 end
                             end
                         end
@@ -5259,11 +5249,45 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     end
                 end
 
+                -- MISSING BUFF. Absent from this dump until 2026-08-07, which is exactly
+                -- why "missing buff draws over the defensive icon" could not be settled
+                -- from it — the badges were rendering 40 levels above their setting and
+                -- nothing here would have shown that. The strip is DF's own frame and the
+                -- cells are containers parented to it, so BOTH lines matter: a cell whose
+                -- anchor is not equal to the strip's level means an offset is leaking in.
+                o:Section("Missing Buff")
+                local mStrip = frame.missingBuffStrip
+                if not mStrip then
+                    print("  |cff888888(no strip on this frame)|r")
+                else
+                    print(("  %-10s level=%d  shown=%s")
+                        :format("strip", mStrip:GetFrameLevel(), tostring(mStrip:IsShown())))
+                    -- ⚠ pairs, not ipairs: DriveMissingBuffFactory keys the cell table by
+                    -- the tracked buff's id (cells[info[2]] = h), not 1..n.
+                    local cells = frame.missingFactory
+                    if type(cells) == "table" then
+                        for key, h in pairs(cells) do
+                            local hf = h and h.GetFrame and h:GetFrame()
+                            local badge = h and h.GetBadgeFrame and h:GetBadgeFrame()
+                            print(("    %-12s anchor=%s  badge=%s  cfgOffset=%s")
+                                :format(tostring(key):sub(1, 12),
+                                    hf and tostring(hf:GetFrameLevel()) or "-",
+                                    badge and tostring(badge:GetFrameLevel()) or "-",
+                                    tostring(h and h.config and h.config.frameLevelOffset or "nil(->40)")))
+                            local bw = badge and badge.dfBorder
+                            if bw and bw.GetFrameLevel then
+                                print(("      .%-14s level=%d"):format("dfBorder", bw:GetFrameLevel()))
+                            end
+                        end
+                    end
+                end
+
                 -- The CONFIGURED values, so the dump shows setting-vs-reality side by side.
                 -- That is the whole question in an "it says 30 but behaves like more" report.
                 o:Section("Configured")
                 local zdb = DF.GetDB and DF:GetDB()
                 o:Field("defensiveIconFrameLevel", tostring(zdb and zdb.defensiveIconFrameLevel), "NEUTRAL")
+                o:Field("missingBuffIconFrameLevel", tostring(zdb and zdb.missingBuffIconFrameLevel), "NEUTRAL")
                 -- DF:ResolveAuraDesigner is the RENDER-side resolver (the same one
                 -- Factory:SyncFrame uses). Options.lua's GetAuraDesignerDB is a file-local
                 -- and is the EDITOR's view — reading that here would report the wrong table
@@ -5272,6 +5296,125 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 local zdef = zad and zad.defaults
                 o:Field("AD indicatorFrameLevel", tostring(zdef and zdef.indicatorFrameLevel), "NEUTRAL")
                 o:Field("AD indicatorFrameStrata", tostring(zdef and zdef.indicatorFrameStrata), "NEUTRAL")
+
+                -- ☠ ALPHA, NEXT TO THE LEVELS. A faded thing on top of a bright thing reads
+                -- EXACTLY like a z-order fault: an indicator "bleeding through" the icon above
+                -- it is the same picture whether that icon dropped a band or merely went
+                -- transparent. Levels alone cannot tell those apart, and guessing between them
+                -- cost three wrong fixes on one report. The dump answers both questions now.
+                --
+                -- Read-only, and every object here is DF-owned (anchor frames, alpha hosts,
+                -- the row frame) -- never a secret aura button.
+                local function A(v)
+                    if type(v) ~= "number" then return "-" end
+                    return string.format("%.2f", v)
+                end
+                o:Section("Alpha")
+                o:Field("frame", A(frame:GetAlpha()), "NEUTRAL")
+                o:Field("dfInRange", tostring(frame.dfInRange), "NEUTRAL")
+                o:Field("dfIsDead", tostring(frame.dfIsDead), "NEUTRAL")
+                o:Field("oorEnabled", tostring(zdb and zdb.oorEnabled), "NEUTRAL")
+                o:Field("testShowOutOfRange", tostring(zdb and zdb.testShowOutOfRange), "NEUTRAL")
+                o:Field("rangeFadeAlpha", tostring(zdb and zdb.rangeFadeAlpha), "NEUTRAL")
+                o:Field("oorDefensiveIconAlpha", tostring(zdb and zdb.oorDefensiveIconAlpha), "NEUTRAL")
+                o:Field("oorAuraDesignerAlpha", tostring(zdb and zdb.oorAuraDesignerAlpha), "NEUTRAL")
+                for _, r in ipairs(rows) do
+                    local h = r[2]
+                    local rf = h and h.GetFrame and h:GetFrame()
+                    if rf then o:Field(r[1] .. " row", A(rf:GetAlpha()), "NEUTRAL") end
+                end
+                if frame.missingBuffStrip then
+                    o:Field("missingBuff strip", A(frame.missingBuffStrip:GetAlpha()), "NEUTRAL")
+                end
+                local adN = 0
+                if DF.ForEachAuraDesignerAlphaHost then
+                    DF:ForEachAuraDesignerAlphaHost(frame, function(host, base)
+                        adN = adN + 1
+                        o:Field("AD host " .. adN,
+                            A(host:GetAlpha()) .. "  (base " .. A(base) .. ")", "NEUTRAL")
+                    end)
+                end
+                if adN == 0 then
+                    -- ⚠ NOT the same as "no indicators placed". UpdateAuraDesignerAppearance
+                    -- bails on a nil frame.dfADFactory, so a zero here with an indicator on
+                    -- screen means the AD fade is a silent no-op, not that it ran and went stale.
+                    o:Field("AD hosts", "NONE WALKED (dfADFactory="
+                        .. tostring(frame.dfADFactory ~= nil) .. ")", "WARN")
+                end
+
+                -- ☠ DOES THE WRITE LAND? An AD host reading 1.00 on an out-of-range frame has
+                -- two completely different causes -- the fade never ran, or it ran and was
+                -- overwritten afterwards -- and they need opposite fixes. Re-running the
+                -- appearance function here and re-reading the same host separates them in one
+                -- shot: a value that changes means the write works and something downstream
+                -- undoes it; a value that does not means the write itself is the fault.
+                -- UpdateAuraDesignerAppearance is idempotent (it recomputes from db + stamps
+                -- and writes an alpha), so calling it from a read-only dump is safe.
+                if DF.UpdateAuraDesignerAppearance and DF.ForEachAuraDesignerAlphaHost then
+                    local before, after = {}, {}
+                    DF:ForEachAuraDesignerAlphaHost(frame, function(h) before[#before + 1] = h:GetAlpha() end)
+                    DF:UpdateAuraDesignerAppearance(frame)
+                    DF:ForEachAuraDesignerAlphaHost(frame, function(h)
+                        after[#after + 1] = h:GetAlpha()
+                        -- The parent chain matters as much as the number: fading an anchor
+                        -- frame the visible art does NOT descend from writes a correct alpha
+                        -- onto the wrong object, and only the chain shows that.
+                        local p, chain, hops = h:GetParent(), "", 0
+                        while p and hops < 4 do
+                            chain = chain .. "<-" .. tostring(p:GetFrameLevel())
+                            p, hops = p:GetParent(), hops + 1
+                        end
+                        o:Field("AD host parents", tostring(h:GetFrameLevel()) .. chain, "NEUTRAL")
+                    end)
+                    for i = 1, #before do
+                        o:Field("AD host " .. i .. " re-applied",
+                            A(before[i]) .. "  ->  " .. A(after[i]),
+                            (before[i] ~= after[i]) and "GOOD" or "WARN")
+                    end
+                end
+
+                -- ☠ ONE FRAME CANNOT ANSWER A RANGE QUESTION. "The out-of-range one is not
+                -- fading" is a COMPARISON: it only means anything against a frame that is in
+                -- range under the same settings. Dumping a single frame turned every check
+                -- into a round trip. One compact line per preview frame instead -- the answer
+                -- is the row whose dfInRange is false but whose alphas match the rows above it.
+                if DF.testMode or DF.raidTestMode then
+                    o:Section("Alpha per test frame")
+                    local function line(f, label)
+                        if not (f and f:IsShown()) then return end
+                        local defRow = f.defensiveFactory and f.defensiveFactory.GetFrame
+                            and f.defensiveFactory:GetFrame()
+                        local ad = "-"
+                        if DF.ForEachAuraDesignerAlphaHost then
+                            DF:ForEachAuraDesignerAlphaHost(f, function(host)
+                                ad = (ad == "-") and A(host:GetAlpha())
+                                    or (ad .. "/" .. A(host:GetAlpha()))
+                            end)
+                        end
+                        -- ⚠ The BUFF ROW is the control. It fades through the same
+                        -- ApplyOORAlpha -> SetAlphaFromBoolean call the AD host does, so a
+                        -- row that faded next to an AD host that did not narrows this to the
+                        -- AD path; both at 1.00 on an out-of-range frame means element-mode
+                        -- fading is not landing at all. Without it the dump cannot tell those
+                        -- apart, which cost a round trip.
+                        local buffRow = f.buffFactory and f.buffFactory.GetFrame
+                            and f.buffFactory:GetFrame()
+                        local debuffRow = f.debuffFactory and f.debuffFactory.GetFrame
+                            and f.debuffFactory:GetFrame()
+                        o:Field(label, string.format(
+                            "inRange=%-5s frame=%s  buff=%s  debuff=%s  def=%s  AD=%s",
+                            tostring(f.dfInRange), A(f:GetAlpha()),
+                            buffRow and A(buffRow:GetAlpha()) or "-",
+                            debuffRow and A(debuffRow:GetAlpha()) or "-",
+                            defRow and A(defRow:GetAlpha()) or "-", ad), "NEUTRAL")
+                    end
+                    if DF.testMode and DF.testPartyFrames then
+                        for i = 0, 4 do line(DF.testPartyFrames[i], "party " .. i) end
+                    end
+                    if DF.raidTestMode and DF.testRaidFrames then
+                        for i = 1, 10 do line(DF.testRaidFrames[i], "raid " .. i) end
+                    end
+                end
                 return
             end
             if msg == "unlock" then
@@ -6127,6 +6270,59 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF:HandleUnitPetEvent(arg1)
         end
         
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        -- ☠ ARENA PET ENTRY POINT. See the RegisterEvent comment: ProcessRosterUpdate
+        -- returns in its arena branch long before the pet dispatch, so without this
+        -- nothing ever calls the arena pet track and pets simply never appear in
+        -- 2v2 / 3v3 / shuffle, with no error to show for it.
+        --
+        -- ⚠ BOUNDED RETRY, because the arena header's children have no units the
+        -- instant this event lands -- the secure header populates them a moment later,
+        -- and a single pass here finds nothing to attach pets to. Retries are capped
+        -- and stop as soon as a pass finds units, so a genuinely empty zone costs a
+        -- fixed handful of ticks rather than a live ticker.
+        --
+        -- Runs on the way OUT of an arena too: UpdateAllRaidPetFrames hides the arena
+        -- set when it sees we are no longer in one. Nothing else did that, so in
+        -- GROUPED mode the arena pets followed you out as frozen bars.
+        -- ☠ GATED ON ACTUALLY BEING IN AN ARENA. Without this the chain is unsatisfiable
+        -- outside one: sawUnit comes from IterateArenaFrames, which yields nothing when
+        -- there is no arena header, so the early exit can never fire and all five tries
+        -- burn over 2.5s on EVERY PLAYER_ENTERING_WORLD -- every loading screen, portal,
+        -- hearth and reload. `tries` is a per-fire closure local, so overlapping fires
+        -- stack their own chains and nothing cancels on zone-out. Re-checked each tick,
+        -- not just at entry, so leaving mid-chain stops it.
+        --
+        -- ⚠ The single unconditional pass stays: leaving an arena is exactly when the
+        -- arena pet set needs hiding, and UpdateAllRaidPetFrames does that when it sees
+        -- we are no longer in one. Only the RETRY is arena-gated.
+        if DF.UpdateAllRaidPetFrames then
+            local inArena = DF.IsInArena and DF:IsInArena()
+            local tries = 0
+            local function DriveArenaPets()
+                tries = tries + 1
+                DF:UpdateAllRaidPetFrames(true)
+
+                -- Stop once the arena header actually has units, or we run out of
+                -- patience. IterateArenaFrames yields nothing until the header fills.
+                if not (DF.IsInArena and DF:IsInArena()) then return end
+                local sawUnit = false
+                if DF.IterateArenaFrames then
+                    DF:IterateArenaFrames(function(frame)
+                        if frame and frame.unit then sawUnit = true end
+                    end)
+                end
+                if sawUnit or tries >= 5 then return end
+                C_Timer.After(0.5, DriveArenaPets)
+            end
+            if inArena then
+                C_Timer.After(0, DriveArenaPets)
+            else
+                -- Not an arena: one pass, no chain. This is the hide-on-the-way-out case.
+                C_Timer.After(0, function() DF:UpdateAllRaidPetFrames(true) end)
+            end
+        end
+
     elseif event == "PLAYER_REGEN_ENABLED" then
         -- Track combat state
         DF.playerInCombat = false
@@ -6137,6 +6333,31 @@ DF._MainEventDispatcher = function(self, event, arg1)
         if DF.pendingArenaPetUpdate then
             DF.pendingArenaPetUpdate = nil
             if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
+        end
+
+        -- Pet work the lockdown blocked, on any track. Two flags rather than one
+        -- because they cost differently: a visibility replay only needs the show/hide
+        -- pass re-run, while a position replay re-parents and re-anchors every pet
+        -- frame. Both are set from deep inside the pet paths (SetPetFrameVisible,
+        -- PositionPetFrame, the two GROUPED layouts, InitializePetFrames), which is
+        -- why they are plain booleans and not per-frame lists — by the time we drain,
+        -- the whole pass is cheaper and more correct than replaying individual frames
+        -- against state that has since moved on.
+        --
+        -- Visibility first: InitializePetFrames may need to CREATE frames that the
+        -- position pass then has something to place. Both forced, since the pet
+        -- updates throttle to one run per frame and the arena replay above may
+        -- already have taken this frame's slot.
+        if DF.pendingPetVisibilityUpdate then
+            DF.pendingPetVisibilityUpdate = nil
+            if DF.InitializePetFrames then DF:InitializePetFrames() end
+            if DF.UpdateAllPetFrames then DF:UpdateAllPetFrames(true) end
+            if DF.UpdateAllRaidPetFrames then DF:UpdateAllRaidPetFrames(true) end
+        end
+
+        if DF.pendingPetPositionUpdate then
+            DF.pendingPetPositionUpdate = nil
+            if DF.UpdateAllPetFramePositions then DF:UpdateAllPetFramePositions() end
         end
 
         -- Clean up after test mode was interrupted by combat
@@ -6733,8 +6954,12 @@ local LDB = LibStub("LibDataBroker-1.1"):NewDataObject("DandersFrames", {
     end,
     OnTooltipShow = function(tooltip)
         tooltip:AddLine("DandersFrames")
-        tooltip:AddLine("|cffffffffLeft-Click:|r Open settings", 0.8, 0.8, 0.8)
-        tooltip:AddLine("|cffffffffRight-Click:|r Toggle solo mode", 0.8, 0.8, 0.8)
+        -- ⚠ Title Case on purpose: L["Open Settings"] and L["Toggle Solo Mode"] already
+        -- existed, and these two lines had introduced sentence-case twins of both. Two
+        -- keys for one string is a translation trap -- a locale can fill one and miss the
+        -- other, and nothing errors.
+        tooltip:AddLine("|cffffffff" .. L["Left-Click:"] .. "|r " .. L["Open Settings"], 0.8, 0.8, 0.8)
+        tooltip:AddLine("|cffffffff" .. L["Right-Click:"] .. "|r " .. L["Toggle Solo Mode"], 0.8, 0.8, 0.8)
     end,
 })
 

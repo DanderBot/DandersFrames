@@ -114,14 +114,80 @@ end
 
 
 -- Check if unit is dead or offline
+-- ★★ STAMPS FIRST, UNIT APIS SECOND. The three helpers below are the ONLY reason
+-- this file's Update*Appearance functions cannot simply run on a test frame, so each
+-- prefers a frame-stamped value and falls back to the unit API.
+--
+-- ☠ AND THE STAMP IS NOT MERELY A CONVENIENCE. Test frames carry REAL unit tokens --
+-- TestFramePool assigns "raid1".."raidN" and "player" -- so in an actual group these
+-- resolve to REAL units and UnitIsDeadOrGhost / UnitClass answer about whoever is
+-- standing next to you, not about the preview's scenario. That is what the
+-- `if DF.testMode then return end` guards throughout this file are really defending
+-- against; it is NOT a fabricated-token problem. Stamping is what makes removing
+-- those guards safe, so do not remove one before its inputs are stamped.
+-- (Audit, 2026-08-07.)
 local function IsDeadOrOffline(frame)
+    if frame.dfIsDead ~= nil then return frame.dfIsDead end
     local unit = frame.unit
     if not unit or not UnitExists(unit) then return false end
     return UnitIsDeadOrGhost(unit) or not UnitIsConnected(unit)
 end
 
+-- ★★ THE FADE MULTIPLIER FOR THE EIGHT STATUS ICONS, shared by live and the preview.
+--
+-- ☠ THESE ICONS COULD NOT FADE LIVE AT ALL. CreateStatusIcon sets
+-- SetIgnoreParentAlpha(true), so the whole-frame cascade cannot reach them, and this
+-- file has never referenced summon/resurrection/phased/afk/vehicle/raidRole/
+-- bgCarrier/combat — so neither route existed. Only the PREVIEW dimmed them, off its
+-- own hand-written alpha table. That is the rare case where the preview was showing
+-- something live was structurally incapable of (audit, 2026-08-07).
+--
+-- Keeping SetIgnoreParentAlpha is deliberate: we now set the alpha explicitly, and
+-- ignoring the parent is what stops the simple-mode cascade multiplying it a second
+-- time. One application, both modes.
+--
+-- ★ SUMMON AND RESURRECTION DO NOT DIM OUT OF RANGE. Krathe's rule: an icon that
+-- exists because someone is casting something AT this unit is most useful precisely
+-- when they are far away — you summon people who are elsewhere. Dimming it would
+-- fight what the icon is for. They still dim for dead/offline. If resurrection turns
+-- out to be the wrong call, this table is the only thing to change.
+local STATUS_ICON_NO_OOR_FADE = {
+    summonIcon        = true,
+    resurrectionIcon  = true,
+}
+
+function DF:GetStatusIconFadeAlpha(frame, prefix)
+    if not frame then return 1.0 end
+    local db = GetDB(frame)
+    if not db then return 1.0 end
+
+    local alpha = 1.0
+    -- Dead/offline first: applies to every icon, summon included.
+    local dead = IsDeadOrOffline(frame)   -- stamp-aware; see the helper
+    if dead and db.fadeDeadFrames then
+        alpha = alpha * (db.fadeDeadIcons or 1.0)
+    end
+
+    if not STATUS_ICON_NO_OOR_FADE[prefix] then
+        local inRange = GetInRange(frame)
+        -- issecretvalue-safe: a secret boolean cannot drive a Lua multiply, so treat
+        -- an unresolvable range as in-range rather than guessing dim.
+        if not (issecretvalue and issecretvalue(inRange)) and inRange == false then
+            -- ⚠ BOTH range-fade modes, unlike every other element. Elsewhere simple
+            -- mode leans on the whole-frame SetAlpha cascade and only element mode
+            -- needs a per-element value — but these icons set
+            -- SetIgnoreParentAlpha(true), so the cascade never reaches them and an
+            -- explicit multiply is the only route either way.
+            alpha = alpha * (db.oorEnabled and (db.oorIconsAlpha or 0.5)
+                or (db.rangeFadeAlpha or db.rangeAlpha or 0.4))
+        end
+    end
+    return alpha
+end
+
 -- Check if unit is specifically offline (not just dead)
 local function IsOffline(frame)
+    if frame.dfIsOffline ~= nil then return frame.dfIsOffline end
     local unit = frame.unit
     if not unit or not UnitExists(unit) then return false end
     return not UnitIsConnected(unit)
@@ -134,11 +200,15 @@ end
 
 -- Get class color for a unit
 local function GetClassColor(frame)
-    local unit = frame.unit
-    if not unit or not UnitExists(unit) then
-        return DEFAULT_COLOR_GRAY
+    local class = frame.dfClassToken
+    if not class then
+        local unit = frame.unit
+        if not unit or not UnitExists(unit) then
+            return DEFAULT_COLOR_GRAY
+        end
+        local _
+        _, class = UnitClass(unit)
     end
-    local _, class = UnitClass(unit)
     return DF:GetClassColor(class)
 end
 
@@ -156,7 +226,10 @@ function DF:UpdateHealthBarAppearance(frame)
     if not db then return end
     
     -- Skip during test mode (test mode handles its own appearance)
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through. The curve-driven colour below takes the stamped
+    -- health fraction instead of UnitHealthPercent -- a DATA fork; the rendering,
+    -- the colour stops and the mode branching are all shared.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local unit = frame.unit
     local deadOrOffline = IsDeadOrOffline(frame)
@@ -214,7 +287,20 @@ function DF:UpdateHealthBarAppearance(frame)
     else
         -- Priority 3: Normal color based on mode
         if colorMode == "PERCENT" then
-            -- PERCENT mode: Use UnitHealthPercent with curve - returns ColorMixin
+            -- PERCENT mode: Use UnitHealthPercent with curve - returns ColorMixin.
+            -- ☠ TEST FRAMES TAKE DF:GetHealthGradientColor INSTEAD -- the same stops,
+            -- interpolated in Lua. Live cannot do that (the health value is secret and
+            -- may never be compared), and test cannot use the curve (it needs a real
+            -- unit). Verified equivalent point-for-point during the 2026-08-07 audit:
+            -- same positions, same weight flooring, same percent == 1 boundary.
+            local testPct = frame.dfHealthPct
+            if testPct and DF.GetHealthGradientColor then
+                local c = DF:GetHealthGradientColor(testPct, db, frame.dfClassToken, "healthColor")
+                if c then
+                    tex:SetVertexColor(c.r, c.g, c.b)
+                    return
+                end
+            end
             local curve = DF:GetCurveForUnit(unit, db)
             if curve and unit and UnitHealthPercent then
                 local color = UnitHealthPercent(unit, true, curve)
@@ -281,8 +367,13 @@ function DF:UpdateMissingHealthBarAppearance(frame)
     if not IsDandersFrame(frame) then return end
     if not frame.missingHealthBar then return end
 
-    -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ TEST FRAMES PASS THROUGH. The fade is pure db + GetInRange and the preview had
+    -- NO counterpart for oorMissingHealthAlpha, so the bar never dimmed out of range
+    -- there. SetMissingHealthBarValue is stamp-aware now (it takes the fraction, the
+    -- dead state and the class from the frame when they are stamped), so the VALUE write
+    -- is shared too -- it no longer resolves a test frame's REAL token to whoever is
+    -- standing next to you. (Audit, 2026-08-07.)
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local unit = frame.unit
     if not unit then return end
@@ -312,7 +403,10 @@ function DF:UpdateBackgroundAppearance(frame)
     if not db then return end
     
     -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through. The curve-driven colour below takes the stamped
+    -- health fraction instead of UnitHealthPercent -- a DATA fork; the rendering,
+    -- the colour stops and the mode branching are all shared.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     -- Skip if actively adjusting background color in options (prevents flicker)
     if DF.isAdjustingBackgroundColor then return end
@@ -350,7 +444,15 @@ function DF:UpdateBackgroundAppearance(frame)
         local c = db.fadeDeadBackgroundColor or DEFAULT_COLOR_DEAD_BG
         r, g, b = c.r, c.g, c.b
         baseAlpha = 0.8
-    elseif bgMode == "CLASS" and unit and UnitExists(unit) then
+    -- ⚠ The gate must accept the STAMP, because the body already does. GetClassColor
+    -- reads frame.dfClassToken first and only falls back to UnitClass -- but a raw
+    -- `unit and UnitExists(unit)` gate rejected test frames before it could. Test
+    -- frames carry REAL tokens ("raid1"), so solo the token does not exist, this branch
+    -- was skipped and the background fell through to db.backgroundColor; inside a real
+    -- raid the token resolves and it worked, which is why it read as intermittent.
+    -- Same shape as Frames/Core.lua:230, which had it right.
+    elseif bgMode == "CLASS"
+        and ((frame and frame.dfClassToken) or (unit and UnitExists(unit))) then
         local classColor = GetClassColor(frame)
         r, g, b = classColor.r, classColor.g, classColor.b
         baseAlpha = db.backgroundClassAlpha or 0.3
@@ -420,7 +522,9 @@ function DF:UpdateNameTextAppearance(frame)
     if not frame.nameText then return end
 
     -- Skip test frames - they handle their own appearance in TestMode.lua
-    if frame.dfIsTestFrame then return end
+    -- ★ Test frames pass through. This guarded on dfIsTestFrame rather than on
+    -- DF.testMode like its neighbours -- an inconsistency that predates the audit --
+    -- and its only unit read is GetClassColor, which is stamp-aware now.
 
     local db = GetDB(frame)
     if not db then return end
@@ -484,8 +588,9 @@ function DF:UpdateHealthTextAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: every unit read here goes via the stamp-aware
+    -- helpers (GetInRange / IsDeadOrOffline / GetClassColor).
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
@@ -541,8 +646,9 @@ function DF:UpdateStatusTextAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: every unit read here goes via the stamp-aware
+    -- helpers (GetInRange / IsDeadOrOffline / GetClassColor).
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local deadOrOffline = IsDeadOrOffline(frame)
 
@@ -572,8 +678,9 @@ function DF:UpdatePowerBarAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
     
-    -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: every unit read here goes via the stamp-aware
+    -- helpers (GetInRange / IsDeadOrOffline / GetClassColor).
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
@@ -609,8 +716,9 @@ function DF:UpdateBorderAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: every unit read here goes via the stamp-aware
+    -- helpers (GetInRange / IsDeadOrOffline / GetClassColor).
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local inRange = GetInRange(frame)
     local alpha = 1.0
@@ -640,19 +748,28 @@ function DF:UpdateBuffIconsAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: the only unit reads are IsDeadOrOffline and
+    -- GetInRange, both stamp-aware.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
 
-    local alpha = 1.0
+    -- ☠ THE ROW'S OWN OPACITY MUST BE THE BASE, NOT AN AFTERTHOUGHT.
+    -- DriveBuffFactory sets this same frame's alpha to db.buffAlpha and caches it in
+    -- frame.dfBuffFactoryAlpha; this function then OVERWROTE it with a fade value
+    -- that did not include it -- so the row opacity slider was silently reset to 1
+    -- by the next range/appearance pass, and the cache meant the drive never put
+    -- it back. LIVE-ONLY: the preview always multiplied the two, so it was right
+    -- and live was wrong. (Audit, 2026-08-07.)
+    local base = db.buffAlpha or 1
+    local alpha = base
     if deadOrOffline and db.fadeDeadFrames then
-        alpha = db.fadeDeadAuras or 1.0
+        alpha = alpha * (db.fadeDeadAuras or 1.0)
     end
 
     if db.oorEnabled then
-        ApplyOORAlpha(row, inRange, alpha, db.oorAurasAlpha or 0.2)
+        ApplyOORAlpha(row, inRange, alpha, base * (db.oorAurasAlpha or 0.2))
     else
         row:SetAlpha(alpha)
     end
@@ -671,19 +788,28 @@ function DF:UpdateDebuffIconsAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: the only unit reads are IsDeadOrOffline and
+    -- GetInRange, both stamp-aware.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
 
-    local alpha = 1.0
+    -- ☠ THE ROW'S OWN OPACITY MUST BE THE BASE, NOT AN AFTERTHOUGHT.
+    -- DriveDebuffFactory sets this same frame's alpha to db.debuffAlpha and caches it in
+    -- frame.dfDebuffFactoryAlpha; this function then OVERWROTE it with a fade value
+    -- that did not include it -- so the row opacity slider was silently reset to 1
+    -- by the next range/appearance pass, and the cache meant the drive never put
+    -- it back. LIVE-ONLY: the preview always multiplied the two, so it was right
+    -- and live was wrong. (Audit, 2026-08-07.)
+    local base = db.debuffAlpha or 1
+    local alpha = base
     if deadOrOffline and db.fadeDeadFrames then
-        alpha = db.fadeDeadAuras or 1.0
+        alpha = alpha * (db.fadeDeadAuras or 1.0)
     end
 
     if db.oorEnabled then
-        ApplyOORAlpha(row, inRange, alpha, db.oorAurasAlpha or 0.2)
+        ApplyOORAlpha(row, inRange, alpha, base * (db.oorAurasAlpha or 0.2))
     else
         row:SetAlpha(alpha)
     end
@@ -724,7 +850,8 @@ function DF:UpdateLeaderIconAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
     
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: unit reads go via the stamp-aware helpers.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
@@ -749,7 +876,8 @@ function DF:UpdateRaidTargetIconAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
     
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: unit reads go via the stamp-aware helpers.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
@@ -774,7 +902,8 @@ function DF:UpdateReadyCheckIconAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
     
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: unit reads go via the stamp-aware helpers.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
@@ -802,7 +931,8 @@ function DF:UpdateDispelOverlayAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: unit reads go via the stamp-aware helpers.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     -- 12.1 factory path: one alpha on the handle's plain anchor WINDOW (ours) —
     -- the whole subtree rides it (every slot button, the slot-hosted widgets, the
@@ -850,17 +980,19 @@ function DF:UpdateDispelOverlayAppearance(frame)
     -- hardcodes. Until that function is updated to read the user settings, using
     -- db.dispelBorderAlpha/db.dispelIconAlpha here would cause ~5Hz flicker
     -- (ShowOverlayWithSecretColor sets 1.0, range ticker dims them back).
-    local gradAlpha = math.min((db.dispelGradientAlpha or 0.5) * (db.dispelGradientIntensity or 1.0), 1.0) * deadAlpha
+    -- ⚠ Shared resolver, not a fourth inline copy. This line WAS the copy that made the
+    -- "all four sites share it" claim in Features/Dispel.lua false, and it carried a
+    -- different fallback (0.5 vs Config's 1) so the two disagreed on an unset profile.
+    local gradAlpha = (DF.ResolveDispelGradientAlpha
+        and DF:ResolveDispelGradientAlpha(db) or 1.0) * deadAlpha
     local brdAlpha  = 1.0 * deadAlpha
     local icnAlpha  = 1.0 * deadAlpha
 
     if db.oorEnabled then
         local oorAlpha = db.oorDispelOverlayAlpha or 0.2
         ApplyOORAlpha(overlay.gradient,     inRange, gradAlpha, gradAlpha * oorAlpha)
-        ApplyOORAlpha(overlay.borderTop,    inRange, brdAlpha,  brdAlpha  * oorAlpha)
-        ApplyOORAlpha(overlay.borderBottom, inRange, brdAlpha,  brdAlpha  * oorAlpha)
-        ApplyOORAlpha(overlay.borderLeft,   inRange, brdAlpha,  brdAlpha  * oorAlpha)
-        ApplyOORAlpha(overlay.borderRight,  inRange, brdAlpha,  brdAlpha  * oorAlpha)
+        -- One ring host now, not four strips (see BuildDispelOverlayWidget).
+        ApplyOORAlpha(overlay.borderRingHost, inRange, brdAlpha, brdAlpha * oorAlpha)
         if overlay.icons then
             for _, icon in pairs(overlay.icons) do
                 ApplyOORAlpha(icon, inRange, icnAlpha, icnAlpha * oorAlpha)
@@ -871,10 +1003,7 @@ function DF:UpdateDispelOverlayAppearance(frame)
         end
     else
         if overlay.gradient     then overlay.gradient:SetAlpha(gradAlpha) end
-        if overlay.borderTop    then overlay.borderTop:SetAlpha(brdAlpha) end
-        if overlay.borderBottom then overlay.borderBottom:SetAlpha(brdAlpha) end
-        if overlay.borderLeft   then overlay.borderLeft:SetAlpha(brdAlpha) end
-        if overlay.borderRight  then overlay.borderRight:SetAlpha(brdAlpha) end
+        if overlay.borderRingHost then overlay.borderRingHost:SetAlpha(brdAlpha) end
         if overlay.icons then
             for _, icon in pairs(overlay.icons) do
                 icon:SetAlpha(icnAlpha)
@@ -899,7 +1028,11 @@ function DF:UpdateMissingBuffAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ TEST FRAMES PASS THROUGH. Every unit read this function makes now goes via
+    -- GetInRange / IsDeadOrOffline, both stamp-aware, so it renders a preview frame
+    -- correctly. LIVE frames still bail while test mode is on -- they are hidden
+    -- behind the preview and repainting them is wasted work. (Audit, 2026-08-07.)
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
@@ -930,7 +1063,11 @@ function DF:UpdateAbsorbBarAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ TEST FRAMES PASS THROUGH -- this function's only unit read is GetInRange,
+    -- which already prefers frame.dfInRange. The preview had NO counterpart for
+    -- this key at all, so the bar simply never faded out of range there.
+    -- (Audit, 2026-08-07.)
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     if not db.oorEnabled then return end
 
     local inRange = GetInRange(frame)
@@ -973,7 +1110,11 @@ function DF:UpdateHealAbsorbBarAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
     
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ TEST FRAMES PASS THROUGH -- this function's only unit read is GetInRange,
+    -- which already prefers frame.dfInRange. The preview had NO counterpart for
+    -- this key at all, so the bar simply never faded out of range there.
+    -- (Audit, 2026-08-07.)
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     local inRange = GetInRange(frame)
     
@@ -996,7 +1137,11 @@ function DF:UpdateHealPredictionBarAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
     
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ TEST FRAMES PASS THROUGH -- this function's only unit read is GetInRange,
+    -- which already prefers frame.dfInRange. The preview had NO counterpart for
+    -- this key at all, so the bar simply never faded out of range there.
+    -- (Audit, 2026-08-07.)
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     local inRange = GetInRange(frame)
     
@@ -1023,7 +1168,11 @@ function DF:UpdateDefensiveIconAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ TEST FRAMES PASS THROUGH. Every unit read this function makes now goes via
+    -- GetInRange / IsDeadOrOffline, both stamp-aware, so it renders a preview frame
+    -- correctly. LIVE frames still bail while test mode is on -- they are hidden
+    -- behind the preview and repainting them is wasted work. (Audit, 2026-08-07.)
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local inRange = GetInRange(frame)
 
@@ -1044,42 +1193,70 @@ end
 -- Handles OOR alpha for placed AD indicators (icons, squares, bars)
 -- ============================================================
 
+-- Walk every Aura Designer indicator on a frame, handing the caller the region to
+-- set alpha on plus that indicator's own base alpha.
+--
+-- ★ SHARED WITH TEST MODE ON PURPOSE. The preview cannot just call
+-- UpdateAuraDesignerAppearance: it computes its own per-element alphas because it has
+-- no whole-frame SetAlpha cascade to fall back on in simple range-fade mode. Copying
+-- the walk over there is exactly how the missing-buff strip and defensive row
+-- silently stopped fading in the preview. One walk, two alpha policies.
+--
+-- ☠ ASK FOR THE ALPHA HOST, NEVER GetFrame(). This used to fade h:GetFrame(), which
+-- for a per-indicator container is DF's own anchor frame -- fine. A collapsed slot's
+-- GetFrame() is the aura BUTTON, which carries DenyTaintedAccessWhenAurasAreSecret:
+-- this walk runs from the range update, which is tainted, so every call threw the
+-- moment auras went secret (43 errors, "forbidden object", reported 2026-08-06).
+-- GetAlphaHost answers with the DF-owned frame that every one of that indicator's
+-- regions hangs off — its own anchor frame for a container, dfLevelHost for a
+-- collapsed slot — so fading it fades the indicator whole. Nil only if host creation
+-- failed, hence the guard. See SlotHandle:GetAlphaHost.
+local AD_STORE_KEYS = { "healthbar", "background", "border", "placed",
+                        "nametext", "healthtext" }
+
+function DF:ForEachAuraDesignerAlphaHost(frame, fn)
+    local store = frame and frame.dfADFactory
+    if not (store and fn) then return end
+    for _, storeKey in ipairs(AD_STORE_KEYS) do
+        local t = store[storeKey]
+        if t then
+            for _, entry in pairs(t) do
+                local h = entry and entry.handle
+                local f = h and h.GetAlphaHost and h:GetAlphaHost()
+                if f then fn(f, h._dfADBaseAlpha or 1.0) end
+            end
+        end
+    end
+end
+
 function DF:UpdateAuraDesignerAppearance(frame)
     if not IsDandersFrame(frame) then return end
 
     -- 12.1: AD indicators are factory containers; fade each container's plain
     -- anchor frame (base config alpha times the OOR fade — alpha is ours even
     -- though the slot geometry is secret).
-    local store = frame.dfADFactory
-    if not store then return end
+    if not frame.dfADFactory then return end
 
     local db = GetDB(frame)
     if not db then return end
 
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ TEST FRAMES PASS THROUGH. Every unit read this function makes now goes via
+    -- GetInRange / IsDeadOrOffline, both stamp-aware, so it renders a preview frame
+    -- correctly. LIVE frames still bail while test mode is on -- they are hidden
+    -- behind the preview and repainting them is wasted work. (Audit, 2026-08-07.)
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local inRange = GetInRange(frame)
     local oorOn = db.oorEnabled
     local oorAlpha = db.oorAuraDesignerAlpha or 0.2
 
-    for _, storeKey in ipairs({ "healthbar", "background", "border", "placed",
-                                "nametext", "healthtext" }) do
-        local t = store[storeKey]
-        if t then
-            for _, entry in pairs(t) do
-                local h = entry and entry.handle
-                local f = h and h.GetFrame and h:GetFrame()
-                if f then
-                    local base = h._dfADBaseAlpha or 1.0
-                    if oorOn then
-                        ApplyOORAlpha(f, inRange, base, oorAlpha)
-                    else
-                        f:SetAlpha(base)
-                    end
-                end
-            end
+    DF:ForEachAuraDesignerAlphaHost(frame, function(f, base)
+        if oorOn then
+            ApplyOORAlpha(f, inRange, base, oorAlpha)
+        else
+            f:SetAlpha(base)
         end
-    end
+    end)
 end
 
 -- ============================================================
@@ -1092,7 +1269,10 @@ function DF:UpdateFrameAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
     
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through. The curve-driven colour below takes the stamped
+    -- health fraction instead of UnitHealthPercent -- a DATA fork; the rendering,
+    -- the colour stops and the mode branching are all shared.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     if db.oorEnabled then
         ApplyOORAlpha(frame, true, 1.0, 1.0)
@@ -1201,7 +1381,7 @@ function DF:UpdateAllFrameAppearances()
     
     -- Pinned frames
     if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
-        for setIndex = 1, 2 do
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
             local header = DF.PinnedFrames.headers[setIndex]
             if header then
                 for i = 1, 40 do

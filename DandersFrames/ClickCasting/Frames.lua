@@ -498,8 +498,11 @@ function CC:CreateClickCastHeader()
     self.header:SetSize(1, 1)
     self.header:Hide()
     
-    -- Set the enabled attribute (checked by OnEnter snippets to allow Clique/Clicked when disabled)
-    self.header:SetAttribute("dfClickCastEnabled", self.db and self.db.enabled or false)
+    -- Master switch, read by the OnEnter/OnShow snippets so a disabled DF leaves the
+    -- hover free for Clique/Clicked. Normalised to a real boolean: the snippets gate on
+    -- `~= true`, so a truthy non-boolean must not read as enabled.
+    -- ⚠ If the profile is not resolved yet this pins FALSE; ApplyBindings re-asserts it.
+    self.header:SetAttribute("dfClickCastEnabled", (self.db and self.db.enabled) and true or false)
     
     -- Initialize secure environment variables
     -- mouseoverbutton tracks the currently hovered frame (handle, used ONLY
@@ -757,12 +760,27 @@ function CC:CaptureOriginalClickBindings(frame)
 
     local t1, t2 = frame:GetAttribute("type1"), frame:GetAttribute("type2")
     local s1, s2 = frame:GetAttribute("*type1"), frame:GetAttribute("*type2")
-    if issecretvalue(t1) or issecretvalue(t2) or issecretvalue(s1) or issecretvalue(s2) then
+    -- unit1/unit2 are captured too: ClearBlizzardClickCastFromFrame nils them,
+    -- and nothing restored them. A foreign frame whose click actions relied on
+    -- per-button unit overrides lost that behaviour for the session.
+    local u1, u2 = frame:GetAttribute("unit1"), frame:GetAttribute("unit2")
+    if issecretvalue(t1) or issecretvalue(t2) or issecretvalue(s1) or issecretvalue(s2)
+        or issecretvalue(u1) or issecretvalue(u2) then
         frame.dfOriginalClickBindings = false
     else
         frame.dfOriginalClickBindings = {
             type1 = t1, type2 = t2, starType1 = s1, starType2 = s2,
+            unit1 = u1, unit2 = u2,
         }
+    end
+
+    -- Mousewheel state is captured separately (it is not an attribute).
+    -- ApplyBindingsToFrameUnified force-enables the wheel on every apply and
+    -- nothing ever turned it off again, so a frame that deliberately left the
+    -- wheel disabled started swallowing scroll events -- scrolling over it
+    -- stopped scrolling the parent scrollframe, for the rest of the session.
+    if frame.IsMouseWheelEnabled then
+        frame.dfOriginalMouseWheel = frame:IsMouseWheelEnabled() and true or false
     end
 end
 
@@ -864,18 +882,156 @@ end
 -- frame's click attributes to DF's macro/target actions, which BREAKS any
 -- non-unit secure button that lands in the global table — a toy/action button
 -- has no unit and can't receive unit-targeted casts anyway (bug #988,
--- ToyPicker's button had its type1 replaced). Frames whose unit is assigned
--- late (secure header children) are picked up by the next RegisterAllFrames
--- sweep once the attribute exists.
+-- ToyPicker's button had its type1 replaced).
+--
+-- OUR OWN frames are exempt from the unit test -- see below.
 local function clickCastFrameEligible(frame)
     if type(frame) ~= "table" or not frame.GetObjectType or not frame.GetAttribute then
         return false
     end
     local objType = frame:GetObjectType()
     if objType ~= "Button" and objType ~= "Frame" then return false end
+
+    -- Our frames are known unit frames the moment they exist, so they do not
+    -- wait for a unit to be assigned.
+    --
+    -- Nothing in the hover-bind machinery reads the unit. The snippet is
+    -- `owner:SetBindingClick(true, key, self, virtualBtn)` -- the unit resolves
+    -- at click time from the frame's own attribute -- and applicability is
+    -- decided by dfIsDandersFrame, set before registration is even attempted
+    -- (Frames/Headers.lua). The unit test was gating the work on a fact the
+    -- work does not use.
+    --
+    -- That gating is what made the worst case unbounded rather than brief. A
+    -- header child that first gains its unit DURING combat could not be
+    -- registered, because RegisterFrame defers under lockdown -- so its wrap and
+    -- snippet could not be installed until combat ended, leaving it with no
+    -- keyboard binds for the REST OF THE FIGHT. Arming at creation removes the
+    -- window rather than shortening it: by the time a unit arrives, in combat or
+    -- not, there is nothing left to do. A unit-less frame is hidden by
+    -- RegisterUnitWatch and cannot be hovered, so its binds never activate until
+    -- it actually holds someone.
+    -- Test-mode frames are excluded explicitly. They carry dfIsDandersFrame "for
+    -- consistency with live frames" (TestMode/TestFramePool.lua), but they are
+    -- deliberately plain Buttons rather than secure unit buttons, and they set
+    -- `frame.unit` as a plain field rather than the unit ATTRIBUTE this function
+    -- reads -- so the old test would have refused them anyway. Nothing currently
+    -- registers a test frame (TestMode never calls RegisterFrameWithClickCast,
+    -- and RegisterAllFrames only walks header children), but exempting on the
+    -- shared flag would have left that door held shut by nothing more than the
+    -- absence of a caller.
+    if frame.dfIsTestFrame then return false end
+
+    if frame.dfIsDandersFrame == true then return true end
+
+    -- Foreign frames keep the strict test: this gate exists to stop click
+    -- casting taking over buttons that are not unit frames at all, and for
+    -- anything we did not create, carrying a unit is the only way to tell.
     local unit = frame:GetAttribute("unit")
     if issecretvalue(unit) then return false end
     return unit ~= nil
+end
+
+-- Register a frame with click casting, or remember it for when it becomes
+-- eligible. This is the ONE entry point -- ClickCastFrames' __newindex, DF's own
+-- RegisterFrameWithClickCast, and the unit-assignment path all come through here.
+--
+-- Why it exists: __newindex fires only for keys the table does not already have,
+-- and it rawsets before testing eligibility. A header child is created BEFORE the
+-- header assigns its unit ("the header pre-creates children but units aren't set
+-- until group members actually appear" -- Frames/Init.lua), so a fresh child was
+-- rawset (key now present, __newindex spent) and then failed the unit test, and
+-- every later write bypassed the metatable entirely. The frame stayed
+-- unregistered for the session while dfClickCastRegistered claimed otherwise: no
+-- hooks, no binds, keys falling through to the action bar.
+--
+-- Field-proven (2026-08-02 16:18): a party->raid mode change recreated 40 pinned
+-- children; the next 15 seconds of hovering and pressing a bound key produced
+-- ZERO OnEnter/PreClick entries, and the sweep saw 357 frames against 375 after a
+-- reload. ScanForThirdPartyFrames would have caught it, but it only runs 1s and
+-- 3s after setup -- login only -- which is exactly why a reload was the only cure.
+function CC:EnsureRegistered(frame)
+    if not frame then return false end
+    if self.registeredFrames and self.registeredFrames[frame] then return true end
+    if not (self.db and self.db.enabled) then return false end
+
+    -- Respect an explicit opt-out: UnregisterFrameWithClickCast writes false, and
+    -- a frame hidden on purpose must not be resurrected when its unit arrives.
+    if ClickCastFrames and ClickCastFrames[frame] == false then return false end
+
+    if clickCastFrameEligible(frame) then
+        if self.pendingRegistration then self.pendingRegistration[frame] = nil end
+        self:RegisterFrame(frame)
+        return true
+    end
+
+    -- No unit yet. Hold it; ReconcileClickCastFrames retries.
+    self.pendingRegistration = self.pendingRegistration or {}
+    self.pendingRegistration[frame] = true
+    return false
+end
+
+-- Reconcile CC's registry against the public ClickCastFrames table.
+--
+-- Two things the ClickCastFrames metatable structurally cannot do, both because
+-- __newindex fires only for keys the table does not already hold and the rawset
+-- inside it spends that one chance immediately:
+--
+--   1. RETRY a frame that was ineligible when first written. EnsureRegistered
+--      parks those in pendingRegistration. Our own header children are covered
+--      by the explicit hook on unit assignment (Frames/Headers.lua), but nothing
+--      covered anything else -- a third-party group header that registers its
+--      children before assigning units had them parked and never looked at
+--      again, so an entire foreign raid grid could silently have no click
+--      casting until a reload. pendingRegistration was write-only.
+--
+--   2. Notice an opt-out. The documented Clique-convention unregister is
+--      `ClickCastFrames[frame] = false`, and for any frame that has been
+--      registered the key already exists, so that write lands in the table with
+--      no metamethod at all. DF kept its bindings, its wrap and its snippet on a
+--      frame whose owner had explicitly taken it back, for the rest of the
+--      session.
+--
+-- Both are reconciled by comparing the two tables rather than by trying to
+-- observe writes. Cheap: pendingRegistration is near-empty in steady state, and
+-- the registry walk is a few hundred entries against a table we already own.
+function CC:ReconcileClickCastFrames()
+    if not ClickCastFrames then return end
+    if not (self.db and self.db.enabled) then return end
+    if InCombatLockdown() then return end
+
+    -- (1) Anything parked that has since become eligible.
+    if self.pendingRegistration then
+        local nowReady = {}
+        for frame in pairs(self.pendingRegistration) do
+            if ClickCastFrames[frame] ~= false and clickCastFrameEligible(frame) then
+                nowReady[#nowReady + 1] = frame
+            end
+        end
+        for _, frame in ipairs(nowReady) do
+            self.pendingRegistration[frame] = nil
+            self:RegisterFrame(frame)
+        end
+        if #nowReady > 0 then
+            DF:Debug("CLICK", "Reconcile: registered %d frame(s) that became eligible", #nowReady)
+        end
+    end
+
+    -- (2) Anything we hold that has been opted out of since.
+    if self.registeredFrames then
+        local revoked = {}
+        for frame in pairs(self.registeredFrames) do
+            if ClickCastFrames[frame] == false then
+                revoked[#revoked + 1] = frame
+            end
+        end
+        for _, frame in ipairs(revoked) do
+            self:UnregisterFrame(frame)
+        end
+        if #revoked > 0 then
+            DF:DebugWarn("CLICK", "Reconcile: released %d frame(s) opted out via ClickCastFrames", #revoked)
+        end
+    end
 end
 
 function CC:SetupClickCastFramesGlobal()
@@ -907,22 +1063,32 @@ function CC:SetupClickCastFramesGlobal()
             -- Always store the value in the table
             rawset(t, frame, enabled)
             
-            -- Process registration since our click casting is enabled
+            -- Process registration since our click casting is enabled.
+            -- EnsureRegistered rather than an inline eligibility test: the rawset
+            -- above has already spent this frame's one __newindex, so a frame that
+            -- is not eligible YET must be remembered rather than dropped.
             if CC.db and CC.db.enabled then
                 if enabled == nil or enabled == false then
                     CC:UnregisterFrame(frame)
-                elseif clickCastFrameEligible(frame) then
-                    CC:RegisterFrame(frame)
+                else
+                    CC:EnsureRegistered(frame)
                 end
             end
         end
     })
     
-    -- Re-register any frames that were already in ClickCastFrames
+    -- Re-register any frames that were already in ClickCastFrames.
+    --
+    -- Through EnsureRegistered, not RegisterFrame directly: the eligibility gate
+    -- lives in EnsureRegistered, so this loop used to register anything present
+    -- unconditionally. Anything an addon parked in the table before our
+    -- PLAYER_ENTERING_WORLD -- including a non-unit secure button, the exact
+    -- case the gate was written for after a toy button had its type1 replaced --
+    -- was adopted with no check at all.
     for frame, enabled in pairs(existingFrames) do
         if enabled then
             rawset(ClickCastFrames, frame, true)
-            CC:RegisterFrame(frame)
+            CC:EnsureRegistered(frame)
         end
     end
     
@@ -983,15 +1149,27 @@ function CC:ScanForThirdPartyFrames()
     for _, frameName in ipairs(knownFramePatterns) do
         local frame = _G[frameName]
         if frame and type(frame) == "table" and frame.GetAttribute then
-            -- Check if it's a valid unit frame with a unit attribute
+            -- Check if it's a valid unit frame with a unit attribute.
+            -- The issecretvalue guard has to come BEFORE the boolean test, not
+            -- after it as it did for isProtected below: evaluating a secret value
+            -- in a condition throws, and this runs inside a C_Timer callback, so
+            -- the error took out the rest of the pattern list and the
+            -- ClickCastFrames sweep underneath it -- no third-party registration
+            -- at all for the session, from one silent error at login.
             local unit = frame:GetAttribute("unit")
+            if issecretvalue(unit) then unit = nil end
             if unit and not self.registeredFrames[frame] then
                 -- Check if it's a protected secure frame
                 local isProtected = frame.IsProtected and frame:IsProtected()
                 -- Bail if secret value (can't do boolean operations on it)
                 if issecretvalue(isProtected) then
                     -- Skip this frame
-                elseif isProtected then
+                elseif isProtected and ClickCastFrames[frame] ~= false then
+                    -- ⚠ The `~= false` matters twice over. RegisterFrame now refuses an
+                    -- opted-out frame on its own, but the rawset below would still
+                    -- ERASE the sentinel -- and ReconcileClickCastFrames' revoke pass
+                    -- reads that same sentinel, so destroying it here made the opt-out
+                    -- unrecoverable rather than merely ignored.
                     self:RegisterFrame(frame)
                     rawset(ClickCastFrames, frame, true)
                     registered = registered + 1
@@ -1023,7 +1201,14 @@ end
 -- Check if any binding requires Blizzard frames (now "Other Frames")
 function CC:AnyBindingNeedsBlizzardFrames()
     for _, binding in ipairs(self.db.bindings) do
-        if binding.enabled and self:ShouldBindingLoad(binding) then
+        -- ☠ ShouldBindingLoad IS the enabled test (`binding.enabled ~= false`), so a
+        -- leading `binding.enabled and` was not redundant, it was WRONG: it demanded a
+        -- truthy field where the rest of the addon treats nil as enabled. Nothing
+        -- normalises `enabled` on the way in -- the login pass fixes frames/fallback/
+        -- combat but not this, and profile import inserts bindings verbatim -- so an
+        -- imported binding built macros in BuildUnifiedMacroMap while this returned
+        -- false, and the frames those macros needed were never registered.
+        if self:ShouldBindingLoad(binding) then
             -- Check if binding applies to other frames
             local frames = binding.frames or { dandersFrames = true, otherFrames = true }
             if frames.otherFrames then
@@ -1043,7 +1228,9 @@ end
 -- Check if any binding applies to Other Frames (non-DandersFrames)
 function CC:AnyBindingNeedsOtherFrames()
     for _, binding in ipairs(self.db.bindings) do
-        if binding.enabled and self:ShouldBindingLoad(binding) then
+        -- See AnyBindingNeedsBlizzardFrames: ShouldBindingLoad already carries the
+        -- `enabled ~= false` semantics; a leading truthiness test breaks imports.
+        if self:ShouldBindingLoad(binding) then
             local frames = binding.frames or { dandersFrames = true, otherFrames = true }
             if frames.otherFrames then
                 return true
@@ -1461,6 +1648,32 @@ function CC:RegisterFrame(frame)
 
     if self.registeredFrames[frame] then return end
 
+    -- ☠ EXPLICIT OPT-OUT, honoured HERE and not only in EnsureRegistered. The
+    -- documented Clique-convention opt-out is `ClickCastFrames[frame] = false`, and
+    -- DF:UnregisterFrameWithClickCast writes exactly that. Testing it only in
+    -- EnsureRegistered left every DIRECT caller of this function bypassing it --
+    -- RegisterAllFrames' party/separated-raid/flat-raid/pet header walks, the
+    -- third-party scan, and two event paths -- so a frame the user had opted out of
+    -- was silently re-adopted on the next full sweep. Guard the entry point that
+    -- actually registers, not one of the several routes into it.
+    if ClickCastFrames and ClickCastFrames[frame] == false then return end
+
+    -- An unnamed frame can never be a click-cast target. HANDLE:SetBindingClick
+    -- resolves its target through GetName() and errors on a nil name
+    -- (RestrictedFrames.lua), so no hover bind can ever point here.
+    --
+    -- Registering one was actively destructive rather than merely useless:
+    -- ClearBlizzardClickCastFromFrame runs early and has no name check, wiping
+    -- type1/type2 and every modifier variant, while the three functions that
+    -- would have installed our bindings each bail on the missing name further
+    -- down. Net effect on a third-party frame: left-click no longer targets,
+    -- right-click no longer opens the menu, and nothing replaces either, until
+    -- a reload. If we cannot bind it, we do not touch it.
+    if frame.GetName and not frame:GetName() then
+        DF:DebugWarn("CLICK", "Refusing to register an unnamed frame — SetBindingClick requires a name")
+        return
+    end
+
     -- Don't register during combat OR if secure frames aren't initialized yet
     -- (init drains the "register" job once secureFramesInitialized flips)
     if InCombatLockdown() or not self.secureFramesInitialized then
@@ -1706,6 +1919,16 @@ function CC:SetupSecureHandlers(frame)
         -- (the pre-4.7.4 bug #976 abort class). Diagnostics read the
         -- mouseovername string mirror rather than the shared handle.
         local onEnterSnippet = [[
+            -- Phase -1: the master switch. `dfClickCastEnabled` lives on the HEADER
+            -- (owner), written by CC:SetEnabled and by the headerEnabled deferred job
+            -- for the in-combat case. Until this line existed the attribute had three
+            -- writers and NO readers outside two debug prints -- so turning click
+            -- casting off left every hover bind live and still eating keypresses,
+            -- while the UI said off and the Clique/Clicked coexistence comment claimed
+            -- otherwise. Bail BEFORE Phase 3's owner:ClearBindings() so a disabled
+            -- addon also stops wiping bindings another addon may own.
+            if owner:GetAttribute("dfClickCastEnabled") ~= true then return end
+
             -- Phase 0: Reset tracking for this enter cycle
             -- dfBindingsActive is cleared FIRST so a stale true from the previous
             -- enter can't fool us. It only gets set back to true at the very end.
@@ -1809,7 +2032,14 @@ function CC:SetupSecureHandlers(frame)
         -- ClearBindings() even during combat — unlike HookScript OnHide.
         -- Covers the case where a frame is hidden while hovered (e.g., party
         -- member leaves group, pet dies) and OnLeave doesn't fire.
+        -- dfHideFired counts every time the wrap RUNS, not every time it clears.
+        -- Without it "clearedBy=onhide never appears" is ambiguous between "this
+        -- path is dead code" and "it runs constantly and correctly has nothing to
+        -- do", and those have opposite conclusions. Same measurement that settled
+        -- the OnShow claim (kept, load-bearing) against the state-driver reclaim
+        -- (deleted, never unique) -- do not delete this path on absence alone.
         local onHideSnippet = [[
+            self:SetAttribute("dfHideFired", (self:GetAttribute("dfHideFired") or 0) + 1)
             if mouseoverbutton == self then
                 self:SetAttribute("dfClearedBy", "onhide")
                 self:ClearBindings()
@@ -1846,6 +2076,7 @@ function CC:SetupSecureHandlers(frame)
         -- the hover, and on mouseoverbutton ~= self so a show while already
         -- claimed is a no-op. Mirrors OnEnter's phases 3-6 in the same order.
         local onShowSnippet = [[
+            if owner:GetAttribute("dfClickCastEnabled") ~= true then return end
             if self:IsUnderMouse() and mouseoverbutton ~= self then
                 local snippet = self:GetAttribute("dfBindingSnippet")
                 if snippet and snippet ~= "" then
@@ -1976,11 +2207,18 @@ function CC:SetupSecureHandlers(frame)
         -- the wrap snippet, so when wrapEnter is false they are STALE values from the
         -- last successful cycle, not a description of THIS hover. "phase=7 with
         -- wrapEnter=false" means the PREVIOUS enter completed, nothing more.
-        DF:Debug("CLICK", "OnEnter %s unit=%s kbActive=%s hasKB=%s type1=%s wrapEnter=%s(%d) wrapLeave=%d phase=%d prev=%s postCheck=%s showClaimed=%d reasserted=%d",
+        -- sdFired / hideFired are the instrument-before-delete counters for the
+        -- two release paths that have never been observed doing work. Sampled
+        -- here because OnEnter is the one line that prints on every hover, so a
+        -- normal session builds the evidence without any extra logging.
+        local sdFired = self:GetAttribute("dfStateDriverCount") or 0
+        local hideFired = self:GetAttribute("dfHideFired") or 0
+        DF:Debug("CLICK", "OnEnter %s unit=%s kbActive=%s hasKB=%s type1=%s wrapEnter=%s(%d) wrapLeave=%d phase=%d prev=%s postCheck=%s showClaimed=%d reasserted=%d sdFired=%d hideFired=%d",
             frameName, tostring(unit), tostring(bindingsActive),
             tostring(hasKeyboardBindings), tostring(type1),
             tostring(wrapEnterFired), wrapEnterCount, wrapLeaveCount,
-            enterPhase, prevMouseover, postCheck, showClaimed, reasserted)
+            enterPhase, prevMouseover, postCheck, showClaimed, reasserted,
+            sdFired, hideFired)
 
         -- THE MEASUREMENT: was a redundant set path load-bearing on THIS hover?
         --
@@ -2122,10 +2360,25 @@ function CC:SetupSecureHandlers(frame)
             local stateDriverRectKnown = self:GetAttribute("dfStateDriverRectKnown")
             local sdMouseX = self:GetAttribute("dfSDMouseX")
             local sdMouseY = self:GetAttribute("dfSDMouseY")
+            -- showClaimed separates the two ways this frame got its binds, and
+            -- the distinction decides whether a release was even POSSIBLE: a
+            -- claim made by the OnShow wrap can never be released by the secure
+            -- OnLeave, because Wrapped_OnLeave gates on
+            -- `motion and self:GetAttribute("_wrapentered")` and only the motion
+            -- branch of Wrapped_OnEnter sets that attribute. Restricted code
+            -- cannot set it either — HANDLE:SetAttribute rejects any name
+            -- matching ^_ (RestrictedFrames.lua:523, Gethe live 4383ced3). A
+            -- show-claimed frame therefore depends on OnHide, on the next
+            -- frame's claim, on the mouseoverstate driver above, or on the
+            -- backstop below. Without this field the log cannot tell a
+            -- show-claim from a motion-enter after the fact, and the two have
+            -- completely different release paths — a 2026-08-01 user log was
+            -- misread for exactly that reason.
+            local showClaimed = self:GetAttribute("dfShowClaimed") or 0
             DF:DebugError("CLICK", "BINDINGS STILL ACTIVE after OnLeave %s! wrapLeave=%s mouseoverbutton=%s checkPassed=%s isSecureMO=%s postCheck=%s",
                 frameName, tostring(wrapLeaveFired), mouseoverOnLeave, tostring(leaveCheckPassed), tostring(isSecureMouseover), postCheck)
-            DF:DebugError("CLICK", "  clearedBy=%s stateDriverFired=%d underMouse=%s rectKnown=%s mousePos=%s,%s",
-                clearedBy, stateDriverCount, tostring(stateDriverUnderMouse), tostring(stateDriverRectKnown), tostring(sdMouseX), tostring(sdMouseY))
+            DF:DebugError("CLICK", "  clearedBy=%s showClaimed=%d stateDriverFired=%d underMouse=%s rectKnown=%s mousePos=%s,%s",
+                clearedBy, showClaimed, stateDriverCount, tostring(stateDriverUnderMouse), tostring(stateDriverRectKnown), tostring(sdMouseX), tostring(sdMouseY))
 
             -- STUCK-BINDS BACKSTOP: the client sometimes skips the secure
             -- OnLeave wrap (and the mouseoverstate driver has a blind spot
@@ -2679,6 +2932,17 @@ end
 -- Unregister a unit frame from click-casting
 function CC:UnregisterFrame(frame)
     if not frame then return end
+    -- Drop any deferred registration first, and unconditionally: a frame can be
+    -- unregistered while still only PENDING (created, no unit yet, then hidden
+    -- before its unit arrived) or while sitting in the combat-deferred "register"
+    -- set. Both must go before the early returns below, because a frame in either
+    -- state is NOT in registeredFrames -- so this function used to return without
+    -- touching them, and the queued registration then took over, one combat
+    -- later, a frame the caller had just explicitly opted out of.
+    if self.pendingRegistration then self.pendingRegistration[frame] = nil end
+    if self.deferred and type(self.deferred.register) == "table" then
+        self.deferred.register[frame] = nil
+    end
     if not self.registeredFrames then return end
     if not self.registeredFrames[frame] then return end
     

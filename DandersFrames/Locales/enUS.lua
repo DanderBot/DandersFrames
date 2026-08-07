@@ -703,7 +703,6 @@ L["Dispel Overlay"] = true
 L["Dispel Overlay Alpha"] = true
 L["Dispel Text"] = true
 L["Dispel Type Colors"] = true
-L["Dispel Type Icon"] = true
 L["Dispellable By Me"] = true
 L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled. Any Dispel Type: every debuff with a dispel type, even ones that cannot be dispelled."] = true
 L["Dispellable Debuffs"] = true
@@ -794,6 +793,25 @@ L["Exclamation Mark"] = true
 L["Expiring Threshold (%)"] = true
 L["Expiring Threshold (seconds)"] = true
 L["Expiration"] = true
+-- Pandemic (12.1 PTR 8) — the refresh-window cue. Grouped rather than scattered
+-- alphabetically because the collision strings only make sense read together, and a
+-- translator needs to see that "Expiration" and "Pandemic" are two named features
+-- being contrasted, not two ways of saying the same thing.
+-- Aura Designer bar indicator: the per-side trim on Match Frame Width/Height.
+L["Trims the matched size on every side. Use it to clear an Aura Designer border indicator, which the frame's own border inset does not know about. Negative values push the bar back out past the health bar's edge."] = true
+L["Pandemic"] = true
+L["Highlights an aura once you can refresh it without losing any of its remaining time. The game decides when that is, and it differs per spell — auras that can't be refreshed never light up."] = true
+L["Highlights each icon once the aura can be refreshed without losing time."] = true
+L["This game build does not support refresh-window highlights."] = true
+L["How far inside the icon edge the highlight sits. Negative values push it outward, so it rings the icon rather than sitting on it."] = true
+L["Flash"] = true
+L["Flash Speed"] = true
+L["Pulses the highlight in and out instead of holding it steady."] = true
+L["Expiration and Pandemic are both set to Tint. They cover the same area, so only one will ever be seen."] = true
+L["Expiration and Pandemic both draw a border at this inset. Give one of them a different Inset to show both at once."] = true
+-- CreateNote lead words (opts.prefix). "Note" is already defined above.
+L["Tip"] = true
+L["Warning"] = true
 L["Export Failed"] = true
 L["Export Filter"] = true
 L["Export Profile"] = true
@@ -1131,7 +1149,6 @@ L["None active (using global settings)"] = true
 L["Normal"] = true
 L["Normal (BLEND)"] = true
 L["Not in a raid group"] = true
-L["Number"] = true
 L["not in database"] = true
 -- 12.1 unsupported-version guard popup (Core.lua)
 L["Unsupported Game Version"] = true
@@ -1403,7 +1420,11 @@ L["Show Border"] = true
 L["Show Buffs"] = true
 L["Show Cooldown Swipe"] = true
 L["Show Debuffs"] = true
-L["Show Dispel Icon"] = true
+L["Dispel Symbol"] = true
+L["Show Dispel Symbol"] = true
+L["Symbol Size"] = true
+L["Symbol Opacity"] = true
+L["Symbol Position"] = true
 L["Show Dispel Text"] = true
 L["Show DPS"] = true
 L["Show Duration"] = true
@@ -1619,7 +1640,12 @@ L["Use FrameSort Addon"] = true
 L["Use Group-Based Layout"] = true
 L["Uses party frame settings/position"] = true
 L["Utility"] = true
-L["v%s loaded. Type %s/df%s for settings, %s/df resetgui%s if window is offscreen."] = true
+-- Login greeting. `/df resetgui` was dropped from it: anyone whose window is
+-- offscreen goes looking, and `/df help` lists it. Opt-out lives in
+-- Options > General > Notifications (GlobalDefaults.showLoginMessage).
+L["v%s loaded. %s/df%s for settings, %s/df help%s for commands."] = true
+L["Show the login message"] = true
+L["The one-line greeting printed to chat when you log in. Takes effect at your next login."] = true
 L["Valid range"] = true
 L["Vehicle"] = true
 L["Vehicle Icon"] = true
@@ -1798,8 +1824,16 @@ L["Replace Buffs"] = true
 L["Reset"] = true
 L["Reset All Aura Configs"] = true
 L["Right-click"] = true
+-- ⚠ L["Seconds"] is the Color by Time scale tab ONLY. It briefly also labelled a
+-- no-roll-up duration format; that format was dropped before shipping, so do not read
+-- this key as a Duration Format label — those are Standard / Units / Timer below.
 L["Seconds"] = true
-L["Seconds + Percent"] = true
+L["Standard"] = true
+L["Timer"] = true
+L["Units"] = true
+-- ⚠ Contains a literal %. Safe only because option labels are displayed verbatim
+-- (SetText) and never passed through format(). Do not start formatting them.
+L["Units + %"] = true
 L["Select a spell"] = true
 L["Select indicator..."] = true
 L["Select trigger for %s"] = true
@@ -2294,4 +2328,22 @@ L["Marker Offset X"] = true
 L["Marker Offset Y"] = true
 L["Marker Color"] = true
 L["Marker Symbol Color"] = true
+
+-- Runtime user-visible strings that were hardcoded to English (2026-08-03 pass).
+-- These are seen in normal play, not in the settings panel.
+-- Resurrection icon tooltip (Frames/StatusIcons.lua):
+L["Resurrection Incoming"] = true
+L["Resurrection Pending"] = true
+L["A resurrection is being cast on this player."] = true
+L["Waiting for this player to accept the resurrection."] = true
+-- Targeted List bar, shown on a live interrupt (Features/TargetedSpells.lua):
+L["Interrupted: %s"] = true
+-- Minimap / DataBroker tooltip (Core.lua):
+-- ⚠ The action halves are NOT declared here: the tooltip reuses the existing
+-- L["Open Settings"] and L["Toggle Solo Mode"]. Sentence-case twins of both were added
+-- here and have been removed -- two keys for one string is a translation trap, since a
+-- locale can fill one and silently miss the other. Only the colon-suffixed labels below
+-- are unique to this tooltip.
+L["Left-Click:"] = true
+L["Right-Click:"] = true
 --@end-do-not-package@

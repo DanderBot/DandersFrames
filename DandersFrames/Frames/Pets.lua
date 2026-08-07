@@ -20,22 +20,141 @@ DF.testPetFrames = DF.testPetFrames or {}       -- [0]=player pet, [1-4]=party p
 DF.testRaidPetFrames = DF.testRaidPetFrames or {} -- [1-40]=raid pets
 
 -- ============================================================
+-- PET TRACK IDENTITY
+-- ============================================================
+-- ☠ THE ROOT FIX for pets resurrecting each other. Three live sets exist (party,
+-- raid, arena) and exactly one may be drawn, but nothing could reliably say which
+-- one owned the display:
+--
+--   * the unit token cannot say  — raid AND arena both use raidpet<N>
+--   * isRaidFrame cannot say     — arena frames are deliberately isRaid = false so
+--                                  their settings resolve to the PARTY config
+--
+-- So after a handover hid one set, that set's own UNIT_HEALTH / UNIT_FLAGS handler
+-- re-showed it moments later. Field evidence from the retail lane, where this was
+-- found: SetPetFrameVisible counts paired EXACTLY — pet 214 / raidpet1 214,
+-- partypet1 161 / raidpet2 161. Four frames drawing two pets.
+--
+-- Every frame now carries the track it was born into, and every live path asks
+-- whether that track is the active one.
+local PET_TRACK_PARTY = "party"
+local PET_TRACK_RAID  = "raid"
+local PET_TRACK_ARENA = "arena"
+
+-- ⚠ Test modes return their OWN pseudo-tracks, which no live frame can ever match.
+-- Live pets keep their event registrations while a test runs, and without this they
+-- re-show themselves on top of the preview.
+local PET_TRACK_TEST_PARTY = "test-party"
+local PET_TRACK_TEST_RAID  = "test-raid"
+
+local activePetTrack, activePetTrackFrameTime
+
+-- ☠ CACHED FOR ONE FRAME, and that is not a micro-optimisation. This sits on the
+-- first line of the per-frame pet event handler, and the arena test resolves through
+-- GetContentType() -> IsInInstance(), sometimes GetInstanceInfo(), PLUS a
+-- SavedVariables write on every call. Uncached that is an instance query per unit
+-- event per pet frame. GetTime() is constant within a frame, so keying on it needs
+-- no invalidation at all.
+function DF:ActivePetTrack()
+    local now = GetTime()
+    if activePetTrackFrameTime == now and activePetTrack then
+        return activePetTrack
+    end
+
+    local track
+    if DF.raidTestMode then
+        track = PET_TRACK_TEST_RAID
+    elseif DF.testMode then
+        track = PET_TRACK_TEST_PARTY
+    elseif DF.IsInArena and DF:IsInArena() then
+        track = PET_TRACK_ARENA
+    elseif IsInRaid() then
+        track = PET_TRACK_RAID
+    else
+        track = PET_TRACK_PARTY
+    end
+
+    activePetTrack = track
+    activePetTrackFrameTime = now
+    return track
+end
+
+-- ☠ GATE ON THE TRACK NAME, never on `not partyTrack` or any other negation.
+-- With the test pseudo-tracks above there are FIVE tracks, not two, so "not party"
+-- is true in party test mode and real pet events start driving live secure frames.
+-- For an arena frame it is worse than a stray show: arena frames are isRaid = false,
+-- so UpdatePetFrame reads DF.testMode as *their* test flag and will fill a live
+-- secure button with fake test health and force it visible.
+function DF:PetFrameTrackActive(frame)
+    if not frame then return false end
+    -- A frame with no track predates this system or is a test frame; treat it as
+    -- always-active rather than silently freezing it.
+    if not frame.dfPetTrack then return true end
+    return frame.dfPetTrack == DF:ActivePetTrack()
+end
+
+-- ============================================================
+-- PET ANCHOR INVALIDATION
+-- ============================================================
+-- ☠ HUNG OFF UNIT REASSIGNMENT, NOT OFF SORTING. A pet anchor goes stale for exactly
+-- one reason: the header moved its owner's unit to a different button. Hanging the
+-- re-anchor off a *sorting entry point* looks equivalent and is not — the combat-end
+-- drain deliberately skips DF:ProcessRosterUpdate when FrameSort is active (see
+-- Frames/Headers.lua, the IsFrameSortActive check: FrameSort fires its own combat-end
+-- sort, and our pass would reset nameList to INDEX and undo it, with non-deterministic
+-- handler order between the two addons). Features/FrameSort.lua contains zero pet
+-- references, so FrameSort users kept exactly the "pets under the wrong teammate" bug
+-- the re-anchor exists to fix.
+--
+-- Every sorter finishes by moving units between buttons, so hooking the reassignment
+-- covers our own arena sorting, FrameSort, Blizzard's default and anything added
+-- later, without any of them needing to know pets exist.
+local petAnchorFrame = CreateFrame("Frame")
+petAnchorFrame:Hide()
+petAnchorFrame:SetScript("OnUpdate", function(self)
+    self:Hide()
+    if DF.UpdateAllPetFramePositions then DF:UpdateAllPetFramePositions() end
+end)
+
+-- Coalesced onto the next frame deliberately: a re-sort reassigns many children at
+-- once and every one of them lands here, while the repositioning pass already walks
+-- every pet frame. Reacting per child would be quadratic for one visible result.
+-- Showing an already-shown frame is a no-op, so this dedups for free.
+function DF:InvalidatePetAnchors()
+    petAnchorFrame:Show()
+end
+
+-- ============================================================
 -- PET FRAME CREATION
 -- ============================================================
 
-function DF:CreatePetFrame(unit, ownerFrame, isRaid)
+function DF:CreatePetFrame(unit, ownerFrame, isRaid, track)
     local db = isRaid and DF:GetRaidDB() or DF:GetDB()
     local parent = ownerFrame or (isRaid and DF.raidContainer or DF.container)
-    
+
     -- Generate frame name based on unit
-    local frameName = "DandersFrames_Pet_" .. unit:gsub("pet", "Pet")
-    
+    -- ☠ ARENA NEEDS ITS OWN NAMESPACE. Arena pets use the same raidpet<N> tokens as
+    -- the raid track, so both resolved to DandersFrames_Pet_raidPet<N> and whichever
+    -- CreateFrame ran second silently took the global — two Lua frames, one name, and
+    -- anything resolving by name got the wrong one. isRaid cannot disambiguate here
+    -- either: arena frames pass isRaid = false on purpose (party config).
+    local frameName
+    if track == PET_TRACK_ARENA then
+        frameName = "DandersFrames_ArenaPet_" .. unit:gsub("pet", "Pet")
+    else
+        frameName = "DandersFrames_Pet_" .. unit:gsub("pet", "Pet")
+    end
+
     local frame = CreateFrame("Button", frameName, parent, "SecureUnitButtonTemplate,SecureHandlerEnterLeaveTemplate")
     frame:SetSize(db.petFrameWidth or 80, db.petFrameHeight or 20)
     frame.unit = unit
     frame.ownerFrame = ownerFrame
     frame.isPetFrame = true
     frame.isRaidFrame = isRaid
+    -- Which of the three live sets this frame belongs to. Set once, at creation, and
+    -- never recomputed — that is the whole point: it survives the fact that neither
+    -- the unit token nor isRaidFrame can tell raid and arena apart.
+    frame.dfPetTrack = track
     frame.dfIsDandersFrame = true  -- Mark as DandersFrames frame for click casting module
     
     -- Register unit attribute
@@ -74,7 +193,15 @@ function DF:CreatePetFrame(unit, ownerFrame, isRaid)
     
     -- Border via the unified DF.Border backend (Stage 4.3).
     -- ApplyPetFrameStyle drives BuildSpec + Apply on each update.
-    frame.border = DF.Border:New(frame)
+    --
+    -- ⚠ Offset is explicit, matching Frames/Create.lua's unit-frame border. A pet's
+    -- healthBar is SetAllPoints and covers the whole rect, exactly like the unit
+    -- frame's -- it only survives DF.Border's leaf-sized default because nothing in
+    -- this file calls SetFrameLevel, so it sits at the child default frame+1 and a
+    -- border at +2 happens to clear it. That is luck, not design: level the health bar
+    -- for any reason and the border silently disappears, which is precisely what
+    -- happened on the unit frame in alpha 15. Pin it above the whole bar stack.
+    frame.border = DF.Border:New(frame, { frameLevelOffset = 10 })
     
     -- Name text — do NOT use SetFont() directly; use SetFontObject so that
     -- later SafeSetFont calls with font families can properly override
@@ -201,7 +328,15 @@ function DF:CreateTestPetFrame(unit, ownerTestFrame, isRaid)
 
     -- Border via the unified DF.Border backend (Stage 4.3).
     -- ApplyPetFrameStyle drives BuildSpec + Apply on each update.
-    frame.border = DF.Border:New(frame)
+    --
+    -- ⚠ Offset is explicit, matching Frames/Create.lua's unit-frame border. A pet's
+    -- healthBar is SetAllPoints and covers the whole rect, exactly like the unit
+    -- frame's -- it only survives DF.Border's leaf-sized default because nothing in
+    -- this file calls SetFrameLevel, so it sits at the child default frame+1 and a
+    -- border at +2 happens to clear it. That is luck, not design: level the health bar
+    -- for any reason and the border silently disappears, which is precisely what
+    -- happened on the unit frame in alpha 15. Pin it above the whole bar stack.
+    frame.border = DF.Border:New(frame, { frameLevelOffset = 10 })
 
     -- Name text — do NOT use SetFont() directly; use SafeSetFont or SetFontObject
     -- so that later SafeSetFont calls with font families can properly override
@@ -275,6 +410,18 @@ end
 -- ============================================================
 
 function DF:OnPetFrameEvent(frame, event, unit, ...)
+    -- ☠ THE GATE. Every branch below can call SetPetFrameVisible(frame, true), and a
+    -- frame belonging to a set that is NOT currently on screen doing that is exactly
+    -- how the three tracks resurrected each other: a handover hid one set, then its
+    -- own UNIT_HEALTH / UNIT_FLAGS arrived a moment later and showed it straight back.
+    -- The frames keep their event registrations through a handover by design (so they
+    -- are current when their track next becomes active), which is why the gate has to
+    -- be here rather than in the registration.
+    --
+    -- One line, first thing, and no negations -- see PetFrameTrackActive for why
+    -- `not partyTrack` is a trap rather than a shortcut.
+    if not DF:PetFrameTrackActive(frame) then return end
+
     -- Handle UNIT_PET event (fires on owner unit when pet changes)
     if event == "UNIT_PET" then
         if unit == frame.ownerUnit then
@@ -372,6 +519,17 @@ function DF:SetPetFrameVisible(frame, visible)
             frame:Hide()
         end
     end
+
+    -- ☠ Under lockdown only the alpha above actually took, so the Shown state is now
+    -- wrong in BOTH directions: a pet that died mid-fight is left as an invisible but
+    -- still CLICKABLE button, and one summoned mid-fight is left Hidden with alpha 1
+    -- (so it stays invisible even once combat ends). Neither self-corrects — nothing
+    -- re-runs this until the next roster or pet event, which may never come.
+    --
+    -- Arena had a deferral for its own pass; this covers every track, per frame.
+    if InCombatLockdown() then
+        DF.pendingPetVisibilityUpdate = true
+    end
 end
 
 function DF:UpdatePetHealth(frame)
@@ -419,10 +577,58 @@ function DF:UpdatePetHealth(frame)
 
     if DF.UpdateTextDesigner then DF:UpdateTextDesigner(frame, "health") end
 
-    -- Color health bar based on settings
+    -- Colour health bar based on settings — shared with the preview.
+    DF:ApplyPetHealthColor(frame, db, ownerUnit, unit)
+end
+
+-- ★★ PET HEALTH BAR COLOUR — ONE IMPLEMENTATION, LIVE AND PREVIEW.
+--
+-- ☠ THE PREVIEW USED TO HARDCODE ONE COLOUR: SetStatusBarColor(0.2, 0.8, 0.2), a
+-- flat green that is not even live's default green (0, 0.8, 0). Every pet
+-- health-colour setting was therefore invisible in test -- and the shipped default
+-- mode is HEALTH, so out of the box live drew a red->yellow->green gradient while
+-- the preview drew flat green. (Audit, 2026-08-07.)
+--
+-- `test` is the only fork and it is pure DATA: { pct = 0..1, class = "MAGE" }.
+-- Live resolves those two from unit APIs, which fabricated pet tokens fail.
+--   * CLASS  -- needs the OWNER's class token.
+--   * HEALTH -- live takes the colour straight out of UnitHealthPercent(unit, true,
+--     curve), which is secret-safe and needs a real unit; the preview interpolates
+--     the same stops in Lua. Safe to restate the ramp because it is hardcoded on
+--     both sides -- GetPetHealthGradientCurve builds it from constants, not from db,
+--     so there is no user setting here that could drift.
+--   * CUSTOM and the default arm are pure db reads, shared verbatim.
+local PET_HEALTH_STOPS = {
+    { pos = 0.0, r = 1, g = 0,   b = 0 },
+    { pos = 0.5, r = 1, g = 0.8, b = 0 },
+    { pos = 1.0, r = 0, g = 0.8, b = 0 },
+}
+
+local function PetGradientRGB(pct)
+    pct = math.max(0, math.min(1, pct or 1))
+    for i = 1, #PET_HEALTH_STOPS - 1 do
+        local a, b = PET_HEALTH_STOPS[i], PET_HEALTH_STOPS[i + 1]
+        if pct <= b.pos then
+            local span = b.pos - a.pos
+            local t = span > 0 and ((pct - a.pos) / span) or 0
+            return a.r + (b.r - a.r) * t,
+                   a.g + (b.g - a.g) * t,
+                   a.b + (b.b - a.b) * t
+        end
+    end
+    local last = PET_HEALTH_STOPS[#PET_HEALTH_STOPS]
+    return last.r, last.g, last.b
+end
+
+function DF:ApplyPetHealthColor(frame, db, ownerUnit, unit, test)
+    if not (frame and frame.healthBar and db) then return end
+
     if db.petHealthColorMode == "CLASS" then
-        -- Try to get pet owner's class color
-        local _, class = UnitClass(ownerUnit)
+        local class = test and test.class
+        if not class and ownerUnit then
+            local _, c = UnitClass(ownerUnit)
+            class = c
+        end
         if class then
             local color = DF:GetClassColor(class)
             if color then
@@ -431,24 +637,31 @@ function DF:UpdatePetHealth(frame)
             end
         end
     elseif db.petHealthColorMode == "HEALTH" then
-        -- Use gradient curve to get color based on health percentage
-        -- UnitHealthPercent with a color curve returns the color directly
-        local curve = DF:GetPetHealthGradientCurve()
-        if curve then
-            local success = pcall(function()
-                local color = UnitHealthPercent(unit, true, curve)
-                if color and color.GetRGB then
-                    local tex = frame.healthBar:GetStatusBarTexture()
-                    if tex then
-                        tex:SetVertexColor(color:GetRGB())
-                    end
-                end
-            end)
-            if success then
+        if test then
+            local tex = frame.healthBar:GetStatusBarTexture()
+            if tex then
+                tex:SetVertexColor(PetGradientRGB(test.pct))
                 return
             end
+        else
+            -- UnitHealthPercent with a colour curve returns the colour directly
+            local curve = DF:GetPetHealthGradientCurve()
+            if curve then
+                local success = pcall(function()
+                    local color = UnitHealthPercent(unit, true, curve)
+                    if color and color.GetRGB then
+                        local tex = frame.healthBar:GetStatusBarTexture()
+                        if tex then
+                            tex:SetVertexColor(color:GetRGB())
+                        end
+                    end
+                end)
+                if success then
+                    return
+                end
+            end
         end
-        -- Fallback if curve not available or failed - just use green
+        -- Fallback if the curve is unavailable or failed - just use green
         frame.healthBar:SetStatusBarColor(0, 0.8, 0)
         return
     elseif db.petHealthColorMode == "CUSTOM" then
@@ -456,7 +669,7 @@ function DF:UpdatePetHealth(frame)
         frame.healthBar:SetStatusBarColor(c.r, c.g, c.b)
         return
     end
-    
+
     -- Default green
     frame.healthBar:SetStatusBarColor(0, 0.8, 0)
 end
@@ -751,8 +964,14 @@ function DF:UpdatePetFrameTestMode(frame)
     frame.healthBar:SetMinMaxValues(0, 1)
     frame.healthBar:SetValue(healthPercent)
 
-    -- Set health bar color (green)
-    frame.healthBar:SetStatusBarColor(0.2, 0.8, 0.2)
+    -- Colour through the LIVE renderer, supplying only the two values a fabricated
+    -- pet token cannot answer: the health fraction and the owner's class. This used
+    -- to hardcode a flat green and every pet health-colour setting was invisible here.
+    local ownerTest = frame.ownerFrame and DF.GetTestUnitData
+        and DF:GetTestUnitData(frame.ownerFrame.index, frame.ownerFrame.isRaidFrame,
+            frame.ownerFrame.isPinnedBossFrame)
+    DF:ApplyPetHealthColor(frame, DF:GetFrameDB(frame), frame.ownerUnit, frame.unit,
+        { pct = healthPercent, class = ownerTest and ownerTest.class })
 
     -- Fake power bar (geometry/visibility already set by ApplyPetFrameStyle)
     if frame.powerBar then
@@ -793,8 +1012,12 @@ function DF:LightweightUpdatePetFrames()
                 DF:PositionPetFrame(DF.testPetFrames[i])
             end
         end
-    else
-        -- Live mode: update real pet frames
+    elseif DF:ActivePetTrack() == PET_TRACK_PARTY then
+        -- ☠ ONLY WHEN PARTY IS THE ACTIVE TRACK. PositionPetFrame re-resolves the owner
+        -- through GetFrameForUnit, which is arena-aware, so restyling the party set
+        -- while an arena is on screen re-parents it onto the arena header. This is the
+        -- slider path — every pet option change comes through here — which is why
+        -- touching any pet slider in an arena used to drag the party pets into it.
         if DF.petFrames.player then
             DF:ApplyPetFrameStyle(DF.petFrames.player)
             DF:PositionPetFrame(DF.petFrames.player)
@@ -816,19 +1039,32 @@ function DF:LightweightUpdatePetFrames()
             end
         end
     else
+        -- ☠ ONE TRACK AT A TIME. This used to walk raidPetFrames AND arenaPetFrames
+        -- unconditionally, which meant that in an arena the hidden raid set was
+        -- restyled and repositioned too -- and PositionPetFrame re-resolves the owner
+        -- through the arena-aware GetFrameForUnit, so it did not just waste work, it
+        -- re-parented the raid pets onto the arena header. That is the whole "dragging
+        -- a pet slider in an arena dragged the raid pets onto the arena frames" bug.
+        local track = DF:ActivePetTrack()
+
         -- Live mode: update real raid pet frames
-        for i = 1, 40 do
-            if DF.raidPetFrames[i] then
-                DF:ApplyPetFrameStyle(DF.raidPetFrames[i])
-                DF:PositionPetFrame(DF.raidPetFrames[i])
+        if track == PET_TRACK_RAID then
+            for i = 1, 40 do
+                if DF.raidPetFrames[i] then
+                    DF:ApplyPetFrameStyle(DF.raidPetFrames[i])
+                    DF:PositionPetFrame(DF.raidPetFrames[i])
+                end
             end
         end
+
         -- Arena pets are a separate set (see UpdateAllRaidPetFrames); without this
         -- they would keep their creation-time look and ignore every settings change.
-        for i = 1, 5 do
-            if DF.arenaPetFrames[i] then
-                DF:ApplyPetFrameStyle(DF.arenaPetFrames[i])
-                DF:PositionPetFrame(DF.arenaPetFrames[i])
+        if track == PET_TRACK_ARENA then
+            for i = 1, 5 do
+                if DF.arenaPetFrames[i] then
+                    DF:ApplyPetFrameStyle(DF.arenaPetFrames[i])
+                    DF:PositionPetFrame(DF.arenaPetFrames[i])
+                end
             end
         end
     end
@@ -840,9 +1076,23 @@ end
 
 function DF:PositionPetFrame(frame)
     if not frame then return end
-    
+
+    -- ☠ GUARDED AT THE FUNCTION, not at each caller. This does ClearAllPoints /
+    -- SetParent / SetPoint on a SecureUnitButtonTemplate, all blocked under lockdown,
+    -- and it is reachable mid-fight from at least three directions: the secure-sort
+    -- completion callback (SecureSort -> NotifySortComplete -> UpdateAllPetFramePositions),
+    -- the Options sliders, which are usable in combat, and UNIT_PET. Guarding the
+    -- callers instead leaves the next new caller to rediscover this.
+    --
+    -- ⚠ Test frames are NOT secure and must keep positioning normally -- test mode is
+    -- routinely entered and left with the lockdown up.
+    if not frame.dfIsTestFrame and InCombatLockdown() then
+        DF.pendingPetPositionUpdate = true
+        return
+    end
+
     local db = DF:GetFrameDB(frame)
-    
+
     -- Check if we're using grouped mode
     if db.petGroupMode == "GROUPED" then
         -- In grouped mode, positioning is handled by UpdatePetGroupLayout
@@ -901,6 +1151,15 @@ function DF:UpdatePetGroupLayout()
     local petsEnabled = isTestMode and (db.petEnabled and db.testShowPets ~= false) or (not isTestMode and db.petEnabled)
     if db.petGroupMode ~= "GROUPED" or not petsEnabled then
         DF:HidePetGroupContainer(DF.petGroupContainer)
+        return
+    end
+
+    -- ☠ GUARDS ITSELF. PositionPetFrame's guard provably cannot cover this path: it
+    -- returns early for GROUPED by design, so grouped layout is the one arrangement
+    -- whose SetParent / SetPoint calls never pass through it. Test frames are not
+    -- secure, so only the live pass needs holding back.
+    if not isTestMode and InCombatLockdown() then
+        DF.pendingPetPositionUpdate = true
         return
     end
 
@@ -1097,15 +1356,27 @@ function DF:UpdatePetGroupLayout()
         end
     end
     
-    -- Fallback: use party container directly
-    if anchor == "BOTTOM" then
-        container:SetPoint("TOP", partyContainer, "BOTTOM", offsetX, offsetY)
-    elseif anchor == "TOP" then
-        container:SetPoint("BOTTOM", partyContainer, "TOP", offsetX, -offsetY)
-    elseif anchor == "LEFT" then
-        container:SetPoint("RIGHT", partyContainer, "LEFT", offsetX, offsetY)
-    elseif anchor == "RIGHT" then
-        container:SetPoint("LEFT", partyContainer, "RIGHT", -offsetX, offsetY)
+    -- Fallback: use party container directly.
+    -- ☠ This was a bare `partyContainer` -- an undefined GLOBAL, never declared anywhere
+    -- in this file, so it resolved to nil and every SetPoint below anchored to the
+    -- container's PARENT instead of the party frames. Parse-clean, silent, and reachable
+    -- whenever grouped pets are on with no visible party frame (solo with a pet, arena).
+    -- The raid twin further down has always carried the `local raidContainer = ...` line
+    -- this branch was missing -- mirror it exactly, including the nil bail.
+    -- Guard the ANCHOR only, not the whole tail: the pet-frame positioning loop below
+    -- still has to run. (The broken version reached it, so returning early here would
+    -- trade a mis-anchored container for unpositioned pets.)
+    local partyContainer = isTestMode and DF.testPartyContainer or DF.partyContainer
+    if partyContainer then
+        if anchor == "BOTTOM" then
+            container:SetPoint("TOP", partyContainer, "BOTTOM", offsetX, offsetY)
+        elseif anchor == "TOP" then
+            container:SetPoint("BOTTOM", partyContainer, "TOP", offsetX, -offsetY)
+        elseif anchor == "LEFT" then
+            container:SetPoint("RIGHT", partyContainer, "LEFT", offsetX, offsetY)
+        elseif anchor == "RIGHT" then
+            container:SetPoint("LEFT", partyContainer, "RIGHT", -offsetX, offsetY)
+        end
     end
     
     -- Position pet frames within container (fallback path)
@@ -1160,6 +1431,13 @@ function DF:UpdateRaidPetGroupLayout()
     local petsEnabled = isTestMode and (db.petEnabled and db.testShowPets ~= false) or (not isTestMode and db.petEnabled)
     if db.petGroupMode ~= "GROUPED" or not petsEnabled then
         DF:HidePetGroupContainer(DF.raidPetGroupContainer)
+        return
+    end
+
+    -- ☠ Guards itself, for the same reason as the party layout above — PositionPetFrame
+    -- returns early for GROUPED, so its guard cannot cover this path.
+    if not isTestMode and InCombatLockdown() then
+        DF.pendingPetPositionUpdate = true
         return
     end
 
@@ -1366,10 +1644,20 @@ function DF:InitializePetFrames()
         return
     end
 
+    -- ☠ CreatePetFrame does SetSize / SetAttribute / Hide on a secure button, so this
+    -- whole function is a protected path. It is not login-only: HandleUnitPetEvent
+    -- lazily initialises here for anyone who had pets switched off at login, so the
+    -- first pet summoned mid-boss lands right here with the lockdown up.
+    if InCombatLockdown() then
+        DF:DebugWarn("PET", "InitializePetFrames: in combat, deferring")
+        DF.pendingPetVisibilityUpdate = true
+        return
+    end
+
     -- Create player pet frame
     local playerFrame = DF:GetPlayerFrame()
     if not DF.petFrames.player and playerFrame then
-        DF.petFrames.player = DF:CreatePetFrame("pet", playerFrame, false)
+        DF.petFrames.player = DF:CreatePetFrame("pet", playerFrame, false, PET_TRACK_PARTY)
         DF:Debug("PET", "InitializePetFrames: created player pet frame")
     end
     DF:Debug("PET", "InitializePetFrames: playerFrame=%s petFrames.player=%s", tostring(playerFrame ~= nil), tostring(DF.petFrames.player ~= nil))
@@ -1379,7 +1667,7 @@ function DF:InitializePetFrames()
     for i = 1, 4 do
         local partyFrame = DF:GetPartyFrame(i)
         if not DF.partyPetFrames[i] and partyFrame then
-            DF.partyPetFrames[i] = DF:CreatePetFrame("partypet" .. i, partyFrame, false)
+            DF.partyPetFrames[i] = DF:CreatePetFrame("partypet" .. i, partyFrame, false, PET_TRACK_PARTY)
             partyCount = partyCount + 1
         end
     end
@@ -1439,7 +1727,16 @@ function DF:UpdateAllPetFrames(force)
         for i = 1, 4 do
             if DF.partyPetFrames[i] then DF:SetPetFrameVisible(DF.partyPetFrames[i], false) end
         end
-        DF:HidePetGroupContainer(DF.petGroupContainer)
+        -- ☠ NOT IN AN ARENA. DF.petGroupContainer is the container GROUPED *arena*
+        -- pets are laid out into — deliberately, because arena reads the party config
+        -- and so uses the party layout. Hiding it as part of the party handover blanked
+        -- the entire arena pet block, and recovery depended on UpdateAllRaidPetFrames
+        -- happening to run in the same tick; several callers invoke UpdateAllPetFrames
+        -- on its own, and those left the arena pets invisible until something else
+        -- redrew them.
+        if not (DF.IsInArena and DF:IsInArena()) then
+            DF:HidePetGroupContainer(DF.petGroupContainer)
+        end
         return
     end
 
@@ -1557,11 +1854,16 @@ local function UpdateArenaPetFrames()
 
     -- Everything below this point touches protected state: CreatePetFrame builds a
     -- SecureUnitButtonTemplate and calls SetSize/SetAttribute, and PositionPetFrame
-    -- does ClearAllPoints/SetParent/SetPoint. The raid track gets away without a
-    -- guard because you only reach it forming a group, out of combat. Arena does
-    -- not: a pet summoned or resurrected mid-match, a Solo Shuffle round
-    -- transition, or Core's PLAYER_REGEN_DISABLED handler ending test mode all
-    -- land here with the lockdown up.
+    -- does ClearAllPoints/SetParent/SetPoint. Arena reaches it constantly: a pet
+    -- summoned or resurrected mid-match, a Solo Shuffle round transition, or Core's
+    -- PLAYER_REGEN_DISABLED handler ending test mode all land here with the lockdown up.
+    --
+    -- ☠ This comment used to claim the raid track "gets away without a guard because
+    -- you only reach it forming a group, out of combat". That was FALSE — the Options
+    -- sliders are usable in combat and reach it. The guard now lives on
+    -- PositionPetFrame and InitializePetFrames themselves, covering every track; this
+    -- one stays because deferring the whole arena pass is cheaper than deferring each
+    -- frame within it.
     --
     -- Defer rather than drop, so the pets appear the moment combat ends instead of
     -- waiting for whatever roster event happens to come next.
@@ -1578,7 +1880,10 @@ local function UpdateArenaPetFrames()
         DF:IterateArenaFrames(function(frame)
             idx = idx + 1
             if frame and not DF.arenaPetFrames[idx] then
-                DF.arenaPetFrames[idx] = DF:CreatePetFrame("raidpet" .. idx, frame, false)
+                -- isRaid = false routes settings to the party config (see the block
+                -- comment above); the track is what says "arena", since raidpet<N> and
+                -- isRaidFrame both read identically to the raid set.
+                DF.arenaPetFrames[idx] = DF:CreatePetFrame("raidpet" .. idx, frame, false, PET_TRACK_ARENA)
             end
         end)
     end
@@ -1673,12 +1978,32 @@ function DF:UpdateAllRaidPetFrames(force)
 
     -- Live mode: use real raid pet frames
     -- Initialize if needed (deferred creation)
+    --
+    -- ☠ CREATION IS COMBAT-BLOCKED, AND THIS FUNCTION IS REACHABLE IN COMBAT.
+    -- CreatePetFrame does CreateFrame(..., "SecureUnitButtonTemplate") + SetSize +
+    -- SetAttribute("unit", ...), none of which are legal once the lockdown is up. The
+    -- reachable caller is the auto-profile refresh, which fires on combat ENTRY and
+    -- calls UpdateAllRaidPetFrames(true) -- so a profile that switches on pull would
+    -- throw here for anyone who had not already been in a raid this session. The
+    -- guards elsewhere in this file (InitializePetFrames, UpdateArenaPetFrames) sit on
+    -- sibling entry points and do not dominate this one.
+    --
+    -- ⚠ Guard the CREATION only, NOT the whole function. A blanket early return would
+    -- also skip the visibility and update passes below, and those are combat-safe by
+    -- design -- SetPetFrameVisible degrades to alpha-only under lockdown rather than
+    -- calling Show/Hide. Anything skipped here is picked up by the regen drain, which
+    -- raises exactly this flag and re-runs UpdateAllRaidPetFrames(true).
     local frameIdx = 0
     if DF.IterateRaidFrames then
+        local inCombat = InCombatLockdown()
         DF:IterateRaidFrames(function(frame)
             frameIdx = frameIdx + 1
             if frame and not DF.raidPetFrames[frameIdx] then
-                DF.raidPetFrames[frameIdx] = DF:CreatePetFrame("raidpet" .. frameIdx, frame, true)
+                if inCombat then
+                    DF.pendingPetVisibilityUpdate = true
+                else
+                    DF.raidPetFrames[frameIdx] = DF:CreatePetFrame("raidpet" .. frameIdx, frame, true, PET_TRACK_RAID)
+                end
             end
         end)
     end
@@ -1698,21 +2023,42 @@ function DF:UpdateAllRaidPetFrames(force)
 end
 
 function DF:UpdateAllPetFramePositions()
+    -- ☠ ONLY THE ACTIVE TRACK. Walking all three is not merely wasted work:
+    -- PositionPetFrame re-resolves the owner through GetFrameForUnit, which is
+    -- arena-aware, so repositioning a non-owning set RE-PARENTS it onto whichever
+    -- header is currently visible. That is why dragging any pet slider in an arena
+    -- dragged the hidden raid pets onto the arena frames.
+    local track = DF:ActivePetTrack()
+
     -- Update party pet positions
-    if DF.petFrames.player then
-        DF:PositionPetFrame(DF.petFrames.player)
-    end
-    
-    for i = 1, 4 do
-        if DF.partyPetFrames[i] then
-            DF:PositionPetFrame(DF.partyPetFrames[i])
+    if track == PET_TRACK_PARTY then
+        if DF.petFrames.player then
+            DF:PositionPetFrame(DF.petFrames.player)
+        end
+
+        for i = 1, 4 do
+            if DF.partyPetFrames[i] then
+                DF:PositionPetFrame(DF.partyPetFrames[i])
+            end
         end
     end
-    
+
     -- Update raid pet positions
-    for i = 1, 40 do
-        if DF.raidPetFrames[i] then
-            DF:PositionPetFrame(DF.raidPetFrames[i])
+    if track == PET_TRACK_RAID then
+        for i = 1, 40 do
+            if DF.raidPetFrames[i] then
+                DF:PositionPetFrame(DF.raidPetFrames[i])
+            end
+        end
+    end
+
+    -- ☠ ARENA WAS OMITTED ENTIRELY, so Anchor / Offset X / Offset Y did nothing at
+    -- all in an arena — the sliders wrote to the DB and no arena pet ever moved.
+    if track == PET_TRACK_ARENA then
+        for i = 1, 5 do
+            if DF.arenaPetFrames[i] then
+                DF:PositionPetFrame(DF.arenaPetFrames[i])
+            end
         end
     end
 end
@@ -1730,33 +2076,64 @@ local function PetSetForRaidIndex()
     return DF.raidPetFrames
 end
 
+-- Update AND reposition. Every branch below used to call UpdatePetFrame alone, so a
+-- pet arriving through UNIT_PET -- a warlock resummoning mid-arena is the everyday
+-- case -- was SHOWN at whatever anchor it last held. That is the "right pet under the
+-- wrong teammate" symptom for anything that arrives here rather than through a track
+-- pass. Owner death and rez arrive as UNIT_HEALTH / UNIT_FLAGS and never reach here.
+local function RefreshPetFrame(frame)
+    if not frame then return end
+    DF:UpdatePetFrame(frame)
+    -- ⚠ NO combat early-return here, deliberately. PositionPetFrame owns the guard AND
+    -- raises pendingPetPositionUpdate itself; short-circuiting on InCombatLockdown
+    -- here means nothing ever gets flagged, so the anchor stays stale past the end of
+    -- the fight instead of being replayed by the drain. Let the choke point own it.
+    DF:PositionPetFrame(frame)
+end
+
 function DF:OnPetChanged(unit)
+    -- ☠ GATE BY TRACK. UNIT_PET fires for BOTH "player" and "raidN" in an arena --
+    -- one pet reached through two tokens -- so acting on the player branch as well as
+    -- the raid branch re-shows the party-side frame the handover just hid, on every
+    -- pet event for the rest of the match. That is precisely the duplicate-frame bug
+    -- the track system exists to kill, and the retail field capture shows it as counts
+    -- pairing in lockstep (pet 214 / raidpet1 214, partypet1 161 / raidpet2 161). The
+    -- raid branches below already cover the arena case. The same applies to the party
+    -- branches in a live raid.
+    --
+    -- ⚠ Written as explicit track-name comparisons, NOT as `not partySide`. With five
+    -- tracks in play, "not party" is TRUE in party test mode, and real pet events would
+    -- start driving live secure frames -- worse for arena frames, which are
+    -- isRaid = false, so UpdatePetFrame reads DF.testMode as *their* test flag and
+    -- fills a live secure button with fake test health and forces it visible.
+    local track = DF:ActivePetTrack()
+    local partySide = (track == PET_TRACK_PARTY)
+    local raidSide  = (track == PET_TRACK_RAID) or (track == PET_TRACK_ARENA)
+
     -- Determine which pet frame to update based on unit
     if unit == "player" or unit == "pet" then
-        if DF.petFrames.player then
-            DF:UpdatePetFrame(DF.petFrames.player)
+        if partySide and DF.petFrames.player then
+            RefreshPetFrame(DF.petFrames.player)
         end
     elseif unit:match("^party%d$") then
         local index = tonumber(unit:match("party(%d)"))
-        if index and DF.partyPetFrames[index] then
-            DF:UpdatePetFrame(DF.partyPetFrames[index])
+        if partySide and index then
+            RefreshPetFrame(DF.partyPetFrames[index])
         end
     elseif unit:match("^partypet%d$") then
         local index = tonumber(unit:match("partypet(%d)"))
-        if index and DF.partyPetFrames[index] then
-            DF:UpdatePetFrame(DF.partyPetFrames[index])
+        if partySide and index then
+            RefreshPetFrame(DF.partyPetFrames[index])
         end
     elseif unit:match("^raid%d+$") then
         local index = tonumber(unit:match("raid(%d+)"))
-        local set = PetSetForRaidIndex()
-        if index and set[index] then
-            DF:UpdatePetFrame(set[index])
+        if raidSide and index then
+            RefreshPetFrame(PetSetForRaidIndex()[index])
         end
     elseif unit:match("^raidpet%d+$") then
         local index = tonumber(unit:match("raidpet(%d+)"))
-        local set = PetSetForRaidIndex()
-        if index and set[index] then
-            DF:UpdatePetFrame(set[index])
+        if raidSide and index then
+            RefreshPetFrame(PetSetForRaidIndex()[index])
         end
     end
 end
@@ -1821,5 +2198,27 @@ function DF:ApplyPetSettings()
             if DF.raidPetFrames[i] then DF:SetPetFrameVisible(DF.raidPetFrames[i], false) end
         end
         DF:HideAllTestRaidPetFrames()
+    end
+
+    -- ☠ ARENA IS ITS OWN TRACK, and neither branch above covers it. It was gated on
+    -- the RAID config while actually READING the party one, and arenaPetFrames was
+    -- never touched at all — so every pet option was inert in an arena, and turning
+    -- pets off mid-match left them on screen until a zone change.
+    --
+    -- ⚠ TEST MODES EXCLUDED. Without that, raid test mode entered inside an arena
+    -- takes the enabled branch here and leaves all 40 live raid pet frames shown on
+    -- top of the preview.
+    if not (DF.testMode or DF.raidTestMode) and DF.IsInArena and DF:IsInArena() then
+        if db.petEnabled then
+            -- Routes to UpdateArenaPetFrames via the arena branch at the top of it.
+            DF:UpdateAllRaidPetFrames(true)
+        else
+            for i = 1, 5 do
+                if DF.arenaPetFrames[i] then DF:SetPetFrameVisible(DF.arenaPetFrames[i], false) end
+            end
+            -- The PARTY container: GROUPED arena pets are laid out by
+            -- UpdatePetGroupLayout, which owns DF.petGroupContainer.
+            DF:HidePetGroupContainer(DF.petGroupContainer)
+        end
     end
 end

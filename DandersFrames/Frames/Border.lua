@@ -66,7 +66,27 @@ function Border:New(parent, opts)
     -- replaces it with two SetPoint calls translated by the offset).
     border.anchorTo = opts.anchorTo or parent
     border:SetAllPoints(border.anchorTo)
-    border:SetFrameLevel(parent:GetFrameLevel() + (opts.frameLevelOffset or 10))
+    -- DEFAULT +2. Sized for a LEAF parent — an aura button, a badge, an icon — whose own
+    -- content is regions (textures/fontstrings) rather than child frames. At parent+2 the
+    -- border clears the parent's regions and a cooldown swipe, and stays inside the tight
+    -- band the aura rows budget for it (Factory.ALERT_ROW_LIFT is measured against this
+    -- number — re-measure it if this moves).
+    --
+    -- ☠ THIS DEFAULT IS WRONG FOR A FRAME THAT STACKS CHILD FRAMES OVER ITS OWN RECT, and
+    -- such a parent MUST pass frameLevelOffset explicitly. The comment that used to sit here
+    -- claimed "+2 clears both" because it reasoned about regions on the parent and about
+    -- SIBLING frames, and never considered a CHILD frame covering the same rect. A unit
+    -- frame is exactly that: healthBar is a child at frame+3 with SetAllPoints and
+    -- framePadding defaulting to 0, so it covers the whole rect and buries a border at +2 —
+    -- completely at 100% health, half of it at 50%. Shipped that way briefly in alpha 15;
+    -- caught in review, never released. The measured unit-frame stack is health +3, power
+    -- +5, absorb +7, heal-absorb +8, contentOverlay +25 — hence the explicit +10 those
+    -- consumers now pass, which is the free band between the bars and the text/icon layer.
+    --
+    -- ⚠ The rule, for anyone adding a consumer: read the PARENT's children, not its regions,
+    -- and not its siblings. If any child covers the parent's rect, this default will hide
+    -- your border and nothing will error.
+    border:SetFrameLevel(parent:GetFrameLevel() + (opts.frameLevelOffset or 2))
 
     local layer = opts.layer or "BORDER"
     border._layer = layer   -- texture-piece renderer creates on the same layer
@@ -183,12 +203,15 @@ local borderKeyMemo = {}
 -- BuildSpec runs per bordered element per tick (4.6% of trash allocation, 4.3%
 -- of boss).
 --
--- ☠ THE UPVALUES ARE SHARED, which is safe ONLY because BuildSpec cannot
--- re-enter: its body reaches DF:GetClassColor, DF:GetTestUnitData, DF:GetUnitRole
--- and the Border:Resolve* helpers, and none of those calls BuildSpec. Verified
--- against every caller, not assumed. If a resolver ever needs to build a spec it
--- must not do it through here, or this silently starts reading another prefix's
--- keys -- a wrong-border bug with nothing at the call site to explain it.
+-- THE UPVALUES ARE SHARED, so BuildSpec saves and restores them around its body
+-- (see below) and reentrancy is CORRECT rather than merely forbidden. It cannot
+-- currently happen -- the body reaches DF:GetClassColor, DF:GetTestUnitData,
+-- DF:GetUnitRole and the Border:Resolve* helpers, and none of those calls
+-- BuildSpec -- but relying on that was a comment enforcing an invariant nothing
+-- checked. A resolver that ever did build a spec would have started reading
+-- another prefix's keys: a wrong border, silently, with nothing at the call site
+-- to explain it. Stack discipline costs two locals and no allocation, which is
+-- cheaper than the assert that would only have caught it on a debug build.
 local bsMemo, bsPrefix
 local function k(suffix)
     local key = bsMemo[suffix]
@@ -200,6 +223,8 @@ function Border:BuildSpec(dbTable, prefix, ctx)
     if not dbTable or not prefix then return {} end
     local memo = borderKeyMemo[prefix]
     if not memo then memo = {}; borderKeyMemo[prefix] = memo end
+    -- Save/restore rather than plain assignment: see the note above k().
+    local prevMemo, prevPrefix = bsMemo, bsPrefix
     bsMemo, bsPrefix = memo, prefix
 
     -- Style is the top-level choice: SOLID | GRADIENT | TEXTURE.
@@ -330,6 +355,7 @@ function Border:BuildSpec(dbTable, prefix, ctx)
     if ctx and ctx.iconMode then
         self:IconGeometry(spec, spec.size, spec.inset)
     end
+    bsMemo, bsPrefix = prevMemo, prevPrefix
     return spec
 end
 
@@ -372,7 +398,7 @@ function Border:ResolveClassColor(unit, fallback, frame)
 
     local classToken
     if frame and frame.dfIsTestFrame then
-        local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame)
+        local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame, frame.isPinnedBossFrame)
         classToken = testData and testData.class
     elseif unit and UnitExists and UnitExists(unit) then
         classToken = select(2, UnitClass(unit))
@@ -397,7 +423,7 @@ function Border:ResolveRoleColor(unit, fallback, roleColors, frame)
 
     local role
     if frame and frame.dfIsTestFrame then
-        local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame)
+        local testData = DF.GetTestUnitData and DF:GetTestUnitData(frame.index, frame.isRaidFrame, frame.isPinnedBossFrame)
         role = testData and testData.role
     else
         -- Player falls back to the spec role when the group assigned none;
@@ -482,10 +508,28 @@ end
 -- the faithful equivalent of DF's "Atlas" is the badge-LESS variant. `showIcon` no
 -- longer exists on 68914's options, so the style is the only place that intent can
 -- live. Use "BorderWithIcon" here if a corner dispel badge is ever wanted.
-local DISPEL_STYLE_NEW = { Color = "PreserveAsset", Atlas = "Border" }
-local DISPEL_STYLE_LITERAL = { Color = 3, Atlas = 0 }
+-- ★ `Icon` below is that "if": it lets a carrier ask Blizzard for the dispel-type
+-- ART rather than just its colour, which is what lets one badge on the dispel
+-- overlay's slot agree with the overlay by construction -- same aura, Blizzard picks
+-- both -- instead of us guessing a type we cannot read.
+--
+-- The enum's other two art styles, BorderWithIcon and Border, are deliberately NOT
+-- mapped: they are ui-debuff-border-* art meant to frame an aura BUTTON, so on a unit
+-- frame they render as a square box around the symbol (tried live 2026-08-03).
+--
+-- Resolved BY NAME, never by literal: the numbers were RENUMBERED for 68914, so any
+-- hardcoded `style = 1` that used to mean "Color" now draws BorderWithIcon instead. The
+-- literal table is a last resort for clients without the enum at all.
+local DISPEL_STYLE_NEW = {
+    Color = "PreserveAsset", Atlas = "Border",
+    Icon = "Icon",
+}
+local DISPEL_STYLE_LITERAL = {
+    Color = 3, Atlas = 0,
+    Icon = 2,
+}
 function DF:ResolveDispelTextureStyle(styleName)
-    styleName = (styleName == "Color" or styleName == "Atlas") and styleName or "Atlas"
+    if DISPEL_STYLE_NEW[styleName] == nil then styleName = "Atlas" end
     local newEnum = Enum and Enum.CustomAuraButtonDispelTypeTextureStyle
     local v = newEnum and newEnum[DISPEL_STYLE_NEW[styleName]]
     if v ~= nil then return v end
@@ -564,6 +608,123 @@ function DF:GetGameDispelTextMap()
     -- read would otherwise freeze the fallbacks in for the session.
     if sawGlobal then DF._gameDispelTextMap = map end
     return map
+end
+
+-- ============================================================
+-- LEGACY (v4) DISPEL COLOURS -> the shared account palette
+-- ============================================================
+-- v4 shipped TWO independent, separately-editable sets of dispel colours, each with its
+-- own pickers and its own Reset:
+--
+--   debuffBorderColor{Magic,Curse,Disease,Poison,Bleed}  -- the debuff ICON BORDER
+--   dispel{Magic,Curse,Disease,Poison,Bleed}Color        -- the DISPEL OVERLAY
+--
+-- v5 collapses both onto ONE account-wide table (DF.db.dispelColors, edited on the
+-- Colors page), so a profile carrying both has to resolve to a single value per type.
+--
+-- ☠ RESOLUTION IS PER TYPE, AND "SET" MEANS "DIFFERS FROM THE v4 DEFAULT" -- NOT
+-- "EXISTS". v4's Config seeds BOTH families into every profile, so both keys are
+-- present on essentially every v4 profile whether or not the user ever opened that
+-- picker. A presence test would hand the overlay family the win for everybody and
+-- silently discard the border customisation of every user who only ever touched the
+-- border -- the same data loss as doing nothing, pointed the other way.
+--
+-- Order per type: OVERLAY if customised -> BORDER if customised -> game palette.
+-- Krathe's call (2026-08-06). The conflict case is narrow by construction -- it needs
+-- BOTH families customised to DIFFERENT colours -- and the overlay is the more visible
+-- element of the two, so it takes the tiebreak.
+--
+-- Party is read before raid because v5's palette is account-wide and party is the
+-- surface a solo/party user configures; a raid-only customiser would otherwise be lost
+-- entirely, which is why raid is a fallback rather than being ignored.
+DF.LegacyDispelDefaults = {   -- v4's shipped defaults; IDENTICAL across both families
+    Magic   = { r = 0.2, g = 0.6, b = 1 },
+    Curse   = { r = 0.6, g = 0,   b = 1 },
+    Disease = { r = 0.6, g = 0.4, b = 0 },
+    Poison  = { r = 0,   g = 0.6, b = 0 },
+    Bleed   = { r = 1,   g = 0,   b = 0 },
+}
+
+-- Deliberately loose (1e-3): a colour-picker round-trip can perturb the low bits, and a
+-- user who nudged a slider and put it back should read as untouched. A false "untouched"
+-- costs nothing here -- it falls through to the other family or the game palette, which
+-- for an at-default value is the same colour either way.
+-- ☠ ALL THREE CHANNELS ARE TYPE-CHECKED, not just r. This used to guard `c.r` alone and
+-- then read c.g and c.b in the `or` chain below, so a partial table -- {r = <default>},
+-- which reaches the second term because the first compares equal -- threw "attempt to
+-- perform arithmetic on a nil value". That throw lands inside ADDON_LOADED, which aborts
+-- the rest of the migration chain for that login and leaves a half-migrated profile with
+-- no recovery path. Guarding the one field you happen to read first is not a guard.
+local function dispelColorCustomised(c, def)
+    if type(c) ~= "table" then return false end
+    if type(c.r) ~= "number" or type(c.g) ~= "number" or type(c.b) ~= "number" then
+        return false
+    end
+    return math.abs(c.r - def.r) > 1e-3
+        or math.abs(c.g - def.g) > 1e-3
+        or math.abs(c.b - def.b) > 1e-3
+end
+
+-- Build a v5 dispelColors table from a v4 profile's per-mode tables. Returns a fresh
+-- table, always fully populated. Shared by the login migration (Core.lua) and the
+-- profile IMPORT path (Core/Profile.lua) -- an import string written by v4 carries the
+-- legacy keys and no dispelColors, so without this the import silently lands nothing.
+-- ☠ Candidates are passed as VARARGS, not as a table walked with ipairs. Any of them
+-- can legitimately be nil -- a v5-native profile has no legacy keys at all, and a
+-- partial import may carry one mode and not the other -- and ipairs STOPS at the first
+-- nil, which would have silently skipped every later candidate. Missing the first one
+-- would have meant the border fallback was never reached.
+local function pickDispelColor(def, ...)
+    for i = 1, select("#", ...) do
+        local c = select(i, ...)
+        if dispelColorCustomised(c, def) then
+            return { r = c.r, g = c.g, b = c.b }
+        end
+    end
+end
+
+function DF:BuildDispelColorsFromLegacy(party, raid)
+    party, raid = party or {}, raid or {}
+    local game = (DF.GetGameDispelPalette and DF:GetGameDispelPalette()) or DF.DispelDefaultColors
+    local out = {}
+    for _, t in ipairs({ "Magic", "Curse", "Disease", "Poison", "Bleed" }) do
+        local def = DF.LegacyDispelDefaults[t]
+        -- Overlay first, then border; party before raid within each.
+        local picked = pickDispelColor(def,
+            party["dispel" .. t .. "Color"],
+            raid["dispel" .. t .. "Color"],
+            party["debuffBorderColor" .. t],
+            raid["debuffBorderColor" .. t])
+        if not picked then
+            local g = (game and game[t]) or def
+            picked = { r = g.r, g = g.g, b = g.b }
+        end
+        out[t] = picked
+    end
+    return out
+end
+
+-- Resolve ONE dispel type to r,g,b. The single source of truth for "what colour is a
+-- Magic debuff", shared by the dispel overlay's test path and Core's lightweight
+-- repaint. Order: the shared account palette (DF.db.dispelColors, edited on the Colors
+-- page) -> the game palette -> a neutral. Enrage folds into Bleed, as everywhere else.
+--
+-- ☠ This exists because Core's LightweightUpdateDispelOverlay had its OWN copy of this
+-- table, built from per-mode `db.dispelMagicColor`-style keys that the v5 migration
+-- DELETES. Those reads were always nil, so it always fell through to hardcoded literals
+-- that disagreed with this palette (Bleed 1,0,0 vs 0.8,0,0) -- meaning dragging the
+-- dispel colour wheel repainted the overlay to a colour the user had not picked.
+-- Resolve here, never inline: a second copy is what caused the bug.
+function DF:ResolveDispelColor(dispelType)
+    local key = dispelType == "Enrage" and "Bleed" or dispelType
+    if DF.db and type(DF.db.dispelColors) == "table" then
+        local c = DF.db.dispelColors[key]
+        if c and c.r then return c.r, c.g, c.b end
+    end
+    local pal = (DF.GetGameDispelPalette and DF:GetGameDispelPalette()) or DF.DispelDefaultColors
+    local c = pal and pal[key]
+    if c then return c.r, c.g, c.b end
+    return 0.5, 0.5, 1.0
 end
 
 function DF:GetDispelColorMap()

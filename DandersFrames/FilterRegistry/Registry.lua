@@ -14,6 +14,28 @@ local format = string.format
 DF.FilterRegistry = DF.FilterRegistry or {}
 local R = DF.FilterRegistry
 
+-- ☠ SPELL IDS ARE 32-BIT. This is the real ceiling, and it is not a style choice:
+-- string.format("%d", n) throws "integer overflow attempting to store <n>" for anything
+-- above it, so an id past this point cannot even be DISPLAYED, let alone looked up.
+--
+-- Both add-by-ID boxes used to cap on DIGIT COUNT (`#text > 10`) instead, and 2147483647
+-- is itself ten digits -- so every id from 2147483648 to 9999999999 passed the guard and
+-- then blew up when the list tried to render it. That is exactly why #1111111111 was
+-- accepted quietly and #2222222222 errored (Aphoex, alpha 15). Cap on VALUE.
+R.MAX_SPELL_ID = 2147483647   -- 2^31 - 1
+
+-- Render a spell id for display. Never use "%d" on an id that came from STORAGE: the
+-- input cap above cannot protect an id that arrived in an imported filter string or was
+-- already saved before the cap existed, and those still have to draw rather than error.
+function R:FormatSpellID(id)
+    id = tonumber(id)
+    if not id then return "?" end
+    if id % 1 == 0 and id >= -2147483648 and id <= R.MAX_SPELL_ID then
+        return format("%d", id)
+    end
+    return format("%.0f", id)   -- out of int range: print in full, never in exponent form
+end
+
 -- ------------------------------------------------------------
 -- ACCOUNT-WIDE STORE
 -- ------------------------------------------------------------

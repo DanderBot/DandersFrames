@@ -208,29 +208,24 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             refreshStates = function() self:RefreshStates() end,
             disableWhen   = function(d) return not d.showBuffs end,
         })
-        Add(borderGroup, nil, 2)
-        
-        -- Stack Count Group (col2) — the shared TextStyle control block (font/scale/
-        -- outline/shadow/colour/anchor/offsets/justify) + the feature-specific extras.
-        local stackCountGroup = GUI:CreateSettingsGroup(self.child, 280)
-        stackCountGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
-        GUI:CreateTextControls(stackCountGroup, db, "buffStack", {
-            parent   = self.child,
-            include  = { color = true },
-            onChange = function() DF:LightweightUpdateAuraStackText("buff") end,
-            onDrag   = function() DF:LightweightUpdateAuraStackText("buff") end,
-        })
-        -- (No "Min Stacks to Show": a stacks formatter is FORBIDDEN on container rows — it
-        -- throws on the secret combat stack count inside Blizzard's dirty pass and bricks
-        -- the container (see the Features/Auras.lua tombstone). Native display is
-        -- "counts > 1", so a custom minimum cannot be expressed; the setting is gone.)
-        -- Grey the whole group when Buffs are off, matching Settings/Position/Grid.
-        stackCountGroup.disableChildrenOn = function(d) return not d.showBuffs end
-        Add(stackCountGroup, nil, 1)
-        
+        -- ☠ COLUMN 1, deliberately against the usual "styling goes right" split. This page
+        -- is almost entirely styling — Appearance, Border, Stack Count, Duration, Duration
+        -- Bar, Pandemic — so applying the split literally piles six boxes on the right and
+        -- leaves the left half empty: measured at 885 vs 2639. Two styling boxes have to
+        -- cross, and the two that do are the ones applied to the WHOLE icon rather than
+        -- drawn on it: Border (most tied to geometry — size, inset, offsets — and reads
+        -- naturally after Position) and Pandemic below it. That brings the columns to
+        -- 1781 vs 1743. The doctrine's own "when possible" is doing the work here; a page
+        -- that is 3x out of balance is a worse failure than a box on the wrong side.
+        Add(borderGroup, nil, 1)
+
         -- Duration Text Group (col2)
+        -- "Duration Text", not "Duration": this box and Duration Bar are two renderings of
+        -- the same value, and a bare "Duration" made the pair look like one had been
+        -- separated from the other. The name says which one this is — and matches what the
+        -- Aura Designer cards have always called it.
         local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
-        durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration"]), 40)
+        durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Text"]), 40)
         durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "buffShowDuration", function()
             self:RefreshStates()
             DF:UpdateAllFrames()
@@ -242,9 +237,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- FULL ("14 Seconds") overflows a 20px icon (never fit, delisted with #5's
         -- percent work — a saved FULL still renders until the user re-picks); the
         -- combined "12s (45%)" is AD-bar-only for the same reason.
-        local durationFormatOptions = { NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
-            _order = { "NUMBER", "SHORT", "PERCENT" } }
-        local durFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], durationFormatOptions, db, "buffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames(); GUI:RefreshCurrentPage() end), 55)
+        -- The icon rows carry the three time formats plus Percent; FULL and the percent
+        -- composite stay on the Aura Designer bar, which has the width for them.
+        local durationFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
+            TIMER = L["Timer"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }
+        local durFormat = GUI:CreateDurationFormatControls(self.child, durationGroup, durationFormatOptions, db, "buffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames(); GUI:RefreshCurrentPage() end)
         durFormat.disableOn = function(d) return not d.buffShowDuration end
         -- Shared TextStyle control block (font/scale/outline/shadow/colour/anchor/
         -- offsets/justify). The static colour greys out while Color-by-Time owns it.
@@ -272,6 +270,27 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- buffShowDuration gates), matching Settings/Position/Grid.
         durationGroup.disableChildrenOn = function(d) return not d.showBuffs end
         Add(durationGroup, nil, 2)
+
+        -- Stack Count Group (col2) — the shared TextStyle control block (font/scale/
+        -- outline/shadow/colour/anchor/offsets/justify) + the feature-specific extras.
+        -- Directly under Duration, and in that order on every surface that has both: they
+        -- are the two text elements on an icon and are tuned as a pair, so a user looking
+        -- for one expects the other adjacent. Matches the Aura Designer cards.
+        local stackCountGroup = GUI:CreateSettingsGroup(self.child, 280)
+        stackCountGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
+        GUI:CreateTextControls(stackCountGroup, db, "buffStack", {
+            parent   = self.child,
+            include  = { color = true },
+            onChange = function() DF:LightweightUpdateAuraStackText("buff") end,
+            onDrag   = function() DF:LightweightUpdateAuraStackText("buff") end,
+        })
+        -- (No "Min Stacks to Show": a stacks formatter is FORBIDDEN on container rows — it
+        -- throws on the secret combat stack count inside Blizzard's dirty pass and bricks
+        -- the container (see the Features/Auras.lua tombstone). Native display is
+        -- "counts > 1", so a custom minimum cannot be expressed; the setting is gone.)
+        -- Grey the whole group when Buffs are off, matching Settings/Position/Grid.
+        stackCountGroup.disableChildrenOn = function(d) return not d.showBuffs end
+        Add(stackCountGroup, nil, 2)
 
         -- (No Expiring Indicator group: the pre-12.1 expiring border/tint was driven by a
         -- ~3 Hz ticker reading remaining time, which is SECRET on 12.1. Removed 2026-07-25
@@ -324,6 +343,36 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "buffDurationBarBGColor", true, BuffBarChanged), 30)
         durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "buffDurationBarReverseFill", BuffBarChanged), 30)
         Add(durBarGroup, nil, 2)
+
+        -- ===== PANDEMIC ===== (12.1 factory rows only, and only on PTR 8+ clients —
+        -- CreatePandemicControls greys itself and says why on an older build.)
+        --
+        -- This is the ROW half of the feature the Aura Designer cards also carry. There is
+        -- deliberately NO Expiration section on this page (the pre-12.1 expiring border was
+        -- removed above and its 12.1 replacement is AD-only so far), so no collision check is
+        -- passed — nothing here can clash with anything.
+        local pandemicGroup = GUI:CreateSettingsGroup(self.child, 280)
+        pandemicGroup.hideOn = HideDurationBar   -- same gate: no factory row, no button to hang it on
+        pandemicGroup:AddWidget(GUI:CreateHeader(self.child, L["Pandemic"]), 40)
+        pandemicGroup:AddWidget(GUI:CreateLabel(self.child, L["Highlights each icon once the aura can be refreshed without losing time."], 250), 30)
+        GUI:CreatePandemicControls(pandemicGroup, db, {
+            parent     = self.child,
+            prefix     = "buff",
+            -- The row has to exist before any of this means anything; the helper folds this
+            -- into both its group gate and its Enable toggle.
+            masterGate = function(d) return not d.showBuffs end,
+            fullUpdate = function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end,
+            refreshStates = function() self:RefreshStates() end,
+        })
+        -- ☠ COLUMN 1, and it lands under Border rather than at the source position you would
+        -- guess from reading down this file. Column 1 is layout PLUS the treatments applied
+        -- to the whole icon (Border, then Pandemic, which is a border or a tint); column 2
+        -- is the elements drawn ON the icon (Appearance, Duration, Stack Count, Duration
+        -- Bar). That split is what lets Duration and Stack Count sit together on the right
+        -- without tipping the page over -- Pandemic crossing left is the near-exact
+        -- counterweight for Stack Count crossing right (442 vs 408). Debuffs runs the same
+        -- seven-group column 1 with Important Debuffs in this slot.
+        Add(pandemicGroup, nil, 1)
 
         -- ========================================
         -- ORDER & LIMITS  (moved here from the old Aura Filters page)
@@ -531,7 +580,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local impMarkCol = impGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Marker Symbol Color"],
             db, "debuffImportantMarkColor", false, ImportantChanged, nil, false), 35)
         impMarkCol.disableOn = function(d) return ImportantOff(d) or not d.debuffImportantBadge end
-        Add(impGroup, nil, 2)
+        -- ☠ NO Add() HERE — this box is placed further down, immediately after Border, so it
+        -- lands in column 1 UNDER Border rather than third from the top. Placement follows
+        -- Add() call order within a column, and the group has to be built before it can be
+        -- placed; the block stays here (it is long, and moving it buys nothing) while the
+        -- Add sits at the position it actually occupies. See the note at that Add.
 
         -- Layout Group (col1)
         local gridGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -596,61 +649,21 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Overlay). Co-located with its toggle so it's obvious where to edit the colours.
         local dispelColorsLink = GUI:CreateDispelColorsPageLink(self.child, 260)
         borderGroup:AddWidget(dispelColorsLink, (dispelColorsLink.layoutHeight or 16) + 2)
-        -- Column 2 leads with Border and then runs the whole duration family --
-        -- Duration, Duration Bar, Bar Style -- so the three boxes that configure
-        -- one thing sit together instead of being split across the page.
-        Add(borderGroup, nil, 2)
+        -- ☠ COLUMN 1 — same call as the Buffs page, same reasoning, see the note there.
+        -- This page is even more lopsided (939 of layout against 3229 of styling). Border
+        -- lands under Position, which is where its size/inset/offset controls belong anyway.
+        Add(borderGroup, nil, 1)
 
-        -- Stack Count Group (col1)
-        local stackCountGroup = GUI:CreateSettingsGroup(self.child, 280)
-        stackCountGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
-        stackCountGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "debuffStackFont", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
-        stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "debuffStackScale", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
-        stackCountGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "debuffStackOutline", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
-        stackCountGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "debuffStackOutline", function() DF:LightweightUpdateAuraStackText("debuff") end), 30)
-        stackCountGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "debuffStackAnchor", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
-        stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "debuffStackX", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
-        stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "debuffStackY", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
-        stackCountGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "debuffStackColor", false, function() DF:LightweightUpdateAuraStackText("debuff") end, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 30)
-        -- (No "Min Stacks to Show" — see the Buffs page for why it cannot exist on 12.1.)
-        -- Grey the whole group when Debuffs are off, matching Settings/Position/Grid.
-        stackCountGroup.disableChildrenOn = function(d) return not d.showDebuffs end
-        Add(stackCountGroup, nil, 1)
+        -- Important Debuffs, built ~150 lines above. COLUMN 1, directly under Border: it is
+        -- the OTHER whole-icon treatment on this page (a size step plus a corner marker),
+        -- and it is the counterweight that lets Stack Count cross right to sit with Duration
+        -- (458 out vs 413 in). Same seven-group column 1 as Buffs, which carries Pandemic in
+        -- this slot. Column 2 is then purely the elements drawn on the icon.
+        Add(impGroup, nil, 1)
 
-        -- Dispel Text Group (col1, under Stack Count) — the dispel-type letters
-        -- ("Ma", "Po", …), engine-written per aura (12.1 factory rows only; the
-        -- legacy renderer has no source for them).
-        -- ★ 2026-07-31: no longer requires Colorblind Mode. The bind passes
-        -- customDispelTextMap, which takes Blizzard's direct SetText path instead of
-        -- the CVar-gated one (DF:GetGameDispelTextMap, Frames/Border.lua) — so the
-        -- old caution note and the CVar caveat in the tooltip are gone with it.
-        -- Renamed from "Dispel Symbol" the same day: that read as the dispel ICON,
-        -- which is a different native feature. DB keys stay debuffDispelSymbol*.
-        local symbolGroup = GUI:CreateSettingsGroup(self.child, 280)
-        symbolGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Text"]), 40)
-        local symbolEnable = symbolGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Dispel Text"], db, "debuffDispelSymbolEnabled", function()
-            self:RefreshStates()
-            -- Region presence is structural (create-once) — full re-drive rebuilds the row.
-            DF:InvalidateAuraLayout()
-            DF:UpdateAllFrames()
-        end), 30)
-        symbolEnable.tooltip = L["Shows a short letter code on each debuff for its dispel type — Ma for Magic, Po for Poison, and so on. Uses the game's own wording for your language."]
-        symbolEnable.keepEnabled = true
-        symbolEnable.disableOn = function(d) return not d.showDebuffs end
-        GUI:CreateTextControls(symbolGroup, db, "debuffDispelSymbol", {
-            parent    = self.child,
-            include   = { color = true },
-            disableOn = function(d) return not d.debuffDispelSymbolEnabled end,
-            onChange  = function() DF:InvalidateAuraLayout() end,
-            onDrag    = function() DF:InvalidateAuraLayout() end,
-        })
-        symbolGroup.disableChildrenOn = function(d) return not d.showDebuffs end
-        symbolGroup.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
-        Add(symbolGroup, nil, 1)
-
-        -- Duration Text Group (col2)
+        -- Duration Text Group (col2) — "Duration Text" for the same reason as Buffs.
         local durationGroup = GUI:CreateSettingsGroup(self.child, 280)
-        durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration"]), 40)
+        durationGroup:AddWidget(GUI:CreateHeader(self.child, L["Duration Text"]), 40)
         durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Duration"], db, "debuffShowDuration", function()
             self:RefreshStates()
             DF:UpdateAllFrames()
@@ -658,9 +671,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Cooldown swipe (radial time-remaining) lives with Duration Text, not Border.
         durationGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Hide Cooldown Swipe"], db, "debuffHideSwipe", nil), 30)
         -- Icon-sized formats only (see the buff page's Duration Format note).
-        local debuffDurationFormatOptions = { NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
-            _order = { "NUMBER", "SHORT", "PERCENT" } }
-        local durFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], debuffDurationFormatOptions, db, "debuffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames(); GUI:RefreshCurrentPage() end), 55)
+        local debuffDurationFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
+            TIMER = L["Timer"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }
+        local durFormat = GUI:CreateDurationFormatControls(self.child, durationGroup, debuffDurationFormatOptions, db, "debuffDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames(); GUI:RefreshCurrentPage() end)
         durFormat.disableOn = function(d) return not d.debuffShowDuration end
         local durFont = durationGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "debuffDurationFont", nil), 55)
         durFont.disableOn = function(d) return not d.debuffShowDuration end
@@ -692,6 +706,59 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- debuffShowDuration gates), matching Settings/Position/Grid.
         durationGroup.disableChildrenOn = function(d) return not d.showDebuffs end
         Add(durationGroup, nil, 2)
+
+        -- Stack Count Group (col2) — directly under Duration, and in that order on every
+        -- surface that has both: they are the two text elements on an icon and are tuned as
+        -- a pair, so a user looking for one expects the other adjacent. Matches Buffs and
+        -- the Aura Designer cards.
+        local stackCountGroup = GUI:CreateSettingsGroup(self.child, 280)
+        stackCountGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
+        stackCountGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "debuffStackFont", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
+        stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.0, 0.05, db, "debuffStackScale", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
+        stackCountGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "debuffStackOutline", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
+        stackCountGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "debuffStackOutline", function() DF:LightweightUpdateAuraStackText("debuff") end), 30)
+        stackCountGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "debuffStackAnchor", function() DF:LightweightUpdateAuraStackText("debuff") end), 55)
+        stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -150, 150, 1, db, "debuffStackX", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
+        stackCountGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -150, 150, 1, db, "debuffStackY", nil, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 55)
+        stackCountGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "debuffStackColor", false, function() DF:LightweightUpdateAuraStackText("debuff") end, function() DF:LightweightUpdateAuraStackText("debuff") end, true), 30)
+        -- (No "Min Stacks to Show" — see the Buffs page for why it cannot exist on 12.1.)
+        -- Grey the whole group when Debuffs are off, matching Settings/Position/Grid.
+        stackCountGroup.disableChildrenOn = function(d) return not d.showDebuffs end
+        Add(stackCountGroup, nil, 2)
+
+        -- Dispel Text Group (col2, under Stack Count) — the dispel-type letters
+        -- ("Ma", "Po", …), engine-written per aura (12.1 factory rows only; the
+        -- legacy renderer has no source for them).
+        -- ★ 2026-07-31: no longer requires Colorblind Mode. The bind passes
+        -- customDispelTextMap, which takes Blizzard's direct SetText path instead of
+        -- the CVar-gated one (DF:GetGameDispelTextMap, Frames/Border.lua) — so the
+        -- old caution note and the CVar caveat in the tooltip are gone with it.
+        -- Renamed from "Dispel Symbol" the same day: that read as the dispel ICON,
+        -- which is a different native feature. DB keys stay debuffDispelSymbol*.
+        -- ☠ Its hideOn makes this the one box on the page that can vanish, so it belongs in
+        -- the SHORTER column: here it takes the page from 1972/1753 to 1972/2196 rather than
+        -- lurching an already-long column by 443 every time the row backend changes.
+        local symbolGroup = GUI:CreateSettingsGroup(self.child, 280)
+        symbolGroup:AddWidget(GUI:CreateHeader(self.child, L["Dispel Text"]), 40)
+        local symbolEnable = symbolGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Dispel Text"], db, "debuffDispelSymbolEnabled", function()
+            self:RefreshStates()
+            -- Region presence is structural (create-once) — full re-drive rebuilds the row.
+            DF:InvalidateAuraLayout()
+            DF:UpdateAllFrames()
+        end), 30)
+        symbolEnable.tooltip = L["Shows a short letter code on each debuff for its dispel type — Ma for Magic, Po for Poison, and so on. Uses the game's own wording for your language."]
+        symbolEnable.keepEnabled = true
+        symbolEnable.disableOn = function(d) return not d.showDebuffs end
+        GUI:CreateTextControls(symbolGroup, db, "debuffDispelSymbol", {
+            parent    = self.child,
+            include   = { color = true },
+            disableOn = function(d) return not d.debuffDispelSymbolEnabled end,
+            onChange  = function() DF:InvalidateAuraLayout() end,
+            onDrag    = function() DF:InvalidateAuraLayout() end,
+        })
+        symbolGroup.disableChildrenOn = function(d) return not d.showDebuffs end
+        symbolGroup.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
+        Add(symbolGroup, nil, 2)
 
         -- ===== DURATION BAR ===== (12.1 factory rows only — mirrors the Buffs
         -- page's block; see there for the sig-split routing note)
@@ -734,6 +801,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         durBarGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "debuffDurationBarBGColor", true, DebuffBarChanged), 30)
         durBarGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill"], db, "debuffDurationBarReverseFill", DebuffBarChanged), 30)
         Add(durBarGroup, nil, 2)
+
+        -- (No Pandemic box here, unlike Buffs. This row shows harmful auras on a FRIENDLY
+        -- unit — cast on your party by something else — which you cannot refresh, so they
+        -- have no refresh window and the cue could never light. Controls wired to an
+        -- impossibility are worse than no controls. See BuildAuraRowConfig in
+        -- Features/Auras.lua for the render-side gate that matches this.)
 
         -- See Also links
         -- ========================================
@@ -1261,9 +1334,12 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Duration Format (PTR-7 #5): previously hardcoded NUMBER; icon-sized
         -- formats only (see the buff page's Duration Format note). No Hide Above
         -- on this page, so no percent-grey needed.
-        local defDurFormatOptions = { NUMBER = L["Number"], SHORT = L["Seconds"], PERCENT = L["Percent"],
-            _order = { "NUMBER", "SHORT", "PERCENT" } }
-        local defDurFormat = durationGroup:AddWidget(GUI:CreateDropdown(self.child, L["Duration Format"], defDurFormatOptions, db, "defensiveIconDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end), 55)
+        local defDurFormatOptions = { NUMBER = L["Standard"], SHORT = L["Units"],
+            TIMER = L["Timer"], PERCENT = L["Percent"],
+            _order = { "NUMBER", "SHORT", "TIMER", "PERCENT" } }
+        -- One widget now, so hideOn covers the example too — no second predicate to keep
+        -- in step (see CreateDurationFormatControls).
+        local defDurFormat = GUI:CreateDurationFormatControls(self.child, durationGroup, defDurFormatOptions, db, "defensiveIconDurationFormat", function() DF:InvalidateAuraLayout(); DF:UpdateAllFrames() end)
         defDurFormat.hideOn = HideDefensiveDurationOptions
 
         -- Shared TextStyle control block (font/scale/outline/shadow/colour/anchor/

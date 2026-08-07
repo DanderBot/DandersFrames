@@ -568,7 +568,7 @@ function DandersFrames_GetPinnedFrames()
     if not DF or not DF.PinnedFrames or not DF.PinnedFrames.initialized or not DF.PinnedFrames.headers then
         return frames
     end
-    for setIndex = 1, 2 do
+    for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
         local header = DF.PinnedFrames.headers[setIndex]
         if header and header:IsShown() then
             for i = 1, 40 do
@@ -590,7 +590,7 @@ function DandersFrames_GetPinnedFrameForUnit(unit)
     if not DF or not unit or not DF.PinnedFrames or not DF.PinnedFrames.initialized or not DF.PinnedFrames.headers then
         return nil
     end
-    for setIndex = 1, 2 do
+    for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
         local header = DF.PinnedFrames.headers[setIndex]
         if header and header:IsShown() then
             for i = 1, 40 do
@@ -915,4 +915,104 @@ SlashCmdList["DFAPI"] = function(msg)
         o:Item("list", "current subscribers per event")
         o:Siblings("api")
     end
+end
+
+-- ============================================================
+-- FRAME POSITIONS (Party + Raid + Pinned sets)
+-- ============================================================
+-- Added for MSUF's Edit Mode (Mapko, 2026-08-06): lets another addon list DF's movable
+-- frames and reposition them from its own editor, without reading or writing
+-- DandersFramesDB_v2 directly.
+--
+-- ☠ THIS IS A PUBLIC CONTRACT. Once an addon ships against these ids and this table
+-- shape, changing either breaks it silently — there is no version handshake and no way
+-- for the caller to detect a rename. ADD fields and ids; never rename, repurpose or
+-- reorder-with-meaning. The resolver behind all three lives in Frames/Position.lua.
+--
+-- ⚠ Every write refuses in combat. Repositioning DF's containers touches protected
+-- frames, and DF's own raid positioner already early-returns in combat — an external
+-- editor must not be able to do what DF will not do to itself. An Edit Mode is an
+-- out-of-combat activity anyway (Blizzard's own cannot be opened in combat).
+
+-- List every frame DandersFrames can reposition.
+-- Returns: array of tables, or empty table if DF is not ready. Each entry:
+--   id       string   pass this to Get/SetPosition ("party", "raid", "pinned1"…)
+--   label    string   human-readable name, in the user's DF locale where DF has one
+--   kind     string   "party" | "raid" | "pinned"
+--   enabled  boolean  whether this frame is switched on in DF's settings
+--   setIndex number   pinned targets only — which pinned set this is
+-- Pinned sets are listed whether enabled or not, so the list keeps a stable shape when
+-- the user toggles one; check `enabled` to decide what to show.
+function DandersFrames_GetPositionTargets()
+    local out = {}
+    if not (DF and DF.ListPositionTargets and DF.ResolvePositionTarget) then return out end
+    for _, id in ipairs(DF:ListPositionTargets()) do
+        local t = DF:ResolvePositionTarget(id)
+        if t then
+            out[#out + 1] = {
+                id       = t.id,
+                label    = t.label,
+                kind     = t.kind,
+                enabled  = t.enabled,
+                setIndex = t.setIndex,
+            }
+        end
+    end
+    return out
+end
+
+-- Read one frame's current position.
+-- Parameters:
+--   targetID: an id from DandersFrames_GetPositionTargets
+-- Returns: table, or nil if the id is unknown. Fields:
+--   point     string  anchor point the offset is measured from (usually "CENTER")
+--   x, y      number  offset from that point on UIParent, in UI units
+--   anchorTo  string  PINNED ONLY, and only when the set is glued to the frames
+--                     container — then x/y are a fine offset from that corner rather
+--                     than a screen position. nil means free screen placement.
+-- ⚠ The returned table is a COPY. Mutating it changes nothing; call SetPosition.
+function DandersFrames_GetPosition(targetID)
+    if not (DF and DF.ResolvePositionTarget) then return nil end
+    local t = DF:ResolvePositionTarget(targetID)
+    if not (t and t.read) then return nil end
+    local x, y = t.read()
+    return { point = t.point, x = x, y = y, anchorTo = t.anchorTo }
+end
+
+-- Move one frame.
+-- Parameters:
+--   targetID: an id from DandersFrames_GetPositionTargets
+--   position: table with numeric x and y (the shape GetPosition returns). `point` and
+--             `anchorTo` are IGNORED — changing a frame's anchor corner or gluing a
+--             pinned set to the container are DF-side layout decisions, not something an
+--             external editor should flip as a side effect of a drag.
+-- Returns: boolean success, string reason on failure
+--   "BAD_ARGS"     targetID or position was not usable
+--   "UNKNOWN_ID"   no such target
+--   "IN_COMBAT"    refused; retry after combat ends
+function DandersFrames_SetPosition(targetID, position)
+    if not (DF and DF.ResolvePositionTarget) then return false, "BAD_ARGS" end
+    if type(position) ~= "table" then return false, "BAD_ARGS" end
+    local x, y = tonumber(position.x), tonumber(position.y)
+    -- Reject NaN as well as non-numbers: x ~= x is only true for NaN, and a NaN offset
+    -- reaches SetPoint and strands the frame somewhere unrecoverable by dragging.
+    if not x or not y or x ~= x or y ~= y then return false, "BAD_ARGS" end
+
+    local t = DF:ResolvePositionTarget(targetID)
+    if not (t and t.write) then return false, "UNKNOWN_ID" end
+    if InCombatLockdown() then return false, "IN_COMBAT" end
+
+    -- The target's own writer, NOT a field poke from here: raid has to offer the write
+    -- to the active auto layout first (writing the base anchors while a layout drives
+    -- the frames corrupts them silently), and a pinned set stores a nested table rather
+    -- than flat fields. Both shapes and that routing live in the resolver so this wrapper
+    -- cannot drift from what DF's own dragging does.
+    t.write(x, y)
+
+    -- Keep DF's own position panel honest if the user has it open: it reads the same
+    -- fields, and without this it would show the pre-move numbers until reopened.
+    if DF.UpdatePositionPanel and DF.positionPanel and DF.positionPanel:IsShown() then
+        DF:UpdatePositionPanel()
+    end
+    return true
 end

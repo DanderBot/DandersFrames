@@ -236,13 +236,48 @@ local function AddExpiryAlertControls(g, parent, proxy, include)
 end
 P.AddExpiryAlertControls = AddExpiryAlertControls
 
+-- "Pandemic" section — the sibling of Expiration above, and deliberately its own section
+-- rather than a mode inside it. Both answer "act on this aura soon", but from opposite
+-- ends: Expiration fires at a threshold the USER picks and can walk a colour ramp;
+-- Pandemic fires on the window the GAME defines and cannot. Folding pandemic into the
+-- Expiration threshold block would leave a user who set 5s watching it fire at 9s with no
+-- explanation — so it gets its own box, and the two are free to run together.
+--
+-- All four reveal types apply to EVERY indicator shape here, including the bar. Unlike the
+-- expiry alert — whose Border/Tint are a |T escape inside a fontstring and so collapse on a
+-- thin bar — a pandemic region is a real texture anchored to the button's own edges, so a
+-- ring or wash fits a bar exactly as well as an icon. Hence no `include` parameter.
+local function AddPandemicControls(g, parent, proxy)
+    GUI:CreatePandemicControls(g, proxy, {
+        parent          = parent,
+        anchorOptions   = OPTS.ANCHOR_OPTIONS,
+        -- Both systems key off the SAME per-indicator record here, so the collision notes
+        -- can compare them directly. The buff/debuff rows have no expiry alert at all and
+        -- pass nothing.
+        expiryCollision = true,
+        -- Sub-table colour writes skip the proxy __newindex — same reason as the expiry
+        -- section above, same hand-driven refresh.
+        fullUpdate    = function()
+            if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end
+            RefreshLiveFramesThrottled()
+        end,
+        refreshStates = function()
+            g:LayoutChildren()
+            g:RefreshChildStates()
+            if parent.dfAD_ReflowWidgets then parent.dfAD_ReflowWidgets() end
+        end,
+    })
+    g:RefreshChildStates()   -- initial grey (the initial hide rides AddGroup's LayoutChildren)
+end
+P.AddPandemicControls = AddPandemicControls
+
 -- Colours-S.page cross-link placed under an AD "Color by Time Remaining" TEXT control, matching
 -- the aura pages' duration link (jump + whole-section flash). The duration text's By-Time colour
 -- draws from the shared Colours-S.page breakpoints, so the link points there. Fixed-layout note, so
 -- size it to the group's inner width up front (the group advances Y by the height we pass).
 -- Built once in GUI:CreateColorsPageLink. NOT for the bar FILL colour (fixed ramp, immutable).
 local function AddDurationColorsLink(g, parent)
-    local innerW = math.max(40, (g:GetWidth() or 260) - 2 * (g.padding or 10))
+    local innerW = GUI:GroupInnerWidth(g)
     local note = GUI:CreateColorsPageLink(parent, innerW)
     g:AddWidget(note, (note.layoutHeight or 16) + 2)
     return note
@@ -1370,7 +1405,11 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         ah:ClearAllPoints()
         ah:SetAllPoints(slot)
         ah:SetFrameStrata(slot:GetFrameStrata())
-        ah:SetFrameLevel(slot:GetFrameLevel() + (Factory.ALERT_ROW_LIFT or 13))
+        -- Mode-dependent, exactly like the live companion: a payload reveal clears the
+        -- whole row, a TINT sits under the indicator's own timer. Factory.AlertLift is the
+        -- shared source so the canvas cannot drift from live (see its note).
+        ah:SetFrameLevel(slot:GetFrameLevel()
+            + ((Factory.AlertLift and Factory.AlertLift(indicator)) or Factory.ALERT_ROW_LIFT or 13))
         -- Reuse the indicator slot's duration object (PaintPreviewSlot armed it just above)
         -- so the reveal reacts to the very timer it sits on, not a second one.
         AC.PaintPreviewSlot(ah, ap, 1, slot._dfTestDurObj)

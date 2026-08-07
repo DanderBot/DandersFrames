@@ -1178,6 +1178,22 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         end
     end
 
+    -- ☠ SHARED BY BOTH IMPORT PATHS. This lived inside the full-export branch only, so a
+    -- SELECTIVE import -- a v4 selective-export string, or a full v4 string with
+    -- categories ticked in the UI -- landed nothing, and RunV5LegacyMigrations further
+    -- down then stripped the v4 overlay keys it would have been rebuilt from. Silent
+    -- colour loss on the very path the fix claimed to cover. Reads importData (the
+    -- payload) rather than DF.db, so it is unaffected by the category merge dropping the
+    -- legacy keys, and it must stay AHEAD of RunV5LegacyMigrations.
+    local function importDispelColors()
+        if importData.dispelColors then
+            DF.db.dispelColors = importData.dispelColors
+        elseif DF.BuildDispelColorsFromLegacy then
+            local legacy = DF:BuildDispelColorsFromLegacy(importData.party, importData.raid)
+            if legacy then DF.db.dispelColors = legacy end
+        end
+    end
+
     -- If it's a full export (legacy or "all categories"), use direct replacement
     if importInfo.isFullExport and not selectedCategories then
         -- Legacy behavior: replace entire profile sections
@@ -1199,10 +1215,16 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         if importData.roleColors then
             DF.db.roleColors = importData.roleColors
         end
-        -- Import dispel colours if present (profile-root, like roleColors)
-        if importData.dispelColors then
-            DF.db.dispelColors = importData.dispelColors
-        end
+        -- Import dispel colours if present (profile-root, like roleColors).
+        -- ☠ A v4 STRING HAS NO dispelColors. v4 kept two separate per-mode families
+        -- (debuffBorderColor* for the icon border, dispel<Type>Color for the overlay),
+        -- both of which ride v4's export; v5 merged them onto this one account-wide
+        -- table. Without the else-branch the import silently landed nothing and the
+        -- user's dispel colours were gone -- and the login migration could not save
+        -- them either, because it only fires when dispelColors is absent and it reads
+        -- the mode tables, which by then have had the overlay half stripped.
+        -- Same resolver as the login migration, so both paths agree exactly.
+        importDispelColors()
         -- Import auto layout profiles if present
         if importData.raidAutoProfiles then
             DF.db.raidAutoProfiles = importData.raidAutoProfiles
@@ -1238,6 +1260,13 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         -- Section-sync flags: top-level key, travel with the Other category
         if importCategorySet.other and importData.linkedSections then
             DF.db.linkedSections = importData.linkedSections
+        end
+        -- Dispel palette: top-level key. Gated on EITHER category because the two v4
+        -- families it is rebuilt from ride different ones -- the overlay's
+        -- dispel<Type>Color under `dispel`, the icon border's debuffBorderColor* under
+        -- `auras` -- so ticking either is a request for these colours.
+        if importCategorySet.dispel or importCategorySet.auras then
+            importDispelColors()
         end
     end
 

@@ -85,8 +85,9 @@ function DF:ApplyHealthFadeAlpha(frame)
     local db = DF:GetFrameDB(frame)
     if not db or not db.healthFadeEnabled then return false end
 
-    -- Skip in test mode (test mode handles its own fade)
-    if DF.testMode or DF.raidTestMode then return false end
+    -- ★ Test frames pass through; see the dfHealthPct branch below for how the
+    -- threshold is resolved without a real unit.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return false end
 
     -- Dispel cancel: if dispel overlay is showing, cancel fade
     -- (IsShown is a non-tainted boolean)
@@ -110,13 +111,26 @@ function DF:ApplyHealthFadeAlpha(frame)
     local aboveAlpha = db.healthFadeAlpha or 0.5
     local threshold = db.healthFadeThreshold or 100
 
-    -- Build curve and resolve via WoW engine (no secret number comparison)
-    local curve = BuildHealthFadeCurve(threshold, belowAlpha, aboveAlpha)
-    local color = UnitHealthPercent(frame.unit, true, curve)
-    if not color then return false end
+    -- ☠ DATA FORK, NOT A RENDER FORK. Live must resolve the threshold through the
+    -- ENGINE -- UnitHealthPercent(unit, true, curve) -- because the health value is
+    -- secret and Lua may never compare it. A test frame's health is a plain number
+    -- DF wrote itself, so the same threshold is a plain comparison, and the same two
+    -- alphas come out. Everything after this point is shared.
+    -- ⚠ The comparison is `>` to match the curve, whose points sit at
+    -- threshold/100 -/+ 0.001: at exactly the threshold the curve returns belowAlpha.
+    local alpha
+    if frame.dfHealthPct then
+        alpha = (frame.dfHealthPct > (threshold / 100)) and aboveAlpha or belowAlpha
+    else
+        -- Build curve and resolve via WoW engine (no secret number comparison)
+        local curve = BuildHealthFadeCurve(threshold, belowAlpha, aboveAlpha)
+        local color = UnitHealthPercent(frame.unit, true, curve)
+        if not color then return false end
 
-    -- Extract alpha and apply directly — never compare, never store
-    local _, _, _, alpha = color:GetRGBA()
+        -- Extract alpha and apply directly — never compare, never store
+        local _, _, _, a = color:GetRGBA()
+        alpha = a
+    end
     if not alpha then return false end
 
     frame:SetAlpha(alpha)

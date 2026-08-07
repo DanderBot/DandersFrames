@@ -155,7 +155,14 @@ local function SortGroupedRaidFrames(units)
             wipe(groupUnitsBuf)
             for raidIndex = 1, GetNumGroupMembers() do
                 local name, _, subgroup = GetRaidRosterInfo(raidIndex)
-                if type(name) == "string" and subgroup == groupIndex then
+                -- ☠ `type(name) == "string"` is NOT sufficient on its own: a secret
+                -- value passes it and then crashes the tconcat below. This is the
+                -- same trap already documented at the top of this file, and guarded
+                -- correctly at the two sibling sites -- this one was missed.
+                -- Dropping an unnameable member matches the sibling's behaviour: the
+                -- secure header hides a nil-roster-name unit anyway, and the roster
+                -- filling in fires a roster event that re-sorts.
+                if not issecretvalue(name) and type(name) == "string" and subgroup == groupIndex then
                     local unitToken = "raid" .. raidIndex
                     groupUnitsBuf[#groupUnitsBuf + 1] = {
                         name = name,
