@@ -851,7 +851,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     local backgroundAlpha = 1.0
     local nameAlpha = 1.0
     local healthTextAlpha = 1.0
-    local aurasAlpha = 1.0
     local iconsAlpha = 1.0
     local powerBarAlpha = 1.0
     local dispelAlpha = 1.0
@@ -876,7 +875,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             backgroundAlpha = db.oorBackgroundAlpha or 0.1
             nameAlpha = db.oorTextAlpha or 0.55
             healthTextAlpha = db.oorTextAlpha or 0.55
-            aurasAlpha = db.oorAurasAlpha or 0.2
             iconsAlpha = db.oorIconsAlpha or 0.5
             powerBarAlpha = db.oorPowerBarAlpha or 0.2
             dispelAlpha = db.oorDispelOverlayAlpha or 0.2
@@ -942,7 +940,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             backgroundAlpha = hfAlpha
             nameAlpha = hfAlpha
             healthTextAlpha = hfAlpha
-            aurasAlpha = hfAlpha
             iconsAlpha = hfAlpha
             powerBarAlpha = hfAlpha
             dispelAlpha = hfAlpha
@@ -1221,17 +1218,12 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         
         -- Apply out of range effect to auras: the container rows fade as one
         -- (alpha on the row's plain anchor frame is ours to set).
-        local buffAlpha = db.buffAlpha or 1
-        local debuffAlpha = db.debuffAlpha or 1
-        local buffRow = frame.buffFactory and frame.buffFactory:GetFrame()
-        local debuffRow = frame.debuffFactory and frame.debuffFactory:GetFrame()
-        if isOutOfRange then
-            if buffRow then buffRow:SetAlpha(aurasAlpha * buffAlpha) end
-            if debuffRow then debuffRow:SetAlpha(aurasAlpha * debuffAlpha) end
-        else
-            if buffRow then buffRow:SetAlpha(buffAlpha) end
-            if debuffRow then debuffRow:SetAlpha(debuffAlpha) end
-        end
+        -- ★ Row fades through the live functions now. They compose the same three
+        -- inputs this used to (row opacity x dead fade x out-of-range) and, since
+        -- 2026-08-07, use the row's own opacity as the BASE -- which live had been
+        -- dropping. One implementation, so the slider cannot mean two things.
+        if DF.UpdateBuffIconsAppearance then DF:UpdateBuffIconsAppearance(frame) end
+        if DF.UpdateDebuffIconsAppearance then DF:UpdateDebuffIconsAppearance(frame) end
     end
 
     -- Text Designer: render TD text on this test frame using its simulated

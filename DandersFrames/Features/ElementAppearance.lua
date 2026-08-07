@@ -718,19 +718,28 @@ function DF:UpdateBuffIconsAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: the only unit reads are IsDeadOrOffline and
+    -- GetInRange, both stamp-aware.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
 
-    local alpha = 1.0
+    -- ☠ THE ROW'S OWN OPACITY MUST BE THE BASE, NOT AN AFTERTHOUGHT.
+    -- DriveBuffFactory sets this same frame's alpha to db.buffAlpha and caches it in
+    -- frame.dfBuffFactoryAlpha; this function then OVERWROTE it with a fade value
+    -- that did not include it -- so the row opacity slider was silently reset to 1
+    -- by the next range/appearance pass, and the cache meant the drive never put
+    -- it back. LIVE-ONLY: the preview always multiplied the two, so it was right
+    -- and live was wrong. (Audit, 2026-08-07.)
+    local base = db.buffAlpha or 1
+    local alpha = base
     if deadOrOffline and db.fadeDeadFrames then
-        alpha = db.fadeDeadAuras or 1.0
+        alpha = alpha * (db.fadeDeadAuras or 1.0)
     end
 
     if db.oorEnabled then
-        ApplyOORAlpha(row, inRange, alpha, db.oorAurasAlpha or 0.2)
+        ApplyOORAlpha(row, inRange, alpha, base * (db.oorAurasAlpha or 0.2))
     else
         row:SetAlpha(alpha)
     end
@@ -749,19 +758,28 @@ function DF:UpdateDebuffIconsAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: the only unit reads are IsDeadOrOffline and
+    -- GetInRange, both stamp-aware.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
 
-    local alpha = 1.0
+    -- ☠ THE ROW'S OWN OPACITY MUST BE THE BASE, NOT AN AFTERTHOUGHT.
+    -- DriveDebuffFactory sets this same frame's alpha to db.debuffAlpha and caches it in
+    -- frame.dfDebuffFactoryAlpha; this function then OVERWROTE it with a fade value
+    -- that did not include it -- so the row opacity slider was silently reset to 1
+    -- by the next range/appearance pass, and the cache meant the drive never put
+    -- it back. LIVE-ONLY: the preview always multiplied the two, so it was right
+    -- and live was wrong. (Audit, 2026-08-07.)
+    local base = db.debuffAlpha or 1
+    local alpha = base
     if deadOrOffline and db.fadeDeadFrames then
-        alpha = db.fadeDeadAuras or 1.0
+        alpha = alpha * (db.fadeDeadAuras or 1.0)
     end
 
     if db.oorEnabled then
-        ApplyOORAlpha(row, inRange, alpha, db.oorAurasAlpha or 0.2)
+        ApplyOORAlpha(row, inRange, alpha, base * (db.oorAurasAlpha or 0.2))
     else
         row:SetAlpha(alpha)
     end
