@@ -876,21 +876,18 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             defensiveAlpha = db.oorDefensiveIconAlpha or 0.5
             auraDesignerAlpha = db.oorAuraDesignerAlpha or 0.2
             borderAlpha = db.oorBorderAlpha or 0.55
-        else
-            -- Simple frame-level alpha mode
-            local alpha = db.rangeFadeAlpha or db.rangeAlpha or 0.55
-            healthBarAlpha = alpha
-            backgroundAlpha = alpha
-            nameAlpha = alpha
-            healthTextAlpha = alpha
-            aurasAlpha = alpha
-            iconsAlpha = alpha
-            powerBarAlpha = alpha
-            dispelAlpha = alpha
-            missingBuffAlpha = alpha
-            defensiveAlpha = alpha
-            auraDesignerAlpha = alpha
         end
+        -- ☠ NO `else` BRANCH, DELIBERATELY. Simple range-fade mode fades the WHOLE
+        -- FRAME with one SetAlpha further down -- exactly as live's
+        -- UpdateFrameAppearance does, and that is live's ONLY alpha write in this
+        -- mode. This block used to ALSO push rangeFadeAlpha into every per-element
+        -- variable, so the preview applied the fade twice and rendered
+        -- rangeFadeAlpha SQUARED: 0.16 against live's 0.40 at the stock 0.4, with no
+        -- setting needed to hit it. Every element left at 1.0 here is the fix -- the
+        -- cascade supplies the dim. (Audit, 2026-08-07.)
+        -- ⚠ The status icons are the one exception and are handled separately: they
+        -- set SetIgnoreParentAlpha(true), so the cascade cannot reach them and
+        -- DF:GetStatusIconFadeAlpha applies their fade explicitly in both modes.
     end
 
     -- Store alpha values for use by UpdateTestIcons and UpdateTestPowerBar
@@ -927,15 +924,24 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     end
     
     if isAboveHealthThreshold then
+        -- ☠ SAME DOUBLE-APPLY AS THE RANGE FADE ABOVE, and the same fix. Live has no
+        -- per-element health fade at all: ApplyHealthFadeAlpha resolves ONE alpha and
+        -- writes it to the FRAME (ElementAppearance references health fade in exactly
+        -- one place, inside UpdateFrameAppearance). The preview pushed healthFadeAlpha
+        -- into every element AND set the frame, rendering 0.25 against live's 0.50 at
+        -- the stock 0.5. Only the element-specific mode needs per-element values,
+        -- because there the frame stays at 1.0.
         local hfAlpha = db.healthFadeAlpha or 0.5
-        healthBarAlpha = hfAlpha
-        backgroundAlpha = hfAlpha
-        nameAlpha = hfAlpha
-        healthTextAlpha = hfAlpha
-        aurasAlpha = hfAlpha
-        iconsAlpha = hfAlpha
-        powerBarAlpha = hfAlpha
-        dispelAlpha = hfAlpha
+        if db.oorEnabled then
+            healthBarAlpha = hfAlpha
+            backgroundAlpha = hfAlpha
+            nameAlpha = hfAlpha
+            healthTextAlpha = hfAlpha
+            aurasAlpha = hfAlpha
+            iconsAlpha = hfAlpha
+            powerBarAlpha = hfAlpha
+            dispelAlpha = hfAlpha
+        end
         frame.dfTestHealthFadeAlphas = {
             icons = iconsAlpha,
             power = powerBarAlpha,
