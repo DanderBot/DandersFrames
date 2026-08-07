@@ -670,6 +670,16 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- stale. See DF:IsTestFrameDead.
     frame.dfTestIsDead = (testData.status == "Dead") or nil
 
+    -- ★ THE SHARED STAMPS ElementAppearance's helpers prefer. Test frames carry REAL
+    -- unit tokens ("raid1", "player"), so in an actual group UnitIsDeadOrGhost /
+    -- UnitClass would answer about a real player standing next to you rather than
+    -- about this scenario -- which is what forced those helpers to be walled off from
+    -- test mode in the first place. Stamping is what lets the live appearance code run
+    -- on a preview frame at all. (Audit, 2026-08-07.)
+    frame.dfIsDead = (testData.status == "Dead") or (testData.status == "Offline") or false
+    frame.dfIsOffline = (testData.status == "Offline") or false
+    frame.dfClassToken = testData.class
+
     local db = DF:GetFrameDB(frame)
 
     -- Set dfInRange for test mode - consumed by the range/alpha systems
@@ -845,16 +855,11 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     local iconsAlpha = 1.0
     local powerBarAlpha = 1.0
     local dispelAlpha = 1.0
-    -- ☠ THE MISSING-BUFF STRIP AND THE DEFENSIVE ROW HAVE THEIR OWN OOR KEYS and
-    -- are NOT covered by aurasAlpha. Live fades them in
-    -- UpdateMissingBuffAppearance / UpdateDefensiveIconAppearance, both of which
-    -- early-return in test mode — so the preview left them at full opacity on an
-    -- out-of-range frame while everything around them dimmed (Krathe, 2026-08-06).
-    -- Anything given an oor*Alpha key in ElementAppearance.lua needs a counterpart
-    -- here, or it silently stops fading in the preview.
-    local missingBuffAlpha = 1.0
-    local defensiveAlpha = 1.0
-    local auraDesignerAlpha = 1.0
+    -- ⚠ NO missingBuff / defensive / auraDesigner ALPHAS HERE ANY MORE. Those three
+    -- surfaces fade through ElementAppearance's own functions now (called after the
+    -- drives, further down) rather than being hand-mirrored into this block -- which
+    -- is how each of them shipped a silent no-fade bug in turn. Add nothing here
+    -- that ElementAppearance already owns. (Audit, 2026-08-07.)
     -- Border stays 1.0 in whole-frame mode (the frame's SetAlpha cascade fades
     -- it); only element-specific mode needs its own border alpha.
     local borderAlpha = 1.0
@@ -870,11 +875,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             iconsAlpha = db.oorIconsAlpha or 0.55
             powerBarAlpha = db.oorPowerBarAlpha or 0.55
             dispelAlpha = db.oorDispelOverlayAlpha or 0.55
-            -- ⚠ 0.5, not 0.55: these two mirror ElementAppearance.lua's OWN
-            -- fallbacks so preview and live agree when the key is absent.
-            missingBuffAlpha = db.oorMissingBuffAlpha or 0.5
-            defensiveAlpha = db.oorDefensiveIconAlpha or 0.5
-            auraDesignerAlpha = db.oorAuraDesignerAlpha or 0.2
             borderAlpha = db.oorBorderAlpha or 0.55
         end
         -- ☠ NO `else` BRANCH, DELIBERATELY. Simple range-fade mode fades the WHOLE
@@ -1274,14 +1274,19 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- when the toggle is off, not just the legacy icon).
     DF:UpdateTestDefensiveBar(frame, testData)
 
-    -- ⚠ AFTER the two drives above, not up with the aura-row alphas. Both widgets
-    -- are created LAZILY by those drives, so at the row-alpha block they are still
-    -- nil on a frame's first pass and the fade would not land until some later
-    -- repaint. Neither drive touches alpha, so setting it here sticks.
-    local missingStrip = frame.missingBuffStrip
-    if missingStrip then missingStrip:SetAlpha(isOutOfRange and missingBuffAlpha or 1) end
-    local defRow = frame.defensiveFactory and frame.defensiveFactory:GetFrame()
-    if defRow then defRow:SetAlpha(isOutOfRange and defensiveAlpha or 1) end
+    -- ★ FADES NOW COME FROM THE LIVE FUNCTIONS. These three used to be hand-mirrored
+    -- here -- and each one shipped a bug first (the missing-buff strip, the defensive
+    -- row and the AD indicators all silently stopped fading out of range, one at a
+    -- time, because each had an oor*Alpha key in ElementAppearance with no counterpart
+    -- in this file). ElementAppearance's own functions now accept test frames: every
+    -- unit read they make goes through GetInRange / IsDeadOrOffline, both of which
+    -- prefer the stamps set at the top of this function. One policy, one place.
+    --
+    -- ⚠ AFTER the two drives above, not before: both widgets are created LAZILY by
+    -- those drives, so earlier in the pass they are still nil on a frame's first
+    -- paint. Neither drive touches alpha, so setting it here sticks.
+    if DF.UpdateMissingBuffAppearance then DF:UpdateMissingBuffAppearance(frame) end
+    if DF.UpdateDefensiveIconAppearance then DF:UpdateDefensiveIconAppearance(frame) end
 
     -- Update Aura Designer test indicators through the factory containers — the
     -- SAME path as the bulk DF:UpdateAllTestAuraDesigner, so the per-frame and
@@ -1291,15 +1296,9 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         if db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame)
             and not DF:IsTestFrameDead(frame) then
             ADFactory:SyncFrame(frame)
-            -- Fade the indicators out of range, same as live. Without this they were
-            -- the only thing on an out-of-range frame still at full opacity, so a
-            -- bright AD icon read straight through the dimmed missing-buff badge
-            -- above it (Krathe, 2026-08-07). Shares ElementAppearance's walk rather
-            -- than repeating it — see ForEachAuraDesignerAlphaHost.
-            if DF.ForEachAuraDesignerAlphaHost then
-                DF:ForEachAuraDesignerAlphaHost(frame, function(f, base)
-                    f:SetAlpha(base * auraDesignerAlpha)
-                end)
+            -- Fade through the live function, same as the two above.
+            if DF.UpdateAuraDesignerAppearance then
+                DF:UpdateAuraDesignerAppearance(frame)
             end
         else
             ADFactory:ClearFrame(frame)

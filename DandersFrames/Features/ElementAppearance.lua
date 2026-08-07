@@ -114,7 +114,20 @@ end
 
 
 -- Check if unit is dead or offline
+-- ★★ STAMPS FIRST, UNIT APIS SECOND. The three helpers below are the ONLY reason
+-- this file's Update*Appearance functions cannot simply run on a test frame, so each
+-- prefers a frame-stamped value and falls back to the unit API.
+--
+-- ☠ AND THE STAMP IS NOT MERELY A CONVENIENCE. Test frames carry REAL unit tokens --
+-- TestFramePool assigns "raid1".."raidN" and "player" -- so in an actual group these
+-- resolve to REAL units and UnitIsDeadOrGhost / UnitClass answer about whoever is
+-- standing next to you, not about the preview's scenario. That is what the
+-- `if DF.testMode then return end` guards throughout this file are really defending
+-- against; it is NOT a fabricated-token problem. Stamping is what makes removing
+-- those guards safe, so do not remove one before its inputs are stamped.
+-- (Audit, 2026-08-07.)
 local function IsDeadOrOffline(frame)
+    if frame.dfIsDead ~= nil then return frame.dfIsDead end
     local unit = frame.unit
     if not unit or not UnitExists(unit) then return false end
     return UnitIsDeadOrGhost(unit) or not UnitIsConnected(unit)
@@ -150,8 +163,7 @@ function DF:GetStatusIconFadeAlpha(frame, prefix)
 
     local alpha = 1.0
     -- Dead/offline first: applies to every icon, summon included.
-    local dead = frame.dfTestIsDead
-    if dead == nil then dead = IsDeadOrOffline(frame) end
+    local dead = IsDeadOrOffline(frame)   -- stamp-aware; see the helper
     if dead and db.fadeDeadFrames then
         alpha = alpha * (db.fadeDeadIcons or 1.0)
     end
@@ -175,6 +187,7 @@ end
 
 -- Check if unit is specifically offline (not just dead)
 local function IsOffline(frame)
+    if frame.dfIsOffline ~= nil then return frame.dfIsOffline end
     local unit = frame.unit
     if not unit or not UnitExists(unit) then return false end
     return not UnitIsConnected(unit)
@@ -187,11 +200,15 @@ end
 
 -- Get class color for a unit
 local function GetClassColor(frame)
-    local unit = frame.unit
-    if not unit or not UnitExists(unit) then
-        return DEFAULT_COLOR_GRAY
+    local class = frame.dfClassToken
+    if not class then
+        local unit = frame.unit
+        if not unit or not UnitExists(unit) then
+            return DEFAULT_COLOR_GRAY
+        end
+        local _
+        _, class = UnitClass(unit)
     end
-    local _, class = UnitClass(unit)
     return DF:GetClassColor(class)
 end
 
@@ -952,7 +969,11 @@ function DF:UpdateMissingBuffAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ TEST FRAMES PASS THROUGH. Every unit read this function makes now goes via
+    -- GetInRange / IsDeadOrOffline, both stamp-aware, so it renders a preview frame
+    -- correctly. LIVE frames still bail while test mode is on -- they are hidden
+    -- behind the preview and repainting them is wasted work. (Audit, 2026-08-07.)
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
@@ -1076,7 +1097,11 @@ function DF:UpdateDefensiveIconAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ TEST FRAMES PASS THROUGH. Every unit read this function makes now goes via
+    -- GetInRange / IsDeadOrOffline, both stamp-aware, so it renders a preview frame
+    -- correctly. LIVE frames still bail while test mode is on -- they are hidden
+    -- behind the preview and repainting them is wasted work. (Audit, 2026-08-07.)
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local inRange = GetInRange(frame)
 
@@ -1144,7 +1169,11 @@ function DF:UpdateAuraDesignerAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ TEST FRAMES PASS THROUGH. Every unit read this function makes now goes via
+    -- GetInRange / IsDeadOrOffline, both stamp-aware, so it renders a preview frame
+    -- correctly. LIVE frames still bail while test mode is on -- they are hidden
+    -- behind the preview and repainting them is wasted work. (Audit, 2026-08-07.)
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local inRange = GetInRange(frame)
     local oorOn = db.oorEnabled
