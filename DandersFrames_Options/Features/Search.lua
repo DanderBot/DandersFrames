@@ -32,6 +32,23 @@ local CARD_PAD_X     = 10
 local CARD_CONTENT_Y = 28   -- top of the control, below the breadcrumb button
 local CARD_CHROME    = 38   -- breadcrumb strip + top and bottom padding
 
+-- ★ A RESULT CARD IS A SETTINGS BOX, so it is exactly as wide as one. 280 is what
+-- GUI:CreateSettingsGroup builds (`group:SetSize(width or 280, 10)`, Sections.lua) and
+-- CARD_PAD_X below is that group's own `padding or 10` -- so the control inside a card
+-- lands on 280 - 2*10 = 260, which is precisely GUI:GroupInnerWidth. A search hit is
+-- therefore the same size as the thing it takes you to, by construction rather than by a
+-- second number that has to be kept in step.
+--
+-- The results panel spans the whole content area (about two of these side by side), and
+-- letting a card have all of it was the problem: a slider stretched across the full width
+-- reads as a different control from the same slider on its page.
+local CARD_MAX_W = 280
+
+-- Debounce before a keystroke turns into a rebuild. Every result is a real settings
+-- widget, so an un-debounced OnTextChanged built the whole result set once PER LETTER --
+-- typing "frame" meant five full builds of ~159 cards.
+local SEARCH_DEBOUNCE = 0.25
+
 -- The empty-results prompt. A function, not a constant: L is populated at load
 -- and this file's locals are evaluated then too, so reading it lazily keeps the
 -- string correct if the locale table is finished after this file runs.
@@ -643,7 +660,10 @@ end
 -- ============================================================
 function Search:CreateResultWidget(parent, entry, index)
     local widget = CreateFrame("Frame", nil, parent)
-    widget:SetSize(parent:GetWidth() - 20, CARD_CHROME + DF.GUI.RowHeight.checkbox)
+    -- Capped at one settings-box width; the panel is wider than that, and a card that
+    -- used all of it did not read as a settings box any more.
+    local cardW = math.min((parent:GetWidth() or CARD_MAX_W) - 20, CARD_MAX_W)
+    widget:SetSize(cardW, CARD_CHROME + DF.GUI.RowHeight.checkbox)
 
     -- Card chrome from the shared palette. These were three retyped literals
     -- (0.14 fill, 0.25 border) that matched nothing -- the panel token is the
@@ -676,9 +696,22 @@ function Search:CreateResultWidget(parent, entry, index)
     local textWidth = breadcrumbText:GetStringWidth()
     breadcrumb:SetWidth(textWidth + 24)
 
-    -- Tooltip on hover (the accent wash/border hover is handled by StyleButton)
+    -- Tooltip on hover (the accent wash/border hover is handled by StyleButton).
+    --
+    -- ⚠ TITLE PLUS A LINE, which is the house shape -- see BindingEditor and the AD
+    -- editor, and ResolveTooltipSpec, which builds { title = label, lines = { desc } }
+    -- for every settings widget. This passed a bare title and so rendered as a lone
+    -- floating string with no body, which is why it did not look like the rest of them.
+    --
+    -- "Show me" rather than "Go to <tab>": the button's own label already spells the
+    -- destination out ("Frame > Frame Size"), so repeating it in the title said nothing
+    -- twice. The verb is also the honest one now that the target pulses on arrival --
+    -- FlashWidget's own comment describes itself as the "show me" highlight.
     breadcrumb:HookScript("OnEnter", function(self)
-        DF.GUI:ShowTooltip(self, { title = string.format(L["Go to %s"], tabDisplay) })
+        DF.GUI:ShowTooltip(self, {
+            title = L["Show me"],
+            lines = { L["Open this setting's own page and highlight it."] },
+        })
     end)
     breadcrumb:HookScript("OnLeave", function()
         DF.GUI:HideTooltip()
@@ -716,9 +749,9 @@ function Search:CreateResultWidget(parent, entry, index)
     
     if inlineWidget then
         inlineWidget:SetPoint("TOPLEFT", CARD_PAD_X, -CARD_CONTENT_Y)
-        -- The shared builders anchor by two corners in a real page column; here
-        -- the card is the column, so give the control the card's width minus the
-        -- padding it is inset by on both sides.
+        -- The shared builders anchor by two corners in a real page column; here the card
+        -- IS the column. No separate cap needed: the card is already one settings box
+        -- wide, so this lands on GroupInnerWidth (280 - 2*10 = 260) on its own.
         inlineWidget:SetWidth(widget:GetWidth() - CARD_PAD_X * 2)
         -- Tooltip text lives on the page's widget, not on the search entry --
         -- ResolveTooltipSpec reads .tooltip off the container it was attached to.
@@ -733,7 +766,75 @@ function Search:CreateResultWidget(parent, entry, index)
     widget:SetHeight(cardHeight)
 
     widget.entry = entry
+    widget.inlineWidget = inlineWidget
     widget.calculatedHeight = cardHeight
+    return widget
+end
+
+-- ☠ CARDS ARE CACHED AND REUSED. Building one is expensive -- it is a REAL settings
+-- widget, so a single card is a frame, a breadcrumb button, the control's own container,
+-- its check button / slider / swatch, its override indicators and a tooltip hit frame:
+-- roughly six to ten frames. The old code built every result fresh on every call and then
+-- did `SetParent(nil)` on the previous set, which does not free anything -- a WoW frame,
+-- once created, is never really reclaimed. Combined with an un-debounced OnTextChanged
+-- that meant typing one five-letter word over ~159 results stranded several thousand live
+-- frames, each still carrying scripts. That is the "everything is sluggish until I
+-- reload" -- it was not the search being slow, it was the whole UI carrying the wreckage.
+--
+-- The key is (mode, widgetType, dbKey) rather than the registry's entry.id, on purpose:
+--   * ids are reassigned whenever the registry rebuilds, so they are not stable;
+--   * the shared builders bind dbTable/dbKey in CLOSURES at creation, so a card can never
+--     be re-pointed at a different setting -- the cache has to be per setting, not a
+--     generic pool;
+--   * including the mode is what keeps that safe. `db` is captured as
+--     DF.db[SelectedMode] at build time, so a party card must never be handed back for
+--     raid. Different mode, different key, different card.
+-- Total cards built is therefore bounded by the number of DISTINCT settings the user has
+-- ever seen results for, once each, instead of growing without limit.
+local function cardCacheKey(entry)
+    local mode = (DF.GUI and DF.GUI.SelectedMode) or "party"
+    return mode .. "\0" .. tostring(entry.widgetType) .. "\0" .. tostring(entry.dbKey or entry.label)
+end
+
+function Search:AcquireResultWidget(parent, entry, index)
+    local panel = self.ResultsPanel
+    panel.cardCache = panel.cardCache or {}
+    local key = cardCacheKey(entry)
+
+    -- ☠ THE TABLE IDENTITY IS PART OF THE CONTRACT, not just the mode name. DF.db is
+    -- REASSIGNED on a profile switch (Core/Profile.lua), and the shared builders captured
+    -- the OLD table in their closures -- so a card cached before the switch would happily
+    -- write the previous profile's settings while the user looks at the new one. The mode
+    -- in the key cannot catch that, because the mode name has not changed. Compare the
+    -- actual table and rebuild if it moved.
+    local liveDB = DF.db and DF.db[(DF.GUI and DF.GUI.SelectedMode) or "party"]
+
+    local widget = panel.cardCache[key]
+    if widget and widget.dfBoundDB ~= liveDB then
+        -- Profile switched under us. Drop it; nothing here can be re-pointed, because the
+        -- binding lives in closures. (The old frame cannot be freed -- WoW frames never
+        -- are -- but a profile switch is a rare, deliberate act, unlike a keystroke.)
+        widget:Hide()
+        panel.cardCache[key] = nil
+        widget = nil
+    end
+
+    if widget then
+        -- Refresh what can legitimately have moved since it was built. The displayed
+        -- VALUE needs no help -- every shared builder re-reads its db on OnShow (see
+        -- CreateCheckbox's container:SetScript("OnShow", UpdateState)) -- but the entry
+        -- object itself is new after a registry rebuild, so re-point the tooltip source.
+        widget.entry = entry
+        local inline, src = widget.inlineWidget, entry.sourceWidget
+        if inline and src and src.tooltip ~= nil then
+            inline.tooltip = src.tooltip
+        end
+        return widget
+    end
+
+    widget = self:CreateResultWidget(parent, entry, index)
+    widget.dfBoundDB = liveDB
+    panel.cardCache[key] = widget
     return widget
 end
 
@@ -742,24 +843,40 @@ end
 -- ============================================================
 function Search:NavigateToTab(tabName, sectionName)
     if not tabName then return end
-    
-    -- Clear search
+
+    -- Clear search. SelectTab hides the results itself, but the box keeps its text
+    -- otherwise, and a stale query sitting in a hidden panel reads as still-searching.
     if self.SearchBar and self.SearchBar.editbox then
         self.SearchBar.editbox:SetText("")
         self.SearchBar.editbox:ClearFocus()
     end
     self:HideResults()
-    
-    -- Switch to the correct tab
-    if DF.GUI and DF.GUI.Tabs and DF.GUI.Tabs[tabName] then
-        DF.GUI.Tabs[tabName]:Click()
-        
-        -- If we have a section, try to scroll to it after a short delay
-        if sectionName and sectionName ~= "" then
-            C_Timer.After(0.1, function()
-                self:ScrollToSection(tabName, sectionName)
-            end)
-        end
+
+    -- ☠ DELEGATE TO THE SHARED LINK ACTION, do not hand-roll the jump. This used to do
+    -- its own Tabs[name]:Click() plus a timed ScrollToSection -- which scrolled correctly
+    -- and then never flashed, so a search result landed you on the right page with no
+    -- indication of WHICH setting you had come for, while every other cross-link in the
+    -- GUI pulses its target. GUI:LinkToSetting is that behaviour, and it already calls
+    -- this file's own ScrollToSection to do the scrolling half; it also owns the two
+    -- timings (0.12 for the tab to build, 0.05 for the scroll to settle) that the
+    -- hand-rolled copy had guessed at differently.
+    --
+    -- ⚠ Guard the function, not the table: LinkToSetting lives in GUI/Sections.lua and a
+    -- load-order slip would otherwise be a silent dead breadcrumb. Warn rather than fall
+    -- back to a worse copy of the same thing.
+    if DF.GUI and DF.GUI.LinkToSetting then
+        DF.GUI:LinkToSetting({
+            page    = tabName,
+            section = (sectionName ~= "" and sectionName) or nil,
+            -- ⚠ BORDER ONLY -- both flags are required. FlashWidget's fill is opt-OUT
+            -- (`opts.fill ~= false`), so passing border alone would outline AND wash it.
+            -- A search lands you on a whole section, which is a large target; the filled
+            -- pulse over that much area is heavy, and the outline reads better at that
+            -- size (Krathe, 2026-08-07).
+            flash   = { fill = false, border = true },
+        })
+    else
+        DF:DebugWarn("SEARCH", "LinkToSetting unavailable — breadcrumb cannot navigate")
     end
 end
 
@@ -881,9 +998,11 @@ function Search:CreateSearchBar(parent)
             if userInput then
                 -- Don't search during combat - building registry creates UI elements
                 if InCombatLockdown() then
+                    Search:CancelQueuedSearch()
                     Search:ShowCombatMessage()
                 else
-                    Search:ShowResults(text)
+                    -- Debounced: one rebuild after the typing stops, not one per letter.
+                    Search:QueueSearch(text)
                 end
             end
         else
@@ -970,6 +1089,37 @@ end
 -- ============================================================
 -- SHOW/HIDE RESULTS
 -- ============================================================
+-- Coalesce keystrokes into one rebuild. OnTextChanged fires per character, and each
+-- rebuild lays out every result, so without this "frame" cost five full passes over ~159
+-- cards -- the visible symptom being the panel lurching as it re-laid itself under the
+-- scrollbar while you were still typing or scrolling.
+--
+-- ⚠ Always store the LATEST query and let the timer read it when it fires, rather than
+-- capturing the text in the closure: the timer must render what the box says when it
+-- expires, not what it said when the first key was pressed.
+function Search:QueueSearch(text)
+    self._pendingQuery = text
+    if self._searchTimer then return end
+    self._searchTimer = C_Timer.NewTimer(SEARCH_DEBOUNCE, function()
+        self._searchTimer = nil
+        local q = self._pendingQuery
+        self._pendingQuery = nil
+        -- Re-check combat: the debounce window is long enough to have entered it, and
+        -- building results creates frames.
+        if q and q ~= "" and not InCombatLockdown() then
+            self:ShowResults(q)
+        end
+    end)
+end
+
+function Search:CancelQueuedSearch()
+    if self._searchTimer then
+        self._searchTimer:Cancel()
+        self._searchTimer = nil
+    end
+    self._pendingQuery = nil
+end
+
 function Search:ShowResults(query)
     if not self.ResultsPanel then return end
     
@@ -977,15 +1127,16 @@ function Search:ShowResults(query)
     local panel = self.ResultsPanel
     local scrollChild = panel.scrollChild
     
+    -- ⚠ HIDE, never SetParent(nil). These cards are cached and will be shown again; the
+    -- old teardown orphaned them instead, which freed nothing and lost the reuse.
     for _, widget in ipairs(panel.resultWidgets) do
         widget:Hide()
-        widget:SetParent(nil)
     end
     panel.resultWidgets = {}
-    
+
     local c = GetThemeColor()
     panel.header:SetTextColor(c.r, c.g, c.b)
-    
+
     if #results == 0 then
         panel.noResults:Show()
         panel.countText:SetText("")
@@ -994,16 +1145,19 @@ function Search:ShowResults(query)
         panel.noResults:Hide()
         panel.countText:SetText(string.format(L["(%d found)"], #results))
         panel.scroll:Show()
-        
+
         local yOffset = 0
         for i, entry in ipairs(results) do
-            local widget = self:CreateResultWidget(scrollChild, entry, i)
+            local widget = self:AcquireResultWidget(scrollChild, entry, i)
+            -- ClearAllPoints first: a reused card still carries the anchor from wherever
+            -- it sat in the previous result set.
+            widget:ClearAllPoints()
             widget:SetPoint("TOPLEFT", 5, -yOffset)
             widget:Show()
             table.insert(panel.resultWidgets, widget)
             yOffset = yOffset + (widget.calculatedHeight or 75) + 5
         end
-        
+
         scrollChild:SetHeight(yOffset + 20)
     end
     
@@ -1017,6 +1171,10 @@ function Search:ShowResults(query)
 end
 
 function Search:HideResults()
+    -- ⚠ Kill any debounced rebuild first. Clearing the box or closing the panel must not
+    -- be followed a quarter of a second later by a build for a query that is now gone --
+    -- that would re-show the results panel over whatever page the user just went back to.
+    self:CancelQueuedSearch()
     if self.ResultsPanel then
         self.ResultsPanel:Hide()
         -- Reset the no-results text in case it was changed to the combat message.
@@ -1043,13 +1201,14 @@ function Search:ShowCombatMessage()
     
     local panel = self.ResultsPanel
     
-    -- Clear existing results
+    -- Clear existing results.
+    -- ⚠ Hide only. SetParent(nil) here would orphan cards that are still in cardCache,
+    -- so the next search would hand back a parentless frame that never draws.
     for _, widget in ipairs(panel.resultWidgets) do
         widget:Hide()
-        widget:SetParent(nil)
     end
     panel.resultWidgets = {}
-    
+
     -- Show combat message instead of "No results"
     panel.noResults:SetText(L["Search unavailable during combat"])
     panel.noResults:Show()

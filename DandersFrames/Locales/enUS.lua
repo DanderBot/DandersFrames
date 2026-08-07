@@ -81,7 +81,11 @@ L["No results found"] = true
 L["No settings found.\nTry different keywords."] = true
 L["(click header to edit)"] = true
 L["(%d found)"] = true
-L["Go to %s"] = true
+-- Breadcrumb button on a search result. Two-part, like every other DF tooltip: the
+-- button's own label already names the destination, so the title is the ACTION.
+-- ("Go to %s" retired with it -- it had exactly one consumer, this tooltip.)
+L["Show me"] = true
+L["Open this setting's own page and highlight it."] = true
 -- Misc GUI fallback strings (banner / confirm)
 L["Does NOT work in Mythic+ keystones. In combat, results may be slightly delayed."] = true
 L["Updates instantly, including in combat and Mythic+. Each tracked buff that is missing shows its own icon."] = true
