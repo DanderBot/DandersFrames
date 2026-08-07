@@ -4,6 +4,40 @@ local addonName, DF = ...
 DandersFrames = DF
 
 -- ============================================================
+-- MELEE / RANGED CLASSIFICATION — ONE TABLE, THREE FORMER COPIES
+-- ============================================================
+-- Used by "Separate Melee & Ranged DPS". Only consulted when role == DAMAGER, so
+-- the tank specs listed below are inert and kept only so the set reads complete.
+--
+-- ☠ THIS EXISTED THREE TIMES AND THE COPIES DISAGREED, one of them live:
+--   * Frames/Headers.lua  (live party + grouped raid) -- omitted PALADIN from the
+--     class fallback AND [255] Survival Hunter from the spec table
+--   * Features/FlatRaidFrames.lua (live flat raid)    -- had both
+--   * Features/Sort.lua   (test preview)              -- had both, under a comment
+--     claiming it "matches live fallback". It did not.
+-- So a Ret Paladin whose spec was not yet inspected sorted MELEE in the preview and
+-- in flat raid, and RANGED in live party and grouped raid. A Survival Hunter split
+-- the same way. Headers was the outlier and the wrong one: a Paladin DAMAGER is
+-- Retribution, which is melee. (Audit, 2026-08-07.)
+DF.MELEE_SPECS = {
+    [250] = true, [251] = true, [252] = true,   -- Death Knight (Blood/Frost/Unholy)
+    [577] = true, [581] = true,                 -- Demon Hunter (Havoc/Vengeance)
+    [103] = true,                               -- Druid    Feral
+    [255] = true,                               -- Hunter   Survival
+    [269] = true,                               -- Monk     Windwalker
+    [70]  = true,                               -- Paladin  Retribution
+    [259] = true, [260] = true, [261] = true,   -- Rogue
+    [263] = true,                               -- Shaman   Enhancement
+    [71]  = true, [72]  = true,                 -- Warrior  Arms/Fury
+}
+
+-- Class fallback for a DAMAGER whose spec is not known yet: only classes whose
+-- damage spec is ALWAYS melee.
+DF.MELEE_CLASSES = {
+    DEATHKNIGHT = true, DEMONHUNTER = true, ROGUE = true, WARRIOR = true, PALADIN = true,
+}
+
+-- ============================================================
 -- SHARED MEDIA SUPPORT
 -- ============================================================
 

@@ -36,26 +36,10 @@ local Sort = DF.Sort
 -- Spec to role mapping (melee vs ranged DPS)
 -- This maps DPS spec IDs to whether they're melee
 -- Tank/healer specs are excluded - they're filtered by role before this check
-local MELEE_SPECS = {
-    -- Death Knight
-    [251] = true, [252] = true,                    -- Frost, Unholy
-    -- Demon Hunter
-    [577] = true,                                   -- Havoc
-    -- Druid
-    [103] = true,                                   -- Feral
-    -- Hunter
-    [255] = true,                                   -- Survival
-    -- Monk
-    [269] = true,                                   -- Windwalker
-    -- Paladin
-    [70] = true,                                    -- Retribution
-    -- Rogue
-    [259] = true, [260] = true, [261] = true,      -- Assassination, Outlaw, Subtlety
-    -- Shaman
-    [263] = true,                                   -- Enhancement
-    -- Warrior
-    [71] = true, [72] = true,                      -- Arms, Fury
-}
+-- ★ ONE SHARED TABLE (Core/Config.lua). This was a local copy; the header there
+-- records the three-way disagreement between this file, Headers.lua and
+-- FlatRaidFrames.lua that it caused.
+local MELEE_SPECS = DF.MELEE_SPECS
 
 -- Cache for unit info (cleared on group changes)
 Sort.UnitCache = {}
@@ -244,14 +228,11 @@ function Sort:CompareTestData(dataA, dataB, db)
                 return MELEE_SPECS[specID] and "MELEE" or "RANGED"
             end
             
-            -- Fallback to class-based detection (matches live fallback)
+            -- Class fallback -- the SAME table live uses now. The comment here used
+            -- to claim it matched live; it did not (live omitted PALADIN).
             local class = data.class
             if class then
-                if class == "WARRIOR" or class == "ROGUE" or class == "DEATHKNIGHT" or class == "DEMONHUNTER" or class == "PALADIN" then
-                    return "MELEE"
-                else
-                    return "RANGED"
-                end
+                return DF.MELEE_CLASSES[class] and "MELEE" or "RANGED"
             end
         end
         
