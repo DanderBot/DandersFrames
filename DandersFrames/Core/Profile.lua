@@ -851,7 +851,23 @@ function DF:ValidateImportString(str)
         if not func then
             return nil, "Invalid format"
         end
-        
+
+        -- ☠ SANDBOX BEFORE CALLING. An import string is UNTRUSTED INPUT -- it arrives from
+        -- Discord, a forum post, a whisper. `loadstring` compiles arbitrary Lua, and
+        -- `return <expr>` is enough to RUN it: `return (function() ... end)()` executes
+        -- inside the pcall, and pcall only catches the error AFTERWARDS -- too late. Without
+        -- this, Parse String is remote code execution, reached before the confirm popup and
+        -- before any category is ticked.
+        --
+        -- An empty environment leaves table constructors working (which is all a genuine
+        -- payload is) while every global -- the whole WoW API included -- resolves nil, so a
+        -- hostile chunk errors instead of running. CC:DeserializeStringLegacy
+        -- (ClickCasting/Profiles.lua) has always done this; the profile path had not.
+        -- Guarded on setfenv existing, matching that sibling exactly.
+        if setfenv then
+            pcall(setfenv, func, {})
+        end
+
         local success, data = pcall(func)
         if not success or type(data) ~= "table" then
             return nil, "Corrupt data"
@@ -870,10 +886,21 @@ function DF:ValidateImportString(str)
     end
     
     -- Try legacy base64
+    --
+    -- ⚠ THE WIDEST ENTRY POINT IN THE ADDON: no prefix is required to reach it, so ANY
+    -- string that happens to Base64-decode lands on loadstring. Every DF build that has
+    -- ever shipped exports with a `!DFP1!` prefix (4.x included), so nothing this branch
+    -- accepts can have come from us. It is kept only in case some very old third-party
+    -- string exists; the sandbox below is what makes keeping it safe. Worth deleting
+    -- outright if we ever confirm nothing depends on it.
     local decoded = DF:Base64Decode(str)
     if decoded and decoded ~= "" then
         local func = loadstring("return " .. decoded)
         if func then
+            -- Sandbox before calling -- see the !DF1! branch above for the full reasoning.
+            if setfenv then
+                pcall(setfenv, func, {})
+            end
             local success, data = pcall(func)
             if success and type(data) == "table" and (data.party or data.raid) then
                 return data, nil
@@ -1050,6 +1077,33 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             partyEnabled = DF.db.partyEnabled ~= false,
             raidEnabled  = DF.db.raidEnabled  ~= false,
         }
+
+        -- ☠ CARRY THE MIGRATION FLAGS. Everything above is copied from the CURRENT
+        -- profile, so the new profile holds ALREADY-MIGRATED data -- but the enumeration
+        -- lists no `_…V1` flag, so it was born claiming to need every root migration it
+        -- has already had. On the next reload CleanupRedundantLayoutPresets re-ran and
+        -- pruned layout presets the user had deliberately made identical to their base,
+        -- which is the exact thing that guard exists to prevent.
+        --
+        -- Copied by CONVENTION (every profile-root migration flag is `_`-prefixed) rather
+        -- than from a fixed list, so a future migration is carried without anyone
+        -- remembering to come back here. DF:StampFreshProfileMigrations is deliberately
+        -- NOT used: it stamps the three flags a profile born from DEFAULTS needs, and this
+        -- profile is not born from defaults -- it would miss _designerLayoutCleanupV1 and
+        -- _designerPresetsMigratedV1, the two that actually bite.
+        --
+        -- Read through _realProfile: DF.db is proxied, and pairs() on the proxy does not
+        -- reliably enumerate the real table. DF:DuplicateProfile gets this for free via
+        -- DeepCopy(DF.db); only this hand-enumerated branch had to be told.
+        local srcProfile = DF._realProfile or DF.db
+        local newProfile = DandersFramesDB_v2.profiles[profileName]
+        if type(srcProfile) == "table" then
+            for k, v in pairs(srcProfile) do
+                if type(k) == "string" and k:sub(1, 1) == "_" and newProfile[k] == nil then
+                    newProfile[k] = v
+                end
+            end
+        end
 
         -- Switch to the new profile
         DandersFramesDB_v2.currentProfile = profileName
