@@ -120,6 +120,59 @@ local function IsDeadOrOffline(frame)
     return UnitIsDeadOrGhost(unit) or not UnitIsConnected(unit)
 end
 
+-- ★★ THE FADE MULTIPLIER FOR THE EIGHT STATUS ICONS, shared by live and the preview.
+--
+-- ☠ THESE ICONS COULD NOT FADE LIVE AT ALL. CreateStatusIcon sets
+-- SetIgnoreParentAlpha(true), so the whole-frame cascade cannot reach them, and this
+-- file has never referenced summon/resurrection/phased/afk/vehicle/raidRole/
+-- bgCarrier/combat — so neither route existed. Only the PREVIEW dimmed them, off its
+-- own hand-written alpha table. That is the rare case where the preview was showing
+-- something live was structurally incapable of (audit, 2026-08-07).
+--
+-- Keeping SetIgnoreParentAlpha is deliberate: we now set the alpha explicitly, and
+-- ignoring the parent is what stops the simple-mode cascade multiplying it a second
+-- time. One application, both modes.
+--
+-- ★ SUMMON AND RESURRECTION DO NOT DIM OUT OF RANGE. Krathe's rule: an icon that
+-- exists because someone is casting something AT this unit is most useful precisely
+-- when they are far away — you summon people who are elsewhere. Dimming it would
+-- fight what the icon is for. They still dim for dead/offline. If resurrection turns
+-- out to be the wrong call, this table is the only thing to change.
+local STATUS_ICON_NO_OOR_FADE = {
+    summonIcon        = true,
+    resurrectionIcon  = true,
+}
+
+function DF:GetStatusIconFadeAlpha(frame, prefix)
+    if not frame then return 1.0 end
+    local db = GetDB(frame)
+    if not db then return 1.0 end
+
+    local alpha = 1.0
+    -- Dead/offline first: applies to every icon, summon included.
+    local dead = frame.dfTestIsDead
+    if dead == nil then dead = IsDeadOrOffline(frame) end
+    if dead and db.fadeDeadFrames then
+        alpha = alpha * (db.fadeDeadIcons or 1.0)
+    end
+
+    if not STATUS_ICON_NO_OOR_FADE[prefix] then
+        local inRange = GetInRange(frame)
+        -- issecretvalue-safe: a secret boolean cannot drive a Lua multiply, so treat
+        -- an unresolvable range as in-range rather than guessing dim.
+        if not (issecretvalue and issecretvalue(inRange)) and inRange == false then
+            -- ⚠ BOTH range-fade modes, unlike every other element. Elsewhere simple
+            -- mode leans on the whole-frame SetAlpha cascade and only element mode
+            -- needs a per-element value — but these icons set
+            -- SetIgnoreParentAlpha(true), so the cascade never reaches them and an
+            -- explicit multiply is the only route either way.
+            alpha = alpha * (db.oorEnabled and (db.oorIconsAlpha or 0.5)
+                or (db.rangeFadeAlpha or db.rangeAlpha or 0.55))
+        end
+    end
+    return alpha
+end
+
 -- Check if unit is specifically offline (not just dead)
 local function IsOffline(frame)
     local unit = frame.unit

@@ -296,10 +296,23 @@ local function ApplyIconSettings(icon, db, prefix)
     
     icon:SetScale(scale)
     icon:ClearAllPoints()
-    icon:SetPoint(anchor, icon:GetParent():GetParent(), anchor, x, y)
+    -- icon -> contentOverlay -> unit frame.
+    local frame = icon:GetParent() and icon:GetParent():GetParent()
+    icon:SetPoint(anchor, frame, anchor, x, y)
+    -- ★ THE ONE PLACE THESE ICONS' ALPHA IS SET, so the out-of-range / dead fade
+    -- belongs here rather than in a second pass that would fight it.
+    -- ☠ Before this they could not fade LIVE at all: CreateStatusIcon sets
+    -- SetIgnoreParentAlpha(true) so the whole-frame cascade cannot reach them, and
+    -- ElementAppearance never named any of the eight. Only the preview dimmed them,
+    -- off its own hand-written table -- the preview showing something live was
+    -- structurally incapable of. Summon and resurrection are exempt from the RANGE
+    -- half (not the dead half); DF:GetStatusIconFadeAlpha holds the reasoning.
+    if DF.GetStatusIconFadeAlpha then
+        alpha = alpha * DF:GetStatusIconFadeAlpha(frame, prefix)
+    end
     icon:SetAlpha(alpha)
-    
-    icon:SetFrameLevel(icon:GetParent():GetParent():GetFrameLevel() + frameLevel)
+
+    icon:SetFrameLevel(frame:GetFrameLevel() + frameLevel)
     
     -- Apply status icon font settings to text. Route through SafeSetFont so the
     -- shadow lands on the font-family's per-alphabet font objects — 12.0.7 no

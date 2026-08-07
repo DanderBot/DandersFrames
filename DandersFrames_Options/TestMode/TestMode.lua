@@ -1818,32 +1818,32 @@ function DF:UpdateTestStatusIcons(frame, testData)
     
     -- Apply fade alpha to all status icons
     if frame.readyCheckIcon and frame.readyCheckIcon:IsShown() then
-        local baseAlpha = db.readyCheckIconAlpha or 1
-        frame.readyCheckIcon:SetAlpha(baseAlpha * alpha)
+        frame.readyCheckIcon:SetAlpha((db.readyCheckIconAlpha or 1)
+            * (DF.GetStatusIconFadeAlpha and DF:GetStatusIconFadeAlpha(frame, "readyCheckIcon") or 1))
     end
     if frame.summonIcon and frame.summonIcon:IsShown() then
-        local baseAlpha = db.summonIconAlpha or 1
-        frame.summonIcon:SetAlpha(baseAlpha * alpha)
+        frame.summonIcon:SetAlpha((db.summonIconAlpha or 1)
+            * (DF.GetStatusIconFadeAlpha and DF:GetStatusIconFadeAlpha(frame, "summonIcon") or 1))
     end
     if frame.resurrectionIcon and frame.resurrectionIcon:IsShown() then
-        local baseAlpha = db.resurrectionIconAlpha or 1
-        frame.resurrectionIcon:SetAlpha(baseAlpha * alpha)
+        frame.resurrectionIcon:SetAlpha((db.resurrectionIconAlpha or 1)
+            * (DF.GetStatusIconFadeAlpha and DF:GetStatusIconFadeAlpha(frame, "resurrectionIcon") or 1))
     end
     if frame.phasedIcon and frame.phasedIcon:IsShown() then
-        local baseAlpha = db.phasedIconAlpha or 1
-        frame.phasedIcon:SetAlpha(baseAlpha * alpha)
+        frame.phasedIcon:SetAlpha((db.phasedIconAlpha or 1)
+            * (DF.GetStatusIconFadeAlpha and DF:GetStatusIconFadeAlpha(frame, "phasedIcon") or 1))
     end
     if frame.afkIcon and frame.afkIcon:IsShown() then
-        local baseAlpha = db.afkIconAlpha or 1
-        frame.afkIcon:SetAlpha(baseAlpha * alpha)
+        frame.afkIcon:SetAlpha((db.afkIconAlpha or 1)
+            * (DF.GetStatusIconFadeAlpha and DF:GetStatusIconFadeAlpha(frame, "afkIcon") or 1))
     end
     if frame.vehicleIcon and frame.vehicleIcon:IsShown() then
-        local baseAlpha = db.vehicleIconAlpha or 1
-        frame.vehicleIcon:SetAlpha(baseAlpha * alpha)
+        frame.vehicleIcon:SetAlpha((db.vehicleIconAlpha or 1)
+            * (DF.GetStatusIconFadeAlpha and DF:GetStatusIconFadeAlpha(frame, "vehicleIcon") or 1))
     end
     if frame.raidRoleIcon and frame.raidRoleIcon:IsShown() then
-        local baseAlpha = db.raidRoleIconAlpha or 1
-        frame.raidRoleIcon:SetAlpha(baseAlpha * alpha)
+        frame.raidRoleIcon:SetAlpha((db.raidRoleIconAlpha or 1)
+            * (DF.GetStatusIconFadeAlpha and DF:GetStatusIconFadeAlpha(frame, "raidRoleIcon") or 1))
     end
 end
 
