@@ -6506,6 +6506,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- Hide party test frames (non-secure, safe in combat)
             if DF.testMode then
                 DF.testMode = false
+                -- ☠ DROP THE CLAIMS TOO. This tears the preview down DIRECTLY rather than
+                -- through the ownership model, so without this the `user` and `unlock`
+                -- claims outlive the frames they asked for. ReconcileTestMode then reads
+                -- wanted=true / active=false and re-shows the preview on the next owner
+                -- change -- so clicking Lock after a fight brought test mode BACK. That is
+                -- the "stuck on" half of the bug the ownership model exists to remove, and
+                -- Shim.lua's own header names this call site as one that must clear.
+                if DF.ClearTestModeOwners then DF:ClearTestModeOwners("party") end
                 DF:StopTestAnimation()
                 for i = 0, 4 do
                     local frame = DF.testPartyFrames and DF.testPartyFrames[i]
@@ -6527,6 +6535,8 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- Hide raid test frames (non-secure, safe in combat)
             if DF.raidTestMode then
                 DF.raidTestMode = false
+                -- Raid twin of the party clear above -- see that comment.
+                if DF.ClearTestModeOwners then DF:ClearTestModeOwners("raid") end
                 DF:StopTestAnimation()
                 for i = 1, 40 do
                     local frame = DF.testRaidFrames and DF.testRaidFrames[i]

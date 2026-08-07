@@ -71,7 +71,14 @@ DF.TestData = {
         {icon = "Interface\Icons\spell_holy_prayerofmending", name = "Prayer of Mending", duration = 30, stacks = 5, spellID = 41635},
         {icon = "Interface\Icons\Spell_Nature_Rejuvenation", name = "Rejuvenation", duration = 12, stacks = 0, spellID = 774},
         {icon = "Interface\Icons\Spell_Nature_Riptide", name = "Riptide", duration = 8, stacks = 0, spellID = 61295},
-        {icon = "Interface\Icons\ability_monk_renewingmists", name = "Renewing Mist", duration = 20, stacks = 0, spellID = 119611},
+        -- ☠ ESCAPED PATH, ON PURPOSE. Every other icon here uses single backslashes, which
+        -- works only because Lua 5.1 passes an UNKNOWN escape straight through (\I -> I,
+        -- \s -> s). "\a" is NOT unknown -- it is BEL (0x07) -- so the single-backslash form
+        -- of this one silently became "Interface\Icons" + chr(7) + "bility_monk_renewingmists"
+        -- and the icon could never load. Its neighbours are safe purely because none of them
+        -- happens to start a segment with a b f n r t v or a digit.
+        -- Do NOT "tidy" this back to match the others.
+        {icon = "Interface\\Icons\\ability_monk_renewingmists", name = "Renewing Mist", duration = 20, stacks = 0, spellID = 119611},
         -- duration = 0 is the PERMANENT case, and it drives "Hide Duration on Permanent
         -- Auras". Beacon holds until the paladin moves it, so it is a real one rather
         -- than a made-up zero. ⚠ If a patch ever gives Beacon a timer this stops

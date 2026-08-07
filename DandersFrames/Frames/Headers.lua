@@ -7059,6 +7059,14 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
         if event == "PLAYER_ENTERING_WORLD" and (DF.testMode or DF.raidTestMode) then
             if DF.testMode then
                 DF.testMode = false
+                -- ☠ DROP THE CLAIMS TOO. This zone teardown clears the flag INLINE rather
+                -- than going through the ownership model (the comment below says so), so a
+                -- surviving `user` / `unlock` claim outlives the frames it asked for.
+                -- ReconcileTestMode then sees wanted=true / active=false and re-shows the
+                -- preview on the next owner change -- e.g. clicking Lock. Shim.lua's header
+                -- names this call site and the combat one in Core.lua as the two that must
+                -- clear their claims explicitly.
+                if DF.ClearTestModeOwners then DF:ClearTestModeOwners("party") end
                 DF:StopTestAnimation()
                 if DF.testPartyFrames then
                     for i = 0, 4 do
@@ -7070,6 +7078,8 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
             end
             if DF.raidTestMode then
                 DF.raidTestMode = false
+                -- Raid twin of the party clear above -- see that comment.
+                if DF.ClearTestModeOwners then DF:ClearTestModeOwners("raid") end
                 DF:StopTestAnimation()
                 if DF.testRaidContainer then DF.testRaidContainer:Hide() end
             end
