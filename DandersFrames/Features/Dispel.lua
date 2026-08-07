@@ -1,4 +1,4 @@
-﻿local addonName, DF = ...
+local addonName, DF = ...
 
 -- ============================================================
 -- DISPEL OVERLAY SYSTEM
@@ -765,6 +765,24 @@ end
 -- Handles EDGE gradients which need SetVertexColor re-applied with OOR alpha
 -- ============================================================
 
+-- ★★ THE ONE DEFINITION OF GRADIENT STRENGTH. Intensity is folded into ALPHA, not
+-- into RGB, because the live slot path cannot touch RGB at all: Blizzard securecopy's
+-- the colour map at bind time and owns the carrier's vertex colour from then on
+-- (StyleGameMainSlot's own header says so). Alpha stays ours on both lanes, so it is
+-- the only channel where preview and live can agree.
+--
+-- ☠ dispelGradientIntensity USED TO BE PREVIEW-ONLY. The test path multiplied RGB by
+-- it in three places; StyleGameMainSlot and StyleGameEdgeSlot had no intensity term
+-- whatsoever. Dragging the slider visibly brightened every preview frame and did
+-- nothing in game — a setting that only existed in the mirror. ElementAppearance.lua
+-- had already worked this out and folded it into alpha; this hoists that one line so
+-- all four sites share it. (Audit, 2026-08-07.)
+--
+-- Clamped: alpha above 1 is meaningless and would silently cap on one lane only.
+local function ResolveGradientAlpha(db)
+    return math.min((db.dispelGradientAlpha or 0.5) * (db.dispelGradientIntensity or 1.0), 1.0)
+end
+
 function DF:ApplyDispelOverlayAppearance(frame)
     if not frame or not frame.dfDispelOverlay then return end
     
@@ -799,12 +817,10 @@ function DF:ApplyDispelOverlayAppearance(frame)
     if not c or not c.r then return end
 
     local r, g, b = c.r, c.g, c.b
-    local gradientAlpha = db.dispelGradientAlpha or 0.5
-    local intensity = db.dispelGradientIntensity or 1.0
+    -- Intensity rides ALPHA, matching the live slot path -- see ResolveGradientAlpha.
+    local gradientAlpha = ResolveGradientAlpha(db)
     local blendMode = db.dispelGradientBlendMode or "ADD"
-    
-    -- Apply intensity to colors
-    local ri, gi, bi = r * intensity, g * intensity, b * intensity
+    local ri, gi, bi = r, g, b
     
     -- Calculate final alpha with OOR
     local finalAlpha = gradientAlpha
@@ -866,10 +882,11 @@ local GRADIENT_TEXTURES = {
 
 -- Region styling ONLY (no Show/Hide of the widget itself, no name text, no
 -- last-aura bookkeeping): everything an explicit-RGB overlay needs — layout,
--- borders, gradients, type icon, pulse anim state. Reused verbatim by the 12.1
--- slot path, where the widget's visibility rides the slot button and this runs
--- ONCE at style time (build-once-leave-it). `frame` is only consulted for
+-- borders, gradients, type icon, pulse anim state. `frame` is only consulted for
 -- ApplyOverlayLayout's cache key and may be nil on a slot host.
+-- ⚠ The header here used to claim "reused verbatim by the 12.1 slot path". It is
+-- not: the slot path styles through StyleOneSlot -> StyleGame*Slot and never calls
+-- this. Grep confirms one caller, ShowOverlayWithRGB, which is test-only.
 local function StyleOverlayRegions(overlay, r, g, b, db, dispelType, oorAlphaMultiplier, frame)
     if not overlay then return end
 
@@ -880,7 +897,8 @@ local function StyleOverlayRegions(overlay, r, g, b, db, dispelType, oorAlphaMul
     oorAlphaMultiplier = oorAlphaMultiplier or 1.0
     
     local borderAlpha = (db.dispelBorderAlpha or 0.8) * oorAlphaMultiplier
-    local gradientAlpha = (db.dispelGradientAlpha or 0.5) * oorAlphaMultiplier
+    -- Intensity rides ALPHA, matching the live slot path -- see ResolveGradientAlpha.
+    local gradientAlpha = ResolveGradientAlpha(db) * oorAlphaMultiplier
     local showBorder = db.dispelShowBorder ~= false
     local showGradient = db.dispelShowGradient ~= false
     local showIcon = db.dispelShowIcon ~= false
@@ -913,7 +931,6 @@ local function StyleOverlayRegions(overlay, r, g, b, db, dispelType, oorAlphaMul
     
     if showGradient then
         local gradientStyle = db.dispelGradientStyle or "FULL"
-        local intensity = db.dispelGradientIntensity or 1.0
         local blendMode = db.dispelGradientBlendMode or "ADD"
         local darkenEnabled = db.dispelGradientDarkenEnabled
         local darkenAlpha = db.dispelGradientDarkenAlpha or 0.5
@@ -926,34 +943,32 @@ local function StyleOverlayRegions(overlay, r, g, b, db, dispelType, oorAlphaMul
                 overlay.gradientDarken:Hide()
             end
             
-            -- Apply intensity to colors
-            local ri, gi, bi = r * intensity, g * intensity, b * intensity
             
             -- Show edge gradients with gradient textures + SetVertexColor
             if overlay.gradientTop then
                 overlay.gradientTop:SetTexture(EDGE_GRADIENT_TEXTURES.TOP)
-                overlay.gradientTop:SetVertexColor(ri, gi, bi, gradientAlpha)
+                overlay.gradientTop:SetVertexColor(r, g, b, gradientAlpha)
                 overlay.gradientTop:SetBlendMode(blendMode)
                 overlay.gradientTop:Show()
             end
             
             if overlay.gradientBottom then
                 overlay.gradientBottom:SetTexture(EDGE_GRADIENT_TEXTURES.BOTTOM)
-                overlay.gradientBottom:SetVertexColor(ri, gi, bi, gradientAlpha)
+                overlay.gradientBottom:SetVertexColor(r, g, b, gradientAlpha)
                 overlay.gradientBottom:SetBlendMode(blendMode)
                 overlay.gradientBottom:Show()
             end
             
             if overlay.gradientLeft then
                 overlay.gradientLeft:SetTexture(EDGE_GRADIENT_TEXTURES.LEFT)
-                overlay.gradientLeft:SetVertexColor(ri, gi, bi, gradientAlpha)
+                overlay.gradientLeft:SetVertexColor(r, g, b, gradientAlpha)
                 overlay.gradientLeft:SetBlendMode(blendMode)
                 overlay.gradientLeft:Show()
             end
             
             if overlay.gradientRight then
                 overlay.gradientRight:SetTexture(EDGE_GRADIENT_TEXTURES.RIGHT)
-                overlay.gradientRight:SetVertexColor(ri, gi, bi, gradientAlpha)
+                overlay.gradientRight:SetVertexColor(r, g, b, gradientAlpha)
                 overlay.gradientRight:SetBlendMode(blendMode)
                 overlay.gradientRight:Show()
             end
@@ -980,8 +995,7 @@ local function StyleOverlayRegions(overlay, r, g, b, db, dispelType, oorAlphaMul
             overlay.gradient:SetStatusBarTexture(texturePath)
             
             local tex = overlay.gradient:GetStatusBarTexture()
-            -- Apply intensity by multiplying RGB values (makes gradient brighter/dimmer)
-            tex:SetVertexColor(r * intensity, g * intensity, b * intensity, gradientAlpha)
+            tex:SetVertexColor(r, g, b, gradientAlpha)
             tex:SetBlendMode(blendMode)
             overlay.gradient:Show()
         end
@@ -1546,7 +1560,8 @@ local function StyleGameMainSlot(btn, frame, db)
                 carrier:SetAllPoints(w.gradient)
             end
             carrier:SetBlendMode(db.dispelGradientBlendMode or "ADD")
-            carrier:SetAlpha(showGradient and (db.dispelGradientAlpha or 0.5) or 0)
+            -- Intensity rides alpha here; RGB is Blizzard's after the bind.
+            carrier:SetAlpha(showGradient and ResolveGradientAlpha(db) or 0)
         end
     end
 
@@ -1675,7 +1690,7 @@ local function StyleGameEdgeSlot(btn, frame, db, edge)
         tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -pad, pad)
     end
     tex:SetBlendMode(db.dispelGradientBlendMode or "ADD")
-    tex:SetAlpha(db.dispelGradientAlpha or 0.5)
+    tex:SetAlpha(ResolveGradientAlpha(db))
     ApplySlotPulse(btn.dfDispelEdgeHolder and btn.dfDispelEdgeHolder[edge], db.dispelAnimate)
 end
 
