@@ -498,7 +498,9 @@ function DF:UpdateNameTextAppearance(frame)
     if not frame.nameText then return end
 
     -- Skip test frames - they handle their own appearance in TestMode.lua
-    if frame.dfIsTestFrame then return end
+    -- ★ Test frames pass through. This guarded on dfIsTestFrame rather than on
+    -- DF.testMode like its neighbours -- an inconsistency that predates the audit --
+    -- and its only unit read is GetClassColor, which is stamp-aware now.
 
     local db = GetDB(frame)
     if not db then return end
@@ -562,8 +564,9 @@ function DF:UpdateHealthTextAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: every unit read here goes via the stamp-aware
+    -- helpers (GetInRange / IsDeadOrOffline / GetClassColor).
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
@@ -619,8 +622,9 @@ function DF:UpdateStatusTextAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: every unit read here goes via the stamp-aware
+    -- helpers (GetInRange / IsDeadOrOffline / GetClassColor).
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local deadOrOffline = IsDeadOrOffline(frame)
 
@@ -650,8 +654,9 @@ function DF:UpdatePowerBarAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
     
-    -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: every unit read here goes via the stamp-aware
+    -- helpers (GetInRange / IsDeadOrOffline / GetClassColor).
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
@@ -687,8 +692,9 @@ function DF:UpdateBorderAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    -- Skip during test mode
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: every unit read here goes via the stamp-aware
+    -- helpers (GetInRange / IsDeadOrOffline / GetClassColor).
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local inRange = GetInRange(frame)
     local alpha = 1.0
@@ -820,7 +826,8 @@ function DF:UpdateLeaderIconAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
     
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: unit reads go via the stamp-aware helpers.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
@@ -845,7 +852,8 @@ function DF:UpdateRaidTargetIconAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
     
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: unit reads go via the stamp-aware helpers.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
@@ -870,7 +878,8 @@ function DF:UpdateReadyCheckIconAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
     
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: unit reads go via the stamp-aware helpers.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
     local deadOrOffline = IsDeadOrOffline(frame)
     local inRange = GetInRange(frame)
@@ -898,7 +907,8 @@ function DF:UpdateDispelOverlayAppearance(frame)
     local db = GetDB(frame)
     if not db then return end
 
-    if DF.testMode or DF.raidTestMode then return end
+    -- ★ Test frames pass through: unit reads go via the stamp-aware helpers.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     -- 12.1 factory path: one alpha on the handle's plain anchor WINDOW (ours) —
     -- the whole subtree rides it (every slot button, the slot-hosted widgets, the

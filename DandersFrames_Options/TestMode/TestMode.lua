@@ -849,8 +849,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- Calculate per-element alphas for out-of-range
     local healthBarAlpha = 1.0
     local backgroundAlpha = 1.0
-    local nameAlpha = 1.0
-    local healthTextAlpha = 1.0
     local iconsAlpha = 1.0
     local powerBarAlpha = 1.0
     local dispelAlpha = 1.0
@@ -861,7 +859,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- that ElementAppearance already owns. (Audit, 2026-08-07.)
     -- Border stays 1.0 in whole-frame mode (the frame's SetAlpha cascade fades
     -- it); only element-specific mode needs its own border alpha.
-    local borderAlpha = 1.0
 
     if isOutOfRange then
         if db.oorEnabled then
@@ -873,12 +870,9 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             -- If you add an oor*Alpha, copy live's fallback, do not invent one.
             healthBarAlpha = db.oorHealthBarAlpha or 0.2
             backgroundAlpha = db.oorBackgroundAlpha or 0.1
-            nameAlpha = db.oorTextAlpha or 0.55
-            healthTextAlpha = db.oorTextAlpha or 0.55
             iconsAlpha = db.oorIconsAlpha or 0.5
             powerBarAlpha = db.oorPowerBarAlpha or 0.2
             dispelAlpha = db.oorDispelOverlayAlpha or 0.2
-            borderAlpha = db.oorBorderAlpha or 0.2
         end
         -- ☠ NO `else` BRANCH, DELIBERATELY. Simple range-fade mode fades the WHOLE
         -- FRAME with one SetAlpha further down -- exactly as live's
@@ -938,8 +932,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         if db.oorEnabled then
             healthBarAlpha = hfAlpha
             backgroundAlpha = hfAlpha
-            nameAlpha = hfAlpha
-            healthTextAlpha = hfAlpha
             iconsAlpha = hfAlpha
             powerBarAlpha = hfAlpha
             dispelAlpha = hfAlpha
@@ -953,22 +945,9 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         frame.dfTestHealthFadeAlphas = nil
     end
     
-    -- Update name color with appropriate alpha
-    -- Priority: OOR > dead fade > health-based fade
-    local finalNameAlpha = nameAlpha
-    if not isOutOfRange and applyDeadFade then
-        finalNameAlpha = db.fadeDeadName or 1.0
-    end
-    
-    if db.nameTextUseClassColor then
-        local classColor = DF:GetClassColor(testData.class)
-        if classColor then
-            frame.nameText:SetTextColor(classColor.r, classColor.g, classColor.b, finalNameAlpha)
-        end
-    else
-        local c = db.nameTextColor or {r=1, g=1, b=1}
-        frame.nameText:SetTextColor(c.r, c.g, c.b, finalNameAlpha)
-    end
+    -- Name text colour + alpha: DF:UpdateNameTextAppearance owns both (it deliberately
+    -- writes colour at alpha 1.0 and controls opacity through SetAlpha, so that
+    -- SetAlphaFromBoolean keeps working). Applied by the shared pass further down.
     
     -- Update health bar color based on mode
     -- Use RGB only (no alpha in SetStatusBarColor) so we can control alpha externally
@@ -1119,25 +1098,9 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         frame:SetAlpha(1)
     end
 
-    -- Frame border OOR fade (mirrors live DF:UpdateBorderAppearance). borderAlpha
-    -- is 1.0 in whole-frame mode so this is a no-op there (the frame cascade fades
-    -- it); in element-specific mode it carries the border's own OOR alpha.
-    if frame.border then
-        frame.border:SetAlpha(borderAlpha)
-    end
 
-    -- Apply alpha to health text
-    if frame.healthText then
-        if db.healthTextUseClassColor then
-            local classColor = DF:GetClassColor(testData.class)
-            if classColor then
-                frame.healthText:SetTextColor(classColor.r, classColor.g, classColor.b, healthTextAlpha)
-            end
-        else
-            local htc = db.healthTextColor or {r=1, g=1, b=1}
-            frame.healthText:SetTextColor(htc.r, htc.g, htc.b, healthTextAlpha)
-        end
-    end
+    -- Health text colour + alpha: DF:UpdateHealthTextAppearance owns both, same as the
+    -- name text. Applied by the shared pass below.
     
     -- Update absorb bars
     if db.testShowAbsorbs then
@@ -1162,16 +1125,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     else
         if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
     end
-
-    -- ★ OUT-OF-RANGE FADE FOR THE FOUR BARS, straight from the live functions. The
-    -- preview had NO counterpart for oorAbsorbBarAlpha or oorMissingHealthAlpha, so
-    -- the absorb, heal-absorb, heal-prediction and missing-health bars never dimmed
-    -- out of range here while live dimmed all four. Nothing was deleted to make room:
-    -- these are keys the preview simply never implemented. (Audit, 2026-08-07.)
-    if DF.UpdateAbsorbBarAppearance then DF:UpdateAbsorbBarAppearance(frame) end
-    if DF.UpdateHealAbsorbBarAppearance then DF:UpdateHealAbsorbBarAppearance(frame) end
-    if DF.UpdateHealPredictionBarAppearance then DF:UpdateHealPredictionBarAppearance(frame) end
-    if DF.UpdateMissingHealthBarAppearance then DF:UpdateMissingHealthBarAppearance(frame) end
 
     -- Update power/resource bar
     DF:UpdateTestPowerBar(frame, testData)
@@ -1292,8 +1245,23 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- ⚠ AFTER the two drives above, not before: both widgets are created LAZILY by
     -- those drives, so earlier in the pass they are still nil on a frame's first
     -- paint. Neither drive touches alpha, so setting it here sticks.
-    if DF.UpdateMissingBuffAppearance then DF:UpdateMissingBuffAppearance(frame) end
-    if DF.UpdateDefensiveIconAppearance then DF:UpdateDefensiveIconAppearance(frame) end
+    -- ★★ ONE SHARED APPEARANCE PASS, after every lazy drive above has had its chance
+    -- to create widgets. ElementAppearance owns colour AND alpha for the border, the
+    -- name/health/status text, the power bar, the four header icons, the dispel
+    -- overlay, the aura rows, the four bars, missing buff, defensive and the Aura
+    -- Designer -- 16 of its 19 functions accept test frames now. The three that still
+    -- bail (health bar, background, frame-level health fade) need a health stamp that
+    -- does not exist yet, and keep their own blocks above.
+    --
+    -- ☠ THIS IS THE FIX FOR A WHOLE CLASS OF BUG. The pattern was: an oor*Alpha or
+    -- fadeDead* key gets added to ElementAppearance and silently not to the copy that
+    -- used to live here, and the preview quietly stops matching live. That happened to
+    -- the missing-buff strip, the defensive row and the AD indicators in three separate
+    -- reports over two days. ADD NOTHING HERE THAT ElementAppearance ALREADY APPLIES.
+    -- (Audit, 2026-08-07.)
+    if DF.UpdateAllElementAppearances then
+        DF:UpdateAllElementAppearances(frame)
+    end
 
     -- Update Aura Designer test indicators through the factory containers — the
     -- SAME path as the bulk DF:UpdateAllTestAuraDesigner, so the per-frame and
@@ -1303,10 +1271,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         if db.testShowAuraDesigner and DF:IsAuraDesignerEnabled(frame)
             and not DF:IsTestFrameDead(frame) then
             ADFactory:SyncFrame(frame)
-            -- Fade through the live function, same as the two above.
-            if DF.UpdateAuraDesignerAppearance then
-                DF:UpdateAuraDesignerAppearance(frame)
-            end
         else
             ADFactory:ClearFrame(frame)
         end
