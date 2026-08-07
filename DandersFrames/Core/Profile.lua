@@ -770,6 +770,23 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         if categorySet.other and DF.db.linkedSections and next(DF.db.linkedSections) then
             exportData.linkedSections = DF:DeepCopy(DF.db.linkedSections)
         end
+        -- ☠ COLOURS ARE PROFILE-ROOT, so they need a special case here exactly like the
+        -- blocks above -- ExtractCategorySettings only ever walks the MODE tables. The
+        -- full-export branch has copied all four since the roleColors/dispelColors move;
+        -- this branch had no equivalent and no category could request them, so a user who
+        -- ticked ALL SIXTEEN boxes still shipped none of their colours. The recipient's
+        -- frames visibly did not match, and the dispel palette is the single source of
+        -- truth for both the debuff-icon border and the dispel overlay.
+        --
+        -- ⚠ DF:AuditExportCategories cannot catch this class: it walks PartyDefaults and
+        -- RaidDefaults only, so it is structurally blind to profile-root keys. Anything
+        -- added at the root has to be wired here by hand.
+        if categorySet.colors then
+            if DF.db.classColors  and next(DF.db.classColors)  then exportData.classColors  = DF:DeepCopy(DF.db.classColors)  end
+            if DF.db.powerColors  and next(DF.db.powerColors)  then exportData.powerColors  = DF:DeepCopy(DF.db.powerColors)  end
+            if DF.db.roleColors   and next(DF.db.roleColors)   then exportData.roleColors   = DF:DeepCopy(DF.db.roleColors)   end
+            if DF.db.dispelColors and next(DF.db.dispelColors) then exportData.dispelColors = DF:DeepCopy(DF.db.dispelColors) end
+        end
     end
 
     if not exportData.party and not exportData.raid then
