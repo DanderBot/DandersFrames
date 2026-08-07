@@ -3142,7 +3142,17 @@ function DF:MigrateOORTextAlpha()
     end
 end
 -- One-shot per-profile, two independently-guarded steps so a profile already
--- through step 1 still receives step 2. Both steps are value-idempotent.
+-- through step 1 still receives step 2.
+--
+-- ☠ ONLY STEP 1 IS VALUE-IDEMPOTENT. This header used to claim both were, and the
+-- import path trusted it -- clearing BOTH guards on every import so the payload got
+-- re-scanned. Step 1 is fine (FoldAuraDesignerConfig early-returns on inset == 0).
+-- Step 2 is not: ZeroBuffDebuffBorderInset writes 0 unconditionally and cannot tell a
+-- legacy inset from a value the user set after migrating, so re-running it destroyed
+-- those settings profile-wide. Re-arming step 2's guard is now conditional on the
+-- payload actually carrying a non-zero inset -- see DF:ApplyImportedProfile.
+--
+-- Anything added here must state which of the two shapes it is.
 function DF:MigrateBorderInsetFold()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do

@@ -1362,12 +1362,36 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     end
 
     -- Fold/zero border insets on the just-imported configs (pre-rework look).
-    -- Clear the active profile's guards so the imported data is re-scanned; the
-    -- steps are value-idempotent, so already-migrated entries are untouched.
     if DF.MigrateBorderInsetFold then
         if DF.db then
+            -- Step 1 (Aura Designer icon/square fold) IS value-idempotent: FoldAuraDesignerConfig
+            -- early-returns on inset == 0, and `seen` stops a shared preset folding twice. Free
+            -- to re-arm on every import.
             DF.db._borderInsetFoldV1 = nil
-            DF.db._buffDebuffInsetZeroV1 = nil
+
+            -- ☠ STEP 2 IS NOT IDEMPOTENT, despite what MigrateBorderInsetFold's header says.
+            -- ZeroBuffDebuffBorderInset writes buffBorderInset = 0 / debuffBorderInset = 0
+            -- UNCONDITIONALLY on BOTH modes and strips those keys out of every raid
+            -- auto-layout override. It cannot tell a leftover legacy inset from a value the
+            -- user deliberately set AFTER the migration ran -- nothing marks the difference.
+            --
+            -- So re-arming it on every import silently destroyed those settings across the
+            -- WHOLE profile, including presets and layouts the import never touched. Importing
+            -- a friend's colour scheme, or a text-only selective import, was enough.
+            --
+            -- Re-arm only when the PAYLOAD actually carries something to fold, and only for a
+            -- mode this import is applying. A v5 export always has these at 0 (the migration
+            -- ran on the sender), so this is a no-op for the normal case while still repairing
+            -- a genuine 4.x payload.
+            local function payloadNeedsInsetZero(mode)
+                if type(mode) ~= "table" then return false end
+                return (tonumber(mode.buffBorderInset) or 0) ~= 0
+                    or (tonumber(mode.debuffBorderInset) or 0) ~= 0
+            end
+            if (selectedFrameTypes.party and payloadNeedsInsetZero(importData.party))
+                or (selectedFrameTypes.raid and payloadNeedsInsetZero(importData.raid)) then
+                DF.db._buffDebuffInsetZeroV1 = nil
+            end
         end
         DF:MigrateBorderInsetFold()
     end
