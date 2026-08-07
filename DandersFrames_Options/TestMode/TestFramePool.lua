@@ -100,11 +100,23 @@ local function CreateTestFrame(index, isRaid)
         DF:ApplyFrameStyle(frame)
     end
     
-    -- Binding tooltip on hover
+    -- Binding tooltip on hover, PLUS the hover-state flag live sets.
+    --
+    -- ☠ HOVER HIGHLIGHT COULD NOT RENDER IN THE PREVIEW. Live's InitializeHeaderChild
+    -- HOOKS OnEnter/OnLeave to set self.dfIsHovered and re-run DF:UpdateHighlights;
+    -- this handler REPLACED that with a tooltip-only script. Highlights.lua gates the
+    -- Hover Highlight on frame.dfIsHovered, and test frames DO run the live
+    -- DF:UpdateHighlights (through UpdateAllTestHighlights) -- so the entire render
+    -- path already existed and only the flag was missing. Nothing secure is involved:
+    -- it is a Lua field and a Lua call. (Audit, 2026-08-07.)
     frame:SetScript("OnEnter", function(self)
+        self.dfIsHovered = true
+        if DF.UpdateHighlights then DF:UpdateHighlights(self) end
         if DF.ShowBindingTooltip then DF:ShowBindingTooltip(self) end
     end)
     frame:SetScript("OnLeave", function(self)
+        self.dfIsHovered = false
+        if DF.UpdateHighlights then DF:UpdateHighlights(self) end
         if DFBindingTooltip then DFBindingTooltip:Hide(); DFBindingTooltip.anchorFrame = nil end
     end)
 
