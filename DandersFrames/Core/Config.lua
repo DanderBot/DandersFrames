@@ -1268,7 +1268,11 @@ DF.PartyDefaults = {
     directBuffShowAll = false,                -- Show all buffs (ignores sub-filters)
     directBuffOnlyMine = true,               -- Restrict all buff filters to player-cast only
     buffFilterSelection = {
-        presets = { healing = true, raidBuffs = true },
+        -- Raid Buffs came off the default with the v5 spell DB: they are permanent
+        -- always-on auras that only ever occupied icon slots. Existing profiles keep
+        -- whatever they had -- see the _buffPresetBaselineV1 migration in Core.lua,
+        -- which only ADDS the three new presets and never removes one.
+        presets = { healing = true, raidDefensives = true, offensiveCooldowns = true, powerExternals = true },
         customs = {},
         uncategorised = false,
     },

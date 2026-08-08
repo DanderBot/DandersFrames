@@ -3290,6 +3290,30 @@ function DF:MigrateAbsoluteFrameLevels()
             end
             profile._missingBuffBaselineV3 = true
         end
+
+        -- Buff preset baseline (v5 spell DB). The buff bar shipped with Healing +
+        -- Raid Buffs selected; the default is now Healing, Raid Cooldowns, Offensive
+        -- Cooldowns and Power Externals. Config defaults only fill MISSING keys and
+        -- every profile already has a buffFilterSelection, so nothing would ever
+        -- revisit the stored table -- hence this pass.
+        --
+        -- Deliberately ADD-ONLY. It turns on the three presets that are new to the
+        -- default and never removes one: Raid Buffs leaving the default is a change
+        -- for NEW profiles, not a reason to hide buffs someone is currently using.
+        -- Healing is untouched for the same reason -- it was already default-on, so
+        -- a profile with it off turned it off on purpose.
+        if type(profile) == "table" and not profile._buffPresetBaselineV1 then
+            for _, mode in ipairs({ "party", "raid" }) do
+                local modeDb = profile[mode]
+                local sel = type(modeDb) == "table" and modeDb.buffFilterSelection
+                if type(sel) == "table" and type(sel.presets) == "table" then
+                    sel.presets.raidDefensives     = true
+                    sel.presets.offensiveCooldowns = true
+                    sel.presets.powerExternals     = true
+                end
+            end
+            profile._buffPresetBaselineV1 = true
+        end
     end
 end
 
@@ -3317,6 +3341,7 @@ local FRESH_PROFILE_MIGRATION_FLAGS = {
     _absoluteFrameLevelsV1  = true,
     _defensiveBaselineV2    = true,
     _missingBuffBaselineV3  = true,
+    _buffPresetBaselineV1   = true,
 }
 local FRESH_PROFILE_PARTY_MIGRATION_FLAGS = {
     _personalContainerCenterMigrated = true,
