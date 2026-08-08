@@ -709,6 +709,17 @@ local function teardownExcept(store, keepName)
     end
 end
 
+-- Same, for the one type that can legitimately hold several containers at once: border in
+-- Stacked mode. keepSet is a name -> true lookup; everything else is torn down as usual.
+local function teardownExceptSet(store, keepSet)
+    for auraName, entry in pairs(store) do
+        if not keepSet[auraName] then
+            if entry.handle then entry.handle:Destroy() end
+            store[auraName] = nil
+        end
+    end
+end
+
 -- Release the background anchor frame (the plain non-secure host for the background-tint
 -- container). WoW frames can't be destroyed, so hide + unanchor + forget the ref; a fresh
 -- one is created on the next background config. Call ONLY after the background containers
@@ -3571,6 +3582,117 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix, defs)
     end
 end
 
+-- Stand up / restyle one whole-frame border ring on its own DF.AuraContainer, keyed by
+-- aura name in the per-type store. Factored out of the border block so BOTH the single
+-- Priority-mode winner and every Stacked-mode ring run the identical path -- there is one
+-- renderer, and "stacked" is only a statement about how many of them exist.
+local function syncBorderEntry(bd, frame, key, cfg, map, mine)
+    local spec = buildBorderSpec(frame, cfg)
+    if not spec then return false end          -- resolved disabled -> render nothing
+
+    local filt = poolFilter(cfg, mine)
+    local wantMissing = cfg.showWhenMissing and true or false
+    local existing = bd[key]
+    if existing and (existing.missing and true or false) ~= wantMissing then
+        existing.handle:Destroy(); bd[key] = nil
+    end
+
+    if wantMissing then
+        -- SHOW-WHEN-MISSING: the ring shows while the buff is ABSENT. Window covers the WHOLE
+        -- frame (config-sized: fdb.frameWidth/Height, live rect secret); badge = the static
+        -- border art with animation STRIPPED (the badge is not a slot in self.buttons, so no
+        -- _teardownContainer StopAnimation loop reaches its UIParent driver -> hard-nil, per
+        -- the missing-buff badge precedent). NEW USE of the missing mechanism at FRAME size —
+        -- the cell push (badge.w + pad) must evacuate the wide window fully on presence
+        -- (flag for in-game validation).
+        local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
+        local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
+        local capturedSpec = spec
+        local coSig = "miss|" .. borderSpecSig(spec) .. "|" .. tostring(mw) .. "x" .. tostring(mh)
+        syncFrameLevelMissing(bd, key, map, frame, frame, frame, mw, mh, 10, coSig,
+            function(handle) styleBorderMissingBadge(handle, capturedSpec) end, filt)
+        return true
+    end
+
+    -- drawAboveFrameBorder rides the STRUCT sig: it resolves to frameLevelOffset in
+    -- buildBorderConfig, which only a Rebuild re-reads (ApplyStyle carries the spec only).
+    local drawAbove = cfg.drawAboveFrameBorder ~= false
+    local structSig = "da=" .. tostring(drawAbove)
+    local tuningSig = placedTuningSig(map, filt)
+    local coSig = borderSpecSig(spec)
+
+    local entry = bd[key]
+    if not entry then
+        local handle = DF.AuraContainer:Create(frame, buildBorderConfig(frame.unit, map, spec, filt, drawAbove))
+        if handle then
+            bd[key] = { handle = handle, structSig = structSig,
+                        tuningSig = tuningSig, coSig = coSig }
+        end
+    elseif entry.structSig ~= structSig then
+        entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
+        entry.handle:Rebuild(buildBorderConfig(frame.unit, map, spec, filt, drawAbove), structSig)
+    else
+        if entry.tuningSig ~= tuningSig then
+            entry.tuningSig = tuningSig
+            entry.handle:ApplyTuning(buildBorderConfig(frame.unit, map, spec, filt, drawAbove))
+        end
+        if entry.coSig ~= coSig then
+            entry.coSig = coSig
+            entry.handle:ApplyStyle({ border = { spec = spec } })
+        end
+    end
+    return true
+end
+
+-- Collect every border indicator opted into Stacked mode, across both pools, resolving
+-- identity exactly as pickWinner does. Sorted highest-priority FIRST so the rings are
+-- created in a deterministic, priority-driven order rather than pairs() order.
+-- ☠ Sort order is the CREATION order, not a frame-level guarantee: every ring lands on the
+-- same level for a given Draw Above setting (the +9/+11 border band has no headroom for a
+-- ladder — +10 is the missing badge, +11/+12 are the absorb/heal-prediction bands). Rings
+-- meant to be seen together must be separated by INSET, which is the point of the mode.
+-- Returns a fresh list (nil when there are none, which is the common case: nothing is
+-- allocated unless the profile actually uses the mode). Deliberately NOT a reused module
+-- scratch table -- SyncFrame runs per frame off config/roster changes, not per tick, so a
+-- short-lived list is free here and cannot be clobbered by re-entrancy.
+local function collectStackedBorders(spec, specAuras, otherAuras)
+    local stackedBorders
+    for pool = 1, 2 do
+        local auras = (pool == 1) and specAuras or otherAuras
+        -- Other-pool identity is spec-INDEPENDENT (see pickWinner).
+        local idSpec = (pool == 1) and spec or nil
+        if auras then
+            for auraName, auraCfg in pairs(auras) do
+                local typeCfg = (type(auraCfg) == "table") and auraCfg.border
+                if typeCfg and typeCfg.enabled ~= false and typeCfg.ShowBorder ~= false
+                   and typeCfg.borderMode == "custom" then
+                    local map = unionIdentity(idSpec, auraName, typeCfg)
+                    if not map and pool == 2 then warnOtherUnresolved(auraName) end
+                    if map then
+                        stackedBorders = stackedBorders or {}
+                        stackedBorders[#stackedBorders + 1] = {
+                            key  = (pool == 2) and (OTHER_PREFIX .. auraName) or auraName,
+                            cfg  = typeCfg,
+                            map  = map,
+                            prio = auraCfg.priority or 5,
+                            mine = (pool == 1),
+                        }
+                    end
+                end
+            end
+        end
+    end
+    if not stackedBorders then return nil end
+    -- Same tiebreak as pickWinner: priority, then pool, then name — so equal-priority rings
+    -- keep a stable order instead of shuffling on every roster change.
+    table.sort(stackedBorders, function(a, b)
+        if a.prio ~= b.prio then return a.prio > b.prio end
+        if a.mine ~= b.mine then return a.mine end
+        return a.key < b.key
+    end)
+    return stackedBorders
+end
+
 -- ============================================================
 -- PER-FRAME SYNC  (P4.1 health-bar + P4.2 frame-level family)
 -- Reads the CONFIGURED indicators in adDB.auras[spec] (never a live aura list). Each
@@ -3579,6 +3701,8 @@ end
 -- its own DF.AuraContainer. Types ported here: healthbar, background, border. framealpha /
 -- nametext / healthtext RECOVERED via colour-by-cover (see the NAME / HEALTH TEXT block
 -- below and the foot notes); framealpha stays a 12.1 casualty (P4.7 overlays its controls).
+-- ☠ BORDER IS THE ONE EXCEPTION to "one winner per type": an indicator set to Stacked mode
+-- opts out of the priority contest and gets its own ring, so several can show at once.
 -- ============================================================
 function Factory:SyncFrame(frame)
     if not frame or not frame.unit then return end
@@ -3874,69 +3998,35 @@ function Factory:SyncFrame(frame)
 
         -- Cheap RAW-config gate (no BuildSpec, no allocation on the hot path): BuildSpec
         -- keys `enabled` off exactly this key (Border.lua:217 → enabled = ShowBorder ~= false),
-        -- so the winner set is identical to a full-spec enabled check. The one real spec is
-        -- built ONCE below, for the chosen winner.
+        -- so the winner set is identical to a full-spec enabled check. Stacked-mode entries
+        -- are excluded here — they opt OUT of the single-ring contest and are stood up below,
+        -- so a Stacked ring never suppresses the Priority-mode winner or vice versa.
         local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, "border",
-            function(c) return c.ShowBorder ~= false end)
+            function(c) return c.ShowBorder ~= false and c.borderMode ~= "custom" end)
 
-        local bestSpec
-        if bestName then
-            bestSpec = buildBorderSpec(frame, bestCfg)
-            if not bestSpec then bestName = nil end   -- resolved disabled → render nothing
-        end
+        -- STACKED: each opted-in indicator gets its own ring, highest priority created first.
+        local stacked = collectStackedBorders(spec, specAuras, otherAuras)
 
-        if bestName then
-            local filt = poolFilter(bestCfg, bestPool == 1)
-            local wantMissingBD = bestCfg.showWhenMissing and true or false
-            local existingBD = bd[bestName]
-            if existingBD and (existingBD.missing and true or false) ~= wantMissingBD then
-                existingBD.handle:Destroy(); bd[bestName] = nil
+        if not stacked then
+            -- Nothing stacked (the overwhelmingly common case) — the original single-winner
+            -- path, with no set to build and nothing extra to tear down.
+            if bestName and not syncBorderEntry(bd, frame, bestName, bestCfg, bestMap, bestPool == 1) then
+                bestName = nil          -- resolved disabled → tear the old ring down too
             end
-          if wantMissingBD then
-            -- SHOW-WHEN-MISSING: the ring shows while the buff is ABSENT. Window covers the WHOLE
-            -- frame (config-sized: fdb.frameWidth/Height, live rect secret); badge = the static
-            -- border art with animation STRIPPED (the badge is not a slot in self.buttons, so no
-            -- _teardownContainer StopAnimation loop reaches its UIParent driver -> hard-nil, per
-            -- the missing-buff badge precedent). NEW USE of the missing mechanism at FRAME size —
-            -- the cell push (badge.w + pad) must evacuate the wide window fully on presence
-            -- (flag for in-game validation).
-            local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
-            local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
-            local capturedSpec = bestSpec
-            local coSig = "miss|" .. borderSpecSig(bestSpec) .. "|" .. tostring(mw) .. "x" .. tostring(mh)
-            syncFrameLevelMissing(bd, bestName, bestMap, frame, frame, frame, mw, mh, 10, coSig,
-                function(handle) styleBorderMissingBadge(handle, capturedSpec) end, filt)
-          else
-            -- drawAboveFrameBorder rides the STRUCT sig: it resolves to frameLevelOffset in
-            -- buildBorderConfig, which only a Rebuild re-reads (ApplyStyle carries the spec only).
-            local drawAbove = bestCfg.drawAboveFrameBorder ~= false
-            local structSig = "da=" .. tostring(drawAbove)
-            local tuningSig = placedTuningSig(bestMap, filt)
-            local coSig = borderSpecSig(bestSpec)
-
-            local entry = bd[bestName]
-            if not entry then
-                local handle = DF.AuraContainer:Create(frame, buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove))
-                if handle then
-                    bd[bestName] = { handle = handle, structSig = structSig,
-                                     tuningSig = tuningSig, coSig = coSig }
-                end
-            elseif entry.structSig ~= structSig then
-                entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                entry.handle:Rebuild(buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove), structSig)
-            else
-                if entry.tuningSig ~= tuningSig then
-                    entry.tuningSig = tuningSig
-                    entry.handle:ApplyTuning(buildBorderConfig(frame.unit, bestMap, bestSpec, filt, drawAbove))
-                end
-                if entry.coSig ~= coSig then
-                    entry.coSig = coSig
-                    entry.handle:ApplyStyle({ border = { spec = bestSpec } })
+            teardownExcept(bd, bestName)
+        else
+            local keep = {}
+            if bestName and syncBorderEntry(bd, frame, bestName, bestCfg, bestMap, bestPool == 1) then
+                keep[bestName] = true
+            end
+            for i = 1, #stacked do
+                local s = stacked[i]
+                if syncBorderEntry(bd, frame, s.key, s.cfg, s.map, s.mine) then
+                    keep[s.key] = true
                 end
             end
-          end
+            teardownExceptSet(bd, keep)
         end
-        teardownExcept(bd, bestName)
     end
 
     -- ---- NAME / HEALTH TEXT (colour-by-cover via Text Designer mirrors) --------------

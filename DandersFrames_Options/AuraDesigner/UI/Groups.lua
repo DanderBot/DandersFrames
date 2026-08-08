@@ -1955,8 +1955,11 @@ local function RefreshPreviewEffects()
     local auraName, auraCfg = entry.name, entry.cfg
 
     -- Border effect (Stage 5.4: rendered via DF.Border, mirroring the runtime).
-    -- Shared borders use a single overlay (first/highest-priority claim wins);
-    -- custom borders get independent per-aura overlays so multiple can stack.
+    -- Priority-mode borders share a single overlay (first/highest-priority claim wins);
+    -- Stacked-mode borders (stored as borderMode == "custom") get independent per-aura
+    -- overlays so several show at once. sortedAuras is already in the same descending-
+    -- priority, name-tiebreak order the factory's collectStackedBorders uses, so the
+    -- stacking order here matches the live one.
     -- Every type skips hidden blocks (eye toggle, enabled == false) — same as pickWinner.
     if auraCfg.border and auraCfg.border.enabled ~= false and auraCfg.border.ShowBorder ~= false then
         local spec = DF.Border:BuildSpec(auraCfg.border, "")

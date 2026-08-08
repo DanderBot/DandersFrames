@@ -1857,28 +1857,30 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 bmLabel:SetText(L["Border Mode:"])
                 bmLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
 
-                -- Shared button
+                -- Priority button (the stored default: borderMode nil)
                 local sharedBtn = CreateFrame("Button", nil, bmContainer, "BackdropTemplate")
                 sharedBtn:SetPoint("LEFT", bmLabel, "RIGHT", 6, 0)
 
                 local sharedText = sharedBtn:CreateFontString(nil, "OVERLAY")
                 GUI:SetSettingsFont(sharedText, 9, "")
                 sharedText:SetPoint("CENTER", 0, 0)
-                sharedText:SetText(L["Shared"])
+                sharedText:SetText(L["Priority"])
                 local sharedW = sharedText:GetStringWidth() + 16
                 if sharedW < 50 then sharedW = 50 end
                 -- Shared styler: rest + accent-wash hover + SetActive selection state.
                 -- Keep the manual (small) label; size to the computed text width.
                 GUI:StyleButton(sharedBtn, { width = sharedW, height = 20 })
 
-                -- Custom button
+                -- Stacked button (stored as borderMode = "custom" -- the LABEL was renamed
+                -- for clarity, the stored key deliberately was NOT, so existing profiles
+                -- keep working with no migration)
                 local customBtn = CreateFrame("Button", nil, bmContainer, "BackdropTemplate")
                 customBtn:SetPoint("LEFT", sharedBtn, "RIGHT", 4, 0)
 
                 local customText = customBtn:CreateFontString(nil, "OVERLAY")
                 GUI:SetSettingsFont(customText, 9, "")
                 customText:SetPoint("CENTER", 0, 0)
-                customText:SetText(L["Custom"])
+                customText:SetText(L["Stacked"])
                 local customW = customText:GetStringWidth() + 16
                 if customW < 50 then customW = 50 end
                 GUI:StyleButton(customBtn, { width = customW, height = 20 })
@@ -1914,18 +1916,19 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 -- Tooltips via HookScript so they compose with the styler's hover wash.
                 sharedBtn:HookScript("OnEnter", function()
                     GUI:ShowTooltip(sharedBtn, {
-                        title = L["Shared Border"],
+                        title = L["Priority Border"],
                         lines = {
-                            L["Uses a single border per frame. Highest priority wins."],
+                            L["Competes for the frame's single border. The highest-priority aura wins and the rest stay hidden."],
                         },
                     })
                 end)
                 sharedBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
                 customBtn:HookScript("OnEnter", function()
                     GUI:ShowTooltip(customBtn, {
-                        title = L["Custom Border"],
+                        title = L["Stacked Border"],
                         lines = {
-                            L["Gets its own independent border overlay. Multiple custom borders can be visible at the same time."],
+                            L["Draws its own border, so it shows at the same time as the others."],
+                            L["Give each stacked border a different Inset so they nest instead of overlapping."],
                         },
                     })
                 end)
