@@ -1035,16 +1035,29 @@ function GUI:CreateInfoBanner(parent, opts)
                 fs:SetText(seg.text)
                 fs:SetTextColor(0.85, 0.85, 0.85)
                 seg._w = fs:GetStringWidth()
-                -- Give an explicit size matching the button height so TOPLEFT
-                -- anchors place both text words and link buttons on the same baseline.
-                fs:SetSize(seg._w, FLOW_LINE_H)
+                -- HEIGHT ONLY -- deliberately no width. The height matches the link button so
+                -- TOPLEFT anchors put words and links on the same baseline; the width is left
+                -- unset so the fontstring auto-sizes to its own text.
+                -- ☠ AN EXPLICIT WIDTH HERE IS A CLIP RECT, and with word wrap off a
+                -- fontstring one sub-pixel too narrow renders as "...". Glyph advances snap to
+                -- PHYSICAL pixels, so a box measured at one UI scale is wrong at another: these
+                -- were sized from GetStringWidth at 100% and every word truncated at 95%.
+                -- An unset width cannot truncate at any scale.
+                -- Safe because DoFlowLayout positions from seg._w and never reads the widget's
+                -- own width -- the box is invisible to spacing and to wrapping.
+                fs:SetHeight(FLOW_LINE_H)
                 seg._widget = fs
                 self._flowWidgets[#self._flowWidgets + 1] = fs
             elseif seg.type == "link" then
                 local btn = CreateFrame("Button", nil, self)
                 local fs = btn:CreateFontString(nil, "OVERLAY", fontTemplate)
                 if not opts.fontTemplate then GUI:SetSettingsFont(fs, 11, "") end  -- match the 11px plain body
-                fs:SetAllPoints()
+                -- Anchored, NOT SetAllPoints: the button is the hit rect and gets a ceil'd
+                -- width below, but pinning the fontstring to it makes that box a clip rect
+                -- too, and the same scale-dependent metrics truncated links as well as words.
+                -- Left-anchored with no width, the text auto-sizes; the button keeps an honest
+                -- hit rect. LEFT justify kept so it still reads correctly if a width is ever set.
+                fs:SetPoint("LEFT", btn, "LEFT", 0, 0)
                 fs:SetJustifyH("LEFT")   -- ink flush-left so the link spaces like a plain word
                 fs:SetText(seg.text)
                 fs:SetTextColor(tc.r, tc.g, tc.b)
@@ -1134,12 +1147,17 @@ function GUI:CreateLink(parent, text, opts)
             fs:SetText(seg.text)
             fs:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)   -- dim body, like a note
             seg._w = fs:GetStringWidth()
-            fs:SetSize(seg._w, LINE_H)
+            -- Height only, no width -- see the matching note in SetHTML. An explicit width is
+            -- a clip rect, and a box measured at one UI scale is a hair short at another, so
+            -- every word rendered as "...". The flow reads seg._w, never the widget's width.
+            fs:SetHeight(LINE_H)
             seg._widget = fs
         elseif seg.type == "link" then
             local btn = CreateFrame("Button", nil, frame)
             local fs = btn:CreateFontString(nil, "OVERLAY", fontTemplate)
-            fs:SetAllPoints()
+            -- Anchored, not SetAllPoints, so the button's box stays a hit rect and never
+            -- clips the text (see SetHTML).
+            fs:SetPoint("LEFT", btn, "LEFT", 0, 0)
             fs:SetJustifyH("LEFT")   -- ink flush-left so the link spaces like a plain word
             fs:SetText(seg.text)
             fs:SetTextColor(tc.r, tc.g, tc.b)
