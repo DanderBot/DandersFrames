@@ -1230,6 +1230,18 @@ function DF:CreateGUI()
     GUI.SelectTab = SelectTab
     
     GUI.RefreshCurrentPage = function()
+        -- ☠ THE SEARCH RESULTS RE-FLOW HERE TOO, and this is the only place they can.
+        -- The results panel is not a page, so the page loop below never reaches it — yet
+        -- it lays out in the same two columns and needs the same recompute when the
+        -- window is resized (this function is what the resize handle's OnMouseUp calls).
+        -- Without this the search grid kept whatever column geometry it had when the
+        -- query ran, and its gutter did not track the window like every page does.
+        -- It re-lays out only; it does not re-run the query.
+        if DF.Search and DF.Search.LayoutResults
+            and DF.Search.ResultsPanel and DF.Search.ResultsPanel:IsShown() then
+            DF.Search:LayoutResults()
+        end
+
         -- Don't refresh regular pages when in clicks mode (they use DF.db which doesn't have "clicks")
         if GUI.SelectedMode == "clicks" then
             return
