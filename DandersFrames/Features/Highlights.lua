@@ -704,6 +704,19 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         if isAggro and db.aggroHideOnTanks and unit and UnitGroupRolesAssigned(unit) == "TANK" then
             isAggro = false
         end
+        -- ☠ A CORPSE HOLDS NO THREAT, but UnitThreatSituation keeps reporting one, so the
+        -- glow used to sit on a dead player until the next target change / hover / combat
+        -- end. Blizzard hit the same thing and shipped the same guard in PTR build 69189
+        -- (UnitFrame_UpdateThreatIndicator gained `and not UnitIsDead(indicator.unit)`).
+        -- ⚠ Their COMPACT-frame aggro path -- the one this mirrors -- still has no such
+        -- check at 69189, so this is ours to carry.
+        -- DeadOrGhost rather than Blizzard's plain Dead: a ghost is even further off the
+        -- threat table, and it matches how the rest of DF asks the question (IsDeadOrOffline).
+        -- Suppresses the HIGHLIGHT only; `status` stays intact for the Text Designer stash
+        -- just below, which is a separate display with its own rules.
+        if isAggro and unit and UnitIsDeadOrGhost(unit) then
+            isAggro = false
+        end
     end
 
     -- TD: stash the threat status (already fetched above for the aggro border)
