@@ -1840,103 +1840,6 @@ S.CreateEffectCard = function(parent, yPos, effect)
             triggersH = -(tagY) + TAG_H + 8  -- total height of trigger section
             trigContainer:SetHeight(triggersH)
 
-            -- Border mode toggle (border effects only)
-            if effect.typeKey == "border" then
-                local auraCfgBM = CurrentAuraPool()[effect.auraName]
-                local typeCfgBM = auraCfgBM and auraCfgBM[effect.typeKey]
-                local isCustom = typeCfgBM and typeCfgBM.borderMode == "custom"
-
-                local bmContainer = CreateFrame("Frame", nil, body)
-                bmContainer:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(triggersH + 10))
-                bmContainer:SetPoint("RIGHT", body, "RIGHT", -8, 0)
-                bmContainer:SetHeight(26)
-
-                local bmLabel = bmContainer:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(bmLabel, 9, "")
-                bmLabel:SetPoint("LEFT", 0, 0)
-                bmLabel:SetText(L["Border Mode:"])
-                bmLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-                -- Priority button (the stored default: borderMode nil)
-                local sharedBtn = CreateFrame("Button", nil, bmContainer, "BackdropTemplate")
-                sharedBtn:SetPoint("LEFT", bmLabel, "RIGHT", 6, 0)
-
-                local sharedText = sharedBtn:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(sharedText, 9, "")
-                sharedText:SetPoint("CENTER", 0, 0)
-                sharedText:SetText(L["Priority"])
-                local sharedW = sharedText:GetStringWidth() + 16
-                if sharedW < 50 then sharedW = 50 end
-                -- Shared styler: rest + accent-wash hover + SetActive selection state.
-                -- Keep the manual (small) label; size to the computed text width.
-                GUI:StyleButton(sharedBtn, { width = sharedW, height = 20 })
-
-                -- Stacked button (stored as borderMode = "custom" -- the LABEL was renamed
-                -- for clarity, the stored key deliberately was NOT, so existing profiles
-                -- keep working with no migration)
-                local customBtn = CreateFrame("Button", nil, bmContainer, "BackdropTemplate")
-                customBtn:SetPoint("LEFT", sharedBtn, "RIGHT", 4, 0)
-
-                local customText = customBtn:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(customText, 9, "")
-                customText:SetPoint("CENTER", 0, 0)
-                customText:SetText(L["Stacked"])
-                local customW = customText:GetStringWidth() + 16
-                if customW < 50 then customW = 50 end
-                GUI:StyleButton(customBtn, { width = customW, height = 20 })
-
-                -- Drive the selection state via the shared styler's SetActive (active =
-                -- toned accent border + subtle accent fill). Keep a bright/dim label cue.
-                local function StyleBorderModeButtons(customActive)
-                    sharedBtn:SetActive(not customActive)
-                    customBtn:SetActive(customActive)
-                    if customActive then
-                        customText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-                        sharedText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                    else
-                        sharedText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-                        customText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                    end
-                end
-                StyleBorderModeButtons(isCustom)
-
-                sharedBtn:SetScript("OnClick", function()
-                    local cfg = EnsureTypeConfig(effect.auraName, effect.typeKey)
-                    cfg.borderMode = nil  -- shared is default
-                    S.SwitchTab("effects")
-                    RefreshPreviewEffects()
-                end)
-                customBtn:SetScript("OnClick", function()
-                    local cfg = EnsureTypeConfig(effect.auraName, effect.typeKey)
-                    cfg.borderMode = "custom"
-                    S.SwitchTab("effects")
-                    RefreshPreviewEffects()
-                end)
-
-                -- Tooltips via HookScript so they compose with the styler's hover wash.
-                sharedBtn:HookScript("OnEnter", function()
-                    GUI:ShowTooltip(sharedBtn, {
-                        title = L["Priority Border"],
-                        lines = {
-                            L["Competes for the frame's single border. The highest-priority aura wins and the rest stay hidden."],
-                        },
-                    })
-                end)
-                sharedBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
-                customBtn:HookScript("OnEnter", function()
-                    GUI:ShowTooltip(customBtn, {
-                        title = L["Stacked Border"],
-                        lines = {
-                            L["Draws its own border, so it shows at the same time as the others."],
-                            L["Give each stacked border a different Inset so they nest instead of overlapping."],
-                        },
-                    })
-                end)
-                customBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
-
-                triggersH = triggersH + 36
-            end
-
             -- Priority slider (frame-level effects only — resolves conflicts when
             -- multiple auras set the same frame effect, e.g. two health bar colors)
             local auraProxy = CreateAuraProxy(effect.auraName)
@@ -1953,6 +1856,69 @@ S.CreateEffectCard = function(parent, yPos, effect)
             local priNote = GUI:CreateLabel(body, L["Higher priority wins"], bodyWidth - 16)
             priNote:SetPoint("TOPLEFT", priSlider, "BOTTOMLEFT", 0, -2)
             triggersH = triggersH + 84
+
+            -- "Own border" opt-out (border effects only). BELOW Priority on purpose:
+            -- Priority is the general per-aura setting, this is a border-specific override,
+            -- and here it sits next to Others Only and directly above the Border appearance
+            -- controls that BuildTypeContent adds -- which is what it actually belongs with.
+            --
+            -- ☠ This is a MEMBERSHIP choice, not a mode, and the control says so. It was a
+            -- Priority/Stacked button PAIR, which read as a per-aura policy and raised the
+            -- obvious question: what happens if one indicator says Priority and another says
+            -- Stacked? (Answer: they coexist fine -- the stacked one opts out of the contest
+            -- and the priority one takes the shared ring.) A pair of modes could not express
+            -- that without the user inferring it. Unticked = share the frame's one border and
+            -- resolve by Priority; ticked = draw your own alongside.
+            -- ☠ THE STORED VALUE IS UNCHANGED -- nil / "custom" -- so no migration and old
+            -- profiles keep working. Do not "tidy" it to a boolean without one.
+            if effect.typeKey == "border" then
+                local function OwnBorderOn()
+                    local a = CurrentAuraPool()[effect.auraName]
+                    local t = a and a[effect.typeKey]
+                    return (t and t.borderMode == "custom") and true or false
+                end
+
+                -- ☠ RE-WORD THE PRIORITY NOTE, DO NOT DISABLE THE SLIDER. "Higher priority
+                -- wins" is plainly false once this aura has opted out of the contest -- but
+                -- the slider is still live: priority is per-AURA (CreateAuraProxy ->
+                -- auraCfg.priority, the SAME value every frame-level effect card edits), so
+                -- it still resolves this aura's health-bar / background / text effects, and
+                -- collectStackedBorders sorts by it so it still orders the stacked rings.
+                -- Greying it would claim a working control does nothing.
+                local function SyncPriorityNote()
+                    priNote:SetText(OwnBorderOn()
+                        and L["This aura's border always shows. Priority still applies to its other effects."]
+                        or L["Higher priority wins"])
+                end
+                SyncPriorityNote()
+
+                -- customGet/customSet rather than a db key: the stored value is nil /
+                -- "custom", not a boolean, and the checkbox maps ticked -> "custom".
+                -- The factory writes through customSet BEFORE firing this callback, so
+                -- SyncPriorityNote reads the new value (SettingsWidgets.lua, checkbox OnClick).
+                local ownBorderCb = GUI:CreateCheckbox(body, L["Give this aura its own border"],
+                    nil, nil,
+                    function()
+                        SyncPriorityNote()
+                        S.SwitchTab("effects")
+                        RefreshPreviewEffects()
+                    end,
+                    OwnBorderOn,
+                    function(val)
+                        local cfg = EnsureTypeConfig(effect.auraName, effect.typeKey)
+                        cfg.borderMode = val and "custom" or nil
+                    end)
+                ownBorderCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(triggersH + 10))
+                ownBorderCb:SetWidth(bodyWidth - 16)
+                ownBorderCb.tooltip = {
+                    title = L["Give this aura its own border"],
+                    lines = {
+                        L["Off: this aura shares the frame's single border. If two auras both want it, the higher Priority one shows."],
+                        L["On: it draws its own border alongside the others. Give them different Insets so they nest instead of covering each other."],
+                    },
+                }
+                triggersH = triggersH + 36
+            end
         end
 
         -- ── OTHERS ONLY (Other Buffs tab; placed AND frame-level effects) ──
