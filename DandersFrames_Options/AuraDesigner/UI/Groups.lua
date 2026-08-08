@@ -1368,6 +1368,14 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     slot:SetPoint(lay.anchor or "TOPLEFT", mockFrame, lay.anchor or "TOPLEFT", lay.offsetX or 0, lay.offsetY or 0)
     slot:SetFrameStrata(mockFrame:GetFrameStrata())
     slot:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+    -- ★ ALPHA. The canvas set size, scale, anchor, strata and level but never alpha, so an
+    -- indicator dropped to 40% rendered full-strength here while the live frame faded it
+    -- correctly — the preview disagreeing with the thing it previews.
+    -- Alpha is not in cfg because it is not a style/layout field: live applies it separately
+    -- through applyPlacedAlpha, which stashes _dfADBaseAlpha for the OOR fade and writes the
+    -- slot's host. The canvas has neither a handle nor an OOR pass, so it reads the SAME
+    -- source key with the SAME fallback instead — previews differ in DATA, never in rendering.
+    slot:SetAlpha(tonumber(indicator.alpha) or 1)
     AC.PaintPreviewSlot(slot, cfg, 1)
     slot:Show()
 

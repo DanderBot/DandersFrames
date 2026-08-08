@@ -5021,6 +5021,32 @@ local function ownerOf(frame)
     return frame and frame.dfSlotOwner or nil
 end
 
+-- ★ THE LEGAL FADE TARGET FOR EVERY SLOT-BACKED INDICATOR ON THIS FRAME.
+-- SlotHandle:GetAlphaHost answers with button.dfLevelHost, which is INSIDE the aura button
+-- and therefore forbidden to tainted code on 12.1 — proven in the field, where even a bare
+-- GetDebugName() on it is refused, not just the alpha setters. So per-indicator alpha on a
+-- shared slot cannot be written at all.
+--
+-- ensureOwner already interposes a plain DF-created Frame between the unit frame and the
+-- container (`anchor`), purely so the container has something to SetAllPoints to. That frame
+-- is ours, lives above the whole aura hierarchy, and alpha multiplies down through the
+-- container to every button and region inside it — so fading it fades every slot-backed
+-- indicator on the frame with ONE legal write.
+--
+-- ⚠ Deliberately frame-wide, not per-indicator. Out-of-range is a property of the UNIT, so
+-- every indicator on it fades together anyway; there is nothing to lose by sharing the write.
+-- What this canNOT do is per-indicator BASE alpha (the AD Alpha slider) — that needs the
+-- per-button host, which is unwritable. That capability is already gone for slot-backed
+-- indicators regardless of this; fading here neither restores nor worsens it.
+local function ownerAlphaHost(frame)
+    local owner = frame and frame.dfSlotOwner
+    return owner and owner.anchor or nil
+end
+
+function AuraContainer:GetSlotOwnerAlphaHost(frame)
+    return ownerAlphaHost(frame)
+end
+
 -- Lazily stand up the per-frame owner. Build order mirrors NativeBackend:build exactly --
 -- create -> anchor -> SetUnit -> (slots) -> SetEnabled -- because the same rules bite:
 -- SetEnabled gates event registration on IsVisible() and IsEnabled(), and anchoring must
