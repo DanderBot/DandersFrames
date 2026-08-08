@@ -3,8 +3,8 @@ local addonName, DF = ...
 -- ============================================================
 -- FILTER REGISTRY — SHIPPED SPELL DATABASE
 -- Curated spell records for the buff filter presets. Source:
--- WCL harvest v4, 2026-08-07 (lab discussion
--- ee16e59f-d4c9-4680-b2ca-17a754a3e102), 14 categories / 529 ids.
+-- WCL harvest v5, 2026-08-08 (lab discussion
+-- ee16e59f-d4c9-4680-b2ca-17a754a3e102), 15 categories / 599 ids.
 -- One record per SPELL; alts carry every other known
 -- spellID for the same spell — but IDs are merged into one record
 -- ONLY when they share the identical category set (per-ID category
@@ -20,7 +20,7 @@ local pairs, ipairs = pairs, ipairs
 DF.FilterRegistry = DF.FilterRegistry or {}
 local R = DF.FilterRegistry
 
-R.DBStamp = { harvest = "2026-08-07", gameBuild = 68569 }
+R.DBStamp = { harvest = "2026-08-08", gameBuild = 68914 }
 
 -- Hand-maintained exclusion list — harvest ids DF refuses to carry, with the
 -- reason. Regeneration (/update-spelldb) DROPS these ids from records (a record
@@ -107,6 +107,7 @@ R.Categories = {
     { key = "externalDefensives", name = "External Defensives" },
     { key = "defensives",         name = "Defensives" },
     { key = "tankCooldowns",      name = "Tank Cooldowns" },
+    { key = "offensiveCooldowns", name = "Offensive Cooldowns" },
     { key = "powerExternals",     name = "Power Externals" },
     { key = "movement",           name = "Movement" },
     { key = "utility",            name = "Utility" },
@@ -194,6 +195,7 @@ R.Spells = {
     { id = 450805,   n = "Purified Spirit",           class = "MONK",          cats = { healing = true } },
     { id = 388513,   n = "Overflowing Mists",         class = "MONK",          cats = {} },  -- DB-only: out of Healing preset, still addable via the picker
     { id = 467281,   alts = { 427296 }, n = "Healing Elixir", class = "MONK", cats = { healing = true } },
+    { id = 370562,   alts = { 370537 }, n = "Stasis", class = "EVOKER",        cats = { healing = true } },
     { id = 54149,    n = "Infusion of Light",         class = "PALADIN",       off = true, cats = { healing = true } },
 
     -- ------------------------------------------------------------
@@ -236,6 +238,8 @@ R.Spells = {
     { id = 462568,   n = "Elemental Resistance",      class = "SHAMAN",        off = true, cats = { raidDefensives = true } },
     { id = 1260681,  alts = { 406139, 406220, 451299, 432772 }, n = "Chi Cocoon", class = "MONK", cats = { raidDefensives = true } },
     { id = 211210,   n = "Protection of Tyr",         class = "PALADIN",       cats = { raidDefensives = true } },
+    { id = 472433,   n = "Evangelism",                class = "PRIEST",        cats = { raidDefensives = true } },
+    { id = 33891,    n = "Incarnation: Tree of Life", class = "DRUID",         cats = { raidDefensives = true } },
 
     -- ------------------------------------------------------------
     -- Movement
@@ -288,6 +292,8 @@ R.Spells = {
     { id = 446044,   n = "Relentless Pursuit",        class = "WARRIOR",       cats = { movement = true } },
     { id = 262232,   n = "War Machine",               class = "WARRIOR",       cats = { movement = true } },
     { id = 434029,   n = "Vampiric Speed",            class = "DEATHKNIGHT",   cats = { movement = true } },
+    { id = 358267,   n = "Hover",                     class = "EVOKER",        cats = { movement = true } },
+    { id = 444347,   n = "Death Charge",              class = "DEATHKNIGHT",   cats = { movement = true } },
 
     -- ------------------------------------------------------------
     -- Power Externals
@@ -332,7 +338,7 @@ R.Spells = {
     { id = 48707,    alts = { 444741, 410358 }, n = "Anti-Magic Shell", class = "DEATHKNIGHT", cats = { defensives = true, tankCooldowns = true } },
     { id = 49039,    n = "Lichborne",                 class = "DEATHKNIGHT",   cats = { defensives = true } },
     { id = 45438,    n = "Ice Block",                 class = "MAGE",          cats = { defensives = true } },
-    { id = 414658,   n = "Ice Cold",                  class = "MAGE",          cats = { defensives = true } },
+    { id = 414658,   alts = { 414659 }, n = "Ice Cold", class = "MAGE",        cats = { defensives = true } },
     { id = 235450,   n = "Prismatic Barrier",         class = "MAGE",          cats = { defensives = true } },
     { id = 235313,   n = "Blazing Barrier",           class = "MAGE",          cats = { defensives = true } },
     { id = 11426,    n = "Ice Barrier",               class = "MAGE",          cats = { defensives = true } },
@@ -369,11 +375,14 @@ R.Spells = {
     { id = 1966,     n = "Feint",                     class = "ROGUE",         cats = { defensives = true } },
     { id = 5277,     n = "Evasion",                   class = "ROGUE",         cats = { defensives = true } },
     { id = 442715,   n = "Blade Ward",                class = "DEMONHUNTER",   cats = { defensives = true } },
-    { id = 212800,   n = "Blur",                      class = "DEMONHUNTER",   cats = { defensives = true } },
+    { id = 212800,   alts = { 198589 }, n = "Blur", class = "DEMONHUNTER",     cats = { defensives = true } },
     { id = 434107,   alts = { 434105 }, n = "Vampiric Aura", class = "DEATHKNIGHT", off = true, cats = { defensives = true } },
     { id = 404381,   n = "Defy Fate",                 class = "EVOKER",        cats = { defensives = true } },
     { id = 374349,   alts = { 374348 }, n = "Renewing Blaze", class = "EVOKER", cats = { defensives = true } },
     { id = 455179,   n = "Elixir of Determination",   class = "MONK",          cats = { defensives = true, tankCooldowns = true } },
+    { id = 185311,   n = "Crimson Vial",               class = "ROGUE",         cats = { defensives = true } },
+    { id = 125174,   alts = { 122470 }, n = "Touch of Karma", class = "MONK",   cats = { defensives = true } },
+    { id = 109304,   n = "Exhilaration",              class = "HUNTER",        cats = { defensives = true } },
     { id = 378412,   n = "Light of the Titans",       class = "PALADIN",       cats = { healing = true, tankCooldowns = true } },
 
     -- ------------------------------------------------------------
@@ -391,7 +400,7 @@ R.Spells = {
     { id = 81256,    n = "Dancing Rune Weapon",        class = "DEATHKNIGHT",   cats = { defensives = true, tankCooldowns = true } },
     { id = 187827,   n = "Metamorphosis",              class = "DEMONHUNTER",   cats = { defensives = true, tankCooldowns = true } },
     { id = 263648,   n = "Soul Barrier",               class = "DEMONHUNTER",   cats = { defensives = true, tankCooldowns = true } },
-    { id = 207771,   n = "Fiery Brand",                class = "DEMONHUNTER",   cats = { defensives = true, tankCooldowns = true } },
+    { id = 207771,   alts = { 204021 }, n = "Fiery Brand", class = "DEMONHUNTER", cats = { defensives = true, tankCooldowns = true } },
     { id = 322507,   alts = { 425965 }, n = "Celestial Brew", class = "MONK",   cats = { defensives = true, tankCooldowns = true } },
     { id = 132578,   n = "Invoke Niuzao, the Black Ox", class = "MONK",         cats = { defensives = true, tankCooldowns = true } },
     { id = 102558,   n = "Incarnation: Guardian of Ursoc", class = "DRUID",     cats = { defensives = true, tankCooldowns = true } },
@@ -402,6 +411,61 @@ R.Spells = {
     { id = 132404,   n = "Shield Block",               class = "WARRIOR",       off = true, cats = { tankCooldowns = true } },
     { id = 215479,   n = "Shuffle",                    class = "MONK",          off = true, cats = { tankCooldowns = true } },
     { id = 203819,   n = "Demon Spikes",               class = "DEMONHUNTER",   off = true, cats = { tankCooldowns = true } },
+    -- v5 2026-08-08: upstream reclassified these two from "rotational procs" to real cooldowns
+    { id = 1241059,  n = "Celestial Infusion",         class = "MONK",          cats = { tankCooldowns = true } },
+    { id = 1253799,  n = "Sundering Roar",             class = "DRUID",         cats = { tankCooldowns = true } },
+
+    -- ------------------------------------------------------------
+    -- Offensive Cooldowns
+    -- v5 2026-08-08. Burst-window signal rather than a defensive read:
+    -- 60s+ cooldown, a real aura, harvest evidence. Flagged exceptions
+    -- are noted in the lab thread rather than filtered out here.
+    -- ------------------------------------------------------------
+    { id = 107574, n = "Avatar",                          class = "WARRIOR",       cats = { offensiveCooldowns = true } },
+    { id = 1719, n = "Recklessness",                    class = "WARRIOR",       cats = { offensiveCooldowns = true } },
+    { id = 446035, alts = { 227847 }, n = "Bladestorm", class = "WARRIOR", cats = { offensiveCooldowns = true } },
+    { id = 42650, n = "Army of the Dead",                class = "DEATHKNIGHT",   cats = { offensiveCooldowns = true } },
+    { id = 1249658, n = "Breath of Sindragosa",            class = "DEATHKNIGHT",   cats = { offensiveCooldowns = true } },
+    { id = 51271, n = "Pillar of Frost",                 class = "DEATHKNIGHT",   cats = { offensiveCooldowns = true } },
+    { id = 162264, n = "Metamorphosis",                   class = "DEMONHUNTER",   cats = { offensiveCooldowns = true } },
+    { id = 1241937, n = "Soul Immolation",                 class = "DEMONHUNTER",   cats = { offensiveCooldowns = true } },
+    { id = 370965, alts = { 1246167, 1259431 }, n = "The Hunt", class = "DEMONHUNTER", cats = { offensiveCooldowns = true } },
+    { id = 391528, n = "Convoke the Spirits",             class = "DRUID",         cats = { offensiveCooldowns = true } },
+    { id = 102560, n = "Incarnation: Chosen of Elune",    class = "DRUID",         cats = { offensiveCooldowns = true } },
+    { id = 106951, n = "Berserk",                         class = "DRUID",         cats = { offensiveCooldowns = true } },
+    { id = 194223, n = "Celestial Alignment",             class = "DRUID",         cats = { offensiveCooldowns = true } },
+    { id = 202770, n = "Fury of Elune",                   class = "DRUID",         cats = { offensiveCooldowns = true } },
+    { id = 442204, alts = { 403631 }, n = "Breath of Eons", class = "EVOKER", cats = { offensiveCooldowns = true } },
+    { id = 375087, n = "Dragonrage",                      class = "EVOKER",        cats = { offensiveCooldowns = true } },
+    { id = 357210, alts = { 433874 }, n = "Deep Breath", class = "EVOKER", cats = { offensiveCooldowns = true } },
+    { id = 288613, n = "Trueshot",                        class = "HUNTER",        cats = { offensiveCooldowns = true } },
+    { id = 1261193, n = "Boomstick",                       class = "HUNTER",        cats = { offensiveCooldowns = true } },
+    { id = 1250646, n = "Takedown",                        class = "HUNTER",        cats = { offensiveCooldowns = true } },
+    { id = 190319, n = "Combustion",                      class = "MAGE",          cats = { offensiveCooldowns = true } },
+    { id = 365362, n = "Arcane Surge",                    class = "MAGE",          cats = { offensiveCooldowns = true } },
+    { id = 1249625, n = "Zenith",                          class = "MONK",          cats = { offensiveCooldowns = true } },
+    { id = 194249, n = "Voidform",                        class = "PRIEST",        cats = { offensiveCooldowns = true } },
+    { id = 13750, n = "Adrenaline Rush",                 class = "ROGUE",         cats = { offensiveCooldowns = true } },
+    { id = 51690, n = "Killing Spree",                   class = "ROGUE",         cats = { offensiveCooldowns = true } },
+    { id = 121471, n = "Shadow Blades",                   class = "ROGUE",         cats = { offensiveCooldowns = true } },
+    { id = 394095, alts = { 385627 }, n = "Kingsbane", class = "ROGUE", cats = { offensiveCooldowns = true } },
+    { id = 13877, n = "Blade Flurry",                    class = "ROGUE",         cats = { offensiveCooldowns = true } },
+    { id = 185422, n = "Shadow Dance",                    class = "ROGUE",         cats = { offensiveCooldowns = true } },
+    { id = 191634, n = "Stormkeeper",                     class = "SHAMAN",        cats = { offensiveCooldowns = true } },
+    { id = 466772, n = "Doom Winds",                      class = "SHAMAN",        cats = { offensiveCooldowns = true } },
+    { id = 1219480, alts = { 114051 }, n = "Ascendance", class = "SHAMAN", cats = { offensiveCooldowns = true } },
+    { id = 265187, n = "Summon Demonic Tyrant",           class = "WARLOCK",       cats = { offensiveCooldowns = true } },
+    { id = 205180, n = "Summon Darkglare",                class = "WARLOCK",       cats = { offensiveCooldowns = true } },
+    { id = 442726, n = "Malevolence",                     class = "WARLOCK",       cats = { offensiveCooldowns = true } },
+    { id = 1257052, n = "Dark Harvest",                    class = "WARLOCK",       cats = { offensiveCooldowns = true } },
+    { id = 1225789, alts = { 1217607 }, n = "Void Metamorphosis", class = "DEMONHUNTER", cats = { offensiveCooldowns = true } },
+    { id = 1234189, n = "Execution Sentence",              class = "PALADIN",       cats = { offensiveCooldowns = true } },
+    { id = 1258344, alts = { 1258345 }, n = "Stampede", class = "HUNTER", cats = { offensiveCooldowns = true } },
+    { id = 1265063, n = "Bloody Frenzy",                   class = "HUNTER",        cats = { offensiveCooldowns = true } },
+    { id = 111685, n = "Summon Infernal",                 class = "WARLOCK",       cats = { offensiveCooldowns = true } },
+    { id = 459808, n = "Wailing Arrow",                   class = "HUNTER",        cats = { offensiveCooldowns = true } },
+    { id = 204066, n = "Lunar Beam",                      class = "DRUID",         cats = { offensiveCooldowns = true } },
+    { id = 325153, n = "Exploding Keg",                   class = "MONK",          cats = { offensiveCooldowns = true } },
 
     -- ------------------------------------------------------------
     -- Utility
@@ -419,6 +483,7 @@ R.Spells = {
     { id = 3714,     n = "Path of Frost",             class = "DEATHKNIGHT",   cats = { utility = true } },
     { id = 410318,   n = "Bestow Weyrnstone",         class = "EVOKER",        cats = { utility = true } },
     { id = 1243972,  n = "Void-touched Drums",        class = "ALL",           cats = { utility = true } },
+    { id = 404977,   n = "Time Skip",                 class = "EVOKER",        cats = { utility = true } },
 
     -- ------------------------------------------------------------
     -- Pet Buffs

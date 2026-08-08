@@ -1160,6 +1160,7 @@ L["Notifications"] = true
 L["Notify me when a newer version is available"] = true
 L["OOR"] = true
 L["Off"] = true
+L["Offensive Cooldowns"] = true
 L["Offline"] = true
 L["Offset X"] = true
 L["Offset Y"] = true
