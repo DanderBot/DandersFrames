@@ -323,7 +323,6 @@ local function AbsorbLayoutStateChanged(frame, db)
 
     -- Mode + appearance (all modes)
     if s.mode            ~= (db.absorbBarMode or "OVERLAY")               then return true end
-    if s.strata          ~= (db.absorbBarStrata or "MEDIUM")              then return true end
     if s.texture         ~= (db.absorbBarTexture or "Interface\\Buttons\\WHITE8x8") then return true end
     if s.blendMode       ~= (db.absorbBarBlendMode or "BLEND")            then return true end
     if s.pixelPerfect    ~= db.pixelPerfect                               then return true end
@@ -383,7 +382,6 @@ local function CacheAbsorbLayoutState(frame, db)
         frame.dfAbsorbState = s
     end
     s.mode            = db.absorbBarMode or "OVERLAY"
-    s.strata          = db.absorbBarStrata or "MEDIUM"
     s.texture         = db.absorbBarTexture or "Interface\\Buttons\\WHITE8x8"
     s.blendMode       = db.absorbBarBlendMode or "BLEND"
     s.pixelPerfect    = db.pixelPerfect
@@ -620,21 +618,23 @@ function DF:UpdateAbsorb(frame, testIndex)
     
     local customBar = frame.dfAbsorbBar
     
-    -- Strata and level
-    local strata = db.absorbBarStrata or "MEDIUM"
-    local useSandwich = (strata == "SANDWICH")
-    local useSandwichLow = (strata == "SANDWICH_LOW")
+    -- Level. In the health-bar-BOUND modes (OVERLAY / ATTACHED / ATTACHED_OVERFLOW) the
+    -- level is DERIVED, by design: the Frame Level slider is FLOATING-only
+    -- (Pages/Auras.lua, `levelSlider.hideOn`), because a bar pinned to the health bar has
+    -- no meaningful level of its own to expose. FLOATING and ATTACHED override this below.
+    --
+    -- ☠ This +15 used to be one of three branches selected by an `absorbBarStrata` key that
+    -- had NO UI, no migration and no writer of any kind -- so every profile held the
+    -- "MEDIUM" default and the other two branches (+3 / +1) were unreachable. Collapsed to
+    -- the value that actually shipped. NOTHING MOVED; see the commit for the audit.
+    -- ⚠ OPEN, deliberately not changed here: healthBar sits at frame+3, so this lands the
+    -- bar at ~frame+18 -- above the dispel overlay's +16/+17 band -- while
+    -- absorbBarFrameLevel (the FLOATING slider), Core.lua's re-level and the z-order map all
+    -- say +11. Whether the bound modes SHOULD move to +11 is a design call needing in-game
+    -- measurement, not arithmetic. See [[zorder_layer_map]].
     local healthLevel = frame.healthBar:GetFrameLevel()
-    
-    local absorbLevel
-    if useSandwich then
-        absorbLevel = healthLevel + 3
-    elseif useSandwichLow then
-        absorbLevel = healthLevel + 1
-    else
-        absorbLevel = healthLevel + 15
-    end
-    
+    local absorbLevel = healthLevel + 15
+
     customBar:SetParent(frame)
     customBar:SetFrameStrata(frame:GetFrameStrata())
     customBar:SetFrameLevel(absorbLevel)
@@ -709,13 +709,18 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- Hide briefly to force strata change to take effect
         local wasShown = customBar:IsShown()
         if wasShown then customBar:Hide() end
-        
-        if not useSandwich and not useSandwichLow then
-            customBar:SetFrameStrata(strata)
-        else
-            customBar:SetFrameStrata(frame:GetFrameStrata())
-        end
-        
+
+        -- ☠ MEDIUM, not the parent's strata. This is the ONE place absorbBarStrata was a
+        -- real frame strata rather than a level selector, and with the key unwritable its
+        -- value was always "MEDIUM" -- so a floating bar has always been pinned to MEDIUM
+        -- regardless of the frame's own strata. Preserved verbatim; see the commit.
+        -- ⚠ Latent oddity, NOT changed here: frames on a higher strata would render OVER
+        -- their own floating absorb bar. Nobody has reported it, and "follow the parent"
+        -- is a behaviour change, so it wants a decision rather than a quiet fix. Note that
+        -- heal prediction, whose key defaulted to SANDWICH, takes the opposite branch and
+        -- DOES follow the parent -- the asymmetry is accident, not design.
+        customBar:SetFrameStrata("MEDIUM")
+
         -- Use user-configured frame level for floating mode
         customBar:SetFrameLevel(frame:GetFrameLevel() + (db.absorbBarFrameLevel or 11))
         
@@ -1939,21 +1944,13 @@ function DF:UpdateHealPrediction(frame, testIndex)
         frame.dfHealPredictionBar2:Hide()
     end
 
-    -- Strata and level
-    local strata = db.healPredictionStrata or "SANDWICH"
-    local useSandwich = (strata == "SANDWICH")
-    local useSandwichLow = (strata == "SANDWICH_LOW")
+    -- Level: just below the resource bar (which sits at health +2).
+    -- ☠ Was three branches on a `healPredictionStrata` key with NO UI and no writer, so the
+    -- stored value was always the "SANDWICH" default. Two of the three branches produced
+    -- the SAME +1 anyway, and the third (+14) was unreachable. Collapsed; nothing moved.
     local healthLevel = frame.healthBar:GetFrameLevel()
-    
-    local predictionLevel
-    if useSandwich then
-        predictionLevel = healthLevel + 1  -- Below resource bar (which is at +2)
-    elseif useSandwichLow then
-        predictionLevel = healthLevel + 1
-    else
-        predictionLevel = healthLevel + 14
-    end
-    
+    local predictionLevel = healthLevel + 1
+
     -- Texture and color
     local tex = db.healPredictionTexture or "Interface\\Buttons\\WHITE8x8"
     local blendMode = db.healPredictionBlendMode or "BLEND"
@@ -1985,12 +1982,10 @@ function DF:UpdateHealPrediction(frame, testIndex)
     if mode == "FLOATING" then
         bar:SetParent(frame)
         
-        if not useSandwich and not useSandwichLow then
-            bar:SetFrameStrata(strata)
-        else
-            bar:SetFrameStrata(frame:GetFrameStrata())
-        end
-        
+        -- Follows the frame's own strata. (The removed healPredictionStrata key defaulted to
+        -- SANDWICH, which selected exactly this branch; the other one was unreachable.)
+        bar:SetFrameStrata(frame:GetFrameStrata())
+
         bar:SetFrameLevel(frame:GetFrameLevel() + (db.healPredictionFrameLevel or 12))
         
         -- Dimensions & Orientation
