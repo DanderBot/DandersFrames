@@ -1669,6 +1669,13 @@ S.CreateEffectCard = function(parent, yPos, effect)
             local condGroups = GetEffectConditionGroups(effect.auraName, effect.typeKey)
             local condMode   = GetEffectConditionMode(effect.auraName, effect.typeKey)
             local multiCond  = #condGroups > 1
+            -- ☠ WITHIN a group the operator is the OPPOSITE of the one BETWEEN groups, and
+            -- that is not arbitrary: ALL means every group must match, so a group is a bag
+            -- of alternatives (OR); ANY means one group must match, so its members have to
+            -- hold together (AND). An ungrouped effect is a single OR group -- the legacy
+            -- behaviour, unchanged. Drawn between the tags because pressing the mode button
+            -- otherwise reverses what every existing trigger means with no visual change.
+            local innerOp = (multiCond and condMode == "ANY") and L["AND"] or L["OR"]
             local trigContainer = CreateFrame("Frame", nil, body)
             trigContainer:SetPoint("TOPLEFT", 8, -12)
             trigContainer:SetPoint("RIGHT", body, "RIGHT", -8, 0)
@@ -1796,6 +1803,20 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 end
 
                 tagX = tagX + tagW + TAG_GAP
+
+                if ti < #triggers then
+                    local OP_W = 24
+                    if tagX > 0 and (tagX + OP_W) > containerW then
+                        tagX = 0
+                        tagY = tagY - (TAG_H + TAG_ROW_GAP)
+                    end
+                    local opTxt = trigContainer:CreateFontString(nil, "OVERLAY")
+                    GUI:SetSettingsFont(opTxt, 8, "")
+                    opTxt:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX + 2, tagY - 5)
+                    opTxt:SetText(innerOp)
+                    opTxt:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                    tagX = tagX + OP_W
+                end
             end
 
             -- "+ Add Trigger" button
