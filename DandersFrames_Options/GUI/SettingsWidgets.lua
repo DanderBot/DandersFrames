@@ -383,6 +383,19 @@ function GUI:CreateCollapsibleSection(parent, text, defaultExpanded, width)
                 local co = data.coords
                 DF:SetIconTextureOrAtlas(slot.tex, data.texture, co and co[1], co and co[2], co and co[3], co and co[4])
                 slot.tex:SetDesaturated(dim)
+                -- ☠ TINT THE SWATCH. data.color was honoured for TEXT entries only, so an
+                -- icon whose frame appearance comes from a colour setting previewed at its
+                -- RAW texture colour. For a white mask that means WHITE — the AFK clock
+                -- renders gold on a frame but showed white here, and its baked-black
+                -- interior then read as a heavy dark outline rather than as clock hands
+                -- (Krathe, 2026-08-08: "still looks bad on the preview ... almost like it
+                -- still has a black border around it"). The art was fine; the swatch lied.
+                -- ⚠ Must come AFTER the texture call — SetTexture/SetAtlas reset vertex colour.
+                if not dim and data.color then
+                    slot.tex:SetVertexColor(data.color.r or 1, data.color.g or 1, data.color.b or 1, data.color.a or 1)
+                else
+                    slot.tex:SetVertexColor(1, 1, 1, 1)
+                end
                 -- Optional per-entry inset: textures that fill their cell edge-to-edge
                 -- (e.g. raid-target markers) read bigger than the padded status-icon
                 -- atlases. data.inset shrinks the swatch to match.
@@ -1958,9 +1971,18 @@ function GUI:CreateOutlineDropdown(parent, label, dbTable, dbKey, callback, inhe
     return GUI:CreateDropdown(parent, label or L["Outline"], options, dbTable, dbKey, callback, get, set)
 end
 
-function GUI:CreateShadowCheckbox(parent, label, dbTable, dbKey, callback)
-    local get = function() return DF:OutlineHasShadow(dbTable[dbKey]) end
-    local set = function(val) dbTable[dbKey] = DF:ComposeOutline(DF:OutlineFlag(dbTable[dbKey]), val) end
+-- ⚠ inheritKey mirrors CreateOutlineDropdown's 5th argument, and exists for the same
+-- reason: an outline key may be deliberately UNSET so it falls through to a shared one
+-- (afkIconTimerOutline -> statusIconFontOutline). Without it this widget reads
+-- dbTable[dbKey] raw, so on an inheriting key it would:
+--   * report UNCHECKED while the inherited outline actually carries a shadow, and
+--   * on first tick, compose from OutlineFlag(nil) and PIN the outline to NONE --
+--     silently discarding the inherited style rather than just adding a shadow.
+-- Both halves must consult the fallback, exactly as the dropdown does.
+function GUI:CreateShadowCheckbox(parent, label, dbTable, dbKey, callback, inheritKey)
+    local function effective() return dbTable[dbKey] or (inheritKey and dbTable[inheritKey]) end
+    local get = function() return DF:OutlineHasShadow(effective()) end
+    local set = function(val) dbTable[dbKey] = DF:ComposeOutline(DF:OutlineFlag(effective()), val) end
     return GUI:CreateCheckbox(parent, label or L["Shadow"], dbTable, dbKey, callback, get, set)
 end
 

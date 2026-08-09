@@ -48,7 +48,7 @@ local function CreateStatusIcon(parent, size)
     icon.texture = icon:CreateTexture(nil, "OVERLAY")
     icon.texture:SetAllPoints()
     icon.texture:SetDrawLayer("OVERLAY", 6)
-    
+
     -- Text fontstring for text mode
     icon.text = icon:CreateFontString(nil, "OVERLAY")
     DF:SafeSetFont(icon.text, nil, 10, "OUTLINE")
@@ -182,7 +182,10 @@ function DF:CreateStatusIcons(frame)
     -- BG OBJECTIVE CARRIER ICON (flag / orb carrier)
     -- ========================================
     frame.bgCarrierIcon = CreateStatusIcon(overlay, 18)
-    frame.bgCarrierIcon:SetPoint("CENTER", frame, "CENTER", 0, 0)
+    -- Seed only — ApplyIconSettings ClearAllPoints/SetPoints this from the db on every
+    -- update. Kept in step with Config's default (TOPRIGHT -2,-2) by convention, so
+    -- reading this line does not imply a placement the addon no longer uses.
+    frame.bgCarrierIcon:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -2, -2)
     DF:SetUpgradedStatusIcon(frame.bgCarrierIcon.texture, "Interface\\Icons\\inv_bannerpvp_03")
     frame.bgCarrierIcon.text:SetTextColor(1, 0.82, 0, 1)  -- Gold for objective carrier
 
@@ -768,7 +771,7 @@ end
 -- Cache for AFK start times (GUID -> timestamp)
 local afkStartTimes = {}
 
--- Cache for last confirmed AFK/DND state (GUID -> "AFK"/"DND"/false/nil)
+-- Cache for last confirmed AFK state (GUID -> "AFK"/false/nil)
 local afkStateCache = {}
 
 local function GetAFKKey(unit)
@@ -815,36 +818,24 @@ function DF:UpdateAFKIcon(frame)
     
     local unit = frame.unit
     local showIcon = false
-    local isDND = false
 
-    -- Check AFK/DND status (secret-safe), keyed by GUID so the timer survives
-    -- transient nil returns (cross-realm latency, instance loading).
+    -- ⚠ AFK ONLY. UnitIsDND was consulted here and rendered on this same widget; it was
+    -- dropped deliberately (Krathe, 2026-08-08 — "somewhat useless info on a raid frame").
+    -- A DND unit now shows nothing. Re-adding it means a second cache state AND its own
+    -- art: sharing the clock is what made DND indistinguishable from AFK in the first place.
+    -- Check AFK status (secret-safe), keyed by GUID so the timer survives transient nil
+    -- returns (cross-realm latency, instance loading).
     local afkKey = GetAFKKey(unit)
     local isAFK = nil
     pcall(function() isAFK = UnitIsAFK(unit) end)
     if canaccessvalue(isAFK) then
-        if isAFK then
-            afkStateCache[afkKey] = "AFK"
-        else
-            local dndStatus = nil
-            pcall(function() dndStatus = UnitIsDND(unit) end)
-            if canaccessvalue(dndStatus) and dndStatus then
-                afkStateCache[afkKey] = "DND"
-            else
-                afkStateCache[afkKey] = false
-            end
-        end
+        afkStateCache[afkKey] = isAFK and "AFK" or false
     end
 
-    local cachedState = afkStateCache[afkKey]
-    if cachedState == "AFK" then
+    if afkStateCache[afkKey] == "AFK" then
         if not afkStartTimes[afkKey] then
             afkStartTimes[afkKey] = GetTime()
         end
-        showIcon = true
-    elseif cachedState == "DND" then
-        isDND = true
-        afkStartTimes[afkKey] = nil
         showIcon = true
     else
         afkStartTimes[afkKey] = nil
@@ -853,17 +844,9 @@ function DF:UpdateAFKIcon(frame)
     if showIcon then
         ApplyIconSettings(frame.afkIcon, db, "afkIcon")
 
-        local L = DF.L
-        local statusText
-        if isDND then
-            statusText = L["DND"]
-            -- Red-ish for DND to visually distinguish from orange AFK
-            frame.afkIcon.text:SetTextColor(1, 0.2, 0.2, 1)
-            if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-        else
-            statusText = db.afkIconText or "AFK"
-            -- AFK text colour comes from afkIconTextColor (applied by
-            -- ApplyIconSettings above); the DND branch overrides to red when DND.
+        local statusText = db.afkIconText or "AFK"
+        -- Text colour comes from afkIconTextColor, applied by ApplyIconSettings above.
+        do
             local showTimer = db.afkIconShowTimer ~= false
 
             -- Calculate timer if enabled
