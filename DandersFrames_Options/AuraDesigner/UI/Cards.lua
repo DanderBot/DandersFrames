@@ -1739,23 +1739,11 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 -- A RULE across the card, not a floating word: the previous layout put the
                 -- operator and a bare X into the same wrapping flow as the tags, so nothing
                 -- said where one group ended and the next began, or which X removed what.
-                local rule = trigContainer:CreateTexture(nil, "ARTWORK")
-                rule:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY - 8)
-                rule:SetPoint("RIGHT", trigContainer, "RIGHT", 0, 0)
-                rule:SetHeight(1)
-                rule:SetColorTexture(0.91, 0.66, 0.25, 0.25)
-
                 local sep = trigContainer:CreateFontString(nil, "OVERLAY")
                 GUI:SetSettingsFont(sep, 9, "OUTLINE")
                 sep:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
                 sep:SetText(condMode == "ALL" and L["AND"] or L["OR"])
                 sep:SetTextColor(0.91, 0.66, 0.25)
-                -- Sit the caption ON the rule by masking the line behind it.
-                local mask = trigContainer:CreateTexture(nil, "BACKGROUND")
-                mask:SetPoint("TOPLEFT", sep, "TOPLEFT", -3, 2)
-                mask:SetPoint("BOTTOMRIGHT", sep, "BOTTOMRIGHT", 3, -2)
-                mask:SetColorTexture(0.09, 0.09, 0.09, 1)
-                sep:SetDrawLayer("OVERLAY")
 
                 -- Removal belongs to the group BELOW the rule, and sits at the far right so
                 -- it can never be mistaken for a tag's own X.
@@ -1770,6 +1758,17 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 })
                 delG:SetPoint("TOPRIGHT", trigContainer, "TOPRIGHT", 0, tagY - 1)
                 delG.tooltip = L["Remove this condition group."]
+
+                -- ☠ The rule spans the GAP between the caption and the remove button, rather
+                -- than running the full width behind them. Masking the line under the text
+                -- needed the card's exact background colour and still clipped at whatever
+                -- width the translated word happened to be; anchoring between the two makes
+                -- overlap impossible in any language and at any font size.
+                local rule = trigContainer:CreateTexture(nil, "ARTWORK")
+                rule:SetPoint("LEFT", sep, "RIGHT", 8, 0)
+                rule:SetPoint("RIGHT", delG, "LEFT", -8, 0)
+                rule:SetHeight(1)
+                rule:SetColorTexture(0.91, 0.66, 0.25, 0.22)
                 tagY = tagY - 22
                 tagX = 0
             end
