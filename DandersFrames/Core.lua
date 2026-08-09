@@ -1,4 +1,4 @@
-﻿local addonName, DF = ...
+local addonName, DF = ...
 
 -- Local caching of frequently used globals for performance
 local pairs, ipairs, type, tonumber, tostring = pairs, ipairs, type, tonumber, tostring
@@ -927,26 +927,115 @@ end
 DF.STOCK_BAR_TEXTURE = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist"
 local _df_warnedMissingTexture = {}
 
--- false -> asset (texture path or fileID) is definitively NOT known to the client
--- true  -> known/present
--- nil   -> validation API unavailable (caller leaves the texture as-is)
+DF.OUR_MEDIA_PREFIX = "interface\\addons\\dandersframes\\media\\"
+
+-- Is this one of OUR media paths? Returns the manifest key when it is.
+local function ourMediaKey(asset)
+    if type(asset) ~= "string" then return nil end
+    local lower = asset:lower()
+    if lower:find(DF.OUR_MEDIA_PREFIX, 1, true) ~= 1 then return nil end
+    return lower:sub(#DF.OUR_MEDIA_PREFIX + 1)
+end
+DF.GetOurMediaKey = ourMediaKey
+
+-- false -> asset is definitively NOT present
+-- true  -> present
+-- nil   -> cannot tell (caller leaves the texture alone)
+--
+-- ☠ TWO SOURCES OF TRUTH, DELIBERATELY, because they have different reliability:
+--   OUR media  -> the shipped manifest (Core/Config.lua). Authoritative from the
+--                 first frame and never stale mid-session.
+--   3rd-party  -> C_UIFileAsset.IsKnownFile. The ONLY signal available, but it
+--                 answers from an index built at client launch, so it reports a
+--                 renamed/deleted file as KNOWN until that index catches up.
+--                 Proven in game 2026-08-09 — see the manifest comment. That is
+--                 why our own files must never go through it.
 local function textureKnown(asset)
     if asset == nil then return nil end
+    local key = ourMediaKey(asset)
+    if key then
+        local manifest = DF.SHIPPED_MEDIA
+        -- We KNOW we do not ship this -> certain, and permanent. No reinstall
+        -- brings it back, so the db repair is also allowed to act on this.
+        if manifest and not manifest[key] then return false end
+        -- ☠ WE DO SHIP IT — BUT THAT IS NOT THE SAME AS IT BEING ON DISK.
+        -- A broken download or half-extracted zip leaves a file we ship genuinely
+        -- absent, so fall through to the API for a second opinion. It is unreliable
+        -- in one direction only (it can wrongly say KNOWN just after a file changes
+        -- under a running client), so it can ADD a detection but never remove one
+        -- the manifest already made.
+        --
+        -- ⚠ ASK ABOUT THE REAL FILENAME, NOT THE STORED PATH. Most of our media is
+        -- .tga and is referenced WITHOUT an extension ("...\\Media\\DF_Minimalist"),
+        -- and we have no evidence IsKnownFile resolves that form — we only ever
+        -- proved it for a ".png" path. Asking it about the extensionless form risks
+        -- reporting every .tga we ship as missing.
+        --   The manifest knows the actual filename, so rebuild the path with its
+        -- extension and ask about THAT. Same file, a shape the API demonstrably
+        -- handles, and no coverage given up for .tga.
+        if not asset:find("%.%w+$") then
+            local real = DF.SHIPPED_MEDIA_FILENAME and DF.SHIPPED_MEDIA_FILENAME[key]
+            if not real then return true end     -- no filename to rebuild from
+            asset = DF.OUR_MEDIA_PREFIX .. real
+        end
+    end
     local api = C_UIFileAsset
     if not (api and api.IsKnownFile) then return nil end
     local ok, known = pcall(api.IsKnownFile, asset)
     if not ok then return nil end
     return known and true or false
 end
+DF.IsTexturePresent = textureKnown
 
+-- ☠ NAME THE FILE. The old message said only that "a configured texture couldn't
+-- be loaded" — true, useless, and indistinguishable from a DF bug. A user cannot
+-- act on it: they do not know which texture, which setting, or whose addon.
+-- One line per DISTINCT missing path (deduped), so a raid of frames all missing
+-- the same texture still produces exactly one line.
 local function warnMissingTexture(path)
     if not path or _df_warnedMissingTexture[path] then return end
     _df_warnedMissingTexture[path] = true
     if DF.Debug then DF:Debug("TEXTURE", "Missing texture '%s' — using stock fallback", tostring(path)) end
-    if not DF._warnedAnyMissingTexture then
-        DF._warnedAnyMissingTexture = true
-        print("|cff66ccffDandersFrames|r: a configured texture couldn't be loaded and was replaced with a stock texture. Check your texture settings (an imported profile may reference a texture you don't have).")
+
+    local shown = tostring(path)
+    -- Ours: show just the filename, and say plainly that it is not coming back.
+    -- Theirs: show the whole path, because the ADDON NAME in it is the actionable
+    -- part — that is what tells them which addon to reinstall or re-enable.
+    local key = DF.GetOurMediaKey and DF.GetOurMediaKey(path)
+    local tail
+    if key then
+        shown = shown:match("([^\\]+)$") or shown
+        -- Ours, but two different problems with two different fixes. Saying "no
+        -- longer part of DandersFrames" about a file we DO still ship sends the
+        -- user hunting for a setting to change when their install is the issue.
+        if DF.SHIPPED_MEDIA and DF.SHIPPED_MEDIA[key] then
+            tail = "It ships with DandersFrames but is missing from disk — your install may be incomplete. Reinstalling should restore it."
+        else
+            tail = "It is no longer part of DandersFrames — pick a new one in the texture settings."
+        end
+    else
+        tail = "It belongs to another addon — reinstall or re-enable it, or pick a different texture."
     end
+    print(("|cff66ccffDandersFrames|r: texture |cffffd200%s|r is missing, using a stock texture instead. %s")
+        :format(shown, tail))
+end
+
+local function isVerticalBar(bar)
+    if not (bar and bar.GetOrientation) then return false end
+    local ok, orient = pcall(bar.GetOrientation, bar)
+    return ok and orient == "VERTICAL"
+end
+
+-- Record BOTH what the caller asked for and what actually landed, then apply the
+-- texture's tiling. Keeping the requested path lets a later orientation change
+-- re-resolve the companion without the caller threading it back through — see
+-- DF:ApplyBarFillOrientation. Tiling lives HERE, not at the call sites: every
+-- user-chosen bar texture in the addon routes through the safe setters, so this
+-- is the one place that covers all of them and any added later.
+local function recordBarTexture(bar, requested, applied)
+    bar.dfBaseTexture = requested
+    bar.dfAppliedTexture = applied
+    DF:ApplyBarTextureTiling(bar, applied)
 end
 
 -- StatusBar texture with stock fallback. Returns true if the requested texture
@@ -954,11 +1043,20 @@ end
 function DF:SafeSetStatusBarTexture(bar, path, stock)
     if not bar then return end
     if textureKnown(path) == false then
-        bar:SetStatusBarTexture(stock or DF.STOCK_BAR_TEXTURE)
+        local fallback = stock or DF.STOCK_BAR_TEXTURE
+        bar:SetStatusBarTexture(fallback)
         warnMissingTexture(path)
+        -- Tiling follows the FALLBACK, not the path we asked for.
+        recordBarTexture(bar, fallback, fallback)
         return false
     end
-    bar:SetStatusBarTexture(path)
+    -- Resolved against the orientation the bar already carries. Callers set the
+    -- texture before the orientation, so on the update where orientation CHANGES
+    -- this is one step behind — DF:ApplyBarFillOrientation corrects it in the same
+    -- pass. Bars whose orientation never changes are fully handled right here.
+    local applied = DF:ResolveBarTexture(path, isVerticalBar(bar))
+    bar:SetStatusBarTexture(applied)
+    recordBarTexture(bar, path, applied)
     return true
 end
 
@@ -966,12 +1064,224 @@ end
 function DF:SafeSetTexture(region, path, stock)
     if not region then return end
     if textureKnown(path) == false then
-        region:SetTexture(stock or DF.STOCK_BAR_TEXTURE)
+        local fallback = stock or DF.STOCK_BAR_TEXTURE
+        region:SetTexture(fallback)
         warnMissingTexture(path)
+        DF:ApplyTextureTiling(region, fallback)
         return false
     end
     region:SetTexture(path)
+    DF:ApplyTextureTiling(region, path)
     return true
+end
+
+-- ============================================================
+-- TILED BAR TEXTURES
+-- ============================================================
+-- Every other DF bar texture is STRETCHED: the one image is scaled to whatever
+-- rect the fill happens to be. That is right for a gradient or a flat fill, but
+-- it wrecks a REPEATING pattern — stripe spacing and angle then change with the
+-- frame's width and height, so the same texture reads differently on a 96x26
+-- raid frame and a 220x76 party frame, and a 128px source dragged across a
+-- 300px-tall frame (our Frame Height max) resamples into mush.
+--   A TILED texture instead repeats at its native pixel size on both axes, so
+-- the pattern is identical at every frame size. This is what Blizzard do for
+-- their own shield overlay: CompactUnitFrame.lua passes AddressModeWrap for
+-- both U and V, which TextureUtil resolves to SetHorizTile/SetVertTile(true).
+--   ☠ Tiling requires POWER-OF-TWO dimensions on both axes. Anything added to
+-- this table must be 2^n x 2^n(ish) or the tiling silently misbehaves.
+--   ☠ A tiled texture must NOT be rotated for a VERTICAL bar — rotation fights
+-- the tiling and produces exactly the smeared look tiling is here to avoid.
+-- Callers that flip orientation must leave SetRotatesTexture off for these.
+--   Keyed by the full path INCLUDING the .png extension, because that is what
+-- LSM hands back and what the db stores. The value is the tiling MODE:
+--   "BOTH"  — repeat on both axes. Pure pattern, no shading that needs to span
+--             the bar. Requires the pattern to wrap on both axes.
+--   "HORIZ" — repeat across, STRETCH down. For art that carries a vertical
+--             gradient: the stripes keep a fixed width whatever the bar's width
+--             (the whole point), while the shading still spans the bar's height
+--             however tall the frame is. Blizzard use horiz-only tiling this way
+--             in NavigationBar.xml (horizTile="true" with no vertTile).
+--   "VERT"  — the mirror of HORIZ, for a VERTICAL bar. See the companion table
+--             below for why a second file is needed rather than just swapping
+--             the two flags.
+-- The four shipped absorb patterns. All share the same ~1.80x stripe contrast
+-- and differ ONLY in the perpendicular stripe gap = period / sqrt(1 + slope^2):
+--   DF Absorb V1 2.22px · Medium 2.83 · Wide 3.58 · Wider 4.44
+-- The leading number is the ART FAMILY, not the spacing — a later pattern becomes
+-- DF Absorb V2 and carries its own Medium/Wide/Wider.
+-- ☠ The suffixes are chosen so alphabetical order matches spacing order, because
+-- that is what the texture dropdown sorts by. "Wide" is a prefix of "Wider" so
+-- the pair sorts correctly; "Very Wide" and "Widest" both sort wrong.
+-- ☠ Tighter than ~2.2 is not available. The gap can only be reached via a
+-- power-of-two period, and a 2px period degenerates into a checkerboard: it
+-- cannot hold the contrast (Nyquist) and measures as having no lean at all, so
+-- there is nothing to rotate for the vertical companion.
+local ABSORB_TILES = { "DF_Absorb_V1", "DF_Absorb_V1_Medium", "DF_Absorb_V1_Wide", "DF_Absorb_V1_Wider" }
+
+-- The V2 family: glyph tiles rather than stripes. "+" is intended for shields and
+-- "-" for heal absorbs, though both are ordinary statusbar textures and appear in
+-- every bar dropdown — LSM has no per-setting media list.
+--   Listed SEPARATELY from ABSORB_TILES because neither takes a vertical
+-- companion, and for two different reasons:
+--   _Plus  ("+")  4-fold symmetric — a plus rotated 90 degrees is the same glyph,
+--                 so a companion would be a byte-identical second file.
+--   _Minus ("-")  NOT symmetric, and deliberately left unrotated: a dash that
+--                 becomes a pipe on a vertical frame stops reading as "minus",
+--                 which is the entire point of the glyph. ☠ This is the ONE
+--                 texture in DF that does not follow the rotate-with-a-vertical-
+--                 bar convention. Intentional (Krathe, 2026-08-09) — not a bug,
+--                 do not "fix" it in a sweep.
+--   Both fall out of the existing code with no special-casing: with no companion
+-- entry, DF:ResolveBarTexture returns the path unchanged, and
+-- DF:ApplyBarFillOrientation still suppresses rotation because they are tiled.
+--   ⚠ Sizes are Small/Medium/Large by GLYPH, not by grid. Staggering makes the
+-- vertical period 2*cell, so 2*cell must divide 128 and the cell may only be
+-- 8, 16 or 32 — there is no cell 12. Medium and Large therefore share cell 16
+-- and differ in glyph size; only Small drops to cell 8.
+local SYMBOL_TILES = {
+    "DF_Absorb_V2_Plus_Small",  "DF_Absorb_V2_Plus_Medium",  "DF_Absorb_V2_Plus_Large",
+    "DF_Absorb_V2_Minus_Small", "DF_Absorb_V2_Minus_Medium", "DF_Absorb_V2_Minus_Large",
+}
+
+DF.TILED_BAR_TEXTURES = {}
+for _, list in ipairs({ ABSORB_TILES, SYMBOL_TILES }) do
+    for _, name in ipairs(list) do
+        DF.TILED_BAR_TEXTURES["Interface\\AddOns\\DandersFrames\\Media\\" .. name .. ".png"] = "BOTH"
+    end
+end
+
+-- ============================================================
+-- VERTICAL COMPANIONS
+-- ============================================================
+-- ☠ A HORIZ texture is only correct while the bar's HEIGHT is fixed. On a
+-- horizontal bar the width is the fill axis (tiled, so the pattern holds still)
+-- and the height is constant (stretched, so the gradient spans the bar). On a
+-- VERTICAL bar those swap: the height becomes the fill axis, so the STRETCHED
+-- axis is now the one that changes with the value, and the art visibly squashes
+-- and shears every time the shield grows or shrinks.
+--   Swapping the two tile flags alone does NOT fix it, because that doesn't
+-- rotate the art — the gradient would repeat as bands down the bar and the
+-- stripes would smear across it. The companion is the same image rotated 90°,
+-- so the repeat axis follows the fill and the gradient spans the bar's (now
+-- horizontal) thickness.
+--   ⚠ Rotating via SetRotatesTexture was the alternative. Rejected without
+-- testing on purpose: it is unclear whether SetHorizTile then refers to texture
+-- or screen space, and a second ~1.4KB file costs less than that uncertainty.
+--   ☠ NOT for correctness — these textures tile on BOTH axes, so nothing
+-- stretches or rotates and they are already orientation-proof. The companion
+-- exists purely to keep the stripe DIRECTION consistent with the rest of DF.
+--   DF's convention is that a texture rotates with a vertical bar
+-- (SetRotatesTexture(isVertical) — see Frames/Update.lua and
+-- Frames/ReducedMaxHealth.lua). Stretched art therefore leans the other way on a
+-- vertical frame, while a tiled texture never rotates, so the absorb and the
+-- reduced-max-health stripes underneath it disagreed. Rotating the tiled fill to
+-- match is not an option — rotation is exactly what both-axis tiling avoids — so
+-- the rotation lives in the ART instead: a second square whose pattern is
+-- generated along the other axis.
+--   ⚠ The companion is GENERATED with its phase along the other axis, not
+-- produced by rotating the finished PNG. Rotating the render inherits the edge
+-- filtering of the original and broke the horizontal wrap on the steeper slopes.
+--   ⚠ The companion is GENERATED with a true 90° rotation of the phase,
+-- (x,y) -> (y,-x) i.e. `y - slope*x`. Two things that look equivalent are not:
+-- rotating the finished PNG inherits its border-clamped filtering onto the axis
+-- that must then wrap (broke the seam), and `y + slope*x` is a TRANSPOSE — it
+-- changes the angle but leaves the lean unchanged, so it does not fix anything.
+-- Verified by structure tensor: each pair measures exactly 90° apart.
+DF.TILED_VERTICAL_COMPANION = {}
+for _, name in ipairs(ABSORB_TILES) do
+    local base = "Interface\\AddOns\\DandersFrames\\Media\\" .. name
+    DF.TILED_VERTICAL_COMPANION[base .. ".png"] = base .. "_Vert.png"
+    -- Companions are square and tile both ways exactly as their base does — the
+    -- rotation is baked into the art, so the MODE is still BOTH, never VERT.
+    DF.TILED_BAR_TEXTURES[base .. "_Vert.png"] = "BOTH"
+end
+
+-- Swap a tiled texture for its vertical companion when the bar fills vertically.
+-- Returns the path unchanged for everything else, so it is safe to call on any
+-- texture from any call site.
+function DF:ResolveBarTexture(path, isVertical)
+    if isVertical and path then
+        local companion = DF.TILED_VERTICAL_COMPANION[path]
+        if companion then return companion end
+    end
+    return path
+end
+
+-- Pick the variant of a tiled texture matching the axis a bar fills along, and
+-- report that axis. A FLOATING bar carries its own orientation key; every
+-- health-bound mode inherits the health bar's.
+--   Resolved where the TEXTURE is chosen rather than where the orientation is
+-- applied, because the orientation branches run hundreds of lines later, by which
+-- point the texture is already on the bar. Non-tiled textures come back
+-- untouched, so it is inert for all of them.
+--   Shared by Frames/Bars.lua and Frames/Update.lua: both set the absorb texture
+-- in the same pass, and if only one resolved, the other would overwrite it.
+function DF:ResolveBarTextureForFill(db, tex, mode, floatingOrientKey)
+    local orient = (mode == "FLOATING") and (db[floatingOrientKey] or "HORIZONTAL")
+        or (db.healthOrientation or "HORIZONTAL")
+    local isVertical = (orient == "VERTICAL" or orient == "VERTICAL_INV")
+    return DF:ResolveBarTexture(tex, isVertical), isVertical
+end
+
+-- Returns the mode string, or nil for a normal stretched texture.
+function DF:GetBarTextureTiling(path)
+    return path ~= nil and DF.TILED_BAR_TEXTURES[path] or nil
+end
+
+-- Apply the tiling mode a texture asks for to a StatusBar's CURRENT fill.
+-- Sets both flags EXPLICITLY either way, so a bar switched from a tiled texture
+-- back to a stretched one clears the tiling instead of inheriting it. Returns
+-- true when the texture is a tiled one.
+--   Pass the path that actually landed on the bar — if SafeSetStatusBarTexture
+-- substituted the stock fallback, pass that, not the requested path.
+function DF:ApplyBarTextureTiling(bar, path)
+    if not bar or not bar.GetStatusBarTexture then return false end
+    local fill = bar:GetStatusBarTexture()
+    if not fill then return false end
+    local mode = DF:GetBarTextureTiling(path)
+    fill:SetHorizTile(mode == "BOTH" or mode == "HORIZ")
+    fill:SetVertTile(mode == "BOTH" or mode == "VERT")
+    -- Only meaningful when NOT tiling at all: once either axis wraps, repetition
+    -- comes from the region-to-texture size ratio and an explicit texcoord fights it.
+    if not mode then fill:SetTexCoord(0, 1, 0, 1) end
+    return mode ~= nil
+end
+
+-- Same, for a plain Texture region (backgrounds, GUI preview swatches). Sets the
+-- tile flags only — deliberately NOT the texcoords, because arbitrary regions may
+-- be cropping on purpose and a StatusBar fill is the only one we fully own.
+function DF:ApplyTextureTiling(region, path)
+    if not (region and region.SetHorizTile) then return false end
+    local mode = DF:GetBarTextureTiling(path)
+    region:SetHorizTile(mode == "BOTH" or mode == "HORIZ")
+    region:SetVertTile(mode == "BOTH" or mode == "VERT")
+    return mode ~= nil
+end
+
+-- Call this wherever a bar's orientation is decided, INSTEAD of SetRotatesTexture.
+-- Two things have to move together and no call site should have to remember it:
+--   · a TILED texture must NEVER rotate — rotation fights the tiling and produces
+--     exactly the smeared look tiling exists to prevent
+--   · but DF's convention is that art leans with a vertical bar, so instead of
+--     rotating we swap to the pre-rotated companion, which keeps a tiled absorb
+--     leaning the same way as the stretched stripes beside it
+-- Stretched textures keep the previous behaviour byte for byte.
+function DF:ApplyBarFillOrientation(bar, isVertical)
+    if not bar then return end
+    isVertical = isVertical and true or false
+    local base = bar.dfBaseTexture
+    if base and DF:GetBarTextureTiling(base) then
+        if bar.SetRotatesTexture then bar:SetRotatesTexture(false) end
+        local want = DF:ResolveBarTexture(base, isVertical)
+        if want ~= bar.dfAppliedTexture then
+            bar:SetStatusBarTexture(want)
+            bar.dfAppliedTexture = want
+            DF:ApplyBarTextureTiling(bar, want)
+        end
+    elseif bar.SetRotatesTexture then
+        bar:SetRotatesTexture(isVertical)
+    end
 end
 
 -- Update only font shadows on all text elements
@@ -2064,8 +2374,7 @@ function DF:LightweightUpdateBackgroundColor()
             -- Textured background - always apply when called from settings (user is changing texture)
             -- Update cache so UpdateUnitFrame knows the current texture
             frame.background:SetTexture(bgTexture)
-            frame.background:SetHorizTile(false)
-            frame.background:SetVertTile(false)
+            DF:ApplyTextureTiling(frame.background, bgTexture)
             frame.dfCurrentBgTexture = bgTexture
             
             -- Ensure SetAlpha is 1.0 for textured backgrounds (alpha controlled via vertex color only)
@@ -2935,6 +3244,175 @@ function DF:MigrateColorPickerToGlobal()
     end
 end
 
+-- One-time repair for a DandersFrames texture that the addon USED TO SHIP and no longer
+-- does. Reported from live: a long-standing profile upgraded across several versions came
+-- back with green health bars, and picking a colour did nothing -- because a StatusBar
+-- with no usable texture has nothing to tint, so it renders the default green whatever
+-- colour you set. Toggling the texture dropdown to anything else and back fixed it
+-- permanently, which is the tell that the stored VALUE was stale rather than the renderer.
+--
+-- ☠ WHY DF:SafeSetStatusBarTexture DID NOT COVER THIS. That guard asks
+-- C_UIFileAsset.IsKnownFile, and its own note says the API "doesn't verify a known loose
+-- file still exists on disk" -- it was built for the IMPORT case, where a profile names a
+-- texture belonging to an addon you do not have, and that path is simply not known. Our
+-- own deleted file is a different shape: DandersFrames IS installed, so the path can still
+-- read as known, and the render-time fallback never engages. It also only ever fixes the
+-- FRAME, never the saved value, so it would have to win again on every login.
+--
+-- ⚠ THE NARROWEST RULE THAT FIXES IT, deliberately. A value is repaired ONLY when it is
+-- BOTH ours AND unrecognised:
+--   * not under our own Media path  -> untouched. Blizzard paths, and third-party
+--     SharedMedia paths, are none of our business. A texture from an addon that is merely
+--     disabled today must survive: the user reinstalls it and expects their choice back.
+--     Those are exactly what the render-time fallback already handles gracefully.
+--   * ours AND still registered     -> untouched.
+--   * ours AND no longer registered -> repaired to this key's current default.
+-- Anything we cannot classify is left alone. The failure mode of doing nothing is one
+-- green bar the user can fix in two clicks; the failure mode of over-reaching is silently
+-- rewriting a texture choice someone made on purpose.
+--
+-- ☠ AND IT REFUSES TO RUN ON AN EMPTY REGISTRY. The valid set is built from LSM's live
+-- registrations, so if this ever ran before Config.lua registered ours, EVERY DF path
+-- would look unrecognised and the pass would rewrite the lot. Below a plausible count it
+-- bails WITHOUT stamping the flag, so it simply tries again next login.
+local TEXTURE_REPAIR_KEYS = {
+    "healthTexture", "backgroundTexture", "missingHealthTexture", "reducedMaxHealthTexture",
+    "absorbBarTexture", "healAbsorbBarTexture", "healPredictionTexture",
+    "petTexture", "resourceBarTexture", "targetedListTexture",
+    "buffDurationBarTexture", "debuffDurationBarTexture", "defensiveDurationBarTexture",
+    "buffPandemicBorderTexture",
+}
+
+-- Human labels for the chat report. A key name is not something to show a user.
+local TEXTURE_KEY_LABELS = {
+    healthTexture = "Health Bar", backgroundTexture = "Background",
+    missingHealthTexture = "Missing Health", reducedMaxHealthTexture = "Reduced Max Health",
+    absorbBarTexture = "Absorb Shield", healAbsorbBarTexture = "Heal Absorb",
+    healPredictionTexture = "Heal Prediction", petTexture = "Pet Health",
+    resourceBarTexture = "Resource Bar", targetedListTexture = "Targeted List",
+    buffDurationBarTexture = "Buff Duration Bar", debuffDurationBarTexture = "Debuff Duration Bar",
+    defensiveDurationBarTexture = "Defensive Duration Bar",
+    buffPandemicBorderTexture = "Buff Pandemic Border",
+}
+
+-- ☠ RUNS EVERY LOGIN, NOT ONCE PER PROFILE. It used to stamp
+-- `_staleTexturePathV1` and never run again, which is right for a MIGRATION and
+-- wrong for HEALING: the profile was repaired once and every later rename — every
+-- future addon update — went unfixed forever. Healing has to re-check whenever the
+-- world may have changed, and the world changes on every update. The pass is a
+-- table walk over 14 keys across 2 modes; the cost is nothing.
+--
+-- ☠ AND IT ONLY EVER TOUCHES OUR OWN MEDIA. A third-party path is left alone even
+-- when it looks missing, because that judgement comes from an API whose answer is
+-- timing-dependent (see textureKnown) and because the addon may simply be disabled
+-- for the evening. Rewriting it would destroy a valid choice permanently.
+--
+-- ⚠ IT RESETS BOTH KINDS OF MISSING, retired-from-the-manifest AND absent-from-disk.
+-- An earlier version kept the setting for the second kind, reasoning that a reinstall
+-- would restore it — but that left the dropdown proudly displaying a texture the bars
+-- were not using, which is a worse lie than losing the choice. The two cases still
+-- get DIFFERENT ADVICE in the report, because the user's fix differs.
+function DF:MigrateStaleTexturePaths()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    -- The manifest is the authority here, NOT LSM's live registry: a texture we
+    -- still ship but have not registered yet would otherwise look missing and get
+    -- rewritten. Bail if it is absent rather than guess.
+    local manifest = DF.SHIPPED_MEDIA
+    if not manifest or not next(manifest) then return end
+
+    -- ☠ SANITY-GATE THE DISK CHECK. The manifest is always safe to trust, but the
+    -- disk check runs through C_UIFileAsset, and if the client's file index is not
+    -- ready this early EVERY path would look absent and we would reset the lot. So
+    -- probe something that must always resolve: if even that reads as missing, the
+    -- API is not usable yet — do manifest-only repairs this login, re-check next.
+    -- Same shape as the old "refuse to run on an empty registry" guard.
+    --   ⚠ The probe is a BLIZZARD asset on purpose. Probing one of ours would make
+    -- the gate depend on whether IsKnownFile resolves EXTENSIONLESS paths (all our
+    -- .tga are referenced without one) — an unknown we do not need to take on here.
+    local diskCheckUsable = DF.IsTexturePresent("Interface\\Buttons\\WHITE8x8") ~= false
+
+    -- Pick the first candidate that is actually present. ☠ THE MODE DEFAULT CAN
+    -- ITSELF BE THE MISSING FILE — absorbBarTexture defaults to DF_Absorb_V1.png, so
+    -- when that file went missing the "repair" computed a fallback equal to the dead
+    -- value, the `fallback ~= v` guard rejected it, and nothing was fixed while the
+    -- render still warned. WHITE8x8 is the backstop: a Blizzard asset that cannot go
+    -- missing, so this can always return something.
+    local function pickFallback(defaults, key, deadValue)
+        local candidates = { defaults and defaults[key], DF.STOCK_BAR_TEXTURE, "Interface\\Buttons\\WHITE8x8" }
+        for _, c in ipairs(candidates) do
+            if type(c) == "string" and c ~= deadValue and DF.IsTexturePresent(c) ~= false then
+                return c
+            end
+        end
+    end
+
+    local repaired = {}
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        if type(profile) == "table" then
+            for _, mode in ipairs({ "party", "raid" }) do
+                local modeDb = profile[mode]
+                local defaults = (mode == "party") and DF.PartyDefaults or DF.RaidDefaults
+                if type(modeDb) == "table" then
+                    for _, key in ipairs(TEXTURE_REPAIR_KEYS) do
+                        local v = modeDb[key]
+                        -- ourMediaKey returns nil for anything that is not ours,
+                        -- which skips third-party paths and border STYLE strings
+                        -- like "SOLID" for free.
+                        local mediaKey = type(v) == "string" and ourMediaKey(v) or nil
+                        -- "retired" = we no longer ship it (manifest, always reliable).
+                        -- "absent"  = we ship it but it is not on disk (needs the API,
+                        --             hence the gate above).
+                        local why
+                        if mediaKey then
+                            if not manifest[mediaKey] then
+                                why = "retired"
+                            elseif diskCheckUsable and DF.IsTexturePresent(v) == false then
+                                why = "absent"
+                            end
+                        end
+                        if why then
+                            local fallback = pickFallback(defaults, key, v)
+                            if fallback then
+                                modeDb[key] = fallback
+                                local label = TEXTURE_KEY_LABELS[key] or key
+                                local file = v:match("([^\\]+)$") or v
+                                repaired[why .. "|" .. label .. "|" .. file] = true
+                                -- Claim the render-time warning for this path so it
+                                -- cannot also fire. The reorder above should make that
+                                -- impossible, but a frame holding a cached value would
+                                -- otherwise produce a second message about a texture we
+                                -- have already reported and fixed.
+                                _df_warnedMissingTexture[v] = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- One line per distinct setting+file, naming BOTH — "we fixed something" with
+    -- no subject is what the old message did, and it left users unable to act.
+    local list = {}
+    for k in pairs(repaired) do list[#list + 1] = k end
+    if #list == 0 then return end
+    table.sort(list)
+    local anyAbsent = false
+    print(("|cff66ccffDandersFrames|r: %d texture setting%s pointed at a file that couldn't be found and %s been reset to the default:")
+        :format(#list, #list == 1 and "" or "s", #list == 1 and "has" or "have"))
+    for _, k in ipairs(list) do
+        local why, label, file = k:match("^(.-)|(.-)|(.*)$")
+        if why == "absent" then anyAbsent = true end
+        print(("  |cffffd200%s|r  (was %s)%s"):format(label, file,
+            why == "absent" and " |cffff7f3f*|r" or ""))
+    end
+    -- Only the second kind is recoverable, so only mention reinstalling when one
+    -- actually occurred — otherwise it is advice that cannot help.
+    if anyAbsent then
+        print("  |cffff7f3f*|r This file ships with DandersFrames but is missing from disk — your install may be incomplete. Reinstalling should restore it.")
+    end
+end
+
 -- Move the role-border colour set from per-mode storage (Stage 2 default
 -- placement) up to profile level under DF.db.roleColors so the global Colors
 -- settings page can manage them alongside class colours. Idempotent: only
@@ -3420,6 +3898,10 @@ local FRESH_PROFILE_MIGRATION_FLAGS = {
     -- profile is unflagged and every reload re-forces it -- silently undoing the user
     -- turning it off, which is precisely what the feature request ruled out.
     _importantDebuffOnV1    = true,
+    -- ☠ _staleTexturePathV1 DELIBERATELY REMOVED. The texture repair is HEALING, not a
+    -- migration: it must re-check on every login, because a file can go missing at any
+    -- future update, not just once in a profile's life. Stamping a flag here would have
+    -- exempted every new profile from healing forever. Do not add it back.
 }
 local FRESH_PROFILE_PARTY_MIGRATION_FLAGS = {
     _personalContainerCenterMigrated = true,
@@ -3788,6 +4270,17 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 RunLegacyKeyAdoption(profile)
             end
         end
+
+        -- ☠ MUST RUN HERE, BEFORE FRAMES ARE BUILT. This used to sit in the
+        -- C_Timer.After(0.5) block far below, which is half a second AFTER the
+        -- frames are created — so every bar rendered with the dead path first,
+        -- each printed its own "texture is missing" line, and the repair then
+        -- printed a second report about the same textures. Two sets of messages
+        -- for one problem. Healing the db before anything reads it means the
+        -- frames never see the dead path and only the (better) repair report is
+        -- printed. Needs only DandersFramesDB_v2 and the Config.lua tables, all
+        -- of which exist by now.
+        if DF.MigrateStaleTexturePaths then DF:MigrateStaleTexturePaths() end
         -- Pinned frames decouple: strip stale pinned.N.<setting> auto-layout
         -- overrides (everything except the per-set `enabled` flag).
         if DF.MigratePinnedLayoutOverrides then
@@ -6115,6 +6608,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
             if DF.MigrateImportantDebuffOn then
                 DF:MigrateImportantDebuffOn()
             end
+
+            -- (Texture-path repair moved to ADDON_LOADED, before frames are built —
+            -- running it here meant the bars had already rendered the dead path and
+            -- warned about it. See the call site there.)
 
             -- Priority higher-wins flip is now lazy/at-point-of-use — see
             -- DF.MigrateAuraDesignerPrioritiesLazy and CC:MigratePrioritiesLazy.

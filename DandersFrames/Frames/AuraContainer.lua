@@ -725,7 +725,7 @@ local function styleBarShared(slot, sb, barSpec, dr, dg, db2, da)
         -- SetRotatesTexture(isVertical)) so a DIRECTIONAL fill like the DF/Classic colour
         -- ramp runs ALONG the drain, not sideways across the width. Set explicitly both ways
         -- so a bar flipped back to horizontal clears it.
-        if sb.SetRotatesTexture then sb:SetRotatesTexture(barSpec.orientation == "VERTICAL") end
+        DF:ApplyBarFillOrientation(sb, barSpec.orientation == "VERTICAL")
     end
     if sb.SetReverseFill then sb:SetReverseFill(barSpec.reverseFill and true or false) end
     -- Background texture child (drawn under the fill). Create-once; recolour live.

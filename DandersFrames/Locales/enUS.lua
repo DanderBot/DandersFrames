@@ -30,6 +30,7 @@ if not L then return end
 --@do-not-package@
 
 -- Search system strings
+L["(missing)"] = true
 L["Dispel"] = true
 L["Export for"] = true
 L["Frame Layout"] = true

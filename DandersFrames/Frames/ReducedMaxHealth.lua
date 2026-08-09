@@ -110,7 +110,7 @@ function DF:UpdateReducedMaxHealth(frame)
     local isVertical = (orientation == "VERTICAL" or orientation == "VERTICAL_INV")
     bar:SetOrientation(isVertical and "VERTICAL" or "HORIZONTAL")
     bar:SetReverseFill(orientation == "HORIZONTAL" or orientation == "VERTICAL")
-    bar:SetRotatesTexture(isVertical)
+    DF:ApplyBarFillOrientation(bar, isVertical)
 
     local tex = bar:GetStatusBarTexture()
     if tex then

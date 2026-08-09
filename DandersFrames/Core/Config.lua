@@ -79,7 +79,36 @@ local function RegisterCustomMedia()
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Stripes Medium", "Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Medium")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Stripes Dense", "Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Dense")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Stripes Very Dense", "Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Very_Dense")
-    
+
+    -- ☠ TWO things here are deliberately unlike every registration above.
+    -- 1. It is a PNG, and PNG paths MUST carry the ".png" extension — the
+    --    extensionless form only resolves for .blp/.tga. (PNG loose files have
+    --    been supported since 10.0.7.)
+    -- 2. It TILES rather than stretching — see DF.TILED_BAR_TEXTURES in Core.lua,
+    --    which is keyed by this exact string. Renaming the file or dropping the
+    --    extension here silently turns the tiling off.
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1.png")
+
+    -- The wider absorb patterns. Same art family, differing only in stripe gap;
+    -- see DF.TILED_BAR_TEXTURES in Core.lua, which is keyed by these exact paths
+    -- and pairs each with a rotated companion for vertical frames.
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V1 Medium", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1_Medium.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V1 Wide", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1_Wide.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V1 Wider", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1_Wider.png")
+
+    -- The V2 family — glyph tiles. "+" is intended for shields and "-" for heal
+    -- absorbs, but both are ordinary statusbar textures and appear in every bar
+    -- dropdown: LSM has no notion of a per-setting media list, so the intent lives
+    -- in the NAME rather than in any restriction.
+    -- Neither takes a vertical companion; see SYMBOL_TILES in Core.lua, where each
+    -- is exempt for a different reason.
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V2 Plus Small", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Plus_Small.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V2 Plus Medium", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Plus_Medium.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V2 Plus Large", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Plus_Large.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V2 Minus Small", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Minus_Small.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V2 Minus Medium", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Minus_Medium.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V2 Minus Large", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Minus_Large.png")
+
     -- Health bar textures
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Smooth", "Interface\\AddOns\\DandersFrames\\Media\\DF_Smooth")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Glossy", "Interface\\AddOns\\DandersFrames\\Media\\DF_Glossy")
@@ -139,6 +168,134 @@ DF.SharedFonts = {
     ["Interface\\AddOns\\DandersFrames\\Fonts\\Roboto-Bold.ttf"] = "DF Roboto Bold",
 }
 
+-- ============================================================
+-- SHIPPED MEDIA MANIFEST
+-- ============================================================
+-- ☠ GENERATED from DandersFrames/Media/. Regenerate whenever art is added,
+-- renamed or removed — a stale manifest is worse than none, because it makes the
+-- healing below confidently wrong in both directions.
+--
+-- WHY THIS EXISTS, rather than asking C_UIFileAsset.IsKnownFile:
+--   That API answers from a loose-file index the client builds at launch, so it
+-- reports a file as KNOWN until the index catches up. Proven in game 2026-08-09:
+-- files renamed under a running client, /reload -> textures rendered green with
+-- no fallback and no warning; a fresh client launch -> the same paths healed
+-- correctly and the warning fired. Same API, same paths, different answers.
+--   That timing is exactly our real-world case: an addon update renames files
+-- under a running client. For OUR OWN media we do not need to ask — we know what
+-- we ship. The manifest is authoritative from the first frame and cannot go
+-- stale mid-session.
+--   The API is still used for THIRD-PARTY paths, where it is the only signal
+-- available and where being wrong is harmless (see DF:SafeSetStatusBarTexture).
+local SHIPPED_MEDIA_FILES = {
+    "Classic_Curve.tga",
+    "DF_Absorb_V1.png",
+    "DF_Absorb_V1_Medium.png",
+    "DF_Absorb_V1_Medium_Vert.png",
+    "DF_Absorb_V1_Vert.png",
+    "DF_Absorb_V1_Wide.png",
+    "DF_Absorb_V1_Wide_Vert.png",
+    "DF_Absorb_V1_Wider.png",
+    "DF_Absorb_V1_Wider_Vert.png",
+    "DF_Absorb_V2_Minus_Large.png",
+    "DF_Absorb_V2_Minus_Medium.png",
+    "DF_Absorb_V2_Minus_Small.png",
+    "DF_Absorb_V2_Plus_Large.png",
+    "DF_Absorb_V2_Plus_Medium.png",
+    "DF_Absorb_V2_Plus_Small.png",
+    "DF_AlertBadge.tga",
+    "DF_AlertMark.tga",
+    "DF_Bevel.tga",
+    "DF_Beveled.tga",
+    "DF_ColorWheel.tga",
+    "DF_Curve_Smooth.tga",
+    "DF_Curve_Stops.tga",
+    "DF_Double.tga",
+    "DF_DPS.tga",
+    "DF_ExpireBorder.tga",
+    "DF_ExpireBorder_Fill.tga",
+    "DF_ExpireBorder_Thick.tga",
+    "DF_ExpireBorder_Thin.tga",
+    "DF_Glass.tga",
+    "DF_Glossy.tga",
+    "DF_Glow.tga",
+    "DF_Gradient_H.tga",
+    "DF_Gradient_H_Rev.tga",
+    "DF_Gradient_V.tga",
+    "DF_Gradient_V_Rev.tga",
+    "DF_Healer.tga",
+    "DF_Icon.tga",
+    "DF_Inset.tga",
+    "DF_Matte.tga",
+    "DF_Minimalist.tga",
+    "DF_Ring.tga",
+    "DF_Smooth.tga",
+    "DF_Soft.tga",
+    "DF_SquareBorder.tga",
+    "DF_SquareRing.tga",
+    "DF_Stripes.tga",
+    "DF_Stripes_Dense.tga",
+    "DF_Stripes_Medium.tga",
+    "DF_Stripes_Soft.tga",
+    "DF_Stripes_Soft_Wide.tga",
+    "DF_Stripes_Sparse.tga",
+    "DF_Stripes_Very_Dense.tga",
+    "DF_Tank.tga",
+    "Icons\\add.tga",
+    "Icons\\check.tga",
+    "Icons\\chevron_right.tga",
+    "Icons\\close.tga",
+    "Icons\\content_copy.tga",
+    "Icons\\delete.tga",
+    "Icons\\dot.tga",
+    "Icons\\download.tga",
+    "Icons\\edit.tga",
+    "Icons\\edit_square.tga",
+    "Icons\\expand_more.tga",
+    "Icons\\filter_alt.tga",
+    "Icons\\filter_list.tga",
+    "Icons\\info.tga",
+    "Icons\\keyboard.tga",
+    "Icons\\lock.tga",
+    "Icons\\lock_open.tga",
+    "Icons\\menu.tga",
+    "Icons\\mouse.tga",
+    "Icons\\notes.tga",
+    "Icons\\preview.tga",
+    "Icons\\preview_off.tga",
+    "Icons\\refresh.tga",
+    "Icons\\remove.tga",
+    "Icons\\reorder.tga",
+    "Icons\\save.tga",
+    "Icons\\search.tga",
+    "Icons\\settings.tga",
+    "Icons\\star.tga",
+    "Icons\\sync.tga",
+    "Icons\\sync_disabled.tga",
+    "Icons\\upload.tga",
+    "Icons\\visibility.tga",
+    "Icons\\visibility_off.tga",
+    "Icons\\warning.tga",
+    "Icons\\widget_small.tga",
+}
+
+-- Lookup keyed BOTH ways: with the extension (how .png must be referenced) and
+-- without (how .tga/.blp conventionally are). Lowercased — WoW paths are
+-- case-insensitive and profiles hold whatever case was typed.
+DF.SHIPPED_MEDIA = {}
+-- Extensionless key -> the real on-disk filename. This turns the extensionless form
+-- profiles store ("...\\Media\\DF_Stripes") back into "df_stripes.tga", which is the
+-- shape C_UIFileAsset.IsKnownFile is known to answer for. Without it the disk check
+-- has to be skipped for every .tga we ship, which is most of our art.
+DF.SHIPPED_MEDIA_FILENAME = {}
+for _, name in ipairs(SHIPPED_MEDIA_FILES) do
+    local lower = name:lower()
+    local stem = lower:gsub("%.%w+$", "")
+    DF.SHIPPED_MEDIA[lower] = true
+    DF.SHIPPED_MEDIA[stem] = true
+    DF.SHIPPED_MEDIA_FILENAME[stem] = lower
+end
+
 -- Fallback textures if SharedMedia not available
 DF.SharedTextures = {
     ["Solid"] = "Solid (No Texture)",  -- Special option for solid color backgrounds
@@ -154,6 +311,17 @@ DF.SharedTextures = {
     ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Medium"] = "DF Stripes Medium",
     ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Dense"] = "DF Stripes Dense",
     ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Very_Dense"] = "DF Stripes Very Dense",
+    -- .png extension is REQUIRED in these paths; see the registrations above.
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1.png"] = "DF Absorb V1",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1_Medium.png"] = "DF Absorb V1 Medium",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1_Wide.png"] = "DF Absorb V1 Wide",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1_Wider.png"] = "DF Absorb V1 Wider",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Plus_Small.png"] = "DF Absorb V2 Plus Small",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Plus_Medium.png"] = "DF Absorb V2 Plus Medium",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Plus_Large.png"] = "DF Absorb V2 Plus Large",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Minus_Small.png"] = "DF Absorb V2 Minus Small",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Minus_Medium.png"] = "DF Absorb V2 Minus Medium",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Minus_Large.png"] = "DF Absorb V2 Minus Large",
 }
 
 -- Fonts to exclude (known problematic fonts)
@@ -1059,10 +1227,13 @@ DF.PartyDefaults = {
     absorbBarOvershieldStyle = "SPARK",
     absorbBarReverse = false,
     absorbBarShowOvershield = false,
-    -- DF Minimalist (Krathe, 2026-08-08; was DF_Stripes). Stored as the PATH, which is
-    -- what LSM registers the display name "DF Minimalist" against (Config.lua ~90) and
-    -- what every other texture default in this file holds.
-    absorbBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+    -- DF Absorb V1 (Krathe, 2026-08-09; was DF_Minimalist, before that DF_Stripes).
+    -- Stored as the PATH, which is what LSM registers the display name against
+    -- (Config.lua ~85) and what every other texture default in this file holds.
+    -- ☠ The ".png" is REQUIRED and is not decoration: PNG paths do not resolve
+    -- without their extension, and DF.TILED_BAR_TEXTURES is keyed by this exact
+    -- string — drop it and the texture both fails to load and stops tiling.
+    absorbBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1.png",
     absorbBarWidth = 46,
     absorbBarX = 0,
     absorbBarY = 0,
@@ -1641,9 +1812,10 @@ DF.PartyDefaults = {
     healAbsorbBarOrientation = "HORIZONTAL",
     healAbsorbBarOverlayReverse = false,
     healAbsorbBarReverse = false,
-    -- DF Minimalist (Krathe, 2026-08-08; was DF_Stripes) — matching absorbBarTexture,
-    -- since the two bars sit on the same health bar and read as one surface.
-    healAbsorbBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+    -- DF Absorb V1 (Krathe, 2026-08-09) — matching absorbBarTexture, since the two
+    -- bars sit on the same health bar and read as one surface. See the note
+    -- there about the required ".png".
+    healAbsorbBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1.png",
     healAbsorbBarWidth = 50,
     healAbsorbBarX = 0,
     healAbsorbBarY = -10,
