@@ -46,6 +46,14 @@ local WithConfiguredAdHocAuras = P.WithConfiguredAdHocAuras
 local GetAuraIcon = P.GetAuraIcon
 local GetFrameEffectTriggers = P.GetFrameEffectTriggers
 local AddFrameEffectTrigger = P.AddFrameEffectTrigger
+local GetEffectConditionGroups = P.GetEffectConditionGroups
+local GetEffectConditionMode = P.GetEffectConditionMode
+local SetEffectConditionMode = P.SetEffectConditionMode
+local AddEffectConditionGroup = P.AddEffectConditionGroup
+local RemoveEffectConditionGroup = P.RemoveEffectConditionGroup
+local AddEffectTriggerToGroup = P.AddEffectTriggerToGroup
+local RemoveEffectTriggerFromGroup = P.RemoveEffectTriggerFromGroup
+local EffectChainLinkCount = P.EffectChainLinkCount
 local RemoveFrameEffectTrigger = P.RemoveFrameEffectTrigger
 local CloseADPicker = P.CloseADPicker
 local GetIndicatorLayoutGroup = P.GetIndicatorLayoutGroup
@@ -1657,7 +1665,10 @@ S.CreateEffectCard = function(parent, yPos, effect)
 
         -- ── TRIGGER TAGS (frame-level effects only) ──
         if not isPlaced then
-            local triggers = GetFrameEffectTriggers(effect.auraName, effect.typeKey)
+            -- Normalised view: one group for a plain effect, N for a conditional one.
+            local condGroups = GetEffectConditionGroups(effect.auraName, effect.typeKey)
+            local condMode   = GetEffectConditionMode(effect.auraName, effect.typeKey)
+            local multiCond  = #condGroups > 1
             local trigContainer = CreateFrame("Frame", nil, body)
             trigContainer:SetPoint("TOPLEFT", 8, -12)
             trigContainer:SetPoint("RIGHT", body, "RIGHT", -8, 0)
@@ -1707,7 +1718,34 @@ S.CreateEffectCard = function(parent, yPos, effect)
             local TAG_GAP = 4
             local TAG_ROW_GAP = 3
             local tagX, tagY = 0, -(14 + 6)  -- below label
-            local canRemove = #triggers > 1
+
+            for gi = 1, #condGroups do
+            local triggers = condGroups[gi].triggers or {}
+            -- A grouped effect may empty a group out (the card warns); an ungrouped one
+            -- keeps the legacy minimum of one trigger.
+            local canRemove = multiCond or #triggers > 1
+
+            -- Operator caption BETWEEN groups, so the card reads downward as
+            -- "these ... AND ... these". Only present once the effect is conditional.
+            if multiCond and gi > 1 then
+                local sep = trigContainer:CreateFontString(nil, "OVERLAY")
+                GUI:SetSettingsFont(sep, 9, "OUTLINE")
+                sep:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY - 2)
+                sep:SetText(condMode == "ALL" and L["AND"] or L["OR"])
+                sep:SetTextColor(0.91, 0.66, 0.25)
+                local delG = DF.GUI:CreateCloseButton(trigContainer, {
+                    size = 14, tone = "danger",
+                    onClick = function()
+                        RemoveEffectConditionGroup(effect.auraName, effect.typeKey, gi)
+                        S.SwitchTab("effects")
+                        RefreshPreviewEffects()
+                        RefreshLiveFramesThrottled()
+                    end,
+                })
+                delG:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 34, tagY - 1)
+                tagY = tagY - 20
+                tagX = 0
+            end
 
             for ti, trigName in ipairs(triggers) do
                 local tagFrame = CreateFrame("Frame", nil, trigContainer, "BackdropTemplate")
@@ -1748,7 +1786,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
                         size = 14,
                         tone = "danger",
                         onClick = function()
-                            RemoveFrameEffectTrigger(effect.auraName, effect.typeKey, capturedTrigName)
+                            RemoveEffectTriggerFromGroup(effect.auraName, effect.typeKey, gi, capturedTrigName)
                             S.SwitchTab("effects")
                             RefreshPreviewEffects()
                             RefreshLiveFramesThrottled()   -- see the trigger-edit note above
@@ -1809,7 +1847,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
                     rowActions = {
                         {
                             handler = function(rec, _, picker)
-                                AddFrameEffectTrigger(effect.auraName, effect.typeKey, rec.auraName, capturedPool)
+                                AddEffectTriggerToGroup(effect.auraName, effect.typeKey, gi, rec.auraName, capturedPool)
                                 picker:Close()
                                 S.SwitchTab("effects")
                                 RefreshPreviewEffects()
@@ -1857,13 +1895,79 @@ S.CreateEffectCard = function(parent, yPos, effect)
                     onPick = function(kind, key)
                         local ref = DF:MakeADFilterRef(kind, key)
                         if not ref then return end
-                        AddFrameEffectTrigger(effect.auraName, effect.typeKey, ref, capturedPool)
+                        AddEffectTriggerToGroup(effect.auraName, effect.typeKey, gi, ref, capturedPool)
                         S.SwitchTab("effects")
                         RefreshPreviewEffects()
                         RefreshLiveFramesThrottled()   -- see the trigger-edit note above
                     end,
                 })
             end)
+
+            tagX = 0
+            tagY = tagY - (TAG_H + TAG_ROW_GAP)
+            end  -- for gi
+
+            -- CONDITION CONTROLS. The operator flips the whole expression's shape, which
+            -- is why it is ONE switch rather than per-group: ALL means the groups are ORs
+            -- ANDed together, ANY means they are ANDs ORed together. Between them that is
+            -- every two-level expression, and the factory renders both (ANY is distributed
+            -- into ALL form so it still draws through a single chain, one visual).
+            if multiCond then
+                local modeBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
+                modeBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
+                GUI:StyleButton(modeBtn, { width = 150, height = TAG_H, primary = true,
+                    accent = { r = 0.91, g = 0.66, b = 0.25 },
+                    text = condMode == "ALL" and L["Match ALL groups"] or L["Match ANY group"] })
+                GUI:SetSettingsFont(modeBtn.Text, 9, "")
+                modeBtn:SetScript("OnClick", function()
+                    SetEffectConditionMode(effect.auraName, effect.typeKey,
+                        condMode == "ALL" and "ANY" or "ALL", CurrentAuraPool())
+                    S.SwitchTab("effects")
+                    RefreshPreviewEffects()
+                    RefreshLiveFramesThrottled()
+                end)
+                tagX = 154
+            end
+
+            if #condGroups < 5 then
+                local addGroupBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
+                addGroupBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
+                GUI:StyleButton(addGroupBtn, { width = 110, height = TAG_H, primary = true,
+                    accent = { r = 0.25, g = 0.40, b = 0.25 },
+                    icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 },
+                    text = L["Condition"] })
+                GUI:SetSettingsFont(addGroupBtn.Text, 9, "")
+                addGroupBtn.Text:SetTextColor(0.5, 0.8, 0.5)
+                addGroupBtn.Icon:SetVertexColor(0.5, 0.8, 0.5)
+                addGroupBtn:SetScript("OnClick", function()
+                    AddEffectConditionGroup(effect.auraName, effect.typeKey, CurrentAuraPool())
+                    S.SwitchTab("effects")
+                    RefreshPreviewEffects()
+                    RefreshLiveFramesThrottled()
+                end)
+            end
+            tagY = tagY - (TAG_H + TAG_ROW_GAP)
+
+            -- The factory REFUSES to render an empty group or an over-cap expansion rather
+            -- than draw a truncated conjunction, so the card has to say why nothing shows.
+            if multiCond then
+                local links = EffectChainLinkCount(effect.auraName, effect.typeKey)
+                local emptyG = false
+                for _, g in ipairs(condGroups) do
+                    if #(g.triggers or {}) == 0 then emptyG = true break end
+                end
+                if emptyG or links > 9 then
+                    local warn = trigContainer:CreateFontString(nil, "OVERLAY")
+                    GUI:SetSettingsFont(warn, 9, "")
+                    warn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
+                    warn:SetPoint("RIGHT", trigContainer, "RIGHT", 0, 0)
+                    warn:SetJustifyH("LEFT")
+                    warn:SetText(emptyG and L["A condition group is empty, so this effect cannot show."]
+                        or format(L["Too many combinations (%d). Simplify the conditions."], links))
+                    warn:SetTextColor(0.95, 0.45, 0.35)
+                    tagY = tagY - 26
+                end
+            end
 
             triggersH = -(tagY) + TAG_H + 8  -- total height of trigger section
             trigContainer:SetHeight(triggersH)
@@ -2620,4 +2724,4 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
 end
 
 -- ☠ Published HERE, in the part that DEFINES it -- see the note in Options.lua.
-P.AddGroupAppearanceSection = AddGroupAppearanceSection
+P.AddGroupAppearanceSection = AddGroupAppearanceSection

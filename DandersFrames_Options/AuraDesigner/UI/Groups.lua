@@ -593,6 +593,127 @@ P.GetFrameEffectTriggers = GetFrameEffectTriggers
 -- Add a trigger aura to a frame effect. `pool` (optional) pins the target
 -- pool — the floating trigger picker captures it at OPEN time so a dropdown
 -- surviving a tab switch can't write the trigger into the wrong pool.
+-- ============================================================
+-- CONDITION GROUPS (editor side)
+-- The render path reads typeCfg.conditions; the editor works through this normalised
+-- view so the card never has to care which of the two storage shapes is in play:
+--   * ONE group  -> stored as the legacy flat typeCfg.triggers (unchanged on disk, and
+--                   the factory's plain union path renders it exactly as before)
+--   * 2+ groups  -> promoted to typeCfg.conditions, and demoted back on the way down
+-- Callers address groups by INDEX; group 1 is always the effect's original trigger list.
+-- ============================================================
+local AD_MAX_COND_GROUPS = 5
+
+-- Array of { triggers = {...} }. Always at least one group, never nil.
+local function GetEffectConditionGroups(auraName, typeKey)
+    local auraCfg = CurrentAuraPool()[auraName]
+    local typeCfg = auraCfg and auraCfg[typeKey]
+    local c = typeCfg and typeCfg.conditions
+    if type(c) == "table" and type(c.groups) == "table" and #c.groups > 0 then
+        return c.groups
+    end
+    return { { triggers = GetFrameEffectTriggers(auraName, typeKey) } }
+end
+P.GetEffectConditionGroups = GetEffectConditionGroups
+
+-- "ALL" (groups are ORs, ANDed) or "ANY" (groups are ANDs, ORed). Default ALL.
+local function GetEffectConditionMode(auraName, typeKey)
+    local auraCfg = CurrentAuraPool()[auraName]
+    local typeCfg = auraCfg and auraCfg[typeKey]
+    local c = typeCfg and typeCfg.conditions
+    return (type(c) == "table" and c.mode) or "ALL"
+end
+P.GetEffectConditionMode = GetEffectConditionMode
+
+local function SetEffectConditionMode(auraName, typeKey, mode, pool)
+    local typeCfg = EnsureTypeConfig(auraName, typeKey, pool)
+    if type(typeCfg.conditions) ~= "table" then return end
+    typeCfg.conditions.mode = mode
+end
+P.SetEffectConditionMode = SetEffectConditionMode
+
+-- Promote to the grouped shape and append an empty group. Returns the new group index,
+-- or nil at the cap.
+local function AddEffectConditionGroup(auraName, typeKey, pool)
+    local typeCfg = EnsureTypeConfig(auraName, typeKey, pool)
+    if type(typeCfg.conditions) ~= "table" then
+        -- First promotion: the existing flat list becomes group 1 verbatim, so turning a
+        -- simple effect into a conditional one never changes what it already matched.
+        typeCfg.conditions = {
+            mode = "ALL",
+            groups = { { triggers = typeCfg.triggers or { auraName } } },
+        }
+    end
+    local groups = typeCfg.conditions.groups
+    if #groups >= AD_MAX_COND_GROUPS then return nil end
+    tinsert(groups, { triggers = {} })
+    return #groups
+end
+P.AddEffectConditionGroup = AddEffectConditionGroup
+
+-- Remove a group; dropping back to one demotes to the flat list so the stored shape
+-- matches what the render path will actually take.
+local function RemoveEffectConditionGroup(auraName, typeKey, index)
+    local auraCfg = CurrentAuraPool()[auraName]
+    local typeCfg = auraCfg and auraCfg[typeKey]
+    local c = typeCfg and typeCfg.conditions
+    if type(c) ~= "table" or type(c.groups) ~= "table" then return end
+    if #c.groups <= 1 then return end
+    tremove(c.groups, index)
+    if #c.groups == 1 then
+        typeCfg.triggers = c.groups[1].triggers
+        typeCfg.conditions = nil
+    end
+end
+P.RemoveEffectConditionGroup = RemoveEffectConditionGroup
+
+-- Add/remove within one group. Group 1 of an ungrouped effect is the flat list, so these
+-- fall through to the legacy helpers and the on-disk shape is untouched.
+local function AddEffectTriggerToGroup(auraName, typeKey, index, triggerName, pool)
+    local typeCfg = EnsureTypeConfig(auraName, typeKey, pool)
+    local c = typeCfg.conditions
+    if type(c) ~= "table" or type(c.groups) ~= "table" then
+        return P.AddFrameEffectTrigger(auraName, typeKey, triggerName, pool)
+    end
+    local g = c.groups[index]
+    if not g then return end
+    g.triggers = g.triggers or {}
+    for _, t in ipairs(g.triggers) do
+        if t == triggerName then return end
+    end
+    tinsert(g.triggers, triggerName)
+end
+P.AddEffectTriggerToGroup = AddEffectTriggerToGroup
+
+local function RemoveEffectTriggerFromGroup(auraName, typeKey, index, triggerName)
+    local auraCfg = CurrentAuraPool()[auraName]
+    local typeCfg = auraCfg and auraCfg[typeKey]
+    local c = typeCfg and typeCfg.conditions
+    if type(c) ~= "table" or type(c.groups) ~= "table" then
+        return P.RemoveFrameEffectTrigger(auraName, typeKey, triggerName)
+    end
+    local g = c.groups[index]
+    if not g or type(g.triggers) ~= "table" then return end
+    -- A group may empty out (unlike the flat list, which keeps a minimum of one): an
+    -- empty group makes the whole expression unrenderable, which the card surfaces.
+    for i, t in ipairs(g.triggers) do
+        if t == triggerName then tremove(g.triggers, i); return end
+    end
+end
+P.RemoveEffectTriggerFromGroup = RemoveEffectTriggerFromGroup
+
+-- Would-be chain length, for the editor's over-cap warning. Mirrors the factory:
+-- ALL = one link per group, ANY = the product of the group sizes.
+local function EffectChainLinkCount(auraName, typeKey)
+    local groups = GetEffectConditionGroups(auraName, typeKey)
+    if #groups < 2 then return 1 end
+    if GetEffectConditionMode(auraName, typeKey) == "ALL" then return #groups end
+    local n = 1
+    for _, g in ipairs(groups) do n = n * math.max(1, #(g.triggers or {})) end
+    return n
+end
+P.EffectChainLinkCount = EffectChainLinkCount
+
 local function AddFrameEffectTrigger(auraName, typeKey, triggerName, pool)
     local typeCfg = EnsureTypeConfig(auraName, typeKey, pool)
     if not typeCfg.triggers then
