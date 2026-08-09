@@ -521,7 +521,8 @@ end
 -- Absent `conditions` = the legacy flat `triggers` list = a single OR group. Nothing
 -- about existing records changes.
 -- ============================================================
-local AD_MAX_CONDITION_GROUPS = 5   -- each group is a real container; cap the chain
+local AD_MAX_CONDITION_GROUPS = 5   -- author-facing groups
+local AD_MAX_CHAIN_LINKS      = 9   -- links the chain may end up with AFTER compiling
 
 -- Union one group's entries into a single include map (the free OR).
 local function groupIdentity(spec, entries)
@@ -537,26 +538,95 @@ local function groupIdentity(spec, entries)
     return map
 end
 
--- Resolve an effect's conditions into an ORDERED list of include maps, one per chain
--- link. Returns nil when the effect has no renderable condition chain — no conditions
--- block, fewer than two usable groups, a shape we don't render (see the note above), or
--- any group that resolves to nothing (an unresolvable group would silently widen the
--- conjunction to "ignore this condition", which is worse than not rendering).
+-- DISTRIBUTE an OR-of-ANDs into the AND-of-ORs the chain can actually render.
+-- terms[i] is one AND-group, held as an array of its members' maps. The result is one
+-- clause per combination taking a single member from each group:
+--     (X and Y) or (Z and W)  ->  (X or Z) and (X or W) and (Y or Z) and (Y or W)
+-- Logically identical, one chain, ONE visual — which is the whole point. Rendering the
+-- un-distributed form would mean a chain per term and therefore a visual per term, and a
+-- translucent tint drawn twice composites to a darker one (measured in game 2026-08-09,
+-- 25% -> 44% -> 58%). So this is not an optimisation, it is the only correct render.
+--
+-- Clause count is the PRODUCT of the group sizes, which grows fast (2x2 = 4, 3x2 = 8,
+-- 2x3 = 9). Over the cap returns nil + the count so the editor can refuse the expression
+-- up front rather than render a truncated — and therefore WRONG — conjunction.
+local function distributeTerms(terms, cap)
+    local total = 1
+    for _, t in ipairs(terms) do
+        total = total * #t
+        if total > cap then return nil, total end
+    end
+    local clauses, idx = {}, {}
+    for i = 1, #terms do idx[i] = 1 end
+    while true do
+        local map = {}
+        for i = 1, #terms do
+            for id in pairs(terms[i][idx[i]]) do map[id] = true end
+        end
+        clauses[#clauses + 1] = map
+        -- Odometer: advance the last group, carrying left when it wraps.
+        local i = #terms
+        while i >= 1 do
+            idx[i] = idx[i] + 1
+            if idx[i] <= #terms[i] then break end
+            idx[i] = 1
+            i = i - 1
+        end
+        if i < 1 then break end
+    end
+    return clauses, total
+end
+
+-- Resolve an effect's conditions into an ORDERED list of include maps, one per chain link.
+--
+-- `conditions.mode` alone fixes the shape — the groups are always the OPPOSITE operator, so
+-- a per-group mode would be redundant (and a way to express nothing new):
+--     mode = "ALL"  ->  groups are ORs   ->  (A or B) and (C or D)   -- renders directly
+--     mode = "ANY"  ->  groups are ANDs  ->  (A and B) or (C and D)  -- distributed above
+-- Between them that covers every two-level expression in either normal form.
+--
+-- Returns nil when there is no renderable chain: no conditions block, fewer than two
+-- groups, an empty group, a group that resolves to no spells, or an expansion over the
+-- link cap. Refusing beats rendering: an unresolvable group would silently widen the
+-- conjunction to "ignore this condition", which is worse than showing nothing.
+-- Second return is the would-be link count, for the editor's over-cap message.
 local function resolveConditions(spec, typeCfg)
     local c = typeCfg.conditions
     if type(c) ~= "table" or type(c.groups) ~= "table" then return nil end
-    -- Only ALL-of-ANY renders. ANY-of-ALL needs a chain per group (unbuilt).
-    if c.mode ~= "ALL" then return nil end
-    local links = {}
+    local groups = {}
     for _, g in ipairs(c.groups) do
-        if #links >= AD_MAX_CONDITION_GROUPS then break end
-        if type(g) ~= "table" or (g.mode ~= nil and g.mode ~= "ANY") then return nil end
-        local map = groupIdentity(spec, g.triggers)
-        if not map or not next(map) then return nil end
-        links[#links + 1] = map
+        if #groups >= AD_MAX_CONDITION_GROUPS then break end
+        if type(g) ~= "table" or type(g.triggers) ~= "table" or #g.triggers == 0 then
+            return nil
+        end
+        groups[#groups + 1] = g
     end
-    if #links < 2 then return nil end   -- one group is just a plain union
-    return links
+    if #groups < 2 then return nil end   -- one group is just a plain union
+
+    if c.mode == "ALL" then
+        local links = {}
+        for _, g in ipairs(groups) do
+            local map = groupIdentity(spec, g.triggers)
+            if not map or not next(map) then return nil end
+            links[#links + 1] = map
+        end
+        return links, #links
+    elseif c.mode == "ANY" then
+        local terms = {}
+        for _, g in ipairs(groups) do
+            local t = {}
+            for _, name in ipairs(g.triggers) do
+                local f = DF:BuildADIdentityFilters(spec, name)
+                -- Every member must resolve: dropping one from a conjunction would
+                -- quietly turn "A and B" into "A".
+                if not (f and f.includeSpellIDs and next(f.includeSpellIDs)) then return nil end
+                t[#t + 1] = f.includeSpellIDs
+            end
+            terms[#terms + 1] = t
+        end
+        return distributeTerms(terms, AD_MAX_CHAIN_LINKS)
+    end
+    return nil
 end
 
 -- Slot/group filter string for an indicator/effect config (read-free). othersOnly =
@@ -3766,6 +3836,31 @@ function Factory:SyncFrame(frame)
 
         if bestName then
             local filt = poolFilter(bestCfg, bestPool == 1)
+            -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
+            -- the border consumer: a conjunction of presence gates does not express "while
+            -- all of these are absent".
+            local chainHB = resolveConditions(spec, bestCfg)
+            if chainHB then
+                local r, g, b, a = readADColor(bestCfg.color)
+                local mode = slower(bestCfg.mode or "replace")
+                local wholeBar = (mode == "tint") and (bestCfg.tintWholeBar and true or false) or false
+                if wholeBar then
+                    local blend = healthbarBlend(mode, bestCfg.blend, a)
+                    syncConditionChain(hb, bestName, frame, frame.unit, chainHB, filt, "flat",
+                        tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|"),
+                        function(map, f) return buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 1, f) end,
+                        function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end)
+                else
+                    local alpha = (mode == "replace") and 1 or healthbarBlend(mode, bestCfg.blend, a)
+                    local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
+                    local tex = (fdb and fdb.healthTexture) or "Interface\\TargetingFrame\\UI-StatusBar"
+                    local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
+                    syncConditionChain(hb, bestName, frame, frame.unit, chainHB, filt, "cover",
+                        tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo) }, "|"),
+                        function(map, f) return buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, f) end,
+                        function(h) h:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo } } }) end)
+                end
+            else
             local existingHB = hb[bestName]
             local wantMissingHB = bestCfg.showWhenMissing and true or false
             if existingHB and (existingHB.missing and true or false) ~= wantMissingHB then
@@ -3858,6 +3953,7 @@ function Factory:SyncFrame(frame)
                 end
             end
           end
+            end  -- if chainHB
         end
         teardownExcept(hb, bestName)
         -- No health-bar winner this pass → the mirror bar is gone; drop the ref.
@@ -3882,6 +3978,30 @@ function Factory:SyncFrame(frame)
 
         if bestName then
             local filt = poolFilter(bestCfg, bestPool == 1)
+            -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
+            -- the border consumer: a conjunction of presence gates does not express "while
+            -- all of these are absent".
+            local chainBG = resolveConditions(spec, bestCfg)
+            if chainBG then
+                local r, g, b, a = readADColor(bestCfg.color)
+                local mode = slower(bestCfg.mode or "tint")
+                local blend = healthbarBlend(mode, bestCfg.blend, a)
+                -- Same parked anchor the single-container path uses: frame.background is a
+                -- TEXTURE and can't parent a container, and the tint has to sit at
+                -- healthBar-3 so it lands above the background but below every bar.
+                local bgHost = store.bgAnchor
+                if not bgHost then
+                    bgHost = CreateFrame("Frame", nil, frame)
+                    bgHost:SetAllPoints(frame.background)
+                    store.bgAnchor = bgHost
+                end
+                local hbLvl = frame.healthBar and frame.healthBar:GetFrameLevel() or 3
+                bgHost:SetFrameLevel(math.max(0, hbLvl - 3))
+                syncConditionChain(bg, bestName, bgHost, frame.unit, chainBG, filt, "bgtint",
+                    tconcat({ "bg", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|"),
+                    function(map, f) return buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, f) end,
+                    function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end)
+            else
             local existingBG = bg[bestName]
             local wantMissingBG = bestCfg.showWhenMissing and true or false
             if existingBG and (existingBG.missing and true or false) ~= wantMissingBG then
@@ -3942,6 +4062,7 @@ function Factory:SyncFrame(frame)
                 end
             end
           end
+            end  -- if chainBG
         end
         teardownExcept(bg, bestName)
         -- No background winner this pass → the containers are gone; drop the anchor too.
@@ -4059,6 +4180,30 @@ function Factory:SyncFrame(frame)
                 local filt = poolFilter(bestCfg, bestPool == 1)
                 local r, g, b, a = readADColor(bestCfg.color)
                 local color = { r = r, g = g, b = b, a = a }
+                -- CONDITION CHAIN: the LAST link hands its host to the Text Designer, so the
+                -- colour covers only exist when every condition holds. The chain's own gates
+                -- use the same mirror-host config, which is why this type nests for free --
+                -- the visual link is just one more host, handed to a different consumer.
+                local chainTX = resolveConditions(spec, bestCfg)
+                if chainTX then
+                    local cat = category
+                    syncConditionChain(st, bestName, frame, frame.unit, chainTX, filt,
+                        "mirrorhost", colSig(bestCfg.color),
+                        function(map, f)
+                            return buildMirrorHostConfig(frame.unit, map, function(host)
+                                local e = st[bestName]
+                                if e then e.host = host end
+                                st._lastHost = host
+                                TDRender:EnableMirrors(frame, cat, host, color)
+                            end, f)
+                        end,
+                        -- A colour edit re-registers on the stashed host; EnableMirrors is
+                        -- idempotent per parent and restamps the colour.
+                        function() 
+                            local e = st[bestName]
+                            if e and e.host then TDRender:EnableMirrors(frame, cat, e.host, color) end
+                        end)
+                else
                 -- Nothing structural: one overlay slot whose only region is the mirror
                 -- host. Map and filter string both tune live.
                 local structSig = "mirrorhost"
@@ -4116,6 +4261,7 @@ function Factory:SyncFrame(frame)
                     -- nil-check per pass, only fires after a TD teardown.
                     TDRender:EnableMirrors(frame, category, entry.host, color)
                 end
+                end  -- if chainTX
             elseif TDRender then
                 TDRender:DisableMirrors(frame, category)
             end
