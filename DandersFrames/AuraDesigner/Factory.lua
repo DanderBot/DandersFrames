@@ -49,6 +49,14 @@ local DBG = "AD"
 -- SpellDB/curated spell names or ad-hoc "#<id>" keys — neither can start with "other:".
 local OTHER_PREFIX = "other:"
 
+-- Store-key prefix for LAYOUT-GROUP frame-level effects (the third winner pool). A group
+-- key is GROUP_PREFIX .. <pool prefix> .. <group id> — the pool prefix because the two
+-- group stores (adDB.layoutGroups[spec] and the flat adDB.otherLayoutGroups) run
+-- independent id counters, exactly the collision syncFilterGroupList's "fgroup:<prefix><id>"
+-- keys already guard against. Collision-proof against aura names for the same reason
+-- OTHER_PREFIX is: no spell name or "#<id>" key can start with "group:".
+local GROUP_PREFIX = "group:"
+
 -- One-shot (per session, per name) tripwire for OTHER-pool names that resolve to NO
 -- identity map. The pool's naming contract is SpellDB names (rec.n / localized) or
 -- ad-hoc "#<id>" keys — an unresolvable name here means a bad record (e.g. a curated
@@ -654,6 +662,93 @@ local function borderSpecSig(spec)
     return tconcat(parts, "|")
 end
 
+-- ============================================================
+-- LAYOUT-GROUP EFFECT POOL  (pickWinner's third pool)
+-- A layout group can drive the frame-level effects too, on the group's whole spell
+-- set rather than one aura's. Both group stores take part: the spec-keyed
+-- adDB.layoutGroups[spec] and the flat spec-independent adDB.otherLayoutGroups,
+-- because both tabs show the same group card.
+--
+-- Resolved ONCE per SyncFrame, not once per pickWinner call: a group's identity map
+-- is the same for all five effect types, so resolving it per type would repeat the
+-- work five times over. Groups with no `effects` block -- the default, since every
+-- effect ships off -- cost one type() check and nothing else.
+--
+-- Entry tables are module-level scratch, reused across passes (they hold no
+-- long-lived reference; everything is read inside the same SyncFrame). The MAPS are
+-- not reused: a winning map is handed to AuraContainer:Create and retained in the
+-- live handle's config for ApplyTuning to re-derive from, so wiping a buffer under a
+-- standing container would corrupt its candidate filters. Member maps are therefore
+-- allocated fresh per pass, exactly as unionIdentity already does for trigger unions.
+-- ============================================================
+local groupPool = { n = 0 }
+
+-- A group's include map. Filter groups reuse the version-cached registry resolve
+-- (shared, immutable -- handed on as-is, never mutated). Member groups union their
+-- members' aura identities: ALL members, regardless of each member indicator's own eye
+-- toggle, because the effect is a property of the group's membership list rather than
+-- of any one icon's visibility.
+local function groupEffectMap(R, group, idSpec)
+    if group.kind == "filter" then
+        if not R then return nil end
+        local res = resolveFilterGroup(R, group)
+        if res and res.kind == "include" and res.map and next(res.map) then return res.map end
+        return nil
+    end
+    local members = group.members
+    if not members or #members == 0 then return nil end
+    local map
+    for _, member in ipairs(members) do
+        local f = member.auraName and DF:BuildADIdentityFilters(idSpec, member.auraName)
+        if f and f.includeSpellIDs then
+            map = map or {}
+            for id in pairs(f.includeSpellIDs) do map[id] = true end
+        end
+    end
+    return map
+end
+
+-- Returns the shared scratch pool (with .n), or nil when no group drives an effect.
+local function collectGroupEffectPool(adDB, spec, R)
+    groupPool.n = 0
+    for p = 1, 2 do
+        local groups = (p == 1) and (adDB.layoutGroups and adDB.layoutGroups[spec])
+                                 or adDB.otherLayoutGroups
+        if groups then
+            local keyPrefix = (p == 1) and "" or OTHER_PREFIX
+            -- Other-store identity is spec-INDEPENDENT, mirroring the other aura pool.
+            local idSpec = (p == 1) and spec or nil
+            for _, group in ipairs(groups) do
+                -- Eye-hidden groups (`enabled == false`) render nothing, so they drive
+                -- nothing either -- the same gate their icon row and the dedup union use.
+                if type(group) == "table" and type(group.effects) == "table"
+                    and group.enabled ~= false then
+                    local map = groupEffectMap(R, group, idSpec)
+                    if map then
+                        local n = groupPool.n + 1
+                        local e = groupPool[n]
+                        if not e then e = {}; groupPool[n] = e end
+                        -- Key rebuilt only when this slot changes group, so a steady
+                        -- roster costs no string concat per pass.
+                        if e.group ~= group then
+                            e.key = GROUP_PREFIX .. keyPrefix .. tostring(group.id)
+                            e.group = group
+                        end
+                        e.map = map
+                        -- The group's OWN icon-row filter: spec-keyed groups are
+                        -- player-cast only, the flat store stays anyone-cast, and
+                        -- Others Only is honoured (mirror syncFilterGroupList).
+                        e.filter = poolFilter(group, keyPrefix == "")
+                        groupPool.n = n
+                    end
+                end
+            end
+        end
+    end
+    if groupPool.n == 0 then return nil end
+    return groupPool
+end
+
 -- Pick the single highest-priority configured indicator of `typeKey` across all configured
 -- auras for this spec AND the spec-independent Other Buffs pool (adDB.otherAuras) —
 -- candidates from BOTH pools compete in the SAME pick, so there is one winner per effect
@@ -665,10 +760,20 @@ end
 -- blocks count (e.g. healthbar/background need .color, border must be enabled). Read-free.
 -- Hidden blocks (eye toggle, `enabled == false`; nil/true = shown for legacy records) never
 -- compete — the pick falls to the next candidate, or nothing.
--- Returns the winner's STORE KEY (OTHER_PREFIX-prefixed for other-pool winners, so store
--- entries never collide with a same-named spec-pool aura), its type config, map, priority.
-local function pickWinner(spec, specAuras, otherAuras, typeKey, validate)
-    local bestName, bestCfg, bestMap, bestPrio, bestPool
+--
+-- POOL 3 = LAYOUT GROUPS (groupPool, pre-resolved by collectGroupEffectPool). A group's
+-- effects live in group.effects[typeKey] with the per-aura typeCfg shape, so every
+-- validator and every downstream config builder reads them unchanged. Pool 3 is walked
+-- LAST, which is the whole tie-break rule: on equal priority an explicit per-aura config
+-- beats a broad group. Within the pool, ties break on the group's store key.
+--
+-- Returns the winner's STORE KEY (OTHER_PREFIX-prefixed for other-pool winners and
+-- GROUP_PREFIX-prefixed for groups, so store entries never collide with a same-named
+-- spec-pool aura), its type config, map, priority, and the resolved caster FILTER STRING.
+-- The filter is resolved here rather than by the caller because a group's filter comes
+-- from the GROUP (its icon row's own), not from the effect block.
+local function pickWinner(spec, specAuras, otherAuras, groupPoolIn, typeKey, validate)
+    local bestName, bestCfg, bestMap, bestPrio, bestPool, bestFilter
     for pool = 1, 2 do
         local auras = (pool == 1) and specAuras or otherAuras
         -- Other-pool identity is spec-INDEPENDENT: nil spec skips the per-spec Config
@@ -687,15 +792,34 @@ local function pickWinner(spec, specAuras, otherAuras, typeKey, validate)
                             or (prio == bestPrio and (pool < bestPool
                                 or (pool == bestPool and auraName < bestName))) then
                             bestName, bestCfg, bestMap, bestPrio, bestPool = auraName, typeCfg, map, prio, pool
+                            bestFilter = poolFilter(typeCfg, pool == 1)
                         end
                     end
                 end
             end
         end
     end
+    if groupPoolIn then
+        for i = 1, groupPoolIn.n do
+            local e = groupPoolIn[i]
+            local typeCfg = e.group.effects[typeKey]
+            if type(typeCfg) == "table" and typeCfg.enabled ~= false
+                and (not validate or validate(typeCfg)) then
+                local prio = e.group.priority or 5
+                -- Pool 3 loses every priority tie to pools 1 and 2 (3 < bestPool is
+                -- never true), so this only ever displaces another group.
+                if (not bestName)
+                    or prio > bestPrio
+                    or (prio == bestPrio and bestPool == 3 and e.key < bestName) then
+                    bestName, bestCfg, bestMap, bestPrio, bestPool = e.key, typeCfg, e.map, prio, 3
+                    bestFilter = e.filter
+                end
+            end
+        end
+    end
+    -- Pool 3 keys arrive already prefixed (collectGroupEffectPool builds them).
     local bestKey = bestName and ((bestPool == 2) and (OTHER_PREFIX .. bestName) or bestName)
-    -- bestPool (1 = spec/My Buffs, 2 = other) drives the caster filter — see poolFilter.
-    return bestKey, bestCfg, bestMap, bestPrio, bestPool
+    return bestKey, bestCfg, bestMap, bestPrio, bestFilter
 end
 
 -- Tear down every container in a per-type store that is not the current winner (winner
@@ -3458,6 +3582,10 @@ function Factory:SyncFrame(frame)
     -- NIL spec (ad-hoc "#id" -> SpellDB by name; per-spec Config tables never apply).
     local otherAuras = adDB.otherAuras
 
+    -- LAYOUT-GROUP EFFECTS (pool 3): resolved ONCE for all five effect types below.
+    -- nil when no group drives an effect, which is every profile until one is configured.
+    local groupFx = collectGroupEffectPool(adDB, spec, DF.FilterRegistry)
+
     -- ---- HEALTH BAR (child of frame.healthBar, overlay) -----------------------------
     -- Two render paths, chosen by config:
     --   * FILL COVER (replace, or tint without "Tint Entire Bar") — a texture anchored to the
@@ -3472,11 +3600,10 @@ function Factory:SyncFrame(frame)
         local hb = store.healthbar
         if not hb then hb = {}; store.healthbar = hb end
 
-        local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, "healthbar",
+        local bestName, bestCfg, bestMap, _, filt = pickWinner(spec, specAuras, otherAuras, groupFx, "healthbar",
             function(c) return c.color end)
 
         if bestName then
-            local filt = poolFilter(bestCfg, bestPool == 1)
             local existingHB = hb[bestName]
             local wantMissingHB = bestCfg.showWhenMissing and true or false
             if existingHB and (existingHB.missing and true or false) ~= wantMissingHB then
@@ -3588,11 +3715,10 @@ function Factory:SyncFrame(frame)
         local bg = store.background
         if not bg then bg = {}; store.background = bg end
 
-        local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, "background",
+        local bestName, bestCfg, bestMap, _, filt = pickWinner(spec, specAuras, otherAuras, groupFx, "background",
             function(c) return c.color end)
 
         if bestName then
-            local filt = poolFilter(bestCfg, bestPool == 1)
             local existingBG = bg[bestName]
             local wantMissingBG = bestCfg.showWhenMissing and true or false
             if existingBG and (existingBG.missing and true or false) ~= wantMissingBG then
@@ -3673,7 +3799,7 @@ function Factory:SyncFrame(frame)
         -- keys `enabled` off exactly this key (Border.lua:217 → enabled = ShowBorder ~= false),
         -- so the winner set is identical to a full-spec enabled check. The one real spec is
         -- built ONCE below, for the chosen winner.
-        local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, "border",
+        local bestName, bestCfg, bestMap, _, filt = pickWinner(spec, specAuras, otherAuras, groupFx, "border",
             function(c) return c.ShowBorder ~= false end)
 
         local bestSpec
@@ -3683,7 +3809,6 @@ function Factory:SyncFrame(frame)
         end
 
         if bestName then
-            local filt = poolFilter(bestCfg, bestPool == 1)
             local wantMissingBD = bestCfg.showWhenMissing and true or false
             local existingBD = bd[bestName]
             if existingBD and (existingBD.missing and true or false) ~= wantMissingBD then
@@ -3751,10 +3876,9 @@ function Factory:SyncFrame(frame)
             local st = store[typeKey]
             if not st then st = {}; store[typeKey] = st end
 
-            local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, typeKey,
+            local bestName, bestCfg, bestMap, _, filt = pickWinner(spec, specAuras, otherAuras, groupFx, typeKey,
                 function(c) return c.color and not c.showWhenMissing end)
             if bestName and TDRender then
-                local filt = poolFilter(bestCfg, bestPool == 1)
                 local r, g, b, a = readADColor(bestCfg.color)
                 local color = { r = r, g = g, b = b, a = a }
                 -- Nothing structural: one overlay slot whose only region is the mirror
