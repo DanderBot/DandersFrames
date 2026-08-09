@@ -201,10 +201,10 @@ R.Spells = {
     -- ------------------------------------------------------------
     -- Raid Buffs
     -- ------------------------------------------------------------
-    { id = 1459,     n = "Arcane Intellect",          class = "MAGE",          cats = { raidBuffs = true } },
+    { id = 1459,     alts = { 432778 }, n = "Arcane Intellect", class = "MAGE",  cats = { raidBuffs = true } },
     { id = 21562,    n = "Power Word: Fortitude",     class = "PRIEST",        cats = { raidBuffs = true } },
     { id = 6673,     n = "Battle Shout",              class = "WARRIOR",       cats = { raidBuffs = true } },
-    { id = 1126,     n = "Mark of the Wild",          class = "DRUID",         cats = { raidBuffs = true } },
+    { id = 1126,     alts = { 432661 }, n = "Mark of the Wild", class = "DRUID", cats = { raidBuffs = true } },
     { id = 462854,   n = "Skyfury",                   class = "SHAMAN",        cats = { raidBuffs = true } },
     { id = 381732,   alts = { 381741, 381746, 381748, 381749, 381750, 381751, 381752, 381753, 381756, 381757, 381758, 381754 },
       n = "Blessing of the Bronze", class = "EVOKER", cats = { raidBuffs = true } },
