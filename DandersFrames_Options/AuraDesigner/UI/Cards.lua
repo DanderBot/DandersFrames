@@ -1692,6 +1692,16 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 end })
             end
 
+            -- ☠ EVERY trigger edit below must drive the LIVE frames, not just the editor.
+            -- A trigger change moves the effect's resolved spell map, which rides the
+            -- TUNING signature — so it only lands when SyncFrame next runs and compares
+            -- sigs. S.SwitchTab rebuilds this tab and RefreshPreviewEffects repaints the
+            -- mock frame; neither touches a real unit frame. Without the throttled live
+            -- refresh the edit sat in the DB doing nothing until some unrelated action
+            -- (or a reload) happened to fire ForceRefreshAllFrames — reported from the
+            -- field as "removed a trigger and the border kept showing until I reloaded".
+            -- Same class of bug AddPickedSpell's own comment already warns about.
+
             -- Tag flow layout
             local TAG_H = 20
             local TAG_GAP = 4
@@ -1741,6 +1751,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
                             RemoveFrameEffectTrigger(effect.auraName, effect.typeKey, capturedTrigName)
                             S.SwitchTab("effects")
                             RefreshPreviewEffects()
+                            RefreshLiveFramesThrottled()   -- see the trigger-edit note above
                         end,
                     })
                     removeBtn:SetPoint("RIGHT", -2, 0)
@@ -1802,6 +1813,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
                                 picker:Close()
                                 S.SwitchTab("effects")
                                 RefreshPreviewEffects()
+                                RefreshLiveFramesThrottled()   -- see the trigger-edit note above
                             end,
                         },
                     },
@@ -1848,6 +1860,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
                         AddFrameEffectTrigger(effect.auraName, effect.typeKey, ref, capturedPool)
                         S.SwitchTab("effects")
                         RefreshPreviewEffects()
+                        RefreshLiveFramesThrottled()   -- see the trigger-edit note above
                     end,
                 })
             end)
@@ -1913,17 +1926,22 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 end
                 StyleBorderModeButtons(isCustom)
 
+                -- Same live-frame gap as the trigger edits above: borderMode picks which
+                -- container the ring renders through, so the editor repaint alone left the
+                -- real frames on the old mode until a reload.
                 sharedBtn:SetScript("OnClick", function()
                     local cfg = EnsureTypeConfig(effect.auraName, effect.typeKey)
                     cfg.borderMode = nil  -- shared is default
                     S.SwitchTab("effects")
                     RefreshPreviewEffects()
+                    RefreshLiveFramesThrottled()
                 end)
                 customBtn:SetScript("OnClick", function()
                     local cfg = EnsureTypeConfig(effect.auraName, effect.typeKey)
                     cfg.borderMode = "custom"
                     S.SwitchTab("effects")
                     RefreshPreviewEffects()
+                    RefreshLiveFramesThrottled()
                 end)
 
                 -- Tooltips via HookScript so they compose with the styler's hover wash.
