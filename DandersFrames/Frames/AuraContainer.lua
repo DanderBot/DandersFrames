@@ -3862,6 +3862,12 @@ end
 -- (the original stranded-fail-open field bug).
 function Handle:_applyVisibility()
     if self._destroyed then return end
+    -- ☠ PARENT-DRIVEN handles never manage their own visibility. A container nested
+    -- inside another container's aura slot inherits that slot's SECRET shown state, so
+    -- frame:IsShown() below returns a secret boolean and comparing it taints ("attempt
+    -- to compare a secret boolean value"). It is also pointless: the parent slot already
+    -- shows and hides the whole subtree, which is the entire reason for nesting.
+    if self.config and self.config.parentDrivenVisibility then return end
     local want = (self._intendedShown ~= false) and not self._idGateHidden
     -- Respect the fake-data park (Edit Mode etc.): while parked, this handle is
     -- hidden regardless of intent/gate — otherwise a hover-deferred retry could
@@ -4275,7 +4281,12 @@ function Handle:Destroy()
     -- Plain frame; safe in combat, hides the container child too. Hover-safe:
     -- hiding while a native button is under the cursor runs its tooltip
     -- intrinsic under our taint (see _applyVisibility).
-    if self.frame then safeHideWindow(self.frame) end
+    -- Parent-driven handles must not be hidden here either: safeHideWindow reads
+    -- frame:IsShown(), which is secret for a nested container. The parent slot's own
+    -- teardown takes the subtree with it.
+    if self.frame and not (self.config and self.config.parentDrivenVisibility) then
+        safeHideWindow(self.frame)
+    end
     if InCombatLockdown() then
         -- Can't tear down secure container state in lockdown; defer to regen.
         self:_queueOp("destroy")

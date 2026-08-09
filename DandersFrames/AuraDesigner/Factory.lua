@@ -1021,17 +1021,23 @@ local function buildConditionChain(entry, frame, unit, links, filt, makeVisual)
     local function makeLink(i, parent)
         if not parent then return end
         if i == #links then
-            local h = DF.AuraContainer:Create(parent, makeVisual(links[i], filt))
+            local cfg = makeVisual(links[i], filt)
+            -- Links after the first live inside a slot, so their visibility is the
+            -- parent's and reading their own is a secret-value taint.
+            if i > 1 then cfg.parentDrivenVisibility = true end
+            local h = DF.AuraContainer:Create(parent, cfg)
             entry.chain[i] = h
             entry.handle = h   -- the visual link is what ApplyStyle targets
             return
         end
-        local h = DF.AuraContainer:Create(parent, chainGateConfig(unit, links[i], filt,
+        local gcfg = chainGateConfig(unit, links[i], filt,
             function(host)
                 if not host or host.dfChainLink then return end
                 host.dfChainLink = true
                 makeLink(i + 1, host)
-            end))
+            end)
+        if i > 1 then gcfg.parentDrivenVisibility = true end
+        local h = DF.AuraContainer:Create(parent, gcfg)
         entry.chain[i] = h
     end
     makeLink(1, frame)
