@@ -2240,62 +2240,20 @@ end
 -- under "adGroupStyle:<cardKey>" — cardKey is the caller's expand-key form
 -- (raw id / "othergroup:<id>" / "dgroup:<id>"), so the three stores' keys
 -- stay disjoint from each other and from the effect cards' header keys.
-local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
-    local s = group.style
-    if type(s) ~= "table" then s = {}; group.style = s end
-
-    -- Defaults = today's uniform group rendering (Factory buildFilterGroupStyle's
-    -- pre-style values) + the icon indicator's Border* seeds so CreateBorderControls
-    -- reads sensible values on first open (ShowBorder overridden OFF — a group has
-    -- no ring until the user enables one).
-    local defaults = {
-        hideSwipe = false, showDuration = true, showStacks = true,
-        durationFormat = "NUMBER",
-        durationFont = "DF Roboto SemiBold", durationScale = 1.0, durationOutline = "SHADOW;OUTLINE",
-        durationAnchor = "CENTER", durationX = 0, durationY = 0,
-        durationColorByTime = false, durationColor = { r = 1, g = 1, b = 1, a = 1 },
-        durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
-        durationHideOnPermanent = true,   -- Wave 4: absent key = ON (style-less identity)
-        stackFont = "DF Roboto SemiBold", stackScale = 1.0, stackOutline = "SHADOW;OUTLINE",
-        stackAnchor = "BOTTOMRIGHT", stackX = 2, stackY = -1,
-        stackColor = { r = 1, g = 1, b = 1, a = 1 },
-        ShowBorder = false,
-        -- Duration bar strip (Wave 3) — mirrors the row pages' defaults
-        -- (Config.lua buffDurationBar*). OFF until the user enables it.
-        durationBarEnabled = false, durationBarPosition = "BOTTOM",
-        durationBarHeight = 4, durationBarGap = 1, durationBarColorMode = "STATIC",
-        durationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
-        durationBarColor = { r = 0.2, g = 0.9, b = 0.3, a = 1 },
-        durationBarBGColor = { r = 0, g = 0, b = 0, a = 0.8 },
-        durationBarReverseFill = false,
-    }
-    for k, v in pairs(TYPE_DEFAULTS.icon) do
-        if k:find("^Border") and defaults[k] == nil then defaults[k] = v end
-    end
-
-    -- Defaults proxy (CreateInstanceProxy's idiom, group.style-backed): reads fall
-    -- through to the defaults (table fallbacks copy-on-read so colour sub-key edits
-    -- persist); writes land in group.style and refresh the live frames. The factory
-    -- reads the RAW style table with the same defaults, so UI and render agree.
-    local proxy = setmetatable({ _skipOverrideIndicators = true, __dfDefaults = defaults }, {
-        __index = function(_, k)
-            local val = s[k]
-            if val ~= nil then return val end
-            local fallback = defaults[k]
-            if type(fallback) == "table" then
-                local copy = {}
-                for fk, fv in pairs(fallback) do copy[fk] = fv end
-                s[k] = copy
-                return copy
-            end
-            return fallback
-        end,
-        __newindex = function(_, k, v)
-            s[k] = v
-            RefreshPlacedIndicators()
-            RefreshLiveFramesThrottled()
-        end,
-    })
+--
+-- `opts` picks which families this card gets, because they don't apply everywhere:
+--   opts.style   (default ON)  — the icon-styling sections above. Meaningless on a
+--                               MEMBER group, whose members are placed indicators that
+--                               each carry their own full styling.
+--   opts.effects (default OFF) — the frame-level effect sections. Buff groups only:
+--                               a DEBUFF group may not drive them at all (spell-ID
+--                               matching is permitted for helpful buffs on assistable
+--                               units, and that is an identity gate, not a preference).
+-- Both families share ONE section stack, so the reflow seam and the body/card height
+-- stay a single pass however many families are built.
+local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey, opts)
+    local wantStyle   = (opts == nil) or (opts.style ~= false)
+    local wantEffects = (opts ~= nil) and (opts.effects == true)
 
     -- Cosmetic edits hot-apply (coSig -> ApplyStyle); structural toggles move the
     -- struct sig -> Rebuild. Both ride the same throttled factory re-sync. The
@@ -2361,6 +2319,65 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         tinsert(sections, { widget = g, height = h })
         by = by - h
     end
+
+    -- ============================================================
+    -- ICON STYLING — how the group draws its own icon row
+    -- ============================================================
+    if wantStyle then
+    local s = group.style
+    if type(s) ~= "table" then s = {}; group.style = s end
+
+    -- Defaults = today's uniform group rendering (Factory buildFilterGroupStyle's
+    -- pre-style values) + the icon indicator's Border* seeds so CreateBorderControls
+    -- reads sensible values on first open (ShowBorder overridden OFF — a group has
+    -- no ring until the user enables one).
+    local defaults = {
+        hideSwipe = false, showDuration = true, showStacks = true,
+        durationFormat = "NUMBER",
+        durationFont = "DF Roboto SemiBold", durationScale = 1.0, durationOutline = "SHADOW;OUTLINE",
+        durationAnchor = "CENTER", durationX = 0, durationY = 0,
+        durationColorByTime = false, durationColor = { r = 1, g = 1, b = 1, a = 1 },
+        durationHideAboveEnabled = false, durationHideAboveThreshold = 10,
+        durationHideOnPermanent = true,   -- Wave 4: absent key = ON (style-less identity)
+        stackFont = "DF Roboto SemiBold", stackScale = 1.0, stackOutline = "SHADOW;OUTLINE",
+        stackAnchor = "BOTTOMRIGHT", stackX = 2, stackY = -1,
+        stackColor = { r = 1, g = 1, b = 1, a = 1 },
+        ShowBorder = false,
+        -- Duration bar strip (Wave 3) — mirrors the row pages' defaults
+        -- (Config.lua buffDurationBar*). OFF until the user enables it.
+        durationBarEnabled = false, durationBarPosition = "BOTTOM",
+        durationBarHeight = 4, durationBarGap = 1, durationBarColorMode = "STATIC",
+        durationBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
+        durationBarColor = { r = 0.2, g = 0.9, b = 0.3, a = 1 },
+        durationBarBGColor = { r = 0, g = 0, b = 0, a = 0.8 },
+        durationBarReverseFill = false,
+    }
+    for k, v in pairs(TYPE_DEFAULTS.icon) do
+        if k:find("^Border") and defaults[k] == nil then defaults[k] = v end
+    end
+
+    -- Defaults proxy (CreateInstanceProxy's idiom, group.style-backed): reads fall
+    -- through to the defaults (table fallbacks copy-on-read so colour sub-key edits
+    -- persist); writes land in group.style and refresh the live frames. The factory
+    -- reads the RAW style table with the same defaults, so UI and render agree.
+    local proxy = setmetatable({ _skipOverrideIndicators = true, __dfDefaults = defaults }, {
+        __index = function(_, k)
+            local val = s[k]
+            if val ~= nil then return val end
+            local fallback = defaults[k]
+            if type(fallback) == "table" then
+                local copy = {}
+                for fk, fv in pairs(fallback) do copy[fk] = fv end
+                s[k] = copy
+                return copy
+            end
+            return fallback
+        end,
+        __newindex = function(_, k, v)
+            s[k] = v
+            refresh()
+        end,
+    })
 
     -- ── APPEARANCE ── (the effect card's Appearance box; of its controls only
     -- the swipe applies at group level — size/scale live in the card's layout
@@ -2504,6 +2521,204 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         barChild(GUI:CreateCheckbox(body, L["Reverse Fill"], proxy, "durationBarReverseFill", refresh), 28)
         UpdateBarGrey()
     end)
+    end  -- if wantStyle
+
+    -- ============================================================
+    -- FRAME EFFECTS — how the group colours the unit frame itself
+    -- The same five effects a single aura can drive (border / health bar /
+    -- background / name text / health text), keyed off the group's WHOLE spell set
+    -- instead of one buff. Blocks live at group.effects[typeKey] in the per-aura
+    -- typeCfg shape, so the render path and every control builder read them
+    -- unchanged (Factory pickWinner's third pool).
+    -- ============================================================
+    if wantEffects then
+    -- Group-effect proxy: reads fall through to the per-aura TYPE_DEFAULTS, writes
+    -- materialise group.effects[typeKey] on demand.
+    --
+    -- ☠ Materialising a block does NOT turn the effect on. The factory requires an
+    -- explicit `enabled == true` for a group (unlike the per-aura `~= false`), which
+    -- only the Enable checkbox below ever writes — so the colour pickers' copy-on-read,
+    -- which fires the moment a section is drawn, can't switch an effect on by itself.
+    local function EffectProxy(typeKey)
+        local defs = TYPE_DEFAULTS[typeKey]
+        local function block(create)
+            local fx = group.effects
+            if not fx then
+                if not create then return nil end
+                fx = {}; group.effects = fx
+            end
+            local b = fx[typeKey]
+            if not b then
+                if not create then return nil end
+                b = {}; fx[typeKey] = b
+            end
+            return b
+        end
+        -- Fill in every key the user never touched, mirroring what EnsureTypeConfig
+        -- seeds for a per-aura effect. The render path reads the RAW table (never this
+        -- proxy), so a block holding only the keys that happened to be edited would
+        -- reach DF.Border:BuildSpec half-specified.
+        --
+        -- Run from the Enable checkbox rather than at block creation, so a card the user
+        -- merely EXPANDS doesn't write a full default block for all five effects — the
+        -- colour pickers' copy-on-read materialises one key, not fifty. `enabled` is not
+        -- in TYPE_DEFAULTS, so seeding never turns anything on by itself.
+        local function seed()
+            local b = block(true)
+            for k, v in pairs(defs or {}) do
+                if b[k] == nil then
+                    if type(v) == "table" then
+                        local copy = {}
+                        for vk, vv in pairs(v) do copy[vk] = vv end
+                        b[k] = copy
+                    else
+                        b[k] = v
+                    end
+                end
+            end
+        end
+        return seed, setmetatable({ _skipOverrideIndicators = true, __dfDefaults = defs }, {
+            __index = function(_, k)
+                local b = block(false)
+                if b then
+                    local v = b[k]
+                    if v ~= nil then return v end
+                end
+                local fallback = defs and defs[k]
+                if type(fallback) == "table" then
+                    -- Copy-on-read so sub-key edits (proxy.color.r = 1) persist.
+                    local copy = {}
+                    for fk, fv in pairs(fallback) do copy[fk] = fv end
+                    block(true)[k] = copy
+                    return copy
+                end
+                return fallback
+            end,
+            __newindex = function(_, k, v)
+                block(true)[k] = v
+                refresh()
+            end,
+        })
+    end
+
+    -- One effect section = an Enable checkbox plus whatever `buildFn` adds, with
+    -- everything below the checkbox greyed while the effect is off. Greys
+    -- IMPERATIVELY for the same reason the Duration Bar section above does: an AD
+    -- editor card has no disableOn/RefreshStates loop. The greyed range is captured
+    -- from the group's child list rather than a hand-kept widget array, so controls a
+    -- shared builder adds (CreateBorderControls' whole set) are covered too.
+    local function AddEffectSection(header, typeKey, buildFn)
+        local seed, proxy = EffectProxy(typeKey)
+        AddSection(header, "fx:" .. typeKey, function(g)
+            g:AddWidget(GUI:CreateCheckbox(body, L["Enable"], proxy, "enabled", function()
+                -- Writing `enabled` is what arms the effect; nil/false = off. Fill in
+                -- the untouched keys on the way on, so the render path never sees a
+                -- half-specified block.
+                if proxy.enabled == true then seed() end
+                if g.dfFxUpdateGrey then g.dfFxUpdateGrey() end
+                refresh()
+            end), 28)
+            local first = #g.groupChildren + 1
+            buildFn(g, proxy)
+            local last = #g.groupChildren
+            g.dfFxUpdateGrey = function()
+                local on = proxy.enabled == true
+                for i = first, last do
+                    local w = g.groupChildren[i] and g.groupChildren[i].widget
+                    if w then
+                        if w.SetEnabled then w:SetEnabled(on)
+                        else
+                            w:SetAlpha(on and 1 or 0.4)
+                            if w.EnableMouse then w:EnableMouse(on) end
+                        end
+                    end
+                end
+            end
+            g.dfFxUpdateGrey()
+        end)
+    end
+
+    -- Intro + the shared priority. Priority is a GROUP-level field: all five effects
+    -- enter the same one-winner-per-type contest the per-aura configs run, so it
+    -- belongs here once rather than repeated in each box. Read through customGet so an
+    -- untouched group displays the engine default without a write-on-open.
+    AddSection(L["Frame Effects"], "fxintro", function(g)
+        g:AddWidget(GUI:CreateLabel(body,
+            L["Colour the unit frame itself while any buff in this group is active."],
+            bodyWidth - 26))
+        g:AddWidget(GUI:CreateSlider(body, L["Priority"], 1, 10, 1, nil, nil, refresh, refresh, true,
+            function() return tonumber(group.priority) or 5 end,
+            function(v) group.priority = v end), 54)
+        g:AddWidget(GUI:CreateLabel(body, L["Higher priority wins"], bodyWidth - 26))
+    end)
+
+    -- ── FRAME BORDER ── The placed border card's control set. noShowToggle: the
+    -- section's own Enable checkbox is the gate, so CreateBorderControls' "Show
+    -- Border" would be a second switch for the same thing. With it suppressed
+    -- ShowBorder stays nil, which the factory's validator reads as on.
+    AddEffectSection(L["Frame Border"], "border", function(g, proxy)
+        GUI:CreateBorderControls(g, proxy, "", {
+            parent  = body,
+            noShowToggle = true,
+            include = {
+                inset = true, offset = true, blendMode = true,
+                gradient = true, shadow = true, alpha = true,
+            },
+            fullUpdate    = refresh,
+            lightUpdate   = refresh,
+            lightColors   = refresh,
+            refreshStates = function()
+                g:LayoutChildren()
+                if g.dfFxUpdateGrey then g.dfFxUpdateGrey() end
+                ReflowSections()
+            end,
+            sizeMin = 0, sizeMax = 8, sizeStep = 1,
+        })
+        g:AddWidget(GUI:CreateCheckbox(body, L["Draw above frame border"], proxy, "drawAboveFrameBorder", refresh), 28)
+    end)
+
+    -- ── HEALTH BAR / BACKGROUND ── Mode + colour + blend, mirroring the placed
+    -- cards'. Blend only means anything in Tint mode, and Tint Entire Bar is health
+    -- bar only (in Replace mode the cover IS the bar, so it would hide health loss).
+    -- Show When Missing has no group analogue and is not offered.
+    local function AddTintControls(g, proxy, defaultMode, wholeBar)
+        g:AddWidget(GUI:CreateDropdown(body, L["Mode"], OPTS.HEALTHBAR_MODE_OPTIONS, proxy, "mode", function()
+            g:LayoutChildren()
+            if g.dfFxUpdateGrey then g.dfFxUpdateGrey() end
+            ReflowSections()
+            refresh()
+        end), 54)
+        g:AddWidget(GUI:CreateColorPicker(body, L["Color"], proxy, "color", true, refresh, refresh, true), 28)
+        local blend = GUI:CreateSlider(body, L["Blend %"], 0, 1, 0.05, proxy, "blend", refresh, refresh, true)
+        -- hideOn is re-evaluated on every LayoutChildren, so it survives GUI reopens
+        -- where a manual :Hide() would be clobbered by the unconditional :Show().
+        blend.hideOn = function() return (proxy.mode or defaultMode) == "Replace" end
+        g:AddWidget(blend, 54)
+        if wholeBar then
+            local whole = GUI:CreateCheckbox(body, L["Tint Entire Bar"], proxy, "tintWholeBar", refresh)
+            whole.hideOn = blend.hideOn
+            g:AddWidget(whole, 28)
+        end
+    end
+
+    AddEffectSection(L["Health Bar Color"], "healthbar", function(g, proxy)
+        AddTintControls(g, proxy, "Replace", true)
+    end)
+
+    AddEffectSection(L["Background Color"], "background", function(g, proxy)
+        AddTintControls(g, proxy, "Tint", false)
+    end)
+
+    -- ── NAME / HEALTH TEXT ── Colour only; the factory drives a Text Designer
+    -- mirror over the real fontstring.
+    AddEffectSection(L["Name Text Color"], "nametext", function(g, proxy)
+        g:AddWidget(GUI:CreateColorPicker(body, L["Color"], proxy, "color", true, refresh, refresh, true), 28)
+    end)
+
+    AddEffectSection(L["Health Text Color"], "healthtext", function(g, proxy)
+        g:AddWidget(GUI:CreateColorPicker(body, L["Color"], proxy, "color", true, refresh, refresh, true), 28)
+    end)
+    end  -- if wantEffects
 
     return by
 end

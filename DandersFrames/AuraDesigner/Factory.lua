@@ -803,7 +803,13 @@ local function pickWinner(spec, specAuras, otherAuras, groupPoolIn, typeKey, val
         for i = 1, groupPoolIn.n do
             local e = groupPoolIn[i]
             local typeCfg = e.group.effects[typeKey]
-            if type(typeCfg) == "table" and typeCfg.enabled ~= false
+            -- ☠ `enabled == true`, NOT the per-aura `~= false`. Group effects ship OFF
+            -- on every group, and the block is materialised by the editor the moment a
+            -- control reads a table default (the colour pickers' copy-on-read) — so an
+            -- absent-means-on rule would switch an effect on just by opening its section.
+            -- Explicit opt-in also covers `border`, whose validator (ShowBorder ~= false)
+            -- would otherwise pass on an empty block.
+            if type(typeCfg) == "table" and typeCfg.enabled == true
                 and (not validate or validate(typeCfg)) then
                 local prio = e.group.priority or 5
                 -- Pool 3 loses every priority tie to pools 1 and 2 (3 < bestPool is

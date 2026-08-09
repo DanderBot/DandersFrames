@@ -954,21 +954,27 @@ S.BuildLayoutGroupsTab = function()
                         by = by - 34
                     end
 
-                    -- ── APPEARANCE (collapsible — the effect-card section idiom) ──
-                    by = by - 10
-                    by = AddGroupAppearanceSection(body, group, bodyWidth, by, expandKey)
+                end
 
-                    -- The appearance sections reflow in place; when they do, the
-                    -- body and card must re-size and the cards below must slide.
-                    -- `newBy` is the section stack's new tail, i.e. what
-                    -- AddGroupAppearanceSection would have returned this time —
-                    -- so the body height formula is the build-time one verbatim.
-                    body.dfAD_ReflowCard = function(newBy)
-                        local h = -newBy + 12
-                        body:SetHeight(h)
-                        card:SetHeight(cardHeaderH + h)
-                        stack:Reflow()
-                    end
+                -- ── APPEARANCE / FRAME EFFECTS (collapsible — the effect-card
+                -- section idiom) ── Outside the filter-group branch: the icon styling
+                -- only applies to a filter group (a member group's members are placed
+                -- indicators carrying their own), but the frame effects apply to BOTH
+                -- kinds — they key off the group's spell set, not off how it draws.
+                by = by - 10
+                by = AddGroupAppearanceSection(body, group, bodyWidth, by, expandKey,
+                    { style = isFilterGroup, effects = true })
+
+                -- The sections reflow in place; when they do, the body and card must
+                -- re-size and the cards below must slide. `newBy` is the section
+                -- stack's new tail, i.e. what AddGroupAppearanceSection would have
+                -- returned this time — so the body height formula is the build-time
+                -- one verbatim.
+                body.dfAD_ReflowCard = function(newBy)
+                    local h = -newBy + 12
+                    body:SetHeight(h)
+                    card:SetHeight(cardHeaderH + h)
+                    stack:Reflow()
                 end
 
                 local bodyH = -by + 12
@@ -1395,7 +1401,11 @@ S.BuildDebuffGroupsTab = function()
 
                 -- ── APPEARANCE (collapsible — the effect-card section idiom) ──
                 by = by - 10
-                by = AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
+                -- Icon styling only. A DEBUFF group may not drive the frame-level
+                -- effects: those match on spell ID, which is permitted for helpful
+                -- buffs on assistable units. That is an identity gate, not a choice.
+                by = AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey,
+                    { style = true, effects = false })
 
                 -- In-place reflow hook — see the Layout Groups tab's copy.
                 body.dfAD_ReflowCard = function(newBy)
