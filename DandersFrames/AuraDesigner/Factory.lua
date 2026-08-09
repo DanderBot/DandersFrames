@@ -297,6 +297,20 @@ local function resolveFilterGroup(R, group)
     return res, sig
 end
 
+-- ☠ FILTER-OWNED records never dedup, whatever they render. Dedup exists to stop a
+-- buff showing twice — once on the bar, once as its Aura Designer visual — which only
+-- holds when the AD visual IDENTIFIES the buff. A filter-driven frame effect does not:
+-- one border cannot tell you which of forty matched buffs is up, so counting it as
+-- "tracked" strips the filter's ENTIRE spell list off the bar and replaces forty icons
+-- with one ring. Field-reported: a Regrowth icon vanishing from the bar for a user who
+-- had never added Regrowth to Aura Designer — it was simply inside a linked filter.
+--
+-- Per-SPELL effects keep deduping (a border on one named buff is a fair substitute for
+-- that buff's icon). This gate is about scale, not about frame effects as a category.
+local function auraIsFilterOwned(auraName)
+    return DF.ParseADFilterRef ~= nil and DF:ParseADFilterRef(auraName) ~= nil
+end
+
 local function auraHasTrackedIndicator(auraCfg)
     if type(auraCfg) ~= "table" then return false end
     local inds = auraCfg.indicators
@@ -340,7 +354,7 @@ function DF:GetADTrackedSpellIDs(frame, db)
     local union
     if specAuras then
         for auraName, auraCfg in pairs(specAuras) do
-            if auraHasTrackedIndicator(auraCfg) then
+            if auraHasTrackedIndicator(auraCfg) and not auraIsFilterOwned(auraName) then
                 local f = DF:BuildADIdentityFilters(spec, auraName)
                 if f and f.includeSpellIDs then
                     union = union or {}
@@ -357,7 +371,7 @@ function DF:GetADTrackedSpellIDs(frame, db)
     local otherAuras = adDB.otherAuras
     if otherAuras then
         for auraName, auraCfg in pairs(otherAuras) do
-            if auraHasTrackedIndicator(auraCfg) then
+            if auraHasTrackedIndicator(auraCfg) and not auraIsFilterOwned(auraName) then
                 local f = DF:BuildADIdentityFilters(nil, auraName)
                 if f and f.includeSpellIDs then
                     union = union or {}
