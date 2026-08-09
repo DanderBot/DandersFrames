@@ -39,7 +39,11 @@ local Border = DF.Border
 -- Create a border widget anchored to `parent` (or opts.anchorTo).
 -- opts:
 --   anchorTo          frame to cover (default: parent)
---   frameLevelOffset  level above parent (default: 10)
+--   frameLevelOffset  level above parent (default: 2 — NOT 10, which this line claimed
+--                     long after the default changed. Any parent that stacks CHILD
+--                     FRAMES over its own rect must pass this explicitly: unit and pet
+--                     frames pass 10, aura buttons pass DF.AuraButtonLevels.BORDER.
+--                     See the note at the default itself for why.)
 --   layer             texture draw layer for the solid edges (default: "BORDER")
 --   solidOnly         hot-path SOLID border: skips the SetGradient/CreateColor
 --                     gradient-clear in both Apply (SOLID) and SetColor, so live

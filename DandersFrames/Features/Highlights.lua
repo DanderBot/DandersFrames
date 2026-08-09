@@ -221,7 +221,7 @@ end
 -- "on top". Since the frame-level rework every DF element carries an ABSOLUTE
 -- offset from the unit frame, and the content stack now runs: resource bar 20,
 -- contentOverlay 25, status icons 30, missing buff 35, buff/debuff rows 40,
--- defensive 65 -- whose border art reaches 77, because a row is 13 levels thick.
+-- defensive 65 -- whose art reaches 74, because a row is 9 levels thick.
 -- At +10 the hover highlight sat under ALL of that. The reported "resource bar
 -- draws over the hover highlight" is just the shallowest instance of it.
 --
@@ -232,15 +232,32 @@ end
 --
 -- Relative order among the three is preserved: aggro < hover < selection.
 --
--- The numbers: 65 is the highest default in Config (defensiveIconFrameLevel), and
--- a row's art sits above its baseline -- by +12 or +14 depending on which element
--- is tallest, so call the real ceiling 79. These sit clear of it rather than on
--- the boundary, deliberately: land on 78 and a single off-by-one in that estimate
--- puts the highlight back under the art with no visible reason why.
+-- ☠ 82/83/84 -> 75/76/77 (2026-08-08). RE-DERIVED, because the number they were
+-- built on stopped being true: this comment said "a row is 13 levels thick" and
+-- that was the PRE-SQUASH ladder. The per-button ladder is now
+-- DF.AuraButtonLevels (Frames/AuraContainer.lua) and a row is 9 thick, so the
+-- highlights had been sitting seven levels higher than anything required.
+-- ⚠ It was the THIRD stale copy of that thickness found in one day, after
+-- Factory.ALERT_ROW_LIFT and a prose line in AuraContainer. If you move the
+-- ladder again, grep the repo for the row-thickness number -- it is quoted in
+-- several derivations and none of them recompute it.
+--
+-- The arithmetic, from the top of the tallest DEFAULT element:
+--   defensiveIconFrameLevel 65 is the anchor -> container 66 -> buttons 67
+--   -> holders 67 + DF.AuraButtonLevels (max 7) = 74, border 67 + 3 = 70.
+-- So 74 is the ceiling and 75 clears it. The headroom is one level rather than
+-- the four the old estimate carried, and that is deliberate: the ladder is a
+-- single named table now, so this is derived rather than guessed. ⚠ Re-derive
+-- it here if DF.AuraButtonLevels or defensiveIconFrameLevel moves.
 -- ⚠ Clears the DEFAULT stack only. The per-element sliders run 0-100, so pushing
 -- an element above these covers the highlight again -- that is the slider doing
--- what it says, not a regression.
-local HIGHLIGHT_LEVEL = { Aggro = 82, Hover = 83, Selection = 84 }
+-- what it says, not a regression. The LEADER icon default does exactly that on
+-- purpose (Config: leaderIconFrameLevel = 80) -- a crown anchored at the frame
+-- edge was being crossed by the perimeter border, which the "highlights only
+-- draw at the perimeter so they cannot obscure content" argument above never
+-- considered. That argument holds for the name and health text, not for icons
+-- parked on the edge.
+local HIGHLIGHT_LEVEL = { Aggro = 75, Hover = 76, Selection = 77 }
 
 -- Applied on REUSE as well as creation: the level is absolute, derived from the
 -- owner's level at the time it is set, so a highlight created before the owner's
@@ -451,10 +468,33 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
             end
         end
         
-        -- Each layer is slightly larger and more transparent
+        -- Each layer is slightly larger and more transparent. They must ABUT to read as a
+        -- falloff rather than as concentric lines — but the stack must also not run away
+        -- from the frame as the thickness climbs.
+        --
+        -- ☠ THE STEP IS `min(thickness, 2)`, AND BOTH HALVES MATTER.
+        --   * It was a hardcoded 2, which only equals the ring width at thickness 2. At
+        --     thickness 1 the rings covered radius 0-1, 2-3, 4-5, 6-7 — a 1px TRANSPARENT
+        --     GAP between each — so it read as four hairlines, the DF Double silhouette
+        --     rather than a glow (Krathe, 2026-08-08).
+        --   * Making it plain `thickness` fixed that and immediately broke the other end:
+        --     the spread becomes 4x thickness, so a thick glow blew far outside the frame
+        --     (24px at thickness 6, against ~12 before). Reported the same day.
+        -- Capping the step keeps BOTH: below 2 the step follows the ring width, so the
+        -- rings abut and the falloff is real; at 2 and above the arithmetic is IDENTICAL
+        -- to the original, so every thickness that already looked right is untouched.
+        -- ⚠ At 3+ the rings therefore overlap slightly and the alpha ramp flattens a
+        -- little. That is the ORIGINAL behaviour and nobody has complained about it —
+        -- fixing it means varying the LAYER COUNT with thickness (contiguous AND bounded
+        -- needs count = spread / thickness), which is a bigger change than this is worth
+        -- before ship. It belongs with the DF.Border texture integration afterwards.
+        -- ⚠ `thickness` is already snapped to whole screen pixels above, so the sub-2
+        -- steps land on the physical grid; do not reintroduce a fractional step here.
+        local GLOW_MAX_STEP = 2
+        local step = math.min(thickness, GLOW_MAX_STEP)
         local baseSize = thickness
         for i, layer in ipairs(ch.glowLayers) do
-            local offset = (i - 1) * 2 + inset
+            local offset = (i - 1) * step + inset
             local layerAlpha = alpha * (1.1 - (i * 0.25))
             
             layer:ClearAllPoints()
@@ -664,9 +704,21 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
                 -- appear in the preview and aggroOnlyTanking / aggroHideOnTanks were
                 -- skipped entirely. Supplying the number instead lets live's own code
                 -- cover all three colours and both toggles. (Audit, 2026-08-07.)
+                -- ☠ 4, NOT 3 — index 3 is the DEAD scenario ("Alexandrosthegreat",
+                -- status = "Dead" in DF.TestData). Live suppresses the aggro glow on a
+                -- corpse, so the preview must not demonstrate a threat colour there; with
+                -- the dead guard above now stamp-aware, leaving it at 3 would simply make
+                -- one of the three colours vanish from the preview instead.
+                -- ⚠ Index 2 is the OUT-OF-RANGE scenario and keeps its colour on purpose:
+                -- range has nothing to do with threat, so a faded frame holding aggro is
+                -- what live actually does. Five frames cannot show selection plus three
+                -- threat levels without landing on one of the special scenarios — this is
+                -- the one where the overlap is honest.
+                -- ☠ These indices are POOL indices and the display is sorted, so what you
+                -- see on screen is not this order. Check DF.TestData, not the screenshot.
                 forceThreat = (frameIndex == 1 and 3)
                     or (frameIndex == 2 and 2)
-                    or (frameIndex == 3 and 1)
+                    or (frameIndex == 4 and 1)
                     or nil
             end
         end
@@ -714,7 +766,27 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         -- threat table, and it matches how the rest of DF asks the question (IsDeadOrOffline).
         -- Suppresses the HIGHLIGHT only; `status` stays intact for the Text Designer stash
         -- just below, which is a separate display with its own rules.
-        if isAggro and unit and UnitIsDeadOrGhost(unit) then
+        --
+        -- ☠ THE STAMP FIRST, THE UNIT SECOND. A preview frame carries a REAL unit token,
+        -- so `UnitIsDeadOrGhost` answers about a live player standing next to you rather
+        -- than about the scenario — the preview went on showing the aggro glow on its
+        -- "Dead" frame while live correctly hid it (Krathe, 2026-08-08). That divergence
+        -- was introduced by the first version of this guard, which read the unit only.
+        -- `dfIsDead` is how the rest of the appearance code resolves exactly this question
+        -- (Features/ElementAppearance.lua, Frames/Core.lua) and it covers OFFLINE too,
+        -- which holds no threat either. Stamp when present, live read otherwise — the
+        -- same shape as those two, so the preview runs live's logic with a different
+        -- input rather than getting a fork of its own.
+        -- ⚠ Deliberately NOT `DF:IsTestFrameDead`: that lives in the load-on-demand
+        -- companion and this file is resident, so calling it would be an unguarded
+        -- cross-boundary call. A plain field read is always safe.
+        local isDeadOrOffline
+        if frame.dfIsDead ~= nil then
+            isDeadOrOffline = frame.dfIsDead
+        else
+            isDeadOrOffline = unit and UnitIsDeadOrGhost(unit)
+        end
+        if isAggro and isDeadOrOffline then
             isAggro = false
         end
     end
