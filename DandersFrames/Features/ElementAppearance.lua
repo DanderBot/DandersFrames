@@ -102,12 +102,33 @@ end
 -- Apply OOR alpha to any UI element (Frame, Texture, or FontString)
 -- inRange may be a secret boolean from UnitInRange fallback (DK/DH/Hunter/Warrior).
 -- SetAlphaFromBoolean handles secret booleans natively (Midnight+ API).
+-- ☠ PREFER PLAIN SetAlpha. SetAlphaFromBoolean exists for ONE reason: to consume a SECRET
+-- boolean without Lua ever branching on it. This reached for it unconditionally, including
+-- when inRange is an ordinary Lua boolean we can resolve ourselves — and that is what broke
+-- the AD placed-indicator fade.
+--
+-- The secret-aware setter is refused on an object that inherits FORBIDDEN ASPECTS from the
+-- aura button (the slot alpha host is a child of the button, and forbidden aspects propagate
+-- through parent/child — see AuraContainerUtil.ValidateInboundScriptObject, which requires
+-- descendancy precisely so they inherit). Plain SetAlpha on that same object is accepted:
+-- AuraContainer's own base-alpha write to the host does exactly that and works.
+--
+-- GetInRange only hands back a secret for the classes that fall through to UnitInRange, so
+-- for most specs this now takes the plain path — the fade works everywhere, slot-backed
+-- placed indicators included, and the error storm has no source left.
 local function ApplyOORAlpha(element, inRange, inAlpha, oorAlpha)
     if not element then return end
+    if not (issecretvalue and issecretvalue(inRange)) then
+        -- Plain boolean: resolve it here. No secret ever touches a comparison.
+        element:SetAlpha(inRange and inAlpha or oorAlpha)
+        return
+    end
     if element.SetAlphaFromBoolean then
         element:SetAlphaFromBoolean(inRange, inAlpha, oorAlpha)
     else
-        element:SetAlpha(inRange and inAlpha or oorAlpha)
+        -- Secret value and no secret-safe setter (pre-Midnight): branching on it is
+        -- exactly the taint trap, so hold the in-range alpha rather than guess.
+        element:SetAlpha(inAlpha)
     end
 end
 
@@ -156,6 +177,14 @@ local STATUS_ICON_NO_OOR_FADE = {
     resurrectionIcon  = true,
 }
 
+-- The eight status icons, by config prefix. The frame field is the same name
+-- (frame.summonIcon <-> "summonIcon"), which is what lets the refresh below stay a
+-- plain list rather than a mapping.
+local STATUS_ICON_PREFIXES = {
+    "summonIcon", "resurrectionIcon", "phasedIcon", "afkIcon",
+    "vehicleIcon", "raidRoleIcon", "bgCarrierIcon", "combatIcon",
+}
+
 function DF:GetStatusIconFadeAlpha(frame, prefix)
     if not frame then return 1.0 end
     local db = GetDB(frame)
@@ -183,6 +212,45 @@ function DF:GetStatusIconFadeAlpha(frame, prefix)
         end
     end
     return alpha
+end
+
+-- ☠ RE-APPLY THE STATUS-ICON FADE ON A RANGE CHANGE.
+--
+-- GetStatusIconFadeAlpha above is correct, and ApplyIconSettings (Frames/StatusIcons.lua)
+-- multiplies by it -- but ApplyIconSettings only runs from each icon's own Update*Icon
+-- path. NOTHING re-ran it when range changed: UpdateAllElementAppearances drove 22
+-- appearance functions and named none of the eight icons, and UpdateAllStatusIcons is
+-- reachable only from the full-frame refresh in Headers.lua. CreateStatusIcon also sets
+-- SetIgnoreParentAlpha(true), so the whole-frame cascade cannot reach them either.
+--
+-- Net effect: an icon only faded when it happened to re-render for its own reason. AFK
+-- and BG-carrier self-heal off their own tickers; summon, resurrection, phased, vehicle,
+-- raid-role and combat did not -- so a unit walking out of range kept a bright icon on an
+-- otherwise dimmed frame, and walking back in left a dim one. The changelog says this was
+-- fixed; only half of it was.
+--
+-- ⚠ This is deliberately ALPHA ONLY and reuses ApplyIconSettings' exact expression.
+-- StatusIcons.lua calls itself "THE ONE PLACE THESE ICONS' ALPHA IS SET, so the fade
+-- belongs here rather than in a second pass that would fight it" -- the hazard it names is
+-- a second pass computing something DIFFERENT. This computes the same product, so the two
+-- always agree; it just makes the range path able to trigger it. Do not grow this into a
+-- general icon-settings pass.
+function DF:UpdateStatusIconsAppearance(frame)
+    if not IsDandersFrame(frame) then return end
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
+
+    local db = GetDB(frame)
+    if not db then return end
+
+    for i = 1, #STATUS_ICON_PREFIXES do
+        local prefix = STATUS_ICON_PREFIXES[i]
+        local icon = frame[prefix]
+        -- Hidden icons cost nothing to skip and will be re-alpha'd by
+        -- ApplyIconSettings when their own path shows them.
+        if icon and icon.IsShown and icon:IsShown() then
+            icon:SetAlpha((db[prefix .. "Alpha"] or 1) * DF:GetStatusIconFadeAlpha(frame, prefix))
+        end
+    end
 end
 
 -- Check if unit is specifically offline (not just dead)
@@ -726,10 +794,27 @@ function DF:UpdateBorderAppearance(frame)
     if db.oorEnabled then
         local oorAlpha = db.oorBorderAlpha or 0.2
         ApplyOORAlpha(frame.border, inRange, alpha, oorAlpha)
+        -- ☠ HAND THE ANIMATION DRIVER WHAT IT NEEDS TO RESPECT THIS.
+        -- DF_PULSATE drives the border's OWN alpha every frame, so it overwrites the
+        -- SetAlpha above and an out-of-range border keeps pulsing at full strength. Its
+        -- tick tried to compensate by multiplying by `dfRangeAlpha` -- but nothing has
+        -- ever written that field (two hits addon-wide, both inside that one expression),
+        -- so the multiplier was permanently 1 and the comment claiming this pass sets it
+        -- was false.
+        --
+        -- It cannot be a plain number: `inRange` may be a SECRET boolean, so the tick
+        -- cannot compute `pulse * (inRange and 1 or oor)` in Lua at all. Stamp the secret
+        -- itself PLUS a plain companion flag, and let the tick push the choice into
+        -- SetAlphaFromBoolean -- the same move ApplyOORAlpha makes. The plain flag is what
+        -- the tick is allowed to test; the secret is only ever forwarded to the setter.
+        frame.border.dfOORActive  = true
+        frame.border.dfOORInRange = inRange
+        frame.border.dfOORAlpha   = oorAlpha
     else
         -- Whole-frame mode: reset to full so a stale element-specific fade
         -- doesn't linger; the frame's alpha cascade handles the OOR dim.
         frame.border:SetAlpha(alpha)
+        frame.border.dfOORActive = false
     end
 end
 
@@ -1214,6 +1299,33 @@ end
 local AD_STORE_KEYS = { "healthbar", "background", "border", "placed",
                         "nametext", "healthtext" }
 
+-- ☠ THE WRITE IS PROTECTED, AND A DENIED HOST IS REMEMBERED.
+-- GetAlphaHost is supposed to answer with a DF-owned frame, so in principle a tainted
+-- alpha write to it is always legal. In practice it is not guaranteed: the host is a CHILD
+-- of the aura button, and the button carries DenyTaintedAccessWhenAurasAreSecret. DF's
+-- design rests on access restrictions NOT descending to children (see SlotHandle:GetAlphaHost)
+-- — a Blizzard-side implementation detail, not a contract, and one that has already bitten
+-- once (43 errors) and again on a later build (75 errors from this exact call):
+--     calling 'SetAlphaFromBoolean' on bad self (Attempt to access forbidden object
+--     from code tainted by an AddOn)
+--
+-- Two things were wrong with letting it throw:
+--   1. It errors PER HOST PER RANGE UPDATE. Range runs on a timer over every frame, so one
+--      denied host is not one error, it is a permanent storm — the 75x is the loop, not 75
+--      separate faults.
+--   2. It aborts the whole walk. Everything after the first denied host in that pass — the
+--      other indicators, the other store keys — silently stops being faded at all.
+--
+-- So: pcall the callback, and latch the failure on the handle so a host that is denied once
+-- is skipped from then on rather than retried every tick. The indicator keeps its base alpha
+-- (no out-of-range fade) instead of taking the frame down, which is the same degrade the
+-- nil-host path already takes. AuraContainer's own base-alpha write to this very host is
+-- already pcall'd for the same reason (`pcall(host.SetAlpha, host, ...)`); this closes the
+-- gap on the OOR side, and covers every consumer of the walker rather than just that one.
+--
+-- ⚠ The latch is per HANDLE, so it clears naturally when the slot is rebuilt or re-acquired.
+-- If a build makes the restriction descend permanently, the visible symptom is AD indicators
+-- that no longer fade out of range — not an error storm, and not a dead range pass.
 function DF:ForEachAuraDesignerAlphaHost(frame, fn)
     local store = frame and frame.dfADFactory
     if not (store and fn) then return end
@@ -1222,8 +1334,45 @@ function DF:ForEachAuraDesignerAlphaHost(frame, fn)
         if t then
             for _, entry in pairs(t) do
                 local h = entry and entry.handle
-                local f = h and h.GetAlphaHost and h:GetAlphaHost()
-                if f then fn(f, h._dfADBaseAlpha or 1.0) end
+                -- ⚠ The skip is scoped to the CURRENT layout version, not forever. A flat
+                -- boolean latch turned a possibly-transient refusal into a permanent one:
+                -- the button batch is built lazily and the engine now defers
+                -- AddAccessRestrictions to PLAYER_ENTERING_WORLD, so a host can be
+                -- momentarily unwritable during login and perfectly writable a second
+                -- later. Keying the skip to DF.auraLayoutVersion means any settings change
+                -- or rebuild re-arms it instead of leaving that indicator dark for the
+                -- session — and it still costs one failed call per version, not per tick.
+                local ver = DF.auraLayoutVersion or 0
+                local denied = h and h._dfAlphaHostDeniedVer == ver
+                local f = (h and not denied and h.GetAlphaHost) and h:GetAlphaHost() or nil
+                if f then
+                    local ok, err = pcall(fn, f, h._dfADBaseAlpha or 1.0)
+                    if not ok then
+                        h._dfAlphaHostDeniedVer = ver
+                        -- Name the method that was refused, not just the error: whether
+                        -- PLAIN SetAlpha is rejected or only the secret-aware setter is the
+                        -- difference between "wrong setter" and "the host is unwritable at
+                        -- all", and those have completely different fixes.
+                        if not DF._warnedADAlphaHost then
+                            DF._warnedADAlphaHost = true
+                            -- ☠ EVERY probe of a refused object must itself be pcall'd.
+                            -- This block previously called f:GetDebugName() bare while
+                            -- building the log arguments — inside the very handler that
+                            -- exists because calls to this object throw. It threw, before
+                            -- DebugWarn ever ran, so the fault it was meant to describe was
+                            -- replaced by a fresh error and nothing was logged at all.
+                            -- GetDebugName is a pure READ and it is still refused: the host
+                            -- is forbidden to tainted code for ALL access, not just setters.
+                            local okPlain = pcall(f.SetAlpha, f, h._dfADBaseAlpha or 1.0)
+                            local okName, name = pcall(f.GetDebugName, f)
+                            DF:DebugWarn("AURACONTAINER",
+                                "AD alpha host refused a tainted write. plainSetAlphaOK=%s readableName=%s host=%s err=%s",
+                                tostring(okPlain), tostring(okName),
+                                okName and tostring(name) or "<refused>",
+                                tostring(err))
+                        end
+                    end
+                end
             end
         end
     end
@@ -1257,6 +1406,22 @@ function DF:UpdateAuraDesignerAppearance(frame)
             f:SetAlpha(base)
         end
     end)
+
+    -- ★ SLOT-BACKED INDICATORS FADE HERE, not in the walk above. Their per-button alpha
+    -- host lives inside the aura button and is forbidden to tainted code, so every write
+    -- the walk attempts on one is refused. The slot owner's DF-created anchor frame sits
+    -- ABOVE the container, is ours, and multiplies its alpha down over every slot — one
+    -- legal write covers all of them. Frame-wide is the correct grain for range anyway.
+    -- No-op on frames that never took a shared slot (accessor returns nil).
+    local slotHost = DF.AuraContainer and DF.AuraContainer.GetSlotOwnerAlphaHost
+        and DF.AuraContainer:GetSlotOwnerAlphaHost(frame)
+    if slotHost then
+        if oorOn then
+            ApplyOORAlpha(slotHost, inRange, 1.0, oorAlpha)
+        else
+            slotHost:SetAlpha(1.0)
+        end
+    end
 end
 
 -- ============================================================
@@ -1361,6 +1526,10 @@ function DF:UpdateAllElementAppearances(frame)
     DF:UpdateHealAbsorbBarAppearance(frame)
     DF:UpdateHealPredictionBarAppearance(frame)
     DF:UpdateDefensiveIconAppearance(frame)
+    -- The eight status icons. They were absent from this list entirely, which is why
+    -- their range/dead fade never fired on a range change -- see
+    -- DF:UpdateStatusIconsAppearance for the full reasoning.
+    DF:UpdateStatusIconsAppearance(frame)
 end
 
 -- ============================================================
@@ -1395,30 +1564,8 @@ function DF:UpdateAllFrameAppearances()
     end
 end
 
--- ============================================================
--- BACKWARD COMPATIBILITY
--- These functions redirect to the new appearance functions
--- for code that still calls the old alpha-only functions
--- ============================================================
-
--- Redirect old alpha functions to new appearance functions
-DF.UpdateAllElementAlphas = DF.UpdateAllElementAppearances
-DF.UpdateAllSecureFrameAlphas = DF.UpdateAllFrameAppearances
-
--- Individual redirects (in case any code calls these directly)
-DF.UpdateHealthBarAlpha = DF.UpdateHealthBarAppearance
-DF.UpdateBackgroundAlpha = DF.UpdateBackgroundAppearance
-DF.UpdateNameTextAlpha = DF.UpdateNameTextAppearance
-DF.UpdateHealthTextAlpha = DF.UpdateHealthTextAppearance
-DF.UpdateStatusTextAlpha = DF.UpdateStatusTextAppearance
-DF.UpdatePowerBarAlpha = DF.UpdatePowerBarAppearance
-DF.UpdateBuffIconsAlpha = DF.UpdateBuffIconsAppearance
-DF.UpdateDebuffIconsAlpha = DF.UpdateDebuffIconsAppearance
-DF.UpdateRoleIconAlpha = DF.UpdateRoleIconAppearance
-DF.UpdateLeaderIconAlpha = DF.UpdateLeaderIconAppearance
-DF.UpdateRaidTargetIconAlpha = DF.UpdateRaidTargetIconAppearance
-DF.UpdateReadyCheckIconAlpha = DF.UpdateReadyCheckIconAppearance
-DF.UpdateDispelOverlayAlpha = DF.UpdateDispelOverlayAppearance
-DF.UpdateMissingBuffAlpha = DF.UpdateMissingBuffAppearance
-DF.UpdateDefensiveIconAlpha = DF.UpdateDefensiveIconAppearance
-DF.UpdateFrameAlpha = DF.UpdateFrameAppearance
+-- (Removed) the 18-name DF.Update*Alpha back-compat alias block. It dated from the
+-- alpha-only -> full-appearance rename and redirected every old name at the new function
+-- "in case any code calls these directly". Nothing did: all 18, plus UpdateAllElementAlphas
+-- and UpdateAllSecureFrameAlphas, had exactly one hit each across BOTH addons — their own
+-- definition. They were never part of the published DandersFrames_* API surface either.

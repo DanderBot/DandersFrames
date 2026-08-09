@@ -946,11 +946,23 @@ function CC:ResetBindingsToDefaults()
     -- Rebuild secure bindings
     self:RefreshKeyboardBindings()
     
-    -- Re-apply to all frames
+    -- ☠ THE MISSING else. ApplyBindings ALREADY self-defers via Defer("bindingRefresh"),
+    -- so this guard protected nothing -- it converted a QUEUED reapply into a DROPPED one.
+    -- Worse, RefreshKeyboardBindings above DOES defer, and at drain it rebuilds every
+    -- snippet from unifiedMacroMap -- which is only rebuilt inside ApplyBindings, i.e. the
+    -- call just skipped. So resetting mid-fight left the list showing Target + Menu while
+    -- every frame kept the old macro attributes, and at combat end the deferred keyboard
+    -- refresh re-wrote the OLD hover snippets back over them. State stayed wrong until
+    -- something unrelated (roster, talent, zone) triggered another ApplyBindings.
+    --
+    -- The three checkbox handlers in this same file (mounted, flying, targeting) all carry
+    -- this else branch. Reset was the only sibling missing it.
     if not InCombatLockdown() then
         self:ApplyBindings()
+    else
+        self:Defer("bindingRefresh")
     end
-    
+
     -- Refresh the UI
     self:RefreshClickCastingUI()
     

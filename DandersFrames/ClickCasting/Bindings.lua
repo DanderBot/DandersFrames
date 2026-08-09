@@ -760,8 +760,27 @@ function CC:ApplyBindings()
                     -- clear and rebuild now happen inside one call with no yield
                     -- between them, so combat can no longer land in the gap.
                     -- quiet=true keeps it to one summary line per sweep.
-                    CC:ApplyBindingsToFrameUnified(allFrames[i], false, true)
-                    applied = applied + 1
+                    -- ☠ PCALL PER FRAME. This is the highest-volume per-frame loop in the
+                    -- subsystem (a raid with a third-party grid reaches ~500 frames) and it
+                    -- ran unprotected inside a C_Timer callback. One frame throwing killed
+                    -- the callback outright: every remaining frame in that batch AND every
+                    -- later batch was skipped, the ReassertHoverBinds / IterateAllFrames
+                    -- tail never ran, and no bindingRefresh was queued -- that only happens
+                    -- on the combat-interrupt branch. The failing frame is left half-cleared
+                    -- (ClearBindingsFromFrame has already run, so its attributes are dead
+                    -- clicks) and everything behind it silently keeps the PREVIOUS profile's
+                    -- macros for the rest of the session.
+                    --
+                    -- The sibling set-job runner in Events.lua (forEachFrameSafe) was
+                    -- hardened for exactly this -- "One frame erroring is survivable. Losing
+                    -- the rest of the roster because of it is not." -- and DrainDeferred
+                    -- pcalls each job. This loop never got the same treatment.
+                    local ok, err = pcall(CC.ApplyBindingsToFrameUnified, CC, allFrames[i], false, true)
+                    if ok then
+                        applied = applied + 1
+                    elseif DF and DF.Debug then
+                        DF:Debug("CLICK", "ApplyBindings: frame %d threw: %s", i, tostring(err))
+                    end
                 end
 
                 -- The hovered frame is index 1, so this runs in the first batch

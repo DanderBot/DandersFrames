@@ -828,7 +828,10 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 matchFrameWidth = true, matchFrameHeight = false,
                 matchInset = 0,   -- extra per-side trim on the matched axes (see resolveBarSize)
                 -- Texture & colors
-                texture = "Interface\\TargetingFrame\\UI-StatusBar",
+                -- DF Minimalist (Krathe, 2026-08-08; was Blizzard UI-StatusBar) — every
+                -- other DF bar default is DF_Minimalist, this one was the odd one out.
+                -- ⚠ Keep in sync with TYPE_DEFAULTS.bar.texture below.
+                texture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
                 fillColor = {r = 1, g = 1, b = 1, a = 1},
                 bgColor = {r = 0, g = 0, b = 0, a = 0.5},
                 -- Border (canonical keys, Stage 5.3; legacy migrated on load)
@@ -1133,7 +1136,8 @@ local TYPE_DEFAULTS = {
         matchFrameWidth = true, matchFrameHeight = false,
         matchInset = 0,   -- extra per-side trim on the matched axes (see resolveBarSize)
         barColorMode = "STATIC",   -- STATIC / DF / DFSTOPS / CLASSIC (curve = green->red ramp as it drains)
-        texture = "Interface\\TargetingFrame\\UI-StatusBar",
+        -- ⚠ Mirrors the inline literal in EnsureTypeConfig's "bar" branch — change both.
+        texture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
         fillColor = {r = 1, g = 1, b = 1, a = 1},
         bgColor = {r = 0, g = 0, b = 0, a = 0.5},
         -- Canonical border keys (Stage 5.3).  Legacy showBorder /

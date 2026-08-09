@@ -660,6 +660,62 @@ local function makeHolder(button, levelOffset)
     return h
 end
 
+-- ★★★ THE PER-BUTTON LEVEL LADDER — ONE TABLE, because it used to be TWO PLACES and
+-- they drifted the moment one of them was renumbered.
+--
+-- Every value is an offset from the BUTTON. Nothing outside the button competes with
+-- these; they only have to be ordered among themselves and to clear the border.
+--
+--     0  icon art (on the button itself)
+--     1  cooldown swipe (dfCD — parented to the button, not a holder)
+--     2  PANDEMIC_TINT    a wash over the icon: must sit UNDER the information
+--     3  BORDER           DF.Border, passed EXPLICITLY (see below)
+--     4  DISPEL_RING      the dispel-type ring traces the icon edge, over the border
+--     5  DURATION         duration text / spell name / DISPEL_SYMBOL
+--     6  STACK            top-most text
+--     7  PANDEMIC_BORDER  a ring tracing the edge, so it must clear everything
+--
+-- ⚠ DISPEL_SYMBOL DELIBERATELY SHARES RUNG 5 with the duration text rather than taking
+-- its own. The ladder is depth-limited (see the budget below) and the two are the only
+-- pair with no ordering requirement between them. Where they overlap — a centred
+-- duration text under a centred glyph — draw order falls to creation order, and the
+-- symbol holder is created after the duration holder in this same pass, so the glyph
+-- still lands on top exactly as it did when it had its own rung.
+--
+-- ☠☠ HOW THIS BROKE, so it is not repeated. The 2026-08-07 z-order squash collapsed
+-- this ladder from 12/13/13/14/15 to 1/2/3/4/5 and dropped the icon border to
+-- DF.Border's shared default of +2 — but `Features/Pandemic.lua` computed its own
+-- absolute levels (9 for TINT, 15 for BORDER) against the OLD numbers and was not
+-- touched. Two consequences, both shipped:
+--   * the dispel ring sat at +1 UNDER a +2 border and was invisible (Krathe, 2026-08-08);
+--   * the pandemic TINT at +9 rose ABOVE the whole 1-5 ladder, washing over the timer
+--     and stack count again — the exact regression 2026-08-05 had already fixed.
+-- ⇒ **Pandemic.lua now reads THIS table.** Do not reintroduce a second set of numbers.
+--
+-- ☠ BORDER IS PASSED EXPLICITLY, never left to DF.Border's default. The default is +2
+-- and is documented as wrong for any parent that stacks things over its own rect —
+-- which is exactly what these holders do. Leaving it default is what buried the ring,
+-- and it also leaves no room BELOW the border for the tint.
+--
+-- ☠☠ THE BUDGET, AND WHY THIS LADDER CANNOT SIMPLY GROW. Measured from the CONTAINER:
+-- container +0, button +2, so the holders occupy container +4..+9 and a row is **9
+-- levels thick**. `AuraDesigner/Factory.ALERT_ROW_LIFT` lifts an alert clear of a whole
+-- row, so it must exceed that — and an indicator PLUS its alert has to stay inside one
+-- user-facing band, which are 20 apart. 10 + 9 = 19 fits, with one level of slack.
+-- ⇒ **Adding a rung here costs two levels of that budget and breaks it at 21.** If a new
+-- region needs a level, share an existing rung (as DISPEL_SYMBOL does) or re-derive
+-- ALERT_ROW_LIFT and the band spacing together. Confirm with `/df debug zorder`.
+DF.AuraButtonLevels = {
+    PANDEMIC_TINT   = 2,
+    BORDER          = 3,
+    DISPEL_RING     = 4,
+    DURATION        = 5,
+    DISPEL_SYMBOL   = 5,   -- shares DURATION; see the note above
+    STACK           = 6,
+    PANDEMIC_BORDER = 7,
+}
+local LEVELS = DF.AuraButtonLevels
+
 -- Shared duration-bar STYLING, applied to BOTH bar shapes (fill and strip): fill
 -- texture, orientation (fill-only — a strip is horizontal by definition, so the
 -- gate lives here to keep the fill path's call order byte-identical), reverse-fill,
@@ -676,7 +732,7 @@ local function styleBarShared(slot, sb, barSpec, dr, dg, db2, da)
         -- SetRotatesTexture(isVertical)) so a DIRECTIONAL fill like the DF/Classic colour
         -- ramp runs ALONG the drain, not sideways across the width. Set explicitly both ways
         -- so a bar flipped back to horizontal clears it.
-        if sb.SetRotatesTexture then sb:SetRotatesTexture(barSpec.orientation == "VERTICAL") end
+        DF:ApplyBarFillOrientation(sb, barSpec.orientation == "VERTICAL")
     end
     if sb.SetReverseFill then sb:SetReverseFill(barSpec.reverseFill and true or false) end
     -- Background texture child (drawn under the fill). Create-once; recolour live.
@@ -903,7 +959,17 @@ local function styleButton_regions(slot, config)
     local borderSpec = style.border
     if borderSpec and DF.Border then
         if not slot.dfBorder then
-            local ok, w = pcall(function() return DF.Border:New(host, { solidOnly = true, secretRect = true }) end)
+            -- ☠ frameLevelOffset is EXPLICIT. DF.Border's default (+2) is documented as
+            -- wrong for a parent that stacks frames over its own rect, and that is what
+            -- the holder ladder does — the default buried the dispel ring and left no
+            -- room beneath the border for the pandemic tint. See DF.AuraButtonLevels.
+            local ok, w = pcall(function()
+                return DF.Border:New(host, {
+                    solidOnly = true,
+                    secretRect = true,
+                    frameLevelOffset = LEVELS.BORDER,
+                })
+            end)
             if ok then slot.dfBorder = w end
         end
         if slot.dfBorder then
@@ -991,19 +1057,9 @@ local function styleButton_regions(slot, config)
     local durSpec = style.duration
     if isRow and durSpec and durSpec.show then
         if not slot.dfDur then
-            -- ★★ THE PER-BUTTON HOLDER LADDER, in one place so it stays orderable at a
-            -- glance. These only need to be above the icon and correctly ordered among
-            -- THEMSELVES — they are all children of the same button, so nothing outside
-            -- competes with them:
-            --     1 dispel ring   2 duration text / name   3 dispel symbol
-            --     4 stack count   5 pandemic cue
-            -- ☠ THEY USED TO BE 12/13/13/13/14/15, sized to clear a +10 DF.Border. The
-            -- border default is +2 now, so the whole ladder collapses — and it had to,
-            -- because a button at frame+42 with a +15 holder and a +10 border on top of
-            -- that reached frame+67, i.e. inside the DEFENSIVE icon's band at 65. Bands
-            -- are the budget: an aura container must fit between its own level and the
-            -- next user-facing one. Keep this ladder ≤ 5. (Z-order review, 2026-08-07.)
-            slot.dfDurHolder = makeHolder(host, durSpec.level or 2)
+            -- Rung DURATION. The ladder itself lives at DF.AuraButtonLevels, next to
+            -- makeHolder — including why it must not be duplicated anywhere else.
+            slot.dfDurHolder = makeHolder(host, durSpec.level or LEVELS.DURATION)
             slot.dfDur = slot.dfDurHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         end
         DF.TextStyle:Apply(slot.dfDur, durSpec, slot.dfDurHolder)
@@ -1013,11 +1069,11 @@ local function styleButton_regions(slot, config)
     local stackSpec = style.stacks
     if isRow and stackSpec and stackSpec.show then
         if not slot.dfStack then
-            -- Rung 4 of the holder ladder (see the duration holder): the stack count is
-            -- the top-most TEXT, above the ring, duration and symbol. It rendered UNDER
-            -- the icon border once before (Krathe 2026-07-15) -- that was at +7 against a
-            -- +10 border; the border is +2 now, so any rung above 2 clears it.
-            slot.dfStackHolder = makeHolder(host, stackSpec.level or 4)
+            -- Rung STACK: the top-most TEXT, above the ring, duration and symbol. It
+            -- rendered UNDER the icon border once before (Krathe 2026-07-15) — every rung
+            -- in the ladder now clears BORDER by construction, which is the point of
+            -- keeping them in one table.
+            slot.dfStackHolder = makeHolder(host, stackSpec.level or LEVELS.STACK)
             slot.dfStack = slot.dfStackHolder:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
         end
         DF.TextStyle:Apply(slot.dfStack, stackSpec, slot.dfStackHolder)
@@ -1074,9 +1130,9 @@ local function styleButton_regions(slot, config)
     local nameSpec = style.spellName
     if isRow and nameSpec and nameSpec.show then
         if not slot.dfName then
-            -- Rung 2, level with the duration text (see the duration holder): both are
-            -- content text and never occupy the same corner.
-            slot.dfNameHolder = makeHolder(host, 2)
+            -- Level with the duration text: both are content text and never occupy the
+            -- same corner.
+            slot.dfNameHolder = makeHolder(host, LEVELS.DURATION)
             slot.dfName = slot.dfNameHolder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         end
         slot.dfName:ClearAllPoints()
@@ -1088,11 +1144,12 @@ local function styleButton_regions(slot, config)
     local dispelSpec = style.dispel
     if dispelSpec then
         if dispelSpec.nativeBorder and not slot.dfAuraBorder then
-            -- HOLDER at +12: DF.Border is a child FRAME at +10, so a slot-level texture
-            -- would render UNDER the static border and the dispel colour would be
-            -- invisible behind it. (Holder-hosted regions are registrar-legal — the
-            -- duration text binds from a holder the same way.)
-            slot.dfDispelHolder = makeHolder(host, dispelSpec.level or 1)
+            -- ☠ HOLDER, NOT A SLOT-LEVEL TEXTURE, and it must out-rank BORDER: DF.Border
+            -- is a child FRAME, so a texture on the button renders under it and the
+            -- dispel colour is simply invisible. That is exactly what happened when this
+            -- was left at rung 1 against a +2 border. (Holder-hosted regions are
+            -- registrar-legal — the duration text binds from a holder the same way.)
+            slot.dfDispelHolder = makeHolder(host, dispelSpec.level or LEVELS.DISPEL_RING)
             slot.dfAuraBorder = slot.dfDispelHolder:CreateTexture(nil, "OVERLAY")
             -- The native Color style only VERTEX-TINTS the region (SetAuraBorderColor →
             -- SetVertexColor; no file is ever assigned) — a blank texture renders
@@ -1128,9 +1185,9 @@ local function styleButton_regions(slot, config)
             slot.dfAuraBorder:SetTexCoord(aX, 1 - aX, aY, 1 - aY)
         end
         if dispelSpec.nativeSymbol and not slot.dfSymbol then
-            -- Rung 3 (see the duration holder): above the dispel RING it belongs to, so
-            -- the glyph sits on the ring rather than under it.
-            slot.dfSymbolHolder = makeHolder(host, 3)
+            -- Above the dispel RING it belongs to, so the glyph sits on the ring rather
+            -- than under it.
+            slot.dfSymbolHolder = makeHolder(host, LEVELS.DISPEL_SYMBOL)
             slot.dfSymbol = slot.dfSymbolHolder:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
             slot.dfSymbol:SetPoint("CENTER")
         end
@@ -1184,9 +1241,10 @@ local function styleButton_regions(slot, config)
     end
     if isRow and pdSpec then
         if not slot.dfPandemicHolder then
-            -- Rung 5, the top of the ladder (see the duration holder): the refresh cue
-            -- has to read over every other content region on the button.
-            slot.dfPandemicHolder = makeHolder(host, pdSpec.level or 5)
+            -- ⚠ The level comes from the SPEC, because the two pandemic modes want
+            -- opposite z-order: a BORDER tops the ladder, a TINT sits under the
+            -- information. Both values come from DF.AuraButtonLevels — see Pandemic.lua.
+            slot.dfPandemicHolder = makeHolder(host, pdSpec.level or LEVELS.PANDEMIC_BORDER)
             -- Created hidden so a slot never flashes its cue between creation and the
             -- bind. This is the ONLY legal visibility write on the holder: it happens
             -- strictly before AddPandemicRegion, while the Shown aspect is still ours.
@@ -1964,8 +2022,14 @@ local function applyContainerLayout(c, handle)
             local live = handle.backend and handle.backend.container == c
             -- GetLeft on our plain window is expected non-secret; guard anyway —
             -- truthiness on a secret number is the 12.1 taint trap.
+            -- ☠ The SECRET CHECK MUST COME FIRST. This read `gl and issecretvalue(gl)`,
+            -- which truthiness-tests gl before establishing it is safe to touch — the exact
+            -- trap the line above warns about, one line under the warning. issecretvalue(nil)
+            -- is safe (Blizzard's own RestrictedInfrastructure does `pos = tonumber(pos)`
+            -- then `issecretvalue(pos)` with no nil guard), so the leading test bought
+            -- nothing. The `issecretvalue and` short-circuit stays for older clients.
             local gl = fr:GetLeft()
-            if gl and issecretvalue and issecretvalue(gl) then gl = nil end
+            if issecretvalue and issecretvalue(gl) then gl = nil end
             if not live or gl or tries > 600 then
                 fr:SetScript("OnUpdate", nil)
                 if live and gl then applyContainerLayout(c, handle) end
@@ -3592,7 +3656,7 @@ function applyRecordStyle(button, handle, recStyle)
 
     local bs = recStyle.badge
     if bs then
-        local sz = bs.size or 10
+        local sz = bs.size or 12   -- mirrors debuffImportantBadgeSize's Config default
         -- HOST FRAME, not bare textures on the button. The badge deliberately overhangs
         -- the button's corner, which puts it in the NEXT button's space — and sibling
         -- buttons draw in their own order, so a plain OVERLAY texture ends up BEHIND the
@@ -5003,7 +5067,8 @@ end
 -- ☠ THE EXPLICIT SetFrameLevel IS NOT COSMETIC — WITHOUT IT EVERY SLOT SHIFTS A LEVEL.
 -- A new child frame defaults to its parent's level + 1. Interposing this host would
 -- therefore push all of a slot's content up one level relative to everything else on the
--- frame, and AD levels are ABSOLUTE (the z-order map: a row is 13 levels thick, measured)
+-- frame, and AD levels are ABSOLUTE (a row is 9 levels thick — derive it from
+-- DF.AuraButtonLevels, never from a number copied into prose like this one was)
 -- — a uniform +1 walks a slot's content into the next band. Pinning the host to the
 -- BUTTON's own level keeps every offset below it arithmetically identical to when the
 -- regions hung off the button directly: makeHolder(host, n) resolves to the same level
@@ -5033,6 +5098,32 @@ local SLOT_OWNER_WARN_AT = 48
 
 local function ownerOf(frame)
     return frame and frame.dfSlotOwner or nil
+end
+
+-- ★ THE LEGAL FADE TARGET FOR EVERY SLOT-BACKED INDICATOR ON THIS FRAME.
+-- SlotHandle:GetAlphaHost answers with button.dfLevelHost, which is INSIDE the aura button
+-- and therefore forbidden to tainted code on 12.1 — proven in the field, where even a bare
+-- GetDebugName() on it is refused, not just the alpha setters. So per-indicator alpha on a
+-- shared slot cannot be written at all.
+--
+-- ensureOwner already interposes a plain DF-created Frame between the unit frame and the
+-- container (`anchor`), purely so the container has something to SetAllPoints to. That frame
+-- is ours, lives above the whole aura hierarchy, and alpha multiplies down through the
+-- container to every button and region inside it — so fading it fades every slot-backed
+-- indicator on the frame with ONE legal write.
+--
+-- ⚠ Deliberately frame-wide, not per-indicator. Out-of-range is a property of the UNIT, so
+-- every indicator on it fades together anyway; there is nothing to lose by sharing the write.
+-- What this canNOT do is per-indicator BASE alpha (the AD Alpha slider) — that needs the
+-- per-button host, which is unwritable. That capability is already gone for slot-backed
+-- indicators regardless of this; fading here neither restores nor worsens it.
+local function ownerAlphaHost(frame)
+    local owner = frame and frame.dfSlotOwner
+    return owner and owner.anchor or nil
+end
+
+function AuraContainer:GetSlotOwnerAlphaHost(frame)
+    return ownerAlphaHost(frame)
 end
 
 -- Lazily stand up the per-frame owner. Build order mirrors NativeBackend:build exactly --
@@ -5403,7 +5494,42 @@ function SlotHandle:ApplyStyle(style, layout)
     if not (cfg and btn) then return false end
     if type(style) == "table" then cfg.style = style end
     if type(layout) == "table" then cfg.layout = layout end
-    if InCombatLockdown() then return false end
+    -- ☠ DEFER AND REPLAY -- returning false alone LOSES the edit.
+    -- The new style/layout are already stored on cfg above, so the config is right; only
+    -- the paint is skipped. But AuraDesigner/Factory.lua stamps entry.coSig BEFORE calling
+    -- this, so the next SyncFrame pass sees no delta and never retries, and nothing else
+    -- re-drives AD at combat end. Net: a cosmetic edit made in combat -- a border colour,
+    -- an alpha drag, a group offset -- was saved to the profile and never appeared until
+    -- the user touched some unrelated setting or reloaded. This is the DEFAULT path, since
+    -- every placed indicator goes through the shared slot.
+    --
+    -- Handle:ApplyStyle already does exactly this (_pendingRestyle + _registerRegen); the
+    -- slot side never got an equivalent. Replaying with NO arguments is correct: the
+    -- `type(...) == "table"` guards above mean a bare call re-paints from stored cfg.
+    if InCombatLockdown() then
+        self._pendingRestyle = true
+        local reg = AuraContainer._slotRegen
+        if not reg then
+            reg = CreateFrame("Frame")
+            -- Weak keys: a slot torn down before regen must not be kept alive by this.
+            reg._pending = setmetatable({}, { __mode = "k" })
+            reg:RegisterEvent("PLAYER_REGEN_ENABLED")
+            reg:SetScript("OnEvent", function(selfFrame)
+                for h in pairs(selfFrame._pending) do
+                    selfFrame._pending[h] = nil
+                    if h._pendingRestyle then
+                        h._pendingRestyle = nil
+                        -- pcall per slot so one failure cannot strand the rest, matching
+                        -- the container-side regen drain.
+                        pcall(h.ApplyStyle, h)
+                    end
+                end
+            end)
+            AuraContainer._slotRegen = reg
+        end
+        reg._pending[self] = true
+        return false
+    end
     -- ☠ REFUSE TO STYLE A SLOT WHOSE LEVEL HOST DOES NOT EXIST YET, and the damage is
     -- PERMANENT if we don't. styleButton_regions resolves `local host = slot.dfLevelHost
     -- or slot` -- a fallback that is right for a CONTAINER button (which never has a

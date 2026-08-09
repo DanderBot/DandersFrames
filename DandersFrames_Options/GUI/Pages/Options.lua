@@ -103,7 +103,18 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
         end
         
-        -- Store for refresh
+        -- ☠ refreshContent IS THE HOOK PANEL ACTUALLY CALLS (Panel.lua's per-widget sweep).
+        -- `UpdateModeText` below has NO callers anywhere in either addon — it was "stored
+        -- for refresh" and nothing ever refreshed it, so this button's Copy label and its
+        -- Synced/Sync state were painted once at build and then frozen. That was invisible
+        -- while the only way to change link state was clicking this very button (which
+        -- repaints itself), but a profile Reset clears linkedSections wholesale and the
+        -- button went on claiming "Synced with Raid" until the page was rebuilt
+        -- (Krathe, 2026-08-08). Kept the old field rather than deleting it unasked.
+        -- ⚠ Called as widget:refreshContent(db) — colon, so it arrives (self, db).
+        -- UpdateAppearance reads upvalues and ignores both, which is why it can be reused
+        -- verbatim; do not give it parameters without checking these two call shapes.
+        btn.refreshContent = UpdateAppearance
         btn.UpdateModeText = UpdateAppearance
         btn.rightAlign = true  -- Flag for layout system
         
@@ -1608,6 +1619,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         -- Function to update the correct frames based on mode
         local function UpdateFrames()
+            -- ⚠ FORCED, and it must come first. This is the only path that re-anchors the
+            -- health bar to framePadding; ApplyHeaderSettings below re-applies frame WIDTH
+            -- and HEIGHT through the secure header, which is why those two looked fine
+            -- while padding did not. `true` skips the drag throttle — an un-forced call
+            -- landing inside the drag window would silently do nothing, which is the
+            -- failure this is here to prevent (Krathe, 2026-08-09).
+            if DF.LightweightUpdateFrameSize then
+                DF:LightweightUpdateFrameSize(true)
+            end
             -- Invalidate the raid layoutSig optimization cache BEFORE
             -- ApplyHeaderSettings runs, so this cycle's ApplyRaidGroupSorting
             -- applies layout settings that aren't tracked by layoutSig (notably

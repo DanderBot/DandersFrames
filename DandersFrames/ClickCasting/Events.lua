@@ -29,13 +29,9 @@ function CC:RegisterEvents()
     eventFrame:RegisterEvent("TRAIT_CONFIG_CREATED")
     eventFrame:RegisterEvent("ACTIVE_PLAYER_SPECIALIZATION_CHANGED")
     eventFrame:RegisterEvent("ACTIVE_COMBAT_CONFIG_CHANGED")  -- Fires when loadout is switched
-    -- Events for dynamic frames (boss/arena)
+    -- Arena entry is one of the cold-start profile resolve triggers
+    -- (see CC:ResolveColdStartProfile)
     eventFrame:RegisterEvent("ARENA_PREP_OPPONENT_SPECIALIZATIONS")
-    eventFrame:RegisterEvent("INSTANCE_ENCOUNTER_ENGAGE_UNIT")
-    
-    -- Nameplate events for click-casting on nameplates
-    eventFrame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
-    eventFrame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 
     -- Spell data arrival — one of the triggers that re-runs a cold-start
     -- profile check (see CC:ResolveColdStartProfile)
@@ -129,21 +125,8 @@ function CC:RegisterEvents()
                 end)
             end
         elseif event == "ARENA_PREP_OPPONENT_SPECIALIZATIONS" then
-            -- Arena frames should now exist
             -- Belt: never enter an arena on an unresolved cold-start profile
             CC:ResolveColdStartProfile("arena-prep")
-            CC:OnArenaPrep()
-        elseif event == "INSTANCE_ENCOUNTER_ENGAGE_UNIT" then
-            -- Boss frames should now exist
-            CC:OnBossEngage()
-        elseif event == "NAME_PLATE_UNIT_ADDED" then
-            -- A nameplate was added
-            local unitToken = ...
-            CC:OnNamePlateAdded(unitToken)
-        elseif event == "NAME_PLATE_UNIT_REMOVED" then
-            -- A nameplate was removed
-            local unitToken = ...
-            CC:OnNamePlateRemoved(unitToken)
         elseif event == "HOUSE_EDITOR_MODE_CHANGED" then
             -- Housing mode transitions can kill secure wraps; the repair
             -- re-wraps every frame (self-defers in combat, cooldown-limited)
@@ -178,8 +161,6 @@ function CC:ScheduleZoneSettle()
                 if CC:AnyBindingNeedsBlizzardFrames() then
                     CC:RegisterBlizzardFrames()
                 end
-                -- Register all currently visible nameplates
-                CC:RegisterAllNameplates()
                 -- Apply hovercast bindings
                 CC:ApplyGlobalBindings()
 
@@ -573,215 +554,6 @@ function CC:OnSpecChanged()
     end
 end
 
-function CC:OnArenaPrep()
-    if self.db.options.globalEnabled then
-        -- Arena frames should now exist, try to register.
-        -- Keyed: ARENA_PREP fires once per opponent, so this would otherwise
-        -- schedule several identical registration passes.
-        self:DeferAfter("dynamicFrameRegister", 0.1, function()
-            if not CC:CombatGuard("blizzardRegister") then
-                CC:RegisterBlizzardFrames()
-            end
-        end)
-    end
-end
-
-function CC:OnBossEngage()
-    if self.db.options.globalEnabled then
-        -- Boss frames should now exist.
-        -- Keyed: INSTANCE_ENCOUNTER_ENGAGE_UNIT fires repeatedly during an
-        -- encounter, so this would otherwise stack a timer per fire.
-        self:DeferAfter("dynamicFrameRegister", 0.1, function()
-            if not CC:CombatGuard("blizzardRegister") then
-                CC:RegisterBlizzardFrames()
-            end
-        end)
-    end
-end
-
--- ============================================================
-
--- NAMEPLATE HANDLING
--- ============================================================
-
--- Track registered nameplates
-CC.registeredNameplates = CC.registeredNameplates or {}
-
--- Called when a nameplate is added
-function CC:OnNamePlateAdded(unitToken)
-    if not self.db or not self.db.enabled then return end
-    if not self.db.options.globalEnabled then return end
-    
-    -- Get the nameplate frame
-    local nameplate = C_NamePlate.GetNamePlateForUnit(unitToken)
-    if not nameplate then return end
-    
-    if DF:DebugActive("CLICK") then
-        DF:Debug("CLICK", "Nameplate: added for %s (%s)", tostring(UnitName(unitToken) or "Unknown"), tostring(unitToken))
-    end
-    
-    -- Get the actual clickable button from the nameplate
-    -- Different nameplate addons structure this differently
-    local clickableFrame = self:GetNameplateClickableFrame(nameplate, unitToken)
-    
-    if clickableFrame then
-        -- Mark as a nameplate frame
-        clickableFrame.dfIsNameplate = true
-        clickableFrame.dfNameplateUnit = unitToken
-        
-        -- Track it
-        self.registeredNameplates[unitToken] = clickableFrame
-        
-        -- Register for click-casting
-        if not InCombatLockdown() then
-            self:RegisterFrame(clickableFrame)
-            
-            if DF:DebugActive("CLICK") then
-                DF:Debug("CLICK", "Nameplate: registered frame: %s", tostring(clickableFrame:GetName() or "unnamed"))
-            end
-        else
-            -- Queue for after combat
-            self:Defer("register", clickableFrame)
-        end
-    else
-        DF:DebugWarn("CLICK", "Nameplate: could not find clickable frame for %s", tostring(unitToken))
-    end
-end
-
--- Called when a nameplate is removed
-function CC:OnNamePlateRemoved(unitToken)
-    local frame = self.registeredNameplates[unitToken]
-    
-    if frame then
-        DF:Debug("CLICK", "Nameplate: removed for %s", tostring(unitToken))
-        
-        -- Unregister from click-casting
-        if not InCombatLockdown() then
-            self:UnregisterFrame(frame)
-        else
-            -- Queue for after combat
-            self:Defer("unregister", frame)
-        end
-        
-        self.registeredNameplates[unitToken] = nil
-    end
-end
-
--- Get the clickable frame from a nameplate
--- This handles different nameplate addon structures
-function CC:GetNameplateClickableFrame(nameplate, unitToken)
-    if not nameplate then return nil end
-    
-    -- Debug helper
-    local function debugFrame(label, frame)
-        if frame and DF:DebugActive("CLICK") then
-            DF:Debug("CLICK", "Nameplate probe [%s] %s (%s) isButton=%s hasRegister=%s unit=%s",
-                tostring(label), tostring(frame:GetName() or "unnamed"), tostring(frame:GetObjectType()),
-                tostring(frame:IsObjectType("Button")), tostring(frame.RegisterForClicks ~= nil),
-                tostring(frame:GetAttribute("unit") or frame.unit))
-        end
-    end
-    
-    -- Try to find the UnitFrame child (Blizzard default structure)
-    local unitFrame = nameplate.UnitFrame
-    if unitFrame then
-        debugFrame("UnitFrame", unitFrame)
-        -- Check if it's a Button or has RegisterForClicks
-        if unitFrame:IsObjectType("Button") or unitFrame.RegisterForClicks then
-            local unit = unitFrame:GetAttribute("unit") or unitFrame.unit
-            if unit then
-                return unitFrame
-            end
-        end
-    end
-    
-    -- Try the nameplate itself
-    debugFrame("nameplate", nameplate)
-    if nameplate:IsObjectType("Button") or nameplate.RegisterForClicks then
-        local unit = nameplate:GetAttribute("unit")
-        if unit then
-            return nameplate
-        end
-    end
-    
-    -- Try common nameplate addon patterns
-    -- Plater
-    if nameplate.unitFrame then
-        debugFrame("Plater unitFrame", nameplate.unitFrame)
-        if nameplate.unitFrame:IsObjectType("Button") or nameplate.unitFrame.RegisterForClicks then
-            return nameplate.unitFrame
-        end
-    end
-    
-    -- Plater alternate structure
-    if nameplate.PlaterFrame then
-        debugFrame("PlaterFrame", nameplate.PlaterFrame)
-        return nameplate.PlaterFrame
-    end
-    
-    -- KuiNameplates
-    if nameplate.kui then
-        local kuiFrame = nameplate.kui
-        debugFrame("KuiFrame", kuiFrame)
-        if kuiFrame.HealthBar then
-            return kuiFrame
-        end
-    end
-    
-    -- TidyPlates / ThreatPlates
-    if nameplate.TPFrame then
-        debugFrame("TPFrame", nameplate.TPFrame)
-        return nameplate.TPFrame
-    end
-    
-    -- NeatPlates
-    if nameplate.carrier then
-        debugFrame("NeatPlates carrier", nameplate.carrier)
-        return nameplate.carrier
-    end
-    
-    -- Fallback: search all children for a Button with unit attribute
-    for _, child in ipairs({nameplate:GetChildren()}) do
-        if child:IsObjectType("Button") then
-            debugFrame("Child Button", child)
-            local childUnit = child:GetAttribute("unit") or child.unit
-            if childUnit then
-                return child
-            end
-        end
-    end
-    
-    -- Last resort: search for any frame with RegisterForClicks
-    for _, child in ipairs({nameplate:GetChildren()}) do
-        if child.RegisterForClicks then
-            debugFrame("Child with RegisterForClicks", child)
-            local childUnit = child:GetAttribute("unit") or child.unit
-            if childUnit or not InCombatLockdown() then
-                -- Set unit if missing
-                if not child:GetAttribute("unit") and not InCombatLockdown() then
-                    child:SetAttribute("unit", unitToken)
-                end
-                return child
-            end
-        end
-    end
-    
-    -- Very last resort: if the nameplate's UnitFrame exists but isn't a Button,
-    -- we can still try to use it with SecureActionButton behavior
-    if unitFrame and not InCombatLockdown() then
-        debugFrame("Fallback UnitFrame", unitFrame)
-        -- Try to set it up for click-casting
-        if not unitFrame:GetAttribute("unit") then
-            unitFrame:SetAttribute("unit", unitToken)
-        end
-        return unitFrame
-    end
-    
-    DF:Debug("CLICK", "Nameplate: no suitable clickable frame found")
-    
-    return nil
-end
-
 -- ============================================================
 -- BOOTSTRAP
 -- ============================================================
@@ -801,23 +573,5 @@ initFrame:SetScript("OnEvent", function(self, event, isInitialLogin, isReloading
         self:UnregisterEvent("PLAYER_ENTERING_WORLD")
     end
 end)
-
--- Register all currently visible nameplates
-function CC:RegisterAllNameplates()
-    if not self.db or not self.db.enabled then return end
-    if not self.db.options.globalEnabled then return end
-    
-    -- Get all visible nameplates
-    local nameplates = C_NamePlate.GetNamePlates()
-    
-    DF:Debug("CLICK", "Nameplate: registering %d visible nameplates", #nameplates)
-    
-    for _, nameplate in ipairs(nameplates) do
-        local unitToken = nameplate.namePlateUnitToken
-        if unitToken then
-            self:OnNamePlateAdded(unitToken)
-        end
-    end
-end
 
 -- ============================================================

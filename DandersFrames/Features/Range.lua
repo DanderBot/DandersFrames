@@ -642,20 +642,26 @@ function DF:UpdatePetRange(frame)
 
     frame.dfInRange = inRange
 
-    local outOfRangeAlpha = db.rangeFadeAlpha or 0.55
-    -- Use SetAlphaFromBoolean when available to handle secret booleans
-    -- from UnitInRange (Midnight+ returns secret values for non-healer specs)
+    -- ⚠ 0.4, matching every other consumer and the Config default. This read 0.55, a
+    -- value that appears nowhere else: ElementAppearance and HealthFade both use
+    -- `db.rangeFadeAlpha or 0.4` and Core/Config seeds 0.4. Invisible while the key is
+    -- present, wrong on an old import or a hand-edited SavedVariables.
+    local outOfRangeAlpha = db.rangeFadeAlpha or 0.4
+
+    -- ☠ FRAME ONLY -- NOT the health bar as well.
+    -- The pet health bar is a plain child (CreateFrame("StatusBar", nil, frame),
+    -- SetAllPoints) with no SetIgnoreParentAlpha, so setting BOTH multiplied the fades
+    -- together: 0.4 x 0.4 = 0.16 on the bar and the name/health text parented to it, while
+    -- the frame itself sat at 0.4. HealthFade.lua's own header states the rule this broke --
+    -- "only set frame:SetAlpha (cascades to children). Do NOT also set healthBar:SetAlpha
+    -- or the alpha double-stacks."
+    --
+    -- SetAlphaFromBoolean handles the secret boolean UnitInRange returns for non-healer
+    -- specs on Midnight+; the plain branch is the pre-12.1 fallback.
     if frame.SetAlphaFromBoolean then
         frame:SetAlphaFromBoolean(inRange, 1.0, outOfRangeAlpha)
     else
         frame:SetAlpha(inRange and 1.0 or outOfRangeAlpha)
-    end
-    if frame.healthBar then
-        if frame.healthBar.SetAlphaFromBoolean then
-            frame.healthBar:SetAlphaFromBoolean(inRange, 1.0, outOfRangeAlpha)
-        else
-            frame.healthBar:SetAlpha(inRange and 1.0 or outOfRangeAlpha)
-        end
     end
 end
 
@@ -725,9 +731,32 @@ rangeAnimGroup:SetScript("OnLoop", function()
     local contentType = DF:GetContentType()
 
     if contentType == "arena" then
-        -- Arena: only arena frames, no pets, no highlights
+        -- Arena: arena frames + the ARENA pet track. (Highlights are still excluded.)
         if DF.IterateArenaFrames then
             DF:IterateArenaFrames(RangeCheckFrame)
+        end
+        -- ☠ ARENA PETS WERE OMITTED ENTIRELY. DF.arenaPetFrames appeared nowhere in this
+        -- file: the branch above said "no pets" and the event helper maps a raidN owner
+        -- straight to DF.raidPetFrames -- the HIDDEN track in arena, not the arena one. So
+        -- in a 3v3 every arena unit frame faded and the pet frames under them stayed at
+        -- full brightness for the whole match.
+        --
+        -- SetPetFrameVisible explicitly hands alpha ownership to the range system ("Set to 1
+        -- so range system can take over"), and in arena nothing ever took over. Same
+        -- omission class the pets file already fixed once for Anchor / Offset X / Offset Y.
+        -- 1..5 rather than #arenaPetFrames: the table is sparse (a slot exists only once
+        -- that arena pet has been created), so the length operator is unreliable. Every
+        -- other consumer in Pets.lua walks it the same way.
+        if DF.arenaPetFrames then
+            for i = 1, 5 do
+                local frame = DF.arenaPetFrames[i]
+                if frame and not frame.dfPetHidden then
+                    DF:UpdatePetRange(frame)
+                    if DF.UpdatePetHealthFade then
+                        DF:UpdatePetHealthFade(frame)
+                    end
+                end
+            end
         end
     elseif contentType then
         -- Raid content (battleground/mythic/instanced/openWorld): raid frames + raid pets

@@ -146,7 +146,7 @@ local function BuildDirectDebuffFilters(db, claimed)
         importantStyle = {
             scale = (sc > 0) and sc or 1,
             badge = db.debuffImportantBadge ~= false and {
-                size = tonumber(db.debuffImportantBadgeSize) or 10,
+                size = tonumber(db.debuffImportantBadgeSize) or 12,
                 point = db.debuffImportantBadgePoint or "TOPRIGHT",
                 offsetX = tonumber(db.debuffImportantBadgeX) or 0,
                 offsetY = tonumber(db.debuffImportantBadgeY) or 0,
@@ -2345,6 +2345,30 @@ function DF:DriveDebuffFactory(frame, db)
         frame.dfDebuffFactoryEmptyVer = nil   -- version moved: fall through and re-evaluate
     end
 
+    -- ★ PER-FRAME IMPORTANT-HIGHLIGHT OPT-OUT (preview only; nothing sets this stamp on a
+    -- live frame). The enlarged + badged treatment is right for a real row but wrong on
+    -- EVERY preview frame at once: it swamped the raid grid, and on the party tank it sat
+    -- over the AFK countdown (Krathe, 2026-08-08).
+    --
+    -- ⚠ Done by SHADOWING ONE KEY, not by threading a flag through the resolver, because
+    -- the resolver already gates on exactly this key and the Aura Designer facade already
+    -- suppresses the treatment the same way (a db carrying no debuffImportant* keys).
+    -- That facade is also the proof this is safe: it is a FLAT scratch table, so
+    -- BuildDirectDebuffFilters reads plain scalar keys synchronously and never pairs()
+    -- the db -- an __index proxy is indistinguishable to it.
+    --
+    -- Cached per frame and re-made only when the source db identity changes (profile or
+    -- mode switch), so this costs one table for the life of the frame rather than one per
+    -- update. ⚠ Tri-state: nil means "use the normal rule", only an explicit false opts out.
+    if frame.dfTestShowImportantDebuff == false then
+        if frame.dfNoImportantSrcDb ~= db then
+            frame.dfNoImportantDb = setmetatable({ debuffImportantHighlight = false },
+                                                 { __index = db })
+            frame.dfNoImportantSrcDb = db
+        end
+        db = frame.dfNoImportantDb
+    end
+
     local h = frame.debuffFactory
     if not h then
         local filterList = BuildDirectDebuffFilters(db,
@@ -2546,9 +2570,14 @@ function DF:BuildDefensiveRowConfig(db, unit)
         -- NOT — nothing ever set testMax here, so the preview fell through to the row's
         -- full `max` and declared one AuraGroup per icon, each eagerly allocating ten
         -- buttons, for a curated pool of FOUR defensives. Another comment asserting a
-        -- behaviour no code implemented. Capped like the buff row now: this is a
-        -- HELPFUL row, so the Buffs count is the one the user set for it.
-        testMax = db.testBuffCount or 2,
+        -- behaviour no code implemented.
+        -- ⚠ It was then capped at `testBuffCount` on the reasoning "this is a HELPFUL
+        -- row, so the Buffs count is the one the user set for it". That is wrong from
+        -- the user's side: nothing on the panel says the Buffs slider governs the
+        -- defensive icon, so the row silently drew 2 while its own Max Icons read 5.
+        -- It has its own count now (default 1). ☠ Keep this in step with the
+        -- SetTestMax in TestMode.lua's defensive drive — two writers, one value.
+        testMax = db.testDefensiveCount or 0,
         tooltips = db.tooltipDefensiveEnabled ~= false,
         -- Z-order: an ABSOLUTE offset from the unit frame. Highest of the aura surfaces, so a
         -- defensive cue is never buried. Applied via h:ApplyZOrder(cfg) at Create + re-apply.

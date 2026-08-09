@@ -151,7 +151,18 @@ function DF:UpdateHealthFade(frame)
     end
 
     if DF:MemTestDisabled("enableHealthFade") then return end
-    if DF.testMode or DF.raidTestMode then return end
+    -- ☠ TEST FRAMES PASS THROUGH — the same gate shape DF:ApplyHealthFadeAlpha uses.
+    -- This was a flat `if DF.testMode or DF.raidTestMode then return end`, which left the
+    -- feature HALF-MIGRATED: the applier was taught to fade a preview (it carries a
+    -- dfHealthPct data fork) but the driver that sets dfHealthFadeActive still bailed —
+    -- and UpdateFrameAppearance gates its fade branch on exactly that flag. So the shared
+    -- appearance pass always took the else-branch and reset the frame to alpha 1.0, and
+    -- previews stayed opaque (Krathe, 2026-08-08). The applier's preview support existed
+    -- but was unreachable through the live path.
+    -- ⚠ Animate Health MASKED it: UpdateTestFrameHealthOnly calls ApplyHealthFadeAlpha
+    -- directly from the ticker, AFTER the appearance pass, so it won by running last.
+    -- Fixing the driver is what makes the STATIC path work.
+    if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
 
     local db = DF:GetFrameDB(frame)
     if not db or not db.healthFadeEnabled then
@@ -190,7 +201,16 @@ function DF:UpdatePetHealthFade(frame)
     local db = DF:GetFrameDB(frame)
     if not db or not db.healthFadeEnabled then
         frame.dfHealthFadeActive = false
-        frame:SetAlpha(1.0)
+        -- ☠ DO NOT STAMP 1.0 OVER THE RANGE FADE. healthFadeEnabled is FALSE by default,
+        -- and Range.lua's OnLoop calls DF:UpdatePetRange(frame) and then
+        -- DF:UpdatePetHealthFade(frame) on the same frame in the same pass -- so this
+        -- unconditional reset erased the range fade the line before had just applied.
+        -- UpdatePetRange early-returns on a cache hit, so it never re-applied it: at stock
+        -- settings an out-of-range pet's frame sat at full opacity indefinitely.
+        --
+        -- With health fade off this function has no opinion about alpha, so leaving it alone
+        -- is correct. The range path is the only other writer of pet frame alpha and always
+        -- sets an explicit value (1.0 when in range), so nothing here needs to reset it.
         return
     end
 

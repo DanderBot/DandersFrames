@@ -112,7 +112,6 @@ DF.ExportCategories = {
         "absorbBarOvershieldStyle",
         "absorbBarReverse",
         "absorbBarShowOvershield",
-        "absorbBarStrata",
         "absorbBarTexture",
         "absorbBarWidth",
         "absorbBarX",
@@ -151,7 +150,6 @@ DF.ExportCategories = {
         "healPredictionReverse",
         "healPredictionShowMode",
         "healPredictionShowOverheal",
-        "healPredictionStrata",
         "healPredictionTexture",
         "healPredictionWidth",
         "healPredictionX",
@@ -1083,13 +1081,13 @@ DF.ExportCategories = {
         "testAnimateTargetedList",
         "testBuffCount",
         "testDebuffCount",
+        "testDefensiveCount",
         "testPreset",
         "testShowAbsorbs",
         "testShowAggro",
         "testShowAuraDesigner",
         "testShowAuras",
         "testShowDispelGlow",
-        "testShowExternalDef",
         "testShowHealPrediction",
         "testShowMissingBuff",
         "testShowOutOfRange",
@@ -1235,6 +1233,24 @@ DF.ExportCategoryInfo = {
         name = "Auto Layouts",
         description = "Raid size auto-layout profiles",
         order = 18,
+    },
+    -- ☠ NO ENTRY IN DF.ExportCategories, DELIBERATELY. The four colour tables live at
+    -- the PROFILE ROOT (classColors / powerColors / roleColors / dispelColors), not in
+    -- the party/raid mode tables, so there are no mode keys to list -- and
+    -- ExtractCategorySettings walks pairs(DF.ExportCategories), so a category absent
+    -- from that table is simply never visited. The payload is attached by hand in
+    -- DF:ExportProfile's selective branch, the same way raidAutoProfiles, auraBlacklist
+    -- and linkedSections are.
+    --
+    -- This category exists because the selective export could not carry colours AT ALL:
+    -- the full-export branch copied all four, the selective branch had no equivalent,
+    -- and no checkbox could request them. Ticking all sixteen boxes still shipped none
+    -- of them, so a shared profile arrived with stock class, power, role and dispel
+    -- colours and the recipient's frames visibly did not match.
+    colors = {
+        name = "Colors",
+        description = "Class, power, role and dispel colours",
+        order = 19,
     },
 }
 

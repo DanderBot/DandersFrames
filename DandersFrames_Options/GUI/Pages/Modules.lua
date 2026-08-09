@@ -54,34 +54,35 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local textShadow = Add(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "statusIconFontOutline", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30, 1)
         textSection:RegisterChild(textShadow)
 
-        local shadowNote = Add(GUI:CreateLabel(self.child, L["Shadow offset and colour are controlled in General > Global Fonts."], 240), 30, 1)
+        -- ⚠ Fixed-layout link (GUI:CreateLink) — it flows once at build and reports its own
+        -- height, so it must be Add'd at note.layoutHeight rather than a guessed row.
+        local shadowNote = GUI:CreateGlobalFontsShadowLink(self.child, 240)
+        Add(shadowNote, shadowNote.layoutHeight, 1)
         textSection:RegisterChild(shadowNote)
         shadowNote.hideOn = function(d) return not DF:OutlineHasShadow(d.statusIconFontOutline) end
         
-        -- Text Colors header
-        local colorsLabel = Add(GUI:CreateLabel(self.child, L["Text Colors:"], 240), 25, 1)
-        textSection:RegisterChild(colorsLabel)
-        
-        local summonColor = Add(GUI:CreateColorPicker(self.child, L["Summon"], db, "summonIconTextColor", false, nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 30, 1)
-        textSection:RegisterChild(summonColor)
-        
-        local resColor = Add(GUI:CreateColorPicker(self.child, L["Resurrection"], db, "resurrectionIconTextColor", false, nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 30, 1)
-        textSection:RegisterChild(resColor)
-        
-        local afkColor = Add(GUI:CreateColorPicker(self.child, L["AFK"], db, "afkIconTextColor", false, nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 30, 1)
-        textSection:RegisterChild(afkColor)
-        
-        local phasedColor = Add(GUI:CreateColorPicker(self.child, L["Phased"], db, "phasedIconTextColor", false, nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 30, 1)
-        textSection:RegisterChild(phasedColor)
-        
-        local vehicleColor = Add(GUI:CreateColorPicker(self.child, L["Vehicle"], db, "vehicleIconTextColor", false, nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 30, 1)
-        textSection:RegisterChild(vehicleColor)
-        
-        local raidRoleColor = Add(GUI:CreateColorPicker(self.child, L["Raid Role (MT/MA)"], db, "raidRoleIconTextColor", false, nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 30, 1)
-        textSection:RegisterChild(raidRoleColor)
+        -- ★ THE PER-ICON TEXT COLOURS USED TO LIVE HERE, as a flat list of seven pickers
+        -- ("Summon", "Resurrection", "AFK", …) divorced from the icons they colour
+        -- (Krathe, 2026-08-08: "odd having the text settings separate from each indicator
+        -- at the very least the colors"). Each now sits in its OWN icon's Settings group,
+        -- beside that icon's Show as Text and label controls, and hides when Show as Text
+        -- is off — so the control is where you are already looking when you turn text on.
+        -- ⚠ Adding a new status icon? Its text colour belongs in ITS section, not here.
+        -- What remains in this section is genuinely SHARED typography: one font, size,
+        -- outline and shadow for every status icon that renders as text.
 
-        local bgCarrierColor = Add(GUI:CreateColorPicker(self.child, L["BG Carrier"], db, "bgCarrierIconTextColor", false, nil, function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 30, 1)
-        textSection:RegisterChild(bgCarrierColor)
+        -- Per-icon TEXT COLOUR row. One helper rather than seven near-identical pairs:
+        -- ⚠ it also keeps SEVEN locals out of this function. DF._SetupGUIPagesPart5 is
+        -- ~2200 lines in a single scope and Lua caps locals at 200 per scope, so a batch
+        -- of throwaway handles is a real cost here, not a style preference.
+        -- Hidden unless that icon is in text mode -- an icon-mode colour picker controls
+        -- nothing visible.
+        local function AddTextColor(group, label, key, showKey)
+            local w = group:AddWidget(GUI:CreateColorPicker(self.child, label, db, key, false, nil,
+                function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end, true), 30)
+            w.hideOn = function(d) return not d[showKey] end
+            return w
+        end
 
         -- ============================================
         -- ROLE ICON (Collapsible)
@@ -184,7 +185,18 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 local entries = {}
                 if opts.showTextKey and db[opts.showTextKey] then
                     for _, key in ipairs(opts.texts or {}) do
-                        entries[#entries + 1] = { text = db[key] or key, color = textColor }
+                        if type(key) == "table" then
+                            -- table form: { key = <text key>, colorKey = <colour key> },
+                            -- for a section previewing two states whose labels are
+                            -- coloured independently. Mirrors the table form `icons`
+                            -- already accepts below. No caller uses it today.
+                            entries[#entries + 1] = {
+                                text  = db[key.key] or key.key,
+                                color = (key.colorKey and db[key.colorKey]) or textColor,
+                            }
+                        else
+                            entries[#entries + 1] = { text = db[key] or key, color = textColor }
+                        end
                     end
                 else
                     for _, ic in ipairs(opts.icons or {}) do
@@ -193,7 +205,8 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                             -- for icons that need a texcoord slice (e.g. raid-target markers
                             -- off the shared UI-RaidTargetingIcons sheet). SetIconTextureOrAtlas
                             -- auto-detects atlas vs path, so a plain texture string still works.
-                            entries[#entries + 1] = { texture = ic.texture, coords = ic.coords, inset = ic.inset }
+                            entries[#entries + 1] = { texture = ic.texture, coords = ic.coords, inset = ic.inset,
+                                                  color = ic.colorKey and db[ic.colorKey] or ic.color }
                         else
                             entries[#entries + 1] = { texture = ic }
                         end
@@ -339,6 +352,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         sumSettings:AddWidget(GUI:CreateEditBox(self.child, L["Pending Text"], db, "summonIconTextPending", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
         sumSettings:AddWidget(GUI:CreateEditBox(self.child, L["Accepted Text"], db, "summonIconTextAccepted", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
         sumSettings:AddWidget(GUI:CreateEditBox(self.child, L["Declined Text"], db, "summonIconTextDeclined", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
+        AddTextColor(sumSettings, L["Text Color"], "summonIconTextColor", "summonIconShowText")
         Add(sumSettings, nil, 1)
         summonSection:RegisterChild(sumSettings)
 
@@ -381,6 +395,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         bgcSettings:AddWidget(GUI:CreateLabel(self.child, L["Shows on a friendly party/raid member carrying a battleground objective (flag, orb). Only active inside battlegrounds."], 240), 44)
         bgcSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "bgCarrierIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
         bgcSettings:AddWidget(GUI:CreateEditBox(self.child, L["Carrier Text"], db, "bgCarrierIconText", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
+        AddTextColor(bgcSettings, L["Text Color"], "bgCarrierIconTextColor", "bgCarrierIconShowText")
         Add(bgcSettings, nil, 1)
         bgCarrierSection:RegisterChild(bgcSettings)
 
@@ -456,6 +471,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         resurrectionIconEnableCb.keepEnabled = true
         resSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "resurrectionIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
         resSettings:AddWidget(GUI:CreateEditBox(self.child, L["Casting Text"], db, "resurrectionIconTextCasting", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
+        AddTextColor(resSettings, L["Text Color"], "resurrectionIconTextColor", "resurrectionIconShowText")
         -- ("Pending Text" removed: resurrectionIconTextPending was never read by
         -- any render path — live or test — since inception. The pending state
         -- renders as the yellow icon tint.)
@@ -496,6 +512,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         phasedIconEnableCb.keepEnabled = true
         phSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "phasedIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
         phSettings:AddWidget(GUI:CreateEditBox(self.child, L["Status Text"], db, "phasedIconText", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
+        AddTextColor(phSettings, L["Text Color"], "phasedIconTextColor", "phasedIconShowText")
         phSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show LFG Eye for Cross-Instance"], db, "phasedIconShowLFGEye", function() DF:UpdateAllFrames() end), 30)
         Add(phSettings, nil, 1)
         phasedSection:RegisterChild(phSettings)
@@ -539,6 +556,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         afkIconEnableCb.keepEnabled = true
         afkSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "afkIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
         afkSettings:AddWidget(GUI:CreateEditBox(self.child, L["Status Text"], db, "afkIconText", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
+        AddTextColor(afkSettings, L["Text Color"], "afkIconTextColor", "afkIconShowText")
         afkSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show Timer"], db, "afkIconShowTimer", function() DF:UpdateAllFramesStatusIcons() end), 30)
         -- In text mode the timer is merged into the status text, so the Timer
         -- Text box is hidden; explain it inherits the main text styling.
@@ -555,6 +573,21 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         afkTimerGroup:AddWidget(GUI:CreateFontDropdown(self.child, L["Font"], db, "afkIconTimerFont", afkTimerCB, "statusIconFont"), 55)
         afkTimerGroup:AddWidget(GUI:CreateSlider(self.child, L["Size"], 6, 24, 1, db, "afkIconTimerFontSize", afkTimerCB, afkTimerCB, true), 55)
         afkTimerGroup:AddWidget(GUI:CreateOutlineDropdown(self.child, L["Outline"], db, "afkIconTimerOutline", afkTimerCB, "statusIconFontOutline"), 55)
+        -- ⚠ SHADOW LIVES INSIDE THE OUTLINE STRING, so this checkbox writes the SAME key as
+        -- the dropdown above — hence the matching inheritKey. afkIconTimerOutline ships
+        -- UNSET so the timer follows the shared status-icon outline; without the fallback
+        -- the box would read unchecked while inheriting a shadow, and ticking it would pin
+        -- the outline to NONE, throwing the inherited style away.
+        afkTimerGroup:AddWidget(GUI:CreateShadowCheckbox(self.child, L["Shadow"], db, "afkIconTimerOutline", afkTimerCB, "statusIconFontOutline"), 30)
+        -- Same note the shared Icon Text Settings box carries: only WHETHER there is a
+        -- shadow is per-timer. Its offset and colour are global (fontShadow* keys) because
+        -- on 12.0.7 the shadow rides the font OBJECT — fontstring SetShadow* is a silent
+        -- no-op — and font objects are shared. Shown only while a shadow is actually on.
+        local afkTimerShadowLink = GUI:CreateGlobalFontsShadowLink(self.child, 230)
+        local afkTimerShadowNote = afkTimerGroup:AddWidget(afkTimerShadowLink, afkTimerShadowLink.layoutHeight)
+        afkTimerShadowNote.hideOn = function(d)
+            return not DF:OutlineHasShadow(d.afkIconTimerOutline or d.statusIconFontOutline)
+        end
         afkTimerGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "afkIconTimerColor", false, nil, afkTimerCB, true), 30)
         afkTimerGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "afkIconTimerX", afkTimerCB, afkTimerCB, true), 55)
         afkTimerGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "afkIconTimerY", afkTimerCB, afkTimerCB, true), 55)
@@ -597,6 +630,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         vehicleIconEnableCb.keepEnabled = true
         vehSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "vehicleIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
         vehSettings:AddWidget(GUI:CreateEditBox(self.child, L["Status Text"], db, "vehicleIconText", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
+        AddTextColor(vehSettings, L["Text Color"], "vehicleIconTextColor", "vehicleIconShowText")
         Add(vehSettings, nil, 1)
         vehSection:RegisterChild(vehSettings)
 
@@ -638,6 +672,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         rrSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Show as Text"], db, "raidRoleIconShowText", function() DF:UpdateAllFramesStatusIcons(); DF:RefreshTestFrames() end), 30)
         rrSettings:AddWidget(GUI:CreateEditBox(self.child, L["Tank Text"], db, "raidRoleIconTextTank", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
         rrSettings:AddWidget(GUI:CreateEditBox(self.child, L["Assist Text"], db, "raidRoleIconTextAssist", function() DF:UpdateAllFramesStatusIcons() end, 120), 55)
+        AddTextColor(rrSettings, L["Text Color"], "raidRoleIconTextColor", "raidRoleIconShowText")
         Add(rrSettings, nil, 1)
         rrSection:RegisterChild(rrSettings)
 
@@ -1766,7 +1801,16 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                         label = L["Import"],
                         onClick = function()
                             if not importData then return end
-                            DF:ApplyImportedProfile(importData, selectedCats, selectedFrameTypes, profileName, createNew)
+                            -- ☠ PCALL the apply. It creates the profile and switches to it
+                            -- BEFORE merging the payload, so a mid-apply throw used to leave
+                            -- the user sitting in a half-imported profile with no message and
+                            -- FullProfileRefresh never reached. Shape validation upstream makes
+                            -- that unlikely; this makes it survivable and says so.
+                            local ok = pcall(DF.ApplyImportedProfile, DF, importData,
+                                selectedCats, selectedFrameTypes, profileName, createNew)
+                            if not ok then
+                                DF:Err(L["Import failed. Please try again or check for errors."])
+                            end
                             if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
                         end,
                     },

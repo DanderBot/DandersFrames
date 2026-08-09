@@ -221,7 +221,7 @@ end
 -- "on top". Since the frame-level rework every DF element carries an ABSOLUTE
 -- offset from the unit frame, and the content stack now runs: resource bar 20,
 -- contentOverlay 25, status icons 30, missing buff 35, buff/debuff rows 40,
--- defensive 65 -- whose border art reaches 77, because a row is 13 levels thick.
+-- defensive 65 -- whose art reaches 74, because a row is 9 levels thick.
 -- At +10 the hover highlight sat under ALL of that. The reported "resource bar
 -- draws over the hover highlight" is just the shallowest instance of it.
 --
@@ -232,15 +232,32 @@ end
 --
 -- Relative order among the three is preserved: aggro < hover < selection.
 --
--- The numbers: 65 is the highest default in Config (defensiveIconFrameLevel), and
--- a row's art sits above its baseline -- by +12 or +14 depending on which element
--- is tallest, so call the real ceiling 79. These sit clear of it rather than on
--- the boundary, deliberately: land on 78 and a single off-by-one in that estimate
--- puts the highlight back under the art with no visible reason why.
+-- ☠ 82/83/84 -> 75/76/77 (2026-08-08). RE-DERIVED, because the number they were
+-- built on stopped being true: this comment said "a row is 13 levels thick" and
+-- that was the PRE-SQUASH ladder. The per-button ladder is now
+-- DF.AuraButtonLevels (Frames/AuraContainer.lua) and a row is 9 thick, so the
+-- highlights had been sitting seven levels higher than anything required.
+-- ⚠ It was the THIRD stale copy of that thickness found in one day, after
+-- Factory.ALERT_ROW_LIFT and a prose line in AuraContainer. If you move the
+-- ladder again, grep the repo for the row-thickness number -- it is quoted in
+-- several derivations and none of them recompute it.
+--
+-- The arithmetic, from the top of the tallest DEFAULT element:
+--   defensiveIconFrameLevel 65 is the anchor -> container 66 -> buttons 67
+--   -> holders 67 + DF.AuraButtonLevels (max 7) = 74, border 67 + 3 = 70.
+-- So 74 is the ceiling and 75 clears it. The headroom is one level rather than
+-- the four the old estimate carried, and that is deliberate: the ladder is a
+-- single named table now, so this is derived rather than guessed. ⚠ Re-derive
+-- it here if DF.AuraButtonLevels or defensiveIconFrameLevel moves.
 -- ⚠ Clears the DEFAULT stack only. The per-element sliders run 0-100, so pushing
 -- an element above these covers the highlight again -- that is the slider doing
--- what it says, not a regression.
-local HIGHLIGHT_LEVEL = { Aggro = 82, Hover = 83, Selection = 84 }
+-- what it says, not a regression. The LEADER icon default does exactly that on
+-- purpose (Config: leaderIconFrameLevel = 80) -- a crown anchored at the frame
+-- edge was being crossed by the perimeter border, which the "highlights only
+-- draw at the perimeter so they cannot obscure content" argument above never
+-- considered. That argument holds for the name and health text, not for icons
+-- parked on the edge.
+local HIGHLIGHT_LEVEL = { Aggro = 75, Hover = 76, Selection = 77 }
 
 -- Applied on REUSE as well as creation: the level is absolute, derived from the
 -- owner's level at the time it is set, so a highlight created before the owner's
@@ -451,10 +468,33 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
             end
         end
         
-        -- Each layer is slightly larger and more transparent
+        -- Each layer is slightly larger and more transparent. They must ABUT to read as a
+        -- falloff rather than as concentric lines — but the stack must also not run away
+        -- from the frame as the thickness climbs.
+        --
+        -- ☠ THE STEP IS `min(thickness, 2)`, AND BOTH HALVES MATTER.
+        --   * It was a hardcoded 2, which only equals the ring width at thickness 2. At
+        --     thickness 1 the rings covered radius 0-1, 2-3, 4-5, 6-7 — a 1px TRANSPARENT
+        --     GAP between each — so it read as four hairlines, the DF Double silhouette
+        --     rather than a glow (Krathe, 2026-08-08).
+        --   * Making it plain `thickness` fixed that and immediately broke the other end:
+        --     the spread becomes 4x thickness, so a thick glow blew far outside the frame
+        --     (24px at thickness 6, against ~12 before). Reported the same day.
+        -- Capping the step keeps BOTH: below 2 the step follows the ring width, so the
+        -- rings abut and the falloff is real; at 2 and above the arithmetic is IDENTICAL
+        -- to the original, so every thickness that already looked right is untouched.
+        -- ⚠ At 3+ the rings therefore overlap slightly and the alpha ramp flattens a
+        -- little. That is the ORIGINAL behaviour and nobody has complained about it —
+        -- fixing it means varying the LAYER COUNT with thickness (contiguous AND bounded
+        -- needs count = spread / thickness), which is a bigger change than this is worth
+        -- before ship. It belongs with the DF.Border texture integration afterwards.
+        -- ⚠ `thickness` is already snapped to whole screen pixels above, so the sub-2
+        -- steps land on the physical grid; do not reintroduce a fractional step here.
+        local GLOW_MAX_STEP = 2
+        local step = math.min(thickness, GLOW_MAX_STEP)
         local baseSize = thickness
         for i, layer in ipairs(ch.glowLayers) do
-            local offset = (i - 1) * 2 + inset
+            local offset = (i - 1) * step + inset
             local layerAlpha = alpha * (1.1 - (i * 0.25))
             
             layer:ClearAllPoints()
@@ -535,85 +575,18 @@ end
 -- Expose for reuse by the Aura Designer border indicator
 DF.ApplyHighlightStyle = ApplyHighlightStyle
 
--- ============================================================
--- UPDATE HIGHLIGHT STYLE COLOR (lightweight recolor)
--- ============================================================
+-- (Removed) UpdateHighlightStyleColor, a per-style colour-only fast path that skipped
+-- ApplyHighlightStyle's full tear-down. Its only consumer was the pre-12.1 Aura Designer
+-- EXPIRING ticker (~3 Hz), which was deliberately retired this cycle, so the helper and its
+-- DF.UpdateHighlightStyleColor export were left with zero callers across both addons.
 --
--- Changes the color/alpha of a highlight without touching geometry.
--- Used by the Aura Designer expiring ticker (~3 Hz) so it can animate
--- a color curve as an aura approaches expiration without calling the
--- full ApplyHighlightStyle each tick.
---
--- ApplyHighlightStyle is expensive because it tears everything down:
--- hides all edge textures, hides every dash in the animated border
--- (80 Hide ops), removes the frame from the shared animator, and then
--- rebuilds whichever style was requested — even if the only thing that
--- changed was the color. For an animated border with expiring enabled,
--- that tear-down happens 3 times per second per frame on top of the
--- 30 Hz animation, which is pure waste.
---
--- This helper matches each style exactly and only calls the subset of
--- APIs needed to change colors:
---
---   NONE:     no-op
---   SOLID:    4x SetColorTexture on the edge lines
---   GLOW:     4x SetBackdropBorderColor on the glow layers (same per-
---             layer alpha falloff as the original style code)
---   CORNERS:  8x SetColorTexture on the corner textures
---   ANIMATED: just mutate ch.animR/G/B/A. The next animator tick picks
---             up the new color via the per-dash color cache in
---             DrawHorizontalEdge / DrawVerticalEdge and calls
---             SetColorTexture only on dashes whose cached color differs.
---             Zero work on *this* tick.
---   DASHED:   same as ANIMATED but there's no animator redrawing it,
---             so we call UpdateAnimatedBorder(ch, 0) once to push the
---             new colors to the dashes. Still far cheaper than the
---             full tear-down.
---
--- IMPORTANT: only call this when the style has NOT changed from what
--- was last set via ApplyHighlightStyle. If the style changes, call
--- ApplyHighlightStyle instead — this helper does not create, move,
--- or resize geometry.
-local function UpdateHighlightStyleColor(ch, mode, r, g, b, alpha)
-    if not ch or mode == "NONE" then return end
-
-    if mode == "SOLID" then
-        if ch.topLine    then ch.topLine:SetColorTexture(r, g, b, alpha) end
-        if ch.bottomLine then ch.bottomLine:SetColorTexture(r, g, b, alpha) end
-        if ch.leftLine   then ch.leftLine:SetColorTexture(r, g, b, alpha) end
-        if ch.rightLine  then ch.rightLine:SetColorTexture(r, g, b, alpha) end
-
-    elseif mode == "ANIMATED" then
-        -- Animator picks up the new color on its next tick. Zero ops here.
-        ch.animR, ch.animG, ch.animB, ch.animA = r, g, b, alpha
-
-    elseif mode == "DASHED" then
-        -- No animator; push the new color through via a one-shot redraw.
-        ch.animR, ch.animG, ch.animB, ch.animA = r, g, b, alpha
-        DF:UpdateAnimatedBorder(ch, 0)
-
-    elseif mode == "GLOW" then
-        if ch.glowLayers then
-            for i, layer in ipairs(ch.glowLayers) do
-                -- Matches the alpha falloff in ApplyHighlightStyle's GLOW branch
-                local layerAlpha = alpha * (1.1 - (i * 0.25))
-                layer:SetBackdropBorderColor(r, g, b, math.max(0, layerAlpha))
-            end
-        end
-
-    elseif mode == "CORNERS" then
-        if ch.topLine     then ch.topLine:SetColorTexture(r, g, b, alpha) end
-        if ch.leftLine    then ch.leftLine:SetColorTexture(r, g, b, alpha) end
-        if ch.topRight    then ch.topRight:SetColorTexture(r, g, b, alpha) end
-        if ch.rightTop    then ch.rightTop:SetColorTexture(r, g, b, alpha) end
-        if ch.bottomLeft  then ch.bottomLeft:SetColorTexture(r, g, b, alpha) end
-        if ch.leftBottom  then ch.leftBottom:SetColorTexture(r, g, b, alpha) end
-        if ch.bottomRight then ch.bottomRight:SetColorTexture(r, g, b, alpha) end
-        if ch.rightBottom then ch.rightBottom:SetColorTexture(r, g, b, alpha) end
-    end
-end
-
-DF.UpdateHighlightStyleColor = UpdateHighlightStyleColor
+-- ⚠ KEEP THE REASON IT EXISTED. ApplyHighlightStyle is a full rebuild: it hides every edge
+-- texture, hides every dash in the animated border (~80 Hide ops), drops the frame from the
+-- shared animator, then re-creates whichever style was asked for — even when only the COLOUR
+-- changed. If anything is ever wired to recolour a highlight on a timer again, it must not
+-- call ApplyHighlightStyle per tick; SOLID/CORNERS need only SetColorTexture on the existing
+-- textures, GLOW only SetBackdropBorderColor per layer, and ANIMATED/DASHED only need
+-- ch.animR/G/B/A mutated (the animator's per-dash colour cache picks it up on its next tick).
 
 -- ============================================================
 -- UPDATE HIGHLIGHTS FOR A FRAME
@@ -731,9 +704,21 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
                 -- appear in the preview and aggroOnlyTanking / aggroHideOnTanks were
                 -- skipped entirely. Supplying the number instead lets live's own code
                 -- cover all three colours and both toggles. (Audit, 2026-08-07.)
+                -- ☠ 4, NOT 3 — index 3 is the DEAD scenario ("Alexandrosthegreat",
+                -- status = "Dead" in DF.TestData). Live suppresses the aggro glow on a
+                -- corpse, so the preview must not demonstrate a threat colour there; with
+                -- the dead guard above now stamp-aware, leaving it at 3 would simply make
+                -- one of the three colours vanish from the preview instead.
+                -- ⚠ Index 2 is the OUT-OF-RANGE scenario and keeps its colour on purpose:
+                -- range has nothing to do with threat, so a faded frame holding aggro is
+                -- what live actually does. Five frames cannot show selection plus three
+                -- threat levels without landing on one of the special scenarios — this is
+                -- the one where the overlap is honest.
+                -- ☠ These indices are POOL indices and the display is sorted, so what you
+                -- see on screen is not this order. Check DF.TestData, not the screenshot.
                 forceThreat = (frameIndex == 1 and 3)
                     or (frameIndex == 2 and 2)
-                    or (frameIndex == 3 and 1)
+                    or (frameIndex == 4 and 1)
                     or nil
             end
         end
@@ -769,6 +754,39 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         -- (dungeons/M+/raids) and no-ops where roles aren't set (UnitGroupRolesAssigned
         -- returns "NONE").
         if isAggro and db.aggroHideOnTanks and unit and UnitGroupRolesAssigned(unit) == "TANK" then
+            isAggro = false
+        end
+        -- ☠ A CORPSE HOLDS NO THREAT, but UnitThreatSituation keeps reporting one, so the
+        -- glow used to sit on a dead player until the next target change / hover / combat
+        -- end. Blizzard hit the same thing and shipped the same guard in PTR build 69189
+        -- (UnitFrame_UpdateThreatIndicator gained `and not UnitIsDead(indicator.unit)`).
+        -- ⚠ Their COMPACT-frame aggro path -- the one this mirrors -- still has no such
+        -- check at 69189, so this is ours to carry.
+        -- DeadOrGhost rather than Blizzard's plain Dead: a ghost is even further off the
+        -- threat table, and it matches how the rest of DF asks the question (IsDeadOrOffline).
+        -- Suppresses the HIGHLIGHT only; `status` stays intact for the Text Designer stash
+        -- just below, which is a separate display with its own rules.
+        --
+        -- ☠ THE STAMP FIRST, THE UNIT SECOND. A preview frame carries a REAL unit token,
+        -- so `UnitIsDeadOrGhost` answers about a live player standing next to you rather
+        -- than about the scenario — the preview went on showing the aggro glow on its
+        -- "Dead" frame while live correctly hid it (Krathe, 2026-08-08). That divergence
+        -- was introduced by the first version of this guard, which read the unit only.
+        -- `dfIsDead` is how the rest of the appearance code resolves exactly this question
+        -- (Features/ElementAppearance.lua, Frames/Core.lua) and it covers OFFLINE too,
+        -- which holds no threat either. Stamp when present, live read otherwise — the
+        -- same shape as those two, so the preview runs live's logic with a different
+        -- input rather than getting a fork of its own.
+        -- ⚠ Deliberately NOT `DF:IsTestFrameDead`: that lives in the load-on-demand
+        -- companion and this file is resident, so calling it would be an unguarded
+        -- cross-boundary call. A plain field read is always safe.
+        local isDeadOrOffline
+        if frame.dfIsDead ~= nil then
+            isDeadOrOffline = frame.dfIsDead
+        else
+            isDeadOrOffline = unit and UnitIsDeadOrGhost(unit)
+        end
+        if isAggro and isDeadOrOffline then
             isAggro = false
         end
     end

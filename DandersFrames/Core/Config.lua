@@ -79,7 +79,36 @@ local function RegisterCustomMedia()
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Stripes Medium", "Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Medium")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Stripes Dense", "Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Dense")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Stripes Very Dense", "Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Very_Dense")
-    
+
+    -- ☠ TWO things here are deliberately unlike every registration above.
+    -- 1. It is a PNG, and PNG paths MUST carry the ".png" extension — the
+    --    extensionless form only resolves for .blp/.tga. (PNG loose files have
+    --    been supported since 10.0.7.)
+    -- 2. It TILES rather than stretching — see DF.TILED_BAR_TEXTURES in Core.lua,
+    --    which is keyed by this exact string. Renaming the file or dropping the
+    --    extension here silently turns the tiling off.
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V1", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1.png")
+
+    -- The wider absorb patterns. Same art family, differing only in stripe gap;
+    -- see DF.TILED_BAR_TEXTURES in Core.lua, which is keyed by these exact paths
+    -- and pairs each with a rotated companion for vertical frames.
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V1 Medium", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1_Medium.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V1 Wide", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1_Wide.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V1 Wider", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1_Wider.png")
+
+    -- The V2 family — glyph tiles. "+" is intended for shields and "-" for heal
+    -- absorbs, but both are ordinary statusbar textures and appear in every bar
+    -- dropdown: LSM has no notion of a per-setting media list, so the intent lives
+    -- in the NAME rather than in any restriction.
+    -- Neither takes a vertical companion; see SYMBOL_TILES in Core.lua, where each
+    -- is exempt for a different reason.
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V2 Plus Small", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Plus_Small.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V2 Plus Medium", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Plus_Medium.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V2 Plus Large", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Plus_Large.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V2 Minus Small", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Minus_Small.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V2 Minus Medium", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Minus_Medium.png")
+    LSM:Register(LSM.MediaType.STATUSBAR, "DF Absorb V2 Minus Large", "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Minus_Large.png")
+
     -- Health bar textures
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Smooth", "Interface\\AddOns\\DandersFrames\\Media\\DF_Smooth")
     LSM:Register(LSM.MediaType.STATUSBAR, "DF Glossy", "Interface\\AddOns\\DandersFrames\\Media\\DF_Glossy")
@@ -139,6 +168,139 @@ DF.SharedFonts = {
     ["Interface\\AddOns\\DandersFrames\\Fonts\\Roboto-Bold.ttf"] = "DF Roboto Bold",
 }
 
+-- ============================================================
+-- SHIPPED MEDIA MANIFEST
+-- ============================================================
+-- ☠ GENERATED from DandersFrames/Media/. Regenerate whenever art is added,
+-- renamed or removed — a stale manifest is worse than none, because it makes the
+-- healing below confidently wrong in both directions.
+--
+-- WHY THIS EXISTS, rather than asking C_UIFileAsset.IsKnownFile:
+--   That API answers from a loose-file index the client builds at launch, so it
+-- reports a file as KNOWN until the index catches up. Proven in game 2026-08-09:
+-- files renamed under a running client, /reload -> textures rendered green with
+-- no fallback and no warning; a fresh client launch -> the same paths healed
+-- correctly and the warning fired. Same API, same paths, different answers.
+--   That timing is exactly our real-world case: an addon update renames files
+-- under a running client. For OUR OWN media we do not need to ask — we know what
+-- we ship. The manifest is authoritative from the first frame and cannot go
+-- stale mid-session.
+--   The API is still used for THIRD-PARTY paths, where it is the only signal
+-- available and where being wrong is harmless (see DF:SafeSetStatusBarTexture).
+local SHIPPED_MEDIA_FILES = {
+    "Classic_Curve.tga",
+    "DF_Absorb_V1.png",
+    "DF_Absorb_V1_Medium.png",
+    "DF_Absorb_V1_Medium_Vert.png",
+    "DF_Absorb_V1_Vert.png",
+    "DF_Absorb_V1_Wide.png",
+    "DF_Absorb_V1_Wide_Vert.png",
+    "DF_Absorb_V1_Wider.png",
+    "DF_Absorb_V1_Wider_Vert.png",
+    "DF_Absorb_V2_Minus_Large.png",
+    "DF_Absorb_V2_Minus_Medium.png",
+    "DF_Absorb_V2_Minus_Small.png",
+    "DF_Absorb_V2_Plus_Large.png",
+    "DF_Absorb_V2_Plus_Medium.png",
+    "DF_Absorb_V2_Plus_Small.png",
+    "DF_AlertBadge.tga",
+    "DF_AlertMark.tga",
+    "DF_Bevel.tga",
+    "DF_Beveled.tga",
+    "DF_ColorWheel.tga",
+    "DF_Curve_Smooth.tga",
+    "DF_Curve_Stops.tga",
+    "DF_Double.tga",
+    "DF_DPS.tga",
+    "DF_ExpireBorder.tga",
+    "DF_ExpireBorder_Fill.tga",
+    "DF_ExpireBorder_Thick.tga",
+    "DF_ExpireBorder_Thin.tga",
+    "DF_Glass.tga",
+    "DF_Glossy.tga",
+    "DF_Glow.tga",
+    "DF_Gradient_H.tga",
+    "DF_Gradient_H_Rev.tga",
+    "DF_Gradient_V.tga",
+    "DF_Gradient_V_Rev.tga",
+    "DF_Healer.tga",
+    "DF_Icon.tga",
+    "DF_Inset.tga",
+    "DF_Matte.tga",
+    "DF_Minimalist.tga",
+    "DF_Ring.tga",
+    "DF_Smooth.tga",
+    "DF_Soft.tga",
+    "DF_SquareBorder.tga",
+    "DF_SquareRing.tga",
+    "DF_Stripes.tga",
+    "DF_Stripes_Dense.tga",
+    "DF_Stripes_Medium.tga",
+    "DF_Stripes_Soft.tga",
+    "DF_Stripes_Soft_Wide.tga",
+    "DF_Stripes_Sparse.tga",
+    "DF_Stripes_Very_Dense.tga",
+    "DF_Tank.tga",
+    "Icons\\add.tga",
+    "Icons\\check.tga",
+    "Icons\\chevron_right.tga",
+    "Icons\\close.tga",
+    "Icons\\content_copy.tga",
+    "Icons\\delete.tga",
+    "Icons\\dot.tga",
+    "Icons\\download.tga",
+    "Icons\\edit.tga",
+    "Icons\\edit_square.tga",
+    "Icons\\expand_more.tga",
+    "Icons\\filter_alt.tga",
+    "Icons\\filter_list.tga",
+    "Icons\\info.tga",
+    "Icons\\keyboard.tga",
+    "Icons\\lock.tga",
+    "Icons\\lock_open.tga",
+    "Icons\\menu.tga",
+    "Icons\\mouse.tga",
+    "Icons\\notes.tga",
+    "Icons\\preview.tga",
+    "Icons\\preview_off.tga",
+    "Icons\\refresh.tga",
+    "Icons\\remove.tga",
+    "Icons\\reorder.tga",
+    "Icons\\save.tga",
+    "Icons\\search.tga",
+    "Icons\\settings.tga",
+    "Icons\\star.tga",
+    "Icons\\sync.tga",
+    "Icons\\sync_disabled.tga",
+    "Icons\\upload.tga",
+    "Icons\\visibility.tga",
+    "Icons\\visibility_off.tga",
+    "Icons\\warning.tga",
+    "Icons\\widget_small.tga",
+}
+
+-- Lookup keyed BOTH ways: with the extension (how .png must be referenced) and
+-- without (how .tga/.blp conventionally are). Lowercased — WoW paths are
+-- case-insensitive and profiles hold whatever case was typed.
+-- Reverse of DF.TILED_VERTICAL_COMPANION, populated in Core.lua beside it. Lets
+-- DF:ResolveBarTexture normalise BACK to the base before deciding, which is what
+-- makes resolution idempotent -- see the note there.
+DF.TILED_COMPANION_BASE = {}
+
+DF.SHIPPED_MEDIA = {}
+-- Extensionless key -> the real on-disk filename. This turns the extensionless form
+-- profiles store ("...\\Media\\DF_Stripes") back into "df_stripes.tga", which is the
+-- shape C_UIFileAsset.IsKnownFile is known to answer for. Without it the disk check
+-- has to be skipped for every .tga we ship, which is most of our art.
+DF.SHIPPED_MEDIA_FILENAME = {}
+for _, name in ipairs(SHIPPED_MEDIA_FILES) do
+    local lower = name:lower()
+    local stem = lower:gsub("%.%w+$", "")
+    DF.SHIPPED_MEDIA[lower] = true
+    DF.SHIPPED_MEDIA[stem] = true
+    DF.SHIPPED_MEDIA_FILENAME[stem] = lower
+end
+
 -- Fallback textures if SharedMedia not available
 DF.SharedTextures = {
     ["Solid"] = "Solid (No Texture)",  -- Special option for solid color backgrounds
@@ -154,6 +316,17 @@ DF.SharedTextures = {
     ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Medium"] = "DF Stripes Medium",
     ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Dense"] = "DF Stripes Dense",
     ["Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes_Very_Dense"] = "DF Stripes Very Dense",
+    -- .png extension is REQUIRED in these paths; see the registrations above.
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1.png"] = "DF Absorb V1",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1_Medium.png"] = "DF Absorb V1 Medium",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1_Wide.png"] = "DF Absorb V1 Wide",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1_Wider.png"] = "DF Absorb V1 Wider",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Plus_Small.png"] = "DF Absorb V2 Plus Small",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Plus_Medium.png"] = "DF Absorb V2 Plus Medium",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Plus_Large.png"] = "DF Absorb V2 Plus Large",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Minus_Small.png"] = "DF Absorb V2 Minus Small",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Minus_Medium.png"] = "DF Absorb V2 Minus Medium",
+    ["Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V2_Minus_Large.png"] = "DF Absorb V2 Minus Large",
 }
 
 -- Fonts to exclude (known problematic fonts)
@@ -1059,8 +1232,13 @@ DF.PartyDefaults = {
     absorbBarOvershieldStyle = "SPARK",
     absorbBarReverse = false,
     absorbBarShowOvershield = false,
-    absorbBarStrata = "MEDIUM",
-    absorbBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes",
+    -- DF Absorb V1 (Krathe, 2026-08-09; was DF_Minimalist, before that DF_Stripes).
+    -- Stored as the PATH, which is what LSM registers the display name against
+    -- (Config.lua ~85) and what every other texture default in this file holds.
+    -- ☠ The ".png" is REQUIRED and is not decoration: PNG paths do not resolve
+    -- without their extension, and DF.TILED_BAR_TEXTURES is keyed by this exact
+    -- string — drop it and the texture both fails to load and stops tiling.
+    absorbBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1.png",
     absorbBarWidth = 46,
     absorbBarX = 0,
     absorbBarY = 0,
@@ -1305,7 +1483,10 @@ DF.PartyDefaults = {
     debuffImportantHighlight = true,          -- master toggle for the treatment below
     debuffImportantScale = 1.25,              -- icon size step for important debuffs (1 = same as the rest)
     debuffImportantBadge = true,              -- corner "!" badge
-    debuffImportantBadgeSize = 10,            -- badge diameter in px (centred inside the corner, inset by size/4)
+    -- 12, not 10 (Krathe, 2026-08-08): at 10 the "!" mark lands ~1.5px wide and reads as a
+    -- smudge no matter how heavy the art is — the floor is the disc diameter, not the glyph.
+    -- ⚠ Two render-side fallbacks mirror this (Features/Auras.lua, Frames/AuraContainer.lua).
+    debuffImportantBadgeSize = 12,            -- badge diameter in px (centred inside the corner, inset by size/4)
     debuffImportantBadgePoint = "TOPRIGHT",   -- which icon corner the badge sits on
     debuffImportantBadgeX = 0,                -- nudge from that corner (ADDED to the default inward inset)
     debuffImportantBadgeY = 0,
@@ -1328,7 +1509,10 @@ DF.PartyDefaults = {
     buffGrowth = "LEFT_UP",
     buffHideSwipe = false,
     buffMax = 4,
-    buffOffsetX = -2,
+    -- -3 / 6 (Krathe, 2026-08-08; X was -2, Y already 6). Mirrors the debuff row's
+    -- +3 / 6 — the buff row grows LEFT and the debuff row RIGHT, so equal-and-opposite
+    -- X insets sit them symmetrically about the frame. Change one, change the other.
+    buffOffsetX = -3,
     buffOffsetY = 6,
     buffPaddingX = 2,
     buffPaddingY = 2,
@@ -1447,8 +1631,11 @@ DF.PartyDefaults = {
     debuffGrowth = "RIGHT_UP",
     debuffHideSwipe = false,
     debuffMax = 5,
-    debuffOffsetX = 2,
-    debuffOffsetY = 5,
+    -- 3 / 6 (Krathe, 2026-08-08; was 2 / 5). The mirror of buffOffsetX/Y — see the note
+    -- there. Y was one off the buff row, which read as the two rows sitting at slightly
+    -- different heights.
+    debuffOffsetX = 3,
+    debuffOffsetY = 6,
     debuffPaddingX = 2,
     debuffPaddingY = 2,
     debuffScale = 1,
@@ -1464,7 +1651,10 @@ DF.PartyDefaults = {
     showDebuffs = true,
 
     -- Defensive Bar
-    defensiveBarGrowth = "RIGHT_DOWN",
+    -- Grow = "From Center" (Krathe, 2026-08-08). The stored form is
+    -- <direction>_<wrap>, so CENTER_DOWN keeps the row HORIZONTAL wrapping DOWN — the
+    -- orientation and wrap of the old RIGHT_DOWN — and changes only where it grows from.
+    defensiveBarGrowth = "CENTER_DOWN",
     defensiveBarMax = 4,
     defensiveBarSpacing = 2,
     defensiveBarWrap = 5,
@@ -1530,7 +1720,9 @@ DF.PartyDefaults = {
     defensiveIconScale = 1,
     defensiveIconShowBorder = true,
     defensiveIconShowDuration = true,
-    defensiveIconSize = 30,
+    -- 26 (Krathe, 2026-08-08; was 30). ⚠ RAID keeps its own smaller value — see
+    -- RAID_DEFAULT_OVERRIDES at the bottom of this file.
+    defensiveIconSize = 26,
     defensiveIconX = 0,
     defensiveIconY = 0,
     defensiveSortOrder = "EXTERNALS",         -- "DEFAULT" / "TIME" / "EXTERNALS" (EXTERNALS = the shipped BigDefensive order)
@@ -1625,7 +1817,10 @@ DF.PartyDefaults = {
     healAbsorbBarOrientation = "HORIZONTAL",
     healAbsorbBarOverlayReverse = false,
     healAbsorbBarReverse = false,
-    healAbsorbBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes",
+    -- DF Absorb V1 (Krathe, 2026-08-09) — matching absorbBarTexture, since the two
+    -- bars sit on the same health bar and read as one surface. See the note
+    -- there about the required ".png".
+    healAbsorbBarTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Absorb_V1.png",
     healAbsorbBarWidth = 50,
     healAbsorbBarX = 0,
     healAbsorbBarY = -10,
@@ -1645,8 +1840,8 @@ DF.PartyDefaults = {
     healPredictionReverse = false,
     healPredictionShowMode = "MINE",
     healPredictionShowOverheal = false,
-    healPredictionStrata = "SANDWICH",
-    healPredictionTexture = "Interface\\Buttons\\WHITE8x8",
+    -- DF Minimalist (Krathe, 2026-08-08; was WHITE8x8) — matching every other DF bar fill.
+    healPredictionTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
     healPredictionWidth = 50,
     healPredictionX = 0,
     healPredictionY = 0,
@@ -1683,6 +1878,9 @@ DF.PartyDefaults = {
     reducedMaxHealthClipHealthBar = true,
     reducedMaxHealthColor = {r = 0.502, g = 0.502, b = 0.502, a = 0.8039},
     reducedMaxHealthEnabled = true,
+    -- ⚠ DELIBERATELY DF_Stripes, not DF_Minimalist (Krathe, 2026-08-08). Every other
+    -- bar-fill default is DF_Minimalist, so this reads as the odd one out in a sweep —
+    -- it is not. The hatch is what makes lost max health legible as a distinct band.
     reducedMaxHealthTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Stripes",
 
     -- Blizzard Frame Hiding
@@ -1703,7 +1901,14 @@ DF.PartyDefaults = {
     leaderIconAlpha = 1,
     leaderIconAnchor = "TOPLEFT",
     leaderIconEnabled = true,
-    leaderIconFrameLevel = 30,
+    -- 80, not the 30 every other status icon uses (Krathe, 2026-08-08). The leader
+    -- crown is anchored at the frame EDGE, which is exactly where the selection/hover/
+    -- aggro highlights draw -- at 30 the highlight crossed it. Those sit at 75/76/77
+    -- (Features/Highlights.lua), so 80 clears them with room to spare.
+    -- ⚠ Core.lua's ABS_LEVEL_SENTINEL_DEFAULT still says 30 for this key and MUST:
+    -- that table records what a stored 0 historically MEANT, so changing it would move
+    -- existing users' icons. This is a baseline change, not a migration.
+    leaderIconFrameLevel = 80,
     leaderIconHideInCombat = true,
     leaderIconScale = 1,
     leaderIconX = 0,
@@ -1764,7 +1969,9 @@ DF.PartyDefaults = {
     -- frameLevelOffset and ApplyZOrder's `or 40` fallback silently added 40. Existing
     -- profiles move by _missingBuffBaselineV3 (Core.lua), value-targeted on 35.
     missingBuffIconFrameLevel = 60,
-    missingBuffIconScale = 1.2000000476837,
+    -- 1 (Krathe, 2026-08-08). The old value was 1.2000000476837 — a float32 round-trip
+    -- of a slider drag that had been committed as the baseline; 1 is exact.
+    missingBuffIconScale = 1,
     missingBuffIconShowBorder = true,
     missingBuffIconSize = 24,
     missingBuffIconX = 0,
@@ -2009,7 +2216,9 @@ DF.PartyDefaults = {
     raidTargetIconEnabled = true,
     raidTargetIconFrameLevel = 30,
     raidTargetIconHideInCombat = false,
-    raidTargetIconScale = 1.1000000238419,
+    -- 1 (Krathe, 2026-08-08). The old value was 1.1000000238419 — a float32 round-trip
+    -- of a slider drag committed as the baseline, the same shape as missingBuffIconScale.
+    raidTargetIconScale = 1,
     raidTargetIconX = 36,
     raidTargetIconY = 5,
     raidTestFrameCount = 40,
@@ -2166,7 +2375,11 @@ DF.PartyDefaults = {
     statusTextColor = {r = 1, g = 1, b = 1, a = 1},
     statusTextEnabled = true,
     statusTextFont = "DF Roboto SemiBold",
-    statusTextFontSize = 14,
+    -- 12 (Krathe, 2026-08-08; was 14). This is the "Dead / Offline / Ghost" size for
+    -- BOTH surfaces: the legacy status text, and the Text Designer's `status_text`
+    -- element — TextDesigner/Migration.lua seeds that element's fontSize from this key,
+    -- so one value is the default for both by construction.
+    statusTextFontSize = 12,
     statusTextOutline = "SHADOW",
     statusTextX = 0,
     statusTextY = 6,
@@ -2187,16 +2400,29 @@ DF.PartyDefaults = {
     summonIconY = 0,
 
     -- BG Objective Carrier Icon (flag / orb carrier)
+    -- ★ TOPRIGHT, NOT THE CENTRE BUS (Krathe, 2026-08-08; was CENTER 0,0).
+    -- afkIcon, readyCheckIcon, summonIcon, resurrectionIcon and phasedIcon are ALL
+    -- "CENTER", 0, 0 at frame level 30 -- five icons at one point, resolved only by draw
+    -- order. That is survivable for states that cannot co-occur, but a flag carrier who
+    -- goes AFK, or who dies and is being resurrected, is ordinary BG behaviour, so this
+    -- one had to come off the bus. TOPRIGHT is clear of leaderIcon and roleIcon (both
+    -- TOPLEFT); ⚠ raidTargetIcon sits at TOP +36, which is close on a narrow frame.
+    -- ⚠ The remaining five are STILL on the bus -- moving this one does not fix the
+    -- ready-check/AFK collision noted in the party test data.
     bgCarrierIconAlpha = 1,
-    bgCarrierIconAnchor = "CENTER",
-    bgCarrierIconEnabled = true,
+    bgCarrierIconAnchor = "TOPRIGHT",
+    -- OFF by default (Krathe, 2026-08-08; was true). Opt-in like combatIcon and
+    -- raidRoleIcon -- it is a PvP-only cue and the detection ticker only runs inside a
+    -- BG anyway, so leaving it on bought nothing for the majority who never see it.
+    bgCarrierIconEnabled = false,
     bgCarrierIconFrameLevel = 30,
     bgCarrierIconScale = 1,
     bgCarrierIconShowText = false,
     bgCarrierIconText = "FC",
     bgCarrierIconTextColor = {r = 1, g = 0.82, b = 0},
-    bgCarrierIconX = 0,
-    bgCarrierIconY = 0,
+    -- Small inset off the TOPRIGHT corner — see the anchor note above.
+    bgCarrierIconX = -2,
+    bgCarrierIconY = -2,
     -- Combat icon (crossed swords shown when a unit is in combat)
     combatIconAlpha = 1,
     combatIconAnchor = "TOP",
@@ -2266,7 +2492,8 @@ DF.PartyDefaults = {
     targetedListSpacing = 6,
     targetedListStylePreset = "DEFAULT",
     targetedListTargetNameClassColor = true,
-    targetedListTexture = "Interface\\Buttons\\WHITE8x8",
+    -- DF Minimalist (Krathe, 2026-08-08; was WHITE8x8) — matching every other DF bar fill.
+    targetedListTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
     targetedListUninterruptibleColor = {r = 0.8, g = 0.302, b = 0.302, a = 1},
     targetedListSelfTargetColorEnabled = true,
     targetedListSelfTargetColor = {r = 0.02, g = 0.776, b = 0.4, a = 0.2},
@@ -2307,21 +2534,33 @@ DF.PartyDefaults = {
     -- The toggle defaults below MIRROR TEST_PRESETS.DEFAULT (TestMode/TestMode.lua),
     -- so a fresh profile actually matches the preset the panel shows as selected
     -- (testPreset = "DEFAULT"). They drifted apart once; if DEFAULT changes, change
-    -- these to match. The sliders (testBuffCount/testDebuffCount/testFrameCount)
-    -- are deliberately outside the preset - a working preference, not part of its
-    -- visual identity - so they have no DEFAULT counterpart.
+    -- these to match. The sliders (testBuffCount/testDebuffCount/testDefensiveCount/
+    -- testFrameCount) are deliberately outside the preset - a working preference, not
+    -- part of its visual identity - so they have no DEFAULT counterpart.
     testShowTargetedList = true,
     testAnimateTargetedList = true,
     testAnimateHealth = false,
     testBuffCount = 2,
     testDebuffCount = 2,
+    -- ☠ 0 = the defensive row does not preview, and that is DELIBERATE: this key
+    -- replaced the `testShowExternalDef` checkbox, which shipped OFF, and these defaults
+    -- must mirror TEST_PRESETS.DEFAULT (see the note further down) or a fresh profile
+    -- matches no preset and the panel highlights nothing. Default does not include the
+    -- defensive icon; HEALER and Full do.
+    -- Raise it and the row previews that many icons - 1 is the natural working value,
+    -- since the defensive icon is a single-slot cue in the common case and this row only
+    -- previews on TANK/HEALER frames. Before the key existed the preview borrowed
+    -- testBuffCount and drew 2 whatever the row's own Max Icons said.
+    testDefensiveCount = 0,
     testFrameCount = 5,
     testPreset = "DEFAULT",
     testShowAbsorbs = false,
     testShowAggro = false,
     testShowAuras = false,
     testShowDispelGlow = false,
-    testShowExternalDef = false,
+    -- (Removed) testShowExternalDef — the defensive preview is `testDefensiveCount`
+    -- above, where 0 is off. Stale copies survive in existing saved profiles and are
+    -- harmless: nothing reads the key any more.
     testShowHealPrediction = false,
     testShowMissingBuff = false,
     testShowOutOfRange = true,
@@ -2512,7 +2751,14 @@ DF.PartyDefaults = {
 
 local RAID_DEFAULT_OVERRIDES = {
     defensiveBarMax = 3,      -- party: 4
-    defensiveIconSize = 20,   -- party: 30
+    -- 24 to MATCH THE RAID MISSING-BUFF STRIP (Krathe, 2026-08-08; was 20). The two sit in
+    -- the same band on a raid frame and read as one row, so a 4px difference looked like a
+    -- mistake rather than a distinction. ⚠ Kept as a raid OVERRIDE rather than folded into
+    -- the party default: party stays 26.
+    -- ⚠ Comparable only because both scales default to 1 (defensiveIconScale,
+    -- missingBuffIconScale). missingBuffIconSize has no raid override, so 24 is its value
+    -- in both modes — change that and this stops matching silently.
+    defensiveIconSize = 24,   -- party: 26; matches missingBuffIconSize (24)
 }
 
 local PARTY_ONLY_PREFIX = "targetedList"

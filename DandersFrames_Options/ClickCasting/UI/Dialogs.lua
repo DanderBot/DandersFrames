@@ -2002,7 +2002,6 @@ SlashCmdList["DFCCGLOBAL"] = function(msg)
             print("  .unit field: " .. (frame.unit or "nil"))
             print("  Registered: " .. ((CC.registeredFrames and CC.registeredFrames[frame]) and "yes" or "no"))
             print("  dfClickCastRegistered: " .. (frame.dfClickCastRegistered and "yes" or "no"))
-            print("  dfIsNameplate: " .. tostring(frame.dfIsNameplate or false))
             print("  dfKeyboardHandlersSetup: " .. tostring(frame.dfKeyboardHandlersSetup or false))
             
             -- Check if it's a Button
@@ -2015,55 +2014,16 @@ SlashCmdList["DFCCGLOBAL"] = function(msg)
                 print("  RegisteredClicks: " .. (clicks or "none"))
             end
             
-            -- Check parent chain for nameplates
+            -- Walk the parent chain: a registered frame is often an ancestor
             local parent = frame:GetParent()
             local depth = 0
-            local isNameplateChild = false
             while parent and depth < 5 do
-                local pName = parent:GetName() or "unnamed"
-                print("  Parent " .. depth .. ": " .. pName)
-                if pName:match("NamePlate") then
-                    print("    ^ This is a nameplate!")
-                    isNameplateChild = true
-                end
+                print("  Parent " .. depth .. ": " .. (parent:GetName() or "unnamed"))
                 parent = parent:GetParent()
                 depth = depth + 1
             end
-            
-            -- If it's a nameplate child, check if the nameplate itself is registered
-            if isNameplateChild then
-                print("  Checking nameplate registrations...")
-                for unitToken, regFrame in pairs(CC.registeredNameplates or {}) do
-                    print("    " .. unitToken .. " -> " .. (regFrame:GetName() or "unnamed"))
-                end
-            end
         else
             print("|cffff6666No frame under mouse|r")
-        end
-    elseif msg == "nameplates" then
-        -- Show all registered nameplates
-        DF:Say("Registered Nameplates:")
-        local count = 0
-        for unitToken, frame in pairs(CC.registeredNameplates or {}) do
-            count = count + 1
-            local name = UnitName(unitToken) or "Unknown"
-            local frameName = frame:GetName() or "unnamed"
-            local registered = (CC.registeredFrames and CC.registeredFrames[frame]) and "yes" or "no"
-            print("  " .. unitToken .. " (" .. name .. ") -> " .. frameName .. " [registered: " .. registered .. "]")
-        end
-        if count == 0 then
-            print("  (none)")
-        end
-        print("Total: " .. count)
-        
-        -- Also show all visible nameplates according to WoW
-        local allPlates = C_NamePlate.GetNamePlates()
-        print("|cff33cc66WoW visible nameplates:|r " .. #allPlates)
-        for i, plate in ipairs(allPlates) do
-            local unitToken = plate.namePlateUnitToken
-            local name = unitToken and UnitName(unitToken) or "Unknown"
-            local isRegistered = CC.registeredNameplates[unitToken] and "yes" or "no"
-            print("  " .. (unitToken or "?") .. " (" .. name .. ") registered: " .. isRegistered)
         end
     elseif msg == "bindings" then
         -- Show all active bindings on the current hovered frame
@@ -2278,7 +2238,6 @@ SlashCmdList["DFCCGLOBAL"] = function(msg)
         print("  list - Show binding counts and status")
         print("  inspect - Inspect frame under mouse cursor")
         print("  mouseover - Check what WoW sees as mouseover unit")
-        print("  nameplates - Show all registered nameplates")
         print("  bindings - Show bindings for frame under cursor")
         print("  register - Try to register frame under cursor")
         print("  onhover - Show on hover button status")

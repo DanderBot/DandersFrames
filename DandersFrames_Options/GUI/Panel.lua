@@ -21,6 +21,21 @@ local CreateElementBackdrop = GUI._priv.CreateElementBackdrop
 local CreatePanelBackdrop = GUI._priv.CreatePanelBackdrop
 local StyleScrollBar = GUI.StyleScrollBar
 local RefreshAllOverrideIndicators = GUI.RefreshAllOverrideIndicators
+-- ★ ONE PLACE THAT APPLIES THE GUI SCALE. It was open-coded at three sites (creation,
+-- slider drag, slider release), each listing the surfaces it knew about — so a surface
+-- added later was scaled by whichever of the three someone remembered. DFPopupFrame was
+-- in none of them and rendered at 100% forever (Krathe, 2026-08-09).
+-- ⚠ DFPopupFrame is created LAZILY, so it is resolved through _G each call rather than
+-- captured: it usually does not exist yet when the scale is first applied. Popup.lua
+-- seeds the saved scale at creation for exactly that gap.
+local function ApplyGUIScale(frame, value)
+    if frame then frame:SetScale(value) end
+    if DF.positionPanel then DF.positionPanel:SetScale(value) end
+    if DF.TestPanel then DF.TestPanel:SetScale(value) end
+    local popup = _G and _G.DFPopupFrame
+    if popup then popup:SetScale(value) end
+end
+
 function DF:CreateGUI()
     if DF.GUIFrame then return end
     
@@ -51,7 +66,7 @@ function DF:CreateGUI()
     frame:SetResizable(true)
     frame:SetResizeBounds(minWidth, minHeight, maxWidth, maxHeight)
     frame:EnableMouse(true)
-    frame:SetScale(savedScale)
+    ApplyGUIScale(frame, savedScale)
     -- Note: Dragging is handled by titleBar, not main frame
     CreatePanelBackdrop(frame)
     frame:Hide()
@@ -480,26 +495,14 @@ function DF:CreateGUI()
         value = math.floor(value * 20 + 0.5) / 20  -- Round to 0.05
         scaleValue:SetText(string.format("%.0f%%", value * 100))
         -- Update popup panels live (they don't cause cursor drift)
-        if DF.positionPanel then
-            DF.positionPanel:SetScale(value)
-        end
-        if DF.TestPanel then
-            DF.TestPanel:SetScale(value)
-        end
+        ApplyGUIScale(nil, value)   -- panels only; the main frame waits for mouse-up
     end)
     
     -- Apply scale only on mouse release to avoid cursor drift issues
     scaleSlider:SetScript("OnMouseUp", function(self)
         local value = math.floor(self:GetValue() * 20 + 0.5) / 20
-        frame:SetScale(value)
+        ApplyGUIScale(frame, value)
         DF:GetWindowState().scale = value
-        -- Also update popup panels
-        if DF.positionPanel then
-            DF.positionPanel:SetScale(value)
-        end
-        if DF.TestPanel then
-            DF.TestPanel:SetScale(value)
-        end
         -- A new scale changes how many device pixels a UI unit covers, so
         -- every border on screen has to be re-derived at the new thickness.
         -- This is the ONLY action that does: nothing else in the GUI writes
@@ -1051,15 +1054,42 @@ function DF:CreateGUI()
     -- Designer, Text Designer, Pinned Frames) — their two-panel / tab-strip
     -- layouts squash below this.
     local wideMinWidth = 850
-    
+
+    -- Pages whose two-panel / tab-strip layouts squash below wideMinWidth.
+    -- ☠ Hoisted to panel scope on purpose. This lived INSIDE SelectTab, which meant
+    -- (a) it was rebuilt on every tab click, and (b) ShowNormalContent could not see it --
+    -- so returning from BINDS to PARTY/RAID reset the minimum to 520 while a wide page was
+    -- still the visible one, and it could then be dragged narrow. Any new consumer of the
+    -- wide-page rule reads THIS table; do not re-declare a local copy.
+    local WIDE_PAGES = {
+        auras_auradesigner   = true,  -- two-panel preview + controls
+        auras_filterdesigner = true,  -- Aura Filters: two-column preset list + spell list
+        text_designer        = true,  -- two-panel preview + controls
+        general_pinnedframes = true,  -- tab strip + active-set meter
+        general_nicknames    = true,  -- wide add-row (Match+Char+Nick+Add) + list columns
+    }
+
+    -- Apply the right minimum for a page id, expanding if we are currently under it.
+    local function ApplyPageWidthBounds(name)
+        local wanted = WIDE_PAGES[name] and wideMinWidth or normalMinWidth
+        frame:SetResizeBounds(wanted, minHeight, maxWidth, maxHeight)
+        if frame:GetWidth() < wanted then
+            frame:SetWidth(wanted)
+        end
+        return WIDE_PAGES[name]
+    end
+
     -- Function to show normal Party/Raid content
     function GUI:ShowNormalContent()
         if clickCastPanel then clickCastPanel:Hide() end
         if tabFrame then tabFrame:Show() end
         if content then content:Show() end
 
-        -- Restore normal minimum width
-        frame:SetResizeBounds(normalMinWidth, minHeight, maxWidth, maxHeight)
+        -- Restore the minimum width FOR THE PAGE WE ARE RETURNING TO -- not a blanket
+        -- normalMinWidth. This used to reset to 520 unconditionally, so coming back from
+        -- BINDS onto a wide page (Aura Filters, AD/TD, Pinned) left that page draggable
+        -- down to 520 and squashed.
+        ApplyPageWidthBounds(GUI.CurrentPageName)
 
         -- Update tab availability for current mode (greys out tabs for disabled modes)
         GUI:UpdateTabAvailability()
@@ -1099,6 +1129,15 @@ function DF:CreateGUI()
     GUI.Pages = {}
     
     local function SelectTab(name)
+        -- ☠ CLOSE OPEN MENUS FIRST. A dropdown menu is parented to its own button, so a
+        -- tab change hides it by ANCESTOR — which fires its OnHide (clearing the
+        -- single-slot tracker) while leaving the menu's own shown flag set. Come back to
+        -- that tab and it reappears, untracked: it floats over the page, overlaps the next
+        -- dropdown you open, and only closes if you click its own button
+        -- (Krathe, 2026-08-09). Hiding them here is what stops them being stranded.
+        -- ⚠ Before HideResults and the page swap, so nothing is mid-teardown when it runs.
+        if GUI.CloseAllMenus then GUI:CloseAllMenus() end
+
         -- Hide search results when navigating to a tab
         if DF.Search then
             DF.Search:HideResults()
@@ -1152,21 +1191,11 @@ function DF:CreateGUI()
             end
         end
         
-        -- Wide pages (AD/TD/Pinned) need extra width; set the resize bounds +
-        -- expand BEFORE building the page so its content lays out at the final
-        -- width instead of building narrow then staying squashed until a resize.
-        local WIDE_PAGES = {
-            auras_auradesigner = true,    -- two-panel preview + controls
-            auras_filterdesigner = true,  -- two-column preset list + spell list
-            text_designer = true,         -- two-panel preview + controls
-            general_pinnedframes = true,  -- tab strip + active-set meter
-            general_nicknames = true,     -- wide add-row (Match+Char+Nick+Add) + list columns
-        }
-        if WIDE_PAGES[name] then
-            frame:SetResizeBounds(wideMinWidth, minHeight, maxWidth, maxHeight)
-            if frame:GetWidth() < wideMinWidth then
-                frame:SetWidth(wideMinWidth)
-            end
+        -- Wide pages need extra width; set the resize bounds + expand BEFORE building the
+        -- page so its content lays out at the final width instead of building narrow and
+        -- staying squashed until a resize. (WIDE_PAGES + ApplyPageWidthBounds live at panel
+        -- scope so ShowNormalContent shares them -- see the note there.)
+        if ApplyPageWidthBounds(name) then
             -- Belt-and-braces: re-assert the width next frame so size-dependent
             -- layout settles without a manual resize. A page can build at a
             -- pre-layout width (tabs overflow the panel / cards squashed); nudging
@@ -1177,8 +1206,6 @@ function DF:CreateGUI()
                 frame:SetWidth(w + 1)
                 frame:SetWidth(w)
             end)
-        else
-            frame:SetResizeBounds(normalMinWidth, minHeight, maxWidth, maxHeight)
         end
 
         if GUI.Pages[name] then
@@ -1230,6 +1257,18 @@ function DF:CreateGUI()
     GUI.SelectTab = SelectTab
     
     GUI.RefreshCurrentPage = function()
+        -- ☠ THE SEARCH RESULTS RE-FLOW HERE TOO, and this is the only place they can.
+        -- The results panel is not a page, so the page loop below never reaches it — yet
+        -- it lays out in the same two columns and needs the same recompute when the
+        -- window is resized (this function is what the resize handle's OnMouseUp calls).
+        -- Without this the search grid kept whatever column geometry it had when the
+        -- query ran, and its gutter did not track the window like every page does.
+        -- It re-lays out only; it does not re-run the query.
+        if DF.Search and DF.Search.LayoutResults
+            and DF.Search.ResultsPanel and DF.Search.ResultsPanel:IsShown() then
+            DF.Search:LayoutResults()
+        end
+
         -- Don't refresh regular pages when in clicks mode (they use DF.db which doesn't have "clicks")
         if GUI.SelectedMode == "clicks" then
             return

@@ -260,7 +260,73 @@ function GUI:DebugDumpWidths()
     o:Siblings("guiwidth")
 end
 
+-- ☠ THE REGISTRY MUST BE COMPLETE BEFORE ANYTHING READS IT.
+--
+-- DF:SectionOwnsKey (Core/Profile.lua) resolves prefix collisions by LONGEST MATCHING
+-- PREFIX ACROSS THE WHOLE REGISTRY. That is only correct if every page is present.
+-- Registration used to happen inside CreateCopyButton, inside a page's builderFunc,
+-- which GUI Panel's DoBuild calls only on the FIRST VISIT to that page -- and skips
+-- entirely for a page disabled in the current mode.
+--
+-- So the answer depended on which tabs you had opened this session. Fresh login →
+-- Auras → Debuffs, without ever opening Aura Filters: auras_filterdesigner is absent,
+-- its debuffFilter* / debuffBlacklist prefixes are not there to out-rank the Debuffs
+-- page's plain "debuff", and Reset Page wipes the user's entire debuff blacklist and
+-- all six filter toggles. Open Aura Filters first and the identical click is safe.
+-- Same shape on Copy to Raid and on DF:SyncLinkedSections.
+--
+-- Seeding it here fixes a second, quieter case too: DF:SyncLinkedSections runs from
+-- DF:UpdateAll() in the MAIN addon, which can run with the options companion never
+-- loaded -- in which case the registry was simply empty and linked sections silently
+-- did not sync at all.
+--
+-- ⚠ THIS TABLE MUST STAY IN STEP WITH THE CreateCopyButton CALL SITES. It was
+-- transcribed from them via the AST rather than by hand, and CreateCopyButton still
+-- writes its own entry on build, so a page that drifts self-heals once visited -- but
+-- a drifted entry re-opens exactly the bug above until then. If you add or change a
+-- section, change it here too.
+DF.SECTION_PREFIXES = {
+    auras_buffs                  = { "buff", "showBuffs", "directBuff" },
+    auras_debuffs                = { "debuff", "showDebuffs", "directDebuff" },
+    auras_defensiveicon          = { "defensiveIcon", "defensiveFilterSelection", "defensiveSortOrder", "defensiveDurationBar", "defensiveBar" },
+    auras_dispel                 = { "dispel" },
+    -- ⚠ directDebuffDispellableMode is listed EXPLICITLY. It is not covered by
+    -- "directDebuffShowAll" (not a prefix of it), and the Debuffs page's plain
+    -- "directDebuff" would otherwise win it back — the control moved here, so its
+    -- Reset Page / Sync / Copy must move with it (a control must write where it reads).
+    -- ☠ SectionOwnsKey resolves by LONGEST matching prefix across the WHOLE registry, so
+    -- this 27-char entry out-ranks auras_debuffs' 12-char "directDebuff" for this key and
+    -- for nothing else.
+    auras_filterdesigner         = { "buffFilterSelection", "debuffFilter", "debuffBlacklist", "directBuffShowAll", "directBuffOnlyMine", "directDebuffShowAll", "directDebuffDispellableMode" },
+    auras_missingbuffs           = { "missingBuff" },
+    bars_absorb                  = { "absorbBar", "healAbsorb" },
+    bars_healpred                = { "healPrediction" },
+    bars_health                  = { "healthColor", "healthOrientation", "healthTexture", "classColor", "smoothBars", "background", "missingHealth", "reducedMaxHealth" },
+    bars_resource                = { "resourceBar" },
+    display_fading               = { "rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "healthFade", "hf" },
+    display_pets                 = { "pet" },
+    display_tooltips             = { "tooltip" },
+    display_visibility           = { "soloMode", "hidePlayerFrame", "restedIndicator" },
+    general_fonts                = { "fontShadow" },
+    general_frame                = { "frame", "permanentMover", "border", "anchor" },
+    general_labels               = { "groupLabel" },
+    general_pinnedframes         = { "pinnedFrames" },
+    general_sorting              = { "sort", "useFrameSort", "selfPosition", "rolePriority", "classPriority" },
+    indicators_highlights        = { "selectionHighlight", "hoverHighlight", "aggroHighlight", "aggro" },
+    indicators_icons             = { "roleIcon", "leaderIcon", "raidTargetIcon", "readyCheckIcon", "summonIcon", "resurrectionIcon", "phasedIcon", "afkIcon", "vehicleIcon", "raidRoleIcon", "bgCarrierIcon", "combatIcon", "statusIconFont", "statusIconFontSize", "statusIconFontOutline" },
+    indicators_personal_targeted = { "personalTargeted" },
+    indicators_targetedlist      = { "targetedList" },
+}
+
 DF.SectionRegistry = DF.SectionRegistry or {}
+
+-- Seed eagerly at load. CreateCopyButton overwrites its own entry on first build,
+-- which is harmless (same value) and keeps the self-heal described above.
+for pageId, prefixes in pairs(DF.SECTION_PREFIXES) do
+    if DF.SectionRegistry[pageId] == nil then
+        DF.SectionRegistry[pageId] = prefixes
+    end
+end
 
 
 -- Track selected mode

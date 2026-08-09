@@ -225,16 +225,22 @@ function Pandemic:BuildSpec(cfg, prefix, ctx)
     local spec = { mode = mode, flash = self:Flash(cfg, prefix) }
 
     -- ☠ THE TWO TYPES WANT OPPOSITE Z-ORDER, so the level is per mode.
-    --   BORDER 15 — one above the stack count (14), the top-most content region. A ring
-    --               traces the edge, so it has to read over the icon's own border (10) and
-    --               the dispel ring (12) or it is simply hidden behind them.
-    --   TINT    9 — BELOW the duration text (13), the stack count (14), the dispel ring
-    --               (12) and DF.Border (10), but above the icon art and the cooldown swipe.
-    --               A wash covers the whole button, so at 15 it washed over the timer and
-    --               the stack count and made both hard to read (Krathe, 2026-08-05). Tint
-    --               the ICON, not the information on top of it.
-    -- See zorder_layer_map: these are ABSOLUTE offsets from the button, not nudges.
-    spec.level = (mode == "TINT") and 9 or 15
+    --   BORDER — the TOP of the ladder. A ring traces the edge, so it has to read over
+    --            the icon's own border and the dispel ring or it is simply hidden.
+    --   TINT   — BELOW the duration text, the stack count, the dispel ring and
+    --            DF.Border, but above the icon art and the cooldown swipe. A wash covers
+    --            the whole button, so at the top it washed over the timer and the stack
+    --            count and made both hard to read (Krathe, 2026-08-05). Tint the ICON,
+    --            not the information on top of it.
+    --
+    -- ☠☠ THESE ARE READ FROM `DF.AuraButtonLevels` (Frames/AuraContainer.lua), NEVER
+    -- HARDCODED. This block used to carry its own absolutes — 9 and 15, reasoned against
+    -- a ladder of 10/12/13/14. The 2026-08-07 squash renumbered that ladder and did not
+    -- touch this file, so TINT at 9 rose above ALL of it and re-broke the very thing the
+    -- 2026-08-05 fix addressed. Read the table; do not re-derive the numbers here.
+    -- Read at CALL time (this runs long after load; AuraContainer loads first anyway).
+    local LEVELS = DF.AuraButtonLevels
+    spec.level = (mode == "TINT") and LEVELS.PANDEMIC_TINT or LEVELS.PANDEMIC_BORDER
 
     if mode == "TINT" then
         local r, g, b = readColor(get(cfg, prefix, "TintColor"), 0.2, 1, 0.2)

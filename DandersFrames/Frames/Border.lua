@@ -39,7 +39,11 @@ local Border = DF.Border
 -- Create a border widget anchored to `parent` (or opts.anchorTo).
 -- opts:
 --   anchorTo          frame to cover (default: parent)
---   frameLevelOffset  level above parent (default: 10)
+--   frameLevelOffset  level above parent (default: 2 — NOT 10, which this line claimed
+--                     long after the default changed. Any parent that stacks CHILD
+--                     FRAMES over its own rect must pass this explicitly: unit and pet
+--                     frames pass 10, aura buttons pass DF.AuraButtonLevels.BORDER.
+--                     See the note at the default itself for why.)
 --   layer             texture draw layer for the solid edges (default: "BORDER")
 --   solidOnly         hot-path SOLID border: skips the SetGradient/CreateColor
 --                     gradient-clear in both Apply (SOLID) and SetColor, so live
@@ -1871,7 +1875,21 @@ function Border:StopAnimation(border)
     -- glow), and activeAnimation still holds the prior effect here (it's cleared
     -- just below), so gate the reset on it.
     if border.activeAnimation == "DF_PULSATE" and border.SetAlpha then
-        border:SetAlpha(1)
+        -- ⚠ RESTORE THE OOR FADE, NOT FULL OPACITY. This block already exists because a
+        -- blanket reset flashed out-of-range borders to full on every re-render; gating it
+        -- on DF_PULSATE narrowed that to the one effect that owns wrapper alpha, but the
+        -- value written was still a hard 1 -- so stopping a pulse on an OUT-OF-RANGE border
+        -- did exactly what the comment above says this guard was added to prevent, just in
+        -- a narrower case.
+        --
+        -- Same mechanism as the tick: test the plain flag, forward the (possibly secret)
+        -- boolean, let SetAlphaFromBoolean choose. Falls back to 1 when the OOR pass has
+        -- not stamped this border (whole-frame mode, or never range-checked).
+        if border.dfOORActive and border.dfOORAlpha and border.SetAlphaFromBoolean then
+            border:SetAlphaFromBoolean(border.dfOORInRange, 1, border.dfOORAlpha)
+        else
+            border:SetAlpha(1)
+        end
     end
     border.activeAnimation = nil
     border._animHash = nil  -- ensure the next StartAnimation runs the full path
@@ -2091,12 +2109,24 @@ function Border:StartAnimation(border, spec)
             border._dfPulsatePhase = ph
             local wave = (1 - math.cos(ph * 2 * math.pi)) * 0.5
             -- Fade between 0.05 (dim trough) and 1.0 (full) — a gentle pulse.
-            -- DF_PULSATE is the one effect that drives the widget's OWN alpha each
-            -- frame, so it would clobber the range system's out-of-range fade
-            -- (which dims the widget via SetAlpha). Multiply by dfRangeAlpha (set
-            -- by the OOR appearance pass; defaults to 1 when in range / unset) so
-            -- the pulse rides on top of the OOR dim instead of overwriting it.
-            border:SetAlpha((0.05 + 0.95 * wave) * (border.dfRangeAlpha or 1))
+            --
+            -- ☠ DF_PULSATE is the one effect that drives the widget's OWN alpha every
+            -- frame, so it clobbers the out-of-range fade unless it folds it in itself.
+            -- This used to multiply by `border.dfRangeAlpha`, which NOTHING ever wrote --
+            -- the multiplier was permanently 1 and the OOR dim was simply overwritten.
+            --
+            -- It cannot be a number, because `inRange` may be SECRET: a secret boolean
+            -- can't be tested here, so `pulse * (inRange and 1 or oor)` is impossible in
+            -- Lua. DF:UpdateBorderAppearance instead stamps the secret plus a PLAIN
+            -- companion flag; test the flag, forward the secret, and let
+            -- SetAlphaFromBoolean pick between the two pre-multiplied values C-side.
+            local pulse = 0.05 + 0.95 * wave
+            local oor = border.dfOORAlpha
+            if border.dfOORActive and oor and border.SetAlphaFromBoolean then
+                border:SetAlphaFromBoolean(border.dfOORInRange, pulse, pulse * oor)
+            else
+                border:SetAlpha(pulse)
+            end
         end)
         border.activeAnimation = anim.type
         return
@@ -2287,6 +2317,15 @@ function Border:Apply(border, spec)
         -- the LCG glow keeps rendering around the unit with no visible
         -- border underneath it.
         self:StopAnimation(border)
+        -- ☠ AND THE SHADOW. Same reasoning as the glow above, and it was missed:
+        -- border.shadow is a lazily-created frame parented to border:GetParent(), not to
+        -- the border, so hiding the edges leaves it drawn. Its only teardown lives ~280
+        -- lines below in the normal path, which this early return skips entirely.
+        --
+        -- Symptom: tick "Border Shadow", then untick "Show Border" -- the border goes and a
+        -- solid black ring stays around the frame or icon. Recoverable only by working out
+        -- that the still-enabled Shadow checkbox is the culprit.
+        if border.shadow then border.shadow:Hide() end
         return
     end
 

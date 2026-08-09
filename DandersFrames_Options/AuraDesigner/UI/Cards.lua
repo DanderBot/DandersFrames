@@ -173,8 +173,19 @@ local function BuildGlobalView(parent)
             function(v)                                                        -- customSet
                 local adDB = GetAuraDesignerDB()
                 adDB.soundEnabled = v and true or false
-                if not adDB.soundEnabled and DF.AuraDesigner.SoundEngine then
+                -- ☠ RE-RECONCILE, don't just write the flag. reconcileSoundNow honours
+                -- soundEnabled, but nothing here asked it to run -- so a mute would not take
+                -- effect until the next UNIT_AURA happened to re-sync each frame, which in a
+                -- quiet moment is never. SyncSound registers/unregisters the native handles,
+                -- which is exactly what muting has to do.
+                if DF.AuraDesigner.SoundEngine and not adDB.soundEnabled then
                     DF.AuraDesigner.SoundEngine:StopAll()
+                end
+                local SoundFactory = DF.AuraDesigner and DF.AuraDesigner.Factory
+                if SoundFactory and SoundFactory.SyncSound and DF.IterateAllFrames then
+                    DF:IterateAllFrames(function(frame)
+                        if frame and frame.dfADFactory then SoundFactory:SyncSound(frame) end
+                    end)
                 end
             end), 24)
         g:AddWidget(GUI:CreateDropdown(parent, L["Channel"], SOUND_CHANNELS,
@@ -633,7 +644,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
     container.mockFrame = mockFrame
 
     -- Resolve health texture
-    local healthTexPath = frameDB.healthTexture or "Interface\\Buttons\\WHITE8x8"
+    local healthTexPath = frameDB.healthTexture or DF.STOCK_BAR_TEXTURE
 
     -- Health bar background
     local healthBg = mockFrame:CreateTexture(nil, "BACKGROUND")
@@ -889,17 +900,24 @@ local spellPickerBlockCache = {}   -- auraName -> bool memo over S.spellPickerBl
 -- else the spec identity) already tracked by the opposite pool.
 local function IsCandidateCrossBlocked(auraName, spec)
     if not S.spellPickerBlockedIDs or not next(S.spellPickerBlockedIDs) then return false end
-    local cached = spellPickerBlockCache[auraName]
+    -- ☠ THE SPEC IS AN INPUT TO THE ANSWER, SO IT BELONGS IN THE KEY. This memoised on
+    -- auraName alone while the value came from BuildADIdentityFilters(spec, ...), and the
+    -- memo is wiped only when the picker OPENS -- but the spec dropdown lives on a bar the
+    -- picker does not hide, so the spec can change under an open picker and a candidate
+    -- resolved beforehand kept the previous spec's verdict.
+    local effSpec = (not IsOtherTab()) and spec or nil
+    local key = tostring(effSpec) .. "\0" .. tostring(auraName)
+    local cached = spellPickerBlockCache[key]
     if cached ~= nil then return cached end
     local blocked = false
-    local f = DF:BuildADIdentityFilters(IsOtherTab() and nil or spec, auraName)
+    local f = DF:BuildADIdentityFilters(effSpec, auraName)
     local map = f and f.includeSpellIDs
     if map then
         for id in pairs(map) do
             if S.spellPickerBlockedIDs[id] then blocked = true; break end
         end
     end
-    spellPickerBlockCache[auraName] = blocked
+    spellPickerBlockCache[key] = blocked
     return blocked
 end
 
@@ -2012,102 +2030,64 @@ S.CreateEffectCard = function(parent, yPos, effect)
             triggersH = -(tagY) + TAG_H + 8  -- total height of trigger section
             trigContainer:SetHeight(triggersH)
 
-            -- Border mode toggle (border effects only)
+            -- "Own border" opt-out (border effects only). BELOW Priority on purpose: this
+            -- is a border-specific override sitting next to the Border appearance controls
+            -- it belongs with.
+            --
+            -- ☠ A MEMBERSHIP choice, not a mode. It was a Priority/Stacked button PAIR,
+            -- which read as a per-aura policy and raised the obvious question: what if one
+            -- indicator says Priority and another says Stacked? (They coexist fine -- the
+            -- stacked one opts out of the contest and the priority one takes the shared
+            -- ring.) Unticked = share the frame's one border, resolve by Priority; ticked =
+            -- draw your own alongside.
+            -- ☠ THE STORED VALUE IS UNCHANGED -- nil / "custom" -- so no migration and old
+            -- profiles keep working. Do not "tidy" it to a boolean without one.
             if effect.typeKey == "border" then
-                local auraCfgBM = CurrentAuraPool()[effect.auraName]
-                local typeCfgBM = auraCfgBM and auraCfgBM[effect.typeKey]
-                local isCustom = typeCfgBM and typeCfgBM.borderMode == "custom"
-
-                local bmContainer = CreateFrame("Frame", nil, body)
-                bmContainer:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(triggersH + 10))
-                bmContainer:SetPoint("RIGHT", body, "RIGHT", -8, 0)
-                bmContainer:SetHeight(26)
-
-                local bmLabel = bmContainer:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(bmLabel, 9, "")
-                bmLabel:SetPoint("LEFT", 0, 0)
-                bmLabel:SetText(L["Border Mode:"])
-                bmLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-
-                -- Shared button
-                local sharedBtn = CreateFrame("Button", nil, bmContainer, "BackdropTemplate")
-                sharedBtn:SetPoint("LEFT", bmLabel, "RIGHT", 6, 0)
-
-                local sharedText = sharedBtn:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(sharedText, 9, "")
-                sharedText:SetPoint("CENTER", 0, 0)
-                sharedText:SetText(L["Shared"])
-                local sharedW = sharedText:GetStringWidth() + 16
-                if sharedW < 50 then sharedW = 50 end
-                -- Shared styler: rest + accent-wash hover + SetActive selection state.
-                -- Keep the manual (small) label; size to the computed text width.
-                GUI:StyleButton(sharedBtn, { width = sharedW, height = 20 })
-
-                -- Custom button
-                local customBtn = CreateFrame("Button", nil, bmContainer, "BackdropTemplate")
-                customBtn:SetPoint("LEFT", sharedBtn, "RIGHT", 4, 0)
-
-                local customText = customBtn:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(customText, 9, "")
-                customText:SetPoint("CENTER", 0, 0)
-                customText:SetText(L["Custom"])
-                local customW = customText:GetStringWidth() + 16
-                if customW < 50 then customW = 50 end
-                GUI:StyleButton(customBtn, { width = customW, height = 20 })
-
-                -- Drive the selection state via the shared styler's SetActive (active =
-                -- toned accent border + subtle accent fill). Keep a bright/dim label cue.
-                local function StyleBorderModeButtons(customActive)
-                    sharedBtn:SetActive(not customActive)
-                    customBtn:SetActive(customActive)
-                    if customActive then
-                        customText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-                        sharedText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                    else
-                        sharedText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-                        customText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                    end
+                local function OwnBorderOn()
+                    local a = CurrentAuraPool()[effect.auraName]
+                    local t = a and a[effect.typeKey]
+                    return (t and t.borderMode == "custom") and true or false
                 end
-                StyleBorderModeButtons(isCustom)
 
-                -- Same live-frame gap as the trigger edits above: borderMode picks which
-                -- container the ring renders through, so the editor repaint alone left the
-                -- real frames on the old mode until a reload.
-                sharedBtn:SetScript("OnClick", function()
-                    local cfg = EnsureTypeConfig(effect.auraName, effect.typeKey)
-                    cfg.borderMode = nil  -- shared is default
-                    S.SwitchTab("effects")
-                    RefreshPreviewEffects()
-                    RefreshLiveFramesThrottled()
-                end)
-                customBtn:SetScript("OnClick", function()
-                    local cfg = EnsureTypeConfig(effect.auraName, effect.typeKey)
-                    cfg.borderMode = "custom"
-                    S.SwitchTab("effects")
-                    RefreshPreviewEffects()
-                    RefreshLiveFramesThrottled()
-                end)
+                -- ☠ RE-WORD THE PRIORITY NOTE, DO NOT DISABLE THE SLIDER. "Higher priority
+                -- wins" is false once this aura opts out of the contest, but the slider is
+                -- still live: priority is per-AURA, so it still resolves this aura's health
+                -- bar / background / text effects, and collectStackedBorders sorts by it so
+                -- it orders the stacked rings too.
+                local function SyncPriorityNote()
+                    priNote:SetText(OwnBorderOn()
+                        and L["This aura's border always shows. Priority still applies to its other effects."]
+                        or L["Higher priority wins"])
+                end
+                SyncPriorityNote()
 
-                -- Tooltips via HookScript so they compose with the styler's hover wash.
-                sharedBtn:HookScript("OnEnter", function()
-                    GUI:ShowTooltip(sharedBtn, {
-                        title = L["Shared Border"],
-                        lines = {
-                            L["Uses a single border per frame. Highest priority wins."],
-                        },
-                    })
-                end)
-                sharedBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
-                customBtn:HookScript("OnEnter", function()
-                    GUI:ShowTooltip(customBtn, {
-                        title = L["Custom Border"],
-                        lines = {
-                            L["Gets its own independent border overlay. Multiple custom borders can be visible at the same time."],
-                        },
-                    })
-                end)
-                customBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
-
+                -- customGet/customSet rather than a db key: the stored value is nil /
+                -- "custom", not a boolean, and the checkbox maps ticked -> "custom".
+                local ownBorderCb = GUI:CreateCheckbox(body, L["Give this aura its own border"],
+                    nil, nil,
+                    function()
+                        SyncPriorityNote()
+                        S.SwitchTab("effects")
+                        RefreshPreviewEffects()
+                        -- Live frames too: borderMode picks which container renders the
+                        -- ring, so the editor repaint alone left real frames on the old
+                        -- mode until a reload.
+                        RefreshLiveFramesThrottled()
+                    end,
+                    OwnBorderOn,
+                    function(val)
+                        local cfg = EnsureTypeConfig(effect.auraName, effect.typeKey)
+                        cfg.borderMode = val and "custom" or nil
+                    end)
+                ownBorderCb:SetPoint("TOPLEFT", body, "TOPLEFT", 8, -(triggersH + 10))
+                ownBorderCb:SetWidth(bodyWidth - 16)
+                ownBorderCb.tooltip = {
+                    title = L["Give this aura its own border"],
+                    lines = {
+                        L["Off: this aura shares the frame's single border. If two auras both want it, the higher Priority one shows."],
+                        L["On: it draws its own border alongside the others. Give them different Insets so they nest instead of covering each other."],
+                    },
+                }
                 triggersH = triggersH + 36
             end
 

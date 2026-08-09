@@ -793,7 +793,7 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
                 menuFrame:Hide()
                 S.currentOpenDropdown = nil
             else
-                CloseOpenDropdown()
+                GUI:CloseAllMenus()
                 -- Highlight current selection
                 local curVal = getValue()
                 local curDisplay = options[curVal]
@@ -947,12 +947,52 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
                 -- Use robust SharedMedia lookup
                 displayName = DF:GetTextureNameFromPath(val)
             end
-            btn.Text:SetText(displayName or L["Select..."])
+            -- ☠ A MISSING TEXTURE IS NOT "NOTHING SELECTED". This lookup returns nil
+            -- both when nothing has been chosen and when the choice points at a file
+            -- that is gone — and "Select..." tells the wrong story about the second,
+            -- which is the one the user needs to act on. Name the file instead; the
+            -- bars have already fallen back to a stock texture by this point, so the
+            -- dropdown is the only place the real state is visible.
+            -- ☠ ASK ABOUT THE FILE, NOT ABOUT THE NAME. These are independent:
+            --   * DISABLING the providing addon drops the SharedMedia registration
+            --     but leaves the file on disk — unnamed, still renders perfectly.
+            --     Tagging that "(missing)" would send someone reinstalling an addon
+            --     to fix something that is not broken.
+            --   * REMOVING it takes the file too — and GetTextureNameFromPath STILL
+            --     returns something, because its last resort is the filename. So a
+            --     resolved name proves nothing about whether the file exists.
+            -- An earlier version keyed the tag off `not displayName`, which meant it
+            -- only ever fired on the absorb dropdowns (those pass customOptions, which
+            -- genuinely returns nil) and never on the plain ones.
+            local isMissing = type(val) == "string" and val ~= "" and val ~= "Solid"
+                and DF.IsTexturePresent and DF.IsTexturePresent(val) == false
+            local shown = displayName
+            if not shown and type(val) == "string" and val ~= "" and val ~= "Solid" then
+                shown = val:match("([^\\]+)$") or val
+            end
+            if shown and isMissing then
+                btn.Text:SetText(("|cffff7f3f%s|r %s"):format(shown, L["(missing)"]))
+            else
+                btn.Text:SetText(shown or L["Select..."])
+            end
             -- Handle "Solid" special case (not a valid texture path)
             if val == "Solid" then
                 btn.Preview:SetColorTexture(0.3, 0.3, 0.3, 1)
             else
-                btn.Preview:SetTexture(val)
+                -- ☠ SAFE SETTER, NOT A RAW SetTexture. A raw call on a path whose
+                -- file is gone renders WoW's missing-texture GREEN — and because
+                -- the db stores resolved paths, that happens to real users whenever
+                -- a texture is renamed or its addon removed. The frames already
+                -- fall back to the stock texture, so a raw preview showed green
+                -- next to bars that rendered fine, which reads as "DF is broken"
+                -- rather than "this texture is gone".
+                --   Showing the FALLBACK is also the honest preview: it is what the
+                -- bar will actually render. The label independently degrades to
+                -- "Select..." because GetTextureNameFromPath cannot name a dead
+                -- path, so the missing state is still signalled.
+                -- Also applies the texture's tiling: a tiled texture must PREVIEW
+                -- tiled, even though an 80x16 swatch shows a crop of the tile.
+                DF:SafeSetTexture(btn.Preview, val)
                 btn.Preview:SetVertexColor(0.3, 0.7, 0.3)  -- Green tint for preview
             end
         end
@@ -1075,7 +1115,11 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
             if opt.key == "Solid" then
                 menuBtn.Preview:SetColorTexture(0.3, 0.3, 0.3, 1)
             else
-                menuBtn.Preview:SetTexture(opt.key)
+                -- Safe setter + tiling, for the reasons on the button swatch above.
+                -- Menu rows are built from REGISTERED media so a dead path is far
+                -- less likely here, but a stale SharedTextures fallback entry can
+                -- still produce one and it costs nothing to be consistent.
+                DF:SafeSetTexture(menuBtn.Preview, opt.key)
                 menuBtn.Preview:SetVertexColor(0.3, 0.7, 0.3)  -- Green tint for preview
             end
             
@@ -1145,7 +1189,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
             S.currentOpenDropdown = nil
         else
             -- Close any other open dropdown first
-            CloseOpenDropdown()
+            GUI:CloseAllMenus()
             -- Rebuild menu with current SharedMedia textures
             RebuildMenu()
             menuFrame:Show()
@@ -1464,7 +1508,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
             S.currentOpenDropdown = nil
         else
             -- Close any other open dropdown first
-            CloseOpenDropdown()
+            GUI:CloseAllMenus()
             -- Rebuild menu with current SharedMedia fonts
             RebuildMenu()
             menuFrame:Show()
@@ -1705,7 +1749,7 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
             menuFrame:Hide()
             S.currentOpenDropdown = nil
         else
-            CloseOpenDropdown()
+            GUI:CloseAllMenus()
             RebuildMenu()
             menuFrame:Show()
             S.currentOpenDropdown = menuFrame
@@ -2823,7 +2867,16 @@ function GUI:CreateHighlightRosterWidget(parent, getPlayersFunc, setPlayersFunc,
                 if isRaid then
                     local raidIndex = UnitInRaid(unit)
                     if raidIndex then
-                        local _, _, subgroup = GetRaidRosterInfo(raidIndex + 1)
+                        -- ☠ NO `+ 1`. UnitInRaid already returns an index that feeds
+                        -- GetRaidRosterInfo directly — Blizzard passes it straight through in
+                        -- both CompactUnitFrame (GetUnitFrameRaidRole) and
+                        -- CompactRaidFrameManager. The +1 read the NEXT member's subgroup, so
+                        -- every unit reported its neighbour's group and the last member in the
+                        -- raid got nil and silently fell back to group 1. DF's three other
+                        -- UnitInRaid consumers (TextDesigner/DataSource GetGroupNumber and both
+                        -- Frames/Init sites) already pass it through unmodified; this was the
+                        -- only site that disagreed.
+                        local _, _, subgroup = GetRaidRosterInfo(raidIndex)
                         group = subgroup or 1
                     end
                 end

@@ -1725,9 +1725,13 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     --     Copy/Reset would silently reach into the bar pages.
     local pageFilterDesigner = CreateSubTab("auras", "auras_filterdesigner", L["Aura Filters"])
     BuildPage(pageFilterDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
+        -- ⚠ MIRRORED IN DF.SECTION_PREFIXES.auras_filterdesigner (GUI.lua) — change both.
+        -- directDebuffDispellableMode is listed explicitly: its control moved here from
+        -- Auras > Debuffs, and "directDebuffShowAll" does not prefix-match it.
         Add(CreateCopyButton(self.child, {
             "buffFilterSelection", "debuffFilter", "debuffBlacklist",
             "directBuffShowAll", "directBuffOnlyMine", "directDebuffShowAll",
+            "directDebuffDispellableMode",
         }, L["Aura Filters"], "auras_filterdesigner"), 25, 2)
         if DF.BuildFilterDesignerPage then DF.BuildFilterDesignerPage(GUI, self, db) end
 

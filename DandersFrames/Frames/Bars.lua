@@ -18,6 +18,8 @@ local UnitClass = UnitClass
 local issecretvalue = issecretvalue or function() return false end
 local pcall = pcall
 
+local ResolveBarTextureForFill = function(...) return DF:ResolveBarTextureForFill(...) end
+
 -- ============================================================
 -- RESOURCE BAR LOGIC
 -- ============================================================
@@ -92,8 +94,12 @@ function DF:LayoutResourceBar(frame, db)
     DF:SafeSetStatusBarTexture(bar, db.resourceBarTexture or "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist")
 
     -- Orientation & Fill Direction
-    bar:SetOrientation(db.resourceBarOrientation or "HORIZONTAL")
+    local resourceOrient = db.resourceBarOrientation or "HORIZONTAL"
+    bar:SetOrientation(resourceOrient)
     bar:SetReverseFill(db.resourceBarReverseFill)
+    -- Suppresses rotation for a tiled texture and swaps in its rotated companion.
+    -- Safe to call unconditionally — a stretched texture just rotates as before.
+    DF:ApplyBarFillOrientation(bar, resourceOrient == "VERTICAL")
 
     local isVertical = (db.resourceBarOrientation == "VERTICAL")
     local length = db.resourceBarWidth or 50
@@ -323,8 +329,7 @@ local function AbsorbLayoutStateChanged(frame, db)
 
     -- Mode + appearance (all modes)
     if s.mode            ~= (db.absorbBarMode or "OVERLAY")               then return true end
-    if s.strata          ~= (db.absorbBarStrata or "MEDIUM")              then return true end
-    if s.texture         ~= (db.absorbBarTexture or "Interface\\Buttons\\WHITE8x8") then return true end
+    if s.texture         ~= (db.absorbBarTexture or DF.STOCK_BAR_TEXTURE)  then return true end
     if s.blendMode       ~= (db.absorbBarBlendMode or "BLEND")            then return true end
     if s.pixelPerfect    ~= db.pixelPerfect                               then return true end
     if s.oorEnabled      ~= db.oorEnabled                                 then return true end
@@ -383,8 +388,7 @@ local function CacheAbsorbLayoutState(frame, db)
         frame.dfAbsorbState = s
     end
     s.mode            = db.absorbBarMode or "OVERLAY"
-    s.strata          = db.absorbBarStrata or "MEDIUM"
-    s.texture         = db.absorbBarTexture or "Interface\\Buttons\\WHITE8x8"
+    s.texture         = db.absorbBarTexture or DF.STOCK_BAR_TEXTURE
     s.blendMode       = db.absorbBarBlendMode or "BLEND"
     s.pixelPerfect    = db.pixelPerfect
     s.oorEnabled      = db.oorEnabled
@@ -620,27 +624,31 @@ function DF:UpdateAbsorb(frame, testIndex)
     
     local customBar = frame.dfAbsorbBar
     
-    -- Strata and level
-    local strata = db.absorbBarStrata or "MEDIUM"
-    local useSandwich = (strata == "SANDWICH")
-    local useSandwichLow = (strata == "SANDWICH_LOW")
+    -- Level. In the health-bar-BOUND modes (OVERLAY / ATTACHED / ATTACHED_OVERFLOW) the
+    -- level is DERIVED, by design: the Frame Level slider is FLOATING-only
+    -- (Pages/Auras.lua, `levelSlider.hideOn`), because a bar pinned to the health bar has
+    -- no meaningful level of its own to expose. FLOATING and ATTACHED override this below.
+    --
+    -- ☠ This +15 used to be one of three branches selected by an `absorbBarStrata` key that
+    -- had NO UI, no migration and no writer of any kind -- so every profile held the
+    -- "MEDIUM" default and the other two branches (+3 / +1) were unreachable. Collapsed to
+    -- the value that actually shipped. NOTHING MOVED; see the commit for the audit.
+    -- ⚠ OPEN, deliberately not changed here: healthBar sits at frame+3, so this lands the
+    -- bar at ~frame+18 -- above the dispel overlay's +16/+17 band -- while
+    -- absorbBarFrameLevel (the FLOATING slider), Core.lua's re-level and the z-order map all
+    -- say +11. Whether the bound modes SHOULD move to +11 is a design call needing in-game
+    -- measurement, not arithmetic. See [[zorder_layer_map]].
     local healthLevel = frame.healthBar:GetFrameLevel()
-    
-    local absorbLevel
-    if useSandwich then
-        absorbLevel = healthLevel + 3
-    elseif useSandwichLow then
-        absorbLevel = healthLevel + 1
-    else
-        absorbLevel = healthLevel + 15
-    end
-    
+    local absorbLevel = healthLevel + 15
+
     customBar:SetParent(frame)
     customBar:SetFrameStrata(frame:GetFrameStrata())
     customBar:SetFrameLevel(absorbLevel)
     
     -- Texture and color
-    local tex = db.absorbBarTexture or "Interface\\Buttons\\WHITE8x8"
+    local tex = db.absorbBarTexture or DF.STOCK_BAR_TEXTURE
+    local isVerticalFill
+    tex, isVerticalFill = ResolveBarTextureForFill(db, tex, mode, "absorbBarOrientation")
     local col = db.absorbBarColor or {r = 0, g = 0.835, b = 1, a = 0.7}
     local blendMode = db.absorbBarBlendMode or "BLEND"
     
@@ -658,12 +666,13 @@ function DF:UpdateAbsorb(frame, testIndex)
                 barTex:SetDrawLayer("ARTWORK", 2)
             end
         else
-            DF:SafeSetStatusBarTexture(customBar, tex)
+            -- Tiling follows the texture that actually LANDED: if the safe setter
+            -- substituted the stock fallback, tile against that, not the path we
+            -- asked for (the fallback is a stretched texture).
+            local applied = DF:SafeSetStatusBarTexture(customBar, tex)
+            DF:ApplyBarTextureTiling(customBar, applied == false and DF.STOCK_BAR_TEXTURE or tex)
             local barTex = customBar:GetStatusBarTexture()
             if barTex then
-                barTex:SetHorizTile(false)
-                barTex:SetVertTile(false)
-                barTex:SetTexCoord(0, 1, 0, 1)
                 barTex:SetDesaturated(false)
                 barTex:SetDrawLayer("ARTWORK", 1)
             end
@@ -709,13 +718,18 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- Hide briefly to force strata change to take effect
         local wasShown = customBar:IsShown()
         if wasShown then customBar:Hide() end
-        
-        if not useSandwich and not useSandwichLow then
-            customBar:SetFrameStrata(strata)
-        else
-            customBar:SetFrameStrata(frame:GetFrameStrata())
-        end
-        
+
+        -- ☠ MEDIUM, not the parent's strata. This is the ONE place absorbBarStrata was a
+        -- real frame strata rather than a level selector, and with the key unwritable its
+        -- value was always "MEDIUM" -- so a floating bar has always been pinned to MEDIUM
+        -- regardless of the frame's own strata. Preserved verbatim; see the commit.
+        -- ⚠ Latent oddity, NOT changed here: frames on a higher strata would render OVER
+        -- their own floating absorb bar. Nobody has reported it, and "follow the parent"
+        -- is a behaviour change, so it wants a decision rather than a quiet fix. Note that
+        -- heal prediction, whose key defaulted to SANDWICH, takes the opposite branch and
+        -- DOES follow the parent -- the asymmetry is accident, not design.
+        customBar:SetFrameStrata("MEDIUM")
+
         -- Use user-configured frame level for floating mode
         customBar:SetFrameLevel(frame:GetFrameLevel() + (db.absorbBarFrameLevel or 11))
         
@@ -775,13 +789,13 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- Use healthLevel + 2 regardless of strata setting
         customBar:SetFrameLevel(healthLevel + 2)
         
-        -- For ATTACHED mode, disable tiling to prevent dense repeating in narrow bars
-        local attachedBarTex = customBar:GetStatusBarTexture()
-        if attachedBarTex then
-            attachedBarTex:SetHorizTile(false)
-            attachedBarTex:SetVertTile(false)
-            attachedBarTex:SetTexCoord(0, 1, 0, 1)
-        end
+        -- Re-assert the texture's tiling mode. This block used to force tiling OFF
+        -- unconditionally "to prevent dense repeating in narrow bars" — which is
+        -- still the right default, and ApplyBarTextureTiling keeps it for every
+        -- stretched texture. But it runs AFTER the texture is applied above, so a
+        -- blanket SetHorizTile(false) here silently undid the tiling for textures
+        -- that opt into it (DF.TILED_BAR_TEXTURES). Ask the texture instead.
+        DF:ApplyBarTextureTiling(customBar, tex)
         
         if customBar.bg then customBar.bg:Hide() end
         
@@ -1021,13 +1035,13 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- Use healthLevel + 2 regardless of strata setting
         customBar:SetFrameLevel(healthLevel + 2)
         
-        -- For ATTACHED mode, disable tiling to prevent dense repeating in narrow bars
-        local attachedBarTex = customBar:GetStatusBarTexture()
-        if attachedBarTex then
-            attachedBarTex:SetHorizTile(false)
-            attachedBarTex:SetVertTile(false)
-            attachedBarTex:SetTexCoord(0, 1, 0, 1)
-        end
+        -- Re-assert the texture's tiling mode. This block used to force tiling OFF
+        -- unconditionally "to prevent dense repeating in narrow bars" — which is
+        -- still the right default, and ApplyBarTextureTiling keeps it for every
+        -- stretched texture. But it runs AFTER the texture is applied above, so a
+        -- blanket SetHorizTile(false) here silently undid the tiling for textures
+        -- that opt into it (DF.TILED_BAR_TEXTURES). Ask the texture instead.
+        DF:ApplyBarTextureTiling(customBar, tex)
         
         if customBar.bg then customBar.bg:Hide() end
         
@@ -1152,21 +1166,22 @@ function DF:UpdateAbsorb(frame, testIndex)
         overflowBar:SetFrameLevel(healthLevel + 3)
         
         -- Apply same texture/color as main absorb bar
-        local texture = db.absorbBarTexture or "Interface\\TargetingFrame\\UI-StatusBar"
+        local texture = db.absorbBarTexture or DF.STOCK_BAR_TEXTURE
         if type(texture) == "table" then
-            texture = texture.path or "Interface\\TargetingFrame\\UI-StatusBar"
+            texture = texture.path or DF.STOCK_BAR_TEXTURE
         end
-        DF:SafeSetStatusBarTexture(overflowBar, texture)
-        
+        -- Same vertical-companion resolution as the main bar. It has to match, or
+        -- the two halves of a single shield would use different art.
+        texture = DF:ResolveBarTexture(texture, isVerticalFill)
+        local overflowApplied = DF:SafeSetStatusBarTexture(overflowBar, texture)
+
         local color = db.absorbBarColor or {r = 1, g = 1, b = 1, a = 0.7}
         overflowBar:SetStatusBarColor(color.r, color.g, color.b, color.a or 0.7)
-        
-        -- Disable tiling
-        local overflowTex = overflowBar:GetStatusBarTexture()
-        if overflowTex then
-            overflowTex:SetHorizTile(false)
-            overflowTex:SetVertTile(false)
-        end
+
+        -- Tiling per the texture (off for everything except DF.TILED_BAR_TEXTURES).
+        -- The overflow bar must match the main absorb bar or the pattern breaks
+        -- across the seam where one hands over to the other.
+        DF:ApplyBarTextureTiling(overflowBar, overflowApplied == false and DF.STOCK_BAR_TEXTURE or texture)
         
         -- Position like OVERLAY mode — flush when opaque/off, inset when translucent
         local overflowInset = DF:GetAbsorbEdgeInset(frame, db)
@@ -1439,19 +1454,19 @@ function DF:UpdateHealAbsorb(frame, testIndex)
     bar:SetFrameLevel(healAbsorbLevel)
     
     -- Texture and color
-    local tex = db.healAbsorbBarTexture or "Interface\\Buttons\\WHITE8x8"
+    local tex = ResolveBarTextureForFill(db, db.healAbsorbBarTexture or DF.STOCK_BAR_TEXTURE,
+        mode, "healAbsorbBarOrientation")
     local col = db.healAbsorbBarColor or {r = 0.4, g = 0.1, b = 0.1, a = 0.7}
     local blendMode = db.healAbsorbBarBlendMode or "BLEND"
     
     -- Apply texture only if changed to prevent flickering
     if bar.currentTexture ~= tex then
         bar.currentTexture = tex
+        -- Tiling and texcoords are set by SafeSetStatusBarTexture from the
+        -- texture's own mode; only the bits it can't know are set here.
         DF:SafeSetStatusBarTexture(bar, tex)
         local barTex = bar:GetStatusBarTexture()
         if barTex then
-            barTex:SetHorizTile(false)
-            barTex:SetVertTile(false)
-            barTex:SetTexCoord(0, 1, 0, 1)
             barTex:SetDesaturated(false)
             barTex:SetDrawLayer("ARTWORK", 1)
         end
@@ -1521,13 +1536,12 @@ function DF:UpdateHealAbsorb(frame, testIndex)
         -- ATTACHED mode should be below dispel overlay (+6) and aggro highlight (+9)
         bar:SetFrameLevel(healthLevel + 3)
         
-        -- For ATTACHED mode, disable tiling to prevent dense repeating in narrow bars
-        local attachedBarTex = bar:GetStatusBarTexture()
-        if attachedBarTex then
-            attachedBarTex:SetHorizTile(false)
-            attachedBarTex:SetVertTile(false)
-            attachedBarTex:SetTexCoord(0, 1, 0, 1)
-        end
+        -- Re-assert the texture's own tiling. This used to force it OFF outright
+        -- "to prevent dense repeating in narrow bars", which is still the default
+        -- for every stretched texture — but it runs after the texture is applied,
+        -- so a blanket clear here silently undid tiling for the textures that opt
+        -- into it. Ask the texture instead.
+        DF:ApplyBarTextureTiling(bar, bar.dfAppliedTexture)
         
         if bar.bg then bar.bg:Hide() end
         
@@ -1727,12 +1741,9 @@ end
 local function StyleHealPredSegment(seg, tex, blendMode, color)
     if seg.currentTexture ~= tex then
         seg.currentTexture = tex
-        DF:SafeSetStatusBarTexture(seg, tex)
+        DF:SafeSetStatusBarTexture(seg, tex)   -- also sets tiling + texcoords
         local t = seg:GetStatusBarTexture()
-        if t then
-            t:SetHorizTile(false); t:SetVertTile(false)
-            t:SetTexCoord(0, 1, 0, 1); t:SetDrawLayer("ARTWORK", 1)
-        end
+        if t then t:SetDrawLayer("ARTWORK", 1) end
     end
     local t = seg:GetStatusBarTexture()
     if t then t:SetBlendMode(blendMode) end
@@ -1939,34 +1950,24 @@ function DF:UpdateHealPrediction(frame, testIndex)
         frame.dfHealPredictionBar2:Hide()
     end
 
-    -- Strata and level
-    local strata = db.healPredictionStrata or "SANDWICH"
-    local useSandwich = (strata == "SANDWICH")
-    local useSandwichLow = (strata == "SANDWICH_LOW")
+    -- Level: just below the resource bar (which sits at health +2).
+    -- ☠ Was three branches on a `healPredictionStrata` key with NO UI and no writer, so the
+    -- stored value was always the "SANDWICH" default. Two of the three branches produced
+    -- the SAME +1 anyway, and the third (+14) was unreachable. Collapsed; nothing moved.
     local healthLevel = frame.healthBar:GetFrameLevel()
-    
-    local predictionLevel
-    if useSandwich then
-        predictionLevel = healthLevel + 1  -- Below resource bar (which is at +2)
-    elseif useSandwichLow then
-        predictionLevel = healthLevel + 1
-    else
-        predictionLevel = healthLevel + 14
-    end
-    
+    local predictionLevel = healthLevel + 1
+
     -- Texture and color
-    local tex = db.healPredictionTexture or "Interface\\Buttons\\WHITE8x8"
+    local tex = ResolveBarTextureForFill(db, db.healPredictionTexture or DF.STOCK_BAR_TEXTURE,
+        mode, "healPredictionOrientation")
     local blendMode = db.healPredictionBlendMode or "BLEND"
     
     -- Apply texture
     if bar.currentTexture ~= tex then
         bar.currentTexture = tex
-        DF:SafeSetStatusBarTexture(bar, tex)
+        DF:SafeSetStatusBarTexture(bar, tex)   -- also sets tiling + texcoords
         local barTex = bar:GetStatusBarTexture()
         if barTex then
-            barTex:SetHorizTile(false)
-            barTex:SetVertTile(false)
-            barTex:SetTexCoord(0, 1, 0, 1)
             barTex:SetDrawLayer("ARTWORK", 1)
         end
     end
@@ -1985,12 +1986,10 @@ function DF:UpdateHealPrediction(frame, testIndex)
     if mode == "FLOATING" then
         bar:SetParent(frame)
         
-        if not useSandwich and not useSandwichLow then
-            bar:SetFrameStrata(strata)
-        else
-            bar:SetFrameStrata(frame:GetFrameStrata())
-        end
-        
+        -- Follows the frame's own strata. (The removed healPredictionStrata key defaulted to
+        -- SANDWICH, which selected exactly this branch; the other one was unreachable.)
+        bar:SetFrameStrata(frame:GetFrameStrata())
+
         bar:SetFrameLevel(frame:GetFrameLevel() + (db.healPredictionFrameLevel or 12))
         
         -- Dimensions & Orientation

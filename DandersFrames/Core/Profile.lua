@@ -69,6 +69,16 @@ end
 -- without this, edited AD/TD presets survive a "Reset Profile to Defaults".
 -- Used by the GUI "Reset Profile to Defaults" button and /df reset.
 function DF:ResetFullProfile()
+    -- ★ UNLINK FIRST. Party/Raid sync state lives at the PROFILE ROOT, so neither
+    -- per-mode ResetProfile reached it and a "Reset Profile to Defaults" left every
+    -- synced page still synced — a state a freshly created profile can never be in
+    -- (Profile.lua seeds linkedSections = {}), which is the yardstick for this function.
+    -- ⚠ BEFORE the mode resets, not after: each ResetProfile ends in FullProfileRefresh,
+    -- which runs DF:SyncLinkedSections. Clearing afterwards would let three refreshes
+    -- fire against link state we are about to discard.
+    -- `{}` rather than nil to match the fresh-profile shape exactly; readers are
+    -- nil-guarded either way.
+    DF.db.linkedSections = {}
     self:ResetProfile("party")
     self:ResetProfile("raid")
     if self.ResetDesignerPresets then self:ResetDesignerPresets() end
@@ -800,6 +810,23 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         if categorySet.other and DF.db.linkedSections and next(DF.db.linkedSections) then
             exportData.linkedSections = DF:DeepCopy(DF.db.linkedSections)
         end
+        -- ☠ COLOURS ARE PROFILE-ROOT, so they need a special case here exactly like the
+        -- blocks above -- ExtractCategorySettings only ever walks the MODE tables. The
+        -- full-export branch has copied all four since the roleColors/dispelColors move;
+        -- this branch had no equivalent and no category could request them, so a user who
+        -- ticked ALL SIXTEEN boxes still shipped none of their colours. The recipient's
+        -- frames visibly did not match, and the dispel palette is the single source of
+        -- truth for both the debuff-icon border and the dispel overlay.
+        --
+        -- ⚠ DF:AuditExportCategories cannot catch this class: it walks PartyDefaults and
+        -- RaidDefaults only, so it is structurally blind to profile-root keys. Anything
+        -- added at the root has to be wired here by hand.
+        if categorySet.colors then
+            if DF.db.classColors  and next(DF.db.classColors)  then exportData.classColors  = DF:DeepCopy(DF.db.classColors)  end
+            if DF.db.powerColors  and next(DF.db.powerColors)  then exportData.powerColors  = DF:DeepCopy(DF.db.powerColors)  end
+            if DF.db.roleColors   and next(DF.db.roleColors)   then exportData.roleColors   = DF:DeepCopy(DF.db.roleColors)   end
+            if DF.db.dispelColors and next(DF.db.dispelColors) then exportData.dispelColors = DF:DeepCopy(DF.db.dispelColors) end
+        end
     end
 
     if not exportData.party and not exportData.raid then
@@ -817,6 +844,42 @@ function DF:ExportProfile(categories, frameTypes, profileName)
     local encoded = LibDeflate:EncodeForPrint(compressed)
     
     return "!DFP1!" .. encoded  -- DFP1 = DandersFrames Profile v1
+end
+
+-- ☠ SHAPE-CHECK THE PAYLOAD, NOT JUST ITS PRESENCE.
+--
+-- Validation used to be `type(data) == "table" and (data.party or data.raid)` -- a
+-- TRUTHINESS test. `party = "x"` passed, merged nothing, and still reported "Profile
+-- imported successfully!"; `party = 5` passed and threw halfway through the apply,
+-- AFTER the profile had been created and switched to. An import string is untrusted
+-- input from Discord or a whisper, and DF:ApplyImportedProfile assigns these straight
+-- into the saved variables.
+--
+-- Every key below is assigned to DF.db.<key> by the apply, so each must be a table if
+-- present. Absent is always fine -- a selective export legitimately carries only some.
+--
+-- R:DecodeFilterString (FilterRegistry/Registry.lua) is the model this follows: check
+-- the type, then interpret. Deliberately shallow -- deep validation of every setting
+-- would reject payloads from a NEWER build, which must stay forward-compatible.
+local PAYLOAD_TABLE_KEYS = {
+    "party", "raid", "raidAutoProfiles", "auraBlacklist", "linkedSections",
+    "classColors", "powerColors", "roleColors", "dispelColors",
+    "filterPresetOverrides", "customAuraFilters",
+    "auraDesignerPresets", "textDesignerPresets",
+}
+
+local function ValidatePayloadShape(data)
+    if type(data) ~= "table" then return nil, "Corrupt data" end
+    for _, key in ipairs(PAYLOAD_TABLE_KEYS) do
+        local v = data[key]
+        if v ~= nil and type(v) ~= "table" then
+            return nil, "Corrupt data"
+        end
+    end
+    if type(data.party) ~= "table" and type(data.raid) ~= "table" then
+        return nil, "No profile data found"
+    end
+    return data, nil
 end
 
 -- Validate an import string and return the parsed data if valid
@@ -852,11 +915,7 @@ function DF:ValidateImportString(str)
             return nil, "Deserialization failed"
         end
         
-        if type(data) ~= "table" or (not data.party and not data.raid) then
-            return nil, "No profile data found"
-        end
-        
-        return data, nil
+        return ValidatePayloadShape(data)
     end
     
     -- Legacy format support (!DF1! - old LibDeflate with DF:Serialize)
@@ -881,17 +940,29 @@ function DF:ValidateImportString(str)
         if not func then
             return nil, "Invalid format"
         end
-        
+
+        -- ☠ SANDBOX BEFORE CALLING. An import string is UNTRUSTED INPUT -- it arrives from
+        -- Discord, a forum post, a whisper. `loadstring` compiles arbitrary Lua, and
+        -- `return <expr>` is enough to RUN it: `return (function() ... end)()` executes
+        -- inside the pcall, and pcall only catches the error AFTERWARDS -- too late. Without
+        -- this, Parse String is remote code execution, reached before the confirm popup and
+        -- before any category is ticked.
+        --
+        -- An empty environment leaves table constructors working (which is all a genuine
+        -- payload is) while every global -- the whole WoW API included -- resolves nil, so a
+        -- hostile chunk errors instead of running. CC:DeserializeStringLegacy
+        -- (ClickCasting/Profiles.lua) has always done this; the profile path had not.
+        -- Guarded on setfenv existing, matching that sibling exactly.
+        if setfenv then
+            pcall(setfenv, func, {})
+        end
+
         local success, data = pcall(func)
         if not success or type(data) ~= "table" then
             return nil, "Corrupt data"
         end
         
-        if not data.party and not data.raid then
-            return nil, "No profile data found"
-        end
-        
-        return data, nil
+        return ValidatePayloadShape(data)
     end
     
     -- Other legacy formats
@@ -900,13 +971,25 @@ function DF:ValidateImportString(str)
     end
     
     -- Try legacy base64
+    --
+    -- ⚠ THE WIDEST ENTRY POINT IN THE ADDON: no prefix is required to reach it, so ANY
+    -- string that happens to Base64-decode lands on loadstring. Every DF build that has
+    -- ever shipped exports with a `!DFP1!` prefix (4.x included), so nothing this branch
+    -- accepts can have come from us. It is kept only in case some very old third-party
+    -- string exists; the sandbox below is what makes keeping it safe. Worth deleting
+    -- outright if we ever confirm nothing depends on it.
     local decoded = DF:Base64Decode(str)
     if decoded and decoded ~= "" then
         local func = loadstring("return " .. decoded)
         if func then
+            -- Sandbox before calling -- see the !DF1! branch above for the full reasoning.
+            if setfenv then
+                pcall(setfenv, func, {})
+            end
             local success, data = pcall(func)
-            if success and type(data) == "table" and (data.party or data.raid) then
-                return data, nil
+            if success then
+                local ok = ValidatePayloadShape(data)
+                if ok then return ok, nil end
             end
         end
     end
@@ -1019,6 +1102,23 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     local L = DF.L
     if not importData then return false end
 
+    -- ☠ TAKE OUR OWN COPY OF THE PAYLOAD BEFORE ANYTHING TOUCHES IT.
+    --
+    -- A dozen sites below do `DF.db.<key> = importData.<key>` -- storing the payload's
+    -- tables BY REFERENCE into the saved variables. Two consequences, both real:
+    --
+    --   * The GUI never clears self.parsedImportData, so parse once, import as "A",
+    --     rename, import as "B" left BOTH profiles sharing the same party/raid/preset
+    --     tables. Editing one silently edited the other until logout flattened them.
+    --   * Anything the caller still holds a reference to could mutate a live profile.
+    --
+    -- Only filterPresetOverrides was being copied. Copying the whole payload once here
+    -- fixes every site at a stroke and, more importantly, keeps fixing them: a new
+    -- `DF.db.x = importData.x` added later is safe without anyone remembering this.
+    -- One deep copy per import is nothing -- this is a deliberate user action, not a
+    -- hot path.
+    importData = DF:DeepCopy(importData)
+
     -- A SELECTIVE payload (importData.categories set) merges through the
     -- category tables in the companion. Import is a deliberate user action --
     -- and an external caller (Wago pack) could hand us a selective string with
@@ -1080,6 +1180,33 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             partyEnabled = DF.db.partyEnabled ~= false,
             raidEnabled  = DF.db.raidEnabled  ~= false,
         }
+
+        -- ☠ CARRY THE MIGRATION FLAGS. Everything above is copied from the CURRENT
+        -- profile, so the new profile holds ALREADY-MIGRATED data -- but the enumeration
+        -- lists no `_…V1` flag, so it was born claiming to need every root migration it
+        -- has already had. On the next reload CleanupRedundantLayoutPresets re-ran and
+        -- pruned layout presets the user had deliberately made identical to their base,
+        -- which is the exact thing that guard exists to prevent.
+        --
+        -- Copied by CONVENTION (every profile-root migration flag is `_`-prefixed) rather
+        -- than from a fixed list, so a future migration is carried without anyone
+        -- remembering to come back here. DF:StampFreshProfileMigrations is deliberately
+        -- NOT used: it stamps the three flags a profile born from DEFAULTS needs, and this
+        -- profile is not born from defaults -- it would miss _designerLayoutCleanupV1 and
+        -- _designerPresetsMigratedV1, the two that actually bite.
+        --
+        -- Read through _realProfile: DF.db is proxied, and pairs() on the proxy does not
+        -- reliably enumerate the real table. DF:DuplicateProfile gets this for free via
+        -- DeepCopy(DF.db); only this hand-enumerated branch had to be told.
+        local srcProfile = DF._realProfile or DF.db
+        local newProfile = DandersFramesDB_v2.profiles[profileName]
+        if type(srcProfile) == "table" then
+            for k, v in pairs(srcProfile) do
+                if type(k) == "string" and k:sub(1, 1) == "_" and newProfile[k] == nil then
+                    newProfile[k] = v
+                end
+            end
+        end
 
         -- Switch to the new profile
         DandersFramesDB_v2.currentProfile = profileName
@@ -1332,11 +1459,25 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         if importCategorySet.other and importData.linkedSections then
             DF.db.linkedSections = importData.linkedSections
         end
-        -- Dispel palette: top-level key. Gated on EITHER category because the two v4
+        -- ☠ THE COLOURS CATEGORY WAS EXPORT-ONLY. The export block above packs all four
+        -- palettes when `colors` is ticked, but nothing here consumed them and the only
+        -- code that applies classColors/powerColors/roleColors sits in the FULL-import
+        -- branch -- which selecting any category skips. So ticking Colors, exporting,
+        -- and importing with Colors ticked silently discarded three of the four tables:
+        -- data loss on the one feature whose entire purpose is moving colours between
+        -- accounts. These are profile-root keys, so they need naming here by hand;
+        -- MergeCategorySettings only ever walks the MODE tables.
+        if importCategorySet.colors then
+            if importData.classColors then DF.db.classColors = importData.classColors end
+            if importData.powerColors then DF.db.powerColors = importData.powerColors end
+            if importData.roleColors  then DF.db.roleColors  = importData.roleColors  end
+        end
+        -- Dispel palette: top-level key, and the fourth member of that set -- so `colors`
+        -- must request it too. Also gated on `dispel` and `auras` because the two v4
         -- families it is rebuilt from ride different ones -- the overlay's
         -- dispel<Type>Color under `dispel`, the icon border's debuffBorderColor* under
-        -- `auras` -- so ticking either is a request for these colours.
-        if importCategorySet.dispel or importCategorySet.auras then
+        -- `auras` -- so ticking any of the three is a request for these colours.
+        if importCategorySet.dispel or importCategorySet.auras or importCategorySet.colors then
             importDispelColors()
         end
     end
@@ -1379,12 +1520,36 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     end
 
     -- Fold/zero border insets on the just-imported configs (pre-rework look).
-    -- Clear the active profile's guards so the imported data is re-scanned; the
-    -- steps are value-idempotent, so already-migrated entries are untouched.
     if DF.MigrateBorderInsetFold then
         if DF.db then
+            -- Step 1 (Aura Designer icon/square fold) IS value-idempotent: FoldAuraDesignerConfig
+            -- early-returns on inset == 0, and `seen` stops a shared preset folding twice. Free
+            -- to re-arm on every import.
             DF.db._borderInsetFoldV1 = nil
-            DF.db._buffDebuffInsetZeroV1 = nil
+
+            -- ☠ STEP 2 IS NOT IDEMPOTENT, despite what MigrateBorderInsetFold's header says.
+            -- ZeroBuffDebuffBorderInset writes buffBorderInset = 0 / debuffBorderInset = 0
+            -- UNCONDITIONALLY on BOTH modes and strips those keys out of every raid
+            -- auto-layout override. It cannot tell a leftover legacy inset from a value the
+            -- user deliberately set AFTER the migration ran -- nothing marks the difference.
+            --
+            -- So re-arming it on every import silently destroyed those settings across the
+            -- WHOLE profile, including presets and layouts the import never touched. Importing
+            -- a friend's colour scheme, or a text-only selective import, was enough.
+            --
+            -- Re-arm only when the PAYLOAD actually carries something to fold, and only for a
+            -- mode this import is applying. A v5 export always has these at 0 (the migration
+            -- ran on the sender), so this is a no-op for the normal case while still repairing
+            -- a genuine 4.x payload.
+            local function payloadNeedsInsetZero(mode)
+                if type(mode) ~= "table" then return false end
+                return (tonumber(mode.buffBorderInset) or 0) ~= 0
+                    or (tonumber(mode.debuffBorderInset) or 0) ~= 0
+            end
+            if (selectedFrameTypes.party and payloadNeedsInsetZero(importData.party))
+                or (selectedFrameTypes.raid and payloadNeedsInsetZero(importData.raid)) then
+                DF.db._buffDebuffInsetZeroV1 = nil
+            end
         end
         DF:MigrateBorderInsetFold()
     end

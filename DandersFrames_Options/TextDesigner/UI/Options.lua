@@ -2734,7 +2734,7 @@ function DF.BuildTextDesignerPage(GUI, page, db)
             DF.TextDesigner.Preview:Init(state.mockFrame, tdDB)
         end
 
-        local healthTexPath = frameDB.healthTexture or "Interface\\Buttons\\WHITE8x8"
+        local healthTexPath = frameDB.healthTexture or DF.STOCK_BAR_TEXTURE
 
         -- Health bar background
         local healthBg = mockFrame:CreateTexture(nil, "BACKGROUND")

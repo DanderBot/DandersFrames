@@ -163,6 +163,14 @@ function FlatRaidFrames:BuildSortedNameList()
     local function GetMeleeRangedType(unit, role, class)
         if role ~= "DAMAGER" then return nil end
         
+        -- ☠ SAME PRIORITY AS THE HEADER PATH (Frames/Headers.lua GetMeleeRangedType):
+        -- SecureSort.specCache -> the game's inspect cache -> class fallback. This site
+        -- went straight to GetInspectSpecialization, which answers 0 until an inspect
+        -- lands, so every melee spec whose CLASS fallback is not melee -- Survival Hunter,
+        -- Feral Druid, Windwalker Monk, Retribution Paladin, Enhancement Shaman -- sorted
+        -- as RANGED in flat raid while grouped raid already had them as MELEE, then jumped
+        -- across once the inspect resolved. The persistent cache is what stops that flip,
+        -- which is precisely why the header path consults it first.
         local specID
         if UnitIsUnit(unit, "player") then
             local spec = GetSpecialization()
@@ -170,7 +178,17 @@ function FlatRaidFrames:BuildSortedNameList()
                 specID = GetSpecializationInfo(spec)
             end
         else
-            specID = GetInspectSpecialization(unit)
+            local cache = DF.SecureSort and DF.SecureSort.specCache
+            if cache then
+                local name = GetUnitName(unit, true)
+                local cached = name and cache[name]
+                if cached and cached.specID and cached.specID > 0 then
+                    specID = cached.specID
+                end
+            end
+            if not specID then
+                specID = GetInspectSpecialization(unit)
+            end
         end
         
         if specID and specID > 0 then

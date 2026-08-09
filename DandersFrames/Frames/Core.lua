@@ -175,7 +175,7 @@ local function SetMissingHealthBarValue(bar, unit, frame)
     -- Update texture before color (SetStatusBarTexture resets vertex color)
     local texture = db and db.missingHealthTexture
     if not texture or texture == "" then
-        texture = db and db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
+        texture = db and db.healthTexture or DF.STOCK_BAR_TEXTURE
     end
     DF:SafeSetStatusBarTexture(bar, texture)
 

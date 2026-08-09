@@ -350,12 +350,20 @@ function DF:ApplyBarOrientation(frame)
     
     frame.healthBar:SetOrientation(orient)
     frame.healthBar:SetReverseFill(reverse)
-    
+    -- ⚠ Distinct from DF:ApplyBarFillOrientation despite the similar name: this
+    -- function sets the bar's fill DIRECTION, that one settles what the fill
+    -- TEXTURE does about it (a tiled texture must not rotate, and swaps to its
+    -- pre-rotated companion instead). Unlike Frames/Update.lua this path never
+    -- touched rotation at all, so without the call a tiled texture chosen here
+    -- would keep the horizontal art on a vertical frame.
+    DF:ApplyBarFillOrientation(frame.healthBar, orient == "VERTICAL")
+
     -- Apply orientation to missing health bar (opposite fill direction)
     -- Missing health fills from the "end" where health is depleted
     if frame.missingHealthBar then
         frame.missingHealthBar:SetOrientation(orient)
         frame.missingHealthBar:SetReverseFill(not reverse)  -- Opposite of health bar
+        DF:ApplyBarFillOrientation(frame.missingHealthBar, orient == "VERTICAL")
     end
 end
 

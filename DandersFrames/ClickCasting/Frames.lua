@@ -372,9 +372,6 @@ function CC:InitializeSecureFrames()
     -- Register for spec change events
     self:RegisterEvents()
     
-    -- Set up hooks for dynamic Blizzard frames (boss/arena)
-    self:SetupDynamicFrameHooks()
-
     -- Heal Blizzard click-setup clobbering (guided by Clique's reassert
     -- queue). SecureUnitButton_OnLoad runs on every CompactUnitFrame_SetUnit
     -- (roster shuffles, including during combat) and resets
@@ -1512,69 +1509,10 @@ function CC:UpdateBlizzardFrameRegistration()
         end
     end
     
-    -- (No nameplate pass here: nameplate registration is driven entirely by
-    -- NAME_PLATE_UNIT_ADDED/REMOVED. There used to be an `if needsNameplates`
-    -- block with two empty branches, reading an undeclared global that nothing
-    -- ever assigned -- it advertised a re-registration pass that did not exist.)
-end
-
--- ============================================================
-
--- DYNAMIC FRAME HOOKS (Boss/Arena frames that appear mid-combat)
--- ============================================================
-
-function CC:SetupDynamicFrameHooks()
-    -- Hook boss frame show events
-    for _, frameName in ipairs(BLIZZARD_BOSS_FRAMES) do
-        local frame = _G[frameName]
-        if frame and not frame.dfHooked then
-            frame:HookScript("OnShow", function(self)
-                if CC.db.options.globalEnabled then
-                    if not CC:CombatGuard("register", self) then
-                        CC:RegisterFrame(self)
-                    end
-                end
-            end)
-            frame.dfHooked = true
-        end
-    end
-    
-    -- Hook arena frame show events
-    for _, frameName in ipairs(BLIZZARD_ARENA_FRAMES) do
-        local frame = _G[frameName]
-        if frame and not frame.dfHooked then
-            frame:HookScript("OnShow", function(self)
-                if CC.db.options.globalEnabled then
-                    if not CC:CombatGuard("register", self) then
-                        CC:RegisterFrame(self)
-                    end
-                end
-            end)
-            frame.dfHooked = true
-        end
-    end
-    
-    -- Boss and arena frames are created lazily, so retry while any are still
-    -- unhooked. This previously re-armed unconditionally every 2 seconds for
-    -- the entire session, and because the timer was not keyed, a second call
-    -- to this function forked another chain that also ran forever.
-    local pending = false
-    for _, list in ipairs({ BLIZZARD_BOSS_FRAMES, BLIZZARD_ARENA_FRAMES }) do
-        for _, frameName in ipairs(list) do
-            local frame = _G[frameName]
-            if not frame or not frame.dfHooked then
-                pending = true
-                break
-            end
-        end
-        if pending then break end
-    end
-
-    if pending then
-        CC:DeferAfter("dynamicFrameHooks", 2, function()
-            CC:SetupDynamicFrameHooks()
-        end)
-    end
+    -- (No nameplate pass here. Click casting on world units and nameplates is
+    -- delivered by the per-binding targeting fallback, which rides the global
+    -- bind list rather than registering individual frames -- see
+    -- CC:BuildHovercastSetupScript.)
 end
 
 -- Build a virtual button name from binding (like Cell's approach: "shiftQ", "ctrlF1", etc.)

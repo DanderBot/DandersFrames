@@ -533,6 +533,19 @@ function GUI:StyleButton(btn, opts)
 
     btn:SetScript("OnEnter", function(self) applyHoverState(self, true) end)
     btn:SetScript("OnLeave", function(self) applyHoverState(self, false) end)
+    -- ☠ OnLeave DOES NOT FIRE FOR A BUTTON HIDDEN UNDER THE CURSOR, so a button hidden
+    -- mid-hover comes back lit — stuck fill, border and text colour until you hover and
+    -- leave it again. The SetHovered comment above already names this hazard; this is the
+    -- half that actually clears it.
+    -- Reported on "+ Import Filter" (Aura Filters), which is a standing frame the page
+    -- SetShown()s per tab and per Party/Raid switch — hover it, switch mode, and it is
+    -- hidden before the mouse ever leaves (Krathe, 2026-08-09). Fixed here rather than
+    -- there: nothing about it is specific to that button, and several pooled/standing
+    -- buttons in this addon are shown and hidden under a stationary mouse.
+    -- ⚠ HookScript, not SetScript: OnHide is a script a CALLER may already own (unlike
+    -- OnEnter/OnLeave, which StyleButton owns by contract) — this composes instead of
+    -- silently replacing theirs.
+    btn:HookScript("OnHide", function(self) applyHoverState(self, false) end)
     return btn
 end
 
@@ -1835,10 +1848,22 @@ function GUI:RegisterMenu(frame) self._menus[frame] = true end
 -- call that is nil half the time fails SILENTLY: the menu just stays floating,
 -- which is the exact symptom this registry exists to prevent. Four lines is
 -- not worth an addon boundary.
+-- ☠ THE ONLY RELIABLE CLOSER, and why the single-slot tracker is not.
+-- Every menu is parented to its own dropdown BUTTON, so a tab switch hides it via its
+-- ancestor. That fires the menu's OnHide, which clears S.currentOpenDropdown -- but the
+-- menu's OWN shown flag was never touched, so returning to that tab re-shows it, now
+-- untracked. From then on CloseOpenDropdown() is a no-op against it: it stays floating,
+-- overlaps whatever you open next, and only closes if you click its own button
+-- (Krathe, 2026-08-09 -- all three dropdown symptoms are this one fault).
+-- ⇒ Iterating the registry and calling Hide() clears the frame's own flag, which
+-- ancestor-hiding never does. Prefer this over CloseOpenDropdown at every open site.
 function GUI:CloseAllMenus()
     for f in pairs(self._menus) do
         if f:IsShown() then f:Hide() end
     end
+    -- Keep the single-slot tracker honest: it is still read by the toggle handlers, and a
+    -- stale reference here is what made a re-shown menu invisible to them.
+    if self._state then self._state.currentOpenDropdown = nil end
 end
 
 function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, customGet, customSet, opts)
@@ -2258,7 +2283,7 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
             S.currentOpenDropdown = nil
         else
             -- Close any other open dropdown first
-            CloseOpenDropdown()
+            GUI:CloseAllMenus()
             -- Dynamic dropdowns regenerate their option list each open.
             if optionsFunc then
                 container:RebuildOptions(optionsFunc())

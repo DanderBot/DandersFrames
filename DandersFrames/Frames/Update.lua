@@ -68,7 +68,7 @@ function DF:ApplyFrameLayout(frame)
     local healthBar = frame.healthBar
     if healthBar then
         -- Texture
-        local healthTex = db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
+        local healthTex = db.healthTexture or DF.STOCK_BAR_TEXTURE
         -- Safe setter: falls back to the stock texture when the configured path
         -- is missing (imported profiles referencing another addon's media render
         -- solid green otherwise). Frame CREATION already used the safe setter,
@@ -80,19 +80,19 @@ function DF:ApplyFrameLayout(frame)
         if orientation == "HORIZONTAL" then
             healthBar:SetOrientation("HORIZONTAL")
             healthBar:SetReverseFill(false)
-            healthBar:SetRotatesTexture(false)
+            DF:ApplyBarFillOrientation(healthBar, false)
         elseif orientation == "HORIZONTAL_INV" then
             healthBar:SetOrientation("HORIZONTAL")
             healthBar:SetReverseFill(true)
-            healthBar:SetRotatesTexture(false)
+            DF:ApplyBarFillOrientation(healthBar, false)
         elseif orientation == "VERTICAL" then
             healthBar:SetOrientation("VERTICAL")
             healthBar:SetReverseFill(false)
-            healthBar:SetRotatesTexture(true)
+            DF:ApplyBarFillOrientation(healthBar, true)
         elseif orientation == "VERTICAL_INV" then
             healthBar:SetOrientation("VERTICAL")
             healthBar:SetReverseFill(true)
-            healthBar:SetRotatesTexture(true)
+            DF:ApplyBarFillOrientation(healthBar, true)
         end
         
         -- Also apply to missing health bar (opposite fill direction)
@@ -100,19 +100,19 @@ function DF:ApplyFrameLayout(frame)
             if orientation == "HORIZONTAL" then
                 frame.missingHealthBar:SetOrientation("HORIZONTAL")
                 frame.missingHealthBar:SetReverseFill(true)  -- Opposite of health bar
-                frame.missingHealthBar:SetRotatesTexture(false)
+                DF:ApplyBarFillOrientation(frame.missingHealthBar, false)
             elseif orientation == "HORIZONTAL_INV" then
                 frame.missingHealthBar:SetOrientation("HORIZONTAL")
                 frame.missingHealthBar:SetReverseFill(false)  -- Opposite of health bar
-                frame.missingHealthBar:SetRotatesTexture(false)
+                DF:ApplyBarFillOrientation(frame.missingHealthBar, false)
             elseif orientation == "VERTICAL" then
                 frame.missingHealthBar:SetOrientation("VERTICAL")
                 frame.missingHealthBar:SetReverseFill(true)  -- Opposite of health bar
-                frame.missingHealthBar:SetRotatesTexture(true)
+                DF:ApplyBarFillOrientation(frame.missingHealthBar, true)
             elseif orientation == "VERTICAL_INV" then
                 frame.missingHealthBar:SetOrientation("VERTICAL")
                 frame.missingHealthBar:SetReverseFill(false)  -- Opposite of health bar
-                frame.missingHealthBar:SetRotatesTexture(true)
+                DF:ApplyBarFillOrientation(frame.missingHealthBar, true)
             end
         end
     end
@@ -130,9 +130,12 @@ function DF:ApplyFrameLayout(frame)
     local absorbBar = frame.dfAbsorbBar
     if absorbBar then
         local absorbMode = db.absorbBarMode or "OVERLAY"
-        local absorbTex = db.absorbBarTexture or "Interface\\Buttons\\WHITE8x8"
+        -- Same resolution UpdateAbsorb performs. Both run in the same pass, so if
+        -- only one resolved the tiled variant the other would overwrite it.
+        local absorbTex = DF:ResolveBarTextureForFill(db,
+            db.absorbBarTexture or DF.STOCK_BAR_TEXTURE, absorbMode, "absorbBarOrientation")
         local absorbColor = db.absorbBarColor or {r = 0, g = 0.835, b = 1, a = 0.7}
-        
+
         DF:SafeSetStatusBarTexture(absorbBar, absorbTex)
         absorbBar:SetStatusBarColor(absorbColor.r, absorbColor.g, absorbColor.b, absorbColor.a)
         
@@ -154,6 +157,7 @@ function DF:ApplyFrameLayout(frame)
             local orient = db.absorbBarOrientation or "HORIZONTAL"
             absorbBar:SetOrientation(orient)
             absorbBar:SetReverseFill(db.absorbBarReverse or false)
+            DF:ApplyBarFillOrientation(absorbBar, orient == "VERTICAL")
             
             if absorbBar.bg then
                 local bgC = db.absorbBarBackgroundColor or {r = 0, g = 0, b = 0, a = 0.5}
@@ -168,7 +172,7 @@ function DF:ApplyFrameLayout(frame)
     local healAbsorbBar = frame.dfHealAbsorbBar
     if healAbsorbBar then
         local healAbsorbMode = db.healAbsorbBarMode or "OVERLAY"
-        local healAbsorbTex = db.healAbsorbBarTexture or "Interface\\Buttons\\WHITE8x8"
+        local healAbsorbTex = db.healAbsorbBarTexture or DF.STOCK_BAR_TEXTURE
         local healAbsorbColor = db.healAbsorbBarColor or {r = 0.4, g = 0.1, b = 0.1, a = 0.7}
         
         DF:SafeSetStatusBarTexture(healAbsorbBar, healAbsorbTex)
@@ -378,9 +382,7 @@ function DF:ApplyFrameLayout(frame)
         else
             -- Textured background - only call SetTexture if texture path changed
             if frame.dfCurrentBgTexture ~= bgTexture then
-                DF:SafeSetTexture(frame.background, bgTexture)
-                frame.background:SetHorizTile(false)
-                frame.background:SetVertTile(false)
+                DF:SafeSetTexture(frame.background, bgTexture)  -- also sets tiling
                 frame.dfCurrentBgTexture = bgTexture
                 frame.dfCurrentBgKey = nil  -- Clear key when switching to textured
             end
