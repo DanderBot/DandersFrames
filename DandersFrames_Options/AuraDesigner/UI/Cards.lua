@@ -1735,11 +1735,30 @@ S.CreateEffectCard = function(parent, yPos, effect)
             -- Operator caption BETWEEN groups, so the card reads downward as
             -- "these ... AND ... these". Only present once the effect is conditional.
             if multiCond and gi > 1 then
+                tagY = tagY - 6
+                -- A RULE across the card, not a floating word: the previous layout put the
+                -- operator and a bare X into the same wrapping flow as the tags, so nothing
+                -- said where one group ended and the next began, or which X removed what.
+                local rule = trigContainer:CreateTexture(nil, "ARTWORK")
+                rule:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY - 8)
+                rule:SetPoint("RIGHT", trigContainer, "RIGHT", 0, 0)
+                rule:SetHeight(1)
+                rule:SetColorTexture(0.91, 0.66, 0.25, 0.25)
+
                 local sep = trigContainer:CreateFontString(nil, "OVERLAY")
                 GUI:SetSettingsFont(sep, 9, "OUTLINE")
-                sep:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY - 2)
+                sep:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
                 sep:SetText(condMode == "ALL" and L["AND"] or L["OR"])
                 sep:SetTextColor(0.91, 0.66, 0.25)
+                -- Sit the caption ON the rule by masking the line behind it.
+                local mask = trigContainer:CreateTexture(nil, "BACKGROUND")
+                mask:SetPoint("TOPLEFT", sep, "TOPLEFT", -3, 2)
+                mask:SetPoint("BOTTOMRIGHT", sep, "BOTTOMRIGHT", 3, -2)
+                mask:SetColorTexture(0.09, 0.09, 0.09, 1)
+                sep:SetDrawLayer("OVERLAY")
+
+                -- Removal belongs to the group BELOW the rule, and sits at the far right so
+                -- it can never be mistaken for a tag's own X.
                 local delG = DF.GUI:CreateCloseButton(trigContainer, {
                     size = 14, tone = "danger",
                     onClick = function()
@@ -1749,8 +1768,9 @@ S.CreateEffectCard = function(parent, yPos, effect)
                         RefreshLiveFramesThrottled()
                     end,
                 })
-                delG:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 34, tagY - 1)
-                tagY = tagY - 20
+                delG:SetPoint("TOPRIGHT", trigContainer, "TOPRIGHT", 0, tagY - 1)
+                delG.tooltip = L["Remove this condition group."]
+                tagY = tagY - 22
                 tagX = 0
             end
 
@@ -1820,11 +1840,11 @@ S.CreateEffectCard = function(parent, yPos, effect)
             end
 
             -- "+ Add Trigger" button
+            -- ☠ ALWAYS a fresh row. Sharing the tag flow made the add buttons wrap into the
+            -- middle of a spell list, so which group they belonged to was pure guesswork.
             local addTrigW = 80
-            if tagX > 0 and (tagX + addTrigW) > (bodyWidth - 16) then
-                tagX = 0
-                tagY = tagY - (TAG_H + TAG_ROW_GAP)
-            end
+            tagX = 0
+            tagY = tagY - (TAG_H + TAG_ROW_GAP)
             local addTrigBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
             addTrigBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
             GUI:StyleButton(addTrigBtn, { width = addTrigW, height = TAG_H, primary = true, accent = { r = 0.25, g = 0.40, b = 0.25 }, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add Trigger"] })
@@ -1853,9 +1873,13 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 local trigSpec = (not isOtherTrig) and ResolveSpec() or nil
                 local trigSpecInfo = trigSpec and DF.AuraDesigner.SpecInfo[trigSpec]
 
-                local currentTriggers = GetFrameEffectTriggers(effect.auraName, effect.typeKey)
+                -- ☠ THIS GROUP's triggers, not the flat list. GetFrameEffectTriggers returns
+                -- group 1 for a grouped effect, so a spell already in group 1 was blocked
+                -- everywhere -- which made (A and B) or (A and C) impossible to build, the
+                -- exact shape ANY mode exists for. A spell may legitimately appear in several
+                -- groups; only a duplicate WITHIN one group is meaningless.
                 local trigLookup = {}
-                for _, t in ipairs(currentTriggers) do trigLookup[t] = true end
+                for _, t in ipairs(condGroups[gi].triggers or {}) do trigLookup[t] = true end
 
                 OpenADPicker({
                     title = format(L["Select trigger for %s"], S.FRAME_LEVEL_LABELS[effect.typeKey] or effect.typeKey),
@@ -1887,10 +1911,6 @@ S.CreateEffectCard = function(parent, yPos, effect)
             -- hidden modifier is not a discoverable way to reach half a feature.
             tagX = tagX + addTrigW + TAG_GAP
             local addFilterW = 66
-            if (tagX + addFilterW) > (bodyWidth - 16) then
-                tagX = 0
-                tagY = tagY - (TAG_H + TAG_ROW_GAP)
-            end
             local addTrigFilterBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
             addTrigFilterBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
             GUI:StyleButton(addTrigFilterBtn, { width = addFilterW, height = TAG_H, primary = true,
@@ -1904,7 +1924,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 -- Pool pinned at open time, same reason as the spell picker above.
                 local capturedPool = CurrentAuraPool()
                 local existing = {}
-                for _, t in ipairs(GetFrameEffectTriggers(effect.auraName, effect.typeKey)) do
+                for _, t in ipairs(condGroups[gi].triggers or {}) do
                     existing[t] = true
                 end
                 OpenFilterPicker({
@@ -1925,7 +1945,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
             end)
 
             tagX = 0
-            tagY = tagY - (TAG_H + TAG_ROW_GAP)
+            tagY = tagY - (TAG_H + TAG_ROW_GAP + 4)
             end  -- for gi
 
             -- CONDITION CONTROLS. The operator flips the whole expression's shape, which

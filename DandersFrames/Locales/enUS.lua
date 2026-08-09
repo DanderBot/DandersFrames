@@ -1832,6 +1832,7 @@ L["Blink"] = true
 L["Corner Length"] = true
 L["Replace"] = true
 L["Replace Buffs"] = true
+L["Remove this condition group."] = true
 L["Reset"] = true
 L["Reset All Aura Configs"] = true
 L["Right-click"] = true
