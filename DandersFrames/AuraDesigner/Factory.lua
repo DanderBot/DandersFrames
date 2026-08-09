@@ -675,7 +675,9 @@ end
 -- effect ships off -- cost one type() check and nothing else.
 --
 -- Entry tables are module-level scratch, reused across passes (they hold no
--- long-lived reference; everything is read inside the same SyncFrame). The MAPS are
+-- long-lived reference; everything is read inside the same SyncFrame). That relies on
+-- SyncFrame not being re-entered between the collect and the picks -- true today, and
+-- the same assumption the mgScratch member-group arrangement already makes. The MAPS are
 -- not reused: a winning map is handed to AuraContainer:Create and retained in the
 -- live handle's config for ApplyTuning to re-derive from, so wiping a buffer under a
 -- standing container would corrupt its candidate filters. Member maps are therefore
