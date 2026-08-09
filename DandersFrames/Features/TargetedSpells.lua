@@ -3494,7 +3494,7 @@ local function TargetedList_ApplyBarAppearance(bar, db)
     -- Only call SetStatusBarTexture if the path changed — calling it
     -- unconditionally resets the StatusBar's internal value/fill state,
     -- which clobbers the progress fill set by ApplyBarContent.
-    local texturePath = db.targetedListTexture or "Interface\\TargetingFrame\\UI-StatusBar"
+    local texturePath = db.targetedListTexture or DF.STOCK_BAR_TEXTURE
     if bar._lastTexturePath ~= texturePath then
         DF:SafeSetStatusBarTexture(bar.progress, texturePath)
         bar._lastTexturePath = texturePath

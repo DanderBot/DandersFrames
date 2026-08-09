@@ -1869,13 +1869,20 @@ end
 -- indicator's icon but under its border, and under every sibling indicator's border at the
 -- same configured level. That is why the glyph showed under the icons.
 --
--- ☠ 13 -> 8 (Z-order review, 2026-08-07). "A container row is 13 levels thick" was measured
--- when DF.Border defaulted to +10 and the per-button holder ladder ran to +15. Both shrank:
--- the border default is +2 and the ladder tops out at +5, so a row is 7 thick — container
--- +0, button +2, border +4, holders +3..+7. 8 clears it with a level spare, and keeps an
--- indicator plus its alert inside 16 levels, which is what lets the user-facing bands sit
--- 20 apart. RE-MEASURE THIS if the border default or the holder ladder moves again.
-Factory.ALERT_ROW_LIFT = 8
+-- ☠ 13 -> 8 (Z-order review, 2026-08-07) -> 10 (2026-08-08). RE-MEASURED, as the previous
+-- revision of this comment instructed, because the holder ladder moved again.
+--
+-- The 2026-08-07 pass measured a row at 7 thick against a ladder topping out at +5. That
+-- ladder was wrong: it left the dispel ring under the icon border and no room beneath the
+-- border for a pandemic tint. The corrected ladder is `DF.AuraButtonLevels`
+-- (Frames/AuraContainer.lua) and runs button+2..+7, so measured from the container —
+-- container +0, button +2, border +5, holders +4..+9 — a row is now **9 thick**.
+--
+-- 10 clears that with a level spare, and keeps an indicator plus its alert inside 19
+-- levels, which is what lets the user-facing bands sit 20 apart. That is now a TIGHT fit:
+-- one more rung on the ladder costs two levels here and busts the band.
+-- RE-MEASURE THIS if the border level or the holder ladder moves again.
+Factory.ALERT_ROW_LIFT = 10
 
 -- ☠ ...EXCEPT FOR TINT, which wants the opposite. A wash covers the whole icon, so lifting
 -- it a full row puts it over the indicator's own duration text and stack count and makes
@@ -3865,7 +3872,7 @@ function Factory:SyncFrame(frame)
                 -- FILLED MIRROR PATH — duplicate StatusBar fed the secret health percent.
                 local alpha = (mode == "replace") and 1 or healthbarBlend(mode, bestCfg.blend, a)
                 local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
-                local tex = (fdb and fdb.healthTexture) or "Interface\\TargetingFrame\\UI-StatusBar"
+                local tex = (fdb and fdb.healthTexture) or DF.STOCK_BAR_TEXTURE
                 -- Anchor target: the REAL health bar's fill texture. Its rect is already
                 -- driven by the bar's value, so the cover follows health for free --
                 -- no feed, no per-tick work, nothing read, nothing written from our

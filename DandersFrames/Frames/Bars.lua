@@ -323,7 +323,7 @@ local function AbsorbLayoutStateChanged(frame, db)
 
     -- Mode + appearance (all modes)
     if s.mode            ~= (db.absorbBarMode or "OVERLAY")               then return true end
-    if s.texture         ~= (db.absorbBarTexture or "Interface\\Buttons\\WHITE8x8") then return true end
+    if s.texture         ~= (db.absorbBarTexture or DF.STOCK_BAR_TEXTURE)  then return true end
     if s.blendMode       ~= (db.absorbBarBlendMode or "BLEND")            then return true end
     if s.pixelPerfect    ~= db.pixelPerfect                               then return true end
     if s.oorEnabled      ~= db.oorEnabled                                 then return true end
@@ -382,7 +382,7 @@ local function CacheAbsorbLayoutState(frame, db)
         frame.dfAbsorbState = s
     end
     s.mode            = db.absorbBarMode or "OVERLAY"
-    s.texture         = db.absorbBarTexture or "Interface\\Buttons\\WHITE8x8"
+    s.texture         = db.absorbBarTexture or DF.STOCK_BAR_TEXTURE
     s.blendMode       = db.absorbBarBlendMode or "BLEND"
     s.pixelPerfect    = db.pixelPerfect
     s.oorEnabled      = db.oorEnabled
@@ -640,7 +640,7 @@ function DF:UpdateAbsorb(frame, testIndex)
     customBar:SetFrameLevel(absorbLevel)
     
     -- Texture and color
-    local tex = db.absorbBarTexture or "Interface\\Buttons\\WHITE8x8"
+    local tex = db.absorbBarTexture or DF.STOCK_BAR_TEXTURE
     local col = db.absorbBarColor or {r = 0, g = 0.835, b = 1, a = 0.7}
     local blendMode = db.absorbBarBlendMode or "BLEND"
     
@@ -1157,9 +1157,9 @@ function DF:UpdateAbsorb(frame, testIndex)
         overflowBar:SetFrameLevel(healthLevel + 3)
         
         -- Apply same texture/color as main absorb bar
-        local texture = db.absorbBarTexture or "Interface\\TargetingFrame\\UI-StatusBar"
+        local texture = db.absorbBarTexture or DF.STOCK_BAR_TEXTURE
         if type(texture) == "table" then
-            texture = texture.path or "Interface\\TargetingFrame\\UI-StatusBar"
+            texture = texture.path or DF.STOCK_BAR_TEXTURE
         end
         DF:SafeSetStatusBarTexture(overflowBar, texture)
         
@@ -1444,7 +1444,7 @@ function DF:UpdateHealAbsorb(frame, testIndex)
     bar:SetFrameLevel(healAbsorbLevel)
     
     -- Texture and color
-    local tex = db.healAbsorbBarTexture or "Interface\\Buttons\\WHITE8x8"
+    local tex = db.healAbsorbBarTexture or DF.STOCK_BAR_TEXTURE
     local col = db.healAbsorbBarColor or {r = 0.4, g = 0.1, b = 0.1, a = 0.7}
     local blendMode = db.healAbsorbBarBlendMode or "BLEND"
     
@@ -1952,7 +1952,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
     local predictionLevel = healthLevel + 1
 
     -- Texture and color
-    local tex = db.healPredictionTexture or "Interface\\Buttons\\WHITE8x8"
+    local tex = db.healPredictionTexture or DF.STOCK_BAR_TEXTURE
     local blendMode = db.healPredictionBlendMode or "BLEND"
     
     -- Apply texture

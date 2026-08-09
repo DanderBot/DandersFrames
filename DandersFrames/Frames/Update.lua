@@ -68,7 +68,7 @@ function DF:ApplyFrameLayout(frame)
     local healthBar = frame.healthBar
     if healthBar then
         -- Texture
-        local healthTex = db.healthTexture or "Interface\\TargetingFrame\\UI-StatusBar"
+        local healthTex = db.healthTexture or DF.STOCK_BAR_TEXTURE
         -- Safe setter: falls back to the stock texture when the configured path
         -- is missing (imported profiles referencing another addon's media render
         -- solid green otherwise). Frame CREATION already used the safe setter,
@@ -130,7 +130,7 @@ function DF:ApplyFrameLayout(frame)
     local absorbBar = frame.dfAbsorbBar
     if absorbBar then
         local absorbMode = db.absorbBarMode or "OVERLAY"
-        local absorbTex = db.absorbBarTexture or "Interface\\Buttons\\WHITE8x8"
+        local absorbTex = db.absorbBarTexture or DF.STOCK_BAR_TEXTURE
         local absorbColor = db.absorbBarColor or {r = 0, g = 0.835, b = 1, a = 0.7}
         
         DF:SafeSetStatusBarTexture(absorbBar, absorbTex)
@@ -168,7 +168,7 @@ function DF:ApplyFrameLayout(frame)
     local healAbsorbBar = frame.dfHealAbsorbBar
     if healAbsorbBar then
         local healAbsorbMode = db.healAbsorbBarMode or "OVERLAY"
-        local healAbsorbTex = db.healAbsorbBarTexture or "Interface\\Buttons\\WHITE8x8"
+        local healAbsorbTex = db.healAbsorbBarTexture or DF.STOCK_BAR_TEXTURE
         local healAbsorbColor = db.healAbsorbBarColor or {r = 0.4, g = 0.1, b = 0.1, a = 0.7}
         
         DF:SafeSetStatusBarTexture(healAbsorbBar, healAbsorbTex)

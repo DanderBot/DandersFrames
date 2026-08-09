@@ -640,7 +640,7 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
     container.mockFrame = mockFrame
 
     -- Resolve health texture
-    local healthTexPath = frameDB.healthTexture or "Interface\\Buttons\\WHITE8x8"
+    local healthTexPath = frameDB.healthTexture or DF.STOCK_BAR_TEXTURE
 
     -- Health bar background
     local healthBg = mockFrame:CreateTexture(nil, "BACKGROUND")
