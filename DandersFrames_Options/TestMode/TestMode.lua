@@ -704,6 +704,20 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     frame.dfTestCurrentHealth = math.floor((testData.maxHealth or 100000) * health)
     if DF.ApplyHealthFadeAlpha then DF:ApplyHealthFadeAlpha(frame) end
 
+    -- ☠ THE BAR COLOUR HAS TO BE RE-RUN TOO. Live pairs every health change with the
+    -- colour applier -- Frames/Update.lua does SetHealthBarValue then
+    -- UpdateHealthBarAppearance, twice -- because in "Health Gradient" (PERCENT) mode
+    -- the colour IS a function of health. This ticker set the value and the stamps but
+    -- never the colour, so an animated preview kept whatever colour the last full
+    -- render happened to leave: the bars moved and stayed green. CLASS and CUSTOM hid
+    -- the bug, since their colour does not depend on health.
+    --   Must run AFTER the dfHealthPct stamp above -- that is the DATA the test fork
+    -- inside UpdateHealthBarAppearance reads instead of UnitHealthPercent.
+    --   Safe next to ApplyHealthFadeAlpha: the fade writes the FRAME's alpha
+    -- (HealthFade.lua `frame:SetAlpha`) and this writes the TEXTURE's, so neither
+    -- clobbers the other regardless of order.
+    if DF.UpdateHealthBarAppearance then DF:UpdateHealthBarAppearance(frame) end
+
     -- ★ LIVE'S MISSING-HEALTH RENDERER, not a copy of it. Two near-identical ~55-line
     -- restatements (value, texture, all four colour modes, the dead-colour override)
     -- lived in this file. DF.SetMissingHealthBarValue now reads the frame stamps, so
