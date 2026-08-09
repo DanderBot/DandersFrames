@@ -727,10 +727,18 @@ local function IterateFramesInMode(mode, updateFunc)
 end
 
 -- Update frame sizes AND layout positions
-function DF:LightweightUpdateFrameSize()
+-- `force` skips the drag throttle. ⚠ NEEDED, not a convenience: this is the ONLY live
+-- path that re-anchors the health bar to framePadding (the other two sites are frame
+-- CREATION and the reduced-max-health restore). Nothing in the full-update path does it,
+-- so a padding change that does not come from a slider DRAG left the health bar at the
+-- old inset while the resource bar moved — ApplyResourceBarLayout re-reads padding every
+-- pass, so the two disagreed. Typing a value and pressing Enter was the reported case
+-- (Krathe, 2026-08-09); the throttle would also have swallowed a single un-forced call
+-- landing inside the drag window.
+function DF:LightweightUpdateFrameSize(force)
     -- Frame-skip throttle
     local now = GetTime()
-    if now - lastSizeUpdate < SIZE_UPDATE_INTERVAL then
+    if not force and now - lastSizeUpdate < SIZE_UPDATE_INTERVAL then
         return
     end
     lastSizeUpdate = now
@@ -2948,8 +2956,23 @@ function DF:MigrateRoleBorderColors(profile)
         DAMAGER = {r = 0.85, g = 0.20, b = 0.20, a = 1},
     }
 
-    -- Adopt from whichever mode-level set was customised first.
-    local sources = { DF.db.party, DF.db.raid }
+    -- Adopt from whichever mode-level set was customised first, WITHIN THIS PROFILE.
+    --
+    -- ☠ THIS READ USED TO BE `DF.db.party` / `DF.db.raid` — the ACTIVE profile — while the
+    -- write went to the profile passed in. The caller loops every profile in the DB, so
+    -- every one of them adopted whichever profile you happened to log in on, and their own
+    -- legacy colours were skipped (Krathe, 2026-08-08).
+    --
+    -- ⚠ AND IT COULD NOT SELF-CORRECT. adopt() always ends by writing DEFAULTS when no
+    -- source matches, so roleColors is fully populated after one pass, and the `if rc[role]
+    -- then return end` gate then makes every later run a no-op. Fixing the source only
+    -- helps profiles that have not been migrated yet; already-migrated ones keep the wrong
+    -- colours (their legacy keys are still in party/raid, just unreachable). Krathe's call:
+    -- fix forward, no V2 recovery pass — the affected population is alpha testers.
+    --
+    -- ⚠ `profile = profile or DF.db` above still works: DF.db is itself profile-shaped
+    -- (.party/.raid), so the no-argument call reads the active profile, as intended.
+    local sources = { profile.party, profile.raid }
     local function adopt(role, modeKey)
         if rc[role] then return end
         for _, m in ipairs(sources) do
@@ -3185,6 +3208,46 @@ function DF:MigrateBorderInsetFold()
     end
 end
 
+-- One-time: turn the Important Debuffs highlight ON for profiles that predate the
+-- baseline flip. Krathe's call (2026-08-08) -- the treatment is good enough now to be
+-- the out-of-box look, but the flip alone could never reach anyone.
+--
+-- ☠ WHY A MIGRATION IS NEEDED AT ALL, given the default is ALREADY true. The feature
+-- shipped OFF (408a59a5, "it changes the look of a row every user already has") and the
+-- default moved to true in ab781303. Config defaults only fill MISSING keys, and the
+-- ADDON_LOADED backfill had already written `false` into every profile alive during the
+-- OFF era. So those profiles hold an explicit false that the new default never revisits.
+-- This is the documented exception to change-the-baseline: the baseline DID change and
+-- provably did not carry.
+--
+-- ⚠ UNCONDITIONAL WRITE, unlike the …BaselineV2/V3 migrations, which only correct one
+-- exact legacy number. There is no legacy value to key off here -- false is both "never
+-- touched it" and "turned it off on purpose", and the two are indistinguishable in the
+-- saved variables. Krathe's ruling (2026-08-08): the feature only ever existed on the
+-- PTR lane, so the "turned it off on purpose" population is a handful of testers and
+-- overwriting them once is acceptable. Do NOT reuse this shape for a setting with live
+-- users without asking -- the reasoning is about the audience, not the mechanism. The
+-- flag is therefore
+-- what makes it once-only, so it MUST also be stamped on fresh profiles
+-- (FRESH_PROFILE_MIGRATION_FLAGS) -- otherwise a user who turns it off, reloads, and
+-- gets re-forced would be the exact behaviour asked against.
+function DF:MigrateImportantDebuffOn()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        if type(profile) == "table" and not profile._importantDebuffOnV1 then
+            -- Both modes: debuffImportantHighlight is not a party-only key, so
+            -- RaidDefaults carries its own copy and the raid table holds a stored false too.
+            for _, mode in ipairs({ "party", "raid" }) do
+                local modeDb = profile[mode]
+                if type(modeDb) == "table" then
+                    modeDb.debuffImportantHighlight = true
+                end
+            end
+            profile._importantDebuffOnV1 = true
+        end
+    end
+end
+
 -- One-time cleanup: the legacy raidGroupOrder ("NORMAL"/"REVERSE") toggle is
 -- deprecated -- group order now comes solely from the Group Display Order /
 -- My Group First feature (raidGroupDisplayOrder), which every positioner honours.
@@ -3352,6 +3415,11 @@ local FRESH_PROFILE_MIGRATION_FLAGS = {
     _defensiveBaselineV2    = true,
     _missingBuffBaselineV3  = true,
     _buffPresetBaselineV1   = true,
+    -- ☠ MANDATORY here, not merely tidy. MigrateImportantDebuffOn writes
+    -- debuffImportantHighlight = true UNCONDITIONALLY, so without this stamp a fresh
+    -- profile is unflagged and every reload re-forces it -- silently undoing the user
+    -- turning it off, which is precisely what the feature request ruled out.
+    _importantDebuffOnV1    = true,
 }
 local FRESH_PROFILE_PARTY_MIGRATION_FLAGS = {
     _personalContainerCenterMigrated = true,
@@ -6039,6 +6107,13 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- stale "REVERSE"); group order now comes from Group Display Order.
             if DF.MigrateDeprecateRaidGroupOrder then
                 DF:MigrateDeprecateRaidGroupOrder()
+            end
+
+            -- Turn Important Debuffs ON once for profiles that predate the baseline
+            -- flip. Writes unconditionally behind a per-profile flag, so it runs exactly
+            -- once and a later user OFF is permanent. See DF:MigrateImportantDebuffOn.
+            if DF.MigrateImportantDebuffOn then
+                DF:MigrateImportantDebuffOn()
             end
 
             -- Priority higher-wins flip is now lazy/at-point-of-use — see
