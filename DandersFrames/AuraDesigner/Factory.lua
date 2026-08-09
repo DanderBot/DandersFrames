@@ -84,6 +84,98 @@ function DF:FactoryOwnsAD(db)
 end
 
 -- ============================================================
+-- FILTER REFERENCES  ("@preset:<key>" / "@custom:<id>")
+-- A registry filter used where an aura NAME is expected — as an effect's trigger, or
+-- as the record a frame effect hangs off. One sentinel string rather than a nested
+-- selection table, so every array of aura names (triggers, store keys, card keys)
+-- keeps working untouched.
+--
+-- ☠ CACHED, and it has to be. Resolving a selection walks the registry and a preset
+-- can carry 100+ ids; the caller is BuildADIdentityFilters, which pickWinner runs once
+-- per configured effect per TYPE — five times per frame on every aura event. Uncached
+-- this would be a hot-path regression, not a feature. Keyed to DF.auraLayoutVersion,
+-- which every filter edit / custom-filter delete / link change already bumps (the same
+-- invalidation fgroupResCache rides).
+--
+-- The returned table is SHARED and must be treated as immutable: it is handed to
+-- AuraContainer:Create and retained in the live handle's config, exactly as the filter
+-- groups' cached res.map already is.
+-- ============================================================
+local AD_FILTER_PREFIX = "@"
+local adFilterRefCache, adFilterRefCacheVer = {}, -1
+
+-- Split a sentinel into its selection shape, or nil when it isn't one.
+-- Custom-filter ids are STRINGS ("cf17" — R:CreateCustomFilter builds them as
+-- "cf" .. nextFilterID), so the id travels verbatim and is never tonumber'd.
+function DF:ParseADFilterRef(name)
+    if type(name) ~= "string" or name:sub(1, 1) ~= AD_FILTER_PREFIX then return nil end
+    local presetKey = name:match("^@preset:(.+)$")
+    if presetKey then return "preset", presetKey end
+    local customID = name:match("^@custom:(.+)$")
+    if customID then return "custom", customID end
+    return nil
+end
+
+-- Build the sentinel for a filter reference (the one place the format is written).
+function DF:MakeADFilterRef(kind, key)
+    if kind ~= "preset" and kind ~= "custom" then return nil end
+    if key == nil or key == "" then return nil end
+    return AD_FILTER_PREFIX .. kind .. ":" .. tostring(key)
+end
+
+-- Display name for a sentinel, or nil when it isn't one. Lives here rather than in the
+-- options addon because the editor's card list DROPS any record it can't name
+-- (CollectAllEffects) — a filter-owned effect that can't resolve a name is an effect the
+-- user can never see or delete. Deleted custom filters fall back to a placeholder for
+-- exactly that reason.
+function DF:ADFilterRefDisplayName(name)
+    local kind, key = DF:ParseADFilterRef(name)
+    if not kind then return nil end
+    local R = DF.FilterRegistry
+    local L = DF.L
+    if kind == "preset" then
+        if R and R.Categories then
+            for _, cat in ipairs(R.Categories) do
+                if cat.key == key then return L[cat.name] or cat.name end
+            end
+        end
+        return key
+    end
+    local cf = R and R.GetCustomFilter and R:GetCustomFilter(key)
+    return (cf and cf.name) or L["Deleted Filter"]
+end
+
+function DF:ResolveADFilterRef(name)
+    local kind, key = DF:ParseADFilterRef(name)
+    if not kind then return nil end
+    local ver = DF.auraLayoutVersion or 0
+    if adFilterRefCacheVer ~= ver then
+        adFilterRefCache = {}
+        adFilterRefCacheVer = ver
+    end
+    local hit = adFilterRefCache[name]
+    if hit ~= nil then
+        -- `false` is the memoised "does not resolve" — don't re-walk the registry for it.
+        if hit == false then return nil end
+        return hit
+    end
+    local R = DF.FilterRegistry
+    local res = R and R.ResolveSelection and R:ResolveSelection(
+        (kind == "preset") and { presets = { [key] = true }, customs = {} }
+                            or { presets = {}, customs = { [key] = true } }, false)
+    -- "all" (empty selection) and "exclude" render nothing and must NOT collapse to an
+    -- empty include map — that would match every helpful aura. Same gate the filter
+    -- group render path applies.
+    if res and res.kind == "include" and res.map and next(res.map) then
+        local out = { includeSpellIDs = res.map }
+        adFilterRefCache[name] = out
+        return out
+    end
+    adFilterRefCache[name] = false
+    return nil
+end
+
+-- ============================================================
 -- IDENTITY  (static spell-ID whitelist -> native includeSpellIDs map)
 -- A { includeSpellIDs = map } candidate-filter table Blizzard evaluates
 -- container-side. Built purely from the static per-spec
@@ -122,6 +214,13 @@ function DF:BuildADIdentityFilters(spec, auraName)
     if adHocID then
         return { includeSpellIDs = { [tonumber(adHocID)] = true } }
     end
+    -- FILTER REFERENCES ("@preset:<key>" / "@custom:<id>"): a whole registry filter
+    -- standing in for a single spell. Because this is the ONE resolver every effect
+    -- goes through, teaching it here makes a filter usable both as an effect's TRIGGER
+    -- and as the record a frame effect hangs off -- no second store, no extra pool.
+    -- Collision-proof for the same reason "#<id>" is: no spell name starts with "@".
+    local fref = DF.ResolveADFilterRef and DF:ResolveADFilterRef(auraName)
+    if fref then return fref end
     -- SpellDB fallback (all-spec support): a name the curated per-spec Config
     -- tables don't know resolves through the FilterRegistry SpellDB by display
     -- name (shipped English `rec.n` or the localized runtime name), unioning
@@ -2917,7 +3016,11 @@ local SOUND_EVENTS = {
 local function collectDesiredSounds(desired, unit, auras, keyPrefix, idSpec, channel)
     for auraName, auraCfg in pairs(auras) do
         local sc = (type(auraCfg) == "table") and auraCfg.sound
-        if sc and sc.enabled then
+        -- Filter-owned records never register sounds: the native path is per spell ID,
+        -- so one filter would mean one registration per spell in it. The editor doesn't
+        -- offer sound on them either; this is the render-side backstop for hand-edited
+        -- or imported data.
+        if sc and sc.enabled and not DF:ParseADFilterRef(auraName) then
             local ids = DF:BuildADIdentityFilters(idSpec, auraName)
             local map = ids and ids.includeSpellIDs
             if not map and keyPrefix ~= "" then warnOtherUnresolved(auraName) end

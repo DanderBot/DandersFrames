@@ -38,6 +38,7 @@ local RefreshLiveFramesThrottled = P.RefreshLiveFramesThrottled
 local AddDurationColorsLink = P.AddDurationColorsLink
 local CreateInstanceProxy = P.CreateInstanceProxy
 local CreateProxy = P.CreateProxy
+local OpenFilterPicker = P.OpenFilterPicker
 local CreateAuraProxy = P.CreateAuraProxy
 local GetAuraWarningKey = P.GetAuraWarningKey
 local AttachWarningBadge = P.AttachWarningBadge
@@ -1705,7 +1706,10 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 local tagText = tagFrame:CreateFontString(nil, "OVERLAY")
                 GUI:SetSettingsFont(tagText, 9, "")
                 tagText:SetPoint("LEFT", 6, 0)
-                tagText:SetText(displayNames[trigName] or trigName)
+                -- Filter triggers name themselves from the registry; a raw
+                -- "@preset:raidBuffs" on the tag would be meaningless.
+                tagText:SetText((DF.ADFilterRefDisplayName and DF:ADFilterRefDisplayName(trigName))
+                    or displayNames[trigName] or trigName)
                 tagText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
                 local tagW = tagText:GetStringWidth() + 12
@@ -1801,6 +1805,50 @@ S.CreateEffectCard = function(parent, yPos, effect)
                             end,
                         },
                     },
+                })
+            end)
+
+            -- "+ Filter" — the same trigger list, but the entry is a whole registry
+            -- filter rather than one spell. It rides the identical code path:
+            -- DF:BuildADIdentityFilters resolves an "@preset:"/"@custom:" entry exactly
+            -- as it resolves a spell name, so the effect fires on anything the filter
+            -- matches. Its own button rather than a mode on the one above, because a
+            -- hidden modifier is not a discoverable way to reach half a feature.
+            tagX = tagX + addTrigW + TAG_GAP
+            local addFilterW = 66
+            if (tagX + addFilterW) > (bodyWidth - 16) then
+                tagX = 0
+                tagY = tagY - (TAG_H + TAG_ROW_GAP)
+            end
+            local addTrigFilterBtn = CreateFrame("Button", nil, trigContainer, "BackdropTemplate")
+            addTrigFilterBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
+            GUI:StyleButton(addTrigFilterBtn, { width = addFilterW, height = TAG_H, primary = true,
+                accent = { r = 0.25, g = 0.40, b = 0.25 },
+                icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_alt", size = 11 },
+                text = L["Filter"] })
+            GUI:SetSettingsFont(addTrigFilterBtn.Text, 9, "")
+            addTrigFilterBtn.Text:SetTextColor(0.5, 0.8, 0.5)
+            addTrigFilterBtn.Icon:SetVertexColor(0.5, 0.8, 0.5)
+            addTrigFilterBtn:SetScript("OnClick", function()
+                -- Pool pinned at open time, same reason as the spell picker above.
+                local capturedPool = CurrentAuraPool()
+                local existing = {}
+                for _, t in ipairs(GetFrameEffectTriggers(effect.auraName, effect.typeKey)) do
+                    existing[t] = true
+                end
+                OpenFilterPicker({
+                    anchor = addTrigFilterBtn,
+                    isLinked = function(kind, key)
+                        local ref = DF:MakeADFilterRef(kind, key)
+                        return ref ~= nil and existing[ref] or false
+                    end,
+                    onPick = function(kind, key)
+                        local ref = DF:MakeADFilterRef(kind, key)
+                        if not ref then return end
+                        AddFrameEffectTrigger(effect.auraName, effect.typeKey, ref, capturedPool)
+                        S.SwitchTab("effects")
+                        RefreshPreviewEffects()
+                    end,
                 })
             end)
 
@@ -2025,6 +2073,19 @@ S.BuildEffectsTab = function()
     local my = -4
     local MENU_ROW_H = 24
 
+    -- Same five effects, owned by a FILTER instead of one spell. Sound is absent by
+    -- design: the native sound path registers per spell ID, so a 600-spell filter
+    -- would mean 600 registrations.
+    local FRAME_FILTER_ITEMS = {
+        { label = L["Border"],            type = "border"     },
+        { label = L["Health Bar Color"],  type = "healthbar"  },
+        { label = L["Background Color"],  type = "background" },
+        { label = L["Name Text Color"],   type = "nametext"   },
+        { label = L["Health Text Color"], type = "healthtext" },
+    }
+
+    local MENU_ROW_H = 24
+
     -- The menu is two identical sections -- a small dim heading, then one row
     -- per entry coloured by its type badge -- and both were written out in
     -- full. `my` is the running cursor, so these close over it.
@@ -2053,6 +2114,27 @@ S.BuildEffectsTab = function()
             local capturedType = item.type
             menuBtn:SetScript("OnClick", function()
                 menuFrame:Hide()
+                if scope == "filter" then
+                    -- The effect hangs off the FILTER: its record is stored under the
+                    -- "@preset:"/"@custom:" key, which DF:BuildADIdentityFilters resolves
+                    -- to the filter's whole spell set. Nothing downstream changes.
+                    OpenFilterPicker({
+                        anchor = addBtn,
+                        isLinked = function(kind, key)
+                            local ref = DF:MakeADFilterRef(kind, key)
+                            return ref ~= nil and HasFrameEffect(ref, capturedType) or false
+                        end,
+                        onPick = function(kind, key)
+                            local ref = DF:MakeADFilterRef(kind, key)
+                            if not ref then return end
+                            AddPickedSpell(ref, capturedType, "frame")
+                            S.SwitchTab("effects")
+                            RefreshPlacedIndicators()
+                            RefreshPreviewEffects()
+                        end,
+                    })
+                    return
+                end
                 OpenIndicatorPicker(capturedType, scope)
             end)
             my = my - MENU_ROW_H
@@ -2071,6 +2153,17 @@ S.BuildEffectsTab = function()
     my = my - 6
 
     AddMenuSection(L["FRAME-LEVEL EFFECTS"], FRAME_ITEMS, "frame")
+
+    -- Divider
+    my = my - 4
+    local mdiv2 = menuFrame:CreateTexture(nil, "ARTWORK")
+    mdiv2:SetPoint("TOPLEFT", 8, my)
+    mdiv2:SetPoint("RIGHT", menuFrame, "RIGHT", -8, 0)
+    mdiv2:SetHeight(1)
+    mdiv2:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.6)
+    my = my - 6
+
+    AddMenuSection(L["FROM A FILTER"], FRAME_FILTER_ITEMS, "filter")
 
     menuFrame:SetHeight(-my + 6)
 

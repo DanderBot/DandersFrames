@@ -25,6 +25,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Aura Designer) **New: Expiry Alerts.** Indicators can now warn you when a tracked buff is about to run out — below a threshold you choose, your own custom text or a warning glyph appears on the unit frame, positioned and sized however you like, so a tracked shield can literally say "Shield dropping!". Find it in each indicator's Expiry Warning section.
 * (Aura Designer) Open dropdown menus now close when switching tabs instead of lingering over the new tab.
 * (Aura Designer) Changing a group's border style no longer rebuilds the whole group list — the cards adjust in place and your scroll position is kept.
+* (Aura Designer) **Effects can now be driven by a whole filter.** A border, health bar colour, background colour or text colour can fire on any buff a filter matches, instead of one spell at a time. Choose one from the new "From a Filter" section when adding an effect, or use the Filter button to add one as an extra trigger on an effect you already have.
 * (Auras) "Hide Long Debuffs" now also works while "All Debuffs" is enabled. "Keep important debuffs" still requires the category filters.
 * (Aura Designer) Fix cooldown swipes on indicators and groups draining in the opposite direction from the buff and debuff bars.
 * (Aura Designer) Fix error spam from the health bar overlay, most noticeable in follower dungeons and other content where players join and leave often.

@@ -619,6 +619,36 @@ local function EmbedCustomFilterData(exportData, includeOverrides)
             -- store — no dual-shape dispatch needed).
             local olg = type(preset) == "table" and preset.otherLayoutGroups
             if type(olg) == "table" then collectGroupArray(olg) end
+            -- Aura Designer effects reference custom filters TWO more ways: a
+            -- filter-owned effect is stored under the "@custom:<id>" aura key, and any
+            -- effect can list one as a TRIGGER. Both are plain strings rather than a
+            -- selection table, so collectSel never sees them — miss these and the
+            -- filter doesn't ride the export, and the receiver's effect silently binds
+            -- to whatever filter happens to hold that id.
+            local function collectAuraRefs(auraName, auraCfg)
+                local kind, key = DF:ParseADFilterRef(auraName)
+                if kind == "custom" then refs[key] = true end
+                if type(auraCfg) ~= "table" then return end
+                for _, typeCfg in pairs(auraCfg) do
+                    if type(typeCfg) == "table" and type(typeCfg.triggers) == "table" then
+                        for _, t in ipairs(typeCfg.triggers) do
+                            local tk, tkey = DF:ParseADFilterRef(t)
+                            if tk == "custom" then refs[tkey] = true end
+                        end
+                    end
+                end
+            end
+            local function collectAuraStore(store)
+                if type(store) ~= "table" then return end
+                for k, v in pairs(store) do collectAuraRefs(k, v) end
+            end
+            if type(preset) == "table" then
+                -- auras is spec-keyed ({ [specKey] = { [name] = cfg } }); otherAuras is flat.
+                if type(preset.auras) == "table" then
+                    for _, specAuras in pairs(preset.auras) do collectAuraStore(specAuras) end
+                end
+                collectAuraStore(preset.otherAuras)
+            end
         end
     end
     if next(refs) and DF.FilterRegistry then
@@ -1174,6 +1204,47 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
                 -- store — no dual-shape dispatch needed).
                 local olg = type(preset) == "table" and preset.otherLayoutGroups
                 if type(olg) == "table" then remapGroupArray(olg) end
+                -- AD effect references to custom filters: the "@custom:<id>" aura KEY of
+                -- a filter-owned effect, and any "@custom:<id>" in a trigger list. Both
+                -- are strings, so remapCustoms can't reach them — without this they keep
+                -- the exporter's cf id and bind to an unrelated filter on the receiver.
+                local function remapRef(name)
+                    local kind, key = DF:ParseADFilterRef(name)
+                    if kind ~= "custom" then return name end
+                    local newKey = remap[key]
+                    if not newKey or newKey == key then return name end
+                    return DF:MakeADFilterRef("custom", newKey) or name
+                end
+                local function remapAuraStore(store)
+                    if type(store) ~= "table" then return end
+                    -- Rekey filter-owned records first, collecting into a fresh table so a
+                    -- remapped key can't collide with one still to be visited.
+                    local rekeyed, changed = {}, false
+                    for auraName, auraCfg in pairs(store) do
+                        if type(auraCfg) == "table" then
+                            for _, typeCfg in pairs(auraCfg) do
+                                if type(typeCfg) == "table" and type(typeCfg.triggers) == "table" then
+                                    for i, t in ipairs(typeCfg.triggers) do
+                                        typeCfg.triggers[i] = remapRef(t)
+                                    end
+                                end
+                            end
+                        end
+                        local newName = remapRef(auraName)
+                        if newName ~= auraName then changed = true end
+                        rekeyed[newName] = auraCfg
+                    end
+                    if changed then
+                        wipe(store)
+                        for k, v in pairs(rekeyed) do store[k] = v end
+                    end
+                end
+                if type(preset) == "table" then
+                    if type(preset.auras) == "table" then
+                        for _, specAuras in pairs(preset.auras) do remapAuraStore(specAuras) end
+                    end
+                    remapAuraStore(preset.otherAuras)
+                end
             end
         end
     end

@@ -535,6 +535,12 @@ P.WithConfiguredAdHocAuras = WithConfiguredAdHocAuras
 -- Uses static texture IDs to avoid C_Spell.GetSpellTexture returning
 -- the wrong icon when talent choice nodes replace a spell.
 local function GetAuraIcon(specKey, auraName)
+    -- Filter-owned records aren't one spell, so there is no spell icon to show —
+    -- the shared filter glyph stands in (the card's other fallback is a colour swatch
+    -- resolved from the spec's trackable list, which a filter is never in).
+    if DF.ParseADFilterRef and DF:ParseADFilterRef(auraName) then
+        return "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_alt"
+    end
     -- Static icon table — always returns the correct icon regardless of talents
     local icons = DF.AuraDesigner.IconTextures
     if icons and icons[auraName] then
@@ -635,6 +641,173 @@ local function CloseADPicker()
     end
 end
 P.CloseADPicker = CloseADPicker
+
+-- ============================================================
+-- FILTER PICKER  (a small anchored dropdown of registry filters)
+-- Presets in Categories order with live counts, then customs name-sorted. No
+-- Uncategorised option by design — every consumer needs a resolvable include map.
+--
+-- Extracted from the filter group card's "+ Add Filter", which owned the only copy.
+-- Two more consumers arrived (an effect's trigger list, and a filter OWNING an
+-- effect) and forking a 120-line bespoke dropdown three ways was not on.
+--
+-- opts = {
+--   anchor    — the button to hang under; clicking it again closes (toggle)
+--   isLinked  — function(kind, key) -> true to leave the candidate out
+--   onPick    — function(kind, key, label); the picker closes itself first
+--   emptyText — optional override for the no-candidates line
+-- }
+-- ============================================================
+local function OpenFilterPicker(opts)
+    local R = DF.FilterRegistry
+    if not R or not opts or not opts.anchor then return end
+    local anchor = opts.anchor
+    local isLinked = opts.isLinked or function() return false end
+
+    local candidates = {}
+    for _, cat in ipairs(R.Categories) do
+        if not isLinked("preset", cat.key) then
+            local enabled, total = R:PresetCounts(cat.key)
+            tinsert(candidates, { kind = "preset", key = cat.key,
+                label = format("%s |cff888888(%d/%d)|r", L[cat.name], enabled, total) })
+        end
+    end
+    local freeCustoms = {}
+    for cfId in pairs(R:GetStore().customFilters) do
+        if not isLinked("custom", cfId) then tinsert(freeCustoms, cfId) end
+    end
+    sort(freeCustoms, function(a, b)
+        local fa, fb = R:GetCustomFilter(a), R:GetCustomFilter(b)
+        local na, nb = (fa and fa.name or ""), (fb and fb.name or "")
+        if na ~= nb then return na < nb end
+        return a < b
+    end)
+    for _, cfId in ipairs(freeCustoms) do
+        local cf = R:GetCustomFilter(cfId)
+        tinsert(candidates, { kind = "custom", key = cfId,
+            label = format("%s |c%s(%s)|r", (cf and cf.name) or cfId, GUI:ToneHex("info"), L["Custom"]) })
+    end
+
+    local dropName = "DFADFilterGroupPicker"
+    local drop = _G[dropName]
+    if not drop then
+        drop = CreateFrame("Frame", dropName, UIParent, "BackdropTemplate")
+        drop:SetFrameStrata("FULLSCREEN_DIALOG")
+        drop:SetClampedToScreen(true)
+        local overlay = CreateFrame("Button", nil, UIParent)
+        overlay:SetAllPoints(UIParent)
+        overlay:SetFrameStrata("FULLSCREEN")
+        overlay:Hide()
+        overlay:SetScript("OnClick", function()
+            drop:Hide()
+            overlay:Hide()
+        end)
+        drop._overlay = overlay
+        -- SetPropagateKeyboardInput is protected in combat for insecure code: skip the
+        -- calls there (keys propagate anyway — ESC just hides the dropdown), and don't
+        -- trap keyboard input if built mid-combat.
+        if not InCombatLockdown() then
+            drop:EnableKeyboard(true)
+            drop:SetPropagateKeyboardInput(true)
+        end
+        drop:SetScript("OnKeyDown", function(self, key)
+            if key == "ESCAPE" then
+                if not InCombatLockdown() then self:SetPropagateKeyboardInput(false) end
+                self:Hide()
+            else
+                if not InCombatLockdown() then self:SetPropagateKeyboardInput(true) end
+            end
+        end)
+        drop:SetScript("OnHide", function(self)
+            self._ownerBtn = nil
+            if self._overlay then self._overlay:Hide() end
+        end)
+    end
+    if drop:IsShown() and drop._ownerBtn == anchor then
+        drop:Hide()
+        return
+    end
+    drop._ownerBtn = anchor
+
+    local DROP_W = 240
+    local MAX_H = 300
+    drop:SetWidth(DROP_W)
+    ApplyBackdrop(drop, GUI.Colors.background, GUI.Colors.border)
+
+    if not drop._scrollFrame then
+        local sf = CreateFrame("ScrollFrame", nil, drop)
+        sf:SetPoint("TOPLEFT", 0, 0)
+        sf:SetPoint("BOTTOMRIGHT", 0, 0)
+        drop._scrollFrame = sf
+        local sc = CreateFrame("Frame", nil, sf)
+        sc:SetWidth(DROP_W)
+        sf:SetScrollChild(sc)
+        drop._scrollChild = sc
+        sf:SetScript("OnMouseWheel", function(self2, delta2)
+            local cur = self2:GetVerticalScroll()
+            local maxS = max(0, self2:GetVerticalScrollRange())
+            self2:SetVerticalScroll(max(0, min(maxS, cur - (delta2 * 24))))
+        end)
+    end
+    local scrollChild = drop._scrollChild
+    local scrollFrame = drop._scrollFrame
+    scrollChild:SetWidth(DROP_W)
+    for _, child in ipairs({scrollChild:GetChildren()}) do child:Hide(); child:SetParent(nil) end
+    for _, rgn in ipairs({scrollChild:GetRegions()}) do
+        if rgn:GetObjectType() == "FontString" or rgn:GetObjectType() == "Texture" then rgn:Hide() end
+    end
+    scrollFrame:Show()
+    scrollChild:EnableMouseWheel(true)
+    scrollChild:SetScript("OnMouseWheel", function(_, delta2)
+        scrollFrame:GetScript("OnMouseWheel")(scrollFrame, delta2)
+    end)
+
+    local C_TEXT, C_TEXT_DIM = GUI.Colors.text, GUI.Colors.textDim
+    local dy2 = -4
+    if #candidates == 0 then
+        local none = scrollChild:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(none, 9, "")
+        none:SetPoint("TOPLEFT", 8, dy2 - 4)
+        none:SetText(opts.emptyText or L["No filters available"])
+        none:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
+        dy2 = dy2 - 24
+    end
+    for _, cand in ipairs(candidates) do
+        local ROW_H = 24
+        local row = CreateFrame("Button", nil, scrollChild)
+        row:SetHeight(ROW_H)
+        row:SetPoint("TOPLEFT", 4, dy2)
+        row:SetPoint("RIGHT", scrollChild, "RIGHT", -4, 0)
+
+        local rName = row:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(rName, 9, "")
+        rName:SetPoint("LEFT", 8, 0)
+        rName:SetText(cand.label)
+        rName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+        local hl = row:CreateTexture(nil, "BACKGROUND")
+        hl:SetAllPoints()
+        hl:SetColorTexture(1, 1, 1, 0)
+        row:SetScript("OnEnter", function() hl:SetColorTexture(1, 1, 1, 0.03) end)
+        row:SetScript("OnLeave", function() hl:SetColorTexture(1, 1, 1, 0) end)
+
+        local capturedCand = cand
+        row:SetScript("OnClick", function()
+            drop:Hide()
+            if opts.onPick then opts.onPick(capturedCand.kind, capturedCand.key, capturedCand.label) end
+        end)
+        dy2 = dy2 - ROW_H
+    end
+    local totalH = -dy2 + 4
+    scrollChild:SetHeight(totalH)
+    drop:SetHeight(math.min(totalH, MAX_H))
+
+    drop:ClearAllPoints()
+    drop:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)
+    drop:Show()
+    if drop._overlay then drop._overlay:Show() end
+end
+P.OpenFilterPicker = OpenFilterPicker
 
 -- ============================================================
 -- LAYOUT GROUP HELPERS
@@ -880,7 +1053,12 @@ local FRAME_LEVEL_TYPE_KEYS = { "border", "healthbar", "background", "nametext",
 -- auras deliberately keep today's linger behavior. Forward-declared above
 -- RemoveIndicatorInstance, which calls it after every removal.
 S.CleanupAdHocAura = function(auraName)
-    if not AdHocSpellID(auraName) then return end
+    -- Filter-owned records ("@preset:"/"@custom:") clean up on the same rule as ad-hoc
+    -- ones: neither is a spell the user picked into the pool, so an entry left holding
+    -- nothing but its default priority is pure cruft in the profile.
+    local isSynthetic = AdHocSpellID(auraName)
+        or (DF.ParseADFilterRef and DF:ParseADFilterRef(auraName) ~= nil)
+    if not isSynthetic then return end
     local auras = CurrentAuraPool()
     local auraCfg = auras and auras[auraName]
     if type(auraCfg) ~= "table" then return end
@@ -954,7 +1132,14 @@ local function CollectAllEffects()
         -- (names are SpellDB names or ad-hoc keys; resolve display live).
         local adHocID = AdHocSpellID(auraName)
         local displayName
-        if isOther then
+        -- Filter-owned effects ("@preset:<key>" / "@custom:<id>") are named from the
+        -- registry, in BOTH pools — they are spec-independent by nature. Resolved
+        -- FIRST: this gate drops any record it cannot name, so a filter-owned effect
+        -- that fell through here would be invisible and undeletable.
+        displayName = DF.ADFilterRefDisplayName and DF:ADFilterRefDisplayName(auraName)
+        if displayName then
+            -- named
+        elseif isOther then
             displayName = OtherPoolDisplayName(auraName)
         else
             displayName = displayNames[auraName]
@@ -978,9 +1163,12 @@ local function CollectAllEffects()
                 end
             end
 
-            -- Frame-level effects (current per-aura model)
+            -- Frame-level effects (current per-aura model). Sound is NOT offered on a
+            -- filter-owned record: the native sound path registers per spell ID, so a
+            -- 600-spell filter would mean 600 registrations.
+            local isFilterOwned = DF.ParseADFilterRef and DF:ParseADFilterRef(auraName) ~= nil
             for _, typeKey in ipairs(FRAME_LEVEL_TYPE_KEYS) do
-                if auraCfg[typeKey] then
+                if auraCfg[typeKey] and not (isFilterOwned and typeKey == "sound") then
                     tinsert(effects, {
                         source      = "frame",
                         auraName    = auraName,

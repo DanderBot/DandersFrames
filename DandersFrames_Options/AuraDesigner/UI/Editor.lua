@@ -57,6 +57,7 @@ local UpdateLayoutTabState = P.UpdateLayoutTabState
 local UpdateSpecDropdownState = P.UpdateSpecDropdownState
 local SetMainTab = P.SetMainTab
 local OpenGroupSpellPicker = P.OpenGroupSpellPicker
+local OpenFilterPicker = P.OpenFilterPicker
 local AddGroupAppearanceSection = P.AddGroupAppearanceSection
 
 S.BuildLayoutGroupsTab = function()
@@ -417,158 +418,18 @@ S.BuildLayoutGroupsTab = function()
                 GUI:StyleButton(addFilterLinkBtn, { height = 22, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 11 }, text = L["Add Filter"] })
                 GUI:SetSettingsFont(addFilterLinkBtn.Text, 9, "")
                 addFilterLinkBtn:SetScript("OnClick", function()
-                    -- Build the unlinked candidate list: presets (Categories order,
-                    -- live counts), then customs (name-sorted). No Uncategorised
-                    -- option by design — a group must resolve to an include map.
-                    local candidates = {}
-                    for _, cat in ipairs(R.Categories) do
-                        if not fsel.presets[cat.key] then
-                            local enabled, total = R:PresetCounts(cat.key)
-                            tinsert(candidates, { kind = "preset", key = cat.key,
-                                label = format("%s |cff888888(%d/%d)|r", L[cat.name], enabled, total) })
-                        end
-                    end
-                    local freeCustoms = {}
-                    for cfId in pairs(R:GetStore().customFilters) do
-                        if not fsel.customs[cfId] then tinsert(freeCustoms, cfId) end
-                    end
-                    sort(freeCustoms, function(a, b)
-                        local fa, fb = R:GetCustomFilter(a), R:GetCustomFilter(b)
-                        local na, nb = (fa and fa.name or ""), (fb and fb.name or "")
-                        if na ~= nb then return na < nb end
-                        return a < b
-                    end)
-                    for _, cfId in ipairs(freeCustoms) do
-                        local cf = R:GetCustomFilter(cfId)
-                        tinsert(candidates, { kind = "custom", key = cfId,
-                            label = format("%s |c%s(%s)|r", (cf and cf.name) or cfId, GUI:ToneHex("info"), L["Custom"]) })
-                    end
-
-                    -- Create/reuse the picker dropdown (same overlay/ESC/scroll idiom
-                    -- as the member picker above)
-                    local dropName = "DFADFilterGroupPicker"
-                    local drop = _G[dropName]
-                    if not drop then
-                        drop = CreateFrame("Frame", dropName, UIParent, "BackdropTemplate")
-                        drop:SetFrameStrata("FULLSCREEN_DIALOG")
-                        drop:SetClampedToScreen(true)
-                        local overlay = CreateFrame("Button", nil, UIParent)
-                        overlay:SetAllPoints(UIParent)
-                        overlay:SetFrameStrata("FULLSCREEN")
-                        overlay:Hide()
-                        overlay:SetScript("OnClick", function()
-                            drop:Hide()
-                            overlay:Hide()
-                        end)
-                        drop._overlay = overlay
-                        -- SetPropagateKeyboardInput is protected in combat for
-                        -- insecure code: skip the calls there (keys propagate
-                        -- anyway — ESC just hides the dropdown), and don't trap
-                        -- keyboard input if built mid-combat.
-                        if not InCombatLockdown() then
-                            drop:EnableKeyboard(true)
-                            drop:SetPropagateKeyboardInput(true)
-                        end
-                        drop:SetScript("OnKeyDown", function(self, key)
-                            if key == "ESCAPE" then
-                                if not InCombatLockdown() then self:SetPropagateKeyboardInput(false) end
-                                self:Hide()
-                            else
-                                if not InCombatLockdown() then self:SetPropagateKeyboardInput(true) end
-                            end
-                        end)
-                        drop:SetScript("OnHide", function(self)
-                            self._ownerBtn = nil
-                            if self._overlay then self._overlay:Hide() end
-                        end)
-                    end
-                    if drop:IsShown() and drop._ownerBtn == addFilterLinkBtn then
-                        drop:Hide()
-                        return
-                    end
-                    drop._ownerBtn = addFilterLinkBtn
-
-                    local DROP_W = 240
-                    local MAX_H = 300
-                    drop:SetWidth(DROP_W)
-                    ApplyBackdrop(drop, C_BACKGROUND, C_BORDER)
-
-                    if not drop._scrollFrame then
-                        local sf = CreateFrame("ScrollFrame", nil, drop)
-                        sf:SetPoint("TOPLEFT", 0, 0)
-                        sf:SetPoint("BOTTOMRIGHT", 0, 0)
-                        drop._scrollFrame = sf
-                        local sc = CreateFrame("Frame", nil, sf)
-                        sc:SetWidth(DROP_W)
-                        sf:SetScrollChild(sc)
-                        drop._scrollChild = sc
-                        sf:SetScript("OnMouseWheel", function(self2, delta2)
-                            local cur = self2:GetVerticalScroll()
-                            local maxS = max(0, self2:GetVerticalScrollRange())
-                            self2:SetVerticalScroll(max(0, min(maxS, cur - (delta2 * 24))))
-                        end)
-                    end
-                    local scrollChild = drop._scrollChild
-                    local scrollFrame = drop._scrollFrame
-                    scrollChild:SetWidth(DROP_W)
-                    for _, child in ipairs({scrollChild:GetChildren()}) do child:Hide(); child:SetParent(nil) end
-                    for _, rgn in ipairs({scrollChild:GetRegions()}) do
-                        if rgn:GetObjectType() == "FontString" or rgn:GetObjectType() == "Texture" then rgn:Hide() end
-                    end
-                    scrollFrame:Show()
-                    scrollChild:EnableMouseWheel(true)
-                    scrollChild:SetScript("OnMouseWheel", function(_, delta2)
-                        scrollFrame:GetScript("OnMouseWheel")(scrollFrame, delta2)
-                    end)
-
-                    local dy2 = -4
-                    if #candidates == 0 then
-                        local none = scrollChild:CreateFontString(nil, "OVERLAY")
-                        GUI:SetSettingsFont(none, 9, "")
-                        none:SetPoint("TOPLEFT", 8, dy2 - 4)
-                        none:SetText(L["No filters available"])
-                        none:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
-                        dy2 = dy2 - 24
-                    end
-                    for _, cand in ipairs(candidates) do
-                        local ROW_H = 24
-                        local row = CreateFrame("Button", nil, scrollChild)
-                        row:SetHeight(ROW_H)
-                        row:SetPoint("TOPLEFT", 4, dy2)
-                        row:SetPoint("RIGHT", scrollChild, "RIGHT", -4, 0)
-
-                        local rName = row:CreateFontString(nil, "OVERLAY")
-                        GUI:SetSettingsFont(rName, 9, "")
-                        rName:SetPoint("LEFT", 8, 0)
-                        rName:SetText(cand.label)
-                        rName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-                        local hl = row:CreateTexture(nil, "BACKGROUND")
-                        hl:SetAllPoints()
-                        hl:SetColorTexture(1, 1, 1, 0)
-                        row:SetScript("OnEnter", function() hl:SetColorTexture(1, 1, 1, 0.03) end)
-                        row:SetScript("OnLeave", function() hl:SetColorTexture(1, 1, 1, 0) end)
-
-                        local capturedCand = cand
-                        row:SetScript("OnClick", function()
-                            if capturedCand.kind == "preset" then
-                                fsel.presets[capturedCand.key] = true
-                            else
-                                fsel.customs[capturedCand.key] = true
-                            end
-                            drop:Hide()
+                    OpenFilterPicker({
+                        anchor = addFilterLinkBtn,
+                        isLinked = function(kind, key)
+                            if kind == "preset" then return fsel.presets[key] and true or false end
+                            return fsel.customs[key] and true or false
+                        end,
+                        onPick = function(kind, key)
+                            if kind == "preset" then fsel.presets[key] = true
+                            else fsel.customs[key] = true end
                             StructuralFilterRefresh()
-                        end)
-                        dy2 = dy2 - ROW_H
-                    end
-                    local totalH = -dy2 + 4
-                    scrollChild:SetHeight(totalH)
-                    drop:SetHeight(math.min(totalH, MAX_H))
-
-                    drop:ClearAllPoints()
-                    drop:SetPoint("TOPLEFT", addFilterLinkBtn, "BOTTOMLEFT", 0, -2)
-                    drop:Show()
-                    if drop._overlay then drop._overlay:Show() end
+                        end,
+                    })
                 end)
                 by = by - 26
 
