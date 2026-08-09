@@ -237,7 +237,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Profiles) Fixed "Reset Profile to Defaults" leaving Party/Raid page syncing switched on. A freshly created profile has no synced pages, so a reset now matches one.
 * (Profiles) Fixed the one-time role colour adoption copying colours from whichever profile you logged in on onto every other profile, instead of each profile taking its own.
 * (Interface) Fixed the Order & Limits boxes on the Buffs and Debuffs pages staying active after switching Show Buffs or Show Debuffs off.
-* (Icons) Fixed the leader and role icons drawing underneath the selection and aggro highlights.
+* (Icons) Fixed the leader icon drawing underneath the selection and aggro highlights.
 * (Click Casting) **Fixed hover keybinds never working on frames that appear after you open the settings window** — opening the Click Casting options replaced the internal frame that owns hover bindings with a piece of the settings panel, so every frame created from then on (arena and boss frames, nameplates, frames for people joining your group) silently never got its keyboard bindings, and the automatic repair could not fix it either. A reload was the only way back. (by Krathe)
 * (Click Casting) Fixed keyboard binds going dead on every frame for a whole fight when combat interrupted a binding refresh — typically zoning into a raid and a pull starting seconds later. (by Krathe)
 * (Click Casting) Fixed hover keybinds dying for the rest of the session on some frames after visiting player housing. (by Krathe)

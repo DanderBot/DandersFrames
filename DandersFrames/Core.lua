@@ -778,9 +778,23 @@ function DF:LightweightUpdateFrameSize(force)
         local frameHeight = db.frameHeight or 50
         local padding = db.framePadding or 0
         
+        -- ☠ SetSize IS PROTECTED ON A SECURE HEADER CHILD. Party frames are
+        -- SecureUnitButtonTemplate children of a secure header, so resizing one in
+        -- combat raises a blocked-action error -- once per frame. This was only ever
+        -- reachable from a slider drag before; it is now the first statement of the
+        -- Options page's shared UpdateFrames callback, and the settings window is
+        -- usable mid-pull. The guard belongs HERE rather than at the call site, so
+        -- every future caller inherits it.
+        --   Skip only the resize, matching DF:ApplyFrameLayout's `skipResize` -- the
+        -- anchors and bar updates below are unprotected and still worth doing, and
+        -- the size re-applies on the next out-of-combat layout pass.
+        local skipResize = InCombatLockdown()
+
         local function UpdateFrame(frame)
             if not frame then return end
-            frame:SetSize(frameWidth, frameHeight)
+            if not (skipResize and frame.dfIsHeaderChild) then
+                frame:SetSize(frameWidth, frameHeight)
+            end
             if frame.healthBar then
                 frame.healthBar:ClearAllPoints()
                 frame.healthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)

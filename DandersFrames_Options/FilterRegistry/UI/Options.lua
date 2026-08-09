@@ -2256,7 +2256,15 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             dispelModeDD:ClearAllPoints()
             dispelModeDD:SetPoint("TOPLEFT", 4, -y)
             dispelModeDD:SetPoint("TOPRIGHT", -4, -y)
-            if dispelModeDD.refreshContent then dispelModeDD:refreshContent(ModeDB()) end
+            -- ☠ UpdateText, NOT refreshContent. GUI:CreateDropdown exposes UpdateText /
+            -- SetDisplayOverride / RebuildOptions / SetEnabled and has no refreshContent
+            -- at all, so the old call was a silent no-op hidden behind its own `if`
+            -- guard -- and nothing else refreshes this control: it is positioned by hand
+            -- rather than added to a page column, so Panel's refresh sweep never reaches
+            -- it, and OnShow does not fire when the frame is already shown. The visible
+            -- effect was building this page in Party, switching to Raid, and still
+            -- reading the PARTY value while customGet/customSet resolved against raid.
+            dispelModeDD:UpdateText()
             dispelModeDD:Show()
             y = y + (dispelModeDD.layoutHeight or dispelModeDD:GetHeight() or 44) + 6
         else

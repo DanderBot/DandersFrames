@@ -1388,11 +1388,25 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         if importCategorySet.other and importData.linkedSections then
             DF.db.linkedSections = importData.linkedSections
         end
-        -- Dispel palette: top-level key. Gated on EITHER category because the two v4
+        -- ☠ THE COLOURS CATEGORY WAS EXPORT-ONLY. The export block above packs all four
+        -- palettes when `colors` is ticked, but nothing here consumed them and the only
+        -- code that applies classColors/powerColors/roleColors sits in the FULL-import
+        -- branch -- which selecting any category skips. So ticking Colors, exporting,
+        -- and importing with Colors ticked silently discarded three of the four tables:
+        -- data loss on the one feature whose entire purpose is moving colours between
+        -- accounts. These are profile-root keys, so they need naming here by hand;
+        -- MergeCategorySettings only ever walks the MODE tables.
+        if importCategorySet.colors then
+            if importData.classColors then DF.db.classColors = importData.classColors end
+            if importData.powerColors then DF.db.powerColors = importData.powerColors end
+            if importData.roleColors  then DF.db.roleColors  = importData.roleColors  end
+        end
+        -- Dispel palette: top-level key, and the fourth member of that set -- so `colors`
+        -- must request it too. Also gated on `dispel` and `auras` because the two v4
         -- families it is rebuilt from ride different ones -- the overlay's
         -- dispel<Type>Color under `dispel`, the icon border's debuffBorderColor* under
-        -- `auras` -- so ticking either is a request for these colours.
-        if importCategorySet.dispel or importCategorySet.auras then
+        -- `auras` -- so ticking any of the three is a request for these colours.
+        if importCategorySet.dispel or importCategorySet.auras or importCategorySet.colors then
             importDispelColors()
         end
     end
