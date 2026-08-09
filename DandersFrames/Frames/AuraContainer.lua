@@ -4659,7 +4659,8 @@ local function ensureProviderWatch()
     local function parkAll(watch)
         watch._fakeActive = true
         for h in pairs(AuraContainer._handles or {}) do
-            if not h._destroyed and h:GetFrame():IsShown() then
+            if not h._destroyed and not (h.config and h.config.parentDrivenVisibility)
+            and h:GetFrame():IsShown() then
                 watch._hidden[h] = true
                 safeHideWindow(h:GetFrame(), function() return watch._hidden[h] end)
             end
@@ -4746,7 +4747,8 @@ local function ensureProviderWatch()
         local later, n = {}, 0
         for h in pairs(AuraContainer._handles or {}) do
             if not h._destroyed then
-                if h:GetFrame():IsShown() then
+                if not (h.config and h.config.parentDrivenVisibility)
+                    and h:GetFrame():IsShown() then
                     rebirth(h)
                 else
                     n = n + 1
@@ -5653,7 +5655,10 @@ function AuraContainer:Create(parent, config)
     -- born during a foreign fake-data period (e.g. roster change while the user
     -- sits in Edit Mode), start hidden like the rest, restored on the real switch.
     local watch = AuraContainer._providerWatch
-    if watch and watch._fakeActive then
+    -- Parent-driven handles are skipped: their shown state is secret (safeHideWindow
+    -- would taint on it) and the park is redundant — hiding the outermost link of a
+    -- chain already takes the whole subtree with it.
+    if watch and watch._fakeActive and not cfg.parentDrivenVisibility then
         watch._hidden[h] = true
         -- Hover-safe + self-cancelling: if the fake period ends before a deferred
         -- hide lands, the retry sees _hidden cleared and stands down.
@@ -5771,7 +5776,8 @@ function AuraContainer.DebugDumpIdentityGate()
                 tostring(type(unit) == "string" and UnitExists(unit) or false), canTxt, visTxt,
                 tostring(h._idGateHidden or false),
                 tostring(h._intendedShown ~= false),
-                tostring(h.frame and h.frame:IsShown() or false),
+                tostring(h.config and h.config.parentDrivenVisibility and "(nested)"
+                    or (h.frame and h.frame:IsShown()) or false),
                 tostring(h._visRetry or false)))
         end
     end
@@ -5855,7 +5861,8 @@ function AuraContainer.DebugDumpPP()
     local n = 0
     for h in pairs(AuraContainer._handles or {}) do
         local cfg = h.config
-        if cfg and cfg.mode ~= "overlay" and h.frame and h.frame.IsVisible and h.frame:IsVisible() then
+        if cfg and cfg.mode ~= "overlay" and not cfg.parentDrivenVisibility
+            and h.frame and h.frame.IsVisible and h.frame:IsVisible() then
             n = n + 1
             if n > 12 then print("  " .. DF.OUT.NEUTRAL .. "… capped at 12 handles|r") break end
             local L = cfg.layout or {}

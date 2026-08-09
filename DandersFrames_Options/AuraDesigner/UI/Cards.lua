@@ -1962,7 +1962,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
                     warn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
                     warn:SetPoint("RIGHT", trigContainer, "RIGHT", 0, 0)
                     warn:SetJustifyH("LEFT")
-                    warn:SetText(emptyG and L["A condition group is empty, so this effect cannot show."]
+                    warn:SetText(emptyG and L["A condition group is empty and is being ignored."]
                         or format(L["Too many combinations (%d). Simplify the conditions."], links))
                     warn:SetTextColor(0.95, 0.45, 0.35)
                     tagY = tagY - 26

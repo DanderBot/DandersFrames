@@ -577,11 +577,20 @@ function DF:GetADTrackedSpellIDs(frame, db)
     local otherAuras = adDB.otherAuras
     if otherAuras then
         for auraName, auraCfg in pairs(otherAuras) do
-            local before = union
-            union = unionTrackedIdentity(nil, auraName, auraCfg, union)
-            -- Tripwire kept: a tracked other-pool record that contributed NOTHING means an
-            -- unresolvable name, which the pool's naming contract forbids.
-            if union == before and auraHasTrackedIndicator(auraCfg) then
+            -- ☠ COUNT, don't compare references. unionTrackedIdentity adds into the table it
+            -- is given and returns the SAME table, so `union ~= before` only ever detected the
+            -- very first allocation — every later record tripped the warning whether or not it
+            -- resolved. Contribution has to be measured, not inferred from identity.
+            local added = false
+            local probe = unionTrackedIdentity(nil, auraName, auraCfg, nil)
+            if probe and next(probe) then
+                added = true
+                union = union or {}
+                for id in pairs(probe) do union[id] = true end
+            end
+            -- A tracked other-pool record that contributed NOTHING means an unresolvable
+            -- name, which the pool's naming contract forbids.
+            if not added and auraHasTrackedIndicator(auraCfg) then
                 warnOtherUnresolved(auraName)
             end
         end
@@ -1092,10 +1101,24 @@ end
 -- configured rarely, not driven per frame), and the alternative is per-link tuning
 -- bookkeeping over handles that may not exist yet — the lazy build means link 3 can be nil
 -- when the edit arrives. Everything identity-shaped rides structSig; only cosmetics tune.
+-- Release a chain entry whose config no longer resolves to one. MUST run before the
+-- caller's single-container branch: that branch reads entry.handle, which is NIL for
+-- every incomplete chain, and its struct sig will never match a chain sig — so it would
+-- drive Rebuild against nil (hard error, every pass) or rebuild the final link in place
+-- and strand the gate links above it. Reached by emptying or deleting a condition group.
+local function dropChainEntry(store, key)
+    local e = key and store[key]
+    if e and e.chain then destroyEntry(e); store[key] = nil end
+end
+
 local function syncConditionChain(store, key, frame, unit, links, filt, structSig, coSig,
                                   makeVisual, applyStyle)
     if not links then return false end
-    local parts = { "chain=" .. #links, structSig, "f=" .. tostring(filt) }
+    -- ☠ UNIT IS PART OF THE SIGNATURE. Every link captures the unit at build time, and the
+    -- SyncFrame retarget loop only walks entry.handle — it cannot see the gate links. Without
+    -- the unit here a frame reassigned by roster churn keeps gates evaluating the OLD unit and
+    -- the chain can never complete again. Folding it in rebuilds the chain on a retarget.
+    local parts = { "chain=" .. #links, structSig, "f=" .. tostring(filt), "u=" .. tostring(unit) }
     for i = 1, #links do parts[#parts + 1] = includeSig(links[i]) end
     local chainSig = tconcat(parts, "|")
 
@@ -3914,6 +3937,7 @@ function Factory:SyncFrame(frame)
                         function(h) h:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo } } }) end)
                 end
             else
+            dropChainEntry(hb, bestName)
             local existingHB = hb[bestName]
             local wantMissingHB = bestCfg.showWhenMissing and true or false
             if existingHB and (existingHB.missing and true or false) ~= wantMissingHB then
@@ -4055,6 +4079,7 @@ function Factory:SyncFrame(frame)
                     function(map, f) return buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, f) end,
                     function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end)
             else
+            dropChainEntry(bg, bestName)
             local existingBG = bg[bestName]
             local wantMissingBG = bestCfg.showWhenMissing and true or false
             if existingBG and (existingBG.missing and true or false) ~= wantMissingBG then
@@ -4159,6 +4184,7 @@ function Factory:SyncFrame(frame)
                 function(h) h:ApplyStyle({ border = { spec = bestSpec } }) end)
           if handledBD then   -- nothing further; the chain owns this effect
           else
+            dropChainEntry(bd, bestName)
             local wantMissingBD = bestCfg.showWhenMissing and true or false
             local existingBD = bd[bestName]
             if existingBD and (existingBD.missing and true or false) ~= wantMissingBD then
@@ -4271,6 +4297,7 @@ function Factory:SyncFrame(frame)
                     st._lastHost = host
                     TDRender:EnableMirrors(frame, category, host, color)
                 end
+                dropChainEntry(st, bestName)
                 local entry = st[bestName]
                 if not entry then
                     local handle = DF.AuraContainer:Create(frame,
