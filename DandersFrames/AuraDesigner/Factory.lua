@@ -566,10 +566,13 @@ local function resolveConditions(spec, typeCfg)
     local groups = {}
     for _, g in ipairs(c.groups) do
         if #groups >= AD_MAX_CONDITION_GROUPS then break end
-        if type(g) ~= "table" or type(g.triggers) ~= "table" or #g.triggers == 0 then
-            return nil
-        end
-        groups[#groups + 1] = g
+        -- ☠ SKIP an empty group rather than refusing the whole expression. Adding a
+        -- condition group creates it empty, so refusing here made the effect briefly
+        -- unrenderable the instant the user pressed the button — and that mid-edit
+        -- churn is what surfaced the identity-gate taint. A half-configured group
+        -- simply does not constrain anything yet; the card still warns about it.
+        if type(g) ~= "table" or type(g.triggers) ~= "table" then return nil end
+        if #g.triggers > 0 then groups[#groups + 1] = g end
     end
     if #groups < 2 then return nil end   -- one group is just a plain union
 
