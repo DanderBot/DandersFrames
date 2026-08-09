@@ -18,11 +18,61 @@ local L = DF.L
 
 DF.TestData = {
     units = {
-        {name = "Tankerino", class = "WARRIOR", role = "TANK", specID = 73, health = 1.0, maxHealth = 100000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.15, status = nil, outOfRange = false, isLeader = true, raidTarget = 8, dispelType = nil, centerStatus = nil, isMainTank = true, isAFK = false, isPhased = false, inVehicle = false, isBGCarrier = false, isInCombat = true, reducedMaxPct = 0.20},  -- Skull marker, leader, main tank, has HoT, in combat (BG carrier kept to raid test to avoid overlapping the leader's ready-check icon)
-        {name = "Healsworth", class = "PRIEST", role = "HEALER", specID = 257, health = 0.95, maxHealth = 85000, absorb = 0.10, healAbsorb = 0, healPrediction = 0.05, status = nil, outOfRange = false, isAssist = true, raidTarget = nil, dispelType = "Magic", centerStatus = "summon", isMainAssist = true, isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0},  -- Assistant, main assist, summon pending
-        {name = "Мишок", class = "MAGE", role = "DAMAGER", specID = 63, health = 0.60, maxHealth = 75000, absorb = 0, healAbsorb = 0.15, healPrediction = 0.15, status = nil, outOfRange = true, raidTarget = 1, dispelType = "Curse", centerStatus = nil, isAFK = true, isPhased = false, inVehicle = false, reducedMaxPct = 0},  -- Star marker, AFK, has HoT
+        -- ☠ isAFK LIVES HERE, NOT ON THE OUT-OF-RANGE UNIT. The AFK icon carries a
+        -- TICKING TIMER, and it used to sit on Мишок below — the only outOfRange unit —
+        -- so the one element that exists to be READ was on the one frame that is
+        -- deliberately dimmed, and it was lost (Krathe, 2026-08-08).
+        -- ⇒ RULE: a TIMED or ANIMATED element must not share a frame with the range fade
+        -- or the dead state. This unit's other states are all static badges (leader
+        -- crown, skull marker, combat flag), so nothing competes with a countdown.
+        -- ★ ONE JOB PER FRAME (Krathe, 2026-08-08). Each of the five demonstrates a
+        -- distinct set and nothing doubles up: this one is the AFK TIMER plus the leader
+        -- badges. Both icon strips are off — the defensive row would show here by default
+        -- (TANK role) and the missing-buff strip shows everywhere by default, and between
+        -- them they crowded the timer this frame exists for. They live on Healsworth and
+        -- Xx respectively.
+        -- ⚠ This unit KEEPS its debuff row — `showDebuffs = false` was tried here and was
+        -- the wrong tool. The ask was to drop the IMPORTANT (enlarged + badged) debuff
+        -- sitting over the AFK timer, not every debuff. `showImportantDebuff = false` is
+        -- the right one, and it now exists: the row renders plain, so the countdown this
+        -- frame is here to demonstrate has the space to itself.
+        -- ☠ showReadyCheck = false, AND THIS ONE IS NOT COSMETIC. The ready-check demo is
+        -- gated on isLeader, which is this unit — and readyCheckIcon and afkIcon share
+        -- anchor CENTER, offset 0,0 AND frame level 30, i.e. the same point. With the AFK
+        -- timer here they overlapped. The ready check moved to Мишок: it is a static icon
+        -- and survives being faded, where a countdown does not.
+        -- ⚠ THE LIVE COLLISION IS UNFIXED — a real unit that is AFK during a real ready
+        -- check still gets both at the same point, draw order by creation order. That is
+        -- a defaults/precedence decision for after 12.1; this only moves the preview.
+        {name = "Tankerino", class = "WARRIOR", role = "TANK", specID = 73, health = 1.0, maxHealth = 100000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.15, status = nil, outOfRange = false, isLeader = true, raidTarget = 8, dispelType = nil, centerStatus = nil, isMainTank = true, isAFK = true, isPhased = false, inVehicle = false, isBGCarrier = false, isInCombat = true, reducedMaxPct = 0.20, showDefensive = false, showMissingBuff = false, showReadyCheck = false, showImportantDebuff = false},  -- AFK timer, skull marker, leader, main tank, has HoT, in combat (BG carrier lives on Xx — this frame's centre belongs to the AFK countdown)
+        -- The DEFENSIVE ICON + summon frame (HEALER, so the defensive row shows by the
+        -- role rule — no override needed). The missing-buff strip is off: with both, this
+        -- became the busiest frame of the five and the two strips sat in the same region.
+        {name = "Healsworth", class = "PRIEST", role = "HEALER", specID = 257, health = 0.95, maxHealth = 85000, absorb = 0.10, healAbsorb = 0, healPrediction = 0.05, status = nil, outOfRange = false, isAssist = true, raidTarget = nil, dispelType = "Magic", centerStatus = "summon", isMainAssist = true, isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0, showMissingBuff = false},  -- Assistant, main assist, summon pending, defensive icon
+        -- THE out-of-range unit, and the only one — so the fade has a subject with
+        -- plenty to dim: 60% health, a HoT, a dispel type, a raid marker. ⚠ Keep TIMED
+        -- elements off it (see the note on Tankerino); it also carries the threat-2
+        -- aggro colour, which is deliberate — range has nothing to do with threat.
+        -- ⚠ showDefensive = true OVERRIDES the role rule (this is a DAMAGER, so the row
+        -- would not show here otherwise) and showMissingBuff = false swaps the badge
+        -- strip out for it — one surface per frame rather than both stacked on the one
+        -- unit that is also faded (Krathe, 2026-08-08).
+        {name = "Мишок", class = "MAGE", role = "DAMAGER", specID = 63, health = 0.60, maxHealth = 75000, absorb = 0, healAbsorb = 0.15, healPrediction = 0.15, status = nil, outOfRange = true, raidTarget = 1, dispelType = "Curse", centerStatus = nil, isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0, showDefensive = true, showMissingBuff = false, showReadyCheck = true},  -- Star marker, out of range, has HoT, defensive icon, ready check (no missing-buff strip)
         {name = "Alexandrosthegreat", class = "PALADIN", role = "DAMAGER", specID = 70, health = 0, maxHealth = 90000, absorb = 0, healAbsorb = 0, healPrediction = 0, status = "Dead", outOfRange = false, raidTarget = nil, dispelType = nil, centerStatus = "resurrect", isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0},  -- Dead unit, being resurrected
-        {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.05, healAbsorb = 0.12, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, reducedMaxPct = 0.45},  -- Phased, in vehicle, has HoT
+        -- ★ THE ONLY MISSING-BUFF FRAME now (it shows here by default — no field needed).
+        -- ⚠ If this unit ever gains showMissingBuff = false, the strip is previewed
+        -- NOWHERE. Check the other four before turning it off here.
+        -- ★ ALSO THE ONLY BG-CARRIER FRAME in party (Krathe, 2026-08-08). It was raid-only
+        -- before, on the reasoning that it would overlap the leader's ready-check icon —
+        -- but the ready check has since moved to Мишок, and the real constraint was broader:
+        -- bgCarrierIcon sat on the CENTRE BUS, and all five party frames already have their
+        -- centre claimed, so there was nowhere clear to put it.
+        -- ⇒ Fixed at the SOURCE, not in the preview: the icon's live default moved to
+        -- TOPRIGHT -2,-2 (Config.lua). It now has its own lane on every frame, here and in
+        -- game alike — no preview-only offset, which would have broken "previews differ in
+        -- DATA, never RENDERING". This frame's centre still belongs to phasedIcon.
+        -- ⚠ Nothing draws until the user opts in — bgCarrierIconEnabled defaults false.
+        {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.05, healAbsorb = 0.12, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, isBGCarrier = true, reducedMaxPct = 0.45},  -- Missing buffs, phased, in vehicle, BG carrier, has HoT
     },
     -- Test aura data - expanded for testing layouts. spellID (where a stable,
     -- still-live spell matches) lets the 12.1 container preview show the REAL
@@ -59,7 +109,7 @@ DF.TestData = {
     -- made safe at any ordering, so the pool now runs one class per slot in the first
     -- five and repeats that order in the second five:
     --     1-5  PALADIN PRIEST DRUID SHAMAN MONK
-    --     6-10 PALADIN PRIEST DRUID MAGE   WARRIOR
+    --     6-10 PALADIN PRIEST DRUID SHAMAN WARRIOR
     -- Every window of 5 therefore holds five DIFFERENT classes, so no override can merge
     -- two of them. Verified for every offset the rotation produces.
     -- ⚠ Adding an entry breaks the arithmetic. Keep the pool at 10 and swap, or redo the
@@ -84,14 +134,27 @@ DF.TestData = {
         -- than a made-up zero. ⚠ If a patch ever gives Beacon a timer this stops
         -- exercising that setting — the pool then needs another duration-less buff.
         {icon = "Interface\Icons\Ability_Paladin_BeaconofLight", name = "Beacon of Light", duration = 0, stacks = 0, spellID = 53563},
-        -- 1 hour, like every modern raid buff — NOT permanent. This shipped as
-        -- duration = 0 and was the preview's "permanent aura" case, which was wrong on
-        -- both counts. Also the long-duration case, so the countdown formats get
-        -- exercised above the minutes/hours boundary.
-        {icon = "Interface\Icons\Spell_Holy_WordFortitude", name = "Power Word: Fortitude", duration = 3600, stacks = 0, spellID = 21562},
+        -- ☠ NO RAID BUFFS IN THIS POOL. Slots 7, 9 and 10 used to be Power Word:
+        -- Fortitude, Arcane Intellect and Battle Shout at 1 hour each. All three are
+        -- entries in `DF.RaidBuffs` (Frames/Bars.lua) — i.e. the spells MISSING BUFFS
+        -- exists to track — so the preview was teaching the wrong thing twice over:
+        -- it invited "why is Fortitude in the buff row AND on the missing-buff badge",
+        -- and `missingBuffHideFromBar` DEFAULTS TO TRUE, which unions every RaidBuffs id
+        -- into the row's `excludeSpellIDs` (Features/Auras.lua). So on a default profile
+        -- a live buff row can never show them and the preview showed three — a
+        -- test-vs-live divergence, not just a confusing choice.
+        -- ⇒ Anything added here must NOT appear in `DF.RaidBuffs`. Check it.
+        {icon = "Interface\Icons\Spell_Holy_Renew", name = "Renew", duration = 15, stacks = 0, spellID = 139},
         {icon = "Interface\Icons\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
-        {icon = "Interface\Icons\Spell_Holy_MagicalSentry", name = "Arcane Intellect", duration = 3600, stacks = 0, spellID = 1459},
-        {icon = "Interface\Icons\Ability_Warrior_BattleShout", name = "Battle Shout", duration = 3600, stacks = 0, spellID = 6673},
+        -- ★ THE ONE LONG BUFF, and the pool needs exactly one: it is the only entry that
+        -- exercises the minutes side of the countdown formats and a duration bar that
+        -- barely moves. 10 minutes is Earth Shield's real duration — durations here are
+        -- honest, per the Beacon note above. ⚠ It no longer crosses the HOUR boundary,
+        -- which the old 3600s entries did; that format is now unpreviewed. Deliberate —
+        -- Krathe's call was "keep just 1 longer buff... maybe 5min or something", and an
+        -- hour-long buff on a party frame only ever means a raid buff.
+        {icon = "Interface\Icons\Spell_Nature_SkinofEarth", name = "Earth Shield", duration = 600, stacks = 0, spellID = 974},
+        {icon = "Interface\Icons\Ability_Warrior_RallyingCry", name = "Rallying Cry", duration = 10, stacks = 0, spellID = 97463},
     },
     debuffs = {
         -- ☠ POSITIONS 5, 6, 9 AND 10 CARRY NO DISPEL TYPE, AND THAT IS THE DENSITY DIAL.
@@ -140,6 +203,82 @@ DF.TestData = {
     animationPhase = 0,
 }
 
+-- ============================================================
+-- ★ THE RAID PREVIEW ALLOCATION  (Krathe, 2026-08-08)
+-- ============================================================
+-- Which raid frame demonstrates WHAT. This replaces the index arithmetic the raid
+-- branch used to carry (`i % 4 == 3` for range, `i == 3` for AFK, and so on), which
+-- was unauditable: two rules written months apart silently landed on the same frame
+-- and nobody could see it without evaluating the modulos by hand.
+--
+-- ☠ THAT IS NOT HYPOTHETICAL — IT SHIPPED TWICE. `outOfRange = (i % 4 == 3)` selects
+-- {3,7,11,15,19,…}. `isAFK = (i == 3)` was IN that set, so the AFK countdown sat on a
+-- deliberately faded frame — the same bug the party table carries a ☠ note about,
+-- reintroduced here because the raid side expressed the idea as arithmetic, not a list.
+-- (Its DND twin had the identical fault; DND was later dropped from the addon.)
+--
+-- ★ THE RULES THESE SETS ENCODE (same as the party table, now checkable at a glance):
+--   1. A TIMED or ANIMATED element never shares a frame with the range fade or death.
+--   2. At most ONE centre-region element per frame — afkIcon, readyCheckIcon,
+--      summon/resurrect all draw at CENTER 0,0, so two on one frame
+--      is a guaranteed overlap, not a near miss.
+--   3. The missing-buff strip and the defensive row never share a frame: they occupy
+--      the same band, and together they were the "busiest frame" problem in party.
+--   4. A dead frame carries the resurrect marker and nothing else.
+--   5. An out-of-range frame carries STATIC badges only.
+--
+-- ⚠ COVERAGE IS FRONT-LOADED, because raidTestFrameCount is user-driven (1-40).
+-- Frames 1-10 cover every primary indicator; the four secondary status icons (summon,
+-- phased, vehicle) start at 11. Everything appears by 20. Below 10 frames the
+-- preview is necessarily partial — that is a property of the slider, not a gap here.
+--
+-- ⚠ 21-40 MIRROR 1-20 (+20) via inRaidSet, so a full 40-frame raid repeats the spread
+-- instead of trailing off into 20 identical frames. Add an index ≤ 20 and the upper
+-- half inherits it automatically.
+local RAID_ALLOC = {
+    OOR        = { [6] = true, [14] = true, [19] = true },
+    DEAD       = { [9] = true, [17] = true },
+    -- Centre-region — see rule 2. These five sets must stay mutually disjoint.
+    AFK        = { [2] = true },
+    READYCHECK = { [8] = true },
+    SUMMON     = { [11] = true },
+    -- (12 is free — it held DND until that state was dropped.)
+    -- Static badges
+    LEADER     = { [1] = true },
+    ASSIST     = { [3] = true },
+    MAINTANK   = { [1] = true },
+    MAINASSIST = { [3] = true },
+    COMBAT     = { [1] = true },
+    BGCARRIER  = { [10] = true },
+    PHASED     = { [13] = true },
+    VEHICLE    = { [16] = true },
+    -- Icon strips — see rule 3, these two must stay disjoint from each other.
+    MISSINGBUF = { [4] = true, [15] = true },
+    DEFENSIVE  = { [5] = true, [18] = true },
+    -- The enlarged + badged important debuff. ⚠ Deliberately sparse and deliberately NOT
+    -- on frame 2: it carries the AFK countdown, and an oversized badged
+    -- icon lands on the same region — the party tank hit exactly that.
+    IMPORTANTDEBUFF = { [7] = true, [16] = true },
+    -- Healer bars. Deliberately sparse: the old `i % 2 == 0 or i % 3 == 1` put heal
+    -- prediction on 14 of the first 20 frames, which reads as "every frame is being
+    -- healed" rather than as an example of the bar.
+    ABSORB     = { [7] = true, [20] = true },
+    HEALABSORB = { [10] = true, [20] = true },
+    HEALPRED   = { [7] = true, [20] = true },
+    REDUCEDMAX = { [10] = true, [18] = true },
+}
+-- Raid target markers: which frame gets which marker index (1-8). Five of forty, so a
+-- marker still reads as a marker; it was every frame 1-8 before, i.e. a solid band.
+local RAID_MARKERS = { [1] = 8, [3] = 7, [7] = 1, [13] = 4, [20] = 6 }
+
+-- 21-40 inherit 1-20's allocation. Keeps the upper half populated without a second
+-- table to keep in sync, and guarantees the rules above hold there too by construction.
+local function inRaidSet(key, i)
+    local set = RAID_ALLOC[key]
+    if not set then return false end
+    return set[i] == true or (i > 20 and set[i - 20] == true)
+end
+
 -- Get test unit data for a frame index
 -- For party: index 0 = player, 1-4 = party members
 -- For raid: index 1-40 = raid members
@@ -180,7 +319,6 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             isMainTank = false,
             isMainAssist = false,
             isAFK = false,
-            isDND = false,
             isPhased = false,
             inVehicle = false,
         }
@@ -297,8 +435,8 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         local baseHealth = testHealthPercents[i] or 0.75
         local basePower = testPowerPercents[i] or 0.80
         
-        -- Determine if this frame should be dead (frames 9, 17, 29)
-        local isDead = (i == 9 or i == 17 or i == 29)
+        -- Dead frames come from RAID_ALLOC.DEAD (9, 17 and their +20 mirrors).
+        local isDead = inRaidSet("DEAD", i)
         
         -- ☠ THE OVERLAY NAMES A DEBUFF THAT IS ACTUALLY ON THE FRAME. This used to be a
         -- hardcoded index pattern ("i % 5 == 1 -> Magic") while the debuff ICONS came
@@ -324,25 +462,45 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             maxHealth = 100000,
             currentHealth = isDead and 0 or math.floor(baseHealth * 100000),
             powerPercent = isDead and 0 or basePower,
-            absorbPercent = isDead and 0 or ((i % 3 == 0) and 0.15 or ((i % 5 == 0) and 0.10 or 0)),
-            reducedMaxPct = isDead and 0 or ((i % 7 == 0) and 0.30 or ((i % 11 == 0) and 0.15 or 0)),
-            healAbsorbPercent = isDead and 0 or ((i % 7 == 0) and 0.15 or 0),
-            healPredictionPercent = isDead and 0 or ((i % 2 == 0) and 0.12 or ((i % 3 == 1) and 0.08 or 0)),  -- Show heal prediction on some frames
+            absorbPercent = (not isDead and inRaidSet("ABSORB", i)) and 0.15 or 0,
+            reducedMaxPct = (not isDead and inRaidSet("REDUCEDMAX", i)) and 0.30 or 0,
+            healAbsorbPercent = (not isDead and inRaidSet("HEALABSORB", i)) and 0.15 or 0,
+            healPredictionPercent = (not isDead and inRaidSet("HEALPRED", i)) and 0.12 or 0,
             status = isDead and "Dead" or nil,
-            outOfRange = (i % 4 == 3) and not isDead,  -- Every 4th frame starting at 3, but not dead frames
-            isLeader = (i == 1),
-            raidTarget = (i <= 8) and i or nil,
+            outOfRange = inRaidSet("OOR", i),
+            isLeader = inRaidSet("LEADER", i),
+            isAssist = inRaidSet("ASSIST", i),
+            raidTarget = RAID_MARKERS[i] or (i > 20 and RAID_MARKERS[i - 20]) or nil,
             dispelType = dispelType,
-            centerStatus = isDead and "resurrect" or ((i == 2 or i == 6) and "summon" or nil),  -- Dead get resurrect, frames 2 and 6 get summon
-            -- New icon states
-            isMainTank = (i == 1 or i == 25),  -- First frame and frame 25
-            isMainAssist = (i == 2 or i == 26),  -- Second frame and frame 26
-            isAFK = (i == 3),             -- Frame 3 is away
-            isDND = (i == 15),            -- Frame 15 is busy (the AFK icon's other state)
-            isPhased = (i == 4 or i == 20),  -- Frames 4 and 20
-            inVehicle = (i == 5 or i == 30),  -- Frames 5 and 30
-            isBGCarrier = (i == 2 or i == 10),  -- Frames 2 and 10 carry an objective
-            isInCombat = (i == 1 or i == 7),  -- Frames 1 and 7 in combat
+            -- Centre region: resurrect wins on a dead frame, otherwise the summon set.
+            -- RAID_ALLOC keeps SUMMON off every dead frame, so this `or` never hides one.
+            centerStatus = isDead and "resurrect" or (inRaidSet("SUMMON", i) and "summon" or nil),
+            isMainTank = inRaidSet("MAINTANK", i),
+            isMainAssist = inRaidSet("MAINASSIST", i),
+            -- ☠ THE AFK ICON CARRIES A TICKING COUNTDOWN. It must never land on an
+            -- out-of-range or dead frame -- see rule 1 on RAID_ALLOC. It used to be
+            -- `i == 3`, and 3 is in the old `i % 4 == 3` range set.
+            isAFK = inRaidSet("AFK", i) and not isDead,
+            isPhased = inRaidSet("PHASED", i),
+            inVehicle = inRaidSet("VEHICLE", i),
+            isBGCarrier = inRaidSet("BGCARRIER", i),
+            isInCombat = inRaidSet("COMBAT", i),
+            -- ☠ WHITELIST -- see the party branch's note. These four are the per-frame
+            -- overrides; without them here the raid preview ignored the unit allocation
+            -- entirely and drove the missing-buff strip on EVERY frame (Krathe, 2026-08-08:
+            -- "we also have missing buff showing on everyone").
+            -- Written as hard true/false rather than left nil: the fallback rules are
+            -- "missing buff shows everywhere" and "defensive shows for TANK/HEALER", and
+            -- both are exactly what we are overriding.
+            showMissingBuff = inRaidSet("MISSINGBUF", i),
+            showDefensive   = inRaidSet("DEFENSIVE", i),
+            showReadyCheck  = inRaidSet("READYCHECK", i),
+            showDebuffs     = nil,   -- every frame keeps its debuff row...
+            -- ...but only two of twenty get the IMPORTANT treatment. Enlarged + badged on
+            -- every frame read as the default state of a raid rather than as an alert
+            -- ("it looks too heavy on raid"), which is the opposite of what the styling is
+            -- for. Two is enough to judge it against its plain neighbours.
+            showImportantDebuff = inRaidSet("IMPORTANTDEBUFF", i),
         }
         
         -- Apply animation if enabled
@@ -396,11 +554,22 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         isMainTank = data.isMainTank,
         isMainAssist = data.isMainAssist,
         isAFK = data.isAFK,
-        isDND = data.isDND,
         isPhased = data.isPhased,
         inVehicle = data.inVehicle,
         isBGCarrier = data.isBGCarrier,
         isInCombat = data.isInCombat,
+        -- ☠ THIS TABLE IS A WHITELIST, NOT A COPY. Every field a consumer reads has to
+        -- be listed here or it is silently dropped between DF.TestData.units and the
+        -- drives — adding a field to a unit row alone does NOTHING, with no error to say
+        -- so. That is exactly how showDefensive/showMissingBuff first shipped inert
+        -- (2026-08-08): the units table said one thing and the preview ignored it.
+        -- ⇒ ADD ANY NEW PER-UNIT FIELD HERE TOO, and check it arrives.
+        -- Both are tri-state; nil must survive as nil so the fallback rule still applies.
+        showDefensive = data.showDefensive,
+        showMissingBuff = data.showMissingBuff,
+        showReadyCheck = data.showReadyCheck,
+        showDebuffs = data.showDebuffs,
+        showImportantDebuff = data.showImportantDebuff,
     }
     
     -- Don't animate dead or offline units
@@ -608,6 +777,26 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- stale. See DF:IsTestFrameDead.
     frame.dfTestIsDead = (testData.status == "Dead") or nil
 
+    -- ★ PER-UNIT SURFACE OVERRIDES. Both are TRI-STATE and both default to nil, which
+    -- means "use the normal rule" — so a unit that says nothing behaves exactly as
+    -- before and only the units that opt in differ.
+    --   showDefensive   nil = the role rule (TANK/HEALER only) · true/false = force
+    --   showMissingBuff nil = shown (the live default) · false = hidden
+    -- These exist because both surfaces were decided by a RULE with no per-unit say, so
+    -- the only way to move one off a crowded frame was to change that unit's ROLE —
+    -- which drags the role icon, sorting and role colours with it. The units table is
+    -- meant to be the single description of what each frame demonstrates; this keeps it
+    -- that way. Assigning nil deliberately CLEARS a previous frame's value.
+    frame.dfTestShowDefensive = testData.showDefensive
+    frame.dfTestShowMissingBuff = testData.showMissingBuff
+    frame.dfTestShowDebuffs = testData.showDebuffs
+    -- Keeps the debuff ROW but drops the enlarged + badged IMPORTANT treatment. Read by
+    -- DF:DriveDebuffFactory, which shadows debuffImportantHighlight for this frame only.
+    -- ⚠ Structural (recStyleSig serialises the per-record style), so a change here
+    -- rebuilds that frame's container rather than restyling in place — expected, and why
+    -- it lands on a refresh rather than instantly.
+    frame.dfTestShowImportantDebuff = testData.showImportantDebuff
+
     -- ★ THE SHARED STAMPS ElementAppearance's helpers prefer. Test frames carry REAL
     -- unit tokens ("raid1", "player"), so in an actual group UnitIsDeadOrGhost /
     -- UnitClass would answer about a real player standing next to you rather than
@@ -807,18 +996,23 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     --     resolves through the same stops with the frame's own colour weights.
     -- (Audit, 2026-08-07.)
 
-    -- Frame-level alpha when not using element-specific OOR (same as live UpdateFrameAppearance)
-    if not db.oorEnabled then
-        if isOutOfRange then
-            frame:SetAlpha(db.rangeFadeAlpha or db.rangeAlpha or 0.4)
-        elseif isAboveHealthThreshold then
-            frame:SetAlpha(db.healthFadeAlpha or 0.5)
-        else
-            frame:SetAlpha(1)
-        end
-    else
-        frame:SetAlpha(1)
-    end
+    -- ☠ THE FRAME-LEVEL ALPHA BLOCK USED TO LIVE HERE — a preview reimplementation of
+    -- DF:UpdateFrameAppearance's four branches (OOR / above-threshold / normal / the
+    -- element-specific mode). DELETED: the shared appearance pass below owns frame alpha
+    -- outright, and it runs LAST, so this could only ever be overwritten or disagree.
+    --
+    -- ⚠ IT ALREADY DISAGREED. Its threshold test was `healthPct >= threshold - 0.5` on a
+    -- 0-100 percent; live's is `dfHealthPct > threshold/100` on a fraction. At EXACTLY the
+    -- threshold this faded and live did not. Invisible only because live wrote second.
+    --
+    -- ★ And keeping it is what hid the bug it was meant to solve. When the appearance
+    -- functions were shared (d3c6d046, 2026-08-07) the live path became authoritative and
+    -- started overwriting this — but its health-fade branch was gated on a flag whose
+    -- driver still bailed out in test mode, so the preview got NEITHER and every frame
+    -- rendered opaque. A second pathway does not fail loudly; it fails by looking handled.
+    -- ⇒ Preview differs from live in DATA (dfHealthPct, dfIsDead, the dfTestShow* stamps),
+    -- never in RENDERING. If a live appearance function cannot run on a preview frame,
+    -- teach it the data fork — do not copy it here.
 
 
     -- Health text colour + alpha: DF:UpdateHealthTextAppearance owns both, same as the
@@ -951,9 +1145,9 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         end
     end
     
-    -- Update defensive icons. Unconditional: the painter reads
-    -- testShowExternalDef itself (it must also hide the 12.1 container row
-    -- when the toggle is off, not just the legacy icon).
+    -- Update defensive icons. Unconditional: the painter decides for itself whether the
+    -- row shows (defensiveIconEnabled + testDefensiveCount > 0 + role), and it must be
+    -- able to HIDE the 12.1 container row, not just skip painting a legacy icon.
     DF:UpdateTestDefensiveBar(frame, testData)
 
     -- ★ FADES NOW COME FROM THE LIVE FUNCTIONS. These three used to be hand-mirrored
@@ -1009,6 +1203,16 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- the missing-buff strip, the defensive row and the AD indicators in three separate
     -- reports over two days. ADD NOTHING HERE THAT ElementAppearance ALREADY APPLIES,
     -- and ADD NOTHING BELOW IT that touches alpha. (Audit, 2026-08-07.)
+    -- ⚠ BEFORE the appearance pass, not after. UpdateHealthFade's job here is to set
+    -- frame.dfHealthFadeActive, and UpdateFrameAppearance (inside the pass below) gates
+    -- its health-fade branch on that flag — so a call afterwards would set the flag one
+    -- pass too late and the frame would render opaque until something else refreshed it.
+    -- ★ The LIVE driver, not a preview copy: it resolves the same alpha through
+    -- ApplyHealthFadeAlpha, which forks only on DATA (dfHealthPct vs UnitHealthPercent).
+    if DF.UpdateHealthFade then
+        DF:UpdateHealthFade(frame)
+    end
+
     if DF.UpdateAllElementAppearances then
         DF:UpdateAllElementAppearances(frame)
     end
@@ -1133,11 +1337,17 @@ function DF:UpdateTestIcons(frame, testData)
         end
     end
     
-    -- Ready Check Icon (show on leader frame only for demo)
+    -- Ready Check Icon. Per-unit `showReadyCheck` first, "the leader frame" as the
+    -- fallback — see the note on the Tankerino/Мишок rows in DF.TestData for why it no
+    -- longer rides the leader.
+    -- ☠ THIS BLOCK EXISTS TWICE (here and in the other status-icon updater). Both are
+    -- kept in step by hand; change one, change the other.
     if frame.readyCheckIcon then
+        local wantReady = testData.showReadyCheck
+        if wantReady == nil then wantReady = testData.isLeader end
         if not db.readyCheckIconEnabled or db.testShowStatusIcons == false then
             frame.readyCheckIcon:Hide()
-        elseif testData.isLeader then
+        elseif wantReady then
             DF:SetUpgradedStatusIcon(frame.readyCheckIcon.texture, "Interface\\RaidFrame\\ReadyCheck-Ready")
             
             local scale = db.readyCheckIconScale or 1.0
@@ -1211,11 +1421,17 @@ function DF:UpdateTestStatusIcons(frame, testData)
     
     local db = DF:GetFrameDB(frame)
     
-    -- Ready Check Icon (show on leader frame only for demo)
+    -- Ready Check Icon. Per-unit `showReadyCheck` first, "the leader frame" as the
+    -- fallback — see the note on the Tankerino/Мишок rows in DF.TestData for why it no
+    -- longer rides the leader.
+    -- ☠ THIS BLOCK EXISTS TWICE (here and in the other status-icon updater). Both are
+    -- kept in step by hand; change one, change the other.
     if frame.readyCheckIcon then
+        local wantReady = testData.showReadyCheck
+        if wantReady == nil then wantReady = testData.isLeader end
         if not db.readyCheckIconEnabled or db.testShowStatusIcons == false then
             frame.readyCheckIcon:Hide()
-        elseif testData.isLeader then
+        elseif wantReady then
             DF:SetUpgradedStatusIcon(frame.readyCheckIcon.texture, "Interface\\RaidFrame\\ReadyCheck-Ready")
             
             local scale = db.readyCheckIconScale or 1.0
@@ -1371,34 +1587,28 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.afkIconEnabled or db.testShowStatusIcons == false then
             frame.afkIcon:Hide()
             if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-        elseif testData.isAFK or testData.isDND then
+        elseif testData.isAFK then
+            -- ⚠ ART BEFORE GEOMETRY, matching the order this block has always used.
+            -- ☠ AND ESCAPED BACKSLASHES. A single-backslash path here rendered NOTHING in
+            -- the preview while live was fine (live sets this art once at creation, with
+            -- \\, and never re-sets it) — `\F` and `\S` are not escapes Lua recognises and
+            -- the path collapses. Every other SetUpgradedStatusIcon call in this file uses
+            -- \\; match them.
             DF:SetUpgradedStatusIcon(frame.afkIcon.texture, "Interface\\FriendsFrame\\StatusIcon-Away")
-            
+
             -- Geometry, base alpha and frame level from the LIVE applier.
             if DF.ApplyStatusIconSettings then
                 DF:ApplyStatusIconSettings(frame.afkIcon, db, "afkIcon")
             end
-            
+
             -- Track AFK start time for test mode
             local frameKey = tostring(frame)
             if testData.isAFK and not testAFKStartTimes[frameKey] then
                 testAFKStartTimes[frameKey] = GetTime()
             end
             
-            -- ☠ DND WAS UNPREVIEWABLE. Live renders it on this same icon with a
-            -- different label and a red tint, and with the timer suppressed (a DND
-            -- flag has no start time). Neither the label nor the colour could be
-            -- judged from the preview. (Audit, 2026-08-07.)
-            local statusText
-            if testData.isDND then
-                statusText = DF.L["DND"]
-                if frame.afkIcon.text then
-                    frame.afkIcon.text:SetTextColor(1, 0.2, 0.2, 1)
-                end
-                if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-                testAFKStartTimes[frameKey] = nil
-            else
-                statusText = db.afkIconText or "AFK"
+            local statusText = db.afkIconText or "AFK"
+            do
                 local showTimer = db.afkIconShowTimer ~= false
 
                 -- Calculate timer if enabled
@@ -1532,20 +1742,34 @@ function DF:UpdateTestAuras(frame)
             -- of the real row enables. Off -> hide the row frames directly and
             -- keep the drives' shown-caches coherent so re-enabling re-shows.
             local showAuras = db.testShowAuras ~= false and not DF:IsTestFrameDead(frame)
-            if db.showBuffs and showAuras and DF.DriveBuffFactory then
+            -- ☠ A COUNT OF 0 MEANS "DON'T PREVIEW THIS ROW", AND HAS TO HIDE IT.
+            -- `testSlotCount` floors at 1 — a container with no slots is a degenerate
+            -- thing to declare — so a 0 that reaches the drive comes back as ONE sample
+            -- icon (Krathe, 2026-08-08: "setting buffs and debuffs to 0 still shows 1").
+            -- Gate it HERE, before the drive, and let the existing else-branch hide the
+            -- row: that reuses the same shown-cache path as "Show Auras" off, so
+            -- re-raising the slider re-shows correctly. Do NOT instead teach the
+            -- container to build zero slots — slots are add-only and a 0-slot rebuild
+            -- would strand frames for the session.
+            local buffCount = db.testBuffCount or 2
+            local debuffCount = db.testDebuffCount or 2
+            if db.showBuffs and showAuras and buffCount > 0 and DF.DriveBuffFactory then
                 DF:DriveBuffFactory(frame, db)
                 -- Test count slider hot-applies (structural: the handle rebuilds).
                 if frame.buffFactory and frame.buffFactory.SetTestMax then
-                    frame.buffFactory:SetTestMax(db.testBuffCount or 2)
+                    frame.buffFactory:SetTestMax(buffCount)
                 end
             elseif frame.buffFactory then
                 frame.buffFactory:GetFrame():Hide()
                 frame.dfBuffFactoryShown = false
             end
-            if db.showDebuffs and showAuras and DF.DriveDebuffFactory then
+            -- ⚠ `~= false` so nil (every unit that does not opt out) still shows the row.
+            -- Per-unit opt-out; see the stamps in UpdateTestFrame.
+            if db.showDebuffs and showAuras and debuffCount > 0
+                and frame.dfTestShowDebuffs ~= false and DF.DriveDebuffFactory then
                 DF:DriveDebuffFactory(frame, db)
                 if frame.debuffFactory and frame.debuffFactory.SetTestMax then
-                    frame.debuffFactory:SetTestMax(db.testDebuffCount or 2)
+                    frame.debuffFactory:SetTestMax(debuffCount)
                 end
             elseif frame.debuffFactory then
                 frame.debuffFactory:GetFrame():Hide()
@@ -2708,8 +2932,15 @@ end
 -- animate targeted list, selection, aggro) kept whatever value they happened to
 -- have. "Full" wasn't full, and "Static" wasn't a reproducible baseline.
 --
--- Sliders (frame / buff / debuff counts) are deliberately NOT touched: they're a
--- working preference, not part of a preset's visual identity.
+-- Sliders are deliberately NOT touched: they're a working preference, not part of a
+-- preset's visual identity.
+--
+-- ☠ ONE EXCEPTION — `testDefensiveCount`. It is a count, but it is also the defensive
+-- row's ONLY on/off since the "Defensive Icon" checkbox was removed, so a preset that
+-- used to turn that row on or off has to keep doing it (Krathe, 2026-08-08). It is
+-- declared in TEST_TOGGLE_KEYS like any toggle and listed `= true` in the presets that
+-- want it; the apply/match helpers translate that to 1 / 0. The frame, buff and debuff
+-- counts stay untouched — they only change HOW MUCH of a row shows, never whether it does.
 -- ============================================================
 
 local TEST_TOGGLE_KEYS = {
@@ -2721,7 +2952,11 @@ local TEST_TOGGLE_KEYS = {
     -- Auras
     "testShowAuras", "testShowDispelGlow", "testShowMissingBuff", "testShowAuraDesigner",
     -- Indicators & Icons
-    "testShowExternalDef", "testShowTargetedList", "testAnimateTargetedList",
+    -- ⚠ `testShowExternalDef` is gone; `testDefensiveCount` replaced it. It lives in this
+    -- list because it is the defensive row's on/off, but it is COUNT-shaped — see
+    -- TEST_COUNT_KEYS below, which is what makes `= true` in a preset mean 1.
+    "testDefensiveCount",
+    "testShowTargetedList", "testAnimateTargetedList",
     "testShowPersonalTargeted", "testShowStatusIcons",
     -- Highlights
     "testShowSelection", "testShowAggro",
@@ -2777,7 +3012,11 @@ local TEST_PRESETS = {
         testShowOutOfRange       = true,
         testShowReducedMaxHealth = true,
         testShowTextDesigner     = true,
-        testShowExternalDef      = true,
+        -- The defensive icon, as this preset's comment promises. Count-shaped, so this
+        -- `true` is written as 1 — see TEST_COUNT_KEYS. It is the only preset besides
+        -- Full that turns the defensive row on, which is how it worked when this was
+        -- the testShowExternalDef checkbox.
+        testDefensiveCount       = true,
         testShowTargetedList     = true,
         testAnimateTargetedList  = true,
         testShowPersonalTargeted = true,
@@ -2831,8 +3070,22 @@ local TEST_TOGGLE_DEFAULT_ON = {
     testShowStatusIcons      = true,
 }
 
+-- ☠ COUNT-SHAPED TOGGLE KEYS. These live in TEST_TOGGLE_KEYS and are written `= true` in
+-- a preset like any other, but they store a NUMBER: >0 is on, 0 is off. `testDefensiveCount`
+-- is one because it is simultaneously the defensive row's on/off and how many icons it
+-- previews — one control, two jobs, which is why the checkbox beside it was removed.
+-- Anything added here must read as off at 0 and on above it, or the matcher will lie.
+local TEST_COUNT_KEYS = {
+    testDefensiveCount = true,
+}
+
 local function TestToggleOn(db, key)
     local v = db[key]
+    if TEST_COUNT_KEYS[key] then
+        -- nil means the profile predates the key. Off, matching the checkbox this
+        -- replaced (testShowExternalDef defaulted to false).
+        return (tonumber(v) or 0) > 0
+    end
     if v == nil then return TEST_TOGGLE_DEFAULT_ON[key] == true end
     return v == true
 end
@@ -2908,7 +3161,15 @@ function DF:ApplyTestPreset(preset)
 
     for _, key in ipairs(TEST_TOGGLE_KEYS) do
         if not (isRaidMode and TEST_PARTY_ONLY_KEYS[key]) then
-            db[key] = set[key] == true
+            if TEST_COUNT_KEYS[key] then
+                -- Count-shaped: a preset says on/off, so write 1 or 0. ⚠ Turning one ON
+                -- resets it to 1 rather than restoring whatever the user had dialled in —
+                -- deliberate, and the same promise every other preset key makes: a preset
+                -- is a reproducible state, not a partial merge.
+                db[key] = (set[key] == true) and 1 or 0
+            else
+                db[key] = set[key] == true
+            end
         end
     end
 
@@ -3035,9 +3296,11 @@ function DF:UpdateTestMissingBuff(frame)
     -- test session (empty groups park the badges in their windows); the drive's
     -- unit guards are test-bypassed (fabricated units fail every unit API).
     if DF.FactoryOwnsMissingBuff and DF:FactoryOwnsMissingBuff(db) then
-        -- Dead unit: park the strip the same way the toggle-off path does, so
-        -- re-showing goes back through the live drive.
-        if DF:IsTestFrameDead(frame) then
+        -- Dead unit, or a unit that opts out (dfTestShowMissingBuff == false): park the
+        -- strip the same way the toggle-off path does, so re-showing goes back through
+        -- the live drive. ⚠ `== false` deliberately, not `not x` — nil means "show",
+        -- which is the default for every unit that does not opt out.
+        if DF:IsTestFrameDead(frame) or frame.dfTestShowMissingBuff == false then
             if frame.missingBuffStrip and frame.dfMissingStripShown ~= false then
                 frame.dfMissingStripShown = false
                 frame.missingBuffStrip:Hide()
@@ -3135,8 +3398,18 @@ function DF:UpdateTestDefensiveBar(frame, testData)
     -- Role-scaled count mirrors the legacy preview shape (tank 3 / healer 1).
     if DF.FactoryOwnsDefensiveRow and DF:FactoryOwnsDefensiveRow(db) then
         local role = testData and testData.role
-        local show = db.defensiveIconEnabled and db.testShowExternalDef
-            and (role == "TANK" or role == "HEALER")
+        -- The COUNT is the on/off: 0 hides the row outright — same rule as the buff and
+        -- debuff rows, and the same reason (testSlotCount floors at 1, so a 0 reaching
+        -- the drive would draw one icon). There is no separate test toggle any more.
+        -- Per-unit override first, the role rule as the fallback. testData wins when it
+        -- is present (both callers pass it); the frame stamp covers any path that does
+        -- not. See the stamps in UpdateTestFrame.
+        local wantDef = testData and testData.showDefensive
+        if wantDef == nil then wantDef = frame.dfTestShowDefensive end
+        if wantDef == nil then wantDef = (role == "TANK" or role == "HEALER") end
+        local show = db.defensiveIconEnabled
+            and (db.testDefensiveCount or 0) > 0
+            and wantDef
             and not DF:IsTestFrameDead(frame)
         if show then
             DF:DriveDefensiveFactory(frame, db)
@@ -3144,15 +3417,18 @@ function DF:UpdateTestDefensiveBar(frame, testData)
             if h then
                 -- ☠ ONE SOURCE FOR THE PREVIEW COUNT. This used to override with a
                 -- role-scaled 3-on-tanks / 1-on-everyone-else AFTER the drive had
-                -- already applied BuildDefensiveRowConfig's `testMax = testBuffCount`.
-                -- Two values fighting: the Buffs count slider appeared to do nothing
-                -- on the defensive row, and since SetTestMax rebuilds on any change,
-                -- every defensive tweak in test paid an extra container rebuild while
-                -- they argued. The config's own comment states the intent -- this is a
-                -- HELPFUL row, so the Buffs count is the one the user set for it -- and
-                -- wins; the role scaling was a leftover of the legacy preview's shape.
+                -- already applied BuildDefensiveRowConfig's testMax. Two values
+                -- fighting, and since SetTestMax rebuilds on any change, every
+                -- defensive tweak in test paid an extra container rebuild while they
+                -- argued. The role scaling was a leftover of the legacy preview.
+                -- ⚠ Both values now come from `testDefensiveCount` (its own panel
+                -- slider, default 1). They must stay in step — this line and
+                -- BuildDefensiveRowConfig in Features/Auras.lua are the two writers.
+                -- ☠ Still clamped by `defensiveBarMax`: the slider goes to 5 and the
+                -- row's own cap can be lower, in which case the row wins. That is not
+                -- the old bug — it is the row honouring its own Max Icons.
                 if h.SetTestMax then
-                    h:SetTestMax(math.min(db.testBuffCount or 2, db.defensiveBarMax or 4))
+                    h:SetTestMax(math.min(db.testDefensiveCount or 0, db.defensiveBarMax or 4))
                 end
                 if frame.dfDefFactoryShown ~= true then
                     frame.dfDefFactoryShown = true
@@ -3177,8 +3453,8 @@ function DF:UpdateAllTestDefensiveBar()
         if not frame then return end
         local db = DF:GetFrameDB(frame)
 
-        -- Unconditional: the painter reads testShowExternalDef itself and
-        -- hides the container row when it's off.
+        -- Unconditional: the painter decides for itself and hides the container row
+        -- when the count is 0 or the feature is off.
         DF:UpdateTestDefensiveBar(frame, testData)
         RepaintTestSurface(frame, "defensive")
     end
@@ -3227,7 +3503,14 @@ function DF:UpdateAllTestTargetedList()
     -- during raid test mode whenever the PARTY profile had it enabled. (Reading the party
     -- db is deliberate — the Targeted List is party-resolved by design; see GetPersonalDB
     -- in Features/TargetedSpells.lua.)
-    if not DF.raidTestMode
+    -- ☠ AND TEST MODE MUST ACTUALLY BE ON. This gate checked testShowTargetedList and
+    -- targetedListEnabled but never DF.testMode — and testShowTargetedList DEFAULTS TRUE.
+    -- So ticking the feature's own Enable on the Indicators page called straight through
+    -- and showed the demo list on screen with test mode off entirely; it then stayed up,
+    -- because the only routes to HideTestTargetedList are this else-branch (which needs
+    -- the feature turned back off) and the main test-mode teardown (Krathe, 2026-08-09).
+    -- ⚠ A "show X in test mode" flag is a filter on test mode, never a trigger for it.
+    if DF.testMode and not DF.raidTestMode
         and db and db.testShowTargetedList and db.targetedListEnabled and DF.ShowTestTargetedList then
         DF:ShowTestTargetedList()
     elseif DF.HideTestTargetedList then
@@ -3542,7 +3825,8 @@ function DF:CreateTestPanel()
                 end
             end
             if self.arrow then
-                self.arrow:SetTextColor(0.4, 0.4, 0.4, enabled and 0.6 or 0.25)
+                self.arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b,
+                    enabled and 0.9 or 0.35)
             end
         end
 
@@ -3555,10 +3839,35 @@ function DF:CreateTestPanel()
             labelText:SetPoint("LEFT", 0, 0)
             labelText:SetText(text)
             labelText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-            local arrow = labelBtn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+            -- ☠ A TEXTURE, NOT A TEXT GLYPH. This was `SetText("›")` in the small font at
+            -- 0.4 grey × 0.6 alpha — about a quarter opacity on a dark panel, and the
+            -- only chevron in the addon drawn as text rather than as
+            -- Media\Icons\chevron_right (which the Aura Designer card headers, and this
+            -- panel's own section headers, already use). Krathe, 2026-08-08: "they are so
+            -- small I can't see them".
+            -- ⚠ The size was not the whole story: `DFFontHighlightSmall` is not known to
+            -- cover U+203A, and AutoProfiles.lua already records this font missing "→".
+            -- A missing glyph renders as nothing, which no amount of recolouring fixes —
+            -- so this is a texture and the question does not arise.
+            -- The icons are white masks, so vertex colour tints them exactly as
+            -- SetTextColor did; every recolour site below moved to SetVertexColor.
+            --
+            -- ⚠ 8, NOT 10 — and the first swap DID ship at 10, which was too heavy
+            -- (Krathe, 2026-08-08: "does it dominate the listing now?"). Two things had
+            -- changed at once: a thin text stroke became a SOLID glyph, and the effective
+            -- brightness went ~0.29 -> ~0.55 against a 0.9 label, i.e. from a third of the
+            -- label's weight to nearly two thirds. What tips it is the REPETITION — the
+            -- section header carries one 12px chevron, a section body carries five of
+            -- these, so the same per-icon weight reads far heavier in the list.
+            -- 8 sits below the label's cap height, so it reads as a hint rather than a
+            -- peer, while staying in the section chevrons' tonal family. The COLOUR was
+            -- deliberately left alone: dropping both at once is how it became invisible
+            -- the first time round.
+            local arrow = labelBtn:CreateTexture(nil, "OVERLAY")
+            arrow:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+            arrow:SetSize(8, 8)
             arrow:SetPoint("LEFT", labelText, "RIGHT", 2, 0)
-            arrow:SetText("›")
-            arrow:SetTextColor(0.4, 0.4, 0.4, 0.6)
+            arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.9)
             labelBtn:SetWidth(labelText:GetStringWidth() + 14)
             -- Every handler bails when the toggle is greyed: EnableMouse(false)
             -- should already stop them, but a disable applied while the cursor is
@@ -3566,18 +3875,33 @@ function DF:CreateTestPanel()
             labelBtn:SetScript("OnEnter", function(self)
                 if container.dfDisabled then return end
                 labelText:SetTextColor(1, 0.82, 0)
-                arrow:SetTextColor(1, 0.82, 0)
-                DF.GUI:ShowTooltip(self, { title = L["Click to open settings"] })
+                arrow:SetVertexColor(1, 0.82, 0, 1)
+                -- ☠ THE STANDARD DF SHAPE IS "label as TITLE, explanation as a BODY
+                -- line" — that is what GUI:AttachTooltip produces for every settings
+                -- widget (ResolveTooltipSpec defaults the title to the control's label
+                -- and puts the caller's string in `lines`). This passed the hint as the
+                -- TITLE with no body, so it rendered as one large white header with
+                -- nothing under it, which reads as a stray game tooltip rather than one
+                -- of ours (Krathe, 2026-08-08).
+                -- ⚠ Still hand-rolled rather than converted to GUI:AttachTooltip: that
+                -- helper builds its own mouse-enabled hit frame OVER the label, and this
+                -- label is a Button you click to open the page — the hit frame would
+                -- swallow the click. The shared ShowTooltip/HideTooltip primitives are
+                -- the part that has to be common, and they are.
+                DF.GUI:ShowTooltip(self, {
+                    title = text,
+                    lines = { L["Click to open settings"] },
+                })
             end)
             labelBtn:SetScript("OnLeave", function(self)
                 DF.GUI:HideTooltip()
                 if container.dfDisabled then
                     labelText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-                    arrow:SetTextColor(0.4, 0.4, 0.4, 0.25)
+                    arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.35)
                     return
                 end
                 labelText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-                arrow:SetTextColor(0.4, 0.4, 0.4, 0.6)
+                arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.9)
             end)
             labelBtn:SetScript("OnClick", function()
                 if container.dfDisabled then return end
@@ -4118,7 +4442,14 @@ function DF:CreateTestPanel()
     end)
     buffSlider:HookScript("OnValueChanged", function(self, value)
         value = math.floor(value + 0.5)
-        local isRaidMode = DF.raidTestMode
+        -- ☠ THE TAB, NOT THE RUNNING PREVIEW. This read `DF.raidTestMode` while the
+        -- panel DISPLAYS and GREYS every control off `DF.GUI.SelectedMode` — twelve
+        -- sites decide "am I in raid mode?" and only these three count sliders used the
+        -- other source. The moment they disagree (raid preview up, Party tab selected,
+        -- or the reverse) the slider showed one profile's value and WROTE to the other's
+        -- (Krathe, 2026-08-08: reset to defaults in raid, click party, defensives back).
+        -- A panel is a view of the selected tab, so a control must write where it reads.
+        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
         local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
         db.testBuffCount = value
         buffValue:SetText(value)
@@ -4143,7 +4474,8 @@ function DF:CreateTestPanel()
     end)
     debuffSlider:HookScript("OnValueChanged", function(self, value)
         value = math.floor(value + 0.5)
-        local isRaidMode = DF.raidTestMode
+        -- The tab, not the running preview — see the buff slider above.
+        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
         local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
         db.testDebuffCount = value
         debuffValue:SetText(value)
@@ -4177,6 +4509,19 @@ function DF:CreateTestPanel()
         if panel.buffValueText then panel.buffValueText:SetTextColor(lr, lg, lb) end
         if panel.debuffValueText then panel.debuffValueText:SetTextColor(lr, lg, lb) end
 
+        -- The Defensives count is its own on/off (0 = hidden), so nothing on this panel
+        -- gates it. What CAN make it inert is the addon-side feature being off — the
+        -- defensive drive requires `defensiveIconEnabled` — so grey it on that, which is
+        -- the only state where moving the slider does nothing.
+        local defOn = adb and adb.defensiveIconEnabled and true or false
+        if panel.defSlider and panel.defSlider.SetEnabled then
+            panel.defSlider:SetEnabled(defOn)
+        end
+        local dr, dg, dbl = C_TEXT.r, C_TEXT.g, C_TEXT.b
+        if not defOn then dr, dg, dbl = C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b end
+        if panel.defSliderLabel then panel.defSliderLabel:SetTextColor(dr, dg, dbl) end
+        if panel.defValueText then panel.defValueText:SetTextColor(dr, dg, dbl) end
+
         -- Group Targeted Spells and the Targeted List are PARTY-ONLY features:
         -- the group cast detection is fingerprint-based and "Raid is intentionally
         -- unsupported (collisions are near-total)", and the Targeted List bails on
@@ -4193,9 +4538,70 @@ function DF:CreateTestPanel()
 
     -- --- INDICATORS & ICONS ---
     local secIndicators = CreateSection(panel, L["Indicators & Icons"], "indicators")
-    panel.showExternalDefCheck = secIndicators:AddCheckbox(L["Defensive Icon"], "testShowExternalDef", function()
-        if DF.testMode or DF.raidTestMode then DF:UpdateAllTestDefensiveBar() end
-    end, "auras_defensiveicon")
+
+    -- ☠ THERE IS NO "Defensive Icon" CHECKBOX, AND `testShowExternalDef` IS GONE WITH IT
+    -- (Krathe, 2026-08-08). The count slider below is the whole control: 0 hides the row,
+    -- 1-5 previews that many. A checkbox plus a slider whose 0 means the same thing is two
+    -- controls for one decision, and they can disagree — checkbox off with the slider at 3
+    -- reads as broken.
+    -- ⚠ CONSEQUENCE, deliberate: the defensive preview is no longer a PRESET toggle. It
+    -- behaves like the Buffs/Debuffs counts, which presets have always left alone as a
+    -- working preference — so Static/Combat/Healer/Full no longer force it on or off, and
+    -- `GetActiveTestPreset` no longer compares it. That is the consistent answer once it
+    -- became a count rather than a boolean.
+    -- ⚠ Also lost: the checkbox's click-through to the Defensive Icon settings page. The
+    -- slider row is a plain frame with no pageId hook.
+
+    -- Defensive count slider — the Buffs/Debuffs pair for this row. It lives HERE, in
+    -- Indicators rather than on the Auras slider row, because the row it governs is an
+    -- indicator; a third label+slider+value would also overflow that row's width.
+    --
+    -- ☠ THE AddWidget CALL IS AT THE END OF THE SECTION, NOT HERE. `AddWidget` anchors
+    -- to `GetGridBottom()`, which is computed from the checkbox count AT CALL TIME — so
+    -- adding it after the first checkbox parked it one row down and the next four
+    -- checkboxes were then laid out straight over the top of it (Krathe's screenshot,
+    -- 2026-08-08). The widget must be added once every checkbox in the section exists,
+    -- which is exactly what the Auras section does with its own slider row.
+    local defSliderRow = CreateFrame("Frame", nil, secIndicators.content)
+    defSliderRow:SetHeight(18)
+
+    local defLabel = defSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    defLabel:SetPoint("LEFT", 0, 0)
+    defLabel:SetText(L["Defensives:"])
+    defLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    local defSlider = CreateThemedSlider(defSliderRow, 55, 0, 5, 1)
+    defSlider:SetPoint("LEFT", defLabel, "RIGHT", 5, 0)
+    local defValue = defSliderRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    defValue:SetPoint("LEFT", defSlider, "RIGHT", 4, 0)
+    defValue:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    panel.defValueText = defValue
+
+    local defSliderDragging = false
+    defSlider:SetScript("OnMouseDown", function(self, button)
+        if button == "LeftButton" then
+            defSliderDragging = true
+            DF:OnSliderDragStart(function() if DF.RefreshTestFrames then DF:RefreshTestFrames() end end)
+        end
+    end)
+    defSlider:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" and defSliderDragging then
+            defSliderDragging = false
+            DF:OnSliderDragStop()
+        end
+    end)
+    defSlider:HookScript("OnValueChanged", function(self, value)
+        value = math.floor(value + 0.5)
+        -- The tab, not the running preview — see the buff slider above.
+        local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
+        local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
+        db.testDefensiveCount = value
+        defValue:SetText(value)
+        if DF.raidTestMode then DF:ThrottledUpdateRaidTestFrames()
+        elseif DF.testMode then DF:ThrottledUpdateAll() end
+    end)
+    panel.defSlider = defSlider
+    panel.defSliderLabel = defLabel
     -- "Targeted Spell" was the old group-frame icon display that
     -- Blizzard's 2026-04-07 hotfix killed. The checkbox slot is now
     -- repurposed for the Targeted List (alpha/beta-only feature).
@@ -4231,6 +4637,11 @@ function DF:CreateTestPanel()
     panel.showStatusIconsCheck = secIndicators:AddCheckbox(L["Icons"], "testShowStatusIcons", function()
         if DF.testMode or DF.raidTestMode then DF:RefreshTestFrames() end
     end, "indicators_icons")
+
+    -- ⚠ LAST in the section, after every AddCheckbox above — see the note where
+    -- defSliderRow is built. AddWidget measures the checkbox grid as it stands right
+    -- now, so anything added afterwards would be drawn on top of this row.
+    secIndicators:AddWidget(defSliderRow, 22)
 
     -- --- HIGHLIGHTS ---
     local secHighlights = CreateSection(panel, L["Highlights"], "highlights")
@@ -4371,7 +4782,6 @@ function DF:CreateTestPanel()
         self.showDispelGlowCheck:SetChecked(db.testShowDispelGlow)
         self.showMissingBuffCheck:SetChecked(db.testShowMissingBuff)
         self.showADCheck:SetChecked(db.testShowAuraDesigner)
-        self.showExternalDefCheck:SetChecked(db.testShowExternalDef)
         -- The Targeted List is party-only, so it can never be "on" in raid — show it
         -- unchecked there regardless of what the raid profile stores (an older
         -- build's preset wrote testShowTargetedList into the raid db, so it would
@@ -4392,6 +4802,16 @@ function DF:CreateTestPanel()
         self.debuffSlider:SetValue(debuffCount)
         self.debuffValueText:SetText(debuffCount)
         if self.debuffSlider.UpdateTheme then self.debuffSlider:UpdateTheme() end
+        -- ⚠ Fallback is 0 here, matching Config's default (and the OFF checkbox this
+        -- replaced). The two above fall back to 3 while Config seeds 2 — a pre-existing
+        -- mismatch that only shows on a db with no key at all; left alone rather than
+        -- folded into this change.
+        if self.defSlider then
+            local defCount = db.testDefensiveCount or 0
+            self.defSlider:SetValue(defCount)
+            self.defValueText:SetText(defCount)
+            if self.defSlider.UpdateTheme then self.defSlider:UpdateTheme() end
+        end
 
         -- Grey the Buff/Debuff sliders when Show Auras is off (boolean-enable grey
         -- rule). Runs AFTER the value/UpdateTheme set above so the disabled muted
