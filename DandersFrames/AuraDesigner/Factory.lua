@@ -714,8 +714,16 @@ end
 local function collectGroupEffectPool(adDB, spec, R)
     groupPool.n = 0
     for p = 1, 2 do
-        local groups = (p == 1) and (adDB.layoutGroups and adDB.layoutGroups[spec])
-                                 or adDB.otherLayoutGroups
+        -- ☠ NOT `(p == 1) and specGroups or otherGroups`: with no groups on the active
+        -- spec the first arm is nil, and the `or` would hand pass 1 the OTHER store --
+        -- which pass 2 then walks again, so every other-store group would be collected
+        -- twice, once under the wrong key prefix and the wrong caster filter.
+        local groups
+        if p == 1 then
+            groups = adDB.layoutGroups and adDB.layoutGroups[spec]
+        else
+            groups = adDB.otherLayoutGroups
+        end
         if groups then
             local keyPrefix = (p == 1) and "" or OTHER_PREFIX
             -- Other-store identity is spec-INDEPENDENT, mirroring the other aura pool.
