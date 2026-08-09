@@ -297,167 +297,6 @@ local function resolveFilterGroup(R, group)
     return res, sig
 end
 
-local function auraHasTrackedIndicator(auraCfg)
-    if type(auraCfg) ~= "table" then return false end
-    local inds = auraCfg.indicators
-    if inds then
-        for _, ind in ipairs(inds) do
-            -- Bars ignore missing mode entirely (no duration data when absent — legacy
-            -- Engine.lua:510), so a bar always renders present and always dedups.
-            if ind.enabled ~= false and not ind.othersOnly
-                and (ind.type == "bar" or not ind.showWhenMissing) then return true end
-        end
-    end
-    local hb, bg, bd = auraCfg.healthbar, auraCfg.background, auraCfg.border
-    if hb and hb.enabled ~= false and not hb.othersOnly and not hb.showWhenMissing then return true end
-    if bg and bg.enabled ~= false and not bg.othersOnly and not bg.showWhenMissing then return true end
-    if bd and bd.enabled ~= false and not bd.othersOnly and not bd.showWhenMissing then return true end
-    -- Text colour-by-cover (recovered): a present-mode name/health text indicator is a
-    -- rendering visual, so it dedups. SWM-flagged text renders nothing (unsupported).
-    local nt, ht = auraCfg.nametext, auraCfg.healthtext
-    if nt and nt.enabled ~= false and not nt.othersOnly and nt.color and not nt.showWhenMissing then return true end
-    if ht and ht.enabled ~= false and not ht.othersOnly and ht.color and not ht.showWhenMissing then return true end
-    return false
-end
-
-function DF:GetADTrackedSpellIDs(frame, db)
-    if not frame then return nil end
-    -- Gate: AD must be enabled for this frame AND the native factory must own AD for this
-    -- mode's db (mirror the render gates). Off on either -> contribute nothing.
-    if not (DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)) then return nil end
-    if not (DF.FactoryOwnsAD and DF:FactoryOwnsAD(db)) then return nil end
-
-    local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
-    if not adDB or not adDB.enabled then return nil end
-
-    -- Active spec resolved exactly as Factory:SyncFrame does (auto -> player's live spec).
-    local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
-    local spec = Engine and Engine.ResolveSpec and Engine:ResolveSpec(adDB)
-    if not spec then return nil end
-
-    local specAuras = adDB.auras and adDB.auras[spec]
-
-    local union
-    if specAuras then
-        for auraName, auraCfg in pairs(specAuras) do
-            if auraHasTrackedIndicator(auraCfg) then
-                local f = DF:BuildADIdentityFilters(spec, auraName)
-                if f and f.includeSpellIDs then
-                    union = union or {}
-                    for id in pairs(f.includeSpellIDs) do union[id] = true end
-                end
-            end
-        end
-    end
-
-    -- OTHER BUFFS pool (B1): spec-independent records (adDB.otherAuras, flat
-    -- name -> cfg map) join the union exactly like spec auras — same tracked-
-    -- indicator gate (eye-aware), identity resolved pool-agnostically (nil spec:
-    -- ad-hoc "#<id>" -> SpellDB by name; the per-spec Config tables never apply).
-    local otherAuras = adDB.otherAuras
-    if otherAuras then
-        for auraName, auraCfg in pairs(otherAuras) do
-            if auraHasTrackedIndicator(auraCfg) then
-                local f = DF:BuildADIdentityFilters(nil, auraName)
-                if f and f.includeSpellIDs then
-                    union = union or {}
-                    for id in pairs(f.includeSpellIDs) do union[id] = true end
-                else
-                    warnOtherUnresolved(auraName)
-                end
-            end
-        end
-    end
-
-    -- FILTER GROUPS (A5): a filter group renders every spell of its linked registry
-    -- filters on the frame, so its resolved include map joins the dedup union (the
-    -- buff row hides what the group shows). Eye-hidden groups (`enabled == false`)
-    -- render nothing and contribute nothing — their buff-row icons come back. Only
-    -- kind "include" maps count ("all" = empty selection renders nothing; "exclude"
-    -- is unreachable from the group UI and skipped by the render path too).
-    -- Both group stores contribute: the spec-keyed groups AND the flat
-    -- spec-independent otherLayoutGroups (Other Buffs tab) — a filter group
-    -- renders the same spells whichever tab owns it, so the row hides them
-    -- identically. Same eye gate, same version-keyed resolve cache.
-    -- othersOnly groups stay OUT of the union (mirror auraHasTrackedIndicator):
-    -- their container shows only OTHERS' casts, so the player's own cast must
-    -- keep its buff-row icon. Only the flat-store UI offers the flag; the gate
-    -- reads both stores identically (spec-store parity).
-    local R = DF.FilterRegistry
-    if R then
-        local specGroups = adDB.layoutGroups and adDB.layoutGroups[spec]
-        for g = 1, 2 do
-            local groups = (g == 1) and specGroups or adDB.otherLayoutGroups
-            if groups then
-                for _, group in ipairs(groups) do
-                    if type(group) == "table" and group.kind == "filter" and group.enabled ~= false
-                        and not group.othersOnly then
-                        local res = resolveFilterGroup(R, group)   -- version-cached, no re-resolve
-                        if res.kind == "include" and res.map then
-                            for id in pairs(res.map) do
-                                union = union or {}   -- only allocate when the map has entries
-                                union[id] = true
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return union   -- nil when nothing is tracked -> caller unions nothing
-end
-
--- ============================================================
--- DEBUFF-ROW CLAIM SET  (C1 — the row-skip half of debuff-group dedup)
--- The union of every ENABLED debuff group's selected categories for the frame's
--- ACTIVE preset — keys boss / role / priority / crowdControl / raid /
--- dispellable. The debuff ROW (DriveDebuffFactory) passes this into
--- BuildDirectDebuffFilters so a category an AD debuff group displays is dropped
--- from the row (no double render). Gate chain mirrors GetADTrackedSpellIDs
--- exactly: AD enabled for the frame, factory owns AD for this db, preset
--- enabled, spec resolvable (SyncFrame tears every AD container down without a
--- spec, so nothing renders and nothing may be claimed). Eye-hidden groups
--- (`enabled == false`) render nothing and claim nothing. Dispellable claims are
--- mode-AGNOSTIC by design (a group claiming dispellable claims the category
--- whatever mode either side runs — simplest rule). NO CYCLE by construction:
--- this reads group.selection tables only — it never calls the record resolver,
--- and the AD facade path (buildDebuffGroupRecords below) never consults claims.
-local CLAIMABLE_CATEGORIES = { "boss", "role", "priority", "crowdControl", "raid", "dispellable" }
-function DF:GetClaimedDebuffCategories(frame, db)
-    if not frame then return nil end
-    if not (DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)) then return nil end
-    if not (DF.FactoryOwnsAD and DF:FactoryOwnsAD(db)) then return nil end
-
-    local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
-    if not adDB or not adDB.enabled then return nil end
-
-    local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
-    local spec = Engine and Engine.ResolveSpec and Engine:ResolveSpec(adDB)
-    if not spec then return nil end
-
-    local groups = adDB.debuffGroups
-    if not groups then return nil end
-
-    local claimed
-    for _, group in ipairs(groups) do
-        if type(group) == "table" and group.enabled ~= false and type(group.selection) == "table" then
-            local sel = group.selection
-            for i = 1, #CLAIMABLE_CATEGORIES do
-                local k = CLAIMABLE_CATEGORIES[i]
-                if sel[k] then
-                    claimed = claimed or {}
-                    claimed[k] = true
-                end
-            end
-        end
-    end
-    return claimed   -- nil when no group claims anything -> row builds untouched
-end
-
--- ============================================================
--- HELPERS
--- ============================================================
-
 -- ============================================================
 -- CONDITION GROUPS  (AND across groups, OR within a group)
 -- An effect can carry `typeCfg.conditions` instead of the flat `triggers` list:
@@ -636,6 +475,206 @@ local function unionIdentity(spec, auraName, typeCfg)
     end
     return map
 end
+
+local function auraHasTrackedIndicator(auraCfg)
+    if type(auraCfg) ~= "table" then return false end
+    local inds = auraCfg.indicators
+    if inds then
+        for _, ind in ipairs(inds) do
+            -- Bars ignore missing mode entirely (no duration data when absent — legacy
+            -- Engine.lua:510), so a bar always renders present and always dedups.
+            if ind.enabled ~= false and not ind.othersOnly
+                and (ind.type == "bar" or not ind.showWhenMissing) then return true end
+        end
+    end
+    local hb, bg, bd = auraCfg.healthbar, auraCfg.background, auraCfg.border
+    if hb and hb.enabled ~= false and not hb.othersOnly and not hb.showWhenMissing then return true end
+    if bg and bg.enabled ~= false and not bg.othersOnly and not bg.showWhenMissing then return true end
+    if bd and bd.enabled ~= false and not bd.othersOnly and not bd.showWhenMissing then return true end
+    -- Text colour-by-cover (recovered): a present-mode name/health text indicator is a
+    -- rendering visual, so it dedups. SWM-flagged text renders nothing (unsupported).
+    local nt, ht = auraCfg.nametext, auraCfg.healthtext
+    if nt and nt.enabled ~= false and not nt.othersOnly and nt.color and not nt.showWhenMissing then return true end
+    if ht and ht.enabled ~= false and not ht.othersOnly and ht.color and not ht.showWhenMissing then return true end
+    return false
+end
+
+-- Union everything a record's TRACKED blocks actually match into `out`.
+--
+-- ☠ NOT just the owning aura name. An effect fires on its TRIGGERS -- and now on whole
+-- condition groups, each of which can hold several spells or an entire filter -- so
+-- keying dedup off the record's name hid only the first spell and left every other
+-- trigger's icon on the bar beside a visual that was already representing it. That gap
+-- predates conditions but was near-invisible while multi-trigger was rare; it is the
+-- common case now.
+--
+-- Gating is PER BLOCK, not per record, so one othersOnly or show-when-missing block can
+-- no longer drag a whole record's spells into the union (or keep them out of it). Each
+-- block resolves through the same unionIdentity the RENDER path uses, so what dedup
+-- hides and what the effect shows cannot drift apart.
+local AD_FRAME_EFFECT_KEYS = { "healthbar", "background", "border", "nametext", "healthtext" }
+
+local function unionTrackedIdentity(spec, auraName, auraCfg, out)
+    if type(auraCfg) ~= "table" then return out end
+    local function add(cfg)
+        local map = unionIdentity(spec, auraName, cfg)
+        if not map then return end
+        out = out or {}
+        for id in pairs(map) do out[id] = true end
+    end
+    local inds = auraCfg.indicators
+    if inds then
+        for _, ind in ipairs(inds) do
+            -- Bars ignore missing mode (no duration data when absent), so a bar always
+            -- renders present and always dedups.
+            if ind.enabled ~= false and not ind.othersOnly
+                and (ind.type == "bar" or not ind.showWhenMissing) then
+                add(ind)
+            end
+        end
+    end
+    for _, key in ipairs(AD_FRAME_EFFECT_KEYS) do
+        local c = auraCfg[key]
+        if type(c) == "table" and c.enabled ~= false and not c.othersOnly
+            and not c.showWhenMissing then
+            -- Text colour-by-cover renders nothing without a colour, so it tracks nothing.
+            if (key ~= "nametext" and key ~= "healthtext") or c.color then
+                add(c)
+            end
+        end
+    end
+    return out
+end
+
+function DF:GetADTrackedSpellIDs(frame, db)
+    if not frame then return nil end
+    -- Gate: AD must be enabled for this frame AND the native factory must own AD for this
+    -- mode's db (mirror the render gates). Off on either -> contribute nothing.
+    if not (DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)) then return nil end
+    if not (DF.FactoryOwnsAD and DF:FactoryOwnsAD(db)) then return nil end
+
+    local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
+    if not adDB or not adDB.enabled then return nil end
+
+    -- Active spec resolved exactly as Factory:SyncFrame does (auto -> player's live spec).
+    local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    local spec = Engine and Engine.ResolveSpec and Engine:ResolveSpec(adDB)
+    if not spec then return nil end
+
+    local specAuras = adDB.auras and adDB.auras[spec]
+
+    local union
+    if specAuras then
+        for auraName, auraCfg in pairs(specAuras) do
+            union = unionTrackedIdentity(spec, auraName, auraCfg, union)
+        end
+    end
+
+    -- OTHER BUFFS pool (B1): spec-independent records (adDB.otherAuras, flat
+    -- name -> cfg map) join the union exactly like spec auras — same tracked-
+    -- indicator gate (eye-aware), identity resolved pool-agnostically (nil spec:
+    -- ad-hoc "#<id>" -> SpellDB by name; the per-spec Config tables never apply).
+    local otherAuras = adDB.otherAuras
+    if otherAuras then
+        for auraName, auraCfg in pairs(otherAuras) do
+            local before = union
+            union = unionTrackedIdentity(nil, auraName, auraCfg, union)
+            -- Tripwire kept: a tracked other-pool record that contributed NOTHING means an
+            -- unresolvable name, which the pool's naming contract forbids.
+            if union == before and auraHasTrackedIndicator(auraCfg) then
+                warnOtherUnresolved(auraName)
+            end
+        end
+    end
+
+    -- FILTER GROUPS (A5): a filter group renders every spell of its linked registry
+    -- filters on the frame, so its resolved include map joins the dedup union (the
+    -- buff row hides what the group shows). Eye-hidden groups (`enabled == false`)
+    -- render nothing and contribute nothing — their buff-row icons come back. Only
+    -- kind "include" maps count ("all" = empty selection renders nothing; "exclude"
+    -- is unreachable from the group UI and skipped by the render path too).
+    -- Both group stores contribute: the spec-keyed groups AND the flat
+    -- spec-independent otherLayoutGroups (Other Buffs tab) — a filter group
+    -- renders the same spells whichever tab owns it, so the row hides them
+    -- identically. Same eye gate, same version-keyed resolve cache.
+    -- othersOnly groups stay OUT of the union (mirror auraHasTrackedIndicator):
+    -- their container shows only OTHERS' casts, so the player's own cast must
+    -- keep its buff-row icon. Only the flat-store UI offers the flag; the gate
+    -- reads both stores identically (spec-store parity).
+    local R = DF.FilterRegistry
+    if R then
+        local specGroups = adDB.layoutGroups and adDB.layoutGroups[spec]
+        for g = 1, 2 do
+            local groups = (g == 1) and specGroups or adDB.otherLayoutGroups
+            if groups then
+                for _, group in ipairs(groups) do
+                    if type(group) == "table" and group.kind == "filter" and group.enabled ~= false
+                        and not group.othersOnly then
+                        local res = resolveFilterGroup(R, group)   -- version-cached, no re-resolve
+                        if res.kind == "include" and res.map then
+                            for id in pairs(res.map) do
+                                union = union or {}   -- only allocate when the map has entries
+                                union[id] = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return union   -- nil when nothing is tracked -> caller unions nothing
+end
+
+-- ============================================================
+-- DEBUFF-ROW CLAIM SET  (C1 — the row-skip half of debuff-group dedup)
+-- The union of every ENABLED debuff group's selected categories for the frame's
+-- ACTIVE preset — keys boss / role / priority / crowdControl / raid /
+-- dispellable. The debuff ROW (DriveDebuffFactory) passes this into
+-- BuildDirectDebuffFilters so a category an AD debuff group displays is dropped
+-- from the row (no double render). Gate chain mirrors GetADTrackedSpellIDs
+-- exactly: AD enabled for the frame, factory owns AD for this db, preset
+-- enabled, spec resolvable (SyncFrame tears every AD container down without a
+-- spec, so nothing renders and nothing may be claimed). Eye-hidden groups
+-- (`enabled == false`) render nothing and claim nothing. Dispellable claims are
+-- mode-AGNOSTIC by design (a group claiming dispellable claims the category
+-- whatever mode either side runs — simplest rule). NO CYCLE by construction:
+-- this reads group.selection tables only — it never calls the record resolver,
+-- and the AD facade path (buildDebuffGroupRecords below) never consults claims.
+local CLAIMABLE_CATEGORIES = { "boss", "role", "priority", "crowdControl", "raid", "dispellable" }
+function DF:GetClaimedDebuffCategories(frame, db)
+    if not frame then return nil end
+    if not (DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)) then return nil end
+    if not (DF.FactoryOwnsAD and DF:FactoryOwnsAD(db)) then return nil end
+
+    local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
+    if not adDB or not adDB.enabled then return nil end
+
+    local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    local spec = Engine and Engine.ResolveSpec and Engine:ResolveSpec(adDB)
+    if not spec then return nil end
+
+    local groups = adDB.debuffGroups
+    if not groups then return nil end
+
+    local claimed
+    for _, group in ipairs(groups) do
+        if type(group) == "table" and group.enabled ~= false and type(group.selection) == "table" then
+            local sel = group.selection
+            for i = 1, #CLAIMABLE_CATEGORIES do
+                local k = CLAIMABLE_CATEGORIES[i]
+                if sel[k] then
+                    claimed = claimed or {}
+                    claimed[k] = true
+                end
+            end
+        end
+    end
+    return claimed   -- nil when no group claims anything -> row builds untouched
+end
+
+-- ============================================================
+-- HELPERS
+-- ============================================================
 
 -- Slot/group filter string for an indicator/effect config (read-free). othersOnly =
 -- show only OTHERS' casts of the spell, via the native "!PLAYER" negation — the exact
