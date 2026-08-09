@@ -246,6 +246,54 @@ end
 P.CreateCardShell = CreateCardShell
 
 -- ============================================================
+-- CARD STACK (in-place reflow of a card list)
+-- The groups list and the debuff-category list both stack their cards by hand:
+-- each card is pinned at a running y offset, sized once its body is built, and
+-- the accumulator carries the next card's offset. That is fine at build time and
+-- useless afterwards -- a card whose body changes height (a collapsible section
+-- swapping its widget set) leaves every card BELOW it anchored where the old
+-- height put them, which is why those edits used to rebuild the whole tab via
+-- S.SwitchTab. This owns the re-anchor pass so they don't have to.
+--
+--   local stack = CreateCardStack(parent, yPos)   -- yPos = the FIRST card's offset
+--   stack:Add(card)                               -- once per card, in visual order
+--   stack:Reflow()                                -- after any card's height changes
+--
+-- Reflow reads each card's CURRENT height, so the caller only has to keep the
+-- card itself correctly sized. Card gap (5) and the parent's bottom padding (20)
+-- mirror the build-time loop exactly.
+-- ============================================================
+local CARD_GAP = 5
+
+local function CreateCardStack(parent, topY)
+    local stack = { cards = {} }
+
+    function stack:Add(card)
+        tinsert(self.cards, card)
+    end
+
+    function stack:Reflow()
+        local y = topY
+        for _, card in ipairs(self.cards) do
+            card:ClearAllPoints()
+            card:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, y)
+            card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+            y = y - card:GetHeight() - CARD_GAP
+        end
+        parent:SetHeight(max(-y + 20, 200))
+        -- Content that SHRANK leaves the scroll frame parked past its new end.
+        -- Clamp it the same way S.SwitchTab does after a rebuild.
+        if S.tabScrollFrame then
+            local sf = S.tabScrollFrame
+            sf:SetVerticalScroll(min(sf:GetVerticalScroll(), sf:GetVerticalScrollRange()))
+        end
+    end
+
+    return stack
+end
+P.CreateCardStack = CreateCardStack
+
+-- ============================================================
 -- BUFF COEXISTENCE POPUP
 -- Shown once when the user enables Aura Designer, asking whether
 -- to keep standard buff icons or let AD fully replace them.

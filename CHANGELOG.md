@@ -24,6 +24,7 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Aura Designer) **New: Filter Groups.** Place an entire filter on the frame as its own icon row — link built-in or custom filters, and every matching buff appears in a self-arranging row with its own position, icon size, growth and icon cap. Aura Filters changes apply to linked groups immediately, and buffs shown by a group leave the buff bar while "Hide Duplicate Buffs" is on.
 * (Aura Designer) **New: Expiry Alerts.** Indicators can now warn you when a tracked buff is about to run out — below a threshold you choose, your own custom text or a warning glyph appears on the unit frame, positioned and sized however you like, so a tracked shield can literally say "Shield dropping!". Find it in each indicator's Expiry Warning section.
 * (Aura Designer) Open dropdown menus now close when switching tabs instead of lingering over the new tab.
+* (Aura Designer) Changing a group's border style no longer rebuilds the whole group list — the cards adjust in place and your scroll position is kept.
 * (Auras) "Hide Long Debuffs" now also works while "All Debuffs" is enabled. "Keep important debuffs" still requires the category filters.
 * (Aura Designer) Fix cooldown swipes on indicators and groups draining in the opposite direction from the buff and debuff bars.
 * (Aura Designer) Fix error spam from the health bar overlay, most noticeable in follower dungeons and other content where players join and leave often.

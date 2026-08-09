@@ -2306,10 +2306,40 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         RefreshPlacedIndicators()
         RefreshLiveFramesThrottled()
     end
-    -- Visibility changes inside the section (border style dropdown swapping its
-    -- widget set) re-measure heights, so rebuild the tab — the same full-rebuild
-    -- the effect cards' dropdown callbacks run (AuraDesigner_RefreshPage).
-    local function rebuildTab() S.SwitchTab("layout") end
+
+    -- ── SECTION REFLOW ──
+    -- Visibility changes inside a section (the border style dropdown swapping its
+    -- widget set) change that section's height. AddSection pins each section at a
+    -- FIXED y computed at build time, so without a re-anchor pass the sections
+    -- below either overlap it (grew) or leave a gap (shrank) — which is why this
+    -- used to answer with S.SwitchTab("layout"), a full tab rebuild.
+    --
+    -- Same shape as BuildTypeContent's reflow (Indicators.lua): walk the stack
+    -- re-anchoring at the running total, reading each section's CURRENT
+    -- calculatedHeight (LayoutChildren keeps it up to date) and falling back to
+    -- the at-build-time height for anything that doesn't track one.
+    --
+    -- ☠ The final y IS the caller's `by` — this section is the LAST thing placed
+    -- in the card body at both call sites, so dfAD_ReflowCard can size the body
+    -- from it. Anything added to the body BELOW this section must be folded into
+    -- that hook too, or the body will size short.
+    local sections = {}
+    local sectionsStartBy = by
+
+    local function ReflowSections()
+        local y = sectionsStartBy
+        for _, entry in ipairs(sections) do
+            local g = entry.widget
+            g:ClearAllPoints()
+            g:SetPoint("TOPLEFT", body, "TOPLEFT", 5, y)
+            y = y - (g.calculatedHeight or entry.height)
+        end
+        if body.dfAD_ReflowCard then body.dfAD_ReflowCard(y) end
+    end
+    -- Published under the name the toolkit looks for: SettingsWidgets' measured-label
+    -- converge walks up from a resized widget for exactly this key, so a wrapped note
+    -- inside one of these sections now re-flows the card instead of walking past it.
+    body.dfAD_ReflowWidgets = ReflowSections
 
     -- One collapsible box PER CATEGORY — the expanded effect card's section
     -- structure (Appearance / Border / Duration Text / Stack Count, same names
@@ -2328,6 +2358,7 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
         buildFn(g)
         local h = g:LayoutChildren()   -- includes the group's own bottom margin
         g:SetPoint("TOPLEFT", body, "TOPLEFT", 5, by)
+        tinsert(sections, { widget = g, height = h })
         by = by - h
     end
 
@@ -2351,7 +2382,15 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
             fullUpdate    = refresh,
             lightUpdate   = refresh,
             lightColors   = refresh,
-            refreshStates = rebuildTab,
+            -- Re-evaluate this section's own hideOn, then slide the sections
+            -- below it (and the sibling cards) to the new height. No
+            -- RefreshChildStates: this section never applies disableOn at build
+            -- either, so adding it here would grey on toggle and un-grey on the
+            -- next rebuild. Matches the placed icon card's border exactly.
+            refreshStates = function()
+                g:LayoutChildren()
+                ReflowSections()
+            end,
             sizeMin = 1, sizeMax = 5, sizeStep = 1,
         })
     end)

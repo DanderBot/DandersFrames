@@ -23,6 +23,7 @@ local GetAuraDesignerDB = P.GetAuraDesignerDB
 local GetThemeColor = P.GetThemeColor
 local ApplyBackdrop = P.ApplyBackdrop
 local CreateCardShell = P.CreateCardShell
+local CreateCardStack = P.CreateCardStack
 local ResolveSpec = P.ResolveSpec
 local CreateDebuffGroup = P.CreateDebuffGroup
 local IsOtherTab = P.IsOtherTab
@@ -138,6 +139,11 @@ S.BuildLayoutGroupsTab = function()
         empty:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
         empty:SetJustifyH("CENTER")
     else
+        -- Card stack: the appearance sections in an expanded card can change
+        -- height in place, which moves every card below. The stack owns the
+        -- re-anchor pass so those edits don't have to rebuild the tab.
+        local stack = CreateCardStack(parent, yPos)
+
         -- Render group cards (expansion keys are pool-scoped — raw id on My
         -- Buffs, "othergroup:<id>" on Other; the id counters overlap)
         for _, group in ipairs(groups) do
@@ -151,6 +157,7 @@ S.BuildLayoutGroupsTab = function()
                 borderColor   = {r = gc.r * 0.35, g = gc.g * 0.35, b = gc.b * 0.35, a = 0.5},
                 chevronColor  = gc,
             })
+            stack:Add(card)
 
             -- Group name
             local nameText = header:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -248,6 +255,7 @@ S.BuildLayoutGroupsTab = function()
             end)
 
             local totalCardH = 30
+            local cardHeaderH = totalCardH   -- captured before the body is folded in
 
             -- ── BODY (when expanded) ──
             if isExpanded then
@@ -949,6 +957,18 @@ S.BuildLayoutGroupsTab = function()
                     -- ── APPEARANCE (collapsible — the effect-card section idiom) ──
                     by = by - 10
                     by = AddGroupAppearanceSection(body, group, bodyWidth, by, expandKey)
+
+                    -- The appearance sections reflow in place; when they do, the
+                    -- body and card must re-size and the cards below must slide.
+                    -- `newBy` is the section stack's new tail, i.e. what
+                    -- AddGroupAppearanceSection would have returned this time —
+                    -- so the body height formula is the build-time one verbatim.
+                    body.dfAD_ReflowCard = function(newBy)
+                        local h = -newBy + 12
+                        body:SetHeight(h)
+                        card:SetHeight(cardHeaderH + h)
+                        stack:Reflow()
+                    end
                 end
 
                 local bodyH = -by + 12
@@ -1075,6 +1095,9 @@ S.BuildDebuffGroupsTab = function()
         empty:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
         empty:SetJustifyH("CENTER")
     else
+        -- Card stack — same in-place reflow seam as the Layout Groups tab.
+        local stack = CreateCardStack(parent, yPos)
+
         for _, group in ipairs(groups) do
             local cardKey = "dgroup:" .. group.id
             local isExpanded = expandedGroups[cardKey] or false
@@ -1087,6 +1110,7 @@ S.BuildDebuffGroupsTab = function()
                 borderColor   = {r = gc.r * 0.35, g = gc.g * 0.35, b = gc.b * 0.35, a = 0.5},
                 chevronColor  = gc,
             })
+            stack:Add(card)
 
             -- Group name + collapsed summary: the selected category names
             -- (the A5 collapsed treatment, categories instead of link count).
@@ -1160,6 +1184,7 @@ S.BuildDebuffGroupsTab = function()
             end)
 
             local totalCardH = 30
+            local cardHeaderH = totalCardH   -- captured before the body is folded in
 
             -- ── BODY (when expanded) ──
             if isExpanded then
@@ -1371,6 +1396,14 @@ S.BuildDebuffGroupsTab = function()
                 -- ── APPEARANCE (collapsible — the effect-card section idiom) ──
                 by = by - 10
                 by = AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
+
+                -- In-place reflow hook — see the Layout Groups tab's copy.
+                body.dfAD_ReflowCard = function(newBy)
+                    local h = -newBy + 12
+                    body:SetHeight(h)
+                    card:SetHeight(cardHeaderH + h)
+                    stack:Reflow()
+                end
 
                 local bodyH = -by + 12
                 body:SetHeight(bodyH)
