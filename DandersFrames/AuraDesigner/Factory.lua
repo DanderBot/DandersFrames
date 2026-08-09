@@ -458,41 +458,6 @@ end
 -- HELPERS
 -- ============================================================
 
--- Union the includeSpellIDs of a frame-level indicator's triggers into one map.
--- Triggers are AD aura NAMES; no triggers => the owning aura name. Multi-trigger
--- degrades to OR-presence (union) — the accepted 12.1 tradeoff (AND / duration
--- priority need remaining-time reads, unportable; P4.6). Read-free (static config).
-local function unionIdentity(spec, auraName, typeCfg)
-    local triggers = typeCfg.triggers
-    local map
-    -- Condition groups supersede the flat list. This union is only the "does this effect
-    -- resolve to anything at all" answer pickWinner needs, plus the tuning signature —
-    -- the CHAIN is rebuilt from resolveConditions by the consumer. The two shapes can
-    -- share a union (ALL{A,B} and ANY{A,B} union identically), so the chain length is
-    -- folded into the STRUCT signature to keep them apart; a mode change rebuilds.
-    local links = resolveConditions(spec, typeCfg)
-    if links then
-        for _, m in ipairs(links) do
-            map = map or {}
-            for id in pairs(m) do map[id] = true end
-        end
-        return map
-    end
-    if triggers and #triggers > 0 then
-        for _, name in ipairs(triggers) do
-            local f = DF:BuildADIdentityFilters(spec, name)
-            if f and f.includeSpellIDs then
-                map = map or {}
-                for id in pairs(f.includeSpellIDs) do map[id] = true end
-            end
-        end
-    else
-        local f = DF:BuildADIdentityFilters(spec, auraName)
-        if f then map = f.includeSpellIDs end
-    end
-    return map
-end
-
 -- ============================================================
 -- CONDITION GROUPS  (AND across groups, OR within a group)
 -- An effect can carry `typeCfg.conditions` instead of the flat `triggers` list:
@@ -513,10 +478,15 @@ end
 --     too, and the game evaluated the conjunction for us. Proven in game 2026-08-09,
 --     including with the buffs applied in either order and in combat.
 -- So "ALL of ANY groups" is ONE chain with one visual at the end — the shape the
--- mechanism natively has. "ANY of ALL groups" ((X and Y) or (Z and W)) needs one chain
--- PER group and therefore one visual per group, which double-renders translucent tints.
--- It is deliberately NOT built yet; resolveConditions returns nil for it so the effect
--- falls back to the flat union rather than rendering something wrong.
+-- mechanism natively has. "ANY of ALL groups" ((X and Y) or (Z and W)) would need one
+-- chain PER term and therefore one visual per term, which double-renders translucent
+-- tints (measured in game: 25% -> 44% -> 58% over one, two and three chains), so it is
+-- DISTRIBUTED into the first form by distributeTerms below rather than rendered as
+-- written. Both shapes therefore draw through a single chain.
+--
+-- ☠ DEFINED ABOVE unionIdentity ON PURPOSE. Its caller is a `local function` too, so a
+-- definition placed after it compiles the name as a GLOBAL — nil at call time, and a
+-- runtime error the syntax check cannot see. That is exactly how it shipped first.
 --
 -- Absent `conditions` = the legacy flat `triggers` list = a single OR group. Nothing
 -- about existing records changes.
@@ -627,6 +597,41 @@ local function resolveConditions(spec, typeCfg)
         return distributeTerms(terms, AD_MAX_CHAIN_LINKS)
     end
     return nil
+end
+
+-- Union the includeSpellIDs of a frame-level indicator's triggers into one map.
+-- Triggers are AD aura NAMES; no triggers => the owning aura name. Multi-trigger
+-- degrades to OR-presence (union) — the accepted 12.1 tradeoff (AND / duration
+-- priority need remaining-time reads, unportable; P4.6). Read-free (static config).
+local function unionIdentity(spec, auraName, typeCfg)
+    local triggers = typeCfg.triggers
+    local map
+    -- Condition groups supersede the flat list. This union is only the "does this effect
+    -- resolve to anything at all" answer pickWinner needs, plus the tuning signature —
+    -- the CHAIN is rebuilt from resolveConditions by the consumer. The two shapes can
+    -- share a union (ALL{A,B} and ANY{A,B} union identically), so the chain length is
+    -- folded into the STRUCT signature to keep them apart; a mode change rebuilds.
+    local links = resolveConditions(spec, typeCfg)
+    if links then
+        for _, m in ipairs(links) do
+            map = map or {}
+            for id in pairs(m) do map[id] = true end
+        end
+        return map
+    end
+    if triggers and #triggers > 0 then
+        for _, name in ipairs(triggers) do
+            local f = DF:BuildADIdentityFilters(spec, name)
+            if f and f.includeSpellIDs then
+                map = map or {}
+                for id in pairs(f.includeSpellIDs) do map[id] = true end
+            end
+        end
+    else
+        local f = DF:BuildADIdentityFilters(spec, auraName)
+        if f then map = f.includeSpellIDs end
+    end
+    return map
 end
 
 -- Slot/group filter string for an indicator/effect config (read-free). othersOnly =
