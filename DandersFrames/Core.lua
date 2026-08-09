@@ -1034,12 +1034,6 @@ local function warnMissingTexture(path)
         :format(shown, tail))
 end
 
-local function isVerticalBar(bar)
-    if not (bar and bar.GetOrientation) then return false end
-    local ok, orient = pcall(bar.GetOrientation, bar)
-    return ok and orient == "VERTICAL"
-end
-
 -- Record BOTH what the caller asked for and what actually landed, then apply the
 -- texture's tiling. Keeping the requested path lets a later orientation change
 -- re-resolve the companion without the caller threading it back through — see
@@ -1052,8 +1046,14 @@ local function recordBarTexture(bar, requested, applied)
     DF:ApplyBarTextureTiling(bar, applied)
 end
 
--- StatusBar texture with stock fallback. Returns true if the requested texture
--- loaded, false if the stock fallback was substituted, nil if bar was missing.
+-- StatusBar texture with stock fallback.
+--   true  -> the REQUESTED texture was applied
+--   false -> the requested one is missing; the STOCK texture was applied instead
+--   nil   -> no bar, nothing was done
+-- ⚠ `false` does NOT mean "did nothing" — a texture was still set, just not the one
+-- asked for. So `if not DF:SafeSetStatusBarTexture(...)` reads as "it failed" and is
+-- wrong; nil is the only return that means nothing happened. Test `== false` when you
+-- specifically want the substitution case, which is what the tiling callers do.
 function DF:SafeSetStatusBarTexture(bar, path, stock)
     if not bar then return end
     if textureKnown(path) == false then
@@ -1064,13 +1064,16 @@ function DF:SafeSetStatusBarTexture(bar, path, stock)
         recordBarTexture(bar, fallback, fallback)
         return false
     end
-    -- Resolved against the orientation the bar already carries. Callers set the
-    -- texture before the orientation, so on the update where orientation CHANGES
-    -- this is one step behind — DF:ApplyBarFillOrientation corrects it in the same
-    -- pass. Bars whose orientation never changes are fully handled right here.
-    local applied = DF:ResolveBarTexture(path, isVerticalBar(bar))
-    bar:SetStatusBarTexture(applied)
-    recordBarTexture(bar, path, applied)
+    -- ☠ DOES NOT RESOLVE THE VERTICAL COMPANION, DELIBERATELY. It used to, against
+    -- the orientation the BAR already carried — but a caller that had just resolved
+    -- from the db (the authoritative source on the pass where orientation changes)
+    -- would then have its correct choice overridden by this one's stale reading.
+    -- Two resolution points that can disagree is worse than one that is occasionally
+    -- late, so there is now exactly one per bar: the db-driven call at the texture
+    -- site for bars that have their own orientation key, and DF:ApplyBarFillOrientation
+    -- for the rest. Both are idempotent, so calling either twice is harmless.
+    bar:SetStatusBarTexture(path)
+    recordBarTexture(bar, path, path)
     return true
 end
 
@@ -1203,9 +1206,11 @@ end
 -- changes the angle but leaves the lean unchanged, so it does not fix anything.
 -- Verified by structure tensor: each pair measures exactly 90° apart.
 DF.TILED_VERTICAL_COMPANION = {}
+DF.TILED_COMPANION_BASE = DF.TILED_COMPANION_BASE or {}
 for _, name in ipairs(ABSORB_TILES) do
     local base = "Interface\\AddOns\\DandersFrames\\Media\\" .. name
     DF.TILED_VERTICAL_COMPANION[base .. ".png"] = base .. "_Vert.png"
+    DF.TILED_COMPANION_BASE[base .. "_Vert.png"] = base .. ".png"
     -- Companions are square and tile both ways exactly as their base does — the
     -- rotation is baked into the art, so the MODE is still BOTH, never VERT.
     DF.TILED_BAR_TEXTURES[base .. "_Vert.png"] = "BOTH"
@@ -1214,12 +1219,20 @@ end
 -- Swap a tiled texture for its vertical companion when the bar fills vertically.
 -- Returns the path unchanged for everything else, so it is safe to call on any
 -- texture from any call site.
+-- ☠ IDEMPOTENT BY CONSTRUCTION — normalise to the BASE first, then decide. Without
+-- that, resolving an already-resolved path was one-directional: handed a "_Vert"
+-- companion and asked for HORIZONTAL it returned the companion unchanged, so a bar
+-- switched back to horizontal kept the rotated art. Callers legitimately resolve at
+-- more than one point (the db-driven one at the texture site, the live-orientation
+-- one in ApplyBarFillOrientation), and they must be able to disagree about direction
+-- without the result depending on which ran last.
 function DF:ResolveBarTexture(path, isVertical)
-    if isVertical and path then
-        local companion = DF.TILED_VERTICAL_COMPANION[path]
-        if companion then return companion end
+    if not path then return path end
+    local base = DF.TILED_COMPANION_BASE and DF.TILED_COMPANION_BASE[path] or path
+    if isVertical then
+        return DF.TILED_VERTICAL_COMPANION[base] or base
     end
-    return path
+    return base
 end
 
 -- Pick the variant of a tiled texture matching the axis a bar fills along, and

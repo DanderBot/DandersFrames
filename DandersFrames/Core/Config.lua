@@ -282,6 +282,11 @@ local SHIPPED_MEDIA_FILES = {
 -- Lookup keyed BOTH ways: with the extension (how .png must be referenced) and
 -- without (how .tga/.blp conventionally are). Lowercased — WoW paths are
 -- case-insensitive and profiles hold whatever case was typed.
+-- Reverse of DF.TILED_VERTICAL_COMPANION, populated in Core.lua beside it. Lets
+-- DF:ResolveBarTexture normalise BACK to the base before deciding, which is what
+-- makes resolution idempotent -- see the note there.
+DF.TILED_COMPANION_BASE = {}
+
 DF.SHIPPED_MEDIA = {}
 -- Extensionless key -> the real on-disk filename. This turns the extensionless form
 -- profiles store ("...\\Media\\DF_Stripes") back into "df_stripes.tga", which is the
