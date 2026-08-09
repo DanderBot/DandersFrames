@@ -793,7 +793,7 @@ function GUI:CreateGrowthControl(parent, db, dbKey, callback)
                 menuFrame:Hide()
                 S.currentOpenDropdown = nil
             else
-                CloseOpenDropdown()
+                GUI:CloseAllMenus()
                 -- Highlight current selection
                 local curVal = getValue()
                 local curDisplay = options[curVal]
@@ -1145,7 +1145,7 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
             S.currentOpenDropdown = nil
         else
             -- Close any other open dropdown first
-            CloseOpenDropdown()
+            GUI:CloseAllMenus()
             -- Rebuild menu with current SharedMedia textures
             RebuildMenu()
             menuFrame:Show()
@@ -1464,7 +1464,7 @@ function GUI:CreateFontDropdown(parent, label, dbTable, dbKey, callback, inherit
             S.currentOpenDropdown = nil
         else
             -- Close any other open dropdown first
-            CloseOpenDropdown()
+            GUI:CloseAllMenus()
             -- Rebuild menu with current SharedMedia fonts
             RebuildMenu()
             menuFrame:Show()
@@ -1705,7 +1705,7 @@ function GUI:CreateSoundDropdown(parent, label, dbTable, dbKey, callback)
             menuFrame:Hide()
             S.currentOpenDropdown = nil
         else
-            CloseOpenDropdown()
+            GUI:CloseAllMenus()
             RebuildMenu()
             menuFrame:Show()
             S.currentOpenDropdown = menuFrame

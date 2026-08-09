@@ -225,6 +225,17 @@ local function CreatePopupFrame()
     if PopupFrame then return PopupFrame end
 
     local f = CreateFrame("Frame", "DFPopupFrame", UIParent, "BackdropTemplate")
+    -- ☠ PARENTED TO UIParent, SO IT DOES NOT INHERIT THE GUI'S SCALE. Every other DF
+    -- surface is either inside the options frame or explicitly scaled by the GUI Scale
+    -- slider; this one was neither, so popups (Reset Profile to Defaults, the Aura
+    -- Designer warning) rendered at 100% beside a GUI at 70% (Krathe, 2026-08-09).
+    -- Seeded HERE because the frame is created lazily on first use: a popup first opened
+    -- after the slider moved would otherwise never have been told the scale at all.
+    -- DF:ApplyGUIScale keeps it in step from then on.
+    do
+        local ws = DF.GetWindowState and DF:GetWindowState()
+        f:SetScale((ws and ws.scale) or 1)
+    end
     -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
     f:SetSize(FRAME_WIDTH, 300)
     f:SetPoint("CENTER")

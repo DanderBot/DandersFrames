@@ -21,6 +21,21 @@ local CreateElementBackdrop = GUI._priv.CreateElementBackdrop
 local CreatePanelBackdrop = GUI._priv.CreatePanelBackdrop
 local StyleScrollBar = GUI.StyleScrollBar
 local RefreshAllOverrideIndicators = GUI.RefreshAllOverrideIndicators
+-- ★ ONE PLACE THAT APPLIES THE GUI SCALE. It was open-coded at three sites (creation,
+-- slider drag, slider release), each listing the surfaces it knew about — so a surface
+-- added later was scaled by whichever of the three someone remembered. DFPopupFrame was
+-- in none of them and rendered at 100% forever (Krathe, 2026-08-09).
+-- ⚠ DFPopupFrame is created LAZILY, so it is resolved through _G each call rather than
+-- captured: it usually does not exist yet when the scale is first applied. Popup.lua
+-- seeds the saved scale at creation for exactly that gap.
+local function ApplyGUIScale(frame, value)
+    if frame then frame:SetScale(value) end
+    if DF.positionPanel then DF.positionPanel:SetScale(value) end
+    if DF.TestPanel then DF.TestPanel:SetScale(value) end
+    local popup = _G and _G.DFPopupFrame
+    if popup then popup:SetScale(value) end
+end
+
 function DF:CreateGUI()
     if DF.GUIFrame then return end
     
@@ -51,7 +66,7 @@ function DF:CreateGUI()
     frame:SetResizable(true)
     frame:SetResizeBounds(minWidth, minHeight, maxWidth, maxHeight)
     frame:EnableMouse(true)
-    frame:SetScale(savedScale)
+    ApplyGUIScale(frame, savedScale)
     -- Note: Dragging is handled by titleBar, not main frame
     CreatePanelBackdrop(frame)
     frame:Hide()
@@ -480,26 +495,14 @@ function DF:CreateGUI()
         value = math.floor(value * 20 + 0.5) / 20  -- Round to 0.05
         scaleValue:SetText(string.format("%.0f%%", value * 100))
         -- Update popup panels live (they don't cause cursor drift)
-        if DF.positionPanel then
-            DF.positionPanel:SetScale(value)
-        end
-        if DF.TestPanel then
-            DF.TestPanel:SetScale(value)
-        end
+        ApplyGUIScale(nil, value)   -- panels only; the main frame waits for mouse-up
     end)
     
     -- Apply scale only on mouse release to avoid cursor drift issues
     scaleSlider:SetScript("OnMouseUp", function(self)
         local value = math.floor(self:GetValue() * 20 + 0.5) / 20
-        frame:SetScale(value)
+        ApplyGUIScale(frame, value)
         DF:GetWindowState().scale = value
-        -- Also update popup panels
-        if DF.positionPanel then
-            DF.positionPanel:SetScale(value)
-        end
-        if DF.TestPanel then
-            DF.TestPanel:SetScale(value)
-        end
         -- A new scale changes how many device pixels a UI unit covers, so
         -- every border on screen has to be re-derived at the new thickness.
         -- This is the ONLY action that does: nothing else in the GUI writes
@@ -1126,6 +1129,15 @@ function DF:CreateGUI()
     GUI.Pages = {}
     
     local function SelectTab(name)
+        -- ☠ CLOSE OPEN MENUS FIRST. A dropdown menu is parented to its own button, so a
+        -- tab change hides it by ANCESTOR — which fires its OnHide (clearing the
+        -- single-slot tracker) while leaving the menu's own shown flag set. Come back to
+        -- that tab and it reappears, untracked: it floats over the page, overlaps the next
+        -- dropdown you open, and only closes if you click its own button
+        -- (Krathe, 2026-08-09). Hiding them here is what stops them being stranded.
+        -- ⚠ Before HideResults and the page swap, so nothing is mid-teardown when it runs.
+        if GUI.CloseAllMenus then GUI:CloseAllMenus() end
+
         -- Hide search results when navigating to a tab
         if DF.Search then
             DF.Search:HideResults()
