@@ -69,6 +69,16 @@ end
 -- without this, edited AD/TD presets survive a "Reset Profile to Defaults".
 -- Used by the GUI "Reset Profile to Defaults" button and /df reset.
 function DF:ResetFullProfile()
+    -- ★ UNLINK FIRST. Party/Raid sync state lives at the PROFILE ROOT, so neither
+    -- per-mode ResetProfile reached it and a "Reset Profile to Defaults" left every
+    -- synced page still synced — a state a freshly created profile can never be in
+    -- (Profile.lua seeds linkedSections = {}), which is the yardstick for this function.
+    -- ⚠ BEFORE the mode resets, not after: each ResetProfile ends in FullProfileRefresh,
+    -- which runs DF:SyncLinkedSections. Clearing afterwards would let three refreshes
+    -- fire against link state we are about to discard.
+    -- `{}` rather than nil to match the fresh-profile shape exactly; readers are
+    -- nil-guarded either way.
+    DF.db.linkedSections = {}
     self:ResetProfile("party")
     self:ResetProfile("raid")
     if self.ResetDesignerPresets then self:ResetDesignerPresets() end

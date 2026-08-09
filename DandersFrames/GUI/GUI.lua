@@ -290,7 +290,14 @@ DF.SECTION_PREFIXES = {
     auras_debuffs                = { "debuff", "showDebuffs", "directDebuff" },
     auras_defensiveicon          = { "defensiveIcon", "defensiveFilterSelection", "defensiveSortOrder", "defensiveDurationBar", "defensiveBar" },
     auras_dispel                 = { "dispel" },
-    auras_filterdesigner         = { "buffFilterSelection", "debuffFilter", "debuffBlacklist", "directBuffShowAll", "directBuffOnlyMine", "directDebuffShowAll" },
+    -- ⚠ directDebuffDispellableMode is listed EXPLICITLY. It is not covered by
+    -- "directDebuffShowAll" (not a prefix of it), and the Debuffs page's plain
+    -- "directDebuff" would otherwise win it back — the control moved here, so its
+    -- Reset Page / Sync / Copy must move with it (a control must write where it reads).
+    -- ☠ SectionOwnsKey resolves by LONGEST matching prefix across the WHOLE registry, so
+    -- this 27-char entry out-ranks auras_debuffs' 12-char "directDebuff" for this key and
+    -- for nothing else.
+    auras_filterdesigner         = { "buffFilterSelection", "debuffFilter", "debuffBlacklist", "directBuffShowAll", "directBuffOnlyMine", "directDebuffShowAll", "directDebuffDispellableMode" },
     auras_missingbuffs           = { "missingBuff" },
     bars_absorb                  = { "absorbBar", "healAbsorb" },
     bars_healpred                = { "healPrediction" },
