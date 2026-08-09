@@ -1062,14 +1062,25 @@ local function chainGateConfig(unit, map, filt, onHost)
     }
 end
 
--- entry.chain[i] fills in as the links materialise. makeVisual(map, filt) returns the
--- config for the FINAL link and is called at creation time, not now.
-local function buildConditionChain(entry, frame, unit, links, filt, makeVisual)
+-- entry.chain[i] fills in as the links materialise. The FINAL link's config comes from
+-- entry.makeVisual, read at creation time — see the note in syncConditionChain for why it
+-- must be the entry's copy and not a captured parameter.
+local function buildConditionChain(entry, frame, unit, links, filt)
     entry.chain = {}
     local function makeLink(i, parent)
         if not parent then return end
+        -- ☠ REPLACE, never accumulate. A parent link rebuilding (test-mode toggle, the
+        -- provider rebirth sweep, any _rebuild) produces a FRESH slot host and re-fires
+        -- onHost with dfChainLink unset — so this runs again for a link that already
+        -- exists. Without this the old handle is overwritten in entry.chain, stays in the
+        -- registry forever and keeps rendering, and destroyEntry can never reach it.
+        for k = #entry.chain, i, -1 do
+            if entry.chain[k] then entry.chain[k]:Destroy() end
+            entry.chain[k] = nil
+        end
+        if entry.chain[#links] == nil then entry.handle = nil end
         if i == #links then
-            local cfg = makeVisual(links[i], filt)
+            local cfg = entry.makeVisual(links[i], filt)
             -- Links after the first live inside a slot, so their visibility is the
             -- parent's and reading their own is a secret-value taint.
             if i > 1 then cfg.parentDrivenVisibility = true end
@@ -1126,15 +1137,25 @@ local function syncConditionChain(store, key, frame, unit, links, filt, structSi
     if not entry then
         entry = { structSig = chainSig, coSig = coSig }
         store[key] = entry
-        buildConditionChain(entry, frame, unit, links, filt, makeVisual)
-    elseif entry.structSig ~= chainSig then
+    end
+
+    -- ☠ REFRESH THE BUILDERS EVERY PASS, before anything else uses them. The consumers
+    -- rebuild these closures each sync over that pass's colour/texture locals, and a chain
+    -- link can materialise LONG after the pass that created the chain — so a link built
+    -- from a captured closure would render whatever the config was when the chain started.
+    -- Concretely: set up a chain, recolour the effect while not all its buffs are up, gain
+    -- the buffs, and the visual appears in the OLD colour with coSig already matching, so
+    -- nothing ever corrects it. Storing them on the entry makes "current" the only option.
+    entry.makeVisual, entry.applyStyle = makeVisual, applyStyle
+
+    if entry.structSig ~= chainSig or not entry.chain then
         destroyEntry(entry)
         entry.structSig, entry.coSig = chainSig, coSig
-        buildConditionChain(entry, frame, unit, links, filt, makeVisual)
+        buildConditionChain(entry, frame, unit, links, filt)
     elseif entry.coSig ~= coSig then
         entry.coSig = coSig
-        -- The final link may not exist yet; when it is built it reads the CURRENT config
-        -- through makeVisual, so a style edit made now is already applied by then.
+        -- A live visual restyles now; one that has not appeared yet gets the new config
+        -- from entry.makeVisual when it does.
         if entry.handle then applyStyle(entry.handle) end
     end
     return true

@@ -422,10 +422,17 @@ function AuraContainer.SetTestMode(on)
     -- rebuild made the invariant unnecessary. The asymmetry is what makes it worth
     -- naming: a false NEGATIVE silently corrupts what is on screen, a false
     -- POSITIVE only costs one extra rebuild.
-    local function rebuildAll()
+    -- ☠ Parent-driven handles are rebuilt BY THEIR PARENT, never directly. A gate link's
+-- rebuild makes a fresh slot host and re-fires onHost, which recreates everything below
+-- it; driving the inner link here as well would race that and strand a duplicate.
+local function skipNested(h)
+    return h and h.config and h.config.parentDrivenVisibility
+end
+
+local function rebuildAll()
         if AuraContainer._handles then
             for h in pairs(AuraContainer._handles) do
-                if not h._destroyed and h._testFrame then
+                if not h._destroyed and h._testFrame and not skipNested(h) then
                     pcall(function() h:OnTestModeChanged() end)
                 end
             end
@@ -4471,7 +4478,7 @@ function Handle:_registerRegen()
                     if op then
                         pcall(function()
                             if op == "rebuild" then
-                                h:_rebuild()
+                                if not skipNested(h) then h:_rebuild() end
                             elseif op == "retarget" then
                                 if h.backend then h.backend:setUnit(h.config.unit) end
                             elseif op == "enable" then
