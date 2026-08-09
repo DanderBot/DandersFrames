@@ -388,6 +388,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         local buffOrderGroup = GUI:CreateSettingsGroup(self.child, 280)
         buffOrderGroup:AddWidget(GUI:CreateHeader(self.child, L["Order & Limits"]), GUI.RowHeight.sectionHeader)
+        -- Same gap as the debuff Order & Limits box below, and the same fix — its siblings
+        -- on this page all gate on showBuffs.
+        buffOrderGroup.disableChildrenOn = function(d) return not d.showBuffs end
 
         local buffSortOptions = {
             DEFAULT = L["Default (Slot Order)"],
@@ -824,6 +827,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         local debuffOrderGroup = GUI:CreateSettingsGroup(self.child, 280)
         debuffOrderGroup:AddWidget(GUI:CreateHeader(self.child, L["Order & Limits"]), GUI.RowHeight.sectionHeader)
+        -- ⚠ The four sibling boxes on this page (Duration Text, Stack Count, Dispel Symbol,
+        -- Duration Bar) all gate on showDebuffs; this one was simply missed, so it stayed
+        -- live while the row it orders was switched off (Krathe, 2026-08-09).
+        debuffOrderGroup.disableChildrenOn = function(d) return not d.showDebuffs end
 
         local debuffSortOptions = {
             DEFAULT = L["Default (Slot Order)"],
@@ -845,19 +852,14 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         dfSortRev.hideOn = function(d) return not DF:FactoryOwnsDebuffRow(d) end
         dfSortRev.tooltip = L["Reverse the sort direction."]
 
-        -- Which dispels count for the Dispellable Debuffs category. Greys rather
-        -- than hides while that category is off, so you can see what you would be
-        -- turning back on -- and it is inert while All Debuffs is on.
-        local dfDispelMode = debuffOrderGroup:AddWidget(GUI:CreateDropdown(self.child, L["Dispellable Debuffs"], {
-            PLAYER = L["Dispellable By Me"],
-            ALL = L["All Dispellable"],
-            ANY = L["Any Dispel Type"],
-            _order = { "PLAYER", "ALL", "ANY" },
-        }, db, "directDebuffDispellableMode", DebuffOrderChanged), 55)
-        dfDispelMode.disableOn = function(d)
-            return d.directDebuffShowAll or not d.debuffFilterDispellable
-        end
-        dfDispelMode.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled. Any Dispel Type: every debuff with a dispel type, even ones that cannot be dispelled."]
+        -- ☠ "Dispellable Debuffs" (directDebuffDispellableMode) MOVED to Auras > Aura
+        -- Filters > Debuffs, under the category row it belongs to. It lived here gated on
+        -- `directDebuffShowAll or not debuffFilterDispellable` — and BOTH of those are set
+        -- on the Filters page, so with All Debuffs on by default it was permanently greyed
+        -- and nothing on this page could lift it (Krathe, 2026-08-09).
+        -- ⚠ Do not re-add it here. The storage is unchanged (same per-mode key); only the
+        -- control moved, and its sync/reset ownership moved with it — see
+        -- DF.SECTION_PREFIXES, where auras_filterdesigner now claims the key.
 
         -- Works in ALL-debuffs mode too (single maxDuration record) — only Keep
         -- Important needs the category filters (boolean flags can't be negated on

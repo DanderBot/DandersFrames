@@ -583,7 +583,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         { key = "debuffFilterPriority",     name = "Priority Debuffs",    desc = "Debuffs Blizzard flags as high priority." },
         { key = "debuffFilterCrowdControl", name = "Crowd Control",       desc = "CC effects like stuns, roots, and incapacitates." },
         { key = "debuffFilterRaid",         name = "Raid Debuffs",        desc = "Other debuffs Blizzard flags for raid frames." },
-        { key = "debuffFilterDispellable",  name = "Dispellable Debuffs", desc = "Debuffs that can be dispelled. Which dispels count is set on the Debuffs page." },
+        -- ⚠ The old desc ended "Which dispels count is set on the Debuffs page." That
+        -- setting now sits directly beneath this row, so the cross-reference is gone.
+        { key = "debuffFilterDispellable",  name = "Dispellable Debuffs", desc = "Debuffs that can be dispelled. Which dispels count is set just below." },
     }
 
     -- ========== CUSTOM FILTER HELPERS ==========
@@ -794,6 +796,32 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         if RefreshLeft then RefreshLeft() end
         relayoutingCaution = false
     end)
+
+    -- ★ WHICH DISPELS COUNT — a sub-option of the Dispellable Debuffs row it sits under.
+    -- It lived on Auras > Debuffs > Order & Limits, but BOTH of its gates
+    -- (directDebuffShowAll and debuffFilterDispellable) are set on THIS page — so there it
+    -- was permanently greyed with nothing on the page able to lift it, and the two pages
+    -- pointed at each other (Krathe, 2026-08-09).
+    -- ⚠ A STANDING FRAME, not a pooled row: it is a dropdown, not a tick row, so it
+    -- follows catCaution's pattern — created once, hidden, placed at -y during the debuff
+    -- pass. The sweep at the end of RefreshLeft only hides pooled ROWS, which is why
+    -- addRow/importRow need an explicit SetShown and so does this.
+    -- ⚠ Custom get/set rather than a bound table: GUI.SelectedMode can change under an
+    -- already-built page, so the mode db is resolved per access via ModeDB() — the SAME
+    -- table the Debuffs page wrote to, so storage is unchanged and only the control moved.
+    -- Sync ownership moved with it (DF.SECTION_PREFIXES.auras_filterdesigner).
+    local dispelModeDD = GUI:CreateDropdown(leftContent, L["Dispellable Debuffs"], {
+        PLAYER = L["Dispellable By Me"],
+        ALL    = L["All Dispellable"],
+        ANY    = L["Any Dispel Type"],
+        _order = { "PLAYER", "ALL", "ANY" },
+    }, nil, "directDebuffDispellableMode", function()
+        DirectFilterChangedProxy()
+    end,
+    function() local m = ModeDB(); return (m and m.directDebuffDispellableMode) or "PLAYER" end,
+    function(v) local m = ModeDB(); if m then m.directDebuffDispellableMode = v end end)
+    dispelModeDD:Hide()
+    dispelModeDD.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled. Any Dispel Type: every debuff with a dispel type, even ones that cannot be dispelled."]
 
     -- ========== BUFFS / DEBUFFS TABS ==========
     -- The two halves were one scrolling list: sixteen buff rows and then the debuff
@@ -2216,6 +2244,25 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             y = y + LEFT_ROW_H
         end
 
+        -- Which dispels count, directly under the Dispellable Debuffs row it belongs to
+        -- (that category is last in DEBUFF_CATEGORIES, so this lands beneath it).
+        -- ⚠ SHOWN ONLY WHEN IT CAN DO ANYTHING: All Debuffs off AND the category on.
+        -- Those are the same two conditions that greyed it on the Debuffs page — the
+        -- difference is that both toggles are now visible a few rows above it, so the
+        -- state is self-explaining instead of unexplained. Hidden rather than greyed
+        -- because it is inside a scrolling list: a dead control here would push the
+        -- Optional Debuffs row down for no reason.
+        if not debuffAll and GetFlag("debuffFilterDispellable") then
+            dispelModeDD:ClearAllPoints()
+            dispelModeDD:SetPoint("TOPLEFT", 4, -y)
+            dispelModeDD:SetPoint("TOPRIGHT", -4, -y)
+            if dispelModeDD.refreshContent then dispelModeDD:refreshContent(ModeDB()) end
+            dispelModeDD:Show()
+            y = y + (dispelModeDD.layoutHeight or dispelModeDD:GetHeight() or 44) + 6
+        else
+            dispelModeDD:Hide()
+        end
+
         used = used + 1
         do
             local hidden, total = BlacklistCounts()
@@ -2240,6 +2287,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         -- refresh left them at.
         addRow:SetShown(leftTab == "buffs")
         importRow:SetShown(leftTab == "buffs")
+        -- Same reason: a standing frame the pooled-row sweep cannot reach. The debuff
+        -- branch shows it conditionally, so only the buffs tab needs forcing here.
+        if leftTab == "buffs" then dispelModeDD:Hide() end
 
         -- Hide pooled rows beyond this refresh's needs
         for j = used + 1, #leftRows do
