@@ -1148,6 +1148,7 @@ L["No layout set. Using global settings."] = true
 L["No matching text elements. Try a different filter or click '+ Add Text Element'."] = true
 L["No saved position to reset to."] = true
 L["No text elements yet. Click '+ Add Text Element' to create one."] = true
+L["Not available while this effect has more than one condition group."] = true
 L["None"] = true
 L["None (no clamping)"] = true
 L["None active (using global settings)"] = true

@@ -50,6 +50,24 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- swmCheck is captured for the surgical Show-When-Missing block. See block pass below.
     local swmCheck, wholeBarCheck, swmGroup, durColorByTimeCtl
 
+    -- ☠ Show When Missing cannot express a MULTI-GROUP condition, though it is exact for
+    -- everything simpler. One group is a union, so "missing" cleanly means none of its
+    -- spells are present -- multiple triggers in a single group keep working and mean
+    -- "none of these". Two or more groups make the effect a conjunction, and negating a
+    -- conjunction gives "at least one condition is unmet", which needs either a visual per
+    -- group (double-renders translucent effects, measured) or NESTED MISSING gates -- and
+    -- the missing mechanism renders a badge inside a clipping window, with no slot-child
+    -- host to hang the next gate on. So it is greyed rather than left live over a render
+    -- path that silently ignores it.
+    local function GateSWM(cb)
+        if not (cb and auraName and P.GetEffectConditionGroups) then return end
+        local groups = P.GetEffectConditionGroups(auraName, typeKey)
+        if groups and #groups > 1 then
+            cb:SetEnabled(false)
+            cb.tooltip = L["Not available while this effect has more than one condition group."]
+        end
+    end
+
     local function AddWidget(widget, height)
         widget:SetPoint("TOPLEFT", parent, "TOPLEFT", 5, -totalHeight)
         if widget.SetWidth then widget:SetWidth(contentWidth - 10) end
@@ -783,6 +801,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end)
             g:AddWidget(swmCheck, 28)
+            GateSWM(swmCheck)
         end)
         -- Expiring — full parity with icon/square (Stage 5.4): master enable +
         -- State Overrides (border thickness / colour / alpha / animation swap)
@@ -819,6 +838,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end)
             g:AddWidget(swmCheck, 28)
+            GateSWM(swmCheck)
         end)
 
     elseif typeKey == "background" then
@@ -837,6 +857,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end)
             g:AddWidget(swmCheck, 28)
+            GateSWM(swmCheck)
         end)
 
     elseif typeKey == "nametext" then
@@ -1094,4 +1115,4 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
 end
 
 -- ☠ Published HERE, in the part that DEFINES it -- see the note in Options.lua.
-P.BuildTypeContent = BuildTypeContent
+P.BuildTypeContent = BuildTypeContent
