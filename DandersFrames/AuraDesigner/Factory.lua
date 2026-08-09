@@ -465,6 +465,19 @@ end
 local function unionIdentity(spec, auraName, typeCfg)
     local triggers = typeCfg.triggers
     local map
+    -- Condition groups supersede the flat list. This union is only the "does this effect
+    -- resolve to anything at all" answer pickWinner needs, plus the tuning signature —
+    -- the CHAIN is rebuilt from resolveConditions by the consumer. The two shapes can
+    -- share a union (ALL{A,B} and ANY{A,B} union identically), so the chain length is
+    -- folded into the STRUCT signature to keep them apart; a mode change rebuilds.
+    local links = resolveConditions(spec, typeCfg)
+    if links then
+        for _, m in ipairs(links) do
+            map = map or {}
+            for id in pairs(m) do map[id] = true end
+        end
+        return map
+    end
     if triggers and #triggers > 0 then
         for _, name in ipairs(triggers) do
             local f = DF:BuildADIdentityFilters(spec, name)
@@ -478,6 +491,72 @@ local function unionIdentity(spec, auraName, typeCfg)
         if f then map = f.includeSpellIDs end
     end
     return map
+end
+
+-- ============================================================
+-- CONDITION GROUPS  (AND across groups, OR within a group)
+-- An effect can carry `typeCfg.conditions` instead of the flat `triggers` list:
+--
+--   conditions = {
+--       mode   = "ALL",                                  -- how the GROUPS combine
+--       groups = { { mode = "ANY", triggers = {...} },   -- how one group's entries combine
+--                  { mode = "ANY", triggers = {...} } },
+--   }
+--
+-- ☠ WHY ONLY "ALL of ANY" RENDERS TODAY. The two operators cost completely different
+-- things on 12.1:
+--   * OR is FREE. A container's candidateFilters is already a spell-ID SET, so "any of
+--     these" is one union in one container — exactly what the flat trigger list does.
+--   * AND needs the containers STACKED. There is no read available to test two auras at
+--     once, so instead each group builds a container whose slot-child frame hosts the
+--     next group's container: the innermost can only be visible when every outer one is
+--     too, and the game evaluated the conjunction for us. Proven in game 2026-08-09,
+--     including with the buffs applied in either order and in combat.
+-- So "ALL of ANY groups" is ONE chain with one visual at the end — the shape the
+-- mechanism natively has. "ANY of ALL groups" ((X and Y) or (Z and W)) needs one chain
+-- PER group and therefore one visual per group, which double-renders translucent tints.
+-- It is deliberately NOT built yet; resolveConditions returns nil for it so the effect
+-- falls back to the flat union rather than rendering something wrong.
+--
+-- Absent `conditions` = the legacy flat `triggers` list = a single OR group. Nothing
+-- about existing records changes.
+-- ============================================================
+local AD_MAX_CONDITION_GROUPS = 5   -- each group is a real container; cap the chain
+
+-- Union one group's entries into a single include map (the free OR).
+local function groupIdentity(spec, entries)
+    if type(entries) ~= "table" then return nil end
+    local map
+    for _, name in ipairs(entries) do
+        local f = DF:BuildADIdentityFilters(spec, name)
+        if f and f.includeSpellIDs then
+            map = map or {}
+            for id in pairs(f.includeSpellIDs) do map[id] = true end
+        end
+    end
+    return map
+end
+
+-- Resolve an effect's conditions into an ORDERED list of include maps, one per chain
+-- link. Returns nil when the effect has no renderable condition chain — no conditions
+-- block, fewer than two usable groups, a shape we don't render (see the note above), or
+-- any group that resolves to nothing (an unresolvable group would silently widen the
+-- conjunction to "ignore this condition", which is worse than not rendering).
+local function resolveConditions(spec, typeCfg)
+    local c = typeCfg.conditions
+    if type(c) ~= "table" or type(c.groups) ~= "table" then return nil end
+    -- Only ALL-of-ANY renders. ANY-of-ALL needs a chain per group (unbuilt).
+    if c.mode ~= "ALL" then return nil end
+    local links = {}
+    for _, g in ipairs(c.groups) do
+        if #links >= AD_MAX_CONDITION_GROUPS then break end
+        if type(g) ~= "table" or (g.mode ~= nil and g.mode ~= "ANY") then return nil end
+        local map = groupIdentity(spec, g.triggers)
+        if not map or not next(map) then return nil end
+        links[#links + 1] = map
+    end
+    if #links < 2 then return nil end   -- one group is just a plain union
+    return links
 end
 
 -- Slot/group filter string for an indicator/effect config (read-free). othersOnly =
@@ -799,13 +878,120 @@ end
 
 -- Tear down every container in a per-type store that is not the current winner (winner
 -- changed, aura de-configured, or the indicator was removed). Destroy is combat-safe.
+-- Destroy everything an entry owns. A condition-chain entry holds N handles, not one —
+-- released INNERMOST FIRST so a link is never orphaned by its host disappearing under it.
+local function destroyEntry(entry)
+    if not entry then return end
+    local chain = entry.chain
+    if chain then
+        for i = #chain, 1, -1 do
+            if chain[i] then chain[i]:Destroy() end
+            chain[i] = nil
+        end
+        entry.chain = nil
+    elseif entry.handle then
+        entry.handle:Destroy()
+    end
+    entry.handle = nil
+end
+
 local function teardownExcept(store, keepName)
     for auraName, entry in pairs(store) do
         if auraName ~= keepName then
-            if entry.handle then entry.handle:Destroy() end
+            destroyEntry(entry)
             store[auraName] = nil
         end
     end
+end
+
+-- ============================================================
+-- CONDITION CHAIN
+-- Link 1 hangs off the frame; every later link hangs off the previous link's slot-child
+-- host, so it can only be visible when every outer link is. The LAST link carries the
+-- effect's real visual — the rest are pure gates (a mirror host and nothing else).
+--
+-- ☠ BUILT LAZILY, and it has to be. A link's host frame does not exist until that link's
+-- own aura is actually present (the native container creates slot buttons on demand), so
+-- the inner links materialise as the outer buffs land and vanish with them. Consequences
+-- every caller must respect:
+--   * entry.handle is NIL until the whole chain has completed at least once. Guard every
+--     ApplyStyle/Rebuild on it.
+--   * The visual config is read through a CLOSURE at creation time rather than captured,
+--     so a colour edited while the chain is incomplete is already correct when the final
+--     link appears — no pending-style bookkeeping.
+--   * onHost fires on every style pass, not just the first, so each host is stamped to
+--     keep exactly one child link.
+-- ============================================================
+local function chainGateConfig(unit, map, filt, onHost)
+    return {
+        unit = unit,
+        mode = "overlay",
+        filter = filt or "HELPFUL",
+        candidateFilters = { includeSpellIDs = map },
+        enabled = true,
+        -- Matches the mirror-host consumer: high enough to sit above the frame's own art,
+        -- and the gate paints nothing itself so the exact level only has to be legal.
+        frameLevelOffset = 30,
+        style = { overlay = { mirrorHost = { onHost = onHost } } },
+    }
+end
+
+-- entry.chain[i] fills in as the links materialise. makeVisual(map, filt) returns the
+-- config for the FINAL link and is called at creation time, not now.
+local function buildConditionChain(entry, frame, unit, links, filt, makeVisual)
+    entry.chain = {}
+    local function makeLink(i, parent)
+        if not parent then return end
+        if i == #links then
+            local h = DF.AuraContainer:Create(parent, makeVisual(links[i], filt))
+            entry.chain[i] = h
+            entry.handle = h   -- the visual link is what ApplyStyle targets
+            return
+        end
+        local h = DF.AuraContainer:Create(parent, chainGateConfig(unit, links[i], filt,
+            function(host)
+                if not host or host.dfChainLink then return end
+                host.dfChainLink = true
+                makeLink(i + 1, host)
+            end))
+        entry.chain[i] = h
+    end
+    makeLink(1, frame)
+    return entry.chain[1] ~= nil
+end
+
+-- One sync pass for a condition-chained effect. Returns true when it handled the effect,
+-- false when there is no chain and the caller's normal single-container path should run.
+--
+-- ☠ NO TUNING PATH. A single-container effect swaps its include map in place, but a chain
+-- has one map PER LINK and a link count that can move, so any identity change rebuilds the
+-- whole chain. That is the honest trade: the cost lands only on an edit (chains are
+-- configured rarely, not driven per frame), and the alternative is per-link tuning
+-- bookkeeping over handles that may not exist yet — the lazy build means link 3 can be nil
+-- when the edit arrives. Everything identity-shaped rides structSig; only cosmetics tune.
+local function syncConditionChain(store, key, frame, unit, links, filt, structSig, coSig,
+                                  makeVisual, applyStyle)
+    if not links then return false end
+    local parts = { "chain=" .. #links, structSig, "f=" .. tostring(filt) }
+    for i = 1, #links do parts[#parts + 1] = includeSig(links[i]) end
+    local chainSig = tconcat(parts, "|")
+
+    local entry = store[key]
+    if not entry then
+        entry = { structSig = chainSig, coSig = coSig }
+        store[key] = entry
+        buildConditionChain(entry, frame, unit, links, filt, makeVisual)
+    elseif entry.structSig ~= chainSig then
+        destroyEntry(entry)
+        entry.structSig, entry.coSig = chainSig, coSig
+        buildConditionChain(entry, frame, unit, links, filt, makeVisual)
+    elseif entry.coSig ~= coSig then
+        entry.coSig = coSig
+        -- The final link may not exist yet; when it is built it reads the CURRENT config
+        -- through makeVisual, so a style edit made now is already applied by then.
+        if entry.handle then applyStyle(entry.handle) end
+    end
+    return true
 end
 
 -- Release the background anchor frame (the plain non-secure host for the background-tint
@@ -3583,7 +3769,7 @@ function Factory:SyncFrame(frame)
             local existingHB = hb[bestName]
             local wantMissingHB = bestCfg.showWhenMissing and true or false
             if existingHB and (existingHB.missing and true or false) ~= wantMissingHB then
-                existingHB.handle:Destroy(); hb[bestName] = nil
+                destroyEntry(existingHB); hb[bestName] = nil
             end
           if wantMissingHB then
             -- SHOW-WHEN-MISSING: a flat tint over the health-bar region while the buff is ABSENT.
@@ -3699,7 +3885,7 @@ function Factory:SyncFrame(frame)
             local existingBG = bg[bestName]
             local wantMissingBG = bestCfg.showWhenMissing and true or false
             if existingBG and (existingBG.missing and true or false) ~= wantMissingBG then
-                existingBG.handle:Destroy(); bg[bestName] = nil
+                destroyEntry(existingBG); bg[bestName] = nil
             end
           if wantMissingBG then
             -- SHOW-WHEN-MISSING: flat tint over the background region while the buff is ABSENT.
@@ -3787,10 +3973,22 @@ function Factory:SyncFrame(frame)
 
         if bestName then
             local filt = poolFilter(bestCfg, bestPool == 1)
+            -- CONDITION CHAIN takes precedence and suppresses missing mode: "show while all
+            -- of these are absent" is not what a conjunction of presence gates expresses,
+            -- and rendering the present-mode chain for a missing-flagged effect would invert
+            -- the user's intent. The editor greys Show When Missing once conditions exist.
+            local chainLinks = resolveConditions(spec, bestCfg)
+            local drawAboveBD = bestCfg.drawAboveFrameBorder ~= false
+            local handledBD = chainLinks and syncConditionChain(bd, bestName, frame, frame.unit,
+                chainLinks, filt, "da=" .. tostring(drawAboveBD), borderSpecSig(bestSpec),
+                function(map, f) return buildBorderConfig(frame.unit, map, bestSpec, f, drawAboveBD) end,
+                function(h) h:ApplyStyle({ border = { spec = bestSpec } }) end)
+          if handledBD then   -- nothing further; the chain owns this effect
+          else
             local wantMissingBD = bestCfg.showWhenMissing and true or false
             local existingBD = bd[bestName]
             if existingBD and (existingBD.missing and true or false) ~= wantMissingBD then
-                existingBD.handle:Destroy(); bd[bestName] = nil
+                destroyEntry(existingBD); bd[bestName] = nil
             end
           if wantMissingBD then
             -- SHOW-WHEN-MISSING: the ring shows while the buff is ABSENT. Window covers the WHOLE
@@ -3835,6 +4033,7 @@ function Factory:SyncFrame(frame)
                 end
             end
           end
+          end  -- if handledBD
         end
         teardownExcept(bd, bestName)
     end
