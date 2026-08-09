@@ -1369,6 +1369,26 @@ function GUI:CreateDispelColorsPageLink(parent, width)
     })
 end
 
+-- Third of the same family: a text shadow's OFFSET and COLOUR are account-wide, so any
+-- per-element "Shadow" checkbox can only decide WHETHER there is one. ⚠ That is not a
+-- layering choice, it is forced — on 12.0.7 a fontstring's SetShadowColor/SetShadowOffset
+-- is a silent no-op, so the shadow rides the shared font OBJECT and every consumer of that
+-- font gets the same one. Jumps to Global Fonts and flashes its Shadow Settings section.
+function GUI:CreateGlobalFontsShadowLink(parent, width)
+    local link = string.format("|cffffffff|HdfFonts|h%s|h|r", L["Global Fonts"])
+    local text = string.format(L["Shadow offset and colour are set in %s."], link)
+    return GUI:CreateLink(parent, text, {
+        width = width,
+        onLinkClick = function()
+            GUI:LinkToSetting({
+                page    = "general_fonts",
+                section = L["Shadow Settings"],
+                flash   = { border = true, fill = false },
+            })
+        end,
+    })
+end
+
 -- Apply the standard button look to an existing Button frame — the single
 -- source of truth for button styling, shared by GUI:CreateButton AND by
 -- hand-rolled buttons that need the same look (the button analogue of
