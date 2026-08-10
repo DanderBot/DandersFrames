@@ -270,52 +270,44 @@ function CC:CreateClickCastUI(parent)
     row2:SetHeight(22)
     
     -- Cast on down checkbox
-    local downCb = CreateFrame("CheckButton", nil, row2, "BackdropTemplate")
-    downCb:SetPoint("LEFT", 0, 0)
-    DF.GUI:StyleCheckButton(downCb, { accent = themeColor })
-    
-    local downLabel = row2:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    downLabel:SetPoint("LEFT", downCb, "RIGHT", 3, 0)
-    downLabel:SetText(L["Cast on mouse down"])
-    downLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    downCb:SetScript("OnClick", function(self)
-        CC.db.options.castOnDown = self:GetChecked()
-        CC:ApplyBindings()
-    end)
-    downCb:SetScript("OnEnter", function(self)
-        DF.GUI:ShowTooltip(self, {
+    -- nativeCheck + labelGap 3: what this row already had. See CreateCheckRow's note.
+    local downCb = DF.GUI:CreateCheckRow(row2, {
+        label       = L["Cast on mouse down"],
+        accent      = themeColor,
+        nativeCheck = true,
+        labelGap    = 3,
+        get         = function() return CC.db and CC.db.options and CC.db.options.castOnDown end,
+        set         = function(val) CC.db.options.castOnDown = val end,
+        onClick     = function() CC:ApplyBindings() end,
+        tooltip = {
             title = L["Cast on mouse down"],
             anchor = "ANCHOR_RIGHT",
             lines = { L["Click-casting on a unit frame fires when you press the mouse button (down) instead of releasing it (up). Applies to mouse clicks on frames only — keyboard binds are unaffected."] },
-        })
-    end)
-    downCb:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
+        },
+    })
+    downCb:SetPoint("LEFT", 0, 0)
+    local downLabel = downCb.label
     
     -- Quick Bind toggle
-    local quickBindCb = CreateFrame("CheckButton", nil, row2, "BackdropTemplate")
-    quickBindCb:SetPoint("LEFT", downLabel, "RIGHT", 15, 0)
-    DF.GUI:StyleCheckButton(quickBindCb, { accent = themeColor })
-    
-    local quickBindLabel = row2:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    quickBindLabel:SetPoint("LEFT", quickBindCb, "RIGHT", 3, 0)
-    quickBindLabel:SetText(L["Quick Bind"])
-    quickBindLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
-    quickBindCb:SetScript("OnEnter", function(self)
-        DF.GUI:ShowTooltip(self, {
+    -- No anchor on this tooltip, deliberately — it already used the default cursor
+    -- anchor while its neighbour uses ANCHOR_RIGHT. Preserved rather than unified.
+    local quickBindCb = DF.GUI:CreateCheckRow(row2, {
+        label       = L["Quick Bind"],
+        accent      = themeColor,
+        nativeCheck = true,
+        labelGap    = 3,
+        get         = function() return CC.db and CC.db.options and CC.db.options.quickBindEnabled end,
+        set         = function(val) CC.db.options.quickBindEnabled = val end,
+        tooltip = {
             title = L["Quick Bind Mode"],
             lines = {
                 L["When enabled: Click spell, press key to bind instantly."],
                 L["When disabled: Click spell to open Binding Editor."],
             },
-        })
-    end)
-    quickBindCb:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
-    
-    quickBindCb:SetScript("OnClick", function(self)
-        CC.db.options.quickBindEnabled = self:GetChecked()
-    end)
+        },
+    })
+    quickBindCb:SetPoint("LEFT", downLabel, "RIGHT", 15, 0)
+    local quickBindLabel = quickBindCb.label
 
     -- Smart Resurrection dropdown
     local smartResLabel = row2:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")

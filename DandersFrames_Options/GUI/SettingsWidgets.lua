@@ -1431,6 +1431,87 @@ function GUI:CreateRowToggle(parent, opts)
     return btn
 end
 
+-- ============================================================
+-- LABELLED CHECK ROW — for standalone DIALOGS, not settings pages.
+--
+-- ☠ WHY THIS IS NOT GUI:CreateCheckbox. CreateCheckbox is a SETTINGS-PAGE control and
+-- carries the machinery that goes with one: auto-profile override indicators, a
+-- DF.Search registration, DF:UpdateAll() on every click, parent:RefreshStates(), and a
+-- factory-owned row slot for AddWidget layout. The ClickCasting window is a standalone
+-- dialog that anchors its own widgets with SetPoint and drives CC:ApplyBindings() rather
+-- than a full frame repaint, so pushing it through CreateCheckbox would import four
+-- subsystems it has no business in — and register its toggles in the settings search,
+-- pointing at a panel the search cannot navigate to.
+--
+-- What WAS worth sharing is the assembly every one of those call sites hand-rolled:
+-- frame + StyleCheckButton + label + state + click + tooltip, ~30 lines apiece.
+--
+-- ⚠ RETURNS THE CheckButton, not a container. Existing call sites anchor the NEXT
+-- widget off the checkbox itself ("TOPLEFT", prevCb, "BOTTOMLEFT", 0, -8), so returning
+-- a wrapper would move every row. The label is parented to the checkbox's own parent and
+-- pinned LEFT +8, which is exactly what the hand-rolled versions did — pixel-identical.
+--
+-- ⚠ opts.accent is REQUIRED to preserve a non-default check colour. StyleCheckButton
+-- falls back to GetThemeColor(), so omitting it silently repaints ClickCasting's green
+-- check in the party/raid theme colour.
+--
+-- ⚠ labelGap and nativeCheck EXIST TO PRESERVE EXISTING PIXELS, not as taste options.
+-- The ClickCasting call sites were not uniform: the profile panel drives the check
+-- texture itself and sits its label 8px out, while the header rows use the native
+-- checked texture and a 3px gap. Hard-coding either would have visibly moved half of
+-- them, so both are parameters and every converted site passes what it already had.
+--
+-- opts: label, accent, font, labelGap, nativeCheck,
+--       tooltip = { title, lines, anchor }, get, set, onClick
+function GUI:CreateCheckRow(parent, opts)
+    opts = opts or {}
+    local cb = CreateFrame("CheckButton", nil, parent, "BackdropTemplate")
+    -- manualCheck (the default here) means the row drives cb.check:SetShown() itself;
+    -- nativeCheck hands that to WoW via SetCheckedTexture. Mixing them desyncs the box.
+    local manual = not opts.nativeCheck
+    cb.check = GUI:StyleCheckButton(cb, { accent = opts.accent, manualCheck = manual })
+    cb.manualCheck = manual
+
+    local txt = parent:CreateFontString(nil, "OVERLAY", opts.font or "DFFontHighlightSmall")
+    txt:SetPoint("LEFT", cb, "RIGHT", opts.labelGap or 8, 0)
+    txt:SetText(opts.label or "")
+    txt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    cb.label = txt
+
+    -- Keep the native checked state and the manual texture in step, so callers can use
+    -- either GetChecked() or the visual without them disagreeing.
+    function cb:Apply(on)
+        on = on and true or false
+        self:SetChecked(on)
+        -- Only touch the texture when WE own it: with SetCheckedTexture the client
+        -- shows and hides it, and a manual SetShown fights that.
+        if self.manualCheck then self.check:SetShown(on) end
+    end
+
+    -- Re-read the source of truth and repaint. Dialogs rebuild on refresh, and several
+    -- of these are changed behind the widget's back by a sibling control.
+    function cb:Refresh()
+        if opts.get then self:Apply(opts.get()) end
+    end
+
+    cb:SetScript("OnClick", function(self)
+        local val = self:GetChecked() and true or false
+        if self.manualCheck then self.check:SetShown(val) end
+        if opts.set then opts.set(val) end
+        if opts.onClick then opts.onClick(val) end
+    end)
+
+    if opts.tooltip then
+        cb:SetScript("OnEnter", function(self)
+            GUI:ShowTooltip(self, opts.tooltip)
+        end)
+        cb:SetScript("OnLeave", function() GUI:HideTooltip() end)
+    end
+
+    cb:Refresh()
+    return cb
+end
+
 function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, customSet, overrideKey)
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(220, 24)

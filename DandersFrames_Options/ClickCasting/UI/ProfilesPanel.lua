@@ -175,38 +175,27 @@ function CC:CreateProfilesPanelContent()
     end)
     
     -- Auto-create profiles checkbox
-    local autoCreateCb = CreateFrame("CheckButton", nil, leftCol, "BackdropTemplate")
-    autoCreateCb:SetPoint("TOPLEFT", ioRow, "BOTTOMLEFT", 0, -12)
-    autoCreateCb.check = DF.GUI:StyleCheckButton(autoCreateCb, { accent = CC.ACCENT, manualCheck = true })
-    
-    local autoCreateLabel = leftCol:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    autoCreateLabel:SetPoint("LEFT", autoCreateCb, "RIGHT", 8, 0)
-    autoCreateLabel:SetText(L["Auto-create profiles for loadouts"])
-    autoCreateLabel:SetTextColor(C.text.r, C.text.g, C.text.b)
-    
-    -- Initialize checkbox state
-    local autoCreate = CC.db and CC.db.global and CC.db.global.autoCreateProfiles
-    if autoCreate == nil then autoCreate = true end
-    autoCreateCb:SetChecked(autoCreate)
-    autoCreateCb.check:SetShown(autoCreate)
-    
-    autoCreateCb:SetScript("OnClick", function(self)
-        local checked = self:GetChecked()
-        self.check:SetShown(checked)
-        if CC.db and CC.db.global then
-            CC.db.global.autoCreateProfiles = checked
-        end
-        if checked then
-            DF:Say(L["Auto-create profiles enabled."])
-        else
-            DF:Say(L["Auto-create profiles disabled. Profiles will not be created for new loadouts."], nil, "WARN")
-        end
-        -- Refresh to update the status text
-        CC:RefreshProfilesPanel()
-    end)
-    
-    autoCreateCb:SetScript("OnEnter", function(self)
-        DF.GUI:ShowTooltip(self, {
+    local autoCreateCb = DF.GUI:CreateCheckRow(leftCol, {
+        label  = L["Auto-create profiles for loadouts"],
+        accent = CC.ACCENT,
+        get = function()
+            local v = CC.db and CC.db.global and CC.db.global.autoCreateProfiles
+            if v == nil then v = true end   -- default on
+            return v
+        end,
+        set = function(val)
+            if CC.db and CC.db.global then CC.db.global.autoCreateProfiles = val end
+        end,
+        onClick = function(val)
+            if val then
+                DF:Say(L["Auto-create profiles enabled."])
+            else
+                DF:Say(L["Auto-create profiles disabled. Profiles will not be created for new loadouts."], nil, "WARN")
+            end
+            -- Refresh to update the status text
+            CC:RefreshProfilesPanel()
+        end,
+        tooltip = {
             title = L["Auto-Create Profiles"],
             anchor = "ANCHOR_RIGHT",
             lines = {
@@ -217,61 +206,47 @@ function CC:CreateProfilesPanelContent()
                 L["Disable this if you want to use the same profile"],
                 L["for all your loadouts."],
             },
-        })
-    end)
-    autoCreateCb:SetScript("OnLeave", function(self)
-        DF.GUI:HideTooltip()
-    end)
-    
+        },
+    })
+    autoCreateCb:SetPoint("TOPLEFT", ioRow, "BOTTOMLEFT", 0, -12)
+
     CC.autoCreateCb = autoCreateCb
     
     -- Disable while mounted checkbox
-    local mountCb = CreateFrame("CheckButton", nil, leftCol, "BackdropTemplate")
-    mountCb:SetPoint("TOPLEFT", autoCreateCb, "BOTTOMLEFT", 0, -8)
-    mountCb.check = DF.GUI:StyleCheckButton(mountCb, { accent = CC.ACCENT, manualCheck = true })
-    
-    local mountLabel = leftCol:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    mountLabel:SetPoint("LEFT", mountCb, "RIGHT", 8, 0)
-    mountLabel:SetText(L["Disable while mounted/flying"])
-    mountLabel:SetTextColor(C.text.r, C.text.g, C.text.b)
-    
-    -- Initialize checkbox state
-    local disableMounted = CC.db and CC.db.global and CC.db.global.disableWhileMounted
-    if disableMounted == nil then disableMounted = false end
-    mountCb:SetChecked(disableMounted)
-    mountCb.check:SetShown(disableMounted)
-
-    mountCb:SetScript("OnClick", function(self)
-        local checked = self:GetChecked()
-        self.check:SetShown(checked)
-        -- Mutually exclusive with fly-only: turning on mounted turns off fly-only
-        local disableFlying = CC.db and CC.db.global and CC.db.global.disableWhileFlying or false
-        if checked and disableFlying then
-            disableFlying = false
-            if CC.flyingCb then
-                CC.flyingCb:SetChecked(false)
-                CC.flyingCb.check:SetShown(false)
+    local mountCb = DF.GUI:CreateCheckRow(leftCol, {
+        label  = L["Disable while mounted/flying"],
+        accent = CC.ACCENT,
+        get = function()
+            return CC.db and CC.db.global and CC.db.global.disableWhileMounted or false
+        end,
+        set = function(val)
+            -- Mutually exclusive with fly-only: turning on mounted turns off fly-only.
+            -- CC.flyingCb:Apply keeps the native checked state and the manual check
+            -- texture in step — they were set separately here and could disagree.
+            local disableFlying = CC.db and CC.db.global and CC.db.global.disableWhileFlying or false
+            if val and disableFlying then
+                disableFlying = false
+                if CC.flyingCb then CC.flyingCb:Apply(false) end
             end
-        end
-        if CC.db and CC.db.global then
-            CC.db.global.disableWhileMounted = checked
-            CC.db.global.disableWhileFlying  = disableFlying
-        end
-        if checked then
-            DF:Say(L["Click-casting will be disabled while mounted/flying."])
-        else
-            DF:Say(L["Click-casting will stay active while mounted/flying."], nil, "WARN")
-        end
-        -- Rebuild bindings with new macro conditions (if not in combat)
-        if not InCombatLockdown() then
-            CC:ApplyBindings()
-        else
-            CC:Defer("bindingRefresh")
-        end
-    end)
-
-    mountCb:SetScript("OnEnter", function(self)
-        DF.GUI:ShowTooltip(self, {
+            if CC.db and CC.db.global then
+                CC.db.global.disableWhileMounted = val
+                CC.db.global.disableWhileFlying  = disableFlying
+            end
+        end,
+        onClick = function(val)
+            if val then
+                DF:Say(L["Click-casting will be disabled while mounted/flying."])
+            else
+                DF:Say(L["Click-casting will stay active while mounted/flying."], nil, "WARN")
+            end
+            -- Rebuild bindings with new macro conditions (if not in combat)
+            if not InCombatLockdown() then
+                CC:ApplyBindings()
+            else
+                CC:Defer("bindingRefresh")
+            end
+        end,
+        tooltip = {
             title = L["Disable While Mounted"],
             anchor = "ANCHOR_RIGHT",
             lines = {
@@ -279,58 +254,44 @@ function CC:CreateProfilesPanelContent()
                 " ",
                 L["This allows normal clicking on unit frames to select targets while traveling."],
             },
-        })
-    end)
-    mountCb:SetScript("OnLeave", function(self)
-        DF.GUI:HideTooltip()
-    end)
+        },
+    })
+    mountCb:SetPoint("TOPLEFT", autoCreateCb, "BOTTOMLEFT", 0, -8)
 
     CC.mountCb = mountCb
 
     -- Disable while flying only checkbox
-    local flyingCb = CreateFrame("CheckButton", nil, leftCol, "BackdropTemplate")
-    flyingCb:SetPoint("TOPLEFT", mountCb, "BOTTOMLEFT", 0, -8)
-    flyingCb.check = DF.GUI:StyleCheckButton(flyingCb, { accent = CC.ACCENT, manualCheck = true })
-
-    local flyingLabel = leftCol:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    flyingLabel:SetPoint("LEFT", flyingCb, "RIGHT", 8, 0)
-    flyingLabel:SetText(L["Disable Only While Flying"])
-    flyingLabel:SetTextColor(C.text.r, C.text.g, C.text.b)
-
-    local disableFlying = CC.db and CC.db.global and CC.db.global.disableWhileFlying or false
-    flyingCb:SetChecked(disableFlying)
-    flyingCb.check:SetShown(disableFlying)
-
-    flyingCb:SetScript("OnClick", function(self)
-        local checked = self:GetChecked()
-        self.check:SetShown(checked)
-        -- Mutually exclusive with mounted: turning on fly-only turns off mounted
-        local disableMounted = CC.db and CC.db.global and CC.db.global.disableWhileMounted or false
-        if checked and disableMounted then
-            disableMounted = false
-            if CC.mountCb then
-                CC.mountCb:SetChecked(false)
-                CC.mountCb.check:SetShown(false)
+    local flyingCb = DF.GUI:CreateCheckRow(leftCol, {
+        label  = L["Disable Only While Flying"],
+        accent = CC.ACCENT,
+        get = function()
+            return CC.db and CC.db.global and CC.db.global.disableWhileFlying or false
+        end,
+        set = function(val)
+            -- Mutually exclusive with mounted: turning on fly-only turns off mounted.
+            local disableMounted = CC.db and CC.db.global and CC.db.global.disableWhileMounted or false
+            if val and disableMounted then
+                disableMounted = false
+                if CC.mountCb then CC.mountCb:Apply(false) end
             end
-        end
-        if CC.db and CC.db.global then
-            CC.db.global.disableWhileFlying  = checked
-            CC.db.global.disableWhileMounted = disableMounted
-        end
-        if checked then
-            DF:Say(L["Click-casting will be disabled only while flying."])
-        else
-            DF:Say(L["Click-casting will stay active while flying."], nil, "WARN")
-        end
-        if not InCombatLockdown() then
-            CC:ApplyBindings()
-        else
-            CC:Defer("bindingRefresh")
-        end
-    end)
-
-    flyingCb:SetScript("OnEnter", function(self)
-        DF.GUI:ShowTooltip(self, {
+            if CC.db and CC.db.global then
+                CC.db.global.disableWhileFlying  = val
+                CC.db.global.disableWhileMounted = disableMounted
+            end
+        end,
+        onClick = function(val)
+            if val then
+                DF:Say(L["Click-casting will be disabled only while flying."])
+            else
+                DF:Say(L["Click-casting will stay active while flying."], nil, "WARN")
+            end
+            if not InCombatLockdown() then
+                CC:ApplyBindings()
+            else
+                CC:Defer("bindingRefresh")
+            end
+        end,
+        tooltip = {
             title = L["Disable Only While Flying"],
             anchor = "ANCHOR_RIGHT",
             lines = {
@@ -339,56 +300,41 @@ function CC:CreateProfilesPanelContent()
                 " ",
                 L["This allows normal clicking on unit frames to select targets while traveling."],
             },
-        })
-    end)
-    flyingCb:SetScript("OnLeave", function(self)
-        DF.GUI:HideTooltip()
-    end)
+        },
+    })
+    flyingCb:SetPoint("TOPLEFT", mountCb, "BOTTOMLEFT", 0, -8)
 
     CC.flyingCb = flyingCb
 
     -- Target unit when click-casting checkbox
-    local targetCb = CreateFrame("CheckButton", nil, leftCol, "BackdropTemplate")
-    targetCb:SetPoint("TOPLEFT", flyingCb, "BOTTOMLEFT", 0, -8)
-    targetCb.check = DF.GUI:StyleCheckButton(targetCb, { accent = CC.ACCENT, manualCheck = true })
-
-    local targetLabel = leftCol:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    targetLabel:SetPoint("LEFT", targetCb, "RIGHT", 8, 0)
-    targetLabel:SetText(L["Target unit when click-casting"])
-    targetLabel:SetTextColor(C.text.r, C.text.g, C.text.b)
-
-    local targetOnCast = CC.db and CC.db.global and CC.db.global.targetOnCast or false
-    targetCb:SetChecked(targetOnCast)
-    targetCb.check:SetShown(targetOnCast)
-
-    targetCb:SetScript("OnClick", function(self)
-        local checked = self:GetChecked()
-        self.check:SetShown(checked)
-        if CC.db and CC.db.global then
-            CC.db.global.targetOnCast = checked
-        end
-        if checked then
-            DF:Say(L["Click-casting will now also target the unit you cast on."])
-        else
-            DF:Say(L["Click-casting will no longer change your target."], nil, "WARN")
-        end
-        if not InCombatLockdown() then
-            CC:ApplyBindings()
-        else
-            CC:Defer("bindingRefresh")
-        end
-    end)
-
-    targetCb:SetScript("OnEnter", function(self)
-        DF.GUI:ShowTooltip(self, {
+    local targetCb = DF.GUI:CreateCheckRow(leftCol, {
+        label  = L["Target unit when click-casting"],
+        accent = CC.ACCENT,
+        get = function()
+            return CC.db and CC.db.global and CC.db.global.targetOnCast or false
+        end,
+        set = function(val)
+            if CC.db and CC.db.global then CC.db.global.targetOnCast = val end
+        end,
+        onClick = function(val)
+            if val then
+                DF:Say(L["Click-casting will now also target the unit you cast on."])
+            else
+                DF:Say(L["Click-casting will no longer change your target."], nil, "WARN")
+            end
+            if not InCombatLockdown() then
+                CC:ApplyBindings()
+            else
+                CC:Defer("bindingRefresh")
+            end
+        end,
+        tooltip = {
             title = L["Target unit when click-casting"],
             anchor = "ANCHOR_RIGHT",
             lines = { L["When enabled, click-casting a spell on a frame also makes that unit your target. Individual bindings can override this in the binding editor."] },
-        })
-    end)
-    targetCb:SetScript("OnLeave", function(self)
-        DF.GUI:HideTooltip()
-    end)
+        },
+    })
+    targetCb:SetPoint("TOPLEFT", flyingCb, "BOTTOMLEFT", 0, -8)
 
     CC.targetCb = targetCb
 
@@ -450,32 +396,14 @@ function CC:RefreshProfilesPanel()
         self.profileListContent.ThemeListeners = nil
     end
     
-    -- Update auto-create checkbox state
-    if self.autoCreateCb then
-        local autoCreate = self.db and self.db.global and self.db.global.autoCreateProfiles
-        if autoCreate == nil then autoCreate = true end
-        self.autoCreateCb:SetChecked(autoCreate)
-        if self.autoCreateCb.check then
-            self.autoCreateCb.check:SetShown(autoCreate)
-        end
-    end
-    
-    -- Update mount checkbox state
-    if self.mountCb then
-        local disableMounted = self.db and self.db.global and self.db.global.disableWhileMounted or false
-        self.mountCb:SetChecked(disableMounted)
-        if self.mountCb.check then
-            self.mountCb.check:SetShown(disableMounted)
-        end
-    end
-
-    -- Update fly-only checkbox state
-    if self.flyingCb then
-        local disableFlying = self.db and self.db.global and self.db.global.disableWhileFlying or false
-        self.flyingCb:SetChecked(disableFlying)
-        if self.flyingCb.check then
-            self.flyingCb.check:SetShown(disableFlying)
-        end
+    -- Repaint the option checkboxes from the db. Each row owns its own `get`, so the
+    -- default-on rule for autoCreateProfiles lives in ONE place now instead of being
+    -- restated here -- the two copies were free to disagree.
+    --
+    -- ⚠ targetCb is included; it was missing from this block, so the "Target unit when
+    -- click-casting" box did not repaint on a panel refresh.
+    for _, cb in ipairs({ self.autoCreateCb, self.mountCb, self.flyingCb, self.targetCb }) do
+        if cb and cb.Refresh then cb:Refresh() end
     end
 
     -- Get profiles
