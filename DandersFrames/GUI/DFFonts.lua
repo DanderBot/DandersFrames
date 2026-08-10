@@ -123,10 +123,18 @@ end
 -- RefreshSettingsFont can re-apply the new font later.
 -- ============================================================
 
--- List of {fontString, size, outline} tuples to re-apply on refresh.
--- Entries with a garbage-collected FontString become nil and are
--- skipped naturally.
-DF.GUI._settingsFontStrings = DF.GUI._settingsFontStrings or {}
+-- fontString -> { size, outline }, to re-apply on refresh.
+--
+-- ☠ WEAK KEYS, and that is the whole point. This was an ARRAY of {fs, size, outline}
+-- tuples holding STRONG references, under a comment claiming "entries with a
+-- garbage-collected FontString become nil and are skipped naturally" -- which could never
+-- happen, because the registry itself was the thing keeping them alive. The cleanup arm in
+-- RefreshSettingsFont was unreachable, the table only ever grew as settings pages rebuilt
+-- their widgets, and every font change re-applied to fontstrings long gone from the screen.
+--
+-- Keying by the fontstring also retires the linear scan that used to run on every
+-- SetSettingsFont call to find an existing entry.
+DF.GUI._settingsFontStrings = DF.GUI._settingsFontStrings or setmetatable({}, { __mode = "k" })
 
 -- Apply the user's settings font to a FontString with the given
 -- size and outline, then register it for future refreshes.
@@ -163,15 +171,8 @@ function DF.GUI:SetSettingsFont(fontString, size, outline)
     end
 
     -- Register for future refreshes (only once per fontString)
-    local registry = self._settingsFontStrings
-    for _, entry in ipairs(registry) do
-        if entry.fs == fontString then
-            entry.size = size
-            entry.outline = explicitOutline
-            return
-        end
-    end
-    registry[#registry + 1] = { fs = fontString, size = size, outline = explicitOutline }
+    -- Keyed, so a re-registration overwrites in place and no scan is needed.
+    self._settingsFontStrings[fontString] = { size = size, outline = explicitOutline }
 end
 
 -- ============================================================
@@ -187,15 +188,13 @@ function DF.GUI:RefreshSettingsFont()
     -- Re-apply settings font to every registered inline-SetFont FontString
     local registry = self._settingsFontStrings
     if registry then
-        for i = #registry, 1, -1 do
-            local entry = registry[i]
-            local fs = entry and entry.fs
-            if fs and fs.GetObjectType then
+        -- No removal arm: the table is weak-keyed, so a collected FontString drops out on
+        -- its own. Safe to call SetSettingsFont from inside pairs() -- it OVERWRITES the
+        -- key it is handed and never inserts a new one during the traversal.
+        for fs, entry in pairs(registry) do
+            if fs.GetObjectType then
                 -- Re-apply with the same explicit outline semantics
                 self:SetSettingsFont(fs, entry.size, entry.outline)
-            else
-                -- FontString was garbage-collected; drop the entry
-                table.remove(registry, i)
             end
         end
     end

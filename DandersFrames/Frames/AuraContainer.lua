@@ -2359,10 +2359,17 @@ function NativeBackend:build()
     -- record count) is structural -> Rebuild.
     -- Native sort (rows only): declared at AddAuraGroup here, re-tunable live via
     -- applyGroupTuning — one shared derivation (deriveSort).
-    local sortMethod, sortDirection
-    if not testMode then
-        sortMethod, sortDirection = deriveSort(config)
-    end
+    -- ★ NO testMode FORK. Row order is RENDERING, and a preview must render through the
+    -- live pathway -- it may differ in DATA only. With the sort skipped, live rows came
+    -- out in the container's sort order and preview rows in declaration order, so the Sort
+    -- setting could not be judged from the preview at all.
+    --
+    -- Safe to run for test containers: deriveSort is pure config -- it reads config.sort
+    -- and the two AuraContainerSort* enum tables and touches no unit or aura data. Unlike
+    -- the other test forks in this file (per-slot groups, the window-parked missing badge,
+    -- disabled containers) this one carried no stated engine reason, which is what marked
+    -- it out as an oversight rather than a constraint.
+    local sortMethod, sortDirection = deriveSort(config)
     self.groupKeys = {}
     -- key -> the record style that group was built with. applyLayout re-pushes group
     -- layouts on every restyle and would otherwise reset a scaled group's cell back to

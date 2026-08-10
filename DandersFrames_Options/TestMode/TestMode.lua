@@ -1807,28 +1807,18 @@ function DF:UpdateTestPowerBar(frame, testData)
         return
     end
     
-    -- Check role-based filtering
-    local showBar = true
-    local hasAnyRoleFilter = db.resourceBarShowHealer or db.resourceBarShowTank or db.resourceBarShowDPS
-    if hasAnyRoleFilter then
-        if testData.role == "HEALER" then
-            showBar = db.resourceBarShowHealer == true
-        elseif testData.role == "TANK" then
-            showBar = db.resourceBarShowTank == true
-        else
-            showBar = db.resourceBarShowDPS == true
-        end
-    else
-        showBar = false
-    end
-
-    -- Check class-based filtering
-    if showBar then
-        local classFilter = db.resourceBarClassFilter
-        if classFilter and testData.class and classFilter[testData.class] == false then
-            showBar = false
-        end
-    end
+    -- ★ THE LIVE GATE, fed test DATA. DF:ShouldShowResourceBar takes an optional role
+    -- override precisely so the preview can drive it without a real unit -- a test path
+    -- that is a PARAMETER of the live function, not a copy of it.
+    --
+    -- ☠ Do not reinstate a local copy of the role logic. The copy that used to live here
+    -- had lost BOTH of the live function's solo arms (`inSoloMode and
+    -- db.resourceBarShowInSoloMode`), and since resourceBarShowInSoloMode defaults to
+    -- true and test mode is nearly always driven solo, live showed the bar on every frame
+    -- while the preview showed it only on the role-filtered subset. The setting was
+    -- simply not previewable.
+    -- Role AND class both handed over as data, so the ENTIRE gate is the live one.
+    local showBar = DF:ShouldShowResourceBar(nil, db, testData.role, testData.class)
 
     if not showBar then
         if frame.dfPowerBar then frame.dfPowerBar:Hide() end

@@ -27,7 +27,13 @@ local ResolveBarTextureForFill = function(...) return DF:ResolveBarTextureForFil
 -- Centralized role and class filter check for resource bar visibility
 -- Returns true if the resource bar should be shown for this unit
 -- Unit must pass BOTH role filter AND class filter
-function DF:ShouldShowResourceBar(unit, db)
+-- `roleOverride` supplies the role as DATA instead of resolving it from a real unit,
+-- which is how test mode drives this. The preview must run the LIVE gate: it used to
+-- carry its own copy of the role logic and that copy had drifted, losing BOTH solo arms
+-- below. resourceBarShowInSoloMode defaults to true and test mode is almost always driven
+-- solo, so live showed the bar on every frame while the preview showed it only on the
+-- role-filtered subset -- a setting you could not judge from the preview at all.
+function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride)
     if not db.resourceBarEnabled then return false end
 
     -- Role filter
@@ -43,7 +49,7 @@ function DF:ShouldShowResourceBar(unit, db)
         -- DPS showed the bar for every spec. GetUnitRole falls the PLAYER back to
         -- the spec role; other units have no public spec API and still arrive
         -- NONE, which is why the arm stays.
-        local role = DF:GetUnitRole(unit)
+        local role = roleOverride or DF:GetUnitRole(unit)
         local inSoloMode = not IsInGroup() and not IsInRaid()
 
         if inSoloMode and db.resourceBarShowInSoloMode then
@@ -68,7 +74,14 @@ function DF:ShouldShowResourceBar(unit, db)
     -- Class filter (unit must also pass)
     local classFilter = db.resourceBarClassFilter
     if classFilter then
-        local _, classToken = UnitClass(unit)
+        -- classOverride is the DATA half of the same arrangement as roleOverride: with a
+        -- nil unit UnitClass returns nil and this filter would silently never apply, so a
+        -- preview would have to re-implement it -- which is how these copies start.
+        local classToken = classOverride
+        if not classToken then
+            local _
+            _, classToken = UnitClass(unit)
+        end
         if classToken and classFilter[classToken] == false then
             return false
         end

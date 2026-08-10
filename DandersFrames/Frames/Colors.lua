@@ -39,8 +39,19 @@ end
 function DF:ApplyDeadFade(frame, statusType, forceApply)
     if not frame then return end
     
-    -- Skip test frames - they handle their own dead fade in TestMode.lua
-    if frame.dfIsTestFrame then return end
+    -- ☠ THIS BAIL WAS CIRCULAR. It skipped test frames "because they handle their own
+    -- dead fade in TestMode.lua" -- and TestMode's only dead-fade code is the call INTO
+    -- this function (with forceApply set, at UpdateTestFrame). Its own handler moved to
+    -- ElementAppearance in the 2026-08-07 audit and this comment was not updated, so each
+    -- side deferred to the other and the work happened nowhere: a preview frame never got
+    -- the fade, dfDeadFadeApplied never became true on one, and every later branch reading
+    -- that flag for a test frame was dead.
+    --
+    -- Gated on forceApply rather than removed, so the AUTOMATIC path -- driven by real
+    -- unit state, which a test frame does not have -- still skips previews as intended.
+    -- The body below delegates to UpdateAllElementAppearances, which is what the preview
+    -- already runs, so the two now agree instead of cancelling.
+    if frame.dfIsTestFrame and not forceApply then return end
     
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
