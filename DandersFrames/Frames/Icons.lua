@@ -183,10 +183,13 @@ function DF:UpdateExternalDefIcon(frame)
     DF:UpdateDefensiveBar(frame)
 end
 
--- Legacy function for backwards compatibility
-function DF:UpdateAllExternalDefIcons()
-    DF:UpdateAllDefensiveBars()
-end
+-- ☠ (Removed) DF:UpdateAllExternalDefIcons, a one-line forward to
+-- DF:UpdateAllDefensiveBars kept "for backwards compatibility". Nothing called it in
+-- either addon; its only other mention was a PROFILED_FUNCTIONS string, which wraps
+-- DF[name] and never calls it, so it profiled nothing.
+--
+-- ⚠ Its SINGULAR sibling above, DF:UpdateExternalDefIcon, is a different matter and
+-- stays: that one has seven real call sites.
 
 -- Update auras on all frames (used when entering/leaving combat)
 function DF:UpdateAllAuras()

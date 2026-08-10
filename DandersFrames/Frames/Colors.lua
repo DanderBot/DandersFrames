@@ -346,48 +346,16 @@ function DF:ApplyHealthColors(frame)
     -- which is called from UpdateUnitFrame. No need to duplicate it here.
 end
 
--- Apply bar orientation
-function DF:ApplyBarOrientation(frame)
-    if not frame or not frame.healthBar then return end
-    
-    -- Use raid DB for raid frames, party DB for party frames
-    local db = DF:GetFrameDB(frame)
-    local mode = db.healthOrientation or "HORIZONTAL"
-    
-    local orient, reverse
-    if mode == "HORIZONTAL" then
-        orient, reverse = "HORIZONTAL", false
-    elseif mode == "HORIZONTAL_INV" then
-        orient, reverse = "HORIZONTAL", true
-    elseif mode == "VERTICAL" then
-        orient, reverse = "VERTICAL", false
-    elseif mode == "VERTICAL_INV" then
-        orient, reverse = "VERTICAL", true
-    else
-        -- ☠ THE else IS LOAD-BEARING. `or "HORIZONTAL"` above covers a NIL key but not
-        -- an unrecognised STRING -- a stale or imported value, or a mode added later --
-        -- and without this arm both locals stayed nil and SetOrientation(nil) threw two
-        -- lines down. UpdateReducedMaxHealth in this same file already handles the
-        -- unknown case safely by falling through to a boolean.
-        orient, reverse = "HORIZONTAL", false
-    end
-
-    frame.healthBar:SetOrientation(orient)
-    frame.healthBar:SetReverseFill(reverse)
-    -- ⚠ Distinct from DF:ApplyBarFillOrientation despite the similar name: this
-    -- function sets the bar's fill DIRECTION, that one settles what the fill
-    -- TEXTURE does about it (a tiled texture must not rotate, and swaps to its
-    -- pre-rotated companion instead). Unlike Frames/Update.lua this path never
-    -- touched rotation at all, so without the call a tiled texture chosen here
-    -- would keep the horizontal art on a vertical frame.
-    DF:ApplyBarFillOrientation(frame.healthBar, orient == "VERTICAL")
-
-    -- Apply orientation to missing health bar (opposite fill direction)
-    -- Missing health fills from the "end" where health is depleted
-    if frame.missingHealthBar then
-        frame.missingHealthBar:SetOrientation(orient)
-        frame.missingHealthBar:SetReverseFill(not reverse)  -- Opposite of health bar
-        DF:ApplyBarFillOrientation(frame.missingHealthBar, orient == "VERTICAL")
-    end
-end
+-- ☠ (Removed) DF:ApplyBarOrientation. Zero callers in either addon -- its only other
+-- mention was a string in Profiler's PROFILED_FUNCTIONS, which WRAPS DF[name] and
+-- never calls it, so wrapping this measured nothing. It duplicated the orientation
+-- mapping Frames/Update.lua does inside ApplyFrameLayout, for both the health bar and
+-- the missing-health bar, including the "missing health fills the opposite way" rule.
+--
+-- ⚠ ITS SAFETY ARM WAS THE ONE THING WORTH KEEPING, so that reasoning moved to the
+-- live site rather than dying here -- see the note by the orientation chain in
+-- Frames/Update.lua. Two claims in the comment it carried were wrong and are not
+-- reproduced there: on the live path an unrecognised mode does NOT throw (it leaves
+-- the bar untouched instead), and it cited "UpdateReducedMaxHealth in this same
+-- file", which lives in Frames/ReducedMaxHealth.lua.
 

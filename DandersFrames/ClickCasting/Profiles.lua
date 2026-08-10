@@ -39,11 +39,9 @@ local function GetCombatCondition(binding)
     return binding.loadCombat
 end
 
--- Check if binding has a combat restriction (not "always")
-local function HasCombatRestriction(binding)
-    local cond = GetCombatCondition(binding)
-    return cond ~= nil
-end
+-- (Removed) HasCombatRestriction, a one-line `GetCombatCondition(binding) ~= nil`.
+-- No callers in either addon, and its CC export had no readers either -- callers
+-- that want the answer already call GetCombatCondition and use the value itself.
 
 -- Build the modifier prefix string for an attribute
 -- WoW SecureActionButtonTemplate requires modifiers in order: alt, ctrl, shift
@@ -67,52 +65,15 @@ local function BuildModifierPrefix(modifiers)
     return result
 end
 
--- Build a WoW binding key for SetOverrideBindingClick
--- Format: "ALT-CTRL-SHIFT-META-KEY" (same order)
-local function BuildMouseBindingKey(modifiers, button)
-    local buttonMap = {
-        LeftButton = "BUTTON1",
-        RightButton = "BUTTON2",
-        MiddleButton = "BUTTON3",
-    }
-    -- Handle Button4-Button31 dynamically
-    local buttonKey = buttonMap[button]
-    if not buttonKey then
-        local num = button:match("Button(%d+)")
-        if num then
-            buttonKey = "BUTTON" .. num
-        else
-            -- Unparseable button name -> no key, NOT button 1.
-            --
-            -- Defaulting to BUTTON1 silently rewrote plain left-click with an
-            -- action the user never bound there. The editor constrains this
-            -- field, but profile import does not, so a hand-edited or foreign
-            -- profile could hijack left-click on every frame with no way to see
-            -- why. Returning nil lets the caller skip the binding instead.
-            return nil
-        end
-    end
-    
-    if not modifiers or modifiers == "" then
-        return buttonKey
-    end
-    
-    -- Parse modifiers
-    local hasShift = modifiers:lower():find("shift") ~= nil
-    local hasCtrl = modifiers:lower():find("ctrl") ~= nil
-    local hasAlt = modifiers:lower():find("alt") ~= nil
-    local hasMeta = modifiers:lower():find("meta") ~= nil
-    
-    -- Build in order: ALT-CTRL-SHIFT-META-KEY
-    local parts = {}
-    if hasAlt then table.insert(parts, "ALT") end
-    if hasCtrl then table.insert(parts, "CTRL") end
-    if hasShift then table.insert(parts, "SHIFT") end
-    if hasMeta then table.insert(parts, "META") end
-    table.insert(parts, buttonKey)
-    
-    return table.concat(parts, "-")
-end
+-- ☠ (Removed) BuildMouseBindingKey (~44 lines) and its CC export. No callers in
+-- either addon. Its header named SetOverrideBindingClick, an API this addon does not
+-- use at all -- hover binds are set inside the restricted environment via
+-- self:SetBindingClick, built by CC:BuildHovercastSetupScript -- so the function was
+-- built for a mechanism that was replaced before it ever had a caller.
+--
+-- ⚠ The unparseable-button rule it documented is NOT lost: GetButtonNumber below
+-- enforces the same thing and now states the reasoning itself rather than pointing
+-- here. It also held a second copy of the modifier probes in BuildModifierPrefix.
 
 -- Get the button attribute name (e.g., "shift-ctrl-type1" for shift+ctrl+left click)
 local function GetButtonNumber(button)
@@ -129,10 +90,12 @@ local function GetButtonNumber(button)
         if num then
             num = tonumber(num)
         else
-            -- Unparseable -> nil, NOT 1. See BuildMouseBindingKey above: this
-            -- fed the action into type1/macrotext1 and marked button 1 as
-            -- covered, so the "restore uncovered base button" pass then skipped
-            -- restoring left-click targeting as well.
+            -- ☠ UNPARSEABLE -> nil, NOT 1. Defaulting to button 1 fed the action
+            -- into type1/macrotext1 and marked button 1 as covered, so the
+            -- "restore uncovered base button" pass then skipped restoring
+            -- left-click targeting too -- a hand-edited or imported profile could
+            -- hijack left-click on every frame with no way to see why. The editor
+            -- constrains this field; profile import does not.
             return nil
         end
     end
@@ -141,9 +104,7 @@ end
 
 -- Export helper functions to CC table for use by other modules
 CC.GetCombatCondition = GetCombatCondition
-CC.HasCombatRestriction = HasCombatRestriction
 CC.BuildModifierPrefix = BuildModifierPrefix
-CC.BuildMouseBindingKey = BuildMouseBindingKey
 CC.GetButtonNumber = GetButtonNumber
 
 -- ============================================================

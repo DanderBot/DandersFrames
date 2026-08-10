@@ -68,6 +68,15 @@ function DF:ApplyFrameLayout(frame)
         DF:SafeSetStatusBarTexture(healthBar, healthTex)
         
         -- Orientation
+        --
+        -- ⚠ NO `else` ARM, AND THAT IS A REAL GAP -- reasoning carried here from the
+        -- duplicate copy in Frames/Colors.lua, which held it and was itself dead.
+        -- `or "HORIZONTAL"` covers a NIL key but not an unrecognised STRING: a stale
+        -- or imported value, or a mode added to the dropdown without being added
+        -- here. Such a value matches none of the four branches, so the health bar AND
+        -- the missing-health bar below keep whatever orientation they last had --
+        -- silently, per frame, with no error. Add a mode here and to the dropdown in
+        -- the same change.
         local orientation = db.healthOrientation or "HORIZONTAL"
         if orientation == "HORIZONTAL" then
             healthBar:SetOrientation("HORIZONTAL")

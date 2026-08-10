@@ -3782,28 +3782,19 @@ function DF:ApplyRaidGroupSorting()
     -- OnFramesSorted callback is fired from child OnAttributeChanged.
 end
 
--- Refresh all group-based raid frames after sorting changes
-function DF:RefreshRaidGroupFrames()
-    if not DF.raidSeparatedHeaders then return end
-    
-    -- Use a longer delay to ensure header has finished reassigning units
-    C_Timer.After(0.1, function()
-        if not DF.raidSeparatedHeaders then return end
-        if InCombatLockdown() then return end
-        
-        for group = 1, 8 do
-            local header = DF.raidSeparatedHeaders[group]
-            if header then
-                for i = 1, 5 do
-                    local child = header:GetAttribute("child" .. i)
-                    if child and child:IsVisible() and child.unit then
-                        DF:FullFrameRefresh(child)
-                    end
-                end
-            end
-        end
-    end)
-end
+-- ☠ (Removed) DF:RefreshRaidGroupFrames, DF:RefreshRaidFlatFrames and
+-- DF:RefreshPartyFrames -- the three "refresh all X frames after sorting changes"
+-- helpers. None had a caller in either addon.
+--
+-- ⚠ THEIR NAMES DESCRIBED A CONTRACT THAT NO LONGER EXISTS, which is why all three
+-- rotted together: sorting does not call anything to refresh afterwards any more.
+-- Each sat directly beneath a sort path ending in "OnFramesSorted callback is fired
+-- from child OnAttributeChanged" -- the frames re-render from that attribute change,
+-- so there is nothing left for a post-sort sweep to do.
+--
+-- Their only other mention was in Profiler's PROFILED_FUNCTIONS, which wraps
+-- DF[name] rather than calling it; those entries are gone too. DF:FullFrameRefresh,
+-- which they called, is live and has other callers.
 
 -- Comprehensive frame refresh - updates ALL visual elements
 -- Called when unit assignment changes due to sorting
@@ -4305,16 +4296,8 @@ function DF:ApplyRaidFlatSorting()
     -- OnFramesSorted callback is fired from child OnAttributeChanged.
 end
 
--- Refresh all flat raid frames after sorting changes
-function DF:RefreshRaidFlatFrames()
-    -- Delegate to FlatRaidFrames
-    if DF.FlatRaidFrames and DF.FlatRaidFrames.header then
-        C_Timer.After(0.1, function()
-            if InCombatLockdown() then return end
-            DF.FlatRaidFrames:RefreshAllChildFrames()
-        end)
-    end
-end
+-- (Removed) DF:RefreshRaidFlatFrames -- no callers; see the note on its group-frame
+-- twin above. FlatRaidFrames:RefreshAllChildFrames, which it delegated to, is live.
 
 -- Toggle raid group debug backgrounds
 function DF:ToggleRaidDebugBackgrounds()
@@ -5621,23 +5604,8 @@ function DF:ApplyArenaHeaderSorting()
     -- OnFramesSorted callback is fired from child OnAttributeChanged.
 end
 
--- Refresh all party frames after sorting changes
-function DF:RefreshPartyFrames()
-    if not DF.partyHeader then return end
-    
-    -- Use a longer delay to ensure header has finished reassigning units
-    C_Timer.After(0.1, function()
-        if not DF.partyHeader then return end
-        if InCombatLockdown() then return end
-        
-        for i = 1, 5 do
-            local child = DF.partyHeader:GetAttribute("child" .. i)
-            if child and child:IsVisible() and child.unit then
-                DF:FullFrameRefresh(child)
-            end
-        end
-    end)
-end
+-- (Removed) DF:RefreshPartyFrames -- no callers; see the note on the group-frame
+-- twin above.
 
 function DF:SetRaidSorting(sortMethod, groupBy, groupingOrder)
     if InCombatLockdown() then
@@ -6321,19 +6289,21 @@ function DF:HookArenaChildrenForRepositioning()
         end
     end
     
-    DF.arenaChildrenHooked = true
-    
+    -- ☠ (Removed) DF.arenaChildrenHooked = true. Write-only: nothing read it, so it
+    -- guarded no re-entry. Both Hook*ChildrenForRepositioning functions actually
+    -- guard per child, via DF.hookedChildren / DF.hookedArenaChildren -- the flag
+    -- only looked like the guard. (Its party twin, DF.partyChildrenHooked, is read
+    -- once in a debug print and stays.)
+
     headerDebug("Arena children hooked for repositioning")
 end
 
--- Update the totalFrameCount attribute based on current group (backup for out of combat)
-function DF:UpdateHeaderFrameCount()
-    if not DF.partyHeader then return end
-    DF:TriggerSecurePosition(DF.partyHeader)
-    if DF.arenaHeader then
-        DF:TriggerSecurePosition(DF.arenaHeader)
-    end
-end
+-- ☠ (Removed) DF:UpdateHeaderFrameCount, "backup for out of combat" for the
+-- totalFrameCount attribute. No callers in either addon; its only other mention was
+-- a PROFILED_FUNCTIONS string, which wraps rather than calls. Both of its lines
+-- forwarded to DF:TriggerSecurePosition, which is live and called elsewhere -- so
+-- the "backup" it advertised was never running, and whatever keeps totalFrameCount
+-- correct out of combat, it is not this.
 
 -- ============================================================
 -- DEBUG

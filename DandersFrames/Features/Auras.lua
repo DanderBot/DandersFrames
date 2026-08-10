@@ -3286,8 +3286,11 @@ local reparentedFrames = {}
 local blizzardHiddenParent = CreateFrame("Frame")
 blizzardHiddenParent:Hide()
 
--- Track if Direct-mode full disable is active
-DF.blizzardFramesFullyDisabled = false
+-- ☠ (Removed) DF.blizzardFramesFullyDisabled, "track if Direct-mode full disable is
+-- active". Assigned here and recomputed once further down, read NOWHERE in either
+-- addon -- a flag named like a live gate that gated nothing. The expression feeding
+-- it was vestigial too: both directMode locals were hardcoded true ("direct is the
+-- only aura source (4.6.1)"), so it reduced to hidePartyFrames or hideRaidFrames.
 
 -- Function to strip events from a Blizzard unit frame
 -- fullDisable=true: unregister ALL events (Direct mode, no Blizzard aura data needed)
@@ -3442,11 +3445,17 @@ function DF:UpdateBlizzardFrameVisibility()
     local hidePartyFrames = partyDb.hideBlizzardPartyFrames
     local hideRaidFrames = raidDb.hideBlizzardRaidFrames
 
-    -- Check if Direct mode is active (allows full disable instead of just hiding)
+    -- ⚠ THESE TWO LOCALS STAY. They look like leftovers -- both hardcoded true, and
+    -- the DF.blizzardFramesFullyDisabled line that used to combine them here is gone
+    -- (see the note at its declaration) -- but they are read five more times further
+    -- down this same function: two `hidePartyFrames and partyDirectMode` guards and
+    -- three StripUnitFrameEvents(frame, ...) calls, where the value is the
+    -- `fullDisable` argument. Delete them and those resolve as nil GLOBALS: the
+    -- guards silently go false and the strip calls flip to fullDisable = false,
+    -- leaving UNIT_AURA registered on frames that should be fully disabled.
     local partyDirectMode = true -- direct is the only aura source (4.6.1)
     local raidDirectMode = true
-    DF.blizzardFramesFullyDisabled = (hidePartyFrames and partyDirectMode) or (hideRaidFrames and raidDirectMode)
-    
+
     -- Side menu visibility - hide when solo, respect setting when grouped
     local showSideMenu
     if not IsInGroup() and not IsInRaid() then
