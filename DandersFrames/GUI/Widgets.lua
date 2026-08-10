@@ -640,9 +640,22 @@ function GUI:CreateCloseButton(parent, opts)
         if opts.onClick then opts.onClick(self) end
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
+    -- ⚠ ACCEPTS A FULL SPEC, not just a title. This took `opts.tooltip` as a bare string
+    -- and built `{ title = it }`, so EVERY caller was structurally forced into a
+    -- title-only tooltip -- the house style wants a title AND a line saying what the
+    -- thing does, and its sibling CreateOverrideResetButton already took both. That is
+    -- an API gap rather than call-site drift, so the fix belongs here.
+    --
+    -- A string still means title-only, which is correct for a close button whose title
+    -- already says everything ("Close", "Remove"): the house rule prefers silence to a
+    -- correct-but-heavy explanation. Existing callers are unchanged.
     if opts.tooltip then
         btn:HookScript("OnEnter", function(self)
-            GUI:ShowTooltip(self, { title = opts.tooltip})
+            if type(opts.tooltip) == "table" then
+                GUI:ShowTooltip(self, opts.tooltip)
+            else
+                GUI:ShowTooltip(self, { title = opts.tooltip, lines = opts.tooltipDesc and { opts.tooltipDesc } or nil })
+            end
         end)
         btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
     end

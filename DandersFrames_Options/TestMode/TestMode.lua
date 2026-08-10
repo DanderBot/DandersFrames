@@ -881,21 +881,11 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
 
     DF:ApplyHealthText(frame, db, DF.IsLegacyTextHidden and DF:IsLegacyTextHidden(frame))
 
-    -- Update name
-    local displayName = testData.name
-    if displayName then
-        local maxLen = db.nameTextLength or 0
-        local truncMode = db.nameTextTruncateMode or "ELLIPSIS"
-        
-        if maxLen > 0 and DF:UTF8Len(displayName) > maxLen then
-            if truncMode == "CUT" then
-                displayName = DF:UTF8Sub(displayName, 1, maxLen)
-            else
-                displayName = DF:UTF8Sub(displayName, 1, maxLen) .. "..."
-            end
-        end
-    end
-    frame.nameText:SetText(displayName)
+    -- Name through the LIVE renderer, supplying only the fabricated name. This block
+    -- used to restate DF:UpdateName's truncation verbatim -- the nameTextLength read,
+    -- the ELLIPSIS/CUT branch, the UTF8Sub calls -- so the two could drift on any
+    -- format change, and the preview also skipped live's legacy-text suppression.
+    DF:UpdateName(frame, testData.name)
     
     -- Determine if this frame should show out-of-range effects
     -- OOR takes priority over dead fade (they should never multiply)
@@ -1373,14 +1363,12 @@ end
 -- uses DF:ShowStatusIconAsText, which IS live's function. (Audit, 2026-08-07.)
 
 -- Format seconds as M:SS for AFK timer
+-- ★ THE LIVE FORMATTER. This was a verbatim copy of StatusIcons.lua's FormatAFKTime,
+-- kept only because that one was a file-local the preview could not reach. It is
+-- published as DF:FormatAFKTime now, so there is one implementation again: the AFK
+-- timer cannot read one way live and another in the preview after a format change.
 local function FormatTestAFKTime(seconds)
-    if seconds < 3600 then
-        return string.format("%02d:%02d", math.floor(seconds / 60), seconds % 60)
-    else
-        local hours = math.floor(seconds / 3600)
-        local mins = math.floor((seconds % 3600) / 60)
-        return string.format("%02d:%02d:%02d", hours, mins, seconds % 60)
-    end
+    return DF:FormatAFKTime(seconds)
 end
 
 -- Track test AFK start times

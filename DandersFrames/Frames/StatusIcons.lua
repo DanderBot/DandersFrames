@@ -786,6 +786,9 @@ local function GetAFKKey(unit)
 end
 
 -- Format seconds as M:SS or H:MM:SS
+-- ⚠ Published as DF:FormatAFKTime below. The preview cannot call a file-local, so it
+-- kept a byte-identical copy of this and the two were free to drift -- same shape as
+-- ApplyIconSettings, which is published for exactly the same reason.
 local function FormatAFKTime(seconds)
     if seconds < 3600 then
         return string.format("%02d:%02d", math.floor(seconds / 60), seconds % 60)
@@ -795,6 +798,13 @@ local function FormatAFKTime(seconds)
         local secs = seconds % 60
         return string.format("%02d:%02d:%02d", hours, mins, secs)
     end
+end
+
+-- A METHOD, not a bare alias: the preview calls it with `DF:` (colon), so assigning the
+-- local directly would shift every argument by one — the same trap the note on
+-- DF:ApplyStatusIconSettings records. Live keeps calling the local.
+function DF:FormatAFKTime(seconds)
+    return FormatAFKTime(seconds)
 end
 
 function DF:UpdateAFKIcon(frame)

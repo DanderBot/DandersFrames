@@ -1,7 +1,16 @@
-local addonName, DF = ...
+﻿local addonName, DF = ...
 
 -- Get module namespace
 local CC = DF.ClickCast
+
+-- ⚠ This file is the click-casting twin of Core/Profile.lua, which localises every
+-- message it prints; this one printed all of them raw, including several whose keys
+-- already existed and were in use by the sibling for the identical sentence. A bare
+-- literal never reaches the translators at all -- the non-enUS locale files are packager
+-- placeholders filled from the enUS key list, so a string that is not a key cannot be
+-- translated later by anyone, in any language.
+local L = DF.L
+local format = string.format
 
 -- Local aliases for shared constants (defined in Constants.lua)
 local DB_VERSION = CC.DB_VERSION
@@ -327,7 +336,7 @@ function CC:SetActiveProfile(profileName)
     if InCombatLockdown() then
         -- Queue the switch for after combat
         self:Defer("profileSwitch", profileName)
-        DF:Say("Profile switch to '" .. profileName .. "' queued (in combat)")
+        DF:Say(format(L["Profile switch to '%s' queued (in combat)"], profileName))
         return false
     end
     
@@ -335,7 +344,7 @@ function CC:SetActiveProfile(profileName)
     
     -- Check profile exists
     if not classData.profiles[profileName] then
-        DF:Err("Profile '" .. profileName .. "' does not exist")
+        DF:Err(format(L["Profile '%s' does not exist."], profileName))
         return false
     end
     
@@ -380,7 +389,7 @@ function CC:SetActiveProfile(profileName)
     end
 
     if oldProfile ~= profileName then
-        DF:Say("Switched to profile: " .. profileName)
+        DF:Say(format(L["Switched to profile: %s"], profileName))
     end
 
     return true
@@ -391,7 +400,7 @@ function CC:CreateProfile(profileName, copyFrom)
     local classData = self:GetClassData()
     
     if classData.profiles[profileName] then
-        DF:Err("Profile '" .. profileName .. "' already exists")
+        DF:Err(format(L["Profile '%s' already exists."], profileName))
         return false
     end
     
@@ -401,7 +410,7 @@ function CC:CreateProfile(profileName, copyFrom)
         classData.profiles[profileName] = self:CreateEmptyProfile()
     end
     
-    DF:Say("Created profile: " .. profileName)
+    DF:Say(format(L["Created profile: %s"], profileName))
     return true
 end
 
@@ -412,12 +421,12 @@ function CC:DeleteProfile(profileName)
     
     -- Cannot delete the default profile (check both old and new naming)
     if profileName == defaultName or profileName == "Default" then
-        DF:Err("Cannot delete the default profile")
+        DF:Err(L["Cannot delete the default profile"])
         return false
     end
     
     if not classData.profiles[profileName] then
-        DF:Err("Profile '" .. profileName .. "' does not exist")
+        DF:Err(format(L["Profile '%s' does not exist."], profileName))
         return false
     end
     
@@ -437,7 +446,7 @@ function CC:DeleteProfile(profileName)
     end
     
     classData.profiles[profileName] = nil
-    DF:Say("Deleted profile: " .. profileName)
+    DF:Say(format(L["Deleted profile: %s"], profileName))
     return true
 end
 
@@ -448,17 +457,17 @@ function CC:RenameProfile(oldName, newName)
     
     -- Cannot rename the default profile (check both old and new naming)
     if oldName == defaultName or oldName == "Default" then
-        DF:Err("Cannot rename the default profile")
+        DF:Err(L["Cannot rename the default profile"])
         return false
     end
     
     if not classData.profiles[oldName] then
-        DF:Err("Profile '" .. oldName .. "' does not exist")
+        DF:Err(format(L["Profile '%s' does not exist."], oldName))
         return false
     end
     
     if classData.profiles[newName] then
-        DF:Err("Profile '" .. newName .. "' already exists")
+        DF:Err(format(L["Profile '%s' already exists."], newName))
         return false
     end
     
@@ -480,7 +489,7 @@ function CC:RenameProfile(oldName, newName)
         end
     end
     
-    DF:Say("Renamed profile: " .. oldName .. " → " .. newName)
+    DF:Say(format(L["Renamed profile: %s → %s"], oldName, newName))
     return true
 end
 
@@ -558,7 +567,7 @@ function CC:CheckLoadoutProfileSwitch()
             self:ApplyBindings()
             self:RefreshUIIfLoaded()
             local source = isSpecific and "loadout: " .. loadoutName or "spec default"
-            DF:Say("Switched to profile: " .. assignedProfile .. " (" .. source .. ")")
+            DF:Say(format(L["Switched to profile: %s (%s)"], assignedProfile, source))
         end
     elseif not assignedProfile and loadoutID > 0 then
         -- No profile assigned to this loadout or spec at all
@@ -603,8 +612,8 @@ end
 -- Show notification that a profile was auto-created
 function CC:ShowProfileCreatedNotification(profileName)
     -- Simple print for now - could be a fancy toast later
-    DF:Say("Auto-created profile: |cffffffff" .. profileName .. "|r")
-    print("|cff888888Your bindings were copied to this new profile. You can customize it in the Profiles tab.|r")
+    DF:Say(format(L["Auto-created profile: |cffffffff%s|r"], profileName))
+    print("|cff888888" .. L["Your bindings were copied to this new profile. You can customize it in the Profiles tab."] .. "|r")
 end
 
 -- Get all loadouts for a spec (for UI display)
@@ -768,7 +777,7 @@ function CC:ExportProfile()
     local profile, profileName = self:GetActiveProfile()
     
     if not profile then
-        DF:Err("No profile to export")
+        DF:Err(L["No profile to export"])
         return nil
     end
     
@@ -782,7 +791,7 @@ function CC:ExportProfile()
     
     local encoded, err = SerializeTable(exportData)
     if not encoded or encoded == "" then
-        DF:Err("Export failed: " .. (err or "unknown error"))
+        DF:Err(format(L["Export failed: %s"], err or L["unknown error"]))
         return nil
     end
     

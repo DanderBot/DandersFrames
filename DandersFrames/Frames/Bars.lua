@@ -2169,7 +2169,13 @@ function DF:UpdateHealPrediction(frame, testIndex)
     end
 end
 
-function DF:UpdateName(frame)
+-- `testName` is the only preview fork and it is pure DATA: the name a fabricated unit
+-- token cannot answer (DF:GetFrameName reaches UnitName / Nicknames on a real player).
+-- Truncation, the ELLIPSIS/CUT mode and the legacy-text suppression then run identically
+-- for both. The preview used to restate the truncation block byte-for-byte, so a change
+-- to the format only had to land in one of the two copies to desync them. Same shape as
+-- DF:UpdatePetName(frame, testName).
+function DF:UpdateName(frame, testName)
     if not frame or not frame.unit then return end
 
     -- TD legacy-text suppression: when ON, hide name + health text and skip.
@@ -2184,8 +2190,8 @@ function DF:UpdateName(frame)
 
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
-    local name = DF:GetFrameName(frame.unit)
-    
+    local name = testName or DF:GetFrameName(frame.unit)
+
     -- Truncate name if needed (UTF-8 aware)
     if name then
         local maxLen = db.nameTextLength or 0

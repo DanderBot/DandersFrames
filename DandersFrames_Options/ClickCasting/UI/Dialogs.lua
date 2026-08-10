@@ -1146,6 +1146,13 @@ function CC:ShowMacroEditorDialog(existingMacro)
     nameInput:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     nameInput:SetTextInsets(6, 6, 0, 0)
     nameInput:SetAutoFocus(false)
+    -- ⚠ RELEASE FOCUS ON ESCAPE/ENTER. Without these the EditBox swallows both
+    -- keys while focused, so Escape cannot reach the dialog to close it and the
+    -- field keeps the keyboard until something else is clicked. GUI:CreateInput and
+    -- the auto-profile name dialogs already wire exactly this pair; these three
+    -- dialog inputs were the only ones that did not.
+    nameInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    nameInput:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     nameInput:SetText(existingMacro and existingMacro.name or "")
     nameInput:SetEnabled(not isImported)
     if isImported then
@@ -1405,6 +1412,13 @@ function CC:ShowIconPickerDialog(onSelect)
     idInput:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     idInput:SetTextInsets(6, 6, 0, 0)
     idInput:SetAutoFocus(false)
+    -- ⚠ RELEASE FOCUS ON ESCAPE/ENTER. Without these the EditBox swallows both
+    -- keys while focused, so Escape cannot reach the dialog to close it and the
+    -- field keeps the keyboard until something else is clicked. GUI:CreateInput and
+    -- the auto-profile name dialogs already wire exactly this pair; these three
+    -- dialog inputs were the only ones that did not.
+    idInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    idInput:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     idInput:SetNumeric(true)
     
     local useIdBtn = CreateFrame("Button", nil, iconPickerDialog, "BackdropTemplate")
@@ -1767,6 +1781,13 @@ function CC:ShowQuickMacroDialog()
     spellInput:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     spellInput:SetTextInsets(6, 6, 0, 0)
     spellInput:SetAutoFocus(false)
+    -- ⚠ RELEASE FOCUS ON ESCAPE/ENTER. Without these the EditBox swallows both
+    -- keys while focused, so Escape cannot reach the dialog to close it and the
+    -- field keeps the keyboard until something else is clicked. GUI:CreateInput and
+    -- the auto-profile name dialogs already wire exactly this pair; these three
+    -- dialog inputs were the only ones that did not.
+    spellInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    spellInput:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     
     -- Spell icon display
     local spellIcon = quickMacroDialog:CreateTexture(nil, "ARTWORK")

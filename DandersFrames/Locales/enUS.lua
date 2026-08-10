@@ -31,20 +31,48 @@ if not L then return end
 
 -- Search system strings
 L["(missing)"] = true
+L["12.1 AuraContainer factory (build, filters, capability gate)"] = true
+L["Aura Designer (incl. sounds)"] = true
+L["Aura row drivers: rebuild vs tuning vs style, retargets"] = true
 L["Auto-create profiles disabled. Profiles will not be created for new loadouts."] = true
 L["Auto-create profiles enabled."] = true
+L["Auto-created profile: |cffffffff%s|r"] = true
+L["Auto-profile evaluation and runtime overlay"] = true
+L["Cannot delete the default profile"] = true
+L["Cannot rename the default profile"] = true
+L["Click-casting binding apply, hover, PreClick state"] = true
 L["Click-casting will be disabled only while flying."] = true
 L["Click-casting will be disabled while mounted/flying."] = true
 L["Click-casting will no longer change your target."] = true
 L["Click-casting will now also target the unit you cast on."] = true
 L["Click-casting will stay active while flying."] = true
 L["Click-casting will stay active while mounted/flying."] = true
+L["Colour picker handover to/from Blizzard's picker"] = true
+L["Created profile: %s"] = true
 L["Dispel"] = true
+L["Dispel overlay binds and colour resolution"] = true
+L["Export failed: %s"] = true
 L["Export for"] = true
+L["External API callback fires (OnFramesSorted, etc.)"] = true
+L["Flat raid layout and sorting"] = true
 L["Frame Layout"] = true
+L["Frame size, spacing, growth direction, container resize"] = true
+L["FrameSort addon integration"] = true
+L["Group composition changes, throttling, sorting decisions"] = true
+L["Header show/hide and state-driver changes"] = true
+L["Health bar value writes, including Reduced Max Health"] = true
 L["Import for"] = true
+L["Lua script errors and pcall failures"] = true
 L["No bindings to clear."] = true
+L["No profile to export"] = true
+L["Personal Targeted Spells: cast pickup, target changes, and why a cast was skipped"] = true
+L["Pet frame lifecycle and visibility"] = true
+L["Pinned frames init, layout changes, boss handler, test mode"] = true
+L["Popup and dialog config errors"] = true
+L["Profile '%s' does not exist."] = true
 L["Profile imported: %s"] = true
+L["Profile load, save, switch, full refresh"] = true
+L["Profile switch to '%s' queued (in combat)"] = true
 L["Profiles include both Party and Raid settings. Exporting and importing always works on the profile as a whole, no matter which mode tab is selected above. Use the 'Export for' and 'Import for' checkboxes in each column to choose which mode's settings are included."] = true
 -- ☠ DEBUG-LISTING TEXT IS NOT LOCALISED, AND MUST NOT BE ADDED BACK.
 -- The `/df debug` listing used to print L[DF.DEBUG_GROUP_NAMES[g]] and L[r.desc],
@@ -61,7 +89,21 @@ L["Profiles include both Party and Raid settings. Exporting and importing always
 --
 -- "Other" is deliberately NOT removed: it is also a general-purpose label with its
 -- own readers, and is defined in the alphabetical block below.
+L["Raid container position writes (jumping/stuck-position bug)"] = true
+L["Range fading checks and cache decisions"] = true
+L["Reload separators and init confirmation"] = true
+L["Renamed profile: %s → %s"] = true
 L["Reset bindings to defaults (Target + Menu). %d custom binding(s) removed."] = true
+L["Role icon show/hide decisions and combat transitions"] = true
+L["Secure header creation, attributes and re-anchoring"] = true
+L["Secure position handler trigger and snippet runs"] = true
+L["Secure sort handler, snippets and frame registration"] = true
+L["Settings window internals — slider drag paths, relayout"] = true
+L["Switched to profile: %s (%s)"] = true
+L["Targeted List cast pickup + why a cast was dropped, stop, interrupter lookup"] = true
+L["Text Designer render and mirror state"] = true
+L["Texture and atlas resolution, including missing-file fallback"] = true
+L["Your bindings were copied to this new profile. You can customize it in the Profiles tab."] = true
 L["clear stuck auto-layout overrides"] = true
 L["console page"] = true
 L["Turns every category on except the noisy ones, which log many lines per frame during layout and sorting."] = true
@@ -155,7 +197,6 @@ L["Bind Action"] = true
 L["Bind Item"] = true
 L["Bind Spell"] = true
 L["Blizzard Click-Casting"] = true
-L["BG Carrier"] = true
 L["BG Carrier Icon"] = true
 L["Combat Icon"] = true
 L["Enable Combat Icon"] = true
@@ -315,6 +356,7 @@ L["Loadout expects: %s"] = true
 L["No loadout detected"] = true
 L["Profile matched to loadout"] = true
 L["Will auto-create on switch"] = true
+L["unknown error"] = true
 L["— (shared across specs)"] = true
 L["— click to edit"] = true
 -- StaticPopup dialog strings (ClickCasting)
@@ -601,7 +643,6 @@ L["Cannot delete Default profile."] = true
 -- Orphaned: test mode is no longer REFUSED while unlocked, it just leaves up the
 -- frames unlock still needs. Superseded by "Test frames stay visible while frames
 -- are unlocked...". Kept until the locale audit sweeps orphans across all locales.
-L["Cannot disable test mode while frames are unlocked. Lock frames first."] = true
 L["Cannot Edit"] = true
 L["Cannot enter test mode during combat."] = true
 L["Cannot toggle arena mode during combat"] = true
@@ -1045,7 +1086,6 @@ L["How often aura countdown text refreshes. Smooth updates ten times a second, P
 L["How often to check range (seconds). Lower = more responsive but higher CPU. Default: 0.5s"] = true
 L["Hunter"] = true
 L["I, II, III..."] = true
-L["Icon Opacity"] = true
 L["Icon Position"] = true
 L["Icon Size"] = true
 L["Icon Style"] = true
@@ -1333,7 +1373,6 @@ L["Raid frames centered."] = true
 L["Raid Group Labels"] = true
 L["Raid Layout Mode"] = true
 L["Raid position reset."] = true
-L["Raid Role (MT/MA)"] = true
 L["Raid Role Icon (MT/MA)"] = true
 L["Target Marker Icon"] = true
 L["Raid to Party"] = true
@@ -1600,7 +1639,6 @@ L["Text Color"] = true
 L["Justify H"] = true
 L["Justify V"] = true
 L["Middle"] = true
-L["Text Colors:"] = true
 L["Text Designer"] = true
 L["Text Designer Template"] = true
 L["Text Designer is disabled"] = true
@@ -2351,7 +2389,6 @@ L["How far inside the frame edge the dispel border sits. Negative values push it
 -- are tick-only (no spell list of their own), so the tooltip is where their
 -- explanation lives.
 L["Buffs that belong to none of the filters above."] = true
-L["Debuffs that can be dispelled. Which dispels count is set on the Debuffs page."] = true
 
 -- Merged Filters page: the status line above the spell list. It answers ONE
 -- question -- where does this filter apply -- with ONE polarity. "On" lists the
@@ -2634,7 +2671,6 @@ L["This page designs %s — lists of the buffs you want to see. Change what is i
 -- exactly one selectable row (the Blacklist; the categories are switches, not
 -- selections). So it says both what the debuff filters are, and how the one editable
 -- thing works, including the unselect-to-hide polarity nobody can guess.
-L["Debuff filters are Blizzard's: the categories are fixed and can't be changed. Optional Debuffs are the few you can turn off — unselect one to hide it."] = true
 
 -- Buffs / Debuffs pages: the ordering + duration box that moved off Aura Filters.
 L["Order & Limits"] = true

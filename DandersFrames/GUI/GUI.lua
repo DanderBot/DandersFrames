@@ -176,7 +176,12 @@ GUI.RowHeight = {
     dropdown    = 54,   -- 39.8 content + RowGap
     colorpicker = 38,   -- 23.9 content + RowGap
     editbox     = 53,   -- 39.0 content + RowGap (box at -15, h24)
-    toggle      = 35,   -- two-state switch; same content as a checkbox, same row
+    -- ⚠ NO `toggle` ENTRY, deliberately. One was declared here (35, "same content as a
+    -- checkbox") and referenced by nothing: CreateRowToggle and CreateSegmentToggle are
+    -- the only toggles and neither sets fixedRowHeight, so both take whatever height
+    -- their call site passes. Removed rather than wired up — enforcing it would resize
+    -- every existing toggle row, which is a visual change, not a tidy-up. Toggles are
+    -- caller-sized by design; if that should change, change it deliberately.
     -- Labels are VARIABLE height (they wrap), so they have no fixed row — but they do
     -- have fixed CHROME, which CreateLabel adds to the measured text height: the 5px top
     -- inset its FontString sits at, plus the gap below. That gap IS the whole visible
