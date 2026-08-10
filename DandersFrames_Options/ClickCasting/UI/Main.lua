@@ -196,8 +196,7 @@ function CC:CreateClickCastUI(parent)
         end,
     })
     enableCb:SetPoint("LEFT", title, "RIGHT", 15, 0)
-    local enableLabel = enableCb.label
-    
+
     -- Profile settings cogwheel (far right of row 1)
     local profileCogwheel = CreateFrame("Button", nil, row1, "BackdropTemplate")
     profileCogwheel:SetPoint("RIGHT", 0, 0)

@@ -1010,8 +1010,7 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
         set        = function(val) CC.db.ignoreBlizzardWarning = val end,
     })
     dontShowCb:SetPoint("BOTTOM", 0, 55)
-    local dontShowLabel = dontShowCb.label
-    
+
     -- Close button
     local closeBtn = DF.GUI:CreateCloseButton(popup, { onClick = function()
         -- Revert checkbox state
@@ -1900,8 +1899,7 @@ function CC:ShowQuickMacroDialog()
         onClick     = function() UpdatePreview() end,
     })
     stopCb:SetPoint("LEFT", tooltipLabel, "RIGHT", 20, 0)
-    local stopLabel = stopCb.label
-    
+
     -- Preview
     yOffset = yOffset - 35
     local previewLabel = quickMacroDialog:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")

@@ -887,104 +887,31 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- format change, and the preview also skipped live's legacy-text suppression.
     DF:UpdateName(frame, testData.name)
     
-    -- Determine if this frame should show out-of-range effects
-    -- OOR takes priority over dead fade (they should never multiply)
-    local isOutOfRange = db.testShowOutOfRange and testData.outOfRange
-    
-    -- Calculate per-element alphas for out-of-range.
-    -- (No iconsAlpha: the status icons are the one surface the whole-frame cascade
-    -- cannot reach — SetIgnoreParentAlpha(true) — so live gives them their own route,
-    -- DF:GetStatusIconFadeAlpha, which DF:ApplyStatusIconSettings folds in. The
-    -- preview now takes that same route instead of mirroring the fallbacks here.)
-    local powerBarAlpha = 1.0
-    local dispelAlpha = 1.0
-    -- ⚠ NO missingBuff / defensive / auraDesigner ALPHAS HERE ANY MORE. Those three
-    -- surfaces fade through ElementAppearance's own functions now (called after the
-    -- drives, further down) rather than being hand-mirrored into this block -- which
-    -- is how each of them shipped a silent no-fade bug in turn. Add nothing here
-    -- that ElementAppearance already owns. (Audit, 2026-08-07.)
-    -- Border stays 1.0 in whole-frame mode (the frame's SetAlpha cascade fades
-    -- it); only element-specific mode needs its own border alpha.
+    -- ☠ (Removed) THE PER-ELEMENT ALPHA BLOCK, and the three tables it existed to fill:
+    -- frame.dfTestOORAlphas, frame.dfTestDeadFadeAlphas and frame.dfTestHealthFadeAlphas.
+    --
+    -- ~95 lines computing out-of-range, dead-fade and health-fade alphas. Their ONLY
+    -- reader was the alpha chain at the end of DF:UpdateTestPowerBar, and that chain was
+    -- overwritten on every render by DF:UpdatePowerBarAppearance (via the
+    -- UpdateAllElementAppearances pass further down), which handles test frames itself.
+    -- So the whole block computed values nothing could observe -- including a `.dispel`
+    -- and an `.auras` entry that never had a reader at all, in any build.
+    --
+    -- ⚠ THIS IS THE SAME LESSON THE SURVIVING NOTES IN THIS FILE ALREADY TEACH, one
+    -- level up. Each of those notes records pruning ONE element's hand-mirrored alpha
+    -- after it shipped a bug (the squared range fade, the squared health fade, the six
+    -- wrong OOR fallbacks, the icons). Every prune was correct and none of them asked
+    -- the next question: if every individual element belongs to ElementAppearance, what
+    -- is the block still for? Nothing -- only the power bar was left, and live owned
+    -- that too. The right unit of removal was the block, not another element.
+    --
+    -- Nothing here is lost: live resolves all three fades from db + the dfTestIsDead
+    -- stamp (set well above, at the top of this function) and the range stamp, which is
+    -- why DF:UpdatePowerBarAppearance can pass test frames straight through.
+    --
+    -- ⚠ Do not reintroduce a per-element alpha here for a NEW element either. That is
+    -- the move that produced every bug listed above.
 
-    if isOutOfRange then
-        if db.oorEnabled then
-            -- Element-specific alpha mode.
-            -- ⚠ EVERY FALLBACK HERE MIRRORS ElementAppearance.lua's OWN. Six of them
-            -- used to be a blanket 0.55 against live's 0.1-0.5 -- background was out
-            -- by 5.5x. Invisible today because Config seeds all six, so it only bites
-            -- a profile missing a key (an old import, a hand-edited SavedVariables).
-            -- If you add an oor*Alpha, copy live's fallback, do not invent one.
-            powerBarAlpha = db.oorPowerBarAlpha or 0.2
-            dispelAlpha = db.oorDispelOverlayAlpha or 0.2
-        end
-        -- ☠ NO `else` BRANCH, DELIBERATELY. Simple range-fade mode fades the WHOLE
-        -- FRAME with one SetAlpha further down -- exactly as live's
-        -- UpdateFrameAppearance does, and that is live's ONLY alpha write in this
-        -- mode. This block used to ALSO push rangeFadeAlpha into every per-element
-        -- variable, so the preview applied the fade twice and rendered
-        -- rangeFadeAlpha SQUARED: 0.16 against live's 0.40 at the stock 0.4, with no
-        -- setting needed to hit it. Every element left at 1.0 here is the fix -- the
-        -- cascade supplies the dim. (Audit, 2026-08-07.)
-        -- ⚠ The status icons are the one exception and are handled separately: they
-        -- set SetIgnoreParentAlpha(true), so the cascade cannot reach them and
-        -- DF:GetStatusIconFadeAlpha applies their fade explicitly in both modes.
-    end
-
-    -- Store alpha values for use by UpdateTestPowerBar.
-    -- (No `icons` entry in any of the three tables below: the status icons now take
-    -- their fade from DF:GetStatusIconFadeAlpha inside DF:ApplyStatusIconSettings,
-    -- which is live's own route and reads the same dfTestIsDead stamp.)
-    frame.dfTestOORAlphas = {
-        power = powerBarAlpha,
-        dispel = dispelAlpha,
-    }
-    
-    -- Check if this is a dead/offline unit for dead fade handling
-    local isDeadOrOffline = testData.status == "Dead" or testData.status == "Offline"
-    local applyDeadFade = isDeadOrOffline and db.fadeDeadFrames and not isOutOfRange
-    
-    -- Store dead fade alphas for use by UpdateTestIcons and UpdateTestPowerBar
-    -- OOR takes priority: skip dead fade storage when out of range
-    if applyDeadFade then
-        frame.dfTestDeadFadeAlphas = {
-            power = db.fadeDeadPowerBar or 0.4,
-            auras = db.fadeDeadAuras or 1.0,
-        }
-    else
-        frame.dfTestDeadFadeAlphas = nil
-    end
-    
-    -- Health-based fading (above threshold): only when in range, alive, and option enabled
-    local healthPct = (testData.healthPercent or 1) * 100
-    local threshold = db.healthFadeThreshold or 100
-    local isAboveHealthThreshold = not isOutOfRange and not applyDeadFade
-        and db.healthFadeEnabled
-        and (healthPct >= threshold - 0.5)
-    if isAboveHealthThreshold and db.hfCancelOnDispel and frame.dfDispelOverlay and frame.dfDispelOverlay:IsShown() then
-        isAboveHealthThreshold = false
-    end
-    
-    if isAboveHealthThreshold then
-        -- ☠ SAME DOUBLE-APPLY AS THE RANGE FADE ABOVE, and the same fix. Live has no
-        -- per-element health fade at all: ApplyHealthFadeAlpha resolves ONE alpha and
-        -- writes it to the FRAME (ElementAppearance references health fade in exactly
-        -- one place, inside UpdateFrameAppearance). The preview pushed healthFadeAlpha
-        -- into every element AND set the frame, rendering 0.25 against live's 0.50 at
-        -- the stock 0.5. Only the element-specific mode needs per-element values,
-        -- because there the frame stays at 1.0.
-        local hfAlpha = db.healthFadeAlpha or 0.5
-        if db.oorEnabled then
-            powerBarAlpha = hfAlpha
-            dispelAlpha = hfAlpha
-        end
-        frame.dfTestHealthFadeAlphas = {
-            power = powerBarAlpha,
-            dispel = dispelAlpha,
-        }
-    else
-        frame.dfTestHealthFadeAlphas = nil
-    end
-    
     -- Name text colour + alpha: DF:UpdateNameTextAppearance owns both (it deliberately
     -- writes colour at alpha 1.0 and controls opacity through SetAlpha, so that
     -- SetAlphaFromBoolean keeps working). Applied by the shared pass further down.
@@ -1310,30 +1237,19 @@ function DF:UpdateTestIcons(frame, testData)
         end
     end
     
-    -- Ready Check Icon. Per-unit `showReadyCheck` first, "the leader frame" as the
-    -- fallback — see the note on the Tankerino/Мишок rows in DF.TestData for why it no
-    -- longer rides the leader.
-    -- ☠ THIS BLOCK EXISTS TWICE (here and in the other status-icon updater). Both are
-    -- kept in step by hand; change one, change the other.
-    if frame.readyCheckIcon then
-        local wantReady = testData.showReadyCheck
-        if wantReady == nil then wantReady = testData.isLeader end
-        if not db.readyCheckIconEnabled or db.testShowStatusIcons == false then
-            frame.readyCheckIcon:Hide()
-        elseif wantReady then
-            DF:SetUpgradedStatusIcon(frame.readyCheckIcon.texture, "Interface\\RaidFrame\\ReadyCheck-Ready")
-            -- Geometry, base alpha and frame level from the LIVE applier. Both copies
-            -- of this block now forward to it, so the "keep them in step by hand" note
-            -- above no longer describes a real hazard: there is one implementation.
-            if DF.ApplyStatusIconSettings then
-                DF:ApplyStatusIconSettings(frame.readyCheckIcon, db, "readyCheckIcon")
-            end
-            frame.readyCheckIcon:Show()
-        else
-            frame.readyCheckIcon:Hide()
-        end
-    end
-    
+    -- ☠ (Removed) THE READY CHECK BLOCK. It was a byte-identical 24-line twin of the one
+    -- in DF:UpdateTestStatusIcons, carrying a "change one, change the other" warning --
+    -- and the hand-syncing it asked for was never needed, because the copy could not
+    -- affect anything. DF:UpdateTestFrame calls UpdateTestIcons (gated on
+    -- testShowStatusIcons) and then calls UpdateTestStatusIcons UNCONDITIONALLY nine
+    -- lines later, so the surviving block recomputed the identical result over the top
+    -- on every single render. The copy also re-tested `testShowStatusIcons == false`
+    -- inside a branch its own caller had already gated on that key.
+    --
+    -- ⚠ There is now ONE ready-check implementation, in DF:UpdateTestStatusIcons. Do not
+    -- reinstate a copy here: a second pathway does not fail loudly, it fails by looking
+    -- handled (the same reasoning as the ★ note at the top of UpdateTestFrame).
+
     -- ★ NO SECOND ALPHA PASS — matching the other status-icon updater.
     --
     -- DF:ApplyStatusIconSettings folds DF:GetStatusIconFadeAlpha into each icon's
@@ -1384,8 +1300,9 @@ function DF:UpdateTestStatusIcons(frame, testData)
     -- Ready Check Icon. Per-unit `showReadyCheck` first, "the leader frame" as the
     -- fallback — see the note on the Tankerino/Мишок rows in DF.TestData for why it no
     -- longer rides the leader.
-    -- ☠ THIS BLOCK EXISTS TWICE (here and in the other status-icon updater). Both are
-    -- kept in step by hand; change one, change the other.
+    -- ★ THE ONLY ready-check block. Its twin in DF:UpdateTestIcons was deleted (see the
+    -- note there): this function runs unconditionally after that one, so the twin's
+    -- result was overwritten by this one on every render.
     if frame.readyCheckIcon then
         local wantReady = testData.showReadyCheck
         if wantReady == nil then wantReady = testData.isLeader end
@@ -1393,9 +1310,7 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.readyCheckIcon:Hide()
         elseif wantReady then
             DF:SetUpgradedStatusIcon(frame.readyCheckIcon.texture, "Interface\\RaidFrame\\ReadyCheck-Ready")
-            -- Geometry, base alpha and frame level from the LIVE applier. Both copies
-            -- of this block now forward to it, so the "keep them in step by hand" note
-            -- above no longer describes a real hazard: there is one implementation.
+            -- Geometry, base alpha and frame level from the LIVE applier.
             if DF.ApplyStatusIconSettings then
                 DF:ApplyStatusIconSettings(frame.readyCheckIcon, db, "readyCheckIcon")
             end
@@ -1803,16 +1718,23 @@ function DF:UpdateTestPowerBar(frame, testData)
         bar:SetStatusBarColor(powerColor.r, powerColor.g, powerColor.b, 1)
     end
 
-    -- Apply dead / health-based / OOR alpha
-    local alpha = 1.0
-    if frame.dfTestDeadFadeAlphas and frame.dfTestDeadFadeAlphas.power then
-        alpha = frame.dfTestDeadFadeAlphas.power
-    elseif frame.dfTestHealthFadeAlphas and frame.dfTestHealthFadeAlphas.power then
-        alpha = frame.dfTestHealthFadeAlphas.power
-    elseif frame.dfTestOORAlphas and frame.dfTestOORAlphas.power then
-        alpha = frame.dfTestOORAlphas.power
-    end
-    bar:SetAlpha(alpha)
+    -- ★ NO ALPHA PASS HERE — DF:UpdatePowerBarAppearance owns it, and always did.
+    --
+    -- ☠ (Removed) a dead/health/OOR alpha chain reading three test-only tables. It could
+    -- not have any effect: DF:UpdateTestFrame calls this function, then ~170 lines later
+    -- calls DF:UpdateAllElementAppearances, which calls DF:UpdatePowerBarAppearance --
+    -- and that function explicitly passes test frames through and writes
+    -- frame.dfPowerBar:SetAlpha() unconditionally. `bar` here IS frame.dfPowerBar, so
+    -- live overwrote this on every single render.
+    --
+    -- It had also DRIFTED, which is why this matters beyond tidiness: the dead-fade
+    -- fallback was `or 0.4` against live's `or 0`, and the chain had a health-fade arm
+    -- that live does not have at all (UpdatePowerBarAppearance has no health-fade
+    -- branch). It was a strict elseif chain, so dead and OOR could never combine, while
+    -- live layers OOR on top of the dead alpha via ApplyOORAlpha. None of that showed
+    -- on screen only because the result was thrown away -- exactly the failure mode the
+    -- ★ note at the top of UpdateTestFrame describes: a second pathway does not fail
+    -- loudly, it fails by looking handled.
     bar:Show()
 end
 
@@ -1966,9 +1888,9 @@ end
 --     live reads frame.dfPinnedWidth or db.frameWidth -- so it would have sized a
 --     pinned frame by the global width. Inert only because it was never called on one.
 --   * a missing-health TEXTURE write, which looked unique but is not: both test
---     update paths already set it (see the SafeSetStatusBarTexture calls in
---     UpdateTestFrame and UpdateTestFrameHealthOnly), as live does inside
---     SetMissingHealthBarValue.
+--     update paths already set it, because both call DF.SetMissingHealthBarValue --
+--     the LIVE setter, which applies the texture itself. (This file has no
+--     SafeSetStatusBarTexture call of its own, and never had one.)
 --
 -- Kept as a named function rather than deleted because call sites pair it with
 -- UpdateTestFrame and the pairing reads clearly. (Audit, 2026-08-07.)
@@ -2049,8 +1971,10 @@ function DF:RefreshTestFramesWithLayout()
     end
 end
 
--- Throttled layout refresh for slider changes (avoids flickering)
-DF.lastLayoutRefresh = 0
+-- ☠ (Removed) DF.lastLayoutRefresh, and the "throttled layout refresh for slider
+-- changes (avoids flickering)" comment that labelled it. It was assigned 0 here and
+-- read by nothing, in either addon -- whatever throttle once consulted it is long
+-- gone, so the name was documenting a mechanism that no longer exists.
 
 -- Engine-side test-mode teardown: the state that is NOT owned by the test frames
 -- themselves -- the global aura data provider, and the pinned-frame preview.
@@ -2580,15 +2504,13 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
     -- so the flag does not survive into the live-frame positioning path. (#875)
     lp.testMode = true
 
-    -- [LEAK-TEST] Simulates the proposed patch's mutation. Now redundant since
-    -- the patch is in place above, but kept opt-in for diagnostic continuity.
-    if DF.debugLeakTestSimulate then
-        lp.testMode = true
-        if DF.debugLeakTest then
-            DF:Say("LEAK-TEST: TestMode SIMULATED patch mutation: lp.testMode = true written")
-        end
-    end
-
+    -- ☠ (Removed) the [LEAK-TEST] simulate block, which was gated on
+    -- DF.debugLeakTestSimulate -- a flag NOTHING writes, in either addon and in no
+    -- documented /run toggle, so the branch could not be entered. Its own comment
+    -- already called it "redundant since the patch is in place above", and its whole
+    -- body was `lp.testMode = true`, which the line above does unconditionally.
+    -- (DF.debugLeakTest, used just below, is different: it IS a documented manual
+    -- toggle -- see /run DandersFrames.debugLeakTest = true in SecureSort.lua.)
     if DF.debugLeakTest then
         DF:Say(string.format(
             "LEAK-TEST: LightweightPositionRaidTestFrames entered  lp.testMode=%s",

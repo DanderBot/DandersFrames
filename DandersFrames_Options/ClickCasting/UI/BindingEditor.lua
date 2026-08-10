@@ -508,7 +508,6 @@ function CC:CreateEditBindingPanel()
     end
     panel.macWarning = macWarning
     
-    -- Helper to create radio button
     -- Radio = the same row with the NATIVE checked texture, because the GROUP decides
     -- which one is lit (every sibling is SetChecked on each click) and nothing should be
     -- showing or hiding that texture by hand.
@@ -519,17 +518,17 @@ function CC:CreateEditBindingPanel()
     -- the row's handler rather than working around it. That is a plain frame API call now
     -- the SetScript override is gone, not a hack.
     --
-    -- (`yOffset` was already unused before this; dropped rather than carried.)
-    local function CreateRadioButton(parent, text, desc, group)
-        local radio = DF.GUI:CreateCheckRow(parent, {
+    -- (`yOffset` was already unused before this; dropped rather than carried. So were
+    -- the stored `group` and `desc` fields: membership is the targetRadios/combatRadios
+    -- array the caller builds, and the row captures `desc` into its tooltip at
+    -- construction, so neither was ever read back.)
+    local function CreateRadioButton(parent, text, desc)
+        return DF.GUI:CreateCheckRow(parent, {
             label       = text,
             accent      = themeColor,
             nativeCheck = true,
             tooltip     = desc and { title = text, lines = { desc } } or nil,
         })
-        radio.group = group
-        radio.desc  = desc
-        return radio
     end
     
     -- Frames section (checkboxes)
@@ -548,7 +547,6 @@ function CC:CreateEditBindingPanel()
     framesSubtitle:SetTextColor(0.5, 0.5, 0.5)
     panel.framesSubtitle = framesSubtitle
     
-    -- Helper to create custom themed checkbox with tick mark
     -- ☠ THE SetScript / GetChecked / SetChecked OVERRIDES ARE GONE.
     --
     -- This used to monkey-patch three methods onto a native CheckButton so it could
@@ -567,16 +565,19 @@ function CC:CreateEditBindingPanel()
     --
     -- ⚠ Call sites assign `cb.onClick = fn`. Using SetScript("OnClick") again would
     -- REPLACE the row's handler and lose the texture update and the set() call.
+    -- ⚠ No `cb.desc` / `cb.text` fields. Both were carried over from the hand-rolled
+    -- widget and neither survived the conversion as a read: the old OnEnter read
+    -- `self.desc` to build its tooltip, which the row now captures at construction,
+    -- and `cb.text` was a shim for call sites that read the FontString directly --
+    -- all of which were converted in the same change, so it never had a reader.
+    -- (`btn.text` in ProfilesPanel.lua is a DIFFERENT shim, on buttons, and IS read.)
     local function CreateCheckbox(parent, text, desc)
-        local cb = DF.GUI:CreateCheckRow(parent, {
+        return DF.GUI:CreateCheckRow(parent, {
             label   = text,
             accent  = themeColor,
             sound   = true,
             tooltip = { title = text, lines = desc and { desc } or nil },
         })
-        cb.desc = desc
-        cb.text = cb.label   -- legacy accessor: call sites read .text for the FontString
-        return cb
     end
     
     -- DandersFrames checkbox
@@ -612,7 +613,7 @@ function CC:CreateEditBindingPanel()
     }
     
     for i, opt in ipairs(targetOptions) do
-        local radio = CreateRadioButton(panel, opt.text, opt.desc, "target")
+        local radio = CreateRadioButton(panel, opt.text, opt.desc)
         radio:SetPoint("TOPLEFT", 30, -236 - ((i-1) * 20))
         radio.key = opt.key
         
@@ -642,7 +643,7 @@ function CC:CreateEditBindingPanel()
     }
     
     for i, opt in ipairs(combatOptions) do
-        local radio = CreateRadioButton(panel, opt.text, opt.desc, "combat")
+        local radio = CreateRadioButton(panel, opt.text, opt.desc)
         radio:SetPoint("TOPLEFT", 30, -320 - ((i-1) * 20))
         radio.key = opt.key
         
