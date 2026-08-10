@@ -241,8 +241,11 @@ local RAID_ALLOC = {
     -- Centre-region — see rule 2. These five sets must stay mutually disjoint.
     AFK        = { [2] = true },
     READYCHECK = { [8] = true },
-    SUMMON     = { [11] = true },
-    -- (12 is free — it held DND until that state was dropped.)
+    -- Three frames, because summon has THREE live states and each has its own
+    -- user-editable text key. 12 was the documented free slot (it held DND until that
+    -- state was dropped); 15 carries only the missing-buff STRIP, which is not a
+    -- centre-region element, so rule 2 is intact.
+    SUMMON     = { [11] = true, [12] = true, [15] = true },
     -- Static badges
     LEADER     = { [1] = true },
     ASSIST     = { [3] = true },
@@ -267,6 +270,20 @@ local RAID_ALLOC = {
     HEALPRED   = { [7] = true, [20] = true },
     REDUCEDMAX = { [10] = true, [18] = true },
 }
+-- Which summon state each SUMMON frame demonstrates. Live has three -- Pending,
+-- Accepted and Declined -- each with its own texture AND its own user-editable text
+-- key, and only Pending was ever previewable, so two settings existed that nobody
+-- could see in order to judge them.
+--
+-- ☠ AN EXPLICIT LIST, NOT `index % 3`. That is the whole lesson of the note above:
+-- modulo allocation shipped the same class of bug twice here. A modulo would also be
+-- wrong on these particular indices -- 11, 12 and 15 mod 3 give 2, 0, 0, so Accepted
+-- would never render and Pending would render twice.
+--
+-- Anything not listed (including party mode, whose single summon frame is Healsworth)
+-- falls through to Pending, which is the state that was previewed before.
+local RAID_SUMMON_STATE = { [11] = "pending", [12] = "accepted", [15] = "declined" }
+
 -- Raid target markers: which frame gets which marker index (1-8). Five of forty, so a
 -- marker still reads as a marker; it was every frame 1-8 before, i.e. a solid band.
 local RAID_MARKERS = { [1] = 8, [3] = 7, [7] = 1, [13] = 4, [20] = 6 }
@@ -475,6 +492,10 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             -- Centre region: resurrect wins on a dead frame, otherwise the summon set.
             -- RAID_ALLOC keeps SUMMON off every dead frame, so this `or` never hides one.
             centerStatus = isDead and "resurrect" or (inRaidSet("SUMMON", i) and "summon" or nil),
+            -- Which of live's three summon states this frame demonstrates. Mirrors
+            -- inRaidSet's 21-40 wrap so the upper half of a full raid shows the spread
+            -- too. nil (and party mode) falls through to Pending.
+            summonState = RAID_SUMMON_STATE[i] or (i > 20 and RAID_SUMMON_STATE[i - 20]) or nil,
             isMainTank = inRaidSet("MAINTANK", i),
             isMainAssist = inRaidSet("MAINASSIST", i),
             -- ☠ THE AFK ICON CARRIES A TICKING COUNTDOWN. It must never land on an
@@ -1325,17 +1346,39 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.summonIconEnabled or db.testShowStatusIcons == false then
             frame.summonIcon:Hide()
         elseif testData.centerStatus == "summon" then
-            DF:SetUpgradedStatusIcon(frame.summonIcon.texture, "Interface\\RaidFrame\\Raid-Icon-SummonPending")
-            
+            -- ☠ ONLY PENDING WAS PREVIEWABLE. Live renders three summon states, each
+            -- with its own texture AND its own user-editable text key -- Accepted and
+            -- Declined both have seeded defaults, edit boxes on the Modules page and
+            -- profile export, so two settings existed that a user could never see in
+            -- order to judge them. Alternate by frame so all three are on screen at
+            -- once, the same fix the resurrection icon and the phased LFG eye already
+            -- use below.
+            --
+            -- ⚠ Keep these in the same order as live's Pending/Accepted/Declined
+            -- branches: texture and text key are paired per state, and swapping one
+            -- without the other is the drift this preview exists to catch.
+            local summonTexture, summonText
+            if testData.summonState == "accepted" then
+                summonTexture = "Interface\\RaidFrame\\Raid-Icon-SummonAccepted"
+                summonText    = db.summonIconTextAccepted or "Accepted"
+            elseif testData.summonState == "declined" then
+                summonTexture = "Interface\\RaidFrame\\Raid-Icon-SummonDeclined"
+                summonText    = db.summonIconTextDeclined or "Declined"
+            else
+                summonTexture = "Interface\\RaidFrame\\Raid-Icon-SummonPending"
+                summonText    = db.summonIconTextPending or "Summon"
+            end
+            DF:SetUpgradedStatusIcon(frame.summonIcon.texture, summonTexture)
+
             -- Geometry, base alpha and frame level from the LIVE applier.
             if DF.ApplyStatusIconSettings then
                 DF:ApplyStatusIconSettings(frame.summonIcon, db, "summonIcon")
             end
-            
+
             -- Show as text or icon (with font and color settings)
-            DF:ShowStatusIconAsText(frame.summonIcon, db.summonIconTextPending or "Summon", db.summonIconShowText)
+            DF:ShowStatusIconAsText(frame.summonIcon, summonText, db.summonIconShowText)
             frame.summonIcon:Show()
-            
+
         else
             frame.summonIcon:Hide()
         end
