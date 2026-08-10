@@ -1035,13 +1035,28 @@ function CC:CreateClickCastUI(parent)
     showLabel:SetPoint("RIGHT", showDropdown, "LEFT", -4, 0)
     itemsHint:SetPoint("RIGHT", listViewBtn, "LEFT", -15, 0)
 
-    -- Macro controls: right-aligned to match the Spells/Items tabs. Anchored
-    -- here (after the view buttons exist) and chained leftward from the hint.
+    -- ☠ MACRO CONTROLS GROW RIGHTWARDS FROM THE LEFT EDGE, not leftwards from the hint.
+    --
+    -- This row carries four more controls than the Spells/Items rows, and it used to
+    -- chain dropdown <- New <- Import <- Quick Macro <- hint <- view buttons. Every
+    -- width in that chain therefore positioned the DROPDOWN: the leftmost control landed
+    -- wherever the arithmetic put it, lined up with nothing above it, and any button
+    -- getting wider walked the entire row further left -- past this panel's own edge and
+    -- over the bindings list beside it. A longer translated label does the same thing.
+    --
+    -- The dropdown now pins to LEFT 4, the inset the tab strip above already uses
+    -- (spellsTab is BOTTOMLEFT 4), so the two rows line up and stay lined up whatever
+    -- the labels measure. The rest chain rightwards into the middle of the row, which is
+    -- where the slack actually is: ~280px of controls in a ~900px row, with the hint
+    -- still right-anchored to the view buttons and a wide gap between the two groups.
+    --
+    -- ⚠ The declaration site already claimed these were "anchored from LEFT to avoid
+    -- overlap". That is true again rather than aspirational.
+    macroSourceDropdown:SetPoint("LEFT", 4, 0)
+    newMacroBtn:SetPoint("LEFT", macroSourceDropdown, "RIGHT", 8, 0)
+    importMacroBtn:SetPoint("LEFT", newMacroBtn, "RIGHT", 4, 0)
+    quickMacroBtn:SetPoint("LEFT", importMacroBtn, "RIGHT", 4, 0)
     macroHint:SetPoint("RIGHT", listViewBtn, "LEFT", -15, 0)
-    quickMacroBtn:SetPoint("RIGHT", macroHint, "LEFT", -12, 0)
-    importMacroBtn:SetPoint("RIGHT", quickMacroBtn, "LEFT", -4, 0)
-    newMacroBtn:SetPoint("RIGHT", importMacroBtn, "LEFT", -4, 0)
-    macroSourceDropdown:SetPoint("RIGHT", newMacroBtn, "LEFT", -8, 0)
     
     -- Load saved preferences
     CC.viewLayout = CC.db.options.viewLayout or "grid"
