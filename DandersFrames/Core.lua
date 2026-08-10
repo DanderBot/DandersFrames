@@ -2377,9 +2377,16 @@ function DF:LightweightUpdateBackgroundColor()
     local function UpdateFrame(frame, testClass)
         if not frame or not frame.background then return end
         
-        -- Clear the background key cache so the new settings will be applied
-        frame.dfCurrentBgKey = nil
-        
+        -- ☠ (Removed) frame.dfCurrentBgKey and the four "clear the background key
+        -- cache" invalidations of it. It was written with string.format in three
+        -- branches below and NEVER COMPARED, anywhere -- so it cached nothing, the
+        -- clears invalidated nothing, and every background update paid for formatted
+        -- strings that were discarded on the spot.
+        --
+        -- ⚠ Its sibling frame.dfCurrentBgTexture IS a real guard and stays: it is
+        -- tested at Frames/Update.lua:385 before re-applying a texture. The two names
+        -- read alike, which is most of why this one survived.
+
         -- Determine class color for CLASS mode
         local cr, cg, cb = 0, 0, 0
         if bgMode == "CLASS" then
@@ -2401,16 +2408,13 @@ function DF:LightweightUpdateBackgroundColor()
             if bgMode == "CUSTOM" and db.backgroundColor then
                 local c = db.backgroundColor
                 frame.background:SetColorTexture(c.r, c.g, c.b, c.a or 0.8)
-                frame.dfCurrentBgKey = string.format("CUSTOM:%.2f:%.2f:%.2f:%.2f", c.r, c.g, c.b, c.a or 0.8)
             elseif bgMode == "CLASS" then
                 local bgAlpha = db.backgroundClassAlpha or 0.3
                 frame.background:SetColorTexture(cr, cg, cb, bgAlpha)
-                frame.dfCurrentBgKey = string.format("CLASS:%.2f:%.2f:%.2f:%.2f", cr, cg, cb, bgAlpha)
             else
                 -- Fallback - use default background
                 local c = db.backgroundColor or {r = 0.1, g = 0.1, b = 0.1, a = 0.8}
                 frame.background:SetColorTexture(c.r, c.g, c.b, c.a or 0.8)
-                frame.dfCurrentBgKey = string.format("CUSTOM:%.2f:%.2f:%.2f:%.2f", c.r, c.g, c.b, c.a or 0.8)
             end
         else
             -- Textured background - always apply when called from settings (user is changing texture)

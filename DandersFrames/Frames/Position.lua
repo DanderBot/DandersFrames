@@ -363,8 +363,8 @@ function DF:CreateMoverFrame()
             DF.testPartyContainer:SetPoint("CENTER", UIParent, "CENTER", x / frameScale, y / frameScale)
         end
 
-        -- Save position
-        db.anchorPoint = "CENTER"
+        -- Save position. (No anchorPoint write: it was read nowhere -- the anchor is
+        -- the literal "CENTER" at every SetPoint that matters.)
         db.anchorX = x
         db.anchorY = y
 
@@ -2412,7 +2412,6 @@ function DF:UnlockFrames()
     DF.container:SetScale(scale)
 
     -- Always use CENTER anchor for positioning
-    db.anchorPoint = "CENTER"
     DF.container:ClearAllPoints()
     DF.container:SetPoint("CENTER", UIParent, "CENTER", (db.anchorX or 0) / scale, (db.anchorY or 0) / scale)
     DF.container:Show()  -- Ensure container is visible

@@ -17,7 +17,8 @@ local DF = DandersFrames
 DF.ExportCategories = {
     -- Frame positions on screen
     position = {
-        "anchorPoint",
+        -- (Removed) "anchorPoint" -- gone from the defaults too. It was never read,
+        -- so exporting it only carried a dead value between profiles.
         "anchorX",
         "anchorY",
         "hideDragOverlay",

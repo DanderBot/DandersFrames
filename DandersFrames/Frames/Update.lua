@@ -27,7 +27,9 @@ local UnitIsGhost = UnitIsGhost
 local UnitPower = UnitPower
 local UnitPowerMax = UnitPowerMax
 
--- Shared default tables (avoid per-call allocation)
+-- (Removed) a "shared default tables (avoid per-call allocation)" banner with no
+-- tables under it -- whatever it introduced is long gone, and it read as a promise
+-- the file does not keep.
 
 function DF:ApplyFrameLayout(frame)
     if not frame then return end
@@ -385,7 +387,6 @@ function DF:ApplyFrameLayout(frame)
             if frame.dfCurrentBgTexture ~= bgTexture then
                 DF:SafeSetTexture(frame.background, bgTexture)  -- also sets tiling
                 frame.dfCurrentBgTexture = bgTexture
-                frame.dfCurrentBgKey = nil  -- Clear key when switching to textured
             end
             
             -- Ensure SetAlpha is 1.0 for textured backgrounds (alpha controlled via vertex color)

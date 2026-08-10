@@ -10,10 +10,10 @@ local GetTime = GetTime
 local UnitExists = UnitExists
 local issecretvalue = issecretvalue or function() return false end
 
--- ============================================================
--- PERFORMANCE FIX: Default colors for UpdateDefensiveBar fallbacks
--- Avoids creating tables on every call when db values are nil
--- ============================================================
+-- (Removed) a "PERFORMANCE FIX: default colors for UpdateDefensiveBar fallbacks /
+-- avoids creating tables on every call" banner introducing no table -- there is no
+-- default-colour table anywhere in this file. It advertised an optimisation that is
+-- not here, which is worse than silence: the next reader trusts it and stops looking.
 
 -- (Removed) DF:GetRaidBuffIcons + DF.RaidBuffIconCache — a spellID -> icon-texture
 -- set built "for fallback filtering (when spellId is secret)". That fallback was

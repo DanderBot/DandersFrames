@@ -1296,7 +1296,11 @@ DF.PartyDefaults = {
     aggroUseCustomColors = false,
 
     -- Anchor/Position
-    anchorPoint = "CENTER",
+    -- ☠ (Removed) anchorPoint = "CENTER". Seeded here, written twice in
+    -- Frames/Position.lua and carried in profile export, but READ NOWHERE -- every
+    -- SetPoint that would use it passes the literal "CENTER". It was a setting in
+    -- name only: editing it in SavedVariables did nothing. anchorX / anchorY are
+    -- read and stay.
     anchorX = 0,
     anchorY = -325,
 

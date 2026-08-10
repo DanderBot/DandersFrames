@@ -1893,10 +1893,16 @@ function DF:UpdateHealPrediction(frame, testIndex)
             local amount, amountFromHealer, amountFromOthers, clamped = calc:GetIncomingHeals()
             myHeals, othersHeals = amountFromHealer, amountFromOthers
 
-            -- TD stash: expose the full heal breakdown so the TextDesigner
-            -- LiveSource reads it without a second calculator pass. dfTotalHeals
-            -- is the ALL-incoming total (not the showMode-filtered value), so
-            -- the incoming_heal text is correct regardless of the bar's mode.
+            -- TD stash: expose the heal breakdown so the TextDesigner LiveSource
+            -- reads it without a second calculator pass. dfTotalHeals is the
+            -- ALL-incoming total (not the showMode-filtered value), so the
+            -- incoming_heal text is correct regardless of the bar's mode.
+            --
+            -- ⚠ Only dfTotalHeals and dfMyHeals have a reader today
+            -- (TextDesigner/DataSource.lua). dfOthersHeals is written for the
+            -- symmetry of the trio and is currently unconsumed -- one assignment, so
+            -- it stays, but do not read this block as evidence that an
+            -- others-heals text token exists.
             frame.dfTotalHeals = amount
             frame.dfMyHeals = amountFromHealer
             frame.dfOthersHeals = amountFromOthers

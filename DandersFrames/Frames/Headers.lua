@@ -742,7 +742,6 @@ function DF:InitializeHeaderChild(frame)
             -- degrading straight back to a full sweep during arena entry.
             if DF.InvalidatePetAnchors then DF:InvalidatePetAnchors() end
             -- Clear background color tracking (unit changed, need fresh colors)
-            self.dfCurrentBgKey = nil
             -- Clear stale range state so this slot doesn't inherit the previous
             -- occupant's faded appearance. dfInRange is immediately repopulated
             -- by UpdateRange below for accurate OOR state before first render.
@@ -1305,9 +1304,11 @@ function DF:CreateRaidHeaders()
     -- Create both modes, only one will be active at a time
     DF:CreateRaidCombinedHeader()
     DF:CreateRaidSeparatedHeaders()
-    -- NOTE: raidPlayerHeader is no longer needed - nameList handles player positioning
-    -- DF:CreateRaidPlayerHeader()  -- For FIRST/LAST player position in groups
-    
+    -- NOTE: raidPlayerHeader is no longer needed - nameList handles player positioning.
+    -- The commented-out DF:CreateRaidPlayerHeader() call that sat here is gone with
+    -- it: that function no longer exists anywhere, so uncommenting the line would
+    -- have thrown rather than restored the old behaviour.
+
     -- Create secure position handler for raid groups
     DF:CreateRaidPositionHandler()
     
@@ -3804,7 +3805,6 @@ function DF:FullFrameRefresh(frame)
     
     -- Clear color tracking to force re-evaluation of background colors
     -- (When units swap positions due to sorting, old colors would persist otherwise)
-    frame.dfCurrentBgKey = nil      -- Background color tracking
     frame.dfCurrentBgTexture = nil  -- Background texture tracking
     frame.dfAggroActive = nil       -- Aggro highlight state
     frame.dfAggroColor = nil        -- Aggro color override
