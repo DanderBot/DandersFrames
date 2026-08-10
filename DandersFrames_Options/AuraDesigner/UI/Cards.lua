@@ -309,11 +309,11 @@ local function BuildGlobalView(parent)
         descText:SetPoint("RIGHT", descFrame, "RIGHT", 0, 0)
         descText:SetJustifyH("LEFT")
         descText:SetWordWrap(true)
-        descText:SetText(L["Standard buff visibility is managed on the Aura Filters page."])
+        descText:SetText(L["Standard buff visibility is managed on the Buff Bar page."])
         descText:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
         g:AddWidget(descFrame, 24)
 
-        local filtersBtn = GUI:CreateButton(parent, L["Aura Filters"], 140, 22, function()
+        local filtersBtn = GUI:CreateButton(parent, L["Filter Designer"], 140, 22, function()
             if GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"] then
                 GUI.SelectTab("auras_filterdesigner")
             end

@@ -370,6 +370,46 @@ S.BuildLayoutGroupsTab = function()
                 lfLabel:SetPoint("TOPLEFT", 8, by)
                 lfLabel:SetText(L["LINKED FILTERS"])
                 lfLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+                -- The route back, on the caption's own row. A filter group USES a
+                -- filter and can link or unlink one, but it cannot change what is IN
+                -- it -- that is the Aura Filters page, and nothing here said so or
+                -- pointed at it. Same reverse link the Buff Bar page now carries;
+                -- this is the Aura Designer's copy of it.
+                --
+                -- Right-aligned onto the caption row rather than given a row of its
+                -- own: `by` is a hand-run cursor down this card, so an extra row
+                -- costs every measurement below it.
+                -- ☠ FIXED SIZE, not one measured from the label. It was
+                -- SetWidth(GetStringWidth() + 2), which is a measurement taken the
+                -- instant the fontstring is created: if the font object has not
+                -- resolved yet GetStringWidth returns 0, the button collapses to its
+                -- 10px floor, and the link renders perfectly while being almost
+                -- impossible to click. A generous fixed box with the text
+                -- right-aligned inside it cannot fail that way, and the few pixels of
+                -- extra hit area to the left of the words cost nothing.
+                local LF_EDIT_W = 130
+                local lfEdit = CreateFrame("Button", nil, body)
+                lfEdit:SetSize(LF_EDIT_W, 16)
+                lfEdit:SetPoint("TOPRIGHT", -8, by + 1)
+                local lfEditText = lfEdit:CreateFontString(nil, "OVERLAY")
+                GUI:SetSettingsFont(lfEditText, 8, "")
+                lfEditText:SetPoint("RIGHT", 0, 0)
+                lfEditText:SetJustifyH("RIGHT")
+                lfEditText:SetText(L["Edit in Filter Designer"])
+                local lfTC = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
+                lfEditText:SetTextColor(lfTC.r, lfTC.g, lfTC.b)
+                lfEdit:SetScript("OnEnter", function() lfEditText:SetTextColor(1, 1, 1) end)
+                lfEdit:SetScript("OnLeave", function()
+                    -- Re-read the accent rather than restoring lfTC: a party/raid
+                    -- switch can repaint the card while the cursor is still on this.
+                    local c = (GUI.GetThemeColor and GUI.GetThemeColor()) or lfTC
+                    lfEditText:SetTextColor(c.r, c.g, c.b)
+                end)
+                lfEdit:SetScript("OnClick", function()
+                    if GUI.SelectTab then GUI.SelectTab("auras_filterdesigner") end
+                end)
+
                 by = by - 18
 
                 -- Custom-filter spell count (curated spells + raw IDs)

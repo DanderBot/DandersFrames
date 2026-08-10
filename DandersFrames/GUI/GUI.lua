@@ -286,18 +286,30 @@ end
 -- a drifted entry re-opens exactly the bug above until then. If you add or change a
 -- section, change it here too.
 DF.SECTION_PREFIXES = {
-    auras_buffs                  = { "buff", "showBuffs", "directBuff" },
-    auras_debuffs                = { "debuff", "showDebuffs", "directDebuff" },
+    -- ⚠ buffFilterSelection is listed EXPLICITLY here rather than left to "buff":
+    -- it does not share a prefix with the rest, and the page that shows the control
+    -- must own the key it writes.
+    auras_buffs                  = { "buff", "showBuffs", "directBuff", "buffFilterSelection" },
+    auras_debuffs                = { "debuff", "showDebuffs", "directDebuff", "debuffBlacklist" },
     auras_defensiveicon          = { "defensiveIcon", "defensiveFilterSelection", "defensiveSortOrder", "defensiveDurationBar", "defensiveBar" },
     auras_dispel                 = { "dispel" },
-    -- ⚠ directDebuffDispellableMode is listed EXPLICITLY. It is not covered by
-    -- "directDebuffShowAll" (not a prefix of it), and the Debuffs page's plain
-    -- "directDebuff" would otherwise win it back — the control moved here, so its
-    -- Reset Page / Sync / Copy must move with it (a control must write where it reads).
-    -- ☠ SectionOwnsKey resolves by LONGEST matching prefix across the WHOLE registry, so
-    -- this 27-char entry out-ranks auras_debuffs' 12-char "directDebuff" for this key and
-    -- for nothing else.
-    auras_filterdesigner         = { "buffFilterSelection", "debuffFilter", "debuffBlacklist", "directBuffShowAll", "directBuffOnlyMine", "directDebuffShowAll", "directDebuffDispellableMode" },
+    -- ☠ auras_filterdesigner OWNS NOTHING, and the empty table is the statement.
+    -- It used to claim buffFilterSelection, debuffFilter*, debuffBlacklist and the
+    -- directBuff*/directDebuff* switches, because it displayed all of them. It no
+    -- longer displays ANY of them -- filter selection moved to the consumer pages --
+    -- so every key went back to the page whose controls now show it.
+    --
+    -- A control must write where it reads: leaving a claim here would let Reset Page
+    -- on the filter library silently rewrite the Buff Bar's and Debuff Bar's
+    -- settings, and SectionOwnsKey resolves by LONGEST matching prefix across the
+    -- WHOLE registry, so a stale long entry here would outrank the real owner's
+    -- shorter one and win keys back invisibly.
+    --
+    -- What this page does edit is not per-mode at all: preset overrides are per
+    -- PROFILE, custom filters are per ACCOUNT. Neither is reachable by Copy to Raid
+    -- or Sync with Raid, which is why owning nothing here is correct rather than a
+    -- gap to be filled in later.
+    auras_filterdesigner         = {},
     auras_missingbuffs           = { "missingBuff" },
     bars_absorb                  = { "absorbBar", "healAbsorb" },
     bars_healpred                = { "healPrediction" },

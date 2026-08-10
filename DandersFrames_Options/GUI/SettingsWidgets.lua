@@ -815,21 +815,50 @@ function GUI:CreateIconButton(parent, iconName, text, width, height, func, iconS
     return btn
 end
 
+-- A hairline rule for use INSIDE a settings group: separates a sub-option from the
+-- controls it belongs to, or a scope switch from the list it governs, without the
+-- weight of a second header.
+--
+-- ⚠ It was hand-rolled inline on the Blizzard Frames group and copied from there
+-- each time it was wanted again — five lines of texture plumbing per site, each free
+-- to drift in alpha, height and inset. This is that same rule, once.
+--
+-- Returns a Frame ready for AddWidget; the CALLER supplies the slot height, because
+-- the rule is 1px and everything else in the slot is deliberate air. 14 is the
+-- established value and what every current caller passes.
+--
+-- opts.width   frame width (default 260, the settings-group content width)
+-- opts.alpha   line alpha (default 0.08 — visible on the panel, invisible as a box)
+-- opts.inset   pixels held back from each end, for a rule that should not run the
+--              full width of its group
+function GUI:CreateSeparator(parent, opts)
+    opts = opts or {}
+    local inset = opts.inset or 0
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetSize(opts.width or 260, 1)
+    local tex = f:CreateTexture(nil, "OVERLAY")
+    tex:SetColorTexture(1, 1, 1, opts.alpha or 0.08)
+    tex:SetPoint("LEFT", inset, 0)
+    tex:SetPoint("RIGHT", -inset, 0)
+    tex:SetHeight(1)
+    f.Texture = tex   -- exposed so a caller can re-tint without rebuilding
+    return f
 -- ============================================================
 -- CHOICE CARDS
 -- ============================================================
 -- A create action drawn as a small picture of what it produces, its name, and
 -- one line saying where its contents come from.
 --
--- ⚠ EMPTY LISTS ONLY. A card is around two and a half times the height of the
--- compact "+ Add" button it stands in for, which the Aura Designer's ~260px tab
--- column cannot spare once there is also a list to show. Callers build cards
--- when the list is empty and the plain buttons otherwise -- never both at once.
+-- A card REPLACES the compact "+ Add" button it stands in for rather than sitting
+-- above it -- it is itself the create action, so running both would be two paths
+-- to the same thing. Cards are pinned, not shown only while a list is empty; see
+-- GUI:CreateChoiceCardGroup for the collapse that keeps a permanent block
+-- affordable in a column this narrow.
 --
 -- The thumbnail is SYNTHETIC on purpose rather than a render of the player's own
--- config. It is only ever shown when there is nothing configured to draw, and an
--- illustration that reads identically for everyone is what makes it teachable --
--- so it needs none of the frame preview's rendering machinery.
+-- config: an illustration that reads identically for everyone is what makes it
+-- teachable, and it has to work before anything is configured. So it needs none
+-- of the frame preview's rendering machinery.
 --
 --   opts.art      { kind = "iconRow", colors = { {r,g,b}, ... }, ghost = true }
 --   opts.title    card heading (localised)

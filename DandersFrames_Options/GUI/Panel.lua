@@ -1483,6 +1483,23 @@ function DF:CreateGUI()
         return page
     end
     
+    -- Declared PRESENTATION order for a category, plus the caption rows that break
+    -- it into groups. Entries are page ids, or { caption = "..." }.
+    --
+    -- ⚠ Separate from creation order on purpose. A category's pages are created
+    -- across several files in a chain (the Auras rows come from three), so the order
+    -- they land in cat.children is a build detail -- reshuffling THAT to change the
+    -- sidebar would mean moving page builders between files and rethreading the
+    -- arguments they are handed. This declares what the reader sees and leaves the
+    -- build alone.
+    --
+    -- Resolved lazily in UpdateTabLayout rather than here, so it does not matter
+    -- whether the pages this names exist yet when it is called.
+    function GUI:SetNavOrder(categoryName, spec)
+        local cat = self.Categories[categoryName]
+        if cat then cat.navSpec = spec end
+    end
+
     -- Update tab positions based on expanded/collapsed state
     function GUI:UpdateTabLayout()
         -- Every number here is snapped, and the running `y` is built ONLY out of
@@ -1516,6 +1533,59 @@ function DF:CreateGUI()
         local y = SnapLen(container, -8) or -8
         local catStride = SnapLen(container, 30) or 30
         local tabStride = SnapLen(container, 28) or 28
+        -- Captions get a shorter stride than a tab: they are a label, not a target,
+        -- and giving them a full row makes the group they head look detached from it.
+        local capStride = SnapLen(container, 20) or 20
+
+        -- The rows to lay out for a category, in reading order. Without a navSpec
+        -- that is just cat.children (creation order, as before).
+        --
+        -- ⚠ Only rows that are ALREADY in cat.children may be placed. A hidden page
+        -- stays out of that list -- that absence is the entire hiding mechanism (see
+        -- CreateSubTab) -- while remaining present in GUI.Tabs, so resolving the spec
+        -- through GUI.Tabs alone would put hidden pages back on screen.
+        local function NavRows(cat)
+            if not cat.navSpec then return cat.children end
+            local placeable, rows, taken = {}, {}, {}
+            for _, btn in ipairs(cat.children) do placeable[btn] = true end
+            cat.navCaptions = cat.navCaptions or {}
+            for i, entry in ipairs(cat.navSpec) do
+                if type(entry) == "table" and entry.caption then
+                    -- Materialised on first layout and reused by spec INDEX, so a
+                    -- relayout does not leak a frame per pass.
+                    local f = cat.navCaptions[i]
+                    if not f then
+                        f = CreateFrame("Frame", nil, container)
+                        f.isNavCaption = true
+                        f.Text = f:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                        -- 9px: a step under Small (10) and well under the page rows
+                        -- it heads, so it reads as a divider rather than as another
+                        -- entry in the list. The caption text is written UPPERCASE in
+                        -- the locale, not upper-cased here -- see the note on
+                        -- L["FILTERS"].
+                        GUI:SetSettingsFont(f.Text, 9, "")
+                        f.Text:SetPoint("BOTTOMLEFT", 14, 3)
+                        f.Text:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                        cat.navCaptions[i] = f
+                    end
+                    f.Text:SetText(entry.caption)
+                    rows[#rows + 1] = f
+                else
+                    local btn = GUI.Tabs[entry]
+                    if btn and placeable[btn] then
+                        taken[btn] = true
+                        rows[#rows + 1] = btn
+                    end
+                end
+            end
+            -- Anything the spec does not name still gets placed, at the end. A page
+            -- added later must appear in the sidebar even if nobody updated the spec;
+            -- silently dropping it would be a page you cannot reach.
+            for _, btn in ipairs(cat.children) do
+                if not taken[btn] then rows[#rows + 1] = btn end
+            end
+            return rows
+        end
 
         for _, catName in ipairs(GUI.CategoryOrder) do
             local cat = GUI.Categories[catName]
@@ -1526,22 +1596,24 @@ function DF:CreateGUI()
                 cat:SetHeight(catStride)
                 y = y - catStride
 
+                local rows = NavRows(cat)
                 if cat.expanded then
-                    for _, btn in ipairs(cat.children) do
+                    for _, btn in ipairs(rows) do
                         -- Party-only tabs are hidden entirely in raid mode.
                         if btn.partyOnly and GUI.SelectedMode == "raid" then
                             btn:Hide()
                         else
+                            local stride = btn.isNavCaption and capStride or tabStride
                             btn:Show()
                             btn:ClearAllPoints()
                             btn:SetPoint("TOPLEFT", 0, y)
                             btn:SetPoint("TOPRIGHT", 0, y)
-                            btn:SetHeight(tabStride)
-                            y = y - tabStride
+                            btn:SetHeight(stride)
+                            y = y - stride
                         end
                     end
                 else
-                    for _, btn in ipairs(cat.children) do
+                    for _, btn in ipairs(rows) do
                         btn:Hide()
                     end
                 end

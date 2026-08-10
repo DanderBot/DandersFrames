@@ -263,6 +263,18 @@ local SHIPPED_MEDIA_FILES = {
     "Icons\\notes.tga",
     "Icons\\preview.tga",
     "Icons\\preview_off.tga",
+    -- The first .png ICON we ship (the absorb bar textures were the first PNGs of any
+    -- kind). Deliberately left unconverted, to learn whether PNG icons behave.
+    --
+    -- ⚠ Listed here only because this manifest is GENERATED FROM THE FOLDER and has
+    -- to match it. Icons/ entries are INERT: the healing repair walks
+    -- TEXTURE_REPAIR_KEYS -- an explicit list of user-selectable PROFILE keys -- and
+    -- never enumerates this table, while GUI icons are hardcoded at their call sites
+    -- and go through a raw SetTexture rather than DF:SafeSetTexture. Nothing can heal
+    -- a GUI icon and nothing should try; a user cannot pick one, so a wrong one is a
+    -- bug in our source rather than a stale profile. That is true of every Icons\\
+    -- line above this one too.
+    "Icons\\question.png",
     "Icons\\refresh.tga",
     "Icons\\remove.tga",
     "Icons\\reorder.tga",
@@ -1497,7 +1509,29 @@ DF.PartyDefaults = {
     -- post-Lust family (Sated/Exhaustion/Temporal Displacement/Fatigued/Insanity);
     -- Deserters + Ride Along are opt-in on the Aura Blacklist page. Buffs are NOT
     -- here by design — they're opt-in via the Filter Designer.
-    debuffBlacklist = { [57724] = true, [57723] = true, [80354] = true, [160455] = true, [95809] = true },
+    -- ⚠ EVERY entry in DF.AuraBlacklist.DebuffSpells, blacklisted out of the box
+    -- (Krathe, 2026-08-10). It used to be the Sated/Exhaustion family only, with the
+    -- Deserters, Ride Along and Challenger's Burden left as opt-in hides — but every
+    -- spell in that catalog is there BECAUSE it is a nuisance with no combat value
+    -- on a party frame, so defaulting them to visible made the list read as a
+    -- feature nobody had turned on.
+    --
+    -- ☠ Keep this in step with AuraBlacklist/Config.lua. A catalog entry missing
+    -- here simply ships visible, which is silent -- there is no check that the two
+    -- agree, and the UI cannot tell an intentional omission from a forgotten one.
+    debuffBlacklist = {
+        [57724]  = true,  -- Sated
+        [57723]  = true,  -- Exhaustion
+        [80354]  = true,  -- Temporal Displacement
+        [160455] = true,  -- Fatigued
+        [95809]  = true,  -- Insanity
+        [26013]  = true,  -- BG Deserter
+        [71041]  = true,  -- Dungeon Deserter
+        [427490] = true,  -- Ride Along Available
+        [447959] = true,  -- Ride Along Active
+        [447960] = true,  -- Ride Along Inactive
+        [206151] = true,  -- Challenger's Burden
+    },
     directDebuffDispellableMode = "PLAYER",  -- "PLAYER" (dispellable by me) / "ALL" (dispellable type map) / "ANY" (native DISPELLABLE token, PTR-5+)
     debuffMaxDurationEnabled = false,         -- Hide long debuffs
     debuffMaxDurationMinutes = 5,             -- ... threshold (base duration)
