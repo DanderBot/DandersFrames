@@ -67,6 +67,9 @@ local function buildPicker()
     local GUI = DF.GUI
 
     local f = CreateFrame("Frame", "DFNicknamePicker", UIParent, "BackdropTemplate")
+    -- Parented to UIParent (see the pixel-grid note below), which also means it does
+    -- not inherit the GUI scale -- register it.
+    if GUI.RegisterScaledSurface then GUI:RegisterScaledSurface(f) end
     -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
     f:SetSize(380, 440)
     f:SetFrameStrata("FULLSCREEN_DIALOG")

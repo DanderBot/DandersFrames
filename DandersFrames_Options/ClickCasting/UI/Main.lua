@@ -1395,7 +1395,11 @@ function CC:CreateKeybindPopup()
     self.keybindCaptureFrame = captureFrame
     
     -- Visual popup (displays info, positioned on our UI)
+    -- UIParent-parented: register or it draws at 100% over a scaled GUI. NOT the
+    -- captureFrame above -- that is SetAllPoints(UIParent) and exists purely to
+    -- swallow input, so scaling it would shrink what it captures.
     local popup = CreateFrame("Frame", "DFKeybindPopup", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(popup) end
     local popupHeight = (IsMacClient and IsMacClient()) and 155 or 140
     popup:SetSize(280, popupHeight)
     popup:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -1446,7 +1450,11 @@ function CC:CreateKeybindPopup()
     popup.modDisplay = modDisplay
     
     -- Cancel button - create as separate frame at highest strata to avoid capture frame blocking
+    -- Its own UIParent child rather than a child of the popup (it needs TOOLTIP
+    -- strata, above the capture frame), so it needs the scale explicitly too -- and
+    -- more than most: an unscaled button beside a scaled popup is visibly mismatched.
     local cancelBtn = CreateFrame("Button", "DFKeybindCancelBtn", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(cancelBtn) end
     cancelBtn:SetFrameStrata("TOOLTIP")  -- Highest strata, above FULLSCREEN_DIALOG
     cancelBtn:SetFrameLevel(9999)  -- Very high frame level
     cancelBtn:EnableMouse(true)  -- Ensure mouse is enabled

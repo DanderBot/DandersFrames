@@ -28,12 +28,47 @@ local RefreshAllOverrideIndicators = GUI.RefreshAllOverrideIndicators
 -- ⚠ DFPopupFrame is created LAZILY, so it is resolved through _G each call rather than
 -- captured: it usually does not exist yet when the scale is first applied. Popup.lua
 -- seeds the saved scale at creation for exactly that gap.
+--
+-- ☠ AND THE HAND-WRITTEN LIST FAILED AGAIN. DFPopupFrame was the first surface it
+-- missed; the Aura Designer's filter picker, its drag ghost and its buff popup were
+-- the next three, all rendering at 100% beside a GUI at 70% (Krathe, 2026-08-10).
+-- The list cannot work: it lives here, and the surfaces are created in five other
+-- files by people who have no reason to come and edit this function.
+--
+-- So surfaces REGISTER THEMSELVES at creation, and this walks the registry. A new
+-- UIParent-parented surface is scaled by the one line it adds to its own builder, in
+-- the file where it is already looking.
+--
+-- ⚠ Anything parented INSIDE the GUI frame inherits the scale and must NOT register --
+-- it would be scaled twice. This is only for surfaces that hang off UIParent.
+--
+-- ⚠ A full-screen click-catcher must NOT register either. Scaling a frame that is
+-- SetAllPoints(UIParent) shrinks the area it actually covers, so the click-away stops
+-- working near the screen edges. The filter picker's overlay is deliberately absent.
+GUI._scaledSurfaces = GUI._scaledSurfaces or {}
+
+function GUI:RegisterScaledSurface(f)
+    if not f then return end
+    for _, existing in ipairs(GUI._scaledSurfaces) do
+        if existing == f then return end
+    end
+    GUI._scaledSurfaces[#GUI._scaledSurfaces + 1] = f
+    -- Seed immediately. These frames are built lazily, on first use, so one first
+    -- opened after the slider moved would otherwise never be told the scale at all --
+    -- which is the gap DFPopupFrame needed a hand-written seed of its own to cover.
+    local ws = DF.GetWindowState and DF:GetWindowState()
+    f:SetScale((ws and ws.scale) or 1)
+end
+
 local function ApplyGUIScale(frame, value)
     if frame then frame:SetScale(value) end
     if DF.positionPanel then DF.positionPanel:SetScale(value) end
     if DF.TestPanel then DF.TestPanel:SetScale(value) end
     local popup = _G and _G.DFPopupFrame
     if popup then popup:SetScale(value) end
+    for _, f in ipairs(GUI._scaledSurfaces) do
+        f:SetScale(value)
+    end
 end
 
 function DF:CreateGUI()
@@ -463,13 +498,21 @@ function DF:CreateGUI()
     scaleContainer:SetSize(155, 24)
     scaleContainer:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -12, -32)
     
+    -- ★ ANCHORED FROM THE RIGHT, so a longer label grows LEFTWARD into empty title-bar
+    -- space instead of pushing the slider and the percentage out of a fixed-width box.
+    --
+    -- The container is 155px and pinned TOPRIGHT, and this row used to flow the other way
+    -- -- label at the container's LEFT, slider anchored to the label's right, percentage
+    -- to the slider's right. In English "UI Scale:" fits and the row lands inside the box;
+    -- German "UI Skalierung:" is far wider, so everything after it was shoved past the
+    -- right edge of the window. Reversing the chain (percentage pinned RIGHT, slider left
+    -- of it, label left of that) makes the row's right edge fixed and its left edge free,
+    -- which is the direction there is room in.
     local scaleLabel = scaleContainer:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    scaleLabel:SetPoint("LEFT", 0, 0)
     scaleLabel:SetText(L["UI Scale:"])
     scaleLabel:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
     
     local scaleSlider = CreateFrame("Slider", nil, scaleContainer, "BackdropTemplate")
-    scaleSlider:SetPoint("LEFT", scaleLabel, "RIGHT", 6, 0)
     scaleSlider:SetSize(65, 14)
     scaleSlider:SetOrientation("HORIZONTAL")
     scaleSlider:SetMinMaxValues(0.6, 1.4)
@@ -484,8 +527,13 @@ function DF:CreateGUI()
     thumb:SetColorTexture(0.5, 0.5, 0.5, 1)
     scaleSlider:SetThumbTexture(thumb)
     
+    -- The RIGHT-hand end of the reversed chain: percentage pinned to the container's right
+    -- edge, slider to its left, label to the slider's left. Declared here rather than at
+    -- each widget's creation so the whole chain reads in one place.
     local scaleValue = scaleContainer:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    scaleValue:SetPoint("LEFT", scaleSlider, "RIGHT", 4, 0)
+    scaleValue:SetPoint("RIGHT", scaleContainer, "RIGHT", 0, 0)
+    scaleSlider:SetPoint("RIGHT", scaleValue, "LEFT", -4, 0)
+    scaleLabel:SetPoint("RIGHT", scaleSlider, "LEFT", -6, 0)
     scaleValue:SetText(string.format("%.0f%%", savedScale * 100))
     scaleValue:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     
@@ -943,6 +991,9 @@ function DF:CreateGUI()
         local popup = GUI.urlPopup
         if not popup then
             popup = CreateFrame("Frame", "DFURLPopup", UIParent, "BackdropTemplate")
+            -- In the same file as ApplyGUIScale and still missed by it, which is the
+            -- clearest argument for the registry over a hand-written list.
+            GUI:RegisterScaledSurface(popup)
             popup:SetSize(380, 80)
             popup:SetPoint("CENTER")
             GUI:CreatePanelBackdrop(popup, { bgAlpha = 0.98, borderColor = C_ACCENT })

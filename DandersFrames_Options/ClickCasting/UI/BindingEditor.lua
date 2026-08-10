@@ -356,6 +356,8 @@ function CC:CreateEditBindingPanel()
 
     -- Main panel
     local panel = CreateFrame("Frame", "DFEditBindingPanel", UIParent, "BackdropTemplate")
+    -- UIParent-parented: register or it draws at 100% over a scaled GUI.
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(panel) end
     panel:SetSize(320, 480)  -- Start at collapsed height
     panel:SetFrameStrata("FULLSCREEN_DIALOG")
     panel:SetFrameLevel(100)

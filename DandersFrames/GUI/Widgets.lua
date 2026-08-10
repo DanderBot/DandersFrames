@@ -168,6 +168,54 @@ function GUI:StyleButton(btn, opts)
         else
             btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
         end
+
+        -- ★ A DECLARED WIDTH IS A MINIMUM, NOT A FIXED SIZE (localisation).
+        --
+        -- Every `width = N` in this addon was measured against the ENGLISH label, so a
+        -- longer translation overflowed its button: German "SCHLACHTZUG" in a 70px tab,
+        -- "Freischalten" in an Unlock button, and ~80 more across the options addon.
+        --
+        -- ⚠ THIS IS A NO-OP IN ENGLISH BY CONSTRUCTION. The English string already fits
+        -- the width it was designed against, so max() picks the declared value and not one
+        -- pixel moves. Only a label that genuinely does not fit grows its button -- which
+        -- is why this could be made the default rather than opted into at 82 call sites.
+        --
+        -- ⚠ Deferred, because GetStringWidth() returns 0 until the font object has
+        -- resolved -- measuring at construction is what collapsed the Aura Designer's
+        -- "Edit in Filter Designer" link to its 10px floor. Same converge-next-frame shape
+        -- as CreateLabel and CreateInfoBanner.
+        --
+        -- Opt out with `fitText = false` where equal widths are the POINT (a two-column
+        -- grid, a row of buttons that must align); there, growing one is worse than
+        -- clipping it.
+        if opts.fitText ~= false then
+            -- Padding clears the backdrop inset on both sides, plus the leading icon and
+            -- its gap when there is one. `opts.icon` rather than btn.Icon: the icon is
+            -- attached further down this function and does not exist yet.
+            local pad = opts.icon and 32 or 18
+            local function FitToLabel()
+                if not btn.Text then return end
+                local tw = btn.Text:GetStringWidth() or 0
+                -- 0 = the font object has not resolved yet. Leave the declared width and
+                -- let the deferred pass settle it; never shrink to a bogus measurement.
+                if tw <= 0 then return end
+                local want = math.ceil(tw) + pad
+                -- GROW ONLY, measured against the CURRENT width, so the declared value is
+                -- the floor and repeated StyleButton calls (Start/Stop toggles relabel
+                -- through here) cannot ratchet a button smaller mid-session.
+                if want > (btn:GetWidth() or 0) then btn:SetWidth(want) end
+            end
+            FitToLabel()
+            -- One converge next frame, guarded so repeated styling of the same button
+            -- cannot stack timers.
+            if not btn._dfFitScheduled and C_Timer and C_Timer.After then
+                btn._dfFitScheduled = true
+                C_Timer.After(0, function()
+                    btn._dfFitScheduled = nil
+                    FitToLabel()
+                end)
+            end
+        end
     end
 
     if iconOpt then
@@ -645,9 +693,23 @@ function GUI:CreateGlyphButton(parent, opts)
         self._glyphHover = enabled and true or false
     end
 
+    -- opts.tooltip takes EITHER a bare title string or a full ShowTooltip spec
+    -- { title=, lines=, tone= }.
+    --
+    -- ⚠ The table form is what new call sites should use. A title on its own draws a
+    -- single bold line with no description, which is not the house tooltip shape --
+    -- and an icon-only button is precisely the control that cannot get away with it,
+    -- because the title only restates the glyph you are already looking at.
+    local function GlyphTooltipSpec()
+        local t = opts.tooltip
+        if type(t) == "table" then return t end
+        if type(t) == "string" and t ~= "" then return { title = t } end
+        return nil
+    end
     btn:SetScript("OnEnter", function(self)
         if self._glyphHover then self.Icon:SetVertexColor(hr, hg, hb) end
-        if opts.tooltip then GUI:ShowTooltip(self, { title = opts.tooltip }) end
+        local spec = GlyphTooltipSpec()
+        if spec then GUI:ShowTooltip(self, spec) end
     end)
     btn:SetScript("OnLeave", function(self)
         self.Icon:SetVertexColor(unpack(self._glyphRest))

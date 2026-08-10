@@ -62,7 +62,10 @@ end
 local function CreateImportPopup()
     if ImportPopupFrame then return ImportPopupFrame end
     
+    -- UIParent-parented: register or it draws at 100% over a scaled GUI. Same for
+    -- every other dialog in this file.
     local frame = CreateFrame("Frame", "DFClickCastingImportPopup", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(frame) end
     frame:SetSize(520, 460)
     frame:SetPoint("CENTER")
     frame:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -637,6 +640,7 @@ function CC:ShowClickCastConflictPopup(conflicts, enableCheckbox)
     
     -- Create popup frame
     local popup = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(popup) end
     popup:SetSize(400, 280)  -- Taller to fit all buttons
     popup:SetPoint("CENTER")
     -- Shared dialog-root chrome with the CC theme-coloured border + 0.1 fill.
@@ -877,6 +881,7 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
     
     -- Create popup frame
     local popup = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(popup) end
     popup:SetSize(420, 224)
     popup:SetPoint("CENTER")
     -- Shared dialog-root chrome with the CC theme-coloured border + 0.1 fill.
@@ -1020,6 +1025,7 @@ function CC:ShowMacroEditorDialog(existingMacro)
     
     -- Create dialog
     macroEditorDialog = CreateFrame("Frame", "DFMacroEditorDialog", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(macroEditorDialog) end
     local thisDialog = macroEditorDialog  -- Local capture for closures
     macroEditorDialog:SetSize(400, 380)
     macroEditorDialog:SetPoint("CENTER", 0, 50)
@@ -1301,6 +1307,7 @@ function CC:ShowIconPickerDialog(onSelect)
     local C_TEXT_DIM = GUIColors.textDim
 
     iconPickerDialog = CreateFrame("Frame", "DFIconPickerDialog", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(iconPickerDialog) end
     iconPickerDialog:SetSize(320, 280)
     iconPickerDialog:SetPoint("CENTER", 0, 50)
     iconPickerDialog:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -1416,6 +1423,7 @@ function CC:ShowImportMacroDialog()
     local C_TEXT_DIM = GUIColors.textDim
 
     importMacroDialog = CreateFrame("Frame", "DFImportMacroDialog", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(importMacroDialog) end
     local thisDialog = importMacroDialog  -- Local capture for closures
     importMacroDialog:SetSize(400, 400)
     importMacroDialog:SetPoint("CENTER", 0, 50)
@@ -1690,6 +1698,7 @@ function CC:ShowQuickMacroDialog()
     local C_TEXT_DIM = GUIColors.textDim
 
     quickMacroDialog = CreateFrame("Frame", "DFQuickMacroDialog", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(quickMacroDialog) end
     local thisDialog = quickMacroDialog  -- Local capture for closures
     quickMacroDialog:SetSize(420, 400)
     quickMacroDialog:SetPoint("CENTER", 0, 50)

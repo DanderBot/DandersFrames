@@ -539,7 +539,9 @@ local function GetAuraIcon(specKey, auraName)
     -- the shared filter glyph stands in (the card's other fallback is a colour swatch
     -- resolved from the spec's trackable list, which a filter is never in).
     if DF.ParseADFilterRef and DF:ParseADFilterRef(auraName) then
-        return "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_alt"
+        -- ☠ ".png" is mandatory in the path -- a PNG does not resolve extensionless
+        -- the way .tga does, and it fails silently when omitted.
+        return "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list.png"
     end
     -- Static icon table — always returns the correct icon regardless of talents
     local icons = DF.AuraDesigner.IconTextures
@@ -815,6 +817,10 @@ local function OpenFilterPicker(opts)
         drop = CreateFrame("Frame", dropName, UIParent, "BackdropTemplate")
         drop:SetFrameStrata("FULLSCREEN_DIALOG")
         drop:SetClampedToScreen(true)
+        -- Parented to UIParent, so it does NOT inherit the GUI's scale -- register it
+        -- or it draws at 100% beside a scaled panel. Not the overlay below: that one
+        -- is SetAllPoints(UIParent) and scaling it would shrink what it can catch.
+        if GUI.RegisterScaledSurface then GUI:RegisterScaledSurface(drop) end
         local overlay = CreateFrame("Button", nil, UIParent)
         overlay:SetAllPoints(UIParent)
         overlay:SetFrameStrata("FULLSCREEN")
@@ -1361,6 +1367,10 @@ local function CreateDragGhost()
     S.dragGhost:SetFrameStrata("TOOLTIP")
     S.dragGhost:SetFrameLevel(1000)
     S.dragGhost:EnableMouse(false)  -- KEY: mouse events pass through to drop targets
+    -- UIParent-parented, so it needs the GUI scale explicitly. It matters more here
+    -- than on a dialog: the ghost is dragged ACROSS scaled cards, so an unscaled one
+    -- is visibly the wrong size against the slot it is being dropped into.
+    if GUI.RegisterScaledSurface then GUI:RegisterScaledSurface(S.dragGhost) end
     S.dragGhost:Hide()
 
     if not S.dragGhost.SetBackdrop then Mixin(S.dragGhost, BackdropTemplateMixin) end

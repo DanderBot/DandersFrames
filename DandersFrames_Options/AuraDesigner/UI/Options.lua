@@ -304,6 +304,8 @@ P.CreateCardStack = CreateCardStack
 local function ShowBuffCoexistPopup(onConfirm, onCancel)
     if not S.buffCoexistPopup then
         local f = CreateFrame("Frame", "DFADBuffPopup", UIParent, "BackdropTemplate")
+        -- UIParent-parented: register or it draws at 100% over a scaled GUI.
+        if GUI.RegisterScaledSurface then GUI:RegisterScaledSurface(f) end
         f:SetSize(420, 130)
         f:SetPoint("CENTER")
         f:SetFrameStrata("FULLSCREEN_DIALOG")

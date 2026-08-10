@@ -942,6 +942,10 @@ end
 -- branch can reference it. Assign the implementation to the upvalue.
 function BuildPicker(GUI, parent, tdDB, onPick, excludeKey)
     local drop = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    -- UIParent-parented, so it does not inherit the GUI's scale -- register it. NOT
+    -- the overlay below: that is SetAllPoints(UIParent) and scaling a click-catcher
+    -- shrinks the area it can actually catch.
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(drop) end
     drop:SetFrameStrata("FULLSCREEN_DIALOG")
     drop:SetClampedToScreen(true)
     drop:SetSize(280, 380)
