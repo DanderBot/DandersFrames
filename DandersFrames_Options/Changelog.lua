@@ -234,6 +234,8 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 
 ### Bug Fixes
 
+* (Aura Designer) Fix the Health Bar Color effect covering the absorb shield.
+* (Aura Designer) Fix effects with multiple conditions drawing at the wrong depth — a chained effect now sits exactly where an unchained one does.
 * (Auras) **Fixed the Pandemic Tint washing over the duration text and stack count** instead of sitting under them, so both became hard to read at exactly the moment the icon was asking for attention. Tint now draws below the information and above the icon art; the Border mode still draws over everything, as it must to trace the edge.
 * (Interface) **Fixed dropdown menus outliving the tab you opened them on.** A menu left open when you changed tab stayed open, floated over the new page, overlapped the next dropdown you opened, and would only close if you clicked its own button again — which also allowed several menus to be open at once. Menus now close when you change tab.
 * (Interface) Fixed the "+ Import Filter" button keeping its hover colours after switching between Party and Raid. Any button hidden while the mouse was over it came back with its highlight stuck.
@@ -287,6 +289,10 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 
 ### Improvements
 
+* (Aura Filters) Filters are now chosen on the page that shows them. The Buff Bar and Debuff Bar each pick their own, the same way the Defensive Icon and Aura Designer always did, and the page where you build them is now the Filter Designer.
+* (Auras) Optional Debuffs is now the Debuff Blacklist, and ticking a box hides that debuff instead of showing it — matching every other checkbox in the addon.
+* (Auras) New installs now hide all of the nuisance debuffs by default: the two Deserters, the Ride Along states and Challenger's Burden join Sated and Exhaustion. Existing profiles keep whatever they already had.
+* (Aura Designer) Adding a group or an indicator now shows what each kind looks like on a frame with a short description, instead of a list of names.
 * (Auras) **The important-debuff marker is easier to read.** The "!" was a thin outline that all but vanished at small sizes; it is heavier now, and the marker's default size goes from 10 to 12 — below that the mark is barely a pixel wide whatever weight it is drawn at. Important Debuffs is also on by default: it shipped off, and the later change of default never reached anyone whose profile already recorded the old value, so a one-time pass switches it on. Turning it off afterwards sticks.
 * (Bars) Bar texture defaults are consistent. Heal Prediction and the Targeted List were flat white where every other bar uses DF Minimalist, and the Aura Designer's bar indicator defaulted to the Blizzard texture. Reduced Max Health deliberately keeps DF Stripes — the hatch is what makes lost maximum health read as its own band. Existing choices are untouched.
 * (Interface) **Each status icon's text colour now lives with that icon.** The Icons page had all seven in one list at the top, away from the icons they colour; each is now in its own icon's Settings box, and appears only when that icon is set to show as text. The shared box keeps what genuinely is shared — one font, size, outline and shadow for all of them.
