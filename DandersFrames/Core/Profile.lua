@@ -1849,12 +1849,16 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     -- here and at every future login, and the customisation was silently lost.
     --
     -- A flag asserts "this PROFILE's data has been folded". The payload's data has not, so
-    -- for these five the flags are false by definition at this moment.
+    -- for these the flags are false by definition at this moment.
+    --
+    -- ⚠ THREE, not five. _oorTextAlphaV1 used to be cleared here as a fourth and was
+    -- never a gate -- MigrateOORTextAlpha is presence-gated on m.oorNameTextAlpha, so
+    -- clearing the flag did nothing. And MigrateDesignerPresets, called just below,
+    -- has no flag at all: if you give it one, add it here in the same change.
     local p = DF.db
     if type(p) == "table" then
         p._personalTsImportantBorderV1 = nil
         p._legacyTextOverrideCleanupV1 = nil
-        p._oorTextAlphaV1 = nil
         p._designerLayoutCleanupV1 = nil
     end
 

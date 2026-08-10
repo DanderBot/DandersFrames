@@ -2254,7 +2254,10 @@ end
 
 -- ============================================================
 -- DEBUG: Auto Profile Detection Test
--- Usage: /dfautotest - Print current detection results
+-- Usage: /df debug autotest - Print current detection results
+-- ⚠ NOT /dfautotest. RegisterDebugSlash does not create a SLASH_* global for a
+-- /df-prefixed alias, so that spelling is not typeable. Same correction /dfarena
+-- already carries in Core.lua.
 -- ============================================================
 
 DF:RegisterDebugSlash("DFAUTOTEST", "Auto profiles test harness", true, "/dfautotest")

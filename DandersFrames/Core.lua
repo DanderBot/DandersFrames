@@ -1,4 +1,4 @@
-local addonName, DF = ...
+﻿local addonName, DF = ...
 
 -- Local caching of frequently used globals for performance
 local pairs, ipairs, type, tonumber, tostring = pairs, ipairs, type, tonumber, tostring
@@ -67,8 +67,10 @@ end
 -- no flag: it reads as a live gate. Ask DF:DebugActive(cat) — there is no global
 -- accessor, because no consumer ever wanted one (DebugConsole:IsEnabled() was
 -- added for that and removed unused).
-DF.demoMode = false
-DF.demoPercent = 1
+-- ☠ (Removed) DF.demoMode and DF.demoPercent, for the very reason the note directly
+-- above gives: both were write-only, set here and read by nothing in either addon.
+-- They sat two lines under the tombstone explaining why a maintained-but-unconsulted
+-- flag is worse than no flag, which is how easy this is to miss.
 DF.initialized = false  -- Set to true after frames are created and ready
 
 -- Returns true if the current profile's partyEnabled/raidEnabled flags
@@ -126,9 +128,15 @@ end
 -- addons and clutter every slash autocomplete — to document a spelling nobody
 -- needed twice. One documented form now: "/df debug <command>".
 --
--- The one exception is an alias that is NOT /df-prefixed: "/rl" has no "/df"
--- form to fall back to, so a bind is the only way to reach it. That is the rule
--- below, not a hardcoded name — add another such alias and it keeps working.
+-- ⚠ THERE IS NO EXCEPTION, AND /rl IS NOT ONE. This used to say the rule below still
+-- registers a real bind for any alias that is not /df-prefixed, and offered "/rl" as
+-- the worked example. /rl does not go through RegisterDebugSlash at all -- it sets
+-- SLASH_DFRL1 directly, further down this file -- so the example was the one command
+-- that bypasses the mechanism it was illustrating.
+--
+-- In practice every registration passes a single /df-prefixed alias, so the branch
+-- that would create a SLASH_* global has never run. Add a genuinely non-/df alias and
+-- it would, but nothing does today; do not assume it is exercised.
 --
 -- ☠ "/df <name>" (no "debug") does NOT answer for diagnostics. This comment used to
 -- claim it did, "unlisted, so macros and muscle memory survive" — that was the intent
@@ -398,10 +406,17 @@ DF.COMMAND_SIBLINGS = {
     auras     = { "<unit>" },
     auradata  = { "<unit>" },
     dispel    = { "<unit>", "ids", "render" },
-    idgate    = {},   -- no args; present so o:Siblings is a no-op, not a nil index
+    -- No args. NOT here to avoid a nil index -- Out:Siblings opens with
+    -- `if not list then return self end`, so a missing key was always safe; the
+    -- rationale this pair used to carry was describing a hazard the function does not
+    -- have. They stay because both ARE looked up, and an explicit empty list says
+    -- "checked, takes nothing" where a missing key says nothing at all.
+    idgate    = {},
     guiwidth  = {},
     gapcheck  = { "all", "clear" },
-    pixelcheck = {},
+    -- (Removed) pixelcheck = {}. Unlike those two it was never looked up at all -- no
+    -- Siblings("pixelcheck") call exists -- so it was an entry for a question nobody
+    -- asked.
     admissing = { "mark" },
     -- The dev list here MUST stay in step with HEADER_MUTATORS in Frames/Headers.lua,
     -- which is what actually refuses them on a release build. Listing one without
@@ -2870,9 +2885,16 @@ end
 -- Unified approach using IsInInstance() for all content detection
 -- ============================================================
 
--- Cache for content type (updated on zone change)
-DF.cachedContentType = nil
-DF.cachedInstanceType = nil
+-- ☠ (Removed) DF.cachedContentType and DF.cachedInstanceType, and the "cache for
+-- content type (updated on zone change)" comment that introduced them. Nine
+-- assignments across GetContentType's branches, one for the instance type, and NOT
+-- ONE READ in either addon -- so nothing was cached and nothing was invalidated. The
+-- names' only effect was to make GetContentType look memoised, which invites someone
+-- to "use the cache" and get a stale answer.
+--
+-- ⚠ The persisted half is real and stays: DandersFramesCharDB.lastContentType is
+-- written in those same branches and IS read, by the reload hint snapshot at the top
+-- of GetContentType. Do not confuse the two when adding a branch.
 
 -- Debug: Force arena mode for testing (toggle with /df debug arena)
 DF.forceArenaMode = false
@@ -2882,7 +2904,6 @@ DF.forceArenaMode = false
 function DF:GetContentType()
     -- DEBUG: Force arena mode for testing
     if DF.forceArenaMode then
-        DF.cachedContentType = "arena"
         return "arena"
     end
 
@@ -2898,13 +2919,11 @@ function DF:GetContentType()
     end
 
     local inInstance, instanceType = IsInInstance()
-    
-    -- Cache instance type for other uses
-    DF.cachedInstanceType = instanceType
-    
+    -- ☠ (Removed) DF.cachedInstanceType, and its "cache instance type for other uses"
+    -- comment. There were no other uses -- assigned here, read nowhere.
+
     -- Arena - always uses party-style frames (but with raid unit IDs)
     if instanceType == "arena" then
-        DF.cachedContentType = "arena"
         DF.useContentTypeFallback = nil  -- Clear fallback, real detection working
         if DandersFramesCharDB then DandersFramesCharDB.lastContentType = "arena" end
         return "arena"
@@ -2912,7 +2931,6 @@ function DF:GetContentType()
     
     -- Battleground (PvP instance)
     if instanceType == "pvp" then
-        DF.cachedContentType = "battleground"
         DF.useContentTypeFallback = nil
         if DandersFramesCharDB then DandersFramesCharDB.lastContentType = "battleground" end
         return "battleground"
@@ -2926,11 +2944,9 @@ function DF:GetContentType()
         if DF.useContentTypeFallback and not inInstance
            and (instanceType == "none" or instanceType == nil)
            and DF._contentTypeHintAtLoad == "arena" then
-            DF.cachedContentType = "arena"
             return "arena"
         end
         
-        DF.cachedContentType = nil
         DF.useContentTypeFallback = nil
         if DandersFramesCharDB then DandersFramesCharDB.lastContentType = nil end
         return nil
@@ -2940,12 +2956,10 @@ function DF:GetContentType()
     if instanceType == "raid" then
         local difficultyID = select(3, GetInstanceInfo())
         if difficultyID == 16 then
-            DF.cachedContentType = "mythic"
             DF.useContentTypeFallback = nil
             if DandersFramesCharDB then DandersFramesCharDB.lastContentType = "mythic" end
             return "mythic"
         end
-        DF.cachedContentType = "instanced"
         DF.useContentTypeFallback = nil
         if DandersFramesCharDB then DandersFramesCharDB.lastContentType = "instanced" end
         return "instanced"
@@ -2961,17 +2975,14 @@ function DF:GetContentType()
         if DF.useContentTypeFallback and not inInstance
            and (instanceType == "none" or instanceType == nil)
            and DF._contentTypeHintAtLoad == "arena" then
-            DF.cachedContentType = "arena"
             return "arena"
         end
 
-        DF.cachedContentType = "openWorld"
         DF.useContentTypeFallback = nil
         if DandersFramesCharDB then DandersFramesCharDB.lastContentType = "openWorld" end
         return "openWorld"
     end
     
-    DF.cachedContentType = nil
     DF.useContentTypeFallback = nil
     if DandersFramesCharDB then DandersFramesCharDB.lastContentType = nil end
     return nil
@@ -3665,7 +3676,13 @@ function DF:MigrateOORTextAlpha()
                     m.oorHealthTextAlpha = nil
                 end
             end
-            profile._oorTextAlphaV1 = true
+            -- ☠ (Removed) profile._oorTextAlphaV1 = true. It looked like the one-shot
+            -- guard for this migration and was not one: nothing ever READ it. The
+            -- migration is presence-gated on m.oorNameTextAlpha instead -- which the
+            -- comment above already says outright ("not gated on the _oorTextAlphaV1
+            -- flag") -- so the write asserted a guard that did not exist, and the
+            -- matching clear on the import path was a no-op. Existing profiles keep a
+            -- stale `true` in SavedVariables; harmless, since it gates nothing.
         end
     end
 end
@@ -5443,9 +5460,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- and Frames.lua carries its frame-name patterns so click casting works with it.
         -- Those stay.
         
-        -- Enable raid buff filtering now that we're past ADDON_LOADED
-        -- (avoids "secret value" errors during combat reload initialization)
-        DF.raidBuffFilteringReady = true
+        -- ☠ (Removed) DF.raidBuffFilteringReady = true, and its claim to "enable raid
+        -- buff filtering now that we're past ADDON_LOADED (avoids secret value errors
+        -- during combat reload initialization)". Nothing read the flag, so it gated
+        -- nothing and prevented nothing -- whatever protects that path, it is not this.
         
         -- ============================================================
         -- /df SUBCOMMAND REGISTRATIONS
@@ -5457,7 +5475,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- listed twice.
         local sub = function(...) DF:RegisterDebugSub(...) end
         -- Support / general
-        -- These six plus resetgui/test/hide/lock below are EVERYDAY commands and are
+        -- These four plus resetgui/test/hide/lock below are EVERYDAY commands and are
         -- already listed by /df help, so they carry hidden = true to stay out of the
         -- /df debug listing. Same duplication that got pixelcheck/navprobe/gapcheck
         -- pulled from help, resolved the other way round: each command is documented
@@ -5482,6 +5500,25 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Auras (12.1 container era)
         sub("auradata",     "live aura data enumeration (add a unit token)", nil, "[unit]")
         sub("dispel",       "dispel overlay state: a unit token, or ids | render", nil, "[unit|cmd]", true)
+        -- ☠ REGISTERED FOR DEBUG_SUB_KNOWN, NOT FOR THE LISTING. These two are the
+        -- branches behind `/dfdispel ids` and `/dfdispel render`, which reach them by
+        -- re-dispatching SlashCmdList["DANDERSFRAMES"]("debug dispelids"). Being
+        -- unregistered did not make them unreachable -- it made them UNKNOWN to the
+        -- dispatcher, so every use fell into the unknown-word path and loaded the
+        -- ~3 MB settings companion for a branch that lives entirely in this addon.
+        -- That is the exact cost the DEBUG_SUB_KNOWN note describes, and it was being
+        -- paid by a documented command, not just by typing the internal spelling.
+        --
+        -- Hidden because `sub("dispel", ...)` above already documents both as its
+        -- `ids | render` arguments; listing them again would be the two-lists drift
+        -- the `hidden` contract exists to prevent.
+        -- ⚠ NOT devOnly, deliberately, and it must stay that way. devOnly makes the
+        -- dispatcher open the settings window instead of running the branch on a
+        -- release build (see the DEBUG_SUB_DEV test), which would take `/dfdispel ids`
+        -- away from every non-dev user. The parent `dispel` above is not dev-gated
+        -- either; these are reached THROUGH it and have to match it.
+        sub("dispelids",    "dispel type-enum and colour probe (also: /dfdispel ids)", nil, nil, true)
+        sub("dispeldbg",    "dispel gradient render state (also: /dfdispel render)", nil, nil, true)
         sub("idgate",       "container identity-gate dump", true)
         sub("ppdump",       "missing-buff layout-push dump", true)
         -- Not logging, despite the old wording: it window-parks the badge so the
@@ -5514,9 +5551,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
         sub("casthistory",  "cast history")
         sub("clearhistory", "clear the cast history buffer")
         -- Ongoing traces still on their own flag (console migration pending)
-        -- HIDDEN: both are console-migration signposts now. They toggle nothing, so
-        -- listing them as "toggle X logging" offered a no-op; they still answer for
-        -- anyone typing the old command.
+        -- (Removed) a "HIDDEN: both are console-migration signposts" rationale that
+        -- described two sub() entries below it. There were none -- the entries it
+        -- justified were deleted on 2026-07-29, and RegisterDebugSub's own header
+        -- records that decision ("Those commands are gone rather than hidden"). The
+        -- block outlived them and read as documentation for the next two entries.
         -- Config repair
         sub("resetgui",     "reset GUI scale, size and position", nil, nil, true)
         sub("resetconflict", "moved to /df debug cc resetconflict", nil, nil, true)
@@ -6063,8 +6102,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- ONE form per row now. The old listing carried a second grey
                 -- "/dfXXX" column; those binds are gone, so a column showing them
                 -- would be documenting commands the client no longer answers.
-                -- An entry whose alias is not /df-prefixed (/rl) still owns a real
-                -- bind, so it prints that alias verbatim.
+                -- ⚠ /rl IS NOT IN THIS LISTING and never reaches this code: it is not
+                -- registered through RegisterDebugSlash (it sets SLASH_DFRL1 directly)
+                -- and is deliberately left off /df debug -- see the note at its
+                -- registration. The claim that a non-/df-prefixed entry "prints that
+                -- alias verbatim" had no entry it could apply to.
+                --
+                -- Every registration carries a non-nil `sub`, so the `or` fallbacks
+                -- below -- the pattern match here and the table.concat further down --
+                -- have no input that reaches them either.
                 local byGroup = {}
                 local function bucket(isDev, key, name, desc)
                     local g = DF.DEBUG_GROUP_OF[key or ""] or "other"
@@ -6555,10 +6601,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
         end
         
         -- Add convenient /rl reload command
-        -- The one slash command that never went through RegisterDebugSlash, so it
-        -- was the only one absent from /df debug. It is a convenience rather than
-        -- a diagnostic, but being listed costs nothing and being invisible is how
-        -- commands get forgotten.
+        -- (Removed) a superseded paragraph that argued the opposite of the one below --
+        -- that /rl "was the only one absent from /df debug" and that "being listed
+        -- costs nothing". The code implements the decision below, not that one, and
+        -- two stacked rationales reading in opposite directions is worse than either.
         -- NOT via RegisterDebugSlash: /rl is universal muscle memory, so listing it
         -- under /df debug spends a row telling people something they already know.
         -- It is also the one command with no "/df debug <name>" form, which made it
@@ -7229,8 +7275,9 @@ function DF:FullProfileRefresh()
         DF:UpdateColorCurve()
     end
 
-    -- Clear category lookup cache (for export/import)
-    DF._categoryLookup = nil
+    -- ☠ (Removed) DF._categoryLookup = nil, "clear category lookup cache (for
+    -- export/import)". There is no such cache in either addon -- this was the only
+    -- mention of the name anywhere, so it invalidated nothing.
     
     -- === UPDATE PARTY CONTAINER POSITION AND SIZE ===
     if DF.container then

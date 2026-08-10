@@ -46,7 +46,8 @@ local addonName, DF = ...
 --   Test mode uses fake unit tokens like "testparty1" which the WoW engine
 --   doesn't recognize for `RegisterUnitEvent`. The dispatcher does NOT and
 --   CAN NOT fire for test units. Test mode populates frame data via direct
---   function calls (DF:UpdateAllTestFrames etc.), bypassing the event system.
+--   function calls (DF:UpdateTestFrame / DF:RefreshTestFrames), bypassing the event
+--   system. (It named DF:UpdateAllTestFrames, which does not exist in either addon.)
 --   This is intentional and pre-existing behavior.
 --
 -- Pet / vehicle support:
@@ -317,7 +318,9 @@ end
 --   * Roster transitions (party<->raid, joins, leaves) work correctly
 --
 -- Usage (no /reload required):
---   /dfrostertest    -- toggles the probe; watch /df console, ROSTER category
+--   /df debug rostertest  -- toggles the probe; watch /df console, ROSTER category
+--   ⚠ NOT /dfrostertest: RegisterDebugSlash does not create a SLASH_* global for a
+--   /df-prefixed alias, so that spelling is not typeable.
 --
 -- Was /run-only, which made it undiscoverable: nothing pointed at it and nothing
 -- called it, so a dead-code sweep found it before any developer would have.
