@@ -1370,6 +1370,26 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
     -- ============================================================
     if event == "PLAYER_REGEN_ENABLED" then
         -- Handle pending initialization
+        -- ☠ A FULL (RE)INITIALISE SUPERSEDES THE SUB-UPDATES, SO CLEAR THEM.
+        --
+        -- Both branches below `return` straight out of the drain, which left
+        -- pendingNameListUpdate, pendingLayoutUpdate, pendingVisibility and pendingResize
+        -- SET -- so they were not applied now, and not applied until the NEXT time combat
+        -- ended. A raid that pulled again before any of those was serviced carried stale
+        -- flags for the whole fight. The file already knew: the comment above the drain
+        -- notes it "clears it only after several early returns".
+        --
+        -- Clearing rather than processing is the correct semantic, not a shortcut:
+        -- Initialize and Reinitialize rebuild the header, the name list, the layout and
+        -- visibility from current state, so running the four afterwards would repeat work
+        -- that has just been done with the same inputs.
+        local function clearSubUpdates()
+            FlatRaidFrames.pendingNameListUpdate = nil
+            FlatRaidFrames.pendingLayoutUpdate = nil
+            FlatRaidFrames.pendingVisibility = nil
+            FlatRaidFrames.pendingResize = nil
+        end
+
         if FlatRaidFrames.pendingInitialize then
             FlatRaidFrames.pendingInitialize = nil
             if ShouldBeActive() then
@@ -1378,13 +1398,15 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
                     FlatRaidFrames:SetEnabled(true)
                 end
             end
+            clearSubUpdates()
             return
         end
-        
+
         -- Handle pending reinitialize (profile change, etc.)
         if FlatRaidFrames.pendingReinitialize then
             FlatRaidFrames.pendingReinitialize = nil
             FlatRaidFrames:Reinitialize()
+            clearSubUpdates()
             return
         end
         

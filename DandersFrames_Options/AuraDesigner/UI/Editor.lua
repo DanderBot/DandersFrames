@@ -133,6 +133,22 @@ S.BuildLayoutGroupsTab = function()
                 art   = { kind = "iconRow", ghost = true,
                           colors = { {0.30,0.61,0.36}, {0.30,0.61,0.36}, {0.30,0.61,0.36} } },
                 onClick = function() AddGroupOfKind("filter") end,
+                -- The filter card in this block, matching the Effects tab's "From a
+                -- Filter". No filter argument: nothing is chosen until the group
+                -- exists, so this opens the library rather than one filter. Once the
+                -- group HAS links, each chip inside it carries its own pencil.
+                action = {
+                    -- ☠ Extension included -- see the matching note on the Effects
+                    -- tab's card. A PNG path without ".png" fails silently.
+                    icon    = "filter_list.png",
+                    tooltip = {
+                        title = L["Manage Filters"],
+                        lines = { L["Build and edit your buff filters in the Filter Designer."] },
+                    },
+                    onClick = function()
+                        if GUI.OpenFilterInDesigner then GUI:OpenFilterInDesigner() end
+                    end,
+                },
             },
         },
     })
@@ -388,15 +404,22 @@ S.BuildLayoutGroupsTab = function()
                 -- impossible to click. A generous fixed box with the text
                 -- right-aligned inside it cannot fail that way, and the few pixels of
                 -- extra hit area to the left of the words cost nothing.
+                --
+                -- ⚠ "Manage Filters", not "Edit in Filter Designer". It cannot edit
+                -- anything in particular -- it opens the library -- and now that each
+                -- chip below carries a pencil that opens THAT filter, a link claiming
+                -- to edit would be the second thing on the card promising the same
+                -- job while doing less. Same string the Buff Bar's button uses, for
+                -- the same trip.
                 local LF_EDIT_W = 130
                 local lfEdit = CreateFrame("Button", nil, body)
                 lfEdit:SetSize(LF_EDIT_W, 16)
                 lfEdit:SetPoint("TOPRIGHT", -8, by + 1)
                 local lfEditText = lfEdit:CreateFontString(nil, "OVERLAY")
-                GUI:SetSettingsFont(lfEditText, 8, "")
+                GUI:SetSettingsFont(lfEditText, 10, "")
                 lfEditText:SetPoint("RIGHT", 0, 0)
                 lfEditText:SetJustifyH("RIGHT")
-                lfEditText:SetText(L["Edit in Filter Designer"])
+                lfEditText:SetText(L["Manage Filters"])
                 local lfTC = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
                 lfEditText:SetTextColor(lfTC.r, lfTC.g, lfTC.b)
                 lfEdit:SetScript("OnEnter", function() lfEditText:SetTextColor(1, 1, 1) end)
@@ -473,9 +496,35 @@ S.BuildLayoutGroupsTab = function()
                             StructuralFilterRefresh()
                         end)
 
+                        -- Edit pencil, INSIDE the ✕ so the destructive control keeps
+                        -- the corner it already owns. Always drawn rather than shown
+                        -- on hover: the ✕ beside it is always drawn, so a hover-only
+                        -- sibling reads as the row having one action when it has two.
+                        -- ⚠ tooltip and onClick go in OPTS. CreateGlyphButton reads
+                        -- opts.tooltip inside the OnEnter it installs itself, so a
+                        -- btn.tooltip assigned afterwards is read by nothing and the
+                        -- glyph ends up silently unlabelled -- which an icon-only
+                        -- control cannot afford.
+                        local editBtn = DF.GUI:CreateGlyphButton(chipRow, {
+                            size = 18, iconSize = 12,
+                            texture    = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit",
+                            color      = { C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b },
+                            hoverColor = { 1, 1, 1 },
+                            tooltip    = {
+                                title = L["Edit this filter"],
+                                lines = { L["Opens it in the Filter Designer, where you can change which auras it holds."] },
+                            },
+                            onClick    = function()
+                                if GUI.OpenFilterInDesigner then
+                                    GUI:OpenFilterInDesigner(capturedLink.kind, capturedLink.key)
+                                end
+                            end,
+                        })
+                        editBtn:SetPoint("RIGHT", remBtn, "LEFT", -2, 0)
+
                         local chipText = chipRow:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
                         chipText:SetPoint("LEFT", 8, 0)
-                        chipText:SetPoint("RIGHT", remBtn, "LEFT", -4, 0)
+                        chipText:SetPoint("RIGHT", editBtn, "LEFT", -4, 0)
                         chipText:SetMaxLines(1)
                         chipText:SetJustifyH("LEFT")
                         chipText:SetText(link.label)

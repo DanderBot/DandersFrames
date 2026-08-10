@@ -405,7 +405,19 @@ end
 -- link cap. Refusing beats rendering: an unresolvable group would silently widen the
 -- conjunction to "ignore this condition", which is worse than showing nothing.
 -- Second return is the would-be link count, for the editor's over-cap message.
-local function resolveConditions(spec, typeCfg)
+-- ☠ `spec` MUST BE nil FOR AN OTHER-POOL WINNER. Other-pool identity is spec-INDEPENDENT
+-- -- pickWinner already knows this and computes `local idSpec = (pool == 1) and spec or nil`
+-- before resolving -- but all four callers here passed `spec` unconditionally, even though
+-- each had `bestPool` in hand on the adjacent line for poolFilter.
+--
+-- The divergence is not theoretical: an Other-Buffs effect on a Restoration Druid triggered
+-- by Lifebloom resolves to {33763, 419207, 1227806} through the nil-spec path that drives
+-- bestMap and the dedup union, but to {33763} through SpellIDs.RestorationDruid here. The
+-- buff row has already hidden the variant icon via dedup while the chain never lights for
+-- it -- the aura becomes invisible everywhere. Same for Rejuvenation, Regrowth and
+-- HolyPaladin's Dawnlight.
+local function resolveConditions(spec, typeCfg, isSpecPool)
+    if isSpecPool == false then spec = nil end
     local c = typeCfg.conditions
     if type(c) ~= "table" or type(c.groups) ~= "table" then return nil end
     local groups = {}
@@ -4364,7 +4376,7 @@ function Factory:SyncFrame(frame)
             -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
             -- the border consumer: a conjunction of presence gates does not express "while
             -- all of these are absent".
-            local chainHB = resolveConditions(spec, bestCfg)
+            local chainHB = resolveConditions(spec, bestCfg, bestPool == 1)
             if chainHB then
                 local r, g, b, a = readADColor(bestCfg.color)
                 local mode = slower(bestCfg.mode or "replace")
@@ -4513,7 +4525,7 @@ function Factory:SyncFrame(frame)
             -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
             -- the border consumer: a conjunction of presence gates does not express "while
             -- all of these are absent".
-            local chainBG = resolveConditions(spec, bestCfg)
+            local chainBG = resolveConditions(spec, bestCfg, bestPool == 1)
             if chainBG then
                 local r, g, b, a = readADColor(bestCfg.color)
                 local mode = slower(bestCfg.mode or "tint")
@@ -4645,7 +4657,7 @@ function Factory:SyncFrame(frame)
             if not bestName then return false end
             local bestSpec = buildBorderSpec(frame, bestCfg)
             if not bestSpec then return false end   -- resolved disabled → render nothing
-            local chainLinks = resolveConditions(spec, bestCfg)
+            local chainLinks = resolveConditions(spec, bestCfg, bestPool == 1)
             if not chainLinks then
                 dropChainEntry(bd, bestName)
                 return syncBorderEntry(bd, frame, bestName, bestCfg, bestMap, bestPool == 1)
@@ -4708,7 +4720,7 @@ function Factory:SyncFrame(frame)
                 -- colour covers only exist when every condition holds. The chain's own gates
                 -- use the same mirror-host config, which is why this type nests for free --
                 -- the visual link is just one more host, handed to a different consumer.
-                local chainTX = resolveConditions(spec, bestCfg)
+                local chainTX = resolveConditions(spec, bestCfg, bestPool == 1)
                 if chainTX then
                     local cat = category
                     syncConditionChain(st, bestName, frame, frame.unit, chainTX, filt,

@@ -1254,29 +1254,9 @@ DF.ExportCategoryInfo = {
     },
 }
 
--- ===========================================
--- QUICK PRESETS
--- ===========================================
-DF.ExportPresets = {
-    all = {
-        name = "All",
-        categories = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner", "autoLayout"},
-    },
-    appearance = {
-        name = "Appearance",
-        description = "Visual style without position/layout",
-        categories = {"bars", "auras", "text", "icons", "other"},
-    },
-    layoutOnly = {
-        name = "Layout",
-        description = "Position and frame dimensions only",
-        categories = {"position", "layout"},
-    },
-    none = {
-        name = "None",
-        categories = {},
-    },
-}
+-- (DF.ExportPresets removed: it was defined here and referenced nowhere. The export
+-- page's quick-picks are declared inline at GUI/Pages/Modules.lua, and drifted out of
+-- sync with this table long ago -- two sources for one list, one of them unread.)
 
 -- ===========================================
 -- HELPER FUNCTIONS

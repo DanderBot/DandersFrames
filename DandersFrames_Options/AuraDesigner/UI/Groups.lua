@@ -796,7 +796,7 @@ local function OpenFilterPicker(opts)
         end
     end
     local freeCustoms = {}
-    for cfId in pairs(R:GetStore().customFilters) do
+    for cfId in pairs(R:ReadStore().customFilters) do
         if not isLinked("custom", cfId) then tinsert(freeCustoms, cfId) end
     end
     sort(freeCustoms, function(a, b)

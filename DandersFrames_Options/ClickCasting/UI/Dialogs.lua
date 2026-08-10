@@ -45,16 +45,30 @@ local POPUP_COLORS = {
     orange     = {r = 1.0, g = 0.6, b = 0.1},
 }
 
+-- ☠ PASS `text` THROUGH StyleButton -- do not build the label by hand.
+--
+-- This used to create its own FontString as btn.label. StyleButton's grow-only
+-- auto-width (Widgets.lua) lives INSIDE `if opts.text ~= nil then` and measures
+-- btn.Text, so for these buttons it did not merely miss -- it never ran at all, and
+-- Import All / Compatible Only / Cancel stayed pinned to a width measured against
+-- their ENGLISH labels. That is exactly the clipping the auto-width default was added
+-- to end. The sibling helpers in this same file (CreateChoiceButton, CreateButton)
+-- always passed text through and never had the problem.
+--
+-- btn.label is kept as an alias so existing callers that relabel through it still work.
 local function CreateStyledButton(parent, text, width, height)
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
     -- Shared button look; ClickCasting green accent on hover (matches its checkboxes).
-    DF.GUI:StyleButton(btn, { width = width or 120, height = height or 28, accent = CC.ACCENT })
-
-    local label = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    label:SetPoint("CENTER")
-    label:SetText(text)
-    label:SetTextColor(POPUP_COLORS.text.r, POPUP_COLORS.text.g, POPUP_COLORS.text.b)
-    btn.label = label
+    DF.GUI:StyleButton(btn, {
+        width  = width or 120,
+        height = height or 28,
+        accent = CC.ACCENT,
+        text   = text,
+    })
+    if btn.Text then
+        btn.Text:SetTextColor(POPUP_COLORS.text.r, POPUP_COLORS.text.g, POPUP_COLORS.text.b)
+    end
+    btn.label = btn.Text
 
     return btn
 end
@@ -469,7 +483,16 @@ function CC:ImportProfile(importString, newProfileName)
     end
     
     -- Validate
-    if not data.profile then
+    -- ☠ TYPE CHECKS, not truthiness. An import string comes from another player, and the
+    -- only guard here was `if not data.profile` -- so `{profile = 5}` passed it and threw
+    -- on `data.profile.bindings`, `{profile = {bindings = 1}}` threw inside ipairs, and
+    -- `{profile = {bindings = {5}}}` threw on `binding.actionType`. The UI caller has no
+    -- pcall and neither does the public API entry point, so a malformed paste took the
+    -- whole call stack with it. The profile-import twin guards exactly this and says so.
+    if type(data.profile) ~= "table" then
+        return false, L["Invalid profile data"]
+    end
+    if data.profile.bindings ~= nil and type(data.profile.bindings) ~= "table" then
         return false, L["Invalid profile data"]
     end
     
@@ -481,6 +504,11 @@ function CC:ImportProfile(importString, newProfileName)
     
     if data.profile.bindings then
         for _, binding in ipairs(data.profile.bindings) do
+            -- Each ELEMENT is untrusted too: a non-table here threw on binding.actionType.
+            if type(binding) ~= "table" then
+                binding = nil
+            end
+            if binding then
             local status = "valid_spec"
             
             -- Check spell bindings for class compatibility
@@ -499,6 +527,7 @@ function CC:ImportProfile(importString, newProfileName)
             else
                 table.insert(validBindings, entry)
             end
+            end  -- type(binding) == "table"
         end
     end
     

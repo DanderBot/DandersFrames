@@ -7047,6 +7047,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- the rest of the session -- and the state driver below shows the LIVE
             -- frames in combat, so they rendered fake auras.
             DF:TeardownTestModeEngines()
+            -- ...and the FRAME-side teardown, for the same reason. The loops above
+            -- hide the frames and their absorb textures, but the Aura Designer's
+            -- borders are parented to UIParent and survive frame:Hide -- so pulling
+            -- with the preview up left AD indicators floating over the live frames.
+            -- Combat-safe; see the note on TeardownTestFrameVisuals.
+            DF:TeardownTestFrameVisuals()
 
             DF:Say(L["Test mode ended — entering combat."])
 
@@ -7540,10 +7546,17 @@ function DF:CreateAddonCompartment()
             -- the *Ex variants taking an explicit tooltip (the old ones only
             -- survive behind the loadDeprecationFallbacks CVar). Feature-detect
             -- so both 12.0.5 and 12.0.7 work.
+            -- ⚠ THE SAME FOUR KEYS AS THE MINIMAP TOOLTIP ABOVE. These two lines were
+            -- hardcoded English in sentence case ("Open settings"), which is the trap the
+            -- note on the minimap version warns about, in its harder-to-spot form: not a
+            -- duplicate key, but no key at all -- so the compartment tooltip could not be
+            -- translated in any language and was never even offered to the translators
+            -- (the non-enUS locale files are @localization@ placeholders filled from the
+            -- enUS key list at packaging time).
             local fill = function(tooltip)
                 tooltip:AddLine("DandersFrames")
-                tooltip:AddLine("|cffffffffLeft-Click:|r Open settings", 0.8, 0.8, 0.8)
-                tooltip:AddLine("|cffffffffRight-Click:|r Toggle solo mode", 0.8, 0.8, 0.8)
+                tooltip:AddLine("|cffffffff" .. L["Left-Click:"] .. "|r " .. L["Open Settings"], 0.8, 0.8, 0.8)
+                tooltip:AddLine("|cffffffff" .. L["Right-Click:"] .. "|r " .. L["Toggle Solo Mode"], 0.8, 0.8, 0.8)
             end
             if MenuUtil.ShowTooltipEx then
                 MenuUtil.ShowTooltipEx(button, GetAppropriateTooltip(), fill)

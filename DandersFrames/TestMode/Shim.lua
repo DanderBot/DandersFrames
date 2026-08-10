@@ -50,6 +50,10 @@ if not DF.UpdateRaidTestFrames   then DF.UpdateRaidTestFrames   = noop end
 if not DF.HideRaidTestFrames     then DF.HideRaidTestFrames     = noop end
 if not DF.StopTestAnimation      then DF.StopTestAnimation      = noop end
 if not DF.TeardownTestModeEngines then DF.TeardownTestModeEngines = noop end
+-- Frame-side twin of the above: AD indicators, absorb textures and the pet /
+-- personal-targeted / Targeted List preview sets. Called by the combat and zone
+-- teardowns in the RESIDENT files, which run whether or not the companion loaded.
+if not DF.TeardownTestFrameVisuals then DF.TeardownTestFrameVisuals = noop end
 
 -- ============================================================
 -- TEST MODE OWNERSHIP — who is asking for the preview

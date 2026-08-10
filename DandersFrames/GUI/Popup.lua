@@ -100,6 +100,11 @@ local popupMode = nil  -- "alert" or "input"
 -- pulsing orange background that fades out after a few seconds.
 -- ============================================================
 
+-- FALLBACK ONLY. This was the highlight's actual colour, hard-coded, and it reads
+-- as the RAID theme -- so a pulse fired while Party was active looked like the GUI
+-- had switched modes under you (Krathe, 2026-08-10, following an Aura Designer edit
+-- link). ApplyHighlightOverlay now tints from the live theme; this stands in only if
+-- the theme cannot be resolved.
 local HIGHLIGHT_COLOR = {r = 1.0, g = 0.5, b = 0.1}  -- orange
 local HIGHLIGHT_PULSES = 4      -- number of pulse cycles
 local HIGHLIGHT_PULSE_DUR = 0.4 -- seconds per half-cycle
@@ -168,6 +173,13 @@ end
 -- DF:HighlightSettings (dbKey-matched controls) and DF:HighlightWidget.
 local function ApplyHighlightOverlay(widget)
     local overlay = GetHighlightOverlay()
+    -- ⚠ RE-TINT ON EVERY USE, not once at creation. Two reasons, and either alone
+    -- would be enough: the overlay is POOLED, so one built during a Raid session
+    -- would keep that colour for every later Party pulse; and the mode can change
+    -- between two pulses of the same overlay.
+    local c = (DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor()) or HIGHLIGHT_COLOR
+    overlay:SetBackdropColor(c.r, c.g, c.b, 0.15)
+    overlay:SetBackdropBorderColor(c.r, c.g, c.b, 0.8)
     overlay:SetParent(widget)
     overlay:SetFrameLevel(widget:GetFrameLevel() + 10)
     overlay:ClearAllPoints()

@@ -278,9 +278,22 @@ function VC:ShowNag(newVersion)
 end
 
 -- Receive H: respond with our version on the same channel type, with small jitter.
+-- ☠ ONE REPLY IN FLIGHT AT A TIME. The jitter spreads a legitimate group-wide hello, but
+-- it caps nothing: this scheduled a timer and a SendAddonMessage per RECEIVED message,
+-- with no per-sender or global limit. Any peer in guild or raid spamming "DF_VerCheck\tH"
+-- therefore made OUR client emit one addon message each -- enough to hit the client's
+-- outbound throttle and disconnect us. A third party causing our disconnect is not
+-- something jitter can fix.
+--
+-- A pending reply already answers everyone on that channel, so dropping duplicates loses
+-- nothing: the reply is a broadcast, not a per-sender response.
 VC.handlers["H"] = function(self, sender, _, channel)
+    self.pendingHelloReply = self.pendingHelloReply or {}
+    if self.pendingHelloReply[channel] then return end
+    self.pendingHelloReply[channel] = true
     local delay = 1 + math.random() * 2  -- 1-3s jitter to avoid response storms
     C_Timer.After(delay, function()
+        self.pendingHelloReply[channel] = nil
         self:SendVersion(channel)
     end)
 end

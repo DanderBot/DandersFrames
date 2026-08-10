@@ -901,8 +901,11 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- OOR takes priority over dead fade (they should never multiply)
     local isOutOfRange = db.testShowOutOfRange and testData.outOfRange
     
-    -- Calculate per-element alphas for out-of-range
-    local iconsAlpha = 1.0
+    -- Calculate per-element alphas for out-of-range.
+    -- (No iconsAlpha: the status icons are the one surface the whole-frame cascade
+    -- cannot reach — SetIgnoreParentAlpha(true) — so live gives them their own route,
+    -- DF:GetStatusIconFadeAlpha, which DF:ApplyStatusIconSettings folds in. The
+    -- preview now takes that same route instead of mirroring the fallbacks here.)
     local powerBarAlpha = 1.0
     local dispelAlpha = 1.0
     -- ⚠ NO missingBuff / defensive / auraDesigner ALPHAS HERE ANY MORE. Those three
@@ -921,7 +924,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
             -- by 5.5x. Invisible today because Config seeds all six, so it only bites
             -- a profile missing a key (an old import, a hand-edited SavedVariables).
             -- If you add an oor*Alpha, copy live's fallback, do not invent one.
-            iconsAlpha = db.oorIconsAlpha or 0.5
             powerBarAlpha = db.oorPowerBarAlpha or 0.2
             dispelAlpha = db.oorDispelOverlayAlpha or 0.2
         end
@@ -938,9 +940,11 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         -- DF:GetStatusIconFadeAlpha applies their fade explicitly in both modes.
     end
 
-    -- Store alpha values for use by UpdateTestIcons and UpdateTestPowerBar
+    -- Store alpha values for use by UpdateTestPowerBar.
+    -- (No `icons` entry in any of the three tables below: the status icons now take
+    -- their fade from DF:GetStatusIconFadeAlpha inside DF:ApplyStatusIconSettings,
+    -- which is live's own route and reads the same dfTestIsDead stamp.)
     frame.dfTestOORAlphas = {
-        icons = iconsAlpha,
         power = powerBarAlpha,
         dispel = dispelAlpha,
     }
@@ -953,7 +957,6 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- OOR takes priority: skip dead fade storage when out of range
     if applyDeadFade then
         frame.dfTestDeadFadeAlphas = {
-            icons = db.fadeDeadIcons or 1.0,
             power = db.fadeDeadPowerBar or 0.4,
             auras = db.fadeDeadAuras or 1.0,
         }
@@ -981,12 +984,10 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         -- because there the frame stays at 1.0.
         local hfAlpha = db.healthFadeAlpha or 0.5
         if db.oorEnabled then
-            iconsAlpha = hfAlpha
             powerBarAlpha = hfAlpha
             dispelAlpha = hfAlpha
         end
         frame.dfTestHealthFadeAlphas = {
-            icons = iconsAlpha,
             power = powerBarAlpha,
             dispel = dispelAlpha,
         }
@@ -1271,18 +1272,11 @@ function DF:UpdateTestIcons(frame, testData)
         
         if shouldShow then
             DF:SetIconTextureOrAtlas(frame.roleIcon.texture, DF:GetRoleIconTexture(db, role))
-
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.roleIcon, db, "roleIcon")
+            end
             frame.roleIcon:Show()
-            local scale = db.roleIconScale or 1.0
-            local anchor = db.roleIconAnchor or "TOPLEFT"
-            local x = db.roleIconX or 2
-            local y = db.roleIconY or -2
-            frame.roleIcon:SetScale(scale)
-            frame.roleIcon:ClearAllPoints()
-            frame.roleIcon:SetPoint(anchor, frame, anchor, x, y)
-            
-            -- Apply frame level
-            frame.roleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.roleIconFrameLevel or 30))
         else
             frame.roleIcon:Hide()
         end
@@ -1292,36 +1286,18 @@ function DF:UpdateTestIcons(frame, testData)
     if frame.leaderIcon then
         if not db.leaderIconEnabled then
             frame.leaderIcon:Hide()
-        elseif testData.isLeader then
-            frame.leaderIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-LeaderIcon")
+        elseif testData.isLeader or testData.isAssist then
+            frame.leaderIcon.texture:SetTexture(testData.isLeader
+                and "Interface\\GroupFrame\\UI-Group-LeaderIcon"
+                or "Interface\\GroupFrame\\UI-Group-AssistantIcon")
             frame.leaderIcon.texture:SetTexCoord(0, 1, 0, 1)
+            -- Geometry, base alpha and frame level from the LIVE applier. (The two
+            -- arms differed only in the texture, but each carried its own verbatim
+            -- copy of the geometry block — leader kept working while assist drifted.)
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.leaderIcon, db, "leaderIcon")
+            end
             frame.leaderIcon:Show()
-            
-            local scale = db.leaderIconScale or 1.0
-            local anchor = db.leaderIconAnchor or "TOPLEFT"
-            local x = db.leaderIconX or -2
-            local y = db.leaderIconY or 2
-            frame.leaderIcon:SetScale(scale)
-            frame.leaderIcon:ClearAllPoints()
-            frame.leaderIcon:SetPoint(anchor, frame, anchor, x, y)
-            
-            -- Apply frame level
-            frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + (db.leaderIconFrameLevel or 30))
-        elseif testData.isAssist then
-            frame.leaderIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-AssistantIcon")
-            frame.leaderIcon.texture:SetTexCoord(0, 1, 0, 1)
-            frame.leaderIcon:Show()
-            
-            local scale = db.leaderIconScale or 1.0
-            local anchor = db.leaderIconAnchor or "TOPLEFT"
-            local x = db.leaderIconX or -2
-            local y = db.leaderIconY or 2
-            frame.leaderIcon:SetScale(scale)
-            frame.leaderIcon:ClearAllPoints()
-            frame.leaderIcon:SetPoint(anchor, frame, anchor, x, y)
-            
-            -- Apply frame level
-            frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + (db.leaderIconFrameLevel or 30))
         else
             frame.leaderIcon:Hide()
         end
@@ -1334,18 +1310,11 @@ function DF:UpdateTestIcons(frame, testData)
         elseif testData.raidTarget then
             frame.raidTargetIcon.texture:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
             SetRaidTargetIconTexture(frame.raidTargetIcon.texture, testData.raidTarget)
-            
-            local scale = db.raidTargetIconScale or 1.5
-            local anchor = db.raidTargetIconAnchor or "TOP"
-            local x = db.raidTargetIconX or 0
-            local y = db.raidTargetIconY or 2
-            frame.raidTargetIcon:SetScale(scale)
-            frame.raidTargetIcon:ClearAllPoints()
-            frame.raidTargetIcon:SetPoint(anchor, frame, anchor, x, y)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.raidTargetIcon, db, "raidTargetIcon")
+            end
             frame.raidTargetIcon:Show()
-            
-            -- Apply frame level
-            frame.raidTargetIcon:SetFrameLevel(frame:GetFrameLevel() + (db.raidTargetIconFrameLevel or 30))
         else
             frame.raidTargetIcon:Hide()
         end
@@ -1363,47 +1332,36 @@ function DF:UpdateTestIcons(frame, testData)
             frame.readyCheckIcon:Hide()
         elseif wantReady then
             DF:SetUpgradedStatusIcon(frame.readyCheckIcon.texture, "Interface\\RaidFrame\\ReadyCheck-Ready")
-            
-            local scale = db.readyCheckIconScale or 1.0
-            local anchor = db.readyCheckIconAnchor or "CENTER"
-            local x = db.readyCheckIconX or 0
-            local y = db.readyCheckIconY or 0
-            frame.readyCheckIcon:SetScale(scale)
-            frame.readyCheckIcon:ClearAllPoints()
-            frame.readyCheckIcon:SetPoint(anchor, frame, anchor, x, y)
+            -- Geometry, base alpha and frame level from the LIVE applier. Both copies
+            -- of this block now forward to it, so the "keep them in step by hand" note
+            -- above no longer describes a real hazard: there is one implementation.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.readyCheckIcon, db, "readyCheckIcon")
+            end
             frame.readyCheckIcon:Show()
-            
-            -- Apply frame level
-            frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + (db.readyCheckIconFrameLevel or 30))
         else
             frame.readyCheckIcon:Hide()
         end
     end
     
-    -- Apply alpha to icons - check dead fade first, then health-based fade, then OOR alpha
-    local alpha = 1.0
-    if frame.dfTestDeadFadeAlphas and frame.dfTestDeadFadeAlphas.icons then
-        alpha = frame.dfTestDeadFadeAlphas.icons
-    elseif frame.dfDeadFadeApplied then
-        return
-    elseif frame.dfTestHealthFadeAlphas and frame.dfTestHealthFadeAlphas.icons then
-        alpha = frame.dfTestHealthFadeAlphas.icons
-    elseif frame.dfTestOORAlphas and frame.dfTestOORAlphas.icons then
-        alpha = frame.dfTestOORAlphas.icons
-    end
-    
-    if frame.roleIcon and frame.roleIcon:IsShown() then
-        frame.roleIcon:SetAlpha(alpha)
-    end
-    if frame.leaderIcon and frame.leaderIcon:IsShown() then
-        frame.leaderIcon:SetAlpha(alpha)
-    end
-    if frame.raidTargetIcon and frame.raidTargetIcon:IsShown() then
-        frame.raidTargetIcon:SetAlpha(alpha)
-    end
-    if frame.readyCheckIcon and frame.readyCheckIcon:IsShown() then
-        frame.readyCheckIcon:SetAlpha(alpha)
-    end
+    -- ★ NO SECOND ALPHA PASS — matching the other status-icon updater.
+    --
+    -- DF:ApplyStatusIconSettings folds DF:GetStatusIconFadeAlpha into each icon's
+    -- alpha, and all four icons above now go through it. Re-applying here would
+    -- SQUARE the fade, the same mistake the range and health fades made before
+    -- ef3c56e0.
+    --
+    -- ☠ AND IT WAS OVERWRITING, NOT COMPOUNDING. This pass ended with a bare
+    -- SetAlpha(alpha), so it discarded whatever the applier had computed -- including
+    -- the per-icon `<prefix>Alpha` setting, which the four hand-rolled blocks never
+    -- read in the first place. Set roleIconAlpha to 0.5 and live dimmed the icon while
+    -- the preview drew it solid.
+    --
+    -- The health-fade arm went further and previewed something live does not do at
+    -- all: HealthFade.lua touches no status icon, so `dfTestHealthFadeAlphas.icons`
+    -- described a behaviour that exists only in test mode. Dead and out-of-range fade
+    -- are both real and both live in GetStatusIconFadeAlpha, which reads the same
+    -- dfTestIsDead stamp the preview already sets.
 end
 
 -- Helper function to show icon as text or texture in test mode
@@ -1447,18 +1405,13 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.readyCheckIcon:Hide()
         elseif wantReady then
             DF:SetUpgradedStatusIcon(frame.readyCheckIcon.texture, "Interface\\RaidFrame\\ReadyCheck-Ready")
-            
-            local scale = db.readyCheckIconScale or 1.0
-            local anchor = db.readyCheckIconAnchor or "CENTER"
-            local x = db.readyCheckIconX or 0
-            local y = db.readyCheckIconY or 0
-            frame.readyCheckIcon:SetScale(scale)
-            frame.readyCheckIcon:ClearAllPoints()
-            frame.readyCheckIcon:SetPoint(anchor, frame, anchor, x, y)
+            -- Geometry, base alpha and frame level from the LIVE applier. Both copies
+            -- of this block now forward to it, so the "keep them in step by hand" note
+            -- above no longer describes a real hazard: there is one implementation.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.readyCheckIcon, db, "readyCheckIcon")
+            end
             frame.readyCheckIcon:Show()
-            
-            -- Apply frame level
-            frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + (db.readyCheckIconFrameLevel or 30))
         else
             frame.readyCheckIcon:Hide()
         end
@@ -2149,6 +2102,51 @@ function DF:TeardownTestModeEngines()
     end
 end
 
+-- ☠ FRAME-SIDE TEST-MODE TEARDOWN — the twin of TeardownTestModeEngines above, and it
+-- exists for the same reason: THREE paths end test mode, and only one of them was doing
+-- the whole job.
+--
+--   HideTestFrames / HideRaidTestFrames  — the ordinary exit, did all of it
+--   combat entry   (Core.lua, PLAYER_REGEN_DISABLED)   — absorbs + personal targeted only
+--   zone change    (Headers.lua, PLAYER_ENTERING_WORLD) — frame:Hide() and nothing else
+--
+-- ⚠ frame:Hide() IS NOT ENOUGH, which is what made this survivable for so long. The
+-- Aura Designer's borders are parented to UIParent, not to the unit frame, so hiding the
+-- frame leaves them on screen: zone into a raid with the preview up and the AD indicators
+-- stayed floating over live frames until something else happened to clear them. The
+-- absorb textures are the same shape (HideTestFrames hides all three by hand), and the
+-- pet / personal-targeted / Targeted List previews are separate frame sets that no
+-- amount of hiding the party frames reaches.
+--
+-- Safe in combat, which is why the combat path can call it: ClearFrame only tears down
+-- textures and tables, and the test pet frames are deliberately plain Buttons and NOT
+-- SecureUnitButtonTemplate (see DF:CreateTestPetFrame) precisely so they can be hidden
+-- under lockdown.
+--
+-- Call it from any new teardown path too — do not hand-copy a subset of it.
+function DF:TeardownTestFrameVisuals()
+    local ADEngine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    local function cleanFrame(frame)
+        if not frame then return end
+        if ADEngine then ADEngine:ClearFrame(frame) end
+        if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
+        if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
+        if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
+    end
+
+    if DF.testPartyFrames then
+        for i = 0, 4 do cleanFrame(DF.testPartyFrames[i]) end
+    end
+    if DF.testRaidFrames then
+        for i = 1, 40 do cleanFrame(DF.testRaidFrames[i]) end
+    end
+
+    if DF.HideAllTestPetFrames then DF:HideAllTestPetFrames() end
+    if DF.HideAllTestRaidPetFrames then DF:HideAllTestRaidPetFrames() end
+    if DF.HideTestPersonalTargetedSpells then DF:HideTestPersonalTargetedSpells() end
+    if DF.HideTestTargetedList then DF:HideTestTargetedList() end
+end
+
 function DF:HideTestFrames(silent)
     DF.testMode = false
     -- Restore the real aura provider only when NEITHER test mode remains active
@@ -2161,20 +2159,10 @@ function DF:HideTestFrames(silent)
         DF:StopTestAnimation()
     end
     
-    -- Hide all test party frames and clean up test elements
-    local ADEngine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    -- Hide all test party frames
     for i = 0, 4 do
         local frame = DF.testPartyFrames[i]
-        if frame then
-            -- Clear Aura Designer indicators (borders are parented to UIParent
-            -- and survive frame:Hide, so they must be explicitly cleared)
-            if ADEngine then ADEngine:ClearFrame(frame) end
-            frame:Hide()
-            -- Clean up test mode visuals
-            if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
-            if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
-            if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-        end
+        if frame then frame:Hide() end
     end
 
     -- Hide test container
@@ -2182,21 +2170,11 @@ function DF:HideTestFrames(silent)
         DF.testPartyContainer:Hide()
     end
 
-    -- Hide test pet frames
-    if DF.HideAllTestPetFrames then
-        DF:HideAllTestPetFrames()
-    end
+    -- AD indicators, absorb textures, pet / personal-targeted / Targeted List previews.
+    -- Shared with the combat and zone teardowns — see TeardownTestFrameVisuals.
+    DF:TeardownTestFrameVisuals()
 
-    -- Hide personal targeted spell test icons
-    if DF.HideTestPersonalTargetedSpells then
-        DF:HideTestPersonalTargetedSpells()
-    end
 
-    -- Hide Targeted List demo bars
-    if DF.HideTestTargetedList then
-        DF:HideTestTargetedList()
-    end
-    
     -- Restore live frame visibility
     -- Clear state drivers so UpdateHeaderVisibility manages normally
     DF:ClearTestModeStateDrivers()
@@ -2395,20 +2373,10 @@ function DF:HideRaidTestFrames(silent)
         DF:StopTestAnimation()
     end
     
-    -- Hide all test raid frames and clean up test elements
-    local ADEngine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    -- Hide all test raid frames
     for i = 1, 40 do
         local frame = DF.testRaidFrames[i]
-        if frame then
-            -- Clear Aura Designer indicators (borders are parented to UIParent
-            -- and survive frame:Hide, so they must be explicitly cleared)
-            if ADEngine then ADEngine:ClearFrame(frame) end
-            frame:Hide()
-            -- Clean up test mode visuals
-            if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
-            if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
-            if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-        end
+        if frame then frame:Hide() end
     end
 
     -- Hide test container
@@ -2416,20 +2384,9 @@ function DF:HideRaidTestFrames(silent)
         DF.testRaidContainer:Hide()
     end
 
-    -- Hide test raid pet frames
-    if DF.HideAllTestRaidPetFrames then
-        DF:HideAllTestRaidPetFrames()
-    end
-
-    -- Hide personal targeted spell test icons
-    if DF.HideTestPersonalTargetedSpells then
-        DF:HideTestPersonalTargetedSpells()
-    end
-
-    -- Hide Targeted List demo bars
-    if DF.HideTestTargetedList then
-        DF:HideTestTargetedList()
-    end
+    -- AD indicators, absorb textures, pet / personal-targeted / Targeted List previews.
+    -- Shared with the combat and zone teardowns — see TeardownTestFrameVisuals.
+    DF:TeardownTestFrameVisuals()
 
     -- Hide group labels (they will be re-shown by UpdateRaidLayout if needed)
     if DF.raidGroupLabels then

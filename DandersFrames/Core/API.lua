@@ -171,7 +171,12 @@ function DandersFrames_ClickCast_Export(profileKey)
         -- Export the specific profile
         local profile = classData.profiles[profileKey]
         local exportData = {
-            version = 1,
+            -- ☠ THE REAL DB VERSION, not a hardcoded 1. ClickCasting/Profiles.lua writes
+            -- `version = DB_VERSION` (2) into the SAME !DFC1! format; this exporter wrote
+            -- 1. Neither importer reads the field today, so nothing broke -- but two
+            -- exporters disagreeing about the version of one wire format means the first
+            -- gate anyone adds will mis-read every string this path produced.
+            version = (DF.ClickCast and DF.ClickCast.DB_VERSION) or 1,
             profileName = profileKey,
             profile = CopyTable(profile),
             exportedAt = date("%Y-%m-%d %H:%M"),
@@ -242,15 +247,29 @@ function DandersFrames_ClickCast_Import(str, profileKey, importAll)
         return false, "Failed to decode import data"
     end
     
-    if not data.profile then
+    -- ☠ TYPE CHECKS. This is a PUBLIC API taking a string from another player via a
+    -- third-party addon, and unlike DandersFrames_Import it is NOT wrapped in a pcall --
+    -- so anything thrown here lands in the CALLER's stack. `{profile = 5}`,
+    -- `{profile = {bindings = 1}}` and `{profile = {bindings = {5}}}` each threw.
+    -- profileName is checked too: it becomes a table KEY, and a non-string either errors
+    -- in the unique-name concatenation below or poisons GetProfileList's table.sort.
+    if type(data.profile) ~= "table" then
         return false, "Invalid profile data"
     end
-    
+    if data.profile.bindings ~= nil and type(data.profile.bindings) ~= "table" then
+        return false, "Invalid profile data"
+    end
+    if data.profileName ~= nil and type(data.profileName) ~= "string" then
+        data.profileName = nil
+    end
+
     -- Analyze bindings for compatibility
     local bindingsToImport = {}
-    
+
     if data.profile.bindings then
         for _, binding in ipairs(data.profile.bindings) do
+            if type(binding) ~= "table" then binding = nil end
+            if binding then
             local isValid = true
             
             -- Check spell bindings for class compatibility (unless importing all)
@@ -264,9 +283,10 @@ function DandersFrames_ClickCast_Import(str, profileKey, importAll)
             if isValid or importAll then
                 table.insert(bindingsToImport, binding)
             end
+            end  -- type(binding) == "table"
         end
     end
-    
+
     -- Get class data
     local classData = CC:GetClassData()
     if not classData then

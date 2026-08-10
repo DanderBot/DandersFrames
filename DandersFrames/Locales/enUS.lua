@@ -1,4 +1,4 @@
--- AceLocale silent mode is ALWAYS on by default. AceLocale's default
+﻿-- AceLocale silent mode is ALWAYS on by default. AceLocale's default
 -- `readmeta` metatable calls geterrorhandler() on missing keys, which
 -- causes spurious errors when external code (BugSack, debug helpers
 -- calling :ToDebugString() etc.) introspects our L table — and also
@@ -31,10 +31,20 @@ if not L then return end
 
 -- Search system strings
 L["(missing)"] = true
+L["Auto-create profiles disabled. Profiles will not be created for new loadouts."] = true
+L["Auto-create profiles enabled."] = true
+L["Click-casting will be disabled only while flying."] = true
+L["Click-casting will be disabled while mounted/flying."] = true
+L["Click-casting will no longer change your target."] = true
+L["Click-casting will now also target the unit you cast on."] = true
+L["Click-casting will stay active while flying."] = true
+L["Click-casting will stay active while mounted/flying."] = true
 L["Dispel"] = true
 L["Export for"] = true
 L["Frame Layout"] = true
 L["Import for"] = true
+L["No bindings to clear."] = true
+L["Profile imported: %s"] = true
 L["Profiles include both Party and Raid settings. Exporting and importing always works on the profile as a whole, no matter which mode tab is selected above. Use the 'Export for' and 'Import for' checkboxes in each column to choose which mode's settings are included."] = true
 -- ☠ DEBUG-LISTING TEXT IS NOT LOCALISED, AND MUST NOT BE ADDED BACK.
 -- The `/df debug` listing used to print L[DF.DEBUG_GROUP_NAMES[g]] and L[r.desc],
@@ -51,6 +61,7 @@ L["Profiles include both Party and Raid settings. Exporting and importing always
 --
 -- "Other" is deliberately NOT removed: it is also a general-purpose label with its
 -- own readers, and is defined in the alphabetical block below.
+L["Reset bindings to defaults (Target + Menu). %d custom binding(s) removed."] = true
 L["clear stuck auto-layout overrides"] = true
 L["console page"] = true
 L["Turns every category on except the noisy ones, which log many lines per frame during layout and sorting."] = true
@@ -482,6 +493,16 @@ L["Auras"] = true
 L["Auras Alpha"] = true
 L["Auto (Spec Default)"] = true
 L["Auto Layouts"] = true
+-- SINGULAR, and it exists alongside the plural above on purpose: the plural names the
+-- PAGE, this names ONE layout, and it is only ever used as the kind suffix on a
+-- layout's own name. Same split as Pinned / L["Pinned Frames"].
+L["Auto Layout"] = true
+-- "<name> (<kind>)" for the template sharing tooltip's user list. A pinned set or an
+-- auto layout is called whatever the player called it, so without the suffix the list
+-- read "Also used by: test" and named neither the kind nor the page to find it on.
+-- ⚠ Translators: both slots are filled at runtime -- %1 is the player's own name for
+-- the thing and is never translated, %2 is the kind.
+L["%s (%s)"] = true
 L["Auto Layouts is a Raid-only feature. Switch to Raid mode to configure automatic layout switching based on content type and group size."] = true
 L["Auto Layouts module not loaded."] = true
 L["Auto-add DPS"] = true
@@ -695,6 +716,7 @@ L["Debuffs applied by dungeon and raid bosses."] = true
 L["Debuffs Blizzard flags as high priority."] = true
 L["Debuffs Blizzard flags as important for your role."] = true
 L["Debuffs that can be dispelled. Use the dropdown below to choose which dispels count."] = true
+L["Debuffs that can be dispelled. Which dispels count is set just below."] = true
 L["Debug"] = true
 L["Debug Log Export (Filtered)"] = true
 L["Debug console module not loaded."] = true
@@ -2445,7 +2467,30 @@ L["Aura Designer filter groups and effects can use any of these filters."] = tru
 -- so its line says "categories" and offers only the route.
 -- The same route out of an Aura Designer filter group, which can link and unlink a
 -- filter but cannot change what is inside one.
-L["Edit in Filter Designer"] = true
+--
+-- ⚠ That caption link now reads L["Manage Filters"] -- the Buff Bar's own string, for
+-- the identical trip -- because it opens the LIBRARY and cannot edit anything in
+-- particular. Editing ONE filter is the pencil's job, below. Two links on one card
+-- both claiming to edit, where only one can, is what this replaced.
+--
+-- Tooltip on that pencil, which now sits on every place the Aura Designer NAMES a
+-- filter: a linked-filter chip in a filter group, and a trigger tag whose subject is
+-- a filter rather than a spell. Both are icon-only, so this string is the only thing
+-- identifying them. "this filter", not "filter": it opens the one beside it.
+L["Edit this filter"] = true
+-- ⚠ The DESCRIPTION half, and it is not optional. A house tooltip is a title plus a
+-- line saying what happens; these two shipped title-only for one revision and drew a
+-- lone bold word, which on an icon-only control just names the glyph back at you
+-- (Krathe, 2026-08-10). Anything added to CreateGlyphButton or a choice card's corner
+-- action needs both halves.
+--
+-- Says where it goes AND what you can do there, because "edit" on a control that
+-- navigates is otherwise ambiguous -- it could mean rename, or edit in place.
+L["Opens it in the Filter Designer, where you can change which auras it holds."] = true
+-- The corner button on the two filter cards. Those cards create something that will
+-- USE a filter, so the description has to say this leaves for the library rather than
+-- configuring the card in front of you.
+L["Build and edit your buff filters in the Filter Designer."] = true
 -- Caption rows breaking the Auras sidebar into groups: one page produces reusable
 -- filters and displays nothing itself, five pages are places auras appear, and the
 -- Aura Designer builds displays of its own.
@@ -2578,7 +2623,13 @@ L["Built-In Filters"] = true
 -- ⚠ Translators: %1 and %5 arrive as noun PHRASES already coloured, and they are the
 -- literal names of the groups on the Buff Bar / Debuff Bar pages -- keep them as the
 -- subject of their clauses. Do not add an article inside a %s.
-L["This page designs %s — lists of the buffs you want to see. Change what is in our built-in ones, or build your own from scratch. Then pick the ones you want on the %s, the %s, or in an %s group. %s are Blizzard's — they can't be edited, and you pick those on the %s page."] = true
+--
+-- ⚠ "or in %s", NOT "or in an %s group". The banner lists three DESTINATIONS and the
+-- other two are bare page names -- wrapping the third in "an ... group" made it the
+-- odd one out and described the Aura Designer's internals in a sentence that is only
+-- telling you where to go. ("from scratch" went at the same time: "build your own"
+-- already says it.) Krathe, 2026-08-10.
+L["This page designs %s — lists of the buffs you want to see. Change what is in our built-in ones, or build your own. Then pick the ones you want on the %s, the %s, or in %s. %s are Blizzard's — they can't be edited, and you pick those on the %s page."] = true
 -- The Debuffs tab's banner — one string covering the whole tab, because the tab has
 -- exactly one selectable row (the Blacklist; the categories are switches, not
 -- selections). So it says both what the debuff filters are, and how the one editable

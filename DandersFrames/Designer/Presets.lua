@@ -478,6 +478,26 @@ end
 --     the imported mode tables — materialise each as the content of the
 --     preset that mode points at (the login migration would otherwise DISCARD
 --     them, because the "Party"/"Raid" presets already exist).
+-- Which designer libraries does this import touch? Pinned sets and auto-layout
+-- overrides reference designer presets too, so a pinnedFrames-only or autoLayout-only
+-- import/export must still carry the libraries or a set ends up pointing at a missing
+-- preset. ("text" kept alongside "textDesigner" for pre-restructure export strings,
+-- whose category list bundled the Text Designer under Text.)
+--
+-- ⚠ Shared by ImportDesignerPresets and the payload-side uniquify below. These two
+-- MUST agree on which libraries are in play -- a uniquify that ran for a library the
+-- merge then skipped would rename refs to presets that never arrive.
+local function DesignerImportGate(categories)
+    local wanted = nil
+    if type(categories) == "table" then
+        wanted = {}
+        for _, cat in ipairs(categories) do wanted[cat] = true end
+    end
+    local importAura = (not wanted) or wanted.auraDesigner or wanted.autoLayout or wanted.pinnedFrames
+    local importText = (not wanted) or wanted.textDesigner or wanted.text or wanted.autoLayout or wanted.pinnedFrames
+    return importAura, importText
+end
+
 function DF:ImportDesignerPresets(importData, categories)
     if type(importData) ~= "table" then return end
     -- Operate on the REAL profile table — DF.db is a proxy whose .raid is the
@@ -485,17 +505,7 @@ function DF:ImportDesignerPresets(importData, categories)
     local prof = DF._realProfile or DF.db
     if not prof then return end
 
-    local wanted = nil
-    if type(categories) == "table" then
-        wanted = {}
-        for _, cat in ipairs(categories) do wanted[cat] = true end
-    end
-    -- Pinned sets reference designer presets too, so a pinnedFrames-only import/
-    -- export must carry the libraries or a set ends up pointing at a missing preset.
-    -- ("text" kept alongside "textDesigner" for pre-restructure export strings,
-    -- whose category list bundled the Text Designer under Text.)
-    local importAura = (not wanted) or wanted.auraDesigner or wanted.autoLayout or wanted.pinnedFrames
-    local importText = (not wanted) or wanted.textDesigner or wanted.text or wanted.autoLayout or wanted.pinnedFrames
+    local importAura, importText = DesignerImportGate(categories)
 
     local function mergeLib(libKey, src)
         if type(src) ~= "table" then return end
@@ -554,6 +564,105 @@ end
 local function NewKindConfig(kind)
     if kind == "aura" then return DF:NewAuraDesignerConfig() end
     return DF:NewTextDesignerConfig()
+end
+
+-- ☠ NON-DESTRUCTIVE MERGE WHEN IMPORTING INTO AN EXISTING PROFILE.
+--
+-- mergeLib (above) is deliberately imported-wins, and for the NEW-profile import that is
+-- correct: the profile being written was born moments earlier as a COPY of the current
+-- one, so its library is a duplicate and overwriting it loses nothing -- the originals
+-- still live in the profile they were copied from. Uniquifying there would spray
+-- "Party 2" / "Raid 2" across every ordinary import for no gain.
+--
+-- Importing INTO the current profile is the opposite case: that library IS the user's
+-- own work, and a same-named preset replaced its contents with no prompt. Every sibling
+-- in this file uniquifies (CreateDesignerPreset, DuplicateDesignerPreset,
+-- RenameDesignerPreset); this path did not. Hence the createNewProfile gate at the
+-- caller rather than a blanket rule here.
+--
+-- ⚠ THE RENAME MUST HAPPEN PAYLOAD-SIDE, BEFORE THE MODE TABLES ARE APPLIED.
+-- Designer presets are referenced BY NAME, so renaming without repointing leaves every
+-- imported ref dangling -- a worse failure than the clobber it fixes. And once the mode
+-- tables ARE applied, an imported ref and a pre-existing local ref are the same string
+-- with no way to tell them apart, so ForEachDesignerRef (which walks the LIVE profile)
+-- is the wrong tool: it would repoint local refs the import never carried. Same
+-- rationale as the AD filter-ref remap in Profile.lua, which runs in the same place.
+--
+-- Returns a { [kind] = { [oldName] = newName } } map for logging; nil if nothing moved.
+function DF:UniquifyImportedDesignerPresets(importData, categories)
+    if type(importData) ~= "table" then return nil end
+    local prof = DF._realProfile or DF.db
+    if not prof then return nil end
+
+    local importAura, importText = DesignerImportGate(categories)
+    local doKind = { aura = importAura, text = importText }
+    local renamedAny = nil
+
+    for kind, spec in pairs(DESIGNER_KINDS) do
+        local src = doKind[kind] and importData[spec.lib]
+        if type(src) == "table" then
+            local lib = prof[spec.lib]
+            local renames = nil
+            if type(lib) == "table" then
+                for name, preset in pairs(src) do
+                    -- "Default" is the protected empty preset and exists in every
+                    -- library by construction -- renaming it would orphan the one ref
+                    -- that is guaranteed valid.
+                    if type(name) == "string" and type(preset) == "table"
+                        and name ~= DF.DEFAULT_PRESET
+                        and type(lib[name]) == "table"
+                        -- DesignerConfigEqual, not a raw deep-compare: exports run
+                        -- through StripInternalKeys, so the payload has no `_`
+                        -- bookkeeping keys and the local copy does. A plain compare
+                        -- would call every collision a conflict on that alone and
+                        -- rename presets that are in fact identical.
+                        and not DesignerConfigEqual(lib[name], preset)
+                    then
+                        -- Unique against BOTH libraries: against the local one so it
+                        -- does not clobber, and against the payload's own so two
+                        -- imported presets cannot be renamed onto each other.
+                        local newName = UniquePresetName(lib, name)
+                        while src[newName] do newName = UniquePresetName(lib, newName) end
+                        renames = renames or {}
+                        renames[name] = newName
+                    end
+                end
+            end
+
+            if renames then
+                for old, new in pairs(renames) do
+                    src[new] = src[old]
+                    src[old] = nil
+                end
+                -- Repoint every ref carrier INSIDE THE PAYLOAD. This mirrors
+                -- ForEachDesignerRef's carrier list (mode dbs, pinned sets, raid
+                -- auto-layout overrides) but walks importData, not the live profile.
+                local refKey = spec.ref
+                local function repoint(t)
+                    if type(t) == "table" and t[refKey] and renames[t[refKey]] then
+                        t[refKey] = renames[t[refKey]]
+                    end
+                end
+                for _, mode in ipairs({ "party", "raid" }) do
+                    local modeDb = importData[mode]
+                    if type(modeDb) == "table" then
+                        repoint(modeDb)
+                        local pf = modeDb.pinnedFrames
+                        if type(pf) == "table" and type(pf.sets) == "table" then
+                            for _, set in pairs(pf.sets) do repoint(set) end
+                        end
+                    end
+                end
+                ForEachRaidLayoutOverride(importData, function(layout)
+                    repoint(layout.overrides)
+                end)
+                renamedAny = renamedAny or {}
+                renamedAny[kind] = renames
+            end
+        end
+    end
+
+    return renamedAny
 end
 
 -- Invoke fn(tbl) for every table in the CURRENT profile that holds a designer
@@ -627,7 +736,14 @@ function DF:CreateDesignerPreset(kind, name)
     if not lib then return nil end
     -- Empty string from the name popup → sensible base (UniquePresetName's own
     -- fallback is the migration label "Layout", which reads wrong here).
-    if type(name) ~= "string" or name == "" then name = "Preset" end
+    --
+    -- ☠ "Template", not "Preset". This is the name that lands in the dropdown, and
+    -- "Preset" is reserved for the built-in filter sets and the quick-picks — an AD/TD
+    -- saved setup is a Template. Deliberately NOT localised: preset names are stored
+    -- verbatim as library keys and travel in exports, so a translated default would
+    -- make the stored key locale-dependent and break sharing between languages. Same
+    -- reason UniquePresetName's own "Layout" fallback is raw.
+    if type(name) ~= "string" or name == "" then name = "Template" end
     name = UniquePresetName(lib, name)
     lib[name] = NewKindConfig(kind)
     return name
@@ -740,6 +856,18 @@ function DF:ListDesignerPresetUsers(kind, name, excludeMode)
     if not prof or not L then return {} end
     local users = {}
 
+    -- ☠ A USER-CHOSEN NAME MUST CARRY ITS KIND. Party and Raid name themselves, but a
+    -- pinned set or an auto layout is called whatever the player called it -- so this
+    -- list read "Also used by: test", which says nothing about where "test" lives or
+    -- which of the three pages to go looking on (Krathe, 2026-08-10).
+    --
+    -- Only the NAMED branches get the suffix. The unnamed fallbacks below already say
+    -- their kind ("Pinned Frames 2", "Auto Layouts"), and suffixing those would read
+    -- "Auto Layouts (Auto Layout)".
+    local function Kinded(itemName, kindLabel)
+        return format(L["%s (%s)"], itemName, kindLabel)
+    end
+
     local function visitMode(mode, modeDB, label)
         if not modeDB then return end
         if mode ~= excludeMode and (modeDB[refKey] or DefaultPresetNameForMode(mode)) == name then
@@ -751,7 +879,8 @@ function DF:ListDesignerPresetUsers(kind, name, excludeMode)
         if pf and pf.sets then
             for i, set in pairs(pf.sets) do
                 if type(set) == "table" and set[refKey] == name then
-                    users[#users + 1] = set.name or format("%s %s", L["Pinned Frames"], tostring(i))
+                    users[#users + 1] = set.name and Kinded(set.name, L["Pinned"])
+                        or format("%s %s", L["Pinned Frames"], tostring(i))
                 end
             end
         end
@@ -761,7 +890,8 @@ function DF:ListDesignerPresetUsers(kind, name, excludeMode)
     visitMode("raid", DF._realRaidDB or prof.raid, L["Raid"])
     ForEachRaidLayoutOverride(prof, function(layout)
         if layout.overrides[refKey] == name then
-            users[#users + 1] = layout.name or L["Auto Layouts"]
+            users[#users + 1] = layout.name and Kinded(layout.name, L["Auto Layout"])
+                or L["Auto Layouts"]
         end
     end)
     return users

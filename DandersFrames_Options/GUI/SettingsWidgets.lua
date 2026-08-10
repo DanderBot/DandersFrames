@@ -790,6 +790,29 @@ function GUI:RefreshDesignerPresetBars()
     end
 end
 
+-- Open a named filter in the Filter Designer: switch to the page, then scroll to
+-- that filter, select it and pulse it.
+--
+-- One helper because the Aura Designer names filters in several places (linked-filter
+-- chips, filter trigger tags) and every one of them wants the same trip. Written out
+-- at each site it was three lines of page-existence guarding, and the sites drifted --
+-- most did a bare SelectTab and landed you on the page with nothing indicated, which
+-- is indistinguishable from a broken link.
+--
+-- ⚠ The page id is checked because the page is BUILT ON FIRST SHOW: SelectTab builds
+-- it, which is why _fdFocusFilter can only be read after that call and not before.
+--
+-- Returns true when it actually got somewhere, so a caller can fall back.
+function GUI:OpenFilterInDesigner(kind, key)
+    if not (GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then return false end
+    GUI.SelectTab("auras_filterdesigner")
+    local page = GUI.Pages["auras_filterdesigner"]
+    if page and page._fdFocusFilter and kind and key then
+        page._fdFocusFilter(kind, key)
+    end
+    return true
+end
+
 -- Creates a button with an icon and text
 -- iconName is the name of the icon file (without path/extension)
 -- iconSize is optional (defaults to 16)
@@ -864,10 +887,18 @@ end
 --
 --   opts.art      { kind = "iconRow", colors = { {r,g,b}, ... }, ghost = true }
 --   opts.title    card heading (localised)
---   opts.desc     one short line -- roughly 30 characters before it wraps
+--   opts.desc     one short line -- roughly 24 characters before it wraps
 --   opts.accent   border / hover tint, defaults to the mode theme
 --   opts.onClick  fired on click
-local CHOICE_CARD_H, CHOICE_THUMB_W, CHOICE_THUMB_H = 54, 62, 38
+--
+-- ⚠ CARD HEIGHT IS FIXED, so it has to clear the TALLEST card, not the average
+-- one: the desc wraps and nothing re-measures it. 58 = 2 top + 13 title + 3 gap
+-- + 3 wrapped desc lines at 10px. It was 54, which cleared the 8px text with
+-- room to spare and would have clipped a third line at the larger size -- and a
+-- clipped line is invisible until someone writes a longer desc or plays in a
+-- language whose translation runs long. Raising the text is what pulled this
+-- number up; if the text ever grows again, do this arithmetic again.
+local CHOICE_CARD_H, CHOICE_THUMB_W, CHOICE_THUMB_H = 58, 62, 38
 
 -- A unit frame in miniature. The name line and health bar are what make the
 -- icons above them read as "on a frame" rather than as loose squares.
@@ -1030,9 +1061,12 @@ function GUI:CreateChoiceCardGroup(parent, opts)
     if expanded then
         local y = -h
         for _, def in ipairs(opts.cards or {}) do
+            -- ⚠ This is a WHITELIST, not a pass-through: a field not named here never
+            -- reaches the card, and does so silently. `action` had to be added when
+            -- the filter cards grew a corner button.
             local card = GUI:CreateChoiceCard(group, {
                 title = def.title, desc = def.desc, art = def.art,
-                accent = accent, onClick = def.onClick,
+                accent = accent, onClick = def.onClick, action = def.action,
             })
             card:SetPoint("TOPLEFT", 0, y)
             card:SetPoint("RIGHT", group, "RIGHT", 0, 0)
@@ -1062,17 +1096,28 @@ function GUI:CreateChoiceCard(parent, opts)
     local thumb = BuildChoiceThumb(card, opts.art)
     thumb:SetPoint("LEFT", 8, 0)
 
-    local title = card:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    -- 11px, up from DFFontHighlightSmall's 10. Outline left nil so the user's
+    -- Settings Font Outline choice still wins -- that is what the font object this
+    -- replaces did, and passing "" would force the outline off for this string
+    -- alone. (The desc below passes "" deliberately: dim supporting text.)
+    -- The text stops short when this card carries a corner action, so a wrapped
+    -- description cannot run under the button.
+    local textRightPad = opts.action and 32 or 10
+
+    local title = card:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(title, 11)
     title:SetPoint("TOPLEFT", thumb, "TOPRIGHT", 9, -2)
-    title:SetPoint("RIGHT", card, "RIGHT", -10, 0)
+    title:SetPoint("RIGHT", card, "RIGHT", -textRightPad, 0)
     title:SetJustifyH("LEFT")
     title:SetText(opts.title or "")
     title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
+    -- 10px, up from 8. 8 was the smallest text anywhere in the settings UI and it
+    -- read as unfinished next to the card it explains (Krathe, 2026-08-10).
     local desc = card:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(desc, 8, "")
+    GUI:SetSettingsFont(desc, 10, "")
     desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -3)
-    desc:SetPoint("RIGHT", card, "RIGHT", -10, 0)
+    desc:SetPoint("RIGHT", card, "RIGHT", -textRightPad, 0)
     desc:SetJustifyH("LEFT")
     desc:SetWordWrap(true)
     desc:SetText(opts.desc or "")
@@ -1090,6 +1135,80 @@ function GUI:CreateChoiceCard(parent, opts)
         if opts.onClick then opts.onClick(self) end
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
+
+    -- opts.action = { icon, tooltip, onClick } -- an optional second action in the
+    -- card's bottom-right corner, for a card whose SUBJECT has somewhere else to be
+    -- managed. Only "From a Filter" / "Filter Group" pass one; the block header would
+    -- have been the cheaper place to put it, but a header spans every card in the
+    -- block and only one of them is about filters, so it would claim a scope it does
+    -- not have.
+    --
+    -- ☠ A BUTTON INSIDE A BUTTON. The card is itself the create action, over its
+    -- whole area, so this control has to be unmissable about which of the two you are
+    -- about to fire:
+    --
+    --   * The child takes the click. A moused-over child Button captures the input
+    --     and the card's OnClick does not run, so there is no double-fire -- the risk
+    --     is purely one of AIM, which is why this is a 20px target with real padding
+    --     and not a 12px glyph.
+    --   * The card's hover is SUPPRESSED while the cursor is on the child, and the
+    --     child lights instead. Without that the card stays lit saying "click here to
+    --     create", which is a promise it will not keep for this click. That swap is
+    --     the entire reason this is safe to nest.
+    --   * Miss it and you create an effect -- recoverable, but an object you did not
+    --     want, so the padding is not cosmetic.
+    if opts.action then
+        -- Sized to be FOUND, not to be tidy. At 20px with a 13px dim glyph this read
+        -- as decoration on the card rather than a control -- and a control nobody
+        -- sees is the same as one that is not there. It also has to hold its own
+        -- against a 62px thumbnail and two lines of text on the same card.
+        local ACT = 24
+        local actionBtn = CreateFrame("Button", nil, card)
+        actionBtn:SetSize(ACT, ACT)
+        actionBtn:SetPoint("BOTTOMRIGHT", -4, 4)
+        actionBtn:SetFrameLevel(card:GetFrameLevel() + 2)
+
+        local ai = actionBtn:CreateTexture(nil, "OVERLAY")
+        ai:SetSize(16, 16)
+        ai:SetPoint("CENTER")
+        ai:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (opts.action.icon or "edit"))
+        -- Full text colour at REST, accent on hover. Dim-at-rest is the idiom for a
+        -- glyph sitting beside a label that already names it; this one has no label.
+        ai:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+        actionBtn:SetScript("OnEnter", function(self)
+            -- Card back to REST, child lit: one of the two is always the live target
+            -- and the highlight says which.
+            card:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+            card:SetBackdropBorderColor(unpack(idleBorder))
+            ai:SetVertexColor(accent.r, accent.g, accent.b)
+            -- Same contract as CreateGlyphButton's: a full ShowTooltip spec, or a
+            -- bare string for a title-only tooltip. Prefer the spec -- this button
+            -- has no label, so a title alone would just name the glyph again.
+            local t = opts.action.tooltip
+            if type(t) == "table" then
+                GUI:ShowTooltip(self, t)
+            elseif type(t) == "string" and t ~= "" then
+                GUI:ShowTooltip(self, { title = t })
+            end
+        end)
+        actionBtn:SetScript("OnLeave", function()
+            ai:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            if opts.action.tooltip then GUI:HideTooltip() end
+            -- The cursor is still inside the CARD on the way out, and leaving a child
+            -- does not re-fire the parent's OnEnter -- so restore the hover by hand or
+            -- the card sits at rest under a cursor that is still on it.
+            if card:IsMouseOver() then
+                card:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+                card:SetBackdropBorderColor(accent.r, accent.g, accent.b, 1)
+            end
+        end)
+        actionBtn:SetScript("OnClick", function(self)
+            if opts.action.onClick then opts.action.onClick(self) end
+            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+        end)
+        card.ActionButton = actionBtn
+    end
 
     card.layoutHeight = CHOICE_CARD_H
     return card

@@ -1458,12 +1458,30 @@ S.CreateEffectCard = function(parent, yPos, effect)
     -- icon/identity spec-independently (nil spec → ad-hoc / SpellDB fallback).
     local spec = IsOtherTab() and nil or ResolveSpec()
     local iconTex = GetAuraIcon(spec, effect.auraName)
-    local spellIcon = header:CreateTexture(nil, "ARTWORK")
-    spellIcon:SetSize(20, 20)
-    spellIcon:SetPoint("LEFT", chevron, "RIGHT", 6, 0)
+    -- ⚠ A filter-owned record shows our GLYPH here, not a spell icon, and the two
+    -- need different treatment. The 0.08/0.92 crop below exists to trim the border
+    -- baked into Blizzard's spell art; applied to a clean glyph it just zooms in,
+    -- which is why the filter mark read as far too heavy beside the type badge. So:
+    -- no crop, and smaller, since a glyph carries no border to lose.
+    local isGlyphIcon = (DF.ParseADFilterRef and DF:ParseADFilterRef(effect.auraName)) and true or false
+
+    -- ☠ A FIXED 20px SLOT, and the badge anchors to the SLOT, not to the art. The
+    -- badge used to hang off the icon's own right edge, so the moment the glyph was
+    -- drawn at 13 the badge -- and the name, the eye and the ✕ behind it -- slid 4px
+    -- left, and a filter row no longer lined up with the Square and Icon rows above
+    -- it. Every row now reserves the same width whatever it draws inside.
+    local iconSlot = CreateFrame("Frame", nil, header)
+    iconSlot:SetSize(20, 20)
+    iconSlot:SetPoint("LEFT", chevron, "RIGHT", 6, 0)
+
+    local spellIcon = iconSlot:CreateTexture(nil, "ARTWORK")
+    spellIcon:SetSize(isGlyphIcon and 13 or 20, isGlyphIcon and 13 or 20)
+    spellIcon:SetPoint("CENTER")
     if iconTex then
         spellIcon:SetTexture(iconTex)
-        spellIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        if not isGlyphIcon then
+            spellIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        end
     else
         -- Color swatch fallback using aura color
         local trackable3 = spec and Adapter and Adapter:GetTrackableAuras(spec)
@@ -1488,7 +1506,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
 
     local badgeBg = CreateFrame("Frame", nil, header, "BackdropTemplate")
     badgeBg:SetHeight(16)
-    badgeBg:SetPoint("LEFT", spellIcon, "RIGHT", 4, 0)
+    badgeBg:SetPoint("LEFT", iconSlot, "RIGHT", 4, 0)
     ApplyBackdrop(badgeBg,
         {r = badgeColor.r * 0.20, g = badgeColor.g * 0.20, b = badgeColor.b * 0.20, a = 1},
         {r = badgeColor.r * 0.45, g = badgeColor.g * 0.45, b = badgeColor.b * 0.45, a = 0.8})
@@ -1804,8 +1822,24 @@ S.CreateEffectCard = function(parent, yPos, effect)
                     or displayNames[trigName] or trigName)
                 tagText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
+                -- A tag naming a FILTER gets a route to that filter. A tag naming a
+                -- spell does not -- there is nothing to open -- so this is per-tag,
+                -- not per-row: in "Healing OR Tank Cooldowns" only the second one
+                -- earns a pencil.
+                --
+                -- ⚠ Guarded, like every other call to it from this addon: the parser
+                -- is resident and this file is the options companion, so the symbol
+                -- is not guaranteed present at load. The neighbouring
+                -- DF.ADFilterRefDisplayName guard above does NOT cover this -- a
+                -- guard on one function tells you nothing about another.
+                local trigFKind, trigFKey
+                if DF.ParseADFilterRef then
+                    trigFKind, trigFKey = DF:ParseADFilterRef(trigName)
+                end
+
                 local tagW = tagText:GetStringWidth() + 12
                 if canRemove then tagW = tagW + 16 end  -- room for × button
+                if trigFKind then tagW = tagW + 16 end  -- room for the edit pencil
                 tagW = max(tagW, 40)
 
                 -- Wrap to next row if needed
@@ -1823,10 +1857,18 @@ S.CreateEffectCard = function(parent, yPos, effect)
                     {r = 0.30, g = 0.30, b = 0.35, a = 0.8})
 
                 -- Remove × button on each tag (unless it's the last one)
+                -- ☠ DECLARED OUTSIDE the branch: the edit pencil below anchors to it,
+                -- and a `local` inside the `if` is invisible out here. Read from there
+                -- it was a nil GLOBAL, and SetPoint treats a nil relativeTo as the
+                -- PARENT -- so the pencil anchored to the tag's own left edge and drew
+                -- off the frame instead of erroring. Visible with one trigger (where
+                -- canRemove is false and the else branch runs) and silently gone with
+                -- two, which is exactly how it was reported.
+                local removeBtn
                 if canRemove then
                     local capturedTrigName = trigName
                     -- Shared red-at-rest "×" (tone="danger") on each removable tag.
-                    local removeBtn = DF.GUI:CreateCloseButton(tagFrame, {
+                    removeBtn = DF.GUI:CreateCloseButton(tagFrame, {
                         size = 14,
                         tone = "danger",
                         onClick = function()
@@ -1837,6 +1879,39 @@ S.CreateEffectCard = function(parent, yPos, effect)
                         end,
                     })
                     removeBtn:SetPoint("RIGHT", -2, 0)
+                end
+
+                -- The pencil sits INSIDE the ×, i.e. further left, so the destructive
+                -- control keeps the corner it has always had. Moving × to make room
+                -- would retrain the muscle memory of every existing tag on the page.
+                if trigFKind then
+                    local editBtn = CreateFrame("Button", nil, tagFrame)
+                    editBtn:SetSize(14, 14)
+                    if canRemove then
+                        editBtn:SetPoint("RIGHT", removeBtn, "LEFT", -1, 0)
+                    else
+                        editBtn:SetPoint("RIGHT", -2, 0)
+                    end
+                    local ei = editBtn:CreateTexture(nil, "OVERLAY")
+                    ei:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\edit")
+                    ei:SetSize(11, 11)
+                    ei:SetPoint("CENTER")
+                    ei:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                    editBtn:SetScript("OnEnter", function(self)
+                        ei:SetVertexColor(1, 1, 1)
+                        GUI:ShowTooltip(self, {
+                            title = L["Edit this filter"],
+                            lines = { L["Opens it in the Filter Designer, where you can change which auras it holds."] },
+                        })
+                    end)
+                    editBtn:SetScript("OnLeave", function()
+                        ei:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+                        GUI:HideTooltip()
+                    end)
+                    local ek, eq = trigFKind, trigFKey
+                    editBtn:SetScript("OnClick", function()
+                        if GUI.OpenFilterInDesigner then GUI:OpenFilterInDesigner(ek, eq) end
+                    end)
                 end
 
                 tagX = tagX + tagW + TAG_GAP
@@ -1932,7 +2007,10 @@ S.CreateEffectCard = function(parent, yPos, effect)
             addTrigFilterBtn:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", tagX, tagY)
             GUI:StyleButton(addTrigFilterBtn, { width = addFilterW, height = TAG_H, primary = true,
                 accent = { r = 0.25, g = 0.40, b = 0.25 },
-                icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_alt", size = 11 },
+                -- ☠ ".png" IS MANDATORY in the path. A .tga or .blp resolves without
+                -- its extension; a PNG does not, and a missing one fails SILENTLY --
+                -- no error, just no texture.
+                icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\filter_list.png", size = 11 },
                 text = L["Filter"] })
             GUI:SetSettingsFont(addTrigFilterBtn.Text, 9, "")
             addTrigFilterBtn.Text:SetTextColor(0.5, 0.8, 0.5)
@@ -2343,6 +2421,26 @@ S.BuildEffectsTab = function()
                     S.effectsPicker, S.effectsPickerCtx = "filter", pickerCtx
                     S.SwitchTab("effects")
                 end,
+                -- The ONLY card in this block about filters, which is why the route
+                -- to the library is here and not on the block header.
+                --
+                -- ⚠ The filter glyph, not the edit pencil, and no filter argument.
+                -- Nothing is chosen yet on this card -- it creates an effect and then
+                -- asks which filter -- so there is no "this filter" to open. The
+                -- pencils elsewhere target one named filter; this opens the library.
+                -- Same distinction the tooltip draws.
+                action = {
+                    -- ☠ Extension included: CreateChoiceCard concatenates this onto
+                    -- the Icons path verbatim, and a PNG needs it.
+                    icon    = "filter_list.png",
+                    tooltip = {
+                        title = L["Manage Filters"],
+                        lines = { L["Build and edit your buff filters in the Filter Designer."] },
+                    },
+                    onClick = function()
+                        if GUI.OpenFilterInDesigner then GUI:OpenFilterInDesigner() end
+                    end,
+                },
             },
         },
     })

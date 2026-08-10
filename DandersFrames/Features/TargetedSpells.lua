@@ -1094,7 +1094,17 @@ local function GetPersonalIcon(index)
 end
 
 -- Apply settings to a personal icon
-local function ApplyPersonalIconSettings(icon, db, spellID)
+-- ★ `importantOverride` is the ONE value a preview cannot get from the game and the
+-- only fork this function permits: true/false forces the importance answer, nil means
+-- ask C_Spell.IsSpellImportant as live does. It exists because the preview MUST be able
+-- to show the important-spell border -- none of the three demo spell IDs is flagged
+-- important, so without it that border could never be seen while configuring it.
+--
+-- ☠ The preview used to get there by calling this function and then re-deciding
+-- Show/Hide/SetAlpha(1) on icon.highlightFrame two lines later: two computations of one
+-- visual with the second silently winning, which is the shape the live-pathway rule
+-- exists to prevent. The fabricated flag is DATA and belongs here, in the live decision.
+local function ApplyPersonalIconSettings(icon, db, spellID, importantOverride)
     -- No borderColor read here: the colour comes from DF.Border:BuildSpec via the
     -- canonical personalTargetedSpell* keys, so a second local read went unused.
     local borderSize = db.personalTargetedSpellBorderSize or 2
@@ -1125,8 +1135,11 @@ local function ApplyPersonalIconSettings(icon, db, spellID)
     -- Important spell filter
     if icon.importanceFilterFrame then
         if importantOnly and spellID then
-            local isImportant = C_Spell.IsSpellImportant(spellID)
-            icon.importanceFilterFrame:SetAlphaFromBoolean(isImportant)
+            if importantOverride ~= nil then
+                icon.importanceFilterFrame:SetAlpha(importantOverride and 1 or 0)
+            else
+                icon.importanceFilterFrame:SetAlphaFromBoolean(C_Spell.IsSpellImportant(spellID))
+            end
         else
             icon.importanceFilterFrame:SetAlpha(1)
         end
@@ -1143,12 +1156,15 @@ local function ApplyPersonalIconSettings(icon, db, spellID)
         icon.highlightFrame:SetPoint("TOPLEFT", icon.iconFrame, "TOPLEFT", -offset, offset)
         icon.highlightFrame:SetPoint("BOTTOMRIGHT", icon.iconFrame, "BOTTOMRIGHT", offset, -offset)
         if highlightImportant and spellID and icon.highlightBorder then
-            local isImportant = C_Spell.IsSpellImportant(spellID)
             local spec = DF.Border:BuildSpec(db, "personalTargetedSpellImportant", { iconMode = true })
             spec.enabled = true
             DF.Border:Apply(icon.highlightBorder, spec)
             icon.highlightFrame:Show()
-            icon.highlightFrame:SetAlphaFromBoolean(isImportant)
+            if importantOverride ~= nil then
+                icon.highlightFrame:SetAlpha(importantOverride and 1 or 0)
+            else
+                icon.highlightFrame:SetAlphaFromBoolean(C_Spell.IsSpellImportant(spellID))
+            end
         else
             if icon.highlightBorder then DF.Border:Apply(icon.highlightBorder, { enabled = false }) end
             icon.highlightFrame:Hide()
@@ -1668,18 +1684,13 @@ function DF:ShowTestPersonalTargetedSpells()
                 icon.icon:SetDesaturated(testData.isInterrupted)
             end
             
-            -- Apply settings (use real spellID for importance check in test)
-            ApplyPersonalIconSettings(icon, db, testData.isImportant and testData.id or nil)
-            
-            -- For test mode, manually set highlight visibility based on test data
-            if icon.highlightFrame then
-                if db.personalTargetedSpellHighlightImportant and testData.isImportant and not testData.isInterrupted then
-                    icon.highlightFrame:Show()
-                    icon.highlightFrame:SetAlpha(1)
-                else
-                    icon.highlightFrame:Hide()
-                end
-            end
+            -- Real spellID so every geometry/border read is live; the importance ANSWER
+            -- is the one fabricated value (none of the demo IDs is flagged important, so
+            -- the highlight border would otherwise be invisible in the preview). An
+            -- interrupted cast is not highlighted, matching the live read.
+            ApplyPersonalIconSettings(icon, db,
+                testData.isImportant and testData.id or nil,
+                testData.isImportant and not testData.isInterrupted)
             
             -- Show interrupt overlay for the test interrupted icon
             if icon.interruptOverlay then

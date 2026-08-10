@@ -185,6 +185,16 @@ local function ScrubDeletedFilter(cfId)
     local profiles = sv and sv.profiles
     if type(profiles) ~= "table" then return end
 
+    -- ⚠ Guarded like every other call to it from this addon: the parser is RESIDENT and
+    -- this file ships in the options companion, so the symbol is not guaranteed present.
+    -- ☠ Reported rather than silently skipped -- without the parser the three string-form
+    -- scrubs below cannot run, and a scrub that quietly does two thirds of its job is how
+    -- a dangling reference survives a "fix".
+    local ParseRef = DF.ParseADFilterRef
+    if not ParseRef then
+        DF:DebugWarn("FILTER", "ScrubDeletedFilter: DF:ParseADFilterRef unavailable -- @custom: references in AD effect keys, triggers and conditions were NOT scrubbed for '%s'", tostring(cfId))
+    end
+
     -- One array of layout-group records: nil the deleted id from every
     -- filter group's customs selection. Member groups carry no selection.
     local function scrubGroupArray(groups)
@@ -208,6 +218,50 @@ local function ScrubDeletedFilter(cfId)
             end
         end
     end
+    -- ☠ A @custom:<id> LIVES IN FOUR PLACES, not one. Beyond a group's filterSelection
+    -- this function used to scrub, the id appears as a plain STRING in three more:
+    --   (a) the aura KEY of a filter-owned effect  -- cfg.auras[spec][key] / cfg.otherAuras
+    --   (b) an effect's trigger list               -- auraCfg[typeKey].triggers[i]
+    --   (c) a condition group's trigger list       -- .conditions.groups[j].triggers[k]
+    -- Core/Profile.lua's export and import walks already handle (a) and (b) and say
+    -- outright that "collectSel never sees them" -- so the shapes were known here and the
+    -- scrub simply never caught up.
+    --
+    -- Leaving them dangling is not cosmetic: ResolveADFilterRef memoises `false`, the
+    -- effect renders nothing with no warning, and -- because nextFilterID lives in the
+    -- ACCOUNT-wide store -- a later filter can be issued the same cf id and the orphaned
+    -- reference silently binds to it.
+    local function scrubRefList(list)
+        if not ParseRef or type(list) ~= "table" then return end
+        for i = #list, 1, -1 do
+            local kind, key = DF:ParseADFilterRef(list[i])
+            if kind == "custom" and key == cfId then table.remove(list, i) end
+        end
+    end
+    local function scrubAuraCfg(auraCfg)
+        if type(auraCfg) ~= "table" then return end
+        for _, typeCfg in pairs(auraCfg) do
+            if type(typeCfg) == "table" then
+                scrubRefList(typeCfg.triggers)
+                local conds = typeCfg.conditions
+                if type(conds) == "table" and type(conds.groups) == "table" then
+                    for _, grp in pairs(conds.groups) do
+                        if type(grp) == "table" then scrubRefList(grp.triggers) end
+                    end
+                end
+            end
+        end
+    end
+    local function scrubAuraStore(store)
+        if not ParseRef or type(store) ~= "table" then return end
+        for auraName, auraCfg in pairs(store) do
+            scrubAuraCfg(auraCfg)
+            -- The filter-owned record itself: its KEY is the reference, so the whole
+            -- record goes. Nothing else can resolve it once the filter is gone.
+            local kind, key = DF:ParseADFilterRef(auraName)
+            if kind == "custom" and key == cfId then store[auraName] = nil end
+        end
+    end
     local function scrubADConfig(cfg)
         if type(cfg) == "table" then
             scrubLayoutGroups(cfg.layoutGroups)
@@ -216,6 +270,24 @@ local function ScrubDeletedFilter(cfId)
             if type(cfg.otherLayoutGroups) == "table" then
                 scrubGroupArray(cfg.otherLayoutGroups)
             end
+            -- ⚠ Dispatch on shape, like layoutGroups above: `auras` is spec-keyed only
+            -- after the lazy spec-scope migration has touched this adDB.
+            local auras = cfg.auras
+            if type(auras) == "table" then
+                local flat = false
+                for _, v in pairs(auras) do
+                    if type(v) == "table" and (v.priority ~= nil or v.indicators ~= nil or v.border ~= nil) then
+                        flat = true
+                    end
+                    break
+                end
+                if flat then
+                    scrubAuraStore(auras)
+                else
+                    for _, specAuras in pairs(auras) do scrubAuraStore(specAuras) end
+                end
+            end
+            scrubAuraStore(cfg.otherAuras)
         end
     end
     -- Raid auto-layout overrides: a layout-edit session stores a whole-table
@@ -237,6 +309,16 @@ local function ScrubDeletedFilter(cfId)
             if type(ov) == "table" then
                 scrubSelection(ov.buffFilterSelection)
                 scrubSelection(ov.defensiveFilterSelection)
+                -- ☠ AND THE AURA DESIGNER OVERRIDE. `auraDesigner` is a WHOLE-TABLE
+                -- override key (Core/AutoProfiles.lua), so a layout edited while a filter
+                -- was linked carries its own copy of the AD config -- filterSelection
+                -- customs included. Scrubbing only the two selection keys above left the
+                -- deleted id inside that copy, and ApplyRuntimeProfile re-injects it on
+                -- every activation: exactly the resurrection this function's header
+                -- describes. A dangling customs key makes ResolveSelection return an empty
+                -- include map, and Factory's `next(res.map)` guard then drops the whole AD
+                -- filter group with no log while that layout is active.
+                scrubADConfig(ov.auraDesigner)
             end
         end
         for _, ct in pairs(autoDb) do
@@ -547,7 +629,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     -- Stable name-sorted id list (the store is id-keyed)
     local function SortedCustomIDs()
         local ids = {}
-        for cfId in pairs(R:GetStore().customFilters) do
+        for cfId in pairs(R:ReadStore().customFilters) do
             ids[#ids + 1] = cfId
         end
         tsort(ids, function(a, b)
@@ -754,7 +836,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         return (text:gsub("%S+", function(w) return "|c" .. hex .. w .. "|r" end))
     end
     local BUFF_BANNER = format(
-        L["This page designs %s — lists of the buffs you want to see. Change what is in our built-in ones, or build your own from scratch. Then pick the ones you want on the %s, the %s, or in an %s group. %s are Blizzard's — they can't be edited, and you pick those on the %s page."],
+        L["This page designs %s — lists of the buffs you want to see. Change what is in our built-in ones, or build your own. Then pick the ones you want on the %s, the %s, or in %s. %s are Blizzard's — they can't be edited, and you pick those on the %s page."],
         fdEmph(L["Buff Filters"], EMPH_BUFF),
         fdBannerLink(L["Buff Bar"], "auras_buffs"),
         fdBannerLink(L["Defensive Icon"], "auras_defensiveicon"),
@@ -2102,7 +2184,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", 0, -y)
         row:SetPoint("TOPRIGHT", 0, -y)
-        row._kind, row._key, row._selected = kind, key, selected
+        -- _y is the row's own offset down the scroll content, kept because
+        -- _fdFocusFilter has to scroll a row into view and the anchor above is the
+        -- only place that number exists.
+        row._kind, row._key, row._selected, row._y = kind, key, selected, y
         row.name:SetText(nameStr)
         row.count:SetText(countStr)
         row.dot:SetShown(modified)
@@ -2136,6 +2221,39 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         end
         if dim then row.name:SetTextColor(0.42, 0.42, 0.42) end
         row.count:SetTextColor(dim and 0.32 or 0.5, dim and 0.32 or 0.5, dim and 0.32 or 0.5)
+    end
+
+    -- Open ONE named filter: select it, scroll its row into view, pulse it. The
+    -- Aura Designer calls this from every place it names a filter -- a linked-filter
+    -- chip, a filter trigger tag -- so those links land on the filter rather than on
+    -- the page, which is the whole difference between this and a bare SelectTab.
+    --
+    -- Sibling of _fdFocusNewFilter above; same three beats, same reason the scroll is
+    -- part of it (a pulse below the fold is no cue at all). The two differ only in
+    -- that this one has to find its row first.
+    --
+    -- ⚠ DECLARED HERE, not beside _fdFocusNewFilter, because `leftRows` is declared
+    -- ~270 lines below that point -- a closure created up there would read it as a
+    -- nil GLOBAL, parse clean, and fail at runtime. That trap has already cost this
+    -- file two bugs this cycle (CollectADFilters, leftTab).
+    --
+    -- ⚠ SelectFilter FIRST: it runs RefreshAll, which re-binds the pooled rows. Read
+    -- the pool before that and you get the row a different filter used to occupy.
+    pageRef._fdFocusFilter = function(kind, key)
+        if not (kind and key) then return end
+        SelectFilter(kind, key)
+        for _, row in ipairs(leftRows) do
+            if row:IsShown() and row._kind == kind and row._key == key then
+                local range = leftScroll:GetVerticalScrollRange() or 0
+                leftScroll:SetVerticalScroll(math.max(0, math.min((row._y or 0) - 8, range)))
+                if DF.HighlightWidget then DF:HighlightWidget(row) end
+                return
+            end
+        end
+        -- A filter that is selected but has no row is a deleted one whose reference
+        -- outlived it. Selecting it still opens the right-hand pane's empty state,
+        -- which is a truthful landing; say so rather than pulsing nothing.
+        DF:DebugWarn("GUI", "Filter Designer: no row for %s filter '%s'", tostring(kind), tostring(key))
     end
 
     -- ========== SPELL LIST POOLS ==========

@@ -39,6 +39,8 @@ end
 -- ------------------------------------------------------------
 -- ACCOUNT-WIDE STORE
 -- ------------------------------------------------------------
+-- ☠ WRITES SAVEDVARIABLES. Only writers -- and readers that legitimately need the store's
+-- shape guaranteed -- may call this. Read-only paths use ReadStore below.
 function R:GetStore()
     local g = DF:GetGlobalDB()
     if not g.auraFilters then
@@ -49,8 +51,22 @@ function R:GetStore()
     return g.auraFilters
 end
 
+-- Read-only view of the account-wide store. Never creates, so drawing a frame no longer
+-- materialises an auraFilters table for a user who has never made a custom filter.
+-- Returns a shared EMPTY shape -- callers must not mutate it.
+local EMPTY_STORE = { nextFilterID = 1, customFilters = {} }
+function R:ReadStore()
+    local g = DF.GetGlobalDB and DF:GetGlobalDB()
+    local s = g and g.auraFilters
+    if not s or type(s.customFilters) ~= "table" then return EMPTY_STORE end
+    return s
+end
+
+-- ReadStore: if no store exists there is no filter to fetch, so this returns nil without
+-- creating one. The self-heal below still mutates the filter it FOUND, which is fine --
+-- that table demonstrably exists.
 function R:GetCustomFilter(id)
-    local f = self:GetStore().customFilters[id]
+    local f = self:ReadStore().customFilters[id]
     if f then
         -- Self-heal the shape: ResolveSelection / DuplicateFilter /
         -- CustomSpellCount assume both subtables exist, but a hand-edited or
@@ -436,7 +452,7 @@ end
 -- import (no clash) with no extra step.
 function R:IsCustomFilterNameTaken(name, exceptID)
     if not name or name == "" then return false end
-    for id, f in pairs(self:GetStore().customFilters or {}) do
+    for id, f in pairs(self:ReadStore().customFilters or {}) do
         if id ~= exceptID and f.name == name then return true end
     end
     return false
@@ -470,13 +486,33 @@ end
 -- ------------------------------------------------------------
 -- PER-PROFILE PRESET OVERRIDES (diff-only)
 -- ------------------------------------------------------------
+-- ☠ WRITES SAVEDVARIABLES -- so only WRITERS may call it. Use ReadOverrides below on any
+-- path that is only asking a question.
+--
+-- This is reached from the render path (ResolveSelection -> recordSelected ->
+-- IsSpellEnabled), which meant that merely drawing a frame materialised a
+-- filterPresetOverrides table in every profile of every user, including the ones who have
+-- never touched a preset. A read that writes is also a read that cannot be done on a
+-- protected or read-only view later.
+--
+-- ⚠ DF.db is nil-guarded now: it was indexed bare, unlike GetStore's DF:GetGlobalDB().
 function R:GetOverrides()
+    if not DF.db then return {} end
     DF.db.filterPresetOverrides = DF.db.filterPresetOverrides or {}
     return DF.db.filterPresetOverrides
 end
 
+-- Read-only view. Never creates, so it is safe on the render path; callers must treat the
+-- result as immutable (the shared EMPTY table is handed back when nothing is stored).
+local EMPTY_OVERRIDES = {}
+function R:ReadOverrides()
+    return (DF.db and DF.db.filterPresetOverrides) or EMPTY_OVERRIDES
+end
+
+-- Read-only: this is the render path (ResolveSelection -> recordSelected -> here), so it
+-- must not materialise the overrides table.
 function R:IsSpellEnabled(presetKey, rec)
-    local o = self:GetOverrides()[presetKey]
+    local o = self:ReadOverrides()[presetKey]
     if o and o[rec.id] ~= nil then return o[rec.id] end
     return not rec.off
 end
@@ -500,8 +536,9 @@ function R:ResetPreset(presetKey)
     self:GetOverrides()[presetKey] = nil
 end
 
+-- Read-only: the GUI asks this per row on every list refresh.
 function R:IsPresetModified(presetKey)
-    local o = self:GetOverrides()[presetKey]
+    local o = self:ReadOverrides()[presetKey]
     return o ~= nil and next(o) ~= nil
 end
 
@@ -686,7 +723,7 @@ function R:ResolveSelection(selection, showAll)
         -- other reader in this file is either healed or defensive. This loop indexed the
         -- raw entry, so one such filter turned Uncategorised Buffs into `pairs(nil)` on
         -- the render path.
-        for cfId in pairs(self:GetStore().customFilters) do
+        for cfId in pairs(self:ReadStore().customFilters) do
             if not (selection.customs and selection.customs[cfId]) then
                 local f = self:GetCustomFilter(cfId)
                 if f then

@@ -1,4 +1,4 @@
--- ☠ Companion addon: `...` yields THIS addon's private table, not the
+﻿-- ☠ Companion addon: `...` yields THIS addon's private table, not the
 -- parent's, so every DF.* read here would be nil. Take the parent's table
 -- from the global it publishes at DandersFrames/Core.lua:9 (`_G[addonName]
 -- = DF`). NOT from ## AllowAddOnTableAccess -- that directive governs
@@ -197,9 +197,9 @@ function CC:CreateProfilesPanelContent()
             CC.db.global.autoCreateProfiles = checked
         end
         if checked then
-            DF:Say("Auto-create profiles enabled.")
+            DF:Say(L["Auto-create profiles enabled."])
         else
-            DF:Say("Auto-create profiles disabled. Profiles will not be created for new loadouts.", nil, "WARN")
+            DF:Say(L["Auto-create profiles disabled. Profiles will not be created for new loadouts."], nil, "WARN")
         end
         -- Refresh to update the status text
         CC:RefreshProfilesPanel()
@@ -258,9 +258,9 @@ function CC:CreateProfilesPanelContent()
             CC.db.global.disableWhileFlying  = disableFlying
         end
         if checked then
-            DF:Say("Click-casting will be disabled while mounted/flying.")
+            DF:Say(L["Click-casting will be disabled while mounted/flying."])
         else
-            DF:Say("Click-casting will stay active while mounted/flying.", nil, "WARN")
+            DF:Say(L["Click-casting will stay active while mounted/flying."], nil, "WARN")
         end
         -- Rebuild bindings with new macro conditions (if not in combat)
         if not InCombatLockdown() then
@@ -318,9 +318,9 @@ function CC:CreateProfilesPanelContent()
             CC.db.global.disableWhileMounted = disableMounted
         end
         if checked then
-            DF:Say("Click-casting will be disabled only while flying.")
+            DF:Say(L["Click-casting will be disabled only while flying."])
         else
-            DF:Say("Click-casting will stay active while flying.", nil, "WARN")
+            DF:Say(L["Click-casting will stay active while flying."], nil, "WARN")
         end
         if not InCombatLockdown() then
             CC:ApplyBindings()
@@ -368,9 +368,9 @@ function CC:CreateProfilesPanelContent()
             CC.db.global.targetOnCast = checked
         end
         if checked then
-            DF:Say("Click-casting will now also target the unit you cast on.")
+            DF:Say(L["Click-casting will now also target the unit you cast on."])
         else
-            DF:Say("Click-casting will no longer change your target.", nil, "WARN")
+            DF:Say(L["Click-casting will no longer change your target."], nil, "WARN")
         end
         if not InCombatLockdown() then
             CC:ApplyBindings()
@@ -547,7 +547,7 @@ function CC:RefreshProfilesPanel()
                     self:RefreshClickCastingUI()  -- Refresh entire UI including bindings list
                 end
             elseif InCombatLockdown() then
-                DF:Say("Cannot switch profiles during combat", nil, "WARN")
+                DF:Say(L["Cannot switch profiles during combat"], nil, "WARN")
             else
                 -- Already active, just refresh to update selection highlight
                 self:RefreshProfilesPanel()
@@ -893,7 +893,7 @@ function CC:ShowClearAllConfirmation()
     local profileName = self.currentProfileName or "Default"
     
     if bindingCount == 0 then
-        DF:Say("No bindings to clear.", nil, "WARN")
+        DF:Say(L["No bindings to clear."], nil, "WARN")
         return
     end
     
@@ -966,7 +966,7 @@ function CC:ResetBindingsToDefaults()
     -- Refresh the UI
     self:RefreshClickCastingUI()
     
-    DF:Say("Reset bindings to defaults (Target + Menu). " .. count .. " custom binding(s) removed.")
+    DF:Say(format(L["Reset bindings to defaults (Target + Menu). %d custom binding(s) removed."], count))
 end
 
 function CC:ShowExportDialog()
@@ -1005,7 +1005,7 @@ function CC:ShowImportDialog()
             if not importString or importString == "" then return end
             local success, result = CC:ImportProfile(importString)
             if success then
-                DF:Say("Profile imported: " .. result)
+                DF:Say(format(L["Profile imported: %s"], result))
                 CC:RefreshProfilesPanel()
             else
                 DF:Err("Import failed: " .. (result or "unknown error"))

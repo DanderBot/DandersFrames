@@ -185,8 +185,18 @@ C.handlers["Q"] = function(self, sender, _, channel)
     if mode == "off" or not data.selfNick or data.selfNick == "" then return end
     if not modePermits(mode, channel) then return end
     -- Reply with our nickname after small jitter (avoid response storms).
+    -- ☠ ONE REPLY IN FLIGHT PER CHANNEL. The jitter spreads a legitimate group-wide query
+    -- but caps nothing: this scheduled a timer and a SendAddonMessage per RECEIVED "Q",
+    -- with no per-sender or global limit, so a peer spamming queries made OUR client emit
+    -- one message each and risk the outbound throttle -- a third party causing our
+    -- disconnect. The pending reply is a broadcast that already answers everyone on that
+    -- channel, so collapsing duplicates loses nothing. Mirrors VersionCheck's "H" handler.
+    self.pendingNickReply = self.pendingNickReply or {}
+    if self.pendingNickReply[channel] then return end
+    self.pendingNickReply[channel] = true
     local delay = 1 + mrandom() * 2
     C_Timer.After(delay, function()
+        self.pendingNickReply[channel] = nil
         if modePermits(data.shareVia or "off", channel) and data.selfNick ~= "" then
             self:SendMessage("N", data.selfNick, channel)
         end

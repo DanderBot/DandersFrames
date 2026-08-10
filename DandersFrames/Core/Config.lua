@@ -253,6 +253,12 @@ local SHIPPED_MEDIA_FILES = {
     "Icons\\edit_square.tga",
     "Icons\\expand_more.tga",
     "Icons\\filter_alt.tga",
+    -- ⚠ BOTH filter_list files ship, and the .png is the live one -- it is the
+    -- heavier weight, which is what reads at 11-13px. They differ only in that, so
+    -- the trap is real: a call site written as ...\filter_list, with no extension,
+    -- silently resolves to the LIGHT .tga and looks like the icon simply did not
+    -- take. Every live reference spells out ".png".
+    "Icons\\filter_list.png",
     "Icons\\filter_list.tga",
     "Icons\\info.tga",
     "Icons\\keyboard.tga",
