@@ -5,7 +5,6 @@ local addonName, DF = ...
 -- Spec-specific aura display definitions for the adapter stub
 -- ============================================================
 
-local pairs = pairs
 
 -- Initialize the AuraDesigner namespace
 DF.AuraDesigner = DF.AuraDesigner or {}

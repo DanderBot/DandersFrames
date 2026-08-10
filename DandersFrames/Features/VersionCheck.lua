@@ -7,9 +7,9 @@ local addonName, DF = ...
 -- seen. Powers /df users listing for group/raid.
 -- ============================================================
 
-local pairs, ipairs, type = pairs, ipairs, type
+local ipairs, type = ipairs, type
 local tonumber, tostring = tonumber, tostring
-local format, match, find, gsub = string.format, string.match, string.find, string.gsub
+local format, match, gsub = string.format, string.match, string.gsub
 local GetTime = GetTime
 
 DF.VersionCheck = DF.VersionCheck or {}

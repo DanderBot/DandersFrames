@@ -6,19 +6,8 @@ local addonName, DF = ...
 -- ============================================================
 
 -- Local caching of frequently used globals and WoW API for performance
-local pairs, ipairs, type, wipe = pairs, ipairs, type, wipe
-local floor = math.floor
-local strsplit = strsplit
-local UnitBuff, UnitDebuff = UnitBuff, UnitDebuff
 local GetTime = GetTime
-local C_Spell = C_Spell
-local UnitClass = UnitClass
-local UnitIsDeadOrGhost = UnitIsDeadOrGhost
-local UnitIsConnected = UnitIsConnected
 local UnitExists = UnitExists
-local InCombatLockdown = InCombatLockdown
-local GetPlayerAuraBySpellID = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID
-local GetUnitAuraBySpellID = C_UnitAuras and C_UnitAuras.GetUnitAuraBySpellID
 local issecretvalue = issecretvalue or function() return false end
 
 -- ============================================================

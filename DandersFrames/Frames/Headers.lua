@@ -547,7 +547,6 @@ end
 -- Local caching
 local CreateFrame = CreateFrame
 local InCombatLockdown = InCombatLockdown
-local RegisterStateDriver = RegisterStateDriver
 local UnregisterStateDriver = UnregisterStateDriver
 
 -- (Removed) DF.POSITION_HEADER_SNIPPET, a secure-snippet string never handed to any

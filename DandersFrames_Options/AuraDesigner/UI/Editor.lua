@@ -12,7 +12,6 @@ local GUI = DF.GUI
 local Adapter = DF.AuraDesigner.Adapter
 local S = DF.AuraDesigner._uiState
 local P = DF.AuraDesigner._priv
-local C_BACKGROUND = GUI.Colors.background
 local C_ELEMENT = GUI.Colors.element
 local C_BORDER = GUI.Colors.border
 local C_HOVER = GUI.Colors.hover

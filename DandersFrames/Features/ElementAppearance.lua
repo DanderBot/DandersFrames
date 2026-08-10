@@ -26,14 +26,11 @@ local addonName, DF = ...
 
 -- Local caching for performance
 local pairs, ipairs = pairs, ipairs
-local UnitInRange = UnitInRange
 local UnitIsDeadOrGhost = UnitIsDeadOrGhost
 local UnitIsConnected = UnitIsConnected
 local UnitExists = UnitExists
 local UnitIsUnit = UnitIsUnit
 local UnitClass = UnitClass
-local IsInGroup = IsInGroup
-local IsInRaid = IsInRaid
 local CreateColor = CreateColor
 local issecretvalue = issecretvalue  -- nil pre-Midnight, function in Midnight+
 

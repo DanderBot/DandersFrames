@@ -5,7 +5,6 @@ local CC = DF.ClickCast
 local L = DF.L
 
 -- Local aliases for shared constants (defined in Constants.lua)
-local DEFAULT_BINDING = CC.DEFAULT_BINDING
 
 -- Local aliases for helper functions (defined in Profiles.lua)
 local GetCombatCondition = function(b) return CC.GetCombatCondition(b) end

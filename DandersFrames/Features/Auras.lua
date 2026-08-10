@@ -8,8 +8,6 @@ local addonName, DF = ...
 -- Local caching of frequently used globals and WoW API for performance
 local pairs, ipairs, type, pcall, wipe = pairs, ipairs, type, pcall, wipe
 local C_UnitAuras = C_UnitAuras
-local UnitIsUnit = UnitIsUnit
-local GetTime = GetTime
 
 -- Additional cached API for direct aura update (Tier 1 optimization)
 local UnitExists = UnitExists
@@ -17,9 +15,7 @@ local UnitIsDeadOrGhost = UnitIsDeadOrGhost
 local UnitIsConnected = UnitIsConnected
 local InCombatLockdown = InCombatLockdown
 local issecretvalue = issecretvalue
-local strsplit = strsplit
 local C_CurveUtil = C_CurveUtil
-local GetAuraDataByAuraInstanceID = C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID
 
 -- (Removed) the 2025-01-20 aura-entry table pool (tablePool / poolSize) and the
 -- cached IsAuraFilteredOutByInstanceID / strfind / tinsert / tremove. All were

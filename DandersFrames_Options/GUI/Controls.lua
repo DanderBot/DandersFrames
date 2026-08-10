@@ -13,7 +13,6 @@ local L = DF.L
 local S = GUI._state
 local C_PANEL, C_ELEMENT, C_HOVER, C_TEXT, C_TEXT_DIM =
       GUI.Colors.panel, GUI.Colors.element, GUI.Colors.hover, GUI.Colors.text, GUI.Colors.textDim
-local CloseOpenDropdown = GUI._priv.CloseOpenDropdown
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
 local CreateElementBackdrop = GUI._priv.CreateElementBackdrop

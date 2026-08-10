@@ -2,7 +2,7 @@
 
 -- Local caching of frequently used globals for performance
 local pairs, ipairs, type, tonumber, tostring = pairs, ipairs, type, tonumber, tostring
-local floor, ceil, min, max = math.floor, math.ceil, math.min, math.max
+local min, max = math.min, math.max
 local format, sub, len, byte = string.format, string.sub, string.len, string.byte
 
 -- Expose addon table globally

@@ -1,5 +1,4 @@
 local addonName, DF = ...
-local L = DF.L
 
 -- ============================================================
 -- FRAME SORTING SYSTEM
@@ -7,14 +6,13 @@ local L = DF.L
 -- ============================================================
 
 -- Local caching of frequently used globals for performance
-local pairs, ipairs, type, wipe = pairs, ipairs, type, wipe
+local ipairs, wipe = ipairs, wipe
 local sort = table.sort
 local tinsert = table.insert
 local UnitExists = UnitExists
 local UnitGUID = UnitGUID
 local UnitGroupRolesAssigned = UnitGroupRolesAssigned
 local UnitClass = UnitClass
-local GetSpecializationInfoByID = GetSpecializationInfoByID
 local issecretvalue = issecretvalue or function() return false end
 
 -- A unit's GUID can be a SECRET value in 12.0 (e.g. M+ encounters) and a secret

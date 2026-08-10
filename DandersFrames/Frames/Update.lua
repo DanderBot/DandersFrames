@@ -17,23 +17,15 @@ local L = DF.L
 -- per second that compile to nothing with these locals in scope.
 -- Matching pattern: Frames/Bars.lua:8-19 already uses this pattern
 -- for its own unit API calls.
-local pairs, ipairs, type, tonumber, tostring = pairs, ipairs, type, tonumber, tostring
-local floor, ceil, min, max = math.floor, math.ceil, math.min, math.max
-local format = string.format
-local issecretvalue = issecretvalue
+local pairs, type = pairs, type
 local InCombatLockdown = InCombatLockdown
 -- Unit health / power / state APIs (hot path in UpdateHealthFast + UpdatePower)
 local UnitExists = UnitExists
-local UnitClass = UnitClass
 local UnitIsConnected = UnitIsConnected
 local UnitIsDead = UnitIsDead
 local UnitIsGhost = UnitIsGhost
-local UnitHealth = UnitHealth
-local UnitHealthMax = UnitHealthMax
-local UnitHealthMissing = UnitHealthMissing
 local UnitPower = UnitPower
 local UnitPowerMax = UnitPowerMax
-local UnitPowerType = UnitPowerType
 
 -- Shared default tables (avoid per-call allocation)
 

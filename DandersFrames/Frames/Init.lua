@@ -10,15 +10,12 @@ local headerDebug = DF:MakeDebugPrinter("HEADERS")
 
 -- Local caching of frequently used globals for performance
 local pairs, ipairs, type, wipe = pairs, ipairs, type, wipe
-local floor, ceil, min, max, abs = math.floor, math.ceil, math.min, math.max, math.abs
+local ceil, max = math.ceil, math.max
 local CreateFrame = CreateFrame
 local InCombatLockdown = InCombatLockdown
 local IsInRaid = IsInRaid
-local GetNumGroupMembers = GetNumGroupMembers
 local GetRaidRosterInfo = GetRaidRosterInfo
 local UnitExists = UnitExists
-local UnitIsUnit = UnitIsUnit
-local C_Timer = C_Timer
 
 -- PERFORMANCE FIX: Reusable tables for layout calculations (avoid GC during roster updates)
 local reusableGroupPlayerCounts = {}

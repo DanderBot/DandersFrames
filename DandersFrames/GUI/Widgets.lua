@@ -8,7 +8,6 @@ local S = GUI._state
 local P = GUI._priv
 local C_PANEL, C_ELEMENT, C_BORDER, C_HOVER, C_TEXT, C_TEXT_DIM =
       GUI.Colors.panel, GUI.Colors.element, GUI.Colors.border, GUI.Colors.hover, GUI.Colors.text, GUI.Colors.textDim
-local CloseOpenDropdown = GUI._priv.CloseOpenDropdown
 local GetThemeColorFor = GUI.GetThemeColorFor
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen

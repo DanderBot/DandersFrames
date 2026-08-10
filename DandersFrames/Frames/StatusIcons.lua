@@ -7,16 +7,12 @@ local addonName, DF = ...
 -- ============================================================
 
 -- Local caching of frequently used globals
-local pairs, ipairs, type = pairs, ipairs, type
+local type = type
 local UnitExists = UnitExists
 local UnitIsAFK = UnitIsAFK
 local UnitHasVehicleUI = UnitHasVehicleUI
 local UnitHasIncomingResurrection = UnitHasIncomingResurrection
 local UnitIsDeadOrGhost = UnitIsDeadOrGhost
-local UnitIsGroupLeader = UnitIsGroupLeader
-local UnitIsGroupAssistant = UnitIsGroupAssistant
-local GetRaidTargetIndex = GetRaidTargetIndex
-local GetReadyCheckStatus = GetReadyCheckStatus
 local GetPartyAssignment = GetPartyAssignment
 local GetRaidRosterInfo = GetRaidRosterInfo
 local IsInRaid = IsInRaid

@@ -65,7 +65,6 @@ local pairs, next, type = pairs, next, type
 local CreateFrame = CreateFrame
 local IsInRaid = IsInRaid
 local IsInGroup = IsInGroup
-local UnitExists = UnitExists
 local GetNumGroupMembers = GetNumGroupMembers
 
 -- ============================================================

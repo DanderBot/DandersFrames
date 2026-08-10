@@ -1,7 +1,6 @@
 local addonName, DF = ...
 local GUI = {}
 DF.GUI = GUI
-local L = DF.L
 
 -- Mutable module state.
 -- These four were file-scope locals, and two of them are read and written more

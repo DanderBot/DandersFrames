@@ -24,7 +24,6 @@ local CreateFrame = CreateFrame
 local C_Timer = C_Timer
 local GetBuildInfo = GetBuildInfo
 local RAID_CLASS_COLORS = RAID_CLASS_COLORS
-local LOCALIZED_CLASS_NAMES_MALE = LOCALIZED_CLASS_NAMES_MALE
 
 local L = DF.L
 

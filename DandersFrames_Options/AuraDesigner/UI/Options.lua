@@ -13,15 +13,9 @@ local DF = DandersFrames
 -- ============================================================
 
 local pairs, ipairs, type = pairs, ipairs, type
-local format = string.format
-local wipe = wipe
 local tinsert = table.insert
 local tremove = table.remove
-local max, min, floor = math.max, math.min, math.floor
-local strsplit = strsplit
-local sort = table.sort
-local RAID_CLASS_COLORS = RAID_CLASS_COLORS
-local LOCALIZED_CLASS_NAMES_MALE = LOCALIZED_CLASS_NAMES_MALE
+local max, min = math.max, math.min
 local L = DF.L
 
 -- Mutable editor state.
@@ -64,12 +58,8 @@ S.selectedSpec = nil         -- Current spec key being viewed
 -- values, zero visual change) so they track any future palette change in
 -- lockstep. GUI.lua loads before this file (see .toc), so DF.GUI.Colors is
 -- populated at parse time.
-local C_BACKGROUND = DF.GUI.Colors.background
 -- (C_PANEL removed — unreferenced; reclaimed for the 200-locals ceiling.)
 local C_ELEMENT    = DF.GUI.Colors.element
-local C_BORDER     = DF.GUI.Colors.border
-local C_HOVER      = DF.GUI.Colors.hover
-local C_TEXT       = DF.GUI.Colors.text
 local C_TEXT_DIM   = DF.GUI.Colors.textDim
 
 -- Indicator type definitions
