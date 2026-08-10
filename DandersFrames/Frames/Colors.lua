@@ -145,7 +145,13 @@ function DF:GetCurveForUnit(unit, db, prefix, cache)
             if c then return c.r, c.g, c.b, 1.0 end
             return 0.5, 0.5, 0.5, 1.0
         else
-            local c = db[prefix .. stage]
+            -- ☠ Nil-guarded, matching GetHealthGradientColor below, which returns
+            -- `db[prefix..stage] or {r=0.5,g=0.5,b=0.5}` for this identical read. The key
+            -- is one of six <prefix>Low/Medium/High entries and an imported or
+            -- partially-migrated profile can be missing any of them. Unguarded this threw
+            -- "attempt to index a nil value" on every health tick -- the only check above
+            -- it is a cache-hit test, not a key-presence test.
+            local c = db[prefix .. stage] or { r = 0.5, g = 0.5, b = 0.5, a = 1 }
             return c.r, c.g, c.b, c.a or 1
         end
     end
@@ -346,8 +352,15 @@ function DF:ApplyBarOrientation(frame)
         orient, reverse = "VERTICAL", false
     elseif mode == "VERTICAL_INV" then
         orient, reverse = "VERTICAL", true
+    else
+        -- ☠ THE else IS LOAD-BEARING. `or "HORIZONTAL"` above covers a NIL key but not
+        -- an unrecognised STRING -- a stale or imported value, or a mode added later --
+        -- and without this arm both locals stayed nil and SetOrientation(nil) threw two
+        -- lines down. UpdateReducedMaxHealth in this same file already handles the
+        -- unknown case safely by falling through to a boolean.
+        orient, reverse = "HORIZONTAL", false
     end
-    
+
     frame.healthBar:SetOrientation(orient)
     frame.healthBar:SetReverseFill(reverse)
     -- ⚠ Distinct from DF:ApplyBarFillOrientation despite the similar name: this

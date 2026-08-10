@@ -3028,6 +3028,18 @@ local function TargetedList_OnInterruptibilityChange(casterUnit, isInterruptible
     -- Commit #5: apply to the bar via SetVertexColorFromBoolean.
 end
 
+-- ☠ FORWARD DECLARATIONS -- both are defined MUCH further down (casterToBar at ~3183,
+-- TargetedList_ApplyBarContent at ~3682) and are used by the handler immediately below.
+-- Without these the handler compiled them as nil GLOBALS: `casterToBar and
+-- casterToBar[unit]` silently yielded nil, so `if bar then` never ran and mid-cast
+-- re-sync did nothing on every pushback, channel extension and empower stage. It parses
+-- clean and never errors, which is why it survived.
+--
+-- ⚠ The declarations below must stay `casterToBar = {}` / `function TargetedList_...`
+-- (no `local`), or they mint new locals and re-orphan these.
+local casterToBar
+local TargetedList_ApplyBarContent
+
 -- Mid-cast update handler: UNIT_SPELLCAST_DELAYED, CHANNEL_UPDATE,
 -- EMPOWER_UPDATE. The cast duration may have changed (pushback,
 -- channel extension, empower stage). Re-read the duration object and
@@ -3180,7 +3192,9 @@ local activeBars = {}  -- ordered list of currently-displayed bars
 -- This is the incremental tracking table — bars persist until their
 -- cast record is removed, avoiding the teardown-all/rebuild-all
 -- pattern that caused performance issues.
-local casterToBar = {}
+-- ⚠ NO `local` -- assigns the forward declaration made above TargetedList_OnCastUpdate.
+-- Re-adding `local` here mints a second upvalue and silently breaks the mid-cast handler.
+casterToBar = {}
 
 -- Slot tracking for STATIC sort order. Each record gets a fixed slot
 -- index at acquisition time. The slot persists until the record is
@@ -3679,7 +3693,8 @@ end
 -- or inspected in Lua. If you need to add a new rendered field, do
 -- it here and make sure every call goes through a sink.
 
-local function TargetedList_ApplyBarContent(bar, activeRec)
+-- ⚠ NO `local` -- assigns the forward declaration above TargetedList_OnCastUpdate.
+function TargetedList_ApplyBarContent(bar, activeRec)
     local casterUnit = activeRec.casterUnit
     local spellId = activeRec.spellId
     local isTest = activeRec.isTestCast

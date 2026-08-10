@@ -1467,11 +1467,26 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         -- data loss on the one feature whose entire purpose is moving colours between
         -- accounts. These are profile-root keys, so they need naming here by hand;
         -- MergeCategorySettings only ever walks the MODE tables.
-        if importCategorySet.colors then
-            if importData.classColors then DF.db.classColors = importData.classColors end
-            if importData.powerColors then DF.db.powerColors = importData.powerColors end
-            if importData.roleColors  then DF.db.roleColors  = importData.roleColors  end
-        end
+        --
+        -- ☠ AND THAT FIX WAS ITSELF INERT UNTIL 2026-08-10. It gated on
+        -- `importCategorySet.colors`, a condition that can NEVER be true: `colors` has no
+        -- entry in DF.ExportCategories (deliberately -- see the note at the top of that
+        -- file), and the import GUI derives every checkbox from `pairs(DF.ExportCategories)`.
+        -- So the category could not be offered, could not be ticked, and this block never
+        -- ran. The bug it was written to fix survived the fix.
+        --
+        -- Gate on PRESENCE instead, which is sound because of an asymmetry in the exporter:
+        -- the FULL export packs all four palettes unconditionally, while the SELECTIVE
+        -- export packs them only `if categorySet.colors` -- equally unreachable. So a
+        -- payload carrying these keys is necessarily a full export, i.e. the user asked
+        -- for everything. Presence therefore IS the authorisation, and no reachable path
+        -- can deliver these keys without that intent.
+        --
+        -- ⚠ If `colors` is ever given a real category entry, revisit BOTH ends together --
+        -- at that point presence stops implying a full export.
+        if importData.classColors then DF.db.classColors = importData.classColors end
+        if importData.powerColors then DF.db.powerColors = importData.powerColors end
+        if importData.roleColors  then DF.db.roleColors  = importData.roleColors  end
         -- Dispel palette: top-level key, and the fourth member of that set -- so `colors`
         -- must request it too. Also gated on `dispel` and `auras` because the two v4
         -- families it is rebuilt from ride different ones -- the overlay's

@@ -56,11 +56,17 @@ local OTHER_PREFIX = "other:"
 -- dedup/sound paths silently skip such records; this names the culprit once instead of
 -- spamming per frame per aura event. Guards B2's picker contract.
 local otherIdentWarned = {}
-local function warnOtherUnresolved(auraName)
+-- ⚠ `where` names the POOL, because this now fires for BOTH. It used to be gated to the
+-- Other pool (`pool == 2` / `keyPrefix ~= ""`), so a SPEC-pool record whose identity failed
+-- to resolve rendered nothing with no log at all -- the silent-capability-skip class this
+-- codebase has a standing rule against. That is also the dominant failure mode after a
+-- dangling @custom:/@preset: reference, i.e. precisely what somebody would be trying to
+-- diagnose when they turn debug on.
+local function warnOtherUnresolved(auraName, where)
     if not otherIdentWarned[auraName] then
         otherIdentWarned[auraName] = true
-        DF:DebugWarn(DBG, "Other Buffs aura %s has no resolvable spell identity (expected a SpellDB spell name or a #<id> key); skipping",
-            tostring(auraName))
+        DF:DebugWarn(DBG, "%s aura %s has no resolvable spell identity (expected a SpellDB spell name, a #<id> key, or a live filter reference); skipping",
+            where or "Other Buffs", tostring(auraName))
     end
 end
 
@@ -1019,7 +1025,7 @@ local function pickWinner(spec, specAuras, otherAuras, typeKey, validate)
                 local typeCfg = (type(auraCfg) == "table") and auraCfg[typeKey]
                 if typeCfg and typeCfg.enabled ~= false and (not validate or validate(typeCfg)) then
                     local map = unionIdentity(idSpec, auraName, typeCfg)
-                    if not map and pool == 2 then warnOtherUnresolved(auraName) end
+                    if not map then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
                     if map then
                         local prio = auraCfg.priority or 5
                         if (not bestName)
@@ -3637,7 +3643,7 @@ local function collectDesiredSounds(desired, unit, auras, keyPrefix, idSpec, cha
         if sc and sc.enabled and not DF:ParseADFilterRef(auraName) then
             local ids = DF:BuildADIdentityFilters(idSpec, auraName)
             local map = ids and ids.includeSpellIDs
-            if not map and keyPrefix ~= "" then warnOtherUnresolved(auraName) end
+            if not map then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
             if map then
                 for _, ev in ipairs(SOUND_EVENTS) do
                     if ev.enabled(sc) then
@@ -3798,7 +3804,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                 elseif isBar then
                     local ids = DF:BuildADIdentityFilters(idSpec, auraName)
                     local map = ids and ids.includeSpellIDs
-                    if not map and keyPrefix ~= "" then warnOtherUnresolved(auraName) end
+                    if not map then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
                     if map then
                         local key = placedKey(keyPrefix, auraName, indicator)
                         live[key] = true
@@ -3858,7 +3864,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                 elseif isSquare or indicator.type == "icon" then
                     local ids = DF:BuildADIdentityFilters(idSpec, auraName)
                     local map = ids and ids.includeSpellIDs
-                    if not map and keyPrefix ~= "" then warnOtherUnresolved(auraName) end
+                    if not map then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
                     if map then
                         local key = placedKey(keyPrefix, auraName, indicator)
                         live[key] = true
@@ -4218,7 +4224,7 @@ local function collectStackedBorders(spec, specAuras, otherAuras)
                 if typeCfg and typeCfg.enabled ~= false and typeCfg.ShowBorder ~= false
                    and typeCfg.borderMode == "custom" then
                     local map = unionIdentity(idSpec, auraName, typeCfg)
-                    if not map and pool == 2 then warnOtherUnresolved(auraName) end
+                    if not map then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
                     if map then
                         stackedBorders = stackedBorders or {}
                         stackedBorders[#stackedBorders + 1] = {

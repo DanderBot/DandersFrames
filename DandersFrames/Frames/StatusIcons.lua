@@ -1160,8 +1160,14 @@ afkTickerFrame:SetScript("OnUpdate", function(self, elapsed)
     local partyDb = DF:GetDB()
     local raidDb = DF:GetRaidDB()
     
-    local partyTimerEnabled = partyDb.afkIconEnabled and partyDb.afkIconShowTimer ~= false
-    local raidTimerEnabled = raidDb.afkIconEnabled and raidDb.afkIconShowTimer ~= false
+    -- ☠ Both guarded. DF:GetDB()/GetRaidDB() return DF.db[mode], which is nil whenever
+    -- DF.db exists but the mode key does not -- and Core/Profile.lua REASSIGNS DF.db[mode]
+    -- wholesale on a profile switch, so there is a window where this is nil. This is a
+    -- bare OnUpdate on an always-shown frame, so an unguarded index fired once a second
+    -- forever. The same function guards its other db read further down, and the
+    -- BG-carrier ticker below guards explicitly -- this was the one that did not.
+    local partyTimerEnabled = partyDb and partyDb.afkIconEnabled and partyDb.afkIconShowTimer ~= false
+    local raidTimerEnabled = raidDb and raidDb.afkIconEnabled and raidDb.afkIconShowTimer ~= false
     
     if not partyTimerEnabled and not raidTimerEnabled then return end
     

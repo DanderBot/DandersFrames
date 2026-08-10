@@ -88,7 +88,13 @@ function DandersFrames_Import(str, profileKey)
     -- Use ApplyImportedProfile to create/overwrite a profile
     if DF.ApplyImportedProfile then
         -- Use provided profileKey, or fall back to name from import data
-        local targetName = profileKey
+        -- ☠ TYPE-CHECKED. This is a PUBLIC API argument that becomes a SavedVariables
+        -- profile KEY. A table key cannot be serialised by WoW's SV writer -- the profile
+        -- silently vanishes at logout while currentProfile still names it -- and a numeric
+        -- key makes table.sort in DF:GetProfiles throw "attempt to compare number with
+        -- string". A non-string falls back to the payload's own name, same as nil.
+        -- The caller's pcall never caught this because nothing threw at import time.
+        local targetName = (type(profileKey) == "string") and profileKey or nil
         if not targetName or targetName == "" then
             targetName = importData.profileName or "Imported Profile"
         end

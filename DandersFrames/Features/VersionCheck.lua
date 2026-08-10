@@ -91,7 +91,17 @@ VC.playerFullName = nil
 
 local function getPlayerFullName()
     local name = UnitName("player")
-    local realm = GetRealmName():gsub("%s", "")
+    -- ☠ NORMALIZED realm, matching NicknamesComm.lua's getPlayerFullName. CHAT_MSG_ADDON
+    -- hands back a sender whose realm is normalized (punctuation stripped, not just
+    -- spaces), so space-stripping GetRealmName() diverges on apostrophe/hyphen realms
+    -- (Kil'jaeden, Zul'jin, "Aggra (Portugues)"). On those realms the self-guard
+    -- `sender == self.playerFullName` never matched -- we answered our own broadcast and
+    -- recorded ourselves -- and CollectGroupMembers built keys with the punctuation intact
+    -- that could never be found in seenUsers, so every same-realm member read as "not
+    -- detected". The sibling file has carried this fix AND its reasoning; this one was
+    -- never updated.
+    local realm = (GetNormalizedRealmName and GetNormalizedRealmName())
+        or (GetRealmName() or ""):gsub("%s", "")
     return name .. "-" .. realm
 end
 
@@ -336,7 +346,15 @@ function VC:CollectGroupMembers()
         end
         local name, realm = UnitName(token)
         if name then
-            if not realm or realm == "" then realm = GetRealmName():gsub("%s", "") end
+            -- ☠ The other half of the realm fix above. UnitName returns an EMPTY realm for
+            -- same-realm players, so this fallback supplies ours -- and it must be
+            -- normalized the same way, or every same-realm member's fullName fails to
+            -- match a seenUsers key built from the CHAT_MSG_ADDON sender. That is the
+            -- whole "reports everyone as not detected" symptom.
+            if not realm or realm == "" then
+                realm = (GetNormalizedRealmName and GetNormalizedRealmName())
+                    or (GetRealmName() or ""):gsub("%s", "")
+            end
             local fullName = name .. "-" .. realm
             local entry = { name = name, realm = realm, fullName = fullName }
             -- Self: always considered "detected" with local version

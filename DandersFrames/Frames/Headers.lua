@@ -6351,7 +6351,11 @@ function DF:DumpHeaderInfo()
     print("  sortEnabled:", db.sortEnabled and "true" or "false")
     o:Section("Raid settings")
     print("  raidUseGroups:", raidDb.raidUseGroups and "true" or "false")
-    print("  raidEnabled:", raidDb.raidEnabled and "true" or "false")
+    -- ⚠ DF.db, not raidDb. The Enable Raid Frames checkbox writes the profile ROOT key;
+    -- the raid table carries an inert same-named key inherited from PartyDefaults, so
+    -- reading it here reported the opposite of the truth to whoever was diagnosing the
+    -- setting. Same root cause as the two live reads fixed in Frames/Init.lua.
+    print("  raidEnabled:", (DF.db and DF.db.raidEnabled ~= false) and "true" or "false")
     print("  sortEnabled:", raidDb.sortEnabled and "true" or "false")
     print("  sortSelfPosition:", raidDb.sortSelfPosition or "nil")
     print("  sortSeparateMeleeRanged:", raidDb.sortSeparateMeleeRanged and "true" or "false")

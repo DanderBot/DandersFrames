@@ -187,7 +187,19 @@ local function contentMatches(other, def, hasContent)
     return (other.name or "") == (def.name or "")
 end
 
+-- ☠ Forward-declared: sanitizeName is defined ~50 lines below but is called from
+-- ImportCustomFilters above it. Without this it compiles to a nil GLOBAL and throws on
+-- the first imported filter. Assigned (not re-localised) at its definition.
+local sanitizeName
+
+-- ☠ TYPE-CHECK `def`. Its values come straight off an imported payload, and
+-- ValidatePayloadShape is deliberately shallow ("deep validation of every setting would
+-- reject payloads from a NEWER build") -- it checks that customAuraFilters is a table,
+-- never what is IN it. A number or string value here used to throw "attempt to index a
+-- number value" from the render-adjacent import path, after filterPresetOverrides had
+-- already been replaced.
 local function defHasContent(def)
+    if type(def) ~= "table" then return false end
     return next(def.spells or {}) ~= nil or next(def.rawIDs or {}) ~= nil
 end
 
@@ -219,6 +231,12 @@ function R:ImportCustomFilters(imported)
 
     for _, cfId in ipairs(importIds) do
         local def = imported[cfId]
+        -- ☠ Skip a malformed entry rather than letting it reach CreateCustomFilter and
+        -- the pairs() loops below. defHasContent now type-checks, but everything after it
+        -- indexes `def` directly.
+        if type(def) ~= "table" then
+            DF:DebugWarn("FILTER", "ImportCustomFilters: skipping non-table entry '%s'", tostring(cfId))
+        else
         local hasContent = defHasContent(def)
         if contentMatches(store.customFilters[cfId], def, hasContent) then
             remap[cfId] = cfId
@@ -233,7 +251,12 @@ function R:ImportCustomFilters(imported)
             if reuse then
                 remap[cfId] = reuse
             else
-                local newId = self:CreateCustomFilter(def.name or cfId)
+                -- ☠ SANITISE. This name is untrusted text from another player's payload
+                -- and it lands in a list row. sanitizeName strips |c / |r / | escapes and
+                -- control characters and clamps to MAX_NAME_LEN -- the single-filter
+                -- import path has always used it; this one took the payload verbatim, so
+                -- colour escapes survived into every filter list and designer dropdown.
+                local newId = self:CreateCustomFilter(sanitizeName(def.name or cfId))
                 local dst = store.customFilters[newId]
                 for sid in pairs(def.spells or {}) do dst.spells[sid] = true end
                 for rid in pairs(def.rawIDs or {}) do dst.rawIDs[rid] = true end
@@ -243,6 +266,7 @@ function R:ImportCustomFilters(imported)
                 storeIds[#storeIds + 1] = newId
             end
         end
+        end  -- type(def) == "table"
     end
     return remap
 end
@@ -279,7 +303,9 @@ end
 -- An imported name is untrusted text that lands in a list row. Strip colour
 -- escapes and control characters so it can't inject formatting, then clamp to
 -- the same length the rename prompt enforces.
-local function sanitizeName(name)
+-- ⚠ NO `local` -- assigns the forward declaration above ImportCustomFilters, which
+-- calls this. Re-adding `local` mints a second upvalue and nils the caller's reference.
+function sanitizeName(name)
     name = tostring(name or "")
     name = name:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("||", ""):gsub("|", "")
     name = name:gsub("%c", "")
@@ -654,9 +680,18 @@ function R:ResolveSelection(selection, showAll)
             end
         end
         -- Raw IDs from UNSELECTED custom filters are known-but-unselected too
-        for cfId, f in pairs(self:GetStore().customFilters) do
+        -- ☠ Through GetCustomFilter, not the raw store entry. That accessor exists
+        -- precisely to heal `f.spells` / `f.rawIDs` on an entry that predates them ("a
+        -- hand-edited or older-alpha store can carry a filter without them"), and every
+        -- other reader in this file is either healed or defensive. This loop indexed the
+        -- raw entry, so one such filter turned Uncategorised Buffs into `pairs(nil)` on
+        -- the render path.
+        for cfId in pairs(self:GetStore().customFilters) do
             if not (selection.customs and selection.customs[cfId]) then
-                for rid in pairs(f.rawIDs) do map[rid] = true end
+                local f = self:GetCustomFilter(cfId)
+                if f then
+                    for rid in pairs(f.rawIDs) do map[rid] = true end
+                end
             end
         end
         -- ...but never exclude a raw ID that a SELECTED custom also carries
