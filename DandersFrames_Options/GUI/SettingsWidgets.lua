@@ -1,4 +1,4 @@
--- ============================================================
+﻿-- ============================================================
 -- SETTINGS-PANEL WIDGETS
 -- ============================================================
 -- Widget factories used only by the settings panel, lifted out of the resident
@@ -813,6 +813,36 @@ function GUI:CreateIconButton(parent, iconName, text, width, height, func, iconS
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
     return btn
+end
+
+-- A hairline rule for use INSIDE a settings group: separates a sub-option from the
+-- controls it belongs to, or a scope switch from the list it governs, without the
+-- weight of a second header.
+--
+-- ⚠ It was hand-rolled inline on the Blizzard Frames group and copied from there
+-- each time it was wanted again — five lines of texture plumbing per site, each free
+-- to drift in alpha, height and inset. This is that same rule, once.
+--
+-- Returns a Frame ready for AddWidget; the CALLER supplies the slot height, because
+-- the rule is 1px and everything else in the slot is deliberate air. 14 is the
+-- established value and what every current caller passes.
+--
+-- opts.width   frame width (default 260, the settings-group content width)
+-- opts.alpha   line alpha (default 0.08 — visible on the panel, invisible as a box)
+-- opts.inset   pixels held back from each end, for a rule that should not run the
+--              full width of its group
+function GUI:CreateSeparator(parent, opts)
+    opts = opts or {}
+    local inset = opts.inset or 0
+    local f = CreateFrame("Frame", nil, parent)
+    f:SetSize(opts.width or 260, 1)
+    local tex = f:CreateTexture(nil, "OVERLAY")
+    tex:SetColorTexture(1, 1, 1, opts.alpha or 0.08)
+    tex:SetPoint("LEFT", inset, 0)
+    tex:SetPoint("RIGHT", -inset, 0)
+    tex:SetHeight(1)
+    f.Texture = tex   -- exposed so a caller can re-tint without rebuilding
+    return f
 end
 
 -- Creates a \"See Also:\" section with clickable links to related pages

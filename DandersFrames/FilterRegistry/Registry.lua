@@ -695,6 +695,57 @@ function R:ResolveSelection(selection, showAll)
     return { kind = "include", map = map }
 end
 
+-- How many DISTINCT auras a selection adds up to.
+--
+-- ⚠ NOT derivable by counting ResolveSelection's map. That map is keyed by spell
+-- ID and addRecordIDs puts every ID a record carries into it -- rank variants,
+-- follower-cast copies -- so its size runs roughly triple what the user sees
+-- listed. The right-hand pane counts RECORDS ("48 of 63 tracked"), and this number
+-- is displayed inches away from that one, so it has to count the same things.
+--
+-- Raw IDs from a custom filter have no record, so each counts once on its own;
+-- one that DOES resolve to a record dedups against it.
+--
+-- Returns nil when the selection has no bounded total: nothing selected (the bar
+-- falls back to showing everything) or Uncategorised Buffs, which admits any aura
+-- the registry has never seen. The caller decides what to print for "no total" --
+-- this deliberately does not invent a number for the unbounded case.
+function R:CountSelection(selection)
+    if not selection or selection.uncategorised then return nil end
+    local anySel = (selection.presets and next(selection.presets))
+        or (selection.customs and next(selection.customs))
+    if not anySel then return nil end
+
+    local seen, n = {}, 0
+    local function take(k)
+        if k ~= nil and not seen[k] then
+            seen[k] = true
+            n = n + 1
+        end
+    end
+
+    if selection.presets then
+        for catKey in pairs(selection.presets) do
+            local recs = R.ByCategory[catKey]
+            if recs then
+                for _, rec in ipairs(recs) do
+                    if self:IsSpellEnabled(catKey, rec) then take(rec) end
+                end
+            end
+        end
+    end
+    if selection.customs then
+        for cfId in pairs(selection.customs) do
+            local f = self:GetCustomFilter(cfId)
+            if f then
+                for sid in pairs(f.spells or {}) do take(R.ByID[sid] or sid) end
+                for rid in pairs(f.rawIDs or {}) do take(R.ByID[rid] or rid) end
+            end
+        end
+    end
+    return n
+end
+
 -- Stable signature: kind + sorted ids. Structural rebuilds key off this.
 -- `resolved` (optional) is a pre-computed ResolveSelection result for the SAME
 -- selection/showAll pair — pass it when the caller already resolved, so no

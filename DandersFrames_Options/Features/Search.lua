@@ -962,15 +962,35 @@ function Search:ScrollToSection(tabName, sectionName)
     end
     if not flashTarget then return end
 
-    -- Try to scroll the section header into view.
+    -- Put the section at the TOP of the viewport.
+    --
+    -- ☠ TWO BUGS LIVED HERE, and both only showed on a page you had already scrolled
+    -- — which is the common case, because a page keeps its scroll position when you
+    -- leave and come back:
+    --
+    --   1. `pageTop - widgetTop` is a DELTA from the current viewport top, measured
+    --      in live screen coordinates that already include however far the page is
+    --      scrolled. SetVerticalScroll takes an ABSOLUTE offset from the top of the
+    --      content. Passing the delta as the absolute silently landed you somewhere
+    --      arbitrary the moment the page was not already at the top; it was only ever
+    --      correct because the two agree when the current scroll is 0.
+    --
+    --   2. `if offset > 0` meant a target ABOVE the current position did nothing at
+    --      all. Scroll down, click a link to a section near the top, and the page
+    --      did not move -- so the flash fired off-screen above the fold and the link
+    --      looked broken. Clamping to 0 instead lets it scroll UP as well as down,
+    --      which is the whole point of "jump to this section".
+    --
+    -- Reading the current scroll and adding the delta fixes both.
     local widgetTop = scrollTo:GetTop()
     local pageTop = page:GetTop()
-    if widgetTop and pageTop then
-        local offset = pageTop - widgetTop - 20
-        if offset > 0 and page.SetVerticalScroll then
-            local maxScroll = page.child:GetHeight() - page:GetHeight()
-            page:SetVerticalScroll(math.min(offset, math.max(0, maxScroll)))
-        end
+    if widgetTop and pageTop and page.SetVerticalScroll then
+        local current = page:GetVerticalScroll() or 0
+        -- 20px of air above the header, so it reads as the top of a section rather
+        -- than as a line flush against the viewport edge.
+        local target = current + (pageTop - widgetTop) - 20
+        local maxScroll = math.max(0, (page.child:GetHeight() or 0) - (page:GetHeight() or 0))
+        page:SetVerticalScroll(math.max(0, math.min(target, maxScroll)))
     end
     return flashTarget   -- the section (group or header), so GUI:LinkToSetting can flash it
 end

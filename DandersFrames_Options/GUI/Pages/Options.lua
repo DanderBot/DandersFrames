@@ -43,6 +43,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             DF.SectionRegistry[pageId] = prefixes
         end
 
+        -- ☠ A page that owns NO per-mode keys gets no row at all. All three controls
+        -- act on this page's registered prefixes, so with an empty list they render
+        -- fully live -- hover, tooltip, click -- and do nothing whatsoever. Three
+        -- convincing dead buttons is a worse failure than a missing row, and it is
+        -- not hypothetical: the Filter Designer became exactly that page when filter
+        -- selection moved out to the consumers, since what it edits is per PROFILE
+        -- (preset overrides) and per ACCOUNT (custom filters) rather than per mode.
+        --
+        -- Returns an empty zero-height frame rather than nil: every caller Add()s the
+        -- result straight into a page column, and nil there is a layout error.
+        if type(prefixes) ~= "table" or #prefixes == 0 then
+            local empty = CreateFrame("Frame", nil, parent)
+            empty:SetSize(1, 1)
+            empty.layoutHeight = 0
+            return empty
+        end
+
         local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
         btn:SetSize(115, 26)
         -- Copy is a normal button; the shared styler owns the backdrop/hover AND
@@ -628,8 +645,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- See Also links
         Add(GUI:CreateSeeAlso(self.child, {
-            {pageId = "auras_buffs", label = L["Buffs"]},
-            {pageId = "auras_debuffs", label = L["Debuffs"]},
+            {pageId = "auras_buffs", label = L["Buff Bar"]},
+            {pageId = "auras_debuffs", label = L["Debuff Bar"]},
             {pageId = "auras_defensiveicon", label = L["Defensive Icon"]},
             {pageId = "auras_auradesigner", label = L["Aura Designer"]},
         }), 30, "both")
@@ -1386,16 +1403,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         ), 30)
         disablePlayerCheck.tooltip = L["Hides the default Blizzard player portrait and health bar."]
 
-        -- Visual divider + small caption to separate the related sub-option
-        -- (Show Side Menu only applies once a Blizzard frame is disabled)
-        local divider = CreateFrame("Frame", nil, self.child)
-        divider:SetSize(260, 1)
-        local dividerTex = divider:CreateTexture(nil, "OVERLAY")
-        dividerTex:SetColorTexture(1, 1, 1, 0.08)
-        dividerTex:SetPoint("LEFT", 0, 0)
-        dividerTex:SetPoint("RIGHT", 0, 0)
-        dividerTex:SetHeight(1)
-        blizzardGroup:AddWidget(divider, 14)
+        -- Visual divider to separate the related sub-option (Show Side Menu only
+        -- applies once a Blizzard frame is disabled).
+        --
+        -- This rule was hand-rolled here first; it is now GUI:CreateSeparator, so the
+        -- Buff Bar page's scope/filter split draws the identical line instead of a
+        -- second copy of the same five lines.
+        blizzardGroup:AddWidget(GUI:CreateSeparator(self.child), 14)
 
         local sideMenuCheck = blizzardGroup:AddWidget(GUI:CreateCheckbox(
             self.child, L["Show Party/Raid Side Menu"],
