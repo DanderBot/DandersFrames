@@ -50,8 +50,14 @@ DF.AuraBlacklist.DebuffSpells = {
     { spellId = 447959, display = "Ride Along Active",      icon = 4640493 },
     { spellId = 447960, display = "Ride Along Inactive",    icon = 4640493 },
     -- Mythic+ keystone scaling debuff. NeverSecret (confirmed via /al secretcensus),
-    -- so it's hideable; opt-in (default off) because it's informative as well as noisy
-    -- — it sits on every player for the whole dungeon. icon omitted → resolved live.
+    -- so it's hideable. icon omitted → resolved live.
+    --
+    -- ⚠ Hidden by default, like every other entry here (PR #228). It used to be the
+    -- one opt-in exception, on the grounds that it is informative as well as noisy —
+    -- but it sits on every player for the whole dungeon, so it tells you nothing you
+    -- cannot read off the keystone, and carving out an exception made the list read
+    -- as half-enabled. If that call is ever revisited, PartyDefaults.debuffBlacklist
+    -- is the other half of it.
     { spellId = 206151, display = "Challenger's Burden" },
 }
 
