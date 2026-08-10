@@ -372,6 +372,17 @@ function AuraContainer._queueTestBounce()
     end)
 end
 
+-- ☠ Parent-driven handles are rebuilt BY THEIR PARENT, never directly. A gate link's
+-- rebuild makes a fresh slot host and re-fires onHost, which recreates everything below
+-- it; driving the inner link here as well would race that and strand a duplicate.
+-- ☠ FILE SCOPE, not inside SetTestMode. The regen flush (Handle:_registerRegen) consults
+-- this too, and when it was a SetTestMode-local that reference silently resolved to a nil
+-- GLOBAL — the surrounding pcall ate the call error and the whole deferred rebuild op
+-- became a no-op for every handle.
+local function skipNested(h)
+    return h and h.config and h.config.parentDrivenVisibility
+end
+
 function AuraContainer.SetTestMode(on)
     on = on and true or false
     if (AuraContainer._testMode or false) == on then return end
@@ -422,14 +433,8 @@ function AuraContainer.SetTestMode(on)
     -- rebuild made the invariant unnecessary. The asymmetry is what makes it worth
     -- naming: a false NEGATIVE silently corrupts what is on screen, a false
     -- POSITIVE only costs one extra rebuild.
-    -- ☠ Parent-driven handles are rebuilt BY THEIR PARENT, never directly. A gate link's
--- rebuild makes a fresh slot host and re-fires onHost, which recreates everything below
--- it; driving the inner link here as well would race that and strand a duplicate.
-local function skipNested(h)
-    return h and h.config and h.config.parentDrivenVisibility
-end
-
-local function rebuildAll()
+    -- (Parent-driven handles are skipped here too — see skipNested at file scope.)
+    local function rebuildAll()
         if AuraContainer._handles then
             for h in pairs(AuraContainer._handles) do
                 if not h._destroyed and h._testFrame and not skipNested(h) then
@@ -4542,7 +4547,17 @@ function Handle:_registerRegen()
                     if op then
                         pcall(function()
                             if op == "rebuild" then
-                                if not skipNested(h) then h:_rebuild() end
+                                -- ☠ A NEVER-BUILT NESTED LINK MUST STILL BUILD HERE. skipNested
+                                -- exists because a parent link's rebuild re-fires onHost, which
+                                -- recreates the child — driving the child here AS WELL races
+                                -- that and strands a duplicate (d80f319). But a link whose
+                                -- Create happened IN COMBAT has _deferRebuild queueing its ONLY
+                                -- build path: the parent is not rebuilding, onHost will not
+                                -- re-fire (host.dfChainLink is already stamped), and chainSig
+                                -- matches so no sync heals it. With no backend there is nothing
+                                -- a duplicate could be stranded FROM, so the escape cannot
+                                -- reintroduce the race — do not re-tighten it.
+                                if not skipNested(h) or not h.backend then h:_rebuild() end
                             elseif op == "retarget" then
                                 if h.backend then h.backend:setUnit(h.config.unit) end
                             elseif op == "enable" then
@@ -5182,7 +5197,9 @@ end
 -- Behaviour is identical to today. (dfLevelHost stays available for a future consumer
 -- that wants level to become live, which would need regions reparented onto it.)
 --
--- Returns a SlotHandle, or nil if unsupported / in combat with no owner yet / test frame.
+-- Returns a SlotHandle, or nil if unsupported / test frame / in combat with no owner yet
+-- / in combat needing a NEW slot (re-adoption of an existing key still works in combat;
+-- its mutators defer and replay at regen).
 function AuraContainer:AcquireSlot(frame, slotKey, spec)
     if type(slotKey) ~= "string" or slotKey == "" or type(spec) ~= "table" then return nil end
     if not frame then return nil end
@@ -5214,6 +5231,16 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
         end
         return existing
     end
+
+    -- ☠ NO NEW SLOT IN COMBAT. AddAuraSlot on the secure container is exactly the class
+    -- of call ensureOwner refuses above ("container creation is combat-gated everywhere
+    -- else in this file"), and this path used to make it anyway whenever the owner
+    -- already existed. Re-adoption above is fine -- every mutator it uses now defers and
+    -- replays -- but a NEW slot has no deferral story (AddAuraSlot is add-only, one-shot,
+    -- and its initializeFrame window is pre-seal). Returning nil sends the caller down
+    -- its documented fallback: placedAcquire creates a per-indicator CONTAINER, which
+    -- defers its build to regen properly.
+    if InCombatLockdown() then return nil end
 
     -- ☠ THE PARK TABLE IS UNBOUNDED AND CANNOT BE FREED. AddAuraSlot is add-only -- the
     -- engine exposes no remove -- so every distinct slotKey ever seen on this frame is a
@@ -5377,6 +5404,38 @@ function SlotHandle:Destroy()      return self:Park() end
 -- reach for the button, which is the behaviour that stopped the error storm.
 function SlotHandle:GetAlphaHost() return self.button and self.button.dfLevelHost or nil end
 
+-- ☠ THE SLOT-SIDE REGEN DRAIN, shared by every SlotHandle deferral (_pendingTuning from
+-- ApplyTuning / Park / Restore, _pendingRestyle from ApplyStyle). One frame, one pending
+-- set — a second parallel mechanism would order tuning and restyle by accident of which
+-- event handler ran first. Drain order is tuning BEFORE restyle (population first,
+-- cosmetics second), matching both the container-side regen drain and _readoptParked.
+local function registerSlotRegen(handle)
+    local reg = AuraContainer._slotRegen
+    if not reg then
+        reg = CreateFrame("Frame")
+        -- Weak keys: a slot torn down before regen must not be kept alive by this.
+        reg._pending = setmetatable({}, { __mode = "k" })
+        reg:RegisterEvent("PLAYER_REGEN_ENABLED")
+        reg:SetScript("OnEvent", function(selfFrame)
+            for h in pairs(selfFrame._pending) do
+                selfFrame._pending[h] = nil
+                -- pcall per slot so one failure cannot strand the rest, matching the
+                -- container-side regen drain.
+                if h._pendingTuning then
+                    h._pendingTuning = nil
+                    pcall(h._replayTuning, h)
+                end
+                if h._pendingRestyle then
+                    h._pendingRestyle = nil
+                    pcall(h.ApplyStyle, h)
+                end
+            end
+        end)
+        AuraContainer._slotRegen = reg
+    end
+    reg._pending[handle] = true
+end
+
 -- Stop this slot displaying, WITHOUT destroying anything. Proven in game 2026-08-05:
 -- an empty filter string matches nothing (it does NOT fall back to a default).
 -- ⚠ Display only -- the slot keeps its key and its button.
@@ -5392,16 +5451,39 @@ function SlotHandle:_pushFilter()
     return pcall(c.SetAuraSlotFilterString, c, self.key, want)
 end
 
+-- ☠ A REFUSED PUSH MUST NOT BE LATCHED AND FORGOTTEN. `parked` records the consumer's
+-- DECISION and is correct to latch immediately (the early-returns key off it), but the
+-- filter push that actuates it can be refused in lockdown — and before this, the latch
+-- plus the early-return meant a refused push was never retried, so the old visual kept
+-- rendering forever. On failure, queue the regen replay: _replayTuning re-runs
+-- _pushFilter, which re-derives from parked/_gateHidden/liveFilter at drain time, so
+-- whatever the state is BY THEN is what gets pushed (a Park then Restore in the same
+-- fight collapses to one correct push).
 function SlotHandle:Park()
     if self.parked then return true end
     self.parked = true
-    return self:_pushFilter()
+    local ok = self:_pushFilter()
+    -- ⚠ Queue on lockdown even when pcall reported success: whether a secure setter
+    -- refuses loudly (error) or quietly (no-op) is the engine's business, and the replay
+    -- is idempotent either way.
+    if not ok or InCombatLockdown() then
+        self._pendingTuning = true
+        registerSlotRegen(self)
+    end
+    return ok
 end
 
+-- Same failure contract as Park — the re-adopt path (AcquireSlot on an existing key)
+-- calls this in combat, and a refused un-park left the slot dark forever.
 function SlotHandle:Restore()
     if not self.parked then return true end
     self.parked = false
-    return self:_pushFilter()
+    local ok = self:_pushFilter()
+    if not ok or InCombatLockdown() then
+        self._pendingTuning = true
+        registerSlotRegen(self)
+    end
+    return ok
 end
 
 -- ☠ THE IDENTITY GATE, WHICH THIS PATH HAD NONE OF. Every Aura Designer placed config
@@ -5451,6 +5533,13 @@ end
 -- Live tuning. All three are real live mutators on the slot; none needs a rebuild.
 -- ⚠ SetAuraSlotCandidateFilters has NO equality check engine-side -- every call clears the
 -- slot's candidates and reparses -- so callers should compare before calling.
+--
+-- ☠ STORE BEFORE THE COMBAT CHECK, exactly as Handle:ApplyTuning does. The Factory stamps
+-- entry.tuningSig BEFORE calling this, so a dropped pass is never retried by SyncFrame --
+-- the stored state below plus the regen replay is the ONLY thing standing between an
+-- in-combat selection edit and it being silently lost (bug #1024). The engine's own rule
+-- (see applyGroupTuning's header) is that no native tuning setter runs in lockdown; this
+-- path used to break that rule, pcall-swallow the refusals, and return true anyway.
 function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirection)
     local c = self.owner and self.owner.container
     if not c then return false end
@@ -5459,17 +5548,35 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
         self.liveFilter = filter
         filterChanged = true
     end
-    if candidateFilters ~= nil then
+    local candidatesChanged = candidateFilters ~= nil
+    if candidatesChanged then
         self._lastCandidateFilters = candidateFilters
-        pcall(c.SetAuraSlotCandidateFilters, c, self.key, candidateFilters)
+    end
+    -- Kept for the replay: sort is not otherwise stored on the handle (AddAuraSlot took
+    -- it as an option), so a deferred sort edit would have nothing to replay from.
+    if sortMethod ~= nil then
+        self._lastSortMethod    = sortMethod
+        self._lastSortDirection = sortDirection or 0
     end
     -- Recompute the gate's INPUTS whenever either half of the filter moves -- the verdict
     -- depends on the filter string AND the candidateFilters together, so recomputing on
-    -- only one of them leaves a slot flagged from its previous configuration.
-    if filterChanged or candidateFilters ~= nil then
+    -- only one of them leaves a slot flagged from its previous configuration. Pure stored
+    -- state, so it is correct to do even in lockdown -- only the secure pushes defer.
+    if filterChanged or candidatesChanged then
         local cf = self._lastCandidateFilters
         self._idGateVulnerable    = filterVulnerableToIdentityGate(self.liveFilter, cf)
         self._idGateSourceRelative = filterSourceRelative(self.liveFilter, cf)
+    end
+    -- Defer and replay, mirroring ApplyStyle below. The gate VERDICT is deliberately not
+    -- re-evaluated here in combat: _applyIdentityGate actuates via a secure push, and the
+    -- replay runs it first thing out of lockdown, before any filter reaches the engine.
+    if InCombatLockdown() then
+        self._pendingTuning = true
+        registerSlotRegen(self)
+        return false
+    end
+    if candidatesChanged then
+        pcall(c.SetAuraSlotCandidateFilters, c, self.key, candidateFilters)
     end
     -- Re-evaluate before pushing, so a slot that just became vulnerable is dark on the
     -- very first pass rather than showing one frame of the wrong player's auras.
@@ -5479,6 +5586,29 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
         pcall(c.SetAuraSlotSortMethod, c, self.key, sortMethod, sortDirection or 0)
     end
     return true
+end
+
+-- The regen half of ApplyTuning's defer-and-replay. Coarse on purpose: it re-pushes the
+-- whole stored trio rather than tracking which of them the deferred call(s) touched --
+-- delta tracking would be a second bookkeeping mechanism to keep honest, and this runs
+-- once per combat-edited slot per regen. The candidateFilters re-push (no engine-side
+-- equality check) is the only real cost, and it is out of combat by definition here.
+-- ⚠ _pushFilter runs UNCONDITIONALLY: it re-derives from parked/_gateHidden/liveFilter,
+-- so this drain also heals a Park/Restore/gate push that was refused mid-combat.
+function SlotHandle:_replayTuning()
+    local c = self.owner and self.owner.container
+    if not c then return end
+    if self._lastCandidateFilters ~= nil then
+        pcall(c.SetAuraSlotCandidateFilters, c, self.key, self._lastCandidateFilters)
+    end
+    -- Verdict first (population order matches ApplyTuning): a slot that became
+    -- vulnerable during combat must come out of it dark, not flash one frame open.
+    self:_applyIdentityGate()
+    self:_pushFilter()
+    if self._lastSortMethod ~= nil then
+        pcall(c.SetAuraSlotSortMethod, c, self.key, self._lastSortMethod,
+            self._lastSortDirection or 0)
+    end
 end
 
 -- In-place cosmetic restyle, mirroring Handle:ApplyStyle. Re-runs the engine's region
@@ -5508,26 +5638,7 @@ function SlotHandle:ApplyStyle(style, layout)
     -- `type(...) == "table"` guards above mean a bare call re-paints from stored cfg.
     if InCombatLockdown() then
         self._pendingRestyle = true
-        local reg = AuraContainer._slotRegen
-        if not reg then
-            reg = CreateFrame("Frame")
-            -- Weak keys: a slot torn down before regen must not be kept alive by this.
-            reg._pending = setmetatable({}, { __mode = "k" })
-            reg:RegisterEvent("PLAYER_REGEN_ENABLED")
-            reg:SetScript("OnEvent", function(selfFrame)
-                for h in pairs(selfFrame._pending) do
-                    selfFrame._pending[h] = nil
-                    if h._pendingRestyle then
-                        h._pendingRestyle = nil
-                        -- pcall per slot so one failure cannot strand the rest, matching
-                        -- the container-side regen drain.
-                        pcall(h.ApplyStyle, h)
-                    end
-                end
-            end)
-            AuraContainer._slotRegen = reg
-        end
-        reg._pending[self] = true
+        registerSlotRegen(self)
         return false
     end
     -- ☠ REFUSE TO STYLE A SLOT WHOSE LEVEL HOST DOES NOT EXIST YET, and the damage is

@@ -14,7 +14,7 @@ DF.TextDesigner.Render = Render
 local function getResolver() return DF.TextDesigner.Resolver end
 local function getMS() return DF.TextDesigner.MidnightSafe end
 
-local wipe = wipe
+local wipe, pcall = wipe, pcall
 
 -- Enabled-element id set, rebuilt by UpdateFrame. Module-local and reused
 -- (wipe, not {}) because UpdateFrame runs in the unit-event hot path.
@@ -252,37 +252,179 @@ local function mirrorCategoryMatches(elem, category)
     return false
 end
 
+-- ============================================================
+-- MIRROR WRITE GUARDS (bug #1026)
+-- ☠ MIRROR WRITES CAN BE DENIED IN COMBAT. The mirror parent is an aura-slot
+-- child (slot.dfMirrorHost) whose write-legality rests on the shape documented
+-- in AuraContainer's styleButton_regions: the access restriction is applied to
+-- the aura frame ALONE, but FORBIDDEN aspects propagate down the parent chain.
+-- With condition CHAINS (>= 2 groups) the host ends up nested inside ANOTHER
+-- slot's secret-visibility subtree, and every write to the mirror — SetFont,
+-- SetText, SetShown, even Hide() — is refused the moment auras go secret at
+-- combat entry. These are DENIED WRITES, not taint we caused: the identical
+-- writes succeed out of combat, and no execution path changes at combat start
+-- (the ordinary tdDriver flush is what walks into the denial).
+--
+-- So every mirror touch degrades instead of erroring, two layers deep:
+--   1. IsForbidden() early-out where cheap — a clean, no-error skip. ⚠ It is
+--      UNVERIFIED whether 12.1's access-restriction system reports through
+--      IsForbidden(), so this layer alone is never trusted.
+--   2. pcall backstop with a SUSPEND LATCH — the first failed write flips
+--      reg.suspended, every later mirror write for that registry is skipped,
+--      and PLAYER_REGEN_ENABLED clears the latch and forces one category
+--      render to resync (same regen-drain idiom as AuraContainer's
+--      _registerRegen).
+--
+-- ☠ NEVER Hide() as a failure fallback — Hide is itself a denied write on the
+-- same object. Skipping entirely is the only safe response to a denial.
+-- NB: a denied write may still log a taint.log incident even under pcall (the
+-- secret-compare precedent in SafeSetFont's text-refresh block shows blocked
+-- COMPARES do; writes are unconfirmed) — but it cannot error and cannot spam:
+-- the latch stops the writes after the first denial.
+--
+-- Visual result while suspended: the coloured cover freezes mid-combat, but
+-- its VISIBILITY still tracks the aura through parent-driven inheritance (the
+-- point of the attach-and-inherit design), and the real FontString underneath
+-- stays correct throughout.
+-- ============================================================
+
+-- Lazily-created PLAYER_REGEN_ENABLED drain for suspended registries. Weak
+-- keys, like AuraContainer._regen._handles: a frame released while suspended
+-- must not be pinned alive by the drain set.
+local function registerMirrorRegen(frame)
+    local drain = Render._mirrorRegen
+    if not drain then
+        drain = CreateFrame("Frame")
+        drain._frames = setmetatable({}, { __mode = "k" })
+        drain:RegisterEvent("PLAYER_REGEN_ENABLED")
+        drain:SetScript("OnEvent", function(self)
+            -- Removing the CURRENT key during pairs is legal; nothing here can
+            -- ADD one mid-loop — UpdateTextDesigner only marks the coalescing
+            -- buffer, so no write (hence no re-suspend) runs before next frame.
+            for fr in pairs(self._frames) do
+                self._frames[fr] = nil
+                local regs = fr._tdMirrors
+                if regs then
+                    for category, reg in pairs(regs) do
+                        if reg.suspended then
+                            reg.suspended = nil
+                            -- One forced category render resyncs font/text/shown
+                            -- on everything the freeze skipped (coalesced, so
+                            -- several categories still cost one render).
+                            if DF.UpdateTextDesigner then
+                                DF:UpdateTextDesigner(fr, category)
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+        Render._mirrorRegen = drain
+    end
+    drain._frames[frame] = true
+end
+
+-- Latch a registry off after a denied write. At most once per registry per
+-- combat (the early return), so the tostring()s below are not hot-path cost.
+-- DebugWarn is once per session — the developer-visible breadcrumb; the Debug
+-- line carries the per-suspension detail when the TD category is enabled.
+local function suspendMirrors(frame, reg, why)
+    if reg.suspended then return end
+    reg.suspended = true
+    registerMirrorRegen(frame)
+    if not Render._mirrorSuspendWarned then
+        Render._mirrorSuspendWarned = true
+        DF:DebugWarn("TD", "mirror write denied — AD text colour covers frozen until combat ends")
+    end
+    DF:Debug("TD", "mirror write denied (%s) — '%s' covers suspended until combat ends (unit=%s)",
+        tostring(why), tostring(reg.category), tostring(frame.unit))
+end
+
+-- One guarded mirror write. `m` is the region the write targets (the
+-- IsForbidden probe); `fn` is pcall'ed with the args that follow, so both
+-- method-style writes (m.SetText, m, ...) and DF:SafeSetFont
+-- (DF.SafeSetFont, DF, m, ...) take the same allocation-free form.
+local function mirrorWrite(frame, reg, m, fn, ...)
+    if reg.suspended then return false end
+    if m.IsForbidden and m:IsForbidden() then
+        suspendMirrors(frame, reg, "IsForbidden")
+        return false
+    end
+    local ok, err = pcall(fn, ...)
+    if not ok then
+        suspendMirrors(frame, reg, err)
+        return false
+    end
+    return true
+end
+
+-- Best-effort hide for a mirror whose REGISTRY is being discarded (parent
+-- swap / DisableMirrors / Teardown). No latch: the registry will never be
+-- written again, so there is nothing to suspend — and a denied Hide just
+-- means the parent chain takes the cover down with the slot instead.
+local function retireMirror(m)
+    if m.IsForbidden and m:IsForbidden() then return end
+    pcall(m.Hide, m)
+    pcall(m.ClearAllPoints, m)
+end
+
 -- Feed one rendered element to every matching mirror (called from updateOne
 -- with the element's resolved appearance + the exact safe text just set on
 -- the real FontString). A registered-but-no-longer-matching mirror (the user
 -- re-typed a group's items) is hidden so it can't linger as a stale cover.
+-- Every touch of a mirror in here is a guarded write (see MIRROR WRITE GUARDS
+-- above): once a mirror has materialized this runs on EVERY render whether or
+-- not the aura is up, so in-combat denial is the chained shape's NORMAL case,
+-- not an edge.
 local function mirrorElement(frame, elem, fs, app, safeText)
     for _, reg in pairs(frame._tdMirrors) do
-        local m = reg.byId[elem.id]
-        if mirrorCategoryMatches(elem, reg.category) then
+        if reg.suspended then
+            -- Latched: no writes of any kind until the regen drain clears it.
+        elseif mirrorCategoryMatches(elem, reg.category) then
+            local m = reg.byId[elem.id]
             if not m then
-                m = reg.parent:CreateFontString(nil, "OVERLAY")
-                m:SetAllPoints(fs)   -- anchors track the real text render-side
-                local c = reg.color
-                m:SetTextColor(c.r, c.g, c.b, c.a or 1)
-                reg.byId[elem.id] = m
-            end
-            -- Same setter, same resolved inputs -> identical rendering.
-            DF:SafeSetFont(m, fontPath(app.font), app.fontSize, app.outline)
-            -- Same SafeText value the real FontString just received (secret
-            -- passthrough; pcall + warn-once purely as a degrade path).
-            local ok = pcall(m.SetText, m, safeText)
-            if ok then
-                m:SetShown(fs:IsShown())
-            else
-                m:Hide()
-                if not Render._mirrorWarned then
-                    Render._mirrorWarned = true
-                    DF:DebugWarn("TD", "mirror SetText failed — AD text colour degraded off")
+                -- Guard the CREATE as a write too: the parent is the aura-slot
+                -- child, and materializing a child on a denied subtree is as
+                -- refusable as any setter. A mirror that fails any of its
+                -- creation-time writes is NOT stored — byId entries skip
+                -- SetAllPoints/SetTextColor on later passes, so storing a
+                -- half-built one would strand it unanchored/uncoloured for
+                -- good. The orphan FontString (no anchors, no text) renders
+                -- nothing and is at most one per registry per combat — the
+                -- latch stops repeats.
+                local parent = reg.parent
+                if parent.IsForbidden and parent:IsForbidden() then
+                    suspendMirrors(frame, reg, "parent forbidden")
+                else
+                    local ok, created = pcall(parent.CreateFontString, parent, nil, "OVERLAY")
+                    if not ok then
+                        suspendMirrors(frame, reg, created)
+                    else
+                        local c = reg.color
+                        -- anchors track the real text render-side
+                        if mirrorWrite(frame, reg, created, created.SetAllPoints, created, fs)
+                            and mirrorWrite(frame, reg, created, created.SetTextColor, created,
+                                c.r, c.g, c.b, c.a or 1) then
+                            reg.byId[elem.id] = created
+                            m = created
+                        end
+                    end
                 end
             end
-        elseif m then
-            m:Hide()
+            if m then
+                -- Same setter, same resolved inputs -> identical rendering.
+                mirrorWrite(frame, reg, m, DF.SafeSetFont, DF, m, fontPath(app.font), app.fontSize, app.outline)
+                -- Same SafeText value the real FontString just received (secret
+                -- passthrough). SetShown only after SetText lands — never show
+                -- a cover whose text write was refused, and (☠) never Hide()
+                -- on failure either: the latch skip IS the failure path.
+                if mirrorWrite(frame, reg, m, m.SetText, m, safeText) then
+                    mirrorWrite(frame, reg, m, m.SetShown, m, fs:IsShown())
+                end
+            end
+        else
+            local m = reg.byId[elem.id]
+            if m then mirrorWrite(frame, reg, m, m.Hide, m) end
         end
     end
 end
@@ -290,14 +432,23 @@ end
 -- Post-render visibility pass: mirrors follow their real FontStrings' shown
 -- state (covers disabled/deleted elements and the master-off path — every
 -- hide funnels through here). Content/appearance are owned by mirrorElement.
+-- Guarded writes: a suspended registry is skipped whole, and the first denial
+-- inside the loop latches and stops the rest of that registry's writes.
 local function syncMirrors(frame)
     local regs = frame._tdMirrors
     if not regs then return end
     local fss = frame._tdFontStrings
     for _, reg in pairs(regs) do
-        for id, m in pairs(reg.byId) do
-            local fs = fss and fss[id]
-            if fs then m:SetShown(fs:IsShown()) else m:Hide() end
+        if not reg.suspended then
+            for id, m in pairs(reg.byId) do
+                local fs = fss and fss[id]
+                if fs then
+                    mirrorWrite(frame, reg, m, m.SetShown, m, fs:IsShown())
+                else
+                    mirrorWrite(frame, reg, m, m.Hide, m)
+                end
+                if reg.suspended then break end
+            end
         end
     end
 end
@@ -486,7 +637,9 @@ function Render:EnableMirrors(frame, category, parent, color)
     frame._tdMirrors = frame._tdMirrors or {}
     local reg = frame._tdMirrors[category]
     if reg and reg.parent ~= parent then
-        for _, m in pairs(reg.byId) do m:Hide(); m:ClearAllPoints() end
+        -- Old mirrors sit on the outgoing slot subtree, which may already be
+        -- denied — retire best-effort, never trust the writes.
+        for _, m in pairs(reg.byId) do retireMirror(m) end
         reg = nil
     end
     if not reg then
@@ -495,7 +648,8 @@ function Render:EnableMirrors(frame, category, parent, color)
     else
         reg.color = color
         for _, m in pairs(reg.byId) do
-            m:SetTextColor(color.r, color.g, color.b, color.a or 1)
+            mirrorWrite(frame, reg, m, m.SetTextColor, m, color.r, color.g, color.b, color.a or 1)
+            if reg.suspended then break end
         end
     end
     syncMirrors(frame)
@@ -514,7 +668,7 @@ function Render:DisableMirrors(frame, category)
     local regs = frame and frame._tdMirrors
     local reg = regs and regs[category]
     if not reg then return end
-    for _, m in pairs(reg.byId) do m:Hide(); m:ClearAllPoints() end
+    for _, m in pairs(reg.byId) do retireMirror(m) end
     regs[category] = nil
 end
 
@@ -531,7 +685,7 @@ function Render:Teardown(frame)
     end
     if frame._tdMirrors then
         for _, reg in pairs(frame._tdMirrors) do
-            for _, m in pairs(reg.byId) do m:Hide(); m:ClearAllPoints() end
+            for _, m in pairs(reg.byId) do retireMirror(m) end
         end
         frame._tdMirrors = nil
     end

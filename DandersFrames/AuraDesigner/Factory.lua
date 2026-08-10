@@ -751,14 +751,47 @@ local function healthbarBlend(mode, blendCfg, a)
     return (blendCfg or 0.5) * a
 end
 
+-- ============================================================
+-- LEVEL CONSTANTS (single retune point — bug #1027)
+-- The container nests anchor -> native AuraContainer -> AuraSlot button, each a default
+-- +1 child, and the painted regions hang off the BUTTON — so an overlay's visual lands at
+--     anchor level + frameLevelOffset + 2
+-- (same measured arithmetic as Frames/Create.lua:672-679). A condition-chain GATE hands
+-- its mirror host back one level deeper still (a plain child frame of the button):
+--     anchor level + frameLevelOffset + 3
+-- That +2/+3 is derived from the code's default-child nesting, not from a live /fstack —
+-- if an in-game check disagrees, retune the two constants below and nothing else.
+--
+--   * AD_HEALTHBAR_COVER_OFFSET seats the Health Bar Color cover (both variants: fill
+--     cover and whole-bar tint). Intended seat is healthBar+1 — above the real fill,
+--     BELOW the attached absorb bar at healthBar+2 (Bars.lua:790/:1036) and the +2 power
+--     bar, exactly where the legacy tint sat — so -1 + 2 nesting = +1. The old value (1)
+--     landed the cover at healthBar+3, occluding the absorb shield (bug #1027).
+--   * AD_CHAIN_GATE_OFFSET makes a chain gate LEVEL-NEUTRAL: -3 + 3 nesting parks the
+--     gate's mirror host at the anchor's own level, so the FINAL visual link — created on
+--     that host with the consumer's own offset — seats exactly where the flat path puts
+--     it, for ANY chain length. If chained effects render N levels above their flat twin
+--     in game, lower this by N. The gate paints nothing itself, so its own level only has
+--     to be legal — ApplyZOrder clamps at 0, which can lift a gate (and therefore the
+--     visual) a level or two ONLY on a unit frame whose own level is under 3.
+local AD_HEALTHBAR_COVER_OFFSET = -1
+local AD_CHAIN_GATE_OFFSET = -3
+-- Text-mirror chain gates keep the mirror-host band (+30): the visual link there is
+-- itself a mirror host that must clear the TD overlay (~frame+25), and the gates always
+-- sat beside it. Deliberately NOT neutralised with the others — text chains render
+-- correctly today and their band has headroom; see buildMirrorHostConfig.
+local AD_TEXT_CHAIN_GATE_OFFSET = 30
+-- ============================================================
+
 -- Build an OVERLAY-TINT container config (health-bar tint, background tint). mode="overlay":
 -- the slot covers the host region and its tint texture (child of the slot) inherits the
 -- slot's secret visibility; DF.AuraContainer handles SetEnabled-last + combat deferral.
 -- levelOffset is added on top of the caller's anchor level; the tint texture then lands a
 -- further +2 above (anchor -> container -> slot nesting). Callers pick the anchor + offset so
--- the tint seats correctly: health-bar tint hosts on frame.healthBar with offset 1 (tint above
--- the real fill); background tint hosts on a frame parked at healthBar-3 with offset 0 (tint at
--- healthBar-1 — above frame.background, below every bar). See the two call sites for the math.
+-- the tint seats correctly: health-bar tint hosts on frame.healthBar with
+-- AD_HEALTHBAR_COVER_OFFSET (tint at healthBar+1 — above the fill, below the attached
+-- absorb bar); background tint hosts on a frame parked at healthBar-3 with offset 0 (tint
+-- at healthBar-1 — above frame.background, below every bar). See the call sites for the math.
 local function buildOverlayTintConfig(unit, map, r, g, b, blend, levelOffset, filter)
     return {
         unit = unit,
@@ -782,8 +815,11 @@ end
 -- frame's access restrictions (DenyTaintedAccessWhenAurasAreSecret) forbid driving a
 -- duplicate StatusBar outright, which is why the earlier mirror could never work. See the
 -- HEALTH FILL COVER note in Frames/AuraContainer.lua.
--- Level offset 1 = healthBar level + 1 (above the real fill, below the +2 power / content
--- overlay), exactly where the legacy tint sat. Colour/texture/alpha are static config.
+-- Level: AD_HEALTHBAR_COVER_OFFSET + the 2-level container nesting = healthBar+1 (above
+-- the real fill, below the +2 absorb/power bars), exactly where the legacy tint sat. This
+-- comment used to claim "offset 1 = healthBar+1" — wrong by the nesting: offset 1 landed
+-- the cover at healthBar+3, over the absorb shield (bug #1027). Colour/texture/alpha are
+-- static config.
 local function buildHealthFillConfig(unit, map, r, g, b, alpha, texture, clampTo, filter)
     return {
         unit = unit,
@@ -791,7 +827,7 @@ local function buildHealthFillConfig(unit, map, r, g, b, alpha, texture, clampTo
         filter = filter or "HELPFUL",
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
-        frameLevelOffset = 1,
+        frameLevelOffset = AD_HEALTHBAR_COVER_OFFSET,
         style = { overlay = { healthFill = {
             texture = texture, color = { r, g, b }, alpha = alpha, clampTo = clampTo,
         } } },
@@ -1032,9 +1068,11 @@ end
 
 -- ============================================================
 -- CONDITION CHAIN
--- Link 1 hangs off the frame; every later link hangs off the previous link's slot-child
--- host, so it can only be visible when every outer link is. The LAST link carries the
--- effect's real visual — the rest are pure gates (a mirror host and nothing else).
+-- Link 1 hangs off the CONSUMER'S ANCHOR (the same parent its flat path Creates on);
+-- every later link hangs off the previous link's slot-child host, so it can only be
+-- visible when every outer link is. The LAST link carries the effect's real visual — the
+-- rest are pure gates (a mirror host and nothing else), level-neutral by default so the
+-- visual seats exactly where the flat path would put it (see AD_CHAIN_GATE_OFFSET).
 --
 -- ☠ BUILT LAZILY, and it has to be. A link's host frame does not exist until that link's
 -- own aura is actually present (the native container creates slot buttons on demand), so
@@ -1048,16 +1086,22 @@ end
 --   * onHost fires on every style pass, not just the first, so each host is stamped to
 --     keep exactly one child link.
 -- ============================================================
-local function chainGateConfig(unit, map, filt, onHost)
+local function chainGateConfig(unit, map, filt, onHost, levelOffset)
     return {
         unit = unit,
         mode = "overlay",
         filter = filt or "HELPFUL",
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
-        -- Matches the mirror-host consumer: high enough to sit above the frame's own art,
-        -- and the gate paints nothing itself so the exact level only has to be legal.
-        frameLevelOffset = 30,
+        -- Per-consumer, NOT a constant. This was a hardcoded 30 copied from the
+        -- text-mirror consumer, on the reasoning that "the gate paints nothing itself so
+        -- the exact level only has to be legal" — true of the gate, but the FINAL visual
+        -- link is created ON the gate's mirror host and inherits its level as the base
+        -- for its own offset. 30 here re-seated every chained effect ~30 levels above its
+        -- flat twin (bug #1027: the AND-shaped Health Bar Color covered the absorb
+        -- shield). Consumers now pass their band: AD_CHAIN_GATE_OFFSET (level-neutral)
+        -- for the bar-adjacent effects, AD_TEXT_CHAIN_GATE_OFFSET for text mirrors.
+        frameLevelOffset = levelOffset,
         style = { overlay = { mirrorHost = { onHost = onHost } } },
     }
 end
@@ -1065,8 +1109,17 @@ end
 -- entry.chain[i] fills in as the links materialise. The FINAL link's config comes from
 -- entry.makeVisual, read at creation time — see the note in syncConditionChain for why it
 -- must be the entry's copy and not a captured parameter.
-local function buildConditionChain(entry, frame, unit, links, filt)
+--
+-- ☠ anchor = the SAME parent the consumer's flat single-container path Creates on
+-- (frame.healthBar for the health-bar cover, the background's parked anchor, `frame` for
+-- border/text). Link 1 IS the visual when the chain is one link long, and is the level
+-- base for every gate otherwise — anchoring it anywhere else re-seats the effect (level
+-- AND overlay rect) purely by the SHAPE of its condition config, which was bug #1027.
+-- gateOffset = the consumer's gate band (see chainGateConfig); nil defaults to
+-- level-neutral, the correct seat for any future consumer.
+local function buildConditionChain(entry, anchor, unit, links, filt, gateOffset)
     entry.chain = {}
+    if gateOffset == nil then gateOffset = AD_CHAIN_GATE_OFFSET end
     local function makeLink(i, parent)
         if not parent then return end
         -- ☠ REPLACE, never accumulate. A parent link rebuilding (test-mode toggle, the
@@ -1094,12 +1147,12 @@ local function buildConditionChain(entry, frame, unit, links, filt)
                 if not host or host.dfChainLink then return end
                 host.dfChainLink = true
                 makeLink(i + 1, host)
-            end)
+            end, gateOffset)
         if i > 1 then gcfg.parentDrivenVisibility = true end
         local h = DF.AuraContainer:Create(parent, gcfg)
         entry.chain[i] = h
     end
-    makeLink(1, frame)
+    makeLink(1, anchor)
     return entry.chain[1] ~= nil
 end
 
@@ -1122,8 +1175,8 @@ local function dropChainEntry(store, key)
     if e and e.chain then destroyEntry(e); store[key] = nil end
 end
 
-local function syncConditionChain(store, key, frame, unit, links, filt, structSig, coSig,
-                                  makeVisual, applyStyle)
+local function syncConditionChain(store, key, anchor, unit, links, filt, structSig, coSig,
+                                  makeVisual, applyStyle, gateOffset)
     if not links then return false end
     -- ☠ UNIT IS PART OF THE SIGNATURE. Every link captures the unit at build time, and the
     -- SyncFrame retarget loop only walks entry.handle — it cannot see the gate links. Without
@@ -1151,7 +1204,7 @@ local function syncConditionChain(store, key, frame, unit, links, filt, structSi
     if entry.structSig ~= chainSig or not entry.chain then
         destroyEntry(entry)
         entry.structSig, entry.coSig = chainSig, coSig
-        buildConditionChain(entry, frame, unit, links, filt)
+        buildConditionChain(entry, anchor, unit, links, filt, gateOffset)
     elseif entry.coSig ~= coSig then
         entry.coSig = coSig
         -- A live visual restyles now; one that has not appeared yet gets the new config
@@ -2045,8 +2098,10 @@ end
 -- container, and returning to a previous structure re-adopts the parked slot by key.
 --
 -- ⚠ FALLS BACK ON PURPOSE. AcquireSlot declines test frames (the preview declares its own
--- topology) and declines while a frame has no owner yet in combat. Those keep the original
--- per-indicator container, so behaviour is unchanged wherever the shared path says no.
+-- topology) and declines in combat whenever satisfying the request would need a secure op
+-- (no owner yet, or a NEW slot — AddAuraSlot is combat-illegal; re-adoption still works).
+-- Those keep the original per-indicator container, so behaviour is unchanged wherever the
+-- shared path says no.
 -- Both handle kinds answer GetFrame/Destroy/ApplyStyle, so the OOR fade and teardownExcept
 -- need no knowledge of which one they hold.
 local function isSlotHandle(h) return h ~= nil and h.GetButton ~= nil end
@@ -2526,14 +2581,21 @@ local function syncAlertCompanion(frame, placed, live, key, map, indicator, isBa
             live[akey] = true
         end
     elseif entry.structSig ~= structSig then
-        entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-        -- Slot: park the old key, take a new one (a slot's regions are frozen at
-        -- creation). Container fallback: Rebuild, with structSig as its own parking key --
-        -- its definition is exactly "changing this needs a new container", which is also
-        -- the condition for safely re-adopting one parked under it.
-        placedRestructure(entry, frame, akey, structSig, cfg)
-        applyPlacedAlpha(entry.handle, alpha)
-        live[akey] = true
+        -- ☠ Slot + combat: skip WITHOUT stamping, so the sig delta retries after combat
+        -- (see the icon/square branch for why). `live` is still marked — the entry must
+        -- not be swept for having deferred.
+        if isSlotHandle(entry.handle) and InCombatLockdown() then
+            live[akey] = true
+        else
+            entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
+            -- Slot: park the old key, take a new one (a slot's regions are frozen at
+            -- creation). Container fallback: Rebuild, with structSig as its own parking key --
+            -- its definition is exactly "changing this needs a new container", which is also
+            -- the condition for safely re-adopting one parked under it.
+            placedRestructure(entry, frame, akey, structSig, cfg)
+            applyPlacedAlpha(entry.handle, alpha)
+            live[akey] = true
+        end
     else
         -- Selection edit with the struct sig stable: swap the include map on the live
         -- container (row mode, so applyGroupTuning runs) instead of recreating it.
@@ -3759,11 +3821,17 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                                                 tuningSig = tuningSig, coSig = coSig }
                             end
                         elseif entry.structSig ~= structSig then
-                            local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
-                            entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                            placedRestructure(entry, frame, key, structSig,
-                                buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine))
-                            applyPlacedAlpha(entry.handle, alpha)
+                            -- ☠ Slot + combat: skip WITHOUT stamping, so the sig delta
+                            -- retries after combat (see the icon/square branch for why).
+                            if isSlotHandle(entry.handle) and InCombatLockdown() then
+                                -- deliberately empty — retried by sig delta after combat
+                            else
+                                local borderSpec = borderOn and buildBarBorderSpec(frame, indicator) or nil
+                                entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
+                                placedRestructure(entry, frame, key, structSig,
+                                    buildBarConfig(frame, frame.unit, map, eff, borderSpec, defs, mine))
+                                applyPlacedAlpha(entry.handle, alpha)
+                            end
                         else
                             if entry.tuningSig ~= tuningSig then
                                 -- Selection edit, struct sig stable: swap the include map on
@@ -3908,20 +3976,37 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                                                 tuningSig = tuningSig, coSig = coSig }
                             end
                         elseif entry.structSig ~= structSig then
-                            local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon, nil, defs) or nil
-                            entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                            -- Slot: park the old key and take a new one (a slot's regions
-                            -- are frozen at creation). Container: Rebuild as before.
-                            placedRestructure(entry, frame, key, structSig,
-                                buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine))
-                            applyPlacedAlpha(entry.handle, alpha)
+                            -- ☠ SLOT + COMBAT: DO NOTHING, INCLUDING THE SIG STAMP. A slot
+                            -- restructure is park + AddAuraSlot, and both halves are
+                            -- combat-illegal on the secure container (a refused park used
+                            -- to latch anyway and render the old visual forever — bug
+                            -- #1024). Leaving the sigs UNSTAMPED is the whole retry
+                            -- mechanism: the next out-of-combat SyncFrame pass sees the
+                            -- same sig delta and restructures naturally. Containers keep
+                            -- the un-gated path — Handle:Rebuild self-defers to regen.
+                            if isSlotHandle(entry.handle) and InCombatLockdown() then
+                                -- deliberately empty — retried by sig delta after combat
+                            else
+                                local borderSpec = borderOn and buildPlacedBorderSpec(frame, indicator, hideIcon, nil, defs) or nil
+                                entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
+                                -- Slot: park the old key and take a new one (a slot's regions
+                                -- are frozen at creation). Container: Rebuild as before.
+                                placedRestructure(entry, frame, key, structSig,
+                                    buildPlacedConfig(frame, frame.unit, map, eff, isSquare, borderSpec, defs, mine))
+                                applyPlacedAlpha(entry.handle, alpha)
+                            end
                         else
                             if entry.tuningSig ~= tuningSig then
                                 -- Selection edit with the struct sig stable: swap the include
                                 -- map on the LIVE container instead of recreating it.
                                 -- ApplyTuning replaces the trio wholesale (max/sort/
-                                -- candidateFilters) off the fresh config and self-defers in
-                                -- combat. testEntries rides along so a test-mode rebuild
+                                -- candidateFilters) off the fresh config. ⚠ Stamping the sig
+                                -- BEFORE the call means this branch never retries, so it is
+                                -- only correct because BOTH handle kinds store-then-defer in
+                                -- lockdown and replay at regen (Handle via _registerRegen,
+                                -- SlotHandle via _slotRegen). This comment used to claim the
+                                -- slot side self-deferred when it did not — that was bug
+                                -- #1024. testEntries rides along so a test-mode rebuild
                                 -- previews the NEW selection, not a stale one — same pairing
                                 -- as the filter-group path. borderSpec is nil here on purpose:
                                 -- ApplyTuning reads only the trio, and the cosmetic branch
@@ -4278,21 +4363,27 @@ function Factory:SyncFrame(frame)
                 local r, g, b, a = readADColor(bestCfg.color)
                 local mode = slower(bestCfg.mode or "replace")
                 local wholeBar = (mode == "tint") and (bestCfg.tintWholeBar and true or false) or false
+                -- Anchor = healthBar (the flat path's own Create parent) and level-neutral
+                -- gates, so every chain shape seats the visual exactly where the flat path
+                -- does — chained on `frame` this effect rendered at a different z-level
+                -- (and, one-link, a different rect) per condition SHAPE. Bug #1027.
                 if wholeBar then
                     local blend = healthbarBlend(mode, bestCfg.blend, a)
-                    syncConditionChain(hb, bestName, frame, frame.unit, chainHB, filt, "flat",
+                    syncConditionChain(hb, bestName, healthBar, frame.unit, chainHB, filt, "flat",
                         tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|"),
-                        function(map, f) return buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 1, f) end,
-                        function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end)
+                        function(map, f) return buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, f) end,
+                        function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end,
+                        AD_CHAIN_GATE_OFFSET)
                 else
                     local alpha = (mode == "replace") and 1 or healthbarBlend(mode, bestCfg.blend, a)
                     local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
                     local tex = (fdb and fdb.healthTexture) or "Interface\\TargetingFrame\\UI-StatusBar"
                     local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
-                    syncConditionChain(hb, bestName, frame, frame.unit, chainHB, filt, "cover",
+                    syncConditionChain(hb, bestName, healthBar, frame.unit, chainHB, filt, "cover",
                         tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo) }, "|"),
                         function(map, f) return buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, f) end,
-                        function(h) h:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo } } }) end)
+                        function(h) h:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo } } }) end,
+                        AD_CHAIN_GATE_OFFSET)
                 end
             else
             dropChainEntry(hb, bestName)
@@ -4335,18 +4426,18 @@ function Factory:SyncFrame(frame)
                 local blend = healthbarBlend(mode, bestCfg.blend, a)
                 local coSig = tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
                 if not entry then
-                        local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
+                        local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt))
                     if handle then
                         hb[bestName] = { handle = handle, structSig = structSig,
                                          tuningSig = tuningSig, coSig = coSig }
                     end
                 elseif entry.structSig ~= structSig then
                         entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                    entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt), structSig)
+                    entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt), structSig)
                 else
                     if entry.tuningSig ~= tuningSig then
                         entry.tuningSig = tuningSig
-                        entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 1, filt))
+                        entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt))
                     end
                     if entry.coSig ~= coSig then
                         entry.coSig = coSig
@@ -4432,10 +4523,13 @@ function Factory:SyncFrame(frame)
                 end
                 local hbLvl = frame.healthBar and frame.healthBar:GetFrameLevel() or 3
                 bgHost:SetFrameLevel(math.max(0, hbLvl - 3))
+                -- Level-neutral gates: the chain's visual seats at bgHost+2 = healthBar-1,
+                -- same as the flat path below, whatever the chain length.
                 syncConditionChain(bg, bestName, bgHost, frame.unit, chainBG, filt, "bgtint",
                     tconcat({ "bg", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|"),
                     function(map, f) return buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, f) end,
-                    function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end)
+                    function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end,
+                    AD_CHAIN_GATE_OFFSET)
             else
             dropChainEntry(bg, bestName)
             local existingBG = bg[bestName]
@@ -4552,10 +4646,13 @@ function Factory:SyncFrame(frame)
             end
             local filt = poolFilter(bestCfg, bestPool == 1)
             local drawAboveBD = bestCfg.drawAboveFrameBorder ~= false
+            -- Level-neutral gates: the ring keeps its drawAboveFrameBorder 11/9 seat
+            -- relative to `frame` (the flat path's parent) at any chain length.
             return syncConditionChain(bd, bestName, frame, frame.unit, chainLinks, filt,
                 "da=" .. tostring(drawAboveBD), borderSpecSig(bestSpec),
                 function(map, f) return buildBorderConfig(frame.unit, map, bestSpec, f, drawAboveBD) end,
-                function(h) h:ApplyStyle({ border = { spec = bestSpec } }) end) and true or false
+                function(h) h:ApplyStyle({ border = { spec = bestSpec } }) end,
+                AD_CHAIN_GATE_OFFSET) and true or false
         end
 
         if not stacked then
@@ -4620,10 +4717,11 @@ function Factory:SyncFrame(frame)
                         end,
                         -- A colour edit re-registers on the stashed host; EnableMirrors is
                         -- idempotent per parent and restamps the colour.
-                        function() 
+                        function()
                             local e = st[bestName]
                             if e and e.host then TDRender:EnableMirrors(frame, cat, e.host, color) end
-                        end)
+                        end,
+                        AD_TEXT_CHAIN_GATE_OFFSET)
                 else
                 -- Nothing structural: one overlay slot whose only region is the mirror
                 -- host. Map and filter string both tune live.
