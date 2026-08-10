@@ -1099,7 +1099,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- See Also links
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
-            {pageId = "auras_debuffs", label = L["Debuffs"]},
+            {pageId = "auras_debuffs", label = L["Debuff Bar"]},
             {pageId = "indicators_highlights", label = L["Highlights"]},
         }), 30, "both")
     end)

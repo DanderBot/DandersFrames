@@ -289,8 +289,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- See Also links
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
-            {pageId = "auras_buffs", label = L["Buffs"]},
-            {pageId = "auras_debuffs", label = L["Debuffs"]},
+            {pageId = "auras_buffs", label = L["Buff Bar"]},
+            {pageId = "auras_debuffs", label = L["Debuff Bar"]},
             {pageId = "auras_defensiveicon", label = L["Defensive Icon"]},
             -- DEPRECATED-TARGETED-SPELLS: link dropped with the sidebar row.
         }), 30, "both")
@@ -1706,6 +1706,34 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- ========================================
     CreateCategory("auras", L["Auras"])
 
+    -- Reading order for the Auras sidebar, declared here and resolved at layout
+    -- time (GUI:SetNavOrder). The seven pages are created across three files in a
+    -- chain, so the order they land in is a build artefact -- this is the order a
+    -- reader should meet them in, and the three captions say why that order.
+    --
+    -- ⚠ It matches the actual data flow. One page decides WHAT auras exist for the
+    -- addon (the filter library); five pages decide WHERE something is drawn; the
+    -- Aura Designer is a power tool on top. Listed alphabetically or by creation
+    -- order, Aura Designer came SECOND, which read as a step everyone must take.
+    --
+    -- ⚠ Naming a page here does not create or show it: a hidden page stays hidden
+    -- (UpdateTabLayout only places rows already in cat.children), and a page NOT
+    -- named here still appears, at the end. So this cannot strand a page.
+    if GUI.SetNavOrder then
+        GUI:SetNavOrder("auras", {
+            { caption = L["FILTERS"] },
+            "auras_filterdesigner",
+            { caption = L["DISPLAYS"] },
+            "auras_buffs",
+            "auras_debuffs",
+            "auras_defensiveicon",
+            "auras_missingbuffs",
+            "auras_dispel",
+            { caption = L["ADVANCED"] },
+            "auras_auradesigner",
+        })
+    end
+
     -- Auras > Aura Filters (the merged page: pick filters AND edit their spells)
     --
     -- Keeps the FAMILIAR NAME while the page id stays "auras_filterdesigner". That is
@@ -1723,30 +1751,58 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     --     moved away (directBuffSortOrder, directDebuffSort*) share the "directBuff" /
     --     "directDebuff" stems. A stem here would drag them back, and this page's
     --     Copy/Reset would silently reach into the bar pages.
-    local pageFilterDesigner = CreateSubTab("auras", "auras_filterdesigner", L["Aura Filters"])
+    -- "Filter Designer" — the label finally matches the page id it has always had.
+    -- It was called Aura Filters while it did two jobs, one of which was choosing
+    -- which filters each bar used; that job moved to the bars, so what is left is
+    -- purely the place filters are DESIGNED. It is also buffs-only now, and "Aura
+    -- Filters" implied it covered debuffs too.
+    local pageFilterDesigner = CreateSubTab("auras", "auras_filterdesigner", L["Filter Designer"])
     BuildPage(pageFilterDesigner, function(self, db, Add, AddSpace, AddSyncPoint)
         -- ⚠ MIRRORED IN DF.SECTION_PREFIXES.auras_filterdesigner (GUI.lua) — change both.
-        -- directDebuffDispellableMode is listed explicitly: its control moved here from
-        -- Auras > Debuffs, and "directDebuffShowAll" does not prefix-match it.
-        Add(CreateCopyButton(self.child, {
-            "buffFilterSelection", "debuffFilter", "debuffBlacklist",
-            "directBuffShowAll", "directBuffOnlyMine", "directDebuffShowAll",
-            "directDebuffDispellableMode",
-        }, L["Aura Filters"], "auras_filterdesigner"), 25, 2)
+        -- ☠ THIS PAGE OWNS NO PER-MODE KEYS ANY MORE, and its Copy/Sync/Reset list is
+        -- deliberately EMPTY. It used to carry buffFilterSelection, debuffFilter*,
+        -- debuffBlacklist and the directBuff*/directDebuff* switches; every one of
+        -- those moved to the page whose controls now show it — buffFilterSelection
+        -- and directBuff* to Buff Bar, the rest to Debuff Bar.
+        --
+        -- A page's Sync/Reset must own EXACTLY the keys it displays. Leaving these
+        -- here would mean Reset Page on the filter library silently rewriting two
+        -- other pages' settings, which is the bug class this addon has already been
+        -- bitten by.
+        --
+        -- What this page edits instead is not per-mode at all: preset overrides are
+        -- per PROFILE and custom filters are per ACCOUNT, so neither is something
+        -- Copy to Raid or Sync with Raid can act on.
+        -- ⚠ Still CALLED with an empty list, because the call is what registers this
+        -- page in DF.SectionRegistry -- and it has to be registered as owning nothing,
+        -- or SectionOwnsKey would fall through to another page's prefix and hand these
+        -- keys back. The helper returns a zero-height placeholder for an empty list,
+        -- so no dead Copy/Sync/Reset row is drawn.
+        Add(CreateCopyButton(self.child, {}, L["Filter Designer"], "auras_filterdesigner"), 0, 2)
         if DF.BuildFilterDesignerPage then DF.BuildFilterDesignerPage(GUI, self, db) end
 
         -- See Also, after the page's own content. This page positions its panels
         -- absolutely and reports its height through an Add()ed spacer, so anything
         -- Add()ed afterwards lands below them -- which is where a footer belongs.
         --
-        -- It also does real work here rather than being decoration: the four links
-        -- ARE the answer to "what uses these filters". Naming the consumers as
-        -- somewhere you can go beats another sentence explaining that they exist,
-        -- and this was the only page under Auras without a See Also bar.
+        -- ⚠ This was REMOVED once, on the argument that the consumer chip row at the
+        -- top of the page had replaced it and a second copy of the same links was
+        -- redundant. That was wrong on two counts, and it is recorded here because
+        -- the argument is tempting enough to be made again:
+        --
+        --   * Every other page under Auras carries a See Also. This page having none
+        --     is not "one fewer duplicate", it is the one page that breaks the
+        --     pattern -- which is exactly why the bar was added here in the first
+        --     place.
+        --   * The chips and this footer answer different questions. A chip says WHAT
+        --     IS USING these filters right now, with a live count, and greys out when
+        --     nothing is; See Also says WHERE ELSE YOU MIGHT GO, unconditionally. The
+        --     Aura Designer chip reading "Not in use" is correct and is still a place
+        --     you may want to visit.
         AddSpace(GUI.Space.block, "both")
         Add(GUI:CreateSeeAlso(self.child, {
-            {pageId = "auras_buffs", label = L["Buffs"]},
-            {pageId = "auras_debuffs", label = L["Debuffs"]},
+            {pageId = "auras_buffs", label = L["Buff Bar"]},
+            {pageId = "auras_debuffs", label = L["Debuff Bar"]},
             {pageId = "auras_defensiveicon", label = L["Defensive Icon"]},
             {pageId = "auras_auradesigner", label = L["Aura Designer"]},
         }), 30, "both")
@@ -1766,6 +1822,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
     -- Features/Auras.lua applyDebuffBlacklist); stored data carries over.
 
     -- Auras > Buffs (combined Layout + Appearance with collapsible sections)
-    local pageBuffs = CreateSubTab("auras", "auras_buffs", L["Buffs"])
+    -- "Buff Bar", not "Buffs": this page owns the bar's APPEARANCE and placement,
+    -- while Aura Filters owns its CONTENTS. Two pages about one bar, and the old
+    -- name made this the obvious place to look for buff filtering -- which it is not.
+    local pageBuffs = CreateSubTab("auras", "auras_buffs", L["Buff Bar"])
     DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L, AddColorsPageLink, CreateCopyButton, pagePinnedFrames, pageBuffs, pageIcons)
 end

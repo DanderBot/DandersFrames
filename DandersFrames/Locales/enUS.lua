@@ -1,4 +1,4 @@
--- AceLocale silent mode is ALWAYS on by default. AceLocale's default
+﻿-- AceLocale silent mode is ALWAYS on by default. AceLocale's default
 -- `readmeta` metatable calls geterrorhandler() on missing keys, which
 -- causes spurious errors when external code (BugSack, debug helpers
 -- calling :ToDebugString() etc.) introspects our L table — and also
@@ -356,7 +356,6 @@ L["USE"] = true
 -- End ClickCasting UI strings
 L["    Show ZZZ Icon"] = true
 L["%d - %d players"] = true
-L["%d of %d shown"] = true
 L["%d of %d tracked"] = true
 L["%d override"] = true
 L["%d overrides"] = true
@@ -456,9 +455,29 @@ L["Attached to Owner"] = true
 L["Aura Designer"] = true
 L["Aura Designer Alpha"] = true
 L["Aura Designer is active alongside Buffs."] = true
-L["Want per-spell control? The Aura Designer lets you place any buff exactly where you want, with advanced indicators — expiry glyphs, duration bars, custom borders and sounds."] = true
+-- The Aura Designer pitch on the Buff Bar page, shown only while AD is OFF — so it
+-- is a first-contact line, and the one chance to say what AD actually is.
+--
+-- It replaces a version that opened "Want per-spell control?" and then listed four
+-- DECORATIONS (expiry glyphs, duration bars, borders, sounds). Those are flavours of
+-- one idea; they missed the thing that separates AD from a bar, which is that the
+-- FRAME can respond, not just the icon row.
+--
+-- ⚠ Every claim here is deliberately checkable, because a promo banner that
+-- oversells is worse than none:
+--   recolour the health bar  -> the tint effect (tintWholeBar)
+--   ring the frame           -> frame border effects
+--   flash a corner icon      -> a placed indicator at a fixed anchor
+--   play a sound             -> Sound Alerts
+--   per filter               -> a filter can OWN an effect or sit in its trigger
+--                               list ("@preset:"/"@custom:", 12.1 alpha 18)
+--
+-- ⚠ "Per spell, or per filter" is load-bearing and was verified, not assumed: the
+-- layout-GROUP frame effects were reverted in that same batch, superseded by the
+-- filter-as-trigger primitive. The per-filter claim is true through that route, not
+-- through groups — if the filter route is ever dropped, this clause goes with it.
+L["The buff bar shows auras. The Aura Designer makes the frame react to them — recolour the health bar, ring the frame, flash a corner icon, play a sound. Per spell, or per filter."] = true
 L["Aura Duration Update Rate"] = true
-L["Aura Filters"] = true
 L["Auras"] = true
 L["Auras Alpha"] = true
 L["Auto (Spec Default)"] = true
@@ -554,7 +573,7 @@ L["Buffs"] = true
 L["Buffs are disabled. Aura Designer is managing your auras."] = true
 L["Buffs from your own class, and only when you cast them."] = true
 L["Buffs to Check (Manual Mode)"] = true
-L["Built-in presets can't be renamed or deleted."] = true
+L["Built-in filters can't be renamed or deleted."] = true
 L["By Power Type"] = true
 L["Cancel Fade on Dispellable Debuff"] = true
 L["Cannot delete Default profile."] = true
@@ -669,7 +688,6 @@ L["Dead / Offline / Ghost"] = true
 L["Dead Background Color"] = true
 L["Dead/Offline Fading"] = true
 L["Death Knight"] = true
-L["Optional Debuffs"] = true
 L["Debuff Icon"] = true
 L["Debuff Tooltips"] = true
 L["Debuffs"] = true
@@ -1182,7 +1200,7 @@ L["Override active"] = true
 L["This page has an overridden setting."] = true
 L["A page in this category has an overridden setting."] = true
 L["The frame position is overridden in this layout."] = true
-L["This preset has been changed from its defaults."] = true
+L["This built-in filter has been changed from its defaults."] = true
 L["Oldest First"] = true
 L["Only changed settings will be saved"] = true
 L["Only My Buffs"] = true
@@ -1261,7 +1279,7 @@ L["Pre-configure players before they join the group"] = true
 L["Prefix"] = true
 L["Template Name"] = true
 L["Templates"] = true
-L["Presets are curated"] = true
+L["Built-in filters are curated"] = true
 L["Press Ctrl+A to select all, then Ctrl+C to copy"] = true
 L["Press Ctrl+C to copy, then Escape to close"] = true
 L["Priest"] = true
@@ -1338,7 +1356,6 @@ L["Reset %s settings to defaults?\n\nThis cannot be undone."] = true
 L["Reset %s settings to defaults?\n\nThis only affects %s settings on the current %s mode. This cannot be undone."] = true
 L["Reset: %s"] = true
 L["Restore this filter's spell list to its defaults. Other filters are not affected."] = true
-L["Restore every optional debuff to its default setting. Other filters are not affected."] = true
 L["Reset All to Default"] = true
 L["Reset Border to Inherited"] = true
 L["Reset Colors to Default"] = true
@@ -1872,7 +1889,7 @@ L["Stack Scale"] = true
 L["Stack Text"] = true
 L["Stack Text Color"] = true
 L["Standard Buffs"] = true
-L["Standard buff visibility is managed on the Aura Filters page."] = true
+L["Standard buff visibility is managed on the Buff Bar page."] = true
 L["TRIGGERED BY"] = true
 L["Texture & Colors"] = true
 L["This aura's border always shows. Priority still applies to its other effects."] = true
@@ -2014,8 +2031,48 @@ L["X Position"] = true
 L["Y Position"] = true
 -- Grid layout dropdown
 L["Wrap"] = true
--- Aura Filters page notes
-L["Enabled filters are combined \226\128\148 buffs matching any selected filter will be shown."] = true
+-- The filter-selection groups. ONE string, shown by both the Buff Bar page and the
+-- Defensive Icon page: since selection moved out of Aura Filters, those two groups
+-- do the same job for two different consumers, and stating the combine rule twice
+-- is how the two wordings drift apart.
+--
+-- ⚠ "Selected", not "enabled" — the addon's word for a checked box is select /
+-- unselect throughout. This replaced an "Enabled filters are combined…" variant
+-- that only the Defensive Icon used.
+L["Selected filters are combined — a buff matching any of them is shown."] = true
+
+-- The live total under the Buff Bar's filter list, and that page's only feedback
+-- above the frame level: everything else there says what you switched ON, and
+-- nothing said what it adds up to. The Filter Designer's tab strip used to carry
+-- this number and lost it when the tabs went.
+--
+-- ⚠ Counts distinct AURAS (records), not spell IDs — one record can carry several,
+-- so an id-based count reports roughly triple. See R:CountSelection.
+--
+-- ⚠ "every buff" covers three different unbounded cases: All Buffs on, nothing
+-- selected at all (the bar falls back to everything), and Uncategorised Buffs,
+-- which admits auras the registry has never seen. None has a total, and inventing
+-- one would be worse than saying so.
+L["Tracking %d auras."] = true
+L["Tracking every buff."] = true
+
+-- Header for the same two groups. The Defensive Icon's is L["Defensive Filters"];
+-- this is the buff bar's.
+L["Buff Filters"] = true
+
+-- The Debuff Bar page's own group. It deliberately does NOT share the buff wording
+-- above, and has no Manage Filters button, because these are not filters in the
+-- registry sense at all: membership is Blizzard's and cannot be edited, added to or
+-- duplicated. Saying so in the group's own subtitle is what stops a reader carrying
+-- the buff mental model across — which is exactly what the old shared tab strip
+-- invited them to do.
+L["Debuff Filters"] = true
+L["These categories are Blizzard's and cannot be edited."] = true
+
+-- ⚠ "Unselect one to stop it showing" — inverted polarity, and the part nobody can
+-- guess. The checkbox means what it means everywhere else in the addon (this aura
+-- shows), so hiding a debuff is an UNSELECT, on a list of things you may hide.
+L["Select a debuff to hide it from this bar. These are the only debuffs the game lets us hide."] = true
 -- Text Designer
 L["Preview placeholder (visual mockup)"] = true
 
@@ -2267,46 +2324,248 @@ L["Debuffs that can be dispelled. Which dispels count is set on the Debuffs page
 -- positive in the same sentence ("Off · Party buff bar · also Defensive Icon")
 -- and read as though the filter were off in both. %s is a comma-joined list, so
 -- a translator must keep it as one slot.
-L["On · %s"] = true
-L["Off · not in use"] = true
-L["Buff bar (%s)"] = true
-L["Selecting a filter in the list adds it to the buffs bar. Other pages, like the Defensive Icon, choose filters for themselves — so a filter can still be in use while it is unselected here."] = true
+-- ☠ A USED-BY readout, not a switch readout. It opened with the filter's own on/off
+-- state while the switch lived on this page; the switch is now on each consumer's
+-- page, so there is no single "on" to report and the honest question is which
+-- consumers are using this filter right now. All three are equals in the list — the
+-- buff bar is no longer the state with the others trailing as "also".
+--
+-- ⚠ "Not used yet", never "Off". Nothing on this page turned it off, so an
+-- off-state would describe a switch the reader cannot see from here.
+L["Used by: %s"] = true
+L["Not used yet — pick it on a page that shows auras"] = true
+L["Each display picks its own filters on its own page — the Buff Bar, the Defensive Icon, and Aura Designer groups. This line lists the ones using it now, across both Party and Raid."] = true
 
--- Merged page banner + the section-header hints. Between them these say the whole
--- model: the HEADERS say what the row switch does (drives that bar), the BANNER says
--- the filters are a shared library other pages draw from. Two labels and one
--- sentence, where the predecessor was two paragraphs and six links.
+-- ☠ ONE CONSUMER, ONE MODE. The status line covers BOTH modes, because the Filter
+-- Designer is not a party-or-raid page: preset overrides are per profile, custom
+-- filters are per account. A consumer using this filter in both modes prints its
+-- bare name; this string is only used when the two DISAGREE.
 --
--- ⚠ "Selected", everywhere on this page. Both lists draw the same checkbox, so both
--- read the same way: a filter is selected, a spell inside it is selected, and the
--- blacklist banner says "unselect one to hide it". Never "ticked" — the box draws
--- the shared filled square, not a tick glyph, so the word names a mark that is not
--- on screen.
---
--- This overrides an earlier call that banned "selected" from the FILTER rows,
--- because clicking a row there also selects that filter for editing in the right
--- pane. That collision is real but harmless in practice: the sentence is about the
--- checkbox column it sits above, and one word across the whole page beats a split
--- vocabulary that has to be learned twice. Krathe's call, 2026-07-28.
--- Own line under the section header, at DFFontNormalSmall. NOT appended to the
--- header's own text with a colour code: that recolours but does not resize, so it
--- rendered at full header weight and ran off a 240px panel.
-L["Selected filters show on the buffs bar"] = true
-L["Selected filters show on the debuffs bar"] = true
+-- Naming a mode therefore means "watch out, these differ" — which is why the common,
+-- symmetric case deliberately says nothing. Printing "(Party, Raid)" every time
+-- would spend the noisiest text on the least surprising fact, in a line that already
+-- has no room to spare.
+L["%s (%s only)"] = true
 
--- Heads the filter list under the Buffs/Debuffs tabs. Bare "Filters" because the
--- tab above already says which kind — "Buff Filters" on the Buffs tab would be
--- saying it twice.
-L["Filters"] = true
--- The Buffs tab's banner. Leads with what this tab lets you DO, because the buff half
--- is the one place on the page where everything is yours to change — the exact
--- opposite of the Debuffs banner below, which has to say almost nothing here is.
+-- The two aura BAR pages, renamed from "Buffs" / "Debuffs". Each page owns its
+-- bar's appearance and placement; Aura Filters owns the contents. Under the old
+-- names, "Buffs" was the obvious place to look for buff filtering and was the one
+-- page that could not do it.
 --
--- ⚠ "%s filter groups", not "the %s". A normal Aura Designer group holds spells you
--- placed yourself and never touches these filters; only a Filter Group carries a
--- filterSelection. An earlier version named the Aura Designer as a peer of the
--- Defensive Icon, which is untrue of most of what the Aura Designer does.
-L["You have full control over buff filters. Edit the built-in ones or create your own — and use them on the %s and in %s filter groups too."] = true
+-- ⚠ ONE string each, shared by the sidebar row, every See Also, the Copy button
+-- and the Aura Filters banner link. They must all read the same or the link stops
+-- looking like it goes where it goes. L["Buffs"] / L["Debuffs"] still exist and
+-- still mean the aura KIND (group headers, spell-picker categories) — do not merge
+-- them with these.
+L["Buff Bar"] = true
+L["Debuff Bar"] = true
+
+-- The filter library page, renamed from "Aura Filters" once selection moved out to
+-- the bars. Two reasons, both about what the page now IS:
+--   * it no longer picks anything, it only DESIGNS filters — and its page id has
+--     been auras_filterdesigner all along, so the label finally matches it;
+--   * it is BUFFS ONLY. "Aura Filters" implied debuffs lived there too; they never
+--     really did, and the Blizzard debuff categories are on the Debuff Bar page now.
+L["Filter Designer"] = true
+
+-- The Debuff Bar's hide-list, renamed back from "Optional Debuffs".
+--
+-- ☠ SELECT TO HIDE. This is the one checkbox in the addon whose tick does not mean
+-- "show this" — the box IS the blacklist entry, so ticking it hides the debuff. The
+-- previous name and polarity kept the addon's usual meaning at the cost of a list
+-- called a blacklist whose ticks meant the opposite of blacklisting. Krathe's call,
+-- 2026-08-10: name it what it is, and let the tick match the name.
+--
+-- Every catalog entry now ships ticked (see PartyDefaults.debuffBlacklist).
+L["Debuff Blacklist"] = true
+L["Select a debuff to hide it from this bar. These are the only debuffs the game lets us hide."] = true
+
+-- The caption above the filter name in the right-hand pane. It names the KIND of
+-- thing selected rather than just saying "editing", because the two kinds differ in
+-- what you may do to them and in how far the change reaches — a built-in filter's
+-- edits are per PROFILE, a custom filter is per ACCOUNT. The left-hand section
+-- headers say the same two words, so this ties a selected row to its group.
+--
+-- ⚠ No caption at all on Optional Debuffs: that is Blizzard's list, not one of
+-- ours, so there is no filter kind to name.
+L["Editing built-in filter"] = true
+L["Editing custom filter"] = true
+
+-- Hover lines for the two tab counts. They exist because the numbers count
+-- DIFFERENT things — auras on one tab, categories on the other — which is a
+-- consequence of the two tabs being different systems, and no bare number can say
+-- so on its own.
+
+-- The consumer chip row across the top of the Aura Filters page: what is drawing on
+-- the filter library right now. Counts FILTERS, not auras — the tab strip below
+-- already carries the aura total, and two numbers on one screen that look
+-- comparable and are not is worse than one.
+--
+-- ⚠ "Not in use" rather than "0 filters". Zero reads as a quantity and invites the
+-- reader to wonder what went wrong; this is a state, and for the Aura Designer chip
+-- it is the most useful thing the page can say to somebody who has never opened it.
+-- ⚠ The chips SWAP with the Buffs/Debuffs tab, so there are three counters, not
+-- one with a noun argument: a "%d %s" sentence would take the plural rule away from
+-- the translator. Filters on the buff side; categories and Aura Designer debuff
+-- groups on the debuff side.
+L["Not in use"] = true
+L["1 filter"] = true
+L["%d filters"] = true
+-- All Buffs overrides the selection entirely, so a filter count would be true and
+-- misleading at the same time.
+L["All buffs"] = true
+-- Chip hovers. Between them they carry the fact that each consumer picks its filters
+-- in a DIFFERENT place, which is the part of this system with no single answer.
+L["The Buff Bar picks its own filters, on its own page."] = true
+L["The Defensive Icon picks its own filters, on its own page."] = true
+L["Aura Designer filter groups and effects can use any of these filters."] = true
+-- The debuff-tab pair. The Defensive Icon has no chip on that side because it has
+-- no debuff side at all — its selection is buff filters only.
+
+-- The REVERSE links: the consumer pages naming where their contents are decided.
+-- The Aura Filters page has always pointed outward at its consumers; nothing
+-- pointed back, so somebody who noticed a missing buff on the page named after the
+-- thing they were looking at had no route to the page that decides it.
+--
+-- ⚠ The Buff Bar names its filters and the Debuff Bar does not, on purpose:
+-- debuffs are not filters. What reaches that bar is Blizzard's fixed categories,
+-- so its line says "categories" and offers only the route.
+-- The same route out of an Aura Designer filter group, which can link and unlink a
+-- filter but cannot change what is inside one.
+L["Edit in Filter Designer"] = true
+-- Caption rows breaking the Auras sidebar into groups: one page produces reusable
+-- filters and displays nothing itself, five pages are places auras appear, and the
+-- Aura Designer builds displays of its own.
+--
+-- ⚠ These replaced "WHAT TO SHOW" / "WHERE TO SHOW IT", which encoded a what/where
+-- split that no longer exists. Moving selection out to the consumers means the
+-- display pages decide WHAT as well as where — so the honest distinction is not
+-- what-versus-where, it is SOURCE versus CONSUMERS. Krathe spotted the captions
+-- outliving their own model, 2026-08-10.
+--
+-- ⚠ Three parallel nouns, deliberately. A caption row reads as STRUCTURE only while
+-- all of its entries are the same part of speech and the same weight; mixed verbs
+-- and phrases read as more content competing with the page rows beneath them.
+--
+-- ⚠ They also no longer try to TEACH the model. The banner, the consumer chips and
+-- the How-this-works popup all explain it; a fourth voice in the sidebar was one too
+-- many, and it is the one with the least room to be accurate.
+--
+-- ⚠ WRITTEN uppercase, not upper-cased at runtime. string.upper on a localised
+-- string is wrong in several languages and mangles non-ASCII outright, so the
+-- casing has to be a translator's decision — which means it belongs in the string.
+-- A translator whose language does not shout headers can simply not shout.
+--
+-- ⚠ L["ADVANCED"] is its own entry and NOT the existing L["Advanced"]. That one is
+-- a real section header on other pages; forcing it uppercase to save a string here
+-- would shout at every one of them. The same applies to L["FILTERS"], which is not
+-- the old sentence-case L["Filters"] that headed the filter list.
+--
+-- ⚠ Short — they sit in a 220px nav column at 9px under a category row they must
+-- not compete with. None of these is longer than eight characters.
+L["FILTERS"] = true
+L["DISPLAYS"] = true
+L["ADVANCED"] = true
+
+-- The "How this works" map, opened from the button at the end of the chip row. It
+-- exists because banner copy can define a filter but cannot carry the SHAPE: that
+-- three displays each pick their filters somewhere different, and that the Debuffs
+-- tab is a separate system wearing the same controls.
+--
+-- ⚠ The three %s are the destination PAGES' own names, filled in at runtime — do
+-- not spell them out in the sentence, or a page rename leaves this disagreeing with
+-- the chip beside it. They arrive already colour-coded; keep them as bare slots.
+--
+-- ⚠ Newlines are the layout. The popup takes one message string, so \n\n between
+-- blocks and \n between the three rows is what makes it read as a list.
+--
+-- ⚠ "use", never "play" — Krathe's call, 2026-08-09. An Aura Designer group USES a
+-- filter. The word has to match the chip hovers and the filter-group card; if one
+-- surface drifts back to "play", the vocabulary has to be learned twice.
+--
+-- ⚠ The debuff paragraph names the Aura Designer too, and must keep doing so.
+-- Debuff categories are not only the debuff bar's source — an Aura Designer DEBUFF
+-- group uses the same Blizzard categories. An earlier draft stopped that paragraph
+-- at "picked here", which read as though the debuff path ended at the bar.
+-- ⚠ L["How this works"] is now the HOVER TITLE of a "?" icon button, not a button
+-- label — the labelled button was 128px of a row whose three chips need the width
+-- more, and the glyph says the same thing. An icon-only control has to carry a
+-- tooltip or it cannot be identified without clicking it, so both strings below are
+-- load-bearing rather than decoration.
+L["How this works"] = true
+L["A short guide to filters and the displays that use them."] = true
+L["How the Filter Designer works"] = true
+-- ⚠ FIVE %s, two kinds, same split as the info banner: %1 and %5 are the coloured
+-- category phrases (Buff Filters green, Debuff Filters red) and %2-%4 are the three
+-- gold destination names. Both %1 and %5 reuse the banner's own strings, so the page
+-- teaches ONE green/red pair rather than two.
+--
+-- Opened "Filters are lists of auras" until 2026-08-10. Bare "Filters" could not take
+-- the green without breaking the mapping the banner sets up (green = buff, red =
+-- debuff), so the subject became explicit -- which the page had wanted anyway, since
+-- everything built here is a buff filter.
+L["%s are lists of auras. You build them on this page; each display then picks the ones it wants, on its own page:\n\n%s\n%s\n%s — inside a filter group\n\n%s work differently: those categories are Blizzard's, they are fixed, and you pick them on the Debuff Bar page. Aura Designer debuff groups use the same categories.\n\nEditing a filter changes it everywhere it is used."] = true
+
+-- Heads the filter list on BOTH tabs, paired with "Custom Buff Filters" on the Buffs
+-- tab. It replaces a bare "Filters", which repeated the Buffs/Debuffs tab strip
+-- directly above it and distinguished nothing.
+--
+-- ⚠ It names where a filter CAME FROM, not what selecting it does. That sentence is
+-- in the page banner below and nowhere else — do not "improve" this into a
+-- description of the checkbox.
+--
+-- ⚠ Sentence case. A design mock showed letter-spaced uppercase; WoW FontStrings
+-- cannot letter-space, and upper-casing a localised header is a translator's
+-- decision, not ours. Translators: match the weight of your own "Custom Buff
+-- Filters" — the two are peers.
+L["Built-In Filters"] = true
+
+-- The Buffs tab's banner, and the load-bearing text on this page: since the headers
+-- became group names, this is the ONLY place that says what selecting a filter does.
+--
+-- Three beats, in the order a newcomer needs them — what a filter is, what you may do
+-- to one, what selecting it does. The predecessor opened on the freedom ("You have
+-- full control over buff filters"), which answers a question the reader has not
+-- reached: they do not yet know what the thing is.
+--
+-- ⚠ "below" is a real reference to the list underneath the banner. If this page is
+-- ever re-laid-out, this word has to be re-checked.
+--
+-- ⚠ Krathe's wording, 2026-08-09. Kept close on purpose: "auras" over "spells" is
+-- his call even though the pane opposite counts in spells.
+--
+-- ⚠ All three %s are page LINKS, in reading order: Buff Bar, Defensive Icon, Aura
+-- Designer. Keep them bare destination names — an article glued on in translation
+-- lands inside the underline. Languages that must reorder them can, as long as all
+-- three survive. All three are the LINKED PAGES' own names (L["Buff Bar"] etc), so
+-- translating a page name translates its links with it.
+-- ⚠ Opens "BUFF filters", not "Filters" — the page is buffs-only, and a bare
+-- "Filters" implied it covered debuffs too. Krathe's call, 2026-08-10.
+--
+-- ⚠ FOUR %s, all page LINKS, in reading order: Buff Bar, Defensive Icon, Aura
+-- Designer, Debuff Bar.
+--
+-- ⚠ DEBUFFS ARE FILTERS — Blizzard's, which is exactly why they cannot be edited.
+-- An earlier draft of this said "debuffs are not filters", which is wrong and reads
+-- as though the debuff bar were unfiltered. What is true is that we do not AUTHOR
+-- those filters, so they are picked rather than designed, and picked on their own
+-- page. Krathe's correction, 2026-08-10.
+--
+-- Carries the DEFINITION in the em-dash appositive. The predecessor was this same
+-- sentence without it ("This page designs BUFF filters."), which names the activity
+-- to someone who does not yet know what the noun is -- the reader has to already
+-- understand "filter" for that to land. "lists of the buffs you want to see" is the
+-- beat that was missing; the rest is unchanged. Krathe's call, 2026-08-10.
+--
+-- ⚠ SIX %s and they are two different kinds -- 1 and 5 are coloured emphasis (the
+-- buff/debuff category colours), 2, 3, 4 and 6 are page links. Order is fixed:
+-- Buff Filters, Buff Bar, Defensive Icon, Aura Designer, Debuff Filters, Debuff Bar.
+-- The call site at FilterRegistry/UI/Options.lua documents which is which.
+--
+-- ⚠ Translators: %1 and %5 arrive as noun PHRASES already coloured, and they are the
+-- literal names of the groups on the Buff Bar / Debuff Bar pages -- keep them as the
+-- subject of their clauses. Do not add an article inside a %s.
+L["This page designs %s — lists of the buffs you want to see. Change what is in our built-in ones, or build your own from scratch. Then pick the ones you want on the %s, the %s, or in an %s group. %s are Blizzard's — they can't be edited, and you pick those on the %s page."] = true
 -- The Debuffs tab's banner — one string covering the whole tab, because the tab has
 -- exactly one selectable row (the Blacklist; the categories are switches, not
 -- selections). So it says both what the debuff filters are, and how the one editable
@@ -2322,11 +2581,13 @@ L["Order & Limits"] = true
 -- filter's spells are per PROFILE (both modes), custom filter spells are per
 -- ACCOUNT (every profile). Mistaking one for another is what makes filters look
 -- broken after a Party/Raid switch.
-L["Always in force"] = true
 L["Where this applies"] = true
-L["Optional Debuffs are per mode: what you hide here applies to this mode only."] = true
-L["Which filters are selected is per mode, so Party and Raid keep separate choices — use Copy or Sync above to share them. What a filter CONTAINS is not per mode: editing its spells changes both."] = true
-L["Which filters are selected is per mode, so Party and Raid keep separate choices — use Copy or Sync above to share them. A custom filter's spells are shared by every profile on the account."] = true
+-- ⚠ No "use Copy or Sync above" any more: this page's Copy/Sync/Reset owns nothing,
+-- because selection is not stored here. The Copy and Sync that matter now live on
+-- the display pages, so pointing at this page's buttons would send the reader to
+-- controls that cannot do it.
+L["Which filters a display uses is per mode, so Party and Raid keep separate choices. What a filter CONTAINS is not per mode: editing its spells changes both."] = true
+L["Which filters a display uses is per mode, so Party and Raid keep separate choices. A custom filter's spells are shared by every profile on the account."] = true
 
 
 -- Important Debuffs (Debuffs page). Boss/role and priority debuffs already render
