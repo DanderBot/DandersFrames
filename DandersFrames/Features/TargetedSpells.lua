@@ -86,26 +86,30 @@ local addonName, DF = ...
 
 -- ============================================================
 -- TARGETED SPELLS SYSTEM
--- Shows incoming spell casts targeting party/raid members
--- 
--- When an enemy casts a spell targeting a party member, this
--- displays an icon with cast bar on that member's frame to
--- warn healers of incoming damage.
+-- Shows incoming enemy casts, so healers get warning of incoming damage.
 --
--- Supports multiple simultaneous incoming spells with stacking.
--- Features:
---   - Highlight important spells (C_Spell.IsSpellImportant)
---   - Sort by cast time (newest/oldest first)
---   - Max icons limit
---   - Interrupted visual feedback
---   - Off-screen nameplate support
+-- ⚠ THIS BANNER USED TO DESCRIBE THE GROUP DISPLAY, WHICH IS GONE. It advertised
+-- per-member frame icons with stacking, a max-icon limit and sort-by-cast-time --
+-- all of which belonged to the on-frame group feature deleted 2026-07-29/30 (see
+-- the deprecation block below). A reader who skipped that block got the
+-- pre-removal description of the file.
+--
+-- What actually lives here now, both maintained:
+--   * Personal Targeted -- the player-only icon; compares against "player", which
+--     survived the UnitIsUnit lockdown.
+--   * The Targeted List -- the party-only replacement for the per-frame use case,
+--     in its own section at the bottom of this file.
+--
+-- Shared by both: nameplate-only caster detection (and therefore the
+-- nameplateShowOffscreen dependency), and C_Spell.IsSpellImportant highlighting.
 -- ============================================================
 
 local pairs, ipairs, wipe = pairs, ipairs, wipe
 local GetTime = GetTime
 local UnitExists = UnitExists
 local UnitIsUnit = UnitIsUnit
-local UnitGUID = UnitGUID
+-- (Removed) the UnitGUID upvalue -- unused since dedup moved from GUIDs to unit
+-- tokens. Nothing in this file has called it since.
 local UnitCastingInfo = UnitCastingInfo
 local UnitChannelInfo = UnitChannelInfo
 local UnitCastingDuration = UnitCastingDuration
@@ -138,8 +142,8 @@ local activeCasters = {}
 -- path (compares against "player") still works and is unaffected,
 -- since "player" is in the always-allowed list of UnitIsUnit args.
 --
--- A "Targeted List" feature is being designed as a replacement for
--- the per-frame icon use case (see _Reference/targeted-list-mockup.html).
+-- The "Targeted List" feature replaced the per-frame icon use case. It is built and
+-- shipped -- it lives in this same file, in the Targeted List section below.
 -- ============================================================
 
 -- (Removed) DF.GroupTargetedSpellsAPIBlocked and
@@ -305,7 +309,10 @@ end
 local function ProcessCastInternal(casterUnit, isChannel)
     if not casterUnit or not UnitExists(casterUnit) then return end
     
-    -- Only process valid unit types (nameplate, boss, arena)
+    -- Only process valid unit types -- NAMEPLATES ONLY. boss/arena/target are
+    -- deliberately rejected; see the note on IsValidCasterUnit for why (token-string
+    -- dedup would double-count the same cast) and for the nameplateShowOffscreen
+    -- dependency that follows from it.
     -- This prevents duplicates from "target"/"focus" which reference other units
     if not IsValidCasterUnit(casterUnit) then return end
     
@@ -604,17 +611,17 @@ local function OnEvent(self, event, unit, ...)
     -- the rest of the stream.
 
     -- ============================================================
-    -- Targeted List branch (alpha/beta only, stubs until commit #4)
+    -- Targeted List branch
     -- ============================================================
     -- Routing through DF._TargetedList* shims so the handlers defined
     -- in the Targeted List section at the bottom of this file don't
-    -- need to be forward-declared. Each handler is gated internally —
-    -- calls are effectively free on stable builds.
+    -- need to be forward-declared.
     --
-    -- The full event-to-handler wiring (castId unpacking, empower
-    -- spellId offset, varargs forwarding, mob-death guards) is
-    -- implemented in commit #4. This scaffold only needs to invoke
-    -- the stubs so the file loads and the gating plumbing is exercised.
+    -- ⚠ These are NOT stubs, and this is not alpha-only. The full wiring (castId
+    -- unpacking, empower spellId offset, varargs forwarding, mob-death guards) is
+    -- implemented and live -- TargetedList_ProcessCastStart and friends are real
+    -- handlers further down. Each one gates itself on the user's targetedListEnabled
+    -- setting via TargetedList_IsActive, so the calls are cheap when it is off.
     if event == "UNIT_SPELLCAST_START"
        or event == "UNIT_SPELLCAST_CHANNEL_START"
        or event == "UNIT_SPELLCAST_EMPOWER_START" then
@@ -920,8 +927,11 @@ local function CreatePersonalContainer()
     container:SetHitRectInsets(10000, 10000, 10000, 10000)
     
     personalContainer = container
-    DF.personalTargetedSpellsContainer = container
-    
+    -- ☠ (Removed) the DF.personalTargetedSpellsContainer export. Write-only: the file
+    -- local above is what everything here uses, and no reader existed in either addon.
+    -- Not to be confused with DF.personalTargetedSpellsMover, which IS read (four
+    -- sites in Frames/Position.lua).
+
     return container
 end
 
@@ -2384,14 +2394,10 @@ end
 --
 -- Party-mode only by design. We will not add raid support.
 --
--- Implementation is split across commits:
---   * commit #3 (this one): scaffold — state tables, frame pool,
---     roster name cache, event hookup, empty lifecycle stubs
---   * commit #4: cast lifecycle (0.2s delay + all 13 gotchas from
---     the TS3 cross-reference in _Reference/targeted-spells-findings.md)
---   * commit #5: render pipeline + layout (bar build, LayoutBars,
---     Dispel-style skip-rebuild in the apply path)
---   * commit #6: settings sub-tab in Options.lua
+-- ⚠ ALL OF THIS SHIPPED. The build plan that used to sit here ("commit #3: scaffold
+-- ... #6: settings sub-tab") described work finished long ago, and reading it as
+-- current made the whole section look like unfinished scaffolding. The cast
+-- lifecycle, the render pipeline, the layout and the settings tab are all live below.
 --
 -- The user-facing name "Targeted List" is intentionally decoupled
 -- from the internal `targetedList*` db prefix. Renaming the feature
@@ -2463,12 +2469,15 @@ local TargetedList_StartFadeTicker
 -- Runtime gate
 -- ------------------------------------------------------------
 
--- Single source of truth for "is this feature allowed to run at all".
--- Every public entry point calls this; any time it returns false, the
--- caller must be a no-op.
-local function TargetedList_IsGateOpen()
-    return true
-end
+-- ☠ (Removed) TargetedList_IsGateOpen and its 15 call-site guards. It was the DEV
+-- gate that hid this feature from release builds while it was being built -- hence
+-- the "dev gate closed (release build)" reason string, which was already
+-- unreachable. The feature shipped: it has a settings toggle, a GUI page and profile
+-- export, so the gate had been `return true` with no way to close it.
+--
+-- ⚠ It was never the USER-facing gate and must not be confused with one. That is
+-- `party.targetedListEnabled`, checked in TargetedList_IsActive immediately below,
+-- and it is untouched.
 
 -- Map the current content type (from the shared GetContentType
 -- helper above in this file) to the corresponding db toggle key.
@@ -2506,7 +2515,6 @@ end
 -- pickup path logged only successes, so there was no way to tell which gate ate a
 -- cast. Never put a secret value in one of these strings.
 local function TargetedList_IsActive()
-    if not TargetedList_IsGateOpen() then return false, "dev gate closed (release build)" end
     if not DF.db then return false, "no profile loaded yet" end
     local party = DF.db.party
     if not party or not party.targetedListEnabled then return false, "Targeted List is off in settings" end
@@ -2532,7 +2540,6 @@ end
 -- Exposed for NeedsCastEvents below, so the shared event frame stays
 -- registered when the Targeted List is the only active consumer.
 function DF:TargetedListNeedsCastEvents()
-    if not TargetedList_IsGateOpen() then return false end
     if not DF.db then return false end
     -- Party-only feature, but the raid profile may also toggle it on
     -- even though it won't actually render. Still register events so
@@ -2558,7 +2565,7 @@ end
 -- usable boolean for this specific shape.
 --
 -- We don't return WHICH party member is targeted — we don't need to.
--- The render pipeline (commit #5) will fetch the target name via
+-- The render pipeline fetches the target name via
 -- UnitSpellTargetName and feed it directly into a FontString:SetText
 -- secret-safe sink, which doesn't require comparing or indexing.
 -- Returns ok, reason (see TargetedList_IsActive for why).
@@ -2724,7 +2731,7 @@ local function TargetedList_DelayedPickup(casterUnit, isChannel, eventSpellId)
     --
     -- Practical consequences:
     --   * Important-spells filter is DROPPED here. The render pipeline
-    --     in commit #5 will implement it via SetShownFromBoolean using
+    --     implements it via SetShownFromBoolean using
     --     the secret-tainted IsSpellImportant return.
     --   * Spell name / texture are NOT read here. The render pipeline
     --     will fetch them at render time and feed them straight into
@@ -3125,7 +3132,6 @@ end
 -- (e.g. missed NAME_PLATE_UNIT_REMOVED during heavy nameplate
 -- recycling, or zone changes that don't fire proper stop events).
 local function TargetedList_ValidateTrackedBars()
-    if not TargetedList_IsGateOpen() then return end
     local anyRemoved = false
     for unit, rec in pairs(activeTargetedListCasts) do
         if not rec.isTestCast and not rec.fadingStartedAt then
@@ -3149,7 +3155,6 @@ end
 -- Gotcha #11: nameplate removal events don't reliably fire on zone
 -- transitions. Also used on feature disable and on explicit cleanup.
 local function TargetedList_ReleaseAllBars()
-    if not TargetedList_IsGateOpen() then return end
     wipe(activeTargetedListCasts)
     -- Commit #5: release every pooled bar back to the framepool.
     if DF.Debug then
@@ -4069,7 +4074,6 @@ local TARGETEDLIST_STYLE_PRESETS = {
 }
 
 function DF:ApplyTargetedListPreset(presetName)
-    if not TargetedList_IsGateOpen() then return end
     local preset = TARGETEDLIST_STYLE_PRESETS[presetName]
     if not preset then return end
     local party = DF.db and DF.db.party
@@ -4152,7 +4156,6 @@ end
 -- positions via LayoutBars.
 
 local function TargetedList_Render()
-    if not TargetedList_IsGateOpen() then return end
     TargetedList_EnsureBarPool()
 
     local db = DF.db and DF.db.party
@@ -4458,7 +4461,6 @@ local function TargetedList_CreateMover()
 end
 
 function DF:ShowTargetedListMover()
-    if not TargetedList_IsGateOpen() then return end
     TargetedList_CreateMover()
     local db = DF.db and DF.db.party
     if not db then return end
@@ -4641,7 +4643,6 @@ local function TargetedList_UpdateTestCasts()
 end
 
 function DF:ShowTestTargetedList()
-    if not TargetedList_IsGateOpen() then return end
 
     -- FIRST: cancel any running ticker from a previous mode. This
     -- prevents animated-mode tickers from interfering with static mode.
@@ -4805,7 +4806,6 @@ end
 -- down the visible bars including any test records.
 local _TargetedList_ReleaseAllBars_Prev = TargetedList_ReleaseAllBars
 TargetedList_ReleaseAllBars = function()
-    if not TargetedList_IsGateOpen() then return end
     _TargetedList_ReleaseAllBars_Prev()
     TargetedList_ReleaseAllActiveBars()
     if targetedListContainer then
@@ -4852,10 +4852,15 @@ DF._TargetedListValidateAll = TargetedList_ValidateTrackedBars
 -- Public entry points
 -- ------------------------------------------------------------
 
--- Called from DF:InitTargetedSpells() at addon init and from the
--- settings toggle callback. Safe to call on stable (no-op via gate).
+-- Called from DF:InitTargetedSpells() at addon init and from the settings toggle
+-- callback.
+--
+-- ⚠ DELIBERATELY UNCONDITIONAL -- it does NOT check targetedListEnabled. The
+-- container is created eagerly so the mover and test mode always have something to
+-- anchor to; everything expensive (the bar pool, the event work) stays gated on the
+-- setting further in. Do not "fix" this by adding a gate here: the mover would then
+-- have nothing to attach to when the user first enables the feature.
 function DF:InitTargetedList()
-    if not TargetedList_IsGateOpen() then return end
     -- Create the container early so the mover / test mode have
     -- something to anchor to. Bar pool stays lazy.
     TargetedList_EnsureContainer()
@@ -4864,13 +4869,11 @@ end
 -- Called from the settings-apply path. Bumps the layout version and
 -- triggers a re-layout. Safe to call on every callback.
 function DF:UpdateTargetedListLayout()
-    if not TargetedList_IsGateOpen() then return end
     targetedListLayoutVersion = targetedListLayoutVersion + 1
     -- Re-apply appearance + content to all existing bars so settings
     -- changes (font, texture, border, etc.) take effect on bars that
     -- are already acquired (the incremental render only applies
     -- content at acquisition time, not on every render tick).
-    local db = DF.db and DF.db.party
     for unit, bar in pairs(casterToBar) do
         local rec = activeTargetedListCasts[unit]
         if rec then
@@ -4894,7 +4897,6 @@ end
 -- picker drag-tick rate without lag.
 
 function DF:LightweightUpdateTargetedListBarColor()
-    if not TargetedList_IsGateOpen() then return end
     local db = DF.db and DF.db.party
     if not db then return end
     local interColor = db.targetedListInterruptibleColor or {r=1, g=0.2, b=0.2, a=1}
@@ -4917,7 +4919,6 @@ function DF:LightweightUpdateTargetedListBarColor()
 end
 
 function DF:LightweightUpdateTargetedListBorderColor()
-    if not TargetedList_IsGateOpen() then return end
     local db = DF.db and DF.db.party
     if not db then return end
     -- Route through BuildSpec + Apply (Stage 4.5) so the live drag-update
@@ -4930,7 +4931,6 @@ function DF:LightweightUpdateTargetedListBorderColor()
 end
 
 function DF:LightweightUpdateTargetedListHighlightColor()
-    if not TargetedList_IsGateOpen() then return end
     local db = DF.db and DF.db.party
     if not db then return end
     local hc = db.targetedListHighlightColor or {r=1, g=0.8, b=0}
@@ -4949,7 +4949,6 @@ end
 
 -- Called from the settings-apply path when the enable checkbox flips.
 function DF:ToggleTargetedList(enabled)
-    if not TargetedList_IsGateOpen() then return end
     if enabled then
         DF:InitTargetedList()
         TargetedList_Render()
@@ -4986,8 +4985,10 @@ function DF:InitTargetedSpells()
         DF:TogglePersonalTargetedSpells(true)
     end
 
-    -- Initialize the Targeted List. Safe to call unconditionally — the
-    -- function is gated internally on the user's targetedListEnabled setting.
+    -- Initialize the Targeted List. Safe to call unconditionally, but NOT because the
+    -- function checks targetedListEnabled -- it does not. All it does is create the
+    -- container, which is cheap and is wanted either way so the mover has an anchor.
+    -- The setting gates the actual work further in (see TargetedList_IsActive).
     if DF.InitTargetedList then
         DF:InitTargetedList()
     end
