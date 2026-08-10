@@ -843,6 +843,8 @@ function GUI:CreateSeparator(parent, opts)
     tex:SetHeight(1)
     f.Texture = tex   -- exposed so a caller can re-tint without rebuilding
     return f
+end
+
 -- ============================================================
 -- CHOICE CARDS
 -- ============================================================
