@@ -2042,6 +2042,13 @@ S.CreateEffectCard = function(parent, yPos, effect)
             -- draw your own alongside.
             -- ☠ THE STORED VALUE IS UNCHANGED -- nil / "custom" -- so no migration and old
             -- profiles keep working. Do not "tidy" it to a boolean without one.
+            -- ☠ HOISTED ON PURPOSE. SyncPriorityNote (border block below) writes to
+            -- priNote, but the label isn't built until after that block. Declaring both
+            -- here makes them shared upvalues -- a `local` further down never back-fills
+            -- a closure that was already compiled, which is exactly what made this card
+            -- error out and abort the whole Effects tab build.
+            local priNote, SyncPriorityNote
+
             if effect.typeKey == "border" then
                 local function OwnBorderOn()
                     local a = CurrentAuraPool()[effect.auraName]
@@ -2054,12 +2061,11 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 -- still live: priority is per-AURA, so it still resolves this aura's health
                 -- bar / background / text effects, and collectStackedBorders sorts by it so
                 -- it orders the stacked rings too.
-                local function SyncPriorityNote()
+                SyncPriorityNote = function()
                     priNote:SetText(OwnBorderOn()
                         and L["This aura's border always shows. Priority still applies to its other effects."]
                         or L["Higher priority wins"])
                 end
-                SyncPriorityNote()
 
                 -- customGet/customSet rather than a db key: the stored value is nil /
                 -- "custom", not a boolean, and the checkbox maps ticked -> "custom".
@@ -2104,8 +2110,12 @@ S.CreateEffectCard = function(parent, yPos, effect)
             priSlider:SetWidth(bodyWidth - 16)
             -- Direction note in the standard GUI label style (dim, wrapped) so it
             -- matches every other settings note: HIGHER number = higher priority.
-            local priNote = GUI:CreateLabel(body, L["Higher priority wins"], bodyWidth - 16)
+            priNote = GUI:CreateLabel(body, L["Higher priority wins"], bodyWidth - 16)
             priNote:SetPoint("TOPLEFT", priSlider, "BOTTOMLEFT", 0, -2)
+            -- Only now does the label exist, so this is where the border-aware wording
+            -- gets applied. Non-border effects never assign SyncPriorityNote and keep the
+            -- default text the label was built with.
+            if SyncPriorityNote then SyncPriorityNote() end
             triggersH = triggersH + 84
         end
 
@@ -2179,145 +2189,166 @@ S.BuildEffectsTab = function()
     local yPos = -10
     local tc = GetThemeColor()
 
-    -- "+ Add Indicator" button (prominent, theme-colored border)
-    local addBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    addBtn:SetHeight(32)
-    addBtn:SetPoint("TOPLEFT", 8, yPos)
-    addBtn:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-    -- Shared primary CTA: accent fill + white label via the styler (was a bespoke
-    -- fontstring, which is why AD's and TD's hero labels didn't match).
-    GUI:StyleButton(addBtn, { height = 32, primary = true, icon = { texture = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\add", size = 14 }, text = L["Add Indicator"], font = "DFFontHighlight" })
-
-    -- Dropdown menu for add button
-    local menuFrame = CreateFrame("Frame", nil, addBtn, "BackdropTemplate")
-    menuFrame:SetPoint("TOPLEFT", addBtn, "BOTTOMLEFT", 0, -2)
-    menuFrame:SetPoint("TOPRIGHT", addBtn, "BOTTOMRIGHT", 0, -2)
-    menuFrame:SetFrameStrata("DIALOG")
-    menuFrame:SetFrameLevel(100)
-    ApplyBackdrop(menuFrame, {r = 0.10, g = 0.10, b = 0.10, a = 0.98}, C_BORDER)
-    menuFrame:Hide()
-    menuFrame:EnableMouse(true)
-
+    -- ══ ADDING AN INDICATOR ══════════════════════════════════════════════
+    -- Was a "+ Add Indicator" button opening a 14-row dropdown across three
+    -- headed sections. Two problems that a flat card list would have made
+    -- WORSE, not better: fourteen entries is a long column at card height, and
+    -- the "from a filter" section repeats five labels from the section above it
+    -- word for word -- only the heading told them apart.
+    --
+    -- So the choice is split in two. Three pinned scope cards say what KIND of
+    -- change you want; picking one takes the column over with just that scope's
+    -- options, each with room for a description. No duplicate labels can appear,
+    -- because a scope is settled before any type is shown.
     local PLACED_ITEMS = {
-        { label = L["Icon"],   type = "icon"   },
-        { label = L["Square"], type = "square" },
-        { label = L["Bar"],    type = "bar"    },
+        { label = L["Icon"],   type = "icon",   desc = L["The spell's own artwork"]          },
+        { label = L["Square"], type = "square", desc = L["A small coloured square"]          },
+        { label = L["Bar"],    type = "bar",    desc = L["A bar that drains as it expires"]  },
     }
+    -- Sound is absent from the filter list by design: the native sound path
+    -- registers per spell ID, so a 600-spell filter would mean 600 registrations.
     local FRAME_ITEMS = {
-        { label = L["Border"],            type = "border"     },
-        { label = L["Health Bar Color"],  type = "healthbar"  },
-        { label = L["Background Color"],  type = "background" },
-        { label = L["Name Text Color"],   type = "nametext"   },
-        { label = L["Health Text Color"], type = "healthtext" },
-        { label = L["Sound Alert"],       type = "sound"      },
+        { label = L["Border"],            type = "border",     desc = L["Outlines the whole frame"]        },
+        { label = L["Health Bar Color"],  type = "healthbar",  desc = L["Recolours the health bar"]        },
+        { label = L["Background Color"],  type = "background", desc = L["Recolours the frame background"]  },
+        { label = L["Name Text Color"],   type = "nametext",   desc = L["Recolours the player's name"]     },
+        { label = L["Health Text Color"], type = "healthtext", desc = L["Recolours the health numbers"]    },
+        { label = L["Sound Alert"],       type = "sound",      desc = L["Plays a sound. Nothing changes on the frame."] },
     }
-
-    local my = -4
-    local MENU_ROW_H = 24
-
-    -- Same five effects, owned by a FILTER instead of one spell. Sound is absent by
-    -- design: the native sound path registers per spell ID, so a 600-spell filter
-    -- would mean 600 registrations.
     local FRAME_FILTER_ITEMS = {
-        { label = L["Border"],            type = "border"     },
-        { label = L["Health Bar Color"],  type = "healthbar"  },
-        { label = L["Background Color"],  type = "background" },
-        { label = L["Name Text Color"],   type = "nametext"   },
-        { label = L["Health Text Color"], type = "healthtext" },
+        { label = L["Border"],            type = "border",     desc = L["Outlines the whole frame"]        },
+        { label = L["Health Bar Color"],  type = "healthbar",  desc = L["Recolours the health bar"]        },
+        { label = L["Background Color"],  type = "background", desc = L["Recolours the frame background"]  },
+        { label = L["Name Text Color"],   type = "nametext",   desc = L["Recolours the player's name"]     },
+        { label = L["Health Text Color"], type = "healthtext", desc = L["Recolours the health numbers"]    },
     }
 
-    local MENU_ROW_H = 24
+    local SCOPES = {
+        placed = { items = PLACED_ITEMS,       title = L["Placed on the Frame"],
+                   desc = L["An icon, square or bar, wherever you put it"] },
+        frame  = { items = FRAME_ITEMS,        title = L["Frame-Level Effect"],
+                   desc = L["Recolours the frame itself"] },
+        filter = { items = FRAME_FILTER_ITEMS, title = L["From a Filter"],
+                   desc = L["The same frame changes, driven by a whole filter"] },
+    }
 
-    -- The menu is two identical sections -- a small dim heading, then one row
-    -- per entry coloured by its type badge -- and both were written out in
-    -- full. `my` is the running cursor, so these close over it.
-    local function AddMenuSection(heading, items, scope)
-        local hdr = menuFrame:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(hdr, 9, "")
-        hdr:SetPoint("TOPLEFT", 10, my)
-        hdr:SetText(heading)
-        hdr:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-        my = my - 14
-
-        for _, item in ipairs(items) do
-            local menuBtn = CreateFrame("Button", nil, menuFrame)
-            menuBtn:SetHeight(MENU_ROW_H)
-            menuBtn:SetPoint("TOPLEFT", 4, my)
-            menuBtn:SetPoint("RIGHT", menuFrame, "RIGHT", -4, 0)
-            local bc = BADGE_COLORS[item.type]
-            local lbl = menuBtn:CreateFontString(nil, "OVERLAY")
-            GUI:SetSettingsFont(lbl, 10, "")
-            lbl:SetPoint("LEFT", 8, 0)
-            lbl:SetText(item.label)
-            lbl:SetTextColor(bc.r, bc.g, bc.b)
-            local hl = menuBtn:CreateTexture(nil, "HIGHLIGHT")
-            hl:SetAllPoints()
-            hl:SetColorTexture(1, 1, 1, 0.05)
-            local capturedType = item.type
-            menuBtn:SetScript("OnClick", function()
-                menuFrame:Hide()
-                if scope == "filter" then
-                    -- The effect hangs off the FILTER: its record is stored under the
-                    -- "@preset:"/"@custom:" key, which DF:BuildADIdentityFilters resolves
-                    -- to the filter's whole spell set. Nothing downstream changes.
-                    OpenFilterPicker({
-                        anchor = addBtn,
-                        isLinked = function(kind, key)
-                            local ref = DF:MakeADFilterRef(kind, key)
-                            return ref ~= nil and HasFrameEffect(ref, capturedType) or false
-                        end,
-                        onPick = function(kind, key)
-                            local ref = DF:MakeADFilterRef(kind, key)
-                            if not ref then return end
-                            AddPickedSpell(ref, capturedType, "frame")
-                            S.SwitchTab("effects")
-                            RefreshPlacedIndicators()
-                            RefreshPreviewEffects()
-                        end,
-                    })
-                    return
-                end
-                OpenIndicatorPicker(capturedType, scope)
-            end)
-            my = my - MENU_ROW_H
-        end
+    -- The picker is a transient mode, so it must not outlive the thing it was
+    -- opened against. Anything that changes which pool or spec is on screen
+    -- rebuilds this tab, and the context check below drops a stale picker on
+    -- that rebuild rather than leaving the player staring at options for a pool
+    -- they have already left.
+    local pickerCtx = tostring(IsOtherTab()) .. "|" .. tostring(ResolveSpec())
+    if S.effectsPicker and S.effectsPickerCtx ~= pickerCtx then
+        S.effectsPicker = nil
     end
 
-    AddMenuSection(L["PLACED ON FRAME"], PLACED_ITEMS, "placed")
-
-    -- Divider
-    my = my - 4
-    local mdiv = menuFrame:CreateTexture(nil, "ARTWORK")
-    mdiv:SetPoint("TOPLEFT", 8, my)
-    mdiv:SetPoint("RIGHT", menuFrame, "RIGHT", -8, 0)
-    mdiv:SetHeight(1)
-    mdiv:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.6)
-    my = my - 6
-
-    AddMenuSection(L["FRAME-LEVEL EFFECTS"], FRAME_ITEMS, "frame")
-
-    -- Divider
-    my = my - 4
-    local mdiv2 = menuFrame:CreateTexture(nil, "ARTWORK")
-    mdiv2:SetPoint("TOPLEFT", 8, my)
-    mdiv2:SetPoint("RIGHT", menuFrame, "RIGHT", -8, 0)
-    mdiv2:SetHeight(1)
-    mdiv2:SetColorTexture(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.6)
-    my = my - 6
-
-    AddMenuSection(L["FROM A FILTER"], FRAME_FILTER_ITEMS, "filter")
-
-    menuFrame:SetHeight(-my + 6)
-
-    addBtn:SetScript("OnClick", function()
-        if menuFrame:IsShown() then
-            menuFrame:Hide()
-        else
-            menuFrame:Show()
+    local function StartType(itemType, scope, anchor)
+        S.effectsPicker = nil
+        if scope == "filter" then
+            -- The effect hangs off the FILTER: its record is stored under the
+            -- "@preset:"/"@custom:" key, which DF:BuildADIdentityFilters resolves
+            -- to the filter's whole spell set. Nothing downstream changes.
+            OpenFilterPicker({
+                anchor = anchor,
+                isLinked = function(kind, key)
+                    local ref = DF:MakeADFilterRef(kind, key)
+                    return ref ~= nil and HasFrameEffect(ref, itemType) or false
+                end,
+                onPick = function(kind, key)
+                    local ref = DF:MakeADFilterRef(kind, key)
+                    if not ref then return end
+                    AddPickedSpell(ref, itemType, "frame")
+                    S.SwitchTab("effects")
+                    RefreshPlacedIndicators()
+                    RefreshPreviewEffects()
+                end,
+            })
+            return
         end
-    end)
+        OpenIndicatorPicker(itemType, scope)
+    end
 
-    yPos = yPos - 44
+    -- ── PICKER MODE: the column belongs to one scope's options ──
+    if S.effectsPicker then
+        local scope = SCOPES[S.effectsPicker]
+        local scopeKey = S.effectsPicker
+
+        local head = CreateFrame("Frame", nil, parent)
+        head:SetHeight(22)
+        head:SetPoint("TOPLEFT", 8, yPos)
+        head:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+
+        local headText = head:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        headText:SetPoint("LEFT", 0, 0)
+        headText:SetText(scope.title)
+        headText:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+        -- The only way out that does not commit to anything.
+        local close = GUI:CreateCloseButton(head, { size = 18, iconSize = 11 })
+        close:SetPoint("RIGHT", 0, 0)
+        close:SetScript("OnClick", function()
+            S.effectsPicker = nil
+            S.SwitchTab("effects")
+        end)
+        yPos = yPos - 26
+
+        for _, item in ipairs(scope.items) do
+            local bc = BADGE_COLORS[item.type]
+            local capturedType = item.type
+            -- Sound changes nothing on the frame, so it gets the untouched mock
+            -- frame -- which is the honest picture of what it does.
+            local art = (item.type ~= "sound")
+                and { kind = item.type, color = { bc.r, bc.g, bc.b } } or nil
+            local card = GUI:CreateChoiceCard(parent, {
+                title = item.label, desc = item.desc, art = art, accent = bc,
+                onClick = function(self) StartType(capturedType, scopeKey, self) end,
+            })
+            card:SetPoint("TOPLEFT", 8, yPos)
+            card:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+            yPos = yPos - (card.layoutHeight + 6)
+        end
+
+        parent:SetHeight(max(-yPos + 20, 200))
+        return
+    end
+
+    -- ── NORMAL: three pinned scope cards ──
+    local addBlock = GUI:CreateChoiceCardGroup(parent, {
+        title    = L["ADD AN INDICATOR"],
+        accent   = tc,
+        onToggle = function() S.SwitchTab("effects") end,
+        cards = {
+            {
+                title = SCOPES.placed.title, desc = SCOPES.placed.desc,
+                art   = { kind = "icon", color = { tc.r, tc.g, tc.b } },
+                onClick = function()
+                    S.effectsPicker, S.effectsPickerCtx = "placed", pickerCtx
+                    S.SwitchTab("effects")
+                end,
+            },
+            {
+                title = SCOPES.frame.title, desc = SCOPES.frame.desc,
+                art   = { kind = "border", color = { tc.r, tc.g, tc.b } },
+                onClick = function()
+                    S.effectsPicker, S.effectsPickerCtx = "frame", pickerCtx
+                    S.SwitchTab("effects")
+                end,
+            },
+            {
+                -- Filter green, the colour Aura Filters owns everywhere else: the
+                -- effects are identical to the card above, only the source differs.
+                title = SCOPES.filter.title, desc = SCOPES.filter.desc,
+                art   = { kind = "border", color = { 0.51, 0.86, 0.51 } },
+                onClick = function()
+                    S.effectsPicker, S.effectsPickerCtx = "filter", pickerCtx
+                    S.SwitchTab("effects")
+                end,
+            },
+        },
+    })
+    addBlock:SetPoint("TOPLEFT", 8, yPos)
+    addBlock:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+    yPos = yPos - (addBlock.layoutHeight + 10)
 
     -- ── ACTIVE INDICATORS heading ──
     local activeHeader = parent:CreateFontString(nil, "OVERLAY")
@@ -2431,7 +2462,7 @@ S.BuildEffectsTab = function()
         if not IsOtherTab() and (not spec or not specAuras or #specAuras == 0) then
             empty:SetText(L["No trackable spells found for this spec.\n\nYou can select a different spec using the dropdown above."])
         elseif S.activeFilter == "all" then
-            empty:SetText(L["No effects configured yet.\nClick '+ Add Indicator' to get started."])
+            empty:SetText(L["No effects configured yet.\nPick a style above to get started."])
         else
             empty:SetText(format(L["No %s effects configured."], (S.PLACED_TYPE_LABELS[S.activeFilter] or S.FRAME_LEVEL_LABELS[S.activeFilter] or S.activeFilter)))
         end

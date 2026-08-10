@@ -815,6 +815,255 @@ function GUI:CreateIconButton(parent, iconName, text, width, height, func, iconS
     return btn
 end
 
+-- ============================================================
+-- CHOICE CARDS
+-- ============================================================
+-- A create action drawn as a small picture of what it produces, its name, and
+-- one line saying where its contents come from.
+--
+-- ⚠ EMPTY LISTS ONLY. A card is around two and a half times the height of the
+-- compact "+ Add" button it stands in for, which the Aura Designer's ~260px tab
+-- column cannot spare once there is also a list to show. Callers build cards
+-- when the list is empty and the plain buttons otherwise -- never both at once.
+--
+-- The thumbnail is SYNTHETIC on purpose rather than a render of the player's own
+-- config. It is only ever shown when there is nothing configured to draw, and an
+-- illustration that reads identically for everyone is what makes it teachable --
+-- so it needs none of the frame preview's rendering machinery.
+--
+--   opts.art      { kind = "iconRow", colors = { {r,g,b}, ... }, ghost = true }
+--   opts.title    card heading (localised)
+--   opts.desc     one short line -- roughly 30 characters before it wraps
+--   opts.accent   border / hover tint, defaults to the mode theme
+--   opts.onClick  fired on click
+local CHOICE_CARD_H, CHOICE_THUMB_W, CHOICE_THUMB_H = 54, 62, 38
+
+-- A unit frame in miniature. The name line and health bar are what make the
+-- icons above them read as "on a frame" rather than as loose squares.
+local function BuildChoiceThumb(parent, art)
+    local thumb = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    thumb:SetSize(CHOICE_THUMB_W, CHOICE_THUMB_H)
+    CreateElementBackdrop(thumb, {
+        bgColor     = { 0.14, 0.14, 0.14, 1 },
+        borderColor = { 0.23, 0.23, 0.23, 1 },
+    })
+
+    local name = thumb:CreateTexture(nil, "ARTWORK")
+    name:SetColorTexture(0.43, 0.43, 0.43, 1)
+    name:SetPoint("TOPLEFT", 4, -4)
+    name:SetSize(20, 3)
+
+    local hpBg = thumb:CreateTexture(nil, "ARTWORK")
+    hpBg:SetColorTexture(0.17, 0.17, 0.17, 1)
+    hpBg:SetPoint("BOTTOMLEFT", 4, 4)
+    hpBg:SetPoint("BOTTOMRIGHT", -4, 4)
+    hpBg:SetHeight(8)
+
+    local hp = thumb:CreateTexture(nil, "OVERLAY")
+    hp:SetColorTexture(0.25, 0.48, 0.29, 1)
+    hp:SetPoint("TOPLEFT", hpBg, "TOPLEFT")
+    hp:SetPoint("BOTTOMLEFT", hpBg, "BOTTOMLEFT")
+    hp:SetWidth(36)
+
+    local kind = art and art.kind
+    local c = (art and art.color) or { 0.45, 0.45, 0.95 }
+
+    if kind == "iconRow" then
+        local x = 4
+        for _, col in ipairs(art.colors or {}) do
+            local ico = thumb:CreateTexture(nil, "OVERLAY")
+            ico:SetColorTexture(col[1], col[2], col[3], 1)
+            ico:SetPoint("TOPLEFT", x, -11)
+            ico:SetSize(8, 8)
+            x = x + 10
+        end
+        -- One unfilled slot. A layout group's row grows and shrinks with what is
+        -- actually up, and an empty space says that faster than a sentence can.
+        if art.ghost then
+            local ghost = thumb:CreateTexture(nil, "OVERLAY")
+            ghost:SetColorTexture(1, 1, 1, 0.07)
+            ghost:SetPoint("TOPLEFT", x, -11)
+            ghost:SetSize(8, 8)
+        end
+
+    elseif kind == "icon" or kind == "square" then
+        -- Both sit ON the frame at a corner; the size difference IS the difference.
+        local sz = (kind == "icon") and 13 or 7
+        local box = thumb:CreateTexture(nil, "OVERLAY")
+        box:SetColorTexture(c[1], c[2], c[3], 1)
+        box:SetPoint("TOPLEFT", 5, -11)
+        box:SetSize(sz, sz)
+
+    elseif kind == "bar" then
+        local bar = thumb:CreateTexture(nil, "OVERLAY")
+        bar:SetColorTexture(c[1], c[2], c[3], 1)
+        bar:SetPoint("TOPLEFT", 5, -13)
+        bar:SetPoint("RIGHT", thumb, "RIGHT", -5, 0)
+        bar:SetHeight(5)
+
+    elseif kind == "border" then
+        -- Drawn as four edges rather than a backdrop swap: the thumb's own border
+        -- is the "no effect" state, and this has to read as sitting on top of it.
+        for _, e in ipairs({ {"TOPLEFT","TOPRIGHT",0,0,nil,2}, {"BOTTOMLEFT","BOTTOMRIGHT",0,0,nil,2},
+                             {"TOPLEFT","BOTTOMLEFT",0,0,2,nil}, {"TOPRIGHT","BOTTOMRIGHT",0,0,2,nil} }) do
+            local t = thumb:CreateTexture(nil, "OVERLAY")
+            t:SetColorTexture(c[1], c[2], c[3], 1)
+            t:SetPoint(e[1], e[3], e[4])
+            t:SetPoint(e[2], e[3], e[4])
+            if e[5] then t:SetWidth(e[5]) end
+            if e[6] then t:SetHeight(e[6]) end
+        end
+
+    elseif kind == "healthbar" then
+        hp:SetColorTexture(c[1], c[2], c[3], 1)
+
+    elseif kind == "background" then
+        local bg = thumb:CreateTexture(nil, "BORDER")
+        bg:SetColorTexture(c[1], c[2], c[3], 0.55)
+        bg:SetPoint("TOPLEFT", 1, -1)
+        bg:SetPoint("BOTTOMRIGHT", -1, 1)
+
+    elseif kind == "nametext" then
+        name:SetColorTexture(c[1], c[2], c[3], 1)
+
+    elseif kind == "healthtext" then
+        -- The health readout sits on the bar, so the swatch goes there to
+        -- distinguish it from the name line above.
+        local ht = thumb:CreateTexture(nil, "OVERLAY")
+        ht:SetColorTexture(c[1], c[2], c[3], 1)
+        ht:SetPoint("BOTTOMRIGHT", -6, 6)
+        ht:SetSize(12, 3)
+    end
+
+    return thumb
+end
+
+-- A titled, collapsible block of choice cards.
+--
+-- Collapse state persists through GUI:GetCollapsedGroups() -- the same
+-- account-wide store the settings pages' collapsible sections use -- keyed by
+-- opts.title. Give every block a DISTINCT title or two of them share one state.
+-- (Keying by display text means the state resets if the player changes language.
+-- That is pre-existing behaviour for every collapsible section in the panel.)
+--
+-- ⚠ Toggling does not relayout by itself. The host is expected to rebuild from
+-- opts.onToggle -- which suits the Aura Designer, where every edit already
+-- rebuilds the tab. Without onToggle the state is saved but nothing moves.
+local CHOICE_GROUP_HEADER_H, CHOICE_CARD_GAP = 22, 6
+
+function GUI:CreateChoiceCardGroup(parent, opts)
+    opts = opts or {}
+    local accent = opts.accent or GetThemeColor()
+    local key = opts.title
+    local saved = GUI:GetCollapsedGroups()
+    local expanded = not (key and saved[key])
+
+    local group = CreateFrame("Frame", nil, parent)
+
+    local header = CreateFrame("Button", nil, group)
+    header:SetHeight(CHOICE_GROUP_HEADER_H)
+    header:SetPoint("TOPLEFT")
+    header:SetPoint("TOPRIGHT")
+
+    local arrow = header:CreateTexture(nil, "OVERLAY")
+    arrow:SetPoint("LEFT", 0, 0)
+    arrow:SetSize(12, 12)
+    arrow:SetTexture(expanded
+        and "Interface\\AddOns\\DandersFrames\\Media\\Icons\\expand_more"
+        or  "Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+    arrow:SetVertexColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+    local label = header:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(label, 9, "")
+    label:SetPoint("LEFT", arrow, "RIGHT", 6, 0)
+    label:SetText(opts.title or "")
+    label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+    header:SetScript("OnEnter", function()
+        label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    end)
+    header:SetScript("OnLeave", function()
+        label:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+    end)
+    header:SetScript("OnClick", function()
+        if key then
+            -- Store only the collapsed state, matching CreateCollapsibleSection:
+            -- an expanded block leaves no key behind at all.
+            GUI:GetCollapsedGroups()[key] = expanded or nil
+        end
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+        if opts.onToggle then opts.onToggle() end
+    end)
+
+    local h = CHOICE_GROUP_HEADER_H
+    if expanded then
+        local y = -h
+        for _, def in ipairs(opts.cards or {}) do
+            local card = GUI:CreateChoiceCard(group, {
+                title = def.title, desc = def.desc, art = def.art,
+                accent = accent, onClick = def.onClick,
+            })
+            card:SetPoint("TOPLEFT", 0, y)
+            card:SetPoint("RIGHT", group, "RIGHT", 0, 0)
+            y = y - (card.layoutHeight + CHOICE_CARD_GAP)
+            h = h + card.layoutHeight + CHOICE_CARD_GAP
+        end
+    end
+
+    group:SetHeight(h)
+    group.layoutHeight = h
+    group.expanded = expanded
+    return group
+end
+
+function GUI:CreateChoiceCard(parent, opts)
+    opts = opts or {}
+    local accent = opts.accent or GetThemeColor()
+    local idleBorder = { accent.r * 0.45, accent.g * 0.45, accent.b * 0.45, 0.8 }
+
+    local card = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    card:SetHeight(CHOICE_CARD_H)
+    CreateElementBackdrop(card, {
+        bgColor     = { C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1 },
+        borderColor = idleBorder,
+    })
+
+    local thumb = BuildChoiceThumb(card, opts.art)
+    thumb:SetPoint("LEFT", 8, 0)
+
+    local title = card:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    title:SetPoint("TOPLEFT", thumb, "TOPRIGHT", 9, -2)
+    title:SetPoint("RIGHT", card, "RIGHT", -10, 0)
+    title:SetJustifyH("LEFT")
+    title:SetText(opts.title or "")
+    title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+    local desc = card:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(desc, 8, "")
+    desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -3)
+    desc:SetPoint("RIGHT", card, "RIGHT", -10, 0)
+    desc:SetJustifyH("LEFT")
+    desc:SetWordWrap(true)
+    desc:SetText(opts.desc or "")
+    desc:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+    card:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+        self:SetBackdropBorderColor(accent.r, accent.g, accent.b, 1)
+    end)
+    card:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+        self:SetBackdropBorderColor(unpack(idleBorder))
+    end)
+    card:SetScript("OnClick", function(self)
+        if opts.onClick then opts.onClick(self) end
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+    end)
+
+    card.layoutHeight = CHOICE_CARD_H
+    return card
+end
+
 -- Creates a \"See Also:\" section with clickable links to related pages
 -- links = { {pageId = \"display_tooltips\", label = \"Tooltips\"}, ... }
 function GUI:CreateSeeAlso(parent, links)

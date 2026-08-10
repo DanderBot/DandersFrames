@@ -69,52 +69,91 @@ S.BuildLayoutGroupsTab = function()
     -- (Removed) a GROW_DIRECTIONS option map — never read. Also note its labels were
     -- raw English, so wiring it up as-is would have been a localisation regression.
 
-    -- "+ Create Group" / "+ Filter Group" buttons (prominent, theme-colored).
-    -- Left = classic member-arranger group; right = registry-linked filter group.
     local gc = { r = 0.91, g = 0.66, b = 0.25 }  -- Layout Groups tab color
-    local addBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    addBtn:SetHeight(32)
-    addBtn:SetPoint("TOPLEFT", 8, yPos)
-    addBtn:SetPoint("TOPRIGHT", parent, "TOP", -2, yPos)
-    GUI:StyleButton(addBtn, { height = 32, primary = true, accent = gc, text = L["+ Create Group"], font = "DFFontHighlight" })
-    addBtn:SetScript("OnClick", function()
-        local group = CreateLayoutGroup()
-        if group then
-            expandedGroups[GroupExpandKey(group.id)] = true
-            S.SwitchTab("layout")
-            RefreshPlacedIndicators()
-        end
-    end)
-
-    local addFilterBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    addFilterBtn:SetHeight(32)
-    addFilterBtn:SetPoint("TOPLEFT", parent, "TOP", 2, yPos)
-    addFilterBtn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -8, yPos)
-    GUI:StyleButton(addFilterBtn, { height = 32, primary = true, accent = gc, text = L["+ Filter Group"], font = "DFFontHighlight" })
-    addFilterBtn:SetScript("OnClick", function()
-        local group = CreateLayoutGroup(nil, "filter")
-        if group then
-            expandedGroups[GroupExpandKey(group.id)] = true
-            S.SwitchTab("layout")
-            RefreshPlacedIndicators()
-        end
-    end)
-    yPos = yPos - 42
-
-    -- ── LAYOUT GROUPS heading — mirrors the Effects tab's ACTIVE INDICATORS
-    -- caption and the Text Designer's group caption so every list tab has one. ──
-    local groupsHeader = parent:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(groupsHeader, 9, "")
-    groupsHeader:SetPoint("TOPLEFT", 8, yPos)
-    groupsHeader:SetText(L["LAYOUT GROUPS"])
-    groupsHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    yPos = yPos - 16
 
     -- Active tab's groups: the spec-keyed array on My Buffs, the flat
     -- spec-independent store on Other Buffs (read-only — visiting the tab
     -- never creates adDB.otherLayoutGroups; the add buttons do).
+    --
+    -- ⚠ Read BEFORE any chrome is built. An EMPTY tab explains the two kinds
+    -- with choice cards INSTEAD of the compact add buttons and the heading, so
+    -- what gets created depends on the count. A card runs ~2.5x a button's
+    -- height, which this ~260px column can only spare while there is no list
+    -- underneath it -- hence cards or buttons, never both.
     local isOtherGroups = IsOtherTab()
     local groups = CurrentLayoutGroups()
+    local hasGroups = #groups > 0
+
+    -- Teaching prose, first visit only. The CARDS below are pinned permanently --
+    -- they are the create action, so they have to be -- but this sentence is read
+    -- once and would otherwise cost column height on every visit afterwards.
+    if not hasGroups then
+        local intro = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        intro:SetPoint("TOPLEFT", 8, yPos)
+        intro:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+        intro:SetJustifyH("LEFT")
+        intro:SetWordWrap(true)
+        intro:SetText(L["A row of icons that arranges itself as auras come and go."])
+        intro:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        yPos = yPos - 34
+    end
+
+    -- The two kinds, always. These REPLACE the old "+ Create Group" / "+ Filter
+    -- Group" pair rather than sitting above it -- a card is itself the create
+    -- action, and running both would be two paths to the same thing.
+    --
+    -- Both thumbnails are a row of icons because both PRODUCE a row of icons;
+    -- that they differ only in what fills the row is the whole lesson. The
+    -- colours carry that difference -- a set picked by hand reads as mixed, one
+    -- drawn from a single filter reads as uniform.
+    local function AddGroupOfKind(kind)
+        local group = CreateLayoutGroup(nil, kind)
+        if group then
+            expandedGroups[GroupExpandKey(group.id)] = true
+            S.SwitchTab("layout")
+            RefreshPlacedIndicators()
+        end
+    end
+
+    local addBlock = GUI:CreateChoiceCardGroup(parent, {
+        title    = L["ADD A LAYOUT GROUP"],
+        accent   = gc,
+        onToggle = function() S.SwitchTab("layout") end,
+        cards = {
+            {
+                title = L["Spell Group"],
+                desc  = L["Spells you choose yourself"],
+                art   = { kind = "iconRow", ghost = true,
+                          colors = { {0.45,0.45,0.95}, {0.30,0.61,0.36}, {0.91,0.66,0.25} } },
+                onClick = function() AddGroupOfKind(nil) end,
+            },
+            {
+                title = L["Filter Group"],
+                desc  = L["Follows one of your filters"],
+                art   = { kind = "iconRow", ghost = true,
+                          colors = { {0.30,0.61,0.36}, {0.30,0.61,0.36}, {0.30,0.61,0.36} } },
+                onClick = function() AddGroupOfKind("filter") end,
+            },
+        },
+    })
+    addBlock:SetPoint("TOPLEFT", 8, yPos)
+    addBlock:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+    yPos = yPos - (addBlock.layoutHeight + 10)
+
+    if not hasGroups then
+        -- No third card for debuff rows. They are a separate store reached from
+        -- the Debuffs tab, so a card here could not create one -- pointing at
+        -- where they live is the honest version.
+        local hint = parent:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(hint, 8, "")
+        hint:SetPoint("TOPLEFT", 8, yPos - 4)
+        hint:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+        hint:SetJustifyH("LEFT")
+        hint:SetWordWrap(true)
+        hint:SetText(L["Debuff rows are set up on the Debuffs tab."])
+        hint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.8)
+        yPos = yPos - 22
+    end
 
     -- Display name lookup (My Buffs: the spec's trackable pool; Other Buffs:
     -- ad-hoc/SpellDB resolution — other-pool names aren't in a spec pool)
@@ -131,15 +170,18 @@ S.BuildLayoutGroupsTab = function()
         return displayNames[auraName] or auraName
     end
 
-    if #groups == 0 then
-        -- Empty state
-        local empty = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        empty:SetPoint("TOP", parent, "TOP", 0, yPos - 30)
-        empty:SetWidth(220)
-        empty:SetText(L["No layout groups created yet.\nClick '+ Create Group' to get started."])
-        empty:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
-        empty:SetJustifyH("CENTER")
-    else
+    if hasGroups then
+        -- ── LAYOUT GROUPS heading — mirrors the Effects tab's ACTIVE INDICATORS
+        -- caption and the Text Designer's group caption so every list tab has
+        -- one. Only with a list under it: a heading over nothing reads as a
+        -- section that failed to load. ──
+        local groupsHeader = parent:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(groupsHeader, 9, "")
+        groupsHeader:SetPoint("TOPLEFT", 8, yPos)
+        groupsHeader:SetText(L["LAYOUT GROUPS"])
+        groupsHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        yPos = yPos - 16
+
         -- Card stack: the appearance sections in an expanded card can change
         -- height in place, which moves every card below. The stack owns the
         -- re-anchor pass so those edits don't have to rebuild the tab.
@@ -907,55 +949,78 @@ S.BuildDebuffGroupsTab = function()
         end
     end
 
-    -- "+ Debuff Group" (prominent, tab accent — mirrors "+ Create Group").
-    -- The debuffGroups array is born lazily on this first add.
-    local addBtn = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    addBtn:SetHeight(32)
-    addBtn:SetPoint("TOPLEFT", 8, yPos)
-    addBtn:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -8, yPos)
-    GUI:StyleButton(addBtn, { height = 32, primary = true, accent = gc, text = L["+ Debuff Group"], font = "DFFontHighlight" })
-    addBtn:SetScript("OnClick", function()
-        local group = CreateDebuffGroup()
-        if group then
-            expandedGroups["dgroup:" .. group.id] = true
-            -- A new group claims Boss + Role by default, so the main debuff
-            -- bar drops them immediately: full structural chain, not just a
-            -- tab rebuild.
-            StructuralDebuffGroupRefresh()
-        end
-    end)
-    yPos = yPos - 42
-
-    -- Dedup explainer (§11.1 mock): how the row-claim handoff behaves.
-    local dedupHint = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    dedupHint:SetPoint("TOPLEFT", 8, yPos)
-    dedupHint:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
-    dedupHint:SetJustifyH("LEFT")
-    dedupHint:SetWordWrap(true)
-    dedupHint:SetText(L["Categories shown here are hidden from the main debuff bar automatically."])
-    dedupHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    yPos = yPos - 30
-
-    -- ── DEBUFF GROUPS heading — mirrors the Layout Groups tab's caption. ──
-    local groupsHeader = parent:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(groupsHeader, 9, "")
-    groupsHeader:SetPoint("TOPLEFT", 8, yPos)
-    groupsHeader:SetText(L["DEBUFF GROUPS"])
-    groupsHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
-    yPos = yPos - 16
-
     -- READ path: visiting the tab never creates adDB.debuffGroups.
+    -- Read first for the same reason as the Layout Groups tab: an empty tab
+    -- swaps the compact button, the dedup explainer and the heading for a
+    -- single choice card.
     local groups = DebuffGroupsRead()
+    local hasGroups = #groups > 0
 
-    if #groups == 0 then
-        -- Empty state
-        local empty = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        empty:SetPoint("TOP", parent, "TOP", 0, yPos - 30)
-        empty:SetWidth(220)
-        empty:SetText(L["No debuff groups created yet.\nClick '+ Debuff Group' to get started."])
-        empty:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
-        empty:SetJustifyH("CENTER")
-    else
+    -- Teaching prose, first visit only -- see the Layout Groups tab.
+    if not hasGroups then
+        local intro = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        intro:SetPoint("TOPLEFT", 8, yPos)
+        intro:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+        intro:SetJustifyH("LEFT")
+        intro:SetWordWrap(true)
+        intro:SetText(L["A row of icons that arranges itself as auras come and go."])
+        intro:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        yPos = yPos - 34
+    end
+
+    -- The one kind this tab makes, always -- replaces "+ Debuff Group" outright.
+    -- Red icons because the row it builds is made of debuffs, and the mixed
+    -- palette next door means "spells you picked"; keeping the two distinguishable
+    -- matters more than either thumbnail looking good in isolation.
+    -- The debuffGroups array is born lazily on the first add.
+    local addBlock = GUI:CreateChoiceCardGroup(parent, {
+        title    = L["ADD A DEBUFF GROUP"],
+        accent   = gc,
+        onToggle = function() S.SwitchTab("layout") end,
+        cards = {
+            {
+                title = L["Debuff Group"],
+                desc  = L["Blizzard's debuff categories"],
+                art   = { kind = "iconRow", ghost = true,
+                          colors = { {0.66,0.27,0.25}, {0.66,0.27,0.25}, {0.66,0.27,0.25} } },
+                onClick = function()
+                    local group = CreateDebuffGroup()
+                    if group then
+                        expandedGroups["dgroup:" .. group.id] = true
+                        -- A new group claims Boss + Role by default, so the main
+                        -- debuff bar drops them immediately: full structural
+                        -- chain, not just a tab rebuild.
+                        StructuralDebuffGroupRefresh()
+                    end
+                end,
+            },
+        },
+    })
+    addBlock:SetPoint("TOPLEFT", 8, yPos)
+    addBlock:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+    yPos = yPos - (addBlock.layoutHeight + 10)
+
+    if hasGroups then
+        -- Dedup explainer (§11.1 mock): how the row-claim handoff behaves.
+        -- Withheld while the list is empty -- with no groups nothing is being
+        -- hidden yet, so it describes a behaviour the player cannot observe.
+        local dedupHint = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        dedupHint:SetPoint("TOPLEFT", 8, yPos)
+        dedupHint:SetPoint("RIGHT", parent, "RIGHT", -8, 0)
+        dedupHint:SetJustifyH("LEFT")
+        dedupHint:SetWordWrap(true)
+        dedupHint:SetText(L["Categories shown here are hidden from the main debuff bar automatically."])
+        dedupHint:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        yPos = yPos - 30
+
+        -- ── DEBUFF GROUPS heading — mirrors the Layout Groups tab's caption. ──
+        local groupsHeader = parent:CreateFontString(nil, "OVERLAY")
+        GUI:SetSettingsFont(groupsHeader, 9, "")
+        groupsHeader:SetPoint("TOPLEFT", 8, yPos)
+        groupsHeader:SetText(L["DEBUFF GROUPS"])
+        groupsHeader:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+        yPos = yPos - 16
+
         -- Card stack — same in-place reflow seam as the Layout Groups tab.
         local stack = CreateCardStack(parent, yPos)
 
