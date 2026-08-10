@@ -1472,7 +1472,17 @@ function GUI:CreateCheckRow(parent, opts)
     cb.check = GUI:StyleCheckButton(cb, { accent = opts.accent, manualCheck = manual })
     cb.manualCheck = manual
 
-    local txt = parent:CreateFontString(nil, "OVERLAY", opts.font or "DFFontHighlightSmall")
+    -- ☠ PARENTED TO THE CHECKBOX, NOT TO `parent`.
+    --
+    -- A FontString hung off the container survives cb:Hide(), so a hidden checkbox
+    -- leaves its text on screen. The binding editor's Enable box is hidden except for
+    -- macros and items, and with the label on the panel its "Enable" floated over the
+    -- Active radios underneath. The hand-rolled version this replaced parented to the
+    -- checkbox for exactly this reason; parenting to the container was my regression.
+    --
+    -- Safe for the call sites that used to parent to a column: cb is a child of that
+    -- column, so anything hiding the column still hides the label.
+    local txt = cb:CreateFontString(nil, "OVERLAY", opts.font or "DFFontHighlightSmall")
     txt:SetPoint("LEFT", cb, "RIGHT", opts.labelGap or 8, 0)
     txt:SetText(opts.label or "")
     -- labelColor exists for the same pixel-preserving reason as labelGap: the

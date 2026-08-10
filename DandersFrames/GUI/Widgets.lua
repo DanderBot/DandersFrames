@@ -175,10 +175,12 @@ function GUI:StyleButton(btn, opts)
         -- longer translation overflowed its button: German "SCHLACHTZUG" in a 70px tab,
         -- "Freischalten" in an Unlock button, and ~80 more across the options addon.
         --
-        -- ⚠ THIS IS A NO-OP IN ENGLISH BY CONSTRUCTION. The English string already fits
-        -- the width it was designed against, so max() picks the declared value and not one
-        -- pixel moves. Only a label that genuinely does not fit grows its button -- which
-        -- is why this could be made the default rather than opted into at 82 call sites.
+        -- ⚠ A NO-OP IN ENGLISH ONLY BECAUSE THE TEST BELOW IS EXACT. The English label
+        -- fits the width it was designed against, so a fit test measuring what the layout
+        -- actually occupies leaves it alone -- which is why this can be the default rather
+        -- than opted into at 82 call sites. That guarantee is NOT free: it held only after
+        -- the padding was moved out of the test (see the note there). Assume a slack
+        -- allowance and this silently resizes buttons that were already correct.
         --
         -- ⚠ Deferred, because GetStringWidth() returns 0 until the font object has
         -- resolved -- measuring at construction is what collapsed the Aura Designer's
@@ -189,21 +191,37 @@ function GUI:StyleButton(btn, opts)
         -- grid, a row of buttons that must align); there, growing one is worse than
         -- clipping it.
         if opts.fitText ~= false then
-            -- Padding clears the backdrop inset on both sides, plus the leading icon and
-            -- its gap when there is one. `opts.icon` rather than btn.Icon: the icon is
-            -- attached further down this function and does not exist yet.
-            local pad = opts.icon and 32 or 18
+            -- ☠ TEST "WOULD IT CLIP", THEN PAD. Do NOT add padding before the test.
+            --
+            -- This first shipped as `want = tw + 32` for an icon button, compared against
+            -- the declared width -- which assumed every button carried ~8px of slack
+            -- either side. Plenty do not: the click-casting macro row declares width 86
+            -- for a 12px icon plus "Quick Macro", i.e. packed with none. So the formula
+            -- grew buttons whose labels already fitted -- Import by 10 and Quick Macro
+            -- by 18 -- and since that row anchors its left buttons rightward and its
+            -- right buttons leftward, the two chains closed on each other and collided.
+            -- The comment here claimed it was "a no-op in English by construction". It
+            -- was not, and the screenshot that proved it was worth more than the claim.
+            --
+            -- The minimum that avoids clipping is exactly what the layout occupies:
+            -- icon + gap + text. Nothing else is required, so nothing else is assumed.
+            -- Padding is added only to a button that has ALREADY failed that test, where
+            -- it buys breathing room instead of moving a button that was fine.
+            --
+            -- `opts.icon` rather than btn.Icon: the icon is attached further down this
+            -- function and does not exist yet.
+            local occupied = opts.icon and (iconW + iconGap) or 0
             local function FitToLabel()
                 if not btn.Text then return end
                 local tw = btn.Text:GetStringWidth() or 0
                 -- 0 = the font object has not resolved yet. Leave the declared width and
                 -- let the deferred pass settle it; never shrink to a bogus measurement.
                 if tw <= 0 then return end
-                local want = math.ceil(tw) + pad
+                local needed = math.ceil(tw) + occupied
                 -- GROW ONLY, measured against the CURRENT width, so the declared value is
                 -- the floor and repeated StyleButton calls (Start/Stop toggles relabel
                 -- through here) cannot ratchet a button smaller mid-session.
-                if want > (btn:GetWidth() or 0) then btn:SetWidth(want) end
+                if needed > (btn:GetWidth() or 0) then btn:SetWidth(needed + 10) end
             end
             FitToLabel()
             -- One converge next frame, guarded so repeated styling of the same button
