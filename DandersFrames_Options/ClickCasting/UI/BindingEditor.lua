@@ -1,4 +1,4 @@
--- ☠ Companion addon: `...` yields THIS addon's private table, not the
+﻿-- ☠ Companion addon: `...` yields THIS addon's private table, not the
 -- parent's, so every DF.* read here would be nil. Take the parent's table
 -- from the global it publishes at DandersFrames/Core.lua:9 (`_G[addonName]
 -- = DF`). NOT from ## AllowAddOnTableAccess -- that directive governs
@@ -509,19 +509,26 @@ function CC:CreateEditBindingPanel()
     panel.macWarning = macWarning
     
     -- Helper to create radio button
-    local function CreateRadioButton(parent, text, yOffset, group)
-        local radio = CreateFrame("CheckButton", nil, parent, "BackdropTemplate")
-        -- Box + themed check from the shared styler (Binds keeps its green accent).
-        DF.GUI:StyleCheckButton(radio, { accent = themeColor })
-
-        local label = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        label:SetPoint("LEFT", radio, "RIGHT", 8, 0)
-        label:SetText(text)
-        label:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-        
-        radio.label = label
+    -- Radio = the same row with the NATIVE checked texture, because the GROUP decides
+    -- which one is lit (every sibling is SetChecked on each click) and nothing should be
+    -- showing or hiding that texture by hand.
+    --
+    -- ⚠ THE CALLER OWNS OnClick here, unlike the checkbox above. A radio's click is
+    -- "clear the siblings, set the pending value" -- there is no per-widget `set` for the
+    -- row to run and no sound, so the caller's SetScript("OnClick") legitimately replaces
+    -- the row's handler rather than working around it. That is a plain frame API call now
+    -- the SetScript override is gone, not a hack.
+    --
+    -- (`yOffset` was already unused before this; dropped rather than carried.)
+    local function CreateRadioButton(parent, text, desc, group)
+        local radio = DF.GUI:CreateCheckRow(parent, {
+            label       = text,
+            accent      = themeColor,
+            nativeCheck = true,
+            tooltip     = desc and { title = text, lines = { desc } } or nil,
+        })
         radio.group = group
-        
+        radio.desc  = desc
         return radio
     end
     
@@ -542,88 +549,52 @@ function CC:CreateEditBindingPanel()
     panel.framesSubtitle = framesSubtitle
     
     -- Helper to create custom themed checkbox with tick mark
+    -- ☠ THE SetScript / GetChecked / SetChecked OVERRIDES ARE GONE.
+    --
+    -- This used to monkey-patch three methods onto a native CheckButton so it could
+    -- carry its own `isChecked` alongside a manually shown texture -- and the SetScript
+    -- override existed only so call sites could keep writing
+    -- cb:SetScript("OnClick", fn) while the factory kept its own internal handler.
+    -- Patching a frame's own methods to work around owning its state is a lot of
+    -- machinery to hold two booleans in step, and it hid a real hazard: any caller that
+    -- reached for a NON-OnClick script got the real SetScript, so which calls were
+    -- intercepted depended on the string you passed.
+    --
+    -- GUI:CreateCheckRow keeps the native checked state and the manual texture in step
+    -- in one place (:Apply) and exposes an assignable `cb.onClick`, so nothing needs
+    -- patching. Same styler, same accent, same 8px label gap, same tooltip shape --
+    -- identical on screen.
+    --
+    -- ⚠ Call sites assign `cb.onClick = fn`. Using SetScript("OnClick") again would
+    -- REPLACE the row's handler and lose the texture update and the set() call.
     local function CreateCheckbox(parent, text, desc)
-        local cb = CreateFrame("CheckButton", nil, parent, "BackdropTemplate")
+        local cb = DF.GUI:CreateCheckRow(parent, {
+            label   = text,
+            accent  = themeColor,
+            sound   = true,
+            tooltip = { title = text, lines = desc and { desc } or nil },
+        })
         cb.desc = desc
-        -- Box + themed check from the shared styler; manualCheck because this
-        -- factory shows/hides cb.check itself (no native checked state).
-        cb.check = DF.GUI:StyleCheckButton(cb, { accent = themeColor, manualCheck = true })
-
-        -- Text label
-        local label = cb:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-        label:SetPoint("LEFT", cb, "RIGHT", 8, 0)
-        label:SetText(text)
-        cb.text = label
-        
-        -- Internal checked state
-        cb.isChecked = false
-        
-        -- Store external click handler
-        cb.externalOnClick = nil
-        
-        -- Override SetScript to capture OnClick handlers
-        local origSetScript = cb.SetScript
-        cb.SetScript = function(self, scriptType, handler)
-            if scriptType == "OnClick" then
-                self.externalOnClick = handler
-            else
-                origSetScript(self, scriptType, handler)
-            end
-        end
-        
-        -- Override GetChecked
-        cb.GetChecked = function(self)
-            return self.isChecked
-        end
-        
-        -- Override SetChecked to update visuals (show the green square only — the
-        -- dark border stays put, matching the radio buttons + the addon standard).
-        cb.SetChecked = function(self, checked)
-            self.isChecked = checked
-            self.check:SetShown(checked)
-        end
-
-        -- Internal click behavior
-        origSetScript(cb, "OnClick", function(self)
-            self.isChecked = not self.isChecked
-            self.check:SetShown(self.isChecked)
-            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-            -- Call external handler if set
-            if self.externalOnClick then
-                self:externalOnClick()
-            end
-        end)
-
-        -- Tooltip on hover (no border recolor — keep it consistent with radios)
-        origSetScript(cb, "OnEnter", function(self)
-            DF.GUI:ShowTooltip(self, {
-                title = text,
-                lines = self.desc and { self.desc } or nil,
-            })
-        end)
-        origSetScript(cb, "OnLeave", function()
-            DF.GUI:HideTooltip()
-        end)
-        
+        cb.text = cb.label   -- legacy accessor: call sites read .text for the FontString
         return cb
     end
     
     -- DandersFrames checkbox
     local dfFramesCB = CreateCheckbox(panel, FRAME_INFO.dandersFrames.name, FRAME_INFO.dandersFrames.desc)
     dfFramesCB:SetPoint("TOPLEFT", 30, -168)
-    dfFramesCB:SetScript("OnClick", function(self)
+    dfFramesCB.onClick = function(val)
         panel.pendingBinding.frames = panel.pendingBinding.frames or {}
-        panel.pendingBinding.frames.dandersFrames = self:GetChecked()
-    end)
+        panel.pendingBinding.frames.dandersFrames = val
+    end
     panel.dfFramesCB = dfFramesCB
     
     -- Other Frames checkbox
     local otherFramesCB = CreateCheckbox(panel, FRAME_INFO.otherFrames.name, FRAME_INFO.otherFrames.desc)
     otherFramesCB:SetPoint("TOPLEFT", 30, -190)
-    otherFramesCB:SetScript("OnClick", function(self)
+    otherFramesCB.onClick = function(val)
         panel.pendingBinding.frames = panel.pendingBinding.frames or {}
-        panel.pendingBinding.frames.otherFrames = self:GetChecked()
-    end)
+        panel.pendingBinding.frames.otherFrames = val
+    end
     panel.otherFramesCB = otherFramesCB
     
     -- Target Type section (moved up, was below Fallback)
@@ -641,10 +612,9 @@ function CC:CreateEditBindingPanel()
     }
     
     for i, opt in ipairs(targetOptions) do
-        local radio = CreateRadioButton(panel, opt.text, 0, "target")
+        local radio = CreateRadioButton(panel, opt.text, opt.desc, "target")
         radio:SetPoint("TOPLEFT", 30, -236 - ((i-1) * 20))
         radio.key = opt.key
-        radio.desc = opt.desc
         
         radio:SetScript("OnClick", function(self)
             for _, r in ipairs(targetRadios) do
@@ -653,11 +623,6 @@ function CC:CreateEditBindingPanel()
             panel.pendingBinding.targetType = self.key
         end)
         
-        radio:SetScript("OnEnter", function(self)
-            DF.GUI:ShowTooltip(self, { title = opt.text, lines = { opt.desc } })
-        end)
-        radio:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
-
         table.insert(targetRadios, radio)
     end
     panel.targetRadios = targetRadios
@@ -677,10 +642,9 @@ function CC:CreateEditBindingPanel()
     }
     
     for i, opt in ipairs(combatOptions) do
-        local radio = CreateRadioButton(panel, opt.text, 0, "combat")
+        local radio = CreateRadioButton(panel, opt.text, opt.desc, "combat")
         radio:SetPoint("TOPLEFT", 30, -320 - ((i-1) * 20))
         radio.key = opt.key
-        radio.desc = opt.desc
         
         radio:SetScript("OnClick", function(self)
             for _, r in ipairs(combatRadios) do
@@ -689,11 +653,6 @@ function CC:CreateEditBindingPanel()
             panel.pendingBinding.combat = self.key
         end)
         
-        radio:SetScript("OnEnter", function(self)
-            DF.GUI:ShowTooltip(self, { title = opt.text, lines = { opt.desc } })
-        end)
-        radio:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
-
         table.insert(combatRadios, radio)
     end
     panel.combatRadios = combatRadios
@@ -793,41 +752,41 @@ function CC:CreateEditBindingPanel()
     -- Mouseover checkbox
     local mouseoverCB = CreateCheckbox(advancedContent, FALLBACK_INFO.mouseover.name, FALLBACK_INFO.mouseover.desc)
     mouseoverCB:SetPoint("TOPLEFT", 18, -38)
-    mouseoverCB:SetScript("OnClick", function(self)
+    mouseoverCB.onClick = function(val)
         panel.pendingBinding.fallback = panel.pendingBinding.fallback or {}
-        panel.pendingBinding.fallback.mouseover = self:GetChecked()
-        ConfirmGlobalKeyCapture(self, "mouseover")
-    end)
+        panel.pendingBinding.fallback.mouseover = val
+        ConfirmGlobalKeyCapture(mouseoverCB, "mouseover")
+    end
     panel.mouseoverCB = mouseoverCB
     
     -- Target checkbox
     local targetFallbackCB = CreateCheckbox(advancedContent, FALLBACK_INFO.target.name, FALLBACK_INFO.target.desc)
     targetFallbackCB:SetPoint("TOPLEFT", 18, -60)
-    targetFallbackCB:SetScript("OnClick", function(self)
+    targetFallbackCB.onClick = function(val)
         panel.pendingBinding.fallback = panel.pendingBinding.fallback or {}
-        panel.pendingBinding.fallback.target = self:GetChecked()
-        ConfirmGlobalKeyCapture(self, "target")
-    end)
+        panel.pendingBinding.fallback.target = val
+        ConfirmGlobalKeyCapture(targetFallbackCB, "target")
+    end
     panel.targetFallbackCB = targetFallbackCB
     
     -- Self checkbox
     local selfCB = CreateCheckbox(advancedContent, FALLBACK_INFO.selfCast.name, FALLBACK_INFO.selfCast.desc)
     selfCB:SetPoint("TOPLEFT", 18, -82)
-    selfCB:SetScript("OnClick", function(self)
+    selfCB.onClick = function(val)
         panel.pendingBinding.fallback = panel.pendingBinding.fallback or {}
-        panel.pendingBinding.fallback.selfCast = self:GetChecked()
-        ConfirmGlobalKeyCapture(self, "selfCast")
-    end)
+        panel.pendingBinding.fallback.selfCast = val
+        ConfirmGlobalKeyCapture(selfCB, "selfCast")
+    end
     panel.selfCB = selfCB
 
     -- Always Cast checkbox (terminal unconditional fallback — bug #991)
     local alwaysCastCB = CreateCheckbox(advancedContent, FALLBACK_INFO.alwaysCast.name, FALLBACK_INFO.alwaysCast.desc)
     alwaysCastCB:SetPoint("TOPLEFT", 18, -104)
-    alwaysCastCB:SetScript("OnClick", function(self)
+    alwaysCastCB.onClick = function(val)
         panel.pendingBinding.fallback = panel.pendingBinding.fallback or {}
-        panel.pendingBinding.fallback.alwaysCast = self:GetChecked()
-        ConfirmGlobalKeyCapture(self, "alwaysCast")
-    end)
+        panel.pendingBinding.fallback.alwaysCast = val
+        ConfirmGlobalKeyCapture(alwaysCastCB, "alwaysCast")
+    end
     panel.alwaysCastCB = alwaysCastCB
 
     -- Macro Options section header
@@ -840,18 +799,18 @@ function CC:CreateEditBindingPanel()
     -- Cancel Targeting checkbox (stopSpellTarget)
     local stopSpellTargetCB = CreateCheckbox(advancedContent, FALLBACK_INFO.stopSpellTarget.name, FALLBACK_INFO.stopSpellTarget.desc)
     stopSpellTargetCB:SetPoint("TOPLEFT", 18, -150)
-    stopSpellTargetCB:SetScript("OnClick", function(self)
+    stopSpellTargetCB.onClick = function(val)
         panel.pendingBinding.fallback = panel.pendingBinding.fallback or {}
-        panel.pendingBinding.fallback.stopSpellTarget = self:GetChecked()
-    end)
+        panel.pendingBinding.fallback.stopSpellTarget = val
+    end
     panel.stopSpellTargetCB = stopSpellTargetCB
 
     -- Target on cast checkbox (per-binding override of the global setting)
     local targetOnCastCB = CreateCheckbox(advancedContent, L["Target on cast"], L["Also make this unit your target when you click-cast on it. Overrides the global 'Target unit when click-casting' setting."])
     targetOnCastCB:SetPoint("TOPLEFT", 18, -172)
-    targetOnCastCB:SetScript("OnClick", function(self)
-        panel.pendingBinding.targetOnCast = self:GetChecked()
-    end)
+    targetOnCastCB.onClick = function(val)
+        panel.pendingBinding.targetOnCast = val
+    end
     panel.targetOnCastCB = targetOnCastCB
 
     -- Priority slider (inside advanced content)
@@ -928,9 +887,9 @@ function CC:CreateEditBindingPanel()
     -- Global Keybind checkbox (below description)
     local globalBindCB = CreateCheckbox(panel, L["Enable"], L["Makes this binding work everywhere, consuming the keybind."])
     globalBindCB:SetPoint("TOPLEFT", 30, -350)  -- Will be repositioned dynamically
-    globalBindCB:SetScript("OnClick", function(self)
-        panel.pendingBinding.useGlobalBind = self:GetChecked()
-    end)
+    globalBindCB.onClick = function(val)
+        panel.pendingBinding.useGlobalBind = val
+    end
     globalBindCB:Hide()  -- Hidden by default, shown only for macros/items
     panel.globalBindCB = globalBindCB
     

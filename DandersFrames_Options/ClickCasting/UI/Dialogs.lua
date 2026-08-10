@@ -1,4 +1,4 @@
--- ☠ Companion addon: `...` yields THIS addon's private table, not the
+﻿-- ☠ Companion addon: `...` yields THIS addon's private table, not the
 -- parent's, so every DF.* read here would be nil. Take the parent's table
 -- from the global it publishes at DandersFrames/Core.lua:9 (`_G[addonName]
 -- = DF`). NOT from ## AllowAddOnTableAccess -- that directive governs
@@ -998,24 +998,19 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
     end)
     
     -- "Don't show again" checkbox (small, bottom center)
-    local dontShowCb = CreateFrame("CheckButton", nil, popup, "BackdropTemplate")
+    -- ⚠ Its state used to be read off the TEXTURE (`if self.check:IsShown()`), with the
+    -- native checked state left behind entirely. The row keeps the two in step and makes
+    -- the checked state authoritative, so the db no longer depends on what is painted.
+    local dontShowCb = DF.GUI:CreateCheckRow(popup, {
+        label      = L["Don't show this warning again"],
+        accent     = CC.ACCENT,
+        labelGap   = 5,
+        labelColor = { 0.6, 0.6, 0.6 },
+        get        = function() return CC.db and CC.db.ignoreBlizzardWarning end,
+        set        = function(val) CC.db.ignoreBlizzardWarning = val end,
+    })
     dontShowCb:SetPoint("BOTTOM", 0, 55)
-    dontShowCb.check = DF.GUI:StyleCheckButton(dontShowCb, { accent = CC.ACCENT, manualCheck = true })
-    
-    dontShowCb:SetScript("OnClick", function(self)
-        if self.check:IsShown() then
-            self.check:Hide()
-            CC.db.ignoreBlizzardWarning = false
-        else
-            self.check:Show()
-            CC.db.ignoreBlizzardWarning = true
-        end
-    end)
-    
-    local dontShowLabel = popup:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    dontShowLabel:SetPoint("LEFT", dontShowCb, "RIGHT", 5, 0)
-    dontShowLabel:SetText(L["Don't show this warning again"])
-    dontShowLabel:SetTextColor(0.6, 0.6, 0.6)
+    local dontShowLabel = dontShowCb.label
     
     -- Close button
     local closeBtn = DF.GUI:CreateCloseButton(popup, { onClick = function()
@@ -1860,31 +1855,31 @@ function CC:ShowQuickMacroDialog()
     -- Options
     yOffset = yOffset - 10
     
-    local tooltipCb = CreateFrame("CheckButton", nil, quickMacroDialog, "BackdropTemplate")
+    local tooltipCb = DF.GUI:CreateCheckRow(quickMacroDialog, {
+        label       = L["Add #showtooltip"],
+        accent      = CC.ACCENT,
+        nativeCheck = true,
+        labelGap    = 4,
+        font        = "DFFontNormalSmall",
+        get         = function() return showTooltip end,
+        set         = function(val) showTooltip = val end,
+        onClick     = function() UpdatePreview() end,
+    })
     tooltipCb:SetPoint("TOPLEFT", 12, yOffset)
-    DF.GUI:StyleCheckButton(tooltipCb, { accent = CC.ACCENT })
-    tooltipCb:SetChecked(true)
-    tooltipCb:SetScript("OnClick", function(self)
-        showTooltip = self:GetChecked()
-        UpdatePreview()
-    end)
-    local tooltipLabel = quickMacroDialog:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    tooltipLabel:SetPoint("LEFT", tooltipCb, "RIGHT", 4, 0)
-    tooltipLabel:SetText(L["Add #showtooltip"])
-    tooltipLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local tooltipLabel = tooltipCb.label
     
-    local stopCb = CreateFrame("CheckButton", nil, quickMacroDialog, "BackdropTemplate")
+    local stopCb = DF.GUI:CreateCheckRow(quickMacroDialog, {
+        label       = L["Add /stopcasting"],
+        accent      = CC.ACCENT,
+        nativeCheck = true,
+        labelGap    = 4,
+        font        = "DFFontNormalSmall",
+        get         = function() return stopCasting end,
+        set         = function(val) stopCasting = val end,
+        onClick     = function() UpdatePreview() end,
+    })
     stopCb:SetPoint("LEFT", tooltipLabel, "RIGHT", 20, 0)
-    DF.GUI:StyleCheckButton(stopCb, { accent = CC.ACCENT })
-    stopCb:SetChecked(false)
-    stopCb:SetScript("OnClick", function(self)
-        stopCasting = self:GetChecked()
-        UpdatePreview()
-    end)
-    local stopLabel = quickMacroDialog:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    stopLabel:SetPoint("LEFT", stopCb, "RIGHT", 4, 0)
-    stopLabel:SetText(L["Add /stopcasting"])
-    stopLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local stopLabel = stopCb.label
     
     -- Preview
     yOffset = yOffset - 35

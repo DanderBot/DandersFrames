@@ -1462,7 +1462,7 @@ end
 -- them, so both are parameters and every converted site passes what it already had.
 --
 -- opts: label, accent, font, labelGap, nativeCheck,
---       tooltip = { title, lines, anchor }, get, set, onClick
+--       sound, tooltip = { title, lines, anchor }, get, set, onClick
 function GUI:CreateCheckRow(parent, opts)
     opts = opts or {}
     local cb = CreateFrame("CheckButton", nil, parent, "BackdropTemplate")
@@ -1475,17 +1475,39 @@ function GUI:CreateCheckRow(parent, opts)
     local txt = parent:CreateFontString(nil, "OVERLAY", opts.font or "DFFontHighlightSmall")
     txt:SetPoint("LEFT", cb, "RIGHT", opts.labelGap or 8, 0)
     txt:SetText(opts.label or "")
-    txt:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    -- labelColor exists for the same pixel-preserving reason as labelGap: the
+    -- "don't show this warning again" line is a dimmer grey than body text, on purpose.
+    local lc = opts.labelColor or C_TEXT
+    txt:SetTextColor(lc.r or lc[1], lc.g or lc[2], lc.b or lc[3])
     cb.label = txt
 
-    -- Keep the native checked state and the manual texture in step, so callers can use
-    -- either GetChecked() or the visual without them disagreeing.
+    -- ☠ ON A MANUAL ROW, SetChecked MUST ALSO PAINT.
+    --
+    -- With nativeCheck the client owns the texture and plain SetChecked repaints for
+    -- free. With manualCheck nothing does — so an existing `widget:SetChecked(v)`
+    -- anywhere in the codebase would flip the logical state and leave the box looking
+    -- exactly as it was. The binding editor alone has ten such calls, and they are the
+    -- refresh path: open the editor on a saved binding and every tick would be missing.
+    --
+    -- So the override goes HERE, once, and makes the widget behave like the native
+    -- control callers already expect. This is deliberately NOT the old monkey-patch it
+    -- replaces: that one also overrode GetChecked (to read a private `isChecked`) and
+    -- SetScript (to intercept one script type by string), which meant which calls were
+    -- hijacked depended on the argument you passed. The native checked state stays the
+    -- single source of truth; only the texture is kept in step with it.
+    if manual then
+        local baseSetChecked = cb.SetChecked
+        cb.SetChecked = function(self, on)
+            on = on and true or false
+            baseSetChecked(self, on)
+            self.check:SetShown(on)
+        end
+    end
+
+    -- Keep the checked state and the texture in step. Equivalent to SetChecked above on
+    -- a manual row; kept as the explicit name for call sites that mean "repaint too".
     function cb:Apply(on)
-        on = on and true or false
-        self:SetChecked(on)
-        -- Only touch the texture when WE own it: with SetCheckedTexture the client
-        -- shows and hides it, and a manual SetShown fights that.
-        if self.manualCheck then self.check:SetShown(on) end
+        self:SetChecked(on and true or false)
     end
 
     -- Re-read the source of truth and repaint. Dialogs rebuild on refresh, and several
@@ -1494,11 +1516,26 @@ function GUI:CreateCheckRow(parent, opts)
         if opts.get then self:Apply(opts.get()) end
     end
 
+    -- ⚠ ASSIGNABLE, and read at click time rather than captured. Call sites that used to
+    -- do cb:SetScript("OnClick", fn) set `cb.onClick = fn` instead -- if they kept using
+    -- SetScript they would REPLACE the handler below and silently lose set/veto/texture.
+    cb.onClick = opts.onClick
+
+    -- ⚠ NO "veto" HOOK HERE, and that is a considered omission. The one call site that
+    -- looked like it wanted one -- click-casting's Enabled box, which opens a popup and
+    -- writes in that popup's callback -- actually needs the OPPOSITE: the tick must
+    -- stand while the popup is up, because the popup's cancel path is what unchecks it.
+    -- A hook that reverted on the spot would leave the box unticked after a confirm.
+    -- A call site that genuinely defers its write simply passes no `set`.
     cb:SetScript("OnClick", function(self)
         local val = self:GetChecked() and true or false
         if self.manualCheck then self.check:SetShown(val) end
+        -- Before set/onClick so the click still sounds if a handler errors. Opt-in:
+        -- the settings pages deliberately do not sound their checkboxes, but the
+        -- binding editor's always have and that is a behaviour, not a style.
+        if opts.sound then PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON) end
         if opts.set then opts.set(val) end
-        if opts.onClick then opts.onClick(val) end
+        if self.onClick then self.onClick(val) end
     end)
 
     if opts.tooltip then

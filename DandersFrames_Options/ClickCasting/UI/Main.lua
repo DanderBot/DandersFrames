@@ -1,4 +1,4 @@
--- ☠ Companion addon: `...` yields THIS addon's private table, not the
+﻿-- ☠ Companion addon: `...` yields THIS addon's private table, not the
 -- parent's, so every DF.* read here would be nil. Take the parent's table
 -- from the global it publishes at DandersFrames/Core.lua:9 (`_G[addonName]
 -- = DF`). NOT from ## AllowAddOnTableAccess -- that directive governs
@@ -138,18 +138,23 @@ function CC:CreateClickCastUI(parent)
     title:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
     
     -- Enable checkbox (next to title)
-    local enableCb = CreateFrame("CheckButton", nil, row1, "BackdropTemplate")
-    enableCb:SetPoint("LEFT", title, "RIGHT", 15, 0)
-    DF.GUI:StyleCheckButton(enableCb, { accent = themeColor })
-    
-    local enableLabel = row1:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    enableLabel:SetPoint("LEFT", enableCb, "RIGHT", 3, 0)
-    enableLabel:SetText(L["Enabled"])
-    enableLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
-    enableCb:SetScript("OnClick", function(self)
-        local wantEnabled = self:GetChecked()
-        
+    --
+    -- ⚠ NO `set` HERE, DELIBERATELY, and no veto either.
+    --
+    -- Enabling is asynchronous: a Clique/Clicked conflict or the Blizzard warning opens
+    -- a popup, and the write happens in that popup's confirm callback, not on the click.
+    -- The box stays ticked optimistically while the popup is up, and the popup's CANCEL
+    -- path unchecks it (Dialogs.lua:762, 779, 871, 881, 1024) -- so the click must leave
+    -- the visual alone. An "abort and revert" hook is exactly wrong for this shape: it
+    -- would put the box back before the user has answered, and confirming would then
+    -- leave click-casting enabled with the box unticked.
+    local enableCb = DF.GUI:CreateCheckRow(row1, {
+        label       = L["Enabled"],
+        accent      = themeColor,
+        nativeCheck = true,
+        labelGap    = 3,
+        get         = function() return CC.db and CC.db.enabled end,
+        onClick     = function(wantEnabled)
         if wantEnabled then
             -- Check for conflicting addons
             local conflicts = {}
@@ -170,24 +175,28 @@ function CC:CreateClickCastUI(parent)
             end
             
             if #conflicts > 0 then
-                -- Show conflict popup
-                CC:ShowClickCastConflictPopup(conflicts, self)
+                -- The popup owns the decision from here; it unchecks on cancel.
+                CC:ShowClickCastConflictPopup(conflicts, enableCb)
                 return
             end
-            
+
             -- No addon conflicts - show Blizzard warning
-            CC:ShowBlizzardClickCastWarning(self, function()
+            CC:ShowBlizzardClickCastWarning(enableCb, function()
                 -- Proceed with enabling
                 CC.db.enabled = true
                 CC:SetEnabled(true)
             end)
+            -- The warning's confirm callback owns the write; it unchecks on cancel.
             return
         end
-        
-        -- Disabling - proceed normally
+
+        -- Disabling - proceed normally (no popup, so write it here).
         CC.db.enabled = false
         CC:SetEnabled(false)
-    end)
+        end,
+    })
+    enableCb:SetPoint("LEFT", title, "RIGHT", 15, 0)
+    local enableLabel = enableCb.label
     
     -- Profile settings cogwheel (far right of row 1)
     local profileCogwheel = CreateFrame("Button", nil, row1, "BackdropTemplate")
