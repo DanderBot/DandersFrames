@@ -473,6 +473,13 @@ end
 -- opts.refreshPage. Keys are parameterised (thresholdKey / thresholdModeKey) so any
 -- consumer's DB schema works.
 --
+-- ⚠ IN PRACTICE ONLY THE unitKeys PATH IS USED. The one caller
+-- (CreateExpirationControls) always passes unitKeys, and nothing in either addon ever
+-- assigns thresholdKey, resetValues, modeText or modeSegmentWidth -- so the
+-- single-key half of this contract, and those four knobs, are advertised but
+-- unexercised. Treat the paragraph below as a description of intent, not of tested
+-- behaviour, and see the ☠ note on the else branch further down.
+--
 -- opts.unitKeys = { SECONDS = key, PERCENT = key } switches the row to ONE STORED
 -- VALUE PER UNIT instead of a single key reinterpreted between them. A threshold
 -- cannot be reinterpreted (5 seconds is not 5 percent), so with this set the toggle
@@ -537,6 +544,17 @@ function GUI:CreateExpiringThresholdRow(parent, dbTable, opts)
             self:SetRange(lo, hi)   -- also re-reads the value through customGet
         end
     else
+        -- ☠ UNREACHABLE TODAY, and left in place deliberately rather than deleted.
+        -- This factory has exactly ONE caller (CreateExpirationControls, above), and
+        -- it always passes unitKeys -- so `thresholdKey`/`tKey`, this whole branch,
+        -- and opts.resetValues below it cannot run. Nothing assigns thresholdKey or
+        -- resetValues anywhere in either addon.
+        --
+        -- ⚠ Not removed because deleting it collapses the if/else and turns a
+        -- two-mode factory into a single-mode one -- a restructure of a live widget,
+        -- not a dead-code removal, and the header two paragraphs up still advertises
+        -- the parameterised-keys contract. Decide the contract first, then cut.
+        --
         -- Single key reinterpreted between units: clamp it into the new range.
         if isSeconds then
             if tKey and dbTable[tKey] and dbTable[tKey] > maxV then dbTable[tKey] = 10 end
