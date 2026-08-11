@@ -976,40 +976,287 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         
         AddToSection(textureGroup, nil, 2)
         
-        -- ===== GRADIENT PREVIEW (full width, conditional) =====
-        local gradHeader = AddToSection(GUI:CreateHeader(self.child, L["Gradient"]), 40, "both")
-        gradHeader.hideOn = function(d) return d.healthColorMode ~= "PERCENT" end
-        
-        local gradBar = AddToSection(GUI:CreateGradientBar(self.child, 550, 24, db), 35, "both")
-        gradBar.hideOn = function(d) return d.healthColorMode ~= "PERCENT" end
-        
-        -- ===== HIGH HEALTH GROUP (Column 1, conditional) =====
-        local highGroup = GUI:CreateSettingsGroup(self.child, 280)
-        highGroup:AddWidget(GUI:CreateHeader(self.child, L["High Health (100%)"]), 40)
-        highGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "healthColorHigh", false, function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if gradBar.UpdatePreview then gradBar.UpdatePreview() end end, true), 35)
-        highGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Class Color"], db, "healthColorHighUseClass", function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end), 30)
-        highGroup:AddWidget(GUI:CreateSlider(self.child, L["Weight"], 1, 5, 1, db, "healthColorHighWeight", function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if gradBar.UpdatePreview then gradBar.UpdatePreview() end end, true), 55)
-        highGroup.hideOn = function(d) return d.healthColorMode ~= "PERCENT" end
-        AddToSection(highGroup, nil, 1)
-        
-        -- ===== MEDIUM HEALTH GROUP (Column 2, conditional) =====
-        local medGroup = GUI:CreateSettingsGroup(self.child, 280)
-        medGroup:AddWidget(GUI:CreateHeader(self.child, L["Medium Health (50%)"]), 40)
-        medGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "healthColorMedium", false, function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if gradBar.UpdatePreview then gradBar.UpdatePreview() end end, true), 35)
-        medGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Class Color"], db, "healthColorMediumUseClass", function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end), 30)
-        medGroup:AddWidget(GUI:CreateSlider(self.child, L["Weight"], 1, 5, 1, db, "healthColorMediumWeight", function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if gradBar.UpdatePreview then gradBar.UpdatePreview() end end, true), 55)
-        medGroup.hideOn = function(d) return d.healthColorMode ~= "PERCENT" end
-        AddToSection(medGroup, nil, 2)
-        
-        -- ===== LOW HEALTH GROUP (Column 1, conditional) =====
-        local lowGroup = GUI:CreateSettingsGroup(self.child, 280)
-        lowGroup:AddWidget(GUI:CreateHeader(self.child, L["Low Health (0%)"]), 40)
-        lowGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "healthColorLow", false, function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if gradBar.UpdatePreview then gradBar.UpdatePreview() end end, true), 35)
-        lowGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Class Color"], db, "healthColorLowUseClass", function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end), 30)
-        lowGroup:AddWidget(GUI:CreateSlider(self.child, L["Weight"], 1, 5, 1, db, "healthColorLowWeight", function() if gradBar.UpdatePreview then gradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if gradBar.UpdatePreview then gradBar.UpdatePreview() end end, true), 55)
-        lowGroup.hideOn = function(d) return d.healthColorMode ~= "PERCENT" end
-        AddToSection(lowGroup, nil, 1)
-        
+        -- ===== GRADIENT GROUP (Column 1, conditional) =====
+        -- ☠ WAS A FULL-WIDTH HEADER, A 550px BAR AND THREE 280px GROUPS -- roughly 500px
+        -- of page across both columns for what is one ramp. It is one box under Color
+        -- now, in column 1, and the ramp is a STOP LIST rather than three fixed stages
+        -- with weights: any number of stops, each with its own threshold.
+        --
+        -- Modelled on the Color by Time editor further up this file, deliberately -- same
+        -- preview-strip-over-rows shape, same 52px colour chip, same +/- stepper, same
+        -- add/reset footer. Two editors for "a colour ramp with stops" that look
+        -- different would be two things to learn.
+        --
+        -- ⚠ The 550px bar was ALSO the widget that misbehaved on window drag, because a
+        -- full-width widget is resized on every relayout. This one is fixed at the box's
+        -- inner width, and CreateGradientBar repaints on OnSizeChanged regardless.
+        local gradGroup = GUI:CreateSettingsGroup(self.child, 280)
+        gradGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40)
+        local gradInner = GUI:GroupInnerWidth(gradGroup)
+        -- Own copy: the Colors page's `iconPath` is a local inside ITS BuildPage closure,
+        -- so it is not in scope here. Reaching for it would resolve to a nil global.
+        local gradIconPath = "Interface\\AddOns\\DandersFrames\\Media\\Icons\\"
+
+        -- ⚠ Mode-correct defaults, not PartyDefaults unconditionally. RaidDefaults is a
+        -- deep copy of PartyDefaults today, so the two agree on the stops and either
+        -- would work -- but the moment a raid override is added for them, a hardcoded
+        -- PartyDefaults would quietly seed party values into the raid profile. Same
+        -- idiom Pages/Indicators.lua uses for its reset.
+        local function GradDefaults()
+            local d = (db == DF.db.raid) and DF.RaidDefaults or DF.PartyDefaults
+            return DF:DeepCopy(d.healthColorStops)
+        end
+
+        local function GradStops()
+            local s = db.healthColorStops
+            if type(s) ~= "table" or #s < 2 then
+                -- Un-migrated or damaged: seed from the defaults rather than editing a
+                -- list that is not there. The migration normally beats us to this.
+                db.healthColorStops = GradDefaults()
+                s = db.healthColorStops
+            end
+            table.sort(s, function(a, b)
+                return (tonumber(a.threshold) or 0) < (tonumber(b.threshold) or 0)
+            end)
+            return s
+        end
+
+        local gradBar = GUI:CreateGradientBar(self.child, gradInner, 18, db)
+        gradGroup:AddWidget(gradBar, 24)
+
+        -- Colour edits fire per wheel tick, so repaint the strip live but debounce the
+        -- curve rebuild -- the same split the Color by Time editor uses.
+        local function GradRepaint() if gradBar.UpdatePreview then gradBar.UpdatePreview() end end
+        local function GradApply()
+            GradRepaint()
+            DF:UpdateColorCurve()
+            DF:RefreshAllVisibleFrames()
+        end
+        -- Adding, removing or moving a stop changes the ROW SET, so the page has to be
+        -- rebuilt for the captions and stepper bounds to stay truthful. A colour edit
+        -- does not, and must not — rebuilding under an open colour picker closes it.
+        local function GradRebuild()
+            GradApply()
+            if pageHealthBar and pageHealthBar.Refresh then pageHealthBar:Refresh() end
+        end
+
+        do
+            local stops = GradStops()
+            for i, stop in ipairs(stops) do
+                local row = CreateFrame("Frame", nil, self.child)
+                row:SetSize(gradInner, 24)
+
+                -- ★ THE SWATCH AND THE CLASS TOGGLE ARE ONE CONTROL. They sit flush, same
+                -- height, and EXACTLY ONE OF THEM READS AS LIVE -- the inactive half dims.
+                -- That is what stops it looking like two widgets: the pair answers a
+                -- single question ("this colour, or the unit's class?") and shows which
+                -- answer is current, rather than a swatch plus a floating tickbox.
+                --
+                -- Per stop, deliberately. The old three-stage model had a UseClass on each
+                -- stage, and dropping to one ramp-wide toggle would have been a quiet
+                -- capability loss.
+                local chip = GUI:CreateColorPicker(self.child, "", stop, "color", false,
+                    GradRepaint, GradApply, true)
+                chip:SetParent(row)
+                chip:SetSize(52, 24)
+                chip:SetPoint("LEFT", row, "LEFT", 0, 0)
+
+                local classBtn = CreateFrame("Button", nil, row, "BackdropTemplate")
+                classBtn:SetSize(20, 24)
+                classBtn:SetPoint("LEFT", chip, "RIGHT", 0, 0)   -- flush: one unit
+                GUI:CreateElementBackdrop(classBtn, {
+                    fill        = true,
+                    outline     = true,
+                    bgColor     = { 0.14, 0.14, 0.14, 1 },
+                    borderColor = { 0.23, 0.23, 0.23, 1 },
+                })
+                -- The toggle's own fill IS the player's class colour, so the control
+                -- shows what it does instead of needing a letter on it -- and a glyph
+                -- avoids inventing a localisable "C" that means nothing in most languages.
+                local _, rowClass = UnitClass("player")
+                local rowCC = rowClass and DF:GetClassColor(rowClass)
+                local classTex = classBtn:CreateTexture(nil, "ARTWORK")
+                classTex:SetPoint("TOPLEFT", 3, -3)
+                classTex:SetPoint("BOTTOMRIGHT", -3, 3)
+                classTex:SetColorTexture((rowCC and rowCC.r) or 0.6, (rowCC and rowCC.g) or 0.6,
+                                         (rowCC and rowCC.b) or 0.6, 1)
+
+                local function PaintClassPair()
+                    local on = stop.useClass and true or false
+                    -- Dim whichever half is not in play. The fixed swatch keeps its colour
+                    -- (so you can still see what you would go back to) but drops to a
+                    -- third alpha; the class square does the same in reverse.
+                    chip:SetAlpha(on and 0.35 or 1)
+                    classTex:SetAlpha(on and 1 or 0.25)
+                end
+                PaintClassPair()
+
+                classBtn:SetScript("OnClick", function()
+                    stop.useClass = not stop.useClass
+                    PaintClassPair()
+                    GradApply()   -- colour resolution only; must not rebuild the page
+                end)
+                classBtn:HookScript("OnEnter", function()
+                    GUI:ShowTooltip(classBtn, { title = L["Use Class Color"],
+                        lines = { L["Color this stop by each unit's own class."] } })
+                end)
+                classBtn:HookScript("OnLeave", function() GUI:HideTooltip() end)
+
+                local cap = row:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                cap:SetPoint("LEFT", classBtn, "RIGHT", 8, 0)
+                cap:SetText(format("%d%%", math.floor(tonumber(stop.threshold) or 0)))
+                cap:SetTextColor(0.85, 0.85, 0.85)
+                cap:SetWordWrap(false)
+                cap:SetJustifyH("LEFT")
+
+                -- Right to left: [x][+][value][-]. The end stops keep their thresholds:
+                -- a ramp that does not start at 0 or reach 100 has to hold its end
+                -- colours outward, which reads as a bug even though the renderer copes.
+                local isEnd = (i == 1) or (i == #stops)
+                local rightAnchor, rightPoint, rightOff = row, "RIGHT", -2
+
+                if not isEnd then
+                    local remBtn = GUI:CreateCloseButton(row, {
+                        size = 20,
+                        onClick = function()
+                            for idx, s in ipairs(db.healthColorStops) do
+                                if s == stop then table.remove(db.healthColorStops, idx) break end
+                            end
+                            GradRebuild()
+                        end,
+                        tooltipDesc = L["Remove this stop"],
+                    })
+                    remBtn:SetPoint("RIGHT", row, "RIGHT", -2, 0)
+                    rightAnchor, rightPoint, rightOff = remBtn, "LEFT", -4
+                end
+
+                if not isEnd then
+                    local cur = math.floor(tonumber(stop.threshold) or 0)
+                    local lower = math.floor(tonumber(stops[i - 1].threshold) or 0) + 1
+                    local upper = math.floor(tonumber(stops[i + 1].threshold) or 100) - 1
+                    local eb
+                    local function commitTo(nt)
+                        nt = math.floor(tonumber(nt) or cur)
+                        nt = math.max(lower, math.min(upper, nt))
+                        if nt == cur then
+                            -- Rejected or unchanged: put the field back to the truth,
+                            -- otherwise a clamped entry sits there reading as accepted.
+                            if eb then eb:SetText(tostring(cur)) end
+                            return
+                        end
+                        stop.threshold = nt
+                        GradRebuild()
+                    end
+
+                    local plus = CreateFrame("Button", nil, row, "BackdropTemplate")
+                    GUI:StyleButton(plus, { width = 22, height = 20, icon = { texture = gradIconPath .. "add", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                    plus:SetPoint("RIGHT", rightAnchor, rightPoint, rightOff, 0)
+                    plus:SetScript("OnClick", function() commitTo(cur + 1) end)
+
+                    -- Typeable, not a label: a threshold runs 0-100, so nudging 50 to 90
+                    -- on the +/- alone is forty clicks. Same EditBox shape the Color by
+                    -- Time stepper uses, tooltip included -- the row has no width for a
+                    -- caption beside it.
+                    eb = CreateFrame("EditBox", nil, row)
+                    GUI:StyleEditBox(eb)
+                    eb:SetSize(38, 20)
+                    eb:SetPoint("RIGHT", plus, "LEFT", -4, 0)
+                    eb:SetAutoFocus(false)
+                    eb:SetNumeric(true)
+                    eb:SetMaxLetters(3)
+                    eb:SetJustifyH("CENTER")
+                    eb:SetText(tostring(cur))
+                    eb:SetCursorPosition(0)
+                    -- ☠ BOTH keys clear focus. An edit box that swallows Escape traps the
+                    -- keypress so it never reaches the panel -- three of those were fixed
+                    -- in this addon's dialogs recently; do not add a fourth.
+                    eb:SetScript("OnEnterPressed", function(s)
+                        local text = s:GetText()
+                        s:ClearFocus()
+                        commitTo(text)
+                    end)
+                    eb:SetScript("OnEscapePressed", function(s)
+                        s:SetText(tostring(cur))
+                        s:ClearFocus()
+                    end)
+                    -- Commit on click-away too, not only Enter: a typed number that
+                    -- silently reverted because you clicked elsewhere is the most
+                    -- irritating way for a field like this to behave.
+                    eb:SetScript("OnEditFocusLost", function(s) commitTo(s:GetText()) end)
+                    eb:HookScript("OnEnter", function()
+                        GUI:ShowTooltip(eb, { title = L["Starts at"] })
+                    end)
+                    eb:HookScript("OnLeave", function() GUI:HideTooltip() end)
+
+                    local minus = CreateFrame("Button", nil, row, "BackdropTemplate")
+                    GUI:StyleButton(minus, { width = 22, height = 20, icon = { texture = gradIconPath .. "remove", size = 12, color = { r = 0.85, g = 0.85, b = 0.85 } } })
+                    minus:SetPoint("RIGHT", eb, "LEFT", -4, 0)
+                    minus:SetScript("OnClick", function() commitTo(cur - 1) end)
+
+                    cap:SetPoint("RIGHT", minus, "LEFT", -6, 0)
+                else
+                    cap:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+                end
+
+                -- ⚠ NO PER-STOP CLASS TICKBOX. One toggle for the whole ramp sits below
+                -- the rows instead -- a box on every row was heavy, and the picker's own
+                -- Class tab cannot stand in for it (see that toggle's note).
+                gradGroup:AddWidget(row, 28)
+            end
+
+            -- ☠ NO RAMP-WIDE CLASS TOGGLE. One lived here briefly, governing only the top
+            -- stop, and it quietly cost the per-stop control the old three-stage model
+            -- had. The class choice belongs to each stop and now sits fused to that
+            -- stop's swatch -- see the note on the pair above.
+            --
+            -- ⚠ The picker cannot absorb this either: its path rides Blizzard's
+            -- SetupColorPickerAndShow hook and carries a COLOUR, with nowhere to put a
+            -- boolean. And the two are not the same thing -- the flag resolves against
+            -- each unit's own class per frame, while the picker's Class tab sets one
+            -- fixed colour for everybody.
+
+            -- Add drops a stop in the widest remaining gap, so repeated presses spread
+            -- out instead of stacking against one edge. Its colour is sampled from the
+            -- ramp at that point, so adding a stop never changes what is on screen --
+            -- it only gives you a handle there.
+            local footer = CreateFrame("Frame", nil, self.child)
+            footer:SetSize(gradInner, 24)
+
+            local addBtn = CreateFrame("Button", nil, footer, "BackdropTemplate")
+            -- Same key the Color by Time editor's button uses, deliberately: two ramp
+            -- editors that behave alike should not be worded differently.
+            GUI:StyleButton(addBtn, { width = 100, height = 22, text = L["Add Color Stop"], fitText = true })
+            addBtn:SetPoint("LEFT", footer, "LEFT", 0, 0)
+            addBtn:SetScript("OnClick", function()
+                local s = GradStops()
+                local bestGap, bestAt = -1, nil
+                for i = 1, #s - 1 do
+                    local a = math.floor(tonumber(s[i].threshold) or 0)
+                    local b = math.floor(tonumber(s[i + 1].threshold) or 0)
+                    if (b - a) > bestGap then bestGap, bestAt = b - a, math.floor((a + b) / 2) end
+                end
+                if not bestAt or bestGap < 2 then return end   -- no room between neighbours
+                local c = DF:GetHealthGradientColor(bestAt / 100, db, nil, "healthColor")
+                table.insert(s, { threshold = bestAt,
+                                  color = { r = c.r, g = c.g, b = c.b, a = 1 },
+                                  useClass = false })
+                GradRebuild()
+            end)
+
+            local resetBtn = CreateFrame("Button", nil, footer, "BackdropTemplate")
+            GUI:StyleButton(resetBtn, { width = 100, height = 22, text = L["Reset"], fitText = true })
+            resetBtn:SetPoint("LEFT", addBtn, "RIGHT", 6, 0)
+            resetBtn:SetScript("OnClick", function()
+                db.healthColorStops = GradDefaults()
+                GradRebuild()
+            end)
+
+            gradGroup:AddWidget(footer, 28)
+        end
+
+        gradGroup.hideOn = function(d) return d.healthColorMode ~= "PERCENT" end
+        AddToSection(gradGroup, nil, 1)
+
         -- ===== BACKGROUND GROUP (Column 1) =====
         local bgGroup = GUI:CreateSettingsGroup(self.child, 280)
         bgGroup:AddWidget(GUI:CreateHeader(self.child, L["Background"]), 40)

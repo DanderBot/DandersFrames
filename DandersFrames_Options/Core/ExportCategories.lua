@@ -165,6 +165,14 @@ DF.ExportCategories = {
         "healthColorMedium",
         "healthColorMediumUseClass",
         "healthColorMediumWeight",
+        -- ⚠ THE STOP LIST AND THE LEGACY STAGES BOTH TRAVEL, on purpose. The stops are
+        -- what the renderer reads; the Low/Medium/High + Weight keys above are what an
+        -- older build reads, and what DF:MigrateHealthColorStops converts from. Export
+        -- only the stops and a profile sent to someone on the previous build loses its
+        -- gradient entirely; export only the stages and the receiving build's migration
+        -- would rebuild the list from them, silently discarding any stop the sender had
+        -- added beyond the original three.
+        "healthColorStops",
         "healthColorMode",
         "healthOrientation",
         "healthTexture",
@@ -179,6 +187,7 @@ DF.ExportCategories = {
         "missingHealthColorMedium",
         "missingHealthColorMediumUseClass",
         "missingHealthColorMediumWeight",
+        "missingHealthColorStops",   -- see the healthColorStops note above
         "missingHealthColorMode",
         "missingHealthGradientAlpha",
         "missingHealthTexture",

@@ -3523,61 +3523,60 @@ function GUI:CreateGradientBar(parent, width, height, db, prefix)
         
         for _, tex in ipairs(f.TexPool) do tex:Hide() end
         
-        local _, pClass = UnitClass("player")
-        local classCol = DF:GetClassColor(pClass)
-        
-        local function GetC(stage)
-            if db[prefix .. stage .. "UseClass"] then
-                return CreateColor(classCol.r, classCol.g, classCol.b, 1)
-            end
-            local c = db[prefix .. stage]
-            if not c or not c.r then return CreateColor(1, 1, 1, 1) end
-            return CreateColor(c.r, c.g, c.b, 1)
-        end
-        
-        local lCol = GetC("Low")
-        local mCol = GetC("Medium")
-        local hCol = GetC("High")
-        
-        local lowW = math.max(1, math.floor(db[prefix .. "LowWeight"] or 1))
-        local medW = math.max(1, math.floor(db[prefix .. "MediumWeight"] or 1))
-        local highW = math.max(1, math.floor(db[prefix .. "HighWeight"] or 1))
-        
-        local points = {}
-        for i = 1, lowW do table.insert(points, lCol) end
-        for i = 1, medW do table.insert(points, mCol) end
-        for i = 1, highW do table.insert(points, hCol) end
-        
-        if #points < 2 then points = {lCol, hCol} end
-        
-        local numSegments = #points - 1
+        -- ☠ THE RAMP IS BUILT IN ONE PLACE, AND THIS IS NOT IT. This function used to
+        -- hold a THIRD copy of the point-array build -- its own GetStageColor, its own
+        -- weight expansion -- alongside the two in Frames/Colors.lua. When the health
+        -- gradient moved to a stop list those two were converged and this one was
+        -- missed, so the strip kept painting the legacy Low/Medium/High stages: editing
+        -- a stop's colour changed the frames and did nothing to the preview above them.
+        -- A preview that disagrees with what it previews is worse than no preview.
+        --
+        -- DF.BuildColorStops is the shared builder. It answers for BOTH shapes (stop
+        -- list, or the legacy stages for a profile the migration has not reached), so
+        -- this reads whatever the renderer would read, by construction.
+        -- ⚠ THE PLAYER'S CLASS, NOT nil. A stop with useClass set resolves against the
+        -- unit's class at render time; passing nil makes BuildColorStops ignore the flag
+        -- and fall back to the stored colour, so the strip would show one thing and the
+        -- frames another the moment class colouring was switched on. Sampling the
+        -- player's own class is the preview differing in DATA, which is allowed -- it
+        -- shows what a frame for someone of your class would look like.
+        local _, previewClass = UnitClass("player")
+        local stops = DF.BuildColorStops and DF.BuildColorStops(db, prefix, previewClass)
+        if not stops or #stops < 2 then return end
+
         -- ⚠ MEASURED, SO IT MUST BE RE-MEASURED. Everything below is laid out in
         -- absolute pixels off this width, which is why OnSizeChanged has to re-run the
         -- whole function -- see the note at the bottom.
         --
-        -- Defensive, not a fix for an observed bug: the constructor sizes the frame
-        -- before the first paint, so GetWidth is real by then. But now that a resize
-        -- repaints, this runs during layout passes too -- and a width at or under 4
-        -- would make segWidth zero or negative, laying the segments out backwards over
-        -- each other. Bail instead; the next pass with a real width repaints.
+        -- Defensive: a width at or under 4 would give a zero or negative segment width,
+        -- laying segments out backwards over each other. Bail; the next pass repaints.
         local usable = (f:GetWidth() or 0) - 4
         if usable <= 0 then return end
-        local segWidth = usable / numSegments
 
-        for i = 1, numSegments do
+        -- ⚠ SEGMENTS ARE PLACED BY THRESHOLD, NOT BY EQUAL SHARE. The old loop gave every
+        -- segment `usable / numSegments`, which was only right because weights produced
+        -- evenly spaced points. Stops carry their own positions, so a 0/50/90 ramp has a
+        -- wide band and a narrow one -- dividing equally would draw a plausible gradient
+        -- that simply is not the one being rendered on the frames.
+        for i = 1, #stops - 1 do
+            local s1, s2 = stops[i], stops[i + 1]
+            local x0 = 2 + s1.pos * usable
+            local segWidth = (s2.pos - s1.pos) * usable
+            if segWidth < 1 then segWidth = 1 end   -- two stops a percent apart still draw
+
             local tex = f.TexPool[i]
             if not tex then
                 tex = f:CreateTexture(nil, "ARTWORK")
                 table.insert(f.TexPool, tex)
             end
-            
+
             tex:Show()
             tex:ClearAllPoints()
-            tex:SetPoint("LEFT", f, "LEFT", 2 + (i - 1) * segWidth, 0)
+            tex:SetPoint("LEFT", f, "LEFT", x0, 0)
             tex:SetSize(segWidth, f:GetHeight() - 4)
-            
-            local c1 = points[i]
-            local c2 = points[i + 1]
+
+            local c1 = CreateColor(s1.r, s1.g, s1.b, 1)
+            local c2 = CreateColor(s2.r, s2.g, s2.b, 1)
             
             tex:SetColorTexture(1, 1, 1, 1)
             tex:SetGradient("HORIZONTAL", c1, c2)

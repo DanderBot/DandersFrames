@@ -3679,6 +3679,73 @@ local function ZeroBuffDebuffBorderInset(profile)
     end
 end
 
+-- Convert the three-stage health gradient (Low/Medium/High + a Weight each) into the
+-- stop list the renderer now reads, WITHOUT changing what anyone sees.
+--
+-- ★ WHY IT IS EXACT. A weight of N never meant "emphasis" -- it literally repeated that
+-- colour N times in an evenly spaced point array. Low 2 / Medium 2 / High 1 is
+-- [red, red, yellow, yellow, green] at 0 / .25 / .5 / .75 / 1. So the conversion is just
+-- "write those positions down as thresholds": same colours, same positions, same curve.
+--
+-- ☠ WHICH IS WHY THE SHIPPED DEFAULT BECOMES FIVE STOPS, NOT THREE. Those duplicate
+-- pairs are the plateaus that make the bar read the way it does -- red HELD to a quarter
+-- health rather than immediately ramping away from it. Collapsing to three stops at
+-- 0/50/100 would have been the tidier list and a visible change to every upgrading
+-- user's frames. New profiles start at that tidy three (see Config); existing ones keep
+-- their shape.
+--
+-- ⚠ Integer thresholds are exact when the point count minus one divides 100 -- which
+-- covers 2, 3, 5, 6 and 11 points, including the shipped default of 5. Other counts land
+-- within half a percent of bar width, e.g. 4 points at 0/33/67/100 against a true third.
+-- Imperceptible, and only reachable by hand-tuned weights.
+--
+-- Presence-gated, not flag-gated, and idempotent: it converts only while the list is
+-- absent, so a re-import of an old profile is converted again while an edited list is
+-- never overwritten.
+function DF:MigrateHealthColorStops()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        if type(profile) == "table" then
+            for _, modeKey in ipairs({ "party", "raid" }) do
+                local m = profile[modeKey]
+                if type(m) == "table" then
+                    for _, prefix in ipairs({ "healthColor", "missingHealthColor" }) do
+                        local listKey = prefix .. "Stops"
+                        if type(m[listKey]) ~= "table" or #m[listKey] < 2 then
+                            local pts = {}
+                            for _, stage in ipairs({ "Low", "Medium", "High" }) do
+                                local c = m[prefix .. stage]
+                                -- Only fold a stage the profile actually carries. A
+                                -- missing one is skipped rather than invented, so a
+                                -- partial profile converts to the stops it really has.
+                                if type(c) == "table" then
+                                    local w = math.max(1, math.floor(m[prefix .. stage .. "Weight"] or 1))
+                                    local useClass = m[prefix .. stage .. "UseClass"] and true or false
+                                    for _ = 1, w do
+                                        pts[#pts + 1] = {
+                                            color = { r = c.r or 0.5, g = c.g or 0.5, b = c.b or 0.5, a = c.a or 1 },
+                                            useClass = useClass,
+                                        }
+                                    end
+                                end
+                            end
+                            -- Fewer than two points cannot describe a ramp; leave the
+                            -- key absent so BuildColorStops falls back and Config's
+                            -- default seeds it, rather than writing a broken list.
+                            if #pts >= 2 then
+                                for i, p in ipairs(pts) do
+                                    p.threshold = math.floor(((i - 1) / (#pts - 1)) * 100 + 0.5)
+                                end
+                                m[listKey] = pts
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 -- Fold the legacy per-element OOR name-text alpha into the unified oorTextAlpha.
 -- The Text Designer now renders all unit text, so a single OOR "Text Alpha" dims
 -- every TD element out of range. Carry the user's old name-text value only when
@@ -6706,6 +6773,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- (Text Designer now renders all text). Per-profile guarded.
             if DF.MigrateOORTextAlpha then
                 DF:MigrateOORTextAlpha()
+            end
+
+            -- Convert the three-stage health gradient into a stop list. Presence-gated
+            -- per profile, so it is a no-op once converted.
+            if DF.MigrateHealthColorStops then
+                DF:MigrateHealthColorStops()
             end
 
             -- Retire the deprecated raidGroupOrder reverse toggle (NORMAL-ize any
