@@ -1143,7 +1143,10 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                             end
                             GradRebuild()
                         end,
-                        tooltipDesc = L["Remove this stop"],
+                        -- `tooltip`, not `tooltipDesc`: CreateCloseButton gates the whole
+                        -- hook on opts.tooltip, so a desc alone never rendered. Title-only
+                        -- is the house style for a ✕ whose title says everything.
+                        tooltip = L["Remove this stop"],
                     })
                     remBtn:SetPoint("RIGHT", row, "RIGHT", -2, 0)
                     rightAnchor, rightPoint, rightOff = remBtn, "LEFT", -4
@@ -1189,10 +1192,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     -- ☠ BOTH keys clear focus. An edit box that swallows Escape traps the
                     -- keypress so it never reaches the panel -- three of those were fixed
                     -- in this addon's dialogs recently; do not add a fourth.
+                    -- ⚠ ClearFocus ONLY: it fires OnEditFocusLost, which commits. An
+                    -- explicit commitTo here ran SECOND, against cur/lower/upper
+                    -- captured before the focus-lost commit's rebuild -- a stale
+                    -- double-commit per Enter press.
                     eb:SetScript("OnEnterPressed", function(s)
-                        local text = s:GetText()
                         s:ClearFocus()
-                        commitTo(text)
                     end)
                     eb:SetScript("OnEscapePressed", function(s)
                         s:SetText(tostring(cur))

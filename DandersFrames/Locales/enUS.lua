@@ -36,7 +36,9 @@ L["Aura Designer (incl. sounds)"] = true
 L["Aura row drivers: rebuild vs tuning vs style, retargets"] = true
 L["Auto-create profiles disabled. Profiles will not be created for new loadouts."] = true
 L["Auto-create profiles enabled."] = true
-L["Auto-created profile: |cffffffff%s|r"] = true
+-- ⚠ No colour escapes in locale keys: a translator unbalancing |c…|r swallows the
+-- rest of the chat line. The caller wraps the substituted name instead.
+L["Auto-created profile: %s"] = true
 L["Auto-profile evaluation and runtime overlay"] = true
 L["Cannot delete the default profile"] = true
 L["Cannot rename the default profile"] = true
@@ -58,7 +60,9 @@ L["Flat raid layout and sorting"] = true
 L["Frame Layout"] = true
 L["Frame size, spacing, growth direction, container resize"] = true
 L["FrameSort addon integration"] = true
+L["Filter registry: custom filter import, scrub and reference rewrites"] = true
 L["Group composition changes, throttling, sorting decisions"] = true
+L["Settings search: breadcrumb resolution and navigation failures"] = true
 L["Header show/hide and state-driver changes"] = true
 L["Health bar value writes, including Reduced Max Health"] = true
 L["Import for"] = true
@@ -370,6 +374,7 @@ L["Enter name for copy of '%s':"] = true
 L["Enter new name for '%s':"] = true
 L["Export failed. Please try again or check for errors."] = true
 L["Import failed. Please try again or check for errors."] = true
+L["Import failed: %s"] = true
 L["OK"] = true
 L["Paste a profile string to import:"] = true
 L["Reset all bindings to defaults?\n\nThis will set:\n• Left Click = Target Unit\n• Right Click = Open Menu\n\n%sThis cannot be undone.%s"] = true

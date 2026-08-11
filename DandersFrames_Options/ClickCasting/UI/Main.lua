@@ -148,7 +148,14 @@ function CC:CreateClickCastUI(parent)
     -- the visual alone. An "abort and revert" hook is exactly wrong for this shape: it
     -- would put the box back before the user has answered, and confirming would then
     -- leave click-casting enabled with the box unticked.
-    local enableCb = DF.GUI:CreateCheckRow(row1, {
+    -- ☠ DECLARED BEFORE THE INITIALIZER, on purpose. The onClick closure below hands
+    -- `enableCb` to both popups so their cancel paths can untick it -- but a local's
+    -- scope begins at the statement AFTER its declaration, so inside a one-statement
+    -- `local enableCb = CreateCheckRow{ onClick = ... }` those references compiled
+    -- against a nil GLOBAL: both popups received nil, and cancelling left the box
+    -- ticked while CC.db.enabled stayed false.
+    local enableCb
+    enableCb = DF.GUI:CreateCheckRow(row1, {
         label       = L["Enabled"],
         accent      = themeColor,
         nativeCheck = true,

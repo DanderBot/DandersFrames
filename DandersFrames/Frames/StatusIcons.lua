@@ -841,7 +841,15 @@ function DF:UpdateAFKIcon(frame, isAFKOverride)
     -- art: sharing the clock is what made DND indistinguishable from AFK in the first place.
     -- Check AFK status (secret-safe), keyed by GUID so the timer survives transient nil
     -- returns (cross-realm latency, instance loading).
-    local afkKey = GetAFKKey(unit)
+    -- ☠ TEST FRAMES GET THEIR OWN CACHE LANE. Pooled test frames carry REAL unit
+    -- tokens ("player", "party1", "raid1"...), so GetAFKKey resolves REAL GUIDs for
+    -- them -- and the preview's forced isAFK stamped genuine group members' keys
+    -- into afkStateCache/afkStartTimes, restarting their live AFK clocks. (An
+    -- earlier claim that GetAFKKey "falls back to the unit token" for test frames
+    -- was wrong: it only falls back when the GUID is secret or inaccessible, which
+    -- a real token's is not.) Same pathway, different KEY -- the preview still runs
+    -- this live renderer, per the previews-run-live rule.
+    local afkKey = frame.dfIsTestFrame and ("test:" .. unit) or GetAFKKey(unit)
     local isAFK = nil
     if isAFKOverride ~= nil then
         -- Preview: the caller supplies the state. Still goes through the cache below,

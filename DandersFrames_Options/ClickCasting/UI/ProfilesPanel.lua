@@ -935,8 +935,10 @@ function CC:ShowImportDialog()
             if success then
                 DF:Say(format(L["Profile imported: %s"], result))
                 CC:RefreshProfilesPanel()
+            elseif result then
+                DF:Err(format(L["Import failed: %s"], result))
             else
-                DF:Err("Import failed: " .. (result or "unknown error"))
+                DF:Err(L["Import failed. Please try again or check for errors."])
             end
         end,
     })

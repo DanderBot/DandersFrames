@@ -570,8 +570,10 @@ end
 -- Show notification that a profile was auto-created
 function CC:ShowProfileCreatedNotification(profileName)
     -- Simple print for now - could be a fancy toast later
-    DF:Say(format(L["Auto-created profile: |cffffffff%s|r"], profileName))
-    print("|cff888888" .. L["Your bindings were copied to this new profile. You can customize it in the Profiles tab."] .. "|r")
+    -- Colour lives HERE, not in the locale key -- a translator unbalancing |c…|r
+    -- would swallow the rest of the line.
+    DF:Say(format(L["Auto-created profile: %s"], "|cffffffff" .. profileName .. "|r"))
+    DF:Say("|cff888888" .. L["Your bindings were copied to this new profile. You can customize it in the Profiles tab."] .. "|r")
 end
 
 -- Get all loadouts for a spec (for UI display)

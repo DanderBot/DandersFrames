@@ -22,7 +22,9 @@ local ICONS = {
     "edit",
     "expand_more",
     "filter_alt",
-    "filter_list",
+    -- Extension spelled out: extensionless SetTexture resolves .blp/.tga, and this
+    -- icon's live call sites moved to the .png — the preview showed the stale art.
+    "filter_list.png",
     "info",
     "keyboard",
     "lock",

@@ -531,6 +531,12 @@ function DF:CreateGUI()
     -- edge, slider to its left, label to the slider's left. Declared here rather than at
     -- each widget's creation so the whole chain reads in one place.
     local scaleValue = scaleContainer:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    -- ⚠ FIXED WIDTH, because the slider hangs off this string's LEFT edge. Unsized,
+    -- the string narrows when "100%" drops to "95%" and the whole chain -- slider
+    -- included -- shifts under the cursor MID-DRAG, the exact drift the comment on
+    -- OnValueChanged below exists to prevent. Wide enough for "100%".
+    scaleValue:SetWidth(34)
+    scaleValue:SetJustifyH("RIGHT")
     scaleValue:SetPoint("RIGHT", scaleContainer, "RIGHT", 0, 0)
     scaleSlider:SetPoint("RIGHT", scaleValue, "LEFT", -4, 0)
     scaleLabel:SetPoint("RIGHT", scaleSlider, "LEFT", -6, 0)
@@ -679,14 +685,17 @@ function DF:CreateGUI()
         local carryTest = false
         -- Before switching tabs, clean up current mode's test mode and unlock state
         if GUI.SelectedMode == "raid" then
-            -- Lock raid frames if unlocked
+            -- Lock raid frames if unlocked. LockRaidFrames owns the WHOLE transition:
+            -- the db flag, the container, the mover, grid, panel and pinned chrome.
+            -- ⚠ This block used to stamp raidLocked = true and poke the container
+            -- ITSELF before calling -- so when LockRaidFrames' combat guard refused,
+            -- the db said locked while every mover stayed on screen for the rest of
+            -- the fight, and the Lock button then offered Unlock. In combat the state
+            -- now stays consistently UNLOCKED (the guard says so in chat) and the
+            -- user locks after regen; the direct SetMovable poke also fought
+            -- UpdatePermanentMoverVisibility, which owns container movability.
             local raidDb = DF:GetRaidDB()
             if not raidDb.raidLocked then
-                raidDb.raidLocked = true
-                if DF.raidContainer then
-                    DF.raidContainer:EnableMouse(false)
-                    DF.raidContainer:SetMovable(false)
-                end
                 if DF.LockRaidFrames then DF:LockRaidFrames() end
             end
             -- Disable raid test mode if active

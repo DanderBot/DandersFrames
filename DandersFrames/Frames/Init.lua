@@ -801,8 +801,13 @@ function DF:CreateRaidMoverFrame()
                 DF.testRaidContainer:SetPoint("CENTER", UIParent, "CENTER", raidDragOffsetX / scale, raidDragOffsetY / scale)
             end
 
-            -- Snap preview if enabled
-            local snapDb = DF:GetRaidDB()
+            -- Snap preview if enabled.
+            -- ⚠ THE PARTY DB. Grid settings are party-wide: the writer in
+            -- Frames/Position.lua stores snapToGrid via DF:GetDB() for exactly that
+            -- reason. Reading GetRaidDB() here re-opened the split it closed -- a
+            -- profile carrying a stale raid.snapToGrid=false showed the box ticked
+            -- while the raid mover never snapped.
+            local snapDb = DF:GetDB()
             if snapDb.snapToGrid and DF.gridFrame and DF.gridFrame:IsShown() then
                 DF:UpdateSnapPreview(self, raidDragOffsetX, raidDragOffsetY)
             end
@@ -819,9 +824,10 @@ function DF:CreateRaidMoverFrame()
         -- Use the last computed offset from OnUpdate
         local x, y = raidDragOffsetX, raidDragOffsetY
 
-        -- Snap to grid if enabled
+        -- Snap to grid if enabled. Snap flag from the PARTY db (party-wide, same as
+        -- the writer); `db` below stays the RAID db for the anchor writes.
         local db = DF:GetRaidDB()
-        if db.snapToGrid and DF.gridFrame and DF.gridFrame:IsShown() then
+        if DF:GetDB().snapToGrid and DF.gridFrame and DF.gridFrame:IsShown() then
             x, y = DF:SnapToGrid(x, y)
         end
 
@@ -985,9 +991,11 @@ function DF:UnlockRaidFrames()
         headerDebug("Raid unlock - mover parent:", DF.raidMoverFrame:GetParent():GetName() or "unnamed")
     end
     
-    -- Always refresh grid state from db when unlocking
+    -- Always refresh grid state when unlocking. Snap flag from the PARTY db
+    -- (party-wide, same as the writer in Frames/Position.lua); `db` here is the
+    -- raid db and stays authoritative for the anchors above.
     if DF.gridFrame then
-        if db.snapToGrid then
+        if DF:GetDB().snapToGrid then
             -- Refresh grid lines to ensure they match current settings
             if DF.gridFrame.RefreshLines then
                 DF.gridFrame:Show()

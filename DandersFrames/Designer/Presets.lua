@@ -621,8 +621,18 @@ function DF:UniquifyImportedDesignerPresets(importData, categories)
                         -- Unique against BOTH libraries: against the local one so it
                         -- does not clobber, and against the payload's own so two
                         -- imported presets cannot be renamed onto each other.
-                        local newName = UniquePresetName(lib, name)
-                        while src[newName] do newName = UniquePresetName(lib, newName) end
+                        -- ☠ ONE PASS OVER BOTH TABLES. The first version looped
+                        -- `while src[newName] do newName = UniquePresetName(lib, newName) end`
+                        -- -- but UniquePresetName returns its input UNCHANGED when the
+                        -- LOCAL library lacks it, so a candidate colliding only in the
+                        -- PAYLOAD (it carries both "Party" and "Party 2") never
+                        -- advanced: a hard client freeze on import.
+                        local newName = name
+                        if lib[newName] or src[newName] then
+                            local i = 2
+                            while lib[name .. " " .. i] or src[name .. " " .. i] do i = i + 1 end
+                            newName = name .. " " .. i
+                        end
                         renames = renames or {}
                         renames[name] = newName
                     end
