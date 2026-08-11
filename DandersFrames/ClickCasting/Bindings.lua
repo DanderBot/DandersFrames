@@ -216,7 +216,6 @@ local function GetSpellDisplayInfo(baseSpellId, baseSpellName)
             local overrideInfo = C_Spell.GetSpellInfo(overrideId)
             if overrideInfo then
                 -- Debug: Log when an override is found
-                -- print("|cffff00ffDF Override:|r " .. tostring(baseSpellId) .. " -> " .. tostring(overrideId) .. " (" .. tostring(overrideInfo.name) .. ")")
                 displayName = overrideInfo.name or displayName
                 displayIcon = overrideInfo.iconID
             end
@@ -2027,7 +2026,6 @@ function CC:GetSmartResurrectionParts(spellName, targetType, mountedStr)
     mountedStr = mountedStr or ""
     
     -- Debug
-    -- print("[DF SmartRes] mode:", mode, "spellName:", spellName, "targetType:", targetType)
     
     if mode == "disabled" then return nil end
     
@@ -2039,11 +2037,9 @@ function CC:GetSmartResurrectionParts(spellName, targetType, mountedStr)
     
     local resSpells = self:GetPlayerResurrectionSpells()
     if not resSpells then 
-        -- print("[DF SmartRes] No res spells available")
         return nil 
     end
     
-    -- print("[DF SmartRes] Available res spells - normal:", resSpells.normal or "nil", "mass:", resSpells.mass or "nil", "combat:", resSpells.combat or "nil")
     
     local parts = {}
     

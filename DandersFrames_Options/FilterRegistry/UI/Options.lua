@@ -546,10 +546,11 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local HEADER_H = 92 + STATUS_ROW_H + EYEBROW_H -- right column header (caption + 3 rows + status)
 
     -- ========== STATE ==========
-    -- ⚠ leftTab is declared HERE rather than beside the tab strip that owns it,
-    -- because the consumer chips sit above that strip and swap with it -- and a
-    -- local declared further down the file reads as a nil GLOBAL from a closure
-    -- created earlier. It is page state either way; this is where page state lives.
+    -- ⚠ Page state lives here, at the top, because a local declared further down the
+    -- file reads as a nil GLOBAL from a closure created earlier. (This note used to
+    -- explain the placement of `leftTab` specifically -- there is no such local any
+    -- more; the tab strip it belonged to is gone. The rule it states still applies to
+    -- everything below.)
     local selKind = "preset" -- "preset" | "custom"
     local selKey = R.Categories[1] and R.Categories[1].key
     local searchText = "" -- lowercased query
@@ -842,15 +843,13 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         fdBannerLink(L["Aura Designer"], "auras_auradesigner"),
         fdEmph(L["Debuff Filters"], EMPH_DEBUFF),
         fdBannerLink(L["Debuff Bar"], "auras_debuffs"))
-    -- TWO banners on this page, one per tab. Not three, and not four:
-    --
-    -- ⚠ The Debuffs tab has exactly ONE selectable row. SELECTABLE_KIND covers
-    -- preset/custom/blacklist only -- the six categories and All Debuffs are
-    -- switches, not selections, and BuildTab pins selKind to "blacklist" when you
-    -- land on the tab. So "debuffs tab, something other than the blacklist selected"
-    -- is not a state that exists, and a branch for it is dead code. This banner
-    -- therefore has to carry BOTH halves: what the debuff filters are (Blizzard's,
-    -- fixed), and how the one editable thing on the tab works.
+    -- ⚠ ONE banner on this page, not two. This paragraph described a two-tab world:
+    -- a Debuffs tab with its own banner, a SELECTABLE_KIND that included "blacklist",
+    -- and a BuildTab that pinned selKind when you landed there. None of those exist
+    -- now -- SELECTABLE_KIND is { preset, custom }, there is no BuildTab and no tab
+    -- strip, and the Debuffs banner moved to the Debuff Bar page as that group's
+    -- subtitle. BUFF_BANNER below is the only banner constant left; the DEBUFF_BANNER
+    -- that other comments in this file pointed at is gone.
     -- (The Debuffs-tab banner went to the Debuff Bar page as that group's subtitle.)
     -- The "unselect one to hide it" clause above is the part nobody can guess: the box
     -- means what it means everywhere else on the page -- this debuff shows -- so
@@ -1922,7 +1921,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     -- store entry. The blacklist is the exception: it is a per-mode db set, not a
     -- registry filter, so there is nothing to resolve.
     local exportBtn = GUI:CreateButton(leftPanel, L["Export"], ACT_BTN_W, 20, function(self)
-        if self.dfDisabled or not selKey or selKind == "blacklist" then return end
+        -- (No selKind == "blacklist" test: SELECTABLE_KIND is { preset, custom } and
+        -- every SelectFilter call site passes one of those two, so selKind can never
+        -- hold "blacklist" -- the tab it guarded against is gone.)
+        if self.dfDisabled or not selKey then return end
         local str, err = R:ExportFilter(selKey, CurrentDisplayName())
         if not str then
             ShowFilterStringError(L["Export Failed"], err)
@@ -2179,7 +2181,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     -- switch stay VISIBLE and dim rather than disappearing. The old page hid them,
     -- which is the same convention breach we fixed on six other pages -- you could not
     -- see what you would be turning back on.
-    local function BindLeftRow(row, y, kind, key, nameStr, countStr, modified, selected, toggle)
+    local function BindLeftRow(row, y, kind, key, nameStr, countStr, modified, selected)
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", 0, -y)
         row:SetPoint("TOPRIGHT", 0, -y)
@@ -2191,26 +2193,25 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         row.count:SetText(countStr)
         row.dot:SetShown(modified)
 
-        row._onToggle = toggle and toggle.onToggle or nil
+        -- ☠ NO TOGGLE ARM. The `toggle` parameter was never passed -- both call sites
+        -- stop at `selected` -- so row._onToggle was always nil, the
+        -- Show/SetChecked/greyed branch could not run, CreateRowToggle's onClick could
+        -- never fire, and `dim` was always nil, which made both dimmed-text paths
+        -- dead too. The page's own note already said this outright: every row is
+        -- passed a nil toggle, because this list no longer selects anything for a bar.
+        --
+        -- ⚠ row.toggle itself is KEPT deliberately. It is hidden here on every bind
+        -- and never shown, but row.name's CREATION-time anchor is expressed against
+        -- it in the pool setup, so deleting the widget means rewriting that anchor
+        -- chain -- a layout change, not a dead-code removal.
         row.name:ClearAllPoints()
         row.name:SetPoint("RIGHT", row.dot, "LEFT", -6, 0)
-        if toggle then
-            row.toggle:Show()
-            row.toggle:SetChecked(toggle.checked)
-            row.toggle:SetAlpha(toggle.greyed and 0.4 or 1)
-            row.toggle:SetEnabled(not toggle.greyed)
-            row.toggle.tooltipText = toggle.tooltip
-            row.toggle.tooltipDesc = toggle.tooltipDesc
-            row.name:SetPoint("LEFT", row.toggle, "RIGHT", 4, 0)
-        else
-            row.toggle:Hide()
-            row.name:SetPoint("LEFT", 10, 0)
-        end
+        row.toggle:Hide()
+        row.name:SetPoint("LEFT", 10, 0)
 
         local tc = GUI.GetThemeColor()
         row.accent:SetColorTexture(tc.r, tc.g, tc.b, 1)
         row.accent:SetShown(selected)
-        local dim = toggle and toggle.greyed
         if selected then
             row:SetBackdropColor(tc.r * 0.30, tc.g * 0.30, tc.b * 0.30, 0.9)
             row.name:SetTextColor(0.95, 0.95, 0.95)
@@ -2218,8 +2219,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             row:SetBackdropColor(ROW_REST_R, ROW_REST_G, ROW_REST_B, ROW_REST_A)
             row.name:SetTextColor(0.70, 0.70, 0.70)
         end
-        if dim then row.name:SetTextColor(0.42, 0.42, 0.42) end
-        row.count:SetTextColor(dim and 0.32 or 0.5, dim and 0.32 or 0.5, dim and 0.32 or 0.5)
+        row.count:SetTextColor(0.5, 0.5, 0.5)
     end
 
     -- Open ONE named filter: select it, scroll its row into view, pulse it. The
@@ -2641,9 +2641,9 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         end
         local isPreset = selKind == "preset"
 
-        -- ONE banner per tab, both info. Driven off the TAB, not the selection: the
-        -- Debuffs tab has a single selectable row (see DEBUFF_BANNER), so keying this
-        -- off isBlacklist would look like it handled a case that cannot occur.
+        -- ONE banner, info. Not keyed off the selection: an isBlacklist branch would
+        -- look like it handled a case that cannot occur, since selKind only ever
+        -- holds "preset" or "custom".
         --
         -- ⚠ The page banner is never a warning any more. It carried the debuff
         -- completeness caution for a while, which meant flipping All Debuffs off
@@ -2952,17 +2952,15 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     -- Debuffs entry, and there is no such entry here -- that list is on the Debuff
     -- Bar page. Anything wanting it should SelectTab("auras_debuffs"). A stub that
     -- navigated somewhere plausible-but-wrong would be worse than the nil call.
-    pageRef._fdSelectBlacklist = nil
-    -- The buff-side "Customise" button: keep the user's last buff filter, but if
-    -- they're parked on the (debuff) Blacklist, move to the first buff preset so
-    -- "Customise" from the buff section never lands on a debuff view.
-    pageRef._fdSelectBuffs = function()
-        if selKind ~= "preset" and selKind ~= "custom" then
-            SelectFilter("preset", R.Categories[1] and R.Categories[1].key)
-        else
-            RefreshAll()
-        end
-    end
+    -- (The `pageRef._fdSelectBlacklist = nil` statement that used to sit here went
+    -- too: assigning nil to a field nothing sets or reads is a no-op, and the
+    -- paragraph above is what actually carries the decision.)
+    --
+    -- ☠ _fdSelectBuffs went with it. It was the buff-side "Customise" entry point,
+    -- and its whole job was to move you off the Blacklist if you were parked there --
+    -- a view this page no longer has. Nothing in either addon called it; contrast
+    -- _fdFocusFilter and _fdFocusNewFilter just above, which the Aura Designer does
+    -- call and which stay.
 
     -- ========== SEARCH WIRING ==========
     -- HookScript (not SetScript): CreateEditBox already hooks OnTextChanged

@@ -141,7 +141,6 @@ local function GetCurrentLoadoutConfigID()
             if specID then
                 local savedConfigID = C_ClassTalents.GetLastSelectedSavedConfigID(specID)
                 if savedConfigID and savedConfigID > 0 then
-                    -- print("[DF Debug] GetCurrentLoadoutConfigID using LastSelectedSavedConfigID:", savedConfigID)
                     return savedConfigID
                 end
             end
@@ -151,7 +150,6 @@ local function GetCurrentLoadoutConfigID()
     -- Fallback to GetActiveConfigID
     if C_ClassTalents and C_ClassTalents.GetActiveConfigID then
         local activeID = C_ClassTalents.GetActiveConfigID() or 0
-        -- print("[DF Debug] GetCurrentLoadoutConfigID using GetActiveConfigID:", activeID)
         return activeID
     end
     return 0
@@ -520,7 +518,6 @@ function CC:CheckLoadoutProfileSwitch()
     local loadoutName = GetLoadoutName(loadoutID) or "Default"
     
     -- Debug output (use /dfccloadout to see this info manually)
-    -- print("|cff888888[DF Loadout] Spec:", specIndex, "LoadoutID:", loadoutID, "LoadoutName:", loadoutName, "Assigned:", assignedProfile or "none", "IsSpecific:", tostring(isSpecific), "Current:", currentProfile, "|r")
     
     if assignedProfile and assignedProfile ~= currentProfile then
         -- Profile is assigned (either to this specific loadout or as spec default) - switch to it
@@ -592,7 +589,6 @@ function CC:GetSpecLoadouts(specIndex)
                     local loadoutName = "Loadout " .. configID
                     if configInfo then
                         loadoutName = configInfo.name or loadoutName
-                        -- print("[DF Debug] GetSpecLoadouts configID:", configID, "name:", configInfo.name or "nil")
                     end
                     table.insert(loadouts, {
                         configID = configID,
