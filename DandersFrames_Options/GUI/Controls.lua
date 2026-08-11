@@ -3560,30 +3560,13 @@ function GUI:CreateGradientBar(parent, width, height, db, prefix)
     return f
 end
 
--- =========================================================================
--- SELECTABLE LIST WIDGET
--- Scrollable list of selectable items with hover highlight and accent
--- selection bar. Used by the Wizard Builder for wizard/step lists.
--- =========================================================================
-
--- =========================================================================
--- SEARCHABLE DROPDOWN WIDGET
--- Dropdown with a search/filter box. Used for the DB key picker (800+ keys)
--- and any large option set. Groups items by category headers.
--- =========================================================================
-
--- =========================================================================
--- KEY-VALUE EDITOR WIDGET
--- Editable list of key=value rows for the wizard builder settings map.
--- Each row: [Searchable Key Dropdown] = [Value Input] [X Delete]
--- =========================================================================
-
--- =========================================================================
--- BRANCH EDITOR WIDGET
--- Visual editor for conditional wizard branching rules.
--- Each row: IF [step] [operator] [value] → [goto step] [X]
--- Plus: ELSE → [fallback step]
--- =========================================================================
+-- ☠ (Removed) four full section banners heading NO CODE: SELECTABLE LIST WIDGET,
+-- SEARCHABLE DROPDOWN WIDGET, KEY-VALUE EDITOR WIDGET and BRANCH EDITOR WIDGET.
+-- There is no CreateSelectableList, CreateSearchableDropdown, CreateKeyValueEditor or
+-- CreateBranchEditor anywhere in the repo -- three of the four described the Wizard
+-- Builder, which is gone (WizardBuilder.lua is deleted; see the notes in GUI.lua and
+-- Popup.lua). Four banners in a row with nothing between them read as "these widgets
+-- are somewhere in this file", which costs a search every time.
 
 -- =========================================================================
 -- MAIN GUI CREATION

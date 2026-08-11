@@ -757,7 +757,8 @@ local function colSig(c)
     return tostring(r) .. "," .. tostring(g) .. "," .. tostring(b) .. "," .. tostring(a)
 end
 
--- Health-bar overlay alpha per mode — the exact semantics of Indicators:ApplyHealthBar
+-- Health-bar overlay alpha per mode — the exact semantics of the legacy Indicators:ApplyHealthBar (that module is gone;
+-- this is now the only implementation, so the comparison is against behaviour, not source)
 -- (Indicators.lua:1325-1329), read from CONFIG only:
 --   replace: overlay opacity = the colour picker's alpha.
 --   tint:    overlay opacity = blend slider x colour alpha (so the bar colour shows through).
@@ -898,7 +899,7 @@ local function buildMirrorHostConfig(unit, map, onHost, filter)
 end
 
 -- Resolve the DF.Border spec for an AD border indicator from its CONFIG block (never a
--- live aura), mirroring Indicators:ApplyBorderToOverlay: canonical keys via BuildSpec (the
+-- live aura), mirroring the legacy Indicators:ApplyBorderToOverlay (module removed): canonical keys via BuildSpec (the
 -- border-key fold ran in SyncFrame), black default colour. Returns nil when the border
 -- resolves disabled (ShowBorder=false) — the caller then renders no container. Animations
 -- are NO LONGER dropped here: the AuraContainer allowlist (SAFE_OVERLAY_ANIM) is the single
@@ -1275,7 +1276,8 @@ end
 -- legacy icon:SetPoint(anchor, frame, anchor, offsetX, offsetY) + SetSize(size, size).
 -- ============================================================
 
--- Stable per-indicator key (mirror Engine GetInstanceKey: "auraName#id"). keyPrefix is
+-- Stable per-indicator key (mirrors what Engine's key builder produced: "auraName#id"; Engine.lua no longer
+-- has that helper -- it defines only ResolveSpec / ClearFrame / ForceRefreshAllFrames). keyPrefix is
 -- "" for the spec pool, OTHER_PREFIX for the Other Buffs pool — one shared store, no
 -- cross-pool collisions ("other:<name>#<id>" vs "<name>#<id>").
 local function placedKey(keyPrefix, auraName, indicator)
@@ -1283,7 +1285,7 @@ local function placedKey(keyPrefix, auraName, indicator)
 end
 
 -- Build the DF.Border spec for a placed icon/square indicator from its CONFIG (read-free),
--- mirroring Indicators:ConfigureIcon's border block: canonical keys via BuildSpec, AD's
+-- mirroring the legacy Indicators:ConfigureIcon's border block (module removed): canonical keys via BuildSpec, AD's
 -- size = BorderSize (band thickness) + inset = -BorderInset (outward extension) semantics,
 -- enabled gated on ShowBorder AND not hideIcon (a ring around a hidden icon looks broken),
 -- translucent-black default colour. Returns nil when the border resolves off. Gradient
@@ -1451,7 +1453,8 @@ end
 -- Shared styleable duration-text spec for EVERY placed indicator (icon / square / bar). The
 -- countdown is filled secret-safe by native SetDurationText (Blizzard formats the remaining
 -- time C-side; no Lua read). "Color by Time Remaining" (P4.4) routes through the #205 discrete
--- BUCKET formatter (DF:GetFactoryDurationFormatter -> |cRRGGBB escapes baked into the native
+-- BUCKET formatter (the factory duration formatter -- the file-local GetDurationFormatter in
+-- Features/Auras.lua; there is no DF:GetFactoryDurationFormatter -- |cRRGGBB escapes baked into the native
 -- NumericRuleFormatter bands, evaluated C-side against the SECRET remaining time: red <5s /
 -- orange <15s / yellow <60s / green fresh — the same thresholds the buff/debuff rows use). The
 -- smooth per-percent curve stays dead on container buttons (buckets only). When colour-by-time
@@ -3200,7 +3203,7 @@ end
 -- A member ("classic") layout group arranges its members' PLACED indicators in
 -- a grid computed from the group's settings (anchor / offset / grow direction /
 -- icons per row / spacing). Legacy applied this at render time over the ACTIVE
--- members only (Engine.lua ComputeGroupOffset — icons compacted as auras came
+-- members only (the legacy Engine group-offset pass, since removed — icons compacted as auras came
 -- and went); on 12.1 aura presence is SECRET, so slots are STATIC: each member
 -- owns the grid cell of its member index, exactly matching the editor preview
 -- (Options.lua RefreshPlacedIndicators). An absent (or eye-hidden) member
@@ -3377,7 +3380,7 @@ local function primaryADSpellID(spec, auraName)
     return p
 end
 
--- Static icon texture for a missing indicator (mirror Engine buildSyntheticAuraData): the
+-- Static icon texture for a missing indicator (mirrors the legacy Engine synthetic-aura builder, which no longer exists): the
 -- AD IconTextures override, else C_Spell.GetSpellTexture on the static primary ID, else the
 -- generic question-mark fallback. Read-free (config + a static spell-ID texture lookup).
 local function missingIconTexture(spec, auraName)
@@ -5025,7 +5028,7 @@ end
 -- secret show/hide drive it read-free. It works for effects that ARE a child region drawn
 -- over the frame (tint textures, a border ring). It does NOT extend to these three:
 --
---  * framealpha (ref Indicators:ApplyFrameAlpha) — reduces the WHOLE unit frame's alpha on
+--  * framealpha (ref the legacy Indicators:ApplyFrameAlpha; that module is gone) — reduces the WHOLE unit frame's alpha on
 --    presence. There is no additive-child equivalent to reducing a frame's alpha (an overlay
 --    darkens, it can't make the frame transparent — and the plan forbids approximation).
 --    The only mechanism would be an OnShow/OnHide hook on a slot child calling frame:SetAlpha

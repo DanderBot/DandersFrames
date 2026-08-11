@@ -987,29 +987,18 @@ local TYPE_DEFAULTS = {
         stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
         stackX = 2, stackY = -2,
         stackColor = {r = 1, g = 1, b = 1, a = 1},
-        -- Expiring Tint overlay (secret-safe).  Default OFF, red — also feeds the
-        -- colour picker's Default button via the proxy's __dfDefaults = TYPE_DEFAULTS.
-        -- #FF3333 @ 50% (matches expiring border red)
-        -- legacy; migrated to ExpiringAnimationType
-        -- Master enable for the whole Expiring feature.  Default true so
-        -- existing configs are unaffected; turning it OFF disables every
-        -- expiring override (colour / thickness / alpha / animation / pulse /
-        -- bounce) regardless of their individual settings, and hides the rest
-        -- of the Expiring panel.
-        -- Stage 5.1d.2 + parity: full Border Animation effect set as the value
-        -- the expiring callback swaps into spec.animation when remaining <
-        -- threshold.  NONE = no animation override.  The expiring animation
-        -- carries its OWN complete tunable set (colour, particles, thickness,
-        -- offset, …) independent of the base Border Animation — mirrors the
-        -- base defaults so the two panels read identically.
-        -- Stage 5.1d.3: per-state thickness + alpha overrides.  Default to
-        -- 1 / 1 — same thickness as the base (1) and slightly more opaque
-        -- than the base alpha (0.8), so out of the box a user enabling
-        -- Expiring Color Override sees the border tick to fully opaque red
-        -- below threshold (subtle "more solid" feel).  Move the sliders
-        -- higher / lower for stronger emphasis.  Only take effect when the
-        -- expiring ticker is running (i.e. user has at least one expiring
-        -- feature on — colour override, animation, alpha pulse, or bounce).
+        -- ☠ (Removed) ~25 lines documenting the EXPIRING key family -- the tint
+        -- overlay, the master enable, ExpiringAnimationType, and the Stage 5.1d
+        -- per-state thickness/alpha overrides. Not one of those keys is in this table
+        -- any more, or anywhere else: a case-insensitive sweep for expiring* across
+        -- both addons returns comments only. The block sat between stackColor and the
+        -- durationBar* keys with nothing of its own, so it read as documentation for
+        -- whichever keys happened to follow it.
+        --
+        -- ⚠ Do not confuse this with the LIVE feature that replaced it. Expiry alerts
+        -- ship as expiryAlert* (just above) and the reveal work is pandemic*; the
+        -- "Expiry Alert BORDER mode" comments elsewhere in this file are about those
+        -- and are correct.
         -- Duration bar strip (mirrors the buff/debuff rows + filter-group cards):
         -- a native SetDurationBar-driven strip under/over the icon. OFF by default;
         -- render fallbacks live in DF:BuildDurationBarSpec — these seed the editor.
@@ -1103,13 +1092,9 @@ local TYPE_DEFAULTS = {
         stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
         stackX = 2, stackY = -2,
         stackColor = {r = 1, g = 1, b = 1, a = 1},
-        -- Master enable for the whole Expiring feature (Stage 5.2 — mirrors
-        -- the icon).  Default true so existing configs are unaffected.
-        -- #FF3333 @ 50% (matches expiring border red)
-        -- Stage 5.2 expiring-border overrides (shared backend with the icon).
-        -- ExpiringBorderColor is SEPARATE from the fill's expiringColor — the
-        -- fill and border each get their own expiring tint.  Defaults to the
-        -- same red so out of the box both "turn red", but they're independent.
+        -- (Removed) the square card's Expiring block -- the Stage 5.2 master enable
+        -- and expiring-border overrides. Same story as the icon card above: none of
+        -- those keys exist any more, so the paragraphs headed nothing.
         -- Duration bar strip (mirrors the icon card): a native SetDurationBar-driven
         -- strip under/over the square. OFF by default; render fallbacks live in
         -- DF:BuildDurationBarSpec — these seed the editor.
@@ -1244,7 +1229,9 @@ local TYPE_DEFAULTS = {
         BorderAnimationCornerLength = 10,
         -- Draw above the frame's class border (parent+10) / aggro (parent+9).
         drawAboveFrameBorder = true,
-        -- Expiring-border overrides (Stage 5.4 parity with icon/square).
+        -- (The "Expiring-border overrides (Stage 5.4)" label that sat here belonged to
+        -- keys that no longer exist -- it was heading showWhenMissing, which is
+        -- unrelated.)
         showWhenMissing = false,
     },
     healthbar = {

@@ -2457,6 +2457,16 @@ local OUTLINE_FLAG_ORDER = { "NONE", "OUTLINE", "THICKOUTLINE", "MONOCHROME", "M
 
 
 
+-- ⚠ THIS DOC BLOCK, AND THE NEXT FEW, DOCUMENT FUNCTIONS THAT ARE NOT IN THIS FILE.
+-- The border, animation and text-style control sets live in
+-- DandersFrames_Options/GUI/SettingsWidgets.lua, and CreateInfoBanner in Sections.lua;
+-- only the constants between them (OUTLINE_FLAG_ORDER, INFO_BANNER_TONES) are still
+-- here. They were left behind when the settings-only widgets moved out of the
+-- resident toolkit.
+--
+-- Weigh that before trusting one: a spec sitting an addon away from its function is
+-- not checked by anyone editing either side, and the `include` list below went stale
+-- in both directions as a result.
 -- ============================================================
 -- UNIFIED BORDER CONTROL SET
 -- Drops the canonical Show / Style / Texture / Size / Colour controls plus
@@ -2473,8 +2483,13 @@ local OUTLINE_FLAG_ORDER = { "NONE", "OUTLINE", "THICKOUTLINE", "MONOCHROME", "M
 -- opts = {
 --   parent       = the panel widget (e.g. self.child) — same first arg the
 --                  underlying CreateCheckbox/Slider/etc. take
---   include      = { offset=, inset=, blendMode=, gradient=, shadow=,
---                    classColor=, roleColor=, colorByTime=, colorByType= }
+--   include      = { offset=, inset=, blendMode=, gradient=, shadow=, alpha=,
+--                    animate=, classColor=, roleColor= }
+--                  ⚠ THIS LIST HAS DRIFTED IN BOTH DIRECTIONS: it omitted `alpha`
+--                  and `animate` (passed by ~17 and 3 callers) while still listing
+--                  colorByTime / colorByType, which no caller ever passed and whose
+--                  branches are now removed. It drifts because the spec and the
+--                  function live in different addons -- see the note above.
 --   fullUpdate   = callback for full re-render (drop / value-set)
 --   lightUpdate  = callback for slider-drag (size, offsets, shadow sliders)
 --   lightColors  = callback for live colour-picker preview
