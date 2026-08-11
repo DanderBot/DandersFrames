@@ -330,6 +330,10 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Click Casting) Fixed a frame you had explicitly opted out of click casting being silently re-adopted on the next full refresh.
 * (Click Casting) Fixed keyboard bindings not being rebuilt on frames that had left the registry but still carried handlers.
 * (Interface) Fixed the minimap tooltip's two actions using their own copies of text that already existed elsewhere, so a translation could fill one and miss the other.
+* (Test Mode) **Fixed most resource bar colours being impossible to preview.** Test frames picked a power type from each player's role — mana for healers, rage for tanks, energy for everyone else — so if you edited Focus, Runic Power or Fury on the Colors page, nothing on screen ever used them. The preview now follows each test player's class, so those colours show up. Resources that depend on specialisation rather than class (Lunar Power, Maelstrom, Insanity) still have no preview, since the test group doesn't model specs.
+* (Test Mode) **Fixed the Summon icon only ever previewing one of its three states.** It always showed "pending", so the Accepted Text and Declined Text boxes could be typed into but never seen. Test frames now show all three across different players.
+* (Test Mode) Fixed role and leader icons staying lit on test frames while the Memory Test panel had them switched off — the preview was showing a state the addon can't be in.
+* (Interface) The Debug Console now lists its Filter and Search categories, so they can be switched off before reproducing a problem instead of only appearing once they had already logged something.
 
 
 ### Known Issues (12.1 alpha)
