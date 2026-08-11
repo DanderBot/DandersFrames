@@ -340,13 +340,6 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Bars) Fixed the gradient preview bar filling only part of its width, or appearing to jump around, while dragging the settings window edge — it was drawing its colours at sizes measured before the resize.
 
 
-### Known Issues (12.1 alpha)
-
-* The 12.1 aura displays are rebuilt on Blizzard's new container system and are under active testing — please report any case where buff, debuff, defensive or missing-buff displays stop updating, **especially in combat**.
-* Aura Designer text colouring is drawn as a cover over the text: it ignores the out-of-range text fade, and group parts with their own inline colours keep them.
-* Dragging certain aura sliders can briefly stutter.
-* Settings-window borders re-derive their thickness from DandersFrames' own **UI Scale** slider (top of the settings window). Changing WoW's global UI Scale instead won't re-derive them for pages already on screen — reopen the window, or nudge the addon's own slider, if a border looks off after doing that.
-
 ## [4.8.0]
 
 ### Bug Fixes
