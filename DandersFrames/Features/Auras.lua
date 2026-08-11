@@ -3141,13 +3141,34 @@ end
 -- per rendered frame instead of one per callback. The 0-delay timer re-checks
 -- combat when it fires (timers can land after lockdown re-engages).
 local factoryRefreshQueued = false
+local factoryRefreshRegen   -- one-shot regen listener, created on the first combat drop
 function DF:RefreshFactoryRows()
     if factoryRefreshQueued then return end
     if not (DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported()) then return end
     factoryRefreshQueued = true
     C_Timer.After(0, function()
         factoryRefreshQueued = false
-        if InCombatLockdown() then return end   -- drives self-defer in combat; version catches up at next drive
+        if InCombatLockdown() then
+            -- ⚠ RE-QUEUE AT REGEN, DON'T DROP. This used to return outright ("version
+            -- catches up at next drive") — true per frame, since the version IS bumped,
+            -- but the next drive is the next UNIT_AURA on that frame, which after
+            -- combat may be arbitrarily far away on a quiet frame. A mid-combat GUI
+            -- change then looked half-applied until some aura event wandered by:
+            -- disabling Defensive Icons hid the row at once (UpdateDefensiveBar's
+            -- combat-safe hide) while the buff row kept CLAIMING the deduplicated
+            -- defensives until its next drive — auras missing from both displays.
+            -- The restyle itself must stay out of combat (native buttons are
+            -- combat-forbidden); regen is the earliest it can legally run.
+            if not factoryRefreshRegen then
+                factoryRefreshRegen = CreateFrame("Frame")
+                factoryRefreshRegen:SetScript("OnEvent", function(self)
+                    self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                    DF:RefreshFactoryRows()
+                end)
+            end
+            factoryRefreshRegen:RegisterEvent("PLAYER_REGEN_ENABLED")
+            return
+        end
         if DF.IteratePartyFrames then DF:IteratePartyFrames(driveFactoryRowsNow) end
         if DF.IterateRaidFrames then DF:IterateRaidFrames(driveFactoryRowsNow) end
     end)
