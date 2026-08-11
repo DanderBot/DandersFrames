@@ -1716,9 +1716,11 @@ function DF.BuildAuraDesignerPage(guiRef, pageRef, dbRef)
     GUI:CreatePanelBackdrop(S.leftPanel, {border = false})
 
     -- Frame preview (reuses existing CreateFramePreview with adapted anchoring)
-    S.origY_framePreview = 0
+    -- (Removed) S.origY_framePreview and S.contentRightInset, both set to 0 here and
+    -- read nowhere -- old-layout anchors that the current layout does not use. The
+    -- second even carried "no right inset needed in new layout", i.e. a field whose
+    -- own comment said it was not needed.
     S.framePreview = CreateFramePreview(S.leftPanel, 0, nil)
-    S.contentRightInset = 0  -- No right inset needed in new layout
 
     -- ── RIGHT PANEL (tabbed settings) ──
     S.rightPanel = CreateFrame("Frame", nil, splitContainer, "BackdropTemplate")

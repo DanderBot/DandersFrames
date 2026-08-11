@@ -1587,6 +1587,12 @@ local function CreateElementBackdrop(frame, opts)
     -- SetBackdropBorderColor -- so it is now the default for everything that
     -- comes through here, and opts.backdropEdge is the escape hatch for a
     -- surface that genuinely needs the old edgeFile.
+    -- ⚠ NOTHING PASSES backdropEdge TODAY, in either addon. So usePixel is `outline`
+    -- in practice, the backdrop-edge arm below is unreachable, and RevertPixelBorder --
+    -- which only that arm can reach -- cannot run either. Left wired rather than cut:
+    -- it is the documented escape hatch for a surface that needs the old edgeFile, and
+    -- its own note explains what breaks if the shim is left installed. Know that it is
+    -- untested by use before relying on it.
     local usePixel = outline and not opts.backdropEdge
     if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
     local inset = opts.inset

@@ -546,8 +546,16 @@ DF.DEBUG_GROUP_OF = {
     debugfonts = "system",
 }
 
--- `hidden` keeps a command ANSWERING, and registered here for the drift check, but
--- off the /df debug listing. Two reasons qualify:
+-- `hidden` keeps a command ANSWERING, and registered here, but off the /df debug
+-- listing. Two reasons qualify:
+--
+-- ⚠ REGISTERING IS WHAT PUTS THE WORD IN DEBUG_SUB_KNOWN -- that is the real,
+-- checkable reason to register a hidden command, and it is why /df debug <word> does
+-- not load the settings companion for a branch that lives in this addon. These notes
+-- used to say "for the drift check"; there is no drift check. Nothing anywhere
+-- compares the two registries against the dispatcher, so four comments were leaning
+-- on a safety net that does not exist. (auditspells and exportaudit ARE drift checks,
+-- of curation data and export categories -- unrelated to command registration.)
 --   1. It is an everyday command already listed by /df help (test, reset, lock...).
 --      Each command should be documented in exactly ONE list — the one its audience
 --      reads — or the two drift apart, which is how pixelcheck ended up in both.
@@ -5509,7 +5517,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- /df debug listing. Same duplication that got pixelcheck/navprobe/gapcheck
         -- pulled from help, resolved the other way round: each command is documented
         -- in exactly one list, the one its audience reads. They still answer, and
-        -- they still need sub() entries so the drift check can see them.
+        -- they still need sub() entries -- not for a "drift check" (there isn't one;
+        -- see the note at RegisterDebugSub) but because registering is what puts the
+        -- word in DEBUG_SUB_KNOWN.
         sub("help",         "command list", nil, nil, true)
         sub("console",      "open the debug console page", nil, nil, true)
         sub("users",        "group members running DandersFrames", nil, nil, true)
@@ -5521,7 +5531,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- deliberate because the copies sat in different sections; grouping by
         -- subsystem put them side by side and the duplication was obvious. Hidden
         -- here, with the argument hint folded into the slash description, so the
-        -- entry survives for the drift check but appears once.
+        -- entry survives in the registries but appears once in the listing.
         sub("headers",      "secure header state dump, or a /dfheaders subcommand", nil, "[cmd]", true)
         sub("attached",     "foreign frames anchored to ours")
         sub("zorder",       "frame level / strata / alpha map (add a test frame index)", nil, "[index]")
@@ -5575,7 +5585,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         sub("debugfonts",   "font / SharedMedia availability dump")
         sub("debugrested",  "rested indicator state")
         -- Both moved under /df debug cc (see CC_SUBCOMMANDS). Hidden here rather than
-        -- deleted: they still answer, and the drift check needs to see them.
+        -- deleted: they still answer, and registering keeps them in DEBUG_SUB_KNOWN.
         sub("clickcast",    "moved to /df debug cc registration", nil, nil, true)
         sub("casthistory",  "cast history")
         sub("clearhistory", "clear the cast history buffer")

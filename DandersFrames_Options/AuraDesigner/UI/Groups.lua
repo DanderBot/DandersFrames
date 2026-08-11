@@ -1136,8 +1136,8 @@ P.ANCHOR_POSITIONS = ANCHOR_POSITIONS
 -- (S.dragHintText declared on the state table)
 
 -- Layout anchors — stored during build
--- (S.contentRightInset declared on the state table)
--- (S.origY_framePreview declared on the state table)
+-- (S.contentRightInset and S.origY_framePreview are gone: both were written once in
+-- Editor.lua and read nowhere, leftovers of the pre-rework layout.)
 
 -- (The DF_AURA_DESIGNER_RESET_GLOBAL popup was retired with the editing-banner
 -- "Reset to Global" button — the preset dropdown's "Inherit (Global)" entry now

@@ -2737,6 +2737,55 @@ function CC:RefreshItemsGrid(skipScrollReset)
     end
 end
 
+-- Hover / leave / click for an equipment-slot widget, shared by the grid cell and the
+-- list row below.
+--
+-- ☠ These 32 lines existed TWICE, byte for byte apart from the local's name. The two
+-- widgets genuinely differ in layout -- the cell puts the On-Use badge in a corner on a
+-- backing pill, the row puts it after the name, and they disagree about the empty-slot
+-- caption -- so the duplication looked like an unavoidable consequence of that. It was
+-- not: only the CONSTRUCTION differs. The behaviour is identical, and a tooltip or
+-- binding change had to be made in both places or the two views would drift.
+--
+-- ☠ THE COLOURS ARE RESOLVED HERE, NOT CAPTURED, AND THAT IS LOAD-BEARING. Every
+-- C_ELEMENT / C_BORDER in this file is declared INSIDE a function -- there is no
+-- file-scope one -- so a helper at file scope that referenced them would read nil
+-- GLOBALS and throw on the first hover. It parses clean either way; only running it
+-- would have shown it. Same for themeColor, which both callers happen to compute
+-- locally from this exact source.
+local function WireItemHandlers(widget, itemData, itemInfo)
+    local Colors = DF.GUI.Colors
+    local C_ELEMENT, C_BORDER = Colors.element, Colors.border
+    local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or CC.ACCENT
+
+    widget:SetScript("OnEnter", function(self)
+        self:SetBackdropColor(C_ELEMENT.r + 0.08, C_ELEMENT.g + 0.08, C_ELEMENT.b + 0.08, 1)
+
+        local lines = BindingTooltipLines(self.existingBindings, themeColor,
+            L["Left-click to add/edit binding"])
+        if itemInfo then
+            DF.GUI:ShowGameTooltip(self, { inventorySlot = itemData.slot, lines = lines })
+        else
+            -- Empty slot: there is no item for the game to describe, so this is
+            -- an ordinary titled tooltip.
+            table.insert(lines, 1, { text = L["No item equipped"], color = { 0.5, 0.5, 0.5 } })
+            DF.GUI:ShowTooltip(self, { title = itemData.slotName, lines = lines })
+        end
+    end)
+    widget:SetScript("OnLeave", function(self)
+        self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+        if #(self.existingBindings or {}) == 0 then
+            self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
+        end
+        DF.GUI:HideTooltip()
+    end)
+    widget:SetScript("OnClick", function(self, button)
+        if button == "LeftButton" then
+            CC:ShowItemKeybindPopup(itemData)
+        end
+    end)
+end
+
 -- Create a grid cell for an equipment slot item
 function CC:CreateItemCell(parent, itemData, index)
     local themeColor = DF.GUI and DF.GUI.GetThemeColor and DF.GUI.GetThemeColor() or CC.ACCENT
@@ -2811,35 +2860,8 @@ function CC:CreateItemCell(parent, itemData, index)
     cell.existingBindings = bindings
     
     -- Hover effect
-    cell:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(C_ELEMENT.r + 0.08, C_ELEMENT.g + 0.08, C_ELEMENT.b + 0.08, 1)
-        
-        local lines = BindingTooltipLines(self.existingBindings, themeColor,
-            L["Left-click to add/edit binding"])
-        if itemInfo then
-            DF.GUI:ShowGameTooltip(self, { inventorySlot = itemData.slot, lines = lines })
-        else
-            -- Empty slot: there is no item for the game to describe, so this is
-            -- an ordinary titled tooltip.
-            table.insert(lines, 1, { text = L["No item equipped"], color = { 0.5, 0.5, 0.5 } })
-            DF.GUI:ShowTooltip(self, { title = itemData.slotName, lines = lines })
-        end
-    end)
-    cell:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        if #(self.existingBindings or {}) == 0 then
-            self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-        end
-        DF.GUI:HideTooltip()
-    end)
-    
-    -- Click to bind
-    cell:SetScript("OnClick", function(self, button)
-        if button == "LeftButton" then
-            CC:ShowItemKeybindPopup(itemData)
-        end
-    end)
-    
+    WireItemHandlers(cell, itemData, itemInfo)
+
     return cell
 end
 
@@ -2907,36 +2929,8 @@ function CC:CreateItemListRow(parent, itemData, index)
     row.itemData = itemData
     row.existingBindings = bindings
     
-    -- Hover
-    row:SetScript("OnEnter", function(self)
-        self:SetBackdropColor(C_ELEMENT.r + 0.08, C_ELEMENT.g + 0.08, C_ELEMENT.b + 0.08, 1)
-        
-        local lines = BindingTooltipLines(self.existingBindings, themeColor,
-            L["Left-click to add/edit binding"])
-        if itemInfo then
-            DF.GUI:ShowGameTooltip(self, { inventorySlot = itemData.slot, lines = lines })
-        else
-            -- Empty slot: there is no item for the game to describe, so this is
-            -- an ordinary titled tooltip.
-            table.insert(lines, 1, { text = L["No item equipped"], color = { 0.5, 0.5, 0.5 } })
-            DF.GUI:ShowTooltip(self, { title = itemData.slotName, lines = lines })
-        end
-    end)
-    row:SetScript("OnLeave", function(self)
-        self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
-        if #(self.existingBindings or {}) == 0 then
-            self:SetBackdropBorderColor(C_BORDER.r, C_BORDER.g, C_BORDER.b, 0.5)
-        end
-        DF.GUI:HideTooltip()
-    end)
-    
-    -- Click to bind
-    row:SetScript("OnClick", function(self, button)
-        if button == "LeftButton" then
-            CC:ShowItemKeybindPopup(itemData)
-        end
-    end)
-    
+    WireItemHandlers(row, itemData, itemInfo)
+
     return row
 end
 

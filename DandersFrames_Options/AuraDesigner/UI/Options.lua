@@ -691,7 +691,12 @@ P.OtherPoolDisplayName = OtherPoolDisplayName
 -- used-affordance). which = "my" walks ALL spec pools (the preset object is
 -- one: a spell tracked for ANY spec would double-render for that spec when
 -- also in the shared other pool); "other" walks the flat other pool with
--- nil-spec identity. Pure (no editor state) — exposed for the SDD harness.
+-- nil-spec identity. Pure — no editor state.
+--
+-- ⚠ It used to say "exposed for the SDD harness". There is no SDD harness: that
+-- comment was the only mention of one anywhere in the repo, and the DF.* export it
+-- justified had no readers either. The local below is live and used by
+-- CrossPoolTrackedIDs; only the export is gone.
 local function PoolTrackedIDs(adDB, which)
     local out = {}
     if type(adDB) ~= "table" then return out end
@@ -721,7 +726,6 @@ local function PoolTrackedIDs(adDB, which)
     end
     return out
 end
-DF.ADEditor_PoolTrackedIDs = PoolTrackedIDs
 
 -- IDs tracked by the OPPOSITE pool of the active tab (drives the picker's
 -- cross-tab blocked rows and the add-by-ID gate).

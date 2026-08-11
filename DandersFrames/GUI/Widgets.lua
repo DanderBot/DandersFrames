@@ -793,8 +793,12 @@ end
 --   fillAlpha    default 0.30      borderAlpha  default 0.80
 --   fill = false outline only      edgeSize     default 2
 --
--- The returned frame gains :RefreshMoverTint(), which re-resolves the hue against
--- the theme as it stands now -- call it if the mode changes while a mover is shown.
+-- ⚠ NO :RefreshMoverTint(). One was defined here and documented as "call it if the
+-- mode changes while a mover is shown"; nothing ever called it, in either addon. Movers
+-- are rebuilt through CreateMoverBackdrop on a mode change instead, which is the same
+-- work by a different route -- so the method was a second entry point to it, advertised
+-- and unused. opts.color / opts.fill / opts.edgeSize are likewise never passed by any
+-- of the four call sites; the defaults below are what every mover actually gets.
 function GUI:CreateMoverBackdrop(frame, opts)
     opts = opts or {}
     local c = opts.color
@@ -809,17 +813,16 @@ function GUI:CreateMoverBackdrop(frame, opts)
         bgColor     = { r, g, b, opts.fillAlpha or 0.30 },
         borderColor = { r, g, b, opts.borderAlpha or 0.80 },
     })
-    frame.RefreshMoverTint = function(self, newOpts)
-        return GUI:CreateMoverBackdrop(self, newOpts or opts)
-    end
     return frame
 end
 
 -- The element backdrop, exposed to consumer files (the stylers in this file use
 -- the local directly). Nothing outside should be calling SetBackdrop itself --
 -- route it through here so the look, and the border mechanism, stay in one
--- place. See the local for the opts contract: fill, outline, bgColor,
--- borderColor, backdropEdge.
+-- place. See the local for the opts contract: fill, outline, bgColor, borderColor,
+-- edgeSize and inset. (It used to list backdropEdge and omit edgeSize and inset --
+-- backwards on both counts: edgeSize and inset are passed by real callers, while
+-- backdropEdge is passed by none.)
 function GUI:CreateElementBackdrop(frame, opts)
     return CreateElementBackdrop(frame, opts)
 end
@@ -2099,7 +2102,8 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     local searchable = opts.searchable
     local ITEM_HEIGHT = 22
     local SEARCH_HEIGHT = 26
-    local MAX_VISIBLE = opts.maxVisible or 12
+    -- (No opts.maxVisible: nothing ever passed one, so 12 is what every dropdown got.)
+    local MAX_VISIBLE = 12
     local searchBox, scrollFrame, scrollChild, searchPlaceholder
     if searchable then
         searchBox = CreateFrame("EditBox", nil, menuFrame, "BackdropTemplate")
