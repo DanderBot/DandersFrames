@@ -948,20 +948,12 @@ local function BuildChoiceThumb(parent, art)
             ghost:SetSize(8, 8)
         end
 
-    elseif kind == "icon" or kind == "square" then
-        -- Both sit ON the frame at a corner; the size difference IS the difference.
-        local sz = (kind == "icon") and 13 or 7
+    elseif kind == "icon" then
+        -- Sits ON the frame at a corner.
         local box = thumb:CreateTexture(nil, "OVERLAY")
         box:SetColorTexture(c[1], c[2], c[3], 1)
         box:SetPoint("TOPLEFT", 5, -11)
-        box:SetSize(sz, sz)
-
-    elseif kind == "bar" then
-        local bar = thumb:CreateTexture(nil, "OVERLAY")
-        bar:SetColorTexture(c[1], c[2], c[3], 1)
-        bar:SetPoint("TOPLEFT", 5, -13)
-        bar:SetPoint("RIGHT", thumb, "RIGHT", -5, 0)
-        bar:SetHeight(5)
+        box:SetSize(13, 13)
 
     elseif kind == "border" then
         -- Drawn as four edges rather than a backdrop swap: the thumb's own border
@@ -976,26 +968,16 @@ local function BuildChoiceThumb(parent, art)
             if e[6] then t:SetHeight(e[6]) end
         end
 
-    elseif kind == "healthbar" then
-        hp:SetColorTexture(c[1], c[2], c[3], 1)
-
-    elseif kind == "background" then
-        local bg = thumb:CreateTexture(nil, "BORDER")
-        bg:SetColorTexture(c[1], c[2], c[3], 0.55)
-        bg:SetPoint("TOPLEFT", 1, -1)
-        bg:SetPoint("BOTTOMRIGHT", -1, 1)
-
-    elseif kind == "nametext" then
-        name:SetColorTexture(c[1], c[2], c[3], 1)
-
-    elseif kind == "healthtext" then
-        -- The health readout sits on the bar, so the swatch goes there to
-        -- distinguish it from the name line above.
-        local ht = thumb:CreateTexture(nil, "OVERLAY")
-        ht:SetColorTexture(c[1], c[2], c[3], 1)
-        ht:SetPoint("BOTTOMRIGHT", -6, 6)
-        ht:SetSize(12, 3)
     end
+    -- ☠ (Removed) the "square", "bar", "healthbar", "background", "nametext" and
+    -- "healthtext" arms. Every art.kind in the codebase is a string LITERAL -- there
+    -- is no computed `kind =` anywhere -- and across the six call sites only three
+    -- values are ever passed: "iconRow" (3), "border" (2) and "icon" (1). The other
+    -- six could not be reached.
+    --
+    -- ⚠ `name` and `hp` above are still built for every thumb and are NOT dead: they
+    -- draw the little name line and health bar that make the thumbnail read as a unit
+    -- frame at all. Only the arms that RE-TINTED them are gone.
 
     return thumb
 end
@@ -3000,18 +2982,25 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
     -- earlier, above the inset/offset/blendMode/gradient/shadow block, so the
     -- relationship "source → colour" reads top-to-bottom in the panel.)
 
-    if include.colorByTime then
-        w.colorByTime = group:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], dbTable, key("BorderColorByTime"), fullUpdate), 30)
-        w.colorByTime.hideOn = hideOff
-        -- The actual colour curve picker is consumer-specific (e.g. AD's
-        -- existing expiring colour curve) and is added by the consumer
-        -- alongside this checkbox.
-    end
-
-    if include.colorByType then
-        w.colorByType = group:AddWidget(GUI:CreateCheckbox(parent, L["Color by Aura Type"], dbTable, key("BorderColorByType"), fullUpdate), 30)
-        w.colorByType.hideOn = hideOff
-    end
+    -- ☠ (Removed) the include.colorByTime and include.colorByType branches. No caller
+    -- passes either flag -- across all 18 CreateBorderControls call sites the include
+    -- tables only ever carry inset / offset / blendMode / gradient / shadow / alpha /
+    -- animate / classColor / roleColor. They are NOT the same story though, and the
+    -- difference matters if either is ever revived:
+    --
+    --   * COLOR BY TYPE IS A LIVE FEATURE, just not wired through this factory. The
+    --     key is seeded, read by Frames/Border.lua and Features/Auras.lua, carried in
+    --     profile export, and written by a real "Color by Dispel Type" checkbox --
+    --     hand-rolled on the Indicators page against debuffBorderColorByType. This
+    --     branch was a second, unused route to it, so removing it takes nothing away.
+    --
+    --   * COLOR BY TIME HAS NO WRITER AT ALL, and its read is unreachable for a
+    --     second reason too: Border.lua gates it on ctx.timeCurve, which NOTHING
+    --     passes, so Border:ResolveTimeColor cannot run either. ⚠ That resolver is
+    --     kept deliberately -- it is built on C_CurveUtil colour curves, which are
+    --     12.1-legal (same family as the pandemic regions), so it is a capability
+    --     nobody wired up rather than one the lockdown killed. Reviving it needs a
+    --     curve supplied through ctx, not a checkbox here.
 
     -- Two independent greys, both composed on top of whatever disableOn a control
     -- already carries (e.g. the shadow sub-controls), and both leaving the

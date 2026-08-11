@@ -140,9 +140,13 @@ GUI.RowGap = 14
 -- recorded on labelPad, and the reason a stack of sliders needs real air even
 -- though a stack of checkboxes does not.
 GUI.RowGapTight = 8
+-- ☠ NO `toggle` ENTRY. One was here and could never match: only six values are ever
+-- written to rowKind (checkbox, colorpicker, dropdown, editbox, header, slider), so
+-- the lookups in this file and in Sections.lua had nothing to find it with. Its twin
+-- in GUI.RowHeight was removed for the same reason -- see the note there -- and this
+-- one was missed, which is exactly how a pair like that drifts apart.
 GUI.RowCompact = {
     checkbox    = true,
-    toggle      = true,
     colorpicker = true,
 }
 
