@@ -334,6 +334,9 @@ DandersFrames has been rebuilt for WoW 12.1 (Midnight), which fundamentally chan
 * (Test Mode) **Fixed the Summon icon only ever previewing one of its three states.** It always showed "pending", so the Accepted Text and Declined Text boxes could be typed into but never seen. Test frames now show all three across different players.
 * (Test Mode) Fixed role and leader icons staying lit on test frames while the Memory Test panel had them switched off — the preview was showing a state the addon can't be in.
 * (Interface) The Debug Console now lists its Filter and Search categories, so they can be switched off before reproducing a problem instead of only appearing once they had already logged something.
+* (Bars) **The health gradient takes as many colour stops as you want.** It was three fixed steps — Low, Medium and High, each with a "weight" that decided how much of the bar it held. Now it's a list: add a stop anywhere, set the health percentage it starts at, give it a colour, and remove the ones you don't want. Each stop still has its own "use class colour" option, on the swatch itself. Your existing gradient is unchanged — the old weights described a set of evenly spaced colour points, and those are exactly what the stops now hold, so the bar looks the way it did. That means a default setup arrives as five stops rather than three: red held to a quarter health, yellow through the middle, green at full. New profiles start from a simpler red / yellow / green. The missing-health bar works the same way.
+* (Bars) The gradient editor is one box under Color Mode instead of a full-width preview bar and three separate panels, so the Health Bar page is a lot shorter.
+* (Bars) Fixed the gradient preview bar filling only part of its width, or appearing to jump around, while dragging the settings window edge — it was drawing its colours at sizes measured before the resize.
 
 
 ### Known Issues (12.1 alpha)
