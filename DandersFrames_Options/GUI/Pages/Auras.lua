@@ -990,6 +990,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ⚠ The 550px bar was ALSO the widget that misbehaved on window drag, because a
         -- full-width widget is resized on every relayout. This one is fixed at the box's
         -- inner width, and CreateGradientBar repaints on OnSizeChanged regardless.
+        --
+        -- ★ ONE BUILDER, BOTH BARS. The health bar and the missing-health fill each keep
+        -- a stop list under this same editor; only the key prefix and the visibility
+        -- rule differ. The first version was built for the health bar alone, and the
+        -- missing-health section kept its old Low/Medium/High stage groups -- which by
+        -- then were editing legacy keys the renderer no longer reads on any migrated
+        -- profile (BuildColorStops resolves <prefix>Stops first). The body keeps the
+        -- surrounding indent so the factoring reads as what it is in the diff.
+        local function BuildGradientStopBox(prefix, hideOn)
+        local listKey = prefix .. "Stops"
         local gradGroup = GUI:CreateSettingsGroup(self.child, 280)
         gradGroup:AddWidget(GUI:CreateHeader(self.child, L["Gradient"]), 40)
         local gradInner = GUI:GroupInnerWidth(gradGroup)
@@ -1004,11 +1014,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- idiom Pages/Indicators.lua uses for its reset.
         local function GradDefaults()
             local d = (db == DF.db.raid) and DF.RaidDefaults or DF.PartyDefaults
-            return DF:DeepCopy(d.healthColorStops)
+            return DF:DeepCopy(d[listKey])
         end
 
         local function GradStops()
-            local s = db.healthColorStops
+            local s = db[listKey]
             if type(s) ~= "table" or #s < 2 then
                 -- ☠ CONVERT, DO NOT INVENT. This used to seed Config's new three-stop
                 -- default here, and that was a real bug rather than a tidy fallback:
@@ -1020,9 +1030,9 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 --
                 -- DF:LegacyStopsFor is the migration's own conversion, so the editor and
                 -- the migration cannot disagree about what a profile's ramp is.
-                s = DF.LegacyStopsFor and DF:LegacyStopsFor(db, "healthColor")
-                db.healthColorStops = s or GradDefaults()
-                s = db.healthColorStops
+                s = DF.LegacyStopsFor and DF:LegacyStopsFor(db, prefix)
+                db[listKey] = s or GradDefaults()
+                s = db[listKey]
             end
             table.sort(s, function(a, b)
                 return (tonumber(a.threshold) or 0) < (tonumber(b.threshold) or 0)
@@ -1030,7 +1040,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             return s
         end
 
-        local gradBar = GUI:CreateGradientBar(self.child, gradInner, 18, db)
+        local gradBar = GUI:CreateGradientBar(self.child, gradInner, 18, db, prefix)
         gradGroup:AddWidget(gradBar, 24)
 
         -- Colour edits fire per wheel tick, so repaint the strip live but debounce the
@@ -1128,8 +1138,8 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     local remBtn = GUI:CreateCloseButton(row, {
                         size = 20,
                         onClick = function()
-                            for idx, s in ipairs(db.healthColorStops) do
-                                if s == stop then table.remove(db.healthColorStops, idx) break end
+                            for idx, s in ipairs(db[listKey]) do
+                                if s == stop then table.remove(db[listKey], idx) break end
                             end
                             GradRebuild()
                         end,
@@ -1245,7 +1255,7 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     if (b - a) > bestGap then bestGap, bestAt = b - a, math.floor((a + b) / 2) end
                 end
                 if not bestAt or bestGap < 2 then return end   -- no room between neighbours
-                local c = DF:GetHealthGradientColor(bestAt / 100, db, nil, "healthColor")
+                local c = DF:GetHealthGradientColor(bestAt / 100, db, nil, prefix)
                 table.insert(s, { threshold = bestAt,
                                   color = { r = c.r, g = c.g, b = c.b, a = 1 },
                                   useClass = false })
@@ -1256,15 +1266,19 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             GUI:StyleButton(resetBtn, { width = 100, height = 22, text = L["Reset"], fitText = true })
             resetBtn:SetPoint("LEFT", addBtn, "RIGHT", 6, 0)
             resetBtn:SetScript("OnClick", function()
-                db.healthColorStops = GradDefaults()
+                db[listKey] = GradDefaults()
                 GradRebuild()
             end)
 
             gradGroup:AddWidget(footer, 28)
         end
 
-        gradGroup.hideOn = function(d) return d.healthColorMode ~= "PERCENT" end
+        gradGroup.hideOn = hideOn
         AddToSection(gradGroup, nil, 1)
+        end
+
+        BuildGradientStopBox("healthColor",
+            function(d) return d.healthColorMode ~= "PERCENT" end)
 
         -- ===== BACKGROUND GROUP (Column 1) =====
         local bgGroup = GUI:CreateSettingsGroup(self.child, 280)
@@ -1332,39 +1346,15 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         AddToSection(missingGroup, nil, 1)
 
-        -- ===== MISSING HEALTH GRADIENT PREVIEW (full width, conditional) =====
-        local mhGradHeader = AddToSection(GUI:CreateHeader(self.child, L["Gradient"]), 40, "both")
-        mhGradHeader.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
-
-        local mhGradBar = AddToSection(GUI:CreateGradientBar(self.child, 550, 24, db, "missingHealthColor"), 35, "both")
-        mhGradBar.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
-
-        -- ===== MISSING HEALTH HIGH GROUP (Column 1, conditional) =====
-        local mhHighGroup = GUI:CreateSettingsGroup(self.child, 280)
-        mhHighGroup:AddWidget(GUI:CreateHeader(self.child, L["High Health (100%)"]), 40)
-        mhHighGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "missingHealthColorHigh", false, function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, true), 35)
-        mhHighGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Class Color"], db, "missingHealthColorHighUseClass", function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end), 30)
-        mhHighGroup:AddWidget(GUI:CreateSlider(self.child, L["Weight"], 1, 5, 1, db, "missingHealthColorHighWeight", function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, true), 55)
-        mhHighGroup.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
-        AddToSection(mhHighGroup, nil, 1)
-
-        -- ===== MISSING HEALTH MEDIUM GROUP (Column 2, conditional) =====
-        local mhMedGroup = GUI:CreateSettingsGroup(self.child, 280)
-        mhMedGroup:AddWidget(GUI:CreateHeader(self.child, L["Medium Health (50%)"]), 40)
-        mhMedGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "missingHealthColorMedium", false, function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, true), 35)
-        mhMedGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Class Color"], db, "missingHealthColorMediumUseClass", function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end), 30)
-        mhMedGroup:AddWidget(GUI:CreateSlider(self.child, L["Weight"], 1, 5, 1, db, "missingHealthColorMediumWeight", function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, true), 55)
-        mhMedGroup.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
-        AddToSection(mhMedGroup, nil, 2)
-
-        -- ===== MISSING HEALTH LOW GROUP (Column 1, conditional) =====
-        local mhLowGroup = GUI:CreateSettingsGroup(self.child, 280)
-        mhLowGroup:AddWidget(GUI:CreateHeader(self.child, L["Low Health (0%)"]), 40)
-        mhLowGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "missingHealthColorLow", false, function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, true), 35)
-        mhLowGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Class Color"], db, "missingHealthColorLowUseClass", function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end), 30)
-        mhLowGroup:AddWidget(GUI:CreateSlider(self.child, L["Weight"], 1, 5, 1, db, "missingHealthColorLowWeight", function() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() end, function() DF:UpdateColorCurve() DF:RefreshAllVisibleFrames() if mhGradBar.UpdatePreview then mhGradBar.UpdatePreview() end end, true), 55)
-        mhLowGroup.hideOn = function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end
-        AddToSection(mhLowGroup, nil, 1)
+        -- ===== MISSING HEALTH GRADIENT (Column 1, conditional) =====
+        -- ☠ The old Low/Medium/High stage groups that sat here (550px bar + three
+        -- 280px groups) were editing missingHealthColorLow/Medium/High + Weight --
+        -- keys the renderer stopped reading the moment the profile carried
+        -- missingHealthColorStops, which every migrated profile does. The controls
+        -- moved frames on no screen, and the preview bar above them read the stop
+        -- list, so it did not respond either. Same stop-list box as the health bar.
+        BuildGradientStopBox("missingHealthColor",
+            function(d) return d.backgroundMode == "BACKGROUND" or d.missingHealthColorMode ~= "PERCENT" end)
 
         currentSection = nil
 

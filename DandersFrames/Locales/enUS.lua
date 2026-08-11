@@ -1,4 +1,4 @@
-﻿-- AceLocale silent mode is ALWAYS on by default. AceLocale's default
+-- AceLocale silent mode is ALWAYS on by default. AceLocale's default
 -- `readmeta` metatable calls geterrorhandler() on missing keys, which
 -- causes spurious errors when external code (BugSack, debug helpers
 -- calling :ToDebugString() etc.) introspects our L table — and also

@@ -1,4 +1,4 @@
-﻿-- ☠ Companion addon: `...` yields THIS addon's private table, not the
+-- ☠ Companion addon: `...` yields THIS addon's private table, not the
 -- parent's, so every DF.* read here would be nil. Take the parent's table
 -- from the global it publishes at DandersFrames/Core.lua:9 (`_G[addonName]
 -- = DF`). NOT from ## AllowAddOnTableAccess -- that directive governs

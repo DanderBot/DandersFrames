@@ -1342,12 +1342,49 @@ function DF:MergeCategorySettings(profile, imported, categories, exportedCategor
         end
     end
 
+    local copied = {}
     for category, keys in pairs(self.ExportCategories) do
         if categorySet[category] then
             for _, key in ipairs(keys) do
                 if imported[key] ~= nil then
                     profile[key] = imported[key]
+                    copied[key] = true
                 end
+            end
+        end
+    end
+
+    -- ☠ A PRE-STOPS GRADIENT MUST BECOME STOPS *HERE*, OR IT NEVER DOES. This merge
+    -- copies only keys the payload carries, so an export from before the stop list
+    -- brings legacy Low/Medium/High stages and no <prefix>Stops -- and the profile's
+    -- own stop list survives the merge and shadows them: the renderer resolves the
+    -- list first, so the import "works" and the gradient never changes. Permanently,
+    -- because DF:MigrateHealthColorStops is presence-gated on the very list that is
+    -- still there. Same import class MigrateOORTextAlpha documents for the v4
+    -- oorNameTextAlpha payload. Full imports don't need this: they replace the whole
+    -- mode table, the stop list vanishes with it, and the renderer's legacy fallback
+    -- covers until the next login converts.
+    --
+    -- ⚠ Gate on `copied`, not on the payload: the payload can carry stage keys whose
+    -- category the user UNTICKED, and rebuilding then would overwrite the profile's
+    -- edited stop list from its own stale legacy stages (the editor updates only the
+    -- list, so the stages rot the moment a stop is touched).
+    for _, prefix in ipairs({ "healthColor", "missingHealthColor" }) do
+        if not copied[prefix .. "Stops"] then
+            local stageApplied = false
+            for _, stage in ipairs({ "Low", "Medium", "High" }) do
+                if copied[prefix .. stage] or copied[prefix .. stage .. "Weight"]
+                    or copied[prefix .. stage .. "UseClass"] then
+                    stageApplied = true
+                    break
+                end
+            end
+            if stageApplied and DF.LegacyStopsFor then
+                -- From the MERGED table, not the payload: a partial payload merges
+                -- into the profile's remaining stages, and that mix is what a
+                -- pre-stops build would have rendered after this import.
+                local pts = DF:LegacyStopsFor(profile, prefix)
+                if pts then profile[prefix .. "Stops"] = pts end
             end
         end
     end
