@@ -672,6 +672,11 @@ function DF:UpdateAbsorb(frame, testIndex)
             customBar:SetStatusBarTexture(tex)
             local barTex = customBar:GetStatusBarTexture()
             if barTex then
+                -- Wrap set WITH the file, as Blizzard's own template declares for
+                -- this texture (UnitFrame.xml, horizTile/vertTile on the node) --
+                -- SetStatusBarTexture alone leaves the sampler clamped. Same rule
+                -- as DF's tiled textures; see ☠ in DF:ApplyBarTextureTiling.
+                barTex:SetTexture(tex, "REPEAT", "REPEAT")
                 barTex:SetHorizTile(true)
                 barTex:SetVertTile(true)
                 barTex:SetTexCoord(0, 2, 0, 1)

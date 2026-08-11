@@ -1066,6 +1066,11 @@ end
 local function recordBarTexture(bar, requested, applied)
     bar.dfBaseTexture = requested
     bar.dfAppliedTexture = applied
+    -- The file was JUST (re)set, which reset the fill's wrap mode to CLAMP --
+    -- clear the wrap stamp so ApplyBarTextureTiling re-applies it rather than
+    -- trusting a stamp describing the previous set. See the ☠ note there.
+    local fill = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+    if fill then fill.dfWrapPath = nil end
     DF:ApplyBarTextureTiling(bar, applied)
 end
 
@@ -1279,6 +1284,13 @@ function DF:GetBarTextureTiling(path)
     return path ~= nil and DF.TILED_BAR_TEXTURES[path] or nil
 end
 
+-- The SetTexture wrap descriptors a tiling mode asks for, per axis. Same strings
+-- Blizzard's addressModeLookup resolves to (TextureUtil.lua): "REPEAT" / "CLAMP".
+local function tileWrapArgs(mode)
+    return (mode == "BOTH" or mode == "HORIZ") and "REPEAT" or "CLAMP",
+           (mode == "BOTH" or mode == "VERT")  and "REPEAT" or "CLAMP"
+end
+
 -- Apply the tiling mode a texture asks for to a StatusBar's CURRENT fill.
 -- Sets both flags EXPLICITLY either way, so a bar switched from a tiled texture
 -- back to a stretched one clears the tiling instead of inheriting it. Returns
@@ -1290,6 +1302,31 @@ function DF:ApplyBarTextureTiling(bar, path)
     local fill = bar:GetStatusBarTexture()
     if not fill then return false end
     local mode = DF:GetBarTextureTiling(path)
+    -- ☠ THE TILE FLAGS ALONE LEAVE THE SAMPLER CLAMPED. SetHorizTile/SetVertTile
+    -- make the REGION repeat, but the wrap (address) mode is a property of the
+    -- texture SET -- and SetStatusBarTexture takes no wrap arguments, so the fill
+    -- comes back CLAMPED every time the file is (re)set. A clamped sampler under
+    -- a repeating region can smear the border pixels at the tile seams ("lines"
+    -- at the fill's edge), and whether it shows varies with texture cache state:
+    -- it surfaced only on a fresh session with a tile already selected, and any
+    -- reapply cleared it. The two implementations that tile statusbar fills both
+    -- set wrap WITH the file and only then the flags -- Blizzard
+    -- (SetTextureWithAddressModeOptions, TextureUtil.lua; horizTile= on the XML
+    -- node is the declarative form) and Grid2 (IndicatorMultiBar.lua re-sets the
+    -- fill's file with wrap args after SetStatusBarTexture). This is that method.
+    --   Stamped on the fill because the ATTACHED modes re-assert tiling on every
+    -- absorb update: the stamp spares them a per-pass SetTexture, and every site
+    -- that re-sets the file clears it (recordBarTexture for the safe setters,
+    -- DF:ApplyBarFillOrientation for the companion swap), so a fresh set always
+    -- arrives here with the stamp gone and re-applies the wrap.
+    if mode then
+        if fill.dfWrapPath ~= path then
+            fill:SetTexture(path, tileWrapArgs(mode))
+            fill.dfWrapPath = path
+        end
+    else
+        fill.dfWrapPath = nil
+    end
     fill:SetHorizTile(mode == "BOTH" or mode == "HORIZ")
     fill:SetVertTile(mode == "BOTH" or mode == "VERT")
     -- Only meaningful when NOT tiling at all: once either axis wraps, repetition
@@ -1304,6 +1341,13 @@ end
 function DF:ApplyTextureTiling(region, path)
     if not (region and region.SetHorizTile) then return false end
     local mode = DF:GetBarTextureTiling(path)
+    -- Same wrap-with-the-file rule as ApplyBarTextureTiling above, unstamped:
+    -- every caller here runs right after its own SetTexture (which clamps), and
+    -- none is a per-update re-assert, so re-issuing the set is always both
+    -- necessary and cheap.
+    if mode and region.SetTexture then
+        region:SetTexture(path, tileWrapArgs(mode))
+    end
     region:SetHorizTile(mode == "BOTH" or mode == "HORIZ")
     region:SetVertTile(mode == "BOTH" or mode == "VERT")
     return mode ~= nil
@@ -1327,6 +1371,10 @@ function DF:ApplyBarFillOrientation(bar, isVertical)
         if want ~= bar.dfAppliedTexture then
             bar:SetStatusBarTexture(want)
             bar.dfAppliedTexture = want
+            -- Fresh set = clamped wrap; clear the stamp so the tiling pass
+            -- re-applies it (see the ☠ note in ApplyBarTextureTiling).
+            local fill = bar:GetStatusBarTexture()
+            if fill then fill.dfWrapPath = nil end
             DF:ApplyBarTextureTiling(bar, want)
         end
     elseif bar.SetRotatesTexture then
