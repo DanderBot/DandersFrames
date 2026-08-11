@@ -3702,6 +3702,40 @@ end
 -- Presence-gated, not flag-gated, and idempotent: it converts only while the list is
 -- absent, so a re-import of an old profile is converted again while an edited list is
 -- never overwritten.
+-- ★ THE ONE DEFINITION OF "what stops does this profile's legacy data describe".
+-- Returns a stop list, or nil when the table carries no usable stages.
+--
+-- ☠ SHARED WITH THE EDITOR ON PURPOSE. The gradient editor needs the same answer when
+-- it opens on a profile the migration has not reached yet, and its first version
+-- invented one instead -- it seeded Config's new three-stop default and SAVED it,
+-- which permanently stamped the wrong ramp on that profile because the migration is
+-- presence-gated and then skipped it. Two ways to answer "what is this profile's
+-- gradient" is one too many; this is the answer.
+function DF:LegacyStopsFor(tbl, prefix)
+    if type(tbl) ~= "table" then return nil end
+    local pts = {}
+    for _, stage in ipairs({ "Low", "Medium", "High" }) do
+        local c = tbl[prefix .. stage]
+        -- Only fold a stage the table actually carries: a partial profile converts to
+        -- the stops it really has rather than to invented ones.
+        if type(c) == "table" then
+            local w = math.max(1, math.floor(tbl[prefix .. stage .. "Weight"] or 1))
+            local useClass = tbl[prefix .. stage .. "UseClass"] and true or false
+            for _ = 1, w do
+                pts[#pts + 1] = {
+                    color = { r = c.r or 0.5, g = c.g or 0.5, b = c.b or 0.5, a = c.a or 1 },
+                    useClass = useClass,
+                }
+            end
+        end
+    end
+    if #pts < 2 then return nil end
+    for i, p in ipairs(pts) do
+        p.threshold = math.floor(((i - 1) / (#pts - 1)) * 100 + 0.5)
+    end
+    return pts
+end
+
 function DF:MigrateHealthColorStops()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
@@ -3712,32 +3746,11 @@ function DF:MigrateHealthColorStops()
                     for _, prefix in ipairs({ "healthColor", "missingHealthColor" }) do
                         local listKey = prefix .. "Stops"
                         if type(m[listKey]) ~= "table" or #m[listKey] < 2 then
-                            local pts = {}
-                            for _, stage in ipairs({ "Low", "Medium", "High" }) do
-                                local c = m[prefix .. stage]
-                                -- Only fold a stage the profile actually carries. A
-                                -- missing one is skipped rather than invented, so a
-                                -- partial profile converts to the stops it really has.
-                                if type(c) == "table" then
-                                    local w = math.max(1, math.floor(m[prefix .. stage .. "Weight"] or 1))
-                                    local useClass = m[prefix .. stage .. "UseClass"] and true or false
-                                    for _ = 1, w do
-                                        pts[#pts + 1] = {
-                                            color = { r = c.r or 0.5, g = c.g or 0.5, b = c.b or 0.5, a = c.a or 1 },
-                                            useClass = useClass,
-                                        }
-                                    end
-                                end
-                            end
-                            -- Fewer than two points cannot describe a ramp; leave the
-                            -- key absent so BuildColorStops falls back and Config's
-                            -- default seeds it, rather than writing a broken list.
-                            if #pts >= 2 then
-                                for i, p in ipairs(pts) do
-                                    p.threshold = math.floor(((i - 1) / (#pts - 1)) * 100 + 0.5)
-                                end
-                                m[listKey] = pts
-                            end
+                            -- nil when the profile has no usable stages; leave the key
+                            -- absent then, so Config's default applies rather than a
+                            -- broken list being written.
+                            local pts = DF:LegacyStopsFor(m, prefix)
+                            if pts then m[listKey] = pts end
                         end
                     end
                 end
@@ -4383,6 +4396,22 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- One-shot copy per mode: if a new key already exists we leave it
         -- (user has already saved with the new key); otherwise we adopt the
         -- old value.
+        -- ☠ HEALTH GRADIENT STOPS -- HERE, FOR THE REASON THE NOTE BELOW GIVES.
+        --
+        -- healthColorStops / missingHealthColorStops are new keys with a shipped default,
+        -- so the backfill further down stamps that default into EVERY profile. This
+        -- conversion is presence-gated ("only if the list is absent"), so run after the
+        -- backfill it can never fire -- which is exactly what happened: profiles came up
+        -- showing the new flat three-stop ramp instead of the five-stop one their
+        -- Low 2 / Medium 2 / High 1 weights describe, and clearing the key by hand did
+        -- not help because the backfill re-stamped it on the next load.
+        --
+        -- The note below already described this failure, from the frame-border rename.
+        -- Any future migration whose key has a default belongs up here with it.
+        if DF.MigrateHealthColorStops then
+            DF:MigrateHealthColorStops()
+        end
+
         -- ☠ THESE MUST RUN FOR EVERY PROFILE, AND BEFORE THE DEFAULTS BACKFILL.
         --
         -- All of these adopt legacy -> canonical keys and are guarded on "only if the
@@ -6773,12 +6802,6 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- (Text Designer now renders all text). Per-profile guarded.
             if DF.MigrateOORTextAlpha then
                 DF:MigrateOORTextAlpha()
-            end
-
-            -- Convert the three-stage health gradient into a stop list. Presence-gated
-            -- per profile, so it is a no-op once converted.
-            if DF.MigrateHealthColorStops then
-                DF:MigrateHealthColorStops()
             end
 
             -- Retire the deprecated raidGroupOrder reverse toggle (NORMAL-ize any

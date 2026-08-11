@@ -1010,9 +1010,18 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local function GradStops()
             local s = db.healthColorStops
             if type(s) ~= "table" or #s < 2 then
-                -- Un-migrated or damaged: seed from the defaults rather than editing a
-                -- list that is not there. The migration normally beats us to this.
-                db.healthColorStops = GradDefaults()
+                -- ☠ CONVERT, DO NOT INVENT. This used to seed Config's new three-stop
+                -- default here, and that was a real bug rather than a tidy fallback:
+                -- opening this page on a profile the migration had not reached wrote
+                -- three stops and SAVED them, and because the migration is
+                -- presence-gated it then skipped that profile permanently. The user
+                -- ended up with a flat 0/50/100 ramp and no way back -- for a default
+                -- profile the honest answer is FIVE stops, from Low 2 / Medium 2 / High 1.
+                --
+                -- DF:LegacyStopsFor is the migration's own conversion, so the editor and
+                -- the migration cannot disagree about what a profile's ramp is.
+                s = DF.LegacyStopsFor and DF:LegacyStopsFor(db, "healthColor")
+                db.healthColorStops = s or GradDefaults()
                 s = db.healthColorStops
             end
             table.sort(s, function(a, b)
