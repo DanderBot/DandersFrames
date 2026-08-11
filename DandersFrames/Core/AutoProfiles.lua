@@ -1150,10 +1150,19 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
     local liveOwner = DandersFramesDB_v2 and DandersFramesDB_v2.currentProfile or "Default"
     if self.globalSnapshot and snapOwner and snapOwner ~= liveOwner then
         DF:DebugWarn("AUTOPROFILE", "ExitEditing: profile changed during editing (%s -> %s); abandoning the diff rather than writing one profile's values into another", tostring(snapOwner), tostring(liveOwner))
+        -- Drop ONLY the diff/restore inputs, then FALL THROUGH to the shared exit
+        -- tail: every block below is nil-guarded on globalSnapshot, so nothing from
+        -- the stale edit can be written -- but the editing-state clears, the
+        -- crash-recovery flag, the sidebar hint, the override stars and
+        -- EvaluateAndApply still run. An early return here skipped them all,
+        -- leaving the GUI wearing editing chrome for an edit that no longer existed.
+        -- ⚠ Restoring the snapshot into the SOURCE profile by name is possible (it
+        -- still exists in DandersFramesDB_v2.profiles) and deliberately NOT done:
+        -- a cross-profile write is the exact hazard this guard exists to stop, and
+        -- doing it safely against the raw table is its own change.
         self.editingProfile = nil
         self.globalSnapshot = nil
         self.globalSnapshotOwner = nil
-        return
     end
 
     if self.editingProfile and self.globalSnapshot then
