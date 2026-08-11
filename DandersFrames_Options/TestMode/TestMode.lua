@@ -1185,39 +1185,22 @@ function DF:UpdateTestIcons(frame, testData)
     local db = DF:GetFrameDB(frame)
     
     -- Role Icon
+    --
+    -- ★ THE LIVE UPDATER, fed test DATA. DF:UpdateRoleIcon takes a role override, so
+    -- the per-role visibility filter, the texture pick, the positioning and the
+    -- MemTest gate are one implementation.
+    --
+    -- ☠ (Removed) a copy of the roleIconShowTank/Healer/DPS filter that also omitted
+    -- live's DF:MemTestDisabled("enableRoleLeaderIcons") gate -- so running the Memory
+    -- Test panel with role and leader icons unticked left them lit on every test frame
+    -- while live hid them. The preview was showing a state the addon cannot be in.
+    --
+    -- ⚠ roleIconHideInCombat needs no special handling: live reads DF.playerInCombat,
+    -- and test mode is torn down on PLAYER_REGEN_DISABLED, so the preview is never on
+    -- screen in combat and live's gate resolves the same way the old comment here
+    -- reasoned it would.
     if frame.roleIcon then
-        local role = testData.role
-        -- Only TANK/HEALER/DAMAGER have a role icon; a nil/"NONE" role shows none
-        -- (matches live StatusIcons and avoids GetRoleIconTexture indexing a nil
-        -- coord table for a roleless test unit).
-        local shouldShow = (role == "TANK" or role == "HEALER" or role == "DAMAGER")
-
-        -- ☠ WAS GATED ON db.roleIconOnlyInCombat, A KEY THAT DOES NOT EXIST -- one
-        -- read, no writes, absent from Config, so it was always nil and the gate
-        -- was always open. The real key is roleIconHideInCombat, and wiring it
-        -- here would be pointless: test mode is torn down on
-        -- PLAYER_REGEN_DISABLED, so the preview can never be on screen in combat.
-        -- Removed rather than repointed. (Audit, 2026-08-07.)
-        if shouldShow then
-            if role == "TANK" then
-                shouldShow = db.roleIconShowTank ~= false
-            elseif role == "HEALER" then
-                shouldShow = db.roleIconShowHealer ~= false
-            elseif role == "DAMAGER" then
-                shouldShow = db.roleIconShowDPS ~= false
-            end
-        end
-        
-        if shouldShow then
-            DF:SetIconTextureOrAtlas(frame.roleIcon.texture, DF:GetRoleIconTexture(db, role))
-            -- Geometry, base alpha and frame level from the LIVE applier.
-            if DF.ApplyStatusIconSettings then
-                DF:ApplyStatusIconSettings(frame.roleIcon, db, "roleIcon")
-            end
-            frame.roleIcon:Show()
-        else
-            frame.roleIcon:Hide()
-        end
+        DF:UpdateRoleIcon(frame, "testmode", testData.role)
     end
     
     -- Leader Icon
@@ -1299,17 +1282,16 @@ end
 -- DF:ApplyTimerTextSettings, which ApplyStatusIconSettings also calls. The preview now
 -- uses DF:ShowStatusIconAsText, which IS live's function. (Audit, 2026-08-07.)
 
--- Format seconds as M:SS for AFK timer
--- ★ THE LIVE FORMATTER. This was a verbatim copy of StatusIcons.lua's FormatAFKTime,
--- kept only because that one was a file-local the preview could not reach. It is
--- published as DF:FormatAFKTime now, so there is one implementation again: the AFK
--- timer cannot read one way live and another in the preview after a format change.
-local function FormatTestAFKTime(seconds)
-    return DF:FormatAFKTime(seconds)
-end
-
--- Track test AFK start times
-local testAFKStartTimes = {}
+-- ☠ (Removed) FormatTestAFKTime and testAFKStartTimes, the last two pieces of the
+-- preview's private AFK implementation.
+--
+-- Worth recording how this ended, because the first pass stopped a level too early:
+-- the formatter was a verbatim copy of a StatusIcons.lua file-local, so it was fixed
+-- by publishing DF:FormatAFKTime and forwarding to it. That was correct but small --
+-- the ~50 lines AROUND the formatter were still a copy, and one of them had already
+-- dropped live's afkIconHideInCombat gate. Sharing the leaf made the duplication
+-- look handled while the drift stayed. The whole block now calls DF:UpdateAFKIcon
+-- with an isAFK override, and the start times live in live's own table.
 
 -- Update only status icons (ready check, center status) - separated from role/leader icons
 function DF:UpdateTestStatusIcons(frame, testData)
@@ -1496,67 +1478,33 @@ function DF:UpdateTestStatusIcons(frame, testData)
     end
     
     -- AFK Icon with timer support
+    --
+    -- ★ THE LIVE UPDATER, fed test DATA. DF:UpdateAFKIcon takes an isAFK override, so
+    -- the enabled gate, the combat gate, the geometry applier, the elapsed-timer
+    -- bookkeeping and the text-vs-icon-mode split are all live's single implementation.
+    --
+    -- ☠ (Removed) ~50 lines restating that function, comments and all. Only the leaf
+    -- formatter had been shared before; the block around it was still a copy, and it
+    -- had already lost live's afkIconHideInCombat gate -- so the preview kept the icon
+    -- up in combat while live hid it, and that setting could not be judged from the
+    -- preview at all. It also kept its own testAFKStartTimes table keyed by
+    -- tostring(frame); live keys by GetAFKKey, which falls back to the unit token for
+    -- exactly this case.
     if frame.afkIcon then
-        if not db.afkIconEnabled or db.testShowStatusIcons == false then
+        if db.testShowStatusIcons == false then
             frame.afkIcon:Hide()
             if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-        elseif testData.isAFK then
-            -- ⚠ ART BEFORE GEOMETRY, matching the order this block has always used.
-            -- ☠ AND ESCAPED BACKSLASHES. A single-backslash path here rendered NOTHING in
-            -- the preview while live was fine (live sets this art once at creation, with
-            -- \\, and never re-sets it) — `\F` and `\S` are not escapes Lua recognises and
-            -- the path collapses. Every other SetUpgradedStatusIcon call in this file uses
-            -- \\; match them.
-            DF:SetUpgradedStatusIcon(frame.afkIcon.texture, "Interface\\FriendsFrame\\StatusIcon-Away")
-
-            -- Geometry, base alpha and frame level from the LIVE applier.
-            if DF.ApplyStatusIconSettings then
-                DF:ApplyStatusIconSettings(frame.afkIcon, db, "afkIcon")
-            end
-
-            -- Track AFK start time for test mode
-            local frameKey = tostring(frame)
-            if testData.isAFK and not testAFKStartTimes[frameKey] then
-                testAFKStartTimes[frameKey] = GetTime()
-            end
-            
-            local statusText = db.afkIconText or "AFK"
-            do
-                local showTimer = db.afkIconShowTimer ~= false
-
-                -- Calculate timer if enabled
-                if showTimer and testAFKStartTimes[frameKey] then
-                    local elapsed = math.floor(GetTime() - testAFKStartTimes[frameKey])
-                    local timerStr = FormatTestAFKTime(elapsed)
-
-                    if db.afkIconShowText then
-                        -- Text mode: show "AFK 1:23"
-                        statusText = statusText .. " " .. timerStr
-                        if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-                    else
-                        -- Icon mode: show timer below icon
-                        if frame.afkIcon.timerText then
-                            frame.afkIcon.timerText:SetText(timerStr)
-                            frame.afkIcon.timerText:Show()
-                        end
-                    end
-                else
-                    if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-                end
-            end
-            
-            -- Show as text or icon
-            DF:ShowStatusIconAsText(frame.afkIcon, statusText, db.afkIconShowText)
-            if db.afkIconShowText and frame.afkIcon.text and DF.ApplyStableTextAnchor then
-                DF:ApplyStableTextAnchor(frame.afkIcon.text, frame.afkIcon)
-            end
-            frame.afkIcon:Show()
-            
         else
-            frame.afkIcon:Hide()
-            if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-            -- Clear AFK start time
-            testAFKStartTimes[tostring(frame)] = nil
+            -- ⚠ ART FIRST, and it is NOT a duplicate of live: live sets this texture
+            -- once at frame creation and UpdateAFKIcon never re-sets it, so the preview
+            -- has to assert it on the pooled test frame itself.
+            -- ☠ ESCAPED BACKSLASHES. A single-backslash path here rendered NOTHING while
+            -- live was fine — `\F` and `\S` are not escapes Lua recognises and the path
+            -- collapses. Every SetUpgradedStatusIcon call in this file uses \\.
+            if testData.isAFK then
+                DF:SetUpgradedStatusIcon(frame.afkIcon.texture, "Interface\\FriendsFrame\\StatusIcon-Away")
+            end
+            DF:UpdateAFKIcon(frame, testData.isAFK and true or false)
         end
     end
     
@@ -1694,6 +1642,42 @@ function DF:UpdateTestAuras(frame)
 
 end
 
+-- The mock unit's primary resource, for DF:GetResourceBarColor's powerTokenOverride.
+--
+-- ⚠ DERIVED FROM CLASS, NOT ROLE. The old inline version mapped HEALER->MANA,
+-- TANK->RAGE and everything else ->ENERGY, so exactly three power colours were ever
+-- previewable; the raid roster carries all thirteen classes, and FOCUS, RUNIC_POWER
+-- and FURY are all editable on the Colors page with no way to see them. Role is still
+-- consulted, but only where a class genuinely splits by spec role.
+--
+-- ⚠ KNOWN LIMIT, deliberately not faked: the roster models class and role, not spec,
+-- so the spec-only resources -- LUNAR_POWER (Balance), MAELSTROM (Elemental/Enhance),
+-- INSANITY (Shadow), PAIN (Vengeance) -- still have no preview. Inventing a spec per
+-- frame to reach them would be the preview showing something live does not, which is
+-- the fault this whole pass exists to remove.
+local TEST_POWER_TOKEN = {
+    WARRIOR = "RAGE",       PALADIN = "MANA",  HUNTER  = "FOCUS",
+    ROGUE   = "ENERGY",     PRIEST  = "MANA",  SHAMAN  = "MANA",
+    MAGE    = "MANA",       WARLOCK = "MANA",  EVOKER  = "MANA",
+    DEATHKNIGHT = "RUNIC_POWER",
+}
+local function TestPowerTokenFor(class, role)
+    if class == "DRUID" then
+        -- Guardian rages, Feral energises, Balance/Resto cast. Role is the only
+        -- discriminator the test roster has.
+        if role == "TANK" then return "RAGE" end
+        if role == "DAMAGER" then return "ENERGY" end
+        return "MANA"
+    elseif class == "MONK" then
+        return role == "HEALER" and "MANA" or "ENERGY"
+    elseif class == "DEMONHUNTER" then
+        -- Vengeance uses PAIN, but the roster cannot say which spec this is; FURY is
+        -- the Havoc default and at least makes the token previewable at all.
+        return "FURY"
+    end
+    return TEST_POWER_TOKEN[class or ""] or "MANA"
+end
+
 -- Update test power bar (unified for party and raid)
 function DF:UpdateTestPowerBar(frame, testData)
     if not frame then return end
@@ -1738,28 +1722,18 @@ function DF:UpdateTestPowerBar(frame, testData)
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(testData.powerPercent or 0.8)
 
-    -- Fill colour: mirror DF:GetResourceBarColor's mode resolution (Power / Class /
-    -- Custom) using the mock unit's testData (reads resourceBarColorMode so the
-    -- preview reflects a "Class" pick from the Color Mode dropdown).
-    local powerToken
-    if testData.role == "HEALER" then
-        powerToken = "MANA"
-    elseif testData.role == "TANK" then
-        powerToken = "RAGE"
-    else
-        powerToken = "ENERGY"
-    end
-    local mode = db.resourceBarColorMode or (db.resourceBarClassColor and "CLASS" or "POWER_TYPE")
-    local classColor = mode == "CLASS" and testData.class and DF:GetClassColor(testData.class)
-    if mode == "CUSTOM" then
-        local c = db.resourceBarCustomColor or {r = 0, g = 0.5, b = 1}
-        bar:SetStatusBarColor(c.r or 0, c.g or 0.5, c.b or 1, 1)
-    elseif classColor then
-        bar:SetStatusBarColor(classColor.r, classColor.g, classColor.b, 1)
-    else
-        local powerColor = DF:GetPowerColor(powerToken)
-        bar:SetStatusBarColor(powerColor.r, powerColor.g, powerColor.b, 1)
-    end
+    -- ★ THE LIVE COLOUR RESOLVER, fed test DATA. DF:GetResourceBarColor takes class and
+    -- power-token overrides for exactly this, so the Power / Class / Custom mode
+    -- resolution, the CLASS-to-power fallthrough and every default are live's.
+    --
+    -- ☠ Do not reinstate a local copy. The one that was here had drifted three ways --
+    -- one-arg GetPowerColor, missing fallbacks, and a power token fabricated from ROLE
+    -- rather than class, which left FOCUS, RUNIC_POWER, FURY and the rest unpreviewable
+    -- even though they are editable on the Colors page. See the note on the live
+    -- function.
+    local r, g, b = DF:GetResourceBarColor(nil, db, testData.class,
+        TestPowerTokenFor(testData.class, testData.role))
+    bar:SetStatusBarColor(r, g, b, 1)
 
     -- ★ NO ALPHA PASS HERE — DF:UpdatePowerBarAppearance owns it, and always did.
     --

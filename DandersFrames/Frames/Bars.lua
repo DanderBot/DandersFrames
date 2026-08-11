@@ -2281,7 +2281,15 @@ function DF:GetRoleIconRole(unit)
     return UnitGroupRolesAssigned(unit)
 end
 
-function DF:UpdateRoleIcon(frame, source)
+-- ★ roleOverride lets the PREVIEW drive this without a real unit, the same shape
+-- ShouldShowResourceBar and GetResourceBarColor use. The per-role visibility filter,
+-- the MemTest gate, the texture pick and the positioning are then all live's.
+--
+-- ☠ Do not reinstate a copy in TestMode. The one that was there duplicated the
+-- roleIconShowTank/Healer/DPS filter verbatim and omitted the MemTestDisabled gate
+-- entirely, so running the Memory Test panel with role/leader icons unticked left
+-- them lit on every test frame while live hid them.
+function DF:UpdateRoleIcon(frame, source, roleOverride)
     if DF.RosterDebugCount then 
         DF:RosterDebugCount("UpdateRoleIcon")
         if source then
@@ -2300,7 +2308,7 @@ function DF:UpdateRoleIcon(frame, source)
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
     
-    local role = DF:GetRoleIconRole(frame.unit)
+    local role = roleOverride or DF:GetRoleIconRole(frame.unit)
 
     -- Use our tracked combat state (set by PLAYER_REGEN events)
     local inCombat = DF.playerInCombat or false

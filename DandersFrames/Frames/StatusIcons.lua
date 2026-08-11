@@ -803,7 +803,17 @@ function DF:FormatAFKTime(seconds)
     return FormatAFKTime(seconds)
 end
 
-function DF:UpdateAFKIcon(frame)
+-- ★ isAFKOverride lets the PREVIEW drive this without a real unit. Everything else --
+-- the enabled gate, the combat gate, ApplyIconSettings, the timer/text mode split and
+-- the stable text anchor -- is shared, so the preview cannot drift from live.
+--
+-- ☠ Do not reinstate a copy of this in TestMode. The one that was there restated ~45
+-- lines of this function, comments included, and had already lost the
+-- afkIconHideInCombat gate: the preview kept the icon up in combat while live hid it,
+-- so that setting was not previewable. The timer keying needs nothing special either --
+-- GetAFKKey falls back to the unit token when there is no accessible GUID, which is
+-- exactly what a test frame has.
+function DF:UpdateAFKIcon(frame, isAFKOverride)
     if not frame or not frame.unit or not frame.afkIcon then return end
     
     local db = DF:GetFrameDB(frame)
@@ -833,7 +843,13 @@ function DF:UpdateAFKIcon(frame)
     -- returns (cross-realm latency, instance loading).
     local afkKey = GetAFKKey(unit)
     local isAFK = nil
-    pcall(function() isAFK = UnitIsAFK(unit) end)
+    if isAFKOverride ~= nil then
+        -- Preview: the caller supplies the state. Still goes through the cache below,
+        -- so the elapsed-timer bookkeeping is the same code in both paths.
+        isAFK = isAFKOverride and true or false
+    else
+        pcall(function() isAFK = UnitIsAFK(unit) end)
+    end
     if canaccessvalue(isAFK) then
         afkStateCache[afkKey] = isAFK and "AFK" or false
     end

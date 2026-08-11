@@ -2010,7 +2010,23 @@ end
 -- Honours the legacy resourceBarClassColor boolean when resourceBarColorMode
 -- isn't set yet (pre-migration profiles). Uses the same UnitClass/UnitPowerType
 -- calls the old inline logic did, so it carries no new secret-value risk.
-function DF:GetResourceBarColor(unit, db)
+-- ★ classOverride / powerTokenOverride exist so the PREVIEW can drive this without a
+-- real unit -- the same shape DF:ShouldShowResourceBar already uses for its role and
+-- class overrides. A test path that is a PARAMETER of the live function, not a copy.
+--
+-- ☠ Do not reinstate a local copy of this in TestMode. The one that used to live there
+-- had drifted three ways: it called DF:GetPowerColor with ONE argument (dropping the
+-- powerType fallback tier), it lost the altR/altG/altB and terminal 0,0,1 fallbacks
+-- entirely, and it fabricated the power token from ROLE -- HEALER=MANA, TANK=RAGE,
+-- everything else ENERGY -- so only three of the configurable power colours could be
+-- previewed. FOCUS, RUNIC_POWER, LUNAR_POWER, MAELSTROM, FURY and INSANITY are all
+-- editable on the Colors page and none of them could be seen.
+--
+-- ⚠ With powerTokenOverride there is no numeric powerType to pass on, so the preview
+-- gets the TOKEN tiers only. That is not a gap worth closing: the token tiers are the
+-- ones carrying db.powerColors -- the user's own edits -- which is what a preview is
+-- for. The numeric tier only answers for tokens Blizzard does not name.
+function DF:GetResourceBarColor(unit, db, classOverride, powerTokenOverride)
     local mode = db.resourceBarColorMode
     if not mode then
         mode = db.resourceBarClassColor and "CLASS" or "POWER_TYPE"
@@ -2020,13 +2036,22 @@ function DF:GetResourceBarColor(unit, db)
         local c = db.resourceBarCustomColor or {r = 0, g = 0.5, b = 1, a = 1}
         return c.r or 0, c.g or 0.5, c.b or 1
     elseif mode == "CLASS" then
-        local _, classToken = UnitClass(unit)
+        local classToken = classOverride
+        if not classToken and unit then
+            local _
+            _, classToken = UnitClass(unit)
+        end
         local cc = classToken and DF:GetClassColor(classToken)
         if cc then return cc.r, cc.g, cc.b end
         -- No class colour available — fall through to the power-type colour.
     end
 
     -- POWER_TYPE (and the CLASS fallback above)
+    if powerTokenOverride then
+        local info = DF:GetPowerColor(powerTokenOverride)
+        if info then return info.r, info.g, info.b end
+        return 0, 0, 1
+    end
     local pType, pToken, altR, altG, altB = UnitPowerType(unit)
     local info = DF:GetPowerColor(pToken, pType)
     if info then return info.r, info.g, info.b end
