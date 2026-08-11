@@ -3551,8 +3551,19 @@ function GUI:CreateGradientBar(parent, width, height, db, prefix)
         if #points < 2 then points = {lCol, hCol} end
         
         local numSegments = #points - 1
-        local segWidth = (f:GetWidth() - 4) / numSegments
-        
+        -- ⚠ MEASURED, SO IT MUST BE RE-MEASURED. Everything below is laid out in
+        -- absolute pixels off this width, which is why OnSizeChanged has to re-run the
+        -- whole function -- see the note at the bottom.
+        --
+        -- Defensive, not a fix for an observed bug: the constructor sizes the frame
+        -- before the first paint, so GetWidth is real by then. But now that a resize
+        -- repaints, this runs during layout passes too -- and a width at or under 4
+        -- would make segWidth zero or negative, laying the segments out backwards over
+        -- each other. Bail instead; the next pass with a real width repaints.
+        local usable = (f:GetWidth() or 0) - 4
+        if usable <= 0 then return end
+        local segWidth = usable / numSegments
+
         for i = 1, numSegments do
             local tex = f.TexPool[i]
             if not tex then
@@ -3573,7 +3584,20 @@ function GUI:CreateGradientBar(parent, width, height, db, prefix)
         end
     end
     
+    -- ☠ ON RESIZE TOO, NOT JUST ON SHOW. This is a layoutCol = "both" widget, so the
+    -- page layout calls SetWidth on it on every relayout -- and dragging the settings
+    -- window edge relayouts continuously. UpdatePreview paints its segments at ABSOLUTE
+    -- pixel offsets and sizes derived from GetWidth at the moment it runs, so with only
+    -- an OnShow binding the frame took its new width while the segments kept the old
+    -- one: the gradient filled part of the bar, and the stale segments sat at stale
+    -- offsets, spilling past the frame's edge (textures are not clipped) as the window
+    -- shrank. Both halves of "the fill goes half and it jumps around".
+    --
+    -- Safe against the SetHeight -> OnSizeChanged -> relayout cascade this file warns
+    -- about elsewhere: UpdatePreview only ever sizes TEXTURES, never the frame, and a
+    -- texture resize does not fire its parent's OnSizeChanged.
     f:SetScript("OnShow", f.UpdatePreview)
+    f:SetScript("OnSizeChanged", f.UpdatePreview)
     f.UpdatePreview()
     return f
 end
