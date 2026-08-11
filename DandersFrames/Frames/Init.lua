@@ -10,15 +10,12 @@ local headerDebug = DF:MakeDebugPrinter("HEADERS")
 
 -- Local caching of frequently used globals for performance
 local pairs, ipairs, type, wipe = pairs, ipairs, type, wipe
-local floor, ceil, min, max, abs = math.floor, math.ceil, math.min, math.max, math.abs
+local ceil, max = math.ceil, math.max
 local CreateFrame = CreateFrame
 local InCombatLockdown = InCombatLockdown
 local IsInRaid = IsInRaid
-local GetNumGroupMembers = GetNumGroupMembers
 local GetRaidRosterInfo = GetRaidRosterInfo
 local UnitExists = UnitExists
-local UnitIsUnit = UnitIsUnit
-local C_Timer = C_Timer
 
 -- PERFORMANCE FIX: Reusable tables for layout calculations (avoid GC during roster updates)
 local reusableGroupPlayerCounts = {}
@@ -804,8 +801,13 @@ function DF:CreateRaidMoverFrame()
                 DF.testRaidContainer:SetPoint("CENTER", UIParent, "CENTER", raidDragOffsetX / scale, raidDragOffsetY / scale)
             end
 
-            -- Snap preview if enabled
-            local snapDb = DF:GetRaidDB()
+            -- Snap preview if enabled.
+            -- ⚠ THE PARTY DB. Grid settings are party-wide: the writer in
+            -- Frames/Position.lua stores snapToGrid via DF:GetDB() for exactly that
+            -- reason. Reading GetRaidDB() here re-opened the split it closed -- a
+            -- profile carrying a stale raid.snapToGrid=false showed the box ticked
+            -- while the raid mover never snapped.
+            local snapDb = DF:GetDB()
             if snapDb.snapToGrid and DF.gridFrame and DF.gridFrame:IsShown() then
                 DF:UpdateSnapPreview(self, raidDragOffsetX, raidDragOffsetY)
             end
@@ -822,9 +824,10 @@ function DF:CreateRaidMoverFrame()
         -- Use the last computed offset from OnUpdate
         local x, y = raidDragOffsetX, raidDragOffsetY
 
-        -- Snap to grid if enabled
+        -- Snap to grid if enabled. Snap flag from the PARTY db (party-wide, same as
+        -- the writer); `db` below stays the RAID db for the anchor writes.
         local db = DF:GetRaidDB()
-        if db.snapToGrid and DF.gridFrame and DF.gridFrame:IsShown() then
+        if DF:GetDB().snapToGrid and DF.gridFrame and DF.gridFrame:IsShown() then
             x, y = DF:SnapToGrid(x, y)
         end
 
@@ -988,9 +991,11 @@ function DF:UnlockRaidFrames()
         headerDebug("Raid unlock - mover parent:", DF.raidMoverFrame:GetParent():GetName() or "unnamed")
     end
     
-    -- Always refresh grid state from db when unlocking
+    -- Always refresh grid state when unlocking. Snap flag from the PARTY db
+    -- (party-wide, same as the writer in Frames/Position.lua); `db` here is the
+    -- raid db and stays authoritative for the anchors above.
     if DF.gridFrame then
-        if db.snapToGrid then
+        if DF:GetDB().snapToGrid then
             -- Refresh grid lines to ensure they match current settings
             if DF.gridFrame.RefreshLines then
                 DF.gridFrame:Show()
@@ -1048,18 +1053,37 @@ end
 
 function DF:LockRaidFrames()
     if not DF.raidContainer then return end
-    
+
+    -- ☠ COMBAT GUARD, mirroring UnlockRaidFrames. DF.raidContainer is created from
+    -- SecureFrameTemplate, so :Hide() on it further down -- and the SetMovable calls in
+    -- UpdatePermanentMoverVisibility -- are PROTECTED actions. Unlock has always refused
+    -- in combat; Lock had no guard at all, so unlocking out of combat and then locking
+    -- (right-click the mover, or the position panel's Lock button) after a pull raised a
+    -- blocked action.
+    if InCombatLockdown() then
+        DF:Err("Cannot lock raid frames during combat.")
+        return
+    end
+
     local db = DF:GetRaidDB()
     db.raidLocked = true
     DF.positionPanelMode = nil  -- Clear mode
-    
-    DF.raidMoverFrame:Hide()
+
+    -- ⚠ Guarded like DF.raidContainer above. CreateRaidMoverFrame early-returns on
+    -- InCombatLockdown and on a missing container, so this field can legitimately be nil.
+    -- UnlockRaidFrames handles exactly that case; the lock path indexed it blind, here and
+    -- again at the SetScript below.
+    if DF.raidMoverFrame then
+        DF.raidMoverFrame:Hide()
+    end
 
     -- Restore permanent mover visibility (keeps container movable if enabled)
     DF:UpdatePermanentMoverVisibility()
 
     -- Stop any OnUpdate for snap preview
-    DF.raidMoverFrame:SetScript("OnUpdate", nil)
+    if DF.raidMoverFrame then
+        DF.raidMoverFrame:SetScript("OnUpdate", nil)
+    end
     
     -- Hide snap preview lines
     DF:HideSnapPreview()
@@ -1305,9 +1329,21 @@ function DF:UpdateLiveRaidFrames()
         end
         
         local db = DF:GetRaidDB()
-        
+
         -- Check if raid frames are enabled
-        if not db.raidEnabled then
+        -- ☠ PROFILE ROOT, NOT THE RAID TABLE, and `~= false`, not `not`.
+        --
+        -- The Enable Raid Frames checkbox binds to DF.db (Options/GUI/Pages/Options.lua),
+        -- so the flag lives at the PROFILE ROOT. This read used DF:GetRaidDB(), whose
+        -- raidEnabled is a separate key inherited from PartyDefaults (Core/Config.lua)
+        -- that nothing ever writes -- so the test was permanently true and unticking the
+        -- box did nothing here. Headers.lua's CreateHeaderFrames reads the right key, so
+        -- headers were correctly skipped while this path still showed the raid container
+        -- and hid the party one.
+        --
+        -- `~= false` because absence must mean ENABLED: a profile predating the key has
+        -- no value, and `not nil` would read that as "off" -- the fail-dangerous shape.
+        if DF.db and DF.db.raidEnabled == false then
             if DF.raidContainer then
                 DF.raidContainer:Hide()
             end
@@ -1367,9 +1403,11 @@ function DF:UpdateLiveRaidFrames()
     end
     
     local db = DF:GetRaidDB()
-    
+
     -- Check if raid frames are enabled
-    if not db.raidEnabled then
+    -- ☠ Same fix as the sibling above: the flag is at the PROFILE ROOT (the checkbox
+    -- binds to DF.db), not in the raid table, and absence must mean ENABLED.
+    if DF.db and DF.db.raidEnabled == false then
         DF.raidContainer:Hide()
         return
     end

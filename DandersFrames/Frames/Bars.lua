@@ -27,7 +27,13 @@ local ResolveBarTextureForFill = function(...) return DF:ResolveBarTextureForFil
 -- Centralized role and class filter check for resource bar visibility
 -- Returns true if the resource bar should be shown for this unit
 -- Unit must pass BOTH role filter AND class filter
-function DF:ShouldShowResourceBar(unit, db)
+-- `roleOverride` supplies the role as DATA instead of resolving it from a real unit,
+-- which is how test mode drives this. The preview must run the LIVE gate: it used to
+-- carry its own copy of the role logic and that copy had drifted, losing BOTH solo arms
+-- below. resourceBarShowInSoloMode defaults to true and test mode is almost always driven
+-- solo, so live showed the bar on every frame while the preview showed it only on the
+-- role-filtered subset -- a setting you could not judge from the preview at all.
+function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride)
     if not db.resourceBarEnabled then return false end
 
     -- Role filter
@@ -43,7 +49,7 @@ function DF:ShouldShowResourceBar(unit, db)
         -- DPS showed the bar for every spec. GetUnitRole falls the PLAYER back to
         -- the spec role; other units have no public spec API and still arrive
         -- NONE, which is why the arm stays.
-        local role = DF:GetUnitRole(unit)
+        local role = roleOverride or DF:GetUnitRole(unit)
         local inSoloMode = not IsInGroup() and not IsInRaid()
 
         if inSoloMode and db.resourceBarShowInSoloMode then
@@ -68,7 +74,14 @@ function DF:ShouldShowResourceBar(unit, db)
     -- Class filter (unit must also pass)
     local classFilter = db.resourceBarClassFilter
     if classFilter then
-        local _, classToken = UnitClass(unit)
+        -- classOverride is the DATA half of the same arrangement as roleOverride: with a
+        -- nil unit UnitClass returns nil and this filter would silently never apply, so a
+        -- preview would have to re-implement it -- which is how these copies start.
+        local classToken = classOverride
+        if not classToken then
+            local _
+            _, classToken = UnitClass(unit)
+        end
         if classToken and classFilter[classToken] == false then
             return false
         end
@@ -659,6 +672,11 @@ function DF:UpdateAbsorb(frame, testIndex)
             customBar:SetStatusBarTexture(tex)
             local barTex = customBar:GetStatusBarTexture()
             if barTex then
+                -- Wrap set WITH the file, as Blizzard's own template declares for
+                -- this texture (UnitFrame.xml, horizTile/vertTile on the node) --
+                -- SetStatusBarTexture alone leaves the sampler clamped. Same rule
+                -- as DF's tiled textures; see ☠ in DF:ApplyBarTextureTiling.
+                barTex:SetTexture(tex, "REPEAT", "REPEAT")
                 barTex:SetHorizTile(true)
                 barTex:SetVertTile(true)
                 barTex:SetTexCoord(0, 2, 0, 1)
@@ -1880,10 +1898,16 @@ function DF:UpdateHealPrediction(frame, testIndex)
             local amount, amountFromHealer, amountFromOthers, clamped = calc:GetIncomingHeals()
             myHeals, othersHeals = amountFromHealer, amountFromOthers
 
-            -- TD stash: expose the full heal breakdown so the TextDesigner
-            -- LiveSource reads it without a second calculator pass. dfTotalHeals
-            -- is the ALL-incoming total (not the showMode-filtered value), so
-            -- the incoming_heal text is correct regardless of the bar's mode.
+            -- TD stash: expose the heal breakdown so the TextDesigner LiveSource
+            -- reads it without a second calculator pass. dfTotalHeals is the
+            -- ALL-incoming total (not the showMode-filtered value), so the
+            -- incoming_heal text is correct regardless of the bar's mode.
+            --
+            -- ⚠ Only dfTotalHeals and dfMyHeals have a reader today
+            -- (TextDesigner/DataSource.lua). dfOthersHeals is written for the
+            -- symmetry of the trio and is currently unconsumed -- one assignment, so
+            -- it stays, but do not read this block as evidence that an
+            -- others-heals text token exists.
             frame.dfTotalHeals = amount
             frame.dfMyHeals = amountFromHealer
             frame.dfOthersHeals = amountFromOthers
@@ -2156,7 +2180,13 @@ function DF:UpdateHealPrediction(frame, testIndex)
     end
 end
 
-function DF:UpdateName(frame)
+-- `testName` is the only preview fork and it is pure DATA: the name a fabricated unit
+-- token cannot answer (DF:GetFrameName reaches UnitName / Nicknames on a real player).
+-- Truncation, the ELLIPSIS/CUT mode and the legacy-text suppression then run identically
+-- for both. The preview used to restate the truncation block byte-for-byte, so a change
+-- to the format only had to land in one of the two copies to desync them. Same shape as
+-- DF:UpdatePetName(frame, testName).
+function DF:UpdateName(frame, testName)
     if not frame or not frame.unit then return end
 
     -- TD legacy-text suppression: when ON, hide name + health text and skip.
@@ -2171,8 +2201,8 @@ function DF:UpdateName(frame)
 
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
-    local name = DF:GetFrameName(frame.unit)
-    
+    local name = testName or DF:GetFrameName(frame.unit)
+
     -- Truncate name if needed (UTF-8 aware)
     if name then
         local maxLen = db.nameTextLength or 0
@@ -2256,7 +2286,15 @@ function DF:GetRoleIconRole(unit)
     return UnitGroupRolesAssigned(unit)
 end
 
-function DF:UpdateRoleIcon(frame, source)
+-- ★ roleOverride lets the PREVIEW drive this without a real unit, the same shape
+-- ShouldShowResourceBar and GetResourceBarColor use. The per-role visibility filter,
+-- the MemTest gate, the texture pick and the positioning are then all live's.
+--
+-- ☠ Do not reinstate a copy in TestMode. The one that was there duplicated the
+-- roleIconShowTank/Healer/DPS filter verbatim and omitted the MemTestDisabled gate
+-- entirely, so running the Memory Test panel with role/leader icons unticked left
+-- them lit on every test frame while live hid them.
+function DF:UpdateRoleIcon(frame, source, roleOverride)
     if DF.RosterDebugCount then 
         DF:RosterDebugCount("UpdateRoleIcon")
         if source then
@@ -2275,7 +2313,7 @@ function DF:UpdateRoleIcon(frame, source)
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
     
-    local role = DF:GetRoleIconRole(frame.unit)
+    local role = roleOverride or DF:GetRoleIconRole(frame.unit)
 
     -- Use our tracked combat state (set by PLAYER_REGEN events)
     local inCombat = DF.playerInCombat or false

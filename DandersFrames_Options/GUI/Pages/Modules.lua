@@ -2020,7 +2020,13 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     -- only in the Default button's tooltip. The row renders it as
                     -- the shared caution icon; it used to be a "(noisy)" suffix
                     -- concatenated onto the description.
-                    local row = GUI:CreateDebugCategoryRow(self.child, cat.key, cat.desc, 540, cat.noisy)
+                    -- ⚠ L[cat.desc], mirroring L[group.name] a few lines up. The group
+                    -- HEADINGS resolved through the locale table and the category
+                    -- descriptions beneath them did not, so half this page translated
+                    -- and half did not. CreateDebugCategoryRow does a plain SetText on
+                    -- whatever it is handed, so the lookup belongs at this call site.
+                    local row = GUI:CreateDebugCategoryRow(self.child, cat.key,
+                        L[cat.desc] or cat.desc, 540, cat.noisy)
                     self.filterRows[cat.key] = row
                     AddToSection(row, 28, "both")
                 end

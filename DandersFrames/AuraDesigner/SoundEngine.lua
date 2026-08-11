@@ -10,16 +10,10 @@ local addonName, DF = ...
 -- Uses CVar-swap technique for per-indicator volume control.
 -- ============================================================
 
-local pairs, ipairs, wipe = pairs, ipairs, wipe
-local GetTime = GetTime
+local pairs = pairs
 local GetCVar, SetCVar = GetCVar, SetCVar
 local PlaySoundFile = PlaySoundFile
 local StopSound = StopSound
-local InCombatLockdown = InCombatLockdown
-local UnitExists = UnitExists
-local UnitIsDeadOrGhost = UnitIsDeadOrGhost
-local UnitIsConnected = UnitIsConnected
-local IsInGroup = IsInGroup
 local tonumber = tonumber
 
 DF.AuraDesigner = DF.AuraDesigner or {}

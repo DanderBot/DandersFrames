@@ -1,7 +1,6 @@
 local addonName, DF = ...
 local GUI = {}
 DF.GUI = GUI
-local L = DF.L
 
 -- Mutable module state.
 -- These four were file-scope locals, and two of them are read and written more
@@ -141,9 +140,13 @@ GUI.RowGap = 14
 -- recorded on labelPad, and the reason a stack of sliders needs real air even
 -- though a stack of checkboxes does not.
 GUI.RowGapTight = 8
+-- ☠ NO `toggle` ENTRY. One was here and could never match: only six values are ever
+-- written to rowKind (checkbox, colorpicker, dropdown, editbox, header, slider), so
+-- the lookups in this file and in Sections.lua had nothing to find it with. Its twin
+-- in GUI.RowHeight was removed for the same reason -- see the note there -- and this
+-- one was missed, which is exactly how a pair like that drifts apart.
 GUI.RowCompact = {
     checkbox    = true,
-    toggle      = true,
     colorpicker = true,
 }
 
@@ -176,7 +179,12 @@ GUI.RowHeight = {
     dropdown    = 54,   -- 39.8 content + RowGap
     colorpicker = 38,   -- 23.9 content + RowGap
     editbox     = 53,   -- 39.0 content + RowGap (box at -15, h24)
-    toggle      = 35,   -- two-state switch; same content as a checkbox, same row
+    -- ⚠ NO `toggle` ENTRY, deliberately. One was declared here (35, "same content as a
+    -- checkbox") and referenced by nothing: CreateRowToggle and CreateSegmentToggle are
+    -- the only toggles and neither sets fixedRowHeight, so both take whatever height
+    -- their call site passes. Removed rather than wired up — enforcing it would resize
+    -- every existing toggle row, which is a visual change, not a tidy-up. Toggles are
+    -- caller-sized by design; if that should change, change it deliberately.
     -- Labels are VARIABLE height (they wrap), so they have no fixed row — but they do
     -- have fixed CHROME, which CreateLabel adds to the measured text height: the 5px top
     -- inset its FontString sits at, plus the gap below. That gap IS the whole visible
@@ -1579,6 +1587,12 @@ local function CreateElementBackdrop(frame, opts)
     -- SetBackdropBorderColor -- so it is now the default for everything that
     -- comes through here, and opts.backdropEdge is the escape hatch for a
     -- surface that genuinely needs the old edgeFile.
+    -- ⚠ NOTHING PASSES backdropEdge TODAY, in either addon. So usePixel is `outline`
+    -- in practice, the backdrop-edge arm below is unreachable, and RevertPixelBorder --
+    -- which only that arm can reach -- cannot run either. Left wired rather than cut:
+    -- it is the documented escape hatch for a surface that needs the old edgeFile, and
+    -- its own note explains what breaks if the shim is left installed. Know that it is
+    -- untested by use before relying on it.
     local usePixel = outline and not opts.backdropEdge
     if not frame.SetBackdrop then Mixin(frame, BackdropTemplateMixin) end
     local inset = opts.inset

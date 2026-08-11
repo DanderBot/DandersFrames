@@ -8,7 +8,6 @@ local addonName, DF = ...
 -- UNIT_MAX_HEALTH_MODIFIERS_CHANGED event.
 -- ==========================================================
 
-local pairs, ipairs = pairs, ipairs
 local CreateFrame = CreateFrame
 local UnitExists, UnitIsDead, UnitIsGhost, UnitIsConnected =
       UnitExists, UnitIsDead, UnitIsGhost, UnitIsConnected

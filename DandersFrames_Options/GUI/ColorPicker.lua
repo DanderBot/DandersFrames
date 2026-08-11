@@ -214,7 +214,14 @@ local function CreateColorPickerFrame(hasAlpha)
     local isUpdatingInputs = false  -- Prevent recursive updates
     
     -- Main frame
+    -- ⚠ "Test" IS A MISNOMER -- `testFrame` / DFColorPickerTest is the REAL colour
+    -- picker, the one GUI:OpenColorPicker shows for every swatch in the settings GUI.
+    -- The name got it skipped as a debug surface in the 2026-08-10 GUI-scale sweep,
+    -- so it kept rendering at 100% over a scaled panel. Don't trust the name.
     testFrame = CreateFrame("Frame", "DFColorPickerTest", UIParent, "BackdropTemplate")
+    -- Parented to UIParent (see the pixel-grid note below), so it does not inherit
+    -- the GUI scale -- register it.
+    if GUI.RegisterScaledSurface then GUI:RegisterScaledSurface(testFrame) end
     -- Ride the shared GUI pixel grid: this surface is parented to UIParent, so it
     testFrame:SetSize(320, 450)
     GUI:CreateElementBackdrop(testFrame, {

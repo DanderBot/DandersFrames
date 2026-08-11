@@ -17,25 +17,19 @@ local L = DF.L
 -- per second that compile to nothing with these locals in scope.
 -- Matching pattern: Frames/Bars.lua:8-19 already uses this pattern
 -- for its own unit API calls.
-local pairs, ipairs, type, tonumber, tostring = pairs, ipairs, type, tonumber, tostring
-local floor, ceil, min, max = math.floor, math.ceil, math.min, math.max
-local format = string.format
-local issecretvalue = issecretvalue
+local pairs, type = pairs, type
 local InCombatLockdown = InCombatLockdown
 -- Unit health / power / state APIs (hot path in UpdateHealthFast + UpdatePower)
 local UnitExists = UnitExists
-local UnitClass = UnitClass
 local UnitIsConnected = UnitIsConnected
 local UnitIsDead = UnitIsDead
 local UnitIsGhost = UnitIsGhost
-local UnitHealth = UnitHealth
-local UnitHealthMax = UnitHealthMax
-local UnitHealthMissing = UnitHealthMissing
 local UnitPower = UnitPower
 local UnitPowerMax = UnitPowerMax
-local UnitPowerType = UnitPowerType
 
--- Shared default tables (avoid per-call allocation)
+-- (Removed) a "shared default tables (avoid per-call allocation)" banner with no
+-- tables under it -- whatever it introduced is long gone, and it read as a promise
+-- the file does not keep.
 
 function DF:ApplyFrameLayout(frame)
     if not frame then return end
@@ -76,6 +70,15 @@ function DF:ApplyFrameLayout(frame)
         DF:SafeSetStatusBarTexture(healthBar, healthTex)
         
         -- Orientation
+        --
+        -- ⚠ NO `else` ARM, AND THAT IS A REAL GAP -- reasoning carried here from the
+        -- duplicate copy in Frames/Colors.lua, which held it and was itself dead.
+        -- `or "HORIZONTAL"` covers a NIL key but not an unrecognised STRING: a stale
+        -- or imported value, or a mode added to the dropdown without being added
+        -- here. Such a value matches none of the four branches, so the health bar AND
+        -- the missing-health bar below keep whatever orientation they last had --
+        -- silently, per frame, with no error. Add a mode here and to the dropdown in
+        -- the same change.
         local orientation = db.healthOrientation or "HORIZONTAL"
         if orientation == "HORIZONTAL" then
             healthBar:SetOrientation("HORIZONTAL")
@@ -384,7 +387,6 @@ function DF:ApplyFrameLayout(frame)
             if frame.dfCurrentBgTexture ~= bgTexture then
                 DF:SafeSetTexture(frame.background, bgTexture)  -- also sets tiling
                 frame.dfCurrentBgTexture = bgTexture
-                frame.dfCurrentBgKey = nil  -- Clear key when switching to textured
             end
             
             -- Ensure SetAlpha is 1.0 for textured backgrounds (alpha controlled via vertex color)

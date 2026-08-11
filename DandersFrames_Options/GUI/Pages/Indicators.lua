@@ -189,7 +189,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             -- Custom filters, name-sorted for a stable order (the store is id-keyed).
             local sortedCustoms = {}
-            for cfId in pairs(R:GetStore().customFilters) do
+            for cfId in pairs(R:ReadStore().customFilters) do
                 sortedCustoms[#sortedCustoms + 1] = cfId
             end
             table.sort(sortedCustoms, function(a, b)
@@ -267,7 +267,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     parts[#parts + 1] = format("%s:%d/%d%s", cat.key, enabled, total,
                         R:IsPresetModified(cat.key) and "*" or "")
                 end
-                for cfId, f in pairs(R:GetStore().customFilters) do
+                for cfId, f in pairs(R:ReadStore().customFilters) do
                     parts[#parts + 1] = cfId .. "=" .. (f.name or "")
                 end
                 table.sort(parts)
@@ -1656,7 +1656,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
             -- Custom filters, sorted by name for a stable order (the store is id-keyed)
             local sortedCustoms = {}
-            for cfId in pairs(R:GetStore().customFilters) do
+            for cfId in pairs(R:ReadStore().customFilters) do
                 sortedCustoms[#sortedCustoms + 1] = cfId
             end
             table.sort(sortedCustoms, function(a, b)
@@ -1696,7 +1696,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     parts[#parts + 1] = format("%s:%d/%d%s", cat.key, enabled, total,
                         R:IsPresetModified(cat.key) and "*" or "")
                 end
-                for cfId, f in pairs(R:GetStore().customFilters) do
+                for cfId, f in pairs(R:ReadStore().customFilters) do
                     parts[#parts + 1] = cfId .. "=" .. (f.name or "")
                 end
                 table.sort(parts)

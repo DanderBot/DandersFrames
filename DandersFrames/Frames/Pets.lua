@@ -244,8 +244,15 @@ function DF:CreatePetFrame(unit, ownerFrame, isRaid, track)
     
     
     -- Mouse interaction - use HookScript to not interfere with other handlers
+    -- ☠ RE-RESOLVE PER CALL. This closure used to read the `db` captured at
+    -- CreatePetFrame, and Core/Profile.lua REPLACES DF.db[mode] with a fresh DeepCopy on
+    -- a profile reset, copy or AutoProfiles swap -- so the frame went on reading the
+    -- RETIRED table. Pet frames are created once and reused, so the Pet Tooltip checkbox
+    -- silently stopped responding on that frame for the rest of the session. Every other
+    -- function in this file already re-resolves through DF:GetFrameDB(frame) per call.
     frame:HookScript("OnEnter", function(self)
-        if db.tooltipFrameEnabled then
+        local fdb = DF:GetFrameDB(self)
+        if fdb and fdb.tooltipFrameEnabled then
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetUnit(self.unit)
             GameTooltip:Show()
@@ -532,6 +539,39 @@ function DF:SetPetFrameVisible(frame, visible)
     end
 end
 
+-- ★ PET HEALTH TEXT — ONE IMPLEMENTATION, LIVE AND PREVIEW.
+--
+-- `testPct` (0-100) is the only fork and it is pure DATA: the health percentage a
+-- fabricated pet token cannot answer. Everything that is RENDERING -- the enable
+-- check, the TD legacy-text suppression, the format string -- runs identically.
+--
+-- ☠ THE FORMAT STRING IS WHY THIS IS SHARED. The preview built its own text with
+-- `("%d%%"):format(math.floor(pct * 100))`, which TRUNCATES, while live uses "%.0f%%",
+-- which ROUNDS. 79.6% read as 80% live and 79% in the preview -- a one-point
+-- disagreement on the number people use the preview to position and size.
+function DF:ApplyPetHealthText(frame, db, testPct)
+    if not frame or not frame.healthText then return end
+    -- TD legacy-text suppression: when ON, force pet health text hidden.
+    local hideLegacyText = DF:IsLegacyTextHidden(frame)
+    if db.petShowHealthText and not hideLegacyText then
+        if testPct then
+            frame.healthText:SetFormattedText("%.0f%%", testPct)
+        else
+            -- Pass the secret value straight to SetFormattedText — it handles secrets
+            -- internally; only Lua string ops on them raise.
+            local success = pcall(function()
+                frame.healthText:SetFormattedText("%.0f%%", DF.GetSafeHealthPercent(frame.unit))
+            end)
+            if not success then
+                frame.healthText:SetText("")
+            end
+        end
+        frame.healthText:Show()
+    else
+        frame.healthText:Hide()
+    end
+end
+
 function DF:UpdatePetHealth(frame)
     if not frame or not frame.unit then return end
     
@@ -558,22 +598,7 @@ function DF:UpdatePetHealth(frame)
     -- Use the safe SetHealthBarValue function which handles secrets properly
     DF.SetHealthBarValue(frame.healthBar, unit, frame)
     
-    -- Update health text if shown
-    -- Pass secret value directly to SetFormattedText - it handles secrets internally
-    -- TD legacy-text suppression: when ON, force pet health text hidden.
-    local hideLegacyText = DF:IsLegacyTextHidden(frame)
-    if db.petShowHealthText and frame.healthText and not hideLegacyText then
-        local success = pcall(function()
-            local pct = DF.GetSafeHealthPercent(unit)
-            frame.healthText:SetFormattedText("%.0f%%", pct)
-        end)
-        if not success then
-            frame.healthText:SetText("")
-        end
-        frame.healthText:Show()
-    elseif frame.healthText then
-        frame.healthText:Hide()
-    end
+    DF:ApplyPetHealthText(frame, db)
 
     if DF.UpdateTextDesigner then DF:UpdateTextDesigner(frame, "health") end
 
@@ -852,9 +877,14 @@ function DF:ApplyPetFrameStyle(frame)
     end
 end
 
-function DF:UpdatePetName(frame)
+-- `testName` is the only preview fork and it is pure DATA: the name a fabricated pet
+-- token cannot answer. Truncation (petNameMaxLength) and the Text Designer hand-off
+-- below then run identically for both — the preview used to do neither, so a pet name
+-- longer than the limit rendered full-length in test and clipped live, and pet name
+-- text was invisible to the Text Designer preview entirely.
+function DF:UpdatePetName(frame, testName)
     if not frame or not frame.unit then return end
-    if not UnitExists(frame.unit) then return end
+    if testName == nil and not UnitExists(frame.unit) then return end
 
     -- TD legacy-text suppression: when ON, hide pet name and skip.
     if DF:IsLegacyTextHidden(frame) then
@@ -864,7 +894,7 @@ function DF:UpdatePetName(frame)
         frame.nameText:Show()
     end
 
-    local name = GetUnitName(frame.unit, true)
+    local name = testName or GetUnitName(frame.unit, true)
     if name then
         -- Truncate long names. Use secret-value-safe UTF-8 helpers — GetUnitName
         -- can return a secret string in instanced content (delves, encounters).
@@ -938,10 +968,11 @@ end
 function DF:UpdatePetFrameTestMode(frame)
     if not frame then return end
 
-    -- TD legacy-text suppression for pet test frames.
-    local hideLegacyText = DF:IsLegacyTextHidden(frame)
-
-    -- Set fake name
+    -- Fake name -> the LIVE name renderer. Only the name itself is fabricated; the
+    -- legacy-text suppression, petNameMaxLength truncation and Text Designer hand-off
+    -- all come from DF:UpdatePetName. This block used to SetText directly and did none
+    -- of those three: "Water Elemental" showed in full in the preview while live
+    -- clipped it to the configured length, and pet name text never reached the TD.
     local petNames = {"Wolf", "Cat", "Bear", "Imp", "Voidwalker", "Felguard", "Water Elemental", "Ghoul", "Treant", "Earth Elemental"}
     local index = 1
     if frame.unit:match("partypet(%d+)") then
@@ -949,15 +980,7 @@ function DF:UpdatePetFrameTestMode(frame)
     elseif frame.unit:match("raidpet(%d+)") then
         index = tonumber(frame.unit:match("raidpet(%d+)")) or 1
     end
-    local name = petNames[((index - 1) % #petNames) + 1]
-    if frame.nameText then
-        if hideLegacyText then
-            frame.nameText:Hide()
-        else
-            frame.nameText:SetText(name)
-            frame.nameText:Show()
-        end
-    end
+    DF:UpdatePetName(frame, petNames[((index - 1) % #petNames) + 1])
 
     -- Set fake health (random between 60-100%)
     local healthPercent = 0.6 + (math.random() * 0.4)
@@ -988,17 +1011,15 @@ function DF:UpdatePetFrameTestMode(frame)
         end
     end
 
-    -- Update health text if shown
-    if frame.healthText then
-        local db = DF:GetFrameDB(frame)
-        if db.petShowHealthText and not hideLegacyText then
-            -- (Removed) a hardcoded `maxHealth = 50000` and the currentHealth it fed.
-            -- Nothing consumed either — pet health text is a percentage.
-            frame.healthText:SetText(string.format("%d%%", math.floor(healthPercent * 100)))
-            frame.healthText:Show()
-        else
-            frame.healthText:Hide()
-        end
+    -- Health text through the LIVE renderer, supplying only the percentage. The
+    -- preview used to format its own string with math.floor, which truncates where
+    -- live's "%.0f" rounds.
+    DF:ApplyPetHealthText(frame, DF:GetFrameDB(frame), healthPercent * 100)
+
+    -- The Text Designer hand-offs live does after health and name. Without these the
+    -- TD preview showed nothing on pet frames.
+    if DF.UpdateTextDesigner then
+        DF:UpdateTextDesigner(frame, "health")
     end
 end
 

@@ -17,7 +17,8 @@ local DF = DandersFrames
 DF.ExportCategories = {
     -- Frame positions on screen
     position = {
-        "anchorPoint",
+        -- (Removed) "anchorPoint" -- gone from the defaults too. It was never read,
+        -- so exporting it only carried a dead value between profiles.
         "anchorX",
         "anchorY",
         "hideDragOverlay",
@@ -164,6 +165,14 @@ DF.ExportCategories = {
         "healthColorMedium",
         "healthColorMediumUseClass",
         "healthColorMediumWeight",
+        -- ⚠ THE STOP LIST AND THE LEGACY STAGES BOTH TRAVEL, on purpose. The stops are
+        -- what the renderer reads; the Low/Medium/High + Weight keys above are what an
+        -- older build reads, and what DF:MigrateHealthColorStops converts from. Export
+        -- only the stops and a profile sent to someone on the previous build loses its
+        -- gradient entirely; export only the stages and the receiving build's migration
+        -- would rebuild the list from them, silently discarding any stop the sender had
+        -- added beyond the original three.
+        "healthColorStops",
         "healthColorMode",
         "healthOrientation",
         "healthTexture",
@@ -178,6 +187,7 @@ DF.ExportCategories = {
         "missingHealthColorMedium",
         "missingHealthColorMediumUseClass",
         "missingHealthColorMediumWeight",
+        "missingHealthColorStops",   -- see the healthColorStops note above
         "missingHealthColorMode",
         "missingHealthGradientAlpha",
         "missingHealthTexture",
@@ -1254,29 +1264,9 @@ DF.ExportCategoryInfo = {
     },
 }
 
--- ===========================================
--- QUICK PRESETS
--- ===========================================
-DF.ExportPresets = {
-    all = {
-        name = "All",
-        categories = {"position", "layout", "bars", "auras", "text", "icons", "other", "pinnedFrames", "auraDesigner", "autoLayout"},
-    },
-    appearance = {
-        name = "Appearance",
-        description = "Visual style without position/layout",
-        categories = {"bars", "auras", "text", "icons", "other"},
-    },
-    layoutOnly = {
-        name = "Layout",
-        description = "Position and frame dimensions only",
-        categories = {"position", "layout"},
-    },
-    none = {
-        name = "None",
-        categories = {},
-    },
-}
+-- (DF.ExportPresets removed: it was defined here and referenced nowhere. The export
+-- page's quick-picks are declared inline at GUI/Pages/Modules.lua, and drifted out of
+-- sync with this table long ago -- two sources for one list, one of them unread.)
 
 -- ===========================================
 -- HELPER FUNCTIONS
@@ -1352,12 +1342,49 @@ function DF:MergeCategorySettings(profile, imported, categories, exportedCategor
         end
     end
 
+    local copied = {}
     for category, keys in pairs(self.ExportCategories) do
         if categorySet[category] then
             for _, key in ipairs(keys) do
                 if imported[key] ~= nil then
                     profile[key] = imported[key]
+                    copied[key] = true
                 end
+            end
+        end
+    end
+
+    -- ☠ A PRE-STOPS GRADIENT MUST BECOME STOPS *HERE*, OR IT NEVER DOES. This merge
+    -- copies only keys the payload carries, so an export from before the stop list
+    -- brings legacy Low/Medium/High stages and no <prefix>Stops -- and the profile's
+    -- own stop list survives the merge and shadows them: the renderer resolves the
+    -- list first, so the import "works" and the gradient never changes. Permanently,
+    -- because DF:MigrateHealthColorStops is presence-gated on the very list that is
+    -- still there. Same import class MigrateOORTextAlpha documents for the v4
+    -- oorNameTextAlpha payload. Full imports don't need this: they replace the whole
+    -- mode table, the stop list vanishes with it, and the renderer's legacy fallback
+    -- covers until the next login converts.
+    --
+    -- ⚠ Gate on `copied`, not on the payload: the payload can carry stage keys whose
+    -- category the user UNTICKED, and rebuilding then would overwrite the profile's
+    -- edited stop list from its own stale legacy stages (the editor updates only the
+    -- list, so the stages rot the moment a stop is touched).
+    for _, prefix in ipairs({ "healthColor", "missingHealthColor" }) do
+        if not copied[prefix .. "Stops"] then
+            local stageApplied = false
+            for _, stage in ipairs({ "Low", "Medium", "High" }) do
+                if copied[prefix .. stage] or copied[prefix .. stage .. "Weight"]
+                    or copied[prefix .. stage .. "UseClass"] then
+                    stageApplied = true
+                    break
+                end
+            end
+            if stageApplied and DF.LegacyStopsFor then
+                -- From the MERGED table, not the payload: a partial payload merges
+                -- into the profile's remaining stages, and that mix is what a
+                -- pre-stops build would have rendered after this import.
+                local pts = DF:LegacyStopsFor(profile, prefix)
+                if pts then profile[prefix .. "Stops"] = pts end
             end
         end
     end

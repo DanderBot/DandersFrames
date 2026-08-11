@@ -870,6 +870,9 @@ function AutoProfilesUI:CreateProfileDialog()
     
     -- Dialog frame - parented to UIParent like click casting does
     local dialog = CreateFrame("Frame", "DandersAutoProfileDialog", UIParent, "BackdropTemplate")
+    -- ⚠ Anchoring to DF.GUIFrame (next line) positions it with the GUI but does NOT
+    -- scale it -- a point is not a parent. Register for the scale as well.
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(dialog) end
     dialog:SetSize(360, 240)
     dialog:SetPoint("CENTER", DF.GUIFrame or UIParent, "CENTER", 0, 0)
     DF.GUI:CreatePanelBackdrop(dialog, { bgAlpha = 0.98, borderColor = { 0, 0, 0, 1 } })
@@ -1198,6 +1201,7 @@ function AutoProfilesUI:CreateCopyDialog()
     if copyDialog then return copyDialog end
 
     local dialog = CreateFrame("Frame", "DandersAutoProfileCopyDialog", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(dialog) end
     dialog:SetSize(360, 280)
     dialog:SetPoint("CENTER", DF.GUIFrame or UIParent, "CENTER", 0, 0)
     DF.GUI:CreatePanelBackdrop(dialog, { bgAlpha = 0.98, borderColor = { 0, 0, 0, 1 } })

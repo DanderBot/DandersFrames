@@ -6,7 +6,6 @@ local addonName, DF = ...
 -- See docs/superpowers/specs/2026-05-22-text-designer-phase1-design.md
 -- ============================================================
 
-local pairs, ipairs = pairs, ipairs
 
 DF.TextDesigner = DF.TextDesigner or {}
 

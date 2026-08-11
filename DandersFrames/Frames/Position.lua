@@ -363,8 +363,8 @@ function DF:CreateMoverFrame()
             DF.testPartyContainer:SetPoint("CENTER", UIParent, "CENTER", x / frameScale, y / frameScale)
         end
 
-        -- Save position
-        db.anchorPoint = "CENTER"
+        -- Save position. (No anchorPoint write: it was read nowhere -- the anchor is
+        -- the literal "CENTER" at every SetPoint that matters.)
         db.anchorX = x
         db.anchorY = y
 
@@ -1197,10 +1197,23 @@ function DF:UpdatePermanentMoverVisibility()
                 end
                 DF.permanentRaidMover.ApplyHandleColors(false)
             end
-            DF.raidContainer:SetMovable(true)
+            -- ☠ PROTECTED IN COMBAT -- and ONLY on the raid side. DF.raidContainer is
+            -- built from SecureFrameTemplate (Init.lua / Headers.lua); DF.container is a
+            -- plain Frame, which is why the party block above needs no guard and this one
+            -- does. Both calls raised a blocked action any time this ran during combat.
+            --
+            -- ⚠ Guard the two CALLS, not the function. This function is deliberately
+            -- combat-aware -- `inCombat and db.permanentMoverHideInCombat` above is the
+            -- whole point of the hide-in-combat option -- so an early return would kill
+            -- the feature it is being called to deliver. Movability is a no-op in combat
+            -- anyway (the drag handler cannot reposition a secure frame mid-fight), and
+            -- the next out-of-combat call restores the correct state.
+            if not inCombat then
+                DF.raidContainer:SetMovable(true)
+            end
         else
             DF.permanentRaidMover:Hide()
-            if db.raidLocked and not db.permanentMover then
+            if db.raidLocked and not db.permanentMover and not inCombat then
                 DF.raidContainer:SetMovable(false)
             end
         end
@@ -1239,14 +1252,12 @@ function DF:CreateGridOverlay()
         end
         grid.lines = {}
         
-        -- Get db based on current position panel mode
-        local db
-        if DF.positionPanelMode == "raid" then
-            db = DF:GetRaidDB()
-        else
-            db = DF:GetDB()
-        end
-        local gridSize = db.gridSize or 20
+        -- ☠ ALWAYS THE PARTY DB -- gridSize is party-wide (the slider writes it there,
+        -- SnapToGrid and CalculateSnapPreview read it there). Branching on the panel mode
+        -- here meant the DRAWN grid could use a different spacing from the one positions
+        -- actually snap to, which is the worst of the three to have disagreed.
+        local db = DF:GetDB()
+        local gridSize = db and db.gridSize or 20
         local screenWidth, screenHeight = GetScreenWidth(), GetScreenHeight()
         local centerX, centerY = screenWidth / 2, screenHeight / 2
         
@@ -1303,13 +1314,12 @@ end
 
 -- Calculate snap position and return the grid line positions for preview
 function DF:CalculateSnapPreview(x, y, container)
-    local db
-    if DF.positionPanelMode == "raid" then
-        db = DF:GetRaidDB()
-    else
-        db = DF:GetDB()
-    end
-    local gridSize = db.gridSize or 20
+    -- ☠ ALWAYS THE PARTY DB. gridSize is party-wide -- the slider writes it there and
+    -- DF:SnapToGrid reads it there. This branch used the RAID table in raid mode, so the
+    -- red preview line and the position actually committed on release snapped to two
+    -- different grids the moment the two values diverged.
+    local db = DF:GetDB()
+    local gridSize = db and db.gridSize or 20
     local snapThreshold = gridSize / 2
 
     -- Get frame dimensions (account for scale — GetWidth/GetHeight return logical size)
@@ -1848,7 +1858,15 @@ function DF:CreatePositionPanel()
             local pdb = DF:GetDB()
             if pdb then pdb.pinnedSnapToGrid = checked end
         else
-            GetPositionDB().snapToGrid = checked
+            -- ☠ THE PARTY DB, not GetPositionDB(). Grid settings are party-wide and every
+            -- reader takes them from DF:GetDB() -- SnapEnabledForPanel, DF:SnapToGrid
+            -- (whose own comment says "grid settings are party-wide"), and the checkbox
+            -- refresh in UpdatePositionPanel. GetPositionDB() resolves to the RAID db in
+            -- raid mode, so ticking Snap to Grid from the raid mover wrote a flag nothing
+            -- reads: the box flipped back off on the next panel refresh, no grid appeared,
+            -- and dragging did not snap.
+            local sdb = DF:GetDB()
+            if sdb then sdb.snapToGrid = checked end
         end
         if checked then
             if DF.gridFrame.RefreshLines then
@@ -1920,15 +1938,19 @@ function DF:CreatePositionPanel()
     panel.hideOverlayCheck = hideOverlayCheck
 
     -- Grid Size slider (shared builder; follows the mode theme).
-    -- Get/set mirror the hand-rolled version exactly: party-wide gridSize via
-    -- GetPositionDB(), which for pinned mode falls through gridSize to the party
-    -- db (only x/y are set-specific). Default 20 matches the refresh code below.
+    -- ☠ THE PARTY DB, same as snapToGrid above. The comment here used to claim
+    -- "party-wide gridSize via GetPositionDB()" -- which is false in raid mode, where
+    -- GetPositionDB() resolves to the raid table. DF:SnapToGrid reads gridSize from
+    -- DF:GetDB(), so a size set from the raid mover was written somewhere nothing reads;
+    -- worse, CalculateSnapPreview DID read the raid value, so the red preview line and the
+    -- committed position snapped to DIFFERENT grids once the two diverged.
+    -- Default 20 matches the refresh code below.
     local function getGridSize()
-        local db = GetPositionDB()
+        local db = DF:GetDB()
         return (db and db.gridSize) or 20
     end
     local function setGridSize(val)
-        local db = GetPositionDB()
+        local db = DF:GetDB()
         if db then db.gridSize = math.floor(val) end
         -- Refresh grid lines with new size
         if DF.gridFrame and DF.gridFrame:IsShown() and DF.gridFrame.RefreshLines then
@@ -2390,7 +2412,6 @@ function DF:UnlockFrames()
     DF.container:SetScale(scale)
 
     -- Always use CENTER anchor for positioning
-    db.anchorPoint = "CENTER"
     DF.container:ClearAllPoints()
     DF.container:SetPoint("CENTER", UIParent, "CENTER", (db.anchorX or 0) / scale, (db.anchorY or 0) / scale)
     DF.container:Show()  -- Ensure container is visible

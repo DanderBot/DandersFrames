@@ -1582,7 +1582,10 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         Add(frameTypeGroup, nil, 2)
         frameTypeGroup.hideOn = function() return activeSubTab ~= "setup" end  -- Setup tab
         frameTypeGroup.disableChildrenOn = function() return PinnedSetDisabled() end  -- greyed while the set is disabled
-        AddSpace(10, "both")
+        -- GUI.Space.section IS 10; this was the same value written out by hand. The
+        -- other stray AddSpace literals (5, 6, 8, 18) match no constant, so converting
+        -- those would MOVE things rather than tidy them — left alone deliberately.
+        AddSpace(GUI.Space.section, "both")
 
         -- ===== FRAME STYLE GROUP (Column 1) — inherited from your frames, overridable =====
         local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)

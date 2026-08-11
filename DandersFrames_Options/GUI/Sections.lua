@@ -27,12 +27,16 @@ local CURSOR_LIFT_X, CURSOR_LIFT_Y = P.CURSOR_LIFT_X, P.CURSOR_LIFT_Y
 
 
 function GUI:CreateSettingsGroup(parent, width, opts)
-    -- opts can be a boolean (legacy: collapsible) or a table { collapsible, showSummary, onCollapseChanged }
+    -- opts can be a boolean (legacy: collapsible) or a table { collapsible, showSummary }
+    --
+    -- ⚠ (Removed) onCollapseChanged. It was stored here and fired from both collapse
+    -- paths, and NOTHING ever set it -- so neither guard could fire and the callback
+    -- was an advertised extension point with no consumer. A page that needs to react
+    -- to a collapse uses RefreshStates, which both paths already call one line earlier.
     if type(opts) == "boolean" then opts = { collapsible = opts } end
     opts = opts or {}
 
     local group = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    group.onCollapseChanged = opts.onCollapseChanged
     group:SetSize(width or 280, 10)  -- Height will be calculated dynamically
     group.groupChildren = {}
     group.isSettingsGroup = true
@@ -106,7 +110,6 @@ function GUI:CreateSettingsGroup(parent, width, opts)
             end
             local pageChild = group:GetParent()
             if pageChild and pageChild.RefreshStates then pageChild.RefreshStates() end
-            if group.onCollapseChanged then group.onCollapseChanged(group) end
         end)
 
         collapseBar:Hide()
@@ -181,7 +184,6 @@ function GUI:CreateSettingsGroup(parent, width, opts)
                 end
                 local pageChild = self:GetParent()
                 if pageChild and pageChild.RefreshStates then pageChild.RefreshStates() end
-                if self.onCollapseChanged then self.onCollapseChanged(self) end
             end)
 
             -- Highlight arrow on hover to indicate clickable
@@ -648,9 +650,11 @@ end
 -- the scrim is exactly the one who still needs it.
 --
 --   opts.label     the big line, e.g. L["Aura Designer is disabled"]
---   opts.sublabel  the small line (defaults to the shared "Enable the checkbox
---                  above to use")
---   opts.level     frame-level bump over the parent (default 50)
+--
+-- ⚠ label IS THE WHOLE CONTRACT. `sublabel` and `level` were documented here and read
+-- below, and all three call sites pass only `label` -- so the small line is always the
+-- shared "Enable the checkbox above to use" and the level bump is always 50. Both are
+-- literals now rather than options nobody can reach.
 --
 -- Returns the frame; drive it with :SetShown(not enabled) from wherever the
 -- flag changes.
@@ -658,7 +662,7 @@ end
 function GUI:CreateDisabledOverlay(parent, opts)
     opts = opts or {}
     local overlay = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    overlay:SetFrameLevel((parent:GetFrameLevel() or 0) + (opts.level or 50))
+    overlay:SetFrameLevel((parent:GetFrameLevel() or 0) + 50)
     overlay:EnableMouse(true)
 
     local bg = overlay:CreateTexture(nil, "BACKGROUND")
@@ -673,7 +677,7 @@ function GUI:CreateDisabledOverlay(parent, opts)
 
     local sub = overlay:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
     sub:SetPoint("TOP", label, "BOTTOM", 0, -4)
-    sub:SetText(opts.sublabel or L["Enable the checkbox above to use"])
+    sub:SetText(L["Enable the checkbox above to use"])
     sub:SetTextColor(0.45, 0.45, 0.45, 1)
     overlay.SubLabel = sub
 

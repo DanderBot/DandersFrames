@@ -9,7 +9,6 @@ local addonName, DF = ...
 -- Aura Designer is enabled for a frame's mode.
 -- ============================================================
 
-local pairs, ipairs, type = pairs, ipairs, type
 local wipe = table.wipe
 
 

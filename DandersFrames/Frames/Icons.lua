@@ -6,25 +6,14 @@ local addonName, DF = ...
 -- ============================================================
 
 -- Local caching of frequently used globals and WoW API for performance
-local pairs, ipairs, type, wipe = pairs, ipairs, type, wipe
-local floor = math.floor
-local strsplit = strsplit
-local UnitBuff, UnitDebuff = UnitBuff, UnitDebuff
 local GetTime = GetTime
-local C_Spell = C_Spell
-local UnitClass = UnitClass
-local UnitIsDeadOrGhost = UnitIsDeadOrGhost
-local UnitIsConnected = UnitIsConnected
 local UnitExists = UnitExists
-local InCombatLockdown = InCombatLockdown
-local GetPlayerAuraBySpellID = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID
-local GetUnitAuraBySpellID = C_UnitAuras and C_UnitAuras.GetUnitAuraBySpellID
 local issecretvalue = issecretvalue or function() return false end
 
--- ============================================================
--- PERFORMANCE FIX: Default colors for UpdateDefensiveBar fallbacks
--- Avoids creating tables on every call when db values are nil
--- ============================================================
+-- (Removed) a "PERFORMANCE FIX: default colors for UpdateDefensiveBar fallbacks /
+-- avoids creating tables on every call" banner introducing no table -- there is no
+-- default-colour table anywhere in this file. It advertised an optimisation that is
+-- not here, which is worse than silence: the next reader trusts it and stops looking.
 
 -- (Removed) DF:GetRaidBuffIcons + DF.RaidBuffIconCache — a spellID -> icon-texture
 -- set built "for fallback filtering (when spellId is secret)". That fallback was
@@ -194,10 +183,13 @@ function DF:UpdateExternalDefIcon(frame)
     DF:UpdateDefensiveBar(frame)
 end
 
--- Legacy function for backwards compatibility
-function DF:UpdateAllExternalDefIcons()
-    DF:UpdateAllDefensiveBars()
-end
+-- ☠ (Removed) DF:UpdateAllExternalDefIcons, a one-line forward to
+-- DF:UpdateAllDefensiveBars kept "for backwards compatibility". Nothing called it in
+-- either addon; its only other mention was a PROFILED_FUNCTIONS string, which wraps
+-- DF[name] and never calls it, so it profiled nothing.
+--
+-- ⚠ Its SINGULAR sibling above, DF:UpdateExternalDefIcon, is a different matter and
+-- stays: that one has seven real call sites.
 
 -- Update auras on all frames (used when entering/leaving combat)
 function DF:UpdateAllAuras()

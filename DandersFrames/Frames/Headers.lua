@@ -547,7 +547,6 @@ end
 -- Local caching
 local CreateFrame = CreateFrame
 local InCombatLockdown = InCombatLockdown
-local RegisterStateDriver = RegisterStateDriver
 local UnregisterStateDriver = UnregisterStateDriver
 
 -- (Removed) DF.POSITION_HEADER_SNIPPET, a secure-snippet string never handed to any
@@ -743,7 +742,6 @@ function DF:InitializeHeaderChild(frame)
             -- degrading straight back to a full sweep during arena entry.
             if DF.InvalidatePetAnchors then DF:InvalidatePetAnchors() end
             -- Clear background color tracking (unit changed, need fresh colors)
-            self.dfCurrentBgKey = nil
             -- Clear stale range state so this slot doesn't inherit the previous
             -- occupant's faded appearance. dfInRange is immediately repopulated
             -- by UpdateRange below for accurate OOR state before first render.
@@ -1151,8 +1149,12 @@ function DF:CreatePartyHeader()
     DF.partyHeader:SetAttribute("frameHeight", db.frameHeight or 50)
     DF.partyHeader:SetAttribute("spacing", db.frameSpacing or 2)
     DF.partyHeader:SetAttribute("horizontal", horizontal)
-    DF.partyHeader:SetAttribute("growFromCenter", db.growFromCenter)
-    
+    -- (The `growFromCenter` attribute write that used to sit here was removed. It read a
+    -- db key nothing defines or writes, and the ONLY snippet that consumed it was the
+    -- isPlayerHeader branch of SetupSecurePositioning -- a branch never installed, since
+    -- the separate player header was folded into partyHeader. CENTER growth is live and
+    -- correct via `selfCentering`, which DF:SetGrowFromCenter writes.)
+
     -- SetFrameRef for secure snippets (Phase 3) - only if available
     if DF.partyHeader.SetFrameRef then
         DF.partyHeader:SetFrameRef("container", DF.partyContainer)
@@ -1247,8 +1249,7 @@ function DF:CreateArenaHeader()
     DF.arenaHeader:SetAttribute("frameHeight", db.frameHeight or 50)
     DF.arenaHeader:SetAttribute("spacing", db.frameSpacing or 2)
     DF.arenaHeader:SetAttribute("horizontal", horizontal)
-    DF.arenaHeader:SetAttribute("growFromCenter", db.growFromCenter)
-    
+
     -- SetFrameRef for secure snippets
     if DF.arenaHeader.SetFrameRef then
         DF.arenaHeader:SetFrameRef("container", DF.partyContainer)
@@ -1303,9 +1304,11 @@ function DF:CreateRaidHeaders()
     -- Create both modes, only one will be active at a time
     DF:CreateRaidCombinedHeader()
     DF:CreateRaidSeparatedHeaders()
-    -- NOTE: raidPlayerHeader is no longer needed - nameList handles player positioning
-    -- DF:CreateRaidPlayerHeader()  -- For FIRST/LAST player position in groups
-    
+    -- NOTE: raidPlayerHeader is no longer needed - nameList handles player positioning.
+    -- The commented-out DF:CreateRaidPlayerHeader() call that sat here is gone with
+    -- it: that function no longer exists anywhere, so uncommenting the line would
+    -- have thrown rather than restored the old behaviour.
+
     -- Create secure position handler for raid groups
     DF:CreateRaidPositionHandler()
     
@@ -3158,17 +3161,43 @@ function DF:UpdateRaidPositionAttributes()
     -- Update header child layout attributes (point, xOffset, yOffset)
     DF:UpdateRaidHeaderLayoutAttributes()
     
+    -- ☠ SNAP THE SAME FIVE VALUES SecureSort SNAPS, or the two disagree.
+    --
+    -- Grouped raid geometry has TWO independent producers feeding ONE layout:
+    --   * this function          -> handler ATTRIBUTES  -> positions the GROUP HEADERS
+    --   * UpdateRaidGroupLayoutParams -> raidGroupLayoutConfig -> positions the FRAMES
+    --     inside each group (and sizes the container, via Init.lua)
+    -- SecureSort ran every value through DF:PixelPerfect; this side pushed the raw db
+    -- numbers. So with pixelPerfect on, groups were spaced on unsnapped values while
+    -- their contents were laid out on snapped ones, and the error accumulated across
+    -- the row -- the ~4.5px-per-group drift in the audit.
+    --
+    -- ⚠ pixelPerfect DEFAULTS TO TRUE (Core/Config.lua), so this was not an
+    -- opt-in-only fault: it was the shipped behaviour for every grouped raid layout.
+    -- The snap is sub-pixel per value, which is exactly why it survived so long --
+    -- visible as creeping misalignment across eight groups, not as an obvious jump.
+    --
+    -- These five mirror UpdateRaidGroupLayoutParams one-for-one (frameWidth,
+    -- frameHeight, playerSpacing=spacing, groupSpacing, rowColSpacing). Add a value
+    -- there, add it here.
+    local function snap(value)
+        if db.pixelPerfect and DF.PixelPerfect then
+            return DF:PixelPerfect(value)
+        end
+        return value
+    end
+
     -- Update attributes (can only change these out of combat)
     if not InCombatLockdown() then
-        handler:SetAttribute("framewidth", db.frameWidth or 80)
-        handler:SetAttribute("frameheight", db.frameHeight or 40)
-        handler:SetAttribute("spacing", db.frameSpacing or 2)
-        handler:SetAttribute("groupspacing", db.raidGroupSpacing or 10)
+        handler:SetAttribute("framewidth", snap(db.frameWidth or 80))
+        handler:SetAttribute("frameheight", snap(db.frameHeight or 40))
+        handler:SetAttribute("spacing", snap(db.frameSpacing or 2))
+        handler:SetAttribute("groupspacing", snap(db.raidGroupSpacing or 10))
         handler:SetAttribute("playergrowfrom", db.raidPlayerAnchor or "START")
         handler:SetAttribute("groupsgrowfrom", db.raidGroupAnchor or "START")
         handler:SetAttribute("growdirection", db.growDirection or "HORIZONTAL")
         handler:SetAttribute("groupsperrow", db.raidGroupsPerRow or 8)
-        handler:SetAttribute("rowcolspacing", db.raidRowColSpacing or 30)
+        handler:SetAttribute("rowcolspacing", snap(db.raidRowColSpacing or 30))
         handler:SetAttribute("grouprowgrowth", db.raidGroupRowGrowth or "START")
 
         -- Update custom group display order
@@ -3754,28 +3783,19 @@ function DF:ApplyRaidGroupSorting()
     -- OnFramesSorted callback is fired from child OnAttributeChanged.
 end
 
--- Refresh all group-based raid frames after sorting changes
-function DF:RefreshRaidGroupFrames()
-    if not DF.raidSeparatedHeaders then return end
-    
-    -- Use a longer delay to ensure header has finished reassigning units
-    C_Timer.After(0.1, function()
-        if not DF.raidSeparatedHeaders then return end
-        if InCombatLockdown() then return end
-        
-        for group = 1, 8 do
-            local header = DF.raidSeparatedHeaders[group]
-            if header then
-                for i = 1, 5 do
-                    local child = header:GetAttribute("child" .. i)
-                    if child and child:IsVisible() and child.unit then
-                        DF:FullFrameRefresh(child)
-                    end
-                end
-            end
-        end
-    end)
-end
+-- ☠ (Removed) DF:RefreshRaidGroupFrames, DF:RefreshRaidFlatFrames and
+-- DF:RefreshPartyFrames -- the three "refresh all X frames after sorting changes"
+-- helpers. None had a caller in either addon.
+--
+-- ⚠ THEIR NAMES DESCRIBED A CONTRACT THAT NO LONGER EXISTS, which is why all three
+-- rotted together: sorting does not call anything to refresh afterwards any more.
+-- Each sat directly beneath a sort path ending in "OnFramesSorted callback is fired
+-- from child OnAttributeChanged" -- the frames re-render from that attribute change,
+-- so there is nothing left for a post-sort sweep to do.
+--
+-- Their only other mention was in Profiler's PROFILED_FUNCTIONS, which wraps
+-- DF[name] rather than calling it; those entries are gone too. DF:FullFrameRefresh,
+-- which they called, is live and has other callers.
 
 -- Comprehensive frame refresh - updates ALL visual elements
 -- Called when unit assignment changes due to sorting
@@ -3785,7 +3805,6 @@ function DF:FullFrameRefresh(frame)
     
     -- Clear color tracking to force re-evaluation of background colors
     -- (When units swap positions due to sorting, old colors would persist otherwise)
-    frame.dfCurrentBgKey = nil      -- Background color tracking
     frame.dfCurrentBgTexture = nil  -- Background texture tracking
     frame.dfAggroActive = nil       -- Aggro highlight state
     frame.dfAggroColor = nil        -- Aggro color override
@@ -4277,16 +4296,8 @@ function DF:ApplyRaidFlatSorting()
     -- OnFramesSorted callback is fired from child OnAttributeChanged.
 end
 
--- Refresh all flat raid frames after sorting changes
-function DF:RefreshRaidFlatFrames()
-    -- Delegate to FlatRaidFrames
-    if DF.FlatRaidFrames and DF.FlatRaidFrames.header then
-        C_Timer.After(0.1, function()
-            if InCombatLockdown() then return end
-            DF.FlatRaidFrames:RefreshAllChildFrames()
-        end)
-    end
-end
+-- (Removed) DF:RefreshRaidFlatFrames -- no callers; see the note on its group-frame
+-- twin above. FlatRaidFrames:RefreshAllChildFrames, which it delegated to, is live.
 
 -- Toggle raid group debug backgrounds
 function DF:ToggleRaidDebugBackgrounds()
@@ -4402,12 +4413,33 @@ function DF:GetRaidFrame(index)
     
     if db.raidUseGroups and DF.raidSeparatedHeaders then
         -- Separated mode: find which group header has this frame
+        -- ☠ THE ARITHMETIC IS A GUESS, SO VERIFY IT. Separated headers are filtered by
+        -- SUBGROUP and ordered by nameList, so raid index N sits in subgroup ceil(N/5) at
+        -- slot ((N-1)%5)+1 only while the roster happens to be densely packed in index
+        -- order -- which it stops being after any promotion or group move. Unverified,
+        -- this returned a frame showing a DIFFERENT player, and both
+        -- DandersFrames_GetRaidFrame (a public API) and the DF.raidFrames proxy hand that
+        -- straight to callers.
+        local wanted = "raid" .. index
         local group = math.ceil(index / 5)
         local indexInGroup = ((index - 1) % 5) + 1
         local header = DF.raidSeparatedHeaders[group]
         if header then
-            return header:GetAttribute("child" .. indexInGroup)
+            local guess = header:GetAttribute("child" .. indexInGroup)
+            if guess and guess.unit == wanted then return guess end
         end
+        -- Fall back to a scan. Costs a walk of at most 8 headers x 5 children, only on the
+        -- rosters where the fast path was wrong -- and correctness beats the guess.
+        for g = 1, 8 do
+            local h = DF.raidSeparatedHeaders[g]
+            if h then
+                for i = 1, 5 do
+                    local child = h:GetAttribute("child" .. i)
+                    if child and child.unit == wanted then return child end
+                end
+            end
+        end
+        return nil
     elseif DF.FlatRaidFrames and DF.FlatRaidFrames.header then
         -- Flat mode: use FlatRaidFrames header
         return DF.FlatRaidFrames.header:GetAttribute("child" .. index)
@@ -4695,8 +4727,25 @@ function DF:UpdateRaidHeaderVisibility(skipReposition)
         return
     end
 
+    -- ⚠ AUDITED, NOT FIXED (2026-08-10). This function has no IsInRaid() gate, and the
+    -- combat-deferred replay has none either: park a visibility update during combat,
+    -- leave the raid before combat ends, and PLAYER_REGEN_ENABLED drains
+    -- pendingRaidHeaderVisibility straight into here, showing the raid container and the
+    -- flat raid header to someone no longer in a raid. The sibling branch beside that
+    -- drain DOES test IsInRaid() before showing the container -- and then calls this
+    -- unguarded function anyway.
+    --
+    -- ☠ An early `if not IsInRaid() then return end` here is NOT the fix, and was tried
+    -- and reverted. This function is not show-only: further down it calls
+    -- FlatRaidFrames:SetEnabled(false) and header:Hide() on the paths that tear raid
+    -- headers back down. Bailing early would skip that teardown, so the frames stay up in
+    -- the very case the guard was added for -- a different bug wearing the same clothes.
+    --
+    -- The real fix gates the SHOW paths while leaving the hide logic reachable, which
+    -- needs a client to confirm against leaving a raid, a raid converting to a party, and
+    -- the combat-deferred replay. See docs/12.1-final-audit-phase1.md (V40).
     local db = DF:GetRaidDB()
-    
+
     -- Show container
     if DF.raidContainer then
         DF.raidContainer:Show()
@@ -5004,8 +5053,7 @@ function DF:UpdatePartyHeaderLayout()
         DF.partyHeader:SetAttribute("frameHeight", db.frameHeight or 50)
         DF.partyHeader:SetAttribute("spacing", spacing)
         DF.partyHeader:SetAttribute("horizontal", horizontal)
-        DF.partyHeader:SetAttribute("growFromCenter", db.growFromCenter)
-        
+
         -- Update header position
         DF.partyHeader:ClearAllPoints()
         if horizontal then
@@ -5041,8 +5089,7 @@ function DF:UpdatePartyHeaderLayout()
         DF.arenaHeader:SetAttribute("frameHeight", db.frameHeight or 50)
         DF.arenaHeader:SetAttribute("spacing", spacing)
         DF.arenaHeader:SetAttribute("horizontal", horizontal)
-        DF.arenaHeader:SetAttribute("growFromCenter", db.growFromCenter)
-        
+
         -- Update header position (same as party)
         DF.arenaHeader:ClearAllPoints()
         if horizontal then
@@ -5557,23 +5604,8 @@ function DF:ApplyArenaHeaderSorting()
     -- OnFramesSorted callback is fired from child OnAttributeChanged.
 end
 
--- Refresh all party frames after sorting changes
-function DF:RefreshPartyFrames()
-    if not DF.partyHeader then return end
-    
-    -- Use a longer delay to ensure header has finished reassigning units
-    C_Timer.After(0.1, function()
-        if not DF.partyHeader then return end
-        if InCombatLockdown() then return end
-        
-        for i = 1, 5 do
-            local child = DF.partyHeader:GetAttribute("child" .. i)
-            if child and child:IsVisible() and child.unit then
-                DF:FullFrameRefresh(child)
-            end
-        end
-    end)
-end
+-- (Removed) DF:RefreshPartyFrames -- no callers; see the note on the group-frame
+-- twin above.
 
 function DF:SetRaidSorting(sortMethod, groupBy, groupingOrder)
     if InCombatLockdown() then
@@ -5848,82 +5880,37 @@ end
 -- Uses SecureHandlerWrapScript pattern from SecureSort.lua
 -- ============================================================
 
--- Set up secure positioning on a header
-function DF:SetupSecurePositioning(header, isPlayerHeader)
+-- Set up secure positioning on a header.
+--
+-- ☠ THE `isPlayerHeader` PARAMETER IS GONE, and with it the whole player-header snippet.
+-- Both call sites passed `false`: the separate player header was folded into partyHeader
+-- ("All modes now use partyHeader only"), so that branch had not been installed on any
+-- frame in a very long time.
+--
+-- It is worth saying what it cost, because it is still sitting in the audit doc as V6.
+-- That dead snippet was the ONLY consumer of the `growFromCenter` attribute, and it
+-- opened `if not growFromCenter then return end` against a db key nothing defines or
+-- writes. Reading it in isolation says, convincingly, that CENTER growth has never run
+-- for anyone -- and CENTER is the shipped default, so that reads as a shipping bug.
+-- It is not. The live snippet below gates on `selfCentering`, which DF:SetGrowFromCenter
+-- writes correctly from `growthAnchor == "CENTER"`. Centering works and always did.
+--
+-- Deleted rather than kept "just in case" for exactly that reason: an unreachable branch
+-- that reads a never-written key is not inert, it is a trap that costs the next reader
+-- an afternoon and can talk them into "fixing" a working layout path.
+function DF:SetupSecurePositioning(header)
     if not header then return end
-    
+
     -- Store reference to container for secure code
     SecureHandlerSetFrameRef(header, "container", DF.partyContainer)
-    
+
     -- Set max children attribute for counting
-    if isPlayerHeader then
-        header:SetAttribute("maxChildren", 1)
-        header:SetAttribute("partyCount", 0)  -- Initialize party count
-    else
-        header:SetAttribute("maxChildren", 5)
-    end
-    
-    -- The positioning snippet - runs when triggerposition changes
-    local positionSnippet
-    if isPlayerHeader then
-        -- Player header snippet - only does positioning when growFromCenter is enabled
-        -- For START/END modes, insecure code handles the anchoring
-        positionSnippet = [[
-            local header = self
-            local growFromCenter = header:GetAttribute("growFromCenter")
-            
-            -- Only do secure positioning for CENTER mode
-            -- START and END modes are handled by insecure code
-            if not growFromCenter then
-                return
-            end
-            
-            local container = self:GetFrameRef("container")
-            if not container then return end
-            
-            local horizontal = header:GetAttribute("horizontal")
-            local frameWidth = header:GetAttribute("frameWidth") or 120
-            local frameHeight = header:GetAttribute("frameHeight") or 50
-            local spacing = header:GetAttribute("spacing") or 2
-            
-            -- Read party count (set by party header's OnAttributeChanged/OnShow/OnHide)
-            local partyCount = header:GetAttribute("partyCount") or 0
-            local totalFrameCount = 1 + partyCount
-            
-            -- Store debug info
-            header:SetAttribute("debugPartyCount", partyCount)
-            header:SetAttribute("debugTotalCount", totalFrameCount)
-            
-            header:ClearAllPoints()
-            
-            -- Calculate total size for all frames
-            local totalSize
-            if horizontal then
-                totalSize = totalFrameCount * frameWidth + (totalFrameCount - 1) * spacing
-            else
-                totalSize = totalFrameCount * frameHeight + (totalFrameCount - 1) * spacing
-            end
-            
-            header:SetAttribute("debugTotalSize", totalSize)
-            
-            -- Position header so children are centered
-            -- Children grow from header's anchor point (LEFT for horizontal, TOP for vertical)
-            -- So we position that anchor point at -totalSize/2 from container center
-            if horizontal then
-                local offsetX = -totalSize / 2
-                header:SetAttribute("debugOffsetX", offsetX)
-                header:SetPoint("LEFT", container, "CENTER", offsetX, 0)
-            else
-                local offsetY = totalSize / 2
-                header:SetAttribute("debugOffsetY", offsetY)
-                header:SetPoint("TOP", container, "CENTER", 0, offsetY)
-            end
-        ]]
-    else
-        -- Party header snippet - handles centering
-        -- All modes now use partyHeader only (no separate playerHeader)
-        -- childCount is set by OnShow/OnHide hooks on children
-        positionSnippet = [[
+    header:SetAttribute("maxChildren", 5)
+
+    -- The positioning snippet - runs when triggerposition changes. Handles centering.
+    -- All modes use partyHeader only (no separate playerHeader), so there is exactly
+    -- one snippet. childCount is set by the OnShow/OnHide hooks on the children.
+    local positionSnippet = [[
             local header = self
             local selfCentering = header:GetAttribute("selfCentering")
             
@@ -5983,9 +5970,8 @@ function DF:SetupSecurePositioning(header, isPlayerHeader)
                 header:SetAttribute("debugOffsetY", offsetY)
                 header:SetPoint("TOP", container, "CENTER", 0, offsetY)
             end
-        ]]
-    end
-    
+    ]]
+
     -- Use SecureHandlerWrapScript to handle attribute changes
     -- Note: 'name' and 'value' are implicitly available in OnAttributeChanged
     SecureHandlerWrapScript(header, "OnAttributeChanged", header, [[
@@ -6087,7 +6073,7 @@ function DF:InitSecurePositioning()
     
     -- Set up party header for centering
     if DF.partyHeader then
-        DF:SetupSecurePositioning(DF.partyHeader, false)
+        DF:SetupSecurePositioning(DF.partyHeader)
         
         -- When party header's child attributes change, count and trigger repositioning
         -- NOTE: SecureGroupHeaderTemplate stores children as "frameref-childN"
@@ -6118,7 +6104,7 @@ function DF:InitSecurePositioning()
     
     -- Set up arena header for centering (same as party)
     if DF.arenaHeader then
-        DF:SetupSecurePositioning(DF.arenaHeader, false)
+        DF:SetupSecurePositioning(DF.arenaHeader)
         
         SecureHandlerWrapScript(DF.arenaHeader, "OnAttributeChanged", DF.arenaHeader, [[
             if name and name:match("^child%d+$") then
@@ -6303,19 +6289,21 @@ function DF:HookArenaChildrenForRepositioning()
         end
     end
     
-    DF.arenaChildrenHooked = true
-    
+    -- ☠ (Removed) DF.arenaChildrenHooked = true. Write-only: nothing read it, so it
+    -- guarded no re-entry. Both Hook*ChildrenForRepositioning functions actually
+    -- guard per child, via DF.hookedChildren / DF.hookedArenaChildren -- the flag
+    -- only looked like the guard. (Its party twin, DF.partyChildrenHooked, is read
+    -- once in a debug print and stays.)
+
     headerDebug("Arena children hooked for repositioning")
 end
 
--- Update the totalFrameCount attribute based on current group (backup for out of combat)
-function DF:UpdateHeaderFrameCount()
-    if not DF.partyHeader then return end
-    DF:TriggerSecurePosition(DF.partyHeader)
-    if DF.arenaHeader then
-        DF:TriggerSecurePosition(DF.arenaHeader)
-    end
-end
+-- ☠ (Removed) DF:UpdateHeaderFrameCount, "backup for out of combat" for the
+-- totalFrameCount attribute. No callers in either addon; its only other mention was
+-- a PROFILED_FUNCTIONS string, which wraps rather than calls. Both of its lines
+-- forwarded to DF:TriggerSecurePosition, which is live and called elsewhere -- so
+-- the "backup" it advertised was never running, and whatever keeps totalFrameCount
+-- correct out of combat, it is not this.
 
 -- ============================================================
 -- DEBUG
@@ -6351,7 +6339,11 @@ function DF:DumpHeaderInfo()
     print("  sortEnabled:", db.sortEnabled and "true" or "false")
     o:Section("Raid settings")
     print("  raidUseGroups:", raidDb.raidUseGroups and "true" or "false")
-    print("  raidEnabled:", raidDb.raidEnabled and "true" or "false")
+    -- ⚠ DF.db, not raidDb. The Enable Raid Frames checkbox writes the profile ROOT key;
+    -- the raid table carries an inert same-named key inherited from PartyDefaults, so
+    -- reading it here reported the opposite of the truth to whoever was diagnosing the
+    -- setting. Same root cause as the two live reads fixed in Frames/Init.lua.
+    print("  raidEnabled:", (DF.db and DF.db.raidEnabled ~= false) and "true" or "false")
     print("  sortEnabled:", raidDb.sortEnabled and "true" or "false")
     print("  sortSelfPosition:", raidDb.sortSelfPosition or "nil")
     print("  sortSeparateMeleeRanged:", raidDb.sortSeparateMeleeRanged and "true" or "false")
@@ -7080,6 +7072,12 @@ headerEventFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
             -- the handback used to strand C_UnitAuras on the SAMPLE provider for
             -- the rest of the session (live frames then rendered fake auras).
             if DF.TeardownTestModeEngines then DF:TeardownTestModeEngines() end
+            -- ...and the FRAME-side teardown. This path was the thinnest of the three:
+            -- it called frame:Hide() and nothing else, so it left the Aura Designer
+            -- indicators (parented to UIParent, they survive Hide), the absorb
+            -- textures, and the pet / personal-targeted / Targeted List preview sets
+            -- all on screen after zoning with the preview up.
+            if DF.TeardownTestFrameVisuals then DF:TeardownTestFrameVisuals() end
             -- Clear state drivers if not in combat (can't unregister in combat)
             if not InCombatLockdown() and DF.testModeStateDriversActive then
                 DF:ClearTestModeStateDrivers()

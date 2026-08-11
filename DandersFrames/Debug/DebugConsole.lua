@@ -79,6 +79,12 @@ local CATEGORY_GROUPS = {
             -- firehose. Replaces BLIZAURA, which was declared but never logged.
             { key = "AURAROW",       desc = "Aura row drivers: rebuild vs tuning vs style, retargets" },
             { key = "AURACONTAINER", desc = "12.1 AuraContainer factory (build, filters, capability gate)" },
+            -- ⚠ Was EMITTED BUT NOT REGISTERED, which defeats the point of this table:
+            -- both of its sites are DebugWarn -- custom-filter import skipping an
+            -- entry, and a scrub that could not reach ParseADFilterRef -- i.e. exactly
+            -- the lines someone is trying to catch, and they only appeared under
+            -- "Other" AFTER they had already fired.
+            { key = "FILTER",        desc = "Filter registry: custom filter import, scrub and reference rewrites" },
         },
     },
     {
@@ -94,6 +100,9 @@ local CATEGORY_GROUPS = {
             { key = "TARGETEDLIST", desc = "Targeted List cast pickup + why a cast was dropped, stop, interrupter lookup" },
             { key = "PERSONALTARGET", desc = "Personal Targeted Spells: cast pickup, target changes, and why a cast was skipped" },
             { key = "GUI",          desc = "Settings window internals — slider drag paths, relayout" },
+            -- ⚠ Also previously emitted without being registered here: its one site is
+            -- a DebugWarn for a breadcrumb that cannot navigate.
+            { key = "SEARCH",       desc = "Settings search: breadcrumb resolution and navigation failures" },
             -- Kept out of GUI: the Blizzard-picker sync fires on every colour
             -- drag, so folding it in would make the whole GUI category noisy.
             { key = "COLORPICKER",  desc = "Colour picker handover to/from Blizzard's picker", noisy = true },

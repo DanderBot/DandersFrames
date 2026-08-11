@@ -6,7 +6,21 @@ local format = string.format
 -- HELPER: DEEP COPY TABLE
 -- ============================================================
 
-function DF:DeepCopy(src)
+-- ☠ CYCLE-GUARDED. `seen` maps an already-copied source table to its copy, so a table
+-- that references itself (or any loop) terminates and -- just as importantly -- shared
+-- subtables stay shared in the copy instead of being duplicated per reference.
+--
+-- This was plain unguarded recursion, and Core/API.lua already named "DF:DeepCopy (no
+-- cycle guard)" as a live throw source without the fix ever reaching the function.
+-- LibSerialize explicitly supports table self-reference, so a crafted or simply unlucky
+-- import payload survives ValidatePayloadShape (deliberately shallow) and then stack-
+-- overflows here. Both import callers pcall, so it was recoverable -- but a stack
+-- overflow inside a pcall is a poor way to reject a payload.
+--
+-- `seen` is threaded as a second parameter rather than allocated per recursive call, so
+-- one table is created per top-level DeepCopy and nothing changes for the common case.
+-- ⚠ Callers pass one argument. Do not make `seen` a required parameter.
+function DF:DeepCopy(src, seen)
     if type(src) ~= "table" then return src end
     -- Unwrap proxy tables to their real backing store
     local mt = getmetatable(src)
@@ -14,9 +28,12 @@ function DF:DeepCopy(src)
         if mt.__isDBProxy then src = DF._realProfile end
         if mt.__realTable then src = mt.__realTable end
     end
+    seen = seen or {}
+    if seen[src] then return seen[src] end
     local dest = {}
+    seen[src] = dest
     for k, v in pairs(src) do
-        dest[k] = DF:DeepCopy(v)
+        dest[k] = DF:DeepCopy(v, seen)
     end
     return dest
 end
@@ -412,6 +429,9 @@ function DF:SetProfile(name)
     if DF.MigrateOORTextAlpha then
         DF:MigrateOORTextAlpha()
     end
+    if DF.MigrateHealthColorStops then
+        DF:MigrateHealthColorStops()
+    end
 
     -- Apply the profile — runtime state is already clear so the proxy reads
     -- the new profile directly with no stale overlay
@@ -640,10 +660,30 @@ local function EmbedCustomFilterData(exportData, includeOverrides)
                 if kind == "custom" then refs[key] = true end
                 if type(auraCfg) ~= "table" then return end
                 for _, typeCfg in pairs(auraCfg) do
-                    if type(typeCfg) == "table" and type(typeCfg.triggers) == "table" then
-                        for _, t in ipairs(typeCfg.triggers) do
-                            local tk, tkey = DF:ParseADFilterRef(t)
-                            if tk == "custom" then refs[tkey] = true end
+                    if type(typeCfg) == "table" then
+                        if type(typeCfg.triggers) == "table" then
+                            for _, t in ipairs(typeCfg.triggers) do
+                                local tk, tkey = DF:ParseADFilterRef(t)
+                                if tk == "custom" then refs[tkey] = true end
+                            end
+                        end
+                        -- ☠ CONDITION-GROUP TRIGGERS ARE A THIRD STORE. An effect's
+                        -- conditions live at typeCfg.conditions.groups[i].triggers -- the
+                        -- editor writes them, the Factory reads them, and this walk saw
+                        -- neither. A filter used only as a second condition group's
+                        -- trigger did not ride the export, and on import its id was never
+                        -- remapped, so the receiver's condition bound to whatever local
+                        -- filter happened to hold that id.
+                        local conds = typeCfg.conditions
+                        if type(conds) == "table" and type(conds.groups) == "table" then
+                            for _, grp in pairs(conds.groups) do
+                                if type(grp) == "table" and type(grp.triggers) == "table" then
+                                    for _, t in ipairs(grp.triggers) do
+                                        local tk, tkey = DF:ParseADFilterRef(t)
+                                        if tk == "custom" then refs[tkey] = true end
+                                    end
+                                end
+                            end
                         end
                     end
                 end
@@ -653,22 +693,90 @@ local function EmbedCustomFilterData(exportData, includeOverrides)
                 for k, v in pairs(store) do collectAuraRefs(k, v) end
             end
             if type(preset) == "table" then
-                -- auras is spec-keyed ({ [specKey] = { [name] = cfg } }); otherAuras is flat.
+                -- ☠ DISPATCH ON SHAPE, do not assume it. `auras` is spec-keyed post-V2
+                -- ({ [specKey] = { [name] = cfg } }) but the spec-scope migration runs
+                -- LAZILY per adDB, so a preset in the library that has never been rendered
+                -- on this build still holds the legacy FLAT store ({ [name] = cfg }).
+                -- Walking that as spec-keyed skips the aura-name level entirely, which
+                -- makes every @custom: owner key and trigger inside it invisible.
+                -- layoutGroups above already dispatches this way (`lg[1] ~= nil`); auras
+                -- asserted its shape in a comment and never tested it.
+                --
+                -- The probe: a spec bucket's values are aura CONFIG tables keyed by name,
+                -- so a flat store's values are configs too -- distinguish by whether the
+                -- value looks like a config (has any of the config-level keys) rather than
+                -- a bucket of configs.
+                local function looksLikeAuraConfig(v)
+                    if type(v) ~= "table" then return false end
+                    return v.priority ~= nil or v.indicators ~= nil or v.border ~= nil
+                end
                 if type(preset.auras) == "table" then
-                    for _, specAuras in pairs(preset.auras) do collectAuraStore(specAuras) end
+                    local flat = false
+                    for _, v in pairs(preset.auras) do
+                        if looksLikeAuraConfig(v) then flat = true end
+                        break
+                    end
+                    if flat then
+                        collectAuraStore(preset.auras)
+                    else
+                        for _, specAuras in pairs(preset.auras) do collectAuraStore(specAuras) end
+                    end
                 end
                 collectAuraStore(preset.otherAuras)
             end
         end
     end
     if next(refs) and DF.FilterRegistry then
-        local store = DF.FilterRegistry:GetStore()
+        -- ReadStore: exporting is a question, not a change. GetStore materialises the
+        -- account-wide table, and DandersFrames_Export is a public API that a third-party
+        -- addon can call on a user who has never created a custom filter.
+        local store = (DF.FilterRegistry.ReadStore and DF.FilterRegistry:ReadStore())
+            or DF.FilterRegistry:GetStore()
         for cfId in pairs(refs) do
             if store.customFilters[cfId] then
                 exportData.customAuraFilters = exportData.customAuraFilters or {}
                 exportData.customAuraFilters[cfId] = DF:DeepCopy(store.customFilters[cfId])
             end
         end
+    end
+end
+
+-- ☠ PROFILE-ROOT SCALARS -- the same blind spot as the colour tables, one level up.
+-- These are per-profile and user-visible, but they live at the DB ROOT rather than inside
+-- party/raid, so ExtractCategorySettings never sees them and DF:AuditExportCategories is
+-- structurally blind to them (it walks PartyDefaults/RaidDefaults only). Before this list
+-- they travelled in NEITHER direction: a shared profile arrived carrying the sender's
+-- layout but the RECIPIENT's module toggles and settings font.
+--
+-- ⚠ COPY AND APPLY BY PRESENCE, NEVER BY TRUTHINESS. partyEnabled/raidEnabled are booleans
+-- where FALSE is the meaningful value and ABSENT means enabled (see DF.db.partyEnabled
+-- ~= false everywhere), so a `if DF.db[k] then` copy would silently drop exactly the
+-- setting worth carrying. Same reason fontSlug is `~= nil` below.
+--
+-- Anything added at the profile root has to be wired in here by hand.
+local PROFILE_ROOT_SCALARS = {
+    "partyEnabled", "raidEnabled",
+    "settingsFont", "settingsFontOutline", "fontSlug",
+}
+
+local function CopyProfileRootScalars(exportData)
+    if not DF.db then return end
+    for _, key in ipairs(PROFILE_ROOT_SCALARS) do
+        if DF.db[key] ~= nil then exportData[key] = DF.db[key] end
+    end
+end
+
+-- ⚠ Declared HERE, beside the export half, and NOT next to its caller further down --
+-- a local declared after the function that references it resolves as a nil GLOBAL,
+-- which parses clean and only errors when the import actually runs.
+--
+-- Types are already checked by ValidatePayloadShape; this only decides presence.
+-- Changing partyEnabled/raidEnabled needs a reload to create or destroy the headers,
+-- and ApplyImportedProfile already ends with DF:PromptReloadIfEnableFlagsChanged().
+local function ApplyProfileRootScalars(importData)
+    if not DF.db then return end
+    for _, key in ipairs(PROFILE_ROOT_SCALARS) do
+        if importData[key] ~= nil then DF.db[key] = importData[key] end
     end
 end
 
@@ -703,11 +811,12 @@ function DF:ExportProfile(categories, frameTypes, profileName)
     end
     
     -- Build export data
+    -- ☠ No exportTime / exportedBy. Both were written on every export and parsed back
+    -- into GetImportInfo, and NOTHING ever read either one -- so exportedBy only ever
+    -- stamped the exporter's character name into a string built to be shared publicly.
     local exportData = {
         version = DF.VERSION,
-        exportTime = time(),
         profileName = exportProfileName,
-        exportedBy = UnitName("player") or "Unknown",
     }
     
     if not DF.db then
@@ -768,6 +877,7 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         if DF.db.linkedSections and next(DF.db.linkedSections) then
             exportData.linkedSections = DF:DeepCopy(DF.db.linkedSections)
         end
+        CopyProfileRootScalars(exportData)
         exportData.categories = nil
     else
         -- Selective category export
@@ -810,6 +920,9 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         if categorySet.other and DF.db.linkedSections and next(DF.db.linkedSections) then
             exportData.linkedSections = DF:DeepCopy(DF.db.linkedSections)
         end
+        -- Module toggles and the settings font are behaviour/appearance preferences,
+        -- so they ride the same category as linkedSections above.
+        if categorySet.other then CopyProfileRootScalars(exportData) end
         -- ☠ COLOURS ARE PROFILE-ROOT, so they need a special case here exactly like the
         -- blocks above -- ExtractCategorySettings only ever walks the MODE tables. The
         -- full-export branch has copied all four since the roleColors/dispelColors move;
@@ -834,10 +947,9 @@ function DF:ExportProfile(categories, frameTypes, profileName)
         return nil
     end
     
-    exportData.frameTypes = {}
-    if exportData.party then exportData.frameTypes.party = true end
-    if exportData.raid then exportData.frameTypes.raid = true end
-    
+    -- (No exportData.frameTypes: it was written as exactly "party if exportData.party,
+    -- raid if exportData.raid", which is what hasParty/hasRaid already derive on import.)
+
     -- Serialize -> Compress -> Encode (same as WeakAuras, Cell, etc.)
     local serialized = LibSerialize:Serialize(exportData)
     local compressed = LibDeflate:CompressDeflate(serialized)
@@ -876,9 +988,50 @@ local function ValidatePayloadShape(data)
             return nil, "Corrupt data"
         end
     end
+    -- The profile-root scalars are assigned straight to DF.db.<key>, so a table or
+    -- function arriving under one of those names has to be rejected here -- the apply
+    -- has no type check of its own, and settingsFont in particular is handed to
+    -- SetFont downstream.
+    for _, key in ipairs(PROFILE_ROOT_SCALARS) do
+        local t = type(data[key])
+        if data[key] ~= nil and t ~= "string" and t ~= "boolean" and t ~= "number" then
+            return nil, "Corrupt data"
+        end
+    end
     if type(data.party) ~= "table" and type(data.raid) ~= "table" then
         return nil, "No profile data found"
     end
+
+    -- ☠ CYCLE CHECK. LibSerialize explicitly supports table self-reference, so a payload
+    -- can legitimately decode into a structure containing a loop -- and DF:DeepCopy used
+    -- to recurse into it forever. DeepCopy is cycle-guarded now, but a payload that
+    -- CONTAINS a cycle is malformed for our purposes regardless: nothing in a profile is
+    -- supposed to be self-referential, and letting one into SavedVariables risks the same
+    -- unbounded walk in any future consumer that is not guarded. Reject it here, where
+    -- there is a message to show, rather than surviving on the copier's guard.
+    local seen = {}
+    local function hasCycle(t, depth)
+        if type(t) ~= "table" then return false end
+        if seen[t] then return true end
+        if depth > 32 then return true end   -- absurdly deep is malformed too
+        seen[t] = true
+        for _, v in pairs(t) do
+            if hasCycle(v, depth + 1) then return true end
+        end
+        seen[t] = nil
+        return false
+    end
+    if hasCycle(data, 0) then
+        return nil, "Corrupt data"
+    end
+
+    -- ⚠ NO VERSION GATE, DELIBERATELY -- but say so, because its absence looks like an
+    -- oversight. `version` is written by every exporter and read only for the display
+    -- label. Forward compatibility is the stated intent (see the header above): a payload
+    -- from a NEWER build must still import, because its extra keys are simply unknown to
+    -- us and the shallow shape check above is what keeps that safe. The filter-string path
+    -- DOES gate (`v > FILTER_VERSION` -> "newer") because a v2 filter payload can change
+    -- what a filter MEANS; a profile payload carries no such semantics.
     return data, nil
 end
 
@@ -1015,10 +1168,7 @@ function DF:GetImportInfo(importData)
         hasRaid = importData.raid ~= nil,
         isFullExport = importData.categories == nil,
         categories = importData.categories or {},
-        frameTypes = importData.frameTypes or {},
         profileName = importData.profileName or "Imported Profile",
-        exportedBy = importData.exportedBy,
-        exportTime = importData.exportTime,
     }
     
     -- Detect categories if not explicitly stored (legacy imports)
@@ -1179,6 +1329,13 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             linkedSections = DF:DeepCopy(DF.db.linkedSections or {}),
             partyEnabled = DF.db.partyEnabled ~= false,
             raidEnabled  = DF.db.raidEnabled  ~= false,
+            -- Profile-root scalars, copied from current like everything else here so an
+            -- unticked category leaves them alone. Without these the new profile was born
+            -- without a settings font and silently fell back to the default on backfill,
+            -- so importing anything reset the options window's own typeface.
+            settingsFont        = DF.db.settingsFont,
+            settingsFontOutline = DF.db.settingsFontOutline,
+            fontSlug            = DF.db.fontSlug,
         }
 
         -- ☠ CARRY THE MIGRATION FLAGS. Everything above is copied from the CURRENT
@@ -1350,9 +1507,25 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
                     for auraName, auraCfg in pairs(store) do
                         if type(auraCfg) == "table" then
                             for _, typeCfg in pairs(auraCfg) do
-                                if type(typeCfg) == "table" and type(typeCfg.triggers) == "table" then
-                                    for i, t in ipairs(typeCfg.triggers) do
-                                        typeCfg.triggers[i] = remapRef(t)
+                                if type(typeCfg) == "table" then
+                                    if type(typeCfg.triggers) == "table" then
+                                        for i, t in ipairs(typeCfg.triggers) do
+                                            typeCfg.triggers[i] = remapRef(t)
+                                        end
+                                    end
+                                    -- ☠ Condition-group triggers, the third store. Mirrors
+                                    -- the export walk -- miss these and the id is never
+                                    -- remapped, so the condition binds to whatever local
+                                    -- filter happens to hold the exporter's cf number.
+                                    local conds = typeCfg.conditions
+                                    if type(conds) == "table" and type(conds.groups) == "table" then
+                                        for _, grp in pairs(conds.groups) do
+                                            if type(grp) == "table" and type(grp.triggers) == "table" then
+                                                for i, t in ipairs(grp.triggers) do
+                                                    grp.triggers[i] = remapRef(t)
+                                                end
+                                            end
+                                        end
                                     end
                                 end
                             end
@@ -1367,10 +1540,53 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
                     end
                 end
                 if type(preset) == "table" then
+                    -- ☠ Same shape dispatch as the export walk: `auras` is spec-keyed only
+                    -- AFTER the lazy spec-scope migration has touched that adDB, so a
+                    -- never-rendered preset still holds the flat store. Treating it as
+                    -- spec-keyed skips the aura-name level and leaves every id unremapped.
+                    local function looksLikeAuraConfig(v)
+                        if type(v) ~= "table" then return false end
+                        return v.priority ~= nil or v.indicators ~= nil or v.border ~= nil
+                    end
                     if type(preset.auras) == "table" then
-                        for _, specAuras in pairs(preset.auras) do remapAuraStore(specAuras) end
+                        local flat = false
+                        for _, v in pairs(preset.auras) do
+                            if looksLikeAuraConfig(v) then flat = true end
+                            break
+                        end
+                        if flat then
+                            remapAuraStore(preset.auras)
+                        else
+                            for _, specAuras in pairs(preset.auras) do remapAuraStore(specAuras) end
+                        end
                     end
                     remapAuraStore(preset.otherAuras)
+                end
+            end
+        end
+    end
+
+    -- ☠ DESIGNER PRESET NAME CLASHES, resolved payload-side like the filter refs above.
+    --
+    -- ImportDesignerPresets merges imported-wins, which silently replaced a same-named
+    -- preset the user had built. Only a clobber when we are importing INTO the current
+    -- profile: the createNewProfile branch made the new profile a COPY moments ago, so
+    -- its library is a duplicate and the originals are safe in the source profile.
+    --
+    -- ⚠ MUST run here, BEFORE the mode tables are applied. Presets are referenced by
+    -- NAME, and once the payload's refs have been copied into DF.db they are
+    -- indistinguishable from the user's own -- repointing then would move local refs the
+    -- import never carried. Same reason the filter-ref remap above is payload-side.
+    if not createNewProfile and DF.UniquifyImportedDesignerPresets then
+        local presetCats = selectedCategories
+        if not presetCats and not importInfo.isFullExport then
+            presetCats = importInfo.detectedCategories
+        end
+        local renamed = DF:UniquifyImportedDesignerPresets(importData, presetCats)
+        if renamed and DF.Debug then
+            for kind, map in pairs(renamed) do
+                for old, new in pairs(map) do
+                    DF:Debug("PROFILE", "import: %s preset name clash, %s -> %s", kind, old, new)
                 end
             end
         end
@@ -1435,6 +1651,7 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         if importData.linkedSections then
             DF.db.linkedSections = importData.linkedSections
         end
+        ApplyProfileRootScalars(importData)
     else
         -- Selective import: merge only selected categories
         local categoriesToImport = selectedCategories or importInfo.detectedCategories
@@ -1459,6 +1676,8 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         if importCategorySet.other and importData.linkedSections then
             DF.db.linkedSections = importData.linkedSections
         end
+        -- Module toggles and settings font: same category as the flags above.
+        if importCategorySet.other then ApplyProfileRootScalars(importData) end
         -- ☠ THE COLOURS CATEGORY WAS EXPORT-ONLY. The export block above packs all four
         -- palettes when `colors` is ticked, but nothing here consumed them and the only
         -- code that applies classColors/powerColors/roleColors sits in the FULL-import
@@ -1467,11 +1686,26 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         -- data loss on the one feature whose entire purpose is moving colours between
         -- accounts. These are profile-root keys, so they need naming here by hand;
         -- MergeCategorySettings only ever walks the MODE tables.
-        if importCategorySet.colors then
-            if importData.classColors then DF.db.classColors = importData.classColors end
-            if importData.powerColors then DF.db.powerColors = importData.powerColors end
-            if importData.roleColors  then DF.db.roleColors  = importData.roleColors  end
-        end
+        --
+        -- ☠ AND THAT FIX WAS ITSELF INERT UNTIL 2026-08-10. It gated on
+        -- `importCategorySet.colors`, a condition that can NEVER be true: `colors` has no
+        -- entry in DF.ExportCategories (deliberately -- see the note at the top of that
+        -- file), and the import GUI derives every checkbox from `pairs(DF.ExportCategories)`.
+        -- So the category could not be offered, could not be ticked, and this block never
+        -- ran. The bug it was written to fix survived the fix.
+        --
+        -- Gate on PRESENCE instead, which is sound because of an asymmetry in the exporter:
+        -- the FULL export packs all four palettes unconditionally, while the SELECTIVE
+        -- export packs them only `if categorySet.colors` -- equally unreachable. So a
+        -- payload carrying these keys is necessarily a full export, i.e. the user asked
+        -- for everything. Presence therefore IS the authorisation, and no reachable path
+        -- can deliver these keys without that intent.
+        --
+        -- ⚠ If `colors` is ever given a real category entry, revisit BOTH ends together --
+        -- at that point presence stops implying a full export.
+        if importData.classColors then DF.db.classColors = importData.classColors end
+        if importData.powerColors then DF.db.powerColors = importData.powerColors end
+        if importData.roleColors  then DF.db.roleColors  = importData.roleColors  end
         -- Dispel palette: top-level key, and the fourth member of that set -- so `colors`
         -- must request it too. Also gated on `dispel` and `auras` because the two v4
         -- families it is rebuilt from ride different ones -- the overlay's
@@ -1563,6 +1797,83 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     if DF.RunV5LegacyMigrations then
         DF:RunV5LegacyMigrations()
     end
+
+    -- ☠ THE MIGRATIONS A PROFILE SWITCH RUNS, WHICH IMPORT DID NOT.
+    --
+    -- DF:SetProfile runs seven passes over the newly-active profile; this path ran three,
+    -- one of them overlapping. The five below were simply never reached by imported data,
+    -- even though an imported payload is the LEAST migrated data the addon ever sees -- a
+    -- v4 export is by definition pre-migration.
+    --
+    -- MigrateOORTextAlpha is the sharpest case: its own comment (Core.lua) reasons in
+    -- detail about "a v4 export imported over an already-migrated profile" reintroducing
+    -- oorNameTextAlpha, and explains that it is presence-gated rather than flag-gated for
+    -- exactly that reason -- and nothing on this path ever called it. The code was written
+    -- for a scenario its wiring excluded.
+    --
+    -- ⚠ ORDER MATTERS and mirrors SetProfile: designer presets first (later passes read
+    -- the resolved library), then the targeted-spell border fold, then the two text
+    -- clean-ups, then the OOR alpha fold. MigrateBorderInsetFold and the TD legacy rebuild
+    -- already ran above and are deliberately not repeated -- the fold is NOT idempotent
+    -- (see the note at its call site).
+    --
+    -- ⚠ Each is guarded because they live in the resident addon and this file is reached
+    -- from the options companion.
+    -- ☠ BACKFILL DEFAULTS INTO THE IMPORTED MODE TABLES.
+    --
+    -- A full import replaces DF.db.party / DF.db.raid WHOLESALE from the payload, and the
+    -- only defaults backfill in the addon lives inside the ADDON_LOADED handler -- neither
+    -- this path nor SetProfile re-runs it. So every key added to the defaults SINCE the
+    -- payload was exported read nil for the rest of the session: import a v4 export and
+    -- debuffImportantHighlight (default true) is absent, `if db.debuffImportantHighlight`
+    -- reads nil, Important Debuffs is off -- while the settings page shows it ON, because
+    -- the checkbox falls back to the default. Only a /reload corrected it.
+    --
+    -- Same shape as the login pass (Core.lua): fill only ABSENT keys, so nothing the
+    -- payload actually carried is touched.
+    local function backfillDefaults(modeTable, defaults)
+        if type(modeTable) ~= "table" or type(defaults) ~= "table" then return end
+        for key, value in pairs(defaults) do
+            if modeTable[key] == nil then
+                modeTable[key] = DF:DeepCopy(value)
+            end
+        end
+    end
+    backfillDefaults(DF.db and DF.db.party, DF.PartyDefaults)
+    backfillDefaults(DF.db and DF.db.raid, DF.RaidDefaults)
+
+    -- ☠ CLEAR THE GATE FLAGS FIRST, or the passes below are no-ops on imported data.
+    --
+    -- The new-profile branch copies every `_`-prefixed flag off the SOURCE profile by
+    -- convention, so a migration flag describing the user's own already-migrated data
+    -- rides across and then vetoes the migration of the payload that just REPLACED that
+    -- data. `_personalTsImportantBorderV1` is the proven case: a v4 payload carrying
+    -- personalTargetedSpellHighlight* arrived with the flag pre-set, the pass skipped it
+    -- here and at every future login, and the customisation was silently lost.
+    --
+    -- A flag asserts "this PROFILE's data has been folded". The payload's data has not, so
+    -- for these the flags are false by definition at this moment.
+    --
+    -- ⚠ THREE, not five. _oorTextAlphaV1 used to be cleared here as a fourth and was
+    -- never a gate -- MigrateOORTextAlpha is presence-gated on m.oorNameTextAlpha, so
+    -- clearing the flag did nothing. And MigrateDesignerPresets, called just below,
+    -- has no flag at all: if you give it one, add it here in the same change.
+    local p = DF.db
+    if type(p) == "table" then
+        p._personalTsImportantBorderV1 = nil
+        p._legacyTextOverrideCleanupV1 = nil
+        p._designerLayoutCleanupV1 = nil
+    end
+
+    if DF.MigrateDesignerPresets then DF:MigrateDesignerPresets() end
+    if DF.MigrateTargetedSpellImportantBorder then DF:MigrateTargetedSpellImportantBorder() end
+    if DF.CorrectStrayMigratedHealthText then DF:CorrectStrayMigratedHealthText() end
+    if DF.CleanupLegacyTextLayoutOverrides then DF:CleanupLegacyTextLayoutOverrides() end
+    if DF.MigrateOORTextAlpha then DF:MigrateOORTextAlpha() end
+    -- ⚠ An imported profile can carry the OLD three-stage keys and no stop list, so the
+    -- conversion has to run on the import path too -- otherwise the import renders from
+    -- the legacy fallback until some later login happens to convert it.
+    if DF.MigrateHealthColorStops then DF:MigrateHealthColorStops() end
 
     DF:FullProfileRefresh()
     DF:Say(L["Profile imported successfully!"])

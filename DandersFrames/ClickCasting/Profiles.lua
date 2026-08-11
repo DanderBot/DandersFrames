@@ -3,6 +3,15 @@ local addonName, DF = ...
 -- Get module namespace
 local CC = DF.ClickCast
 
+-- ⚠ This file is the click-casting twin of Core/Profile.lua, which localises every
+-- message it prints; this one printed all of them raw, including several whose keys
+-- already existed and were in use by the sibling for the identical sentence. A bare
+-- literal never reaches the translators at all -- the non-enUS locale files are packager
+-- placeholders filled from the enUS key list, so a string that is not a key cannot be
+-- translated later by anyone, in any language.
+local L = DF.L
+local format = string.format
+
 -- Local aliases for shared constants (defined in Constants.lua)
 local DB_VERSION = CC.DB_VERSION
 local PROFILE_TEMPLATE = CC.PROFILE_TEMPLATE
@@ -30,11 +39,9 @@ local function GetCombatCondition(binding)
     return binding.loadCombat
 end
 
--- Check if binding has a combat restriction (not "always")
-local function HasCombatRestriction(binding)
-    local cond = GetCombatCondition(binding)
-    return cond ~= nil
-end
+-- (Removed) HasCombatRestriction, a one-line `GetCombatCondition(binding) ~= nil`.
+-- No callers in either addon, and its CC export had no readers either -- callers
+-- that want the answer already call GetCombatCondition and use the value itself.
 
 -- Build the modifier prefix string for an attribute
 -- WoW SecureActionButtonTemplate requires modifiers in order: alt, ctrl, shift
@@ -58,52 +65,15 @@ local function BuildModifierPrefix(modifiers)
     return result
 end
 
--- Build a WoW binding key for SetOverrideBindingClick
--- Format: "ALT-CTRL-SHIFT-META-KEY" (same order)
-local function BuildMouseBindingKey(modifiers, button)
-    local buttonMap = {
-        LeftButton = "BUTTON1",
-        RightButton = "BUTTON2",
-        MiddleButton = "BUTTON3",
-    }
-    -- Handle Button4-Button31 dynamically
-    local buttonKey = buttonMap[button]
-    if not buttonKey then
-        local num = button:match("Button(%d+)")
-        if num then
-            buttonKey = "BUTTON" .. num
-        else
-            -- Unparseable button name -> no key, NOT button 1.
-            --
-            -- Defaulting to BUTTON1 silently rewrote plain left-click with an
-            -- action the user never bound there. The editor constrains this
-            -- field, but profile import does not, so a hand-edited or foreign
-            -- profile could hijack left-click on every frame with no way to see
-            -- why. Returning nil lets the caller skip the binding instead.
-            return nil
-        end
-    end
-    
-    if not modifiers or modifiers == "" then
-        return buttonKey
-    end
-    
-    -- Parse modifiers
-    local hasShift = modifiers:lower():find("shift") ~= nil
-    local hasCtrl = modifiers:lower():find("ctrl") ~= nil
-    local hasAlt = modifiers:lower():find("alt") ~= nil
-    local hasMeta = modifiers:lower():find("meta") ~= nil
-    
-    -- Build in order: ALT-CTRL-SHIFT-META-KEY
-    local parts = {}
-    if hasAlt then table.insert(parts, "ALT") end
-    if hasCtrl then table.insert(parts, "CTRL") end
-    if hasShift then table.insert(parts, "SHIFT") end
-    if hasMeta then table.insert(parts, "META") end
-    table.insert(parts, buttonKey)
-    
-    return table.concat(parts, "-")
-end
+-- ☠ (Removed) BuildMouseBindingKey (~44 lines) and its CC export. No callers in
+-- either addon. Its header named SetOverrideBindingClick, an API this addon does not
+-- use at all -- hover binds are set inside the restricted environment via
+-- self:SetBindingClick, built by CC:BuildHovercastSetupScript -- so the function was
+-- built for a mechanism that was replaced before it ever had a caller.
+--
+-- ⚠ The unparseable-button rule it documented is NOT lost: GetButtonNumber below
+-- enforces the same thing and now states the reasoning itself rather than pointing
+-- here. It also held a second copy of the modifier probes in BuildModifierPrefix.
 
 -- Get the button attribute name (e.g., "shift-ctrl-type1" for shift+ctrl+left click)
 local function GetButtonNumber(button)
@@ -120,10 +90,12 @@ local function GetButtonNumber(button)
         if num then
             num = tonumber(num)
         else
-            -- Unparseable -> nil, NOT 1. See BuildMouseBindingKey above: this
-            -- fed the action into type1/macrotext1 and marked button 1 as
-            -- covered, so the "restore uncovered base button" pass then skipped
-            -- restoring left-click targeting as well.
+            -- ☠ UNPARSEABLE -> nil, NOT 1. Defaulting to button 1 fed the action
+            -- into type1/macrotext1 and marked button 1 as covered, so the
+            -- "restore uncovered base button" pass then skipped restoring
+            -- left-click targeting too -- a hand-edited or imported profile could
+            -- hijack left-click on every frame with no way to see why. The editor
+            -- constrains this field; profile import does not.
             return nil
         end
     end
@@ -132,9 +104,7 @@ end
 
 -- Export helper functions to CC table for use by other modules
 CC.GetCombatCondition = GetCombatCondition
-CC.HasCombatRestriction = HasCombatRestriction
 CC.BuildModifierPrefix = BuildModifierPrefix
-CC.BuildMouseBindingKey = BuildMouseBindingKey
 CC.GetButtonNumber = GetButtonNumber
 
 -- ============================================================
@@ -171,7 +141,6 @@ local function GetCurrentLoadoutConfigID()
             if specID then
                 local savedConfigID = C_ClassTalents.GetLastSelectedSavedConfigID(specID)
                 if savedConfigID and savedConfigID > 0 then
-                    -- print("[DF Debug] GetCurrentLoadoutConfigID using LastSelectedSavedConfigID:", savedConfigID)
                     return savedConfigID
                 end
             end
@@ -181,7 +150,6 @@ local function GetCurrentLoadoutConfigID()
     -- Fallback to GetActiveConfigID
     if C_ClassTalents and C_ClassTalents.GetActiveConfigID then
         local activeID = C_ClassTalents.GetActiveConfigID() or 0
-        -- print("[DF Debug] GetCurrentLoadoutConfigID using GetActiveConfigID:", activeID)
         return activeID
     end
     return 0
@@ -327,7 +295,7 @@ function CC:SetActiveProfile(profileName)
     if InCombatLockdown() then
         -- Queue the switch for after combat
         self:Defer("profileSwitch", profileName)
-        DF:Say("Profile switch to '" .. profileName .. "' queued (in combat)")
+        DF:Say(format(L["Profile switch to '%s' queued (in combat)"], profileName))
         return false
     end
     
@@ -335,7 +303,7 @@ function CC:SetActiveProfile(profileName)
     
     -- Check profile exists
     if not classData.profiles[profileName] then
-        DF:Err("Profile '" .. profileName .. "' does not exist")
+        DF:Err(format(L["Profile '%s' does not exist."], profileName))
         return false
     end
     
@@ -380,7 +348,7 @@ function CC:SetActiveProfile(profileName)
     end
 
     if oldProfile ~= profileName then
-        DF:Say("Switched to profile: " .. profileName)
+        DF:Say(format(L["Switched to profile: %s"], profileName))
     end
 
     return true
@@ -391,7 +359,7 @@ function CC:CreateProfile(profileName, copyFrom)
     local classData = self:GetClassData()
     
     if classData.profiles[profileName] then
-        DF:Err("Profile '" .. profileName .. "' already exists")
+        DF:Err(format(L["Profile '%s' already exists."], profileName))
         return false
     end
     
@@ -401,7 +369,7 @@ function CC:CreateProfile(profileName, copyFrom)
         classData.profiles[profileName] = self:CreateEmptyProfile()
     end
     
-    DF:Say("Created profile: " .. profileName)
+    DF:Say(format(L["Created profile: %s"], profileName))
     return true
 end
 
@@ -412,12 +380,12 @@ function CC:DeleteProfile(profileName)
     
     -- Cannot delete the default profile (check both old and new naming)
     if profileName == defaultName or profileName == "Default" then
-        DF:Err("Cannot delete the default profile")
+        DF:Err(L["Cannot delete the default profile"])
         return false
     end
     
     if not classData.profiles[profileName] then
-        DF:Err("Profile '" .. profileName .. "' does not exist")
+        DF:Err(format(L["Profile '%s' does not exist."], profileName))
         return false
     end
     
@@ -437,7 +405,7 @@ function CC:DeleteProfile(profileName)
     end
     
     classData.profiles[profileName] = nil
-    DF:Say("Deleted profile: " .. profileName)
+    DF:Say(format(L["Deleted profile: %s"], profileName))
     return true
 end
 
@@ -448,17 +416,17 @@ function CC:RenameProfile(oldName, newName)
     
     -- Cannot rename the default profile (check both old and new naming)
     if oldName == defaultName or oldName == "Default" then
-        DF:Err("Cannot rename the default profile")
+        DF:Err(L["Cannot rename the default profile"])
         return false
     end
     
     if not classData.profiles[oldName] then
-        DF:Err("Profile '" .. oldName .. "' does not exist")
+        DF:Err(format(L["Profile '%s' does not exist."], oldName))
         return false
     end
     
     if classData.profiles[newName] then
-        DF:Err("Profile '" .. newName .. "' already exists")
+        DF:Err(format(L["Profile '%s' already exists."], newName))
         return false
     end
     
@@ -480,7 +448,7 @@ function CC:RenameProfile(oldName, newName)
         end
     end
     
-    DF:Say("Renamed profile: " .. oldName .. " → " .. newName)
+    DF:Say(format(L["Renamed profile: %s → %s"], oldName, newName))
     return true
 end
 
@@ -550,7 +518,6 @@ function CC:CheckLoadoutProfileSwitch()
     local loadoutName = GetLoadoutName(loadoutID) or "Default"
     
     -- Debug output (use /dfccloadout to see this info manually)
-    -- print("|cff888888[DF Loadout] Spec:", specIndex, "LoadoutID:", loadoutID, "LoadoutName:", loadoutName, "Assigned:", assignedProfile or "none", "IsSpecific:", tostring(isSpecific), "Current:", currentProfile, "|r")
     
     if assignedProfile and assignedProfile ~= currentProfile then
         -- Profile is assigned (either to this specific loadout or as spec default) - switch to it
@@ -558,7 +525,7 @@ function CC:CheckLoadoutProfileSwitch()
             self:ApplyBindings()
             self:RefreshUIIfLoaded()
             local source = isSpecific and "loadout: " .. loadoutName or "spec default"
-            DF:Say("Switched to profile: " .. assignedProfile .. " (" .. source .. ")")
+            DF:Say(format(L["Switched to profile: %s (%s)"], assignedProfile, source))
         end
     elseif not assignedProfile and loadoutID > 0 then
         -- No profile assigned to this loadout or spec at all
@@ -603,8 +570,10 @@ end
 -- Show notification that a profile was auto-created
 function CC:ShowProfileCreatedNotification(profileName)
     -- Simple print for now - could be a fancy toast later
-    DF:Say("Auto-created profile: |cffffffff" .. profileName .. "|r")
-    print("|cff888888Your bindings were copied to this new profile. You can customize it in the Profiles tab.|r")
+    -- Colour lives HERE, not in the locale key -- a translator unbalancing |c…|r
+    -- would swallow the rest of the line.
+    DF:Say(format(L["Auto-created profile: %s"], "|cffffffff" .. profileName .. "|r"))
+    DF:Say("|cff888888" .. L["Your bindings were copied to this new profile. You can customize it in the Profiles tab."] .. "|r")
 end
 
 -- Get all loadouts for a spec (for UI display)
@@ -622,7 +591,6 @@ function CC:GetSpecLoadouts(specIndex)
                     local loadoutName = "Loadout " .. configID
                     if configInfo then
                         loadoutName = configInfo.name or loadoutName
-                        -- print("[DF Debug] GetSpecLoadouts configID:", configID, "name:", configInfo.name or "nil")
                     end
                     table.insert(loadouts, {
                         configID = configID,
@@ -768,7 +736,7 @@ function CC:ExportProfile()
     local profile, profileName = self:GetActiveProfile()
     
     if not profile then
-        DF:Err("No profile to export")
+        DF:Err(L["No profile to export"])
         return nil
     end
     
@@ -782,7 +750,7 @@ function CC:ExportProfile()
     
     local encoded, err = SerializeTable(exportData)
     if not encoded or encoded == "" then
-        DF:Err("Export failed: " .. (err or "unknown error"))
+        DF:Err(format(L["Export failed: %s"], err or L["unknown error"]))
         return nil
     end
     

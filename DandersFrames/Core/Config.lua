@@ -253,6 +253,12 @@ local SHIPPED_MEDIA_FILES = {
     "Icons\\edit_square.tga",
     "Icons\\expand_more.tga",
     "Icons\\filter_alt.tga",
+    -- ⚠ BOTH filter_list files ship, and the .png is the live one -- it is the
+    -- heavier weight, which is what reads at 11-13px. They differ only in that, so
+    -- the trap is real: a call site written as ...\filter_list, with no extension,
+    -- silently resolves to the LIGHT .tga and looks like the icon simply did not
+    -- take. Every live reference spells out ".png".
+    "Icons\\filter_list.png",
     "Icons\\filter_list.tga",
     "Icons\\info.tga",
     "Icons\\keyboard.tga",
@@ -1290,7 +1296,11 @@ DF.PartyDefaults = {
     aggroUseCustomColors = false,
 
     -- Anchor/Position
-    anchorPoint = "CENTER",
+    -- ☠ (Removed) anchorPoint = "CENTER". Seeded here, written twice in
+    -- Frames/Position.lua and carried in profile export, but READ NOWHERE -- every
+    -- SetPoint that would use it passes the literal "CENTER". It was a setting in
+    -- name only: editing it in SavedVariables did nothing. anchorX / anchorY are
+    -- read and stay.
     anchorX = 0,
     anchorY = -325,
 
@@ -1311,6 +1321,14 @@ DF.PartyDefaults = {
     missingHealthColorMedium = {r = 1, g = 1, b = 0, a = 1},
     missingHealthColorMediumUseClass = false,
     missingHealthColorMediumWeight = 2,
+    -- The missing-health bar runs the same stop model, read through the same
+    -- BuildColorStops with this prefix. See the healthColorStops note for the shape and
+    -- for why the legacy stage keys are still here.
+    missingHealthColorStops = {
+        { threshold = 0,   color = {r = 1, g = 0, b = 0, a = 1}, useClass = false },
+        { threshold = 50,  color = {r = 1, g = 1, b = 0, a = 1}, useClass = false },
+        { threshold = 100, color = {r = 0.05098039656877518, g = 1, b = 0, a = 1}, useClass = false },
+    },
     missingHealthColorMode = "CUSTOM",
     missingHealthGradientAlpha = 0.8,
     missingHealthTexture = "Interface\\AddOns\\DandersFrames\\Media\\DF_Minimalist",
@@ -1891,6 +1909,25 @@ DF.PartyDefaults = {
     healthColorMedium = {r = 1, g = 1, b = 0, a = 1},
     healthColorMediumUseClass = false,
     healthColorMediumWeight = 2,
+    -- ★ THE GRADIENT, AS A STOP LIST. threshold is HEALTH PERCENT (0 = empty bar), so
+    -- the list reads low-to-full. Any number of stops; the renderer interpolates
+    -- between neighbours and holds the end colour outside the outermost pair.
+    --
+    -- ⚠ NEW PROFILES GET THESE THREE. An EXISTING profile does NOT -- it is converted
+    -- from its Low/Medium/High + Weight keys by DF:MigrateHealthColorStops, and the
+    -- shipped weights (Low 2 / Medium 2 / High 1) describe FIVE points, not three:
+    -- red held to 25%, yellow at 50 held to 75, green at 100. That plateau shape is
+    -- what upgrading users have been looking at, so the migration reproduces it rather
+    -- than flattening everyone onto this cleaner ramp.
+    --
+    -- ☠ The Low/Medium/High/Weight keys above STAY. They are the migration's input and
+    -- the fallback BuildColorStops reads for a profile the lazy migration has not
+    -- reached yet -- deleting them would blank the gradient for exactly one login.
+    healthColorStops = {
+        { threshold = 0,   color = {r = 1, g = 0, b = 0, a = 1}, useClass = false },
+        { threshold = 50,  color = {r = 1, g = 1, b = 0, a = 1}, useClass = false },
+        { threshold = 100, color = {r = 0.05098039656877518, g = 1, b = 0, a = 1}, useClass = false },
+    },
     healthColorMode = "CLASS",
     healthFont = "DF Roboto SemiBold",
     healthFontSize = 12,

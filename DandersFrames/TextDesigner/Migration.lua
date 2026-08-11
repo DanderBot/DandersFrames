@@ -83,6 +83,21 @@ local function buildHealthElement(db, nextID)
         return e
     end
 
+    -- Name the GROUP cards, and only those. A group's card title falls back to the
+    -- generic L["Text Group"] (Options/TextDesigner/UI/Options.lua), which says nothing
+    -- about what is inside it -- a single-element card falls back to its content type's
+    -- own label ("Current Health"), which is already more informative than "Health".
+    -- So this is set per-branch rather than in newHealthElem, which seeds every health
+    -- element.
+    --
+    -- ⚠ EDITOR-ONLY. The Resolver never reads `label`; it is the card's display name.
+    -- Setting it changes nothing that renders on a frame.
+    --
+    -- ⚠ Localised at BUILD time, so it is baked in whatever language the profile was
+    -- created in. Acceptable because the field is user-editable and this is only a
+    -- default -- but it is why this is a plain string in the store and not a key.
+    local healthGroupLabel = (DF.L and DF.L["Health"]) or "Health"
+
     if healthFormat == "PERCENT" then
         return newHealthElem({
             contentType = "hp_percent",
@@ -104,6 +119,7 @@ local function buildHealthElement(db, nextID)
     elseif healthFormat == "CURRENT_PERCENT" then
         return newHealthElem({
             contentType    = "group",
+            label          = healthGroupLabel,
             groupSeparator = " ",
             groupItems     = {
                 { contentType = "hp_current", abbreviate = db.healthTextAbbreviate },
@@ -114,6 +130,7 @@ local function buildHealthElement(db, nextID)
         -- CURRENTMAX / CURRENT_MAX / unknown → the Config default (current / max).
         return newHealthElem({
             contentType    = "group",
+            label          = healthGroupLabel,
             groupSeparator = " / ",
             groupItems     = {
                 { contentType = "hp_current", abbreviate = db.healthTextAbbreviate, hideWhenZero = false },

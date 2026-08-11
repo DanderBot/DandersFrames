@@ -138,18 +138,30 @@ function CC:CreateClickCastUI(parent)
     title:SetTextColor(themeColor.r, themeColor.g, themeColor.b)
     
     -- Enable checkbox (next to title)
-    local enableCb = CreateFrame("CheckButton", nil, row1, "BackdropTemplate")
-    enableCb:SetPoint("LEFT", title, "RIGHT", 15, 0)
-    DF.GUI:StyleCheckButton(enableCb, { accent = themeColor })
-    
-    local enableLabel = row1:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    enableLabel:SetPoint("LEFT", enableCb, "RIGHT", 3, 0)
-    enableLabel:SetText(L["Enabled"])
-    enableLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
-    enableCb:SetScript("OnClick", function(self)
-        local wantEnabled = self:GetChecked()
-        
+    --
+    -- ⚠ NO `set` HERE, DELIBERATELY, and no veto either.
+    --
+    -- Enabling is asynchronous: a Clique/Clicked conflict or the Blizzard warning opens
+    -- a popup, and the write happens in that popup's confirm callback, not on the click.
+    -- The box stays ticked optimistically while the popup is up, and the popup's CANCEL
+    -- path unchecks it (Dialogs.lua:762, 779, 871, 881, 1024) -- so the click must leave
+    -- the visual alone. An "abort and revert" hook is exactly wrong for this shape: it
+    -- would put the box back before the user has answered, and confirming would then
+    -- leave click-casting enabled with the box unticked.
+    -- ☠ DECLARED BEFORE THE INITIALIZER, on purpose. The onClick closure below hands
+    -- `enableCb` to both popups so their cancel paths can untick it -- but a local's
+    -- scope begins at the statement AFTER its declaration, so inside a one-statement
+    -- `local enableCb = CreateCheckRow{ onClick = ... }` those references compiled
+    -- against a nil GLOBAL: both popups received nil, and cancelling left the box
+    -- ticked while CC.db.enabled stayed false.
+    local enableCb
+    enableCb = DF.GUI:CreateCheckRow(row1, {
+        label       = L["Enabled"],
+        accent      = themeColor,
+        nativeCheck = true,
+        labelGap    = 3,
+        get         = function() return CC.db and CC.db.enabled end,
+        onClick     = function(wantEnabled)
         if wantEnabled then
             -- Check for conflicting addons
             local conflicts = {}
@@ -170,25 +182,28 @@ function CC:CreateClickCastUI(parent)
             end
             
             if #conflicts > 0 then
-                -- Show conflict popup
-                CC:ShowClickCastConflictPopup(conflicts, self)
+                -- The popup owns the decision from here; it unchecks on cancel.
+                CC:ShowClickCastConflictPopup(conflicts, enableCb)
                 return
             end
-            
+
             -- No addon conflicts - show Blizzard warning
-            CC:ShowBlizzardClickCastWarning(self, function()
+            CC:ShowBlizzardClickCastWarning(enableCb, function()
                 -- Proceed with enabling
                 CC.db.enabled = true
                 CC:SetEnabled(true)
             end)
+            -- The warning's confirm callback owns the write; it unchecks on cancel.
             return
         end
-        
-        -- Disabling - proceed normally
+
+        -- Disabling - proceed normally (no popup, so write it here).
         CC.db.enabled = false
         CC:SetEnabled(false)
-    end)
-    
+        end,
+    })
+    enableCb:SetPoint("LEFT", title, "RIGHT", 15, 0)
+
     -- Profile settings cogwheel (far right of row 1)
     local profileCogwheel = CreateFrame("Button", nil, row1, "BackdropTemplate")
     profileCogwheel:SetPoint("RIGHT", 0, 0)
@@ -270,52 +285,44 @@ function CC:CreateClickCastUI(parent)
     row2:SetHeight(22)
     
     -- Cast on down checkbox
-    local downCb = CreateFrame("CheckButton", nil, row2, "BackdropTemplate")
-    downCb:SetPoint("LEFT", 0, 0)
-    DF.GUI:StyleCheckButton(downCb, { accent = themeColor })
-    
-    local downLabel = row2:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    downLabel:SetPoint("LEFT", downCb, "RIGHT", 3, 0)
-    downLabel:SetText(L["Cast on mouse down"])
-    downLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-    downCb:SetScript("OnClick", function(self)
-        CC.db.options.castOnDown = self:GetChecked()
-        CC:ApplyBindings()
-    end)
-    downCb:SetScript("OnEnter", function(self)
-        DF.GUI:ShowTooltip(self, {
+    -- nativeCheck + labelGap 3: what this row already had. See CreateCheckRow's note.
+    local downCb = DF.GUI:CreateCheckRow(row2, {
+        label       = L["Cast on mouse down"],
+        accent      = themeColor,
+        nativeCheck = true,
+        labelGap    = 3,
+        get         = function() return CC.db and CC.db.options and CC.db.options.castOnDown end,
+        set         = function(val) CC.db.options.castOnDown = val end,
+        onClick     = function() CC:ApplyBindings() end,
+        tooltip = {
             title = L["Cast on mouse down"],
             anchor = "ANCHOR_RIGHT",
             lines = { L["Click-casting on a unit frame fires when you press the mouse button (down) instead of releasing it (up). Applies to mouse clicks on frames only — keyboard binds are unaffected."] },
-        })
-    end)
-    downCb:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
+        },
+    })
+    downCb:SetPoint("LEFT", 0, 0)
+    local downLabel = downCb.label
     
     -- Quick Bind toggle
-    local quickBindCb = CreateFrame("CheckButton", nil, row2, "BackdropTemplate")
-    quickBindCb:SetPoint("LEFT", downLabel, "RIGHT", 15, 0)
-    DF.GUI:StyleCheckButton(quickBindCb, { accent = themeColor })
-    
-    local quickBindLabel = row2:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    quickBindLabel:SetPoint("LEFT", quickBindCb, "RIGHT", 3, 0)
-    quickBindLabel:SetText(L["Quick Bind"])
-    quickBindLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
-    quickBindCb:SetScript("OnEnter", function(self)
-        DF.GUI:ShowTooltip(self, {
+    -- No anchor on this tooltip, deliberately — it already used the default cursor
+    -- anchor while its neighbour uses ANCHOR_RIGHT. Preserved rather than unified.
+    local quickBindCb = DF.GUI:CreateCheckRow(row2, {
+        label       = L["Quick Bind"],
+        accent      = themeColor,
+        nativeCheck = true,
+        labelGap    = 3,
+        get         = function() return CC.db and CC.db.options and CC.db.options.quickBindEnabled end,
+        set         = function(val) CC.db.options.quickBindEnabled = val end,
+        tooltip = {
             title = L["Quick Bind Mode"],
             lines = {
                 L["When enabled: Click spell, press key to bind instantly."],
                 L["When disabled: Click spell to open Binding Editor."],
             },
-        })
-    end)
-    quickBindCb:SetScript("OnLeave", function() DF.GUI:HideTooltip() end)
-    
-    quickBindCb:SetScript("OnClick", function(self)
-        CC.db.options.quickBindEnabled = self:GetChecked()
-    end)
+        },
+    })
+    quickBindCb:SetPoint("LEFT", downLabel, "RIGHT", 15, 0)
+    local quickBindLabel = quickBindCb.label
 
     -- Smart Resurrection dropdown
     local smartResLabel = row2:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
@@ -1034,13 +1041,28 @@ function CC:CreateClickCastUI(parent)
     showLabel:SetPoint("RIGHT", showDropdown, "LEFT", -4, 0)
     itemsHint:SetPoint("RIGHT", listViewBtn, "LEFT", -15, 0)
 
-    -- Macro controls: right-aligned to match the Spells/Items tabs. Anchored
-    -- here (after the view buttons exist) and chained leftward from the hint.
+    -- ☠ MACRO CONTROLS GROW RIGHTWARDS FROM THE LEFT EDGE, not leftwards from the hint.
+    --
+    -- This row carries four more controls than the Spells/Items rows, and it used to
+    -- chain dropdown <- New <- Import <- Quick Macro <- hint <- view buttons. Every
+    -- width in that chain therefore positioned the DROPDOWN: the leftmost control landed
+    -- wherever the arithmetic put it, lined up with nothing above it, and any button
+    -- getting wider walked the entire row further left -- past this panel's own edge and
+    -- over the bindings list beside it. A longer translated label does the same thing.
+    --
+    -- The dropdown now pins to LEFT 4, the inset the tab strip above already uses
+    -- (spellsTab is BOTTOMLEFT 4), so the two rows line up and stay lined up whatever
+    -- the labels measure. The rest chain rightwards into the middle of the row, which is
+    -- where the slack actually is: ~280px of controls in a ~900px row, with the hint
+    -- still right-anchored to the view buttons and a wide gap between the two groups.
+    --
+    -- ⚠ The declaration site already claimed these were "anchored from LEFT to avoid
+    -- overlap". That is true again rather than aspirational.
+    macroSourceDropdown:SetPoint("LEFT", 4, 0)
+    newMacroBtn:SetPoint("LEFT", macroSourceDropdown, "RIGHT", 8, 0)
+    importMacroBtn:SetPoint("LEFT", newMacroBtn, "RIGHT", 4, 0)
+    quickMacroBtn:SetPoint("LEFT", importMacroBtn, "RIGHT", 4, 0)
     macroHint:SetPoint("RIGHT", listViewBtn, "LEFT", -15, 0)
-    quickMacroBtn:SetPoint("RIGHT", macroHint, "LEFT", -12, 0)
-    importMacroBtn:SetPoint("RIGHT", quickMacroBtn, "LEFT", -4, 0)
-    newMacroBtn:SetPoint("RIGHT", importMacroBtn, "LEFT", -4, 0)
-    macroSourceDropdown:SetPoint("RIGHT", newMacroBtn, "LEFT", -8, 0)
     
     -- Load saved preferences
     CC.viewLayout = CC.db.options.viewLayout or "grid"
@@ -1395,7 +1417,11 @@ function CC:CreateKeybindPopup()
     self.keybindCaptureFrame = captureFrame
     
     -- Visual popup (displays info, positioned on our UI)
+    -- UIParent-parented: register or it draws at 100% over a scaled GUI. NOT the
+    -- captureFrame above -- that is SetAllPoints(UIParent) and exists purely to
+    -- swallow input, so scaling it would shrink what it captures.
     local popup = CreateFrame("Frame", "DFKeybindPopup", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(popup) end
     local popupHeight = (IsMacClient and IsMacClient()) and 155 or 140
     popup:SetSize(280, popupHeight)
     popup:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -1446,7 +1472,11 @@ function CC:CreateKeybindPopup()
     popup.modDisplay = modDisplay
     
     -- Cancel button - create as separate frame at highest strata to avoid capture frame blocking
+    -- Its own UIParent child rather than a child of the popup (it needs TOOLTIP
+    -- strata, above the capture frame), so it needs the scale explicitly too -- and
+    -- more than most: an unscaled button beside a scaled popup is visibly mismatched.
     local cancelBtn = CreateFrame("Button", "DFKeybindCancelBtn", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(cancelBtn) end
     cancelBtn:SetFrameStrata("TOOLTIP")  -- Highest strata, above FULLSCREEN_DIALOG
     cancelBtn:SetFrameLevel(9999)  -- Very high frame level
     cancelBtn:EnableMouse(true)  -- Ensure mouse is enabled

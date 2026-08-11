@@ -241,8 +241,11 @@ local RAID_ALLOC = {
     -- Centre-region — see rule 2. These five sets must stay mutually disjoint.
     AFK        = { [2] = true },
     READYCHECK = { [8] = true },
-    SUMMON     = { [11] = true },
-    -- (12 is free — it held DND until that state was dropped.)
+    -- Three frames, because summon has THREE live states and each has its own
+    -- user-editable text key. 12 was the documented free slot (it held DND until that
+    -- state was dropped); 15 carries only the missing-buff STRIP, which is not a
+    -- centre-region element, so rule 2 is intact.
+    SUMMON     = { [11] = true, [12] = true, [15] = true },
     -- Static badges
     LEADER     = { [1] = true },
     ASSIST     = { [3] = true },
@@ -267,6 +270,20 @@ local RAID_ALLOC = {
     HEALPRED   = { [7] = true, [20] = true },
     REDUCEDMAX = { [10] = true, [18] = true },
 }
+-- Which summon state each SUMMON frame demonstrates. Live has three -- Pending,
+-- Accepted and Declined -- each with its own texture AND its own user-editable text
+-- key, and only Pending was ever previewable, so two settings existed that nobody
+-- could see in order to judge them.
+--
+-- ☠ AN EXPLICIT LIST, NOT `index % 3`. That is the whole lesson of the note above:
+-- modulo allocation shipped the same class of bug twice here. A modulo would also be
+-- wrong on these particular indices -- 11, 12 and 15 mod 3 give 2, 0, 0, so Accepted
+-- would never render and Pending would render twice.
+--
+-- Anything not listed (including party mode, whose single summon frame is Healsworth)
+-- falls through to Pending, which is the state that was previewed before.
+local RAID_SUMMON_STATE = { [11] = "pending", [12] = "accepted", [15] = "declined" }
+
 -- Raid target markers: which frame gets which marker index (1-8). Five of forty, so a
 -- marker still reads as a marker; it was every frame 1-8 before, i.e. a solid band.
 local RAID_MARKERS = { [1] = 8, [3] = 7, [7] = 1, [13] = 4, [20] = 6 }
@@ -475,6 +492,10 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             -- Centre region: resurrect wins on a dead frame, otherwise the summon set.
             -- RAID_ALLOC keeps SUMMON off every dead frame, so this `or` never hides one.
             centerStatus = isDead and "resurrect" or (inRaidSet("SUMMON", i) and "summon" or nil),
+            -- Which of live's three summon states this frame demonstrates. Mirrors
+            -- inRaidSet's 21-40 wrap so the upper half of a full raid shows the spread
+            -- too. nil (and party mode) falls through to Pending.
+            summonState = RAID_SUMMON_STATE[i] or (i > 20 and RAID_SUMMON_STATE[i - 20]) or nil,
             isMainTank = inRaidSet("MAINTANK", i),
             isMainAssist = inRaidSet("MAINASSIST", i),
             -- ☠ THE AFK ICON CARRIES A TICKING COUNTDOWN. It must never land on an
@@ -881,119 +902,37 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
 
     DF:ApplyHealthText(frame, db, DF.IsLegacyTextHidden and DF:IsLegacyTextHidden(frame))
 
-    -- Update name
-    local displayName = testData.name
-    if displayName then
-        local maxLen = db.nameTextLength or 0
-        local truncMode = db.nameTextTruncateMode or "ELLIPSIS"
-        
-        if maxLen > 0 and DF:UTF8Len(displayName) > maxLen then
-            if truncMode == "CUT" then
-                displayName = DF:UTF8Sub(displayName, 1, maxLen)
-            else
-                displayName = DF:UTF8Sub(displayName, 1, maxLen) .. "..."
-            end
-        end
-    end
-    frame.nameText:SetText(displayName)
+    -- Name through the LIVE renderer, supplying only the fabricated name. This block
+    -- used to restate DF:UpdateName's truncation verbatim -- the nameTextLength read,
+    -- the ELLIPSIS/CUT branch, the UTF8Sub calls -- so the two could drift on any
+    -- format change, and the preview also skipped live's legacy-text suppression.
+    DF:UpdateName(frame, testData.name)
     
-    -- Determine if this frame should show out-of-range effects
-    -- OOR takes priority over dead fade (they should never multiply)
-    local isOutOfRange = db.testShowOutOfRange and testData.outOfRange
-    
-    -- Calculate per-element alphas for out-of-range
-    local iconsAlpha = 1.0
-    local powerBarAlpha = 1.0
-    local dispelAlpha = 1.0
-    -- ⚠ NO missingBuff / defensive / auraDesigner ALPHAS HERE ANY MORE. Those three
-    -- surfaces fade through ElementAppearance's own functions now (called after the
-    -- drives, further down) rather than being hand-mirrored into this block -- which
-    -- is how each of them shipped a silent no-fade bug in turn. Add nothing here
-    -- that ElementAppearance already owns. (Audit, 2026-08-07.)
-    -- Border stays 1.0 in whole-frame mode (the frame's SetAlpha cascade fades
-    -- it); only element-specific mode needs its own border alpha.
+    -- ☠ (Removed) THE PER-ELEMENT ALPHA BLOCK, and the three tables it existed to fill:
+    -- frame.dfTestOORAlphas, frame.dfTestDeadFadeAlphas and frame.dfTestHealthFadeAlphas.
+    --
+    -- ~95 lines computing out-of-range, dead-fade and health-fade alphas. Their ONLY
+    -- reader was the alpha chain at the end of DF:UpdateTestPowerBar, and that chain was
+    -- overwritten on every render by DF:UpdatePowerBarAppearance (via the
+    -- UpdateAllElementAppearances pass further down), which handles test frames itself.
+    -- So the whole block computed values nothing could observe -- including a `.dispel`
+    -- and an `.auras` entry that never had a reader at all, in any build.
+    --
+    -- ⚠ THIS IS THE SAME LESSON THE SURVIVING NOTES IN THIS FILE ALREADY TEACH, one
+    -- level up. Each of those notes records pruning ONE element's hand-mirrored alpha
+    -- after it shipped a bug (the squared range fade, the squared health fade, the six
+    -- wrong OOR fallbacks, the icons). Every prune was correct and none of them asked
+    -- the next question: if every individual element belongs to ElementAppearance, what
+    -- is the block still for? Nothing -- only the power bar was left, and live owned
+    -- that too. The right unit of removal was the block, not another element.
+    --
+    -- Nothing here is lost: live resolves all three fades from db + the dfTestIsDead
+    -- stamp (set well above, at the top of this function) and the range stamp, which is
+    -- why DF:UpdatePowerBarAppearance can pass test frames straight through.
+    --
+    -- ⚠ Do not reintroduce a per-element alpha here for a NEW element either. That is
+    -- the move that produced every bug listed above.
 
-    if isOutOfRange then
-        if db.oorEnabled then
-            -- Element-specific alpha mode.
-            -- ⚠ EVERY FALLBACK HERE MIRRORS ElementAppearance.lua's OWN. Six of them
-            -- used to be a blanket 0.55 against live's 0.1-0.5 -- background was out
-            -- by 5.5x. Invisible today because Config seeds all six, so it only bites
-            -- a profile missing a key (an old import, a hand-edited SavedVariables).
-            -- If you add an oor*Alpha, copy live's fallback, do not invent one.
-            iconsAlpha = db.oorIconsAlpha or 0.5
-            powerBarAlpha = db.oorPowerBarAlpha or 0.2
-            dispelAlpha = db.oorDispelOverlayAlpha or 0.2
-        end
-        -- ☠ NO `else` BRANCH, DELIBERATELY. Simple range-fade mode fades the WHOLE
-        -- FRAME with one SetAlpha further down -- exactly as live's
-        -- UpdateFrameAppearance does, and that is live's ONLY alpha write in this
-        -- mode. This block used to ALSO push rangeFadeAlpha into every per-element
-        -- variable, so the preview applied the fade twice and rendered
-        -- rangeFadeAlpha SQUARED: 0.16 against live's 0.40 at the stock 0.4, with no
-        -- setting needed to hit it. Every element left at 1.0 here is the fix -- the
-        -- cascade supplies the dim. (Audit, 2026-08-07.)
-        -- ⚠ The status icons are the one exception and are handled separately: they
-        -- set SetIgnoreParentAlpha(true), so the cascade cannot reach them and
-        -- DF:GetStatusIconFadeAlpha applies their fade explicitly in both modes.
-    end
-
-    -- Store alpha values for use by UpdateTestIcons and UpdateTestPowerBar
-    frame.dfTestOORAlphas = {
-        icons = iconsAlpha,
-        power = powerBarAlpha,
-        dispel = dispelAlpha,
-    }
-    
-    -- Check if this is a dead/offline unit for dead fade handling
-    local isDeadOrOffline = testData.status == "Dead" or testData.status == "Offline"
-    local applyDeadFade = isDeadOrOffline and db.fadeDeadFrames and not isOutOfRange
-    
-    -- Store dead fade alphas for use by UpdateTestIcons and UpdateTestPowerBar
-    -- OOR takes priority: skip dead fade storage when out of range
-    if applyDeadFade then
-        frame.dfTestDeadFadeAlphas = {
-            icons = db.fadeDeadIcons or 1.0,
-            power = db.fadeDeadPowerBar or 0.4,
-            auras = db.fadeDeadAuras or 1.0,
-        }
-    else
-        frame.dfTestDeadFadeAlphas = nil
-    end
-    
-    -- Health-based fading (above threshold): only when in range, alive, and option enabled
-    local healthPct = (testData.healthPercent or 1) * 100
-    local threshold = db.healthFadeThreshold or 100
-    local isAboveHealthThreshold = not isOutOfRange and not applyDeadFade
-        and db.healthFadeEnabled
-        and (healthPct >= threshold - 0.5)
-    if isAboveHealthThreshold and db.hfCancelOnDispel and frame.dfDispelOverlay and frame.dfDispelOverlay:IsShown() then
-        isAboveHealthThreshold = false
-    end
-    
-    if isAboveHealthThreshold then
-        -- ☠ SAME DOUBLE-APPLY AS THE RANGE FADE ABOVE, and the same fix. Live has no
-        -- per-element health fade at all: ApplyHealthFadeAlpha resolves ONE alpha and
-        -- writes it to the FRAME (ElementAppearance references health fade in exactly
-        -- one place, inside UpdateFrameAppearance). The preview pushed healthFadeAlpha
-        -- into every element AND set the frame, rendering 0.25 against live's 0.50 at
-        -- the stock 0.5. Only the element-specific mode needs per-element values,
-        -- because there the frame stays at 1.0.
-        local hfAlpha = db.healthFadeAlpha or 0.5
-        if db.oorEnabled then
-            iconsAlpha = hfAlpha
-            powerBarAlpha = hfAlpha
-            dispelAlpha = hfAlpha
-        end
-        frame.dfTestHealthFadeAlphas = {
-            icons = iconsAlpha,
-            power = powerBarAlpha,
-            dispel = dispelAlpha,
-        }
-    else
-        frame.dfTestHealthFadeAlphas = nil
-    end
-    
     -- Name text colour + alpha: DF:UpdateNameTextAppearance owns both (it deliberately
     -- writes colour at alpha 1.0 and controls opacity through SetAlpha, so that
     -- SetAlphaFromBoolean keeps working). Applied by the shared pass further down.
@@ -1246,82 +1185,40 @@ function DF:UpdateTestIcons(frame, testData)
     local db = DF:GetFrameDB(frame)
     
     -- Role Icon
+    --
+    -- ★ THE LIVE UPDATER, fed test DATA. DF:UpdateRoleIcon takes a role override, so
+    -- the per-role visibility filter, the texture pick, the positioning and the
+    -- MemTest gate are one implementation.
+    --
+    -- ☠ (Removed) a copy of the roleIconShowTank/Healer/DPS filter that also omitted
+    -- live's DF:MemTestDisabled("enableRoleLeaderIcons") gate -- so running the Memory
+    -- Test panel with role and leader icons unticked left them lit on every test frame
+    -- while live hid them. The preview was showing a state the addon cannot be in.
+    --
+    -- ⚠ roleIconHideInCombat needs no special handling: live reads DF.playerInCombat,
+    -- and test mode is torn down on PLAYER_REGEN_DISABLED, so the preview is never on
+    -- screen in combat and live's gate resolves the same way the old comment here
+    -- reasoned it would.
     if frame.roleIcon then
-        local role = testData.role
-        -- Only TANK/HEALER/DAMAGER have a role icon; a nil/"NONE" role shows none
-        -- (matches live StatusIcons and avoids GetRoleIconTexture indexing a nil
-        -- coord table for a roleless test unit).
-        local shouldShow = (role == "TANK" or role == "HEALER" or role == "DAMAGER")
-
-        -- ☠ WAS GATED ON db.roleIconOnlyInCombat, A KEY THAT DOES NOT EXIST -- one
-        -- read, no writes, absent from Config, so it was always nil and the gate
-        -- was always open. The real key is roleIconHideInCombat, and wiring it
-        -- here would be pointless: test mode is torn down on
-        -- PLAYER_REGEN_DISABLED, so the preview can never be on screen in combat.
-        -- Removed rather than repointed. (Audit, 2026-08-07.)
-        if shouldShow then
-            if role == "TANK" then
-                shouldShow = db.roleIconShowTank ~= false
-            elseif role == "HEALER" then
-                shouldShow = db.roleIconShowHealer ~= false
-            elseif role == "DAMAGER" then
-                shouldShow = db.roleIconShowDPS ~= false
-            end
-        end
-        
-        if shouldShow then
-            DF:SetIconTextureOrAtlas(frame.roleIcon.texture, DF:GetRoleIconTexture(db, role))
-
-            frame.roleIcon:Show()
-            local scale = db.roleIconScale or 1.0
-            local anchor = db.roleIconAnchor or "TOPLEFT"
-            local x = db.roleIconX or 2
-            local y = db.roleIconY or -2
-            frame.roleIcon:SetScale(scale)
-            frame.roleIcon:ClearAllPoints()
-            frame.roleIcon:SetPoint(anchor, frame, anchor, x, y)
-            
-            -- Apply frame level
-            frame.roleIcon:SetFrameLevel(frame:GetFrameLevel() + (db.roleIconFrameLevel or 30))
-        else
-            frame.roleIcon:Hide()
-        end
+        DF:UpdateRoleIcon(frame, "testmode", testData.role)
     end
     
     -- Leader Icon
     if frame.leaderIcon then
         if not db.leaderIconEnabled then
             frame.leaderIcon:Hide()
-        elseif testData.isLeader then
-            frame.leaderIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-LeaderIcon")
+        elseif testData.isLeader or testData.isAssist then
+            frame.leaderIcon.texture:SetTexture(testData.isLeader
+                and "Interface\\GroupFrame\\UI-Group-LeaderIcon"
+                or "Interface\\GroupFrame\\UI-Group-AssistantIcon")
             frame.leaderIcon.texture:SetTexCoord(0, 1, 0, 1)
+            -- Geometry, base alpha and frame level from the LIVE applier. (The two
+            -- arms differed only in the texture, but each carried its own verbatim
+            -- copy of the geometry block — leader kept working while assist drifted.)
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.leaderIcon, db, "leaderIcon")
+            end
             frame.leaderIcon:Show()
-            
-            local scale = db.leaderIconScale or 1.0
-            local anchor = db.leaderIconAnchor or "TOPLEFT"
-            local x = db.leaderIconX or -2
-            local y = db.leaderIconY or 2
-            frame.leaderIcon:SetScale(scale)
-            frame.leaderIcon:ClearAllPoints()
-            frame.leaderIcon:SetPoint(anchor, frame, anchor, x, y)
-            
-            -- Apply frame level
-            frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + (db.leaderIconFrameLevel or 30))
-        elseif testData.isAssist then
-            frame.leaderIcon.texture:SetTexture("Interface\\GroupFrame\\UI-Group-AssistantIcon")
-            frame.leaderIcon.texture:SetTexCoord(0, 1, 0, 1)
-            frame.leaderIcon:Show()
-            
-            local scale = db.leaderIconScale or 1.0
-            local anchor = db.leaderIconAnchor or "TOPLEFT"
-            local x = db.leaderIconX or -2
-            local y = db.leaderIconY or 2
-            frame.leaderIcon:SetScale(scale)
-            frame.leaderIcon:ClearAllPoints()
-            frame.leaderIcon:SetPoint(anchor, frame, anchor, x, y)
-            
-            -- Apply frame level
-            frame.leaderIcon:SetFrameLevel(frame:GetFrameLevel() + (db.leaderIconFrameLevel or 30))
         else
             frame.leaderIcon:Hide()
         end
@@ -1334,76 +1231,47 @@ function DF:UpdateTestIcons(frame, testData)
         elseif testData.raidTarget then
             frame.raidTargetIcon.texture:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcons")
             SetRaidTargetIconTexture(frame.raidTargetIcon.texture, testData.raidTarget)
-            
-            local scale = db.raidTargetIconScale or 1.5
-            local anchor = db.raidTargetIconAnchor or "TOP"
-            local x = db.raidTargetIconX or 0
-            local y = db.raidTargetIconY or 2
-            frame.raidTargetIcon:SetScale(scale)
-            frame.raidTargetIcon:ClearAllPoints()
-            frame.raidTargetIcon:SetPoint(anchor, frame, anchor, x, y)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.raidTargetIcon, db, "raidTargetIcon")
+            end
             frame.raidTargetIcon:Show()
-            
-            -- Apply frame level
-            frame.raidTargetIcon:SetFrameLevel(frame:GetFrameLevel() + (db.raidTargetIconFrameLevel or 30))
         else
             frame.raidTargetIcon:Hide()
         end
     end
     
-    -- Ready Check Icon. Per-unit `showReadyCheck` first, "the leader frame" as the
-    -- fallback — see the note on the Tankerino/Мишок rows in DF.TestData for why it no
-    -- longer rides the leader.
-    -- ☠ THIS BLOCK EXISTS TWICE (here and in the other status-icon updater). Both are
-    -- kept in step by hand; change one, change the other.
-    if frame.readyCheckIcon then
-        local wantReady = testData.showReadyCheck
-        if wantReady == nil then wantReady = testData.isLeader end
-        if not db.readyCheckIconEnabled or db.testShowStatusIcons == false then
-            frame.readyCheckIcon:Hide()
-        elseif wantReady then
-            DF:SetUpgradedStatusIcon(frame.readyCheckIcon.texture, "Interface\\RaidFrame\\ReadyCheck-Ready")
-            
-            local scale = db.readyCheckIconScale or 1.0
-            local anchor = db.readyCheckIconAnchor or "CENTER"
-            local x = db.readyCheckIconX or 0
-            local y = db.readyCheckIconY or 0
-            frame.readyCheckIcon:SetScale(scale)
-            frame.readyCheckIcon:ClearAllPoints()
-            frame.readyCheckIcon:SetPoint(anchor, frame, anchor, x, y)
-            frame.readyCheckIcon:Show()
-            
-            -- Apply frame level
-            frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + (db.readyCheckIconFrameLevel or 30))
-        else
-            frame.readyCheckIcon:Hide()
-        end
-    end
-    
-    -- Apply alpha to icons - check dead fade first, then health-based fade, then OOR alpha
-    local alpha = 1.0
-    if frame.dfTestDeadFadeAlphas and frame.dfTestDeadFadeAlphas.icons then
-        alpha = frame.dfTestDeadFadeAlphas.icons
-    elseif frame.dfDeadFadeApplied then
-        return
-    elseif frame.dfTestHealthFadeAlphas and frame.dfTestHealthFadeAlphas.icons then
-        alpha = frame.dfTestHealthFadeAlphas.icons
-    elseif frame.dfTestOORAlphas and frame.dfTestOORAlphas.icons then
-        alpha = frame.dfTestOORAlphas.icons
-    end
-    
-    if frame.roleIcon and frame.roleIcon:IsShown() then
-        frame.roleIcon:SetAlpha(alpha)
-    end
-    if frame.leaderIcon and frame.leaderIcon:IsShown() then
-        frame.leaderIcon:SetAlpha(alpha)
-    end
-    if frame.raidTargetIcon and frame.raidTargetIcon:IsShown() then
-        frame.raidTargetIcon:SetAlpha(alpha)
-    end
-    if frame.readyCheckIcon and frame.readyCheckIcon:IsShown() then
-        frame.readyCheckIcon:SetAlpha(alpha)
-    end
+    -- ☠ (Removed) THE READY CHECK BLOCK. It was a byte-identical 24-line twin of the one
+    -- in DF:UpdateTestStatusIcons, carrying a "change one, change the other" warning --
+    -- and the hand-syncing it asked for was never needed, because the copy could not
+    -- affect anything. DF:UpdateTestFrame calls UpdateTestIcons (gated on
+    -- testShowStatusIcons) and then calls UpdateTestStatusIcons UNCONDITIONALLY nine
+    -- lines later, so the surviving block recomputed the identical result over the top
+    -- on every single render. The copy also re-tested `testShowStatusIcons == false`
+    -- inside a branch its own caller had already gated on that key.
+    --
+    -- ⚠ There is now ONE ready-check implementation, in DF:UpdateTestStatusIcons. Do not
+    -- reinstate a copy here: a second pathway does not fail loudly, it fails by looking
+    -- handled (the same reasoning as the ★ note at the top of UpdateTestFrame).
+
+    -- ★ NO SECOND ALPHA PASS — matching the other status-icon updater.
+    --
+    -- DF:ApplyStatusIconSettings folds DF:GetStatusIconFadeAlpha into each icon's
+    -- alpha, and all four icons above now go through it. Re-applying here would
+    -- SQUARE the fade, the same mistake the range and health fades made before
+    -- ef3c56e0.
+    --
+    -- ☠ AND IT WAS OVERWRITING, NOT COMPOUNDING. This pass ended with a bare
+    -- SetAlpha(alpha), so it discarded whatever the applier had computed -- including
+    -- the per-icon `<prefix>Alpha` setting, which the four hand-rolled blocks never
+    -- read in the first place. Set roleIconAlpha to 0.5 and live dimmed the icon while
+    -- the preview drew it solid.
+    --
+    -- The health-fade arm went further and previewed something live does not do at
+    -- all: HealthFade.lua touches no status icon, so `dfTestHealthFadeAlphas.icons`
+    -- described a behaviour that exists only in test mode. Dead and out-of-range fade
+    -- are both real and both live in GetStatusIconFadeAlpha, which reads the same
+    -- dfTestIsDead stamp the preview already sets.
 end
 
 -- Helper function to show icon as text or texture in test mode
@@ -1414,19 +1282,16 @@ end
 -- DF:ApplyTimerTextSettings, which ApplyStatusIconSettings also calls. The preview now
 -- uses DF:ShowStatusIconAsText, which IS live's function. (Audit, 2026-08-07.)
 
--- Format seconds as M:SS for AFK timer
-local function FormatTestAFKTime(seconds)
-    if seconds < 3600 then
-        return string.format("%02d:%02d", math.floor(seconds / 60), seconds % 60)
-    else
-        local hours = math.floor(seconds / 3600)
-        local mins = math.floor((seconds % 3600) / 60)
-        return string.format("%02d:%02d:%02d", hours, mins, seconds % 60)
-    end
-end
-
--- Track test AFK start times
-local testAFKStartTimes = {}
+-- ☠ (Removed) FormatTestAFKTime and testAFKStartTimes, the last two pieces of the
+-- preview's private AFK implementation.
+--
+-- Worth recording how this ended, because the first pass stopped a level too early:
+-- the formatter was a verbatim copy of a StatusIcons.lua file-local, so it was fixed
+-- by publishing DF:FormatAFKTime and forwarding to it. That was correct but small --
+-- the ~50 lines AROUND the formatter were still a copy, and one of them had already
+-- dropped live's afkIconHideInCombat gate. Sharing the leaf made the duplication
+-- look handled while the drift stayed. The whole block now calls DF:UpdateAFKIcon
+-- with an isAFK override, and the start times live in live's own table.
 
 -- Update only status icons (ready check, center status) - separated from role/leader icons
 function DF:UpdateTestStatusIcons(frame, testData)
@@ -1438,8 +1303,9 @@ function DF:UpdateTestStatusIcons(frame, testData)
     -- Ready Check Icon. Per-unit `showReadyCheck` first, "the leader frame" as the
     -- fallback — see the note on the Tankerino/Мишок rows in DF.TestData for why it no
     -- longer rides the leader.
-    -- ☠ THIS BLOCK EXISTS TWICE (here and in the other status-icon updater). Both are
-    -- kept in step by hand; change one, change the other.
+    -- ★ THE ONLY ready-check block. Its twin in DF:UpdateTestIcons was deleted (see the
+    -- note there): this function runs unconditionally after that one, so the twin's
+    -- result was overwritten by this one on every render.
     if frame.readyCheckIcon then
         local wantReady = testData.showReadyCheck
         if wantReady == nil then wantReady = testData.isLeader end
@@ -1447,18 +1313,11 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.readyCheckIcon:Hide()
         elseif wantReady then
             DF:SetUpgradedStatusIcon(frame.readyCheckIcon.texture, "Interface\\RaidFrame\\ReadyCheck-Ready")
-            
-            local scale = db.readyCheckIconScale or 1.0
-            local anchor = db.readyCheckIconAnchor or "CENTER"
-            local x = db.readyCheckIconX or 0
-            local y = db.readyCheckIconY or 0
-            frame.readyCheckIcon:SetScale(scale)
-            frame.readyCheckIcon:ClearAllPoints()
-            frame.readyCheckIcon:SetPoint(anchor, frame, anchor, x, y)
+            -- Geometry, base alpha and frame level from the LIVE applier.
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.readyCheckIcon, db, "readyCheckIcon")
+            end
             frame.readyCheckIcon:Show()
-            
-            -- Apply frame level
-            frame.readyCheckIcon:SetFrameLevel(frame:GetFrameLevel() + (db.readyCheckIconFrameLevel or 30))
         else
             frame.readyCheckIcon:Hide()
         end
@@ -1469,17 +1328,39 @@ function DF:UpdateTestStatusIcons(frame, testData)
         if not db.summonIconEnabled or db.testShowStatusIcons == false then
             frame.summonIcon:Hide()
         elseif testData.centerStatus == "summon" then
-            DF:SetUpgradedStatusIcon(frame.summonIcon.texture, "Interface\\RaidFrame\\Raid-Icon-SummonPending")
-            
+            -- ☠ ONLY PENDING WAS PREVIEWABLE. Live renders three summon states, each
+            -- with its own texture AND its own user-editable text key -- Accepted and
+            -- Declined both have seeded defaults, edit boxes on the Modules page and
+            -- profile export, so two settings existed that a user could never see in
+            -- order to judge them. Alternate by frame so all three are on screen at
+            -- once, the same fix the resurrection icon and the phased LFG eye already
+            -- use below.
+            --
+            -- ⚠ Keep these in the same order as live's Pending/Accepted/Declined
+            -- branches: texture and text key are paired per state, and swapping one
+            -- without the other is the drift this preview exists to catch.
+            local summonTexture, summonText
+            if testData.summonState == "accepted" then
+                summonTexture = "Interface\\RaidFrame\\Raid-Icon-SummonAccepted"
+                summonText    = db.summonIconTextAccepted or "Accepted"
+            elseif testData.summonState == "declined" then
+                summonTexture = "Interface\\RaidFrame\\Raid-Icon-SummonDeclined"
+                summonText    = db.summonIconTextDeclined or "Declined"
+            else
+                summonTexture = "Interface\\RaidFrame\\Raid-Icon-SummonPending"
+                summonText    = db.summonIconTextPending or "Summon"
+            end
+            DF:SetUpgradedStatusIcon(frame.summonIcon.texture, summonTexture)
+
             -- Geometry, base alpha and frame level from the LIVE applier.
             if DF.ApplyStatusIconSettings then
                 DF:ApplyStatusIconSettings(frame.summonIcon, db, "summonIcon")
             end
-            
+
             -- Show as text or icon (with font and color settings)
-            DF:ShowStatusIconAsText(frame.summonIcon, db.summonIconTextPending or "Summon", db.summonIconShowText)
+            DF:ShowStatusIconAsText(frame.summonIcon, summonText, db.summonIconShowText)
             frame.summonIcon:Show()
-            
+
         else
             frame.summonIcon:Hide()
         end
@@ -1597,67 +1478,33 @@ function DF:UpdateTestStatusIcons(frame, testData)
     end
     
     -- AFK Icon with timer support
+    --
+    -- ★ THE LIVE UPDATER, fed test DATA. DF:UpdateAFKIcon takes an isAFK override, so
+    -- the enabled gate, the combat gate, the geometry applier, the elapsed-timer
+    -- bookkeeping and the text-vs-icon-mode split are all live's single implementation.
+    --
+    -- ☠ (Removed) ~50 lines restating that function, comments and all. Only the leaf
+    -- formatter had been shared before; the block around it was still a copy, and it
+    -- had already lost live's afkIconHideInCombat gate -- so the preview kept the icon
+    -- up in combat while live hid it, and that setting could not be judged from the
+    -- preview at all. It also kept its own testAFKStartTimes table keyed by
+    -- tostring(frame); live keys by GetAFKKey, which falls back to the unit token for
+    -- exactly this case.
     if frame.afkIcon then
-        if not db.afkIconEnabled or db.testShowStatusIcons == false then
+        if db.testShowStatusIcons == false then
             frame.afkIcon:Hide()
             if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-        elseif testData.isAFK then
-            -- ⚠ ART BEFORE GEOMETRY, matching the order this block has always used.
-            -- ☠ AND ESCAPED BACKSLASHES. A single-backslash path here rendered NOTHING in
-            -- the preview while live was fine (live sets this art once at creation, with
-            -- \\, and never re-sets it) — `\F` and `\S` are not escapes Lua recognises and
-            -- the path collapses. Every other SetUpgradedStatusIcon call in this file uses
-            -- \\; match them.
-            DF:SetUpgradedStatusIcon(frame.afkIcon.texture, "Interface\\FriendsFrame\\StatusIcon-Away")
-
-            -- Geometry, base alpha and frame level from the LIVE applier.
-            if DF.ApplyStatusIconSettings then
-                DF:ApplyStatusIconSettings(frame.afkIcon, db, "afkIcon")
-            end
-
-            -- Track AFK start time for test mode
-            local frameKey = tostring(frame)
-            if testData.isAFK and not testAFKStartTimes[frameKey] then
-                testAFKStartTimes[frameKey] = GetTime()
-            end
-            
-            local statusText = db.afkIconText or "AFK"
-            do
-                local showTimer = db.afkIconShowTimer ~= false
-
-                -- Calculate timer if enabled
-                if showTimer and testAFKStartTimes[frameKey] then
-                    local elapsed = math.floor(GetTime() - testAFKStartTimes[frameKey])
-                    local timerStr = FormatTestAFKTime(elapsed)
-
-                    if db.afkIconShowText then
-                        -- Text mode: show "AFK 1:23"
-                        statusText = statusText .. " " .. timerStr
-                        if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-                    else
-                        -- Icon mode: show timer below icon
-                        if frame.afkIcon.timerText then
-                            frame.afkIcon.timerText:SetText(timerStr)
-                            frame.afkIcon.timerText:Show()
-                        end
-                    end
-                else
-                    if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-                end
-            end
-            
-            -- Show as text or icon
-            DF:ShowStatusIconAsText(frame.afkIcon, statusText, db.afkIconShowText)
-            if db.afkIconShowText and frame.afkIcon.text and DF.ApplyStableTextAnchor then
-                DF:ApplyStableTextAnchor(frame.afkIcon.text, frame.afkIcon)
-            end
-            frame.afkIcon:Show()
-            
         else
-            frame.afkIcon:Hide()
-            if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
-            -- Clear AFK start time
-            testAFKStartTimes[tostring(frame)] = nil
+            -- ⚠ ART FIRST, and it is NOT a duplicate of live: live sets this texture
+            -- once at frame creation and UpdateAFKIcon never re-sets it, so the preview
+            -- has to assert it on the pooled test frame itself.
+            -- ☠ ESCAPED BACKSLASHES. A single-backslash path here rendered NOTHING while
+            -- live was fine — `\F` and `\S` are not escapes Lua recognises and the path
+            -- collapses. Every SetUpgradedStatusIcon call in this file uses \\.
+            if testData.isAFK then
+                DF:SetUpgradedStatusIcon(frame.afkIcon.texture, "Interface\\FriendsFrame\\StatusIcon-Away")
+            end
+            DF:UpdateAFKIcon(frame, testData.isAFK and true or false)
         end
     end
     
@@ -1795,6 +1642,42 @@ function DF:UpdateTestAuras(frame)
 
 end
 
+-- The mock unit's primary resource, for DF:GetResourceBarColor's powerTokenOverride.
+--
+-- ⚠ DERIVED FROM CLASS, NOT ROLE. The old inline version mapped HEALER->MANA,
+-- TANK->RAGE and everything else ->ENERGY, so exactly three power colours were ever
+-- previewable; the raid roster carries all thirteen classes, and FOCUS, RUNIC_POWER
+-- and FURY are all editable on the Colors page with no way to see them. Role is still
+-- consulted, but only where a class genuinely splits by spec role.
+--
+-- ⚠ KNOWN LIMIT, deliberately not faked: the roster models class and role, not spec,
+-- so the spec-only resources -- LUNAR_POWER (Balance), MAELSTROM (Elemental/Enhance),
+-- INSANITY (Shadow), PAIN (Vengeance) -- still have no preview. Inventing a spec per
+-- frame to reach them would be the preview showing something live does not, which is
+-- the fault this whole pass exists to remove.
+local TEST_POWER_TOKEN = {
+    WARRIOR = "RAGE",       PALADIN = "MANA",  HUNTER  = "FOCUS",
+    ROGUE   = "ENERGY",     PRIEST  = "MANA",  SHAMAN  = "MANA",
+    MAGE    = "MANA",       WARLOCK = "MANA",  EVOKER  = "MANA",
+    DEATHKNIGHT = "RUNIC_POWER",
+}
+local function TestPowerTokenFor(class, role)
+    if class == "DRUID" then
+        -- Guardian rages, Feral energises, Balance/Resto cast. Role is the only
+        -- discriminator the test roster has.
+        if role == "TANK" then return "RAGE" end
+        if role == "DAMAGER" then return "ENERGY" end
+        return "MANA"
+    elseif class == "MONK" then
+        return role == "HEALER" and "MANA" or "ENERGY"
+    elseif class == "DEMONHUNTER" then
+        -- Vengeance uses PAIN, but the roster cannot say which spec this is; FURY is
+        -- the Havoc default and at least makes the token previewable at all.
+        return "FURY"
+    end
+    return TEST_POWER_TOKEN[class or ""] or "MANA"
+end
+
 -- Update test power bar (unified for party and raid)
 function DF:UpdateTestPowerBar(frame, testData)
     if not frame then return end
@@ -1807,28 +1690,18 @@ function DF:UpdateTestPowerBar(frame, testData)
         return
     end
     
-    -- Check role-based filtering
-    local showBar = true
-    local hasAnyRoleFilter = db.resourceBarShowHealer or db.resourceBarShowTank or db.resourceBarShowDPS
-    if hasAnyRoleFilter then
-        if testData.role == "HEALER" then
-            showBar = db.resourceBarShowHealer == true
-        elseif testData.role == "TANK" then
-            showBar = db.resourceBarShowTank == true
-        else
-            showBar = db.resourceBarShowDPS == true
-        end
-    else
-        showBar = false
-    end
-
-    -- Check class-based filtering
-    if showBar then
-        local classFilter = db.resourceBarClassFilter
-        if classFilter and testData.class and classFilter[testData.class] == false then
-            showBar = false
-        end
-    end
+    -- ★ THE LIVE GATE, fed test DATA. DF:ShouldShowResourceBar takes an optional role
+    -- override precisely so the preview can drive it without a real unit -- a test path
+    -- that is a PARAMETER of the live function, not a copy of it.
+    --
+    -- ☠ Do not reinstate a local copy of the role logic. The copy that used to live here
+    -- had lost BOTH of the live function's solo arms (`inSoloMode and
+    -- db.resourceBarShowInSoloMode`), and since resourceBarShowInSoloMode defaults to
+    -- true and test mode is nearly always driven solo, live showed the bar on every frame
+    -- while the preview showed it only on the role-filtered subset. The setting was
+    -- simply not previewable.
+    -- Role AND class both handed over as data, so the ENTIRE gate is the live one.
+    local showBar = DF:ShouldShowResourceBar(nil, db, testData.role, testData.class)
 
     if not showBar then
         if frame.dfPowerBar then frame.dfPowerBar:Hide() end
@@ -1849,39 +1722,36 @@ function DF:UpdateTestPowerBar(frame, testData)
     bar:SetMinMaxValues(0, 1)
     bar:SetValue(testData.powerPercent or 0.8)
 
-    -- Fill colour: mirror DF:GetResourceBarColor's mode resolution (Power / Class /
-    -- Custom) using the mock unit's testData (reads resourceBarColorMode so the
-    -- preview reflects a "Class" pick from the Color Mode dropdown).
-    local powerToken
-    if testData.role == "HEALER" then
-        powerToken = "MANA"
-    elseif testData.role == "TANK" then
-        powerToken = "RAGE"
-    else
-        powerToken = "ENERGY"
-    end
-    local mode = db.resourceBarColorMode or (db.resourceBarClassColor and "CLASS" or "POWER_TYPE")
-    local classColor = mode == "CLASS" and testData.class and DF:GetClassColor(testData.class)
-    if mode == "CUSTOM" then
-        local c = db.resourceBarCustomColor or {r = 0, g = 0.5, b = 1}
-        bar:SetStatusBarColor(c.r or 0, c.g or 0.5, c.b or 1, 1)
-    elseif classColor then
-        bar:SetStatusBarColor(classColor.r, classColor.g, classColor.b, 1)
-    else
-        local powerColor = DF:GetPowerColor(powerToken)
-        bar:SetStatusBarColor(powerColor.r, powerColor.g, powerColor.b, 1)
-    end
+    -- ★ THE LIVE COLOUR RESOLVER, fed test DATA. DF:GetResourceBarColor takes class and
+    -- power-token overrides for exactly this, so the Power / Class / Custom mode
+    -- resolution, the CLASS-to-power fallthrough and every default are live's.
+    --
+    -- ☠ Do not reinstate a local copy. The one that was here had drifted three ways --
+    -- one-arg GetPowerColor, missing fallbacks, and a power token fabricated from ROLE
+    -- rather than class, which left FOCUS, RUNIC_POWER, FURY and the rest unpreviewable
+    -- even though they are editable on the Colors page. See the note on the live
+    -- function.
+    local r, g, b = DF:GetResourceBarColor(nil, db, testData.class,
+        TestPowerTokenFor(testData.class, testData.role))
+    bar:SetStatusBarColor(r, g, b, 1)
 
-    -- Apply dead / health-based / OOR alpha
-    local alpha = 1.0
-    if frame.dfTestDeadFadeAlphas and frame.dfTestDeadFadeAlphas.power then
-        alpha = frame.dfTestDeadFadeAlphas.power
-    elseif frame.dfTestHealthFadeAlphas and frame.dfTestHealthFadeAlphas.power then
-        alpha = frame.dfTestHealthFadeAlphas.power
-    elseif frame.dfTestOORAlphas and frame.dfTestOORAlphas.power then
-        alpha = frame.dfTestOORAlphas.power
-    end
-    bar:SetAlpha(alpha)
+    -- ★ NO ALPHA PASS HERE — DF:UpdatePowerBarAppearance owns it, and always did.
+    --
+    -- ☠ (Removed) a dead/health/OOR alpha chain reading three test-only tables. It could
+    -- not have any effect: DF:UpdateTestFrame calls this function, then ~170 lines later
+    -- calls DF:UpdateAllElementAppearances, which calls DF:UpdatePowerBarAppearance --
+    -- and that function explicitly passes test frames through and writes
+    -- frame.dfPowerBar:SetAlpha() unconditionally. `bar` here IS frame.dfPowerBar, so
+    -- live overwrote this on every single render.
+    --
+    -- It had also DRIFTED, which is why this matters beyond tidiness: the dead-fade
+    -- fallback was `or 0.4` against live's `or 0`, and the chain had a health-fade arm
+    -- that live does not have at all (UpdatePowerBarAppearance has no health-fade
+    -- branch). It was a strict elseif chain, so dead and OOR could never combine, while
+    -- live layers OOR on top of the dead alpha via ApplyOORAlpha. None of that showed
+    -- on screen only because the result was thrown away -- exactly the failure mode the
+    -- ★ note at the top of UpdateTestFrame describes: a second pathway does not fail
+    -- loudly, it fails by looking handled.
     bar:Show()
 end
 
@@ -2035,9 +1905,9 @@ end
 --     live reads frame.dfPinnedWidth or db.frameWidth -- so it would have sized a
 --     pinned frame by the global width. Inert only because it was never called on one.
 --   * a missing-health TEXTURE write, which looked unique but is not: both test
---     update paths already set it (see the SafeSetStatusBarTexture calls in
---     UpdateTestFrame and UpdateTestFrameHealthOnly), as live does inside
---     SetMissingHealthBarValue.
+--     update paths already set it, because both call DF.SetMissingHealthBarValue --
+--     the LIVE setter, which applies the texture itself. (This file has no
+--     SafeSetStatusBarTexture call of its own, and never had one.)
 --
 -- Kept as a named function rather than deleted because call sites pair it with
 -- UpdateTestFrame and the pairing reads clearly. (Audit, 2026-08-07.)
@@ -2118,8 +1988,10 @@ function DF:RefreshTestFramesWithLayout()
     end
 end
 
--- Throttled layout refresh for slider changes (avoids flickering)
-DF.lastLayoutRefresh = 0
+-- ☠ (Removed) DF.lastLayoutRefresh, and the "throttled layout refresh for slider
+-- changes (avoids flickering)" comment that labelled it. It was assigned 0 here and
+-- read by nothing, in either addon -- whatever throttle once consulted it is long
+-- gone, so the name was documenting a mechanism that no longer exists.
 
 -- Engine-side test-mode teardown: the state that is NOT owned by the test frames
 -- themselves -- the global aura data provider, and the pinned-frame preview.
@@ -2159,6 +2031,51 @@ function DF:TeardownTestModeEngines()
     end
 end
 
+-- ☠ FRAME-SIDE TEST-MODE TEARDOWN — the twin of TeardownTestModeEngines above, and it
+-- exists for the same reason: THREE paths end test mode, and only one of them was doing
+-- the whole job.
+--
+--   HideTestFrames / HideRaidTestFrames  — the ordinary exit, did all of it
+--   combat entry   (Core.lua, PLAYER_REGEN_DISABLED)   — absorbs + personal targeted only
+--   zone change    (Headers.lua, PLAYER_ENTERING_WORLD) — frame:Hide() and nothing else
+--
+-- ⚠ frame:Hide() IS NOT ENOUGH, which is what made this survivable for so long. The
+-- Aura Designer's borders are parented to UIParent, not to the unit frame, so hiding the
+-- frame leaves them on screen: zone into a raid with the preview up and the AD indicators
+-- stayed floating over live frames until something else happened to clear them. The
+-- absorb textures are the same shape (HideTestFrames hides all three by hand), and the
+-- pet / personal-targeted / Targeted List previews are separate frame sets that no
+-- amount of hiding the party frames reaches.
+--
+-- Safe in combat, which is why the combat path can call it: ClearFrame only tears down
+-- textures and tables, and the test pet frames are deliberately plain Buttons and NOT
+-- SecureUnitButtonTemplate (see DF:CreateTestPetFrame) precisely so they can be hidden
+-- under lockdown.
+--
+-- Call it from any new teardown path too — do not hand-copy a subset of it.
+function DF:TeardownTestFrameVisuals()
+    local ADEngine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    local function cleanFrame(frame)
+        if not frame then return end
+        if ADEngine then ADEngine:ClearFrame(frame) end
+        if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
+        if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
+        if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
+    end
+
+    if DF.testPartyFrames then
+        for i = 0, 4 do cleanFrame(DF.testPartyFrames[i]) end
+    end
+    if DF.testRaidFrames then
+        for i = 1, 40 do cleanFrame(DF.testRaidFrames[i]) end
+    end
+
+    if DF.HideAllTestPetFrames then DF:HideAllTestPetFrames() end
+    if DF.HideAllTestRaidPetFrames then DF:HideAllTestRaidPetFrames() end
+    if DF.HideTestPersonalTargetedSpells then DF:HideTestPersonalTargetedSpells() end
+    if DF.HideTestTargetedList then DF:HideTestTargetedList() end
+end
+
 function DF:HideTestFrames(silent)
     DF.testMode = false
     -- Restore the real aura provider only when NEITHER test mode remains active
@@ -2171,20 +2088,10 @@ function DF:HideTestFrames(silent)
         DF:StopTestAnimation()
     end
     
-    -- Hide all test party frames and clean up test elements
-    local ADEngine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    -- Hide all test party frames
     for i = 0, 4 do
         local frame = DF.testPartyFrames[i]
-        if frame then
-            -- Clear Aura Designer indicators (borders are parented to UIParent
-            -- and survive frame:Hide, so they must be explicitly cleared)
-            if ADEngine then ADEngine:ClearFrame(frame) end
-            frame:Hide()
-            -- Clean up test mode visuals
-            if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
-            if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
-            if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-        end
+        if frame then frame:Hide() end
     end
 
     -- Hide test container
@@ -2192,21 +2099,11 @@ function DF:HideTestFrames(silent)
         DF.testPartyContainer:Hide()
     end
 
-    -- Hide test pet frames
-    if DF.HideAllTestPetFrames then
-        DF:HideAllTestPetFrames()
-    end
+    -- AD indicators, absorb textures, pet / personal-targeted / Targeted List previews.
+    -- Shared with the combat and zone teardowns — see TeardownTestFrameVisuals.
+    DF:TeardownTestFrameVisuals()
 
-    -- Hide personal targeted spell test icons
-    if DF.HideTestPersonalTargetedSpells then
-        DF:HideTestPersonalTargetedSpells()
-    end
 
-    -- Hide Targeted List demo bars
-    if DF.HideTestTargetedList then
-        DF:HideTestTargetedList()
-    end
-    
     -- Restore live frame visibility
     -- Clear state drivers so UpdateHeaderVisibility manages normally
     DF:ClearTestModeStateDrivers()
@@ -2405,20 +2302,10 @@ function DF:HideRaidTestFrames(silent)
         DF:StopTestAnimation()
     end
     
-    -- Hide all test raid frames and clean up test elements
-    local ADEngine = DF.AuraDesigner and DF.AuraDesigner.Engine
+    -- Hide all test raid frames
     for i = 1, 40 do
         local frame = DF.testRaidFrames[i]
-        if frame then
-            -- Clear Aura Designer indicators (borders are parented to UIParent
-            -- and survive frame:Hide, so they must be explicitly cleared)
-            if ADEngine then ADEngine:ClearFrame(frame) end
-            frame:Hide()
-            -- Clean up test mode visuals
-            if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
-            if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
-            if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
-        end
+        if frame then frame:Hide() end
     end
 
     -- Hide test container
@@ -2426,20 +2313,9 @@ function DF:HideRaidTestFrames(silent)
         DF.testRaidContainer:Hide()
     end
 
-    -- Hide test raid pet frames
-    if DF.HideAllTestRaidPetFrames then
-        DF:HideAllTestRaidPetFrames()
-    end
-
-    -- Hide personal targeted spell test icons
-    if DF.HideTestPersonalTargetedSpells then
-        DF:HideTestPersonalTargetedSpells()
-    end
-
-    -- Hide Targeted List demo bars
-    if DF.HideTestTargetedList then
-        DF:HideTestTargetedList()
-    end
+    -- AD indicators, absorb textures, pet / personal-targeted / Targeted List previews.
+    -- Shared with the combat and zone teardowns — see TeardownTestFrameVisuals.
+    DF:TeardownTestFrameVisuals()
 
     -- Hide group labels (they will be re-shown by UpdateRaidLayout if needed)
     if DF.raidGroupLabels then
@@ -2645,15 +2521,13 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
     -- so the flag does not survive into the live-frame positioning path. (#875)
     lp.testMode = true
 
-    -- [LEAK-TEST] Simulates the proposed patch's mutation. Now redundant since
-    -- the patch is in place above, but kept opt-in for diagnostic continuity.
-    if DF.debugLeakTestSimulate then
-        lp.testMode = true
-        if DF.debugLeakTest then
-            DF:Say("LEAK-TEST: TestMode SIMULATED patch mutation: lp.testMode = true written")
-        end
-    end
-
+    -- ☠ (Removed) the [LEAK-TEST] simulate block, which was gated on
+    -- DF.debugLeakTestSimulate -- a flag NOTHING writes, in either addon and in no
+    -- documented /run toggle, so the branch could not be entered. Its own comment
+    -- already called it "redundant since the patch is in place above", and its whole
+    -- body was `lp.testMode = true`, which the line above does unconditionally.
+    -- (DF.debugLeakTest, used just below, is different: it IS a documented manual
+    -- toggle -- see /run DandersFrames.debugLeakTest = true in SecureSort.lua.)
     if DF.debugLeakTest then
         DF:Say(string.format(
             "LEAK-TEST: LightweightPositionRaidTestFrames entered  lp.testMode=%s",

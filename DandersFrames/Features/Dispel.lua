@@ -13,9 +13,8 @@ local addonName, DF = ...
 -- ============================================================
 
 -- Local caching of frequently used globals for performance
-local pairs, ipairs, type, wipe = pairs, ipairs, type, wipe
-local floor, ceil, min, max = math.floor, math.ceil, math.min, math.max
-local CreateColorFromBytes = CreateColorFromBytes
+local pairs, ipairs, type = pairs, ipairs, type
+local min, max = math.min, math.max
 local issecretvalue = issecretvalue
 
 -- Edge gradient textures: each edge is solid at the outer edge and fades inward

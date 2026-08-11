@@ -45,16 +45,30 @@ local POPUP_COLORS = {
     orange     = {r = 1.0, g = 0.6, b = 0.1},
 }
 
+-- ☠ PASS `text` THROUGH StyleButton -- do not build the label by hand.
+--
+-- This used to create its own FontString as btn.label. StyleButton's grow-only
+-- auto-width (Widgets.lua) lives INSIDE `if opts.text ~= nil then` and measures
+-- btn.Text, so for these buttons it did not merely miss -- it never ran at all, and
+-- Import All / Compatible Only / Cancel stayed pinned to a width measured against
+-- their ENGLISH labels. That is exactly the clipping the auto-width default was added
+-- to end. The sibling helpers in this same file (CreateChoiceButton, CreateButton)
+-- always passed text through and never had the problem.
+--
+-- btn.label is kept as an alias so existing callers that relabel through it still work.
 local function CreateStyledButton(parent, text, width, height)
     local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
     -- Shared button look; ClickCasting green accent on hover (matches its checkboxes).
-    DF.GUI:StyleButton(btn, { width = width or 120, height = height or 28, accent = CC.ACCENT })
-
-    local label = btn:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    label:SetPoint("CENTER")
-    label:SetText(text)
-    label:SetTextColor(POPUP_COLORS.text.r, POPUP_COLORS.text.g, POPUP_COLORS.text.b)
-    btn.label = label
+    DF.GUI:StyleButton(btn, {
+        width  = width or 120,
+        height = height or 28,
+        accent = CC.ACCENT,
+        text   = text,
+    })
+    if btn.Text then
+        btn.Text:SetTextColor(POPUP_COLORS.text.r, POPUP_COLORS.text.g, POPUP_COLORS.text.b)
+    end
+    btn.label = btn.Text
 
     return btn
 end
@@ -62,7 +76,10 @@ end
 local function CreateImportPopup()
     if ImportPopupFrame then return ImportPopupFrame end
     
+    -- UIParent-parented: register or it draws at 100% over a scaled GUI. Same for
+    -- every other dialog in this file.
     local frame = CreateFrame("Frame", "DFClickCastingImportPopup", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(frame) end
     frame:SetSize(520, 460)
     frame:SetPoint("CENTER")
     frame:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -466,7 +483,16 @@ function CC:ImportProfile(importString, newProfileName)
     end
     
     -- Validate
-    if not data.profile then
+    -- ☠ TYPE CHECKS, not truthiness. An import string comes from another player, and the
+    -- only guard here was `if not data.profile` -- so `{profile = 5}` passed it and threw
+    -- on `data.profile.bindings`, `{profile = {bindings = 1}}` threw inside ipairs, and
+    -- `{profile = {bindings = {5}}}` threw on `binding.actionType`. The UI caller has no
+    -- pcall and neither does the public API entry point, so a malformed paste took the
+    -- whole call stack with it. The profile-import twin guards exactly this and says so.
+    if type(data.profile) ~= "table" then
+        return false, L["Invalid profile data"]
+    end
+    if data.profile.bindings ~= nil and type(data.profile.bindings) ~= "table" then
         return false, L["Invalid profile data"]
     end
     
@@ -478,6 +504,11 @@ function CC:ImportProfile(importString, newProfileName)
     
     if data.profile.bindings then
         for _, binding in ipairs(data.profile.bindings) do
+            -- Each ELEMENT is untrusted too: a non-table here threw on binding.actionType.
+            if type(binding) ~= "table" then
+                binding = nil
+            end
+            if binding then
             local status = "valid_spec"
             
             -- Check spell bindings for class compatibility
@@ -496,6 +527,7 @@ function CC:ImportProfile(importString, newProfileName)
             else
                 table.insert(validBindings, entry)
             end
+            end  -- type(binding) == "table"
         end
     end
     
@@ -637,6 +669,7 @@ function CC:ShowClickCastConflictPopup(conflicts, enableCheckbox)
     
     -- Create popup frame
     local popup = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(popup) end
     popup:SetSize(400, 280)  -- Taller to fit all buttons
     popup:SetPoint("CENTER")
     -- Shared dialog-root chrome with the CC theme-coloured border + 0.1 fill.
@@ -877,6 +910,7 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
     
     -- Create popup frame
     local popup = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(popup) end
     popup:SetSize(420, 224)
     popup:SetPoint("CENTER")
     -- Shared dialog-root chrome with the CC theme-coloured border + 0.1 fill.
@@ -964,25 +998,19 @@ function CC:ShowBlizzardClickCastWarning(enableCheckbox, onConfirm)
     end)
     
     -- "Don't show again" checkbox (small, bottom center)
-    local dontShowCb = CreateFrame("CheckButton", nil, popup, "BackdropTemplate")
+    -- ⚠ Its state used to be read off the TEXTURE (`if self.check:IsShown()`), with the
+    -- native checked state left behind entirely. The row keeps the two in step and makes
+    -- the checked state authoritative, so the db no longer depends on what is painted.
+    local dontShowCb = DF.GUI:CreateCheckRow(popup, {
+        label      = L["Don't show this warning again"],
+        accent     = CC.ACCENT,
+        labelGap   = 5,
+        labelColor = { 0.6, 0.6, 0.6 },
+        get        = function() return CC.db and CC.db.ignoreBlizzardWarning end,
+        set        = function(val) CC.db.ignoreBlizzardWarning = val end,
+    })
     dontShowCb:SetPoint("BOTTOM", 0, 55)
-    dontShowCb.check = DF.GUI:StyleCheckButton(dontShowCb, { accent = CC.ACCENT, manualCheck = true })
-    
-    dontShowCb:SetScript("OnClick", function(self)
-        if self.check:IsShown() then
-            self.check:Hide()
-            CC.db.ignoreBlizzardWarning = false
-        else
-            self.check:Show()
-            CC.db.ignoreBlizzardWarning = true
-        end
-    end)
-    
-    local dontShowLabel = popup:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-    dontShowLabel:SetPoint("LEFT", dontShowCb, "RIGHT", 5, 0)
-    dontShowLabel:SetText(L["Don't show this warning again"])
-    dontShowLabel:SetTextColor(0.6, 0.6, 0.6)
-    
+
     -- Close button
     local closeBtn = DF.GUI:CreateCloseButton(popup, { onClick = function()
         -- Revert checkbox state
@@ -1020,6 +1048,7 @@ function CC:ShowMacroEditorDialog(existingMacro)
     
     -- Create dialog
     macroEditorDialog = CreateFrame("Frame", "DFMacroEditorDialog", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(macroEditorDialog) end
     local thisDialog = macroEditorDialog  -- Local capture for closures
     macroEditorDialog:SetSize(400, 380)
     macroEditorDialog:SetPoint("CENTER", 0, 50)
@@ -1116,6 +1145,13 @@ function CC:ShowMacroEditorDialog(existingMacro)
     nameInput:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     nameInput:SetTextInsets(6, 6, 0, 0)
     nameInput:SetAutoFocus(false)
+    -- ⚠ RELEASE FOCUS ON ESCAPE/ENTER. Without these the EditBox swallows both
+    -- keys while focused, so Escape cannot reach the dialog to close it and the
+    -- field keeps the keyboard until something else is clicked. GUI:CreateInput and
+    -- the auto-profile name dialogs already wire exactly this pair; these three
+    -- dialog inputs were the only ones that did not.
+    nameInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    nameInput:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     nameInput:SetText(existingMacro and existingMacro.name or "")
     nameInput:SetEnabled(not isImported)
     if isImported then
@@ -1301,6 +1337,7 @@ function CC:ShowIconPickerDialog(onSelect)
     local C_TEXT_DIM = GUIColors.textDim
 
     iconPickerDialog = CreateFrame("Frame", "DFIconPickerDialog", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(iconPickerDialog) end
     iconPickerDialog:SetSize(320, 280)
     iconPickerDialog:SetPoint("CENTER", 0, 50)
     iconPickerDialog:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -1374,6 +1411,13 @@ function CC:ShowIconPickerDialog(onSelect)
     idInput:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     idInput:SetTextInsets(6, 6, 0, 0)
     idInput:SetAutoFocus(false)
+    -- ⚠ RELEASE FOCUS ON ESCAPE/ENTER. Without these the EditBox swallows both
+    -- keys while focused, so Escape cannot reach the dialog to close it and the
+    -- field keeps the keyboard until something else is clicked. GUI:CreateInput and
+    -- the auto-profile name dialogs already wire exactly this pair; these three
+    -- dialog inputs were the only ones that did not.
+    idInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    idInput:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     idInput:SetNumeric(true)
     
     local useIdBtn = CreateFrame("Button", nil, iconPickerDialog, "BackdropTemplate")
@@ -1416,6 +1460,7 @@ function CC:ShowImportMacroDialog()
     local C_TEXT_DIM = GUIColors.textDim
 
     importMacroDialog = CreateFrame("Frame", "DFImportMacroDialog", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(importMacroDialog) end
     local thisDialog = importMacroDialog  -- Local capture for closures
     importMacroDialog:SetSize(400, 400)
     importMacroDialog:SetPoint("CENTER", 0, 50)
@@ -1690,6 +1735,7 @@ function CC:ShowQuickMacroDialog()
     local C_TEXT_DIM = GUIColors.textDim
 
     quickMacroDialog = CreateFrame("Frame", "DFQuickMacroDialog", UIParent, "BackdropTemplate")
+    if DF.GUI and DF.GUI.RegisterScaledSurface then DF.GUI:RegisterScaledSurface(quickMacroDialog) end
     local thisDialog = quickMacroDialog  -- Local capture for closures
     quickMacroDialog:SetSize(420, 400)
     quickMacroDialog:SetPoint("CENTER", 0, 50)
@@ -1734,6 +1780,13 @@ function CC:ShowQuickMacroDialog()
     spellInput:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     spellInput:SetTextInsets(6, 6, 0, 0)
     spellInput:SetAutoFocus(false)
+    -- ⚠ RELEASE FOCUS ON ESCAPE/ENTER. Without these the EditBox swallows both
+    -- keys while focused, so Escape cannot reach the dialog to close it and the
+    -- field keeps the keyboard until something else is clicked. GUI:CreateInput and
+    -- the auto-profile name dialogs already wire exactly this pair; these three
+    -- dialog inputs were the only ones that did not.
+    spellInput:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    spellInput:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     
     -- Spell icon display
     local spellIcon = quickMacroDialog:CreateTexture(nil, "ARTWORK")
@@ -1822,32 +1875,31 @@ function CC:ShowQuickMacroDialog()
     -- Options
     yOffset = yOffset - 10
     
-    local tooltipCb = CreateFrame("CheckButton", nil, quickMacroDialog, "BackdropTemplate")
+    local tooltipCb = DF.GUI:CreateCheckRow(quickMacroDialog, {
+        label       = L["Add #showtooltip"],
+        accent      = CC.ACCENT,
+        nativeCheck = true,
+        labelGap    = 4,
+        font        = "DFFontNormalSmall",
+        get         = function() return showTooltip end,
+        set         = function(val) showTooltip = val end,
+        onClick     = function() UpdatePreview() end,
+    })
     tooltipCb:SetPoint("TOPLEFT", 12, yOffset)
-    DF.GUI:StyleCheckButton(tooltipCb, { accent = CC.ACCENT })
-    tooltipCb:SetChecked(true)
-    tooltipCb:SetScript("OnClick", function(self)
-        showTooltip = self:GetChecked()
-        UpdatePreview()
-    end)
-    local tooltipLabel = quickMacroDialog:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    tooltipLabel:SetPoint("LEFT", tooltipCb, "RIGHT", 4, 0)
-    tooltipLabel:SetText(L["Add #showtooltip"])
-    tooltipLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    local tooltipLabel = tooltipCb.label
     
-    local stopCb = CreateFrame("CheckButton", nil, quickMacroDialog, "BackdropTemplate")
+    local stopCb = DF.GUI:CreateCheckRow(quickMacroDialog, {
+        label       = L["Add /stopcasting"],
+        accent      = CC.ACCENT,
+        nativeCheck = true,
+        labelGap    = 4,
+        font        = "DFFontNormalSmall",
+        get         = function() return stopCasting end,
+        set         = function(val) stopCasting = val end,
+        onClick     = function() UpdatePreview() end,
+    })
     stopCb:SetPoint("LEFT", tooltipLabel, "RIGHT", 20, 0)
-    DF.GUI:StyleCheckButton(stopCb, { accent = CC.ACCENT })
-    stopCb:SetChecked(false)
-    stopCb:SetScript("OnClick", function(self)
-        stopCasting = self:GetChecked()
-        UpdatePreview()
-    end)
-    local stopLabel = quickMacroDialog:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")
-    stopLabel:SetPoint("LEFT", stopCb, "RIGHT", 4, 0)
-    stopLabel:SetText(L["Add /stopcasting"])
-    stopLabel:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-    
+
     -- Preview
     yOffset = yOffset - 35
     local previewLabel = quickMacroDialog:CreateFontString(nil, "OVERLAY", "DFFontNormalSmall")

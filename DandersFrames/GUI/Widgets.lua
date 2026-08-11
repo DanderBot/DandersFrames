@@ -8,7 +8,6 @@ local S = GUI._state
 local P = GUI._priv
 local C_PANEL, C_ELEMENT, C_BORDER, C_HOVER, C_TEXT, C_TEXT_DIM =
       GUI.Colors.panel, GUI.Colors.element, GUI.Colors.border, GUI.Colors.hover, GUI.Colors.text, GUI.Colors.textDim
-local CloseOpenDropdown = GUI._priv.CloseOpenDropdown
 local GetThemeColorFor = GUI.GetThemeColorFor
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
@@ -167,6 +166,72 @@ function GUI:StyleButton(btn, opts)
             btn.Text:SetTextColor(toneLabel[1], toneLabel[2], toneLabel[3])
         else
             btn.Text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+        end
+
+        -- ★ A DECLARED WIDTH IS A MINIMUM, NOT A FIXED SIZE (localisation).
+        --
+        -- Every `width = N` in this addon was measured against the ENGLISH label, so a
+        -- longer translation overflowed its button: German "SCHLACHTZUG" in a 70px tab,
+        -- "Freischalten" in an Unlock button, and ~80 more across the options addon.
+        --
+        -- ⚠ A NO-OP IN ENGLISH ONLY BECAUSE THE TEST BELOW IS EXACT. The English label
+        -- fits the width it was designed against, so a fit test measuring what the layout
+        -- actually occupies leaves it alone -- which is why this can be the default rather
+        -- than opted into at 82 call sites. That guarantee is NOT free: it held only after
+        -- the padding was moved out of the test (see the note there). Assume a slack
+        -- allowance and this silently resizes buttons that were already correct.
+        --
+        -- ⚠ Deferred, because GetStringWidth() returns 0 until the font object has
+        -- resolved -- measuring at construction is what collapsed the Aura Designer's
+        -- "Edit in Filter Designer" link to its 10px floor. Same converge-next-frame shape
+        -- as CreateLabel and CreateInfoBanner.
+        --
+        -- Opt out with `fitText = false` where equal widths are the POINT (a two-column
+        -- grid, a row of buttons that must align); there, growing one is worse than
+        -- clipping it.
+        if opts.fitText ~= false then
+            -- ☠ TEST "WOULD IT CLIP", THEN PAD. Do NOT add padding before the test.
+            --
+            -- This first shipped as `want = tw + 32` for an icon button, compared against
+            -- the declared width -- which assumed every button carried ~8px of slack
+            -- either side. Plenty do not: the click-casting macro row declares width 86
+            -- for a 12px icon plus "Quick Macro", i.e. packed with none. So the formula
+            -- grew buttons whose labels already fitted -- Import by 10 and Quick Macro
+            -- by 18 -- and since that row anchors its left buttons rightward and its
+            -- right buttons leftward, the two chains closed on each other and collided.
+            -- The comment here claimed it was "a no-op in English by construction". It
+            -- was not, and the screenshot that proved it was worth more than the claim.
+            --
+            -- The minimum that avoids clipping is exactly what the layout occupies:
+            -- icon + gap + text. Nothing else is required, so nothing else is assumed.
+            -- Padding is added only to a button that has ALREADY failed that test, where
+            -- it buys breathing room instead of moving a button that was fine.
+            --
+            -- `opts.icon` rather than btn.Icon: the icon is attached further down this
+            -- function and does not exist yet.
+            local occupied = opts.icon and (iconW + iconGap) or 0
+            local function FitToLabel()
+                if not btn.Text then return end
+                local tw = btn.Text:GetStringWidth() or 0
+                -- 0 = the font object has not resolved yet. Leave the declared width and
+                -- let the deferred pass settle it; never shrink to a bogus measurement.
+                if tw <= 0 then return end
+                local needed = math.ceil(tw) + occupied
+                -- GROW ONLY, measured against the CURRENT width, so the declared value is
+                -- the floor and repeated StyleButton calls (Start/Stop toggles relabel
+                -- through here) cannot ratchet a button smaller mid-session.
+                if needed > (btn:GetWidth() or 0) then btn:SetWidth(needed + 10) end
+            end
+            FitToLabel()
+            -- One converge next frame, guarded so repeated styling of the same button
+            -- cannot stack timers.
+            if not btn._dfFitScheduled and C_Timer and C_Timer.After then
+                btn._dfFitScheduled = true
+                C_Timer.After(0, function()
+                    btn._dfFitScheduled = nil
+                    FitToLabel()
+                end)
+            end
         end
     end
 
@@ -574,9 +639,22 @@ function GUI:CreateCloseButton(parent, opts)
         if opts.onClick then opts.onClick(self) end
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
+    -- ⚠ ACCEPTS A FULL SPEC, not just a title. This took `opts.tooltip` as a bare string
+    -- and built `{ title = it }`, so EVERY caller was structurally forced into a
+    -- title-only tooltip -- the house style wants a title AND a line saying what the
+    -- thing does, and its sibling CreateOverrideResetButton already took both. That is
+    -- an API gap rather than call-site drift, so the fix belongs here.
+    --
+    -- A string still means title-only, which is correct for a close button whose title
+    -- already says everything ("Close", "Remove"): the house rule prefers silence to a
+    -- correct-but-heavy explanation. Existing callers are unchanged.
     if opts.tooltip then
         btn:HookScript("OnEnter", function(self)
-            GUI:ShowTooltip(self, { title = opts.tooltip})
+            if type(opts.tooltip) == "table" then
+                GUI:ShowTooltip(self, opts.tooltip)
+            else
+                GUI:ShowTooltip(self, { title = opts.tooltip, lines = opts.tooltipDesc and { opts.tooltipDesc } or nil })
+            end
         end)
         btn:HookScript("OnLeave", function() GUI:HideTooltip() end)
     end
@@ -645,9 +723,23 @@ function GUI:CreateGlyphButton(parent, opts)
         self._glyphHover = enabled and true or false
     end
 
+    -- opts.tooltip takes EITHER a bare title string or a full ShowTooltip spec
+    -- { title=, lines=, tone= }.
+    --
+    -- ⚠ The table form is what new call sites should use. A title on its own draws a
+    -- single bold line with no description, which is not the house tooltip shape --
+    -- and an icon-only button is precisely the control that cannot get away with it,
+    -- because the title only restates the glyph you are already looking at.
+    local function GlyphTooltipSpec()
+        local t = opts.tooltip
+        if type(t) == "table" then return t end
+        if type(t) == "string" and t ~= "" then return { title = t } end
+        return nil
+    end
     btn:SetScript("OnEnter", function(self)
         if self._glyphHover then self.Icon:SetVertexColor(hr, hg, hb) end
-        if opts.tooltip then GUI:ShowTooltip(self, { title = opts.tooltip }) end
+        local spec = GlyphTooltipSpec()
+        if spec then GUI:ShowTooltip(self, spec) end
     end)
     btn:SetScript("OnLeave", function(self)
         self.Icon:SetVertexColor(unpack(self._glyphRest))
@@ -701,8 +793,12 @@ end
 --   fillAlpha    default 0.30      borderAlpha  default 0.80
 --   fill = false outline only      edgeSize     default 2
 --
--- The returned frame gains :RefreshMoverTint(), which re-resolves the hue against
--- the theme as it stands now -- call it if the mode changes while a mover is shown.
+-- ⚠ NO :RefreshMoverTint(). One was defined here and documented as "call it if the
+-- mode changes while a mover is shown"; nothing ever called it, in either addon. Movers
+-- are rebuilt through CreateMoverBackdrop on a mode change instead, which is the same
+-- work by a different route -- so the method was a second entry point to it, advertised
+-- and unused. opts.color / opts.fill / opts.edgeSize are likewise never passed by any
+-- of the four call sites; the defaults below are what every mover actually gets.
 function GUI:CreateMoverBackdrop(frame, opts)
     opts = opts or {}
     local c = opts.color
@@ -717,17 +813,16 @@ function GUI:CreateMoverBackdrop(frame, opts)
         bgColor     = { r, g, b, opts.fillAlpha or 0.30 },
         borderColor = { r, g, b, opts.borderAlpha or 0.80 },
     })
-    frame.RefreshMoverTint = function(self, newOpts)
-        return GUI:CreateMoverBackdrop(self, newOpts or opts)
-    end
     return frame
 end
 
 -- The element backdrop, exposed to consumer files (the stylers in this file use
 -- the local directly). Nothing outside should be calling SetBackdrop itself --
 -- route it through here so the look, and the border mechanism, stay in one
--- place. See the local for the opts contract: fill, outline, bgColor,
--- borderColor, backdropEdge.
+-- place. See the local for the opts contract: fill, outline, bgColor, borderColor,
+-- edgeSize and inset. (It used to list backdropEdge and omit edgeSize and inset --
+-- backwards on both counts: edgeSize and inset are passed by real callers, while
+-- backdropEdge is passed by none.)
 function GUI:CreateElementBackdrop(frame, opts)
     return CreateElementBackdrop(frame, opts)
 end
@@ -2007,7 +2102,8 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
     local searchable = opts.searchable
     local ITEM_HEIGHT = 22
     local SEARCH_HEIGHT = 26
-    local MAX_VISIBLE = opts.maxVisible or 12
+    -- (No opts.maxVisible: nothing ever passed one, so 12 is what every dropdown got.)
+    local MAX_VISIBLE = 12
     local searchBox, scrollFrame, scrollChild, searchPlaceholder
     if searchable then
         searchBox = CreateFrame("EditBox", nil, menuFrame, "BackdropTemplate")
@@ -2365,6 +2461,16 @@ local OUTLINE_FLAG_ORDER = { "NONE", "OUTLINE", "THICKOUTLINE", "MONOCHROME", "M
 
 
 
+-- ⚠ THIS DOC BLOCK, AND THE NEXT FEW, DOCUMENT FUNCTIONS THAT ARE NOT IN THIS FILE.
+-- The border, animation and text-style control sets live in
+-- DandersFrames_Options/GUI/SettingsWidgets.lua, and CreateInfoBanner in Sections.lua;
+-- only the constants between them (OUTLINE_FLAG_ORDER, INFO_BANNER_TONES) are still
+-- here. They were left behind when the settings-only widgets moved out of the
+-- resident toolkit.
+--
+-- Weigh that before trusting one: a spec sitting an addon away from its function is
+-- not checked by anyone editing either side, and the `include` list below went stale
+-- in both directions as a result.
 -- ============================================================
 -- UNIFIED BORDER CONTROL SET
 -- Drops the canonical Show / Style / Texture / Size / Colour controls plus
@@ -2381,8 +2487,13 @@ local OUTLINE_FLAG_ORDER = { "NONE", "OUTLINE", "THICKOUTLINE", "MONOCHROME", "M
 -- opts = {
 --   parent       = the panel widget (e.g. self.child) — same first arg the
 --                  underlying CreateCheckbox/Slider/etc. take
---   include      = { offset=, inset=, blendMode=, gradient=, shadow=,
---                    classColor=, roleColor=, colorByTime=, colorByType= }
+--   include      = { offset=, inset=, blendMode=, gradient=, shadow=, alpha=,
+--                    animate=, classColor=, roleColor= }
+--                  ⚠ THIS LIST HAS DRIFTED IN BOTH DIRECTIONS: it omitted `alpha`
+--                  and `animate` (passed by ~17 and 3 callers) while still listing
+--                  colorByTime / colorByType, which no caller ever passed and whose
+--                  branches are now removed. It drifts because the spec and the
+--                  function live in different addons -- see the note above.
 --   fullUpdate   = callback for full re-render (drop / value-set)
 --   lightUpdate  = callback for slider-drag (size, offsets, shadow sliders)
 --   lightColors  = callback for live colour-picker preview

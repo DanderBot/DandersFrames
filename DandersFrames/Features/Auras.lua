@@ -8,8 +8,6 @@ local addonName, DF = ...
 -- Local caching of frequently used globals and WoW API for performance
 local pairs, ipairs, type, pcall, wipe = pairs, ipairs, type, pcall, wipe
 local C_UnitAuras = C_UnitAuras
-local UnitIsUnit = UnitIsUnit
-local GetTime = GetTime
 
 -- Additional cached API for direct aura update (Tier 1 optimization)
 local UnitExists = UnitExists
@@ -17,9 +15,7 @@ local UnitIsDeadOrGhost = UnitIsDeadOrGhost
 local UnitIsConnected = UnitIsConnected
 local InCombatLockdown = InCombatLockdown
 local issecretvalue = issecretvalue
-local strsplit = strsplit
 local C_CurveUtil = C_CurveUtil
-local GetAuraDataByAuraInstanceID = C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID
 
 -- (Removed) the 2025-01-20 aura-entry table pool (tablePool / poolSize) and the
 -- cached IsAuraFilteredOutByInstanceID / strfind / tinsert / tremove. All were
@@ -3145,13 +3141,34 @@ end
 -- per rendered frame instead of one per callback. The 0-delay timer re-checks
 -- combat when it fires (timers can land after lockdown re-engages).
 local factoryRefreshQueued = false
+local factoryRefreshRegen   -- one-shot regen listener, created on the first combat drop
 function DF:RefreshFactoryRows()
     if factoryRefreshQueued then return end
     if not (DF.AuraContainer and DF.AuraContainer.IsSupported and DF.AuraContainer.IsSupported()) then return end
     factoryRefreshQueued = true
     C_Timer.After(0, function()
         factoryRefreshQueued = false
-        if InCombatLockdown() then return end   -- drives self-defer in combat; version catches up at next drive
+        if InCombatLockdown() then
+            -- ⚠ RE-QUEUE AT REGEN, DON'T DROP. This used to return outright ("version
+            -- catches up at next drive") — true per frame, since the version IS bumped,
+            -- but the next drive is the next UNIT_AURA on that frame, which after
+            -- combat may be arbitrarily far away on a quiet frame. A mid-combat GUI
+            -- change then looked half-applied until some aura event wandered by:
+            -- disabling Defensive Icons hid the row at once (UpdateDefensiveBar's
+            -- combat-safe hide) while the buff row kept CLAIMING the deduplicated
+            -- defensives until its next drive — auras missing from both displays.
+            -- The restyle itself must stay out of combat (native buttons are
+            -- combat-forbidden); regen is the earliest it can legally run.
+            if not factoryRefreshRegen then
+                factoryRefreshRegen = CreateFrame("Frame")
+                factoryRefreshRegen:SetScript("OnEvent", function(self)
+                    self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+                    DF:RefreshFactoryRows()
+                end)
+            end
+            factoryRefreshRegen:RegisterEvent("PLAYER_REGEN_ENABLED")
+            return
+        end
         if DF.IteratePartyFrames then DF:IteratePartyFrames(driveFactoryRowsNow) end
         if DF.IterateRaidFrames then DF:IterateRaidFrames(driveFactoryRowsNow) end
     end)
@@ -3290,8 +3307,11 @@ local reparentedFrames = {}
 local blizzardHiddenParent = CreateFrame("Frame")
 blizzardHiddenParent:Hide()
 
--- Track if Direct-mode full disable is active
-DF.blizzardFramesFullyDisabled = false
+-- ☠ (Removed) DF.blizzardFramesFullyDisabled, "track if Direct-mode full disable is
+-- active". Assigned here and recomputed once further down, read NOWHERE in either
+-- addon -- a flag named like a live gate that gated nothing. The expression feeding
+-- it was vestigial too: both directMode locals were hardcoded true ("direct is the
+-- only aura source (4.6.1)"), so it reduced to hidePartyFrames or hideRaidFrames.
 
 -- Function to strip events from a Blizzard unit frame
 -- fullDisable=true: unregister ALL events (Direct mode, no Blizzard aura data needed)
@@ -3446,11 +3466,17 @@ function DF:UpdateBlizzardFrameVisibility()
     local hidePartyFrames = partyDb.hideBlizzardPartyFrames
     local hideRaidFrames = raidDb.hideBlizzardRaidFrames
 
-    -- Check if Direct mode is active (allows full disable instead of just hiding)
+    -- ⚠ THESE TWO LOCALS STAY. They look like leftovers -- both hardcoded true, and
+    -- the DF.blizzardFramesFullyDisabled line that used to combine them here is gone
+    -- (see the note at its declaration) -- but they are read five more times further
+    -- down this same function: two `hidePartyFrames and partyDirectMode` guards and
+    -- three StripUnitFrameEvents(frame, ...) calls, where the value is the
+    -- `fullDisable` argument. Delete them and those resolve as nil GLOBALS: the
+    -- guards silently go false and the strip calls flip to fullDisable = false,
+    -- leaving UNIT_AURA registered on frames that should be fully disabled.
     local partyDirectMode = true -- direct is the only aura source (4.6.1)
     local raidDirectMode = true
-    DF.blizzardFramesFullyDisabled = (hidePartyFrames and partyDirectMode) or (hideRaidFrames and raidDirectMode)
-    
+
     -- Side menu visibility - hide when solo, respect setting when grouped
     local showSideMenu
     if not IsInGroup() and not IsInRaid() then

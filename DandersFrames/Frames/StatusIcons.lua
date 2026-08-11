@@ -7,16 +7,12 @@ local addonName, DF = ...
 -- ============================================================
 
 -- Local caching of frequently used globals
-local pairs, ipairs, type = pairs, ipairs, type
+local type = type
 local UnitExists = UnitExists
 local UnitIsAFK = UnitIsAFK
 local UnitHasVehicleUI = UnitHasVehicleUI
 local UnitHasIncomingResurrection = UnitHasIncomingResurrection
 local UnitIsDeadOrGhost = UnitIsDeadOrGhost
-local UnitIsGroupLeader = UnitIsGroupLeader
-local UnitIsGroupAssistant = UnitIsGroupAssistant
-local GetRaidTargetIndex = GetRaidTargetIndex
-local GetReadyCheckStatus = GetReadyCheckStatus
 local GetPartyAssignment = GetPartyAssignment
 local GetRaidRosterInfo = GetRaidRosterInfo
 local IsInRaid = IsInRaid
@@ -786,6 +782,9 @@ local function GetAFKKey(unit)
 end
 
 -- Format seconds as M:SS or H:MM:SS
+-- ⚠ Published as DF:FormatAFKTime below. The preview cannot call a file-local, so it
+-- kept a byte-identical copy of this and the two were free to drift -- same shape as
+-- ApplyIconSettings, which is published for exactly the same reason.
 local function FormatAFKTime(seconds)
     if seconds < 3600 then
         return string.format("%02d:%02d", math.floor(seconds / 60), seconds % 60)
@@ -797,7 +796,24 @@ local function FormatAFKTime(seconds)
     end
 end
 
-function DF:UpdateAFKIcon(frame)
+-- A METHOD, not a bare alias: the preview calls it with `DF:` (colon), so assigning the
+-- local directly would shift every argument by one — the same trap the note on
+-- DF:ApplyStatusIconSettings records. Live keeps calling the local.
+function DF:FormatAFKTime(seconds)
+    return FormatAFKTime(seconds)
+end
+
+-- ★ isAFKOverride lets the PREVIEW drive this without a real unit. Everything else --
+-- the enabled gate, the combat gate, ApplyIconSettings, the timer/text mode split and
+-- the stable text anchor -- is shared, so the preview cannot drift from live.
+--
+-- ☠ Do not reinstate a copy of this in TestMode. The one that was there restated ~45
+-- lines of this function, comments included, and had already lost the
+-- afkIconHideInCombat gate: the preview kept the icon up in combat while live hid it,
+-- so that setting was not previewable. The timer keying needs nothing special either --
+-- GetAFKKey falls back to the unit token when there is no accessible GUID, which is
+-- exactly what a test frame has.
+function DF:UpdateAFKIcon(frame, isAFKOverride)
     if not frame or not frame.unit or not frame.afkIcon then return end
     
     local db = DF:GetFrameDB(frame)
@@ -825,9 +841,23 @@ function DF:UpdateAFKIcon(frame)
     -- art: sharing the clock is what made DND indistinguishable from AFK in the first place.
     -- Check AFK status (secret-safe), keyed by GUID so the timer survives transient nil
     -- returns (cross-realm latency, instance loading).
-    local afkKey = GetAFKKey(unit)
+    -- ☠ TEST FRAMES GET THEIR OWN CACHE LANE. Pooled test frames carry REAL unit
+    -- tokens ("player", "party1", "raid1"...), so GetAFKKey resolves REAL GUIDs for
+    -- them -- and the preview's forced isAFK stamped genuine group members' keys
+    -- into afkStateCache/afkStartTimes, restarting their live AFK clocks. (An
+    -- earlier claim that GetAFKKey "falls back to the unit token" for test frames
+    -- was wrong: it only falls back when the GUID is secret or inaccessible, which
+    -- a real token's is not.) Same pathway, different KEY -- the preview still runs
+    -- this live renderer, per the previews-run-live rule.
+    local afkKey = frame.dfIsTestFrame and ("test:" .. unit) or GetAFKKey(unit)
     local isAFK = nil
-    pcall(function() isAFK = UnitIsAFK(unit) end)
+    if isAFKOverride ~= nil then
+        -- Preview: the caller supplies the state. Still goes through the cache below,
+        -- so the elapsed-timer bookkeeping is the same code in both paths.
+        isAFK = isAFKOverride and true or false
+    else
+        pcall(function() isAFK = UnitIsAFK(unit) end)
+    end
     if canaccessvalue(isAFK) then
         afkStateCache[afkKey] = isAFK and "AFK" or false
     end
@@ -1160,8 +1190,14 @@ afkTickerFrame:SetScript("OnUpdate", function(self, elapsed)
     local partyDb = DF:GetDB()
     local raidDb = DF:GetRaidDB()
     
-    local partyTimerEnabled = partyDb.afkIconEnabled and partyDb.afkIconShowTimer ~= false
-    local raidTimerEnabled = raidDb.afkIconEnabled and raidDb.afkIconShowTimer ~= false
+    -- ☠ Both guarded. DF:GetDB()/GetRaidDB() return DF.db[mode], which is nil whenever
+    -- DF.db exists but the mode key does not -- and Core/Profile.lua REASSIGNS DF.db[mode]
+    -- wholesale on a profile switch, so there is a window where this is nil. This is a
+    -- bare OnUpdate on an always-shown frame, so an unguarded index fired once a second
+    -- forever. The same function guards its other db read further down, and the
+    -- BG-carrier ticker below guards explicitly -- this was the one that did not.
+    local partyTimerEnabled = partyDb and partyDb.afkIconEnabled and partyDb.afkIconShowTimer ~= false
+    local raidTimerEnabled = raidDb and raidDb.afkIconEnabled and raidDb.afkIconShowTimer ~= false
     
     if not partyTimerEnabled and not raidTimerEnabled then return end
     

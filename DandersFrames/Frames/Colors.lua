@@ -39,8 +39,19 @@ end
 function DF:ApplyDeadFade(frame, statusType, forceApply)
     if not frame then return end
     
-    -- Skip test frames - they handle their own dead fade in TestMode.lua
-    if frame.dfIsTestFrame then return end
+    -- ☠ THIS BAIL WAS CIRCULAR. It skipped test frames "because they handle their own
+    -- dead fade in TestMode.lua" -- and TestMode's only dead-fade code is the call INTO
+    -- this function (with forceApply set, at UpdateTestFrame). Its own handler moved to
+    -- ElementAppearance in the 2026-08-07 audit and this comment was not updated, so each
+    -- side deferred to the other and the work happened nowhere: a preview frame never got
+    -- the fade, dfDeadFadeApplied never became true on one, and every later branch reading
+    -- that flag for a test frame was dead.
+    --
+    -- Gated on forceApply rather than removed, so the AUTOMATIC path -- driven by real
+    -- unit state, which a test frame does not have -- still skips previews as intended.
+    -- The body below delegates to UpdateAllElementAppearances, which is what the preview
+    -- already runs, so the two now agree instead of cancelling.
+    if frame.dfIsTestFrame and not forceApply then return end
     
     -- Use raid DB for raid frames, party DB for party frames
     local db = DF:GetFrameDB(frame)
@@ -116,6 +127,70 @@ function DF:UpdateColorCurve()
     DF.MissingHealthCurveCache = {}
 end
 
+-- ★ THE ONE PLACE THE GRADIENT'S SHAPE IS DECIDED. Returns an ordered list of
+-- { pos = 0..1, r, g, b, a }, low health first, for both consumers below: the live
+-- C_CurveUtil curve and the by-hand interpolation the previews use.
+--
+-- ☠ IT USED TO BE TWO COPIES. GetCurveForUnit and GetHealthGradientColor each had
+-- their own GetStageColor and their own weighted point-array build -- the second
+-- literally commented "same logic as GetCurveForUnit" -- and they had ALREADY drifted:
+-- one nil-guard returned an alpha and the other did not, so a profile missing a colour
+-- key rendered opaque grey live and alpha-nil grey in the preview.
+--
+-- TWO SHAPES ARE READ, deliberately:
+--   * <prefix>Stops -- the list. Each entry { threshold = 0..100, color, useClass }.
+--     threshold is HEALTH PERCENT, so 0 is the low end and 100 the full end.
+--   * the legacy Low/Medium/High + <stage>Weight stages, when no list is present.
+--     A weight of N repeats that stage N times in the array, and the array is spaced
+--     evenly -- which is exactly a stop list with evenly spaced thresholds, and is how
+--     the migration converts one to the other without changing a pixel.
+-- The fallback is not dead code for old profiles only: it is what makes a profile
+-- readable BEFORE the lazy migration has run on it.
+local function BuildColorStops(db, prefix, class)
+    local function stageColor(c, useClass)
+        if useClass and class and class ~= "DEFAULT" then
+            local cc = DF:GetClassColor(class)
+            if cc then return cc.r, cc.g, cc.b, 1.0 end
+            return 0.5, 0.5, 0.5, 1.0
+        end
+        -- ⚠ Nil-guarded WITH an alpha. An imported or partially-migrated profile can be
+        -- missing any colour key; unguarded this threw on every health tick.
+        c = c or { r = 0.5, g = 0.5, b = 0.5, a = 1 }
+        return c.r or 0.5, c.g or 0.5, c.b or 0.5, c.a or 1
+    end
+
+    local out = {}
+    local stops = db[prefix .. "Stops"]
+    if type(stops) == "table" and #stops >= 2 then
+        for _, s in ipairs(stops) do
+            local r, g, b, a = stageColor(s.color, s.useClass)
+            out[#out + 1] = { pos = math.max(0, math.min(100, tonumber(s.threshold) or 0)) / 100,
+                              r = r, g = g, b = b, a = a }
+        end
+        table.sort(out, function(x, y) return x.pos < y.pos end)
+        return out
+    end
+
+    -- Legacy stages. Expand by weight, then space evenly -- the original behaviour.
+    local pts = {}
+    for _, stage in ipairs({ "Low", "Medium", "High" }) do
+        local w = math.max(1, math.floor(db[prefix .. stage .. "Weight"] or 1))
+        local r, g, b, a = stageColor(db[prefix .. stage], db[prefix .. stage .. "UseClass"])
+        for _ = 1, w do pts[#pts + 1] = { r = r, g = g, b = b, a = a } end
+    end
+    if #pts < 2 then
+        local r1, g1, b1, a1 = stageColor(db[prefix .. "Low"], db[prefix .. "LowUseClass"])
+        local r2, g2, b2, a2 = stageColor(db[prefix .. "High"], db[prefix .. "HighUseClass"])
+        pts = { { r = r1, g = g1, b = b1, a = a1 }, { r = r2, g = g2, b = b2, a = a2 } }
+    end
+    for i, p in ipairs(pts) do
+        p.pos = (i - 1) / (#pts - 1)
+        out[#out + 1] = p
+    end
+    return out
+end
+DF.BuildColorStops = BuildColorStops   -- the options page previews the same list
+
 -- Get a color curve for gradient mode
 -- prefix: db key prefix ("healthColor" or "missingHealthColor")
 -- cache: cache table to use (DF.CurveCache or DF.MissingHealthCurveCache)
@@ -124,57 +199,37 @@ function DF:GetCurveForUnit(unit, db, prefix, cache)
     prefix = prefix or "healthColor"
     cache = cache or DF.CurveCache
     
+    -- ⚠ The cache is keyed by CLASS, so the "does anything here want a class colour"
+    -- test has to cover both shapes: any stop in the list, or any of the three legacy
+    -- stage flags. Miss the list half and a class-coloured stop would be resolved once
+    -- against DEFAULT and then served from cache to every class in the group.
     local useClass = db[prefix .. "LowUseClass"] or db[prefix .. "MediumUseClass"] or db[prefix .. "HighUseClass"]
+    if not useClass then
+        local stops = db[prefix .. "Stops"]
+        if type(stops) == "table" then
+            for _, s in ipairs(stops) do
+                if s.useClass then useClass = true break end
+            end
+        end
+    end
+
     local class = "DEFAULT"
-    
     if useClass then
         _, class = UnitClass(unit)
         if not class then class = "DEFAULT" end
     end
-    
+
     if cache[class] then return cache[class] end
-    
+
     if not C_CurveUtil or not C_CurveUtil.CreateColorCurve then return nil end
-    
+
     local curve = C_CurveUtil.CreateColorCurve()
     curve:SetType(Enum.LuaCurveType.Linear)
-    
-    local function GetStageColor(stage)
-        if db[prefix .. stage .. "UseClass"] and class ~= "DEFAULT" then
-            local c = DF:GetClassColor(class)
-            if c then return c.r, c.g, c.b, 1.0 end
-            return 0.5, 0.5, 0.5, 1.0
-        else
-            local c = db[prefix .. stage]
-            return c.r, c.g, c.b, c.a or 1
-        end
+
+    for _, s in ipairs(BuildColorStops(db, prefix, class)) do
+        curve:AddPoint(s.pos, CreateColor(s.r, s.g, s.b, s.a))
     end
-    
-    local lowW = math.max(1, math.floor(db[prefix .. "LowWeight"] or 1))
-    local medW = math.max(1, math.floor(db[prefix .. "MediumWeight"] or 1))
-    local highW = math.max(1, math.floor(db[prefix .. "HighWeight"] or 1))
-    
-    local lr, lg, lb, la = GetStageColor("Low")
-    local mr, mg, mb, ma = GetStageColor("Medium")
-    local hr, hg, hb, ha = GetStageColor("High")
-    
-    local lCol = CreateColor(lr, lg, lb, la)
-    local mCol = CreateColor(mr, mg, mb, ma)
-    local hCol = CreateColor(hr, hg, hb, ha)
-    
-    local colorPoints = {}
-    for i = 1, lowW do table.insert(colorPoints, lCol) end
-    for i = 1, medW do table.insert(colorPoints, mCol) end
-    for i = 1, highW do table.insert(colorPoints, hCol) end
-    
-    if #colorPoints < 2 then colorPoints = {lCol, hCol} end
-    
-    local numPoints = #colorPoints
-    for i, col in ipairs(colorPoints) do
-        local position = (i - 1) / (numPoints - 1)
-        curve:AddPoint(position, col)
-    end
-    
+
     cache[class] = curve
     return curve
 end
@@ -184,49 +239,35 @@ end
 -- prefix: db key prefix ("healthColor" or "missingHealthColor")
 function DF:GetHealthGradientColor(percent, db, testClass, prefix)
     prefix = prefix or "healthColor"
-    
-    local lowW = math.max(1, math.floor(db[prefix .. "LowWeight"] or 1))
-    local medW = math.max(1, math.floor(db[prefix .. "MediumWeight"] or 1))
-    local highW = math.max(1, math.floor(db[prefix .. "HighWeight"] or 1))
-    
-    local function GetStageColor(stage)
-        if db[prefix .. stage .. "UseClass"] and testClass then
-            local c = DF:GetClassColor(testClass)
-            if c then return {r = c.r, g = c.g, b = c.b} end
+
+    local stops = BuildColorStops(db, prefix, testClass)
+    percent = math.max(0, math.min(1, tonumber(percent) or 0))
+
+    -- ⚠ BRACKET BY POSITION, NOT BY INDEX. The old code walked an evenly spaced array
+    -- (`percent * (numPoints - 1)`), which was only correct because weights produced
+    -- even spacing by construction. Stops carry their own thresholds, so the segment
+    -- has to be found by comparing positions -- index arithmetic would silently place
+    -- an unevenly spaced ramp wrong, and it would still LOOK like a gradient.
+    local lower, upper = stops[1], stops[#stops]
+    for i = 1, #stops - 1 do
+        if percent >= stops[i].pos and percent <= stops[i + 1].pos then
+            lower, upper = stops[i], stops[i + 1]
+            break
         end
-        return db[prefix .. stage] or {r = 0.5, g = 0.5, b = 0.5}
     end
-    
-    local lowColor = GetStageColor("Low")
-    local midColor = GetStageColor("Medium")
-    local highColor = GetStageColor("High")
-    
-    -- Build weighted color points array (same logic as GetCurveForUnit)
-    local colorPoints = {}
-    for i = 1, lowW do table.insert(colorPoints, lowColor) end
-    for i = 1, medW do table.insert(colorPoints, midColor) end
-    for i = 1, highW do table.insert(colorPoints, highColor) end
-    
-    if #colorPoints < 2 then 
-        colorPoints = {lowColor, highColor} 
-    end
-    
-    -- Find which segment of the curve we're in and interpolate
-    local numPoints = #colorPoints
-    local scaledPos = percent * (numPoints - 1)
-    local lowerIdx = math.floor(scaledPos) + 1
-    local upperIdx = math.min(lowerIdx + 1, numPoints)
-    local t = scaledPos - (lowerIdx - 1)  -- Fractional position within segment
-    
-    local c1 = colorPoints[lowerIdx]
-    local c2 = colorPoints[upperIdx]
-    
-    -- Linear interpolation between the two points
-    local r = c1.r + (c2.r - c1.r) * t
-    local g = c1.g + (c2.g - c1.g) * t
-    local b = c1.b + (c2.b - c1.b) * t
-    
-    return {r = r, g = g, b = b}
+    -- Outside the outermost stops (a ramp that does not start at 0 or reach 100), hold
+    -- the end colour rather than extrapolating off the end of the ramp.
+    if percent <= stops[1].pos then lower, upper = stops[1], stops[1] end
+    if percent >= stops[#stops].pos then lower, upper = stops[#stops], stops[#stops] end
+
+    local span = upper.pos - lower.pos
+    local t = (span > 0) and ((percent - lower.pos) / span) or 0
+
+    return {
+        r = lower.r + (upper.r - lower.r) * t,
+        g = lower.g + (upper.g - lower.g) * t,
+        b = lower.b + (upper.b - lower.b) * t,
+    }
 end
 
 -- Apply health bar colors based on settings
@@ -329,41 +370,16 @@ function DF:ApplyHealthColors(frame)
     -- which is called from UpdateUnitFrame. No need to duplicate it here.
 end
 
--- Apply bar orientation
-function DF:ApplyBarOrientation(frame)
-    if not frame or not frame.healthBar then return end
-    
-    -- Use raid DB for raid frames, party DB for party frames
-    local db = DF:GetFrameDB(frame)
-    local mode = db.healthOrientation or "HORIZONTAL"
-    
-    local orient, reverse
-    if mode == "HORIZONTAL" then
-        orient, reverse = "HORIZONTAL", false
-    elseif mode == "HORIZONTAL_INV" then
-        orient, reverse = "HORIZONTAL", true
-    elseif mode == "VERTICAL" then
-        orient, reverse = "VERTICAL", false
-    elseif mode == "VERTICAL_INV" then
-        orient, reverse = "VERTICAL", true
-    end
-    
-    frame.healthBar:SetOrientation(orient)
-    frame.healthBar:SetReverseFill(reverse)
-    -- ⚠ Distinct from DF:ApplyBarFillOrientation despite the similar name: this
-    -- function sets the bar's fill DIRECTION, that one settles what the fill
-    -- TEXTURE does about it (a tiled texture must not rotate, and swaps to its
-    -- pre-rotated companion instead). Unlike Frames/Update.lua this path never
-    -- touched rotation at all, so without the call a tiled texture chosen here
-    -- would keep the horizontal art on a vertical frame.
-    DF:ApplyBarFillOrientation(frame.healthBar, orient == "VERTICAL")
-
-    -- Apply orientation to missing health bar (opposite fill direction)
-    -- Missing health fills from the "end" where health is depleted
-    if frame.missingHealthBar then
-        frame.missingHealthBar:SetOrientation(orient)
-        frame.missingHealthBar:SetReverseFill(not reverse)  -- Opposite of health bar
-        DF:ApplyBarFillOrientation(frame.missingHealthBar, orient == "VERTICAL")
-    end
-end
+-- ☠ (Removed) DF:ApplyBarOrientation. Zero callers in either addon -- its only other
+-- mention was a string in Profiler's PROFILED_FUNCTIONS, which WRAPS DF[name] and
+-- never calls it, so wrapping this measured nothing. It duplicated the orientation
+-- mapping Frames/Update.lua does inside ApplyFrameLayout, for both the health bar and
+-- the missing-health bar, including the "missing health fills the opposite way" rule.
+--
+-- ⚠ ITS SAFETY ARM WAS THE ONE THING WORTH KEEPING, so that reasoning moved to the
+-- live site rather than dying here -- see the note by the orientation chain in
+-- Frames/Update.lua. Two claims in the comment it carried were wrong and are not
+-- reproduced there: on the live path an unrecognised mode does NOT throw (it leaves
+-- the bar untouched instead), and it cited "UpdateReducedMaxHealth in this same
+-- file", which lives in Frames/ReducedMaxHealth.lua.
 

@@ -790,6 +790,29 @@ function GUI:RefreshDesignerPresetBars()
     end
 end
 
+-- Open a named filter in the Filter Designer: switch to the page, then scroll to
+-- that filter, select it and pulse it.
+--
+-- One helper because the Aura Designer names filters in several places (linked-filter
+-- chips, filter trigger tags) and every one of them wants the same trip. Written out
+-- at each site it was three lines of page-existence guarding, and the sites drifted --
+-- most did a bare SelectTab and landed you on the page with nothing indicated, which
+-- is indistinguishable from a broken link.
+--
+-- ⚠ The page id is checked because the page is BUILT ON FIRST SHOW: SelectTab builds
+-- it, which is why _fdFocusFilter can only be read after that call and not before.
+--
+-- Returns true when it actually got somewhere, so a caller can fall back.
+function GUI:OpenFilterInDesigner(kind, key)
+    if not (GUI.SelectTab and GUI.Pages and GUI.Pages["auras_filterdesigner"]) then return false end
+    GUI.SelectTab("auras_filterdesigner")
+    local page = GUI.Pages["auras_filterdesigner"]
+    if page and page._fdFocusFilter and kind and key then
+        page._fdFocusFilter(kind, key)
+    end
+    return true
+end
+
 -- Creates a button with an icon and text
 -- iconName is the name of the icon file (without path/extension)
 -- iconSize is optional (defaults to 16)
@@ -864,10 +887,18 @@ end
 --
 --   opts.art      { kind = "iconRow", colors = { {r,g,b}, ... }, ghost = true }
 --   opts.title    card heading (localised)
---   opts.desc     one short line -- roughly 30 characters before it wraps
+--   opts.desc     one short line -- roughly 24 characters before it wraps
 --   opts.accent   border / hover tint, defaults to the mode theme
 --   opts.onClick  fired on click
-local CHOICE_CARD_H, CHOICE_THUMB_W, CHOICE_THUMB_H = 54, 62, 38
+--
+-- ⚠ CARD HEIGHT IS FIXED, so it has to clear the TALLEST card, not the average
+-- one: the desc wraps and nothing re-measures it. 58 = 2 top + 13 title + 3 gap
+-- + 3 wrapped desc lines at 10px. It was 54, which cleared the 8px text with
+-- room to spare and would have clipped a third line at the larger size -- and a
+-- clipped line is invisible until someone writes a longer desc or plays in a
+-- language whose translation runs long. Raising the text is what pulled this
+-- number up; if the text ever grows again, do this arithmetic again.
+local CHOICE_CARD_H, CHOICE_THUMB_W, CHOICE_THUMB_H = 58, 62, 38
 
 -- A unit frame in miniature. The name line and health bar are what make the
 -- icons above them read as "on a frame" rather than as loose squares.
@@ -917,20 +948,12 @@ local function BuildChoiceThumb(parent, art)
             ghost:SetSize(8, 8)
         end
 
-    elseif kind == "icon" or kind == "square" then
-        -- Both sit ON the frame at a corner; the size difference IS the difference.
-        local sz = (kind == "icon") and 13 or 7
+    elseif kind == "icon" then
+        -- Sits ON the frame at a corner.
         local box = thumb:CreateTexture(nil, "OVERLAY")
         box:SetColorTexture(c[1], c[2], c[3], 1)
         box:SetPoint("TOPLEFT", 5, -11)
-        box:SetSize(sz, sz)
-
-    elseif kind == "bar" then
-        local bar = thumb:CreateTexture(nil, "OVERLAY")
-        bar:SetColorTexture(c[1], c[2], c[3], 1)
-        bar:SetPoint("TOPLEFT", 5, -13)
-        bar:SetPoint("RIGHT", thumb, "RIGHT", -5, 0)
-        bar:SetHeight(5)
+        box:SetSize(13, 13)
 
     elseif kind == "border" then
         -- Drawn as four edges rather than a backdrop swap: the thumb's own border
@@ -945,26 +968,16 @@ local function BuildChoiceThumb(parent, art)
             if e[6] then t:SetHeight(e[6]) end
         end
 
-    elseif kind == "healthbar" then
-        hp:SetColorTexture(c[1], c[2], c[3], 1)
-
-    elseif kind == "background" then
-        local bg = thumb:CreateTexture(nil, "BORDER")
-        bg:SetColorTexture(c[1], c[2], c[3], 0.55)
-        bg:SetPoint("TOPLEFT", 1, -1)
-        bg:SetPoint("BOTTOMRIGHT", -1, 1)
-
-    elseif kind == "nametext" then
-        name:SetColorTexture(c[1], c[2], c[3], 1)
-
-    elseif kind == "healthtext" then
-        -- The health readout sits on the bar, so the swatch goes there to
-        -- distinguish it from the name line above.
-        local ht = thumb:CreateTexture(nil, "OVERLAY")
-        ht:SetColorTexture(c[1], c[2], c[3], 1)
-        ht:SetPoint("BOTTOMRIGHT", -6, 6)
-        ht:SetSize(12, 3)
     end
+    -- ☠ (Removed) the "square", "bar", "healthbar", "background", "nametext" and
+    -- "healthtext" arms. Every art.kind in the codebase is a string LITERAL -- there
+    -- is no computed `kind =` anywhere -- and across the six call sites only three
+    -- values are ever passed: "iconRow" (3), "border" (2) and "icon" (1). The other
+    -- six could not be reached.
+    --
+    -- ⚠ `name` and `hp` above are still built for every thumb and are NOT dead: they
+    -- draw the little name line and health bar that make the thumbnail read as a unit
+    -- frame at all. Only the arms that RE-TINTED them are gone.
 
     return thumb
 end
@@ -1030,9 +1043,12 @@ function GUI:CreateChoiceCardGroup(parent, opts)
     if expanded then
         local y = -h
         for _, def in ipairs(opts.cards or {}) do
+            -- ⚠ This is a WHITELIST, not a pass-through: a field not named here never
+            -- reaches the card, and does so silently. `action` had to be added when
+            -- the filter cards grew a corner button.
             local card = GUI:CreateChoiceCard(group, {
                 title = def.title, desc = def.desc, art = def.art,
-                accent = accent, onClick = def.onClick,
+                accent = accent, onClick = def.onClick, action = def.action,
             })
             card:SetPoint("TOPLEFT", 0, y)
             card:SetPoint("RIGHT", group, "RIGHT", 0, 0)
@@ -1062,17 +1078,28 @@ function GUI:CreateChoiceCard(parent, opts)
     local thumb = BuildChoiceThumb(card, opts.art)
     thumb:SetPoint("LEFT", 8, 0)
 
-    local title = card:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    -- 11px, up from DFFontHighlightSmall's 10. Outline left nil so the user's
+    -- Settings Font Outline choice still wins -- that is what the font object this
+    -- replaces did, and passing "" would force the outline off for this string
+    -- alone. (The desc below passes "" deliberately: dim supporting text.)
+    -- The text stops short when this card carries a corner action, so a wrapped
+    -- description cannot run under the button.
+    local textRightPad = opts.action and 32 or 10
+
+    local title = card:CreateFontString(nil, "OVERLAY")
+    GUI:SetSettingsFont(title, 11)
     title:SetPoint("TOPLEFT", thumb, "TOPRIGHT", 9, -2)
-    title:SetPoint("RIGHT", card, "RIGHT", -10, 0)
+    title:SetPoint("RIGHT", card, "RIGHT", -textRightPad, 0)
     title:SetJustifyH("LEFT")
     title:SetText(opts.title or "")
     title:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
 
+    -- 10px, up from 8. 8 was the smallest text anywhere in the settings UI and it
+    -- read as unfinished next to the card it explains (Krathe, 2026-08-10).
     local desc = card:CreateFontString(nil, "OVERLAY")
-    GUI:SetSettingsFont(desc, 8, "")
+    GUI:SetSettingsFont(desc, 10, "")
     desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -3)
-    desc:SetPoint("RIGHT", card, "RIGHT", -10, 0)
+    desc:SetPoint("RIGHT", card, "RIGHT", -textRightPad, 0)
     desc:SetJustifyH("LEFT")
     desc:SetWordWrap(true)
     desc:SetText(opts.desc or "")
@@ -1090,6 +1117,80 @@ function GUI:CreateChoiceCard(parent, opts)
         if opts.onClick then opts.onClick(self) end
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
     end)
+
+    -- opts.action = { icon, tooltip, onClick } -- an optional second action in the
+    -- card's bottom-right corner, for a card whose SUBJECT has somewhere else to be
+    -- managed. Only "From a Filter" / "Filter Group" pass one; the block header would
+    -- have been the cheaper place to put it, but a header spans every card in the
+    -- block and only one of them is about filters, so it would claim a scope it does
+    -- not have.
+    --
+    -- ☠ A BUTTON INSIDE A BUTTON. The card is itself the create action, over its
+    -- whole area, so this control has to be unmissable about which of the two you are
+    -- about to fire:
+    --
+    --   * The child takes the click. A moused-over child Button captures the input
+    --     and the card's OnClick does not run, so there is no double-fire -- the risk
+    --     is purely one of AIM, which is why this is a 20px target with real padding
+    --     and not a 12px glyph.
+    --   * The card's hover is SUPPRESSED while the cursor is on the child, and the
+    --     child lights instead. Without that the card stays lit saying "click here to
+    --     create", which is a promise it will not keep for this click. That swap is
+    --     the entire reason this is safe to nest.
+    --   * Miss it and you create an effect -- recoverable, but an object you did not
+    --     want, so the padding is not cosmetic.
+    if opts.action then
+        -- Sized to be FOUND, not to be tidy. At 20px with a 13px dim glyph this read
+        -- as decoration on the card rather than a control -- and a control nobody
+        -- sees is the same as one that is not there. It also has to hold its own
+        -- against a 62px thumbnail and two lines of text on the same card.
+        local ACT = 24
+        local actionBtn = CreateFrame("Button", nil, card)
+        actionBtn:SetSize(ACT, ACT)
+        actionBtn:SetPoint("BOTTOMRIGHT", -4, 4)
+        actionBtn:SetFrameLevel(card:GetFrameLevel() + 2)
+
+        local ai = actionBtn:CreateTexture(nil, "OVERLAY")
+        ai:SetSize(16, 16)
+        ai:SetPoint("CENTER")
+        ai:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\" .. (opts.action.icon or "edit"))
+        -- Full text colour at REST, accent on hover. Dim-at-rest is the idiom for a
+        -- glyph sitting beside a label that already names it; this one has no label.
+        ai:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+        actionBtn:SetScript("OnEnter", function(self)
+            -- Card back to REST, child lit: one of the two is always the live target
+            -- and the highlight says which.
+            card:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 1)
+            card:SetBackdropBorderColor(unpack(idleBorder))
+            ai:SetVertexColor(accent.r, accent.g, accent.b)
+            -- Same contract as CreateGlyphButton's: a full ShowTooltip spec, or a
+            -- bare string for a title-only tooltip. Prefer the spec -- this button
+            -- has no label, so a title alone would just name the glyph again.
+            local t = opts.action.tooltip
+            if type(t) == "table" then
+                GUI:ShowTooltip(self, t)
+            elseif type(t) == "string" and t ~= "" then
+                GUI:ShowTooltip(self, { title = t })
+            end
+        end)
+        actionBtn:SetScript("OnLeave", function()
+            ai:SetVertexColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+            if opts.action.tooltip then GUI:HideTooltip() end
+            -- The cursor is still inside the CARD on the way out, and leaving a child
+            -- does not re-fire the parent's OnEnter -- so restore the hover by hand or
+            -- the card sits at rest under a cursor that is still on it.
+            if card:IsMouseOver() then
+                card:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 1)
+                card:SetBackdropBorderColor(accent.r, accent.g, accent.b, 1)
+            end
+        end)
+        actionBtn:SetScript("OnClick", function(self)
+            if opts.action.onClick then opts.action.onClick(self) end
+            PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+        end)
+        card.ActionButton = actionBtn
+    end
 
     card.layoutHeight = CHOICE_CARD_H
     return card
@@ -1310,6 +1411,134 @@ function GUI:CreateRowToggle(parent, opts)
     btn.tooltipDesc = opts.tooltipDesc
     btn:SetChecked(false)
     return btn
+end
+
+-- ============================================================
+-- LABELLED CHECK ROW — for standalone DIALOGS, not settings pages.
+--
+-- ☠ WHY THIS IS NOT GUI:CreateCheckbox. CreateCheckbox is a SETTINGS-PAGE control and
+-- carries the machinery that goes with one: auto-profile override indicators, a
+-- DF.Search registration, DF:UpdateAll() on every click, parent:RefreshStates(), and a
+-- factory-owned row slot for AddWidget layout. The ClickCasting window is a standalone
+-- dialog that anchors its own widgets with SetPoint and drives CC:ApplyBindings() rather
+-- than a full frame repaint, so pushing it through CreateCheckbox would import four
+-- subsystems it has no business in — and register its toggles in the settings search,
+-- pointing at a panel the search cannot navigate to.
+--
+-- What WAS worth sharing is the assembly every one of those call sites hand-rolled:
+-- frame + StyleCheckButton + label + state + click + tooltip, ~30 lines apiece.
+--
+-- ⚠ RETURNS THE CheckButton, not a container. Existing call sites anchor the NEXT
+-- widget off the checkbox itself ("TOPLEFT", prevCb, "BOTTOMLEFT", 0, -8), so returning
+-- a wrapper would move every row. The label is parented to the checkbox's own parent and
+-- pinned LEFT +8, which is exactly what the hand-rolled versions did — pixel-identical.
+--
+-- ⚠ opts.accent is REQUIRED to preserve a non-default check colour. StyleCheckButton
+-- falls back to GetThemeColor(), so omitting it silently repaints ClickCasting's green
+-- check in the party/raid theme colour.
+--
+-- ⚠ labelGap and nativeCheck EXIST TO PRESERVE EXISTING PIXELS, not as taste options.
+-- The ClickCasting call sites were not uniform: the profile panel drives the check
+-- texture itself and sits its label 8px out, while the header rows use the native
+-- checked texture and a 3px gap. Hard-coding either would have visibly moved half of
+-- them, so both are parameters and every converted site passes what it already had.
+--
+-- opts: label, accent, font, labelGap, nativeCheck,
+--       sound, tooltip = { title, lines, anchor }, get, set, onClick
+function GUI:CreateCheckRow(parent, opts)
+    opts = opts or {}
+    local cb = CreateFrame("CheckButton", nil, parent, "BackdropTemplate")
+    -- manualCheck (the default here) means the row drives cb.check:SetShown() itself;
+    -- nativeCheck hands that to WoW via SetCheckedTexture. Mixing them desyncs the box.
+    local manual = not opts.nativeCheck
+    cb.check = GUI:StyleCheckButton(cb, { accent = opts.accent, manualCheck = manual })
+    cb.manualCheck = manual
+
+    -- ☠ PARENTED TO THE CHECKBOX, NOT TO `parent`.
+    --
+    -- A FontString hung off the container survives cb:Hide(), so a hidden checkbox
+    -- leaves its text on screen. The binding editor's Enable box is hidden except for
+    -- macros and items, and with the label on the panel its "Enable" floated over the
+    -- Active radios underneath. The hand-rolled version this replaced parented to the
+    -- checkbox for exactly this reason; parenting to the container was my regression.
+    --
+    -- Safe for the call sites that used to parent to a column: cb is a child of that
+    -- column, so anything hiding the column still hides the label.
+    local txt = cb:CreateFontString(nil, "OVERLAY", opts.font or "DFFontHighlightSmall")
+    txt:SetPoint("LEFT", cb, "RIGHT", opts.labelGap or 8, 0)
+    txt:SetText(opts.label or "")
+    -- labelColor exists for the same pixel-preserving reason as labelGap: the
+    -- "don't show this warning again" line is a dimmer grey than body text, on purpose.
+    local lc = opts.labelColor or C_TEXT
+    txt:SetTextColor(lc.r or lc[1], lc.g or lc[2], lc.b or lc[3])
+    cb.label = txt
+
+    -- ☠ ON A MANUAL ROW, SetChecked MUST ALSO PAINT.
+    --
+    -- With nativeCheck the client owns the texture and plain SetChecked repaints for
+    -- free. With manualCheck nothing does — so an existing `widget:SetChecked(v)`
+    -- anywhere in the codebase would flip the logical state and leave the box looking
+    -- exactly as it was. The binding editor alone has ten such calls, and they are the
+    -- refresh path: open the editor on a saved binding and every tick would be missing.
+    --
+    -- So the override goes HERE, once, and makes the widget behave like the native
+    -- control callers already expect. This is deliberately NOT the old monkey-patch it
+    -- replaces: that one also overrode GetChecked (to read a private `isChecked`) and
+    -- SetScript (to intercept one script type by string), which meant which calls were
+    -- hijacked depended on the argument you passed. The native checked state stays the
+    -- single source of truth; only the texture is kept in step with it.
+    if manual then
+        local baseSetChecked = cb.SetChecked
+        cb.SetChecked = function(self, on)
+            on = on and true or false
+            baseSetChecked(self, on)
+            self.check:SetShown(on)
+        end
+    end
+
+    -- Keep the checked state and the texture in step. Equivalent to SetChecked above on
+    -- a manual row; kept as the explicit name for call sites that mean "repaint too".
+    function cb:Apply(on)
+        self:SetChecked(on and true or false)
+    end
+
+    -- Re-read the source of truth and repaint. Dialogs rebuild on refresh, and several
+    -- of these are changed behind the widget's back by a sibling control.
+    function cb:Refresh()
+        if opts.get then self:Apply(opts.get()) end
+    end
+
+    -- ⚠ ASSIGNABLE, and read at click time rather than captured. Call sites that used to
+    -- do cb:SetScript("OnClick", fn) set `cb.onClick = fn` instead -- if they kept using
+    -- SetScript they would REPLACE the handler below and silently lose set/veto/texture.
+    cb.onClick = opts.onClick
+
+    -- ⚠ NO "veto" HOOK HERE, and that is a considered omission. The one call site that
+    -- looked like it wanted one -- click-casting's Enabled box, which opens a popup and
+    -- writes in that popup's callback -- actually needs the OPPOSITE: the tick must
+    -- stand while the popup is up, because the popup's cancel path is what unchecks it.
+    -- A hook that reverted on the spot would leave the box unticked after a confirm.
+    -- A call site that genuinely defers its write simply passes no `set`.
+    cb:SetScript("OnClick", function(self)
+        local val = self:GetChecked() and true or false
+        if self.manualCheck then self.check:SetShown(val) end
+        -- Before set/onClick so the click still sounds if a handler errors. Opt-in:
+        -- the settings pages deliberately do not sound their checkboxes, but the
+        -- binding editor's always have and that is a behaviour, not a style.
+        if opts.sound then PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON) end
+        if opts.set then opts.set(val) end
+        if self.onClick then self.onClick(val) end
+    end)
+
+    if opts.tooltip then
+        cb:SetScript("OnEnter", function(self)
+            GUI:ShowTooltip(self, opts.tooltip)
+        end)
+        cb:SetScript("OnLeave", function() GUI:HideTooltip() end)
+    end
+
+    cb:Refresh()
+    return cb
 end
 
 function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, customSet, overrideKey)
@@ -2753,18 +2982,25 @@ function GUI:CreateBorderControls(group, dbTable, prefix, opts)
     -- earlier, above the inset/offset/blendMode/gradient/shadow block, so the
     -- relationship "source → colour" reads top-to-bottom in the panel.)
 
-    if include.colorByTime then
-        w.colorByTime = group:AddWidget(GUI:CreateCheckbox(parent, L["Color by Time Remaining"], dbTable, key("BorderColorByTime"), fullUpdate), 30)
-        w.colorByTime.hideOn = hideOff
-        -- The actual colour curve picker is consumer-specific (e.g. AD's
-        -- existing expiring colour curve) and is added by the consumer
-        -- alongside this checkbox.
-    end
-
-    if include.colorByType then
-        w.colorByType = group:AddWidget(GUI:CreateCheckbox(parent, L["Color by Aura Type"], dbTable, key("BorderColorByType"), fullUpdate), 30)
-        w.colorByType.hideOn = hideOff
-    end
+    -- ☠ (Removed) the include.colorByTime and include.colorByType branches. No caller
+    -- passes either flag -- across all 18 CreateBorderControls call sites the include
+    -- tables only ever carry inset / offset / blendMode / gradient / shadow / alpha /
+    -- animate / classColor / roleColor. They are NOT the same story though, and the
+    -- difference matters if either is ever revived:
+    --
+    --   * COLOR BY TYPE IS A LIVE FEATURE, just not wired through this factory. The
+    --     key is seeded, read by Frames/Border.lua and Features/Auras.lua, carried in
+    --     profile export, and written by a real "Color by Dispel Type" checkbox --
+    --     hand-rolled on the Indicators page against debuffBorderColorByType. This
+    --     branch was a second, unused route to it, so removing it takes nothing away.
+    --
+    --   * COLOR BY TIME HAS NO WRITER AT ALL, and its read is unreachable for a
+    --     second reason too: Border.lua gates it on ctx.timeCurve, which NOTHING
+    --     passes, so Border:ResolveTimeColor cannot run either. ⚠ That resolver is
+    --     kept deliberately -- it is built on C_CurveUtil colour curves, which are
+    --     12.1-legal (same family as the pandemic regions), so it is a capability
+    --     nobody wired up rather than one the lockdown killed. Reviving it needs a
+    --     curve supplied through ctx, not a checkbox here.
 
     -- Two independent greys, both composed on top of whatever disableOn a control
     -- already carries (e.g. the shadow sub-controls), and both leaving the

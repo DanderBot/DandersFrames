@@ -1650,13 +1650,25 @@ function PinnedFrames:CreateSetFrames(setIndex)
     -- Use same template as main frames
     header:SetAttribute("template", "DandersUnitButtonTemplate")
     
-    -- Initial layout
-    self:ApplyLayoutSettings(setIndex)
-    
     -- Anchor header to container
     header:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0)
-    
+
     self.headers[setIndex] = header
+
+    -- Initial layout
+    -- ☠ MUST COME AFTER self.headers[setIndex] IS SET. ApplyLayoutSettings opens with
+    -- `local header = self.headers[setIndex]; if not header then return end`, so calling
+    -- it above that assignment was a guaranteed no-op -- point, offsets, spacing, column
+    -- config, per-child sizes and border/effect stamps were never written, and a
+    -- SecureGroupHeaderTemplate with no layout attributes stacks every child at its
+    -- default point.
+    --
+    -- Only the LOGIN path hid it: Initialize re-applies at the end of its second loop.
+    -- The on-demand path -- which the ☠ note above calls "the normal way a set gets its
+    -- frames" now -- returns from SetEnabled before ever reaching that second call, so a
+    -- set enabled from the options panel came up as one overlapping column until the user
+    -- nudged a slider or reloaded. FlatRaidFrames does this in the right order.
+    self:ApplyLayoutSettings(setIndex)
     
     -- STARTINGINDEX TRICK - Force create frames upfront
     -- Must happen BEFORE setting nameList/sortMethod

@@ -572,8 +572,15 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
     -- (ch:Show() moved ABOVE the early-out -- see the note there.)
 end
 
--- Expose for reuse by the Aura Designer border indicator
-DF.ApplyHighlightStyle = ApplyHighlightStyle
+-- ☠ (Removed) the DF.ApplyHighlightStyle export, and its claim to be "exposed for
+-- reuse by the Aura Designer border indicator". The Aura Designer does not call it,
+-- and nothing else does either -- every use of ApplyHighlightStyle is a direct call
+-- to the file-local, in this file.
+--
+-- ⚠ The reason is the one the note directly below already gives for its SIBLING
+-- export: the pre-12.1 Aura Designer EXPIRING ticker was that consumer, and it was
+-- retired this cycle. UpdateHighlightStyleColor was removed then; this export was
+-- missed, and kept a comment naming a caller that had just gone away.
 
 -- (Removed) UpdateHighlightStyleColor, a per-style colour-only fast path that skipped
 -- ApplyHighlightStyle's full tear-down. Its only consumer was the pre-12.1 Aura Designer

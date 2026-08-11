@@ -2,7 +2,7 @@ local addonName, DF = ...
 
 -- Local caching of frequently used globals for performance
 local pairs, ipairs, type, tonumber, tostring = pairs, ipairs, type, tonumber, tostring
-local floor, ceil, min, max = math.floor, math.ceil, math.min, math.max
+local min, max = math.min, math.max
 local format, sub, len, byte = string.format, string.sub, string.len, string.byte
 
 -- Expose addon table globally
@@ -67,8 +67,10 @@ end
 -- no flag: it reads as a live gate. Ask DF:DebugActive(cat) — there is no global
 -- accessor, because no consumer ever wanted one (DebugConsole:IsEnabled() was
 -- added for that and removed unused).
-DF.demoMode = false
-DF.demoPercent = 1
+-- ☠ (Removed) DF.demoMode and DF.demoPercent, for the very reason the note directly
+-- above gives: both were write-only, set here and read by nothing in either addon.
+-- They sat two lines under the tombstone explaining why a maintained-but-unconsulted
+-- flag is worse than no flag, which is how easy this is to miss.
 DF.initialized = false  -- Set to true after frames are created and ready
 
 -- Returns true if the current profile's partyEnabled/raidEnabled flags
@@ -126,9 +128,15 @@ end
 -- addons and clutter every slash autocomplete — to document a spelling nobody
 -- needed twice. One documented form now: "/df debug <command>".
 --
--- The one exception is an alias that is NOT /df-prefixed: "/rl" has no "/df"
--- form to fall back to, so a bind is the only way to reach it. That is the rule
--- below, not a hardcoded name — add another such alias and it keeps working.
+-- ⚠ THERE IS NO EXCEPTION, AND /rl IS NOT ONE. This used to say the rule below still
+-- registers a real bind for any alias that is not /df-prefixed, and offered "/rl" as
+-- the worked example. /rl does not go through RegisterDebugSlash at all -- it sets
+-- SLASH_DFRL1 directly, further down this file -- so the example was the one command
+-- that bypasses the mechanism it was illustrating.
+--
+-- In practice every registration passes a single /df-prefixed alias, so the branch
+-- that would create a SLASH_* global has never run. Add a genuinely non-/df alias and
+-- it would, but nothing does today; do not assume it is exercised.
 --
 -- ☠ "/df <name>" (no "debug") does NOT answer for diagnostics. This comment used to
 -- claim it did, "unlisted, so macros and muscle memory survive" — that was the intent
@@ -398,10 +406,17 @@ DF.COMMAND_SIBLINGS = {
     auras     = { "<unit>" },
     auradata  = { "<unit>" },
     dispel    = { "<unit>", "ids", "render" },
-    idgate    = {},   -- no args; present so o:Siblings is a no-op, not a nil index
+    -- No args. NOT here to avoid a nil index -- Out:Siblings opens with
+    -- `if not list then return self end`, so a missing key was always safe; the
+    -- rationale this pair used to carry was describing a hazard the function does not
+    -- have. They stay because both ARE looked up, and an explicit empty list says
+    -- "checked, takes nothing" where a missing key says nothing at all.
+    idgate    = {},
     guiwidth  = {},
     gapcheck  = { "all", "clear" },
-    pixelcheck = {},
+    -- (Removed) pixelcheck = {}. Unlike those two it was never looked up at all -- no
+    -- Siblings("pixelcheck") call exists -- so it was an entry for a question nobody
+    -- asked.
     admissing = { "mark" },
     -- The dev list here MUST stay in step with HEADER_MUTATORS in Frames/Headers.lua,
     -- which is what actually refuses them on a release build. Listing one without
@@ -531,8 +546,16 @@ DF.DEBUG_GROUP_OF = {
     debugfonts = "system",
 }
 
--- `hidden` keeps a command ANSWERING, and registered here for the drift check, but
--- off the /df debug listing. Two reasons qualify:
+-- `hidden` keeps a command ANSWERING, and registered here, but off the /df debug
+-- listing. Two reasons qualify:
+--
+-- ⚠ REGISTERING IS WHAT PUTS THE WORD IN DEBUG_SUB_KNOWN -- that is the real,
+-- checkable reason to register a hidden command, and it is why /df debug <word> does
+-- not load the settings companion for a branch that lives in this addon. These notes
+-- used to say "for the drift check"; there is no drift check. Nothing anywhere
+-- compares the two registries against the dispatcher, so four comments were leaning
+-- on a safety net that does not exist. (auditspells and exportaudit ARE drift checks,
+-- of curation data and export categories -- unrelated to command registration.)
 --   1. It is an everyday command already listed by /df help (test, reset, lock...).
 --      Each command should be documented in exactly ONE list — the one its audience
 --      reads — or the two drift apart, which is how pixelcheck ended up in both.
@@ -1043,6 +1066,11 @@ end
 local function recordBarTexture(bar, requested, applied)
     bar.dfBaseTexture = requested
     bar.dfAppliedTexture = applied
+    -- The file was JUST (re)set, which reset the fill's wrap mode to CLAMP --
+    -- clear the wrap stamp so ApplyBarTextureTiling re-applies it rather than
+    -- trusting a stamp describing the previous set. See the ☠ note there.
+    local fill = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+    if fill then fill.dfWrapPath = nil end
     DF:ApplyBarTextureTiling(bar, applied)
 end
 
@@ -1256,6 +1284,13 @@ function DF:GetBarTextureTiling(path)
     return path ~= nil and DF.TILED_BAR_TEXTURES[path] or nil
 end
 
+-- The SetTexture wrap descriptors a tiling mode asks for, per axis. Same strings
+-- Blizzard's addressModeLookup resolves to (TextureUtil.lua): "REPEAT" / "CLAMP".
+local function tileWrapArgs(mode)
+    return (mode == "BOTH" or mode == "HORIZ") and "REPEAT" or "CLAMP",
+           (mode == "BOTH" or mode == "VERT")  and "REPEAT" or "CLAMP"
+end
+
 -- Apply the tiling mode a texture asks for to a StatusBar's CURRENT fill.
 -- Sets both flags EXPLICITLY either way, so a bar switched from a tiled texture
 -- back to a stretched one clears the tiling instead of inheriting it. Returns
@@ -1267,6 +1302,31 @@ function DF:ApplyBarTextureTiling(bar, path)
     local fill = bar:GetStatusBarTexture()
     if not fill then return false end
     local mode = DF:GetBarTextureTiling(path)
+    -- ☠ THE TILE FLAGS ALONE LEAVE THE SAMPLER CLAMPED. SetHorizTile/SetVertTile
+    -- make the REGION repeat, but the wrap (address) mode is a property of the
+    -- texture SET -- and SetStatusBarTexture takes no wrap arguments, so the fill
+    -- comes back CLAMPED every time the file is (re)set. A clamped sampler under
+    -- a repeating region can smear the border pixels at the tile seams ("lines"
+    -- at the fill's edge), and whether it shows varies with texture cache state:
+    -- it surfaced only on a fresh session with a tile already selected, and any
+    -- reapply cleared it. The two implementations that tile statusbar fills both
+    -- set wrap WITH the file and only then the flags -- Blizzard
+    -- (SetTextureWithAddressModeOptions, TextureUtil.lua; horizTile= on the XML
+    -- node is the declarative form) and Grid2 (IndicatorMultiBar.lua re-sets the
+    -- fill's file with wrap args after SetStatusBarTexture). This is that method.
+    --   Stamped on the fill because the ATTACHED modes re-assert tiling on every
+    -- absorb update: the stamp spares them a per-pass SetTexture, and every site
+    -- that re-sets the file clears it (recordBarTexture for the safe setters,
+    -- DF:ApplyBarFillOrientation for the companion swap), so a fresh set always
+    -- arrives here with the stamp gone and re-applies the wrap.
+    if mode then
+        if fill.dfWrapPath ~= path then
+            fill:SetTexture(path, tileWrapArgs(mode))
+            fill.dfWrapPath = path
+        end
+    else
+        fill.dfWrapPath = nil
+    end
     fill:SetHorizTile(mode == "BOTH" or mode == "HORIZ")
     fill:SetVertTile(mode == "BOTH" or mode == "VERT")
     -- Only meaningful when NOT tiling at all: once either axis wraps, repetition
@@ -1281,6 +1341,13 @@ end
 function DF:ApplyTextureTiling(region, path)
     if not (region and region.SetHorizTile) then return false end
     local mode = DF:GetBarTextureTiling(path)
+    -- Same wrap-with-the-file rule as ApplyBarTextureTiling above, unstamped:
+    -- every caller here runs right after its own SetTexture (which clamps), and
+    -- none is a per-update re-assert, so re-issuing the set is always both
+    -- necessary and cheap.
+    if mode and region.SetTexture then
+        region:SetTexture(path, tileWrapArgs(mode))
+    end
     region:SetHorizTile(mode == "BOTH" or mode == "HORIZ")
     region:SetVertTile(mode == "BOTH" or mode == "VERT")
     return mode ~= nil
@@ -1304,6 +1371,10 @@ function DF:ApplyBarFillOrientation(bar, isVertical)
         if want ~= bar.dfAppliedTexture then
             bar:SetStatusBarTexture(want)
             bar.dfAppliedTexture = want
+            -- Fresh set = clamped wrap; clear the stamp so the tiling pass
+            -- re-applies it (see the ☠ note in ApplyBarTextureTiling).
+            local fill = bar:GetStatusBarTexture()
+            if fill then fill.dfWrapPath = nil end
             DF:ApplyBarTextureTiling(bar, want)
         end
     elseif bar.SetRotatesTexture then
@@ -1995,7 +2066,23 @@ end
 -- Honours the legacy resourceBarClassColor boolean when resourceBarColorMode
 -- isn't set yet (pre-migration profiles). Uses the same UnitClass/UnitPowerType
 -- calls the old inline logic did, so it carries no new secret-value risk.
-function DF:GetResourceBarColor(unit, db)
+-- ★ classOverride / powerTokenOverride exist so the PREVIEW can drive this without a
+-- real unit -- the same shape DF:ShouldShowResourceBar already uses for its role and
+-- class overrides. A test path that is a PARAMETER of the live function, not a copy.
+--
+-- ☠ Do not reinstate a local copy of this in TestMode. The one that used to live there
+-- had drifted three ways: it called DF:GetPowerColor with ONE argument (dropping the
+-- powerType fallback tier), it lost the altR/altG/altB and terminal 0,0,1 fallbacks
+-- entirely, and it fabricated the power token from ROLE -- HEALER=MANA, TANK=RAGE,
+-- everything else ENERGY -- so only three of the configurable power colours could be
+-- previewed. FOCUS, RUNIC_POWER, LUNAR_POWER, MAELSTROM, FURY and INSANITY are all
+-- editable on the Colors page and none of them could be seen.
+--
+-- ⚠ With powerTokenOverride there is no numeric powerType to pass on, so the preview
+-- gets the TOKEN tiers only. That is not a gap worth closing: the token tiers are the
+-- ones carrying db.powerColors -- the user's own edits -- which is what a preview is
+-- for. The numeric tier only answers for tokens Blizzard does not name.
+function DF:GetResourceBarColor(unit, db, classOverride, powerTokenOverride)
     local mode = db.resourceBarColorMode
     if not mode then
         mode = db.resourceBarClassColor and "CLASS" or "POWER_TYPE"
@@ -2005,13 +2092,22 @@ function DF:GetResourceBarColor(unit, db)
         local c = db.resourceBarCustomColor or {r = 0, g = 0.5, b = 1, a = 1}
         return c.r or 0, c.g or 0.5, c.b or 1
     elseif mode == "CLASS" then
-        local _, classToken = UnitClass(unit)
+        local classToken = classOverride
+        if not classToken and unit then
+            local _
+            _, classToken = UnitClass(unit)
+        end
         local cc = classToken and DF:GetClassColor(classToken)
         if cc then return cc.r, cc.g, cc.b end
         -- No class colour available — fall through to the power-type colour.
     end
 
     -- POWER_TYPE (and the CLASS fallback above)
+    if powerTokenOverride then
+        local info = DF:GetPowerColor(powerTokenOverride)
+        if info then return info.r, info.g, info.b end
+        return 0, 0, 1
+    end
     local pType, pToken, altR, altG, altB = UnitPowerType(unit)
     local info = DF:GetPowerColor(pToken, pType)
     if info then return info.r, info.g, info.b end
@@ -2362,9 +2458,16 @@ function DF:LightweightUpdateBackgroundColor()
     local function UpdateFrame(frame, testClass)
         if not frame or not frame.background then return end
         
-        -- Clear the background key cache so the new settings will be applied
-        frame.dfCurrentBgKey = nil
-        
+        -- ☠ (Removed) frame.dfCurrentBgKey and the four "clear the background key
+        -- cache" invalidations of it. It was written with string.format in three
+        -- branches below and NEVER COMPARED, anywhere -- so it cached nothing, the
+        -- clears invalidated nothing, and every background update paid for formatted
+        -- strings that were discarded on the spot.
+        --
+        -- ⚠ Its sibling frame.dfCurrentBgTexture IS a real guard and stays: it is
+        -- tested at Frames/Update.lua:385 before re-applying a texture. The two names
+        -- read alike, which is most of why this one survived.
+
         -- Determine class color for CLASS mode
         local cr, cg, cb = 0, 0, 0
         if bgMode == "CLASS" then
@@ -2386,16 +2489,13 @@ function DF:LightweightUpdateBackgroundColor()
             if bgMode == "CUSTOM" and db.backgroundColor then
                 local c = db.backgroundColor
                 frame.background:SetColorTexture(c.r, c.g, c.b, c.a or 0.8)
-                frame.dfCurrentBgKey = string.format("CUSTOM:%.2f:%.2f:%.2f:%.2f", c.r, c.g, c.b, c.a or 0.8)
             elseif bgMode == "CLASS" then
                 local bgAlpha = db.backgroundClassAlpha or 0.3
                 frame.background:SetColorTexture(cr, cg, cb, bgAlpha)
-                frame.dfCurrentBgKey = string.format("CLASS:%.2f:%.2f:%.2f:%.2f", cr, cg, cb, bgAlpha)
             else
                 -- Fallback - use default background
                 local c = db.backgroundColor or {r = 0.1, g = 0.1, b = 0.1, a = 0.8}
                 frame.background:SetColorTexture(c.r, c.g, c.b, c.a or 0.8)
-                frame.dfCurrentBgKey = string.format("CUSTOM:%.2f:%.2f:%.2f:%.2f", c.r, c.g, c.b, c.a or 0.8)
             end
         else
             -- Textured background - always apply when called from settings (user is changing texture)
@@ -2870,9 +2970,16 @@ end
 -- Unified approach using IsInInstance() for all content detection
 -- ============================================================
 
--- Cache for content type (updated on zone change)
-DF.cachedContentType = nil
-DF.cachedInstanceType = nil
+-- ☠ (Removed) DF.cachedContentType and DF.cachedInstanceType, and the "cache for
+-- content type (updated on zone change)" comment that introduced them. Nine
+-- assignments across GetContentType's branches, one for the instance type, and NOT
+-- ONE READ in either addon -- so nothing was cached and nothing was invalidated. The
+-- names' only effect was to make GetContentType look memoised, which invites someone
+-- to "use the cache" and get a stale answer.
+--
+-- ⚠ The persisted half is real and stays: DandersFramesCharDB.lastContentType is
+-- written in those same branches and IS read, by the reload hint snapshot at the top
+-- of GetContentType. Do not confuse the two when adding a branch.
 
 -- Debug: Force arena mode for testing (toggle with /df debug arena)
 DF.forceArenaMode = false
@@ -2882,7 +2989,6 @@ DF.forceArenaMode = false
 function DF:GetContentType()
     -- DEBUG: Force arena mode for testing
     if DF.forceArenaMode then
-        DF.cachedContentType = "arena"
         return "arena"
     end
 
@@ -2898,13 +3004,11 @@ function DF:GetContentType()
     end
 
     local inInstance, instanceType = IsInInstance()
-    
-    -- Cache instance type for other uses
-    DF.cachedInstanceType = instanceType
-    
+    -- ☠ (Removed) DF.cachedInstanceType, and its "cache instance type for other uses"
+    -- comment. There were no other uses -- assigned here, read nowhere.
+
     -- Arena - always uses party-style frames (but with raid unit IDs)
     if instanceType == "arena" then
-        DF.cachedContentType = "arena"
         DF.useContentTypeFallback = nil  -- Clear fallback, real detection working
         if DandersFramesCharDB then DandersFramesCharDB.lastContentType = "arena" end
         return "arena"
@@ -2912,7 +3016,6 @@ function DF:GetContentType()
     
     -- Battleground (PvP instance)
     if instanceType == "pvp" then
-        DF.cachedContentType = "battleground"
         DF.useContentTypeFallback = nil
         if DandersFramesCharDB then DandersFramesCharDB.lastContentType = "battleground" end
         return "battleground"
@@ -2926,11 +3029,9 @@ function DF:GetContentType()
         if DF.useContentTypeFallback and not inInstance
            and (instanceType == "none" or instanceType == nil)
            and DF._contentTypeHintAtLoad == "arena" then
-            DF.cachedContentType = "arena"
             return "arena"
         end
         
-        DF.cachedContentType = nil
         DF.useContentTypeFallback = nil
         if DandersFramesCharDB then DandersFramesCharDB.lastContentType = nil end
         return nil
@@ -2940,12 +3041,10 @@ function DF:GetContentType()
     if instanceType == "raid" then
         local difficultyID = select(3, GetInstanceInfo())
         if difficultyID == 16 then
-            DF.cachedContentType = "mythic"
             DF.useContentTypeFallback = nil
             if DandersFramesCharDB then DandersFramesCharDB.lastContentType = "mythic" end
             return "mythic"
         end
-        DF.cachedContentType = "instanced"
         DF.useContentTypeFallback = nil
         if DandersFramesCharDB then DandersFramesCharDB.lastContentType = "instanced" end
         return "instanced"
@@ -2961,17 +3060,14 @@ function DF:GetContentType()
         if DF.useContentTypeFallback and not inInstance
            and (instanceType == "none" or instanceType == nil)
            and DF._contentTypeHintAtLoad == "arena" then
-            DF.cachedContentType = "arena"
             return "arena"
         end
 
-        DF.cachedContentType = "openWorld"
         DF.useContentTypeFallback = nil
         if DandersFramesCharDB then DandersFramesCharDB.lastContentType = "openWorld" end
         return "openWorld"
     end
     
-    DF.cachedContentType = nil
     DF.useContentTypeFallback = nil
     if DandersFramesCharDB then DandersFramesCharDB.lastContentType = nil end
     return nil
@@ -3631,6 +3727,86 @@ local function ZeroBuffDebuffBorderInset(profile)
     end
 end
 
+-- Convert the three-stage health gradient (Low/Medium/High + a Weight each) into the
+-- stop list the renderer now reads, WITHOUT changing what anyone sees.
+--
+-- ★ WHY IT IS EXACT. A weight of N never meant "emphasis" -- it literally repeated that
+-- colour N times in an evenly spaced point array. Low 2 / Medium 2 / High 1 is
+-- [red, red, yellow, yellow, green] at 0 / .25 / .5 / .75 / 1. So the conversion is just
+-- "write those positions down as thresholds": same colours, same positions, same curve.
+--
+-- ☠ WHICH IS WHY THE SHIPPED DEFAULT BECOMES FIVE STOPS, NOT THREE. Those duplicate
+-- pairs are the plateaus that make the bar read the way it does -- red HELD to a quarter
+-- health rather than immediately ramping away from it. Collapsing to three stops at
+-- 0/50/100 would have been the tidier list and a visible change to every upgrading
+-- user's frames. New profiles start at that tidy three (see Config); existing ones keep
+-- their shape.
+--
+-- ⚠ Integer thresholds are exact when the point count minus one divides 100 -- which
+-- covers 2, 3, 5, 6 and 11 points, including the shipped default of 5. Other counts land
+-- within half a percent of bar width, e.g. 4 points at 0/33/67/100 against a true third.
+-- Imperceptible, and only reachable by hand-tuned weights.
+--
+-- Presence-gated, not flag-gated, and idempotent: it converts only while the list is
+-- absent, so a re-import of an old profile is converted again while an edited list is
+-- never overwritten.
+-- ★ THE ONE DEFINITION OF "what stops does this profile's legacy data describe".
+-- Returns a stop list, or nil when the table carries no usable stages.
+--
+-- ☠ SHARED WITH THE EDITOR ON PURPOSE. The gradient editor needs the same answer when
+-- it opens on a profile the migration has not reached yet, and its first version
+-- invented one instead -- it seeded Config's new three-stop default and SAVED it,
+-- which permanently stamped the wrong ramp on that profile because the migration is
+-- presence-gated and then skipped it. Two ways to answer "what is this profile's
+-- gradient" is one too many; this is the answer.
+function DF:LegacyStopsFor(tbl, prefix)
+    if type(tbl) ~= "table" then return nil end
+    local pts = {}
+    for _, stage in ipairs({ "Low", "Medium", "High" }) do
+        local c = tbl[prefix .. stage]
+        -- Only fold a stage the table actually carries: a partial profile converts to
+        -- the stops it really has rather than to invented ones.
+        if type(c) == "table" then
+            local w = math.max(1, math.floor(tbl[prefix .. stage .. "Weight"] or 1))
+            local useClass = tbl[prefix .. stage .. "UseClass"] and true or false
+            for _ = 1, w do
+                pts[#pts + 1] = {
+                    color = { r = c.r or 0.5, g = c.g or 0.5, b = c.b or 0.5, a = c.a or 1 },
+                    useClass = useClass,
+                }
+            end
+        end
+    end
+    if #pts < 2 then return nil end
+    for i, p in ipairs(pts) do
+        p.threshold = math.floor(((i - 1) / (#pts - 1)) * 100 + 0.5)
+    end
+    return pts
+end
+
+function DF:MigrateHealthColorStops()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        if type(profile) == "table" then
+            for _, modeKey in ipairs({ "party", "raid" }) do
+                local m = profile[modeKey]
+                if type(m) == "table" then
+                    for _, prefix in ipairs({ "healthColor", "missingHealthColor" }) do
+                        local listKey = prefix .. "Stops"
+                        if type(m[listKey]) ~= "table" or #m[listKey] < 2 then
+                            -- nil when the profile has no usable stages; leave the key
+                            -- absent then, so Config's default applies rather than a
+                            -- broken list being written.
+                            local pts = DF:LegacyStopsFor(m, prefix)
+                            if pts then m[listKey] = pts end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 -- Fold the legacy per-element OOR name-text alpha into the unified oorTextAlpha.
 -- The Text Designer now renders all unit text, so a single OOR "Text Alpha" dims
 -- every TD element out of range. Carry the user's old name-text value only when
@@ -3665,7 +3841,13 @@ function DF:MigrateOORTextAlpha()
                     m.oorHealthTextAlpha = nil
                 end
             end
-            profile._oorTextAlphaV1 = true
+            -- ☠ (Removed) profile._oorTextAlphaV1 = true. It looked like the one-shot
+            -- guard for this migration and was not one: nothing ever READ it. The
+            -- migration is presence-gated on m.oorNameTextAlpha instead -- which the
+            -- comment above already says outright ("not gated on the _oorTextAlphaV1
+            -- flag") -- so the write asserted a guard that did not exist, and the
+            -- matching clear on the import path was a no-op. Existing profiles keep a
+            -- stale `true` in SavedVariables; harmless, since it gates nothing.
         end
     end
 end
@@ -4262,6 +4444,22 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- One-shot copy per mode: if a new key already exists we leave it
         -- (user has already saved with the new key); otherwise we adopt the
         -- old value.
+        -- ☠ HEALTH GRADIENT STOPS -- HERE, FOR THE REASON THE NOTE BELOW GIVES.
+        --
+        -- healthColorStops / missingHealthColorStops are new keys with a shipped default,
+        -- so the backfill further down stamps that default into EVERY profile. This
+        -- conversion is presence-gated ("only if the list is absent"), so run after the
+        -- backfill it can never fire -- which is exactly what happened: profiles came up
+        -- showing the new flat three-stop ramp instead of the five-stop one their
+        -- Low 2 / Medium 2 / High 1 weights describe, and clearing the key by hand did
+        -- not help because the backfill re-stamped it on the next load.
+        --
+        -- The note below already described this failure, from the frame-border rename.
+        -- Any future migration whose key has a default belongs up here with it.
+        if DF.MigrateHealthColorStops then
+            DF:MigrateHealthColorStops()
+        end
+
         -- ☠ THESE MUST RUN FOR EVERY PROFILE, AND BEFORE THE DEFAULTS BACKFILL.
         --
         -- All of these adopt legacy -> canonical keys and are guarded on "only if the
@@ -5443,9 +5641,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- and Frames.lua carries its frame-name patterns so click casting works with it.
         -- Those stay.
         
-        -- Enable raid buff filtering now that we're past ADDON_LOADED
-        -- (avoids "secret value" errors during combat reload initialization)
-        DF.raidBuffFilteringReady = true
+        -- ☠ (Removed) DF.raidBuffFilteringReady = true, and its claim to "enable raid
+        -- buff filtering now that we're past ADDON_LOADED (avoids secret value errors
+        -- during combat reload initialization)". Nothing read the flag, so it gated
+        -- nothing and prevented nothing -- whatever protects that path, it is not this.
         
         -- ============================================================
         -- /df SUBCOMMAND REGISTRATIONS
@@ -5457,12 +5656,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- listed twice.
         local sub = function(...) DF:RegisterDebugSub(...) end
         -- Support / general
-        -- These six plus resetgui/test/hide/lock below are EVERYDAY commands and are
+        -- These four plus resetgui/test/hide/lock below are EVERYDAY commands and are
         -- already listed by /df help, so they carry hidden = true to stay out of the
         -- /df debug listing. Same duplication that got pixelcheck/navprobe/gapcheck
         -- pulled from help, resolved the other way round: each command is documented
         -- in exactly one list, the one its audience reads. They still answer, and
-        -- they still need sub() entries so the drift check can see them.
+        -- they still need sub() entries -- not for a "drift check" (there isn't one;
+        -- see the note at RegisterDebugSub) but because registering is what puts the
+        -- word in DEBUG_SUB_KNOWN.
         sub("help",         "command list", nil, nil, true)
         sub("console",      "open the debug console page", nil, nil, true)
         sub("users",        "group members running DandersFrames", nil, nil, true)
@@ -5474,7 +5675,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- deliberate because the copies sat in different sections; grouping by
         -- subsystem put them side by side and the duplication was obvious. Hidden
         -- here, with the argument hint folded into the slash description, so the
-        -- entry survives for the drift check but appears once.
+        -- entry survives in the registries but appears once in the listing.
         sub("headers",      "secure header state dump, or a /dfheaders subcommand", nil, "[cmd]", true)
         sub("attached",     "foreign frames anchored to ours")
         sub("zorder",       "frame level / strata / alpha map (add a test frame index)", nil, "[index]")
@@ -5482,6 +5683,25 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Auras (12.1 container era)
         sub("auradata",     "live aura data enumeration (add a unit token)", nil, "[unit]")
         sub("dispel",       "dispel overlay state: a unit token, or ids | render", nil, "[unit|cmd]", true)
+        -- ☠ REGISTERED FOR DEBUG_SUB_KNOWN, NOT FOR THE LISTING. These two are the
+        -- branches behind `/dfdispel ids` and `/dfdispel render`, which reach them by
+        -- re-dispatching SlashCmdList["DANDERSFRAMES"]("debug dispelids"). Being
+        -- unregistered did not make them unreachable -- it made them UNKNOWN to the
+        -- dispatcher, so every use fell into the unknown-word path and loaded the
+        -- ~3 MB settings companion for a branch that lives entirely in this addon.
+        -- That is the exact cost the DEBUG_SUB_KNOWN note describes, and it was being
+        -- paid by a documented command, not just by typing the internal spelling.
+        --
+        -- Hidden because `sub("dispel", ...)` above already documents both as its
+        -- `ids | render` arguments; listing them again would be the two-lists drift
+        -- the `hidden` contract exists to prevent.
+        -- ⚠ NOT devOnly, deliberately, and it must stay that way. devOnly makes the
+        -- dispatcher open the settings window instead of running the branch on a
+        -- release build (see the DEBUG_SUB_DEV test), which would take `/dfdispel ids`
+        -- away from every non-dev user. The parent `dispel` above is not dev-gated
+        -- either; these are reached THROUGH it and have to match it.
+        sub("dispelids",    "dispel type-enum and colour probe (also: /dfdispel ids)", nil, nil, true)
+        sub("dispeldbg",    "dispel gradient render state (also: /dfdispel render)", nil, nil, true)
         sub("idgate",       "container identity-gate dump", true)
         sub("ppdump",       "missing-buff layout-push dump", true)
         -- Not logging, despite the old wording: it window-parks the badge so the
@@ -5509,14 +5729,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
         sub("debugfonts",   "font / SharedMedia availability dump")
         sub("debugrested",  "rested indicator state")
         -- Both moved under /df debug cc (see CC_SUBCOMMANDS). Hidden here rather than
-        -- deleted: they still answer, and the drift check needs to see them.
+        -- deleted: they still answer, and registering keeps them in DEBUG_SUB_KNOWN.
         sub("clickcast",    "moved to /df debug cc registration", nil, nil, true)
         sub("casthistory",  "cast history")
         sub("clearhistory", "clear the cast history buffer")
         -- Ongoing traces still on their own flag (console migration pending)
-        -- HIDDEN: both are console-migration signposts now. They toggle nothing, so
-        -- listing them as "toggle X logging" offered a no-op; they still answer for
-        -- anyone typing the old command.
+        -- (Removed) a "HIDDEN: both are console-migration signposts" rationale that
+        -- described two sub() entries below it. There were none -- the entries it
+        -- justified were deleted on 2026-07-29, and RegisterDebugSub's own header
+        -- records that decision ("Those commands are gone rather than hidden"). The
+        -- block outlived them and read as documentation for the next two entries.
         -- Config repair
         sub("resetgui",     "reset GUI scale, size and position", nil, nil, true)
         sub("resetconflict", "moved to /df debug cc resetconflict", nil, nil, true)
@@ -6063,8 +6285,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- ONE form per row now. The old listing carried a second grey
                 -- "/dfXXX" column; those binds are gone, so a column showing them
                 -- would be documenting commands the client no longer answers.
-                -- An entry whose alias is not /df-prefixed (/rl) still owns a real
-                -- bind, so it prints that alias verbatim.
+                -- ⚠ /rl IS NOT IN THIS LISTING and never reaches this code: it is not
+                -- registered through RegisterDebugSlash (it sets SLASH_DFRL1 directly)
+                -- and is deliberately left off /df debug -- see the note at its
+                -- registration. The claim that a non-/df-prefixed entry "prints that
+                -- alias verbatim" had no entry it could apply to.
+                --
+                -- Every registration carries a non-nil `sub`, so the `or` fallbacks
+                -- below -- the pattern match here and the table.concat further down --
+                -- have no input that reaches them either.
                 local byGroup = {}
                 local function bucket(isDev, key, name, desc)
                     local g = DF.DEBUG_GROUP_OF[key or ""] or "other"
@@ -6555,10 +6784,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
         end
         
         -- Add convenient /rl reload command
-        -- The one slash command that never went through RegisterDebugSlash, so it
-        -- was the only one absent from /df debug. It is a convenience rather than
-        -- a diagnostic, but being listed costs nothing and being invisible is how
-        -- commands get forgotten.
+        -- (Removed) a superseded paragraph that argued the opposite of the one below --
+        -- that /rl "was the only one absent from /df debug" and that "being listed
+        -- costs nothing". The code implements the decision below, not that one, and
+        -- two stacked rationales reading in opposite directions is worse than either.
         -- NOT via RegisterDebugSlash: /rl is universal muscle memory, so listing it
         -- under /df debug spends a row telling people something they already know.
         -- It is also the one command with no "/df debug <name>" form, which made it
@@ -7047,6 +7276,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- the rest of the session -- and the state driver below shows the LIVE
             -- frames in combat, so they rendered fake auras.
             DF:TeardownTestModeEngines()
+            -- ...and the FRAME-side teardown, for the same reason. The loops above
+            -- hide the frames and their absorb textures, but the Aura Designer's
+            -- borders are parented to UIParent and survive frame:Hide -- so pulling
+            -- with the preview up left AD indicators floating over the live frames.
+            -- Combat-safe; see the note on TeardownTestFrameVisuals.
+            DF:TeardownTestFrameVisuals()
 
             DF:Say(L["Test mode ended — entering combat."])
 
@@ -7223,8 +7458,9 @@ function DF:FullProfileRefresh()
         DF:UpdateColorCurve()
     end
 
-    -- Clear category lookup cache (for export/import)
-    DF._categoryLookup = nil
+    -- ☠ (Removed) DF._categoryLookup = nil, "clear category lookup cache (for
+    -- export/import)". There is no such cache in either addon -- this was the only
+    -- mention of the name anywhere, so it invalidated nothing.
     
     -- === UPDATE PARTY CONTAINER POSITION AND SIZE ===
     if DF.container then
@@ -7540,10 +7776,17 @@ function DF:CreateAddonCompartment()
             -- the *Ex variants taking an explicit tooltip (the old ones only
             -- survive behind the loadDeprecationFallbacks CVar). Feature-detect
             -- so both 12.0.5 and 12.0.7 work.
+            -- ⚠ THE SAME FOUR KEYS AS THE MINIMAP TOOLTIP ABOVE. These two lines were
+            -- hardcoded English in sentence case ("Open settings"), which is the trap the
+            -- note on the minimap version warns about, in its harder-to-spot form: not a
+            -- duplicate key, but no key at all -- so the compartment tooltip could not be
+            -- translated in any language and was never even offered to the translators
+            -- (the non-enUS locale files are @localization@ placeholders filled from the
+            -- enUS key list at packaging time).
             local fill = function(tooltip)
                 tooltip:AddLine("DandersFrames")
-                tooltip:AddLine("|cffffffffLeft-Click:|r Open settings", 0.8, 0.8, 0.8)
-                tooltip:AddLine("|cffffffffRight-Click:|r Toggle solo mode", 0.8, 0.8, 0.8)
+                tooltip:AddLine("|cffffffff" .. L["Left-Click:"] .. "|r " .. L["Open Settings"], 0.8, 0.8, 0.8)
+                tooltip:AddLine("|cffffffff" .. L["Right-Click:"] .. "|r " .. L["Toggle Solo Mode"], 0.8, 0.8, 0.8)
             end
             if MenuUtil.ShowTooltipEx then
                 MenuUtil.ShowTooltipEx(button, GetAppropriateTooltip(), fill)

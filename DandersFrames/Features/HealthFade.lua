@@ -127,9 +127,21 @@ function DF:ApplyHealthFadeAlpha(frame)
         local color = UnitHealthPercent(frame.unit, true, curve)
         if not color then return false end
 
-        -- Extract alpha and apply directly — never compare, never store
+        -- ☠ APPLY AND RETURN HERE. `a` is a SECRET -- the alpha channel of a colour
+        -- the engine resolved from secret health -- so it may be passed to a setter
+        -- and to nothing else. It must not reach the `if not alpha` below: a boolean
+        -- test on a secret raises "execution tainted" and spams errors on every
+        -- health tick of every frame (see Range.lua's note at the issecretvalue
+        -- guards). This branch used to fall through to that test; the rule was
+        -- written one line above it and broken two lines below.
+        --
+        -- ⚠ Do NOT "simplify" this back into a shared tail. The two branches produce
+        -- different KINDS of value -- a plain number from the test path, a secret
+        -- from the live one -- and only the plain number can be nil-checked. That is
+        -- also why the nil-check cannot simply be deleted: the test path needs it.
         local _, _, _, a = color:GetRGBA()
-        alpha = a
+        frame:SetAlpha(a)
+        return true
     end
     if not alpha then return false end
 
@@ -221,9 +233,13 @@ function DF:UpdatePetHealthFade(frame)
     local color = UnitHealthPercent(frame.unit, true, curve)
     if not color then return end
 
+    -- ☠ NO NIL-CHECK ON `alpha`. It is a SECRET (the alpha channel of a colour the
+    -- engine resolved from secret health), and a boolean test on a secret raises
+    -- "execution tainted". Unlike the unit-frame path above there is no test branch
+    -- here -- pets have no dfHealthPct fork -- so this value is ALWAYS secret and the
+    -- guard could never have been safe. `color` is already nil-checked on the line
+    -- above, which is the only check this needs.
     local _, _, _, alpha = color:GetRGBA()
-    if not alpha then return end
-
     frame:SetAlpha(alpha)
 end
 

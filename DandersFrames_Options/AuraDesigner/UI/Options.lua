@@ -13,15 +13,9 @@ local DF = DandersFrames
 -- ============================================================
 
 local pairs, ipairs, type = pairs, ipairs, type
-local format = string.format
-local wipe = wipe
 local tinsert = table.insert
 local tremove = table.remove
-local max, min, floor = math.max, math.min, math.floor
-local strsplit = strsplit
-local sort = table.sort
-local RAID_CLASS_COLORS = RAID_CLASS_COLORS
-local LOCALIZED_CLASS_NAMES_MALE = LOCALIZED_CLASS_NAMES_MALE
+local max, min = math.max, math.min
 local L = DF.L
 
 -- Mutable editor state.
@@ -64,12 +58,8 @@ S.selectedSpec = nil         -- Current spec key being viewed
 -- values, zero visual change) so they track any future palette change in
 -- lockstep. GUI.lua loads before this file (see .toc), so DF.GUI.Colors is
 -- populated at parse time.
-local C_BACKGROUND = DF.GUI.Colors.background
 -- (C_PANEL removed — unreferenced; reclaimed for the 200-locals ceiling.)
 local C_ELEMENT    = DF.GUI.Colors.element
-local C_BORDER     = DF.GUI.Colors.border
-local C_HOVER      = DF.GUI.Colors.hover
-local C_TEXT       = DF.GUI.Colors.text
 local C_TEXT_DIM   = DF.GUI.Colors.textDim
 
 -- Indicator type definitions
@@ -304,6 +294,8 @@ P.CreateCardStack = CreateCardStack
 local function ShowBuffCoexistPopup(onConfirm, onCancel)
     if not S.buffCoexistPopup then
         local f = CreateFrame("Frame", "DFADBuffPopup", UIParent, "BackdropTemplate")
+        -- UIParent-parented: register or it draws at 100% over a scaled GUI.
+        if GUI.RegisterScaledSurface then GUI:RegisterScaledSurface(f) end
         f:SetSize(420, 130)
         f:SetPoint("CENTER")
         f:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -699,7 +691,12 @@ P.OtherPoolDisplayName = OtherPoolDisplayName
 -- used-affordance). which = "my" walks ALL spec pools (the preset object is
 -- one: a spell tracked for ANY spec would double-render for that spec when
 -- also in the shared other pool); "other" walks the flat other pool with
--- nil-spec identity. Pure (no editor state) — exposed for the SDD harness.
+-- nil-spec identity. Pure — no editor state.
+--
+-- ⚠ It used to say "exposed for the SDD harness". There is no SDD harness: that
+-- comment was the only mention of one anywhere in the repo, and the DF.* export it
+-- justified had no readers either. The local below is live and used by
+-- CrossPoolTrackedIDs; only the export is gone.
 local function PoolTrackedIDs(adDB, which)
     local out = {}
     if type(adDB) ~= "table" then return out end
@@ -729,7 +726,6 @@ local function PoolTrackedIDs(adDB, which)
     end
     return out
 end
-DF.ADEditor_PoolTrackedIDs = PoolTrackedIDs
 
 -- IDs tracked by the OPPOSITE pool of the active tab (drives the picker's
 -- cross-tab blocked rows and the add-by-ID gate).
@@ -995,29 +991,18 @@ local TYPE_DEFAULTS = {
         stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
         stackX = 2, stackY = -2,
         stackColor = {r = 1, g = 1, b = 1, a = 1},
-        -- Expiring Tint overlay (secret-safe).  Default OFF, red — also feeds the
-        -- colour picker's Default button via the proxy's __dfDefaults = TYPE_DEFAULTS.
-        -- #FF3333 @ 50% (matches expiring border red)
-        -- legacy; migrated to ExpiringAnimationType
-        -- Master enable for the whole Expiring feature.  Default true so
-        -- existing configs are unaffected; turning it OFF disables every
-        -- expiring override (colour / thickness / alpha / animation / pulse /
-        -- bounce) regardless of their individual settings, and hides the rest
-        -- of the Expiring panel.
-        -- Stage 5.1d.2 + parity: full Border Animation effect set as the value
-        -- the expiring callback swaps into spec.animation when remaining <
-        -- threshold.  NONE = no animation override.  The expiring animation
-        -- carries its OWN complete tunable set (colour, particles, thickness,
-        -- offset, …) independent of the base Border Animation — mirrors the
-        -- base defaults so the two panels read identically.
-        -- Stage 5.1d.3: per-state thickness + alpha overrides.  Default to
-        -- 1 / 1 — same thickness as the base (1) and slightly more opaque
-        -- than the base alpha (0.8), so out of the box a user enabling
-        -- Expiring Color Override sees the border tick to fully opaque red
-        -- below threshold (subtle "more solid" feel).  Move the sliders
-        -- higher / lower for stronger emphasis.  Only take effect when the
-        -- expiring ticker is running (i.e. user has at least one expiring
-        -- feature on — colour override, animation, alpha pulse, or bounce).
+        -- ☠ (Removed) ~25 lines documenting the EXPIRING key family -- the tint
+        -- overlay, the master enable, ExpiringAnimationType, and the Stage 5.1d
+        -- per-state thickness/alpha overrides. Not one of those keys is in this table
+        -- any more, or anywhere else: a case-insensitive sweep for expiring* across
+        -- both addons returns comments only. The block sat between stackColor and the
+        -- durationBar* keys with nothing of its own, so it read as documentation for
+        -- whichever keys happened to follow it.
+        --
+        -- ⚠ Do not confuse this with the LIVE feature that replaced it. Expiry alerts
+        -- ship as expiryAlert* (just above) and the reveal work is pandemic*; the
+        -- "Expiry Alert BORDER mode" comments elsewhere in this file are about those
+        -- and are correct.
         -- Duration bar strip (mirrors the buff/debuff rows + filter-group cards):
         -- a native SetDurationBar-driven strip under/over the icon. OFF by default;
         -- render fallbacks live in DF:BuildDurationBarSpec — these seed the editor.
@@ -1111,13 +1096,9 @@ local TYPE_DEFAULTS = {
         stackOutline = "SHADOW;OUTLINE", stackAnchor = "BOTTOMRIGHT",
         stackX = 2, stackY = -2,
         stackColor = {r = 1, g = 1, b = 1, a = 1},
-        -- Master enable for the whole Expiring feature (Stage 5.2 — mirrors
-        -- the icon).  Default true so existing configs are unaffected.
-        -- #FF3333 @ 50% (matches expiring border red)
-        -- Stage 5.2 expiring-border overrides (shared backend with the icon).
-        -- ExpiringBorderColor is SEPARATE from the fill's expiringColor — the
-        -- fill and border each get their own expiring tint.  Defaults to the
-        -- same red so out of the box both "turn red", but they're independent.
+        -- (Removed) the square card's Expiring block -- the Stage 5.2 master enable
+        -- and expiring-border overrides. Same story as the icon card above: none of
+        -- those keys exist any more, so the paragraphs headed nothing.
         -- Duration bar strip (mirrors the icon card): a native SetDurationBar-driven
         -- strip under/over the square. OFF by default; render fallbacks live in
         -- DF:BuildDurationBarSpec — these seed the editor.
@@ -1252,7 +1233,9 @@ local TYPE_DEFAULTS = {
         BorderAnimationCornerLength = 10,
         -- Draw above the frame's class border (parent+10) / aggro (parent+9).
         drawAboveFrameBorder = true,
-        -- Expiring-border overrides (Stage 5.4 parity with icon/square).
+        -- (The "Expiring-border overrides (Stage 5.4)" label that sat here belonged to
+        -- keys that no longer exist -- it was heading showWhenMissing, which is
+        -- unrelated.)
         showWhenMissing = false,
     },
     healthbar = {

@@ -1696,9 +1696,11 @@ end
 -- LAYOUT  (row mode)
 -- Baseline grid layout: linear growth in a primary axis, wrapping to a secondary
 -- axis after `wrap` icons. Compound growth strings ("RIGHT_DOWN", "LEFT_UP", ...).
--- NOTE (step 1): reconcile with DF's exact center-growth / pixel-perfect helper
--- (Features/Auras.lua RepositionCenterGrowthIcons, Frames/Icons.lua) so buff/debuff
--- rows lay out pixel-identically to today. This baseline covers the common cases.
+-- NOTE (step 1): reconcile with DF's legacy center-growth / pixel-perfect handling so
+-- buff/debuff rows lay out pixel-identically to today. This baseline covers the common
+-- cases. (The note named Features/Auras.lua RepositionCenterGrowthIcons as the thing
+-- to reconcile against; no such function exists any more, in either addon, so the
+-- comparison has to be made against rendered output rather than against that source.)
 -- ============================================================
 local AXIS = {
     RIGHT = { x = 1, y = 0 }, LEFT = { x = -1, y = 0 },
@@ -1723,7 +1725,12 @@ local FLOW_NAME = { RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down" }
 --   * Vertical-primary growth (UP_*/DOWN_*): the flow can't run column-primary, so we
 --     force one icon per row (rowWidth = sizeX) and the v-direction stacks the column.
 --     A vertical wrap COUNT is not expressible — single column (legacy parity gap, GUI
---     note in P2 polish). CENTER growth is not expressible -> falls back to Right.
+--     note in P2 polish).
+--   * CENTER growth IS expressible and IS implemented — see the `if out.center` branch
+--     in resolveGrowthLayout below, which computes flowAnchor/pinPoint/pinX/pinY for
+--     both the vertical and horizontal centred stacks, and the paragraph above it that
+--     explains the box-pin approach. (This line used to say CENTER "falls back to
+--     Right": written before that branch existed, and left behind when it landed.)
 --   * Scale: applied to the container itself — buttons, fonts, borders and spacing all
 --     render at row scale (the legacy defensive stride model; buff rows historically
 --     didn't scale the spacing term — the flow can't express that split, and scaling
@@ -1732,8 +1739,9 @@ local FLOW_NAME = { RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down" }
 -- flow fills from (flowAnchor), and how the container box pins to the user's anchor
 -- point (pinPoint + pinX/pinY offsets).
 --
--- CENTER growth ("Direction: Center" — legacy did this with a second positioning
--- pass, Icons.lua ApplyDefensiveBarCenterGrowth): the native flow has no centering
+-- CENTER growth ("Direction: Center" — legacy did this with a second positioning pass
+-- in Icons.lua; that helper no longer exists, so this is the only implementation):
+-- the native flow has no centering
 -- concept, but the container SELF-SIZES to content each layout pass (secret SetSize,
 -- Blizzard_CustomAuraContainer.lua:738) — so fill the box from a fixed corner and
 -- pin the box's centre-of-edge to the user's anchor point; the render then keeps
@@ -2359,10 +2367,17 @@ function NativeBackend:build()
     -- record count) is structural -> Rebuild.
     -- Native sort (rows only): declared at AddAuraGroup here, re-tunable live via
     -- applyGroupTuning — one shared derivation (deriveSort).
-    local sortMethod, sortDirection
-    if not testMode then
-        sortMethod, sortDirection = deriveSort(config)
-    end
+    -- ★ NO testMode FORK. Row order is RENDERING, and a preview must render through the
+    -- live pathway -- it may differ in DATA only. With the sort skipped, live rows came
+    -- out in the container's sort order and preview rows in declaration order, so the Sort
+    -- setting could not be judged from the preview at all.
+    --
+    -- Safe to run for test containers: deriveSort is pure config -- it reads config.sort
+    -- and the two AuraContainerSort* enum tables and touches no unit or aura data. Unlike
+    -- the other test forks in this file (per-slot groups, the window-parked missing badge,
+    -- disabled containers) this one carried no stated engine reason, which is what marked
+    -- it out as an oversight rather than a constraint.
+    local sortMethod, sortDirection = deriveSort(config)
     self.groupKeys = {}
     -- key -> the record style that group was built with. applyLayout re-pushes group
     -- layouts on every restyle and would otherwise reset a scaled group's cell back to

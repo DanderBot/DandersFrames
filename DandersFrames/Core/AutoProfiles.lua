@@ -665,6 +665,23 @@ function AutoProfilesUI:InitDefaults()
         DF.db.raidAutoProfiles.howItWorksCollapsed = false
     end
 
+    -- ☠ BACKFILL THE CONTENT-TYPE SUB-TABLES TOO. The guard above is presence-only, so a
+    -- table that EXISTS but is missing a sub-table sails past it -- and a full profile
+    -- import replaces raidAutoProfiles wholesale from the payload, validated only by a
+    -- shallow `type(...) == "table"` check. Import a payload without `mythic` and the Auto
+    -- Layouts page threw "attempt to index field 'mythic' (a nil value)" the moment it
+    -- opened, then again on the next branch.
+    --
+    -- Runtime was already safe (GetActiveProfile and FindMatchingProfile both guard); this
+    -- presented purely as a settings page that could not be opened, with no way back
+    -- except re-importing something else.
+    local ap = DF.db.raidAutoProfiles
+    if type(ap.instanced) ~= "table" then ap.instanced = { profiles = {} } end
+    if type(ap.openWorld) ~= "table" then ap.openWorld = { profiles = {} } end
+    if type(ap.mythic) ~= "table" then ap.mythic = {} end
+    if type(ap.instanced.profiles) ~= "table" then ap.instanced.profiles = {} end
+    if type(ap.openWorld.profiles) ~= "table" then ap.openWorld.profiles = {} end
+
     -- One-time cleanup: strip transient/never-override keys (raidLocked etc.) that
     -- an earlier build's diff-scan may have captured into layout overrides. Such a
     -- key forced the frames locked/unlocked whenever its layout activated (the
@@ -931,6 +948,14 @@ function AutoProfilesUI:EnterEditing(contentType, profileIndex)
     for key, value in pairs(DF._realRaidDB) do
         self.globalSnapshot[key] = DeepCopyValue(value)
     end
+    -- ☠ REMEMBER WHOSE DATA THIS SNAPSHOT IS. ExitEditing reads DF._realRaidDB at CALL
+    -- time, and DF:SetProfile re-points that global -- so a profile switch mid-edit (spec
+    -- change -> CheckProfileAutoSwitch -> SetProfile) left the exit diff comparing the NEW
+    -- profile's table against the OLD profile's snapshot: the orphan sweep nils every key
+    -- the old profile lacked, and the restore loop stamps old values over the new profile.
+    -- SetProfile clears the runtime overlay but never calls ExitEditing, and ExitEditing's
+    -- own guard is only `if self.editingProfile and self.globalSnapshot`.
+    self.globalSnapshotOwner = DandersFramesDB_v2 and DandersFramesDB_v2.currentProfile or "Default"
 
     -- Snapshot pinned frames overridable settings (stored as "pinned.N.setting" keys)
     -- Pinned frames live at raid.pinnedFrames
@@ -1111,6 +1136,35 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
 
     -- Diff safety net: before restoring globals, scan live values vs snapshot
     -- to catch any overrides that weren't explicitly tracked by controls
+    -- ☠ ONLY DIFF AGAINST THE PROFILE THE SNAPSHOT CAME FROM. DF._realRaidDB is read
+    -- fresh below, and DF:SetProfile re-points it -- so if the profile changed while this
+    -- layout was being edited (a spec change routes through CheckProfileAutoSwitch ->
+    -- SetProfile), the sweep would nil every key of the NEW profile that the OLD one
+    -- lacked, and the restore loop would stamp the old profile's values over it. Data loss
+    -- on a profile the user never opened.
+    --
+    -- The edit itself is abandoned in that case: its snapshot describes data no longer
+    -- loaded, so there is nothing safe to diff or restore. Say so rather than skipping
+    -- quietly -- an abandoned edit looks identical to a saved one from the outside.
+    local snapOwner = self.globalSnapshotOwner
+    local liveOwner = DandersFramesDB_v2 and DandersFramesDB_v2.currentProfile or "Default"
+    if self.globalSnapshot and snapOwner and snapOwner ~= liveOwner then
+        DF:DebugWarn("AUTOPROFILE", "ExitEditing: profile changed during editing (%s -> %s); abandoning the diff rather than writing one profile's values into another", tostring(snapOwner), tostring(liveOwner))
+        -- Drop ONLY the diff/restore inputs, then FALL THROUGH to the shared exit
+        -- tail: every block below is nil-guarded on globalSnapshot, so nothing from
+        -- the stale edit can be written -- but the editing-state clears, the
+        -- crash-recovery flag, the sidebar hint, the override stars and
+        -- EvaluateAndApply still run. An early return here skipped them all,
+        -- leaving the GUI wearing editing chrome for an edit that no longer existed.
+        -- ⚠ Restoring the snapshot into the SOURCE profile by name is possible (it
+        -- still exists in DandersFramesDB_v2.profiles) and deliberately NOT done:
+        -- a cross-profile write is the exact hazard this guard exists to stop, and
+        -- doing it safely against the raw table is its own change.
+        self.editingProfile = nil
+        self.globalSnapshot = nil
+        self.globalSnapshotOwner = nil
+    end
+
     if self.editingProfile and self.globalSnapshot then
         if not self.editingProfile.overrides then
             self.editingProfile.overrides = {}
@@ -1209,6 +1263,9 @@ function AutoProfilesUI:ExitEditing(skipUIUpdates)
     self.editingContentType = nil
     self.editingProfileIndex = nil
     self.globalSnapshot = nil
+    -- Cleared with its snapshot: a stale owner would make the NEXT edit session compare
+    -- against the wrong profile name if EnterEditing ever failed to set it.
+    self.globalSnapshotOwner = nil
 
     -- Clear crash recovery flag — editing exited cleanly
     if DF.db then
@@ -1360,8 +1417,23 @@ function AutoProfilesUI:SetProfileSetting(key, value)
     end
 
     -- Get the true global from snapshot (db.raid has been modified by the control already)
+    -- ☠ THE FALLBACK BELOW READS BACK THE CONTROL'S OWN WRITE. Every control writes
+    -- dbTable[dbKey] BEFORE calling this (Controls.lua), so for a key absent from the
+    -- snapshot -- one that was nil on the profile when editing began -- GetRaidValue
+    -- returns the value we are being asked to compare, valuesMatch is trivially true, and
+    -- the override is DELETED. The change could never be recorded, and ExitEditing's
+    -- orphan sweep then stripped it from the profile too: the setting vanished from both.
+    --
+    -- Absent from the snapshot means "no global value to match", so nothing can equal it.
+    -- Treat it as a genuine difference and let the override be stored.
     local globalValue, found = GetSnapshotValue(self.globalSnapshot, key)
     if not found then
+        local newValue = value
+        if newValue ~= nil then
+            self.editingProfile.overrides[key] = DeepCopyValue(newValue)
+            DF:Debug("AUTOPROFILE", "SetProfileSetting: %s absent from snapshot -- stored as an override (no global to compare against)", key)
+            return true
+        end
         globalValue = GetRaidValue(key)
     end
 
@@ -1552,14 +1624,47 @@ function AutoProfilesUI:ApplyRuntimeProfile(profile, contentKey)
         overlay[key] = DeepCopyValue(value)
     end
 
-    -- Table keys: deep-copy parent from real table, apply overrides
+    -- Table keys: a LIVE VIEW of the real parent, not a deep copy — the same
+    -- treatment the pinned block below already got, and for the same reason.
+    --
+    -- ☠ THE DEEP COPY FROZE THE SIBLINGS. An override is per INDEX
+    -- ("raidGroupVisible_1"), but the copy snapshotted the whole parent table at
+    -- activation. So with group 1 overridden, groups 2-8 were served from a stale
+    -- snapshot for as long as the layout stayed active: untick group 3 on the Options
+    -- page and the write reached the real table, but every read still came off the
+    -- copy, so the checkbox sprang back and the frames never changed until the layout
+    -- switched. Only the OVERRIDDEN indices should be frozen; the rest must read live.
+    --
+    -- Overridden indices are rawset on the view, so they shadow __index — and
+    -- __newindex never fires for them, exactly as with pinned `enabled`: their value
+    -- stays view-local while HandleRuntimeWrite persists edits to the global.
+    -- Everything else falls through to the real table for reads AND writes.
+    --
+    -- ⚠ `rawget(view, index) ~= nil` is now THE test for "is this index overridden",
+    -- used by both HandleRuntimeWrite and IsOverriddenByRuntime. Those two used to ask
+    -- `DF.raidOverrides[tableName] ~= nil`, which answered for the whole table and so
+    -- reported all eight groups overridden whenever any one of them was.
+    --
+    -- ⚠ pairs() on the view enumerates only the overridden indices. Safe here because
+    -- every consumer indexes numerically (BuildGroupFilter's `for i = 1, 8`, the header
+    -- and test-mode group loops) and export reads _realProfile, never the overlay.
     for tableName, indices in pairs(tableGroups) do
-        local parent = DeepCopyValue(DF._realRaidDB[tableName])
-        if type(parent) ~= "table" then parent = {} end
+        local realParent = DF._realRaidDB[tableName]
+        local view = {}
         for index, value in pairs(indices) do
-            parent[index] = DeepCopyValue(value)
+            view[index] = DeepCopyValue(value)
         end
-        overlay[tableName] = parent
+        if type(realParent) == "table" then
+            overlay[tableName] = setmetatable(view, {
+                __index = realParent,
+                __newindex = function(_, key, value)
+                    realParent[key] = value
+                end,
+            })
+        else
+            -- Nothing to read through to; the overrides are the whole table.
+            overlay[tableName] = view
+        end
     end
 
     -- Pinned keys: build a LIVE VIEW of the real pinnedFrames, not a deep copy.
@@ -1743,7 +1848,15 @@ function AutoProfilesUI:HandleRuntimeWrite(key, value)
         if type(tbl) == "table" then
             tbl[index] = value
         end
-        local isOverridden = DF.raidOverrides[tableName] ~= nil
+        -- ☠ PER INDEX, not per table. This asked `DF.raidOverrides[tableName] ~= nil`,
+        -- which is true when ANY index of the table is overridden -- so overriding
+        -- group 1 made edits to groups 2-8 return true as well, and the caller then
+        -- treated a perfectly ordinary edit as override-blocked: value written to the
+        -- global only, live overlay untouched, override indicator shown on a control
+        -- that carries no override. Overridden indices are the ones rawset on the
+        -- overlay view (see ApplyRuntimeProfile); everything else reads through.
+        local overlayTbl = DF.raidOverrides[tableName]
+        local isOverridden = type(overlayTbl) == "table" and rawget(overlayTbl, index) ~= nil
         DF:Debug("AUTOPROFILE", "HandleRuntimeWrite: table key %s — overridden=%s, wrote to real table", key, tostring(isOverridden))
         return isOverridden
     end
@@ -1778,7 +1891,10 @@ function AutoProfilesUI:IsOverriddenByRuntime(key)
 
     local tableName, index = ParseTableKey(key)
     if tableName and index then
-        return DF.raidOverrides[tableName] ~= nil
+        -- Per index, matching HandleRuntimeWrite — see the note there. Table-presence
+        -- lit the override indicator on every sibling control.
+        local overlayTbl = DF.raidOverrides[tableName]
+        return type(overlayTbl) == "table" and rawget(overlayTbl, index) ~= nil
     end
 
     return DF.raidOverrides[key] ~= nil
@@ -1813,13 +1929,22 @@ end
 -- These were incorrectly written by the ExitEditing diff scan when a pinned frame was
 -- dragged during editing. The key causes the entire pinnedFrames table (including
 -- position) to overwrite _realRaidDB on the next EnterEditing, moving the frame.
-local dfAutoProfilesMigrated = false
+-- ☠ PER PROFILE, NOT PER SESSION. This was gated by a file-scope
+-- `local dfAutoProfilesMigrated`, so the FIRST EvaluateAndApply after login migrated the
+-- login profile and every later call -- including the one after each DF:SetProfile --
+-- returned immediately. Any other profile's stale overrides.pinnedFrames keys were never
+-- stripped, in that session or in any future one where that profile was not the login
+-- profile: a migration that could only ever reach one profile per install.
+--
+-- The flag now lives on the raidAutoProfiles table it cleans, which is per-profile.
+-- Every sibling migration in this file is already per-profile
+-- (prof._legacyTextOverrideCleanupV1, ap.nonOverridableCleanupDone); this one never got
+-- the same treatment.
 local function MigrateAutoProfileOverrides()
-    if dfAutoProfilesMigrated then return end
-    dfAutoProfilesMigrated = true
-
     local autoDb = DF.db and DF.db.raidAutoProfiles
     if not autoDb then return end
+    if autoDb._overrideCleanupV1 then return end
+    autoDb._overrideCleanupV1 = true
 
     local cleaned = 0
     local contentTypes = { "mythic", "instanced", "openWorld" }
@@ -2138,7 +2263,10 @@ end
 
 -- ============================================================
 -- DEBUG: Auto Profile Detection Test
--- Usage: /dfautotest - Print current detection results
+-- Usage: /df debug autotest - Print current detection results
+-- ⚠ NOT /dfautotest. RegisterDebugSlash does not create a SLASH_* global for a
+-- /df-prefixed alias, so that spelling is not typeable. Same correction /dfarena
+-- already carries in Core.lua.
 -- ============================================================
 
 DF:RegisterDebugSlash("DFAUTOTEST", "Auto profiles test harness", true, "/dfautotest")

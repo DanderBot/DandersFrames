@@ -977,7 +977,7 @@ function AE:ShowRowEditor(index)
                     if v then row.dfCustom = nil end
                 end)
         end
-        local store = R.GetStore and R:GetStore()
+        local store = R.ReadStore and R:ReadStore()
         local customs = store and store.customFilters
         if customs and next(customs) then
             header("DF custom filters")

@@ -13,7 +13,6 @@ local L = DF.L
 local S = GUI._state
 local C_PANEL, C_ELEMENT, C_HOVER, C_TEXT, C_TEXT_DIM =
       GUI.Colors.panel, GUI.Colors.element, GUI.Colors.hover, GUI.Colors.text, GUI.Colors.textDim
-local CloseOpenDropdown = GUI._priv.CloseOpenDropdown
 local GetThemeColor = GUI.GetThemeColor
 local SnapLen = GUI.SnapLen
 local CreateElementBackdrop = GUI._priv.CreateElementBackdrop
@@ -474,6 +473,13 @@ end
 -- opts.refreshPage. Keys are parameterised (thresholdKey / thresholdModeKey) so any
 -- consumer's DB schema works.
 --
+-- ⚠ IN PRACTICE ONLY THE unitKeys PATH IS USED. The one caller
+-- (CreateExpirationControls) always passes unitKeys, and nothing in either addon ever
+-- assigns thresholdKey, resetValues, modeText or modeSegmentWidth -- so the
+-- single-key half of this contract, and those four knobs, are advertised but
+-- unexercised. Treat the paragraph below as a description of intent, not of tested
+-- behaviour, and see the ☠ note on the else branch further down.
+--
 -- opts.unitKeys = { SECONDS = key, PERCENT = key } switches the row to ONE STORED
 -- VALUE PER UNIT instead of a single key reinterpreted between them. A threshold
 -- cannot be reinterpreted (5 seconds is not 5 percent), so with this set the toggle
@@ -538,6 +544,17 @@ function GUI:CreateExpiringThresholdRow(parent, dbTable, opts)
             self:SetRange(lo, hi)   -- also re-reads the value through customGet
         end
     else
+        -- ☠ UNREACHABLE TODAY, and left in place deliberately rather than deleted.
+        -- This factory has exactly ONE caller (CreateExpirationControls, above), and
+        -- it always passes unitKeys -- so `thresholdKey`/`tKey`, this whole branch,
+        -- and opts.resetValues below it cannot run. Nothing assigns thresholdKey or
+        -- resetValues anywhere in either addon.
+        --
+        -- ⚠ Not removed because deleting it collapses the if/else and turns a
+        -- two-mode factory into a single-mode one -- a restructure of a live widget,
+        -- not a dead-code removal, and the header two paragraphs up still advertises
+        -- the parameterised-keys contract. Decide the contract first, then cut.
+        --
         -- Single key reinterpreted between units: clamp it into the new range.
         if isSeconds then
             if tKey and dbTable[tKey] and dbTable[tKey] > maxV then dbTable[tKey] = 10 end
@@ -3506,85 +3523,91 @@ function GUI:CreateGradientBar(parent, width, height, db, prefix)
         
         for _, tex in ipairs(f.TexPool) do tex:Hide() end
         
-        local _, pClass = UnitClass("player")
-        local classCol = DF:GetClassColor(pClass)
-        
-        local function GetC(stage)
-            if db[prefix .. stage .. "UseClass"] then
-                return CreateColor(classCol.r, classCol.g, classCol.b, 1)
-            end
-            local c = db[prefix .. stage]
-            if not c or not c.r then return CreateColor(1, 1, 1, 1) end
-            return CreateColor(c.r, c.g, c.b, 1)
-        end
-        
-        local lCol = GetC("Low")
-        local mCol = GetC("Medium")
-        local hCol = GetC("High")
-        
-        local lowW = math.max(1, math.floor(db[prefix .. "LowWeight"] or 1))
-        local medW = math.max(1, math.floor(db[prefix .. "MediumWeight"] or 1))
-        local highW = math.max(1, math.floor(db[prefix .. "HighWeight"] or 1))
-        
-        local points = {}
-        for i = 1, lowW do table.insert(points, lCol) end
-        for i = 1, medW do table.insert(points, mCol) end
-        for i = 1, highW do table.insert(points, hCol) end
-        
-        if #points < 2 then points = {lCol, hCol} end
-        
-        local numSegments = #points - 1
-        local segWidth = (f:GetWidth() - 4) / numSegments
-        
-        for i = 1, numSegments do
+        -- ☠ THE RAMP IS BUILT IN ONE PLACE, AND THIS IS NOT IT. This function used to
+        -- hold a THIRD copy of the point-array build -- its own GetStageColor, its own
+        -- weight expansion -- alongside the two in Frames/Colors.lua. When the health
+        -- gradient moved to a stop list those two were converged and this one was
+        -- missed, so the strip kept painting the legacy Low/Medium/High stages: editing
+        -- a stop's colour changed the frames and did nothing to the preview above them.
+        -- A preview that disagrees with what it previews is worse than no preview.
+        --
+        -- DF.BuildColorStops is the shared builder. It answers for BOTH shapes (stop
+        -- list, or the legacy stages for a profile the migration has not reached), so
+        -- this reads whatever the renderer would read, by construction.
+        -- ⚠ THE PLAYER'S CLASS, NOT nil. A stop with useClass set resolves against the
+        -- unit's class at render time; passing nil makes BuildColorStops ignore the flag
+        -- and fall back to the stored colour, so the strip would show one thing and the
+        -- frames another the moment class colouring was switched on. Sampling the
+        -- player's own class is the preview differing in DATA, which is allowed -- it
+        -- shows what a frame for someone of your class would look like.
+        local _, previewClass = UnitClass("player")
+        local stops = DF.BuildColorStops and DF.BuildColorStops(db, prefix, previewClass)
+        if not stops or #stops < 2 then return end
+
+        -- ⚠ MEASURED, SO IT MUST BE RE-MEASURED. Everything below is laid out in
+        -- absolute pixels off this width, which is why OnSizeChanged has to re-run the
+        -- whole function -- see the note at the bottom.
+        --
+        -- Defensive: a width at or under 4 would give a zero or negative segment width,
+        -- laying segments out backwards over each other. Bail; the next pass repaints.
+        local usable = (f:GetWidth() or 0) - 4
+        if usable <= 0 then return end
+
+        -- ⚠ SEGMENTS ARE PLACED BY THRESHOLD, NOT BY EQUAL SHARE. The old loop gave every
+        -- segment `usable / numSegments`, which was only right because weights produced
+        -- evenly spaced points. Stops carry their own positions, so a 0/50/90 ramp has a
+        -- wide band and a narrow one -- dividing equally would draw a plausible gradient
+        -- that simply is not the one being rendered on the frames.
+        for i = 1, #stops - 1 do
+            local s1, s2 = stops[i], stops[i + 1]
+            local x0 = 2 + s1.pos * usable
+            local segWidth = (s2.pos - s1.pos) * usable
+            if segWidth < 1 then segWidth = 1 end   -- two stops a percent apart still draw
+
             local tex = f.TexPool[i]
             if not tex then
                 tex = f:CreateTexture(nil, "ARTWORK")
                 table.insert(f.TexPool, tex)
             end
-            
+
             tex:Show()
             tex:ClearAllPoints()
-            tex:SetPoint("LEFT", f, "LEFT", 2 + (i - 1) * segWidth, 0)
+            tex:SetPoint("LEFT", f, "LEFT", x0, 0)
             tex:SetSize(segWidth, f:GetHeight() - 4)
-            
-            local c1 = points[i]
-            local c2 = points[i + 1]
+
+            local c1 = CreateColor(s1.r, s1.g, s1.b, 1)
+            local c2 = CreateColor(s2.r, s2.g, s2.b, 1)
             
             tex:SetColorTexture(1, 1, 1, 1)
             tex:SetGradient("HORIZONTAL", c1, c2)
         end
     end
     
+    -- ☠ ON RESIZE TOO, NOT JUST ON SHOW. This is a layoutCol = "both" widget, so the
+    -- page layout calls SetWidth on it on every relayout -- and dragging the settings
+    -- window edge relayouts continuously. UpdatePreview paints its segments at ABSOLUTE
+    -- pixel offsets and sizes derived from GetWidth at the moment it runs, so with only
+    -- an OnShow binding the frame took its new width while the segments kept the old
+    -- one: the gradient filled part of the bar, and the stale segments sat at stale
+    -- offsets, spilling past the frame's edge (textures are not clipped) as the window
+    -- shrank. Both halves of "the fill goes half and it jumps around".
+    --
+    -- Safe against the SetHeight -> OnSizeChanged -> relayout cascade this file warns
+    -- about elsewhere: UpdatePreview only ever sizes TEXTURES, never the frame, and a
+    -- texture resize does not fire its parent's OnSizeChanged.
     f:SetScript("OnShow", f.UpdatePreview)
+    f:SetScript("OnSizeChanged", f.UpdatePreview)
     f.UpdatePreview()
     return f
 end
 
--- =========================================================================
--- SELECTABLE LIST WIDGET
--- Scrollable list of selectable items with hover highlight and accent
--- selection bar. Used by the Wizard Builder for wizard/step lists.
--- =========================================================================
-
--- =========================================================================
--- SEARCHABLE DROPDOWN WIDGET
--- Dropdown with a search/filter box. Used for the DB key picker (800+ keys)
--- and any large option set. Groups items by category headers.
--- =========================================================================
-
--- =========================================================================
--- KEY-VALUE EDITOR WIDGET
--- Editable list of key=value rows for the wizard builder settings map.
--- Each row: [Searchable Key Dropdown] = [Value Input] [X Delete]
--- =========================================================================
-
--- =========================================================================
--- BRANCH EDITOR WIDGET
--- Visual editor for conditional wizard branching rules.
--- Each row: IF [step] [operator] [value] → [goto step] [X]
--- Plus: ELSE → [fallback step]
--- =========================================================================
+-- ☠ (Removed) four full section banners heading NO CODE: SELECTABLE LIST WIDGET,
+-- SEARCHABLE DROPDOWN WIDGET, KEY-VALUE EDITOR WIDGET and BRANCH EDITOR WIDGET.
+-- There is no CreateSelectableList, CreateSearchableDropdown, CreateKeyValueEditor or
+-- CreateBranchEditor anywhere in the repo -- three of the four described the Wizard
+-- Builder, which is gone (WizardBuilder.lua is deleted; see the notes in GUI.lua and
+-- Popup.lua). Four banners in a row with nothing between them read as "these widgets
+-- are somewhere in this file", which costs a search every time.
 
 -- =========================================================================
 -- MAIN GUI CREATION

@@ -7,9 +7,9 @@ local addonName, DF = ...
 -- seen. Powers /df users listing for group/raid.
 -- ============================================================
 
-local pairs, ipairs, type = pairs, ipairs, type
+local ipairs, type = ipairs, type
 local tonumber, tostring = tonumber, tostring
-local format, match, find, gsub = string.format, string.match, string.find, string.gsub
+local format, match, gsub = string.format, string.match, string.gsub
 local GetTime = GetTime
 
 DF.VersionCheck = DF.VersionCheck or {}
@@ -91,7 +91,17 @@ VC.playerFullName = nil
 
 local function getPlayerFullName()
     local name = UnitName("player")
-    local realm = GetRealmName():gsub("%s", "")
+    -- ☠ NORMALIZED realm, matching NicknamesComm.lua's getPlayerFullName. CHAT_MSG_ADDON
+    -- hands back a sender whose realm is normalized (punctuation stripped, not just
+    -- spaces), so space-stripping GetRealmName() diverges on apostrophe/hyphen realms
+    -- (Kil'jaeden, Zul'jin, "Aggra (Portugues)"). On those realms the self-guard
+    -- `sender == self.playerFullName` never matched -- we answered our own broadcast and
+    -- recorded ourselves -- and CollectGroupMembers built keys with the punctuation intact
+    -- that could never be found in seenUsers, so every same-realm member read as "not
+    -- detected". The sibling file has carried this fix AND its reasoning; this one was
+    -- never updated.
+    local realm = (GetNormalizedRealmName and GetNormalizedRealmName())
+        or (GetRealmName() or ""):gsub("%s", "")
     return name .. "-" .. realm
 end
 
@@ -268,9 +278,22 @@ function VC:ShowNag(newVersion)
 end
 
 -- Receive H: respond with our version on the same channel type, with small jitter.
+-- ☠ ONE REPLY IN FLIGHT AT A TIME. The jitter spreads a legitimate group-wide hello, but
+-- it caps nothing: this scheduled a timer and a SendAddonMessage per RECEIVED message,
+-- with no per-sender or global limit. Any peer in guild or raid spamming "DF_VerCheck\tH"
+-- therefore made OUR client emit one addon message each -- enough to hit the client's
+-- outbound throttle and disconnect us. A third party causing our disconnect is not
+-- something jitter can fix.
+--
+-- A pending reply already answers everyone on that channel, so dropping duplicates loses
+-- nothing: the reply is a broadcast, not a per-sender response.
 VC.handlers["H"] = function(self, sender, _, channel)
+    self.pendingHelloReply = self.pendingHelloReply or {}
+    if self.pendingHelloReply[channel] then return end
+    self.pendingHelloReply[channel] = true
     local delay = 1 + math.random() * 2  -- 1-3s jitter to avoid response storms
     C_Timer.After(delay, function()
+        self.pendingHelloReply[channel] = nil
         self:SendVersion(channel)
     end)
 end
@@ -336,7 +359,15 @@ function VC:CollectGroupMembers()
         end
         local name, realm = UnitName(token)
         if name then
-            if not realm or realm == "" then realm = GetRealmName():gsub("%s", "") end
+            -- ☠ The other half of the realm fix above. UnitName returns an EMPTY realm for
+            -- same-realm players, so this fallback supplies ours -- and it must be
+            -- normalized the same way, or every same-realm member's fullName fails to
+            -- match a seenUsers key built from the CHAT_MSG_ADDON sender. That is the
+            -- whole "reports everyone as not detected" symptom.
+            if not realm or realm == "" then
+                realm = (GetNormalizedRealmName and GetNormalizedRealmName())
+                    or (GetRealmName() or ""):gsub("%s", "")
+            end
             local fullName = name .. "-" .. realm
             local entry = { name = name, realm = realm, fullName = fullName }
             -- Self: always considered "detected" with local version

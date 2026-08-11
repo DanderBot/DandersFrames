@@ -56,11 +56,17 @@ local OTHER_PREFIX = "other:"
 -- dedup/sound paths silently skip such records; this names the culprit once instead of
 -- spamming per frame per aura event. Guards B2's picker contract.
 local otherIdentWarned = {}
-local function warnOtherUnresolved(auraName)
+-- ⚠ `where` names the POOL, because this now fires for BOTH. It used to be gated to the
+-- Other pool (`pool == 2` / `keyPrefix ~= ""`), so a SPEC-pool record whose identity failed
+-- to resolve rendered nothing with no log at all -- the silent-capability-skip class this
+-- codebase has a standing rule against. That is also the dominant failure mode after a
+-- dangling @custom:/@preset: reference, i.e. precisely what somebody would be trying to
+-- diagnose when they turn debug on.
+local function warnOtherUnresolved(auraName, where)
     if not otherIdentWarned[auraName] then
         otherIdentWarned[auraName] = true
-        DF:DebugWarn(DBG, "Other Buffs aura %s has no resolvable spell identity (expected a SpellDB spell name or a #<id> key); skipping",
-            tostring(auraName))
+        DF:DebugWarn(DBG, "%s aura %s has no resolvable spell identity (expected a SpellDB spell name, a #<id> key, or a live filter reference); skipping",
+            where or "Other Buffs", tostring(auraName))
     end
 end
 
@@ -399,7 +405,19 @@ end
 -- link cap. Refusing beats rendering: an unresolvable group would silently widen the
 -- conjunction to "ignore this condition", which is worse than showing nothing.
 -- Second return is the would-be link count, for the editor's over-cap message.
-local function resolveConditions(spec, typeCfg)
+-- ☠ `spec` MUST BE nil FOR AN OTHER-POOL WINNER. Other-pool identity is spec-INDEPENDENT
+-- -- pickWinner already knows this and computes `local idSpec = (pool == 1) and spec or nil`
+-- before resolving -- but all four callers here passed `spec` unconditionally, even though
+-- each had `bestPool` in hand on the adjacent line for poolFilter.
+--
+-- The divergence is not theoretical: an Other-Buffs effect on a Restoration Druid triggered
+-- by Lifebloom resolves to {33763, 419207, 1227806} through the nil-spec path that drives
+-- bestMap and the dedup union, but to {33763} through SpellIDs.RestorationDruid here. The
+-- buff row has already hidden the variant icon via dedup while the chain never lights for
+-- it -- the aura becomes invisible everywhere. Same for Rejuvenation, Regrowth and
+-- HolyPaladin's Dawnlight.
+local function resolveConditions(spec, typeCfg, isSpecPool)
+    if isSpecPool == false then spec = nil end
     local c = typeCfg.conditions
     if type(c) ~= "table" or type(c.groups) ~= "table" then return nil end
     local groups = {}
@@ -739,7 +757,8 @@ local function colSig(c)
     return tostring(r) .. "," .. tostring(g) .. "," .. tostring(b) .. "," .. tostring(a)
 end
 
--- Health-bar overlay alpha per mode — the exact semantics of Indicators:ApplyHealthBar
+-- Health-bar overlay alpha per mode — the exact semantics of the legacy Indicators:ApplyHealthBar (that module is gone;
+-- this is now the only implementation, so the comparison is against behaviour, not source)
 -- (Indicators.lua:1325-1329), read from CONFIG only:
 --   replace: overlay opacity = the colour picker's alpha.
 --   tint:    overlay opacity = blend slider x colour alpha (so the bar colour shows through).
@@ -880,7 +899,7 @@ local function buildMirrorHostConfig(unit, map, onHost, filter)
 end
 
 -- Resolve the DF.Border spec for an AD border indicator from its CONFIG block (never a
--- live aura), mirroring Indicators:ApplyBorderToOverlay: canonical keys via BuildSpec (the
+-- live aura), mirroring the legacy Indicators:ApplyBorderToOverlay (module removed): canonical keys via BuildSpec (the
 -- border-key fold ran in SyncFrame), black default colour. Returns nil when the border
 -- resolves disabled (ShowBorder=false) — the caller then renders no container. Animations
 -- are NO LONGER dropped here: the AuraContainer allowlist (SAFE_OVERLAY_ANIM) is the single
@@ -1019,7 +1038,7 @@ local function pickWinner(spec, specAuras, otherAuras, typeKey, validate)
                 local typeCfg = (type(auraCfg) == "table") and auraCfg[typeKey]
                 if typeCfg and typeCfg.enabled ~= false and (not validate or validate(typeCfg)) then
                     local map = unionIdentity(idSpec, auraName, typeCfg)
-                    if not map and pool == 2 then warnOtherUnresolved(auraName) end
+                    if not map then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
                     if map then
                         local prio = auraCfg.priority or 5
                         if (not bestName)
@@ -1257,7 +1276,8 @@ end
 -- legacy icon:SetPoint(anchor, frame, anchor, offsetX, offsetY) + SetSize(size, size).
 -- ============================================================
 
--- Stable per-indicator key (mirror Engine GetInstanceKey: "auraName#id"). keyPrefix is
+-- Stable per-indicator key (mirrors what Engine's key builder produced: "auraName#id"; Engine.lua no longer
+-- has that helper -- it defines only ResolveSpec / ClearFrame / ForceRefreshAllFrames). keyPrefix is
 -- "" for the spec pool, OTHER_PREFIX for the Other Buffs pool — one shared store, no
 -- cross-pool collisions ("other:<name>#<id>" vs "<name>#<id>").
 local function placedKey(keyPrefix, auraName, indicator)
@@ -1265,7 +1285,7 @@ local function placedKey(keyPrefix, auraName, indicator)
 end
 
 -- Build the DF.Border spec for a placed icon/square indicator from its CONFIG (read-free),
--- mirroring Indicators:ConfigureIcon's border block: canonical keys via BuildSpec, AD's
+-- mirroring the legacy Indicators:ConfigureIcon's border block (module removed): canonical keys via BuildSpec, AD's
 -- size = BorderSize (band thickness) + inset = -BorderInset (outward extension) semantics,
 -- enabled gated on ShowBorder AND not hideIcon (a ring around a hidden icon looks broken),
 -- translucent-black default colour. Returns nil when the border resolves off. Gradient
@@ -1433,7 +1453,8 @@ end
 -- Shared styleable duration-text spec for EVERY placed indicator (icon / square / bar). The
 -- countdown is filled secret-safe by native SetDurationText (Blizzard formats the remaining
 -- time C-side; no Lua read). "Color by Time Remaining" (P4.4) routes through the #205 discrete
--- BUCKET formatter (DF:GetFactoryDurationFormatter -> |cRRGGBB escapes baked into the native
+-- BUCKET formatter (the factory duration formatter -- the file-local GetDurationFormatter in
+-- Features/Auras.lua; there is no DF:GetFactoryDurationFormatter -- |cRRGGBB escapes baked into the native
 -- NumericRuleFormatter bands, evaluated C-side against the SECRET remaining time: red <5s /
 -- orange <15s / yellow <60s / green fresh — the same thresholds the buff/debuff rows use). The
 -- smooth per-percent curve stays dead on container buttons (buckets only). When colour-by-time
@@ -3182,7 +3203,7 @@ end
 -- A member ("classic") layout group arranges its members' PLACED indicators in
 -- a grid computed from the group's settings (anchor / offset / grow direction /
 -- icons per row / spacing). Legacy applied this at render time over the ACTIVE
--- members only (Engine.lua ComputeGroupOffset — icons compacted as auras came
+-- members only (the legacy Engine group-offset pass, since removed — icons compacted as auras came
 -- and went); on 12.1 aura presence is SECRET, so slots are STATIC: each member
 -- owns the grid cell of its member index, exactly matching the editor preview
 -- (Options.lua RefreshPlacedIndicators). An absent (or eye-hidden) member
@@ -3359,7 +3380,7 @@ local function primaryADSpellID(spec, auraName)
     return p
 end
 
--- Static icon texture for a missing indicator (mirror Engine buildSyntheticAuraData): the
+-- Static icon texture for a missing indicator (mirrors the legacy Engine synthetic-aura builder, which no longer exists): the
 -- AD IconTextures override, else C_Spell.GetSpellTexture on the static primary ID, else the
 -- generic question-mark fallback. Read-free (config + a static spell-ID texture lookup).
 local function missingIconTexture(spec, auraName)
@@ -3637,7 +3658,7 @@ local function collectDesiredSounds(desired, unit, auras, keyPrefix, idSpec, cha
         if sc and sc.enabled and not DF:ParseADFilterRef(auraName) then
             local ids = DF:BuildADIdentityFilters(idSpec, auraName)
             local map = ids and ids.includeSpellIDs
-            if not map and keyPrefix ~= "" then warnOtherUnresolved(auraName) end
+            if not map then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
             if map then
                 for _, ev in ipairs(SOUND_EVENTS) do
                     if ev.enabled(sc) then
@@ -3798,7 +3819,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                 elseif isBar then
                     local ids = DF:BuildADIdentityFilters(idSpec, auraName)
                     local map = ids and ids.includeSpellIDs
-                    if not map and keyPrefix ~= "" then warnOtherUnresolved(auraName) end
+                    if not map then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
                     if map then
                         local key = placedKey(keyPrefix, auraName, indicator)
                         live[key] = true
@@ -3858,7 +3879,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                 elseif isSquare or indicator.type == "icon" then
                     local ids = DF:BuildADIdentityFilters(idSpec, auraName)
                     local map = ids and ids.includeSpellIDs
-                    if not map and keyPrefix ~= "" then warnOtherUnresolved(auraName) end
+                    if not map then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
                     if map then
                         local key = placedKey(keyPrefix, auraName, indicator)
                         live[key] = true
@@ -4218,7 +4239,7 @@ local function collectStackedBorders(spec, specAuras, otherAuras)
                 if typeCfg and typeCfg.enabled ~= false and typeCfg.ShowBorder ~= false
                    and typeCfg.borderMode == "custom" then
                     local map = unionIdentity(idSpec, auraName, typeCfg)
-                    if not map and pool == 2 then warnOtherUnresolved(auraName) end
+                    if not map then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
                     if map then
                         stackedBorders = stackedBorders or {}
                         stackedBorders[#stackedBorders + 1] = {
@@ -4358,7 +4379,7 @@ function Factory:SyncFrame(frame)
             -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
             -- the border consumer: a conjunction of presence gates does not express "while
             -- all of these are absent".
-            local chainHB = resolveConditions(spec, bestCfg)
+            local chainHB = resolveConditions(spec, bestCfg, bestPool == 1)
             if chainHB then
                 local r, g, b, a = readADColor(bestCfg.color)
                 local mode = slower(bestCfg.mode or "replace")
@@ -4507,7 +4528,7 @@ function Factory:SyncFrame(frame)
             -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
             -- the border consumer: a conjunction of presence gates does not express "while
             -- all of these are absent".
-            local chainBG = resolveConditions(spec, bestCfg)
+            local chainBG = resolveConditions(spec, bestCfg, bestPool == 1)
             if chainBG then
                 local r, g, b, a = readADColor(bestCfg.color)
                 local mode = slower(bestCfg.mode or "tint")
@@ -4639,7 +4660,7 @@ function Factory:SyncFrame(frame)
             if not bestName then return false end
             local bestSpec = buildBorderSpec(frame, bestCfg)
             if not bestSpec then return false end   -- resolved disabled → render nothing
-            local chainLinks = resolveConditions(spec, bestCfg)
+            local chainLinks = resolveConditions(spec, bestCfg, bestPool == 1)
             if not chainLinks then
                 dropChainEntry(bd, bestName)
                 return syncBorderEntry(bd, frame, bestName, bestCfg, bestMap, bestPool == 1)
@@ -4702,7 +4723,7 @@ function Factory:SyncFrame(frame)
                 -- colour covers only exist when every condition holds. The chain's own gates
                 -- use the same mirror-host config, which is why this type nests for free --
                 -- the visual link is just one more host, handed to a different consumer.
-                local chainTX = resolveConditions(spec, bestCfg)
+                local chainTX = resolveConditions(spec, bestCfg, bestPool == 1)
                 if chainTX then
                     local cat = category
                     syncConditionChain(st, bestName, frame, frame.unit, chainTX, filt,
@@ -5007,7 +5028,7 @@ end
 -- secret show/hide drive it read-free. It works for effects that ARE a child region drawn
 -- over the frame (tint textures, a border ring). It does NOT extend to these three:
 --
---  * framealpha (ref Indicators:ApplyFrameAlpha) — reduces the WHOLE unit frame's alpha on
+--  * framealpha (ref the legacy Indicators:ApplyFrameAlpha; that module is gone) — reduces the WHOLE unit frame's alpha on
 --    presence. There is no additive-child equivalent to reducing a frame's alpha (an overlay
 --    darkens, it can't make the frame transparent — and the plan forbids approximation).
 --    The only mechanism would be an OnShow/OnHide hook on a slot child calling frame:SetAlpha
