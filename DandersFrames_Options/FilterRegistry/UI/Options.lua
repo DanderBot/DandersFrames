@@ -2900,12 +2900,12 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         -- and telling Holy Bulwark's buff from its absorb shield is exactly what the
         -- user is here to do, so the per-id art is the only thing that distinguishes
         -- them.
-        local function putRecordChildren(token, rec)
+        local function putRecordChildren(token, rec, parentName)
             if not (expandedRecords[rec.id] and rec.alts and #rec.alts > 0) then return end
             local ids = { rec.id }
             for _, alt in ipairs(rec.alts) do ids[#ids + 1] = alt end
             local live = #R:LiveRecordIDs(rec)
-            for _, sid in ipairs(ids) do
+            for idx, sid in ipairs(ids) do
                 local nm, icon
                 if C_Spell then
                     if C_Spell.GetSpellName then
@@ -2924,6 +2924,8 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
                     icon = icon or FALLBACK_ICON,
                     chip = R:FormatSpellID(sid),
                     enabled = tracked,
+                    -- Sort with the parent, in record-id order beneath it.
+                    sortName = parentName, sortID = rec.id, childIndex = idx,
                     -- The last tracked id can't be unticked (SetSpellIDMuted refuses):
                     -- a record with nothing live reads as tracked and matches nothing.
                     lastLive = tracked and live <= 1,
@@ -2990,7 +2992,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
                         enabled = R:IsSpellEnabled(selKey, rec),
                         tooltipID = rec.id,
                     })
-                    putRecordChildren(rec.class, rec)
+                    putRecordChildren(rec.class, rec, name)
                 end
             end
         -- (The fixed non-secret debuff list built a third item shape here. It went to
@@ -3009,7 +3011,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
                                 chip = RecordChip(rec),
                                 tooltipID = rec.id,
                             })
-                            putRecordChildren(rec.class, rec)
+                            putRecordChildren(rec.class, rec, name)
                         end
                     else
                         -- Known id orphaned by a spell DB update: render as raw
@@ -3023,13 +3025,24 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         end
 
         -- Sort within each group: named spells alphabetically, raw ids last
+        --
+        -- ☠ CHILD ROWS SORT ON THEIR PARENT'S KEY, NEVER THEIR OWN. They are part of
+        -- that row, not entries in their own right, and sorting them on their own name
+        -- and id scatters them: Holy Bulwark's absorb component resolves to the same
+        -- NAME as its parent and a LOWER id (432496 vs 432607), so it landed above the
+        -- record it belongs to while every record whose alts happen to be numerically
+        -- higher expanded downwards. sortName/sortID carry the parent's key and
+        -- childIndex orders the block beneath it, canonical id first.
         for _, g in pairs(groups) do
             tsort(g, function(a, b)
                 if (a.raw or false) ~= (b.raw or false) then return not a.raw end
                 -- Raw rows sort by resolved name too; unresolved "#id" names
                 -- cluster first ("#" < letters), ordered by id via the tiebreak.
-                if a.name ~= b.name then return a.name < b.name end
-                return a.id < b.id
+                local an, bn = a.sortName or a.name, b.sortName or b.name
+                if an ~= bn then return an < bn end
+                local ai, bi = a.sortID or a.id, b.sortID or b.id
+                if ai ~= bi then return ai < bi end
+                return (a.childIndex or 0) < (b.childIndex or 0)
             end)
         end
 
