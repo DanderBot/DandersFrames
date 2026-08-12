@@ -655,6 +655,38 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
     ApplyBackdrop(mockFrame, {r = 0.07, g = 0.07, b = 0.07, a = 1}, {r = 0.27, g = 0.27, b = 0.27, a = 1})
     container.mockFrame = mockFrame
 
+    -- Live geometry. Frame width/height and Preview Scale were read ONCE, above, so
+    -- the preview only caught up when something else forced a full page rebuild —
+    -- resizing the window, or leaving and returning (Aphoex, 2026-08-12). Re-read
+    -- them from AuraDesigner_RefreshPage instead, which is where every other surface
+    -- on this page already refreshes.
+    --
+    -- ☠ CLAMP BOTH AXES. The container is anchored to its panel on all four sides,
+    -- and the mock is centred inside at the configured size times the user's scale.
+    -- Nothing bounded the vertical, so a tall frame or a high Preview Scale spilled
+    -- the mock out through the top and bottom of its box while the width stayed
+    -- inside. Fitting to the smaller of the two ratios keeps the preview honest
+    -- about proportions — it shrinks, it does not letterbox.
+    container.RefreshGeometry = function()
+        local fdb = DF:GetDB((GUI and GUI.SelectedMode) or "party") or DF.PartyDefaults
+        local w = fdb.frameWidth or 125
+        local h = fdb.frameHeight or 64
+        mockFrame:SetSize(w, h)
+
+        local want = (GetAuraDesignerDB() or {}).previewScale or 1.0
+        -- Before the first layout pass the container has no size yet; honour the
+        -- user's scale rather than clamping against a zero and collapsing the mock.
+        local cw, ch = container:GetWidth() or 0, container:GetHeight() or 0
+        if cw < 2 or ch < 2 then
+            mockFrame:SetScale(want)
+            return
+        end
+        -- 16 = the container's own left/right padding; 28 = that plus the
+        -- "FRAME PREVIEW" label strip along the top.
+        local fit = math.min((cw - 16) / w, (ch - 28) / h)
+        mockFrame:SetScale(math.max(0.2, math.min(want, fit)))
+    end
+
     -- Resolve health texture
     local healthTexPath = frameDB.healthTexture or DF.STOCK_BAR_TEXTURE
 
@@ -864,17 +896,16 @@ local function CreateFramePreview(parent, yOffset, rightPanelRef)
     -- ========================================
     -- PREVIEW SCALE SLIDER
     -- ========================================
+    -- ⚠ BOTH callbacks go through RefreshGeometry, never SetScale directly. They used
+    -- to set the scale raw, which is how the slider could push the mock straight out
+    -- through the top and bottom of its box: the container bounds the width, nothing
+    -- bounded the height, and 2.5x on a tall frame does not fit either way.
+    local function ApplyPreviewScale()
+        if container.RefreshGeometry then container.RefreshGeometry() end
+    end
     local scaleSlider = GUI:CreateSlider(container, L["Preview Scale"], 0.75, 2.5, 0.05, adDB, "previewScale",
-        -- callback (on release)
-        function()
-            local s = adDB.previewScale or 1.0
-            mockFrame:SetScale(s)
-        end,
-        -- lightweightUpdate (during drag)
-        function()
-            local s = adDB.previewScale or 1.0
-            mockFrame:SetScale(s)
-        end
+        ApplyPreviewScale,   -- on release
+        ApplyPreviewScale    -- during drag
     )
     scaleSlider:SetPoint("TOPLEFT", previewLabel, "BOTTOMLEFT", -4, -4)
     scaleSlider:SetSize(220, 30)
