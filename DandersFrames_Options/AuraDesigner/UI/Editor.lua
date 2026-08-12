@@ -1882,14 +1882,6 @@ end
 function DF:AuraDesigner_RefreshPage()
     if not S.mainFrame then return end
 
-    -- The master Enable checkbox binds nothing — it is set at creation and written
-    -- by its own OnClick — so anything else that moves adDB.enabled (a profile
-    -- create, a reset to defaults, a profile import) left it stale. Re-read it here,
-    -- where every other surface on the page is already re-read.
-    if S.enableBanner and S.enableBanner.RefreshEnabled then
-        S.enableBanner.RefreshEnabled()
-    end
-
     -- Frame size and Preview Scale are settings like any other; re-read them here so
     -- the preview follows a slider immediately instead of waiting for a window resize
     -- or a page revisit to rebuild it.

@@ -432,20 +432,6 @@ local function CreateEnableBanner(parent)
     local adDB = GetAuraDesignerDB()
     cb:SetChecked(adDB and adDB.enabled)
 
-    -- ☠ RE-READ ON EVERY REFRESH, not just at creation. This checkbox was set once,
-    -- here, and never again — so any path that changes adDB.enabled WITHOUT going
-    -- through the OnClick below left the box showing the old value. Creating a
-    -- profile or resetting one to defaults does exactly that, and the page's reuse
-    -- gate (BuildAuraDesignerPage) keeps the existing banner because the mode db
-    -- table is the same object, so the stale checkbox survived the reset: the box
-    -- disagreed with the data until some other control forced a rebuild, which is
-    -- why clicking Debuffs / Any Buff / a spec appeared to "disable" it
-    -- (Aphoex, 2026-08-12). Called from AuraDesigner_RefreshPage.
-    banner.RefreshEnabled = function()
-        local db = GetAuraDesignerDB()
-        cb:SetChecked(db and db.enabled)
-    end
-
     cb:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
         if checked then
