@@ -1905,6 +1905,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 -- Reflect the enable change in test mode immediately (so disabling
                 -- hides the test display, not just the live bars).
                 if DF.UpdateAllTestTargetedList then DF:UpdateAllTestTargetedList() end
+                -- ...and in the MOVER, which unlock/lock only syncs on its own
+                -- transition: without this, enabling while unlocked gave no mover to
+                -- drag and disabling left a live one on screen.
+                if DF.RefreshTargetedMovers then DF:RefreshTargetedMovers() end
             end), 30)
             local tlImportantOnly = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Important Spells Only"], db, "targetedListImportantOnly", TargetedListUpdate), 30)
             tlImportantOnly.disableOn = HideTLOptions
@@ -2202,6 +2206,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Personal Targeted Spells"], db, "personalTargetedSpellEnabled", function()
             self:RefreshStates()
             if DF.TogglePersonalTargetedSpells then DF:TogglePersonalTargetedSpells(db.personalTargetedSpellEnabled) end
+            -- Same as the Targeted List enable: unlock/lock only syncs this mover on
+            -- its own transition, so toggling while unlocked left the two out of step.
+            if DF.RefreshTargetedMovers then DF:RefreshTargetedMovers() end
         end), 30)
         settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Important Spells Only"], db, "personalTargetedSpellImportantOnly", PersonalTargetedUpdate), 30)
         -- Same game CVar as the Targeted List page — Personal detects casts through

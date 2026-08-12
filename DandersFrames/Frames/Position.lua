@@ -2544,6 +2544,10 @@ function DF:LockFrames()
         DF:HideTargetedListMover()
     end
 
+    -- ☠ Both hides above are UNCONDITIONAL, unlike the matching shows in
+    -- UnlockFrames which are gated on each feature's enable flag. Keep it that way:
+    -- locking must clear a mover whose feature was switched off while it was up.
+
     -- Hide pinned drag chrome (lock always hides, regardless of mode).
     if DF.PinnedFrames and DF.PinnedFrames.SetMoversShown then
         DF.PinnedFrames:SetMoversShown(false)
@@ -2585,6 +2589,42 @@ function DF:LockFrames()
     DF:SetTestModeOwner("party", "unlock", false, true)  -- silent: lock announces itself
 
     DF:Say(L["Frames locked."])
+end
+
+-- ============================================================
+-- TARGETED MOVERS -> CURRENT UNLOCK STATE
+-- ============================================================
+-- Unlock shows these two movers (gated on each feature's enable flag) and Lock
+-- hides them, but that pass runs ONLY on the unlock/lock transition. Toggling
+-- either feature WHILE unlocked never re-ran it, so both directions were broken
+-- and in opposite ways (Aphoex, 2026-08-12):
+--
+--   enable a feature while unlocked  -> no mover appeared, so the feature was
+--                                       there but "the frames aren't movable"
+--   disable one while unlocked       -> its mover stayed on screen AND stayed
+--                                       draggable, long after the feature was off
+--
+-- One re-sync serves both, and serves any future caller that changes these flags
+-- without going through unlock/lock.
+--
+-- ⚠ Lock state is read from the main mover's visibility — the same probe the rest
+-- of this file uses. There is no separate "unlocked" flag, and inventing one here
+-- would be a second source of truth to drift from.
+function DF:RefreshTargetedMovers()
+    local unlocked = DF.moverFrame and DF.moverFrame:IsShown()
+    local db = DF:GetDB()
+
+    if unlocked and db.personalTargetedSpellEnabled then
+        if DF.ShowPersonalTargetedSpellsMover then DF:ShowPersonalTargetedSpellsMover() end
+    elseif DF.HidePersonalTargetedSpellsMover then
+        DF:HidePersonalTargetedSpellsMover()
+    end
+
+    if unlocked and db.targetedListEnabled then
+        if DF.ShowTargetedListMover then DF:ShowTargetedListMover() end
+    elseif DF.HideTargetedListMover then
+        DF:HideTargetedListMover()
+    end
 end
 
 -- ============================================================
