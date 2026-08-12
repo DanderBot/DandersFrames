@@ -3125,12 +3125,19 @@ end
 -- the arrangement the flow lays out into.
 local function buildMemberGroupConfig(frame, group, recs, mine, defs)
     local borderSpec = buildGroupBorderSpec(frame, group)
+    -- Group-level string. Only the test cap reads it now -- matching is per record.
     local filt = poolFilter(group, mine)
     local filters, unionMap = {}, {}
     for i, r in ipairs(recs) do
         for id in pairs(r.map) do unionMap[id] = true end
+        -- ☠ Compare against nil, not truthiness: `false` is a legitimate resolved
+        -- mode (others' auras) and `r.mine or mine` would silently promote it.
+        local rm = r.mine
+        if rm == nil then rm = mine end
         filters[i] = {
-            filter = filt,
+            -- Resolved per member, so a self-only aura drops the caster filter for
+            -- its own record while every neighbour keeps theirs.
+            filter = poolFilter(group, rm),
             -- Keyed by the member's stable indicator id, not its ordinal: reordering
             -- the group must move icons, not re-key every group and force a rebuild.
             key = "m" .. tostring(r.indicatorID),
@@ -4241,7 +4248,9 @@ end
 -- sized widget, and packing it beside icons is meaningless. Grouped bars keep the
 -- single-slot path (see the skip in syncPlacedPool).
 
-local function collectGroupMembers(frame, group, auras, idSpec, defs)
+-- `mine` is the GROUP's pool flag; each member resolves its own from it, because a
+-- self-only aura needs the caster filter dropped for its record alone.
+local function collectGroupMembers(frame, group, auras, idSpec, defs, mine)
     local recs
     for _, m in ipairs(group.members) do
         local auraCfg = auras and auras[m.auraName]
@@ -4262,6 +4271,13 @@ local function collectGroupMembers(frame, group, auras, idSpec, defs)
                     indicatorID = m.indicatorID,
                     indicator   = ind,
                     map         = map,
+                    -- ☠ PER MEMBER, not per group. Symbiotic Relationship's copy on
+                    -- the druid is credited to the PARTNER, so a group-wide
+                    -- "HELPFUL|PLAYER" can never pass it and the member silently
+                    -- never renders on the druid's own frame -- the exact bug placed
+                    -- indicators were fixed for, reintroduced the moment the spell is
+                    -- dragged into a layout group. See resolvePoolMode.
+                    mine        = resolvePoolMode(idSpec, m.auraName, frame, mine),
                     isSquare    = isSquare,
                     borderOn    = borderOn,
                     size        = math.max(8, tonumber(defOf(ind, "size", defs, 24)) or 24),
@@ -4289,7 +4305,7 @@ local function syncMemberGroupList(frame, mg, live, groups, auras, keyPrefix, id
     for _, group in ipairs(groups) do
         if type(group) == "table" and group.kind ~= "filter" and group.enabled ~= false
            and type(group.members) == "table" and #group.members > 0 then
-            local recs = collectGroupMembers(frame, group, auras, idSpec, defs)
+            local recs = collectGroupMembers(frame, group, auras, idSpec, defs, mine)
             if recs then
                 local key = "mgroup:" .. keyPrefix .. tostring(group.id)
                 live[key] = true
@@ -4312,6 +4328,11 @@ local function syncMemberGroupList(frame, mg, live, groups, auras, keyPrefix, id
                     -- layoutIndex, and the icons must move.
                     parts[#parts + 1] = "m" .. i .. "=" .. tostring(r.indicatorID)
                         .. "|" .. includeSig(r.map)
+                        -- The member's RESOLVED pool filter. Without it, a member
+                        -- whose self-only resolution changes (the group moved onto
+                        -- your own frame) keeps the old filter string until some
+                        -- unrelated edit rebuilds the container.
+                        .. "|f=" .. poolFilter(group, r.mine)
                         .. "|" .. tostring(r.size)
                         .. "|" .. placedStructSig(r.isSquare, r.indicator.hideIcon,
                                      r.indicator.showStacks, r.indicator.showDuration,
