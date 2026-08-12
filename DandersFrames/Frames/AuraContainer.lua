@@ -332,6 +332,51 @@ end
 -- test-mode duration so the edit-mode guard (ensureProviderWatch) never hides our
 -- own preview. The switch is GLOBAL — Blizzard's own aura displays show sample data
 -- while DF test mode is open (restored on exit; accepted trade-off).
+-- ============================================================
+-- BLIZZARD'S OWN AURA FRAMES, WHILE WE OWN THE PROVIDER
+-- ============================================================
+-- Switching the aura data provider is GLOBAL — there is no per-container form of
+-- it — so the moment test mode (which Unlock Mode turns on) points the client at
+-- the sample source, Blizzard's player buff and debuff frames start rendering
+-- sample auras too. Left alone they surface and churn for as long as the mode is
+-- up, which reads as the client bugging out rather than as a preview
+-- (Aphoex, 2026-08-12). The trade itself is documented at EDIT-MODE GUARD below
+-- and is not avoidable; what IS avoidable is showing the user the mess.
+--
+-- So park them for the duration and restore exactly what we hid — never a blanket
+-- Show() on the way out, or we would reveal frames the user had turned off
+-- themselves, or that Blizzard had hidden for its own reasons.
+--
+-- ⚠ Everything here is pcall'd and existence-checked. These are Blizzard frames
+-- whose names and presence change between builds, and a diagnostic-grade
+-- convenience must never be able to take test mode down with it.
+local _parkedBlizzAuraFrames = nil
+
+function AuraContainer._parkBlizzardAuraFrames(park)
+    local names = { "BuffFrame", "DebuffFrame" }
+    if park then
+        if _parkedBlizzAuraFrames then return end   -- already parked; don't re-snapshot
+        _parkedBlizzAuraFrames = {}
+        for _, n in ipairs(names) do
+            local f = _G[n]
+            if f and f.IsShown and f.Hide then
+                pcall(function()
+                    if f:IsShown() then
+                        _parkedBlizzAuraFrames[f] = true
+                        f:Hide()
+                    end
+                end)
+            end
+        end
+    else
+        if not _parkedBlizzAuraFrames then return end
+        for f in pairs(_parkedBlizzAuraFrames) do
+            if f and f.Show then pcall(function() f:Show() end) end
+        end
+        _parkedBlizzAuraFrames = nil
+    end
+end
+
 -- Coalesced provider bounce (reset -> switch). Only the EVENT flips a container
 -- onto the sample source, and a container built AFTER a switch never heard it —
 -- so EVERY native build during test mode queues a bounce (handles are created
@@ -446,6 +491,7 @@ function AuraContainer.SetTestMode(on)
 
     if on then
         AuraContainer._ownsProviderSwitch = true
+        AuraContainer._parkBlizzardAuraFrames(true)
         rebuildAll()
         AuraContainer._queueTestBounce()
         -- No ticker start here: countdowns arm natively per slot (armTestDuration),
@@ -457,6 +503,7 @@ function AuraContainer.SetTestMode(on)
             else C_UnitAuras.SwitchAuraDataProvider(true) end
         end)
         AuraContainer._ownsProviderSwitch = false
+        AuraContainer._parkBlizzardAuraFrames(false)
         rebuildAll()
     end
 end
