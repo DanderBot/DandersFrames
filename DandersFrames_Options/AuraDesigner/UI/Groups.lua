@@ -83,6 +83,28 @@ local function GetIndicatorByID(auraName, indicatorID, pool)
     return nil
 end
 
+-- Does this member take a slot in the group's PACKED flow?
+--
+-- ☠ Must stay identical to Factory's memberRenderable. The group container draws
+-- exactly these, and packs them — so the canvas has to number exactly these by their
+-- packed position, or the preview shows a hole the game has already closed.
+-- Everything else (a bar) is still placed by the full-member grid in arrangeGroupList
+-- and keeps the full index, which is why bars do not move.
+local function MemberPacksInFlow(ind)
+    return ind ~= nil and ind.enabled ~= false
+        and ind.type ~= "bar"
+        and not ind.showWhenMissing
+end
+
+-- How many of a group's members the container will pack.
+local function PackedMemberCount(group, pool)
+    local n = 0
+    for _, m in ipairs(group.members or {}) do
+        if MemberPacksInFlow(GetIndicatorByID(m.auraName, m.indicatorID, pool)) then n = n + 1 end
+    end
+    return n
+end
+
 -- Remove an indicator instance by its stable ID
 -- (S.CleanupAdHocAura declared on the state table)
 local function RemoveIndicatorInstance(auraName, indicatorID)
@@ -2072,10 +2094,10 @@ local function RefreshPlacedIndicators()
     local specGroups = isDebuffs and EMPTY_POOL or CurrentLayoutGroups()
     for _, group in ipairs(specGroups) do
         if group.members then
+            local packedTotal = PackedMemberCount(group, CurrentAuraPool(spec))
+            local packedIdx = 0
             for memberIdx, member in ipairs(group.members) do
                 local key = keyPrefix .. member.auraName .. "#" .. member.indicatorID
-                -- Compute position based on group settings
-                local activeIdx = memberIdx - 1  -- 0-based
                 -- Need to find the indicator's size to compute step (members
                 -- live in the same pool as their group — the active pool)
                 local memberCfg = CurrentAuraPool(spec)[member.auraName]
@@ -2088,6 +2110,17 @@ local function RefreshPlacedIndicators()
                             end
                         end
                     end
+                    -- Packed members number by their PACKED position and count, so the
+                    -- canvas closes the same gaps live does; everything else keeps the
+                    -- full-member grid it is still positioned by. See MemberPacksInFlow.
+                    local packs = MemberPacksInFlow(indCfg)
+                    local activeIdx, totalCount   -- 0-based index, and the total it sits in
+                    if packs then
+                        activeIdx, totalCount = packedIdx, packedTotal
+                        packedIdx = packedIdx + 1
+                    else
+                        activeIdx, totalCount = memberIdx - 1, #group.members
+                    end
                     local size = (indCfg and indCfg.size) or (adDB.defaults and adDB.defaults.iconSize) or 24
                     local scale = (indCfg and indCfg.scale) or (adDB.defaults and adDB.defaults.iconScale) or 1.0
                     local step = (size * scale) + (group.spacing or 2)
@@ -2099,7 +2132,6 @@ local function RefreshPlacedIndicators()
                     end
                     local wrap = group.iconsPerRow or 8
                     if wrap <= 0 then wrap = 1 end
-                    local totalCount = #group.members
                     local col = activeIdx % wrap
                     local row = floor(activeIdx / wrap)
                     local function gOff(d, s)
@@ -2395,15 +2427,25 @@ S.RefreshPreviewLightweight = function()
     local specGroups2 = isDebuffs and EMPTY_POOL or CurrentLayoutGroups()
     for _, group in ipairs(specGroups2) do
         if group.members then
+            local packedTotal = PackedMemberCount(group, CurrentAuraPool(spec))
+            local packedIdx = 0
             for memberIdx, member in ipairs(group.members) do
                 local key = keyPrefix .. member.auraName .. "#" .. member.indicatorID
-                local activeIdx = memberIdx - 1
                 local memberCfg = CurrentAuraPool(spec)[member.auraName]
                 local indCfg = nil
                 if memberCfg and memberCfg.indicators then
                     for _, ind in ipairs(memberCfg.indicators) do
                         if ind.id == member.indicatorID then indCfg = ind; break end
                     end
+                end
+                -- Packed position for members the container packs, full-member grid for
+                -- the rest — the same split as the other pass. See MemberPacksInFlow.
+                local activeIdx, totalCount
+                if MemberPacksInFlow(indCfg) then
+                    activeIdx, totalCount = packedIdx, packedTotal
+                    packedIdx = packedIdx + 1
+                else
+                    activeIdx, totalCount = memberIdx - 1, #group.members
                 end
                 local size = (indCfg and indCfg.size) or (adDB.defaults and adDB.defaults.iconSize) or 24
                 local scale = (indCfg and indCfg.scale) or (adDB.defaults and adDB.defaults.iconScale) or 1.0
@@ -2416,7 +2458,6 @@ S.RefreshPreviewLightweight = function()
                 end
                 local wrap = group.iconsPerRow or 8
                 if wrap <= 0 then wrap = 1 end
-                local totalCount = #group.members
                 local col = activeIdx % wrap
                 local row = floor(activeIdx / wrap)
                 local function gOff(d, s)
