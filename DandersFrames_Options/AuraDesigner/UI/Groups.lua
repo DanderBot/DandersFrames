@@ -2529,4 +2529,4 @@ S.RefreshPreviewLightweight = function()
 
     -- Also refresh frame-level preview effects (border, healthbar color, text colors, alpha)
     RefreshPreviewEffects()
-end
+end
