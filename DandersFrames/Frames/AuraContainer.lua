@@ -2623,27 +2623,59 @@ function NativeBackend:build()
     --   ⚠ Behind DebugActive, not DF:Debug alone: counting the maps is O(entries)
     -- and a caller's arguments are evaluated BEFORE Debug can short-circuit, so an
     -- unguarded count would cost on every build with logging off.
+    --
+    -- ⚠ NOISE BUDGET. Containers are per FRAME, so a 40-man rebuild would emit
+    -- several hundred of these and push everything else out of a 10k-line log --
+    -- and AURACONTAINER is not a `noisy` category, so it is ON for anyone who turns
+    -- debug on for an unrelated bug. The detail is therefore limited to the cases
+    -- that are actually diagnostic:
+    --   * the PLAYER's own frame — always small, always the one being asked about;
+    --   * ANY unit whose row looks WRONG — a HELPFUL pool with no include map is the
+    --     fail-open signature this exists to catch, so it must never be suppressed.
+    -- Everything else keeps the one-line summary above.
+    --   ☠ The DebugActive gate comes FIRST, before the anomaly scan — that scan is
+    -- cheap but it is still work, and running it on every build with logging off is
+    -- exactly the cost this whole block is guarded to avoid.
     if DF.DebugActive and DF:DebugActive(DBG) then
-        local function countOf(m)
-            if type(m) ~= "table" then return "none" end
-            local c = 0
-            for _ in pairs(m) do c = c + 1 end
-            return tostring(c)
+        -- ☠ MIRROR THE ENGINE'S RESOLUTION ORDER wherever this reads a group's
+        -- filters: `rec.candidateFilters or config.candidateFilters`. Reading the
+        -- record alone was a real blind spot — the BUFF row passes a plain filter
+        -- STRING plus CONFIG-LEVEL filters, so it logged "no-cf" and looked exactly
+        -- like the unfiltered bug being hunted, on the row that matters most. The
+        -- DEBUFF row builds per-record filters, so that half read correctly and
+        -- disguised the gap.
+        local function cfOf(rec) return rec.candidateFilters or config.candidateFilters end
+
+        -- Is this build worth the full breakdown? (See the noise budget above.)
+        local detail = (config.unit == "player")
+        if not detail then
+            for _, rec in ipairs(filters) do
+                local cf = cfOf(rec)
+                if type(rec.f) == "string" and rec.f:find("HELPFUL", 1, true)
+                    and not (cf and cf.includeSpellIDs) then
+                    detail = true   -- the fail-open signature; never suppress it
+                    break
+                end
+            end
         end
-        for gi, rec in ipairs(filters) do
-            -- ☠ MIRROR THE ENGINE'S RESOLUTION ORDER — `rec.candidateFilters or
-            -- config.candidateFilters` (see candidateFiltersFor above). Reading the
-            -- record alone was a real blind spot: the BUFF row passes a plain filter
-            -- STRING plus CONFIG-LEVEL filters, so it logged "no-cf" and looked
-            -- exactly like the unfiltered bug being hunted — on the one row that
-            -- matters most. The DEBUFF row builds per-record filters, so that half
-            -- read correctly and disguised the gap. `cf=` names which source won.
-            local cf  = rec.candidateFilters or config.candidateFilters
-            local src = rec.candidateFilters and "rec" or (config.candidateFilters and "cfg" or "-")
-            DF:Debug(DBG, "  group %d key=%s filter=%s cf=%s include=%s exclude=%s",
-                gi, tostring(rec.key), tostring(rec.f), src,
-                cf and countOf(cf.includeSpellIDs) or "no-cf",
-                cf and countOf(cf.excludeSpellIDs) or "no-cf")
+
+        if detail then
+            local function countOf(m)
+                if type(m) ~= "table" then return "none" end
+                local c = 0
+                for _ in pairs(m) do c = c + 1 end
+                return tostring(c)
+            end
+            for gi, rec in ipairs(filters) do
+                local cf  = cfOf(rec)
+                -- `cf=` names which source won: rec / cfg / - (neither).
+                local src = rec.candidateFilters and "rec"
+                    or (config.candidateFilters and "cfg" or "-")
+                DF:Debug(DBG, "  group %d key=%s filter=%s cf=%s include=%s exclude=%s",
+                    gi, tostring(rec.key), tostring(rec.f), src,
+                    cf and countOf(cf.includeSpellIDs) or "no-cf",
+                    cf and countOf(cf.excludeSpellIDs) or "no-cf")
+            end
         end
     end
 
