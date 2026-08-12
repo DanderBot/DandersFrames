@@ -184,10 +184,10 @@ end
 -- ============================================================
 -- IDENTITY  (static spell-ID whitelist -> native includeSpellIDs map)
 -- A { includeSpellIDs = map } candidate-filter table Blizzard evaluates
--- container-side. Built purely from the static per-spec
--- config (SpellIDs + AlternateSpellIDs), never from a live aura. Returns nil when the
--- aura name has no known spell ID (caller then skips — an empty include map would
--- wrongly match EVERY helpful aura).
+-- container-side. Built purely from STATIC data — the per-spec config plus the
+-- shipped SpellDB — never from a live aura. Returns nil when the aura name has
+-- no known spell ID (caller then skips — an empty include map would wrongly
+-- match EVERY helpful aura).
 -- `spec` may be NIL (the Other Buffs pool, B1): the per-spec Config tables can't match
 -- a nil spec key, so resolution is spec-INDEPENDENT by construction — ad-hoc "#<id>"
 -- first, then SpellDB by name. Other-pool names must therefore be SpellDB names
@@ -195,20 +195,19 @@ end
 -- resolve through a spec.
 -- ============================================================
 function DF:BuildADIdentityFilters(spec, auraName)
-    local specIDs = DF.AuraDesigner.SpellIDs and DF.AuraDesigner.SpellIDs[spec]
+    -- Curated identity, resolved by AuraAdapter:GetSpecIdentity -- the ONE place
+    -- the ID set is decided, shared with the editor's add-by-ID snap so a
+    -- placement and the picker can never disagree about a spell. Entries with no
+    -- hand-curated alternates inherit the SpellDB's; see the inheritance rule
+    -- documented there. A fresh map per call: callers store it into container
+    -- configs, and the cached array must not become one.
+    local Adapter = DF.AuraDesigner and DF.AuraDesigner.Adapter
+    local ids = Adapter and Adapter.GetAuraSpellIDs and Adapter:GetAuraSpellIDs(spec, auraName)
     local map
-    local primary = specIDs and specIDs[auraName]
-    if primary then
-        map = map or {}
-        map[primary] = true
-    end
-    local alts = DF.AuraDesigner.AlternateSpellIDs and DF.AuraDesigner.AlternateSpellIDs[spec]
-    if alts then
-        for altID, primaryName in pairs(alts) do
-            if primaryName == auraName then
-                map = map or {}
-                map[altID] = true
-            end
+    if ids then
+        for _, id in ipairs(ids) do
+            map = map or {}
+            map[id] = true
         end
     end
     if map then return { includeSpellIDs = map } end
@@ -230,8 +229,15 @@ function DF:BuildADIdentityFilters(spec, auraName)
     -- SpellDB fallback (all-spec support): a name the curated per-spec Config
     -- tables don't know resolves through the FilterRegistry SpellDB by display
     -- name (shipped English `rec.n` or the localized runtime name), unioning
-    -- the canonical ID + every alt. The Config tables are ALWAYS consulted
-    -- first, so every pre-existing indicator keeps byte-identical identity.
+    -- the canonical ID + every alt. This is the ONLY path for an uncurated spec.
+    -- ⚠ It is NOT how a curated name widens any more — that happens inside
+    -- GetSpecIdentity, which joins to the database by ID rather than by name
+    -- (the curated key "EbonMight" never matches rec.n "Ebon Might"). The old
+    -- comment here promised the Config tables were always consulted first "so
+    -- every pre-existing indicator keeps byte-identical identity"; that promise
+    -- now belongs to GetSpecIdentity's inheritance rule, which keeps it for
+    -- every hand-curated multi-ID entry and only widens entries that declared
+    -- nothing of their own.
     local R = DF.FilterRegistry
     local rec = R and R.GetSpellByName and R:GetSpellByName(auraName)
     if rec then
@@ -4325,6 +4331,11 @@ function Factory:SyncFrame(frame)
     -- on the RENDER-resolved adDB too (not just the editor's GetAuraDesignerDB), or live
     -- frames resolve from the un-migrated defaults while the editor shows the new ones.
     if DF.MigrateAuraDesignerDefaultRefreshLazy then DF.MigrateAuraDesignerDefaultRefreshLazy(adDB) end
+    -- Repairs add-by-ID's orphan SpellDB-name keys onto their curated spell. Runs here
+    -- as well as in the editor precisely BECAUSE the orphan renders without the editor
+    -- ever being opened — a player who never opens settings would otherwise keep the
+    -- undeletable indicator forever.
+    if DF.MigrateAuraDesignerOrphanAuraKeysLazy then DF.MigrateAuraDesignerOrphanAuraKeysLazy(adDB) end
 
     local store = frame.dfADFactory
     if not store then store = {}; frame.dfADFactory = store end
