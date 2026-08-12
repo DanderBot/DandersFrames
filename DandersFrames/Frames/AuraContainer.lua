@@ -2613,6 +2613,32 @@ function NativeBackend:build()
     DF:Debug(DBG, "built (native) unit=%s mode=%s groups=%d",
         tostring(config.unit), tostring(config.mode or "row"), #filters)
 
+    -- ★ WHAT DID EACH GROUP ACTUALLY BUILD WITH? The line above reports only the
+    -- group COUNT, which cannot tell a correctly filtered row from one that fell
+    -- through FilterRegistry:ResolveSelection's "nothing selected -> show
+    -- everything" fallback -- that path sets NO includeSpellIDs at all and renders
+    -- every helpful aura. It is the shape of the v4->v5 first-login reports ("all
+    -- buffs until I toggle something"), and it is invisible in a log that says
+    -- groups=1 either way. include=none vs include=<n> is the whole diagnosis.
+    --   ⚠ Behind DebugActive, not DF:Debug alone: counting the maps is O(entries)
+    -- and a caller's arguments are evaluated BEFORE Debug can short-circuit, so an
+    -- unguarded count would cost on every build with logging off.
+    if DF.DebugActive and DF:DebugActive(DBG) then
+        local function countOf(m)
+            if type(m) ~= "table" then return "none" end
+            local c = 0
+            for _ in pairs(m) do c = c + 1 end
+            return tostring(c)
+        end
+        for gi, rec in ipairs(filters) do
+            local cf = rec.candidateFilters
+            DF:Debug(DBG, "  group %d key=%s filter=%s include=%s exclude=%s",
+                gi, tostring(rec.key), tostring(rec.f),
+                cf and countOf(cf.includeSpellIDs) or "no-cf",
+                cf and countOf(cf.excludeSpellIDs) or "no-cf")
+        end
+    end
+
     -- Initial identity-gate state for this build's unit (see _applyIdentityGate);
     -- the module watcher re-evaluates on faction/phase/roster/world changes.
     handle:_applyIdentityGate()

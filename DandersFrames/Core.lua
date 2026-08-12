@@ -4066,6 +4066,30 @@ function DF:MigrateAbsoluteFrameLevels()
             for _, mode in ipairs({ "party", "raid" }) do
                 local modeDb = profile[mode]
                 local sel = type(modeDb) == "table" and modeDb.buffFilterSelection
+                -- ★ DIAGNOSTIC for the v4 -> v5 first-login reports. A v4 profile has
+                -- NO buffFilterSelection at all (the registry did not exist), so this
+                -- pass finds nothing, does nothing -- and stamps the flag anyway. Log
+                -- what it actually saw, per profile per mode: "sel=absent" here paired
+                -- with "include=none" from the container build (Frames/AuraContainer)
+                -- is the whole v4-upgrade story end to end.
+                -- ⚠ Category FILTER, deliberately NOT profile-ish ones like PROFILE.
+                -- A v4 user arms this by enabling debug in v4 BEFORE upgrading, and
+                -- the filters table carries across verbatim -- so any category that
+                -- also exists in v4 could already be stamped `false` by someone who
+                -- ticked things off, silently suppressing exactly the line we need.
+                -- FILTER / AURACONTAINER / AURAROW are v5-only, so they cannot have
+                -- been disabled from v4 and are visible-by-absence.
+                if DF.Debug then
+                    local n = 0
+                    if type(sel) == "table" and type(sel.presets) == "table" then
+                        for _ in pairs(sel.presets) do n = n + 1 end
+                    end
+                    DF:Debug("FILTER", "buffPresetBaseline: mode=%s sel=%s presets=%s",
+                        tostring(mode),
+                        (type(sel) == "table") and "table" or "absent",
+                        (type(sel) == "table" and type(sel.presets) == "table")
+                            and tostring(n) or "absent")
+                end
                 if type(sel) == "table" and type(sel.presets) == "table" then
                     sel.presets.raidDefensives     = true
                     sel.presets.offensiveCooldowns = true
