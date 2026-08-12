@@ -2,24 +2,32 @@
 
 ## [5.1.0]
 
+### New Features
+
+* (Filter Designer) **Track some of a spell's IDs instead of all or none.** Some spells put more than one aura on you at once — Holy Bulwark shows its buff and its absorb shield. Rows for those spells now show how many IDs they carry; click it to open the row and untick the ones you don't want. Works in built-in and custom filters alike. (by Krathe)
+
+### Bug Fixes
+
 * (Auras) Fix disabled buff bars and defensive icons sometimes reappearing on their own.
-* (Auras) Fix all buffs showing unfiltered after watching a cinematic — including the one 12.1 plays on first login, which made it look like an upgrade problem.
-* (Aura Designer) Group icons close the gap when a member's aura is missing, in the order you arranged them, as they did before 5.0.
-* (Aura Designer) Indicators now match every spell ID a spell has, not just one — Ebon Might now shows on the Augmentation Evoker's own frame.
-* (Aura Designer) Fix indicators that rendered but had no card and could not be deleted; affected profiles are repaired automatically.
-* (Aura Designer) Symbiotic Relationship now shows on the druid's own frame.
-* (Aura Designer) The Frame Preview follows frame size and Preview Scale immediately, and stays inside its box.
-* (Aura Designer) Filter groups follow the account-wide "Default Frame Level" setting.
-* (Filter Designer) **Track some of a spell's IDs instead of all or none.** Some spells put more than one aura on you at once — Holy Bulwark shows its buff and its absorb shield. Rows for those spells now show how many IDs they carry; click it to open the row and untick the ones you don't want. Works in built-in and custom filters alike.
-* (Filter Designer) Spell rows in the picker show their spell IDs, matching the rows inside a filter.
-* (Buff Bar / Debuff Bar) The Show Buffs and Show Debuffs switches now lead their pages, in a box named "Visibility".
-* (Buff Bar / Debuff Bar) Max Buffs and Max Debuffs set to 0 now show nothing in test mode, instead of one icon.
-* (Buff Bar / Debuff Bar) Turning Show Border off removes the borders immediately.
-* (Auras) Fix the Dispel Overlay covering the whole frame, and "Show On Current Health Only" now clips it to the filled part of the health bar and follows damage and healing.
-* (Auras) Fix the Defensive Icon row showing every buff instead of the ones you chose.
-* (Targeted Spells) The movers now follow the Targeted List and Personal Targeted enable toggles while frames are unlocked.
-* (Interface) `/df debug attached` no longer locks the game up while it runs.
-* (Interface) The buffs-disabled notice reads "Enable Buffs or Open Aura Designer" — the two links ran together as one.
+* (Auras) Fix all buffs showing unfiltered after watching a cinematic — including the one 12.1 plays on first login, which made it look like an upgrade problem. (by Krathe)
+* (Aura Designer) Group icons close the gap when a member's aura is missing, in the order you arranged them, as they did before 5.0. (by Krathe)
+* (Aura Designer) Indicators now match every spell ID a spell has, not just one — Ebon Might now shows on the Augmentation Evoker's own frame. (by Krathe)
+* (Aura Designer) Fix indicators that rendered but had no card and could not be deleted; affected profiles are repaired automatically. (by Krathe)
+* (Aura Designer) Symbiotic Relationship now shows on the druid's own frame. (by Krathe)
+* (Aura Designer) The Frame Preview follows frame size and Preview Scale immediately, and stays inside its box. (by Krathe)
+* (Aura Designer) Filter groups follow the account-wide "Default Frame Level" setting. (by Krathe)
+* (Buff Bar / Debuff Bar) Max Buffs and Max Debuffs set to 0 now show nothing in test mode, instead of one icon. (by Krathe)
+* (Buff Bar / Debuff Bar) Turning Show Border off removes the borders immediately. (by Krathe)
+* (Auras) Fix the Dispel Overlay covering the whole frame, and "Show On Current Health Only" now clips it to the filled part of the health bar and follows damage and healing. (by Krathe)
+* (Auras) Fix the Defensive Icon row showing every buff instead of the ones you chose. (by Krathe)
+* (Targeted Spells) The movers now follow the Targeted List and Personal Targeted enable toggles while frames are unlocked. (by Krathe)
+* (Interface) `/df debug attached` no longer locks the game up while it runs. (by Krathe)
+
+### Improvements
+
+* (Filter Designer) Spell rows in the picker show their spell IDs, matching the rows inside a filter. (by Krathe)
+* (Buff Bar / Debuff Bar) The Show Buffs and Show Debuffs switches now lead their pages, in a box named "Visibility". (by Krathe)
+* (Interface) The buffs-disabled notice reads "Enable Buffs or Open Aura Designer" — the two links ran together as one. (by Krathe)
 
 ## [5.0.0]
 
