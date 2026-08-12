@@ -3175,11 +3175,12 @@ function Handle:_slotCount()
     end
     return self.config.max or 1
 end
--- Forward-declared: applyRecordStyle is defined further down (next to the
--- initializeFrame factory it was written for) but _acceptSlot below must call it.
--- Without this declaration the name inside _acceptSlot would resolve to a GLOBAL,
+-- Forward-declared: both are defined further down (next to the initializeFrame
+-- factory they were written for) but _acceptSlot below must call them.
+-- Without this declaration the names inside _acceptSlot would resolve to GLOBALS,
 -- read nil at runtime and the call would error — legal Lua that parses clean.
 local applyRecordStyle
+local styleConfigFor
 
 function Handle:_acceptSlot(slot, index, recStyle)
     self.buttons[index] = slot                 -- cache first (mirror of the pre-split order)
@@ -3190,7 +3191,9 @@ function Handle:_acceptSlot(slot, index, recStyle)
     -- override survive — before this, toggling auras off/on or dragging the Size Step
     -- slider silently reverted the important icons to normal size until a full rebuild.
     if recStyle ~= nil then slot.dfImpRecStyle = recStyle end
-    styleButton_regions(slot, self.config)     -- source-agnostic region creation/styling
+    -- Member records style from their OWN config view; everything else from the
+    -- container's. One pass either way — see styleConfigFor.
+    styleButton_regions(slot, styleConfigFor(self, slot))   -- source-agnostic region creation/styling
     applyRecordStyle(slot, self, slot.dfImpRecStyle)
 end
 function Handle:_bindNativeSlot(slot)
@@ -3801,6 +3804,49 @@ end
 -- NOTE: assigns the local forward-declared above _acceptSlot (which calls this on every
 -- restyle). Deliberately NOT `local function` — that would shadow the forward local and
 -- leave _acceptSlot calling a nil global.
+-- ============================================================
+-- PER-RECORD CONFIG VIEW  — full per-member styling in ONE container
+-- ============================================================
+-- A record that carries `button` (a complete style table) is styled by the SHARED
+-- styler against a config view of its own, rather than by a bespoke override list.
+-- That is what makes per-member styling total instead of partial: everything
+-- styleButton_regions can express, a member can express, automatically and forever
+-- — including anything added to it later.
+--
+-- ⚠ Complete by construction, not by hopeful copying. styleButton_regions reads
+-- exactly five config fields: style, layout, mode, unit, adBorderAnim. The first
+-- two are what a member overrides; the rest are container-wide. So an __index
+-- proxy over the real config, with those two swapped, is the whole substitution —
+-- a hand-built partial copy would silently drift the moment the styler reads
+-- something new.
+--
+-- Memoised on the record: these are rebuilt on every restyle of every button, and
+-- allocating a table per button per pass would churn the hot path.
+local function recordConfigView(handle, recStyle)
+    local view = recStyle._cfgView
+    if view and view._src == handle.config then return view end
+    view = setmetatable({
+        _src   = handle.config,
+        style  = recStyle.button,
+        layout = recStyle.layout or handle.config.layout,
+    }, { __index = handle.config })
+    recStyle._cfgView = view
+    return view
+end
+
+-- The config a button should be styled FROM: its record's view when the record
+-- carries a full style, else the container's own.
+--
+-- ☠ Used INSTEAD of config.style, never after it. Styling once with the shared
+-- config and then re-styling with the member's would leave regions the container
+-- wanted and the member did not — a duration fontstring on a member that shows no
+-- duration, for instance. One pass, correct config.
+function styleConfigFor(handle, button)   -- assigns the forward-declared local
+    local rs = button and button.dfImpRecStyle
+    if rs and rs.button then return recordConfigView(handle, rs) end
+    return handle.config
+end
+
 function applyRecordStyle(button, handle, recStyle)
     if not recStyle then return end
 
@@ -4272,7 +4318,11 @@ function Handle:ApplyStyle(style, layout)
     end
     for i, b in ipairs(self.buttons) do
         local ok, err = pcall(function()
-            styleButton_regions(b, self.config)
+            -- Member buttons restyle from their own record view here too, or an
+            -- ApplyStyle would repaint them with the container's shared style and
+            -- silently undo per-member styling — the same revert that used to eat the
+            -- important-debuff size step, one path along.
+            styleButton_regions(b, styleConfigFor(self, b))
             -- Per-record overrides, re-applied from the button's stash. This path calls
             -- styleButton_regions DIRECTLY rather than going through _acceptSlot, so it
             -- does not inherit the re-apply there — and styleButton_regions always resets
