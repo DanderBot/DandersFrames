@@ -2138,13 +2138,31 @@ end
 -- match, or the bigger icon overlaps its neighbour: the button size and the flow's
 -- reserved cell are separate things. Returns the base table unchanged when there is
 -- nothing to scale, so callers can pass the result straight through.
-local function scaleGroupLayout(base, style)
-    local sc = style and style.scale
-    if not base or not sc or sc == 1 then return base end
+-- The flow-layout cell for ONE record: the container's shared cell plus whatever
+-- that record overrides. Three things can move it:
+--
+--   * scale — the important-debuff step. A bigger BUTTON does not widen its cell, so
+--     without this the scaled icon overlaps its neighbour.
+--   * size — a member carrying its own icon size (Aura Designer group members each do).
+--   * layoutIndex — ☠ WHERE MEMBER ORDER COMES FROM. Blizzard sorts the flow groups by
+--     layoutIndex and falls back to registration order only as a tiebreak
+--     (SortFlowLayoutDescriptions / GetEffectiveFlowLayoutIndex in
+--     Blizzard_CustomAuraContainer.lua). Setting it explicitly is what makes an AD group
+--     render in the order the user arranged it, instead of in whatever order we happened
+--     to register the members — and it keeps that order as members come and go, because
+--     an empty group contributes no elements and no spacing.
+local function recordGroupLayout(base, style)
+    if not base or not style then return base end
+    local sc, sz = style.scale, style.layout and style.layout.size
+    if (not sc or sc == 1) and not sz and style.layoutIndex == nil then return base end
     local out = {}
     for k, v in pairs(base) do out[k] = v end
-    if out.elementWidth then out.elementWidth = out.elementWidth * sc end
-    if out.elementHeight then out.elementHeight = out.elementHeight * sc end
+    if sz then out.elementWidth, out.elementHeight = sz, sz end
+    if sc and sc ~= 1 then
+        if out.elementWidth then out.elementWidth = out.elementWidth * sc end
+        if out.elementHeight then out.elementHeight = out.elementHeight * sc end
+    end
+    if style.layoutIndex ~= nil then out.layoutIndex = style.layoutIndex end
     return out
 end
 
@@ -2488,7 +2506,7 @@ function NativeBackend:build()
         -- A/B for positioning and an honest picture of a live row, where importants are
         -- the minority.
         local testStyleSlots = testStyle and math.min(1, maxCount) or 0
-        local testStyleLayout = scaleGroupLayout(groupLayout, testStyle)
+        local testStyleLayout = recordGroupLayout(groupLayout, testStyle)
         filters = {}   -- the normal declaration loop below is skipped
         -- ☠ ONE GROUP PER PREVIEW SLOT, maxFrameCount = 1, fixedIndex = k. RESTORED
         -- 2026-08-06 after the two-group split broke the preview outright.
@@ -2623,7 +2641,7 @@ function NativeBackend:build()
                 local groupInit, recLayout = initFn, groupLayout
                 if rec.style or rec.onInit then
                     groupInit = handle:_makeInitializeFrame(handle._gen, nil, rec.onInit, rec.style)
-                    recLayout = scaleGroupLayout(groupLayout, rec.style)
+                    recLayout = recordGroupLayout(groupLayout, rec.style)
                 end
                 local okGroup, err = pcall(c.AddAuraGroup, c, key, f,
                     { maxFrameCount = maxCount, initializeFrame = groupInit,
@@ -2812,7 +2830,7 @@ function NativeBackend:applyLayout()
             -- bigger icon overlapped its neighbour — while a full rebuild looked right,
             -- because AddAuraGroup got the scaled layout there. Button size and reserved
             -- cell are separate things and both have to be re-pushed.
-            local gl = scaleGroupLayout(groupLayout, self.groupStyles and self.groupStyles[key])
+            local gl = recordGroupLayout(groupLayout, self.groupStyles and self.groupStyles[key])
             pcall(c.SetAuraGroupLayout, c, key, gl)
         end
     end
