@@ -2631,9 +2631,17 @@ function NativeBackend:build()
             return tostring(c)
         end
         for gi, rec in ipairs(filters) do
-            local cf = rec.candidateFilters
-            DF:Debug(DBG, "  group %d key=%s filter=%s include=%s exclude=%s",
-                gi, tostring(rec.key), tostring(rec.f),
+            -- ☠ MIRROR THE ENGINE'S RESOLUTION ORDER — `rec.candidateFilters or
+            -- config.candidateFilters` (see candidateFiltersFor above). Reading the
+            -- record alone was a real blind spot: the BUFF row passes a plain filter
+            -- STRING plus CONFIG-LEVEL filters, so it logged "no-cf" and looked
+            -- exactly like the unfiltered bug being hunted — on the one row that
+            -- matters most. The DEBUFF row builds per-record filters, so that half
+            -- read correctly and disguised the gap. `cf=` names which source won.
+            local cf  = rec.candidateFilters or config.candidateFilters
+            local src = rec.candidateFilters and "rec" or (config.candidateFilters and "cfg" or "-")
+            DF:Debug(DBG, "  group %d key=%s filter=%s cf=%s include=%s exclude=%s",
+                gi, tostring(rec.key), tostring(rec.f), src,
                 cf and countOf(cf.includeSpellIDs) or "no-cf",
                 cf and countOf(cf.excludeSpellIDs) or "no-cf")
         end
