@@ -1,7 +1,8 @@
 # DandersFrames Changelog
 
-## [Unreleased]
+## [5.1.0]
 
+* (Auras) Fix disabled buff bars and defensive icons sometimes coming back on their own, showing auras until the next update hid them again.
 * (Auras) **Fix buffs and indicators showing unfiltered after a cinematic.** Watching an in-game cinematic made the buff rows and Aura Designer indicators show everything, as though your filters had been switched off, and they stayed that way until you changed a setting. The game briefly changes your faction while a cinematic plays, which switches off the spell matching the frames rely on — they now rebuild as soon as it comes back, about half a second after the cinematic ends. This is what was behind the reports of unfiltered buffs "after updating": 12.1 plays a cinematic on first login, so it looked like an upgrade problem when it wasn't one. It could happen at any cinematic, on any profile.
 * (Aura Designer) **Group icons fill the gaps again.** Icons in a layout group had gone back to holding a fixed slot each, so a member you didn't currently have left a hole and the rest stayed put. They now slide up to close it, as they did before — in the order you arranged them, and each keeping its own size, border, colours and Colour by Time. Filter groups already packed like this; layout groups were the odd one out.
 * (Aura Designer) **Indicators track every spell ID a spell has.** Some spells exist under more than one ID — a cast and the buff it applies, or one version that lands on you and another on your target — and an indicator only ever matched one of them, while the same spell used as a filter matched all of them. That is why an Augmentation Evoker saw Ebon Might on allies but never on themselves. 17 tracked spells across seven specs were affected. Spells deliberately hand-tuned to a specific ID are unchanged.
