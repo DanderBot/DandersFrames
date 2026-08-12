@@ -619,4 +619,148 @@ local function MigrateDefaultRefreshLazy(adDB)
     end
     adDB._adDefaultRefreshV1 = true
 end
-DF.MigrateAuraDesignerDefaultRefreshLazy = MigrateDefaultRefreshLazy
+
+-- ============================================================
+-- ORPHAN AURA KEYS (repair)
+-- ============================================================
+-- The picker's add-by-ID stored the SpellDB's spell NAME (`rec.n`, e.g.
+-- "Ebon Might") for any id the curated tables didn't list -- including ids that
+-- belong to a curated spell but were never recorded as alternates. On the My
+-- Buffs pool that key names nothing: curated keys are internal ("EbonMight"),
+-- so the editor's effect list -- which drops every record it cannot name --
+-- skipped it, while the factory happily resolved it through the SpellDB and
+-- rendered it. Result: an indicator on the frame with no card, no delete button
+-- and no escape short of a new profile. Reported live on 5.0.0.
+--
+-- The creation path is fixed (add-by-ID now snaps through the shared identity
+-- index), so this only has to repair what is already saved: rekey the orphan
+-- onto the curated entry that owns its spell, merging if that entry is also
+-- configured. Layout-group members carry (auraName, indicatorID) pairs, so they
+-- are rewritten with the same remap -- missing that would strip a repaired
+-- indicator out of its group.
+--
+-- Deliberately additive: nothing is deleted. A merge appends the orphan's
+-- indicators rather than guessing which duplicate the user meant to keep --
+-- both become visible, and the user removes the one they don't want.
+--
+-- ☠ Runs on the RESOLVED adDB, so it MUST be wired into BOTH GetAuraDesignerDB
+-- (the editor's resolver) and the Factory render runner -- see the file header.
+-- ☠ Must run AFTER MigrateToSpecScoped: it assumes adDB.auras is spec-keyed.
+
+-- Fold `src` into `dst`, returning { [oldIndicatorID] = newIndicatorID }.
+local function MergeAuraConfig(dst, src)
+    local remap = {}
+    if type(src.indicators) == "table" then
+        if type(dst.indicators) ~= "table" then dst.indicators = {} end
+        -- Derive the next id from the ids actually present, not from the stored
+        -- counter alone: a stale counter would collide and two indicators
+        -- sharing an id break every (auraName, indicatorID) lookup.
+        local nextID = dst.nextIndicatorID or 1
+        for _, inst in ipairs(dst.indicators) do
+            if type(inst.id) == "number" and inst.id >= nextID then nextID = inst.id + 1 end
+        end
+        for _, inst in ipairs(src.indicators) do
+            local oldID = inst.id
+            inst.id = nextID
+            if oldID ~= nil then remap[oldID] = nextID end
+            nextID = nextID + 1
+            tinsert(dst.indicators, inst)
+        end
+        dst.nextIndicatorID = nextID
+    end
+    -- Everything else (frame-level effect tables, priority, border, sound) fills
+    -- GAPS only -- the entry the user can already see and edit keeps its own
+    -- settings.
+    for k, v in pairs(src) do
+        if k ~= "indicators" and k ~= "nextIndicatorID" and dst[k] == nil then
+            dst[k] = v
+        end
+    end
+    return remap
+end
+
+local function MigrateOrphanAuraKeysLazy(adDB)
+    if type(adDB) ~= "table" or adDB._adOrphanAuraKeysV1 then return end
+    local auras = adDB.auras
+    if type(auras) ~= "table" then
+        adDB._adOrphanAuraKeysV1 = true
+        return
+    end
+    local R = DF.FilterRegistry
+    if not (R and R.GetSpellByName and Adapter and Adapter.GetSpecIdentity) then
+        -- The registry loads after this file; if it somehow isn't up yet, leave
+        -- the flag UNSET so the next run repairs rather than stamping a no-op.
+        return
+    end
+
+    local repaired = 0
+    for spec, pool in pairs(auras) do
+        local ident = type(pool) == "table" and Adapter:GetSpecIdentity(spec)
+        if ident then
+            -- Collect first: rekeying inserts new keys, which `pairs` forbids
+            -- mid-traversal.
+            local moves
+            for key, cfg in pairs(pool) do
+                if type(key) == "string" and type(cfg) == "table"
+                    and not ident.byName[key]                 -- not a curated key
+                    and not key:find("^#") and not key:find("^@") then  -- not ad-hoc / filter ref
+                    local rec = R:GetSpellByName(key)
+                    if rec then
+                        local owner = ident.byID[rec.id]
+                        if not owner and rec.alts then
+                            for _, altID in ipairs(rec.alts) do
+                                owner = ident.byID[altID]
+                                if owner then break end
+                            end
+                        end
+                        if owner and owner ~= key then
+                            moves = moves or {}
+                            moves[#moves + 1] = { from = key, to = owner }
+                        end
+                    end
+                end
+            end
+
+            for _, mv in ipairs(moves or {}) do
+                local src = pool[mv.from]
+                local remap
+                if pool[mv.to] then
+                    remap = MergeAuraConfig(pool[mv.to], src)
+                else
+                    pool[mv.to] = src
+                end
+                pool[mv.from] = nil
+                repaired = repaired + 1
+
+                -- Follow the rename into this spec's layout groups.
+                local groups = adDB.layoutGroups and adDB.layoutGroups[spec]
+                if type(groups) == "table" then
+                    for _, group in pairs(groups) do
+                        if type(group) == "table" and type(group.members) == "table" then
+                            for _, m in ipairs(group.members) do
+                                if m.auraName == mv.from then
+                                    m.auraName = mv.to
+                                    if remap and remap[m.indicatorID] then
+                                        m.indicatorID = remap[m.indicatorID]
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+
+                if DF.DebugWarn then
+                    DF:DebugWarn("AD", "orphan aura key repaired: %s[%q] -> %q",
+                        tostring(spec), mv.from, mv.to)
+                end
+            end
+        end
+    end
+
+    if repaired > 0 and DF.Debug then
+        DF:Debug("AD", "orphan aura keys: %d config(s) rekeyed onto their curated spell", repaired)
+    end
+    adDB._adOrphanAuraKeysV1 = true
+end
+DF.MigrateAuraDesignerDefaultRefreshLazy = MigrateDefaultRefreshLazy
+DF.MigrateAuraDesignerOrphanAuraKeysLazy = MigrateOrphanAuraKeysLazy

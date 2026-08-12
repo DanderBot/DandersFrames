@@ -184,10 +184,10 @@ end
 -- ============================================================
 -- IDENTITY  (static spell-ID whitelist -> native includeSpellIDs map)
 -- A { includeSpellIDs = map } candidate-filter table Blizzard evaluates
--- container-side. Built purely from the static per-spec
--- config (SpellIDs + AlternateSpellIDs), never from a live aura. Returns nil when the
--- aura name has no known spell ID (caller then skips — an empty include map would
--- wrongly match EVERY helpful aura).
+-- container-side. Built purely from STATIC data — the per-spec config plus the
+-- shipped SpellDB — never from a live aura. Returns nil when the aura name has
+-- no known spell ID (caller then skips — an empty include map would wrongly
+-- match EVERY helpful aura).
 -- `spec` may be NIL (the Other Buffs pool, B1): the per-spec Config tables can't match
 -- a nil spec key, so resolution is spec-INDEPENDENT by construction — ad-hoc "#<id>"
 -- first, then SpellDB by name. Other-pool names must therefore be SpellDB names
@@ -195,20 +195,19 @@ end
 -- resolve through a spec.
 -- ============================================================
 function DF:BuildADIdentityFilters(spec, auraName)
-    local specIDs = DF.AuraDesigner.SpellIDs and DF.AuraDesigner.SpellIDs[spec]
+    -- Curated identity, resolved by AuraAdapter:GetSpecIdentity -- the ONE place
+    -- the ID set is decided, shared with the editor's add-by-ID snap so a
+    -- placement and the picker can never disagree about a spell. Entries with no
+    -- hand-curated alternates inherit the SpellDB's; see the inheritance rule
+    -- documented there. A fresh map per call: callers store it into container
+    -- configs, and the cached array must not become one.
+    local Adapter = DF.AuraDesigner and DF.AuraDesigner.Adapter
+    local ids = Adapter and Adapter.GetAuraSpellIDs and Adapter:GetAuraSpellIDs(spec, auraName)
     local map
-    local primary = specIDs and specIDs[auraName]
-    if primary then
-        map = map or {}
-        map[primary] = true
-    end
-    local alts = DF.AuraDesigner.AlternateSpellIDs and DF.AuraDesigner.AlternateSpellIDs[spec]
-    if alts then
-        for altID, primaryName in pairs(alts) do
-            if primaryName == auraName then
-                map = map or {}
-                map[altID] = true
-            end
+    if ids then
+        for _, id in ipairs(ids) do
+            map = map or {}
+            map[id] = true
         end
     end
     if map then return { includeSpellIDs = map } end
@@ -230,8 +229,15 @@ function DF:BuildADIdentityFilters(spec, auraName)
     -- SpellDB fallback (all-spec support): a name the curated per-spec Config
     -- tables don't know resolves through the FilterRegistry SpellDB by display
     -- name (shipped English `rec.n` or the localized runtime name), unioning
-    -- the canonical ID + every alt. The Config tables are ALWAYS consulted
-    -- first, so every pre-existing indicator keeps byte-identical identity.
+    -- the canonical ID + every alt. This is the ONLY path for an uncurated spec.
+    -- ⚠ It is NOT how a curated name widens any more — that happens inside
+    -- GetSpecIdentity, which joins to the database by ID rather than by name
+    -- (the curated key "EbonMight" never matches rec.n "Ebon Might"). The old
+    -- comment here promised the Config tables were always consulted first "so
+    -- every pre-existing indicator keeps byte-identical identity"; that promise
+    -- now belongs to GetSpecIdentity's inheritance rule, which keeps it for
+    -- every hand-curated multi-ID entry and only widens entries that declared
+    -- nothing of their own.
     local R = DF.FilterRegistry
     local rec = R and R.GetSpellByName and R:GetSpellByName(auraName)
     if rec then
@@ -721,9 +727,51 @@ end
 -- Hide Duplicate Buffs on, OTHER players' casts of a My-Buffs-tracked spell render
 -- nowhere (not on the PLAYER-filtered indicator, not on the bar). Narrowing the
 -- dedup to the player's own casts is a tracked follow-up, not this hotfix.
+-- SELF_ONLY: a third `mine` value, not a boolean. See resolvePoolMode below for what
+-- it means and why it exists; checked FIRST because a truthy string would otherwise
+-- fall into the My Buffs branch, and it deliberately ignores othersOnly (an Other-pool
+-- concept that has no meaning for a spell on your own frame).
+local SELF_ONLY = "selfOnly"
+
 local function poolFilter(cfg, mine)
+    if mine == SELF_ONLY then return "HELPFUL" end
     if mine then return "HELPFUL|PLAYER" end
     return (type(cfg) == "table" and cfg.othersOnly) and "HELPFUL|!PLAYER" or "HELPFUL"
+end
+
+-- ☠ SELF-ONLY AURAS — the ONE case where My Buffs drops its caster filter.
+-- A few buffs land on the CASTER but are credited to the unit they were cast on:
+-- Symbiotic Relationship sits on the druid with `sourceUnit` = the linked ally
+-- (field-confirmed, lab 029736dd). "HELPFUL|PLAYER" can therefore never pass one, so
+-- a My Buffs indicator for such a spell has never rendered on the player's own frame
+-- at all — not a regression, it has never worked. Config's SelfOnlySpellIDs documented
+-- exactly this and was read nowhere; this is what it was written for.
+--
+-- ☠ SCOPED TO THE PLAYER'S OWN FRAME, deliberately. Relaxing everywhere would light
+-- your indicator from another player's cast on an ally, which is precisely the
+-- complaint that made the spec pool player-only ("it's literally in the name",
+-- 2026-07-16). UnitIsUnit rather than `unit == "player"`: in raid frames the player's
+-- own frame is a raidN unit, so the string test would silently never match.
+--
+-- ⚠ ACCEPTED over-match: one container has one filter string, so on your own frame the
+-- slot now matches the aura whoever cast it — a second druid linking to YOU would light
+-- it. Strictly better than never rendering, and not narrowable without splitting the
+-- container. Flagged to the lab for a field check.
+--
+-- Returns `mine` untouched for everything else, so the Other pool and every ordinary
+-- My Buffs spell keep byte-identical filter strings. ☠ The result is STRUCTURAL (it
+-- feeds the struct/tuning sigs as well as the container config) — resolve it ONCE per
+-- aura and pass that value to both, or the sigs disagree with the config and the
+-- container rebuilds on every update forever.
+local function resolvePoolMode(spec, auraName, frame, mine)
+    if not mine then return mine end
+    local Adapter = DF.AuraDesigner and DF.AuraDesigner.Adapter
+    if not (Adapter and Adapter.IsSelfOnlyAura and Adapter:IsSelfOnlyAura(spec, auraName)) then
+        return mine
+    end
+    local unit = frame and frame.unit
+    if unit and UnitIsUnit and UnitIsUnit(unit, "player") then return SELF_ONLY end
+    return mine
 end
 
 -- Stable signature of an includeSpellIDs map (sorted IDs). Changing the set is a TUNING
@@ -3051,6 +3099,78 @@ local function buildFilterGroupConfig(frame, map, group, mine, defs)
     }
 end
 
+-- ============================================================
+-- LAYOUT-GROUP MEMBERS AS ONE CONTAINER  — v4 compaction parity
+-- ============================================================
+-- A layout group used to render as N single-slot containers, each pinned at an
+-- offset computed from the member's INDEX IN THE CONFIG. Nothing about presence
+-- entered that maths, so an absent member left a hole and the rest held station —
+-- the v4 behaviour people are missing, where icons slid up to close the gap.
+--
+-- ☠ THE HOLE CANNOT BE CLOSED BY ARITHMETIC. Compacting means knowing which
+-- members are actually up, and aura presence is a secret read on 12.1. The only
+-- thing that knows is the container, so the members have to share one.
+--
+-- One container, one GROUP per member:
+--   * each group's candidateFilters is that member's own spell-ID set, so
+--     membership IS the predicate and its styling needs no read to justify it
+--   * each carries `button` — its full placed-indicator style — which the shared
+--     styler applies through the record's own config view (see styleConfigFor)
+--   * each carries `layoutIndex`, which is what preserves the user's chosen ORDER;
+--     Blizzard sorts flow groups by it, and an empty group contributes neither
+--     elements nor spacing, so the survivors close up in the configured order
+--
+-- The container's own `style`/`layout` stay the GROUP's (its Appearance section and
+-- its anchor/growth/spacing/wrap) — that is the base a member style overrides, and
+-- the arrangement the flow lays out into.
+local function buildMemberGroupConfig(frame, group, recs, mine, defs)
+    local borderSpec = buildGroupBorderSpec(frame, group)
+    -- Group-level string. Only the test cap reads it now -- matching is per record.
+    local filt = poolFilter(group, mine)
+    local filters, unionMap = {}, {}
+    for i, r in ipairs(recs) do
+        for id in pairs(r.map) do unionMap[id] = true end
+        -- ☠ Compare against nil, not truthiness: `false` is a legitimate resolved
+        -- mode (others' auras) and `r.mine or mine` would silently promote it.
+        local rm = r.mine
+        if rm == nil then rm = mine end
+        filters[i] = {
+            -- Resolved per member, so a self-only aura drops the caster filter for
+            -- its own record while every neighbour keeps theirs.
+            filter = poolFilter(group, rm),
+            -- Keyed by the member's stable indicator id, not its ordinal: reordering
+            -- the group must move icons, not re-key every group and force a rebuild.
+            key = "m" .. tostring(r.indicatorID),
+            candidateFilters = { includeSpellIDs = r.map },
+            style = {
+                button      = buildPlacedStyle(r.indicator, r.isSquare, r.borderSpec, defs),
+                layout      = { size = r.size },
+                layoutIndex = i,
+            },
+        }
+    end
+    return {
+        unit = frame.unit,
+        mode = "row",
+        max = #recs,
+        -- The list IS the filter (normalizeFilters takes records); the plain string
+        -- stays only as what each record's own filter resolves to.
+        filter = filters,
+        testMax = adTestMax(frame, filt),
+        sort = groupSort(group, "DEFAULT"),
+        -- Config-wide union: the per-record maps are the real selection, but the
+        -- buff-row dedup and the test preview both read the container-level one.
+        candidateFilters = { includeSpellIDs = unionMap },
+        testEntries = filterGroupTestEntries(unionMap),
+        enabled = true,
+        tooltips = adTooltipsOn(frame, "tooltipADIndicatorsEnabled"),
+        adBorderAnim = true,
+        frameLevelOffset = (defs and defs.level) or 40,
+        layout = buildFilterGroupLayout(group),
+        style = buildFilterGroupStyle(group, borderSpec),
+    }
+end
+
 -- Exclude-kind guard warned once per group (per session) — the sync runs per
 -- frame per aura event, so an unconditional DebugWarn would spam the console.
 -- Keyed by the group TABLE, not group.id: ids are only unique within one
@@ -3782,6 +3902,40 @@ function Factory:SyncSound(frame)
     end
     reconcileSoundNow(frame)
 end
+-- ☠ ONE predicate, two callers. The member-group container renders exactly the
+-- indicators this accepts, and syncPlacedPool skips exactly the ones it accepts. If
+-- these two ever disagree an icon renders TWICE (both paths claim it) or not at all
+-- (neither does), so they must not be two spellings of "the same" rule.
+local function memberRenderable(ind)
+    return ind ~= nil and ind.enabled ~= false
+        and ind.type ~= "bar"          -- a bar is its own sized widget, not a flow icon
+        and not ind.showWhenMissing    -- missing mode is a parked badge, never packed
+end
+
+-- The set of member indicators a group container will draw, keyed exactly as
+-- syncPlacedPool keys its own entries so the skip is a plain lookup.
+local function claimedGroupMembers(groups, auras, keyPrefix)
+    if not groups then return nil end
+    local claimed
+    for _, group in ipairs(groups) do
+        if type(group) == "table" and group.kind ~= "filter" and group.enabled ~= false
+           and type(group.members) == "table" then
+            for _, m in ipairs(group.members) do
+                local auraCfg = auras and auras[m.auraName]
+                if type(auraCfg) == "table" and auraCfg.indicators then
+                    for _, ind in ipairs(auraCfg.indicators) do
+                        if ind.id == m.indicatorID and memberRenderable(ind) then
+                            claimed = claimed or {}
+                            claimed[placedKey(keyPrefix, m.auraName, ind)] = true
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return claimed
+end
+
 
 -- ============================================================
 -- PLACED-POOL SYNC  (shared by the spec pool and the Other Buffs pool)
@@ -3803,16 +3957,31 @@ end
 -- Expiry-alert companions ride the same `placed`/`live` stores under
 -- "<key>:alert" keys (syncAlertCompanion) — the shared end-of-pass sweep
 -- retires them exactly like their indicators.
-local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSpec, defs)
+local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSpec, defs, groups)
     -- Spec pool (My Buffs) = player-cast only; the OTHER_PREFIX pool stays anyone-cast.
-    local mine = keyPrefix == ""
+    local poolMine = keyPrefix == ""
+    -- Members of a layout group are drawn by that group's OWN container, where the
+    -- engine can pack them (syncMemberGroupList). Skipping them here is what stops
+    -- them being drawn a second time as pinned single-slot containers — which is
+    -- also what used to hold their positions fixed.
+    local claimed = claimedGroupMembers(groups, auras, keyPrefix)
     for auraName, auraCfg in pairs(auras) do
+        -- ☠ `mine` from here down is the RESOLVED pool mode for THIS aura, not the raw
+        -- pool flag: a self-only aura on the player's own frame drops the caster filter
+        -- (see resolvePoolMode). Resolved ONCE, here, so every container config and
+        -- every signature below reads the same value — those two are compared against
+        -- each other, and a disagreement rebuilds the container on every update forever.
+        local mine = resolvePoolMode(idSpec, auraName, frame, poolMine)
         local indicators = (type(auraCfg) == "table") and auraCfg.indicators
         if indicators then
             for _, indicator in ipairs(indicators) do
                 local isSquare = indicator.type == "square"
                 local isBar = indicator.type == "bar"
-                if indicator.enabled == false then
+                if claimed and claimed[placedKey(keyPrefix, auraName, indicator)] then
+                    -- Drawn by its group's container. Not marked live -> the end-of-pass
+                    -- sweep destroys the single-slot handle this indicator used to own,
+                    -- so adding a member to a group migrates it rather than duplicating it.
+                elseif indicator.enabled == false then
                     -- Hidden (eye toggle; nil/true = shown for legacy records):
                     -- render nothing. Not marking the key `live` lets the
                     -- end-of-pass sweep destroy any existing handle.
@@ -4071,6 +4240,122 @@ end
 -- the per-aura-event hot path allocation-free; body otherwise identical to
 -- the pre-split A5 loop.
 -- ============================================================
+-- Collect a layout group's renderable members, in the user's configured ORDER.
+-- Returns nil when the group has nothing to draw, so the caller leaves the key
+-- un-live and the end-of-pass sweep tears any old container down.
+--
+-- BARS are excluded on purpose: a bar is not an icon in a flow, it is its own
+-- sized widget, and packing it beside icons is meaningless. Grouped bars keep the
+-- single-slot path (see the skip in syncPlacedPool).
+
+-- `mine` is the GROUP's pool flag; each member resolves its own from it, because a
+-- self-only aura needs the caster filter dropped for its record alone.
+local function collectGroupMembers(frame, group, auras, idSpec, defs, mine)
+    local recs
+    for _, m in ipairs(group.members) do
+        local auraCfg = auras and auras[m.auraName]
+        local ind
+        if type(auraCfg) == "table" and auraCfg.indicators then
+            for _, x in ipairs(auraCfg.indicators) do
+                if x.id == m.indicatorID then ind = x; break end
+            end
+        end
+        if memberRenderable(ind) then
+            local ids = DF:BuildADIdentityFilters(idSpec, m.auraName)
+            local map = ids and ids.includeSpellIDs
+            if map then
+                local isSquare = ind.type == "square"
+                local borderOn = placedBorderOn(ind, ind.hideIcon)
+                recs = recs or {}
+                recs[#recs + 1] = {
+                    indicatorID = m.indicatorID,
+                    indicator   = ind,
+                    map         = map,
+                    -- ☠ PER MEMBER, not per group. Symbiotic Relationship's copy on
+                    -- the druid is credited to the PARTNER, so a group-wide
+                    -- "HELPFUL|PLAYER" can never pass it and the member silently
+                    -- never renders on the druid's own frame -- the exact bug placed
+                    -- indicators were fixed for, reintroduced the moment the spell is
+                    -- dragged into a layout group. See resolvePoolMode.
+                    mine        = resolvePoolMode(idSpec, m.auraName, frame, mine),
+                    isSquare    = isSquare,
+                    borderOn    = borderOn,
+                    size        = math.max(8, tonumber(defOf(ind, "size", defs, 24)) or 24),
+                    borderSpec  = borderOn
+                        and buildPlacedBorderSpec(frame, ind, ind.hideIcon, nil, defs) or nil,
+                }
+            end
+        end
+    end
+    return recs
+end
+
+-- ============================================================
+-- LAYOUT GROUPS — one container, one group per member
+-- ============================================================
+-- ⚠ FIRST CUT: EVERYTHING RIDES THE STRUCT SIG, so any change rebuilds the
+-- container rather than hot-applying. That is deliberate. The split sigs are an
+-- optimisation, and getting one wrong here is not a cosmetic bug — a tuning sig
+-- that disagrees with the config rebuilds on EVERY aura event, which in a raid is
+-- a frame-rate cliff rather than a visible glitch. Correct first; split once this
+-- has been seen working.
+local function syncMemberGroupList(frame, mg, live, groups, auras, keyPrefix, idSpec, defs)
+    if not groups then return end
+    local mine = keyPrefix == ""
+    for _, group in ipairs(groups) do
+        if type(group) == "table" and group.kind ~= "filter" and group.enabled ~= false
+           and type(group.members) == "table" and #group.members > 0 then
+            local recs = collectGroupMembers(frame, group, auras, idSpec, defs, mine)
+            if recs then
+                local key = "mgroup:" .. keyPrefix .. tostring(group.id)
+                live[key] = true
+
+                local parts = {
+                    groupStyleStructSig(group),
+                    "fl=" .. tostring((defs and defs.level) or 40),
+                    "f=" .. poolFilter(group, mine),
+                    "n=" .. tostring(#recs),
+                    -- The group's own arrangement: the flow lays the members INTO this,
+                    -- so a growth/wrap/spacing/anchor edit has to reach the container.
+                    "gl=" .. tconcat({
+                        tostring(group.anchor), groupGrowth(group),
+                        tostring(group.iconsPerRow), tostring(group.spacing),
+                        tostring(group.iconSize), tostring(group.offsetX), tostring(group.offsetY),
+                    }, ","),
+                }
+                for i, r in ipairs(recs) do
+                    -- Order is part of identity: swapping two members changes each one's
+                    -- layoutIndex, and the icons must move.
+                    parts[#parts + 1] = "m" .. i .. "=" .. tostring(r.indicatorID)
+                        .. "|" .. includeSig(r.map)
+                        -- The member's RESOLVED pool filter. Without it, a member
+                        -- whose self-only resolution changes (the group moved onto
+                        -- your own frame) keeps the old filter string until some
+                        -- unrelated edit rebuilds the container.
+                        .. "|f=" .. poolFilter(group, r.mine)
+                        .. "|" .. tostring(r.size)
+                        .. "|" .. placedStructSig(r.isSquare, r.indicator.hideIcon,
+                                     r.indicator.showStacks, r.indicator.showDuration,
+                                     r.borderOn, r.indicator, defs)
+                        .. "|" .. placedCoSig(r.indicator, r.isSquare, r.borderOn,
+                                     tonumber(r.indicator.alpha) or 1, defs)
+                end
+                local structSig = tconcat(parts, "|")
+
+                local entry = mg[key]
+                if not entry then
+                    local handle = DF.AuraContainer:Create(frame,
+                        buildMemberGroupConfig(frame, group, recs, mine, defs))
+                    if handle then mg[key] = { handle = handle, structSig = structSig } end
+                elseif entry.structSig ~= structSig then
+                    entry.structSig = structSig
+                    entry.handle:Rebuild(buildMemberGroupConfig(frame, group, recs, mine, defs), structSig)
+                end
+            end
+        end
+    end
+end
+
 local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix, defs)
     -- Spec-keyed groups (My Buffs) = player-cast only; otherLayoutGroups unchanged.
     local mine = keyPrefix == ""
@@ -4325,6 +4610,11 @@ function Factory:SyncFrame(frame)
     -- on the RENDER-resolved adDB too (not just the editor's GetAuraDesignerDB), or live
     -- frames resolve from the un-migrated defaults while the editor shows the new ones.
     if DF.MigrateAuraDesignerDefaultRefreshLazy then DF.MigrateAuraDesignerDefaultRefreshLazy(adDB) end
+    -- Repairs add-by-ID's orphan SpellDB-name keys onto their curated spell. Runs here
+    -- as well as in the editor precisely BECAUSE the orphan renders without the editor
+    -- ever being opened — a player who never opens settings would otherwise keep the
+    -- undeletable indicator forever.
+    if DF.MigrateAuraDesignerOrphanAuraKeysLazy then DF.MigrateAuraDesignerOrphanAuraKeysLazy(adDB) end
 
     local store = frame.dfADFactory
     if not store then store = {}; frame.dfADFactory = store end
@@ -4375,7 +4665,7 @@ function Factory:SyncFrame(frame)
             function(c) return c.color end)
 
         if bestName then
-            local filt = poolFilter(bestCfg, bestPool == 1)
+            local filt = poolFilter(bestCfg, resolvePoolMode(spec, bestName, frame, bestPool == 1))
             -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
             -- the border consumer: a conjunction of presence gates does not express "while
             -- all of these are absent".
@@ -4524,7 +4814,7 @@ function Factory:SyncFrame(frame)
             function(c) return c.color end)
 
         if bestName then
-            local filt = poolFilter(bestCfg, bestPool == 1)
+            local filt = poolFilter(bestCfg, resolvePoolMode(spec, bestName, frame, bestPool == 1))
             -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
             -- the border consumer: a conjunction of presence gates does not express "while
             -- all of these are absent".
@@ -4663,9 +4953,10 @@ function Factory:SyncFrame(frame)
             local chainLinks = resolveConditions(spec, bestCfg, bestPool == 1)
             if not chainLinks then
                 dropChainEntry(bd, bestName)
-                return syncBorderEntry(bd, frame, bestName, bestCfg, bestMap, bestPool == 1)
+                return syncBorderEntry(bd, frame, bestName, bestCfg, bestMap,
+                    resolvePoolMode(spec, bestName, frame, bestPool == 1))
             end
-            local filt = poolFilter(bestCfg, bestPool == 1)
+            local filt = poolFilter(bestCfg, resolvePoolMode(spec, bestName, frame, bestPool == 1))
             local drawAboveBD = bestCfg.drawAboveFrameBorder ~= false
             -- Level-neutral gates: the ring keeps its drawAboveFrameBorder 11/9 seat
             -- relative to `frame` (the flat path's parent) at any chain length.
@@ -4690,7 +4981,12 @@ function Factory:SyncFrame(frame)
             end
             for i = 1, #stacked do
                 local s = stacked[i]
-                if syncBorderEntry(bd, frame, s.key, s.cfg, s.map, s.mine) then
+                -- s.mine stays a plain boolean in the entry table (collectStackedBorders
+                -- SORTS on it); the self-only relaxation is resolved here instead. s.key is
+                -- the bare aura name whenever s.mine is true — the OTHER_PREFIX form only
+                -- appears on pool 2, which resolvePoolMode returns untouched.
+                if syncBorderEntry(bd, frame, s.key, s.cfg, s.map,
+                    resolvePoolMode(spec, s.key, frame, s.mine)) then
                     keep[s.key] = true
                 end
             end
@@ -4716,7 +5012,7 @@ function Factory:SyncFrame(frame)
             local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, typeKey,
                 function(c) return c.color and not c.showWhenMissing end)
             if bestName and TDRender then
-                local filt = poolFilter(bestCfg, bestPool == 1)
+                local filt = poolFilter(bestCfg, resolvePoolMode(spec, bestName, frame, bestPool == 1))
                 local r, g, b, a = readADColor(bestCfg.color)
                 local color = { r = r, g = g, b = b, a = a }
                 -- CONDITION CHAIN: the LAST link hands its host to the Text Designer, so the
@@ -4840,13 +5136,15 @@ function Factory:SyncFrame(frame)
         local defs = resolveDefs(adDB)
 
         if specAuras then
-            syncPlacedPool(frame, placed, live, hasMG, specAuras, "", spec, defs)
+            syncPlacedPool(frame, placed, live, hasMG, specAuras, "", spec, defs,
+                adDB.layoutGroups and adDB.layoutGroups[spec])
         end
         -- OTHER BUFFS pool: same store, same live/sweep — keys carry OTHER_PREFIX so
         -- the pools can't collide (the arranger's scratch keys carry it too) and NIL
         -- idSpec (spec-independent identity).
         if otherAuras then
-            syncPlacedPool(frame, placed, live, hasOtherMG, otherAuras, OTHER_PREFIX, nil, defs)
+            syncPlacedPool(frame, placed, live, hasOtherMG, otherAuras, OTHER_PREFIX, nil, defs,
+                adDB.otherLayoutGroups)
         end
 
         -- Tear down any placed container whose indicator is gone / de-configured —
@@ -4878,12 +5176,32 @@ function Factory:SyncFrame(frame)
         local fg = store.fgroups
         if not fg then fg = {}; store.fgroups = fg end
         local live = {}
+        -- ☠ RESOLVED HERE, not inherited. The `defs` further up is scoped to the
+        -- placed-pool do-block and is NOT visible in this one, so every call below was
+        -- handing out a nil — and had been for as long as one has taken it.
+        --
+        -- It degraded silently instead of erroring, because the filter-group path reads
+        -- it as `(defs and defs.level) or 40`: groups have been pinned to frame level 40
+        -- whatever the account-wide Default Frame Level slider said. That is precisely
+        -- the "AD output split across two planes, groups stranded underneath their own
+        -- indicators" that buildFilterGroupConfig's comment describes having fixed.
+        -- Surfaced by the member-group sync, which reaches defs.level bare through
+        -- placedStructSig and so could not fail quietly.
+        local defs = resolveDefs(adDB)
 
         local R = DF.FilterRegistry
         if R then
             syncFilterGroupList(frame, fg, live, R, adDB.layoutGroups and adDB.layoutGroups[spec], "", defs)
             syncFilterGroupList(frame, fg, live, R, adDB.otherLayoutGroups, OTHER_PREFIX, defs)
         end
+        -- MEMBER groups share this store and this sweep: both are one-container-per-group
+        -- keyed off group.id, they differ only in what fills them ("mgroup:" vs
+        -- "fgroup:", so the key sets cannot collide), and a group that stops being
+        -- renderable has to be torn down the same way either way.
+        syncMemberGroupList(frame, fg, live, adDB.layoutGroups and adDB.layoutGroups[spec],
+            specAuras, "", spec, defs)
+        syncMemberGroupList(frame, fg, live, adDB.otherLayoutGroups,
+            otherAuras, OTHER_PREFIX, nil, defs)
 
         -- Tear down groups gone / hidden / emptied / off-spec.
         for key, entry in pairs(fg) do

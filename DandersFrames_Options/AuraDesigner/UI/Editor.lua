@@ -1882,6 +1882,13 @@ end
 function DF:AuraDesigner_RefreshPage()
     if not S.mainFrame then return end
 
+    -- Frame size and Preview Scale are settings like any other; re-read them here so
+    -- the preview follows a slider immediately instead of waiting for a window resize
+    -- or a page revisit to rebuild it.
+    if S.framePreview and S.framePreview.RefreshGeometry then
+        S.framePreview.RefreshGeometry()
+    end
+
     -- Account for editing banner offset (50px) when editing an auto layout
     local editingOffset = 0
     if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then

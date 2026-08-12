@@ -2896,6 +2896,18 @@ function DF:DebugAuraFilters(unit)
     if ac and ac._providerDeafWhy then
         o:Field("unregister probe", tostring(ac._providerDeafWhy), deafOK and "good" or "neutral")
     end
+    -- Per-container sample source. If this ever comes back accepted AND a visual
+    -- check confirms our rows fill without the global switch, test mode can stop
+    -- calling SwitchAuraDataProvider entirely — which retires both the global-switch
+    -- hacks: parking Blizzard's buff frames under Unlock Mode, and the Edit Mode
+    -- reset that costs Blizzard's own preview its sample auras.
+    local srcOK = ac and ac._editSourceOK
+    if ac and ac._editSourceWhy then
+        o:Field("per-container sample source", tostring(ac._editSourceWhy),
+            srcOK and "good" or "neutral")
+    elseif ac then
+        o:Field("per-container sample source", "not probed yet (needs a build during test mode)", "neutral")
+    end
     -- Populated the first time Edit Mode is opened. QUEUED means the client deferred
     -- our re-entrant switch to after the in-flight dispatch (safe, and the inline reset
     -- gains nothing); NESTED means it dispatched re-entrantly (zero blip, but containers
@@ -3984,7 +3996,9 @@ local ABS_LEVEL_SENTINEL_DEFAULT = {
 
 function DF:MigrateAbsoluteFrameLevels()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
-    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+    -- profileName is bound (was `_`) purely so the buffered migration trace further
+    -- down can name which profile it saw. Nothing else reads it.
+    for profileName, profile in pairs(DandersFramesDB_v2.profiles) do
         if type(profile) == "table" and not profile._absoluteFrameLevelsV1 then
             for _, mode in ipairs({ "party", "raid" }) do
                 local modeDb = profile[mode]
@@ -4066,6 +4080,39 @@ function DF:MigrateAbsoluteFrameLevels()
             for _, mode in ipairs({ "party", "raid" }) do
                 local modeDb = profile[mode]
                 local sel = type(modeDb) == "table" and modeDb.buffFilterSelection
+                -- ★ DIAGNOSTIC for the v4 -> v5 first-login reports. A v4 profile has
+                -- NO buffFilterSelection at all (the registry did not exist), so this
+                -- pass finds nothing, does nothing -- and stamps the flag anyway. Log
+                -- what it actually saw, per profile per mode: "sel=absent" here paired
+                -- with "include=none" from the container build (Frames/AuraContainer)
+                -- is the whole v4-upgrade story end to end.
+                -- ⚠ Category FILTER, deliberately NOT profile-ish ones like PROFILE.
+                -- A v4 user arms this by enabling debug in v4 BEFORE upgrading, and
+                -- the filters table carries across verbatim -- so any category that
+                -- also exists in v4 could already be stamped `false` by someone who
+                -- ticked things off, silently suppressing exactly the line we need.
+                -- FILTER / AURACONTAINER / AURAROW are v5-only, so they cannot have
+                -- been disabled from v4 and are visible-by-absence.
+                -- ☠ BUFFERED, NOT LOGGED DIRECTLY. This migration runs ~1000 lines
+                -- BEFORE DF.DebugConsole:Init(), so `debugDb` is still nil and
+                -- DF:Debug is a silent no-op here — the first version of this line
+                -- could never fire on any login, which is exactly the kind of
+                -- diagnostic that looks armed and captures nothing. Stash the
+                -- observation and let the init site flush it (grep
+                -- `_migrationTrace` for the flush).
+                do
+                    local n = 0
+                    if type(sel) == "table" and type(sel.presets) == "table" then
+                        for _ in pairs(sel.presets) do n = n + 1 end
+                    end
+                    DF._migrationTrace = DF._migrationTrace or {}
+                    DF._migrationTrace[#DF._migrationTrace + 1] = string.format(
+                        "buffPresetBaseline: profile=%s mode=%s sel=%s presets=%s",
+                        tostring(profileName or "?"), tostring(mode),
+                        (type(sel) == "table") and "table" or "absent",
+                        (type(sel) == "table" and type(sel.presets) == "table")
+                            and tostring(n) or "absent")
+                end
                 if type(sel) == "table" and type(sel.presets) == "table" then
                     sel.presets.raidDefensives     = true
                     sel.presets.offensiveCooldowns = true
@@ -5607,6 +5654,20 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Initialize Debug Console (must happen after SavedVariables are ready)
         if DF.DebugConsole then
             DF.DebugConsole:Init()
+        end
+
+        -- ★ FLUSH THE BUFFERED MIGRATION TRACE. The one-time migrations run far
+        -- earlier in this same load, when debugDb is still nil and DF:Debug is a
+        -- silent no-op — so anything they want logged has to be stashed and emitted
+        -- HERE, immediately after the console exists. Without this the migration
+        -- diagnostics look armed and capture nothing, on every login.
+        --   Cleared after flushing: the migrations are one-shot, and a stale buffer
+        -- replayed on a later /reload would report a migration that did not run.
+        if DF._migrationTrace then
+            for _, line in ipairs(DF._migrationTrace) do
+                DF:Debug("FILTER", "%s", line)
+            end
+            DF._migrationTrace = nil
         end
 
         -- Login greeting. Opt-out via Options > General > Notifications; the flag is

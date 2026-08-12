@@ -102,7 +102,11 @@ function DF:ResetFullProfile()
     -- Filter Designer per-spell preset overrides live at profile root
     -- (DF.db.filterPresetOverrides), like the AD/TD preset libraries above —
     -- neither per-mode ResetProfile nor ResetDesignerPresets touches them.
+    -- filterMutedSpellIDs is its sibling (per-spell-ID narrowing within a record)
+    -- and travels with it everywhere: reset, export, payload keys, new-profile
+    -- copy, import.
     DF.db.filterPresetOverrides = nil
+    DF.db.filterMutedSpellIDs = nil
     -- FullProfileRefresh re-applies the Aura Designer engine to live frames
     -- (Core.lua), so the reset AD presets take effect immediately. It does NOT
     -- touch the Text Designer, so nudge that separately below.
@@ -587,6 +591,10 @@ local function EmbedCustomFilterData(exportData, includeOverrides)
     -- on the exporter's screen.
     if includeOverrides then
         exportData.filterPresetOverrides = DF:DeepCopy(DF.db.filterPresetOverrides or {})
+        -- Same replace semantics, same reason: an exporter who has narrowed no
+        -- records must carry an explicit {} so the importer's own narrowing is
+        -- cleared and the bar renders what the exporter saw.
+        exportData.filterMutedSpellIDs = DF:DeepCopy(DF.db.filterMutedSpellIDs or {})
     end
     local refs = {}
     local function collectSel(sel)
@@ -976,7 +984,7 @@ end
 local PAYLOAD_TABLE_KEYS = {
     "party", "raid", "raidAutoProfiles", "auraBlacklist", "linkedSections",
     "classColors", "powerColors", "roleColors", "dispelColors",
-    "filterPresetOverrides", "customAuraFilters",
+    "filterPresetOverrides", "filterMutedSpellIDs", "customAuraFilters",
     "auraDesignerPresets", "textDesignerPresets",
 }
 
@@ -1319,6 +1327,7 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             dispelColors = DF:DeepCopy(DF.db.dispelColors or {}),
             auraBlacklist = DF:DeepCopy(DF.db.auraBlacklist or { buffs = {}, debuffs = {} }),
             filterPresetOverrides = DF:DeepCopy(DF.db.filterPresetOverrides or {}),
+            filterMutedSpellIDs = DF:DeepCopy(DF.db.filterMutedSpellIDs or {}),
             -- Designer preset LIBRARIES (profile-root): the copied mode tables
             -- carry preset NAME refs, so omitting these would leave the new
             -- profile with dangling refs → empty Default → all AD/TD gone.
@@ -1415,6 +1424,10 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
         -- exporter had none — an absent key must leave local overrides alone.
         if importData.filterPresetOverrides then
             DF.db.filterPresetOverrides = DF:DeepCopy(importData.filterPresetOverrides)
+        end
+        -- Per-spell-ID narrowing, same replace-with-absent-key-exemption rule.
+        if importData.filterMutedSpellIDs then
+            DF.db.filterMutedSpellIDs = DF:DeepCopy(importData.filterMutedSpellIDs)
         end
     end
     -- The AD gate only counts when the payload actually carries preset

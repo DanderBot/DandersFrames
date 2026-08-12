@@ -20,6 +20,8 @@ local DF = DandersFrames
 local pairs, ipairs, type, next = pairs, ipairs, type, next
 local tinsert = table.insert
 local tsort = table.sort
+local tconcat = table.concat
+local format = string.format
 local mmax = math.max
 local CreateFrame = CreateFrame
 local C_Timer = C_Timer
@@ -72,6 +74,30 @@ R.ShowSpellTooltip = ShowSpellTooltip
 -- pooled OnEnter handlers don't allocate a closure per hover)
 local function PickerRowStillShows(row, spellID)
     return row._rec ~= nil and row._rec.id == spellID
+end
+
+-- The "Spell IDs: ..." tooltip line, matching what the Filter Designer's spell
+-- rows already show. Worth having on BOTH sides: a spell can carry several ids
+-- (Ebon Might is 395152 cast / 395296 self-buff) and picking the wrong one is
+-- the difference between an indicator that fires and one that never does.
+--
+-- Default set = the record's canonical id + every alt, resolved through the
+-- database when the record itself doesn't carry `alts` (picker records are a
+-- SpellDB-compatible SHAPE, not always a SpellDB record). `opts.rowSpellIDs`
+-- overrides it for consumers that track a set the record can't describe — the
+-- Aura Designer's curated pool fuses spells the database keeps apart.
+local function RowIDText(inst, rec)
+    if not (rec and rec.id and rec.id > 0) then return nil end
+    local ids = inst.opts and inst.opts.rowSpellIDs and inst.opts.rowSpellIDs(rec)
+    if not ids then
+        local dbRec = (not rec.alts) and R.ByID and R.ByID[rec.id] or rec
+        ids = { dbRec.id or rec.id }
+        if dbRec.alts then
+            for _, altID in ipairs(dbRec.alts) do ids[#ids + 1] = altID end
+        end
+    end
+    if #ids == 0 then return nil end
+    return format(L["Spell IDs: %s"], tconcat(ids, ", "))
 end
 
 -- ============================================================
@@ -311,7 +337,9 @@ local function AcquireRow(inst, i)
             self:SetBackdropColor(0.12, 0.12, 0.12, 0.8)
         end
         if self._rec and self._rec.id and self._rec.id > 0 then
-            ShowSpellTooltip(self, self._rec.id, self._name, PickerRowStillShows)
+            local ids = RowIDText(inst, self._rec)
+            ShowSpellTooltip(self, self._rec.id, self._name, PickerRowStillShows,
+                             ids and { ids } or nil)
         end
     end)
     row:SetScript("OnLeave", function(self)

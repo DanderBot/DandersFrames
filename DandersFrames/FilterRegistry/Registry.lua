@@ -74,6 +74,35 @@ function R:GetCustomFilter(id)
         -- the only defensive reader). Persisting the empty tables is harmless.
         f.spells = f.spells or {}
         f.rawIDs = f.rawIDs or {}
+        -- ☠ RE-BUCKET IDs THE DATABASE HAS SINCE LEARNED.
+        -- rawIDs are ids that had no record WHEN THEY WERE ADDED. SpellDB.lua is
+        -- regenerated per patch, so one can be promoted into a real record later --
+        -- and nothing moved it, so it kept taking the raw path, which is applied
+        -- verbatim AFTER the mute logic in both directions. That let a muted id
+        -- come back on the include side and fall out of the exclude map on the
+        -- other, breaking the one rule the mutes have: muting must never make an
+        -- aura appear. The drift predates the mutes; the mutes are what turned it
+        -- into a correctness bug.
+        -- ⚠ Store rec.id, not the typed id -- AddSpellToCustom's own bucketing
+        -- keys on the CANONICAL id, so anything else resolves to nothing.
+        -- Retry-shaped: if R.ByID is not populated yet, promote nothing and let a
+        -- later call do it, rather than recording a verdict taken too early.
+        if R.ByID and next(R.ByID) then
+            local promoted
+            for rid in pairs(f.rawIDs) do
+                local rec = R.ByID[rid]
+                if rec then
+                    promoted = promoted or {}
+                    promoted[rid] = rec.id
+                end
+            end
+            if promoted then
+                for rid, canonical in pairs(promoted) do
+                    f.rawIDs[rid] = nil
+                    f.spells[canonical] = true
+                end
+            end
+        end
     end
     return f
 end
@@ -536,6 +565,107 @@ function R:ResetPreset(presetKey)
     self:GetOverrides()[presetKey] = nil
 end
 
+-- ------------------------------------------------------------
+-- PER-PROFILE MUTED SPELL IDS (diff-only)
+-- ------------------------------------------------------------
+-- A record can carry several spell IDs (`alts`) and every filter path expands to
+-- all of them -- see addRecordIDs. Usually right: the alts are rank variants or
+-- follower-cast copies that never coexist. Sometimes wrong: Holy Bulwark's buff
+-- and its absorb shield are BOTH live at once, so the bar shows two icons for one
+-- spell and there was no way to ask for one. Muting an ID drops it from every
+-- include map.
+--
+-- ☠ SELECTION-INDEPENDENT, BY DESIGN. The mute lives on the ID, not on the filter
+-- that pulled it in, so it holds for built-in presets AND custom filters alike.
+-- Scoping it per filter was the obvious alternative and it fails the reported case:
+-- the user's first instinct was to narrow the spell in the BUILT-IN filter, where
+-- there is no per-filter record to hang a setting on -- they would be back to
+-- disabling the whole spell and rebuilding it as a custom.
+--
+-- Keyed by RAW spell ID, which incidentally survives a SpellDB regen better than
+-- the overrides above (those key on `rec.id`, so a canonical-id shift silently
+-- resets them -- see the gatherer contract). An ID is an ID.
+--
+-- ⚠ NOT carried in a shared FILTER string. A filter payload is a list of spells;
+-- applying a sender's mutes would write a profile-wide preference the receiver
+-- never asked for, and reach their presets too. Whole-PROFILE export does carry
+-- them, which is the same profile's own settings moving as a unit. Adding them to
+-- the filter payload later is additive -- FILTER_VERSION already exists for it.
+--
+-- ☠ WRITES SAVEDVARIABLES -- writers only. Every question goes through ReadMutedIDs.
+function R:GetMutedIDs()
+    if not DF.db then return {} end
+    DF.db.filterMutedSpellIDs = DF.db.filterMutedSpellIDs or {}
+    return DF.db.filterMutedSpellIDs
+end
+
+-- Read-only view. ☠ Never creates: this is reached from the render path
+-- (ResolveSelection -> addRecordIDs -> here), and a read that writes would
+-- materialise the table in every profile of every user merely by drawing a frame --
+-- the exact bug GetOverrides carries its warning about.
+local EMPTY_MUTED = {}
+function R:ReadMutedIDs()
+    return (DF.db and DF.db.filterMutedSpellIDs) or EMPTY_MUTED
+end
+
+function R:IsSpellIDMuted(spellID)
+    return self:ReadMutedIDs()[spellID] == true
+end
+
+-- Every ID of a record that is NOT muted, in a stable order (canonical first, then
+-- alts as shipped). Empty only if the caller has muted all of them, which
+-- SetSpellIDMuted refuses to let happen.
+function R:LiveRecordIDs(rec)
+    if not rec then return {} end
+    local muted, out = self:ReadMutedIDs(), {}
+    if not muted[rec.id] then out[#out + 1] = rec.id end
+    if rec.alts then
+        for _, alt in ipairs(rec.alts) do
+            if not muted[alt] then out[#out + 1] = alt end
+        end
+    end
+    return out
+end
+
+-- Total IDs a record carries, muted or not.
+function R:RecordIDCount(rec)
+    if not rec then return 0 end
+    return 1 + (rec.alts and #rec.alts or 0)
+end
+
+-- Mute / unmute one ID. `rec` is the record it belongs to, needed for the guard.
+-- Returns false when refused.
+--
+-- ☠ THE LAST LIVE ID CANNOT BE MUTED. A record with every ID muted is still
+-- "selected" as far as recordSelected is concerned but contributes nothing to the
+-- include map -- a spell that reads as tracked and matches nothing. Turning the
+-- spell off entirely is what the row's own checkbox is for, and it says so.
+function R:SetSpellIDMuted(rec, spellID, muted)
+    if not rec then return false end
+    if muted and #self:LiveRecordIDs(rec) <= 1 and not self:IsSpellIDMuted(spellID) then
+        return false
+    end
+    local store = self:GetMutedIDs()
+    store[spellID] = muted and true or nil
+    return true
+end
+
+-- Does this record have any ID muted? Drives the row chip's "1 of 2" state.
+function R:IsRecordNarrowed(rec)
+    return #self:LiveRecordIDs(rec) < self:RecordIDCount(rec)
+end
+
+-- Drop every mute belonging to a record (the row's "track all" reset).
+function R:ClearRecordMutes(rec)
+    if not rec or not DF.db or not DF.db.filterMutedSpellIDs then return end
+    local store = DF.db.filterMutedSpellIDs
+    store[rec.id] = nil
+    if rec.alts then
+        for _, alt in ipairs(rec.alts) do store[alt] = nil end
+    end
+    if not next(store) then DF.db.filterMutedSpellIDs = nil end
+end
+
 -- Read-only: the GUI asks this per row on every list refresh.
 function R:IsPresetModified(presetKey)
     local o = self:ReadOverrides()[presetKey]
@@ -676,10 +806,43 @@ end
 --   IDs of every KNOWN spell that is NOT selected — complement math
 --   keeps it one container group.
 -- ------------------------------------------------------------
+-- ☠ MUTES ARE DIRECTIONAL — do NOT fold them into addRecordIDs.
+-- This function is run in BOTH directions: it fills the include map for selected
+-- records, and the EXCLUDE map for unselected ones. Skipping a muted ID here would
+-- be right for include and exactly backwards for exclude -- leaving the ID out of
+-- the exclude map is what makes an aura RENDER under Uncategorised Buffs. Muting
+-- must never make something appear. So the raw function stays raw, the include
+-- path uses addLiveRecordIDs, and the exclude path adds muted IDs of SELECTED
+-- records explicitly (see ResolveSelection).
 local function addRecordIDs(map, rec)
     map[rec.id] = true
     if rec.alts then
         for _, alt in ipairs(rec.alts) do map[alt] = true end
+    end
+end
+
+-- INCLUDE direction: every ID of the record the user has not muted.
+local function addLiveRecordIDs(self, map, rec)
+    local muted = self:ReadMutedIDs()
+    if not muted[rec.id] then map[rec.id] = true end
+    if rec.alts then
+        for _, alt in ipairs(rec.alts) do
+            if not muted[alt] then map[alt] = true end
+        end
+    end
+end
+
+-- EXCLUDE direction, for a record that IS selected: its unmuted IDs render (they
+-- are simply absent from the exclude map), but its muted ones must be pushed INTO
+-- the map or Uncategorised Buffs would show the very icon the user muted.
+local function addMutedRecordIDs(self, map, rec)
+    local muted = self:ReadMutedIDs()
+    if next(muted) == nil then return end
+    if muted[rec.id] then map[rec.id] = true end
+    if rec.alts then
+        for _, alt in ipairs(rec.alts) do
+            if muted[alt] then map[alt] = true end
+        end
     end
 end
 
@@ -714,6 +877,10 @@ function R:ResolveSelection(selection, showAll)
         for _, rec in ipairs(R.Spells) do
             if not recordSelected(self, rec, selection) then
                 addRecordIDs(map, rec)
+            else
+                -- Selected, so its IDs stay out of the exclude map and render —
+                -- except the ones muted, which have to be put back in.
+                addMutedRecordIDs(self, map, rec)
             end
         end
         -- Raw IDs from UNSELECTED custom filters are known-but-unselected too
@@ -735,7 +902,16 @@ function R:ResolveSelection(selection, showAll)
         if selection.customs then
             for cfId in pairs(selection.customs) do
                 local f = self:GetCustomFilter(cfId)
-                if f then for rid in pairs(f.rawIDs) do map[rid] = nil end end
+                -- ☠ A MUTED id must stay excluded. This loop REMOVES ids from the
+                -- exclude map, which is the direction that makes an aura appear --
+                -- so the mute has to win here even though the raw path has no
+                -- record to narrow. (Promoted ids are re-bucketed in
+                -- GetCustomFilter and never reach this loop.)
+                if f then
+                    for rid in pairs(f.rawIDs) do
+                        if not self:IsSpellIDMuted(rid) then map[rid] = nil end
+                    end
+                end
             end
         end
         return { kind = "exclude", map = map }
@@ -747,7 +923,7 @@ function R:ResolveSelection(selection, showAll)
             local recs = R.ByCategory[catKey]
             if recs then
                 for _, rec in ipairs(recs) do
-                    if self:IsSpellEnabled(catKey, rec) then addRecordIDs(map, rec) end
+                    if self:IsSpellEnabled(catKey, rec) then addLiveRecordIDs(self, map, rec) end
                 end
             end
         end
@@ -758,9 +934,16 @@ function R:ResolveSelection(selection, showAll)
             if f then
                 for sid in pairs(f.spells) do
                     local rec = R.ByID[sid]
-                    if rec then addRecordIDs(map, rec) else map[sid] = true end
+                    if rec then addLiveRecordIDs(self, map, rec) else map[sid] = true end
                 end
-                for rid in pairs(f.rawIDs) do map[rid] = true end
+                -- What is left in rawIDs is genuinely unknown to the database, so
+                -- there is no record to narrow. A direct mute is still honoured:
+                -- the store is keyed by raw spell id so it CAN hold one, and
+                -- "muting never reveals" has to hold on every path, not just the
+                -- ones with a record behind them.
+                for rid in pairs(f.rawIDs) do
+                    if not self:IsSpellIDMuted(rid) then map[rid] = true end
+                end
             end
         end
     end
