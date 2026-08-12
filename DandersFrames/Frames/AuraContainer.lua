@@ -86,6 +86,12 @@ AuraContainer.stats = AuraContainer.stats or { builds = 0, teardowns = 0, defers
 
 local DBG = "AURACONTAINER"
 
+-- ★ OWN-FRAME TEST PREVIEW, default ON. Test mode paints our own pooled frames
+-- rather than declaring AuraGroups fed by the GLOBAL sample provider — see
+-- Handle:_buildOwnPreview for why the engine route cannot be scoped to us.
+-- Runtime A/B: /df debug ownpreview (AuraContainer.ToggleOwnPreview).
+AuraContainer._ownTestPreview = true
+
 -- One-time-per-process warning latches so a guarded failure (curve bug, border
 -- taint, native dispel reject) logs ONCE, not once per button.
 local warnedCurve, warnedBorder, warnedNativeDispel = false, false, false
@@ -516,11 +522,21 @@ function AuraContainer.SetTestMode(on)
     if on then
         AuraContainer._ownsProviderSwitch = true
         rebuildAll()
-        AuraContainer._queueTestBounce()
+        -- ★ Own-frame preview never switches the global provider (see
+        -- Handle:_buildOwnPreview), so there is nothing to bounce and no other
+        -- addon's containers are touched. The builds above painted themselves.
+        if not AuraContainer._ownTestPreview then
+            AuraContainer._queueTestBounce()
+        end
         -- No ticker start here: countdowns arm natively per slot (armTestDuration),
         -- and only a slot that FAILS to arm starts the fallback ticker.
     else
         AuraContainer._stopTestTicker()
+        -- ☠ The reset runs REGARDLESS of the current toggle state. Own-preview may
+        -- have been switched on mid-session while the engine route already held the
+        -- provider, and leaving it on the sample source strands every container in
+        -- the client on fake auras. _ownsProviderSwitch records that we took it;
+        -- resetting when we did not is harmless (it is the real provider either way).
         pcall(function()
             if C_UnitAuras.ResetAuraDataProvider then C_UnitAuras.ResetAuraDataProvider()
             else C_UnitAuras.SwitchAuraDataProvider(true) end
@@ -2477,7 +2493,14 @@ function NativeBackend:build()
     self.slotButtons = (isOverlay or isSingleSlot) and {} or nil
     handle._idGateVulnerable = nil   -- re-derived from this build's records (see the record loop)
     handle._idGateSourceRelative = nil   -- PLAYER-token / isFromPlayerOrPlayerPet pools (visibility gate)
-    if testMode and not isOverlay and not isMissing then
+    -- ★ OWN-FRAME PREVIEW (see Handle:_buildOwnPreview). When on, test mode declares
+    -- NOTHING to the engine and paints our own frames instead, so the global sample
+    -- provider is never switched and no other addon's containers are disturbed.
+    -- The per-slot-group shape below is the engine route, kept behind the toggle so
+    -- the two can be compared side by side in game (/df debug ownpreview).
+    if testMode and AuraContainer._ownTestPreview and not isOverlay and not isMissing then
+        filters = {}   -- declare nothing; the loop below is skipped
+    elseif testMode and not isOverlay and not isMissing then
         -- PER-SLOT TEST GROUPS (P5). Two hard-won facts drive this shape:
         --  * The flow lays buttons out by the container's own aura ordering, NOT
         --    by button creation order — indexing the curated paint/hover zones by
@@ -2685,7 +2708,23 @@ function NativeBackend:build()
 
     -- TEST MODE: every native build while the sample provider should be active
     -- queues the coalesced bounce — this container was born deaf to the switch.
-    if testMode then AuraContainer._queueTestBounce() end
+    -- ★ Own-frame preview needs neither: it declares nothing to the engine, so there
+    -- is no container to feed and no reason to touch the global provider.
+    -- ☠ THE GUARD IS ON THE BOUNCE, NOT ON THE ROW SHAPE. First cut wrote this as
+    -- "own-preview AND a row" / "elseif testMode", which still bounced for OVERLAY
+    -- and MISSING containers -- and one bounce is a GLOBAL switch, so a single dispel
+    -- overlay building during test mode re-filled every other addon's containers and
+    -- the leak looked untouched. Neither of those two needs the sample source anyway:
+    -- MISSING deliberately stays disabled for the whole test session so its groups
+    -- never fill, and the dispel overlay takes its preview type from our own pool
+    -- (DF:GetTestDebuffDispelType), not from engine auras.
+    if testMode and AuraContainer._ownTestPreview then
+        if not isOverlay and not isMissing then
+            handle:_buildOwnPreview()
+        end
+    elseif testMode then
+        AuraContainer._queueTestBounce()
+    end
 
     -- MISSING mode: arm the push geometry — hook the badge onto the live container's
     -- TOPLEFT (+pad puts it exactly on the window while the group is empty) and show it.
@@ -3708,6 +3747,188 @@ function Handle:_paintTestSlot(slot, index)
     end
 end
 
+-- ============================================================
+-- OWN-FRAME PREVIEW — test mode without the global sample provider
+-- ============================================================
+-- ☠ WHY THIS EXISTS. The engine has no per-container sample source: the only lever
+-- is C_UnitAuras.SwitchAuraDataProvider, which fires the client-wide
+-- AURA_DATA_PROVIDER_SWITCH that EVERY aura container registers for intrinsically
+-- (Blizzard_AuraContainer.lua). Flipping it for our preview therefore fills every
+-- OTHER addon's containers with sample icons too — nameplates, unit frames, the lot.
+-- The per-container flag exists (useEditModeSource) but its setter is on the private
+-- mixin, and none of the 19 public container methods touches the data source, so it
+-- can be neither set for us nor suppressed for anyone else.
+--
+-- ★ AND THE ENGINE'S SAMPLE DATA WAS NEVER THE POINT. Its auras carry no spell IDs,
+-- durations or raid flags (see the per-slot-group header), so every icon, name,
+-- count and timer in the preview was ALREADY painted by _paintTestSlot from our own
+-- TestData. The switch bought exactly one thing: presence — engine-created buttons
+-- to paint onto. Supplying those ourselves costs nothing and drops the global blast
+-- radius entirely.
+--
+-- ★ THE SEAMS ARE ALL PRE-EXISTING, which is what keeps this honest:
+--   * _acceptSlot   — registers into self.buttons and runs the SAME styleButton_regions
+--                     the engine path runs, so styling cannot diverge.
+--   * _paintTestSlot— the SAME painter, untouched. The AD editor canvas has painted
+--                     plain CreateFrame("Frame") slots this way since it shipped.
+--   * layoutRow     — the SAME positioner live uses off config.layout, including the
+--                     pixel-perfect snap. No second layout implementation exists to
+--                     drift, which is the failure mode this whole design is avoiding.
+-- Everything downstream (ApplyStyle, the test ticker, teardown) already iterates
+-- self.buttons and does not care where a button came from.
+--
+-- ⚠ Frames are pooled per handle and REUSED across rebuilds — creating fresh ones per
+-- rebuild is what made the engine route allocate ~530 MB over four test toggles.
+-- ☠ PLACEMENT MUST COME FROM THE ENGINE'S FLOW, NOT layoutRow.
+-- First cut positioned the preview with layoutRow and the commit claimed that was
+-- "the same positioner live uses". It is not: NATIVE rows are placed by the
+-- container's own AnchorUtil flow (see applyContainerLayout), and layoutRow is the
+-- legacy fallback's maths. Two implementations off one config is exactly the
+-- preview/live divergence this whole design exists to avoid, and it would have
+-- shown up first on the awkward cases (CENTER growth, wrapping, UP/LEFT growth,
+-- the duration-strip reservation that shifts row stride).
+--
+-- So the preview drives AnchorUtil.CreateFlowLayout() -- the SAME public flow the
+-- container uses -- configured from the SAME resolveGrowthLayout / buildGroupLayout
+-- / stripReservation derivations applyContainerLayout feeds it. The box frame stands
+-- in for the container: pinned with the identical pin point, offsets, pp snap and
+-- scale, so the flow lays out in the same space.
+--
+-- Returns false on any doubt (no AnchorUtil, an enum that will not resolve, Apply
+-- throwing) and the caller falls back to layoutRow — a slightly-off preview beats no
+-- preview, and this must never be the thing that breaks test mode.
+function Handle:_flowPreviewLayout(slots, count)
+    local AU = AnchorUtil
+    if not (AU and AU.CreateFlowLayout and AU.FlowDirection) then return false end
+    local box = self._ownPreviewBox
+    if not box then return false end
+
+    local config = self.config
+    local L = config.layout or {}
+    local G = resolveGrowthLayout(L)
+    local scale = tonumber(L.scale) or 1
+    local wrap = tonumber(L.wrap) or 0
+
+    -- Strip reservation -> flow padding. Same exclusive branch as applyContainerLayout.
+    local resv, topStrip = stripReservation(config)
+    if resv > 0 and self._pp then resv = ppSnapScaled(resv, scale) end
+    local padTop, padBottom = 0, 0
+    if resv > 0 then
+        if G.vName == "Up" then
+            if not topStrip then padBottom = resv end
+        elseif topStrip then
+            padTop = resv
+        end
+    end
+
+    -- Pin the box exactly where the container pins itself.
+    local px = (L.offsetX or 0) + G.pinX
+    local py = (L.offsetY or 0) + G.pinY
+    if self._pp then
+        px, py = snapPinOffsets(self.frame, G.anchor, px, py, scale)
+    end
+    local okPin = pcall(function()
+        box:SetScale(scale)
+        box:ClearAllPoints()
+        box:SetPoint(G.pinPoint, self.frame, G.anchor, px, py)
+    end)
+    if not okPin then return false end
+
+    -- Row cap, including the half-icon headroom that stops the flow wrapping one
+    -- icon early on the measured button width (see applyContainerLayout).
+    local headroom = G.sx * 0.5
+    local rowWidth
+    if G.verticalPrimary then
+        rowWidth = G.sx + headroom
+    elseif wrap >= 1 then
+        rowWidth = wrap * G.sx + (wrap - 1) * G.spX + headroom
+    end
+
+    local h = resolveEnum(AU.FlowDirection, G.hName)
+    local v = resolveEnum(AU.FlowDirection, G.vName)
+    if h == nil or v == nil then return false end
+
+    local gl = buildGroupLayout(config)
+    local elements = {}
+    for i = 1, count do elements[i] = slots[i] end
+
+    return pcall(function()
+        local layout = AU.CreateFlowLayout()
+        -- Mirror CustomAuraContainerFlowLayoutMixin: the GROUP's declared cell wins
+        -- over the measured button, which is what folds the strip reservation into
+        -- the row stride.
+        layout.GetElementSize = function(_, _, element, group)
+            local w, hgt = element:GetSize()
+            return group.elementWidth or w, group.elementHeight or hgt
+        end
+        layout:SetAnchorPoint(G.flowAnchor)
+        layout:SetGrowthDirection(h, v)
+        layout:SetMaximumLineSize(rowWidth or math.huge)
+        layout:SetPadding(0, 0, padTop, padBottom)
+        layout:Apply(box, { {
+            elements       = elements,
+            elementSpacing = gl.elementSpacing,
+            lineSpacing    = gl.lineSpacing,
+            elementWidth   = gl.elementWidth,
+            elementHeight  = gl.elementHeight,
+        } })
+    end)
+end
+
+function Handle:_buildOwnPreview()
+    local config = self.config
+    local pool = testPoolFor(config)
+    local want = testSlotCount(config, pool)
+    self._ownPreviewSlots = self._ownPreviewSlots or {}
+    local slots = self._ownPreviewSlots
+
+    -- The box stands in for the container: the flow lays out INSIDE it and sizes it
+    -- on completion, and it carries the layout scale, so slots parent to it rather
+    -- than to the frame (parenting to the frame would leave the scale unapplied).
+    local box = self._ownPreviewBox
+    if not box then
+        box = CreateFrame("Frame", nil, self.frame)
+        self._ownPreviewBox = box
+    end
+    pcall(function()
+        box:SetFrameStrata(self.frame:GetFrameStrata())
+        box:SetFrameLevel(self.frame:GetFrameLevel() + 5)
+    end)
+    box:Show()
+
+    for i = 1, want do
+        local slot = slots[i]
+        if not slot then
+            slot = CreateFrame("Frame", nil, box)
+            slots[i] = slot
+        end
+        slot:Show()
+        -- Same styling seam as a native button. _acceptSlot fills self.buttons[i],
+        -- so ApplyStyle / teardown pick these up unchanged.
+        self:_acceptSlot(slot, i)
+        self:_paintTestSlot(slot, i)
+    end
+
+    -- A shorter preview than last time (pool cap, Max Icons dropped): park the
+    -- surplus and drop it from self.buttons so no cell is reserved for a frame
+    -- nobody can see.
+    for i = want + 1, #slots do
+        slots[i]:Hide()
+        self.buttons[i] = nil
+    end
+
+    if want > 0 then
+        if not self:_flowPreviewLayout(slots, want) then
+            -- Fallback only: positions from DF's own maths rather than the engine
+            -- flow, so it can differ from live on the awkward growth cases.
+            DF:DebugWarn(DBG, "own preview: flow layout unavailable, falling back to layoutRow")
+            layoutRow(self)
+        end
+    elseif box then
+        box:Hide()
+    end
+end
+
 -- Shared ticker driving the preview countdowns (test mode only; started and
 -- stopped by SetTestMode). Loops each timer + swipe at zero and drains the
 -- duration bar in step so the preview animates indefinitely. Buttons die with
@@ -4682,6 +4903,19 @@ function Handle:_teardownContainer(park)
         wipe(self.buttons)
         self._slotCounter = 0   -- restart the lazy-batch index for the next build
     end
+    -- Own-frame preview slots are OURS, not the container's, so nothing above
+    -- reaches them: the wipe drops self.buttons' references but the frames stay
+    -- parented and visible. Park them here. Kept for reuse rather than destroyed —
+    -- they are pooled per handle precisely so a rebuild does not re-allocate.
+    if self._ownPreviewSlots then
+        for _, slot in pairs(self._ownPreviewSlots) do
+            if slot then
+                if DF.Border and slot.dfBorder then DF.Border:StopAnimation(slot.dfBorder) end
+                slot:Hide()
+            end
+        end
+    end
+    if self._ownPreviewBox then self._ownPreviewBox:Hide() end
     -- Test-mode hover tips are handle-owned (anchored over the dying buttons):
     -- hide the lot; a test build re-anchors/re-shows the ones it needs.
     if self._testTips then
@@ -6548,6 +6782,28 @@ end
 -- off-grid source. Rebuilds every missing handle on toggle. NOT a fix: the
 -- layout-push can't hide a window-anchored badge, so present buffs still show
 -- their badge while this is on.
+-- ★ OWN-FRAME PREVIEW toggle (/df debug ownpreview) — the A/B for the new test-mode
+-- route. ON (the default): test mode paints our own pooled frames and never touches
+-- C_UnitAuras.SwitchAuraDataProvider, so no other addon's containers are disturbed.
+-- OFF: the previous engine route, per-slot AuraGroups fed by the global sample
+-- provider, kept so the two can be compared side by side on the same settings.
+-- Flip it with test mode ON: every test container rebuilds on the spot.
+function AuraContainer.ToggleOwnPreview()
+    AuraContainer._ownTestPreview = not AuraContainer._ownTestPreview or nil
+    local n = 0
+    for h in pairs(AuraContainer._handles or {}) do
+        if h.builtInTestMode or AuraContainer._testMode then
+            n = n + 1
+            pcall(function() h:_rebuild() end)
+        end
+    end
+    DF:Say(("Own-frame preview %s — %d test container(s) rebuilt. %s"):format(
+        AuraContainer._ownTestPreview and "ON" or "OFF", n,
+        AuraContainer._ownTestPreview
+            and "Our own frames; the global sample provider is never switched."
+            or "Engine route: per-slot groups + the GLOBAL provider switch (other addons will show sample icons)."))
+end
+
 function AuraContainer.ToggleBadgeParkDebug()
     AuraContainer._badgeParkDebug = not AuraContainer._badgeParkDebug or nil
     local n = 0
