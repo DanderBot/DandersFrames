@@ -3895,6 +3895,40 @@ function Factory:SyncSound(frame)
     end
     reconcileSoundNow(frame)
 end
+-- ☠ ONE predicate, two callers. The member-group container renders exactly the
+-- indicators this accepts, and syncPlacedPool skips exactly the ones it accepts. If
+-- these two ever disagree an icon renders TWICE (both paths claim it) or not at all
+-- (neither does), so they must not be two spellings of "the same" rule.
+local function memberRenderable(ind)
+    return ind ~= nil and ind.enabled ~= false
+        and ind.type ~= "bar"          -- a bar is its own sized widget, not a flow icon
+        and not ind.showWhenMissing    -- missing mode is a parked badge, never packed
+end
+
+-- The set of member indicators a group container will draw, keyed exactly as
+-- syncPlacedPool keys its own entries so the skip is a plain lookup.
+local function claimedGroupMembers(groups, auras, keyPrefix)
+    if not groups then return nil end
+    local claimed
+    for _, group in ipairs(groups) do
+        if type(group) == "table" and group.kind ~= "filter" and group.enabled ~= false
+           and type(group.members) == "table" then
+            for _, m in ipairs(group.members) do
+                local auraCfg = auras and auras[m.auraName]
+                if type(auraCfg) == "table" and auraCfg.indicators then
+                    for _, ind in ipairs(auraCfg.indicators) do
+                        if ind.id == m.indicatorID and memberRenderable(ind) then
+                            claimed = claimed or {}
+                            claimed[placedKey(keyPrefix, m.auraName, ind)] = true
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return claimed
+end
+
 
 -- ============================================================
 -- PLACED-POOL SYNC  (shared by the spec pool and the Other Buffs pool)
@@ -4206,39 +4240,6 @@ end
 -- BARS are excluded on purpose: a bar is not an icon in a flow, it is its own
 -- sized widget, and packing it beside icons is meaningless. Grouped bars keep the
 -- single-slot path (see the skip in syncPlacedPool).
--- ☠ ONE predicate, two callers. The member-group container renders exactly the
--- indicators this accepts, and syncPlacedPool skips exactly the ones it accepts. If
--- these two ever disagree an icon renders TWICE (both paths claim it) or not at all
--- (neither does), so they must not be two spellings of "the same" rule.
-local function memberRenderable(ind)
-    return ind ~= nil and ind.enabled ~= false
-        and ind.type ~= "bar"          -- a bar is its own sized widget, not a flow icon
-        and not ind.showWhenMissing    -- missing mode is a parked badge, never packed
-end
-
--- The set of member indicators a group container will draw, keyed exactly as
--- syncPlacedPool keys its own entries so the skip is a plain lookup.
-local function claimedGroupMembers(groups, auras, keyPrefix)
-    if not groups then return nil end
-    local claimed
-    for _, group in ipairs(groups) do
-        if type(group) == "table" and group.kind ~= "filter" and group.enabled ~= false
-           and type(group.members) == "table" then
-            for _, m in ipairs(group.members) do
-                local auraCfg = auras and auras[m.auraName]
-                if type(auraCfg) == "table" and auraCfg.indicators then
-                    for _, ind in ipairs(auraCfg.indicators) do
-                        if ind.id == m.indicatorID and memberRenderable(ind) then
-                            claimed = claimed or {}
-                            claimed[placedKey(keyPrefix, m.auraName, ind)] = true
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return claimed
-end
 
 local function collectGroupMembers(frame, group, auras, idSpec, defs)
     local recs
