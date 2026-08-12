@@ -3320,7 +3320,12 @@ end
 
 local function armTestDuration(handle, slot, d, offset)
     if not (C_DurationUtil and C_DurationUtil.CreateDuration) then return false end
-    local cfg = handle.config
+    -- ☠ THE SLOT'S OWN CONFIG. This is what actually renders the test countdown —
+    -- formatTestDuration below is only the fallback for a slot that fails to arm — so
+    -- reading the container's shared style here is what left layout-group members
+    -- counting down in white: the colour curve is part of the member's duration spec
+    -- and never reached the binding.
+    local cfg = styleConfigFor(handle, slot)
     local durSpec = (cfg.style and cfg.style.duration) or {}
     local barSpec = (cfg.style and cfg.style.bar) or {}
     local ok, err = pcall(function()
@@ -3477,7 +3482,10 @@ function Handle:_paintTestSlot(slot, index)
         end
     end
 
-    local iconSpec = self.config.style and self.config.style.icon
+    -- Per-slot too: staticSpellID is a per-indicator icon override, so a member that
+    -- pins its own art must be read from its own style, not the group's.
+    local iconCfg = styleConfigFor(self, slot)
+    local iconSpec = iconCfg.style and iconCfg.style.icon
     if slot.dfIcon and not (iconSpec and iconSpec.staticSpellID) then
         -- The GAME's icon for the validated spell (hand-maintained icon paths
         -- drift from the real art); the entry's hardcoded icon is the fallback.
