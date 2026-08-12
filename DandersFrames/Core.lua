@@ -5980,6 +5980,64 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 o:Section("Frame")
                 o:Field("level", frame:GetFrameLevel(), "NEUTRAL")
                 o:Field("strata", tostring(frame:GetFrameStrata()), "NEUTRAL")
+
+                -- ★ THE BAR BAND. Everything below covers the aura rows, which is the
+                -- half of the ladder that never appears in a report about a covered
+                -- absorb, a tinted reduced-max region or a buried resource bar. Six
+                -- rounds of exactly that got diagnosed from source instead, because the
+                -- numbers were not in this dump (Krathe, 2026-08-13).
+                -- ☠ Each row is checked against THE SAME RESOLVER THE LAYOUT CALLS, not
+                -- against a hardcoded number -- a dump carrying its own copy of the
+                -- ladder can agree with itself while disagreeing with the frame. What
+                -- this is for is catching the resolver and reality drifting apart.
+                -- Strata is printed per row too: it outranks level, so a row that looks
+                -- correctly ordered here can still render wrong if one member escaped
+                -- the frame's strata.
+                o:Section("Bars")
+                local base = frame:GetFrameLevel()
+                local bdb = DF.GetFrameDB and DF:GetFrameDB(frame)
+                local absLvl = DF.ResolveAbsorbBarLevel and DF:ResolveAbsorbBarLevel(frame, bdb)
+                local ov = frame.dfDispelOverlay
+                for _, e in ipairs({
+                    { "healthBar",       frame.healthBar,            3 },
+                    { "dfHealAbsorbBar", frame.dfHealAbsorbBar,      8 },
+                    { "dfAbsorbBar",     frame.dfAbsorbBar,          absLvl and (absLvl - base) },
+                    { "absorbOverflow",  frame.absorbOverflowBar,    absLvl and (absLvl - base) },
+                    { "dfHealPrediction", frame.dfHealPredictionBar,
+                        (bdb and bdb.healPredictionFrameLevel) or 12 },
+                    { "dispelOverlay",   ov,                         nil },
+                    { "dispel gradient", ov and ov.gradient,
+                        DF.ResolveDispelGradientLevel and DF:ResolveDispelGradientLevel(0, bdb) },
+                    { "dfPowerBar",      frame.dfPowerBar,
+                        (bdb and bdb.resourceBarFrameLevel) or 20 },
+                    { "contentOverlay",  frame.contentOverlay,       25 },
+                }) do
+                    local nm, w, want = e[1], e[2], e[3]
+                    if not w or not w.GetFrameLevel then
+                        print(("    %-16s |cff888888(absent)|r"):format(nm))
+                    else
+                        -- pcall: some of these carry 12.1 forbidden aspects, and a dump
+                        -- that throws is worse than one that says it could not read.
+                        local ok, lvl, shown, st = pcall(function()
+                            return w:GetFrameLevel(), w:IsShown(), w:GetFrameStrata()
+                        end)
+                        if not ok then
+                            print(("    %-16s |cffff4040(read refused)|r"):format(nm))
+                        else
+                            local off = lvl - base
+                            local tag = ""
+                            if want and off ~= want then
+                                tag = ("  |cffff4040<- EXPECTED +%d|r"):format(want)
+                            end
+                            if st and st ~= frame:GetFrameStrata() then
+                                tag = tag .. ("  |cffff4040strata=%s|r"):format(tostring(st))
+                            end
+                            print(("    %-16s level=%-4d (+%-3d) shown=%-5s%s")
+                                :format(nm, lvl, off, tostring(shown), tag))
+                        end
+                    end
+                end
+
                 local rows = {
                     { "buff", frame.buffFactory }, { "debuff", frame.debuffFactory },
                     { "defensive", frame.defensiveFactory },
