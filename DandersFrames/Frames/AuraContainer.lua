@@ -3215,7 +3215,13 @@ function Handle:_acceptSlot(slot, index, recStyle)
     applyRecordStyle(slot, self, slot.dfImpRecStyle)
 end
 function Handle:_bindNativeSlot(slot)
-    bindNative(slot, self.config)              -- native setters (native slots only)
+    -- ☠ THE RECORD'S CONFIG HERE TOO, not the container's. The duration FORMATTER is
+    -- bound natively, so colour-by-time, the format choice and the hide-above band all
+    -- arrive through this call — bind from the shared config and a member's icons
+    -- silently inherit the GROUP's duration spec while their regions correctly carry
+    -- their own. Styling and binding are two halves of one button and must read the
+    -- same config, or the button is half-dressed by each.
+    bindNative(slot, styleConfigFor(self, slot))   -- native setters (native slots only)
 end
 -- Countdown text for the test preview. The row's OWN duration formatter renders
 -- it whenever one is configured — the same object the live native binding uses —
@@ -4371,7 +4377,11 @@ function Handle:ApplyStyle(style, layout)
                     -- layout order, so recomputing it here would reshuffle the preview.
                     self:_paintTestSlot(b, b._dfTestIndex or i)
                 else
-                    bindNative(b, self.config)
+                    -- Record view here as well: an ApplyStyle re-binds the native
+                    -- setters, so binding from the shared config would undo a member's
+                    -- duration spec on the next restyle even though the build got it
+                    -- right. Same pairing as _bindNativeSlot.
+                    bindNative(b, styleConfigFor(self, b))
                 end
             end
         end)
