@@ -690,10 +690,41 @@ local function ApplyOverlayLayout(overlay, db, frame)
             DF:ResolveDispelGradientLevel(gp and gp:GetFrameLevel() or 0, db))
 
         if onCurrentHealth and frame then
-            -- Position gradient to match health bar
-            overlay.gradient:SetAllPoints(gradientParent)
-            if overlay.gradientDarken then
-                overlay.gradientDarken:SetAllPoints(gradientParent)
+            -- ☠ ANCHOR TO THE HEALTH BAR, NOT THE FULL-FRAME PROXY.
+            -- dfGradientAnchorProxy spans the whole padded frame ON PURPOSE: "Clip
+            -- Health Bar" shrinks the healthBar to the un-reduced portion, and an EDGE
+            -- gradient that shrank with it stopped short of the frame edge (live-caught,
+            -- Top Edge). That reasoning is right for the edge styles and wrong here.
+            --
+            -- "Show On Current Health Only" means the wash marks the CURRENT HEALTH, and
+            -- the reduced-max region is by definition not health -- it is max health that
+            -- has been taken away. With the proxy the wash spanned it anyway and bled
+            -- through the reduced bar's striped texture, so the region read as tinted
+            -- (field-caught with Clip Health Bar ON; with it off the two rects coincide,
+            -- which is why the setting looked like the trigger).
+            -- The clipped healthBar already IS "the health", so anchoring to it gets the
+            -- reduced region excluded for free and stays correct when the user toggles
+            -- clipping.
+            --
+            -- ⚠ Falls back to the proxy if there is no healthBar or the anchor is
+            -- refused: on the 12.1 slot path the carrier's anchor chain must terminate at
+            -- the aura button (see the proxy's own note), and a wash one region too wide
+            -- beats a wash that fails to render.
+            local healthAnchor = frame.healthBar
+            local anchored = false
+            if healthAnchor then
+                anchored = pcall(function()
+                    overlay.gradient:SetAllPoints(healthAnchor)
+                    if overlay.gradientDarken then
+                        overlay.gradientDarken:SetAllPoints(healthAnchor)
+                    end
+                end)
+            end
+            if not anchored then
+                overlay.gradient:SetAllPoints(gradientParent)
+                if overlay.gradientDarken then
+                    overlay.gradientDarken:SetAllPoints(gradientParent)
+                end
             end
             
             -- Match health bar orientation and fill direction
