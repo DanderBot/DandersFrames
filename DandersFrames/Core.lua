@@ -1933,6 +1933,10 @@ local DEFAULT_CLASS_COLOR = { r = 0.5, g = 0.5, b = 0.5 }
 
 function DF:GetClassColor(class)
     if not class then return DEFAULT_CLASS_COLOR end
+    -- ☠ A SECRET class token (boss/hostile units on 12.1) may not be used as a
+    -- table key — both lookups below throw. There is no class colour to resolve
+    -- for such a unit anyway; the default is what an unknown class already gets.
+    if issecretvalue and issecretvalue(class) then return DEFAULT_CLASS_COLOR end
     -- Check for user override
     if DF.db and DF.db.classColors and DF.db.classColors[class] then
         return DF.db.classColors[class]
@@ -1962,6 +1966,11 @@ end
 function DF:GetUnitRole(unit)
     if not unit or not UnitExists(unit) then return nil end
     local role = UnitGroupRolesAssigned and UnitGroupRolesAssigned(unit)
+    -- ☠ SECRET role (boss/hostile units on 12.1): comparing it below throws.
+    -- Null it IN PLACE rather than returning early, so the player's spec
+    -- fallback still runs if the player's own role ever reads secret. Callers
+    -- already collapse nil and "NONE" into the same branch.
+    if issecretvalue and issecretvalue(role) then role = nil end
     if (not role or role == "NONE") and UnitIsUnit and UnitIsUnit(unit, "player")
        and GetSpecialization and GetSpecializationRole then
         local spec = GetSpecialization()
@@ -2012,6 +2021,9 @@ function DF:GetFrameBorderColor(frame, db)
             -- follower dungeon companions) have a class token too. Units
             -- with no class token fall back to the static colour.
             class = select(2, UnitClass(frame.unit))
+            -- Secret class (boss units): no colour resolvable — fall back to
+            -- the static border colour, as a unit with no class token does.
+            if issecretvalue and issecretvalue(class) then class = nil end
         end
         if class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class] then
             local c = DF:GetClassColor(class)
@@ -2096,6 +2108,10 @@ function DF:GetResourceBarColor(unit, db, classOverride, powerTokenOverride)
         if not classToken and unit then
             local _
             _, classToken = UnitClass(unit)
+            -- Secret class (boss units): keep the DESIGNED fallback — the
+            -- power-type colour below — instead of the default-grey table
+            -- GetClassColor would hand back for a token it cannot look up.
+            if issecretvalue and issecretvalue(classToken) then classToken = nil end
         end
         local cc = classToken and DF:GetClassColor(classToken)
         if cc then return cc.r, cc.g, cc.b end

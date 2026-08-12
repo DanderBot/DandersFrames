@@ -406,6 +406,9 @@ function Border:ResolveClassColor(unit, fallback, frame)
         classToken = testData and testData.class
     elseif unit and UnitExists and UnitExists(unit) then
         classToken = select(2, UnitClass(unit))
+        -- Secret class (boss units): keep the picker fallback below rather
+        -- than the default-grey table GetClassColor returns for it.
+        if issecretvalue(classToken) then classToken = nil end
     end
 
     if classToken and DF.GetClassColor then

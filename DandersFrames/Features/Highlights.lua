@@ -760,8 +760,14 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         -- healer pulls aggro. Role-based, so it applies in role-assigned content
         -- (dungeons/M+/raids) and no-ops where roles aren't set (UnitGroupRolesAssigned
         -- returns "NONE").
-        if isAggro and db.aggroHideOnTanks and unit and UnitGroupRolesAssigned(unit) == "TANK" then
-            isAggro = false
+        if isAggro and db.aggroHideOnTanks and unit then
+            -- ☠ Guarded compare: a boss unit's role is SECRET on 12.1 — and a
+            -- boss always holds threat, so this line ran for every pinned boss
+            -- frame the moment the toggle was on. A secret role is not "TANK".
+            local role = UnitGroupRolesAssigned(unit)
+            if not (issecretvalue and issecretvalue(role)) and role == "TANK" then
+                isAggro = false
+            end
         end
         -- ☠ A CORPSE HOLDS NO THREAT, but UnitThreatSituation keeps reporting one, so the
         -- glow used to sit on a dead player until the next target change / hover / combat

@@ -147,6 +147,13 @@ end
 
 function LiveSource:GetClassToken()
     local _, token = UnitClass(self.unit)
+    -- ☠ SECRET class token (boss/hostile units on 12.1): both consumers index
+    -- RAID_CLASS_COLORS with the return, which throws on a secret — and a
+    -- secret is truthy, so the "or WARRIOR" fallback would pass it through.
+    -- nil is the contract for "no class colour": both call sites (Render.lua's
+    -- updateOne, Resolver.lua's per-item colour) skip the override on nil and
+    -- keep the element's configured colour.
+    if issecretvalue and issecretvalue(token) then return nil end
     return token or "WARRIOR"  -- fallback so RAID_CLASS_COLORS lookup never returns nil
 end
 

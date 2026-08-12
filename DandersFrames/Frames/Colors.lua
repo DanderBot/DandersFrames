@@ -216,6 +216,11 @@ function DF:GetCurveForUnit(unit, db, prefix, cache)
     local class = "DEFAULT"
     if useClass then
         _, class = UnitClass(unit)
+        -- ☠ Secret class (boss units): it may not key the curve cache (read OR
+        -- write below), and BuildColorStops compares it. DEFAULT is exactly the
+        -- non-class-coloured curve such a unit should get. Per health tick, so
+        -- unguarded this was the highest-frequency throw of the family.
+        if issecretvalue and issecretvalue(class) then class = nil end
         if not class then class = "DEFAULT" end
     end
 
