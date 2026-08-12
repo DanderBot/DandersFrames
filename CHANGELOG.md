@@ -6,6 +6,7 @@
 
 * (Aura Designer) Fix layout groups showing only their first member when the group mixes different spells.
 * (Pinned Frames) Fix constant error spam on boss frames from role and class colour lookups; boss frames now fall back to their configured colours cleanly.
+* (Pinned Frames) Fix pinned NPC frames showing as offline players, with a stuck "Offline" text and a full grey health bar.
 
 ## [5.1.0]
 
