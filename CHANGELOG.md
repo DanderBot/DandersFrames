@@ -1,5 +1,25 @@
 # DandersFrames Changelog
 
+## [Unreleased]
+
+* (Aura Designer) **Group icons fill the gaps again.** Icons in a layout group had gone back to holding a fixed slot each, so a member you didn't currently have left a hole and the rest stayed put. They now slide up to close it, as they did before — in the order you arranged them, and each keeping its own size, border, colours and Colour by Time. Filter groups already packed like this; layout groups were the odd one out.
+* (Aura Designer) **Indicators track every spell ID a spell has.** Some spells exist under more than one ID — a cast and the buff it applies, or one version that lands on you and another on your target — and an indicator only ever matched one of them, while the same spell used as a filter matched all of them. That is why an Augmentation Evoker saw Ebon Might on allies but never on themselves. 17 tracked spells across seven specs were affected. Spells deliberately hand-tuned to a specific ID are unchanged.
+* (Aura Designer) **Fix an indicator you could not delete.** Adding a spell by an ID the spell list did not recognise could create an indicator that appeared on your frames, showed no card in the editor, and had no way to remove it short of a new profile. Adding by ID now always lands on the right spell, the editor no longer hides a record it cannot name, and an indicator already stuck this way is repaired when the profile loads.
+* (Aura Designer) Symbiotic Relationship now shows on the druid's own frame. The game credits your half of the link to your partner, so the indicator could never match it — the ally's side has always worked.
+* (Aura Designer) Fix the Aura Designer appearing active on a newly created profile, or one reset to defaults, until you clicked something in the editor.
+* (Aura Designer) The Frame Preview follows the frame size and Preview Scale as you change them, rather than waiting for the window to be resized or reopened, and no longer spills out of its box on a tall frame or a high scale.
+* (Aura Designer) Filter groups follow the account-wide "Default Frame Level" setting. They had been pinned to one level whatever the slider said, which could leave a group drawing underneath the indicators it sits with.
+* (Filter Designer) **Track some of a spell's IDs instead of all or none.** A few spells put more than one aura on you at once — Holy Bulwark shows its buff and its absorb shield — and a filter had no way to take one without the other. Rows for those spells show how many IDs they carry; click that to open the row and untick the ones you do not want. It applies wherever the spell is used, in built-in and custom filters alike.
+* (Filter Designer) Spell rows in the picker show their spell IDs, as the rows inside a filter already did.
+* (Buff Bar / Debuff Bar) The Show Buffs and Show Debuffs switches lead their page, above the filters, and their box is named "Visibility" rather than "Settings". They turn everything else on the page on and off, so they were the hardest thing on it to find.
+* (Buff Bar / Debuff Bar) Max Buffs and Max Debuffs set to 0 now show nothing in test mode, instead of one icon.
+* (Buff Bar / Debuff Bar) Turning Show Border off removes the borders straight away, instead of leaving them on most frames until something else redrew them.
+* (Auras) Fix the Dispel Overlay covering the whole frame, and "Show On Current Health Only" now clips it to the filled part of the health bar and follows damage and healing.
+* (Auras) Fix the Defensive Icon row showing every buff on the frame instead of the ones you chose. It depended on load order, so it varied between sessions and a reload appeared to fix it.
+* (Targeted Spells) Turning the Targeted List or Personal Targeted on or off while frames are unlocked shows or hides its mover straight away. Enabling one gave you nothing to drag, and disabling one left a mover on screen that still moved your frames.
+* (Interface) `/df debug attached` no longer locks the game up while it runs.
+* (Interface) The buffs-disabled notice reads "Enable Buffs or Open Aura Designer" — the two links ran together as one.
+
 ## [5.0.0]
 
 ### WoW 12.1 (Midnight) Rework
