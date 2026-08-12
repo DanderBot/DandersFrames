@@ -4336,7 +4336,12 @@ local function syncMemberGroupList(frame, mg, live, groups, auras, keyPrefix, id
                 for i, r in ipairs(recs) do
                     -- Order is part of identity: swapping two members changes each one's
                     -- layoutIndex, and the icons must move.
-                    parts[#parts + 1] = "m" .. i .. "=" .. tostring(r.indicatorID)
+                    -- Full member identity in the sig — the same pair the group key
+                    -- uses. With the id alone, rekeying a member (orphan-repair
+                    -- rename) could leave the sig unchanged and re-adopt a parked
+                    -- container whose groups are keyed by the OLD names.
+                    parts[#parts + 1] = "m" .. i .. "=" .. tostring(r.auraName)
+                        .. ":" .. tostring(r.indicatorID)
                         .. "|" .. includeSig(r.map)
                         -- The member's RESOLVED pool filter. Without it, a member
                         -- whose self-only resolution changes (the group moved onto
