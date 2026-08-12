@@ -484,12 +484,18 @@ function DF:ResolveAbsorbBarLevel(frame, db)
     if mode == "FLOATING" then
         return frame:GetFrameLevel() + ((db and db.absorbBarFrameLevel) or 11)
     end
-    -- Bound to the health bar (OVERLAY / ATTACHED / ATTACHED_OVERFLOW): derived, and
-    -- deliberately clear of the dispel overlay band. healthBar is frame+3, so +15
-    -- lands ~frame+18 against the gradient's ~+17.
-    local hb = frame.healthBar and frame.healthBar:GetFrameLevel()
-        or (frame:GetFrameLevel() + 3)
-    return hb + 15
+    -- Bound to the health bar (OVERLAY / ATTACHED / ATTACHED_OVERFLOW): the ladder's
+    -- own slot, +11 (see the map in Features/Dispel.lua). NOT the slider -- that is
+    -- FLOATING-only, so reading it here would drag a bound bar to wherever a floating
+    -- bar was last placed.
+    --
+    -- ☠ This deliberately does NOT try to out-rank the dispel wash. An earlier cut did
+    -- (+15 off the health bar, landing above the gradient) and that was wrong: it made
+    -- the absorb poke through FULL FRAME too, which is the mode whose whole point is
+    -- covering the frame. Whether the wash hides the absorb is the WASH's business, and
+    -- it is now conditional on "Show On Current Health Only" -- see
+    -- DF:ResolveDispelGradientLevel in Features/Dispel.lua.
+    return frame:GetFrameLevel() + 11
 end
 
 function DF:UpdateAbsorb(frame, testIndex)
