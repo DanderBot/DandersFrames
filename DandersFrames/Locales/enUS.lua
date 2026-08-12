@@ -415,6 +415,7 @@ L["USE"] = true
 L["    Show ZZZ Icon"] = true
 L["%d - %d players"] = true
 L["%d of %d IDs"] = true
+L["%s or %s"] = true
 L["%d of %d tracked"] = true
 L["%d override"] = true
 L["%d overrides"] = true

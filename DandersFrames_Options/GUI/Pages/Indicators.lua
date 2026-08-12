@@ -47,9 +47,15 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 b:SetHTML(L["Aura Designer is active alongside Buffs."] .. " " ..
                     adLink("openAD", L["Open Aura Designer"]), adOnLink)
             elseif adEnabled and not d.showBuffs then
+                -- Two actions, so they need a conjunction: separated by a bare space
+                -- and both in link colour, "Enable Buffs Open Aura Designer" read as
+                -- a single link with a confusing name. Formatted rather than glued to
+                -- an L["or"], so a translator controls word order and spacing instead
+                -- of only the word.
                 b:SetHTML(L["Buffs are disabled. Aura Designer is managing your auras."] .. " " ..
-                    adLink("enableBuffs", L["Enable Buffs"]) .. " " ..
-                    adLink("openAD", L["Open Aura Designer"]), adOnLink)
+                    format(L["%s or %s"],
+                        adLink("enableBuffs", L["Enable Buffs"]),
+                        adLink("openAD", L["Open Aura Designer"])), adOnLink)
             end
         end
 
