@@ -414,6 +414,7 @@ L["USE"] = true
 -- End ClickCasting UI strings
 L["    Show ZZZ Icon"] = true
 L["%d - %d players"] = true
+L["%d of %d IDs"] = true
 L["%d of %d tracked"] = true
 L["%d override"] = true
 L["%d overrides"] = true
@@ -1675,6 +1676,8 @@ L["Thickness"] = true
 L["Thin"] = true
 L["This filter is empty."] = true
 L["This filter was exported by a newer version of DandersFrames."] = true
+L["This spell has %d spell IDs. Click to choose which ones to track."] = true
+L["At least one spell ID must stay ticked. Untick the spell itself to stop tracking it."] = true
 L["This setting differs from the global profile value. Click the reset button to revert."] = true
 L["This setting is being overridden by the active auto layout profile. To change it, edit the profile in the Auto Layouts tab."] = true
 L["This will capture %s everywhere — even away from the frames — and replace its current action:"] = true
