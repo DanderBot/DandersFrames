@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [5.1.1]
+
+### Bug Fixes
+
+* (Aura Designer) Fix layout groups showing only their first member when the group mixes different spells.
+* (Pinned Frames) Fix constant error spam on boss frames from role and class colour lookups; boss frames now fall back to their configured colours cleanly.
+
 ## [5.1.0]
 
 ### New Features

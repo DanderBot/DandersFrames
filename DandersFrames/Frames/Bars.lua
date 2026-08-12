@@ -81,6 +81,11 @@ function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride)
         if not classToken then
             local _
             _, classToken = UnitClass(unit)
+            -- Secret class (boss units): may not key the filter table. Treat as
+            -- "no token" — the filter silently doesn't apply, same as a unit
+            -- with no class. This site was masked by the GetUnitRole throw
+            -- above until that was guarded; it is the very next error in line.
+            if issecretvalue(classToken) then classToken = nil end
         end
         if classToken and classFilter[classToken] == false then
             return false
@@ -2283,7 +2288,12 @@ function DF:GetRoleIconRole(unit)
     if IsInGroup() or IsInRaid() then
         return DF:GetUnitRole(unit)
     end
-    return UnitGroupRolesAssigned(unit)
+    -- ☠ The raw path needs its own guard: this branch bypasses GetUnitRole (and
+    -- its secret handling) entirely, and a pinned boss frame renders solo — a
+    -- world boss or solo delve boss reaches here with a secret role.
+    local role = UnitGroupRolesAssigned(unit)
+    if issecretvalue(role) then return nil end
+    return role
 end
 
 -- ★ roleOverride lets the PREVIEW drive this without a real unit, the same shape

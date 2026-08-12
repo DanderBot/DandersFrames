@@ -4277,8 +4277,10 @@ local function collectGroupMembers(frame, group, auras, idSpec, defs, mine)
                 local borderOn = placedBorderOn(ind, ind.hideIcon)
                 recs = recs or {}
                 recs[#recs + 1] = {
-                    indicatorID = m.indicatorID,
+                    -- Both halves of the member identity: the group key must be
+                    -- built from the PAIR, since indicator ids repeat across auras.
                     auraName    = m.auraName,
+                    indicatorID = m.indicatorID,
                     indicator   = ind,
                     map         = map,
                     -- ☠ PER MEMBER, not per group. Symbiotic Relationship's copy on
