@@ -22,6 +22,9 @@ DF.AuraDesigner.Adapter = AuraAdapter
 -- Per-spec identity index, built lazily by GetSpecIdentity.
 local identityCache = {}  -- { [spec] = { byName = {...}, byID = {...} } }
 
+-- Per-spec set of SELF-ONLY aura names, built lazily by IsSelfOnlyAura.
+local selfOnlyCache = {}  -- { [spec] = { [auraName] = true } }
+
 -- Per-spec merged trackable-aura lists (curated Config list + FilterRegistry
 -- SpellDB class pool), built lazily by GetTrackableAuras.
 local trackableCache = {}  -- { [spec] = { auraInfo, ... } }
@@ -34,6 +37,7 @@ local allTrackableCache = nil
 -- (e.g., Earth Shield for Resto Shaman) get rebuilt on next lookup.
 function AuraAdapter:InvalidateSpecCache()
     identityCache = {}
+    selfOnlyCache = {}
     trackableCache = {}
     allTrackableCache = nil
 end
@@ -154,6 +158,30 @@ end
 function AuraAdapter:GetAuraNameForSpellID(spec, spellID)
     local ident = self:GetSpecIdentity(spec)
     return ident and ident.byID[spellID] or nil
+end
+
+-- Is this aura one of the spec's SELF-ONLY entries — a buff that lands on the
+-- CASTER but which the game credits to the unit it was cast on? Symbiotic
+-- Relationship sits on the druid with `sourceUnit` = the linked ally, so the
+-- spec pool's "HELPFUL|PLAYER" can never pass it and the indicator has never
+-- rendered on the player's own frame (field-confirmed, lab 029736dd).
+--
+-- Config's SelfOnlySpellIDs is keyed by spell ID because that is how the auras
+-- were identified; the render path only ever knows names, so index it the other
+-- way once per spec. Static data — the cache exists for consistency with its
+-- siblings, not because anything invalidates it at runtime.
+function AuraAdapter:IsSelfOnlyAura(spec, auraName)
+    if not (spec and auraName) then return false end
+    local names = selfOnlyCache[spec]
+    if not names then
+        names = {}
+        local t = DF.AuraDesigner.SelfOnlySpellIDs and DF.AuraDesigner.SelfOnlySpellIDs[spec]
+        if t then
+            for _, name in pairs(t) do names[name] = true end
+        end
+        selfOnlyCache[spec] = names
+    end
+    return names[auraName] == true
 end
 
 -- ============================================================

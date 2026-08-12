@@ -727,9 +727,51 @@ end
 -- Hide Duplicate Buffs on, OTHER players' casts of a My-Buffs-tracked spell render
 -- nowhere (not on the PLAYER-filtered indicator, not on the bar). Narrowing the
 -- dedup to the player's own casts is a tracked follow-up, not this hotfix.
+-- SELF_ONLY: a third `mine` value, not a boolean. See resolvePoolMode below for what
+-- it means and why it exists; checked FIRST because a truthy string would otherwise
+-- fall into the My Buffs branch, and it deliberately ignores othersOnly (an Other-pool
+-- concept that has no meaning for a spell on your own frame).
+local SELF_ONLY = "selfOnly"
+
 local function poolFilter(cfg, mine)
+    if mine == SELF_ONLY then return "HELPFUL" end
     if mine then return "HELPFUL|PLAYER" end
     return (type(cfg) == "table" and cfg.othersOnly) and "HELPFUL|!PLAYER" or "HELPFUL"
+end
+
+-- ☠ SELF-ONLY AURAS — the ONE case where My Buffs drops its caster filter.
+-- A few buffs land on the CASTER but are credited to the unit they were cast on:
+-- Symbiotic Relationship sits on the druid with `sourceUnit` = the linked ally
+-- (field-confirmed, lab 029736dd). "HELPFUL|PLAYER" can therefore never pass one, so
+-- a My Buffs indicator for such a spell has never rendered on the player's own frame
+-- at all — not a regression, it has never worked. Config's SelfOnlySpellIDs documented
+-- exactly this and was read nowhere; this is what it was written for.
+--
+-- ☠ SCOPED TO THE PLAYER'S OWN FRAME, deliberately. Relaxing everywhere would light
+-- your indicator from another player's cast on an ally, which is precisely the
+-- complaint that made the spec pool player-only ("it's literally in the name",
+-- 2026-07-16). UnitIsUnit rather than `unit == "player"`: in raid frames the player's
+-- own frame is a raidN unit, so the string test would silently never match.
+--
+-- ⚠ ACCEPTED over-match: one container has one filter string, so on your own frame the
+-- slot now matches the aura whoever cast it — a second druid linking to YOU would light
+-- it. Strictly better than never rendering, and not narrowable without splitting the
+-- container. Flagged to the lab for a field check.
+--
+-- Returns `mine` untouched for everything else, so the Other pool and every ordinary
+-- My Buffs spell keep byte-identical filter strings. ☠ The result is STRUCTURAL (it
+-- feeds the struct/tuning sigs as well as the container config) — resolve it ONCE per
+-- aura and pass that value to both, or the sigs disagree with the config and the
+-- container rebuilds on every update forever.
+local function resolvePoolMode(spec, auraName, frame, mine)
+    if not mine then return mine end
+    local Adapter = DF.AuraDesigner and DF.AuraDesigner.Adapter
+    if not (Adapter and Adapter.IsSelfOnlyAura and Adapter:IsSelfOnlyAura(spec, auraName)) then
+        return mine
+    end
+    local unit = frame and frame.unit
+    if unit and UnitIsUnit and UnitIsUnit(unit, "player") then return SELF_ONLY end
+    return mine
 end
 
 -- Stable signature of an includeSpellIDs map (sorted IDs). Changing the set is a TUNING
@@ -3811,8 +3853,14 @@ end
 -- retires them exactly like their indicators.
 local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSpec, defs)
     -- Spec pool (My Buffs) = player-cast only; the OTHER_PREFIX pool stays anyone-cast.
-    local mine = keyPrefix == ""
+    local poolMine = keyPrefix == ""
     for auraName, auraCfg in pairs(auras) do
+        -- ☠ `mine` from here down is the RESOLVED pool mode for THIS aura, not the raw
+        -- pool flag: a self-only aura on the player's own frame drops the caster filter
+        -- (see resolvePoolMode). Resolved ONCE, here, so every container config and
+        -- every signature below reads the same value — those two are compared against
+        -- each other, and a disagreement rebuilds the container on every update forever.
+        local mine = resolvePoolMode(idSpec, auraName, frame, poolMine)
         local indicators = (type(auraCfg) == "table") and auraCfg.indicators
         if indicators then
             for _, indicator in ipairs(indicators) do
@@ -4386,7 +4434,7 @@ function Factory:SyncFrame(frame)
             function(c) return c.color end)
 
         if bestName then
-            local filt = poolFilter(bestCfg, bestPool == 1)
+            local filt = poolFilter(bestCfg, resolvePoolMode(spec, bestName, frame, bestPool == 1))
             -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
             -- the border consumer: a conjunction of presence gates does not express "while
             -- all of these are absent".
@@ -4535,7 +4583,7 @@ function Factory:SyncFrame(frame)
             function(c) return c.color end)
 
         if bestName then
-            local filt = poolFilter(bestCfg, bestPool == 1)
+            local filt = poolFilter(bestCfg, resolvePoolMode(spec, bestName, frame, bestPool == 1))
             -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
             -- the border consumer: a conjunction of presence gates does not express "while
             -- all of these are absent".
@@ -4674,9 +4722,10 @@ function Factory:SyncFrame(frame)
             local chainLinks = resolveConditions(spec, bestCfg, bestPool == 1)
             if not chainLinks then
                 dropChainEntry(bd, bestName)
-                return syncBorderEntry(bd, frame, bestName, bestCfg, bestMap, bestPool == 1)
+                return syncBorderEntry(bd, frame, bestName, bestCfg, bestMap,
+                    resolvePoolMode(spec, bestName, frame, bestPool == 1))
             end
-            local filt = poolFilter(bestCfg, bestPool == 1)
+            local filt = poolFilter(bestCfg, resolvePoolMode(spec, bestName, frame, bestPool == 1))
             local drawAboveBD = bestCfg.drawAboveFrameBorder ~= false
             -- Level-neutral gates: the ring keeps its drawAboveFrameBorder 11/9 seat
             -- relative to `frame` (the flat path's parent) at any chain length.
@@ -4701,7 +4750,12 @@ function Factory:SyncFrame(frame)
             end
             for i = 1, #stacked do
                 local s = stacked[i]
-                if syncBorderEntry(bd, frame, s.key, s.cfg, s.map, s.mine) then
+                -- s.mine stays a plain boolean in the entry table (collectStackedBorders
+                -- SORTS on it); the self-only relaxation is resolved here instead. s.key is
+                -- the bare aura name whenever s.mine is true — the OTHER_PREFIX form only
+                -- appears on pool 2, which resolvePoolMode returns untouched.
+                if syncBorderEntry(bd, frame, s.key, s.cfg, s.map,
+                    resolvePoolMode(spec, s.key, frame, s.mine)) then
                     keep[s.key] = true
                 end
             end
@@ -4727,7 +4781,7 @@ function Factory:SyncFrame(frame)
             local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, typeKey,
                 function(c) return c.color and not c.showWhenMissing end)
             if bestName and TDRender then
-                local filt = poolFilter(bestCfg, bestPool == 1)
+                local filt = poolFilter(bestCfg, resolvePoolMode(spec, bestName, frame, bestPool == 1))
                 local r, g, b, a = readADColor(bestCfg.color)
                 local color = { r = r, g = g, b = b, a = a }
                 -- CONDITION CHAIN: the LAST link hands its host to the Text Designer, so the
