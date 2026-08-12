@@ -1612,8 +1612,15 @@ function DF:UpdateTestAuras(frame)
             -- re-raising the slider re-shows correctly. Do NOT instead teach the
             -- container to build zero slots — slots are add-only and a 0-slot rebuild
             -- would strand frames for the session.
-            local buffCount = db.testBuffCount or 2
-            local debuffCount = db.testDebuffCount or 2
+            -- ⚠ THE LIVE MAX IS THE OTHER WAY IN, and it was not gated. The container
+            -- resolves a preview count as min(testMax, max) and only THEN floors the
+            -- slot count at 1, so Max Buffs / Max Debuffs = 0 arrived as one sample icon
+            -- — the identical symptom, reached through the Buff Bar page's slider rather
+            -- than the test panel's (Aphoex, 2026-08-12). Clamp by both here so either
+            -- zero hides the row. Mirrors the defensive bar, which has always clamped
+            -- the pair: min(testDefensiveCount, defensiveBarMax).
+            local buffCount = math.min(db.testBuffCount or 2, db.buffMax or 4)
+            local debuffCount = math.min(db.testDebuffCount or 2, db.debuffMax or 5)
             if db.showBuffs and showAuras and buffCount > 0 and DF.DriveBuffFactory then
                 DF:DriveBuffFactory(frame, db)
                 -- Test count slider hot-applies (structural: the handle rebuilds).
