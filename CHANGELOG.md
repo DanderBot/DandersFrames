@@ -1,5 +1,11 @@
 # DandersFrames Changelog
 
+## [5.1.1]
+
+### Bug Fixes
+
+* (Aura Designer) Fix layout groups showing only their first member when the group mixes different spells.
+
 ## [5.1.0]
 
 ### New Features
