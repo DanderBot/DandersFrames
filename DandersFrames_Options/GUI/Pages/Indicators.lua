@@ -486,7 +486,17 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             include       = { inset = true, offset = true, blendMode = true,
                               gradient = true, shadow = true, alpha = true },
             sizeMin = 0, sizeMax = 8, sizeStep = 1,
-            fullUpdate    = function() if DF.UpdateAllFrames then DF:UpdateAllFrames() end end,
+            -- ☠ INVALIDATE, don't just update. Show Border is STRUCTURAL on the aura
+            -- row: BuildAuraRowConfig emits `border = <spec> or nil`, so turning it
+            -- off has to rebuild the container, and UpdateAllFrames alone only redoes
+            -- layout. Without the invalidation the rows kept their old border until
+            -- something else happened to bump the aura layout version — which is why
+            -- it appeared to work on one frame and not the rest
+            -- (Aphoex, 2026-08-12).
+            fullUpdate    = function()
+                if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+                if DF.UpdateAllFrames then DF:UpdateAllFrames() end
+            end,
             lightUpdate   = function() DF:LightweightUpdateAuraBorder("buff") end,
             lightColors   = function() DF:LightweightUpdateAuraBorder("buff") end,
             refreshStates = function() self:RefreshStates() end,
@@ -1109,7 +1119,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             include       = { inset = true, offset = true, blendMode = true,
                               gradient = true, shadow = true, alpha = true },
             sizeMin = 0, sizeMax = 8, sizeStep = 1,
-            fullUpdate    = function() if DF.UpdateAllFrames then DF:UpdateAllFrames() end end,
+            -- Structural, exactly as on the buff row above — see the note there.
+            fullUpdate    = function()
+                if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+                if DF.UpdateAllFrames then DF:UpdateAllFrames() end
+            end,
             lightUpdate   = function() DF:LightweightUpdateAuraBorder("debuff") end,
             lightColors   = function() DF:LightweightUpdateAuraBorder("debuff") end,
             refreshStates = function() self:RefreshStates() end,
