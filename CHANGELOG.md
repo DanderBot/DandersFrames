@@ -8,6 +8,9 @@
 * (Pinned Frames) Fix constant error spam on boss frames from role and class colour lookups; boss frames now fall back to their configured colours cleanly.
 * (Pinned Frames) Fix pinned NPC frames showing as offline players, with a stuck "Offline" text and a full grey health bar.
 * (Aura Designer) Fix aura tooltips staying on after being turned off (and staying off after being turned on) — the Aura Designer tooltip settings now apply immediately instead of after a reload.
+* (Auras) Fix the brief flash of unfiltered buffs when a cinematic ends. (by Krathe)
+* (Test Mode) Test mode no longer fills other addons' aura displays with sample icons while it is open. (by Krathe)
+* (Auras) Fix the absorb bar hiding behind the Dispel Overlay while a dispellable debuff was active. (by Krathe)
 
 ## [5.1.0]
 
