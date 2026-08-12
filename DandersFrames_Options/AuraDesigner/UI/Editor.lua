@@ -1882,6 +1882,14 @@ end
 function DF:AuraDesigner_RefreshPage()
     if not S.mainFrame then return end
 
+    -- The master Enable checkbox binds nothing — it is set at creation and written
+    -- by its own OnClick — so anything else that moves adDB.enabled (a profile
+    -- create, a reset to defaults, a profile import) left it stale. Re-read it here,
+    -- where every other surface on the page is already re-read.
+    if S.enableBanner and S.enableBanner.RefreshEnabled then
+        S.enableBanner.RefreshEnabled()
+    end
+
     -- Account for editing banner offset (50px) when editing an auto layout
     local editingOffset = 0
     if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
