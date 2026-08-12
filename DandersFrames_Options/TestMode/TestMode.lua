@@ -1006,11 +1006,11 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         -- never reaches the UpdateTestAuras seam, so hide them here too (via
         -- the shown-caches the live drives key on).
         if frame.buffFactory then
-            frame.buffFactory:GetFrame():Hide()
+            frame.buffFactory:SetIntentShown(false)
             frame.dfBuffFactoryShown = false
         end
         if frame.debuffFactory then
-            frame.debuffFactory:GetFrame():Hide()
+            frame.debuffFactory:SetIntentShown(false)
             frame.dfDebuffFactoryShown = false
         end
     end
@@ -1628,7 +1628,7 @@ function DF:UpdateTestAuras(frame)
                     frame.buffFactory:SetTestMax(buffCount)
                 end
             elseif frame.buffFactory then
-                frame.buffFactory:GetFrame():Hide()
+                frame.buffFactory:SetIntentShown(false)
                 frame.dfBuffFactoryShown = false
             end
             -- ⚠ `~= false` so nil (every unit that does not opt out) still shows the row.
@@ -1640,7 +1640,7 @@ function DF:UpdateTestAuras(frame)
                     frame.debuffFactory:SetTestMax(debuffCount)
                 end
             elseif frame.debuffFactory then
-                frame.debuffFactory:GetFrame():Hide()
+                frame.debuffFactory:SetIntentShown(false)
                 frame.dfDebuffFactoryShown = false
             end
         end
@@ -3327,7 +3327,7 @@ function DF:UpdateTestDefensiveBar(frame, testData)
                 end
                 if frame.dfDefFactoryShown ~= true then
                     frame.dfDefFactoryShown = true
-                    h:GetFrame():Show()
+                    h:SetIntentShown(true)
                 end
             end
         elseif frame.defensiveFactory then
@@ -3335,7 +3335,7 @@ function DF:UpdateTestDefensiveBar(frame, testData)
             -- mode (or re-ticking the toggle) re-shows through the normal path.
             if frame.dfDefFactoryShown ~= false then
                 frame.dfDefFactoryShown = false
-                frame.defensiveFactory:GetFrame():Hide()
+                frame.defensiveFactory:SetIntentShown(false)
             end
         end
         return

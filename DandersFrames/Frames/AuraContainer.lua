@@ -4185,6 +4185,21 @@ function Handle:SetShown(shown)
     self:_applyVisibility()
     self:_applyEnabled(shown)
 end
+-- Visibility INTENT only — records the consumer's wish and applies it, with NO
+-- enable op. Two reasons this exists instead of SetShown:
+--   * ☠ SetShown's _applyEnabled queues an "enable" op in combat, and a queued
+--     enable upgrades a queued retarget into a full rebuild — a frame leak (see
+--     DriveDefensiveFactory's header in Features/Auras.lua). The drives hide/show
+--     per aura event, so they must never queue backend ops.
+--   * A raw GetFrame():Hide() leaves _intendedShown reading "wants shown", and
+--     the identity-gate sweep's _applyVisibility then RESURRECTS the row on the
+--     next roster/faction/phase/target event — disabled buff bars and defensive
+--     icons popping back with live auras (reported on 5.0.0). Intent recorded
+--     here survives every sweep.
+function Handle:SetIntentShown(shown)
+    self._intendedShown = shown and true or false
+    self:_applyVisibility()
+end
 
 -- Single writer for the window's shown state (consumer intent composed with the
 -- identity gate). NEVER flip visibility while the cursor is inside the window:
@@ -4330,9 +4345,15 @@ function Handle:_applyIdentityGate()
             tostring(self.config and self.config.unit),
             tostring(self._idGateVulnerable or false),
             tostring(self._idGateSourceRelative or false))
+        self._idGateHidden = newHidden
+        -- ⚠ TRANSITION ONLY. The sweep runs on every target change / roster event /
+        -- loading screen; applying visibility unconditionally made every pass a
+        -- frame-op on every vulnerable handle — and worse, it was the resurrection
+        -- path for rows a consumer had hidden raw (before SetIntentShown existed).
+        -- A stable verdict now touches nothing. The rebuilt-onto-non-vulnerable
+        -- case still clears its stale flag: that IS a transition.
+        self:_applyVisibility()
     end
-    self._idGateHidden = newHidden
-    self:_applyVisibility()
 end
 
 -- Enable/disable the container's parse+bind. ★ 68914 re-verified: SetEnabled is NOT

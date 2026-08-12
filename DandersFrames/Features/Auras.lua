@@ -2243,10 +2243,13 @@ function DF:DriveBuffFactory(frame, db)
         frame.dfBuffFactoryHidden = nil
     end
     -- Show/hide only on state change (no per-event SetShown churn on the live tree).
+    -- Through SetIntentShown, not the raw frame: intent must be recorded on the
+    -- handle or the identity-gate sweep resurrects a hidden row (no enable op, so
+    -- the queued-retarget frame leak SetShown carries does not apply).
     local rowShown = not frame.dfBuffFactoryHidden
     if frame.dfBuffFactoryShown ~= rowShown then
         frame.dfBuffFactoryShown = rowShown
-        h:GetFrame():SetShown(rowShown)
+        h:SetIntentShown(rowShown)
     end
 
     -- Apply setting changes only when the layout version actually bumped — and only OUT
@@ -2434,7 +2437,7 @@ function DF:DriveDebuffFactory(frame, db)
     local rowShown = not frame.dfDebuffFactoryHidden
     if frame.dfDebuffFactoryShown ~= rowShown then
         frame.dfDebuffFactoryShown = rowShown
-        h:GetFrame():SetShown(rowShown)
+        h:SetIntentShown(rowShown)   -- intent-recorded hide; see the buff drive
     end
 
     if frame.dfDebuffFactoryVersion ~= ver and not InCombatLockdown() then
@@ -2443,9 +2446,9 @@ function DF:DriveDebuffFactory(frame, db)
             DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db))
         filterList = applyDebuffBlacklist(filterList, db)
         if filterList and #filterList == 0 then
-            -- Fully claimed while a container stands: park it hidden (plain anchor,
+            -- Fully claimed while a container stands: park it hidden (intent-recorded,
             -- combat-safe) until a version bump changes the claim set.
-            h:GetFrame():Hide()
+            h:SetIntentShown(false)
             frame.dfDebuffFactoryShown = false
             frame.dfDebuffFactoryEmptyVer = ver
             return
@@ -2704,9 +2707,10 @@ function DF:DriveDefensiveFactory(frame, db)
 
     if not h then return end
 
-    -- Keep on the frame's unit; defer a wrong-unit show until regen in combat. Hide via the
-    -- plain anchor frame (GetFrame():SetShown), NOT h:SetShown -- the latter queues an enable
-    -- op that would upgrade a queued retarget into a full rebuild (frame leak).
+    -- Keep on the frame's unit; defer a wrong-unit show until regen in combat. Hide via
+    -- h:SetIntentShown, NOT h:SetShown -- the latter queues an enable op that would
+    -- upgrade a queued retarget into a full rebuild (frame leak). SetIntentShown is the
+    -- op-free variant that still records intent, so the gate sweep can't resurrect it.
     if h:GetUnit() ~= frame.unit then
         DF:Debug("AURAROW", "defensive: retarget %s -> %s%s",
             tostring(h:GetUnit()), tostring(frame.unit),
@@ -2722,7 +2726,7 @@ function DF:DriveDefensiveFactory(frame, db)
     local rowShown = not frame.dfDefFactoryHidden
     if frame.dfDefFactoryShown ~= rowShown then
         frame.dfDefFactoryShown = rowShown
-        h:GetFrame():SetShown(rowShown)
+        h:SetIntentShown(rowShown)
     end
 
     -- Re-apply settings only on a layout-version bump (defensive option changes bump it
@@ -3257,14 +3261,18 @@ function DF:UpdateAuras_Enhanced(frame)
     -- path is no longer active (dev toggle off, test mode, or showBuffs off),
     -- hide it via its plain anchor frame (combat-safe, queues no backend op) so the legacy
     -- render can't double up. DriveBuffFactory re-shows it when it drives.
+    -- ☠ SetIntentShown, never GetFrame():Hide(). The raw hide left the handle's
+    -- intent reading "wants shown", and the identity-gate sweep (target change,
+    -- roster, loading screens) re-showed the disabled row with live auras in it —
+    -- the "buff bar comes back while disabled" reports. Intent survives sweeps.
     local buffFactoryActive = db.showBuffs and DF:UseFactoryForBuffs(frame, db)
     if frame.buffFactory and not buffFactoryActive then
-        frame.buffFactory:GetFrame():Hide()
+        frame.buffFactory:SetIntentShown(false)
         frame.dfBuffFactoryShown = false   -- keep DriveBuffFactory's shown-cache coherent
     end
     local debuffFactoryActive = db.showDebuffs and DF:UseFactoryForDebuffs(frame, db)
     if frame.debuffFactory and not debuffFactoryActive then
-        frame.debuffFactory:GetFrame():Hide()
+        frame.debuffFactory:SetIntentShown(false)
         frame.dfDebuffFactoryShown = false
     end
     -- Missing-buff strip mirror: hide it when the factory path goes inactive (test
