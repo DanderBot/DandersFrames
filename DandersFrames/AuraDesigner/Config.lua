@@ -247,18 +247,28 @@ DF.AuraDesigner.SpellIDs = {
 
 -- ============================================================
 -- SELF-ONLY SPELL IDS
--- Auras that only appear on the caster (player unit) but are
--- sourced by another unit (e.g. Symbiotic Relationship buff
--- appears on the druid but sourceUnit is the target).
--- These need a separate "HELPFUL" scan (without PLAYER filter)
--- restricted to the player unit only.
+-- Auras that appear on the CASTER (the player) but which the game
+-- credits to another unit — Symbiotic Relationship sits on the druid
+-- with sourceUnit = the linked ally. A My Buffs indicator filters on
+-- "HELPFUL|PLAYER", which can never pass one of these, so without an
+-- exception the indicator never renders on the player's own frame.
+--
+-- ☠ READ BY THE RENDER PATH — this is live data, not documentation.
+-- Factory.lua's resolvePoolMode consults it (via AuraAdapter's
+-- IsSelfOnlyAura) and drops the caster filter for these auras ON THE
+-- PLAYER'S OWN FRAME ONLY. Adding an entry here changes what renders.
+--
+-- ⚠ Add an aura here ONLY with a live aura dump proving the source
+-- unit is NOT the player. It was wrong once: Ebon Might's self-buff
+-- 395296 was listed on the assumption it was foreign-sourced, and a
+-- field test showed sourceUnit = "player" — it needed the ID union
+-- (see AuraAdapter's GetSpecIdentity), not a filter exception. The
+-- entry was removed 2026-08-12 rather than left as a false example.
 -- ============================================================
 DF.AuraDesigner.SelfOnlySpellIDs = {
     RestorationDruid = {
+        -- Field-verified: on the druid this reads sourceUnit = the linked ally.
         [474754] = "SymbioticRelationship",
-    },
-    AugmentationEvoker = {
-        [395296] = "EbonMight",      -- caster self-buff (secret in combat, readable OOC)
     },
 }
 

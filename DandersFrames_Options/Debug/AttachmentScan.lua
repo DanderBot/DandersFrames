@@ -237,17 +237,52 @@ local function BuildDFFrameSet()
 end
 
 -- Walk the parent chain; true if any ancestor (or the frame itself) is a DF frame.
-local function IsInDFTree(frame, dfSet)
-    local f, guard = frame, 0
-    while f and guard < 80 do
-        if dfSet[f] then return true end
-        f = f:GetParent()
-        guard = guard + 1
+-- (The unmemoised IsInDFTree that lived here is gone. Its only caller was the
+-- scan loop, which now uses a memoised local closed over the frame set — see
+-- isInDFTree inside ScanFrameAttachments.)
+
+-- The DF frame a foreign frame is ANCHORED to, or nil.
+--
+-- ⚠ ONE pcall for the whole point walk, not one per point. It used to be per
+-- point, and pcall is not cheap: EnumerateFrames covers every frame in the UI —
+-- tens of thousands with a normal addon set — so a four-point frame cost four
+-- protected calls each, and the scan spent most of its time in pcall overhead
+-- rather than in the scan.
+--
+-- GetNumPoints now sits INSIDE the guard too. In combat it returns a secret for
+-- protected frames (a secret cannot be a for-loop limit), and having it outside
+-- meant an unexpected throw took the whole scan down rather than skipping one
+-- frame.
+local function DFAnchorOf(f, dfSet)
+    local np = f:GetNumPoints()
+    if type(np) ~= "number" or issecretvalue(np) then return nil end
+    for i = 1, np do
+        local _, relTo = f:GetPoint(i)
+        if relTo and not issecretvalue(relTo) and dfSet[relTo] then
+            return dfSet[relTo]
+        end
     end
-    return false
+    return nil
 end
 
+-- Frames examined per tick. The scan walks the entire frame universe, and doing
+-- that in one pass froze the client long enough to look like a crash on a
+-- machine with many addons loaded (Aphoex, 2026-08-12). Yielding between chunks
+-- costs a few extra frames of wall-clock and keeps the UI responsive throughout.
+local SCAN_CHUNK = 1500
+
+local scanRunning = false
+
 function DF:ScanFrameAttachments()
+    -- Re-entry would interleave two walks into one result set and double every
+    -- count. The scan is a few hundred milliseconds of real work; say so rather
+    -- than silently starting a second one.
+    if scanRunning then
+        DF:Err("An attachment scan is already running.")
+        return
+    end
+    scanRunning = true
+
     local dfSet = BuildDFFrameSet()
 
     local results = {}   -- [label] = { { otype, name, addon, kind }, ... }
@@ -266,69 +301,123 @@ function DF:ScanFrameAttachments()
         total = total + 1
     end
 
+    -- Memoised IsInDFTree. The raw walk climbs to the root for every frame it
+    -- rejects, and UI hierarchies share ancestors heavily, so the same chain was
+    -- re-walked thousands of times. Caching the verdict for every node on the
+    -- path makes the second visit to any ancestor O(1). `path` is reused across
+    -- calls so the hot loop allocates nothing.
+    local verdict, path = {}, {}
+    local function isInDFTree(frame)
+        local node, guard, n = frame, 0, 0
+        while node and guard < 80 do
+            local cached = verdict[node]
+            if cached ~= nil then
+                for i = 1, n do verdict[path[i]] = cached end
+                return cached
+            end
+            if dfSet[node] then
+                for i = 1, n do verdict[path[i]] = true end
+                verdict[node] = true
+                return true
+            end
+            n = n + 1; path[n] = node
+            node = node:GetParent()
+            guard = guard + 1
+        end
+        for i = 1, n do verdict[path[i]] = false end
+        return false
+    end
+
     local scanned = 0
-    local f = EnumerateFrames()
-    while f do
-        scanned = scanned + 1
-        if not f:IsForbidden() and not IsInDFTree(f, dfSet) then
-            local parent = f:GetParent()
-            if parent and dfSet[parent] then
-                -- Re-parented onto a DF frame. Only report if it carries a
-                -- non-DF name (anonymous re-parents can't be told apart from
-                -- DF's own anonymous children, so we skip those).
-                local nm = f:GetName()
-                if nm and not nm:find("Danders", 1, true) then
-                    record(dfSet[parent], f, "parented")
+    local cursor = nil   -- last frame PROCESSED; the next chunk resumes after it
+
+    local function Report()
+        local o = DF:Out("Attachment Scan", format("%d frames scanned", scanned))
+        if total == 0 then
+            -- Nothing attached is the DESIRABLE result here, so it reads GOOD.
+            o:Line("No other addons appear to be attached to DandersFrames unit frames.", "GOOD")
+            o:Line("A foreign frame re-parented onto ours with no name cannot be detected.", "NEUTRAL")
+            return
+        end
+
+        local labels = {}
+        for label in pairs(results) do labels[#labels + 1] = label end
+        tsort(labels)
+
+        for _, label in ipairs(labels) do
+            o:Section(label, #results[label])
+            for _, e in ipairs(results[label]) do
+                local who
+                if e.addon and e.curated then
+                    who = e.addon                       -- confident, from curated list
+                elseif e.addon then
+                    who = e.addon .. "?"                -- guessed from frame name
+                else
+                    who = "unknown addon"
                 end
-            else
-                -- Anchored (SetPoint) to a DF frame without re-parenting.
-                -- In combat, GetNumPoints/GetPoint return secret values for
-                -- protected frames — a secret can't be a for-loop limit. Skip
-                -- those (foreign castbar/cooldown frames aren't protected, so
-                -- they're still scanned); guard relTo the same way.
-                local np = f:GetNumPoints()
-                if type(np) == "number" and not issecretvalue(np) then
-                    for i = 1, np do
-                        local ok, _, relTo = pcall(f.GetPoint, f, i)
-                        if ok and relTo and not issecretvalue(relTo) and dfSet[relTo] then
-                            record(dfSet[relTo], f, "anchored")
-                            break
+                local nm = e.name or "<anonymous>"
+                o:Item(who, format("%s [%s, %s]", nm, e.otype, e.kind))
+            end
+        end
+        -- A foreign attachment is a FINDING, not a fault: usually a deliberate setup
+        -- by another addon. WARN so it stands out without accusing anyone.
+        o:Line(format("%d attachment(s) found across %d frame(s).", total, #labels), "WARN")
+    end
+
+    -- One chunk of the walk, then yield. C_Timer.After(0, ...) resumes on the next
+    -- frame, so the client keeps drawing instead of locking up for the duration.
+    --
+    -- ⚠ Frames created or destroyed mid-scan can perturb the enumeration order —
+    -- acceptable for a read-only diagnostic, and the alternative (holding the whole
+    -- frame universe in a table first) costs more memory than the scan is worth.
+    -- ☠ THE FLAG MUST NOT OUTLIVE THE WALK. Each chunk runs from its own
+    -- C_Timer.After, so an error inside one would kill the chain silently and
+    -- leave scanRunning latched for the session — every later /df debug
+    -- attached then refuses with "already running" until a /reload. pcall the
+    -- chunk body and drop the flag on the error path (with the error surfaced;
+    -- this is a developer command, so raw geterrorhandler is the right sink).
+    local function Step()
+        -- `more` is the chunk's own return on success (frames remain) and the
+        -- error message on failure — the two branches below read the right one.
+        local ok, more = pcall(function()
+            local budget = 0
+            local f = EnumerateFrames(cursor)
+            while f and budget < SCAN_CHUNK do
+                scanned = scanned + 1
+                budget = budget + 1
+                if not f:IsForbidden() and not isInDFTree(f) then
+                    local parent = f:GetParent()
+                    if parent and dfSet[parent] then
+                        -- Re-parented onto a DF frame. Only report if it carries a
+                        -- non-DF name (anonymous re-parents can't be told apart from
+                        -- DF's own anonymous children, so we skip those).
+                        local nm = f:GetName()
+                        if nm and not nm:find("Danders", 1, true) then
+                            record(dfSet[parent], f, "parented")
                         end
+                    else
+                        -- Anchored (SetPoint) to a DF frame without re-parenting.
+                        local okA, label = pcall(DFAnchorOf, f, dfSet)
+                        if okA and label then record(label, f, "anchored") end
                     end
                 end
+                cursor = f
+                f = EnumerateFrames(f)
             end
+            return f ~= nil
+        end)
+        if not ok then
+            scanRunning = false
+            DF:Err("Attachment scan aborted: " .. tostring(more))
+            return
         end
-        f = EnumerateFrames(f)
-    end
-
-    local o = DF:Out("Attachment Scan", format("%d frames scanned", scanned))
-    if total == 0 then
-        -- Nothing attached is the DESIRABLE result here, so it reads GOOD.
-        o:Line("No other addons appear to be attached to DandersFrames unit frames.", "GOOD")
-        o:Line("A foreign frame re-parented onto ours with no name cannot be detected.", "NEUTRAL")
-        return
-    end
-
-    local labels = {}
-    for label in pairs(results) do labels[#labels + 1] = label end
-    tsort(labels)
-
-    for _, label in ipairs(labels) do
-        o:Section(label, #results[label])
-        for _, e in ipairs(results[label]) do
-            local who
-            if e.addon and e.curated then
-                who = e.addon                       -- confident, from curated list
-            elseif e.addon then
-                who = e.addon .. "?"                -- guessed from frame name
-            else
-                who = "unknown addon"
-            end
-            local nm = e.name or "<anonymous>"
-            o:Item(who, format("%s [%s, %s]", nm, e.otype, e.kind))
+        if more then
+            C_Timer.After(0, Step)
+        else
+            scanRunning = false
+            Report()
         end
     end
-    -- A foreign attachment is a FINDING, not a fault: usually a deliberate setup
-    -- by another addon. WARN so it stands out without accusing anyone.
-    o:Line(format("%d attachment(s) found across %d frame(s).", total, #labels), "WARN")
+
+    Step()
 end

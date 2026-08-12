@@ -1006,11 +1006,11 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         -- never reaches the UpdateTestAuras seam, so hide them here too (via
         -- the shown-caches the live drives key on).
         if frame.buffFactory then
-            frame.buffFactory:GetFrame():Hide()
+            frame.buffFactory:SetIntentShown(false)
             frame.dfBuffFactoryShown = false
         end
         if frame.debuffFactory then
-            frame.debuffFactory:GetFrame():Hide()
+            frame.debuffFactory:SetIntentShown(false)
             frame.dfDebuffFactoryShown = false
         end
     end
@@ -1612,8 +1612,15 @@ function DF:UpdateTestAuras(frame)
             -- re-raising the slider re-shows correctly. Do NOT instead teach the
             -- container to build zero slots — slots are add-only and a 0-slot rebuild
             -- would strand frames for the session.
-            local buffCount = db.testBuffCount or 2
-            local debuffCount = db.testDebuffCount or 2
+            -- ⚠ THE LIVE MAX IS THE OTHER WAY IN, and it was not gated. The container
+            -- resolves a preview count as min(testMax, max) and only THEN floors the
+            -- slot count at 1, so Max Buffs / Max Debuffs = 0 arrived as one sample icon
+            -- — the identical symptom, reached through the Buff Bar page's slider rather
+            -- than the test panel's (Aphoex, 2026-08-12). Clamp by both here so either
+            -- zero hides the row. Mirrors the defensive bar, which has always clamped
+            -- the pair: min(testDefensiveCount, defensiveBarMax).
+            local buffCount = math.min(db.testBuffCount or 2, db.buffMax or 4)
+            local debuffCount = math.min(db.testDebuffCount or 2, db.debuffMax or 5)
             if db.showBuffs and showAuras and buffCount > 0 and DF.DriveBuffFactory then
                 DF:DriveBuffFactory(frame, db)
                 -- Test count slider hot-applies (structural: the handle rebuilds).
@@ -1621,7 +1628,7 @@ function DF:UpdateTestAuras(frame)
                     frame.buffFactory:SetTestMax(buffCount)
                 end
             elseif frame.buffFactory then
-                frame.buffFactory:GetFrame():Hide()
+                frame.buffFactory:SetIntentShown(false)
                 frame.dfBuffFactoryShown = false
             end
             -- ⚠ `~= false` so nil (every unit that does not opt out) still shows the row.
@@ -1633,7 +1640,7 @@ function DF:UpdateTestAuras(frame)
                     frame.debuffFactory:SetTestMax(debuffCount)
                 end
             elseif frame.debuffFactory then
-                frame.debuffFactory:GetFrame():Hide()
+                frame.debuffFactory:SetIntentShown(false)
                 frame.dfDebuffFactoryShown = false
             end
         end
@@ -3320,7 +3327,7 @@ function DF:UpdateTestDefensiveBar(frame, testData)
                 end
                 if frame.dfDefFactoryShown ~= true then
                     frame.dfDefFactoryShown = true
-                    h:GetFrame():Show()
+                    h:SetIntentShown(true)
                 end
             end
         elseif frame.defensiveFactory then
@@ -3328,7 +3335,7 @@ function DF:UpdateTestDefensiveBar(frame, testData)
             -- mode (or re-ticking the toggle) re-shows through the normal path.
             if frame.dfDefFactoryShown ~= false then
                 frame.dfDefFactoryShown = false
-                frame.defensiveFactory:GetFrame():Hide()
+                frame.defensiveFactory:SetIntentShown(false)
             end
         end
         return

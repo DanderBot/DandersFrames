@@ -315,6 +315,75 @@ local function setContainerProviderDeaf(c, deaf)
     DF:Debug(DBG, "provider deafening: %s", why)
 end
 
+-- ============================================================
+-- PER-CONTAINER SAMPLE SOURCE — capability probe
+-- ============================================================
+-- ☠ PROBE ONLY. It records what the live client allows and changes NO behaviour.
+-- Do not wire anything to the result until it has come back true in game.
+--
+-- The prize, if it works: SetUseEditModeSource is the ONE thing that decides
+-- whether a container reads Edit Mode's sample auras --
+--
+--     ManagedAuraContainerPrivateMixin:OnAuraDataProviderSwitch(useRealDataProvider)
+--         self:SetUseEditModeSource(not useRealDataProvider)
+--
+-- -- and it is per CONTAINER. Today test mode reaches it the only way we know
+-- works: C_UnitAuras.SwitchAuraDataProvider, which is GLOBAL, so it drags every
+-- other aura container in the client onto sample data with us. That is what makes
+-- Blizzard's buff and debuff frames misbehave under Unlock Mode, and in the other
+-- direction what costs Blizzard's Edit Mode preview its sample auras when we reset
+-- the provider to rescue our own rows. Calling the setter ourselves would remove the
+-- cause of both instead of living with them.
+--
+-- ⚠ Hiding Blizzard's frames for the duration was tried and REVERTED: they come back
+-- on sample data for another 5-10s after test mode exits, so the churn was only moved
+-- to a worse moment, and the cost was a real risk of stranding them hidden.
+--
+-- Why it is probed rather than assumed, either way:
+--   * It is a PRIVATE-mixin method, not a base widget method. Base methods are
+--     reachable on these forbidden-table objects (we already call SetScale,
+--     SetPoint, SetMouseClickEnabled); private ones are usually not exposed to
+--     addon code at all, so the field may simply be nil.
+--   * The container carries a forbidden aspect from birth, and we have already been
+--     refused on this exact object: UnregisterEvent gives "Function call not
+--     permitted on forbidden aspect 'EventRegistrations'" (proven in game, 68914).
+--     A setter that swings the container's data source is at least as likely gated.
+--
+-- ⚠ Only ever called while test mode is ON, and only with `true`. That is the value
+-- the global switch is about to force on this container anyway, so a SUCCESS is a
+-- no-op rather than a behaviour change we did not intend — and a refusal is the
+-- answer we came for. Never probe with `false`: on a container that had legitimately
+-- heard the switch that WOULD change what renders.
+function AuraContainer._probeEditModeSource(c)
+    if AuraContainer._editSourceOK ~= nil then return end   -- answered once, never retried
+    if not c or not AuraContainer._testMode then return end
+
+    if not c.SetUseEditModeSource then
+        AuraContainer._editSourceOK = false
+        AuraContainer._editSourceWhy = "SetUseEditModeSource not exposed on the container (private mixin)"
+        DF:Debug(DBG, "per-container sample source: %s", AuraContainer._editSourceWhy)
+        return
+    end
+
+    local ok, err = pcall(c.SetUseEditModeSource, c, true)
+    if not ok then
+        AuraContainer._editSourceOK = false
+        AuraContainer._editSourceWhy = "refused: " .. tostring(err)
+        DF:DebugWarn(DBG, "per-container sample source refused: %s", tostring(err))
+        return
+    end
+
+    -- Accepted without erroring. ⚠ NOT the same as "it took" — the forbidden-aspect
+    -- refusals we have seen are loud, but a silent no-op is the case that would
+    -- mislead us into ripping out a working workaround. There is no public getter to
+    -- confirm with, so this is recorded as promising-but-unconfirmed and wants a
+    -- visual check (do our rows fill with sample icons WITHOUT the global bounce?)
+    -- before anything depends on it.
+    AuraContainer._editSourceOK = true
+    AuraContainer._editSourceWhy = "accepted (UNCONFIRMED — no getter; verify rows fill without the global switch)"
+    DF:Debug(DBG, "per-container sample source: %s", AuraContainer._editSourceWhy)
+end
+
 -- TEST MODE (P5 hybrid, probe 33 live-proven). A real CustomAuraContainer reads real
 -- unit auras — nothing renders on a fabricated test unit. Instead of faking the
 -- CONTAINER we fake the DATA: the game's own sample provider
@@ -2069,13 +2138,31 @@ end
 -- match, or the bigger icon overlaps its neighbour: the button size and the flow's
 -- reserved cell are separate things. Returns the base table unchanged when there is
 -- nothing to scale, so callers can pass the result straight through.
-local function scaleGroupLayout(base, style)
-    local sc = style and style.scale
-    if not base or not sc or sc == 1 then return base end
+-- The flow-layout cell for ONE record: the container's shared cell plus whatever
+-- that record overrides. Three things can move it:
+--
+--   * scale — the important-debuff step. A bigger BUTTON does not widen its cell, so
+--     without this the scaled icon overlaps its neighbour.
+--   * size — a member carrying its own icon size (Aura Designer group members each do).
+--   * layoutIndex — ☠ WHERE MEMBER ORDER COMES FROM. Blizzard sorts the flow groups by
+--     layoutIndex and falls back to registration order only as a tiebreak
+--     (SortFlowLayoutDescriptions / GetEffectiveFlowLayoutIndex in
+--     Blizzard_CustomAuraContainer.lua). Setting it explicitly is what makes an AD group
+--     render in the order the user arranged it, instead of in whatever order we happened
+--     to register the members — and it keeps that order as members come and go, because
+--     an empty group contributes no elements and no spacing.
+local function recordGroupLayout(base, style)
+    if not base or not style then return base end
+    local sc, sz = style.scale, style.layout and style.layout.size
+    if (not sc or sc == 1) and not sz and style.layoutIndex == nil then return base end
     local out = {}
     for k, v in pairs(base) do out[k] = v end
-    if out.elementWidth then out.elementWidth = out.elementWidth * sc end
-    if out.elementHeight then out.elementHeight = out.elementHeight * sc end
+    if sz then out.elementWidth, out.elementHeight = sz, sz end
+    if sc and sc ~= 1 then
+        if out.elementWidth then out.elementWidth = out.elementWidth * sc end
+        if out.elementHeight then out.elementHeight = out.elementHeight * sc end
+    end
+    if style.layoutIndex ~= nil then out.layoutIndex = style.layoutIndex end
     return out
 end
 
@@ -2253,6 +2340,8 @@ function NativeBackend:build()
     -- this has to be re-applied here rather than once. Inverted while OUR test mode
     -- is on: that preview needs to hear the bounce.
     setContainerProviderDeaf(c, not AuraContainer._testMode)
+    -- Capability probe only; records the client's answer, changes nothing.
+    AuraContainer._probeEditModeSource(c)
     local isOverlay = config.mode == "overlay"
     local isMissing = config.mode == "missing"
     -- SINGLE-SLOT ROW. A row that can only ever show ONE icon declares an AuraSlot
@@ -2408,16 +2497,29 @@ function NativeBackend:build()
         -- actually sit still and position the badge. Capture it before the wipe and
         -- hand it to the first slots, so the preview shows both treatments side by side
         -- (styled slot 1-2, plain slot 3+) exactly as a live row would.
-        local testStyle
+        -- ☠ TWO SHAPES OF STYLED ROW, and they want opposite previews.
+        --
+        -- Important Debuffs styles ONE record among plain ones, so a single styled icon
+        -- against plain neighbours is both a direct A/B for positioning and an honest
+        -- picture of a live row, where importants are the minority. Styling several made
+        -- the preview look like the whole row was highlighted.
+        --
+        -- A LAYOUT GROUP is the mirror image: every record is styled and each one
+        -- differently, because each is a member with its own indicator look. Picking
+        -- "the first styled record" there would paint member 1's style on one icon and
+        -- leave the rest plain — a preview that differs from live in RENDERING rather
+        -- than in data, which is the one thing a preview may never do.
+        --
+        -- So: all records styled and more than one => per-slot, slot k wears member k's
+        -- style. Otherwise the original single-styled-slot behaviour, unchanged.
+        local testStyles, allStyled = {}, true
         for _, r in ipairs(filters) do
-            if r.style then testStyle = r.style break end
+            if r.style then testStyles[#testStyles + 1] = r.style else allStyled = false end
         end
-        -- ONE styled slot only. Styling several made the preview look like the whole row
-        -- was highlighted; a single styled icon against plain neighbours is both a direct
-        -- A/B for positioning and an honest picture of a live row, where importants are
-        -- the minority.
-        local testStyleSlots = testStyle and math.min(1, maxCount) or 0
-        local testStyleLayout = scaleGroupLayout(groupLayout, testStyle)
+        local perSlotStyles = (allStyled and #testStyles > 1) and testStyles or nil
+        local testStyle = testStyles[1]
+        local testStyleSlots = (not perSlotStyles) and (testStyle and math.min(1, maxCount) or 0) or 0
+        local testStyleLayout = recordGroupLayout(groupLayout, testStyle)
         filters = {}   -- the normal declaration loop below is skipped
         -- ☠ ONE GROUP PER PREVIEW SLOT, maxFrameCount = 1, fixedIndex = k. RESTORED
         -- 2026-08-06 after the two-group split broke the preview outright.
@@ -2473,18 +2575,22 @@ function NativeBackend:build()
         else
             for k = 1, maxCount do
                 local key = "dfTest" .. k
-                local styled = (k <= testStyleSlots) or nil
+                -- Per-slot style when the row is a layout group (member k's own look),
+                -- else the single-styled-slot A/B. Nil for a plain slot either way.
+                local slotStyle = perSlotStyles and perSlotStyles[k]
+                    or ((k <= testStyleSlots) and testStyle or nil)
+                local slotLayout = perSlotStyles and recordGroupLayout(groupLayout, slotStyle)
+                    or ((k <= testStyleSlots) and testStyleLayout or groupLayout)
                 -- pcall(fn, args...) rather than pcall(function() ... end): no wrapper
                 -- closure per group. Protection is unchanged — AddAuraGroup asserts.
                 local okGroup, err = pcall(c.AddAuraGroup, c, key, category, {
                     maxFrameCount = 1,
-                    initializeFrame = handle:_makeInitializeFrame(handle._gen, k, nil,
-                        styled and testStyle or nil),
-                    layout = styled and testStyleLayout or groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
+                    initializeFrame = handle:_makeInitializeFrame(handle._gen, k, nil, slotStyle),
+                    layout = slotLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
                 })
                 if okGroup then
                     self.groupKeys[#self.groupKeys + 1] = key
-                    self.groupStyles[key] = styled and testStyle or nil
+                    self.groupStyles[key] = slotStyle
                 else
                     DF:DebugWarn(DBG, "test group failed: %s", tostring(err))
                 end
@@ -2552,7 +2658,7 @@ function NativeBackend:build()
                 local groupInit, recLayout = initFn, groupLayout
                 if rec.style or rec.onInit then
                     groupInit = handle:_makeInitializeFrame(handle._gen, nil, rec.onInit, rec.style)
-                    recLayout = scaleGroupLayout(groupLayout, rec.style)
+                    recLayout = recordGroupLayout(groupLayout, rec.style)
                 end
                 local okGroup, err = pcall(c.AddAuraGroup, c, key, f,
                     { maxFrameCount = maxCount, initializeFrame = groupInit,
@@ -2612,6 +2718,72 @@ function NativeBackend:build()
 
     DF:Debug(DBG, "built (native) unit=%s mode=%s groups=%d",
         tostring(config.unit), tostring(config.mode or "row"), #filters)
+
+    -- ★ WHAT DID EACH GROUP ACTUALLY BUILD WITH? The line above reports only the
+    -- group COUNT, which cannot tell a correctly filtered row from one that fell
+    -- through FilterRegistry:ResolveSelection's "nothing selected -> show
+    -- everything" fallback -- that path sets NO includeSpellIDs at all and renders
+    -- every helpful aura. It is the shape of the v4->v5 first-login reports ("all
+    -- buffs until I toggle something"), and it is invisible in a log that says
+    -- groups=1 either way. include=none vs include=<n> is the whole diagnosis.
+    --   ⚠ Behind DebugActive, not DF:Debug alone: counting the maps is O(entries)
+    -- and a caller's arguments are evaluated BEFORE Debug can short-circuit, so an
+    -- unguarded count would cost on every build with logging off.
+    --
+    -- ⚠ NOISE BUDGET. Containers are per FRAME, so a 40-man rebuild would emit
+    -- several hundred of these and push everything else out of a 10k-line log --
+    -- and AURACONTAINER is not a `noisy` category, so it is ON for anyone who turns
+    -- debug on for an unrelated bug. The detail is therefore limited to the cases
+    -- that are actually diagnostic:
+    --   * the PLAYER's own frame — always small, always the one being asked about;
+    --   * ANY unit whose row looks WRONG — a HELPFUL pool with no include map is the
+    --     fail-open signature this exists to catch, so it must never be suppressed.
+    -- Everything else keeps the one-line summary above.
+    --   ☠ The DebugActive gate comes FIRST, before the anomaly scan — that scan is
+    -- cheap but it is still work, and running it on every build with logging off is
+    -- exactly the cost this whole block is guarded to avoid.
+    if DF.DebugActive and DF:DebugActive(DBG) then
+        -- ☠ MIRROR THE ENGINE'S RESOLUTION ORDER wherever this reads a group's
+        -- filters: `rec.candidateFilters or config.candidateFilters`. Reading the
+        -- record alone was a real blind spot — the BUFF row passes a plain filter
+        -- STRING plus CONFIG-LEVEL filters, so it logged "no-cf" and looked exactly
+        -- like the unfiltered bug being hunted, on the row that matters most. The
+        -- DEBUFF row builds per-record filters, so that half read correctly and
+        -- disguised the gap.
+        local function cfOf(rec) return rec.candidateFilters or config.candidateFilters end
+
+        -- Is this build worth the full breakdown? (See the noise budget above.)
+        local detail = (config.unit == "player")
+        if not detail then
+            for _, rec in ipairs(filters) do
+                local cf = cfOf(rec)
+                if type(rec.f) == "string" and rec.f:find("HELPFUL", 1, true)
+                    and not (cf and cf.includeSpellIDs) then
+                    detail = true   -- the fail-open signature; never suppress it
+                    break
+                end
+            end
+        end
+
+        if detail then
+            local function countOf(m)
+                if type(m) ~= "table" then return "none" end
+                local c = 0
+                for _ in pairs(m) do c = c + 1 end
+                return tostring(c)
+            end
+            for gi, rec in ipairs(filters) do
+                local cf  = cfOf(rec)
+                -- `cf=` names which source won: rec / cfg / - (neither).
+                local src = rec.candidateFilters and "rec"
+                    or (config.candidateFilters and "cfg" or "-")
+                DF:Debug(DBG, "  group %d key=%s filter=%s cf=%s include=%s exclude=%s",
+                    gi, tostring(rec.key), tostring(rec.f), src,
+                    cf and countOf(cf.includeSpellIDs) or "no-cf",
+                    cf and countOf(cf.excludeSpellIDs) or "no-cf")
+            end
+        end
+    end
 
     -- Initial identity-gate state for this build's unit (see _applyIdentityGate);
     -- the module watcher re-evaluates on faction/phase/roster/world changes.
@@ -2675,7 +2847,7 @@ function NativeBackend:applyLayout()
             -- bigger icon overlapped its neighbour — while a full rebuild looked right,
             -- because AddAuraGroup got the scaled layout there. Button size and reserved
             -- cell are separate things and both have to be re-pushed.
-            local gl = scaleGroupLayout(groupLayout, self.groupStyles and self.groupStyles[key])
+            local gl = recordGroupLayout(groupLayout, self.groupStyles and self.groupStyles[key])
             pcall(c.SetAuraGroupLayout, c, key, gl)
         end
     end
@@ -3038,11 +3210,12 @@ function Handle:_slotCount()
     end
     return self.config.max or 1
 end
--- Forward-declared: applyRecordStyle is defined further down (next to the
--- initializeFrame factory it was written for) but _acceptSlot below must call it.
--- Without this declaration the name inside _acceptSlot would resolve to a GLOBAL,
+-- Forward-declared: both are defined further down (next to the initializeFrame
+-- factory they were written for) but _acceptSlot below must call them.
+-- Without this declaration the names inside _acceptSlot would resolve to GLOBALS,
 -- read nil at runtime and the call would error — legal Lua that parses clean.
 local applyRecordStyle
+local styleConfigFor
 
 function Handle:_acceptSlot(slot, index, recStyle)
     self.buttons[index] = slot                 -- cache first (mirror of the pre-split order)
@@ -3053,19 +3226,34 @@ function Handle:_acceptSlot(slot, index, recStyle)
     -- override survive — before this, toggling auras off/on or dragging the Size Step
     -- slider silently reverted the important icons to normal size until a full rebuild.
     if recStyle ~= nil then slot.dfImpRecStyle = recStyle end
-    styleButton_regions(slot, self.config)     -- source-agnostic region creation/styling
+    -- Member records style from their OWN config view; everything else from the
+    -- container's. One pass either way — see styleConfigFor.
+    styleButton_regions(slot, styleConfigFor(self, slot))   -- source-agnostic region creation/styling
     applyRecordStyle(slot, self, slot.dfImpRecStyle)
 end
 function Handle:_bindNativeSlot(slot)
-    bindNative(slot, self.config)              -- native setters (native slots only)
+    -- ☠ THE RECORD'S CONFIG HERE TOO, not the container's. The duration FORMATTER is
+    -- bound natively, so colour-by-time, the format choice and the hide-above band all
+    -- arrive through this call — bind from the shared config and a member's icons
+    -- silently inherit the GROUP's duration spec while their regions correctly carry
+    -- their own. Styling and binding are two halves of one button and must read the
+    -- same config, or the button is half-dressed by each.
+    bindNative(slot, styleConfigFor(self, slot))   -- native setters (native slots only)
 end
 -- Countdown text for the test preview. The row's OWN duration formatter renders
 -- it whenever one is configured — the same object the live native binding uses —
 -- so format (Number/Short/Full), the colour-by-time buckets (|cff escapes) and
 -- the hide-above-threshold blank band all mirror live exactly. Plain fallback
 -- ("14s"/"10m") only when the row runs Blizzard's default formatting.
-local function formatTestDuration(handle, rem)
-    local durSpec = handle.config.style and handle.config.style.duration
+-- `button` is optional but should always be passed where one exists: the preview
+-- countdown must use THAT button's duration spec, not the container's. Colour by
+-- time lives in the formatter, so reading the shared spec here showed a layout
+-- group's members counting down in the group's colours instead of their own — the
+-- test-mode twin of the native-binding split, one layer along, because the preview
+-- PAINTS its text where live BINDS it.
+local function formatTestDuration(handle, rem, button)
+    local cfg = (button and styleConfigFor(handle, button)) or handle.config
+    local durSpec = cfg.style and cfg.style.duration
     local f = durSpec and durSpec.formatter
     if f then
         local ok, s
@@ -3132,7 +3320,12 @@ end
 
 local function armTestDuration(handle, slot, d, offset)
     if not (C_DurationUtil and C_DurationUtil.CreateDuration) then return false end
-    local cfg = handle.config
+    -- ☠ THE SLOT'S OWN CONFIG. This is what actually renders the test countdown —
+    -- formatTestDuration below is only the fallback for a slot that fails to arm — so
+    -- reading the container's shared style here is what left layout-group members
+    -- counting down in white: the colour curve is part of the member's duration spec
+    -- and never reached the binding.
+    local cfg = styleConfigFor(handle, slot)
     local durSpec = (cfg.style and cfg.style.duration) or {}
     local barSpec = (cfg.style and cfg.style.bar) or {}
     local ok, err = pcall(function()
@@ -3289,7 +3482,10 @@ function Handle:_paintTestSlot(slot, index)
         end
     end
 
-    local iconSpec = self.config.style and self.config.style.icon
+    -- Per-slot too: staticSpellID is a per-indicator icon override, so a member that
+    -- pins its own art must be read from its own style, not the group's.
+    local iconCfg = styleConfigFor(self, slot)
+    local iconSpec = iconCfg.style and iconCfg.style.icon
     if slot.dfIcon and not (iconSpec and iconSpec.staticSpellID) then
         -- The GAME's icon for the validated spell (hand-maintained icon paths
         -- drift from the real art); the entry's hardcoded icon is the fallback.
@@ -3348,7 +3544,7 @@ function Handle:_paintTestSlot(slot, index)
                 -- change-detection compares against the live string (a recycled
                 -- button would otherwise carry a stale one across the rebuild).
                 if slot.dfDur then
-                    local s = formatTestDuration(self, d - offset)
+                    local s = formatTestDuration(self, d - offset, slot)
                     slot.dfDur:SetText(s)
                     slot._dfTestText, slot._dfTestTextAt = s, GetTime()
                 end
@@ -3376,11 +3572,12 @@ function Handle:_paintTestSlot(slot, index)
                 -- route. zeroText set (the "" default) = that text verbatim; unset
                 -- (user opted out) = the formatter's zero output, "0" fallback —
                 -- best-effort mimic of Blizzard's default zero-duration rendering.
-                local durSpec = self.config.style and self.config.style.duration
+                local zCfg = styleConfigFor(self, slot)
+                local durSpec = zCfg.style and zCfg.style.duration
                 if durSpec and durSpec.zeroText ~= nil then
                     slot.dfDur:SetText(durSpec.zeroText)
                 else
-                    local zt = formatTestDuration(self, 0)
+                    local zt = formatTestDuration(self, 0, slot)
                     slot.dfDur:SetText(zt ~= "" and zt or "0")
                 end
             end
@@ -3551,7 +3748,7 @@ function AuraContainer._startTestTicker()
                         end
                         if b.dfDur and (not textIv or not b._dfTestTextAt
                             or (now - b._dfTestTextAt) >= textIv) then
-                            local s = formatTestDuration(h, rem)
+                            local s = formatTestDuration(h, rem, b)
                             if s ~= b._dfTestText then
                                 b.dfDur:SetText(s)
                                 b._dfTestText = s
@@ -3664,6 +3861,54 @@ end
 -- NOTE: assigns the local forward-declared above _acceptSlot (which calls this on every
 -- restyle). Deliberately NOT `local function` — that would shadow the forward local and
 -- leave _acceptSlot calling a nil global.
+-- ============================================================
+-- PER-RECORD CONFIG VIEW  — full per-member styling in ONE container
+-- ============================================================
+-- A record that carries `button` (a complete style table) is styled by the SHARED
+-- styler against a config view of its own, rather than by a bespoke override list.
+-- That is what makes per-member styling total instead of partial: everything
+-- styleButton_regions can express, a member can express, automatically and forever
+-- — including anything added to it later.
+--
+-- ⚠ Complete by construction, not by hopeful copying. styleButton_regions reads
+-- exactly five config fields: style, layout, mode, unit, adBorderAnim. The first
+-- two are what a member overrides; the rest are container-wide. So an __index
+-- proxy over the real config, with those two swapped, is the whole substitution —
+-- a hand-built partial copy would silently drift the moment the styler reads
+-- something new.
+--
+-- Memoised on the record: these are rebuilt on every restyle of every button, and
+-- allocating a table per button per pass would churn the hot path.
+local function recordConfigView(handle, recStyle)
+    local view = recStyle._cfgView
+    if view and view._src == handle.config then return view end
+    -- ⚠ layout only when the record OWNS one. Materialising the container's
+    -- layout here would freeze it into the memo: ApplyStyle swaps config.layout
+    -- in place (same config table, so the _src identity check never fires), and
+    -- the view would keep styling from the old geometry. Leaving the key nil
+    -- lets __index read the live value on every access.
+    view = setmetatable({
+        _src   = handle.config,
+        style  = recStyle.button,
+        layout = recStyle.layout,
+    }, { __index = handle.config })
+    recStyle._cfgView = view
+    return view
+end
+
+-- The config a button should be styled FROM: its record's view when the record
+-- carries a full style, else the container's own.
+--
+-- ☠ Used INSTEAD of config.style, never after it. Styling once with the shared
+-- config and then re-styling with the member's would leave regions the container
+-- wanted and the member did not — a duration fontstring on a member that shows no
+-- duration, for instance. One pass, correct config.
+function styleConfigFor(handle, button)   -- assigns the forward-declared local
+    local rs = button and button.dfImpRecStyle
+    if rs and rs.button then return recordConfigView(handle, rs) end
+    return handle.config
+end
+
 function applyRecordStyle(button, handle, recStyle)
     if not recStyle then return end
 
@@ -3940,6 +4185,21 @@ function Handle:SetShown(shown)
     self:_applyVisibility()
     self:_applyEnabled(shown)
 end
+-- Visibility INTENT only — records the consumer's wish and applies it, with NO
+-- enable op. Two reasons this exists instead of SetShown:
+--   * ☠ SetShown's _applyEnabled queues an "enable" op in combat, and a queued
+--     enable upgrades a queued retarget into a full rebuild — a frame leak (see
+--     DriveDefensiveFactory's header in Features/Auras.lua). The drives hide/show
+--     per aura event, so they must never queue backend ops.
+--   * A raw GetFrame():Hide() leaves _intendedShown reading "wants shown", and
+--     the identity-gate sweep's _applyVisibility then RESURRECTS the row on the
+--     next roster/faction/phase/target event — disabled buff bars and defensive
+--     icons popping back with live auras (reported on 5.0.0). Intent recorded
+--     here survives every sweep.
+function Handle:SetIntentShown(shown)
+    self._intendedShown = shown and true or false
+    self:_applyVisibility()
+end
 
 -- Single writer for the window's shown state (consumer intent composed with the
 -- identity gate). NEVER flip visibility while the cursor is inside the window:
@@ -4005,18 +4265,60 @@ end
 -- row is worse than one garbage frame. Always recomputes (no vulnerable
 -- early-out) so a handle rebuilt onto a non-vulnerable filter clears a stale
 -- hidden flag instead of staying hidden forever.
+-- ☠ THE GATE FAILS OPEN AND THE ENGINE DOES NOT RE-PARSE ON ITS OWN.
+-- A non-assistable unit renders EVERY helpful aura (includeSpellIDs is skipped
+-- wholesale — see filterVulnerableToIdentityGate). The engine only re-parses when
+-- an aura CHANGES, so once assistability comes back the unfiltered pool just STAYS.
+-- That is precisely why the only workarounds users ever found (toggling test mode,
+-- toggling any filter) were pure REBUILDS.
+--
+-- Live repro, 100%, Krathe 2026-08-12: watch an in-game cinematic. It flips
+-- UNIT_FACTION so you stop being assistable, every filtered buff pool opens up, and
+-- it persists after the cinematic ends. 12.1 forces one on first login — which is
+-- what produced the "unfiltered buffs after upgrading" reports that were chased as a
+-- v4→v5 migration bug for two days. It is not a migration bug and it hits clean v5
+-- profiles too. Corroborated on the addon dev Discord (plusmouse): "UNIT_FACTION
+-- seems to change, so the unit ceases to be assistable".
+--
+-- ☠ We ALREADY registered UNIT_FACTION (see idGateWatch) — the event was never the
+-- gap. The sweep just recomputed a hide flag and never re-parsed.
+--
+-- Bounce on the false→true EDGE only. A bounce every sweep would re-parse every
+-- vulnerable handle on every roster/name/phase event. nil (first computation) is not
+-- an edge — but a container built DURING a cinematic records false, so the exit edge
+-- still fires, which is the first-login case.
+-- Re-entrancy: the flag is stored BEFORE Refresh(), so a re-entrant gate pass sees
+-- true and cannot bounce again.
+function Handle:_noteGateRecovery(can)
+    local was = self._idGateAssist
+    self._idGateAssist = can and true or false
+    if was == false and self._idGateAssist then
+        DF:Debug("AURACONTAINER", "gate recovered for unit=%s - re-parsing (pool was fail-open)",
+            tostring(self.config and self.config.unit))
+        self:Refresh()
+    end
+end
+
 function Handle:_applyIdentityGate()
     local hide = false
     if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
         local unit = self.config and self.config.unit
-        if type(unit) == "string" and unit ~= "player" and UnitExists(unit) then
+        -- ☠ `unit ~= "player"` USED TO SIT ON THIS LINE, so your own frame was never
+        -- probed at all. That exemption is right about HIDING (a frame you cannot see
+        -- during a cinematic needs no hiding, and hiding your own frame is a worse
+        -- failure than one garbage row) — but it also meant nothing ever NOTICED your
+        -- own pool falling open, so it never got re-parsed. The exemption now sits on
+        -- the two hide branches instead: probe always, hide only others.
+        if type(unit) == "string" and UnitExists(unit) then
+            local isOwn = (unit == "player")
             -- (1) Cross-faction / non-assistable: includeSpellIDs / category tokens
             --     fail open. Signal: UnitCanAssist.
             if self._idGateVulnerable then
                 local ok, can = pcall(UnitCanAssist, "player", unit)
                 if ok then
                     if issecretvalue and issecretvalue(can) then can = true end
-                    if not can then hide = true end
+                    self:_noteGateRecovery(can)
+                    if not can and not isOwn then hide = true end
                 end
             end
             -- (2) Not in your visible world (different instance/phase): the
@@ -4024,7 +4326,7 @@ function Handle:_applyIdentityGate()
             --     fails open — the engine can't attribute a caster. Signal: UnitIsVisible.
             --     Fail-safe (matches the assist gate): only hide on a definite,
             --     non-secret false; any doubt (pcall fail / secret) SHOWS.
-            if not hide and self._idGateSourceRelative then
+            if not hide and not isOwn and self._idGateSourceRelative then
                 local okv, vis = pcall(UnitIsVisible, unit)
                 if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
                     hide = true
@@ -4043,9 +4345,15 @@ function Handle:_applyIdentityGate()
             tostring(self.config and self.config.unit),
             tostring(self._idGateVulnerable or false),
             tostring(self._idGateSourceRelative or false))
+        self._idGateHidden = newHidden
+        -- ⚠ TRANSITION ONLY. The sweep runs on every target change / roster event /
+        -- loading screen; applying visibility unconditionally made every pass a
+        -- frame-op on every vulnerable handle — and worse, it was the resurrection
+        -- path for rows a consumer had hidden raw (before SetIntentShown existed).
+        -- A stable verdict now touches nothing. The rebuilt-onto-non-vulnerable
+        -- case still clears its stale flag: that IS a transition.
+        self:_applyVisibility()
     end
-    self._idGateHidden = newHidden
-    self:_applyVisibility()
 end
 
 -- Enable/disable the container's parse+bind. ★ 68914 re-verified: SetEnabled is NOT
@@ -4135,7 +4443,11 @@ function Handle:ApplyStyle(style, layout)
     end
     for i, b in ipairs(self.buttons) do
         local ok, err = pcall(function()
-            styleButton_regions(b, self.config)
+            -- Member buttons restyle from their own record view here too, or an
+            -- ApplyStyle would repaint them with the container's shared style and
+            -- silently undo per-member styling — the same revert that used to eat the
+            -- important-debuff size step, one path along.
+            styleButton_regions(b, styleConfigFor(self, b))
             -- Per-record overrides, re-applied from the button's stash. This path calls
             -- styleButton_regions DIRECTLY rather than going through _acceptSlot, so it
             -- does not inherit the re-apply there — and styleButton_regions always resets
@@ -4166,7 +4478,11 @@ function Handle:ApplyStyle(style, layout)
                     -- layout order, so recomputing it here would reshuffle the preview.
                     self:_paintTestSlot(b, b._dfTestIndex or i)
                 else
-                    bindNative(b, self.config)
+                    -- Record view here as well: an ApplyStyle re-binds the native
+                    -- setters, so binding from the shared config would undo a member's
+                    -- duration spec on the next restyle even though the build got it
+                    -- right. Same pairing as _bindNativeSlot.
+                    bindNative(b, styleConfigFor(self, b))
                 end
             end
         end)
@@ -4494,6 +4810,8 @@ function Handle:_readoptParked()
     -- Re-applied per adoption for the same reason :build() re-applies it per build --
     -- the deafening lives on the container object and a park does not preserve intent.
     setContainerProviderDeaf(c, not AuraContainer._testMode)
+    -- Capability probe only; records the client's answer, changes nothing.
+    AuraContainer._probeEditModeSource(c)
 
     if config.mode == "overlay" then
         pcall(function() c:SetAllPoints(self.frame) end)
@@ -5177,6 +5495,8 @@ local function ensureOwner(frame, unit)
         return nil
     end
     setContainerProviderDeaf(c, not AuraContainer._testMode)
+    -- Capability probe only; records the client's answer, changes nothing.
+    AuraContainer._probeEditModeSource(c)
     pcall(c.SetAllPoints, c, anchor)
     if type(unit) == "string" then pcall(c.SetUnit, c, unit) end
 
@@ -5515,19 +5835,57 @@ end
 -- two gates that disagree are worse than one. What differs is the ACTUATION: a Handle
 -- hides its frame, a slot has no frame of its own, so it parks. Parking is already the
 -- right primitive (an empty filter string matches nothing, proven in game).
+-- Slot-side twin of Handle:_noteGateRecovery — same edge, same reason (read that
+-- header for the cinematic/UNIT_FACTION mechanism). The ACTUATION differs, as it does
+-- for the gate itself: a slot has no backend to bounce.
+--
+-- ☠ AND IT IS THE CANDIDATES THAT MUST BE RE-PUSHED, NOT THE FILTER STRING.
+-- `includeSpellIDs` is a CANDIDATE filter, not part of the filter string — so the
+-- narrowing the fail-open skipped does not live in what _pushFilter sends, and
+-- re-pushing an unchanged string need not reparse at all. First cut of this fix did
+-- exactly that and one placed AD indicator kept rendering open (Krathe, in game);
+-- the buff bars were fixed because the Handle path bounces the whole backend.
+-- SetAuraSlotCandidateFilters has NO engine-side equality check — every call clears
+-- the slot's candidates and reparses — which is precisely the bounce wanted here.
+--
+-- For a slot the gate DID hide, the transition below already re-pushes the string, so
+-- this edge is what covers the case the gate never hides at all: your own frame.
+function SlotHandle:_noteGateRecovery(can)
+    local was = self._idGateAssist
+    self._idGateAssist = can and true or false
+    if was ~= false or not self._idGateAssist then return end
+    local c = self.owner and self.owner.container
+    if not c or self._lastCandidateFilters == nil then return end
+    DF:Debug(DBG, "slot gate recovered for key=%s unit=%s - re-parsing (pool was fail-open)",
+        tostring(self.key), tostring(self.owner and self.owner.unit))
+    -- ☠ No native tuning setter runs in lockdown (see ApplyTuning). Queue the standard
+    -- replay, which re-pushes candidates, verdict and filter together on the way out.
+    if InCombatLockdown() then
+        self._pendingTuning = true
+        registerSlotRegen(self)
+        return
+    end
+    pcall(c.SetAuraSlotCandidateFilters, c, self.key, self._lastCandidateFilters)
+end
+
 function SlotHandle:_applyIdentityGate()
     local hide = false
     if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
         local unit = self.owner and self.owner.unit
-        if type(unit) == "string" and unit ~= "player" and UnitExists(unit) then
+        -- ☠ See Handle:_applyIdentityGate — the `unit ~= "player"` exemption moved off
+        -- this line onto the hide branches, so the player's own slot is PROBED (and so
+        -- can be re-parsed on recovery) while still never being hidden.
+        if type(unit) == "string" and UnitExists(unit) then
+            local isOwn = (unit == "player")
             if self._idGateVulnerable then
                 local ok, can = pcall(UnitCanAssist, "player", unit)
                 if ok then
                     if issecretvalue and issecretvalue(can) then can = true end
-                    if not can then hide = true end
+                    self:_noteGateRecovery(can)
+                    if not can and not isOwn then hide = true end
                 end
             end
-            if not hide and self._idGateSourceRelative then
+            if not hide and not isOwn and self._idGateSourceRelative then
                 local okv, vis = pcall(UnitIsVisible, unit)
                 if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
                     hide = true

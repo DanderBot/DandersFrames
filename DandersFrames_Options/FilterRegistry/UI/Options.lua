@@ -554,6 +554,12 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
     local selKind = "preset" -- "preset" | "custom"
     local selKey = R.Categories[1] and R.Categories[1].key
     local searchText = "" -- lowercased query
+    -- Records whose spell-ID children are showing. VIEW state only, never saved:
+    -- an expander is where you are looking, not what you configured. Keyed by
+    -- rec.id, so a record expanded under one filter stays expanded when the same
+    -- spell appears under another -- which is the point, since the mute it edits
+    -- is filter-independent too.
+    local expandedRecords = {}
 
     local RefreshLeft, RefreshRight, RefreshAll, UpdateActionStates, OpenPicker -- forward declarations
 
@@ -2380,16 +2386,52 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         -- own tooltip instead. That is the one place this change adds a hover rather
         -- than removing a button.
         hot:SetScript("OnEnter", function()
+            local lines
             local ids = row._infoIDs and format(L["Spell IDs: %s"], row._infoIDs)
+            if ids then lines = { ids } end
+            -- _infoNote carries a per-row explanation the list can't show inline —
+            -- currently the "you can't untick the last ID" rule, so the refusal has
+            -- somewhere to be read BEFORE it is hit.
+            if row._infoNote then
+                lines = lines or {}
+                lines[#lines + 1] = row._infoNote
+            end
             if row._spellID and not row._raw then
-                ShowSpellTooltip(row, row._spellID, row._infoTitle, SpellRowStillShows,
-                                 ids and { ids } or nil)
+                ShowSpellTooltip(row, row._spellID, row._infoTitle, SpellRowStillShows, lines)
             elseif row._infoTitle then
-                GUI:ShowTooltip(row, { title = row._infoTitle, lines = ids and { ids } or nil })
+                GUI:ShowTooltip(row, { title = row._infoTitle, lines = lines })
             end
         end)
         hot:SetScript("OnLeave", function() GUI:HideTooltip() end)
         row.hot = hot
+
+        -- The "+N" chip is a CONTROL on multi-ID records: it opens the record into one
+        -- row per spell ID so a single ID can be untracked. It sat here as inert text
+        -- announcing "this row is 2 spell IDs" and offering nothing to do about it.
+        --
+        -- ⚠ MOTION propagates, CLICKS do not — the opposite split to row.hot above, and
+        -- both halves matter. Without motion propagation this frame swallows the row's
+        -- OnEnter/OnLeave and the hover wash drops out from under the cursor whenever it
+        -- crosses the chip. Without click ISOLATION the row's own click fires too, so
+        -- opening the record would also toggle the whole spell out of the preset.
+        -- (No SetPropagateMouseClicks call at all — not propagating is the default,
+        -- which also sidesteps the 12.1 protection row.hot needs its combat guard for.)
+        -- Width is set per BIND from the chip's rendered string, same reason row.hot's
+        -- is: the chip's text changes with state ("+1" / "1 of 2 IDs").
+        local chipHot = CreateFrame("Button", nil, row)
+        chipHot:SetPoint("TOP", row, "TOP", 0, 0)
+        chipHot:SetPoint("BOTTOM", row, "BOTTOM", 0, 0)
+        chipHot:EnableMouse(true)
+        if chipHot.SetPropagateMouseMotion then chipHot:SetPropagateMouseMotion(true) end
+        chipHot:SetScript("OnClick", function()
+            if row._onChip then row._onChip() end
+        end)
+        chipHot:SetScript("OnEnter", function(self)
+            if not row._chipTip then return end
+            GUI:ShowTooltip(self, { title = row._infoTitle, lines = { row._chipTip } })
+        end)
+        chipHot:SetScript("OnLeave", function() GUI:HideTooltip() end)
+        row.chipHot = chipHot
 
         -- Row click mirrors the action button in the preset view
         row:SetScript("OnClick", function(self)
@@ -2418,9 +2460,15 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         -- The blacklist's toggle writes a different store (its own per-mode set, not
         -- R:SetSpellEnabled) but means the same thing to the reader, which is why it
         -- can share the control.
-        local showCheck = isPreset
+        -- Child rows are one spell ID of a multi-ID record, opened from the parent's
+        -- chip. They always carry a checkbox whichever list they are in: it means "this
+        -- ID is tracked", which is a statement about the SPELL and reads the same under
+        -- a preset and a custom filter. Indented from the left so the nesting is
+        -- structural rather than a colour cue.
+        local isChild = item.child and true or false
+        local showCheck = isPreset or isChild
         row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", 0, -y)
+        row:SetPoint("TOPLEFT", isChild and 18 or 0, -y)
         row:SetPoint("TOPRIGHT", 0, -y)
 
         -- Release any proxied hover left over from the spell this pool slot was
@@ -2450,6 +2498,45 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         -- tells us where the visible label ends. 32 = 6 left inset + 20 icon + 6 gap.
         row.hot:SetWidth(32 + (row.name:GetStringWidth() or 0) + 4)
 
+        -- Chip hotspot: live only on a parent row that HAS a chip to click. A child's
+        -- chip is its own spell ID — a label, not a control — and the raw rows' chip is
+        -- a caption, so both leave it hidden rather than offering a dead click target.
+        local chipIsControl = (not isChild) and item.rec
+            and item.rec.alts and #item.rec.alts > 0
+        -- A control has to LOOK unlike inert text, or it stays undiscovered — which is
+        -- how this shipped: the chip announced "2 spell IDs" in the same grey as the
+        -- captions and offered nothing. Narrowed records take the theme colour so a
+        -- record that no longer tracks everything reads at a glance.
+        if chipIsControl then
+            if R:IsRecordNarrowed(item.rec) then
+                local tc = (GUI.GetThemeColor and GUI.GetThemeColor()) or { r = 1, g = 0.82, b = 0 }
+                row.chip:SetTextColor(tc.r, tc.g, tc.b)
+            else
+                row.chip:SetTextColor(0.68, 0.68, 0.68)
+            end
+        else
+            row.chip:SetTextColor(0.5, 0.5, 0.5)
+        end
+
+        row.chipHot:SetShown(chipIsControl and true or false)
+        if chipIsControl then
+            row.chipHot:ClearAllPoints()
+            row.chipHot:SetPoint("TOP", row, "TOP", 0, 0)
+            row.chipHot:SetPoint("BOTTOM", row, "BOTTOM", 0, 0)
+            row.chipHot:SetPoint("RIGHT", showCheck and row.check or row.remove, "LEFT", -2, 0)
+            row.chipHot:SetWidth((row.chip:GetStringWidth() or 0) + 8)
+            local chipRec = item.rec
+            row._onChip = function()
+                expandedRecords[chipRec.id] = (not expandedRecords[chipRec.id]) or nil
+                RefreshRight()
+            end
+            row._chipTip = format(L["This spell has %d spell IDs. Click to choose which ones to track."],
+                R:RecordIDCount(chipRec))
+        else
+            row._onChip = nil
+            row._chipTip = nil
+        end
+
         row._spellID = item.tooltipID
         row._raw = item.raw
         row._rowToggles = showCheck
@@ -2458,7 +2545,14 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         -- the raw ID otherwise. Rebuilt on every bind like the rest.
         row._infoTitle = item.name
         local rec = item.rec
-        if rec and rec.alts and #rec.alts > 0 then
+        row._infoNote = item.lastLive
+            and L["At least one spell ID must stay ticked. Untick the spell itself to stop tracking it."]
+            or nil
+        if isChild then
+            -- A child row IS one spell ID; listing its siblings here would repeat the
+            -- parent's line and read as though this row covered them.
+            row._infoIDs = R:FormatSpellID(item.id)
+        elseif rec and rec.alts and #rec.alts > 0 then
             row._infoIDs = rec.id .. ", " .. table.concat(rec.alts, ", ")
         else
             row._infoIDs = tostring(rec and rec.id or item.id)
@@ -2478,15 +2572,32 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
         if showCheck then
             row.check:SetChecked(item.enabled and true or false)
-            -- One toggle shape left: a preset's spell in or out of that preset. The
-            -- inverse-polarity branch belonged to the Optional Debuffs list, which
-            -- wrote a hidden-set rather than the registry; it went to the Debuff Bar
-            -- page along with the list.
-            local key, rec = selKey, item.rec
-            row._onAction = function()
-                R:SetSpellEnabled(key, rec, not R:IsSpellEnabled(key, rec))
-                DirectFilterChangedProxy()
-                RefreshAll()
+            if isChild then
+                -- Tracks / untracks ONE spell ID of the record. Filter-independent by
+                -- design (see the registry's muted-ID section), so this same tick
+                -- governs the spell wherever it is pulled in — which is why the parent
+                -- chip reports "1 of 2 IDs" in every list rather than only this one.
+                local childRec, sid, tracked = item.rec, item.id, item.enabled
+                row._onAction = function()
+                    -- Refused on the last tracked ID (SetSpellIDMuted's guard): a record
+                    -- with every ID muted still reads as tracked and matches nothing.
+                    -- The row's own tooltip already carries the reason, so a refusal is
+                    -- a no-op rather than a tick that bounces back unexplained.
+                    if not R:SetSpellIDMuted(childRec, sid, tracked) then return end
+                    DirectFilterChangedProxy()
+                    RefreshAll()
+                end
+            else
+                -- One toggle shape left: a preset's spell in or out of that preset. The
+                -- inverse-polarity branch belonged to the Optional Debuffs list, which
+                -- wrote a hidden-set rather than the registry; it went to the Debuff Bar
+                -- page along with the list.
+                local key, prec = selKey, item.rec
+                row._onAction = function()
+                    R:SetSpellEnabled(key, prec, not R:IsSpellEnabled(key, prec))
+                    DirectFilterChangedProxy()
+                    RefreshAll()
+                end
             end
             row._onRemove = nil
         else
@@ -2771,6 +2882,58 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
             end
             g[#g + 1] = item
         end
+        -- The chip on a multi-ID record: "+1" while whole, "1 of 2" once narrowed, so
+        -- a record that no longer tracks everything says so in EVERY list it appears
+        -- in rather than hiding the state behind the expander.
+        local function RecordChip(rec)
+            if not (rec and rec.alts and #rec.alts > 0) then return nil end
+            if R:IsRecordNarrowed(rec) then
+                return format(L["%d of %d IDs"], #R:LiveRecordIDs(rec), R:RecordIDCount(rec))
+            end
+            return format("+%d", #rec.alts)
+        end
+
+        -- One child row per spell ID the record carries, emitted straight into the
+        -- class bucket so they ride the same pooled rows, layout and scroll as
+        -- everything else -- there is no nested widget here, just indented items.
+        -- Icon and name resolve LIVE per ID: the database keeps one name per RECORD,
+        -- and telling Holy Bulwark's buff from its absorb shield is exactly what the
+        -- user is here to do, so the per-id art is the only thing that distinguishes
+        -- them.
+        local function putRecordChildren(token, rec, parentName)
+            if not (expandedRecords[rec.id] and rec.alts and #rec.alts > 0) then return end
+            local ids = { rec.id }
+            for _, alt in ipairs(rec.alts) do ids[#ids + 1] = alt end
+            local live = #R:LiveRecordIDs(rec)
+            for idx, sid in ipairs(ids) do
+                local nm, icon
+                if C_Spell then
+                    if C_Spell.GetSpellName then
+                        local ok, v = pcall(C_Spell.GetSpellName, sid)
+                        if ok and type(v) == "string" and v ~= "" then nm = v end
+                    end
+                    if C_Spell.GetSpellTexture then
+                        local ok, t = pcall(C_Spell.GetSpellTexture, sid)
+                        if ok and type(t) == "number" then icon = t end
+                    end
+                end
+                local tracked = not R:IsSpellIDMuted(sid)
+                put(token, {
+                    child = true, rec = rec, id = sid,
+                    name = nm or rec.n,
+                    icon = icon or FALLBACK_ICON,
+                    chip = R:FormatSpellID(sid),
+                    enabled = tracked,
+                    -- Sort with the parent, in record-id order beneath it.
+                    sortName = parentName, sortID = rec.id, childIndex = idx,
+                    -- The last tracked id can't be unticked (SetSpellIDMuted refuses):
+                    -- a record with nothing live reads as tracked and matches nothing.
+                    lastLive = tracked and live <= 1,
+                    tooltipID = sid,
+                })
+            end
+        end
+
         local function matches(name)
             if searchText == "" then return true end
             return name:lower():find(searchText, 1, true) ~= nil
@@ -2825,10 +2988,11 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
                 if matches(name) then
                     put(rec.class, {
                         rec = rec, id = rec.id, name = name, icon = icon,
-                        chip = (rec.alts and #rec.alts > 0) and format("+%d", #rec.alts) or nil,
+                        chip = RecordChip(rec),
                         enabled = R:IsSpellEnabled(selKey, rec),
                         tooltipID = rec.id,
                     })
+                    putRecordChildren(rec.class, rec, name)
                 end
             end
         -- (The fixed non-secret debuff list built a third item shape here. It went to
@@ -2844,9 +3008,10 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
                         if matches(name) then
                             put(rec.class, {
                                 rec = rec, id = sid, name = name, icon = icon,
-                                chip = (rec.alts and #rec.alts > 0) and format("+%d", #rec.alts) or nil,
+                                chip = RecordChip(rec),
                                 tooltipID = rec.id,
                             })
+                            putRecordChildren(rec.class, rec, name)
                         end
                     else
                         -- Known id orphaned by a spell DB update: render as raw
@@ -2860,13 +3025,24 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         end
 
         -- Sort within each group: named spells alphabetically, raw ids last
+        --
+        -- ☠ CHILD ROWS SORT ON THEIR PARENT'S KEY, NEVER THEIR OWN. They are part of
+        -- that row, not entries in their own right, and sorting them on their own name
+        -- and id scatters them: Holy Bulwark's absorb component resolves to the same
+        -- NAME as its parent and a LOWER id (432496 vs 432607), so it landed above the
+        -- record it belongs to while every record whose alts happen to be numerically
+        -- higher expanded downwards. sortName/sortID carry the parent's key and
+        -- childIndex orders the block beneath it, canonical id first.
         for _, g in pairs(groups) do
             tsort(g, function(a, b)
                 if (a.raw or false) ~= (b.raw or false) then return not a.raw end
                 -- Raw rows sort by resolved name too; unresolved "#id" names
                 -- cluster first ("#" < letters), ordered by id via the tiebreak.
-                if a.name ~= b.name then return a.name < b.name end
-                return a.id < b.id
+                local an, bn = a.sortName or a.name, b.sortName or b.name
+                if an ~= bn then return an < bn end
+                local ai, bi = a.sortID or a.id, b.sortID or b.id
+                if ai ~= bi then return ai < bi end
+                return (a.childIndex or 0) < (b.childIndex or 0)
             end)
         end
 

@@ -650,10 +650,14 @@ local function ApplyOverlayLayout(overlay, db, frame)
         local onCurrentHealth = gradientStyle == "FULL" and db.dispelGradientOnCurrentHealth ~= false
 
         -- db-only (no frame.healthBar requirement): the tracking decision MUST match
-        -- DispelSlotSecureInit, which binds the StatusBar fill vs a plain texture on
-        -- this same condition at button-create time — before healthBar timing settles.
-        -- The health hook feeds the bar from UnitHealth (not the healthBar widget), so
-        -- no healthBar is needed for the clip; a mismatch here would orphan the carrier.
+        -- the slot path's, where StyleGameMainSlot decides on this same condition
+        -- whether the gradient carrier anchors to the health bar's fill texture
+        -- (anchor-derived clip; the carrier itself is always a plain texture — see
+        -- DispelSlotSecureInit). This legacy widget is the only place a StatusBar
+        -- still carries the clip, fed by UpdateDispelGradientHealth through setters;
+        -- a mismatch between the two decisions shows different coverage in the
+        -- preview than in a group.
+        --
         if onCurrentHealth and frame then
             -- Position gradient to match health bar
             overlay.gradient:SetAllPoints(gradientParent)
@@ -703,32 +707,20 @@ end
 function DF:UpdateDispelGradientHealth(frame)
     if not frame then return end
 
-    -- Health-tracking gradient StatusBars: the legacy overlay and/or the 12.1 slot
-    -- widgets. BOTH colour modes ride this on 12.1 — custom drives the StatusBar's
-    -- fill colour itself; game mode binds the StatusBar's fill TEXTURE as the
-    -- Blizzard-tinted carrier and this hook clips it to health via the bar's value
-    -- (secret-safe: values pass straight to SetValue). Zero-alloc: runs every
-    -- health tick.
+    -- ★ LEGACY OVERLAY ONLY. Its gradient StatusBar is parented to OUR healthBar, so
+    -- feeding it secret health through SetValue is legal and it clips correctly.
+    --
+    -- The 12.1 native slot path is deliberately NOT handled here any more: its carrier
+    -- is a plain texture anchored to the real health fill texture, so it tracks health
+    -- with no feed at all (see DispelSlotSecureInit / StyleGameMainSlot). This function
+    -- used to walk the slots to decide whether to run — that scan now proves nothing,
+    -- and this is a per-health-tick path, so it is gone with the loop it guarded.
+    -- Zero-alloc; runs every health tick.
     local legacy = frame.dfDispelOverlay
     if legacy and not (legacy.gradient and legacy.gradientTracksHealth and legacy:IsShown()) then
         legacy = nil
     end
-    local buttons
-    local anySlot = false
-    local h = frame.dispelFactory
-    if h and h.GetOverlaySlots then
-        buttons = h:GetOverlaySlots()
-        if buttons then
-            for _, btn in pairs(buttons) do
-                local w = btn.dfDispelWidget
-                if w and w.gradient and w.gradientTracksHealth then
-                    anySlot = true
-                    break
-                end
-            end
-        end
-    end
-    if not legacy and not anySlot then return end
+    if not legacy then return end
 
     local unit = frame.unit
     if not unit or not UnitExists(unit) then return end
@@ -757,16 +749,15 @@ function DF:UpdateDispelGradientHealth(frame)
         if interp then legacy.gradient:SetValue(currentHealth, interp)
         else legacy.gradient:SetValue(currentHealth) end
     end
-    if anySlot then
-        for _, btn in pairs(buttons) do
-            local w = btn.dfDispelWidget
-            if w and w.gradient and w.gradientTracksHealth then
-                w.gradient:SetMinMaxValues(0, maxHealth)
-                if interp then w.gradient:SetValue(currentHealth, interp)
-                else w.gradient:SetValue(currentHealth) end
-            end
-        end
-    end
+    -- ★ NO SLOT LOOP. The 12.1 native slot gradient is no longer fed from here at all:
+    -- its carrier is a plain texture ANCHORED to the real health bar's fill texture, so
+    -- it inherits a rect the bar's own value already sizes to current health. Zero
+    -- per-tick work, nothing read, nothing written to a button-owned object.
+    --   ☠ Do NOT reinstate a SetMinMaxValues/SetValue feed here. Aura frames carry
+    -- DenyTaintedAccessWhenAurasAreSecret, so every such write is refused, the bar keeps
+    -- its (0,1)/value=1 defaults, and the wash renders over the WHOLE FRAME while the
+    -- error repeats on every health event (4412x in the first live report).
+    -- See DispelSlotSecureInit and HEALTH FILL COVER in Frames/AuraContainer.lua.
 end
 
 -- ============================================================
@@ -1467,19 +1458,31 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
     -- layout aspects at bind time; StyleGameMainSlot re-pins onto the style rect.
     if roles.gradient then
         local style = roles.gradient
-        local tracking = style == "FULL" and db.dispelGradientOnCurrentHealth ~= false
-        if tracking then
-            w.gradient:SetAllPoints(btn)
-            w.gradient:SetStatusBarTexture(GRADIENT_TEXTURES.FULL)
-            carriers[#carriers + 1] = { tex = w.gradient:GetStatusBarTexture() }
-        else
-            if not w.nativeGradient then
-                w.nativeGradient = w:CreateTexture(nil, "ARTWORK", nil, 2)
-            end
-            w.nativeGradient:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
-            w.nativeGradient:SetAllPoints(btn)
-            carriers[#carriers + 1] = { tex = w.nativeGradient }
+        -- ☠ ALWAYS A PLAIN TEXTURE — never a StatusBar fill, in either mode.
+        --
+        -- "Show On Current Health Only" used to bind w.gradient's FILL here and clip it
+        -- by feeding the bar's value from the health hook. That could never work: aura
+        -- frames carry Enum.ScriptObjectAccessRestriction.DenyTaintedAccessWhenAurasAreSecret
+        -- (Blizzard_AuraContainerShared.lua), which denies ALL tainted writes while auras
+        -- are secret — so SetMinMaxValues/SetValue was refused, the bar kept its
+        -- (0,1)/value=1 defaults, and the gradient rendered at FULL EXTENT over the whole
+        -- frame, hiding the health bar (live report: 4412 errors + "I can't see health").
+        --
+        -- ★ This is the SAME mistake the AD "filled health mirror" made and the SAME fix:
+        -- see HEALTH FILL COVER in Frames/AuraContainer.lua. A plain texture ANCHORED to
+        -- the real health bar's fill texture inherits that texture's rect, and that rect
+        -- is already driven by the bar's own value — so it tracks health exactly, with
+        -- zero per-tick writes and nothing read. Anchor-derived geometry is the one
+        -- geometry route that stays legal on these buttons.
+        --   The anchor itself is applied in StyleGameMainSlot (tainted, and legal), not
+        -- here, because the frame's health texture can be swapped from the settings panel
+        -- and a create-once anchor would go stale.
+        if not w.nativeGradient then
+            w.nativeGradient = w:CreateTexture(nil, "ARTWORK", nil, 2)
         end
+        w.nativeGradient:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
+        w.nativeGradient:SetAllPoints(btn)
+        carriers[#carriers + 1] = { tex = w.nativeGradient }
         -- Name the gradient carrier explicitly. StyleGameMainSlot must dress THIS one;
         -- addressing it as "the bound carrier" only worked while a slot held exactly one,
         -- and would grab the ring on a button whose gradient role is absent (EDGE).
@@ -1582,16 +1585,22 @@ local function StyleGameMainSlot(btn, frame, db)
     else
         local carrier = btn._dfDispelGradientCarrier
         if carrier then
-            if w.gradientTracksHealth then
-                -- Tracking carrier = the StatusBar fill (texture set once in onInit);
-                -- show the bar, UpdateDispelGradientHealth clips it via SetValue.
-                w.gradient:Show()
-                if w.nativeGradient then w.nativeGradient:Hide() end
+            -- The StatusBar is never the carrier now (see DispelSlotSecureInit); it
+            -- survives only as the geometry holder ApplyOverlayLayout positions.
+            w.gradient:Hide()
+            carrier:ClearAllPoints()
+            carrier:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
+            carrier:SetTexCoord(0, 1, 0, 1)
+            local healthFill = w.gradientTracksHealth and frame and frame.healthBar
+                and frame.healthBar.GetStatusBarTexture and frame.healthBar:GetStatusBarTexture()
+            if healthFill then
+                -- ★ SHOW ON CURRENT HEALTH ONLY, the write-free way. Anchoring to the
+                -- real fill TEXTURE (not the bar) inherits its rect, which the bar's own
+                -- value already sizes to current health — so the wash clips itself with
+                -- no feed and no per-tick work. Re-anchored every style pass because a
+                -- health-texture change from the settings panel replaces this region.
+                carrier:SetAllPoints(healthFill)
             else
-                w.gradient:Hide()
-                carrier:ClearAllPoints()
-                carrier:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
-                carrier:SetTexCoord(0, 1, 0, 1)
                 -- The hidden StatusBar holds the style's rect (strips / static FULL).
                 carrier:SetAllPoints(w.gradient)
             end

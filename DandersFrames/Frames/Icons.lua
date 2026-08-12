@@ -112,9 +112,12 @@ function DF:UpdateDefensiveBar(frame)
     local unit = frame.unit
     
     -- Check if feature is enabled
+    -- ☠ SetIntentShown, never GetFrame():Hide(): the raw hide left the handle's
+    -- intent as "shown" and the identity-gate sweep re-showed the disabled icon
+    -- with live auras (the "defensive icon comes back while disabled" reports).
     if not db.defensiveIconEnabled then
         if frame.defensiveFactory then
-            frame.defensiveFactory:GetFrame():Hide()
+            frame.defensiveFactory:SetIntentShown(false)
             frame.dfDefFactoryShown = false   -- keep DriveDefensiveFactory's shown-cache coherent
         end
         return
@@ -123,7 +126,7 @@ function DF:UpdateDefensiveBar(frame)
     -- Check if unit exists
     if not UnitExists(unit) then
         if frame.defensiveFactory then
-            frame.defensiveFactory:GetFrame():Hide()
+            frame.defensiveFactory:SetIntentShown(false)
             frame.dfDefFactoryShown = false
         end
         return
@@ -138,7 +141,7 @@ function DF:UpdateDefensiveBar(frame)
     -- A container was built but the factory path is now inactive (test mode / toggle off):
     -- hide it so the legacy render below can't double up.
     if frame.defensiveFactory then
-        frame.defensiveFactory:GetFrame():Hide()
+        frame.defensiveFactory:SetIntentShown(false)
         frame.dfDefFactoryShown = false
     end
 

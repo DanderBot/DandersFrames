@@ -34,8 +34,35 @@ local BuildDirectDefensiveFilters
 -- Builds the native filter strings the 12.1 container rows consume.
 -- ============================================================
 
--- Cache AuraUtil filter constants (available in 11.1+)
-local AuraFilters = AuraUtil and AuraUtil.AuraFilters or {}
+-- ☠ RESOLVES LIVE ON EVERY READ. DO NOT turn this back into a plain capture.
+--
+-- This was `local AuraFilters = AuraUtil and AuraUtil.AuraFilters or {}` — a
+-- ONCE-PER-SESSION bind at file load. `AuraUtil` is Blizzard's, and if it had not
+-- loaded yet at that instant the local latched an EMPTY table for the whole session
+-- with no way to recover: nothing re-read it, so every token below silently became
+-- nil until the next /reload happened to win the race.
+--
+-- What that cost (12.1 launch, roughly 1 user in 10): with no BigDefensive token,
+-- BuildDefensiveRowConfig's "all" fallback produced NO filter and NO candidateFilters,
+-- normalizeFilters applied its last-ditch `{ f = "HELPFUL" }` default, and the
+-- DEFENSIVE ICON row rendered EVERY helpful aura — food buffs, Sign of the Emissary.
+-- A /reload "fixed" it permanently because the file re-executed and re-captured.
+-- Nothing about a settings toggle can re-bind a file-scope local, which is why
+-- toggling filters did not reliably help.
+--
+-- The proxy keeps every existing `AuraFilters.X` call site working unchanged while
+-- reading through to Blizzard each time — so a late `AuraUtil` is picked up on the
+-- next access instead of never. `__index` fires for every key because this table is
+-- permanently empty. These are config-build paths, not per-frame ones, so the extra
+-- hop is irrelevant.
+--   ⚠ The literal fallback at the RaidPlayerDispellable site below predates this and
+-- is now redundant, but harmless — left alone rather than churn a working line.
+local AuraFilters = setmetatable({}, {
+    __index = function(_, key)
+        local t = AuraUtil and AuraUtil.AuraFilters
+        return t and t[key] or nil
+    end,
+})
 
 -- Cached filter tables per mode (rebuilt only when settings change)
 -- Each is nil (show all / unavailable) or a table of individual filter strings
@@ -2216,10 +2243,13 @@ function DF:DriveBuffFactory(frame, db)
         frame.dfBuffFactoryHidden = nil
     end
     -- Show/hide only on state change (no per-event SetShown churn on the live tree).
+    -- Through SetIntentShown, not the raw frame: intent must be recorded on the
+    -- handle or the identity-gate sweep resurrects a hidden row (no enable op, so
+    -- the queued-retarget frame leak SetShown carries does not apply).
     local rowShown = not frame.dfBuffFactoryHidden
     if frame.dfBuffFactoryShown ~= rowShown then
         frame.dfBuffFactoryShown = rowShown
-        h:GetFrame():SetShown(rowShown)
+        h:SetIntentShown(rowShown)
     end
 
     -- Apply setting changes only when the layout version actually bumped — and only OUT
@@ -2407,7 +2437,7 @@ function DF:DriveDebuffFactory(frame, db)
     local rowShown = not frame.dfDebuffFactoryHidden
     if frame.dfDebuffFactoryShown ~= rowShown then
         frame.dfDebuffFactoryShown = rowShown
-        h:GetFrame():SetShown(rowShown)
+        h:SetIntentShown(rowShown)   -- intent-recorded hide; see the buff drive
     end
 
     if frame.dfDebuffFactoryVersion ~= ver and not InCombatLockdown() then
@@ -2416,9 +2446,9 @@ function DF:DriveDebuffFactory(frame, db)
             DF.GetClaimedDebuffCategories and DF:GetClaimedDebuffCategories(frame, db))
         filterList = applyDebuffBlacklist(filterList, db)
         if filterList and #filterList == 0 then
-            -- Fully claimed while a container stands: park it hidden (plain anchor,
+            -- Fully claimed while a container stands: park it hidden (intent-recorded,
             -- combat-safe) until a version bump changes the claim set.
-            h:GetFrame():Hide()
+            h:SetIntentShown(false)
             frame.dfDebuffFactoryShown = false
             frame.dfDebuffFactoryEmptyVer = ver
             return
@@ -2536,7 +2566,44 @@ function DF:BuildDefensiveRowConfig(db, unit)
         defensiveCandidates = { excludeSpellIDs = res.map }
     else -- "all": legacy token fallback (empty selection safety net)
         if AuraFilters.BigDefensive then factoryFilter = { "HELPFUL|" .. AuraFilters.BigDefensive }
-        elseif AuraFilters.ExternalDefensive then factoryFilter = { "HELPFUL|" .. AuraFilters.ExternalDefensive } end
+        elseif AuraFilters.ExternalDefensive then factoryFilter = { "HELPFUL|" .. AuraFilters.ExternalDefensive }
+        else
+            -- ☠ NEVER FALL THROUGH TO "NO FILTER". Reaching here means neither the
+            -- registry NOR the Blizzard tokens could answer, and leaving both
+            -- factoryFilter and defensiveCandidates nil hands normalizeFilters a
+            -- nil list -- whose last-ditch default is a bare `{ f = "HELPFUL" }`.
+            -- That renders EVERY helpful aura in the defensive slot, which is what
+            -- the 12.1-launch reports were (see the AuraFilters note at the top of
+            -- this file). Failing OPEN on a filter is the worst possible direction.
+            --
+            -- ⚠ But an EMPTY row is nearly as bad for someone who enabled the
+            -- feature, so resolve the SHIPPED DEFAULT selection first: that gives a
+            -- working defensive row from the curated presets rather than a dead one.
+            -- Only if that also comes back empty do we render nothing -- which at
+            -- that point means the spell DB itself is unavailable and there is
+            -- genuinely nothing correct to show.
+            --   ⚠ PartyDefaults deliberately: defensiveFilterSelection is not among
+            -- the raid overrides, so RaidDefaults' copy is identical. If a raid-
+            -- specific default is ever added, this needs the mode-correct table.
+            factoryFilter = { "HELPFUL" }
+            local dflt = DF.PartyDefaults and DF.PartyDefaults.defensiveFilterSelection
+            local dres = dflt and DF.FilterRegistry:ResolveSelection(dflt, false)
+            if dres and dres.kind == "include" and next(dres.map) then
+                defensiveCandidates = { includeSpellIDs = dres.map }
+                -- Count behind DebugActive: arguments evaluate before DebugWarn can
+                -- short-circuit, and this builder runs per frame.
+                if DF.DebugActive and DF:DebugActive("AURAROW") then
+                    local n = 0
+                    for _ in pairs(dres.map) do n = n + 1 end
+                    DF:DebugWarn("AURAROW", "defensive: no registry selection and no Blizzard tokens -- fell back to the shipped default preset set (%d ids)", n)
+                end
+            else
+                -- Render NOTHING rather than everything. Loud, because this means
+                -- the filter registry answered nothing for the shipped defaults.
+                defensiveCandidates = { includeSpellIDs = {} }
+                DF:DebugWarn("AURAROW", "defensive: no selection, no tokens, and the default preset set resolved EMPTY -- rendering nothing (check the FilterRegistry spell DB)")
+            end
+        end
     end
 
     return {
@@ -2640,9 +2707,10 @@ function DF:DriveDefensiveFactory(frame, db)
 
     if not h then return end
 
-    -- Keep on the frame's unit; defer a wrong-unit show until regen in combat. Hide via the
-    -- plain anchor frame (GetFrame():SetShown), NOT h:SetShown -- the latter queues an enable
-    -- op that would upgrade a queued retarget into a full rebuild (frame leak).
+    -- Keep on the frame's unit; defer a wrong-unit show until regen in combat. Hide via
+    -- h:SetIntentShown, NOT h:SetShown -- the latter queues an enable op that would
+    -- upgrade a queued retarget into a full rebuild (frame leak). SetIntentShown is the
+    -- op-free variant that still records intent, so the gate sweep can't resurrect it.
     if h:GetUnit() ~= frame.unit then
         DF:Debug("AURAROW", "defensive: retarget %s -> %s%s",
             tostring(h:GetUnit()), tostring(frame.unit),
@@ -2658,7 +2726,7 @@ function DF:DriveDefensiveFactory(frame, db)
     local rowShown = not frame.dfDefFactoryHidden
     if frame.dfDefFactoryShown ~= rowShown then
         frame.dfDefFactoryShown = rowShown
-        h:GetFrame():SetShown(rowShown)
+        h:SetIntentShown(rowShown)
     end
 
     -- Re-apply settings only on a layout-version bump (defensive option changes bump it
@@ -3193,14 +3261,18 @@ function DF:UpdateAuras_Enhanced(frame)
     -- path is no longer active (dev toggle off, test mode, or showBuffs off),
     -- hide it via its plain anchor frame (combat-safe, queues no backend op) so the legacy
     -- render can't double up. DriveBuffFactory re-shows it when it drives.
+    -- ☠ SetIntentShown, never GetFrame():Hide(). The raw hide left the handle's
+    -- intent reading "wants shown", and the identity-gate sweep (target change,
+    -- roster, loading screens) re-showed the disabled row with live auras in it —
+    -- the "buff bar comes back while disabled" reports. Intent survives sweeps.
     local buffFactoryActive = db.showBuffs and DF:UseFactoryForBuffs(frame, db)
     if frame.buffFactory and not buffFactoryActive then
-        frame.buffFactory:GetFrame():Hide()
+        frame.buffFactory:SetIntentShown(false)
         frame.dfBuffFactoryShown = false   -- keep DriveBuffFactory's shown-cache coherent
     end
     local debuffFactoryActive = db.showDebuffs and DF:UseFactoryForDebuffs(frame, db)
     if frame.debuffFactory and not debuffFactoryActive then
-        frame.debuffFactory:GetFrame():Hide()
+        frame.debuffFactory:SetIntentShown(false)
         frame.dfDebuffFactoryShown = false
     end
     -- Missing-buff strip mirror: hide it when the factory path goes inactive (test

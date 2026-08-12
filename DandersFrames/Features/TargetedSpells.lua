@@ -1640,6 +1640,13 @@ function DF:HidePersonalTargetedSpellsMover()
     DF:HideTestPersonalTargetedSpells()
 end
 
+-- Mover only — same contract as HideTargetedListMoverOnly; see the note there.
+function DF:HidePersonalTargetedSpellsMoverOnly()
+    if DF.personalTargetedSpellsMover then
+        DF.personalTargetedSpellsMover:Hide()
+    end
+end
+
 -- Test mode support for personal targeted spells
 function DF:ShowTestPersonalTargetedSpells()
     local db = GetPersonalDB()
@@ -4480,6 +4487,20 @@ function DF:HideTargetedListMover()
         targetedListMover:Hide()
     end
     DF:HideTestTargetedList()
+end
+
+-- ☠ MOVER ONLY — for callers that must not touch the demo bars.
+-- The compound hide above also tears down the test display. That is right for
+-- lock/unlock, where the bars exist so you can see what you are positioning, and
+-- WRONG for the enable sync: in test mode those bars belong to TEST MODE, and
+-- hiding a mover must not tear down somebody else's preview. Ticking Enable with
+-- frames locked and test mode on made the preview flash up and vanish.
+-- The SHOW side stays compound: while unlocked the bars ARE the positioning aid,
+-- and in test mode they are already up, so showing them again costs nothing.
+function DF:HideTargetedListMoverOnly()
+    if targetedListMover then
+        targetedListMover:Hide()
+    end
 end
 
 -- ------------------------------------------------------------
