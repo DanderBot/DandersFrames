@@ -2614,16 +2614,23 @@ function DF:RefreshTargetedMovers()
     local unlocked = DF.moverFrame and DF.moverFrame:IsShown()
     local db = DF:GetDB()
 
+    -- ☠ The HIDE side must be MOVER-ONLY. The compound HideTargetedListMover /
+    -- HidePersonalTargetedSpellsMover also tear down the test display, so this
+    -- sync -- which runs on every enable toggle, not just on lock/unlock -- was
+    -- killing a preview it does not own: tick Enable with frames LOCKED and test
+    -- mode on, and the bars flashed up (test mode showed them) then vanished (this
+    -- hid them). Test mode owns that display; the mover sync owns the mover. The
+    -- SHOW side stays compound: while unlocked the demo bars ARE the positioning aid.
     if unlocked and db.personalTargetedSpellEnabled then
         if DF.ShowPersonalTargetedSpellsMover then DF:ShowPersonalTargetedSpellsMover() end
-    elseif DF.HidePersonalTargetedSpellsMover then
-        DF:HidePersonalTargetedSpellsMover()
+    elseif DF.HidePersonalTargetedSpellsMoverOnly then
+        DF:HidePersonalTargetedSpellsMoverOnly()
     end
 
     if unlocked and db.targetedListEnabled then
         if DF.ShowTargetedListMover then DF:ShowTargetedListMover() end
-    elseif DF.HideTargetedListMover then
-        DF:HideTargetedListMover()
+    elseif DF.HideTargetedListMoverOnly then
+        DF:HideTargetedListMoverOnly()
     end
 end
 

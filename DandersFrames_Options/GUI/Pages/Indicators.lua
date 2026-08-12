@@ -2220,6 +2220,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Personal Targeted Spells"], db, "personalTargetedSpellEnabled", function()
             self:RefreshStates()
             if DF.TogglePersonalTargetedSpells then DF:TogglePersonalTargetedSpells(db.personalTargetedSpellEnabled) end
+            -- Reflect it in test mode, matching the Targeted List enable above. This
+            -- is the owner of the personal preview and gates on the same master
+            -- Enable, so it resolves the display in both directions.
+            if DF.UpdateAllTestTargetedSpell then DF:UpdateAllTestTargetedSpell() end
             -- Same as the Targeted List enable: unlock/lock only syncs this mover on
             -- its own transition, so toggling while unlocked left the two out of step.
             if DF.RefreshTargetedMovers then DF:RefreshTargetedMovers() end
