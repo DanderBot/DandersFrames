@@ -4245,18 +4245,60 @@ end
 -- row is worse than one garbage frame. Always recomputes (no vulnerable
 -- early-out) so a handle rebuilt onto a non-vulnerable filter clears a stale
 -- hidden flag instead of staying hidden forever.
+-- ☠ THE GATE FAILS OPEN AND THE ENGINE DOES NOT RE-PARSE ON ITS OWN.
+-- A non-assistable unit renders EVERY helpful aura (includeSpellIDs is skipped
+-- wholesale — see filterVulnerableToIdentityGate). The engine only re-parses when
+-- an aura CHANGES, so once assistability comes back the unfiltered pool just STAYS.
+-- That is precisely why the only workarounds users ever found (toggling test mode,
+-- toggling any filter) were pure REBUILDS.
+--
+-- Live repro, 100%, Krathe 2026-08-12: watch an in-game cinematic. It flips
+-- UNIT_FACTION so you stop being assistable, every filtered buff pool opens up, and
+-- it persists after the cinematic ends. 12.1 forces one on first login — which is
+-- what produced the "unfiltered buffs after upgrading" reports that were chased as a
+-- v4→v5 migration bug for two days. It is not a migration bug and it hits clean v5
+-- profiles too. Corroborated on the addon dev Discord (plusmouse): "UNIT_FACTION
+-- seems to change, so the unit ceases to be assistable".
+--
+-- ☠ We ALREADY registered UNIT_FACTION (see idGateWatch) — the event was never the
+-- gap. The sweep just recomputed a hide flag and never re-parsed.
+--
+-- Bounce on the false→true EDGE only. A bounce every sweep would re-parse every
+-- vulnerable handle on every roster/name/phase event. nil (first computation) is not
+-- an edge — but a container built DURING a cinematic records false, so the exit edge
+-- still fires, which is the first-login case.
+-- Re-entrancy: the flag is stored BEFORE Refresh(), so a re-entrant gate pass sees
+-- true and cannot bounce again.
+function Handle:_noteGateRecovery(can)
+    local was = self._idGateAssist
+    self._idGateAssist = can and true or false
+    if was == false and self._idGateAssist then
+        DF:Debug("AURACONTAINER", "gate recovered for unit=%s - re-parsing (pool was fail-open)",
+            tostring(self.config and self.config.unit))
+        self:Refresh()
+    end
+end
+
 function Handle:_applyIdentityGate()
     local hide = false
     if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
         local unit = self.config and self.config.unit
-        if type(unit) == "string" and unit ~= "player" and UnitExists(unit) then
+        -- ☠ `unit ~= "player"` USED TO SIT ON THIS LINE, so your own frame was never
+        -- probed at all. That exemption is right about HIDING (a frame you cannot see
+        -- during a cinematic needs no hiding, and hiding your own frame is a worse
+        -- failure than one garbage row) — but it also meant nothing ever NOTICED your
+        -- own pool falling open, so it never got re-parsed. The exemption now sits on
+        -- the two hide branches instead: probe always, hide only others.
+        if type(unit) == "string" and UnitExists(unit) then
+            local isOwn = (unit == "player")
             -- (1) Cross-faction / non-assistable: includeSpellIDs / category tokens
             --     fail open. Signal: UnitCanAssist.
             if self._idGateVulnerable then
                 local ok, can = pcall(UnitCanAssist, "player", unit)
                 if ok then
                     if issecretvalue and issecretvalue(can) then can = true end
-                    if not can then hide = true end
+                    self:_noteGateRecovery(can)
+                    if not can and not isOwn then hide = true end
                 end
             end
             -- (2) Not in your visible world (different instance/phase): the
@@ -4264,7 +4306,7 @@ function Handle:_applyIdentityGate()
             --     fails open — the engine can't attribute a caster. Signal: UnitIsVisible.
             --     Fail-safe (matches the assist gate): only hide on a definite,
             --     non-secret false; any doubt (pcall fail / secret) SHOWS.
-            if not hide and self._idGateSourceRelative then
+            if not hide and not isOwn and self._idGateSourceRelative then
                 local okv, vis = pcall(UnitIsVisible, unit)
                 if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
                     hide = true
@@ -5767,19 +5809,57 @@ end
 -- two gates that disagree are worse than one. What differs is the ACTUATION: a Handle
 -- hides its frame, a slot has no frame of its own, so it parks. Parking is already the
 -- right primitive (an empty filter string matches nothing, proven in game).
+-- Slot-side twin of Handle:_noteGateRecovery — same edge, same reason (read that
+-- header for the cinematic/UNIT_FACTION mechanism). The ACTUATION differs, as it does
+-- for the gate itself: a slot has no backend to bounce.
+--
+-- ☠ AND IT IS THE CANDIDATES THAT MUST BE RE-PUSHED, NOT THE FILTER STRING.
+-- `includeSpellIDs` is a CANDIDATE filter, not part of the filter string — so the
+-- narrowing the fail-open skipped does not live in what _pushFilter sends, and
+-- re-pushing an unchanged string need not reparse at all. First cut of this fix did
+-- exactly that and one placed AD indicator kept rendering open (Krathe, in game);
+-- the buff bars were fixed because the Handle path bounces the whole backend.
+-- SetAuraSlotCandidateFilters has NO engine-side equality check — every call clears
+-- the slot's candidates and reparses — which is precisely the bounce wanted here.
+--
+-- For a slot the gate DID hide, the transition below already re-pushes the string, so
+-- this edge is what covers the case the gate never hides at all: your own frame.
+function SlotHandle:_noteGateRecovery(can)
+    local was = self._idGateAssist
+    self._idGateAssist = can and true or false
+    if was ~= false or not self._idGateAssist then return end
+    local c = self.owner and self.owner.container
+    if not c or self._lastCandidateFilters == nil then return end
+    DF:Debug(DBG, "slot gate recovered for key=%s unit=%s - re-parsing (pool was fail-open)",
+        tostring(self.key), tostring(self.owner and self.owner.unit))
+    -- ☠ No native tuning setter runs in lockdown (see ApplyTuning). Queue the standard
+    -- replay, which re-pushes candidates, verdict and filter together on the way out.
+    if InCombatLockdown() then
+        self._pendingTuning = true
+        registerSlotRegen(self)
+        return
+    end
+    pcall(c.SetAuraSlotCandidateFilters, c, self.key, self._lastCandidateFilters)
+end
+
 function SlotHandle:_applyIdentityGate()
     local hide = false
     if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
         local unit = self.owner and self.owner.unit
-        if type(unit) == "string" and unit ~= "player" and UnitExists(unit) then
+        -- ☠ See Handle:_applyIdentityGate — the `unit ~= "player"` exemption moved off
+        -- this line onto the hide branches, so the player's own slot is PROBED (and so
+        -- can be re-parsed on recovery) while still never being hidden.
+        if type(unit) == "string" and UnitExists(unit) then
+            local isOwn = (unit == "player")
             if self._idGateVulnerable then
                 local ok, can = pcall(UnitCanAssist, "player", unit)
                 if ok then
                     if issecretvalue and issecretvalue(can) then can = true end
-                    if not can then hide = true end
+                    self:_noteGateRecovery(can)
+                    if not can and not isOwn then hide = true end
                 end
             end
-            if not hide and self._idGateSourceRelative then
+            if not hide and not isOwn and self._idGateSourceRelative then
                 local okv, vis = pcall(UnitIsVisible, unit)
                 if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
                     hide = true
