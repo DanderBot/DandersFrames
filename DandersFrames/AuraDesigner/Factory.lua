@@ -1949,6 +1949,21 @@ local function adTooltipsOn(frame, key)
     return (db and db[key]) and true or false
 end
 
+-- ☠ THE TOOLTIP FLAGS ARE STRUCTURAL AND MUST RIDE THE STRUCT SIGS. Mouse state
+-- is written exactly once per button, at initializeFrame — no restyle can flip
+-- it, and the engine's own contract says a tooltips change needs Rebuild().
+-- These three keys were in the container CONFIGS but in none of the SIGS, so
+-- toggling any Aura Designer tooltip setting rebuilt nothing and did nothing
+-- until a /reload (in BOTH directions — shipped that way in 5.0.0; field
+-- report "turned tooltips off, still showing"). One combined term at every AD
+-- sync site: any of the three flipping rebuilds the AD surfaces once, OOC.
+local function adTooltipSig(frame)
+    local db = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
+    return "|tt=" .. (db.tooltipADGroupsEnabled and "g" or "")
+                  .. (db.tooltipADIndicatorsEnabled and "i" or "")
+                  .. (db.tooltipADBarsEnabled and "b" or "")
+end
+
 local function buildPlacedConfig(frame, unit, map, indicator, isSquare, borderSpec, defs, mine)
     return {
         unit = unit,
@@ -4005,7 +4020,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         local eff = memberEffective(hasMG, key, indicator)
                         local borderOn = placedBorderOn(indicator, false)
                         local alpha = tonumber(indicator.alpha) or 1
-                        local structSig = barStructSig(indicator, borderOn, defs)
+                        local structSig = barStructSig(indicator, borderOn, defs) .. adTooltipSig(frame)
                         local tuningSig = placedTuningSig(map, poolFilter(indicator, mine))
                         local coSig = barCoSig(frame, eff, borderOn, alpha, defs)
 
@@ -4158,7 +4173,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         -- alloc — FIX C); the actual border spec is built ONLY inside a
                         -- create/rebuild/restyle branch below, never per pass.
                         local structSig = placedStructSig(isSquare, hideIcon, showStacks,
-                            showDuration, borderOn, indicator, defs)
+                            showDuration, borderOn, indicator, defs) .. adTooltipSig(frame)
                         local tuningSig = placedTuningSig(map, poolFilter(indicator, mine))
                         local coSig = placedCoSig(eff, isSquare, borderOn, alpha, defs)
 
@@ -4324,6 +4339,7 @@ local function syncMemberGroupList(frame, mg, live, groups, auras, keyPrefix, id
 
                 local parts = {
                     groupStyleStructSig(group),
+                    adTooltipSig(frame),   -- tooltip toggles are structural; see adTooltipSig
                     "fl=" .. tostring((defs and defs.level) or 40),
                     "f=" .. poolFilter(group, mine),
                     "n=" .. tostring(#recs),
@@ -4395,6 +4411,7 @@ local function syncFilterGroupList(frame, fg, live, R, groups, keyPrefix, defs)
                 -- defs.level. Constant at defaults, so this is a no-op unless the user moves it.
                 local structSig = groupStyleStructSig(group)  -- region set only (format key is cosmetic now) (group.style)
                     .. "|fl=" .. tostring((defs and defs.level) or 40)
+                    .. adTooltipSig(frame)
                 local tuningSig = selSig                      -- selection edits: live include-map swap (config-wide candidateFilters)
                     .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 8))
                     .. groupSortSig(group)                    -- per-group sort (Wave 2): live SetAuraGroupSortMethod
@@ -5261,6 +5278,7 @@ function Factory:SyncFrame(frame)
                         local structSig = recStructSig      -- record strings + keys (the SET defines the groups)
                             .. groupStyleStructSig(group)   -- region set only; format key is cosmetic (group.style)
                             .. "|fl=" .. tostring((defs and defs.level) or 40)   -- see syncFilterGroupList
+                            .. adTooltipSig(frame)
                         local tuningSig = recTuningSig      -- per-record candidateFilters (hideLong / keepImportant / dispel maps)
                             .. "|max=" .. tostring(math.max(1, tonumber(group.maxIcons) or 4))
                             .. groupSortSig(group)          -- per-group sort (Wave 2): live SetAuraGroupSortMethod

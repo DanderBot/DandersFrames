@@ -22,6 +22,7 @@ local InCombatLockdown = InCombatLockdown
 -- Unit health / power / state APIs (hot path in UpdateHealthFast + UpdatePower)
 local UnitExists = UnitExists
 local UnitIsConnected = UnitIsConnected
+local UnitIsPlayer = UnitIsPlayer
 local UnitIsDead = UnitIsDead
 local UnitIsGhost = UnitIsGhost
 local UnitPower = UnitPower
@@ -429,8 +430,13 @@ function DF:UpdateUnitFrame(frame, source)
     -- ========================================
     -- OFFLINE CHECK
     -- ========================================
+    -- ☠ PLAYERS ONLY. An NPC has no connection, so UnitIsConnected reads false
+    -- for it — and a pinned NPC (Lura's healable crystals) rendered as an
+    -- offline player: "Offline" status text, forced-full grey bar. Worse, no
+    -- UNIT_CONNECTION ever fires for an NPC, so nothing but a roster refresh
+    -- re-evaluated the frame. Only a player can be offline.
     local isConnected = UnitIsConnected(unit)
-    if not isConnected then
+    if not isConnected and UnitIsPlayer(unit) then
         -- Show offline state
         if frame.healthBar then
             -- FIX: Use SetMinMaxValues(0, 100) + SetValue(100) to match UpdateHealthFast.
@@ -748,8 +754,10 @@ function DF:UpdateHealthFast(frame)
     -- ========================================
     -- OFFLINE CHECK
     -- ========================================
+    -- ☠ PLAYERS ONLY — see the twin branch in UpdateUnitFrame. An NPC has no
+    -- connection and never fires UNIT_CONNECTION, so this branch would stick.
     local isConnected = UnitIsConnected(unit)
-    if not isConnected then
+    if not isConnected and UnitIsPlayer(unit) then
         if frame.healthBar then
             frame.healthBar:SetMinMaxValues(0, 100)
             frame.healthBar:SetValue(100)
