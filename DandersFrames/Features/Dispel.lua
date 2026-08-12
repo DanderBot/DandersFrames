@@ -650,10 +650,13 @@ local function ApplyOverlayLayout(overlay, db, frame)
         local onCurrentHealth = gradientStyle == "FULL" and db.dispelGradientOnCurrentHealth ~= false
 
         -- db-only (no frame.healthBar requirement): the tracking decision MUST match
-        -- DispelSlotSecureInit, which binds the StatusBar fill vs a plain texture on
-        -- this same condition at button-create time — before healthBar timing settles.
-        -- The health hook feeds the bar from UnitHealth (not the healthBar widget), so
-        -- no healthBar is needed for the clip; a mismatch here would orphan the carrier.
+        -- the slot path's, where StyleGameMainSlot decides on this same condition
+        -- whether the gradient carrier anchors to the health bar's fill texture
+        -- (anchor-derived clip; the carrier itself is always a plain texture — see
+        -- DispelSlotSecureInit). This legacy widget is the only place a StatusBar
+        -- still carries the clip, fed by UpdateDispelGradientHealth through setters;
+        -- a mismatch between the two decisions shows different coverage in the
+        -- preview than in a group.
         --
         if onCurrentHealth and frame then
             -- Position gradient to match health bar

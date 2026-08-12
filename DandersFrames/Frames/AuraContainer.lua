@@ -3882,10 +3882,15 @@ end
 local function recordConfigView(handle, recStyle)
     local view = recStyle._cfgView
     if view and view._src == handle.config then return view end
+    -- ⚠ layout only when the record OWNS one. Materialising the container's
+    -- layout here would freeze it into the memo: ApplyStyle swaps config.layout
+    -- in place (same config table, so the _src identity check never fires), and
+    -- the view would keep styling from the old geometry. Leaving the key nil
+    -- lets __index read the live value on every access.
     view = setmetatable({
         _src   = handle.config,
         style  = recStyle.button,
-        layout = recStyle.layout or handle.config.layout,
+        layout = recStyle.layout,
     }, { __index = handle.config })
     recStyle._cfgView = view
     return view

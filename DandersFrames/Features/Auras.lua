@@ -2587,7 +2587,13 @@ function DF:BuildDefensiveRowConfig(db, unit)
             local dres = dflt and DF.FilterRegistry:ResolveSelection(dflt, false)
             if dres and dres.kind == "include" and next(dres.map) then
                 defensiveCandidates = { includeSpellIDs = dres.map }
-                DF:DebugWarn("AURAROW", "defensive: no registry selection and no Blizzard tokens -- fell back to the shipped default preset set (%d ids)", (function() local n=0 for _ in pairs(dres.map) do n=n+1 end return n end)())
+                -- Count behind DebugActive: arguments evaluate before DebugWarn can
+                -- short-circuit, and this builder runs per frame.
+                if DF.DebugActive and DF:DebugActive("AURAROW") then
+                    local n = 0
+                    for _ in pairs(dres.map) do n = n + 1 end
+                    DF:DebugWarn("AURAROW", "defensive: no registry selection and no Blizzard tokens -- fell back to the shipped default preset set (%d ids)", n)
+                end
             else
                 -- Render NOTHING rather than everything. Loud, because this means
                 -- the filter registry answered nothing for the shipped defaults.

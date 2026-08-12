@@ -370,32 +370,48 @@ function DF:ScanFrameAttachments()
     -- ⚠ Frames created or destroyed mid-scan can perturb the enumeration order —
     -- acceptable for a read-only diagnostic, and the alternative (holding the whole
     -- frame universe in a table first) costs more memory than the scan is worth.
+    -- ☠ THE FLAG MUST NOT OUTLIVE THE WALK. Each chunk runs from its own
+    -- C_Timer.After, so an error inside one would kill the chain silently and
+    -- leave scanRunning latched for the session — every later /df debug
+    -- attached then refuses with "already running" until a /reload. pcall the
+    -- chunk body and drop the flag on the error path (with the error surfaced;
+    -- this is a developer command, so raw geterrorhandler is the right sink).
     local function Step()
-        local budget = 0
-        local f = EnumerateFrames(cursor)
-        while f and budget < SCAN_CHUNK do
-            scanned = scanned + 1
-            budget = budget + 1
-            if not f:IsForbidden() and not isInDFTree(f) then
-                local parent = f:GetParent()
-                if parent and dfSet[parent] then
-                    -- Re-parented onto a DF frame. Only report if it carries a
-                    -- non-DF name (anonymous re-parents can't be told apart from
-                    -- DF's own anonymous children, so we skip those).
-                    local nm = f:GetName()
-                    if nm and not nm:find("Danders", 1, true) then
-                        record(dfSet[parent], f, "parented")
+        -- `more` is the chunk's own return on success (frames remain) and the
+        -- error message on failure — the two branches below read the right one.
+        local ok, more = pcall(function()
+            local budget = 0
+            local f = EnumerateFrames(cursor)
+            while f and budget < SCAN_CHUNK do
+                scanned = scanned + 1
+                budget = budget + 1
+                if not f:IsForbidden() and not isInDFTree(f) then
+                    local parent = f:GetParent()
+                    if parent and dfSet[parent] then
+                        -- Re-parented onto a DF frame. Only report if it carries a
+                        -- non-DF name (anonymous re-parents can't be told apart from
+                        -- DF's own anonymous children, so we skip those).
+                        local nm = f:GetName()
+                        if nm and not nm:find("Danders", 1, true) then
+                            record(dfSet[parent], f, "parented")
+                        end
+                    else
+                        -- Anchored (SetPoint) to a DF frame without re-parenting.
+                        local okA, label = pcall(DFAnchorOf, f, dfSet)
+                        if okA and label then record(label, f, "anchored") end
                     end
-                else
-                    -- Anchored (SetPoint) to a DF frame without re-parenting.
-                    local ok, label = pcall(DFAnchorOf, f, dfSet)
-                    if ok and label then record(label, f, "anchored") end
                 end
+                cursor = f
+                f = EnumerateFrames(f)
             end
-            cursor = f
-            f = EnumerateFrames(f)
+            return f ~= nil
+        end)
+        if not ok then
+            scanRunning = false
+            DF:Err("Attachment scan aborted: " .. tostring(more))
+            return
         end
-        if f then
+        if more then
             C_Timer.After(0, Step)
         else
             scanRunning = false

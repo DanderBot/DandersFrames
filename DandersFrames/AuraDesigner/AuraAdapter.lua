@@ -120,23 +120,39 @@ function AuraAdapter:GetSpecIdentity(spec)
     end
 
     -- 3) Inherit the SpellDB's ids for entries that declared no alts of their own.
+    -- ☠ NO REGISTRY, NO CACHE. The header above demands the registry be resolved
+    -- live, and caching a build made without it would freeze the UN-widened id
+    -- set for the whole session — the exact silent narrowing this index exists
+    -- to remove. Unreachable on today's load order (SpellDB is resident and the
+    -- first caller is render/editor time), but Migrations.lua handles the same
+    -- risk by not stamping; mirror it here by returning an uncached build.
     local R = DF.FilterRegistry
-    if R and R.ByID then
-        for name, ids in pairs(byName) do
-            if not hasCuratedAlts[name] then
-                -- Only the curated primary is a safe join key; walking the whole
-                -- set could hop onto a record this entry does not own.
-                local rec = R.ByID[ids[1]]
-                if rec then
-                    -- ☠ TAKE rec.id TOO, not just rec.alts. Curation does not
-                    -- always pick the database's canonical: Dream Flight is
-                    -- curated as 363502, which the DB carries as an ALT of
-                    -- 359816. Unioning only the alts silently dropped the
-                    -- canonical and left that entry one id short of the filter.
-                    add(name, rec.id)
-                    if rec.alts then
-                        for _, altID in ipairs(rec.alts) do add(name, altID) end
-                    end
+    if not (R and R.ByID) then
+        return { byName = byName, byID = byID }
+    end
+    -- Deterministic ownership: within this pass, first-writer-wins would
+    -- otherwise mean "whichever name pairs() reached first" — and byID decides
+    -- where add-by-ID snaps and where the orphan repair rekeys, which must not
+    -- flip between sessions. Zero contested ids in today's data; the sort makes
+    -- that a guarantee instead of an observation.
+    local names = {}
+    for name in pairs(byName) do names[#names + 1] = name end
+    table.sort(names)
+    for _, name in ipairs(names) do
+        if not hasCuratedAlts[name] then
+            local ids = byName[name]
+            -- Only the curated primary is a safe join key; walking the whole
+            -- set could hop onto a record this entry does not own.
+            local rec = R.ByID[ids[1]]
+            if rec then
+                -- ☠ TAKE rec.id TOO, not just rec.alts. Curation does not
+                -- always pick the database's canonical: Dream Flight is
+                -- curated as 363502, which the DB carries as an ALT of
+                -- 359816. Unioning only the alts silently dropped the
+                -- canonical and left that entry one id short of the filter.
+                add(name, rec.id)
+                if rec.alts then
+                    for _, altID in ipairs(rec.alts) do add(name, altID) end
                 end
             end
         end
