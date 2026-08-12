@@ -3138,9 +3138,16 @@ local function buildMemberGroupConfig(frame, group, recs, mine, defs)
             -- Resolved per member, so a self-only aura drops the caster filter for
             -- its own record while every neighbour keeps theirs.
             filter = poolFilter(group, rm),
-            -- Keyed by the member's stable indicator id, not its ordinal: reordering
-            -- the group must move icons, not re-key every group and force a rebuild.
-            key = "m" .. tostring(r.indicatorID),
+            -- ☠ Keyed by the member's FULL identity — (auraName, indicatorID) — the
+            -- same pair the rest of the codebase treats as a member's identity.
+            -- Indicator ids are per-AURA counters, so every aura's first indicator
+            -- is id 1 and a group of four different spells produced four records
+            -- ALL keyed "m1": AddAuraGroup asserted on the duplicates, the pcall
+            -- swallowed it, and members 2..n silently never rendered (live report,
+            -- day one of 5.1.0 — resto druid HoT group showed only its first
+            -- member). Stable across reorders, so reordering still moves icons via
+            -- layoutIndex without re-keying and forcing a rebuild.
+            key = "m:" .. tostring(r.auraName) .. ":" .. tostring(r.indicatorID),
             candidateFilters = { includeSpellIDs = r.map },
             style = {
                 button      = buildPlacedStyle(r.indicator, r.isSquare, r.borderSpec, defs),
@@ -4268,6 +4275,9 @@ local function collectGroupMembers(frame, group, auras, idSpec, defs, mine)
                 local borderOn = placedBorderOn(ind, ind.hideIcon)
                 recs = recs or {}
                 recs[#recs + 1] = {
+                    -- Both halves of the member identity: the group key must be
+                    -- built from the PAIR, since indicator ids repeat across auras.
+                    auraName    = m.auraName,
                     indicatorID = m.indicatorID,
                     indicator   = ind,
                     map         = map,
@@ -4326,7 +4336,12 @@ local function syncMemberGroupList(frame, mg, live, groups, auras, keyPrefix, id
                 for i, r in ipairs(recs) do
                     -- Order is part of identity: swapping two members changes each one's
                     -- layoutIndex, and the icons must move.
-                    parts[#parts + 1] = "m" .. i .. "=" .. tostring(r.indicatorID)
+                    -- Full member identity in the sig — the same pair the group key
+                    -- uses. With the id alone, rekeying a member (orphan-repair
+                    -- rename) could leave the sig unchanged and re-adopt a parked
+                    -- container whose groups are keyed by the OLD names.
+                    parts[#parts + 1] = "m" .. i .. "=" .. tostring(r.auraName)
+                        .. ":" .. tostring(r.indicatorID)
                         .. "|" .. includeSig(r.map)
                         -- The member's RESOLVED pool filter. Without it, a member
                         -- whose self-only resolution changes (the group moved onto
