@@ -3984,7 +3984,9 @@ local ABS_LEVEL_SENTINEL_DEFAULT = {
 
 function DF:MigrateAbsoluteFrameLevels()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
-    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+    -- profileName is bound (was `_`) purely so the buffered migration trace further
+    -- down can name which profile it saw. Nothing else reads it.
+    for profileName, profile in pairs(DandersFramesDB_v2.profiles) do
         if type(profile) == "table" and not profile._absoluteFrameLevelsV1 then
             for _, mode in ipairs({ "party", "raid" }) do
                 local modeDb = profile[mode]
@@ -4079,13 +4081,22 @@ function DF:MigrateAbsoluteFrameLevels()
                 -- ticked things off, silently suppressing exactly the line we need.
                 -- FILTER / AURACONTAINER / AURAROW are v5-only, so they cannot have
                 -- been disabled from v4 and are visible-by-absence.
-                if DF.Debug then
+                -- ☠ BUFFERED, NOT LOGGED DIRECTLY. This migration runs ~1000 lines
+                -- BEFORE DF.DebugConsole:Init(), so `debugDb` is still nil and
+                -- DF:Debug is a silent no-op here — the first version of this line
+                -- could never fire on any login, which is exactly the kind of
+                -- diagnostic that looks armed and captures nothing. Stash the
+                -- observation and let the init site flush it (grep
+                -- `_migrationTrace` for the flush).
+                do
                     local n = 0
                     if type(sel) == "table" and type(sel.presets) == "table" then
                         for _ in pairs(sel.presets) do n = n + 1 end
                     end
-                    DF:Debug("FILTER", "buffPresetBaseline: mode=%s sel=%s presets=%s",
-                        tostring(mode),
+                    DF._migrationTrace = DF._migrationTrace or {}
+                    DF._migrationTrace[#DF._migrationTrace + 1] = string.format(
+                        "buffPresetBaseline: profile=%s mode=%s sel=%s presets=%s",
+                        tostring(profileName or "?"), tostring(mode),
                         (type(sel) == "table") and "table" or "absent",
                         (type(sel) == "table" and type(sel.presets) == "table")
                             and tostring(n) or "absent")
@@ -5631,6 +5642,20 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Initialize Debug Console (must happen after SavedVariables are ready)
         if DF.DebugConsole then
             DF.DebugConsole:Init()
+        end
+
+        -- ★ FLUSH THE BUFFERED MIGRATION TRACE. The one-time migrations run far
+        -- earlier in this same load, when debugDb is still nil and DF:Debug is a
+        -- silent no-op — so anything they want logged has to be stashed and emitted
+        -- HERE, immediately after the console exists. Without this the migration
+        -- diagnostics look armed and capture nothing, on every login.
+        --   Cleared after flushing: the migrations are one-shot, and a stale buffer
+        -- replayed on a later /reload would report a migration that did not run.
+        if DF._migrationTrace then
+            for _, line in ipairs(DF._migrationTrace) do
+                DF:Debug("FILTER", "%s", line)
+            end
+            DF._migrationTrace = nil
         end
 
         -- Login greeting. Opt-out via Options > General > Notifications; the flag is
