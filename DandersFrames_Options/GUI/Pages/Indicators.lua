@@ -94,15 +94,40 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- shows, and this page now shows that table.
         Add(CreateCopyButton(self.child, {"buff", "showBuffs", "directBuff", "buffFilterSelection"}, L["Buff Bar"], "auras_buffs"), 25, 2)
 
-        -- ===== BUFF FILTERS (Column 1, first) =====
+        -- ===== SETTINGS (Column 1, FIRST) =====
+        -- Show Buffs is the master switch for this whole page — every other group
+        -- greys out under it — so it leads, above even the filters. It used to sit
+        -- fourth, below Filters / Order & Limits / Deduplication, where the one
+        -- control that decides whether the bar exists at all was the hardest thing
+        -- on the page to find.
+        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+        settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+        local showBuffsCb = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Buffs"], db, "showBuffs", function()
+            self:RefreshStates()
+            -- Re-scan auras on visible frames (not just layout): the show/hide gate
+            -- lives in the UNIT_AURA-driven UpdateAuras path, so UpdateAllFrames alone
+            -- (layout-only) leaves already-shown auras until the next aura event. Use
+            -- the same refresh the Max Buffs slider uses.
+            DF:RefreshAllVisibleFrames()
+        end), 30)
+        -- Re-sync checked state when value changes externally (e.g. AD banner click)
+        showBuffsCb.refreshContent = function(self)
+            local onShow = self:GetScript("OnShow")
+            if onShow then onShow(self) end
+        end
+        local buffMax = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Buffs"], 0, 8, 1, db, "buffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+        buffMax.disableOn = function(d) return not d.showBuffs end
+        Add(settingsGroup, nil, 1)
+
+        -- ===== BUFF FILTERS (Column 1, second) =====
         -- WHICH auras reach this bar, moved here from the Aura Filters page so that
         -- every consumer picks its own filters in its own place and Aura Filters is
         -- purely where filters are BUILT. The Defensive Icon has always worked this
         -- way; this makes the buff bar match it instead of being the one exception.
         --
-        -- It sits first in column 1, above Deduplication and Settings: it decides
-        -- what the bar contains, and everything else on the page decides how that
-        -- content looks.
+        -- It sits directly under Settings, above Order & Limits and Deduplication:
+        -- once the bar is switched on, what it CONTAINS is the next question, and
+        -- everything below decides how that content looks.
         --
         -- ⚠ The rows are the same three kinds the Aura Filters page listed, in the
         -- same order: built-in presets, then custom filters, then the complement
@@ -374,26 +399,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             CENTER= L["Center"], TOP= L["Top"], BOTTOM= L["Bottom"], LEFT= L["Left"], RIGHT= L["Right"],
             TOPLEFT= L["Top Left"], TOPRIGHT= L["Top Right"], BOTTOMLEFT= L["Bottom Left"], BOTTOMRIGHT= L["Bottom Right"],
         }
-
-        -- Settings Group (col1)
-        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
-        local showBuffsCb = settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Buffs"], db, "showBuffs", function()
-            self:RefreshStates()
-            -- Re-scan auras on visible frames (not just layout): the show/hide gate
-            -- lives in the UNIT_AURA-driven UpdateAuras path, so UpdateAllFrames alone
-            -- (layout-only) leaves already-shown auras until the next aura event. Use
-            -- the same refresh the Max Buffs slider uses.
-            DF:RefreshAllVisibleFrames()
-        end), 30)
-        -- Re-sync checked state when value changes externally (e.g. AD banner click)
-        showBuffsCb.refreshContent = function(self)
-            local onShow = self:GetScript("OnShow")
-            if onShow then onShow(self) end
-        end
-        local buffMax = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Buffs"], 0, 8, 1, db, "buffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        buffMax.disableOn = function(d) return not d.showBuffs end
-        Add(settingsGroup, nil, 1)
 
         -- Appearance Group (col2). Icon Size / Scale / Alpha are how the row LOOKS, so
         -- they sit in column 2 with the other styling, matching Missing Buffs and
@@ -687,6 +692,22 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- ownership is stated rather than inferred.
         Add(CreateCopyButton(self.child, {"debuff", "showDebuffs", "directDebuff", "debuffBlacklist"}, L["Debuff Bar"], "auras_debuffs"), 25, 2)
 
+        -- ===== SETTINGS (Column 1, FIRST) =====
+        -- Leads the page for the same reason it does on Buff Bar: Show Debuffs is the
+        -- master switch everything else greys out under, so it must not be the fourth
+        -- box down. Keep the two pages in step — they are read as a pair.
+        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
+        settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
+        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Debuffs"], db, "showDebuffs", function()
+            self:RefreshStates()
+            -- See Show Buffs above: re-scan auras on visible frames so a static
+            -- debuff hides/shows immediately instead of waiting for the next aura event.
+            DF:RefreshAllVisibleFrames()
+        end), 30)
+        local debuffMax = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Debuffs"], 0, 8, 1, db, "debuffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+        debuffMax.disableOn = function(d) return not d.showDebuffs end
+        Add(settingsGroup, nil, 1)
+
         -- Shared by both groups below: rebuild the native filter strings and re-drive
         -- the container rows. The blacklist rides the same refresh because the debuff
         -- row's excludeSpellIDs merge reacts to exactly this pair
@@ -931,19 +952,6 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         dfDedup.tooltip = L["Hides debuffs that an Aura Designer group is already showing, so they don't appear twice."]
         dedupGroup:AddWidget(dfDedup, 30)
         Add(dedupGroup, nil, 1)
-
-        -- Settings Group (col1)
-        local settingsGroup = GUI:CreateSettingsGroup(self.child, 280)
-        settingsGroup:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), 40)
-        settingsGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show Debuffs"], db, "showDebuffs", function()
-            self:RefreshStates()
-            -- See Show Buffs above: re-scan auras on visible frames so a static
-            -- debuff hides/shows immediately instead of waiting for the next aura event.
-            DF:RefreshAllVisibleFrames()
-        end), 30)
-        local debuffMax = settingsGroup:AddWidget(GUI:CreateSlider(self.child, L["Max Debuffs"], 0, 8, 1, db, "debuffMax", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
-        debuffMax.disableOn = function(d) return not d.showDebuffs end
-        Add(settingsGroup, nil, 1)
 
         -- Appearance Group (col2) -- mirrors Buffs; see the note there.
         local appearanceGroup = GUI:CreateSettingsGroup(self.child, 280)
