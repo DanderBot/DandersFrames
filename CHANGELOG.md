@@ -2,12 +2,6 @@
 
 ## [Unreleased]
 
-### Bug Fixes
-
-* (Auras) Fix the brief flash of unfiltered buffs when a cinematic ends. (by Krathe)
-* (Test Mode) Test mode no longer fills other addons' aura displays with sample icons while it is open. (by Krathe)
-* (Auras) Fix the absorb bar hiding behind the Dispel Overlay while a dispellable debuff was active. (by Krathe)
-
 ## [5.1.1]
 
 ### Bug Fixes
