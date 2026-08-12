@@ -3245,8 +3245,15 @@ end
 -- so format (Number/Short/Full), the colour-by-time buckets (|cff escapes) and
 -- the hide-above-threshold blank band all mirror live exactly. Plain fallback
 -- ("14s"/"10m") only when the row runs Blizzard's default formatting.
-local function formatTestDuration(handle, rem)
-    local durSpec = handle.config.style and handle.config.style.duration
+-- `button` is optional but should always be passed where one exists: the preview
+-- countdown must use THAT button's duration spec, not the container's. Colour by
+-- time lives in the formatter, so reading the shared spec here showed a layout
+-- group's members counting down in the group's colours instead of their own — the
+-- test-mode twin of the native-binding split, one layer along, because the preview
+-- PAINTS its text where live BINDS it.
+local function formatTestDuration(handle, rem, button)
+    local cfg = (button and styleConfigFor(handle, button)) or handle.config
+    local durSpec = cfg.style and cfg.style.duration
     local f = durSpec and durSpec.formatter
     if f then
         local ok, s
@@ -3529,7 +3536,7 @@ function Handle:_paintTestSlot(slot, index)
                 -- change-detection compares against the live string (a recycled
                 -- button would otherwise carry a stale one across the rebuild).
                 if slot.dfDur then
-                    local s = formatTestDuration(self, d - offset)
+                    local s = formatTestDuration(self, d - offset, slot)
                     slot.dfDur:SetText(s)
                     slot._dfTestText, slot._dfTestTextAt = s, GetTime()
                 end
@@ -3557,11 +3564,12 @@ function Handle:_paintTestSlot(slot, index)
                 -- route. zeroText set (the "" default) = that text verbatim; unset
                 -- (user opted out) = the formatter's zero output, "0" fallback —
                 -- best-effort mimic of Blizzard's default zero-duration rendering.
-                local durSpec = self.config.style and self.config.style.duration
+                local zCfg = styleConfigFor(self, slot)
+                local durSpec = zCfg.style and zCfg.style.duration
                 if durSpec and durSpec.zeroText ~= nil then
                     slot.dfDur:SetText(durSpec.zeroText)
                 else
-                    local zt = formatTestDuration(self, 0)
+                    local zt = formatTestDuration(self, 0, slot)
                     slot.dfDur:SetText(zt ~= "" and zt or "0")
                 end
             end
@@ -3732,7 +3740,7 @@ function AuraContainer._startTestTicker()
                         end
                         if b.dfDur and (not textIv or not b._dfTestTextAt
                             or (now - b._dfTestTextAt) >= textIv) then
-                            local s = formatTestDuration(h, rem)
+                            local s = formatTestDuration(h, rem, b)
                             if s ~= b._dfTestText then
                                 b.dfDur:SetText(s)
                                 b._dfTestText = s
