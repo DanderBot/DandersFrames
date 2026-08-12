@@ -4220,6 +4220,7 @@ function Handle:_applyVisibility()
     -- shows and hides the whole subtree, which is the entire reason for nesting.
     if self.config and self.config.parentDrivenVisibility then return end
     local want = (self._intendedShown ~= false) and not self._idGateHidden
+        and not self._cineLatched
     -- Respect the fake-data park (Edit Mode etc.): while parked, this handle is
     -- hidden regardless of intent/gate — otherwise a hover-deferred retry could
     -- ping-pong against the park's own deferred hide.
@@ -4289,6 +4290,18 @@ end
 -- still fires, which is the first-login case.
 -- Re-entrancy: the flag is stored BEFORE Refresh(), so a re-entrant gate pass sees
 -- true and cannot bounce again.
+-- CINEMATIC LATCH (see the cineWatch block at the bottom of the file). While set,
+-- the handle stays hidden through _applyVisibility's existing composition -- the
+-- same combat-safe render-side lever the identity gate uses. The latch exists so
+-- the fail-open parse a cinematic leaves behind is never SEEN: the frames come
+-- back only after the recovery re-parse below has run.
+function Handle:_setCineLatch(on)
+    on = on or nil
+    if self._cineLatched == on then return end
+    self._cineLatched = on
+    self:_applyVisibility()
+end
+
 function Handle:_noteGateRecovery(can)
     local was = self._idGateAssist
     self._idGateAssist = can and true or false
@@ -4296,6 +4309,9 @@ function Handle:_noteGateRecovery(can)
         DF:Debug("AURACONTAINER", "gate recovered for unit=%s - re-parsing (pool was fail-open)",
             tostring(self.config and self.config.unit))
         self:Refresh()
+        -- AFTER the bounce, deliberately: the whole point of the cinematic latch
+        -- is that the frames reappear already re-parsed, not one frame before.
+        self:_setCineLatch(nil)
     end
 end
 
@@ -5782,7 +5798,7 @@ end
 function SlotHandle:_pushFilter()
     local c = self.owner and self.owner.container
     if not c then return false end
-    local want = (self.parked or self._gateHidden) and "" or self.liveFilter
+    local want = (self.parked or self._gateHidden or self._cineLatched) and "" or self.liveFilter
     return pcall(c.SetAuraSlotFilterString, c, self.key, want)
 end
 
@@ -5850,22 +5866,47 @@ end
 --
 -- For a slot the gate DID hide, the transition below already re-pushes the string, so
 -- this edge is what covers the case the gate never hides at all: your own frame.
+-- CINEMATIC LATCH, slot half (see cineWatch at the bottom of the file). A slot has
+-- no frame of its own, so the latch actuates the way the slot gate does: through
+-- _pushFilter, where an empty string matches nothing (proven in game). Same failure
+-- contract as Park/Restore -- a refused CLEAR would otherwise leave the slot dark
+-- forever, so failure or lockdown queues the regen replay, which re-derives from
+-- whatever the latch state is by drain time.
+function SlotHandle:_setCineLatch(on)
+    on = on or nil
+    if self._cineLatched == on then return end
+    self._cineLatched = on
+    local ok = self:_pushFilter()
+    if not ok or InCombatLockdown() then
+        self._pendingTuning = true
+        registerSlotRegen(self)
+    end
+end
+
 function SlotHandle:_noteGateRecovery(can)
     local was = self._idGateAssist
     self._idGateAssist = can and true or false
-    if was ~= false or not self._idGateAssist then return end
+    if was ~= false or not self._idGateAssist then
+        return
+    end
     local c = self.owner and self.owner.container
     if not c or self._lastCandidateFilters == nil then return end
     DF:Debug(DBG, "slot gate recovered for key=%s unit=%s - re-parsing (pool was fail-open)",
         tostring(self.key), tostring(self.owner and self.owner.unit))
     -- ☠ No native tuning setter runs in lockdown (see ApplyTuning). Queue the standard
     -- replay, which re-pushes candidates, verdict and filter together on the way out.
+    -- The latch flag clears NOW in both branches -- the replay's _pushFilter derives
+    -- from the flag at drain time, so leaving it set would re-park the slot the
+    -- moment combat dropped.
     if InCombatLockdown() then
+        self._cineLatched = nil
         self._pendingTuning = true
         registerSlotRegen(self)
         return
     end
     pcall(c.SetAuraSlotCandidateFilters, c, self.key, self._lastCandidateFilters)
+    -- After the bounce, matching the Handle: the slot un-parks already re-parsed.
+    self:_setCineLatch(nil)
 end
 
 function SlotHandle:_applyIdentityGate()
@@ -6339,6 +6380,97 @@ idGateWatch:SetScript("OnEvent", function(_, event)
         C_Timer.After(2, IdentityGateSweep)
         C_Timer.After(6, IdentityGateSweep)
     end
+end)
+
+-- ============================================================
+-- CINEMATIC LATCH — no flash of the fail-open parse
+-- ============================================================
+-- A cinematic flips UNIT_FACTION, the identity gate fails open, and the engine
+-- keeps rendering that unfiltered parse until the recovery bounce re-parses it
+-- (see Handle:_noteGateRecovery). The bounce is event-driven, so there was a
+-- visible half-second of every-buff icons between the UI coming back and
+-- UNIT_FACTION reaching us. The delay is upstream — Blizzard's own event timing
+-- plus one parse tick; other addons report the identical residue — so the only
+-- lever left is not SHOWING the frames until the re-parse has happened.
+--
+-- Shape: START latches every vulnerable handle/slot hidden (both events are
+-- SynchronousEvent, so the latch lands before the first cinematic frame — and the
+-- UI is hidden during playback anyway, so latching costs nothing visible). The
+-- recovery edge clears each latch AFTER its bounce, so frames reappear already
+-- re-parsed. STOP runs the gate sweep immediately (catching an assist restore
+-- that raced ahead of our 50ms coalesce), then clears any handle whose assist
+-- never dropped — its parse was never fail-open, nothing to wait for.
+--
+-- ☠ The fallback timer is NOT optional. Fail-safe direction here is SHOW (a
+-- wrongly-hidden row is worse than one garbage frame — the gate's own rule), so
+-- whatever is still latched 3s after STOP shows regardless, which degrades to
+-- exactly the pre-latch behaviour and never below it. This is also what bounds
+-- the mid-combat case, where the slot pushes defer to the regen replay.
+--
+-- ⚠ Accepted gap: a handle CREATED during a cinematic misses the START arm and
+-- can still flash. Rebuilding mid-cinematic is rare enough that wiring
+-- InCinematic() into the build path is not worth the coupling.
+local cineWatch = CreateFrame("Frame")
+cineWatch:RegisterEvent("CINEMATIC_START")
+cineWatch:RegisterEvent("CINEMATIC_STOP")
+cineWatch:RegisterEvent("PLAY_MOVIE")
+cineWatch:RegisterEvent("STOP_MOVIE")
+local cineGen = 0
+local function CineLatchAll(on)
+    for h in pairs(AuraContainer._handles or {}) do
+        if not on then
+            pcall(function() h:_setCineLatch(nil) end)
+        elseif h._idGateVulnerable then
+            pcall(function() h:_setCineLatch(true) end)
+        end
+    end
+    -- ⚠ Slots live in their own registry — the gate sweep above records why
+    -- forgetting them is how the AD path once had no gate at all.
+    for h in pairs(AuraContainer._slotHandles or {}) do
+        if not on then
+            pcall(function() h:_setCineLatch(nil) end)
+        elseif h._idGateVulnerable then
+            pcall(function() h:_setCineLatch(true) end)
+        end
+    end
+end
+cineWatch:SetScript("OnEvent", function(_, event)
+    cineGen = cineGen + 1
+    if event == "CINEMATIC_START" or event == "PLAY_MOVIE" then
+        -- Test mode shows fake data — nothing to protect, don't touch it.
+        -- ☠ The guard sits HERE and not on the whole handler: STOP must always
+        -- run, because test mode entered mid-cinematic would otherwise skip both
+        -- the clear and the fallback timer while the gate guard suppresses the
+        -- recovery edge — a latch stuck until reload.
+        if AuraContainer._testMode then return end
+        DF:Debug(DBG, "cinematic start (%s): latching vulnerable pools", event)
+        CineLatchAll(true)
+        return
+    end
+    -- STOP: fire any pending recovery NOW rather than waiting out the coalesce —
+    -- if the engine restored assist before this event, the sweep bounces and
+    -- clears those latches in one pass.
+    IdentityGateSweep()
+    -- A handle whose assist never dropped was never fail-open; show it.
+    for h in pairs(AuraContainer._handles or {}) do
+        if h._cineLatched and h._idGateAssist ~= false then
+            pcall(function() h:_setCineLatch(nil) end)
+        end
+    end
+    for h in pairs(AuraContainer._slotHandles or {}) do
+        if h._cineLatched and h._idGateAssist ~= false then
+            pcall(function() h:_setCineLatch(nil) end)
+        end
+    end
+    -- Whatever is still latched is waiting on a restore that has not reached us.
+    -- Hold — that is the whole point — but never past the fail-safe window.
+    local gen = cineGen
+    C_Timer.After(3, function()
+        if gen == cineGen then
+            DF:Debug(DBG, "cinematic latch fallback: showing whatever is still held")
+            CineLatchAll(false)
+        end
+    end)
 end)
 
 -- /df debug idgate — identity-gate ground truth: EVERY handle (not just the
