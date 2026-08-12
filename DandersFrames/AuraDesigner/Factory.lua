@@ -3138,9 +3138,18 @@ local function buildMemberGroupConfig(frame, group, recs, mine, defs)
             -- Resolved per member, so a self-only aura drops the caster filter for
             -- its own record while every neighbour keeps theirs.
             filter = poolFilter(group, rm),
-            -- Keyed by the member's stable indicator id, not its ordinal: reordering
-            -- the group must move icons, not re-key every group and force a rebuild.
-            key = "m" .. tostring(r.indicatorID),
+            -- ☠ THE AURA NAME IS LOAD-BEARING, NOT DECORATION. Indicator ids are
+            -- unique only WITHIN one aura (nextIndicatorID is a per-aura counter
+            -- starting at 1), so "m1" collided for every user who placed one
+            -- indicator per spell -- and the engine ASSERTS on a duplicate group
+            -- key ("aura group 'm1' already exists", CustomAuraContainer), which
+            -- our pcall swallowed. First member rendered, the rest silently never
+            -- did. Shipped that way; two field reports on release day. It passed
+            -- in-game testing only because a dev profile's add/delete history
+            -- happens to produce distinct ids.
+            -- Still keyed by identity rather than ordinal: reordering the group
+            -- must move icons, not re-key every group and force a rebuild.
+            key = "m:" .. tostring(r.auraName) .. ":" .. tostring(r.indicatorID),
             candidateFilters = { includeSpellIDs = r.map },
             style = {
                 button      = buildPlacedStyle(r.indicator, r.isSquare, r.borderSpec, defs),
@@ -4269,6 +4278,7 @@ local function collectGroupMembers(frame, group, auras, idSpec, defs, mine)
                 recs = recs or {}
                 recs[#recs + 1] = {
                     indicatorID = m.indicatorID,
+                    auraName    = m.auraName,
                     indicator   = ind,
                     map         = map,
                     -- ☠ PER MEMBER, not per group. Symbiotic Relationship's copy on
