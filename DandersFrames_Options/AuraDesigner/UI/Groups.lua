@@ -1273,6 +1273,24 @@ local function CollectAllEffects()
             if not displayName and adHocID then
                 displayName = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(adHocID) or auraName
             end
+            -- ☠ LAST RESORT — NEVER LEAVE A RECORD UNNAMED. The gate below drops
+            -- anything without a display name, so a key that falls through here
+            -- is an effect that still RENDERS on the frame (the factory resolves
+            -- identity separately) but has no card, no delete button and no way
+            -- out short of a new profile. Add-by-ID used to mint exactly such
+            -- keys. Name it from its own spell, then from the raw key, so it is
+            -- always visible and always removable. Same doctrine as
+            -- MigrateToSpecScoped's "NEVER drop it" parking.
+            -- Safe against leaking another spec's auras: this pool is already
+            -- spec-scoped storage (adDB.auras[spec]), not a flat table filtered
+            -- by name — the nameability test never did the spec scoping.
+            if not displayName then
+                local ids = Adapter and Adapter.GetAuraSpellIDs
+                    and Adapter:GetAuraSpellIDs(spec, auraName)
+                local id = ids and ids[1]
+                displayName = (id and C_Spell and C_Spell.GetSpellName
+                    and C_Spell.GetSpellName(id)) or auraName
+            end
         end
         if type(auraCfg) == "table" and displayName then
             -- Placed indicators

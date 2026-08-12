@@ -965,6 +965,19 @@ local function OpenADPicker(opts)
     if S.tabScrollFrame then S.tabScrollFrame:Hide() end
     opts.parent = S.rightPanel
     opts.onClose = ADPickerClosed
+    -- Row tooltips list the ID set the PLACEMENT will track, which on My Buffs
+    -- is the curated set and not just what the row's canonical id implies —
+    -- HolyArmaments deliberately fuses two spells the database keeps apart. The
+    -- row's own `id` is a TOOLTIP id (Config's TooltipSpellIDs sends Ebon Might
+    -- to its buff 395296), so without this the only ID a user could see was one
+    -- that named a different spell to the one the picker was about to place.
+    opts.rowSpellIDs = function(rec)
+        local spec = (not IsOtherTab()) and ResolveSpec() or nil
+        if not (spec and rec and rec.auraName and Adapter and Adapter.GetAuraSpellIDs) then
+            return nil
+        end
+        return Adapter:GetAuraSpellIDs(spec, rec.auraName)
+    end
     -- Empty record list on My Buffs = unsupported/undetected spec: keep
     -- the old picker's guidance instead of a bare "No results found".
     -- (Other Buffs records are the full SpellDB — never empty.)
@@ -1212,6 +1225,35 @@ local function AddSpellToGroup(groupID, auraName, display, typeKey, skipEcho, pi
     end
 end
 
+-- The trackable-pool entry for a name, or nil when the name is not in this
+-- spec's pool at all. Doubles as the pool-MEMBERSHIP test below: a config key
+-- outside the pool is a key no editor surface can name.
+local function TrackableInfo(spec, auraName)
+    local list = spec and Adapter and Adapter:GetTrackableAuras(spec)
+    if not list then return nil end
+    for _, info in ipairs(list) do
+        if info.name == auraName then return info end
+    end
+    return nil
+end
+
+-- The curated aura that owns a SpellDB record, by any ID the record carries.
+-- GetTrackableAuras dedups a record OUT of the pool when its ids overlap a
+-- curated entry's, so "record exists but its name isn't in the pool" always
+-- means some curated entry already speaks for it — this finds which.
+local function CuratedOwnerForRecord(spec, rec)
+    if not (spec and rec and Adapter and Adapter.GetAuraNameForSpellID) then return nil end
+    local owner = Adapter:GetAuraNameForSpellID(spec, rec.id)
+    if owner then return owner end
+    if rec.alts then
+        for _, altID in ipairs(rec.alts) do
+            owner = Adapter:GetAuraNameForSpellID(spec, altID)
+            if owner then return owner end
+        end
+    end
+    return nil
+end
+
 -- ── ADD BY ID (shared picker ID row) ──
 -- Snap known ids to their pool/curated record (then behave exactly like
 -- clicking that spell's row — same AddPickedSpell / AddSpellToGroup paths);
@@ -1227,34 +1269,38 @@ local function ADAddByID(idNum, idText, picker, mode, typeKey, groupID)
     -- The Other Buffs pool is spec-independent — no spec required there.
     if not spec and not isOther then return end
 
-    -- Snap. My Buffs: the spec's curated tables first (alt ids included),
-    -- then the SpellDB (R.ByID indexes canonical + alt ids), else ad-hoc.
-    -- Other Buffs: SpellDB ONLY — the B1 naming contract (other-pool keys
-    -- are SpellDB rec.n or ad-hoc "#<id>"; curated internal names don't
-    -- resolve with a nil spec).
+    -- Snap. My Buffs: the spec's curated identity index first, then the SpellDB
+    -- (R.ByID indexes canonical + alt ids), else ad-hoc. Other Buffs: SpellDB
+    -- ONLY — the B1 naming contract (other-pool keys are SpellDB rec.n or ad-hoc
+    -- "#<id>"; curated internal names don't resolve with a nil spec).
     local auraName
-    if not isOther then
-        local alts = DF.AuraDesigner.AlternateSpellIDs and DF.AuraDesigner.AlternateSpellIDs[spec]
-        if alts and alts[idNum] then auraName = alts[idNum] end
-        if not auraName then
-            local specIDs = DF.AuraDesigner.SpellIDs and DF.AuraDesigner.SpellIDs[spec]
-            if specIDs then
-                for name, id in pairs(specIDs) do
-                    if id == idNum then auraName = name; break end
-                    if type(id) == "table" then  -- rare multi-id entries
-                        for _, sub in ipairs(id) do
-                            if sub == idNum then auraName = name; break end
-                        end
-                        if auraName then break end
-                    end
-                end
-            end
-        end
+    if not isOther and Adapter and Adapter.GetAuraNameForSpellID then
+        -- The SHARED identity index — primaries, curated alternates and the
+        -- alternates inherited from the SpellDB, i.e. exactly the ID set
+        -- DF:BuildADIdentityFilters will make the placement track. Typing any ID
+        -- an indicator responds to therefore lands on that indicator's spell,
+        -- which matters because our own AD tooltip hands the user the BUFF id
+        -- (Config's TooltipSpellIDs), not the curated primary.
+        auraName = Adapter:GetAuraNameForSpellID(spec, idNum)
     end
     if not auraName then
         local R = DF.FilterRegistry
         local rec = R and R.ByID and R.ByID[idNum]
-        if rec then auraName = rec.n end
+        if rec then
+            auraName = rec.n
+            -- ☠ MY BUFFS ONLY STORES POOL NAMES. `rec.n` is a SpellDB name
+            -- ("Ebon Might"); curated keys are internal ("EbonMight"). When a
+            -- curated entry has deduped this record out of the spec pool, storing
+            -- rec.n mints a config key nothing can name — and CollectAllEffects
+            -- DROPS records it cannot name, so the indicator renders on the frame
+            -- while being invisible in the editor and impossible to delete. That
+            -- was the reported bug. Snap to the curated owner instead; if there
+            -- somehow isn't one, degrade to an ad-hoc "#<id>" key, which is always
+            -- nameable (resolved live) and always deletable.
+            if not isOther and not TrackableInfo(spec, auraName) then
+                auraName = CuratedOwnerForRecord(spec, rec)
+            end
+        end
     end
 
     local isAdHoc = not auraName
@@ -1285,12 +1331,8 @@ local function ADAddByID(idNum, idText, picker, mode, typeKey, groupID)
         if isOther then
             display = OtherPoolDisplayName(auraName)
         else
-            local trackable = Adapter and Adapter:GetTrackableAuras(spec)
-            if trackable then
-                for _, info in ipairs(trackable) do
-                    if info.name == auraName then display = info.display or auraName; break end
-                end
-            end
+            local info = TrackableInfo(spec, auraName)
+            if info then display = info.display or auraName end
         end
     end
 

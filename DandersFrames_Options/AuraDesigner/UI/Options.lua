@@ -159,6 +159,7 @@ local function GetAuraDesignerDB()
     DF.MigrateAuraDesignerAbsoluteLevelsLazy(adDB)
     DF.MigrateAuraDesignerAbsoluteLevelsV2Lazy(adDB)
     DF.MigrateAuraDesignerDefaultRefreshLazy(adDB)
+    DF.MigrateAuraDesignerOrphanAuraKeysLazy(adDB)
     return adDB
 end
 P.GetAuraDesignerDB = GetAuraDesignerDB
