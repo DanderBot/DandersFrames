@@ -6000,11 +6000,20 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 local ov = frame.dfDispelOverlay
                 for _, e in ipairs({
                     { "healthBar",       frame.healthBar,            3 },
-                    { "dfHealAbsorbBar", frame.dfHealAbsorbBar,      8 },
+                    { "dfHealAbsorbBar", frame.dfHealAbsorbBar,
+                        DF.ResolveHealAbsorbBarLevel
+                        and select(2, pcall(function()
+                            local v = DF:ResolveHealAbsorbBarLevel(frame, bdb)
+                            return v and (v - base)
+                        end)) },
                     { "dfAbsorbBar",     frame.dfAbsorbBar,          absLvl and (absLvl - base) },
                     { "absorbOverflow",  frame.absorbOverflowBar,    absLvl and (absLvl - base) },
                     { "dfHealPrediction", frame.dfHealPredictionBar,
-                        (bdb and bdb.healPredictionFrameLevel) or 12 },
+                        DF.ResolveHealPredictionBarLevel
+                        and select(2, pcall(function()
+                            local v = DF:ResolveHealPredictionBarLevel(frame, bdb)
+                            return v and (v - base)
+                        end)) },
                     { "dispelOverlay",   ov,                         nil },
                     { "dispel gradient", ov and ov.gradient,
                         DF.ResolveDispelGradientLevel and DF:ResolveDispelGradientLevel(0, bdb) },
