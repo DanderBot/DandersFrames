@@ -1901,7 +1901,14 @@ function DF:LightweightUpdateFrameLevel(elementType)
         local frameBaseLevel = frame:GetFrameLevel()
         
         if elementType == "absorb" and frame.dfAbsorbBar then
-            frame.dfAbsorbBar:SetFrameLevel(frame:GetFrameLevel() + (db.absorbBarFrameLevel or 11))
+            -- ☠ MODE-AWARE. This applied absorbBarFrameLevel unconditionally, but that
+            -- slider is FLOATING-only by design -- so it dragged a BOUND absorb bar down
+            -- to frame+11, under the dispel overlay's gradient, where it stayed (
+            -- UpdateAbsorb's fast path returns before its own level block). One shared
+            -- derivation now; see DF:ResolveAbsorbBarLevel for the whole story.
+            local lvl = DF.ResolveAbsorbBarLevel and DF:ResolveAbsorbBarLevel(frame, db)
+            frame.dfAbsorbBar:SetFrameLevel(lvl
+                or (frame:GetFrameLevel() + (db.absorbBarFrameLevel or 11)))
         elseif elementType == "role" and frame.roleIcon then
             frame.roleIcon:SetFrameLevel(frameBaseLevel + (db.roleIconFrameLevel or 30))
         elseif elementType == "leader" and frame.leaderIcon then

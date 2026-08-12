@@ -459,6 +459,39 @@ function DF:GetAbsorbEdgeInset(frame, db)
     return inset
 end
 
+-- ☠ THE ONE DERIVATION OF THE ABSORB BAR'S FRAME LEVEL. Two paths set it and they
+-- disagreed: this file's layout pass (mode-aware) and the Frame Level slider's live
+-- preview in Core.lua, which applied absorbBarFrameLevel UNCONDITIONALLY -- even
+-- though that slider is FLOATING-only by design (Pages/Auras.lua, levelSlider.hideOn).
+-- A bound bar therefore landed at frame+11, BELOW the dispel overlay's gradient at
+-- ~frame+17, and UpdateAbsorb's fast path returns before the level block, so the wrong
+-- value stuck for the rest of the session.
+--
+-- Field-reported (Kaldoran, 5.1.0): with a shield up and a dispellable debuff applied,
+-- the absorb vanished behind the dispel wash. ★ It only became visible when the
+-- day-one fix made "Show On Current Health Only" clip correctly to the FILLED health
+-- -- which is exactly where a bound absorb lives. The layering conflict predates that
+-- fix; the fix is what gave it something to collide with.
+--
+-- A bound absorb MUST sit above the wash: the wash covers the filled health, so an
+-- absorb underneath it is invisible for as long as any dispellable debuff is up --
+-- i.e. the shield is hidden precisely when the frame matters most (Krathe's call).
+-- FLOATING is a free-standing bar the user places and levels themselves, so it keeps
+-- the slider.
+function DF:ResolveAbsorbBarLevel(frame, db)
+    if not frame or not frame.GetFrameLevel then return nil end
+    local mode = (db and db.absorbBarMode) or "ATTACHED_OVERFLOW"
+    if mode == "FLOATING" then
+        return frame:GetFrameLevel() + ((db and db.absorbBarFrameLevel) or 11)
+    end
+    -- Bound to the health bar (OVERLAY / ATTACHED / ATTACHED_OVERFLOW): derived, and
+    -- deliberately clear of the dispel overlay band. healthBar is frame+3, so +15
+    -- lands ~frame+18 against the gradient's ~+17.
+    local hb = frame.healthBar and frame.healthBar:GetFrameLevel()
+        or (frame:GetFrameLevel() + 3)
+    return hb + 15
+end
+
 function DF:UpdateAbsorb(frame, testIndex)
     if not frame then return end
     if not frame.healthBar then return end
@@ -657,7 +690,7 @@ function DF:UpdateAbsorb(frame, testIndex)
     -- say +11. Whether the bound modes SHOULD move to +11 is a design call needing in-game
     -- measurement, not arithmetic. See [[zorder_layer_map]].
     local healthLevel = frame.healthBar:GetFrameLevel()
-    local absorbLevel = healthLevel + 15
+    local absorbLevel = DF:ResolveAbsorbBarLevel(frame, db) or (healthLevel + 15)
 
     customBar:SetParent(frame)
     customBar:SetFrameStrata(frame:GetFrameStrata())
