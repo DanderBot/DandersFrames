@@ -4541,11 +4541,23 @@ function Handle:_applyIdentityGate()
     if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
         local unit = self.config and self.config.unit
         -- ☠ `unit ~= "player"` USED TO SIT ON THIS LINE, so your own frame was never
-        -- probed at all. That exemption is right about HIDING (a frame you cannot see
-        -- during a cinematic needs no hiding, and hiding your own frame is a worse
-        -- failure than one garbage row) — but it also meant nothing ever NOTICED your
-        -- own pool falling open, so it never got re-parsed. The exemption now sits on
-        -- the two hide branches instead: probe always, hide only others.
+        -- probed at all — nothing ever NOTICED your own pool falling open, so it never
+        -- got re-parsed. Probing always is what fixed that.
+        --
+        -- ☠☠ IT THEN SURVIVED ON THE ASSIST HIDE BRANCH BELOW, AND THAT WAS WRONG.
+        -- The reasoning was "a frame you cannot see during a cinematic needs no hiding" —
+        -- true when written, and made obsolete by the cinematic latch that landed after
+        -- it. CineLatchAll (bottom of this file) latches EVERY vulnerable handle with no
+        -- isOwn check, and _noteGateRecovery unlatches only AFTER the recovery Refresh,
+        -- so own frames are already hidden through a cinematic and come back re-parsed.
+        -- The exemption was therefore contributing nothing to the case it was written
+        -- for, and its only live effect was the case with no cinematic and no latch:
+        -- ★ a VEHICLE. Take control of an NPC and UnitCanAssist goes false for minutes
+        -- while you look straight at the frame -- /df debug idgate showed every party1
+        -- handle hidden and every player handle open (field-caught, Krathe 2026-08-13).
+        -- Removing it costs a comparison and needs no timer, event or new state.
+        -- ⚠ Branch (2) keeps isOwn: you are always UnitIsVisible to yourself, so it is
+        -- belt-and-braces there rather than a behaviour decision.
         if type(unit) == "string" and UnitExists(unit) then
             local isOwn = (unit == "player")
             -- (1) Cross-faction / non-assistable: includeSpellIDs / category tokens
@@ -4555,7 +4567,9 @@ function Handle:_applyIdentityGate()
                 if ok then
                     if issecretvalue and issecretvalue(can) then can = true end
                     self:_noteGateRecovery(can)
-                    if not can and not isOwn then hide = true end
+                    -- ☠ NOT `and not isOwn` — see the block above. Cinematics are the
+                    -- latch's job; this branch is what covers a vehicle.
+                    if not can then hide = true end
                 end
             end
             -- (2) Not in your visible world (different instance/phase): the
@@ -6148,8 +6162,11 @@ function SlotHandle:_applyIdentityGate()
     if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
         local unit = self.owner and self.owner.unit
         -- ☠ See Handle:_applyIdentityGate — the `unit ~= "player"` exemption moved off
-        -- this line onto the hide branches, so the player's own slot is PROBED (and so
-        -- can be re-parsed on recovery) while still never being hidden.
+        -- this line onto the hide branches so the player's own slot is PROBED, and has
+        -- now been dropped from the ASSIST branch as well: the cinematic latch already
+        -- hides own handles (CineLatchAll takes no isOwn), so the exemption only ever
+        -- applied to the un-latched case — a vehicle — where it left the player's own
+        -- slots rendering an unfiltered pool.
         if type(unit) == "string" and UnitExists(unit) then
             local isOwn = (unit == "player")
             if self._idGateVulnerable then
@@ -6157,7 +6174,7 @@ function SlotHandle:_applyIdentityGate()
                 if ok then
                     if issecretvalue and issecretvalue(can) then can = true end
                     self:_noteGateRecovery(can)
-                    if not can and not isOwn then hide = true end
+                    if not can then hide = true end
                 end
             end
             if not hide and not isOwn and self._idGateSourceRelative then
