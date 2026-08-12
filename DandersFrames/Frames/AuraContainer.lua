@@ -315,6 +315,71 @@ local function setContainerProviderDeaf(c, deaf)
     DF:Debug(DBG, "provider deafening: %s", why)
 end
 
+-- ============================================================
+-- PER-CONTAINER SAMPLE SOURCE — capability probe
+-- ============================================================
+-- ☠ PROBE ONLY. It records what the live client allows and changes NO behaviour.
+-- Do not wire anything to the result until it has come back true in game.
+--
+-- The prize, if it works: SetUseEditModeSource is the ONE thing that decides
+-- whether a container reads Edit Mode's sample auras --
+--
+--     ManagedAuraContainerPrivateMixin:OnAuraDataProviderSwitch(useRealDataProvider)
+--         self:SetUseEditModeSource(not useRealDataProvider)
+--
+-- -- and it is per CONTAINER. Today test mode reaches it the only way we know
+-- works: C_UnitAuras.SwitchAuraDataProvider, which is GLOBAL, so it drags every
+-- other aura container in the client onto sample data with us. That is what makes
+-- Blizzard's buff and debuff frames misbehave under Unlock Mode (we park them, see
+-- _parkBlizzardAuraFrames) and, in the other direction, what costs Blizzard's Edit
+-- Mode preview its sample auras when we reset the provider to rescue our own rows.
+-- Calling the setter ourselves would replace BOTH hacks with one honest opt-in.
+--
+-- Why it is probed rather than assumed, either way:
+--   * It is a PRIVATE-mixin method, not a base widget method. Base methods are
+--     reachable on these forbidden-table objects (we already call SetScale,
+--     SetPoint, SetMouseClickEnabled); private ones are usually not exposed to
+--     addon code at all, so the field may simply be nil.
+--   * The container carries a forbidden aspect from birth, and we have already been
+--     refused on this exact object: UnregisterEvent gives "Function call not
+--     permitted on forbidden aspect 'EventRegistrations'" (proven in game, 68914).
+--     A setter that swings the container's data source is at least as likely gated.
+--
+-- ⚠ Only ever called while test mode is ON, and only with `true`. That is the value
+-- the global switch is about to force on this container anyway, so a SUCCESS is a
+-- no-op rather than a behaviour change we did not intend — and a refusal is the
+-- answer we came for. Never probe with `false`: on a container that had legitimately
+-- heard the switch that WOULD change what renders.
+function AuraContainer._probeEditModeSource(c)
+    if AuraContainer._editSourceOK ~= nil then return end   -- answered once, never retried
+    if not c or not AuraContainer._testMode then return end
+
+    if not c.SetUseEditModeSource then
+        AuraContainer._editSourceOK = false
+        AuraContainer._editSourceWhy = "SetUseEditModeSource not exposed on the container (private mixin)"
+        DF:Debug(DBG, "per-container sample source: %s", AuraContainer._editSourceWhy)
+        return
+    end
+
+    local ok, err = pcall(c.SetUseEditModeSource, c, true)
+    if not ok then
+        AuraContainer._editSourceOK = false
+        AuraContainer._editSourceWhy = "refused: " .. tostring(err)
+        DF:DebugWarn(DBG, "per-container sample source refused: %s", tostring(err))
+        return
+    end
+
+    -- Accepted without erroring. ⚠ NOT the same as "it took" — the forbidden-aspect
+    -- refusals we have seen are loud, but a silent no-op is the case that would
+    -- mislead us into ripping out a working workaround. There is no public getter to
+    -- confirm with, so this is recorded as promising-but-unconfirmed and wants a
+    -- visual check (do our rows fill with sample icons WITHOUT the global bounce?)
+    -- before anything depends on it.
+    AuraContainer._editSourceOK = true
+    AuraContainer._editSourceWhy = "accepted (UNCONFIRMED — no getter; verify rows fill without the global switch)"
+    DF:Debug(DBG, "per-container sample source: %s", AuraContainer._editSourceWhy)
+end
+
 -- TEST MODE (P5 hybrid, probe 33 live-proven). A real CustomAuraContainer reads real
 -- unit auras — nothing renders on a fabricated test unit. Instead of faking the
 -- CONTAINER we fake the DATA: the game's own sample provider
@@ -2300,6 +2365,8 @@ function NativeBackend:build()
     -- this has to be re-applied here rather than once. Inverted while OUR test mode
     -- is on: that preview needs to hear the bounce.
     setContainerProviderDeaf(c, not AuraContainer._testMode)
+    -- Capability probe only; records the client's answer, changes nothing.
+    AuraContainer._probeEditModeSource(c)
     local isOverlay = config.mode == "overlay"
     local isMissing = config.mode == "missing"
     -- SINGLE-SLOT ROW. A row that can only ever show ONE icon declares an AuraSlot
@@ -4607,6 +4674,8 @@ function Handle:_readoptParked()
     -- Re-applied per adoption for the same reason :build() re-applies it per build --
     -- the deafening lives on the container object and a park does not preserve intent.
     setContainerProviderDeaf(c, not AuraContainer._testMode)
+    -- Capability probe only; records the client's answer, changes nothing.
+    AuraContainer._probeEditModeSource(c)
 
     if config.mode == "overlay" then
         pcall(function() c:SetAllPoints(self.frame) end)
@@ -5290,6 +5359,8 @@ local function ensureOwner(frame, unit)
         return nil
     end
     setContainerProviderDeaf(c, not AuraContainer._testMode)
+    -- Capability probe only; records the client's answer, changes nothing.
+    AuraContainer._probeEditModeSource(c)
     pcall(c.SetAllPoints, c, anchor)
     if type(unit) == "string" then pcall(c.SetUnit, c, unit) end
 

@@ -2896,6 +2896,18 @@ function DF:DebugAuraFilters(unit)
     if ac and ac._providerDeafWhy then
         o:Field("unregister probe", tostring(ac._providerDeafWhy), deafOK and "good" or "neutral")
     end
+    -- Per-container sample source. If this ever comes back accepted AND a visual
+    -- check confirms our rows fill without the global switch, test mode can stop
+    -- calling SwitchAuraDataProvider entirely — which retires both the global-switch
+    -- hacks: parking Blizzard's buff frames under Unlock Mode, and the Edit Mode
+    -- reset that costs Blizzard's own preview its sample auras.
+    local srcOK = ac and ac._editSourceOK
+    if ac and ac._editSourceWhy then
+        o:Field("per-container sample source", tostring(ac._editSourceWhy),
+            srcOK and "good" or "neutral")
+    elseif ac then
+        o:Field("per-container sample source", "not probed yet (needs a build during test mode)", "neutral")
+    end
     -- Populated the first time Edit Mode is opened. QUEUED means the client deferred
     -- our re-entrant switch to after the in-flight dispatch (safe, and the inline reset
     -- gains nothing); NESTED means it dispatched re-entrantly (zero blip, but containers
