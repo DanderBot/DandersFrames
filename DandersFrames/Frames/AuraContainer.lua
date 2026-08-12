@@ -2497,15 +2497,28 @@ function NativeBackend:build()
         -- actually sit still and position the badge. Capture it before the wipe and
         -- hand it to the first slots, so the preview shows both treatments side by side
         -- (styled slot 1-2, plain slot 3+) exactly as a live row would.
-        local testStyle
+        -- ☠ TWO SHAPES OF STYLED ROW, and they want opposite previews.
+        --
+        -- Important Debuffs styles ONE record among plain ones, so a single styled icon
+        -- against plain neighbours is both a direct A/B for positioning and an honest
+        -- picture of a live row, where importants are the minority. Styling several made
+        -- the preview look like the whole row was highlighted.
+        --
+        -- A LAYOUT GROUP is the mirror image: every record is styled and each one
+        -- differently, because each is a member with its own indicator look. Picking
+        -- "the first styled record" there would paint member 1's style on one icon and
+        -- leave the rest plain — a preview that differs from live in RENDERING rather
+        -- than in data, which is the one thing a preview may never do.
+        --
+        -- So: all records styled and more than one => per-slot, slot k wears member k's
+        -- style. Otherwise the original single-styled-slot behaviour, unchanged.
+        local testStyles, allStyled = {}, true
         for _, r in ipairs(filters) do
-            if r.style then testStyle = r.style break end
+            if r.style then testStyles[#testStyles + 1] = r.style else allStyled = false end
         end
-        -- ONE styled slot only. Styling several made the preview look like the whole row
-        -- was highlighted; a single styled icon against plain neighbours is both a direct
-        -- A/B for positioning and an honest picture of a live row, where importants are
-        -- the minority.
-        local testStyleSlots = testStyle and math.min(1, maxCount) or 0
+        local perSlotStyles = (allStyled and #testStyles > 1) and testStyles or nil
+        local testStyle = testStyles[1]
+        local testStyleSlots = (not perSlotStyles) and (testStyle and math.min(1, maxCount) or 0) or 0
         local testStyleLayout = recordGroupLayout(groupLayout, testStyle)
         filters = {}   -- the normal declaration loop below is skipped
         -- ☠ ONE GROUP PER PREVIEW SLOT, maxFrameCount = 1, fixedIndex = k. RESTORED
@@ -2562,18 +2575,22 @@ function NativeBackend:build()
         else
             for k = 1, maxCount do
                 local key = "dfTest" .. k
-                local styled = (k <= testStyleSlots) or nil
+                -- Per-slot style when the row is a layout group (member k's own look),
+                -- else the single-styled-slot A/B. Nil for a plain slot either way.
+                local slotStyle = perSlotStyles and perSlotStyles[k]
+                    or ((k <= testStyleSlots) and testStyle or nil)
+                local slotLayout = perSlotStyles and recordGroupLayout(groupLayout, slotStyle)
+                    or ((k <= testStyleSlots) and testStyleLayout or groupLayout)
                 -- pcall(fn, args...) rather than pcall(function() ... end): no wrapper
                 -- closure per group. Protection is unchanged — AddAuraGroup asserts.
                 local okGroup, err = pcall(c.AddAuraGroup, c, key, category, {
                     maxFrameCount = 1,
-                    initializeFrame = handle:_makeInitializeFrame(handle._gen, k, nil,
-                        styled and testStyle or nil),
-                    layout = styled and testStyleLayout or groupLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
+                    initializeFrame = handle:_makeInitializeFrame(handle._gen, k, nil, slotStyle),
+                    layout = slotLayout,   -- groupSpacing = 0 (buildGroupLayout) = uniform spacing
                 })
                 if okGroup then
                     self.groupKeys[#self.groupKeys + 1] = key
-                    self.groupStyles[key] = styled and testStyle or nil
+                    self.groupStyles[key] = slotStyle
                 else
                     DF:DebugWarn(DBG, "test group failed: %s", tostring(err))
                 end
