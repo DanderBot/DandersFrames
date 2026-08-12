@@ -74,6 +74,35 @@ function R:GetCustomFilter(id)
         -- the only defensive reader). Persisting the empty tables is harmless.
         f.spells = f.spells or {}
         f.rawIDs = f.rawIDs or {}
+        -- ☠ RE-BUCKET IDs THE DATABASE HAS SINCE LEARNED.
+        -- rawIDs are ids that had no record WHEN THEY WERE ADDED. SpellDB.lua is
+        -- regenerated per patch, so one can be promoted into a real record later --
+        -- and nothing moved it, so it kept taking the raw path, which is applied
+        -- verbatim AFTER the mute logic in both directions. That let a muted id
+        -- come back on the include side and fall out of the exclude map on the
+        -- other, breaking the one rule the mutes have: muting must never make an
+        -- aura appear. The drift predates the mutes; the mutes are what turned it
+        -- into a correctness bug.
+        -- ⚠ Store rec.id, not the typed id -- AddSpellToCustom's own bucketing
+        -- keys on the CANONICAL id, so anything else resolves to nothing.
+        -- Retry-shaped: if R.ByID is not populated yet, promote nothing and let a
+        -- later call do it, rather than recording a verdict taken too early.
+        if R.ByID and next(R.ByID) then
+            local promoted
+            for rid in pairs(f.rawIDs) do
+                local rec = R.ByID[rid]
+                if rec then
+                    promoted = promoted or {}
+                    promoted[rid] = rec.id
+                end
+            end
+            if promoted then
+                for rid, canonical in pairs(promoted) do
+                    f.rawIDs[rid] = nil
+                    f.spells[canonical] = true
+                end
+            end
+        end
     end
     return f
 end
@@ -873,7 +902,16 @@ function R:ResolveSelection(selection, showAll)
         if selection.customs then
             for cfId in pairs(selection.customs) do
                 local f = self:GetCustomFilter(cfId)
-                if f then for rid in pairs(f.rawIDs) do map[rid] = nil end end
+                -- ☠ A MUTED id must stay excluded. This loop REMOVES ids from the
+                -- exclude map, which is the direction that makes an aura appear --
+                -- so the mute has to win here even though the raw path has no
+                -- record to narrow. (Promoted ids are re-bucketed in
+                -- GetCustomFilter and never reach this loop.)
+                if f then
+                    for rid in pairs(f.rawIDs) do
+                        if not self:IsSpellIDMuted(rid) then map[rid] = nil end
+                    end
+                end
             end
         end
         return { kind = "exclude", map = map }
@@ -898,9 +936,14 @@ function R:ResolveSelection(selection, showAll)
                     local rec = R.ByID[sid]
                     if rec then addLiveRecordIDs(self, map, rec) else map[sid] = true end
                 end
-                -- rawIDs are ids the database does not know, so there is no record to
-                -- narrow and nothing to mute against — they pass through verbatim.
-                for rid in pairs(f.rawIDs) do map[rid] = true end
+                -- What is left in rawIDs is genuinely unknown to the database, so
+                -- there is no record to narrow. A direct mute is still honoured:
+                -- the store is keyed by raw spell id so it CAN hold one, and
+                -- "muting never reveals" has to hold on every path, not just the
+                -- ones with a record behind them.
+                for rid in pairs(f.rawIDs) do
+                    if not self:IsSpellIDMuted(rid) then map[rid] = true end
+                end
             end
         end
     end
