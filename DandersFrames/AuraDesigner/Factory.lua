@@ -5155,6 +5155,18 @@ function Factory:SyncFrame(frame)
         local fg = store.fgroups
         if not fg then fg = {}; store.fgroups = fg end
         local live = {}
+        -- ☠ RESOLVED HERE, not inherited. The `defs` further up is scoped to the
+        -- placed-pool do-block and is NOT visible in this one, so every call below was
+        -- handing out a nil — and had been for as long as one has taken it.
+        --
+        -- It degraded silently instead of erroring, because the filter-group path reads
+        -- it as `(defs and defs.level) or 40`: groups have been pinned to frame level 40
+        -- whatever the account-wide Default Frame Level slider said. That is precisely
+        -- the "AD output split across two planes, groups stranded underneath their own
+        -- indicators" that buildFilterGroupConfig's comment describes having fixed.
+        -- Surfaced by the member-group sync, which reaches defs.level bare through
+        -- placedStructSig and so could not fail quietly.
+        local defs = resolveDefs(adDB)
 
         local R = DF.FilterRegistry
         if R then
