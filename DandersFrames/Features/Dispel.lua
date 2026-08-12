@@ -181,8 +181,18 @@ end
 -- this file, for an icon atlas, and no dispel colour carries its own alpha. Green
 -- just swallows a cyan absorb most completely -- the absorb was under the wash for
 -- every type, and only the BLEND/ADD difference made it obvious.
+-- ☠ THE STYLE GATE IS NOT OPTIONAL. "Show On Current Health Only" is a FULL-style
+-- setting; the EDGE styles ignore it and always span the whole bar. The first cut of
+-- this function tested the checkbox alone, so Top Edge with the box still ticked --
+-- which is the shipped default, and invisible in the UI because the option does not
+-- apply to that style -- dropped the wash to the low band and the absorb bar at +11
+-- covered it. The edge band rendered over the health and vanished across the absorb
+-- (field-caught, Krathe). This condition MUST stay byte-identical to the layout's own
+-- (`gradientStyle == "FULL" and ...`), or the level and the geometry disagree again.
 function DF:ResolveDispelGradientLevel(parentLevel, db)
-    local onCurrentHealth = db and db.dispelGradientOnCurrentHealth ~= false
+    local style = (db and db.dispelGradientStyle) or "FULL"
+    local onCurrentHealth = style == "FULL"
+        and db and db.dispelGradientOnCurrentHealth ~= false
     return (parentLevel or 0) + (onCurrentHealth and 1 or 14)
 end
 
