@@ -898,7 +898,14 @@ function DF:CreateFrameElementsExtended(frame, db)
     frame.dfPowerBar:SetMinMaxValues(0, 1)
     frame.dfPowerBar:SetValue(1)
     frame.dfPowerBar:SetAlpha(1)
-    frame.dfPowerBar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 2)
+    -- ☠ SAME BAND AS ApplyResourceBarLayout (frame + resourceBarFrameLevel, default 20),
+    -- not healthBar+2 (frame+5). The layout normally supersedes this before the bar is
+    -- ever shown -- it is created hidden -- but the two values disagreed by fifteen
+    -- levels, which put the creation-time bar UNDER the dispel wash's full-frame band at
+    -- frame+17. Latent rather than live, and exactly the creation-vs-layout split that
+    -- hid the absorb overflow bar (see DF:ResolveAbsorbBarLevel). Any custom slider value
+    -- still arrives with the layout pass; this only fixes where it starts.
+    frame.dfPowerBar:SetFrameLevel(frame:GetFrameLevel() + 20)
     frame.dfPowerBar:Hide()
     
     local powerBg = frame.dfPowerBar:CreateTexture(nil, "BACKGROUND")
@@ -1281,7 +1288,14 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     frame.dfPowerBar:SetMinMaxValues(0, 1)
     frame.dfPowerBar:SetValue(1)
     frame.dfPowerBar:SetAlpha(1)
-    frame.dfPowerBar:SetFrameLevel(frame.healthBar:GetFrameLevel() + 2)
+    -- ☠ SAME BAND AS ApplyResourceBarLayout (frame + resourceBarFrameLevel, default 20),
+    -- not healthBar+2 (frame+5). The layout normally supersedes this before the bar is
+    -- ever shown -- it is created hidden -- but the two values disagreed by fifteen
+    -- levels, which put the creation-time bar UNDER the dispel wash's full-frame band at
+    -- frame+17. Latent rather than live, and exactly the creation-vs-layout split that
+    -- hid the absorb overflow bar (see DF:ResolveAbsorbBarLevel). Any custom slider value
+    -- still arrives with the layout pass; this only fixes where it starts.
+    frame.dfPowerBar:SetFrameLevel(frame:GetFrameLevel() + 20)
     frame.dfPowerBar:Hide()
     
     local powerBg = frame.dfPowerBar:CreateTexture(nil, "BACKGROUND")
