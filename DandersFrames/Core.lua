@@ -521,6 +521,7 @@ DF.DEBUG_GROUP_NAMES = {
 DF.DEBUG_GROUP_OF = {
     auras = "auras", auradata = "auras", dispel = "auras", auraexp = "auras",
     duration = "auras", idgate = "auras", ppdump = "auras", ppbadge = "auras",
+    ownpreview = "auras",
     admissing = "auras", cbt = "auras",
 
     headers = "frames", flatraid = "frames", secure = "frames", sort = "frames",
@@ -1900,7 +1901,14 @@ function DF:LightweightUpdateFrameLevel(elementType)
         local frameBaseLevel = frame:GetFrameLevel()
         
         if elementType == "absorb" and frame.dfAbsorbBar then
-            frame.dfAbsorbBar:SetFrameLevel(frame:GetFrameLevel() + (db.absorbBarFrameLevel or 11))
+            -- ☠ MODE-AWARE. This applied absorbBarFrameLevel unconditionally, but that
+            -- slider is FLOATING-only by design -- so it dragged a BOUND absorb bar down
+            -- to frame+11, under the dispel overlay's gradient, where it stayed (
+            -- UpdateAbsorb's fast path returns before its own level block). One shared
+            -- derivation now; see DF:ResolveAbsorbBarLevel for the whole story.
+            local lvl = DF.ResolveAbsorbBarLevel and DF:ResolveAbsorbBarLevel(frame, db)
+            frame.dfAbsorbBar:SetFrameLevel(lvl
+                or (frame:GetFrameLevel() + (db.absorbBarFrameLevel or 11)))
         elseif elementType == "role" and frame.roleIcon then
             frame.roleIcon:SetFrameLevel(frameBaseLevel + (db.roleIconFrameLevel or 30))
         elseif elementType == "leader" and frame.leaderIcon then
@@ -5784,6 +5792,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- Not logging, despite the old wording: it window-parks the badge so the
         -- anchor stays live and the badge shows even when the buff is present.
         sub("ppbadge",      "force the missing-buff badge to stay visible (geometry probe)", true)
+        sub("ownpreview",   "A/B test mode: our own frames (default) vs the global sample provider", true)
         sub("admissing",    "Aura Designer missing-buff trace (add 'mark')", true, "[mark]")
         sub("cbt",          "colour-by-time curve dump", true, "<spellID>")
         -- Data integrity. Both dev-gated for the same reason as /df debug duration: they
@@ -6465,6 +6474,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Pixel-perfect geometry ground truth for aura containers (physical-px
                 -- rects + grid deviation per anchor-chain element)
                 if DF.AuraContainer and DF.AuraContainer.DebugDumpPP then DF.AuraContainer.DebugDumpPP() end
+            elseif msg == "ownpreview" then
+                -- A/B the test-mode route: our own pooled frames (default) versus the
+                -- engine's per-slot groups fed by the GLOBAL sample provider, which
+                -- also fills every other addon's aura containers.
+                if DF.AuraContainer and DF.AuraContainer.ToggleOwnPreview then DF.AuraContainer.ToggleOwnPreview() end
             elseif msg == "ppbadge" then
                 -- Diagnostic: window-park missing badges (bypasses the container's secret
                 -- self-size) — proves/disproves the last missing-badge pp drift source
