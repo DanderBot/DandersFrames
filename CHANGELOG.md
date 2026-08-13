@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* (Pinned Frames) Fix an error when switching a pinned frame to a Friendly Boss NPC while a resource bar class filter is set.
+
 ## [5.1.1]
 
 ### Bug Fixes
