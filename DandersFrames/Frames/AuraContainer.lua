@@ -466,9 +466,10 @@ function AuraContainer.SetTestMode(on)
 
     -- TEST HANDLES ONLY. A container has to be REBUILT across a test transition
     -- because the two shapes declare different groups and groups can never be
-    -- removed: test mode declares dfTestStyled/dfTestPlain and skips the real
-    -- filter loop entirely (build(), `filters = {}`), so neither shape can be
-    -- reached from the other in place.
+    -- removed: test mode skips the real filter loop entirely (build(),
+    -- `filters = {}`) and declares per-slot dfTest<k> groups (engine route) or
+    -- nothing at all (own-frame preview), so neither shape can be reached from
+    -- the other in place.
     --
     -- But that only ever applied to the handles that RENDER the preview. Live
     -- frames are hidden for the whole session by SetTestModeStateDrivers, so
@@ -2639,6 +2640,25 @@ function NativeBackend:build()
     -- The per-slot-group shape below is the engine route, kept behind the toggle so
     -- the two can be compared side by side in game (/df debug ownpreview).
     if testMode and AuraContainer._ownTestPreview and not isOverlay and not isMissing then
+        -- RECORD STYLES (important-debuff highlight / layout-group members) die with
+        -- the real records, so lift them BEFORE the wipe — the same capture as the
+        -- engine route below, same two shapes: all records styled = a layout group
+        -- (slot k wears member k's style), else the single-styled-slot A/B against
+        -- plain neighbours. Dropping this capture was the own-preview regression:
+        -- the important-debuff highlight vanished from test mode entirely (field
+        -- report 2026-08-14). _buildOwnPreview resolves slot k's style from this.
+        local testStyles, allStyled = {}, true
+        for _, r in ipairs(filters) do
+            if r.style then testStyles[#testStyles + 1] = r.style else allStyled = false end
+        end
+        local perSlotStyles = (allStyled and #testStyles > 1) and testStyles or nil
+        -- Assigned UNCONDITIONALLY (nil when no styles): the pooled preview slots
+        -- persist across rebuilds, so a rebuild with the highlight switched off must
+        -- clear the previous build's styles or they would re-stamp forever.
+        handle._ownPreviewStyles = (perSlotStyles or testStyles[1]) and {
+            perSlot = perSlotStyles,
+            single  = (not perSlotStyles) and testStyles[1] or nil,
+        } or nil
         filters = {}   -- declare nothing; the loop below is skipped
     elseif testMode and not isOverlay and not isMissing then
         -- PER-SLOT TEST GROUPS (P5). Two hard-won facts drive this shape:
@@ -4009,6 +4029,16 @@ local function flowSlotsIntoBox(box, anchorFrame, slots, count, config, pp)
         -- over the measured button, which is what folds the strip reservation into
         -- the row stride.
         layout.GetElementSize = function(_, _, element, group)
+            -- Styled preview slot (important-debuff highlight / layout-group member):
+            -- its cell is the record-scaled cell, exactly what the engine route
+            -- declares per group via recordGroupLayout — the button alone growing
+            -- would overlap its neighbour (button size and layout cell are separate
+            -- things, re-learned the hard way on the live containers).
+            local rs = element.dfImpRecStyle
+            if rs then
+                local cell = recordGroupLayout(gl, rs)
+                return cell.elementWidth, cell.elementHeight
+            end
             local w, hgt = element:GetSize()
             return group.elementWidth or w, group.elementHeight or hgt
         end
@@ -4051,6 +4081,7 @@ function Handle:_buildOwnPreview()
     end)
     box:Show()
 
+    local ps = self._ownPreviewStyles
     for i = 1, want do
         local slot = slots[i]
         if not slot then
@@ -4058,6 +4089,15 @@ function Handle:_buildOwnPreview()
             slots[i] = slot
         end
         slot:Show()
+        -- Per-slot record style, the same rule as the engine route's per-slot groups:
+        -- a layout group styles slot k as member k; Important Debuffs styles slot 1
+        -- against plain neighbours (the positioning A/B). Stamped DIRECTLY rather than
+        -- through _acceptSlot's recStyle arg: pooled slots persist across rebuilds and
+        -- _acceptSlot deliberately leaves a nil recStyle untouched, so a stale stamp
+        -- from the previous build must be CLEARED here (applyRecordStyle's nil path
+        -- then hides a leftover badge).
+        slot.dfImpRecStyle = ps and (ps.perSlot and ps.perSlot[i]
+            or (i == 1 and ps.single) or nil) or nil
         -- Same styling seam as a native button. _acceptSlot fills self.buttons[i],
         -- so ApplyStyle / teardown pick these up unchanged.
         self:_acceptSlot(slot, i)
@@ -4286,7 +4326,15 @@ function styleConfigFor(handle, button)   -- assigns the forward-declared local
 end
 
 function applyRecordStyle(button, handle, recStyle)
-    if not recStyle then return end
+    if not recStyle then
+        -- Styled -> plain TRANSITION (own-preview pool only): a native button belongs
+        -- to one group for life, so it can never lose its record style — but the test
+        -- pool's slots persist across rebuilds, and toggling the highlight off leaves
+        -- a stamped badge shown unless the off-path runs here. Size needs no revert:
+        -- _acceptSlot has just re-sized the button from the shared layout.
+        if button and button.dfImpBadgeHost then button.dfImpBadgeHost:SetShown(false) end
+        return
+    end
 
     if recStyle.scale and recStyle.scale ~= 1 then
         local lay = handle.config and handle.config.layout
@@ -4365,9 +4413,10 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
     local seq = seqStart
     -- ☠ THE CONTAINER'S BUILD-TIME SHAPE, CAPTURED HERE — never the live global.
     --
-    -- build() picks its SHAPE from AuraContainer._testMode: a test container declares
-    -- dfTestStyled/dfTestPlain and skips the real filter loop, and groups can never be
-    -- removed, so that shape is fixed for the container's whole life. This closure used
+    -- build() picks its SHAPE from AuraContainer._testMode: a test container skips the
+    -- real filter loop and declares per-slot dfTest<k> groups (or, own-preview,
+    -- nothing), and groups can never be removed, so that shape is fixed for the
+    -- container's whole life. This closure used
     -- to decide paint-vs-bind by reading the GLOBAL again -- but buttons are created in
     -- LAZY BATCHES long after build (AddAuraGroup allocates FrameCreationBatchSize at a
     -- time, and more arrive on later aura events). Any test transition between build and
