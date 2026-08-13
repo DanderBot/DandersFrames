@@ -580,6 +580,17 @@ DF.ExportCategories = {
         "defensiveIconShowBorder",
         "defensiveIconShowDuration",
         "defensiveIconSize",
+        -- ☠ This list is EXPLICIT, not prefix-matched — a new key that is not named here
+        -- silently fails to travel with an exported profile. No Font/Color entries: those
+        -- two keys deliberately have no defaults (see Core/Config.lua), but they are still
+        -- listed so a user who sets one keeps it.
+        "defensiveIconStackAnchor",
+        "defensiveIconStackColor",
+        "defensiveIconStackFont",
+        "defensiveIconStackOutline",
+        "defensiveIconStackScale",
+        "defensiveIconStackX",
+        "defensiveIconStackY",
         "defensiveIconX",
         "defensiveIconY",
         "defensiveSortOrder",

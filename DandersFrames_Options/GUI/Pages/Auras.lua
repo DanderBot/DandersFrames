@@ -1306,8 +1306,18 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local bgClassAlpha = bgGroup:AddWidget(GUI:CreateSlider(self.child, L["Background Alpha"], 0, 1, 0.05, db, "backgroundClassAlpha", nil, function() DF:LightweightUpdateBackgroundColor() end, true), 55)
         bgClassAlpha.hideOn = function(d) return d.backgroundColorMode ~= "CLASS" end
         
-        AddToSection(bgGroup, nil, 1)
-        
+        -- ★ COLUMN 2, under Texture. Column 1 carries Color and then the Gradient editor,
+        -- which is ~280 lines of widgets and expands further as stops are added — so with
+        -- the gradient open, column 1 ran long while column 2 held Texture and nothing
+        -- else, leaving that box stranded beside a wall of controls (Krathe, 2026-08-13).
+        -- Background pairs naturally with Texture anyway: both are what the bar is drawn
+        -- ON, against Color/Gradient which are what it is drawn IN.
+        -- ⚠ When the gradient is hidden (healthColorMode ~= "PERCENT") this tips the other
+        -- way — column 2 then holds two groups against column 1's one. That is the lesser
+        -- imbalance, and the pending "gradient editor as a single-column box" rework
+        -- changes the same balance, so the two want checking together.
+        AddToSection(bgGroup, nil, 2)
+
         currentSection = nil
         AddSpace(GUI.Space.section, "both")
         

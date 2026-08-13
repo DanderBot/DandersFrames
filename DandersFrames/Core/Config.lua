@@ -1772,6 +1772,18 @@ DF.PartyDefaults = {
     defensiveIconScale = 1,
     defensiveIconShowBorder = true,
     defensiveIconShowDuration = true,
+    -- Stack ("count") text on a defensive icon. Was a hardcoded 14pt table in
+    -- Features/Auras.lua with no keys at all, so 12.1's three-digit stacks could not be
+    -- shrunk — only the duration text could (user report, 2026-08-13).
+    -- ☠ These reproduce that fixed look EXACTLY: baseSize 14 × Scale 1 = 14pt.
+    -- ☠ NO Font and NO Color key on purpose. Absent reads nil, and BuildSpec treats nil
+    -- as "DF default font" / "don't touch the colour" — which is what the old table did
+    -- by omitting them. Adding either default here would restyle every existing profile.
+    defensiveIconStackAnchor = "BOTTOMRIGHT",
+    defensiveIconStackOutline = "OUTLINE",
+    defensiveIconStackScale = 1,
+    defensiveIconStackX = 2,
+    defensiveIconStackY = -1,
     -- 26 (Krathe, 2026-08-08; was 30). ⚠ RAID keeps its own smaller value — see
     -- RAID_DEFAULT_OVERRIDES at the bottom of this file.
     defensiveIconSize = 26,

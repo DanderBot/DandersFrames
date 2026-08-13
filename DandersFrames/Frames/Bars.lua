@@ -489,12 +489,45 @@ function DF:ResolveAbsorbBarLevel(frame, db)
     if mode == "FLOATING" then
         return frame:GetFrameLevel() + ((db and db.absorbBarFrameLevel) or 11)
     end
-    -- Bound to the health bar (OVERLAY / ATTACHED / ATTACHED_OVERFLOW): derived, and
-    -- deliberately clear of the dispel overlay band. healthBar is frame+3, so +15
-    -- lands ~frame+18 against the gradient's ~+17.
-    local hb = frame.healthBar and frame.healthBar:GetFrameLevel()
-        or (frame:GetFrameLevel() + 3)
-    return hb + 15
+    -- Bound to the health bar (OVERLAY / ATTACHED / ATTACHED_OVERFLOW): the ladder's
+    -- own slot, +11 (see the map in Features/Dispel.lua). NOT the slider -- that is
+    -- FLOATING-only, so reading it here would drag a bound bar to wherever a floating
+    -- bar was last placed.
+    --
+    -- ☠ This deliberately does NOT try to out-rank the dispel wash. An earlier cut did
+    -- (+15 off the health bar, landing above the gradient) and that was wrong: it made
+    -- the absorb poke through FULL FRAME too, which is the mode whose whole point is
+    -- covering the frame. Whether the wash hides the absorb is the WASH's business, and
+    -- it is now conditional on "Show On Current Health Only" -- see
+    -- DF:ResolveDispelGradientLevel in Features/Dispel.lua.
+    return frame:GetFrameLevel() + 11
+end
+
+-- ★ THE OTHER TWO BOUND BARS. Same contract as the absorb resolver above and for the
+-- same reason: the ladder is stated ONCE, here, and every mode branch asks for its slot
+-- rather than doing its own arithmetic off the health bar.
+--
+-- ☠ What these replace was not a near-miss, it was a different ladder. Each updater
+-- computed a level up top, applied it, then EVERY mode branch overwrote it with
+-- healthLevel + 1..3. The real band was health +3, prediction +4, heal-absorb +5,
+-- absorb +5, overflow +6 -- packed into four levels -- while the comments, the db keys
+-- and DF:ResolveDispelGradientLevel all reasoned about +8/+11/+12. The dispel wash's
+-- current-health slot of +4 was chosen to sit under that documented band and in fact
+-- TIED with heal prediction; it drew correctly on creation order alone
+-- (/df debug zorder on a live frame, 2026-08-13).
+-- ⚠ The old branch comments justified themselves with "below dispel overlay (+6) and
+-- aggro highlight (+9)". The overlay has been at +16 since 2026-08-07, and there is no
+-- aggro-highlight level anywhere in the addon -- both numbers were fiction, and fiction
+-- is what the arithmetic was protecting.
+function DF:ResolveHealAbsorbBarLevel(frame, db)
+    if not frame or not frame.GetFrameLevel then return nil end
+    return frame:GetFrameLevel() + 8
+end
+
+-- ⚠ The key is user-facing so it wins; 12 is the ladder's slot and the shipped default.
+function DF:ResolveHealPredictionBarLevel(frame, db)
+    if not frame or not frame.GetFrameLevel then return nil end
+    return frame:GetFrameLevel() + ((db and db.healPredictionFrameLevel) or 12)
 end
 
 function DF:UpdateAbsorb(frame, testIndex)
@@ -846,9 +879,10 @@ function DF:UpdateAbsorb(frame, testIndex)
         customBar:ClearAllPoints()
         customBar:SetParent(frame.healthBar)
         customBar:SetFrameStrata(frame:GetFrameStrata())
-        -- ATTACHED mode should always be below dispel overlay (+6) and aggro highlight (+9)
-        -- Use healthLevel + 2 regardless of strata setting
-        customBar:SetFrameLevel(healthLevel + 2)
+        -- ☠ The ladder's absorb slot, resolved once at the top of this function.
+        -- Was healthLevel + 2 (frame+5), justified by a dispel overlay at +6 that has
+        -- been at +16 since 2026-08-07 -- see DF:ResolveHealAbsorbBarLevel.
+        customBar:SetFrameLevel(absorbLevel)
         
         -- Re-assert the texture's tiling mode. This block used to force tiling OFF
         -- unconditionally "to prevent dense repeating in narrow bars" — which is
@@ -1092,9 +1126,10 @@ function DF:UpdateAbsorb(frame, testIndex)
         customBar:ClearAllPoints()
         customBar:SetParent(frame.healthBar)
         customBar:SetFrameStrata(frame:GetFrameStrata())
-        -- ATTACHED_OVERFLOW mode should always be below dispel overlay (+6) and aggro highlight (+9)
-        -- Use healthLevel + 2 regardless of strata setting
-        customBar:SetFrameLevel(healthLevel + 2)
+        -- ☠ The ladder's absorb slot, resolved once at the top of this function.
+        -- Was healthLevel + 2 (frame+5), justified by a dispel overlay at +6 that has
+        -- been at +16 since 2026-08-07 -- see DF:ResolveHealAbsorbBarLevel.
+        customBar:SetFrameLevel(absorbLevel)
         
         -- Re-assert the texture's tiling mode. This block used to force tiling OFF
         -- unconditionally "to prevent dense repeating in narrow bars" — which is
@@ -1218,13 +1253,35 @@ function DF:UpdateAbsorb(frame, testIndex)
         end
         
         local overflowBar = frame.absorbOverflowBar
+
+        -- ☠ THE OVERFLOW BAR HAD NO LEVEL OF ITS OWN. Created as a healthBar child and
+        -- never levelled, it inherited frame+3 -- the health bar's own level -- while its
+        -- sibling (the attached bar) sits at +11. That was invisible for as long as the
+        -- dispel wash lived above the whole band, and surfaced the moment the wash
+        -- dropped under it for "Show On Current Health Only": the attached absorb came
+        -- through and the overflow stripe stayed washed (field-caught, Krathe).
+        -- Two halves of ONE readout must share a level; anything else is a coin-flip the
+        -- next z-order change re-tosses.
         local overflowVisHelper = overflowBar.visibilityHelper
         local attachedVisHelper = customBar.visibilityHelper
-        
+
         -- Configure the overflow bar (always, so it's ready when needed)
         overflowBar:ClearAllPoints()
-        -- Overflow bar should be just above attached bar but still below dispel overlay (+6)
-        overflowBar:SetFrameLevel(healthLevel + 3)
+        -- ☠ DERIVED FROM THE ATTACHED BAR, one above it. The two are halves of one
+        -- readout, and their ORDER is the contract -- the absolute number is not.
+        -- A DF:ResolveAbsorbBarLevel call used to sit ten lines above this one and was
+        -- overwritten right here on every pass: dead code that read as a fix, and it
+        -- survived an in-game confirmation because what actually fixed that report was
+        -- the dispel wash dropping to +4, not this bar moving. Proved by
+        -- /df debug zorder -- attached +5, overflow +6, resolver claims +11 (2026-08-13).
+        -- ⚠ The comment here used to say "below dispel overlay (+6)". The overlay has
+        -- been at +16 since the 2026-08-07 z-order review, so that number was fiction
+        -- and it is what justified the hardcoded arithmetic.
+        -- ☠ SHARES the attached bar's level rather than sitting one above it. At the
+        -- old squashed levels +1 was free; on the real ladder absorb is +11 and +12 is
+        -- heal prediction's slot. The two segments are adjacent and never overlap, so
+        -- one level is correct and needs no tie-break.
+        overflowBar:SetFrameLevel(customBar:GetFrameLevel())
         
         -- Apply same texture/color as main absorb bar
         local texture = db.absorbBarTexture or DF.STOCK_BAR_TEXTURE
@@ -1305,8 +1362,9 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- Set parent to health bar for overlay mode
         customBar:SetParent(frame.healthBar)
         customBar:SetFrameStrata(frame:GetFrameStrata())
-        -- OVERLAY mode should be above health bar but below dispel overlay (+6) and highlights (+9)
-        customBar:SetFrameLevel(healthLevel + 2)
+        -- ☠ The ladder's absorb slot, resolved once at the top of this function.
+        -- Was healthLevel + 2 (frame+5) -- see DF:ResolveHealAbsorbBarLevel.
+        customBar:SetFrameLevel(absorbLevel)
         
         if customBar.bg then customBar.bg:Hide() end
         
@@ -1508,7 +1566,7 @@ function DF:UpdateHealAbsorb(frame, testIndex)
     
     local bar = frame.dfHealAbsorbBar
     local healthLevel = frame.healthBar:GetFrameLevel()
-    local healAbsorbLevel = healthLevel + 12
+    local healAbsorbLevel = DF:ResolveHealAbsorbBarLevel(frame, db) or (healthLevel + 5)
     
     bar:SetParent(frame)
     bar:SetFrameStrata(frame:GetFrameStrata())
@@ -1594,8 +1652,8 @@ function DF:UpdateHealAbsorb(frame, testIndex)
     elseif mode == "ATTACHED" then
         bar:ClearAllPoints()
         bar:SetParent(frame.healthBar)
-        -- ATTACHED mode should be below dispel overlay (+6) and aggro highlight (+9)
-        bar:SetFrameLevel(healthLevel + 3)
+        -- ☠ The resolved slot, not healthLevel + 3 -- see DF:ResolveHealAbsorbBarLevel.
+        bar:SetFrameLevel(healAbsorbLevel)
         
         -- Re-assert the texture's own tiling. This used to force it OFF outright
         -- "to prevent dense repeating in narrow bars", which is still the default
@@ -1701,8 +1759,8 @@ function DF:UpdateHealAbsorb(frame, testIndex)
     -- ============================================================
     else
         bar:SetParent(frame.healthBar)
-        -- OVERLAY mode should be above health bar but below dispel overlay (+6) and highlights (+9)
-        bar:SetFrameLevel(healthLevel + 2)
+        -- ☠ The resolved slot, not healthLevel + 2 -- see DF:ResolveHealAbsorbBarLevel.
+        bar:SetFrameLevel(healAbsorbLevel)
         
         if bar.bg then bar.bg:Hide() end
         
@@ -2022,7 +2080,10 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- stored value was always the "SANDWICH" default. Two of the three branches produced
     -- the SAME +1 anyway, and the third (+14) was unreachable. Collapsed; nothing moved.
     local healthLevel = frame.healthBar:GetFrameLevel()
-    local predictionLevel = healthLevel + 1
+    -- ☠ The ladder's slot (healPredictionFrameLevel, default 12), not healthLevel + 1.
+    -- The FLOATING branch below already read the key; every other branch used +1, so the
+    -- same bar sat eight levels apart depending only on mode.
+    local predictionLevel = DF:ResolveHealPredictionBarLevel(frame, db) or (healthLevel + 1)
 
     -- Texture and color
     local tex = ResolveBarTextureForFill(db, db.healPredictionTexture or DF.STOCK_BAR_TEXTURE,

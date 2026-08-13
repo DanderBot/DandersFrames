@@ -198,6 +198,20 @@ DF.TestData = {
         {icon = "Interface\\Icons\\spell_druid_ironbark", name = "Ironbark", duration = 12, stacks = 0, spellID = 102342},
         {icon = "Interface\\Icons\\Spell_Holy_SealOfSacrifice", name = "Blessing of Sacrifice", duration = 12, stacks = 0, spellID = 6940},
         {icon = "Interface\\Icons\\ability_monk_chicocoon", name = "Life Cocoon", duration = 12, stacks = 0, spellID = 116849},
+        -- ★ THE STACKED SAMPLE. Every other entry is stacks = 0, so the stack text never
+        -- drew and the Stack Count controls on the Defensive Icons page could only be
+        -- judged on a live aura in combat.
+        -- ☠ It has to be a spell that GENUINELY stacks. A first cut put a fake 12 on Pain
+        -- Suppression, which does not — a preview that shows something the game never
+        -- shows is the same class of lie as a test path that renders differently from
+        -- live. Sentinel is the right sample twice over: it is the exact spell in the
+        -- report behind these controls ("since the patch the number is quite huge"), and
+        -- SpellDB already carries it as a defensive (389539, cats.defensives).
+        -- ⚠ The value is for WIDTH, not accuracy — nobody has checked the real cap, and
+        -- the point is that two digits reveal the overflow a single digit hides.
+        -- No hand-maintained icon needed: _paintTestSlot prefers the GAME's texture for a
+        -- validated spellID and only falls back to this path.
+        {icon = "Interface\\Icons\\Spell_Holy_AuraOfLight", name = "Sentinel", duration = 15, stacks = 12, spellID = 389539},
     },
     animationTimer = nil,
     animationPhase = 0,

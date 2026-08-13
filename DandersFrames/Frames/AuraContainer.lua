@@ -4599,26 +4599,117 @@ function Handle:_noteGateRecovery(can)
     end
 end
 
+-- ★ THE BOARDING WINDOW. `UnitCanAssist` does not flip the instant you take control of
+-- an NPC -- it flips once the seated state lands, and the gap is a visible flash of
+-- unfiltered icons on your own frame (Krathe, on 851917eb, which fixed the steady state
+-- and left this).
+--
+-- `UnitUsingVehicle` is true through the BOARDING and EXITING transitions as well as the
+-- seated state, so it closes that gap. This is a better SIGNAL, not another event to
+-- catch -- the same correction as measuring a level from the frame rather than from
+-- whatever it happens to be parented to.
+--
+-- ⚠ Self only, deliberately. Another player in a vehicle is still assistable and their
+-- pool is still filtered; it is the OCCUPANT whose own identity data goes away.
+-- ☠ `UnitIsUnit`, not `unit == "player"` -- in raid frames your own token is `raidN`, so
+-- a string compare misses your own frame entirely. (The existing `isOwn` below still uses
+-- the string compare; it only feeds branch (2), where the test is belt-and-braces,
+-- but it is the same latent bug and worth a look.)
+-- Fail-open on a refused or secret read, matching every other probe in this gate: any
+-- doubt SHOWS.
+-- ★ DISCONNECTED and DEAD/GHOST — two more states with no identity to filter on.
+--
+-- ☠ THESE WERE EXCLUDED EARLIER THE SAME DAY AND THE REASONING WAS WRONG. It ran:
+-- "an offline or dead unit has no aura data streaming, so there is no pool to fail open."
+-- Ghost auras stream. A user reported unfiltered debuffs on players who had died and were
+-- carrying the ghost aura (Discord, 2026-08-13) — which is exactly the evidence that
+-- exclusion named as the condition for reversing it, so it is reversed here rather than
+-- argued with. ★ Worth keeping as the shape of the mistake: the claim was about the
+-- ENGINE's behaviour and was reasoned out rather than measured, in a file where that has
+-- now cost a full day.
+--
+-- ⚠ NON-SELF ONLY, matching the assist probe's own shape. Your own frame while dead is
+-- still yours to read, and blanking it is the failure the original isOwn exemption was
+-- written to prevent.
+-- ⚠ Accepted cost, Krathe's call with the tradeoff stated: filtered rows go EMPTY for
+-- every corpse in a wipe. They currently render unfiltered, so empty is the better
+-- failure — but it is a visible change, not a silent one.
+-- Fail-open on a refused or secret read, like every other probe in this gate.
+local function IdentityUnavailable(unit)
+    local okC, connected = pcall(UnitIsConnected, unit)
+    if okC and not (issecretvalue and issecretvalue(connected)) and connected == false then
+        return true
+    end
+    local okD, dead = pcall(UnitIsDeadOrGhost, unit)
+    if okD and not (issecretvalue and issecretvalue(dead)) and dead == true then
+        return true
+    end
+    return false
+end
+local function SelfIsUsingVehicle(unit)
+    if not unit then return false end
+    local okSame, same = pcall(UnitIsUnit, unit, "player")
+    if not okSame or not same then return false end
+    local probe = UnitUsingVehicle or UnitInVehicle
+    if not probe then return false end
+    local ok, v = pcall(probe, "player")
+    if not ok then return false end
+    if issecretvalue and issecretvalue(v) then return false end
+    return v and true or false
+end
+
 function Handle:_applyIdentityGate()
     local hide = false
     if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
         local unit = self.config and self.config.unit
         -- ☠ `unit ~= "player"` USED TO SIT ON THIS LINE, so your own frame was never
-        -- probed at all. That exemption is right about HIDING (a frame you cannot see
-        -- during a cinematic needs no hiding, and hiding your own frame is a worse
-        -- failure than one garbage row) — but it also meant nothing ever NOTICED your
-        -- own pool falling open, so it never got re-parsed. The exemption now sits on
-        -- the two hide branches instead: probe always, hide only others.
+        -- probed at all — nothing ever NOTICED your own pool falling open, so it never
+        -- got re-parsed. Probing always is what fixed that.
+        --
+        -- ☠☠ IT THEN SURVIVED ON THE ASSIST HIDE BRANCH BELOW, AND THAT WAS WRONG.
+        -- The reasoning was "a frame you cannot see during a cinematic needs no hiding" —
+        -- true when written, and made obsolete by the cinematic latch that landed after
+        -- it. CineLatchAll (bottom of this file) latches EVERY vulnerable handle with no
+        -- isOwn check, and _noteGateRecovery unlatches only AFTER the recovery Refresh,
+        -- so own frames are already hidden through a cinematic and come back re-parsed.
+        -- The exemption was therefore contributing nothing to the case it was written
+        -- for, and its only live effect was the case with no cinematic and no latch:
+        -- ★ a VEHICLE. Take control of an NPC and UnitCanAssist goes false for minutes
+        -- while you look straight at the frame -- /df debug idgate showed every party1
+        -- handle hidden and every player handle open (field-caught, Krathe 2026-08-13).
+        -- Removing it costs a comparison and needs no timer, event or new state.
+        -- ⚠ Branch (2) keeps isOwn: you are always UnitIsVisible to yourself, so it is
+        -- belt-and-braces there rather than a behaviour decision.
         if type(unit) == "string" and UnitExists(unit) then
-            local isOwn = (unit == "player")
+            -- ☠ UnitIsUnit, not a string compare: in raid layouts your own token is
+            -- `raidN`, so `unit == "player"` never matched your own frame there and the
+            -- exemption below silently did not apply to you. A no-op in practice today
+            -- (you are always visible and same-phase to yourself, so neither probe trips)
+            -- — but the compare is wrong, and the next probe added here may not be as kind.
+            local okOwn, ownSame = pcall(UnitIsUnit, unit, "player")
+            local isOwn = (okOwn and ownSame) and true or false
             -- (1) Cross-faction / non-assistable: includeSpellIDs / category tokens
             --     fail open. Signal: UnitCanAssist.
             if self._idGateVulnerable then
                 local ok, can = pcall(UnitCanAssist, "player", unit)
                 if ok then
                     if issecretvalue and issecretvalue(can) then can = true end
+                    -- ★ Overrides a still-true assist during the boarding window, before
+                    -- the seated state lands — see SelfIsUsingVehicle. Folded into `can`
+                    -- rather than straight into `hide` on purpose: _noteGateRecovery then
+                    -- records the false, so leaving the vehicle is a real false→true edge
+                    -- and re-parses. Setting `hide` alone would hide correctly and never
+                    -- rebuild the pool.
+                    if can and SelfIsUsingVehicle(unit) then can = false end
+                    -- ★ Disconnected / dead / ghost — see IdentityUnavailable. Folded
+                    -- into `can` like the vehicle probe, so a rez or a reconnect is a
+                    -- real false→true edge and re-parses the pool rather than just
+                    -- un-hiding a stale one.
+                    if can and not isOwn and IdentityUnavailable(unit) then can = false end
                     self:_noteGateRecovery(can)
-                    if not can and not isOwn then hide = true end
+                    -- ☠ NOT `and not isOwn` — see the block above. Cinematics are the
+                    -- latch's job; this branch is what covers a vehicle.
+                    if not can then hide = true end
                 end
             end
             -- (2) Not in your visible world (different instance/phase): the
@@ -4630,6 +4721,21 @@ function Handle:_applyIdentityGate()
                 local okv, vis = pcall(UnitIsVisible, unit)
                 if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
                     hide = true
+                end
+                -- ☠ THE "/phase" HALF OF THE COMMENT ABOVE WAS NEVER IMPLEMENTED. A unit
+                -- in another phase, layer or Chromie time can be UnitIsVisible TRUE and
+                -- still be unattributable, so the source-relative filter fails open with
+                -- the visibility probe perfectly happy. UnitPhaseReason returns nil for
+                -- same-phase and a reason otherwise (Features/Range.lua reads it the same
+                -- way).
+                -- ⚠ Only reliable within ~250yd (Frames/StatusIcons.lua). Past that it
+                -- returns nil, which reads as "same phase", which SHOWS — the
+                -- unreliability fails in the safe direction, so no distance guard.
+                if not hide and UnitPhaseReason then
+                    local okp, reason = pcall(UnitPhaseReason, unit)
+                    if okp and not (issecretvalue and issecretvalue(reason)) and reason then
+                        hide = true
+                    end
                 end
             end
         end
@@ -6251,22 +6357,53 @@ function SlotHandle:_applyIdentityGate()
     if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
         local unit = self.owner and self.owner.unit
         -- ☠ See Handle:_applyIdentityGate — the `unit ~= "player"` exemption moved off
-        -- this line onto the hide branches, so the player's own slot is PROBED (and so
-        -- can be re-parsed on recovery) while still never being hidden.
+        -- this line onto the hide branches so the player's own slot is PROBED, and has
+        -- now been dropped from the ASSIST branch as well: the cinematic latch already
+        -- hides own handles (CineLatchAll takes no isOwn), so the exemption only ever
+        -- applied to the un-latched case — a vehicle — where it left the player's own
+        -- slots rendering an unfiltered pool.
         if type(unit) == "string" and UnitExists(unit) then
-            local isOwn = (unit == "player")
+            -- ☠ UnitIsUnit, not a string compare: in raid layouts your own token is
+            -- `raidN`, so `unit == "player"` never matched your own frame there and the
+            -- exemption below silently did not apply to you. A no-op in practice today
+            -- (you are always visible and same-phase to yourself, so neither probe trips)
+            -- — but the compare is wrong, and the next probe added here may not be as kind.
+            local okOwn, ownSame = pcall(UnitIsUnit, unit, "player")
+            local isOwn = (okOwn and ownSame) and true or false
             if self._idGateVulnerable then
                 local ok, can = pcall(UnitCanAssist, "player", unit)
                 if ok then
                     if issecretvalue and issecretvalue(can) then can = true end
+                    -- ★ Boarding window — see SelfIsUsingVehicle and the Handle twin.
+                    if can and SelfIsUsingVehicle(unit) then can = false end
+                    -- ★ Disconnected / dead / ghost — see IdentityUnavailable. Folded
+                    -- into `can` like the vehicle probe, so a rez or a reconnect is a
+                    -- real false→true edge and re-parses the pool rather than just
+                    -- un-hiding a stale one.
+                    if can and not isOwn and IdentityUnavailable(unit) then can = false end
                     self:_noteGateRecovery(can)
-                    if not can and not isOwn then hide = true end
+                    if not can then hide = true end
                 end
             end
             if not hide and not isOwn and self._idGateSourceRelative then
                 local okv, vis = pcall(UnitIsVisible, unit)
                 if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
                     hide = true
+                end
+                -- ☠ THE "/phase" HALF OF THE COMMENT ABOVE WAS NEVER IMPLEMENTED. A unit
+                -- in another phase, layer or Chromie time can be UnitIsVisible TRUE and
+                -- still be unattributable, so the source-relative filter fails open with
+                -- the visibility probe perfectly happy. UnitPhaseReason returns nil for
+                -- same-phase and a reason otherwise (Features/Range.lua reads it the same
+                -- way).
+                -- ⚠ Only reliable within ~250yd (Frames/StatusIcons.lua). Past that it
+                -- returns nil, which reads as "same phase", which SHOWS — the
+                -- unreliability fails in the safe direction, so no distance guard.
+                if not hide and UnitPhaseReason then
+                    local okp, reason = pcall(UnitPhaseReason, unit)
+                    if okp and not (issecretvalue and issecretvalue(reason)) and reason then
+                        hide = true
+                    end
                 end
             end
         end
@@ -6691,6 +6828,13 @@ idGateWatch:RegisterEvent("GROUP_ROSTER_UPDATE")
 idGateWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
 idGateWatch:RegisterEvent("PLAYER_TARGET_CHANGED")
 idGateWatch:RegisterEvent("PLAYER_FOCUS_CHANGED")
+-- ★ Vehicle occupancy flips your own assistability. Confirmed by /etrace on a live
+-- boarding: none of the events above fire at the moment control is TAKEN — the ones that
+-- do (PARTY_MEMBER_ENABLE / UNIT_PHASE / UNIT_FACTION) arrive ~350ms later, at the end of
+-- the transition, which is the flash.
+idGateWatch:RegisterEvent("UNIT_ENTERING_VEHICLE")
+idGateWatch:RegisterEvent("UNIT_ENTERED_VEHICLE")
+idGateWatch:RegisterEvent("UNIT_EXITED_VEHICLE")
 local gateSweepQueued
 -- ============================================================
 -- DEATH LATCH — unit-keyed sweep (#1043)
@@ -6733,6 +6877,19 @@ local function IdentityGateSweep()
     end
 end
 idGateWatch:SetScript("OnEvent", function(_, event)
+    -- ★ TWO LANES. The 0.05s debounce exists for the noisy events — roster, name and
+    -- phase updates arrive in bursts and a sweep per event would re-probe every
+    -- vulnerable handle each time. Vehicle edges are the opposite: rare, so there is no
+    -- storm to coalesce, and the deferral is precisely what reads on screen as a flash of
+    -- unfiltered icons on your own frame. So they sweep on the spot.
+    -- ⚠ Cinematics deliberately stay OUT of this lane. They are the latch's job
+    -- (cineWatch, below) and that path is confirmed working — an immediate sweep here
+    -- would be redundant work at best and a second writer racing the latch at worst.
+    if event == "UNIT_ENTERING_VEHICLE" or event == "UNIT_ENTERED_VEHICLE"
+        or event == "UNIT_EXITED_VEHICLE" then
+        IdentityGateSweep()
+        return
+    end
     if not gateSweepQueued then
         gateSweepQueued = true
         C_Timer.After(0.05, IdentityGateSweep)
