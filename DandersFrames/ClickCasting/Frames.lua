@@ -1305,9 +1305,13 @@ end
 -- Fix a Blizzard frame so clicks on health/mana bars propagate to the parent
 function CC:FixBlizzardFrameStatusBars(frame)
     if not frame then return end
-    
+    -- Propagation setters are combat-protected on 12.1 (ADDON_ACTION_BLOCKED,
+    -- proven by the #1029 field log). This runs from registration paths that can
+    -- fire mid-combat; skip then — the re-registration sweep at regen re-applies.
+    if InCombatLockdown() then return end
+
     local health, mana = self:FindHealthManaBars(frame)
-    
+
     if health then
         if health.SetPropagateMouseMotion then health:SetPropagateMouseMotion(true) end
         if health.SetPropagateMouseClicks then health:SetPropagateMouseClicks(true) end
