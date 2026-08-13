@@ -729,6 +729,49 @@ end
 -- `_cf` is accepted and ignored ON PURPOSE — callers still hand over the
 -- candidateFilters, and the underscore is there so the next reader sees the omission
 -- as a decision rather than an oversight to fix.
+-- ★ PER-RECORD identity dependence, for the PARK path -- distinct from
+-- filterVulnerableToIdentityGate above, which answers "does this whole HELPFUL pool
+-- fail open" and drives the HIDE path.
+--
+-- This one answers "is this record's CATEGORISATION only as good as the identity data",
+-- and it covers HARMFUL rows, which the hide path deliberately does not.
+-- ☠ Blizzard's two rules run in OPPOSITE directions
+-- (Blizzard_AuraContainerUtil.CanApplyIdentityCandidateFilters):
+--   helpful: spell-ID filters skipped when you CANNOT assist
+--   harmful: spell-ID filters skipped when you CAN assist
+-- which is why spell-ID filters are NOT what this keys on -- see GATED_CANDIDATE_KEYS.
+-- ☠ The four category booleans count too. They sit outside Blizzard's identity block,
+-- but IsRoleAura / IsPriorityDebuff read auraData.spellId to answer, so a record built on
+-- them is only as trustworthy as the identity data behind it -- which is why a peer parks
+-- exactly these four on their debuff rows and nothing else.
+-- ☠ Token-only records (CROWD_CONTROL / RAID / dispel) are NOT gated: they are answered
+-- by the filter string, need no identity, and parking them would empty the row. That
+-- distinction is the whole reason this is per-record rather than per-container.
+-- ☠ THE FOUR CATEGORY BOOLEANS ONLY. Spell-ID filters are deliberately NOT here,
+-- for two independent reasons, either of which is disqualifying:
+--   1. applyDebuffBlacklist stamps excludeSpellIDs onto EVERY debuff record as soon as
+--      one Optional Debuff is configured. Including it would flag the whole row as
+--      gated and park all of it -- exactly the wholesale blanking this design exists to
+--      avoid, arriving through a back door.
+--   2. It would be the wrong DIRECTION anyway. For a harmful aura Blizzard skips
+--      spell-ID filters when you CAN assist, so they do not fail open when trust is
+--      lost -- they start working. Parking on loss of trust would hide the record
+--      precisely when its filtering became reliable.
+-- The booleans are the real exposure: IsRoleAura / IsPriorityDebuff answer from
+-- auraData.spellId, so their categorisation is only as good as the identity data behind
+-- it, and a mis-categorised aura lands in the wrong record or none. That is why the peer
+-- this mirrors parks exactly these four records on its debuff row and nothing else.
+local GATED_CANDIDATE_KEYS = {
+    "isBossAura", "isBossOrRoleAura", "isRoleAura", "isPriorityAura",
+}
+function AuraContainer.RecordIdentityGated(cf)
+    if type(cf) ~= "table" then return false end
+    for i = 1, #GATED_CANDIDATE_KEYS do
+        if cf[GATED_CANDIDATE_KEYS[i]] ~= nil then return true end
+    end
+    return false
+end
+
 local function filterSourceRelative(filterString, _cf)
     if type(filterString) == "string" then
         for token in filterString:gmatch("[^|%s]+") do
@@ -2546,6 +2589,7 @@ function NativeBackend:build()
     -- it out as an oversight rather than a constraint.
     local sortMethod, sortDirection = deriveSort(config)
     self.groupKeys = {}
+    self.gatedGroupKeys = nil   -- rebuilt below, per group (identity park set)
     -- key -> the record style that group was built with. applyLayout re-pushes group
     -- layouts on every restyle and would otherwise reset a scaled group's cell back to
     -- the shared size, so it needs to know which groups are scaled.
@@ -2752,6 +2796,11 @@ function NativeBackend:build()
                 if okGroup then
                     self.groupKeys[#self.groupKeys + 1] = key
                     self.groupStyles[key] = rec.style
+                    -- Remember which groups the identity park applies to (see
+                    -- AuraContainer.RecordIdentityGated). Per KEY, so token records stay
+                    -- live while the identity-dependent ones park.
+                    self.gatedGroupKeys = self.gatedGroupKeys or {}
+                    self.gatedGroupKeys[key] = AuraContainer.RecordIdentityGated(cf) or nil
                 else
                     DF:DebugWarn(DBG, "AddAuraGroup failed: %s", tostring(err))
                 end
@@ -3108,7 +3157,13 @@ function NativeBackend:applyGroupTuning()
                     fsMissing = fsMissing or key
                 end
             end
-            pcall(c.SetAuraGroupMaxFrameCount, c, key, maxCount)
+            -- ★ IDENTITY PARK, per group. maxFrameCount 0 empties one group and leaves
+            -- its siblings rendering -- the surgical alternative to hiding the whole row,
+            -- which is what makes this safe on the DEBUFF row where only some records
+            -- depend on identity data.
+            local parked = self.handle._idGateParked
+                and self.gatedGroupKeys and self.gatedGroupKeys[key]
+            pcall(c.SetAuraGroupMaxFrameCount, c, key, parked and 0 or maxCount)
             -- nil CLEARS: the inbound copy runs over an EMPTY defaults table, so a
             -- toggled-off filter set doesn't survive (the old Rebuild-merge lesson).
             pcall(c.SetAuraGroupCandidateFilters, c, key, cfByKey[key])
@@ -4678,9 +4733,20 @@ local function SelfIsUsingVehicle(unit)
     return v and true or false
 end
 
+function Handle:_hasGatedGroups()
+    local b = self.backend
+    local g = b and b.gatedGroupKeys
+    if not g then return false end
+    return next(g) ~= nil
+end
+
 function Handle:_applyIdentityGate()
     local hide = false
-    if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
+    -- ★ `_hasGatedGroups` widens the probe to rows that are not HIDE-vulnerable but do
+    -- carry identity-dependent GROUPS -- i.e. the debuff row. Without it the assist probe
+    -- never ran for those handles and the park verdict could never flip.
+    if (self._idGateVulnerable or self._idGateSourceRelative or self:_hasGatedGroups())
+        and not AuraContainer._testMode then
         local unit = self.config and self.config.unit
         -- ☠ `unit ~= "player"` USED TO SIT ON THIS LINE, so your own frame was never
         -- probed at all — nothing ever NOTICED your own pool falling open, so it never
@@ -4710,7 +4776,10 @@ function Handle:_applyIdentityGate()
             local isOwn = (okOwn and ownSame) and true or false
             -- (1) Cross-faction / non-assistable: includeSpellIDs / category tokens
             --     fail open. Signal: UnitCanAssist.
-            if self._idGateVulnerable then
+            -- ☠ Runs for a hide-vulnerable pool OR any row with gated groups. `hide`
+            -- still requires vulnerability; the PARK needs only the trust verdict, which
+            -- is the same answer put to a different use.
+            if self._idGateVulnerable or self:_hasGatedGroups() then
                 local ok, can = pcall(UnitCanAssist, "player", unit)
                 if ok then
                     if issecretvalue and issecretvalue(can) then can = true end
@@ -4726,10 +4795,12 @@ function Handle:_applyIdentityGate()
                     -- real false→true edge and re-parses the pool rather than just
                     -- un-hiding a stale one.
                     if can and not isOwn and IdentityUnavailable(unit) then can = false end
+                    -- Trust verdict for the PARK path (see the park block below).
+                    self._idGateUntrusted = (can == false) or nil
                     self:_noteGateRecovery(can)
                     -- ☠ NOT `and not isOwn` — see the block above. Cinematics are the
                     -- latch's job; this branch is what covers a vehicle.
-                    if not can then hide = true end
+                    if not can and self._idGateVulnerable then hide = true end
                 end
             end
             -- (2) Not in your visible world (different instance/phase): the
@@ -4764,6 +4835,28 @@ function Handle:_applyIdentityGate()
     -- all before this: the gate is two pcall'ed probes with deliberate fail-open /
     -- fail-safe asymmetry, and which one tripped is the whole answer. Fires on a
     -- CHANGE, so a stable gate costs one comparison.
+    -- ★ THE PARK VERDICT, separate from the hide verdict below and computed from the
+    -- SAME probe. `hide` empties the whole handle and is right for a HELPFUL pool, which
+    -- fails open as a unit. A DEBUFF row is a set of records where only SOME depend on
+    -- identity data, so it parks per group instead: the boss/role/priority and
+    -- spell-ID-carrying records go to maxFrameCount 0 while the token records
+    -- (CROWD_CONTROL / RAID / dispel) keep rendering. Emptying the row wholesale would be
+    -- a far worse failure than the leak it is meant to stop.
+    -- ☠ Blizzard's harmful rule is the MIRROR of the helpful one -- spell-ID filters are
+    -- skipped when you CAN assist, not when you cannot -- so this is not the same
+    -- condition in a different hat. It is driven by "is identity data trustworthy right
+    -- now", which is what BOTH directions actually turn on.
+    local newParked = (hide or self._idGateUntrusted) and true or nil
+    if self._idGateParked ~= newParked then
+        self._idGateParked = newParked
+        DF:Debug("AURACONTAINER", "identity park %s for unit=%s",
+            newParked and "PARKING gated groups" or "restoring gated groups",
+            tostring(self.config and self.config.unit))
+        -- ApplyTuning is the LIVE setter path and reads _idGateParked, so this is one
+        -- call rather than a rebuild.
+        if self.ApplyTuning then pcall(function() self:ApplyTuning() end) end
+    end
+
     local newHidden = hide or nil
     if self._idGateHidden ~= newHidden then
         DF:Debug("AURACONTAINER", "identity gate %s for unit=%s (vulnerable=%s sourceRelative=%s)",
