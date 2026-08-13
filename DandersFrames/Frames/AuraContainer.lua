@@ -698,23 +698,43 @@ local function filterVulnerableToIdentityGate(filterString, cf)
     return false
 end
 
--- SOURCE-RELATIVE pools depend on WHO cast each aura: the PLAYER token (only-my-
--- buffs = "HELPFUL|PLAYER") and the isFromPlayerOrPlayerPet candidateFilter. These
--- have a SECOND fail-open condition distinct from the UnitCanAssist gate above:
--- for a unit that isn't in your visible world (a same-faction party member in a
--- DIFFERENT instance), the engine can't attribute a caster, so "mine" passes every
--- caster's aura. Spell-ID sub-filters are source-INDEPENDENT and keep working, so
--- only-my-buffs breaks in isolation while UnitCanAssist stays TRUE — which is why
--- the assist gate never catches it. Gated on UnitIsVisible (see _applyIdentityGate):
--- the instance-scoped signal, true for a same-instance member far outside 40yd
--- range, false only across instances/phases (field-verified 3-case probe 2026-07-23).
-local function filterSourceRelative(filterString, cf)
+-- SOURCE-RELATIVE pools are the ones that can FAIL OPEN on who cast an aura: the
+-- PLAYER token ("HELPFUL|PLAYER" = only-my-buffs). For a unit that isn't in your
+-- visible world (a same-faction party member in a DIFFERENT instance) the engine
+-- can't attribute a caster, so "mine" passes every caster's aura. Spell-ID
+-- sub-filters are source-INDEPENDENT and keep working, so only-my-buffs breaks in
+-- isolation while UnitCanAssist stays TRUE — which is why the assist gate never
+-- catches it. Gated on UnitIsVisible (see _applyIdentityGate): the instance-scoped
+-- signal, true for a same-instance member far outside 40yd range, false only across
+-- instances/phases (field-verified 3-case probe 2026-07-23).
+--
+-- ☠ isFromPlayerOrPlayerPet USED TO COUNT HERE AND MUST NOT. It was added on the
+-- reading that the field meant "cast by ME", which made it look like a second flavour
+-- of only-my-buffs. It does not — it means "the caster is A PLAYER", Blizzard's own
+-- consumer names the parameter `casterIsAPlayer`, and the correction is written up in
+-- the friendly-debuff-filtering notes.
+-- ★ On the corrected reading it CANNOT fail open. Blizzard_AuraContainerUtil applies
+-- it as an equality test — `auraData.isFromPlayerOrPlayerPet ~= cf.isFromPlayerOrPlayerPet
+-- → reject` — and that test sits OUTSIDE the CanApplyIdentityCandidateFilters block,
+-- which wraps only includeSpellIDs/excludeSpellIDs. So it keeps being applied on units
+-- where spell-ID filtering is dead, and if the caster is unattributable the aura's own
+-- field cannot equal the requested value, so the aura is REJECTED. It fails CLOSED: it
+-- can hide too much, never leak.
+-- ⇒ Gating it hid a row that was filtering perfectly well — a false trigger, and on the
+-- Non-Player Debuffs category it would have blanked the row on any phased or
+-- out-of-instance unit for no reason. The gate should fire where something actually
+-- fails open (Krathe, 2026-08-13).
+-- ⚠ Reasoned from Blizzard's shipped source, not measured. If a source-only pool is ever
+-- seen leaking on a non-visible unit, this is the line to revisit first.
+-- `_cf` is accepted and ignored ON PURPOSE — callers still hand over the
+-- candidateFilters, and the underscore is there so the next reader sees the omission
+-- as a decision rather than an oversight to fix.
+local function filterSourceRelative(filterString, _cf)
     if type(filterString) == "string" then
         for token in filterString:gmatch("[^|%s]+") do
             if (token:gsub("^!", "")) == "PLAYER" then return true end
         end
     end
-    if cf and cf.isFromPlayerOrPlayerPet ~= nil then return true end
     return false
 end
 
