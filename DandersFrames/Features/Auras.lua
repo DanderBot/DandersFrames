@@ -13,6 +13,7 @@ local C_UnitAuras = C_UnitAuras
 local UnitExists = UnitExists
 local UnitIsDeadOrGhost = UnitIsDeadOrGhost
 local UnitIsConnected = UnitIsConnected
+local UnitIsPlayer = UnitIsPlayer
 local InCombatLockdown = InCombatLockdown
 local issecretvalue = issecretvalue
 local C_CurveUtil = C_CurveUtil
@@ -3045,7 +3046,12 @@ function DF:RefreshMissingBuffVisibility(frame)
         -- group is empty and every badge sits parked in its window.
         visible = true
     else
-        visible = unit and UnitExists(unit)
+        -- ☠ PLAYERS ONLY (#1046/S7): a missing CLASS raid buff is meaningless on
+        -- an NPC, but a story-mode companion passes every other term here
+        -- (assistable, alive — and UnitIsConnected can read secret-truthy on
+        -- such units, sailing through the `and` chain), so pinned NPCs nagged
+        -- about buffs nobody can give them.
+        visible = unit and UnitExists(unit) and UnitIsPlayer(unit)
             and not UnitIsDeadOrGhost(unit) and UnitIsConnected(unit)
             and not frame.isPetFrame and UnitCanAssist("player", unit)
         if visible then
@@ -3261,6 +3267,13 @@ function DF:RefreshFactoryRows()
         end
         if DF.IteratePartyFrames then DF:IteratePartyFrames(driveFactoryRowsNow) end
         if DF.IterateRaidFrames then DF:IterateRaidFrames(driveFactoryRowsNow) end
+        -- Pinned frames were skipped here and "caught up on their next aura
+        -- event" — which for a quiet unit is minutes away, so GUI edits looked
+        -- inert on pinned sets until something else moved (#1046). Same drive,
+        -- same version gates; cheap when nothing changed.
+        if DF.PinnedFrames and DF.PinnedFrames.ForEachActiveFrame then
+            DF.PinnedFrames:ForEachActiveFrame(driveFactoryRowsNow)
+        end
     end)
 end
 
