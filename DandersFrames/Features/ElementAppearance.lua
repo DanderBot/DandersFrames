@@ -1367,7 +1367,30 @@ function DF:ForEachAuraDesignerAlphaHost(frame, fn, retryDenied)
                 if f then
                     local ok, err = pcall(fn, f, h._dfADBaseAlpha or 1.0)
                     if not ok then
-                        h._dfAlphaHostDeniedVer = ver
+                        -- ☠ A REFUSAL IS NOT EVIDENCE THE HOST IS UNWRITABLE, and latching
+                        -- on it alone is what froze indicators at the FADE value.
+                        -- The refused call is almost always SetAlphaFromBoolean, which
+                        -- ApplyOORAlpha is forced to use when the range answer arrives
+                        -- SECRET — IsSpellInRange returns nil for a tick and Range.lua falls
+                        -- back to UnitInRange, which is secret on Midnight. These hosts sit
+                        -- under DenyTaintedAccessWhenAurasAreSecret and refuse that setter
+                        -- specifically, while accepting a PLAIN SetAlpha perfectly well.
+                        -- So: retry plain, and latch only if THAT fails too. A host that
+                        -- merely dislikes the secret-aware setter gets restored to base and
+                        -- is never blacklisted.
+                        -- ⚠ The cost is a one-tick cosmetic miss: through the secret window
+                        -- the indicator shows base alpha instead of the fade. Showing an
+                        -- indicator too brightly for one tick beats freezing it dim for the
+                        -- session. Fail toward visible.
+                        -- ★ Independently reached by Danders's agent from a separate report
+                        -- (an Evoker healer whose icons stayed transparent until /reload) —
+                        -- their Option A. The probe below already existed here and was doing
+                        -- this exact call FOR LOGGING ONLY, once per session behind the
+                        -- warning gate, so the answer was being computed and thrown away.
+                        local okPlain = pcall(f.SetAlpha, f, h._dfADBaseAlpha or 1.0)
+                        if not okPlain then
+                            h._dfAlphaHostDeniedVer = ver
+                        end
                         -- Name the method that was refused, not just the error: whether
                         -- PLAIN SetAlpha is rejected or only the secret-aware setter is the
                         -- difference between "wrong setter" and "the host is unwritable at
@@ -1382,7 +1405,8 @@ function DF:ForEachAuraDesignerAlphaHost(frame, fn, retryDenied)
                             -- replaced by a fresh error and nothing was logged at all.
                             -- GetDebugName is a pure READ and it is still refused: the host
                             -- is forbidden to tainted code for ALL access, not just setters.
-                            local okPlain = pcall(f.SetAlpha, f, h._dfADBaseAlpha or 1.0)
+                            -- (The plain-write probe moved ABOVE this block: its result now
+                            -- decides whether to latch, instead of only being logged once.)
                             local okName, name = pcall(f.GetDebugName, f)
                             DF:DebugWarn("AURACONTAINER",
                                 "AD alpha host refused a tainted write. plainSetAlphaOK=%s readableName=%s host=%s err=%s",
