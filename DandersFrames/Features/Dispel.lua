@@ -201,11 +201,29 @@ end
 -- settings, one broken and its neighbour fine, decided purely by build order
 -- (field-caught, Krathe). Measuring from the frame removes the dependency rather than
 -- adding another number to compensate for it.
+-- ★ The dispel widget's own band, user-settable via dispelOverlayFrameLevel. 16 is the
+-- shipped default and the number this was hardcoded to, so nothing moves untouched.
+-- This is the one element in the whole band a user had NO way to reach, and it is the one
+-- that cost a full day of "the wash is covering X" reports.
+function DF:ResolveDispelOverlayLevel(frameLevel, db)
+    return (frameLevel or 0) + ((db and db.dispelOverlayFrameLevel) or 16)
+end
+
 function DF:ResolveDispelGradientLevel(frameLevel, db)
     local style = (db and db.dispelGradientStyle) or "FULL"
     local onCurrentHealth = style == "FULL"
         and db and db.dispelGradientOnCurrentHealth ~= false
-    return (frameLevel or 0) + (onCurrentHealth and 4 or 17)
+    -- ☠ CURRENT HEALTH IS PINNED AT +4 AND THE SLIDER DOES NOT MOVE IT. The entire
+    -- contract of "Show On Current Health Only" is that the wash marks the health and
+    -- leaves reduced-max (+9), absorb (+11) and heal prediction (+12) readable above it.
+    -- A slider here would let a user silently re-create the exact bug this option was
+    -- rewritten to fix, and they would read the result as the option being broken rather
+    -- than as their own setting. The slider governs the widget and the FULL-FRAME wash,
+    -- which is the mode whose job is covering things and therefore the one worth moving.
+    if onCurrentHealth then return (frameLevel or 0) + 4 end
+    -- Full frame rides one above the widget so the ring and icons stay under their wash
+    -- wherever the user puts the band.
+    return DF:ResolveDispelOverlayLevel(frameLevel, db) + 1
 end
 
 local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
@@ -713,8 +731,13 @@ local function ApplyOverlayLayout(overlay, db, frame)
         -- `overlay`'s own parent is the host the widget was built on, which is the frame
         -- on this path, so it is the correct fallback when no frame was passed in.
         local levelHost = frame or overlay:GetParent()
-        overlay.gradient:SetFrameLevel(
-            DF:ResolveDispelGradientLevel(levelHost and levelHost:GetFrameLevel() or 0, db))
+        local hostLvl = levelHost and levelHost:GetFrameLevel() or 0
+        -- ★ The WIDGET's band is re-applied here too, not just at creation. Creation hard
+        -- codes 16 with no db in scope, so without this the new slider would need a UI
+        -- rebuild to take effect — the same creation-vs-layout split that hid the absorb
+        -- overflow bar and the resource bar earlier today. Resolve it every layout pass.
+        pcall(overlay.SetFrameLevel, overlay, DF:ResolveDispelOverlayLevel(hostLvl, db))
+        overlay.gradient:SetFrameLevel(DF:ResolveDispelGradientLevel(hostLvl, db))
 
         if onCurrentHealth and frame then
             -- ☠ ANCHOR TO THE HEALTH BAR, NOT THE FULL-FRAME PROXY.
@@ -1427,7 +1450,12 @@ local function EnsureSlotWidget(btn, frame)
         -- prediction. Ties draw in creation order, i.e. arbitrarily.
         -- +13/+14 clears both (frame+16/+17) and still sits under the resource bar at 20
         -- and the content overlay at 25. (Z-order review, 2026-08-07.)
-        w:SetFrameLevel(hbLvl + 13)
+        -- ★ Resolver, not hbLvl + 13: the widget band is user-settable now
+        -- (dispelOverlayFrameLevel, default 16) and both paths must honour it or the
+        -- slider works on one render path and silently not the other.
+        local dispelDB = (frame.isRaidFrame and DF.GetRaidDB and DF:GetRaidDB())
+            or (DF.GetDB and DF:GetDB())
+        w:SetFrameLevel(DF:ResolveDispelOverlayLevel(base, dispelDB))
         -- ★ The GRADIENT's level is not fixed: it follows "Show On Current Health Only"
         -- (see DF:ResolveDispelGradientLevel). Full frame lands at frame+17 and covers the
         -- band; current-health drops to frame+4, under absorb / heal prediction /
@@ -1435,9 +1463,7 @@ local function EnsureSlotWidget(btn, frame)
         -- -- it carries the ring and icons, not the wash.
         -- ☠ `base`, not `hbLvl`: the resolver's offsets are measured from the FRAME now,
         -- so passing the health bar's level would land the wash three levels high.
-        w.gradient:SetFrameLevel(DF:ResolveDispelGradientLevel(base,
-            (frame.isRaidFrame and DF.GetRaidDB and DF:GetRaidDB())
-            or (DF.GetDB and DF:GetDB())))
+        w.gradient:SetFrameLevel(DF:ResolveDispelGradientLevel(base, dispelDB))
         if w.borderRingHost then w.borderRingHost:SetFrameLevel(base + 7) end   -- legacy overlay(+6)+1
         local iconLevel = ((frame.contentOverlay and frame.contentOverlay:GetFrameLevel())
             or (base + 25)) + 1                -- legacy contentOverlay+26

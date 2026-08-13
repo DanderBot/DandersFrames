@@ -1815,6 +1815,13 @@ DF.PartyDefaults = {
     dispelGradientBlendMode = "BLEND",
     dispelGradientDarkenAlpha = 0.40000000596046,
     dispelGradientDarkenEnabled = false,
+    -- ☠ The dispel widget's band. 16 is what this was hardcoded to, so nothing moves.
+    -- The slider governs the widget (ring + icons) and the FULL-FRAME wash, which rides
+    -- one above it. "Show On Current Health Only" stays PINNED at frame+4 and the slider
+    -- does not move it -- that mode's whole contract is sitting under reduced-max, absorb
+    -- and heal prediction, and a slider there would let a profile silently re-create the
+    -- bug the option was rewritten to fix. See DF:ResolveDispelGradientLevel.
+    dispelOverlayFrameLevel = 16,
     dispelGradientOnCurrentHealth = true,
     dispelGradientSize = 0.5,
     dispelGradientStyle = "TOP",

@@ -2370,6 +2370,7 @@ L["Skip the highlight on tanks in your group — they are supposed to have threa
 L["Dispellable By Me only lights up debuffs your current spec can actually remove. All Dispellable lights up every removable debuff, including ones for someone else to handle."] = true
 L["Where the coloured wash sits on the frame. Full covers the whole bar; the edge options leave the middle clear so you can still read health and text underneath."] = true
 L["Keeps the wash inside the filled part of the health bar, so it shrinks as the unit takes damage instead of covering the empty section too."] = true
+L["Where the dispel display sits against the other frame elements. Raise it to draw over absorbs and heal prediction, lower it to sit beneath them. Show On Current Health Only ignores this and always stays below them."] = true
 L["Dims the frame underneath the wash so the dispel colour reads cleanly over a bright class colour or a busy health bar."] = true
 
 -- ============================================================

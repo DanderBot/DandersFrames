@@ -1088,6 +1088,17 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             InvalidateCurves()
         end, function() DF:InvalidateDispelColorCurve(); DF:LightweightUpdateDispelOverlay() end, true), 55)
         gradAlpha.hideOn = HideDispelOptions
+
+        -- ★ Frame Level. The dispel widget was the only element in the health band with
+        -- no way to reach it, and it is the one that generated a day of "the wash is
+        -- covering X" reports. Moves the ring, the icons and the FULL-FRAME wash together.
+        -- ⚠ NOT hidden behind DisableIfNoGradient: it positions the ring and icons too,
+        -- which exist with no gradient at all.
+        local dispelLevel = gradientGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "dispelOverlayFrameLevel", function()
+            ApplyDispelSettings()
+        end, function() DF:LightweightUpdateDispelOverlay() end, true)), 55)
+        dispelLevel.hideOn = HideDispelOptions
+        dispelLevel.tooltip = L["Where the dispel display sits against the other frame elements. Raise it to draw over absorbs and heal prediction, lower it to sit beneath them. Show On Current Health Only ignores this and always stays below them."]
         gradAlpha.disableOn = DisableIfNoGradient
         local blendModes = { ["ADD"]= L["Glow (ADD)"], ["BLEND"]= L["Solid (BLEND)"] }
         local blendDropdown = gradientGroup:AddWidget(GUI:CreateDropdown(self.child, L["Blend Mode"], blendModes, db, "dispelGradientBlendMode", function()

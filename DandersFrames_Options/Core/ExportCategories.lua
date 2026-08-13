@@ -449,6 +449,7 @@ DF.ExportCategories = {
         "dispelGradientDarkenAlpha",
         "dispelGradientDarkenEnabled",
         "dispelGradientOnCurrentHealth",
+        "dispelOverlayFrameLevel",
         "dispelGradientSize",
         "dispelGradientStyle",
         "dispelIconAlpha",
