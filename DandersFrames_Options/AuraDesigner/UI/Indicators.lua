@@ -47,6 +47,28 @@ local function CountTypeColorConfigs(typeKey)
     return n
 end
 
+-- "Only during pandemic window" — the frame-level twin of the icon Pandemic cue.
+-- The colour wash is handed to the engine's refresh-window driver (Factory
+-- resolvePandemicGate -> AuraContainer bindNative), so it shows only while a refresh
+-- would clip nothing. Shared by Health Bar Color and Background Color.
+--
+-- ☠ CAPABILITY-GATED: on a client without AddPandemicRegion the control is absent
+-- rather than dead, because the renderer DROPS the flag there — a visible-but-inert
+-- toggle would read as "the colour is broken".
+-- Hidden under Show When Missing: an absent buff has no refresh window, so the pair
+-- is meaningless and the renderer never passes the gate down that branch.
+local function AddPandemicOnly(g, parent, proxy)
+    local AC = DF.AuraContainer
+    if not (AC and AC.HasPandemic and AC.HasPandemic()) then return end
+    local cb = GUI:CreateCheckbox(parent, L["Only during pandemic window"], proxy, "pandemicOnly", function()
+        -- STRUCTURAL (the bind needs secure context) -> a full refresh, not a restyle.
+        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+    end)
+    cb.hideOn = function() return proxy.showWhenMissing and true or false end
+    cb.tooltip = L["Colors the frame only while the buff is inside its refresh window — the moment when recasting wastes none of the remaining time. The game sets this window per spell, so there is no threshold to choose. Buffs you cannot refresh never have one."]
+    g:AddWidget(cb, 28)
+end
+
 -- ============================================================
 -- INDICATOR TYPE WIDGET BUILDER
 -- (Tile strip removed in v4 redesign)
@@ -1033,6 +1055,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             wholeBarCheck = GUI:CreateCheckbox(parent, L["Tint Entire Bar"], proxy, "tintWholeBar", RPL)
             wholeBarCheck.hideOn = function() return (proxy.mode or "Replace") == "Replace" end
             g:AddWidget(wholeBarCheck, 28)
+            AddPandemicOnly(g, parent, proxy)
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end)
@@ -1069,6 +1092,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             local blendSlider = GUI:CreateSlider(parent, L["Blend %"], 0, 1, 0.05, proxy, "blend")
             blendSlider.hideOn = function() return (proxy.mode or "Tint") == "Replace" end
             g:AddWidget(blendSlider, 54)
+            AddPandemicOnly(g, parent, proxy)
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end)

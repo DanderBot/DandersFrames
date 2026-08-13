@@ -920,7 +920,11 @@ local AD_TEXT_CHAIN_GATE_OFFSET = 30
 -- AD_HEALTHBAR_COVER_OFFSET (tint at healthBar+1 — above the fill, below the attached
 -- absorb bar); background tint hosts on a frame parked at healthBar-3 with offset 0 (tint
 -- at healthBar-1 — above frame.background, below every bar). See the call sites for the math.
-local function buildOverlayTintConfig(unit, map, r, g, b, blend, levelOffset, filter)
+-- `pandemicOnly` hands the cover's Shown aspect to the engine's refresh-window driver
+-- (AuraContainer bindNative, PANDEMIC-GATED FRAME COVER) so the wash appears only while
+-- a refresh would clip nothing. STRUCTURAL — the bind needs secure context, so callers
+-- must fold it into their struct signature or a toggle would not re-bind.
+local function buildOverlayTintConfig(unit, map, r, g, b, blend, levelOffset, filter, pandemicOnly)
     return {
         unit = unit,
         mode = "overlay",
@@ -933,7 +937,7 @@ local function buildOverlayTintConfig(unit, map, r, g, b, blend, levelOffset, fi
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
         frameLevelOffset = levelOffset,
-        style = { overlay = { tintColor = { r, g, b, blend } } },
+        style = { overlay = { tintColor = { r, g, b, blend }, pandemicOnly = pandemicOnly or nil } },
     }
 end
 
@@ -948,7 +952,7 @@ end
 -- comment used to claim "offset 1 = healthBar+1" — wrong by the nesting: offset 1 landed
 -- the cover at healthBar+3, over the absorb shield (bug #1027). Colour/texture/alpha are
 -- static config.
-local function buildHealthFillConfig(unit, map, r, g, b, alpha, texture, clampTo, filter)
+local function buildHealthFillConfig(unit, map, r, g, b, alpha, texture, clampTo, filter, pandemicOnly)
     return {
         unit = unit,
         mode = "overlay",
@@ -958,7 +962,7 @@ local function buildHealthFillConfig(unit, map, r, g, b, alpha, texture, clampTo
         frameLevelOffset = AD_HEALTHBAR_COVER_OFFSET,
         style = { overlay = { healthFill = {
             texture = texture, color = { r, g, b }, alpha = alpha, clampTo = clampTo,
-        } } },
+        }, pandemicOnly = pandemicOnly or nil } },
     }
 end
 
@@ -4850,8 +4854,19 @@ end
 -- created): kept = the entry under `key` should survive the keep-set sweep; created = a
 -- container was stood up or rebuilt THIS pass (fresh draw index — the ladder-repair
 -- signal). Chains always report created=false: they are exempt from the ladder.
+-- PANDEMIC GATE, shared by both frame-tint consumers. Capability-gated: on a client
+-- without the API the flag is DROPPED rather than rendering an ungated wash, so an
+-- always-on colour can never masquerade as a refresh cue. Meaningless in missing mode
+-- (an absent buff has no refresh window), so the missing branches never pass it.
+local function resolvePandemicGate(cfg)
+    if not (cfg and cfg.pandemicOnly) then return false end
+    local AC = DF.AuraContainer
+    return (AC and AC.HasPandemic and AC.HasPandemic()) and true or false
+end
+
 local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine, asMissing)
     local filt = poolFilter(cfg, resolvePoolMode(spec, key, frame, mine))
+    local pdOnly = resolvePandemicGate(cfg)
     -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
     -- the border consumer: a conjunction of presence gates does not express "while
     -- all of these are absent".
@@ -4866,9 +4881,9 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
         -- (and, one-link, a different rect) per condition SHAPE. Bug #1027.
         if wholeBar then
             local blend = healthbarBlend(mode, cfg.blend, a)
-            syncConditionChain(hb, key, healthBar, frame.unit, chainHB, filt, "flat",
+            syncConditionChain(hb, key, healthBar, frame.unit, chainHB, filt, "flat" .. (pdOnly and "|pd" or ""),
                 tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|"),
-                function(m, f) return buildOverlayTintConfig(frame.unit, m, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, f) end,
+                function(m, f) return buildOverlayTintConfig(frame.unit, m, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, f, pdOnly) end,
                 function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end,
                 AD_CHAIN_GATE_OFFSET)
         else
@@ -4876,9 +4891,9 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
             local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
             local tex = (fdb and fdb.healthTexture) or "Interface\\TargetingFrame\\UI-StatusBar"
             local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
-            syncConditionChain(hb, key, healthBar, frame.unit, chainHB, filt, "cover",
+            syncConditionChain(hb, key, healthBar, frame.unit, chainHB, filt, "cover" .. (pdOnly and "|pd" or ""),
                 tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo) }, "|"),
-                function(m, f) return buildHealthFillConfig(frame.unit, m, r, g, b, alpha, tex, clampTo, f) end,
+                function(m, f) return buildHealthFillConfig(frame.unit, m, r, g, b, alpha, tex, clampTo, f, pdOnly) end,
                 function(h) h:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo } } }) end,
                 AD_CHAIN_GATE_OFFSET)
         end
@@ -4921,7 +4936,9 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
     -- SetAuraSlotCandidateFilters / SetAuraSlotFilterString), so both ride the
     -- tuning sig rather than forcing a teardown+recreate. wholeBar STAYS
     -- structural: it picks a different config builder entirely.
-    local structSig = (wholeBar and "flat" or "cover")
+    -- pdOnly is STRUCTURAL: the AddPandemicRegion bind needs secure context, so toggling
+    -- it must hand over a fresh button rather than restyle in place.
+    local structSig = (wholeBar and "flat" or "cover") .. (pdOnly and "|pd" or "")
     local tuningSig = placedTuningSig(map, filt)
     local entry = hb[key]
     local created = false
@@ -4931,7 +4948,7 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
         local blend = healthbarBlend(mode, cfg.blend, a)
         local coSig = tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
         if not entry then
-            local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt))
+            local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt, pdOnly))
             if handle then
                 hb[key] = { handle = handle, structSig = structSig,
                             tuningSig = tuningSig, coSig = coSig }
@@ -4939,12 +4956,12 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
             end
         elseif entry.structSig ~= structSig then
             entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-            entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt), structSig)
+            entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt, pdOnly), structSig)
             created = true
         else
             if entry.tuningSig ~= tuningSig then
                 entry.tuningSig = tuningSig
-                entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt))
+                entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt, pdOnly))
             end
             if entry.coSig ~= coSig then
                 entry.coSig = coSig
@@ -4964,7 +4981,7 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
         local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
         local coSig = tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo) }, "|")
         if not entry then
-            local handle = DF.AuraContainer:Create(healthBar, buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, filt))
+            local handle = DF.AuraContainer:Create(healthBar, buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, filt, pdOnly))
             if handle then
                 hb[key] = { handle = handle, structSig = structSig,
                             tuningSig = tuningSig, coSig = coSig }
@@ -4972,14 +4989,14 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
             end
         elseif entry.structSig ~= structSig then
             entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-            entry.handle:Rebuild(buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, filt), structSig)
+            entry.handle:Rebuild(buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, filt, pdOnly), structSig)
             created = true
         else
             if entry.tuningSig ~= tuningSig then
                 -- A tuning pass keeps the SAME slot and the same cover, so it
                 -- only needs the style re-applied, not a rebuild.
                 entry.tuningSig = tuningSig
-                entry.handle:ApplyTuning(buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, filt))
+                entry.handle:ApplyTuning(buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, filt, pdOnly))
             end
             if entry.coSig ~= coSig then
                 entry.coSig = coSig
@@ -4995,6 +5012,7 @@ end
 -- every background tint parents to the one anchor, so the level assert is idempotent).
 local function syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, asMissing)
     local filt = poolFilter(cfg, resolvePoolMode(spec, key, frame, mine))
+    local pdOnly = resolvePandemicGate(cfg)
     -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
     -- the border consumer: a conjunction of presence gates does not express "while
     -- all of these are absent".
@@ -5015,9 +5033,9 @@ local function syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, a
         bgHost:SetFrameLevel(math.max(0, hbLvl - 3))
         -- Level-neutral gates: the chain's visual seats at bgHost+2 = healthBar-1,
         -- same as the flat path, whatever the chain length.
-        syncConditionChain(bg, key, bgHost, frame.unit, chainBG, filt, "bgtint",
+        syncConditionChain(bg, key, bgHost, frame.unit, chainBG, filt, "bgtint" .. (pdOnly and "|pd" or ""),
             tconcat({ "bg", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|"),
-            function(m, f) return buildOverlayTintConfig(frame.unit, m, r, g, b, blend, 0, f) end,
+            function(m, f) return buildOverlayTintConfig(frame.unit, m, r, g, b, blend, 0, f, pdOnly) end,
             function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end,
             AD_CHAIN_GATE_OFFSET)
         return true, false
@@ -5062,14 +5080,15 @@ local function syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, a
 
     -- Nothing structural left: this family declares one overlay slot with a
     -- fixed region set, and both the map and the filter string tune live.
-    local structSig = "bgtint"
+    -- Structural for the same reason as the health-bar twin (secure-context bind).
+    local structSig = "bgtint" .. (pdOnly and "|pd" or "")
     local tuningSig = placedTuningSig(map, filt)
     local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
 
     local entry = bg[key]
     local created = false
     if not entry then
-        local handle = DF.AuraContainer:Create(bgAnchor, buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, filt))
+        local handle = DF.AuraContainer:Create(bgAnchor, buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, filt, pdOnly))
         if handle then
             bg[key] = { handle = handle, structSig = structSig,
                         tuningSig = tuningSig, coSig = coSig }
@@ -5077,12 +5096,12 @@ local function syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, a
         end
     elseif entry.structSig ~= structSig then
         entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-        entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, filt), structSig)
+        entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, filt, pdOnly), structSig)
         created = true
     else
         if entry.tuningSig ~= tuningSig then
             entry.tuningSig = tuningSig
-            entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, filt))
+            entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, filt, pdOnly))
         end
         if entry.coSig ~= coSig then
             entry.coSig = coSig

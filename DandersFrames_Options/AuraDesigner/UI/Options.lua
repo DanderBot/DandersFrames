@@ -863,11 +863,13 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 mode = "Replace", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
                 tintWholeBar = false,
                 showWhenMissing = false,
+                pandemicOnly = false,
             }
         elseif typeKey == "background" then
             auraCfg[typeKey] = {
                 mode = "Tint", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
                 showWhenMissing = false,
+                pandemicOnly = false,
             }
         elseif typeKey == "nametext" then
             auraCfg[typeKey] = {
@@ -1246,10 +1248,12 @@ local TYPE_DEFAULTS = {
         mode = "Replace", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
         tintWholeBar = false,
         showWhenMissing = false,
+        pandemicOnly = false,
     },
     background = {
         mode = "Tint", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
         showWhenMissing = false,
+        pandemicOnly = false,
     },
     nametext = {
         color = {r = 1, g = 1, b = 1, a = 1},

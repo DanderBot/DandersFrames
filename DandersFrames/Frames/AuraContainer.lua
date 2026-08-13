@@ -1799,6 +1799,42 @@ local function bindNative(slot, config)
         end
     end
 
+    -- PANDEMIC-GATED FRAME COVER (AD Health Bar Color / Background Color). Same
+    -- registrar as the icon cue above, pointed at the OVERLAY COVER instead of a holder.
+    -- The cover is already a child region of this slot, so handing its Shown aspect to
+    -- the engine gates the whole wash on the refresh window while the SLOT still gates
+    -- on the buff being present: buff up AND window open -> the frame colours. Nothing
+    -- is read, and no Lua decides anything — the engine owns both gates.
+    --
+    -- ☠ THE REGION IS REGISTERED DIRECTLY, no holder — deliberately the opposite of the
+    -- icon cue's rule, for the reason that rule exists. There the holder protects
+    -- DF.Border, whose Apply calls Show() on every edge piece, so registering pieces
+    -- would turn routine writes into forbidden writes. Nothing ever calls Show/Hide on
+    -- these covers (the pooled-slot re-show sweep in styleButton_regions is isRow-gated),
+    -- so there is no write to protect. A holder would also add a frame to the level
+    -- chain, and the cover sits exactly ONE level under the attached absorb bar — a +1
+    -- shift would put the wash over the shield (bug #1027 territory).
+    -- ☠ SO: never add a Show/Hide of dfHealthFill / dfTint. That is now load-bearing.
+    --
+    -- Only Shown is stamped (unlike AddDispelTypeTexture, which also takes Alpha and
+    -- VertexColor), so the per-style-pass colour/alpha/anchor writes below stay legal.
+    -- On a PREVIEW slot there is no registrar, so the cover renders ungated — the same
+    -- behaviour the icon cue has on the AD canvas, and the reason test mode cannot show
+    -- this gate (a preview aura has no auraInstanceID, so no window ever opens).
+    local ovPd = style.overlay
+    if ovPd and ovPd.pandemicOnly and slot.AddPandemicRegion and not slot._boundPandemicCover then
+        local cover = slot.dfHealthFill or slot.dfTint
+        if cover then
+            local ok, err = pcall(slot.AddPandemicRegion, slot, cover)
+            if ok then
+                slot._boundPandemicCover = true
+            elseif not warnedPandemic then
+                warnedPandemic = true
+                DF:DebugWarn(DBG, "AddPandemicRegion (cover) failed: %s", tostring(err))
+            end
+        end
+    end
+
     local dispelSpec = style.dispel
     if dispelSpec then
         if slot.dfAuraBorder and (slot.AddDispelTypeTexture or slot.SetAuraBorder)
