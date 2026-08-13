@@ -1936,7 +1936,15 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         
         local bgColorPicker = anchorGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Background Color"], db, "healPredictionBackgroundColor", true, nil, function() DF:UpdateAllFrames() end, true), 35)
         bgColorPicker.disableOn = function(d) return not d.healPredictionEnabled end
-        
+
+        -- ⚠ healPredictionFrameLevel has existed and been honoured since the ladder work
+        -- (Features/Auras.lua reads it, DF:ResolveHealPredictionBarLevel resolves it) but
+        -- had NO control anywhere — the only key of the eighteen in Config that a user
+        -- could not reach. Same shape and range as the absorb bar's, and FLOATING-only for
+        -- the same reason: the bound modes take the ladder's slot, not a slider.
+        local hpLevel = anchorGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "healPredictionFrameLevel", nil, function() DF:UpdateAllFrames() end, true)), 55)
+        hpLevel.disableOn = function(d) return not d.healPredictionEnabled end
+
         anchorGroup.hideOn = function(d) return d.healPredictionMode ~= "FLOATING" end
         Add(anchorGroup, nil, 2)
     end)
