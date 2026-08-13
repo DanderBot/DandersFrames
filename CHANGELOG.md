@@ -1,5 +1,11 @@
 # DandersFrames Changelog
 
+## [5.1.2]
+
+### Bug Fixes
+
+* (Aura Designer) Fix placed indicators always showing tooltips (and blocking clicks) no matter what the tooltip settings said.
+
 ## [5.1.1]
 
 ### Bug Fixes
