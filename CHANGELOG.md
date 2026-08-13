@@ -7,6 +7,7 @@
 * (Aura Designer) Fix placed indicators always showing tooltips (and blocking clicks) no matter what the tooltip settings said.
 * (Aura Designer) Fix icons not filling their configured size when Show Border is off.
 * (Pinned Frames) NPC frames follow their configured health colours again instead of rendering grey.
+* (Pinned Frames) Fix an error when switching a pinned frame to a Friendly Boss NPC while a resource bar class filter is set.
 * (Test Mode) Fix disabled elements (borders, duration bars, timers, stack counts, dispel text) sticking to the preview icons until a reload.
 * (Frames) Fix a missing frame border side at certain positions and UI scales.
 * (Pet Frames) Pet frames no longer hide behind neighbouring frames' health bars, and their position and size settings apply immediately when typed in - including in test mode.
