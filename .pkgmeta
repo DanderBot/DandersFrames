@@ -22,6 +22,8 @@ move-folders:
 
 ignore:
   - CHANGELOG.md
+  # 4.x history, split out so the release body stays under GitHub's 125k limit.
+  - CHANGELOG_ARCHIVE.md
   - README.md
   - TRANSLATING.md
   - generate_changelog.sh
