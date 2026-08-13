@@ -985,11 +985,21 @@ local function styleButton_regions(slot, config)
     -- it's also the fake backend's icon mechanism); the native SetIcon bind is in bindNative.
     if config.mode == "overlay" then
         local ov = style.overlay
+        -- ORDER KEY for stacked frame tints (AD multi-tint). Several tint containers
+        -- cover the SAME region at the SAME frame level — the cover band is one level
+        -- wide, with the attached absorb directly above it (#1027), so there is no room
+        -- for a frame-level ladder. Frames at equal level have no guaranteed draw order,
+        -- so creation order cannot arbitrate: field-reported as the lower-priority colour
+        -- staying on top while both buffs were up. The draw-layer SUBLEVEL is the ordering
+        -- key that does not need headroom — higher priority gets a higher sublevel.
+        -- Re-applied on every style pass, so a priority edit reorders without a rebuild.
+        local subLvl = ov and ov.sublevel
         if ov and ov.tintColor then
             if not slot.dfTint then
                 slot.dfTint = host:CreateTexture(nil, "OVERLAY")
                 slot.dfTint:SetAllPoints(host)
             end
+            if subLvl then slot.dfTint:SetDrawLayer("OVERLAY", subLvl) end
             slot.dfTint:SetColorTexture(readColor(ov.tintColor))
         end
         -- (Removed 2026-08-04) FILLED HEALTH MIRROR. It was a StatusBar parented under
@@ -1026,6 +1036,7 @@ local function styleButton_regions(slot, config)
                 slot.dfHealthFill = host:CreateTexture(nil, "OVERLAY")
             end
             local t = slot.dfHealthFill
+            if subLvl then t:SetDrawLayer("OVERLAY", subLvl) end
             t:ClearAllPoints()
             t:SetAllPoints(hf.clampTo)
             local fr, fg, fb = readColor(hf.color)
