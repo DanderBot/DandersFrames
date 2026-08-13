@@ -1573,6 +1573,12 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
     if not roles then return end   -- icon slots bind nothing (plain art on the slot's SetShown)
     local hbLvl = (frame.healthBar and frame.healthBar:GetFrameLevel())
         or (frame:GetFrameLevel() + 3)
+    -- ☠ The edge holders below must stay LEVEL WITH THE WIDGET, and the widget's band is
+    -- user-settable now (dispelOverlayFrameLevel). A hardcoded hbLvl + 13 here would sit
+    -- still while the slider moved the widget -- the drift this file has already produced
+    -- twice today. Resolved from the same function EnsureSlotWidget uses.
+    local edgeLvl = DF:ResolveDispelOverlayLevel(frame:GetFrameLevel(),
+        (frame.isRaidFrame and DF.GetRaidDB and DF:GetRaidDB()) or (DF.GetDB and DF:GetDB()))
     local w = EnsureSlotWidget(btn, frame)
     local carriers = {}
 
@@ -1621,7 +1627,7 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         for _, edge in ipairs(roles.edges) do
             local holder = CreateFrame("Frame", nil, btn)
             holder:SetAllPoints(btn)
-            holder:SetFrameLevel(hbLvl + 13)   -- level with the wash; see EnsureSlotWidget
+            holder:SetFrameLevel(edgeLvl)   -- level with the widget; see edgeLvl above
             local tex = holder:CreateTexture(nil, "ARTWORK", nil, 2)
             tex:SetTexture(EDGE_GRADIENT_TEXTURES[edge])
             tex:SetAllPoints(btn)   -- anchored for the bind; StyleGameEdgeSlot positions the strip
