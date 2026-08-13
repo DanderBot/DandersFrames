@@ -177,14 +177,17 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 self:RefreshStates()
                 BuffFilterChanged()
             end), 30)
-            showAllCb.tooltip = L["All Buffs"]
-            showAllCb.tooltipDesc = L["Show every buff with no filtering."]
+            -- ☠ `.tooltip` IS THE BODY, not the title. ResolveTooltipSpec
+            -- (DandersFrames/GUI/Widgets.lua) turns a string .tooltip into
+            -- { title = the widget's own label, lines = { it } } -- and it never reads
+            -- .tooltipDesc at all. Setting .tooltip to the LABEL therefore rendered the
+            -- label twice and threw the explanation away, on every one of these.
+            showAllCb.tooltip = L["Show every buff with no filtering."]
 
             local onlyMineCb = filterGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Only My Buffs"], db, "directBuffOnlyMine", function()
                 BuffFilterChanged()
             end), 30)
-            onlyMineCb.tooltip = L["Only My Buffs"]
-            onlyMineCb.tooltipDesc = L["Only show buffs that you cast. Applies to all buff filters."]
+            onlyMineCb.tooltip = L["Only show buffs that you cast. Applies to all buff filters."]
 
             -- ⚠ A rule between the two SCOPE switches above and the filter list below.
             -- They are not filters: All Buffs overrides the whole list and Only My
@@ -246,8 +249,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             local uncatCb = SelectionCheckbox(L["Uncategorised Buffs"],
                 function() local s = BuffSelection(); return (s and s.uncategorised) or false end,
                 function(v) local s = BuffSelection(); if s then s.uncategorised = v and true or false end end)
-            uncatCb.tooltip = L["Uncategorised Buffs"]
-            uncatCb.tooltipDesc = L["Buffs that belong to none of the filters above."]
+            uncatCb.tooltip = L["Buffs that belong to none of the filters above."]
 
             -- ⚠ THE PAGE'S ONLY FEEDBACK LOOP above the frame level. Everything above
             -- this line says what you switched ON; nothing said what that adds up to,
@@ -759,8 +761,7 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 self:RefreshStates()
                 DebuffFilterChanged()
             end), 30)
-            showAllCb.tooltip = L["All Debuffs"]
-            showAllCb.tooltipDesc = L["Show every debuff with no filtering."]
+            showAllCb.tooltip = L["Show every debuff with no filtering."]
 
             -- The only real warning here, and it is about the COMBINATION: any single
             -- category obviously misses things, so saying that adds nothing. What is
@@ -789,8 +790,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     self:RefreshStates()
                     DebuffFilterChanged()
                 end), 30)
-                cb.tooltip = L[cat.name]
-                cb.tooltipDesc = L[cat.desc]
+                -- Body only; the title comes from the checkbox label automatically.
+                cb.tooltip = L[cat.desc]
                 -- All Debuffs overrides the whole list.
                 cb.disableOn = function(d) return d.directDebuffShowAll end
             end
