@@ -472,6 +472,10 @@ local function LayoutStateChanged(overlay, db)
         or overlay.dfL_gradientSize            ~= db.dispelGradientSize
         or overlay.dfL_gradientOnCurrentHealth ~= db.dispelGradientOnCurrentHealth
         or overlay.dfL_healthOrientation       ~= db.healthOrientation
+        -- ☠ The Frame Level slider must invalidate this fast path, or the band
+        -- re-apply below it is skipped and the slider silently does nothing on the
+        -- test widget until some other tracked field changes.
+        or overlay.dfL_overlayFrameLevel       ~= db.dispelOverlayFrameLevel
         or overlay.dfL_parentH                 ~= parentH
         or overlay.dfL_parentW                 ~= parentW
 end
@@ -493,6 +497,7 @@ local function CacheLayoutState(overlay, db)
     overlay.dfL_gradientSize            = db.dispelGradientSize
     overlay.dfL_gradientOnCurrentHealth = db.dispelGradientOnCurrentHealth
     overlay.dfL_healthOrientation       = db.healthOrientation
+    overlay.dfL_overlayFrameLevel       = db.dispelOverlayFrameLevel
     local parentH, parentW = SafeRectSize(gradientParent)
     overlay.dfL_parentH                 = parentH or 40
     overlay.dfL_parentW                 = parentW or 80
@@ -738,6 +743,28 @@ local function ApplyOverlayLayout(overlay, db, frame)
         -- overflow bar and the resource bar earlier today. Resolve it every layout pass.
         pcall(overlay.SetFrameLevel, overlay, DF:ResolveDispelOverlayLevel(hostLvl, db))
         overlay.gradient:SetFrameLevel(DF:ResolveDispelGradientLevel(hostLvl, db))
+        -- ☠ THE EDGE STRIPS AND THE RING RIDE THIS RE-APPLY TOO. Both were levelled
+        -- ONCE at creation and never again:
+        --   * the four EDGE strips (and the darken) are REGIONS of the pulse box,
+        --     which was pinned at the gradient host's own level — the healthBar band —
+        --     so EDGE mode rendered UNDER the absorb bar (+11), heal prediction (+12)
+        --     and reduced-max (+6-over-healthBar) on the test widget while the live
+        --     slot lane holds its strips at this same resolver band (edgeLvl in
+        --     DispelSlotSecureInit). Field-caught: "edge mode is not showing over the
+        --     absorb on test mode" (Krathe, 2026-08-13). The ruling stands: only
+        --     Full Frame + Show On Current Health Only sits low (the +4 pin);
+        --     every other shape clears the health-content band.
+        --   * the ring host was pinned at the overlay's CREATION level + 1, so it went
+        --     stale the moment this re-apply moved the overlay (the Frame Level
+        --     slider). Re-derive it from the level just applied.
+        -- Same creation-vs-layout split as the widget band itself — the comment above
+        -- names the pattern; these two were the instances it missed.
+        if overlay.gradientPulseHost then
+            overlay.gradientPulseHost:SetFrameLevel(DF:ResolveDispelOverlayLevel(hostLvl, db))
+        end
+        if overlay.borderRingHost then
+            overlay.borderRingHost:SetFrameLevel(overlay:GetFrameLevel() + 1)
+        end
 
         if onCurrentHealth and frame then
             -- ☠ ANCHOR TO THE HEALTH BAR, NOT THE FULL-FRAME PROXY.
