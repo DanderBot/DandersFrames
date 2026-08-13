@@ -194,7 +194,43 @@ end
 -- (rec.n / localized) or ad-hoc keys; curated INTERNAL names ("PowerWordShield") only
 -- resolve through a spec.
 -- ============================================================
-function DF:BuildADIdentityFilters(spec, auraName)
+-- ★ PER-PLACEMENT NARROWING. A curated aura resolves to the UNION of its spell IDs, which
+-- is right for "never silently miss an effect" and wrong for anyone who wants one of them.
+-- Reported as: Beacon of the Savior carries the beacon buff (1244893) AND an absorb buff
+-- (1244878), and there was no way to place the beacon as a square without the absorb
+-- coming with it — adding it by ID snapped to the curated name and re-widened.
+--
+-- Stored as MUTES (ids to drop) rather than an include subset, matching the Filter page's
+-- own filterMutedSpellIDs: an id the SpellDB adds LATER keeps being tracked instead of
+-- silently going missing, and an absent key means today's behaviour byte-for-byte.
+-- ☠ SCOPE: this is placement-scoped and the filter store is filter-scoped. They are
+-- deliberately separate — muting an id for your Buff Bar filter must not silently retarget
+-- an AD square, and vice versa.
+--
+-- ☠ ALWAYS BUILDS A FRESH TABLE. Two of the resolver's paths hand back memory that is not
+-- ours: the filter-ref path returns a map held in adFilterRefCache, and the curated path is
+-- built from Adapter:GetAuraSpellIDs, whose array is cached and shared. Narrowing in place
+-- would corrupt the cache for every other consumer of that spell.
+local function narrowByPlacementMutes(out, indicator)
+    local mutes = type(indicator) == "table" and indicator.mutedSpellIDs
+    if type(mutes) ~= "table" or not next(mutes) then return out end
+    local src = out and out.includeSpellIDs
+    if type(src) ~= "table" then return out end
+    local kept, n = {}, 0
+    for id in pairs(src) do
+        if not mutes[id] then kept[id] = true; n = n + 1 end
+    end
+    -- ☠ EVERY id muted -> keep the FULL set, don't return an empty map or nil. An empty
+    -- includeSpellIDs matches every helpful aura (the failure this whole resolver guards
+    -- against), and returning nil would make the indicator vanish with no way to tell why.
+    -- The card refuses to mute the last live id, mirroring R:SetSpellIDMuted — this is the
+    -- render-side backstop for a config that got there anyway (an id retired from curation
+    -- under a profile that had muted its siblings).
+    if n == 0 then return out end
+    return { includeSpellIDs = kept }
+end
+
+function DF:BuildADIdentityFilters(spec, auraName, indicator)
     -- Curated identity, resolved by AuraAdapter:GetSpecIdentity -- the ONE place
     -- the ID set is decided, shared with the editor's add-by-ID snap so a
     -- placement and the picker can never disagree about a spell. Entries with no
@@ -210,14 +246,17 @@ function DF:BuildADIdentityFilters(spec, auraName)
             map[id] = true
         end
     end
-    if map then return { includeSpellIDs = map } end
+    if map then return narrowByPlacementMutes({ includeSpellIDs = map }, indicator) end
     -- Ad-hoc add-by-ID auras (picker "Add" with an ID the SpellDB doesn't
     -- know) are stored under the key "#<id>" — the name IS the identity, so
     -- resolving the embedded id here makes the record survive reload and
     -- profile export with no side table.
     local adHocID = type(auraName) == "string" and auraName:match("^#(%d+)$")
     if adHocID then
-        return { includeSpellIDs = { [tonumber(adHocID)] = true } }
+        -- Ad-hoc auras carry exactly one id, so a mute could only ever empty the set —
+        -- narrowByPlacementMutes keeps it whole in that case. Routed through it anyway so
+        -- every path answers the same way and none can be the one somebody forgot.
+        return narrowByPlacementMutes({ includeSpellIDs = { [tonumber(adHocID)] = true } }, indicator)
     end
     -- FILTER REFERENCES ("@preset:<key>" / "@custom:<id>"): a whole registry filter
     -- standing in for a single spell. Because this is the ONE resolver every effect
@@ -225,7 +264,7 @@ function DF:BuildADIdentityFilters(spec, auraName)
     -- and as the record a frame effect hangs off -- no second store, no extra pool.
     -- Collision-proof for the same reason "#<id>" is: no spell name starts with "@".
     local fref = DF.ResolveADFilterRef and DF:ResolveADFilterRef(auraName)
-    if fref then return fref end
+    if fref then return narrowByPlacementMutes(fref, indicator) end
     -- SpellDB fallback (all-spec support): a name the curated per-spec Config
     -- tables don't know resolves through the FilterRegistry SpellDB by display
     -- name (shipped English `rec.n` or the localized runtime name), unioning
@@ -247,7 +286,7 @@ function DF:BuildADIdentityFilters(spec, auraName)
                 map[altID] = true
             end
         end
-        return { includeSpellIDs = map }
+        return narrowByPlacementMutes({ includeSpellIDs = map }, indicator)
     end
     return nil
 end
@@ -2953,11 +2992,32 @@ end
 -- group.style customises it through the SAME spec builders the placed indicators
 -- use (buildDurationTextSpec / buildStackSpec / the border spec passed in); with
 -- no style the output is byte-identical to the pre-style hardcoded table.
+-- Does this group draw solid squares instead of spell icons? nil/"icon" = icon, which is
+-- what every group shipped as, so an untouched group serializes and renders identically.
+-- Bar is deliberately NOT an option: a bar is its own sized widget with its own layout
+-- reservation, not a cell the group flow can lay out like the other two.
+local function groupIsSquare(group)
+    return groupStyle(group).shape == "square"
+end
+
 local function buildFilterGroupStyle(group, borderSpec)
     local s = groupStyle(group)
+    local artInset = borderSpec and borderArtInset(borderSpec) or 0
+    -- ☠ EXACTLY ONE of icon/square, and the square table is emitted even when hidden.
+    -- Its PRESENCE is what tells AuraContainer "this slot is a square, do not run the icon
+    -- path" — the placed builder carries the same warning, having shipped the bug where
+    -- omitting it turned a square back into an icon.
+    local art
+    if groupIsSquare(group) then
+        local r, g, b = readADColor(s.color)
+        art = { square = { show = true, color = { r, g, b, 1 }, inset = artInset } }
+    else
+        art = { icon = { show = true, zoom = true, inset = artInset } }
+    end
     local style = {
         -- Art insets by the border thickness so the ring frames it (placed-icon parity).
-        icon     = { show = true, zoom = true, inset = borderSpec and borderArtInset(borderSpec) or 0 },
+        icon     = art.icon,
+        square   = art.square,
         cooldown = { show = true, swipe = not s.hideSwipe, reverse = true, numbers = false },
         duration = buildDurationTextSpec(s, true),
         stacks   = (s.showStacks ~= false) and buildStackSpec(s, 2, -1) or nil,
@@ -2985,7 +3045,13 @@ end
 -- to each group's struct sig at the sync call sites. "" fields for style-less groups.
 local function groupStyleStructSig(group)
     local s = groupStyle(group)
-    return "|" .. ((s.showStacks ~= false) and "st" or "")
+    -- ☠ SHAPE IS STRUCTURAL. It decides which art region exists (style.square vs
+    -- style.icon), and regions are create-only — a cosmetic restyle cannot swap one for
+    -- the other, so a shape change has to Rebuild. Putting it in the cosmetic sig would
+    -- make the control appear to do nothing. "" for icon so every pre-shape group sigs
+    -- byte-identically and does not rebuild on upgrade.
+    return "|" .. (groupIsSquare(group) and "sq" or "")
+        .. "|" .. ((s.showStacks ~= false) and "st" or "")
         .. "|" .. ((s.showDuration ~= false) and "du" or "")
         .. "|" .. (s.ShowBorder == true and "bd" or "")
         -- ☠ "|df=" .. durationFmtKey(...) was here. Duration formatting is NOT
@@ -3229,6 +3295,10 @@ local function filterGroupCoSig(group, wrapDefault)
         -- It has to sit in SOME signature or a format change would move nothing and
         -- silently do nothing.
         "df=" .. durationFmtKey(s, true),
+        -- Square FILL COLOUR is cosmetic and belongs here, not in the struct sig: the
+        -- region already exists (shape is what's structural), so a colour change restyles
+        -- in place. "" for an icon group, so nothing pre-shape sigs differently.
+        "sc=" .. (groupIsSquare(group) and colSig(s.color) or ""),
         "sz=" .. tostring(math.max(8, tonumber(group.iconSize) or 24)),
         "an=" .. tostring(group.anchor or "TOPLEFT"),
         "ox=" .. tostring(tonumber(group.offsetX) or 0),
@@ -4060,7 +4130,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                     -- render nothing. Not marking the key `live` lets the
                     -- end-of-pass sweep destroy any existing handle.
                 elseif isBar then
-                    local ids = DF:BuildADIdentityFilters(idSpec, auraName)
+                    local ids = DF:BuildADIdentityFilters(idSpec, auraName, indicator)
                     local map = ids and ids.includeSpellIDs
                     if not map then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
                     if map then
@@ -4120,7 +4190,7 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         syncAlertCompanion(frame, placed, live, key, map, eff, true, alpha, mine, defs)
                     end
                 elseif isSquare or indicator.type == "icon" then
-                    local ids = DF:BuildADIdentityFilters(idSpec, auraName)
+                    local ids = DF:BuildADIdentityFilters(idSpec, auraName, indicator)
                     local map = ids and ids.includeSpellIDs
                     if not map then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
                     if map then
@@ -4335,7 +4405,9 @@ local function collectGroupMembers(frame, group, auras, idSpec, defs, mine)
             end
         end
         if memberRenderable(ind) then
-            local ids = DF:BuildADIdentityFilters(idSpec, m.auraName)
+            -- `ind` so a member of a layout group narrows exactly like a loose placement —
+            -- this is the reported case (a Beacon square inside a layout group).
+            local ids = DF:BuildADIdentityFilters(idSpec, m.auraName, ind)
             local map = ids and ids.includeSpellIDs
             if map then
                 local isSquare = ind.type == "square"

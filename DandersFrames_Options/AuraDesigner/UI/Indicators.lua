@@ -208,6 +208,112 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- Color picker callback shorthand — refreshes both the AD preview and live frames
     local function RPL() if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end RefreshLiveFramesThrottled() end
 
+    -- ── TRACKED SPELLS ──
+    -- A curated aura resolves to the UNION of its spell IDs. That is right by default
+    -- ("never silently miss an effect") and wrong for a spell whose ids are different
+    -- EFFECTS: Beacon of the Savior carries the beacon buff (1244893) AND a separate absorb
+    -- buff (1244878), so placing it as a square gave you both, and adding it by id snapped
+    -- to the curated name and re-widened. This is where one is turned off for THIS placement.
+    --
+    -- ☠ Placement-scoped, deliberately separate from the Filter page's own per-id mutes
+    -- (DF.db.filterMutedSpellIDs). Muting an id for a filter must not silently retarget an
+    -- Aura Designer square, and vice versa — they answer different questions about a spell.
+    --
+    -- ☠ Built ONCE here rather than inside the icon/square/bar branches below, which each
+    -- carry their own copy of the following sections. Three copies of a rule is how the
+    -- last few bugs in this addon happened.
+    --
+    -- Only rendered when the aura resolves to more than one id: a single-id spell would get
+    -- a section holding one permanently-disabled row, which is noise, not information.
+    if indicatorID and (typeKey == "icon" or typeKey == "square" or typeKey == "bar") then
+        local indRec, idList
+        local pool = CurrentAuraPool()
+        local auraCfg = pool and pool[auraName]
+        if type(auraCfg) == "table" and auraCfg.indicators then
+            for _, x in ipairs(auraCfg.indicators) do
+                if x.id == indicatorID then indRec = x; break end
+            end
+        end
+        -- Prefer the ADAPTER's array: it is the curated order (canonical first, then alts),
+        -- so the rows read the way the spell is documented. The map from the resolver is
+        -- unordered and only used when there is no curated array (ad-hoc / SpellDB names).
+        if indRec then
+            local specForIDs = (not IsOtherTab()) and ResolveSpec() or nil
+            idList = Adapter and Adapter.GetAuraSpellIDs and Adapter:GetAuraSpellIDs(specForIDs, auraName)
+            if not idList then
+                local f = DF:BuildADIdentityFilters(specForIDs, auraName)
+                local map = f and f.includeSpellIDs
+                if map then
+                    idList = {}
+                    for id in pairs(map) do idList[#idList + 1] = id end
+                    table.sort(idList)
+                end
+            end
+        end
+        if indRec and idList and #idList > 1 then
+            AddGroup(L["Tracked Spells"], function(g)
+                local note = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                note:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
+                note:SetText(L["This spell has more than one effect. Untick any you don't want this indicator to show."])
+                note:SetWordWrap(true)
+                note:SetWidth(contentWidth - 30)
+                g:AddWidget(note, 30)
+
+                -- How many are still live, so the LAST one cannot be turned off. Mirrors
+                -- R:SetSpellIDMuted's guard: an indicator that matches nothing renders
+                -- nothing and reads as broken rather than as configured.
+                local function LiveCount()
+                    local muted, n = indRec.mutedSpellIDs, 0
+                    for _, id in ipairs(idList) do
+                        if not (muted and muted[id]) then n = n + 1 end
+                    end
+                    return n
+                end
+
+                for _, id in ipairs(idList) do
+                    local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id)
+                    local label = (name and (name .. "  |cff808080" .. id .. "|r")) or tostring(id)
+                    local cb
+                    cb = GUI:CreateCheckbox(parent, label, nil, nil, nil,
+                        -- get: ticked = TRACKED, stored = MUTED. The store is inverted
+                        -- because absent means "everything", which is what every existing
+                        -- profile has and must keep meaning.
+                        function()
+                            local muted = indRec.mutedSpellIDs
+                            return not (muted and muted[id])
+                        end,
+                        function(_, checked)
+                            if checked then
+                                local muted = indRec.mutedSpellIDs
+                                if muted then
+                                    muted[id] = nil
+                                    -- Drop the table when it empties so an untouched-again
+                                    -- indicator serializes exactly as it did before.
+                                    if not next(muted) then indRec.mutedSpellIDs = nil end
+                                end
+                            else
+                                if LiveCount() <= 1 then
+                                    -- Refuse and snap the tick back: this is the only id left.
+                                    if cb and cb.SetChecked then cb:SetChecked(true) end
+                                    return
+                                end
+                                indRec.mutedSpellIDs = indRec.mutedSpellIDs or {}
+                                indRec.mutedSpellIDs[id] = true
+                            end
+                            -- ☠ Through P, not a bare call: this file does not import
+                            -- RefreshPlacedIndicators, so the bare name compiled to a nil
+                            -- GLOBAL — clean parse, "attempt to call a nil value" on the
+                            -- first tick. Caught by diffing the file's _ENV reads, which is
+                            -- the only check that sees this class.
+                            if P.RefreshPlacedIndicators then P.RefreshPlacedIndicators() end
+                            RefreshLiveFramesThrottled()
+                        end)
+                    g:AddWidget(cb, 28)
+                end
+            end)
+        end
+    end
+
     -- Shared Duration Bar section for the icon / square placed indicators — both carry
     -- durationBar* keys and the strip hangs off the slot edge regardless of shape. Same
     -- control set as the filter-group card and the buff/debuff rows (one shared spec

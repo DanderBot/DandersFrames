@@ -939,6 +939,13 @@ local function IsCandidateCrossBlocked(auraName, spec)
     local cached = spellPickerBlockCache[key]
     if cached ~= nil then return cached end
     local blocked = false
+    -- ☠ NO per-placement mutes here, deliberately. This asks "would adding this spell
+    -- collide with something already tracked", and the honest answer is about the AURA, not
+    -- about one indicator's narrowing: an aura can carry several indicators and only some of
+    -- them may have muted an id. Narrowing on one of them would let a real duplicate through,
+    -- which is a worse failure than the cautious answer. A properly narrowed version has to
+    -- union each indicator's own set — worth doing, but it is a different question from
+    -- "which ids does this placement render".
     local f = DF:BuildADIdentityFilters(effSpec, auraName)
     local map = f and f.includeSpellIDs
     if map then
@@ -2684,6 +2691,9 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     -- reads sensible values on first open (ShowBorder overridden OFF — a group has
     -- no ring until the user enables one).
     local defaults = {
+        -- "icon" is what every group shipped as, so an untouched group reads the same
+        -- value it always rendered with and its struct sig does not move on upgrade.
+        shape = "icon", color = { r = 1, g = 1, b = 1, a = 1 },
         hideSwipe = false, showDuration = true, showStacks = true,
         durationFormat = "NUMBER",
         durationFont = "DF Roboto SemiBold", durationScale = 1.0, durationOutline = "SHADOW;OUTLINE",
@@ -2801,6 +2811,23 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     -- the swipe applies at group level — size/scale live in the card's layout
     -- sliders, alpha/level/strata/text-only are per-indicator concepts)
     AddSection(L["Appearance"], "appearance", function(g)
+        -- SHAPE. A group used to be spell icons and nothing else, so a filter could only
+        -- ever be shown as icons — the reason someone with a filtered set of Beacons could
+        -- not render them as squares the way a placed indicator can. Icon and square only:
+        -- a bar is its own sized widget with its own layout reservation, not a cell the
+        -- group flow lays out, so offering it here would promise something the row cannot do.
+        --
+        -- ☠ Both controls are ALWAYS shown rather than hiding the colour on icon groups.
+        -- AddSection pins each section at a fixed y and greys imperatively — it never runs
+        -- hideOn/disableOn (the same limitation that kept pandemic controls off this card),
+        -- so a conditionally-present widget would leave a gap or an overlap. The label says
+        -- what the colour is for instead.
+        g:AddWidget(GUI:CreateDropdown(body, L["Shape"], {
+            icon   = L["Spell Icon"],
+            square = L["Solid Square"],
+            _order = { "icon", "square" },
+        }, proxy, "shape", refresh), 54)
+        g:AddWidget(GUI:CreateColorPicker(body, L["Square Color"], proxy, "color", true, refresh, refresh, true), 32)
         g:AddWidget(GUI:CreateCheckbox(body, L["Hide Cooldown Swipe"], proxy, "hideSwipe", refresh), 28)
     end)
 

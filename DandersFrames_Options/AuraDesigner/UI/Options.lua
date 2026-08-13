@@ -702,6 +702,9 @@ local function PoolTrackedIDs(adDB, which)
     local out = {}
     if type(adDB) ~= "table" then return out end
     local function addIDs(spec, auraName)
+        -- ☠ Full union on purpose — see the matching note in Cards.lua's
+        -- IsCandidateCrossBlocked. This is cross-pool duplicate detection, which is a
+        -- question about the aura; per-indicator mutes narrow what one PLACEMENT renders.
         local f = DF:BuildADIdentityFilters(spec, auraName)
         local map = f and f.includeSpellIDs
         if map then

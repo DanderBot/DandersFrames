@@ -1052,6 +1052,16 @@ L["Hide Blizzard Player Frame"] = true
 L["Hides buffs that are already shown elsewhere — by an Aura Designer indicator, or on the Defensive Bar — so they don't appear twice."] = true
 L["Hide Auras"] = true
 L["Hide Cooldown Swipe"] = true
+-- Filter/debuff group shape (Aura Designer group card). "Spell Icon" is what groups
+-- have always rendered; "Solid Square" matches the placed square indicator's look.
+L["Shape"] = true
+L["Spell Icon"] = true
+L["Solid Square"] = true
+L["Square Color"] = true
+-- Per-placement spell-ID narrowing (Aura Designer indicator card). Shown only when a
+-- spell resolves to more than one ID, e.g. a buff that also applies its own absorb.
+L["Tracked Spells"] = true
+L["This spell has more than one effect. Untick any you don't want this indicator to show."] = true
 L["Hide from Main Frames"] = true
 L["Hide on Tanks"] = true
 L["Hide from Main Frames Tooltip"] = "Removes this set's pinned members from your main party/raid frames so they appear only in the pinned set. Applies out of combat. Your frame sorting setting is preserved."
