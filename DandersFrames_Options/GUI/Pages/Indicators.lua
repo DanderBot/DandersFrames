@@ -1809,6 +1809,30 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- renders Anchor + Offset X/Y on the same defensiveIconDurationX/Y keys — the
         -- separate group was a duplicate left behind by the TextStyle conversion.)
 
+        -- ===== STACK COUNT GROUP (Column 1) =====
+        -- Directly under Duration, matching the Buffs page and the Aura Designer cards:
+        -- the two text elements on an icon are tuned as a pair, so a user who finds one
+        -- expects the other adjacent. Until now this page had only the duration half —
+        -- the stack text was a hardcoded 14pt in Features/Auras.lua with no keys at all,
+        -- which a user hit when 12.1 pushed some counts to three digits (report,
+        -- 2026-08-13: "I can only change the duration text for it").
+        -- ⚠ NO colour control here, unlike the Buffs page. The render deliberately keeps
+        -- `defensiveIconStackColor` absent so the colour stays untouched exactly as the
+        -- old hardcoded table left it; seeding a default to feed a picker would restyle
+        -- every existing profile. Adding it is a follow-up that needs a decision on what
+        -- the current native colour actually is, not a guess.
+        local defStackGroup = GUI:CreateSettingsGroup(self.child, 280)
+        defStackGroup.hideOn = function(d) return not DF:FactoryOwnsDefensiveRow(d) end
+        defStackGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
+        GUI:CreateTextControls(defStackGroup, db, "defensiveIconStack", {
+            parent   = self.child,
+            onChange = function() if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end end,
+            onDrag   = function() DF:LightweightUpdateDefensiveIcons() end,
+        })
+        -- Grey with the feature, same as the Duration group above.
+        defStackGroup.disableChildrenOn = HideDefensiveIconOptions
+        Add(defStackGroup, nil, 1)
+
         -- ===== DURATION BAR GROUP (Column 1) ===== (12.1 factory rows only —
         -- mirrors the Buffs page's block; UpdateAllDefensiveBars bumps the layout
         -- version, and the sig split routes Rebuild vs in-place restyle)

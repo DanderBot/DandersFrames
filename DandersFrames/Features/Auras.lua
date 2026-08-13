@@ -2674,18 +2674,28 @@ function DF:BuildDefensiveRowConfig(db, unit)
             tooltip  = buildTooltipSpec(db, "Defensive"),
             -- Duration bar strip (nil when disabled — byte-neutral; see the buff row).
             bar      = DF:BuildDurationBarSpec(db, "defensiveDurationBar"),
-            -- TextStyle-shaped spec (defensive stacks have no db keys — legacy fixed
-            -- look, size/outline explicit now that TextStyle owns the render defaults).
+            -- Shared TextStyle spec, same as the buff and debuff rows. This was a
+            -- hardcoded table whose own comment read "defensive stacks have no db keys —
+            -- legacy fixed look", which is precisely what a user ran into: 12.1 pushed
+            -- some stack counts to three digits and only the DURATION text could be
+            -- resized.
+            -- ☠ THE DEFAULTS RENDER IDENTICALLY TO THAT TABLE: baseSize 14 × Scale 1 =
+            -- 14, same anchor and offsets, Outline defaulted to "OUTLINE" in Config.
+            -- Font and Color get NO defaults on purpose — an absent key reads nil, which
+            -- BuildSpec treats as "DF default font" and "don't touch the colour", exactly
+            -- what the old table did by omission. Seeding either would silently restyle
+            -- every existing profile, which is not what a size request asked for.
             -- No formatter: forbidden on container rows (secret trap — see the
             -- GetStacksFormatter tombstone above). Native default = counts > 1.
-            stacks = {
-                show      = true,
-                anchor    = "BOTTOMRIGHT",
-                offsetX   = 2,
-                offsetY   = -1,
-                size      = 14,
-                outline   = "OUTLINE",
-            },
+            stacks = (function()
+                local st = DF.TextStyle:BuildSpec(db, "defensiveIconStack", {
+                    baseSize = 14, defaultAnchor = "BOTTOMRIGHT",
+                    defaultOffsetX = 2, defaultOffsetY = -1,
+                    boxW = db.defensiveIconSize or 24, boxH = db.defensiveIconSize or 24,
+                })
+                st.show = true
+                return st
+            end)(),
         },
     }
 end
