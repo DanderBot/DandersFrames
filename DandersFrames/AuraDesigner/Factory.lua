@@ -1125,12 +1125,16 @@ end
 -- Pick the single highest-priority configured indicator of `typeKey` across all configured
 -- auras for this spec AND the spec-independent Other Buffs pool (adDB.otherAuras) —
 -- candidates from BOTH pools compete in the SAME pick, so there is one winner per effect
--- type per frame overall. Frame-level effects each target ONE region, so stacking two of
--- the same type conflicts (double-tint / double-border) — one winner per type, exactly like
--- the health bar. priority is static config (Engine.lua:502, default 5); ties broken by
+-- type per frame overall. Consumers: the Priority-mode border (one ring per Draw Above
+-- seat) and the text-mirror colours (one cover colour per element). Health-bar /
+-- background tints used to pick here too — they are MULTI now (every configured tint
+-- renders on its own presence-gated container; see collectFrameTints), because a static
+-- pick meant a lower-priority buff could never colour the bar even when it was the ONLY
+-- buff present — presence is secret, so the pick cannot ask what is actually on the unit.
+-- priority is static config (Engine.lua:502, default 5); ties broken by
 -- pool (spec pool wins — byte-identical to the old name order when the other pool is empty)
 -- then aura name, for a deterministic, non-flapping winner. `validate(typeCfg)` gates which
--- blocks count (e.g. healthbar/background need .color, border must be enabled). Read-free.
+-- blocks count (e.g. border must be enabled). Read-free.
 -- Hidden blocks (eye toggle, `enabled == false`; nil/true = shown for legacy records) never
 -- compete — the pick falls to the next candidate, or nothing.
 -- Returns the winner's STORE KEY (OTHER_PREFIX-prefixed for other-pool winners, so store
@@ -4733,15 +4737,374 @@ local function collectStackedBorders(spec, specAuras, otherAuras)
 end
 
 -- ============================================================
+-- MULTI-TINT HEALTH BAR / BACKGROUND  (one container per configured tint)
+-- These two used to run through pickWinner — ONE static winner per type — which meant a
+-- lower-priority buff could never colour the bar even when it was the ONLY buff present
+-- (presence is secret; a config-time pick cannot ask what is on the unit). Field report
+-- 2026-08-13. Now every configured tint gets its own engine presence-gated container, so
+-- whichever buff is actually up colours the frame. When SEVERAL are up at once the
+-- arbitration is DRAW ORDER: the family shares one frame level (the healthBar+1 cover
+-- band is a single level wide — the attached absorb at +2 is a hard ceiling, bug #1027 —
+-- so there is no room for a level ladder), and same-level render order follows frame
+-- creation order. The sync loop therefore enforces two rules:
+--   * CREATE ASCENDING: collectFrameTints sorts lowest priority FIRST (the exact reverse
+--     of pickWinner's winner-first order), so the highest-priority tint is created last
+--     and draws on top — an opaque Replace cover fully hides the rest, restoring the v4
+--     "highest present priority wins"; translucent Tints compose, top-most last.
+--   * REPAIR THE LADDER: a (re)created container takes a fresh global draw index, so a
+--     mid-list Create/Rebuild would jump above older higher-priority siblings. The loop
+--     recreates every non-chained tint AFTER the first (re)created one, and an
+--     order-signature change (a priority edit that crosses another tint, an add/remove)
+--     tears the whole family down to recreate in order.
+-- ☠ CONDITION-CHAINED tints are exempt from the ladder: their visual container is born
+-- when the last gating buff lands (buildConditionChain is lazy by necessity), a runtime
+-- the sync loop cannot order. A chained tint's draw position among simultaneous tints is
+-- best-effort — accepted; conditions are rare and curate their own visibility.
+-- SHOW-WHEN-MISSING stays SINGLE-WINNER (the highest-priority SWM config): "absent" is
+-- the resting state of most frames, so several missing badges would sit composed over
+-- every idle frame — the one-badge contract is kept deliberately.
+-- ============================================================
+
+-- The same candidate set pickWinner scores, as a LIST — both pools, enabled, colour set,
+-- identity resolved. Sorted lowest priority first; ties reverse pickWinner's exactly
+-- (spec pool and alphabetically-smaller names sort LATER = draw on top), so with a single
+-- candidate the rendered result is identical to the old winner's.
+local function collectFrameTints(spec, specAuras, otherAuras, typeKey)
+    local list
+    for pool = 1, 2 do
+        local auras = (pool == 1) and specAuras or otherAuras
+        -- Other-pool identity is spec-INDEPENDENT (see pickWinner).
+        local idSpec = (pool == 1) and spec or nil
+        if auras then
+            for auraName, auraCfg in pairs(auras) do
+                local typeCfg = (type(auraCfg) == "table") and auraCfg[typeKey]
+                if typeCfg and typeCfg.enabled ~= false and typeCfg.color then
+                    local map = unionIdentity(idSpec, auraName, typeCfg)
+                    if not map then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
+                    if map then
+                        list = list or {}
+                        list[#list + 1] = {
+                            key  = (pool == 2) and (OTHER_PREFIX .. auraName) or auraName,
+                            cfg  = typeCfg,
+                            map  = map,
+                            prio = auraCfg.priority or 5,
+                            mine = (pool == 1),
+                        }
+                    end
+                end
+            end
+        end
+    end
+    if not list then return nil end
+    table.sort(list, function(a, b)
+        if a.prio ~= b.prio then return a.prio < b.prio end
+        if a.mine ~= b.mine then return b.mine end
+        return a.key > b.key
+    end)
+    return list
+end
+
+-- Never written; the teardown-all argument for teardownExceptSet on an order change.
+local EMPTY_KEEP = {}
+
+-- The shared multi-tint loop: order signature (teardown-all when the priority order of
+-- keys changes — creation order IS the z-order), the single missing-winner scan (the
+-- highest-priority SWM config without a chain, mirroring each body's own precedence),
+-- ascending sync with ladder repair, then the keep-set sweep. `syncOne(key, cfg, map,
+-- mine, asMissing) -> kept, created` is the per-family body. Mutates tstore in place.
+local function syncTintFamily(tints, tstore, store, orderKey, spec, syncOne)
+    local parts = {}
+    for i = 1, #tints do parts[i] = tints[i].key end
+    local orderSig = tconcat(parts, "\1")
+    if store[orderKey] ~= orderSig then
+        store[orderKey] = orderSig
+        teardownExceptSet(tstore, EMPTY_KEEP)
+    end
+    -- List is ascending, so the missing winner is the LAST qualifying entry.
+    local missingKey
+    for i = #tints, 1, -1 do
+        local s = tints[i]
+        if s.cfg.showWhenMissing and not resolveConditions(spec, s.cfg, s.mine) then
+            missingKey = s.key
+            break
+        end
+    end
+    local keep, forceFrom = {}, nil
+    for i = 1, #tints do
+        local s = tints[i]
+        if forceFrom then
+            -- Ladder repair: an earlier tint took a fresh draw index this pass, so every
+            -- later non-chained tint must be recreated to land back above it.
+            local e = tstore[s.key]
+            if e and not e.chain then destroyEntry(e); tstore[s.key] = nil end
+        end
+        local kept, created = syncOne(s.key, s.cfg, s.map, s.mine, s.key == missingKey)
+        if kept then keep[s.key] = true end
+        if created and not forceFrom then forceFrom = i end
+    end
+    teardownExceptSet(tstore, keep)
+end
+
+-- One health-bar tint consumer (condition chain / missing badge / flat-or-cover) — the
+-- old single-winner body, run per configured aura by syncTintFamily. Returns (kept,
+-- created): kept = the entry under `key` should survive the keep-set sweep; created = a
+-- container was stood up or rebuilt THIS pass (fresh draw index — the ladder-repair
+-- signal). Chains always report created=false: they are exempt from the ladder.
+local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine, asMissing)
+    local filt = poolFilter(cfg, resolvePoolMode(spec, key, frame, mine))
+    -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
+    -- the border consumer: a conjunction of presence gates does not express "while
+    -- all of these are absent".
+    local chainHB = resolveConditions(spec, cfg, mine)
+    if chainHB then
+        local r, g, b, a = readADColor(cfg.color)
+        local mode = slower(cfg.mode or "replace")
+        local wholeBar = (mode == "tint") and (cfg.tintWholeBar and true or false) or false
+        -- Anchor = healthBar (the flat path's own Create parent) and level-neutral
+        -- gates, so every chain shape seats the visual exactly where the flat path
+        -- does — chained on `frame` this effect rendered at a different z-level
+        -- (and, one-link, a different rect) per condition SHAPE. Bug #1027.
+        if wholeBar then
+            local blend = healthbarBlend(mode, cfg.blend, a)
+            syncConditionChain(hb, key, healthBar, frame.unit, chainHB, filt, "flat",
+                tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|"),
+                function(m, f) return buildOverlayTintConfig(frame.unit, m, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, f) end,
+                function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end,
+                AD_CHAIN_GATE_OFFSET)
+        else
+            local alpha = (mode == "replace") and 1 or healthbarBlend(mode, cfg.blend, a)
+            local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
+            local tex = (fdb and fdb.healthTexture) or "Interface\\TargetingFrame\\UI-StatusBar"
+            local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
+            syncConditionChain(hb, key, healthBar, frame.unit, chainHB, filt, "cover",
+                tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo) }, "|"),
+                function(m, f) return buildHealthFillConfig(frame.unit, m, r, g, b, alpha, tex, clampTo, f) end,
+                function(h) h:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo } } }) end,
+                AD_CHAIN_GATE_OFFSET)
+        end
+        return true, false
+    end
+    dropChainEntry(hb, key)
+    local existing = hb[key]
+    local wantMissing = cfg.showWhenMissing and true or false
+    if existing and (existing.missing and true or false) ~= wantMissing then
+        destroyEntry(existing); hb[key] = nil
+    end
+    if wantMissing then
+        -- Missing stays single-winner: a non-winner SWM config renders nothing and its
+        -- stale entry (if any) falls to the keep-set sweep.
+        if not asMissing then return false, false end
+        -- SHOW-WHEN-MISSING: a flat tint over the health-bar region while the buff is ABSENT.
+        -- Window/badge sized read-free from the frame's CONFIGURED size (the live rect is
+        -- secret on 12.1); single-anchored to the health bar's TOPLEFT so it covers the region
+        -- (config-size approximation — precise region + z-order are P4.7 polish). The filled
+        -- mirror is a present-only concept, so nil the feed ref while in missing mode.
+        local r, g, b, a = readADColor(cfg.color)
+        local mode = slower(cfg.mode or "replace")
+        local blend = (mode == "replace") and a or healthbarBlend(mode, cfg.blend, a)
+        local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
+        local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
+        local coSig = tconcat({ "miss", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(mw), tostring(mh) }, "|")
+        local before = hb[key]
+        syncFrameLevelMissing(hb, key, map, frame, healthBar, healthBar, mw, mh, 1, coSig,
+            function(handle) styleTintMissingBadge(handle, r, g, b, blend) end, filt)
+        -- syncFrameLevelMissing replaces the entry TABLE on create/recreate.
+        return true, hb[key] ~= before
+    end
+    local r, g, b, a = readADColor(cfg.color)
+    local mode = slower(cfg.mode or "replace")
+    -- Whole-bar flat tint only exists in tint mode (mirror Indicators.lua:1338):
+    -- replace mode always uses the fill-matched mirror.
+    local wholeBar = (mode == "tint") and (cfg.tintWholeBar and true or false) or false
+
+    -- The tracked map AND the filter string are live-tunable (overlay slots take
+    -- SetAuraSlotCandidateFilters / SetAuraSlotFilterString), so both ride the
+    -- tuning sig rather than forcing a teardown+recreate. wholeBar STAYS
+    -- structural: it picks a different config builder entirely.
+    local structSig = (wholeBar and "flat" or "cover")
+    local tuningSig = placedTuningSig(map, filt)
+    local entry = hb[key]
+    local created = false
+
+    if wholeBar then
+        -- LEGACY FLAT PATH — whole-bar tint texture, no mirror.
+        local blend = healthbarBlend(mode, cfg.blend, a)
+        local coSig = tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
+        if not entry then
+            local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt))
+            if handle then
+                hb[key] = { handle = handle, structSig = structSig,
+                            tuningSig = tuningSig, coSig = coSig }
+                created = true
+            end
+        elseif entry.structSig ~= structSig then
+            entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
+            entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt), structSig)
+            created = true
+        else
+            if entry.tuningSig ~= tuningSig then
+                entry.tuningSig = tuningSig
+                entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt))
+            end
+            if entry.coSig ~= coSig then
+                entry.coSig = coSig
+                entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
+            end
+        end
+    else
+        -- FILLED MIRROR PATH — duplicate StatusBar fed the secret health percent.
+        local alpha = (mode == "replace") and 1 or healthbarBlend(mode, cfg.blend, a)
+        local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
+        local tex = (fdb and fdb.healthTexture) or DF.STOCK_BAR_TEXTURE
+        -- Anchor target: the REAL health bar's fill texture. Its rect is already
+        -- driven by the bar's value, so the cover follows health for free --
+        -- no feed, no per-tick work, nothing read, nothing written from our
+        -- (tainted) update path. Resolved fresh each pass: changing the frame's
+        -- health texture from the settings panel replaces this region.
+        local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
+        local coSig = tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo) }, "|")
+        if not entry then
+            local handle = DF.AuraContainer:Create(healthBar, buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, filt))
+            if handle then
+                hb[key] = { handle = handle, structSig = structSig,
+                            tuningSig = tuningSig, coSig = coSig }
+                created = true
+            end
+        elseif entry.structSig ~= structSig then
+            entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
+            entry.handle:Rebuild(buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, filt), structSig)
+            created = true
+        else
+            if entry.tuningSig ~= tuningSig then
+                -- A tuning pass keeps the SAME slot and the same cover, so it
+                -- only needs the style re-applied, not a rebuild.
+                entry.tuningSig = tuningSig
+                entry.handle:ApplyTuning(buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, filt))
+            end
+            if entry.coSig ~= coSig then
+                entry.coSig = coSig
+                entry.handle:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo } } })
+            end
+        end
+    end
+    return true, created
+end
+
+-- The background twin — same contract as syncHealthbarTint. `store` is passed for the
+-- shared bgAnchor host (frame.background is a TEXTURE and can't parent a container;
+-- every background tint parents to the one anchor, so the level assert is idempotent).
+local function syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, asMissing)
+    local filt = poolFilter(cfg, resolvePoolMode(spec, key, frame, mine))
+    -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
+    -- the border consumer: a conjunction of presence gates does not express "while
+    -- all of these are absent".
+    local chainBG = resolveConditions(spec, cfg, mine)
+    if chainBG then
+        local r, g, b, a = readADColor(cfg.color)
+        local mode = slower(cfg.mode or "tint")
+        local blend = healthbarBlend(mode, cfg.blend, a)
+        -- Same parked anchor the flat path uses: the tint has to sit at healthBar-3 so
+        -- it lands above the background but below every bar.
+        local bgHost = store.bgAnchor
+        if not bgHost then
+            bgHost = CreateFrame("Frame", nil, frame)
+            bgHost:SetAllPoints(frame.background)
+            store.bgAnchor = bgHost
+        end
+        local hbLvl = frame.healthBar and frame.healthBar:GetFrameLevel() or 3
+        bgHost:SetFrameLevel(math.max(0, hbLvl - 3))
+        -- Level-neutral gates: the chain's visual seats at bgHost+2 = healthBar-1,
+        -- same as the flat path, whatever the chain length.
+        syncConditionChain(bg, key, bgHost, frame.unit, chainBG, filt, "bgtint",
+            tconcat({ "bg", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|"),
+            function(m, f) return buildOverlayTintConfig(frame.unit, m, r, g, b, blend, 0, f) end,
+            function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end,
+            AD_CHAIN_GATE_OFFSET)
+        return true, false
+    end
+    dropChainEntry(bg, key)
+    local existing = bg[key]
+    local wantMissing = cfg.showWhenMissing and true or false
+    if existing and (existing.missing and true or false) ~= wantMissing then
+        destroyEntry(existing); bg[key] = nil
+    end
+    if wantMissing then
+        -- Missing stays single-winner, exactly as in the health-bar twin.
+        if not asMissing then return false, false end
+        -- SHOW-WHEN-MISSING: flat tint over the background region while the buff is ABSENT.
+        -- Sized read-free from config; anchored to frame.background (parents to `frame`, which
+        -- must be a Frame). z-order below the bars is a P4.7 polish concern (uses offset 0).
+        local r, g, b, a = readADColor(cfg.color)
+        local mode = slower(cfg.mode or "tint")
+        local blend = healthbarBlend(mode, cfg.blend, a)
+        local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
+        local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
+        local coSig = tconcat({ "miss", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(mw), tostring(mh) }, "|")
+        local before = bg[key]
+        syncFrameLevelMissing(bg, key, map, frame, frame, frame.background, mw, mh, 0, coSig,
+            function(handle) styleTintMissingBadge(handle, r, g, b, blend) end, filt)
+        return true, bg[key] ~= before
+    end
+    local bgAnchor = store.bgAnchor
+    if not bgAnchor then
+        bgAnchor = CreateFrame("Frame", nil, frame)
+        bgAnchor:SetAllPoints(frame.background)
+        store.bgAnchor = bgAnchor
+    end
+    -- (Re)assert level every pass — the health bar's level is stable post-create,
+    -- but keep it robust to a frame rebuild that recreates healthBar.
+    local hbLevel = frame.healthBar and frame.healthBar:GetFrameLevel() or 3
+    bgAnchor:SetFrameLevel(math.max(0, hbLevel - 3))
+
+    local r, g, b, a = readADColor(cfg.color)
+    local mode = slower(cfg.mode or "tint")   -- background defaults to tint
+    local blend = healthbarBlend(mode, cfg.blend, a)
+
+    -- Nothing structural left: this family declares one overlay slot with a
+    -- fixed region set, and both the map and the filter string tune live.
+    local structSig = "bgtint"
+    local tuningSig = placedTuningSig(map, filt)
+    local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
+
+    local entry = bg[key]
+    local created = false
+    if not entry then
+        local handle = DF.AuraContainer:Create(bgAnchor, buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, filt))
+        if handle then
+            bg[key] = { handle = handle, structSig = structSig,
+                        tuningSig = tuningSig, coSig = coSig }
+            created = true
+        end
+    elseif entry.structSig ~= structSig then
+        entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
+        entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, filt), structSig)
+        created = true
+    else
+        if entry.tuningSig ~= tuningSig then
+            entry.tuningSig = tuningSig
+            entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, filt))
+        end
+        if entry.coSig ~= coSig then
+            entry.coSig = coSig
+            entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
+        end
+    end
+    return true, created
+end
+
+-- ============================================================
 -- PER-FRAME SYNC  (P4.1 health-bar + P4.2 frame-level family)
--- Reads the CONFIGURED indicators in adDB.auras[spec] (never a live aura list). Each
--- frame-level effect targets ONE region, so per type we pick the SINGLE highest-priority
--- winner (stacking two of a type conflicts) and stand it up / restyle / tear it down on
--- its own DF.AuraContainer. Types ported here: healthbar, background, border. framealpha /
--- nametext / healthtext RECOVERED via colour-by-cover (see the NAME / HEALTH TEXT block
--- below and the foot notes); framealpha stays a 12.1 casualty (P4.7 overlays its controls).
--- ☠ BORDER IS THE ONE EXCEPTION to "one winner per type": an indicator set to Stacked mode
--- opts out of the priority contest and gets its own ring, so several can show at once.
+-- Reads the CONFIGURED indicators in adDB.auras[spec] (never a live aura list). Types
+-- ported here: healthbar, background, border. framealpha / nametext / healthtext
+-- RECOVERED via colour-by-cover (see the NAME / HEALTH TEXT block below and the foot
+-- notes); framealpha stays a 12.1 casualty (P4.7 overlays its controls).
+-- Winner rules per type:
+--   * healthbar / background — MULTI-TINT: every configured tint renders on its own
+--     presence-gated container; draw order arbitrates simultaneous buffs (see the
+--     collectFrameTints block comment). Show-when-missing stays single-winner.
+--   * border — single highest-priority winner (one ring per Draw Above seat), EXCEPT
+--     an indicator set to Stacked mode, which opts out and gets its own ring.
+--   * nametext / healthtext — single highest-priority winner (one cover per element).
 -- ============================================================
 function Factory:SyncFrame(frame)
     if not frame or not frame.unit then return end
@@ -4850,152 +5213,29 @@ function Factory:SyncFrame(frame)
     local defs = resolveDefs(adDB)
 
     -- ---- HEALTH BAR (child of frame.healthBar, overlay) -----------------------------
-    -- Two render paths, chosen by config:
-    --   * FILL COVER (replace, or tint without "Tint Entire Bar") — a texture anchored to the
-    --     real health bar's fill region (healthBar:GetStatusBarTexture()), so it tracks health
-    --     with no feed and no reads. replace = opaque cover (alpha 1); tint = fill-matched
-    --     tint (alpha = blend).
-    --   * FLAT WHOLE-BAR TINT (tint + tintWholeBar) — the legacy flat texture overlay covering
-    --     the whole bar incl. the missing-health region. Unchanged behaviour.
-    -- Path (flat vs cover) is folded into structSig so toggling it rebuilds the region fresh.
+    -- MULTI-TINT (see the block comment above collectFrameTints): every configured
+    -- Health Bar Color renders on its own presence-gated container; draw order — not a
+    -- static pick — arbitrates when several buffs are up at once. Per-tint render paths
+    -- are unchanged (see syncHealthbarTint): FILL COVER (replace, or tint without "Tint
+    -- Entire Bar") anchored to the real fill region, or the legacy FLAT WHOLE-BAR TINT
+    -- (tint + tintWholeBar); flat vs cover is folded into structSig so toggling it
+    -- rebuilds the region fresh.
     local healthBar = frame.healthBar
     if healthBar then
         local hb = store.healthbar
         if not hb then hb = {}; store.healthbar = hb end
 
-        local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, "healthbar",
-            function(c) return c.color end)
-
-        if bestName then
-            local filt = poolFilter(bestCfg, resolvePoolMode(spec, bestName, frame, bestPool == 1))
-            -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
-            -- the border consumer: a conjunction of presence gates does not express "while
-            -- all of these are absent".
-            local chainHB = resolveConditions(spec, bestCfg, bestPool == 1)
-            if chainHB then
-                local r, g, b, a = readADColor(bestCfg.color)
-                local mode = slower(bestCfg.mode or "replace")
-                local wholeBar = (mode == "tint") and (bestCfg.tintWholeBar and true or false) or false
-                -- Anchor = healthBar (the flat path's own Create parent) and level-neutral
-                -- gates, so every chain shape seats the visual exactly where the flat path
-                -- does — chained on `frame` this effect rendered at a different z-level
-                -- (and, one-link, a different rect) per condition SHAPE. Bug #1027.
-                if wholeBar then
-                    local blend = healthbarBlend(mode, bestCfg.blend, a)
-                    syncConditionChain(hb, bestName, healthBar, frame.unit, chainHB, filt, "flat",
-                        tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|"),
-                        function(map, f) return buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, f) end,
-                        function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end,
-                        AD_CHAIN_GATE_OFFSET)
-                else
-                    local alpha = (mode == "replace") and 1 or healthbarBlend(mode, bestCfg.blend, a)
-                    local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
-                    local tex = (fdb and fdb.healthTexture) or "Interface\\TargetingFrame\\UI-StatusBar"
-                    local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
-                    syncConditionChain(hb, bestName, healthBar, frame.unit, chainHB, filt, "cover",
-                        tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo) }, "|"),
-                        function(map, f) return buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, f) end,
-                        function(h) h:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo } } }) end,
-                        AD_CHAIN_GATE_OFFSET)
-                end
-            else
-            dropChainEntry(hb, bestName)
-            local existingHB = hb[bestName]
-            local wantMissingHB = bestCfg.showWhenMissing and true or false
-            if existingHB and (existingHB.missing and true or false) ~= wantMissingHB then
-                destroyEntry(existingHB); hb[bestName] = nil
-            end
-          if wantMissingHB then
-            -- SHOW-WHEN-MISSING: a flat tint over the health-bar region while the buff is ABSENT.
-            -- Window/badge sized read-free from the frame's CONFIGURED size (the live rect is
-            -- secret on 12.1); single-anchored to the health bar's TOPLEFT so it covers the region
-            -- (config-size approximation — precise region + z-order are P4.7 polish). The filled
-            -- mirror is a present-only concept, so nil the feed ref while in missing mode.
-            local r, g, b, a = readADColor(bestCfg.color)
-            local mode = slower(bestCfg.mode or "replace")
-            local blend = (mode == "replace") and a or healthbarBlend(mode, bestCfg.blend, a)
-            local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
-            local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
-            local coSig = tconcat({ "miss", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(mw), tostring(mh) }, "|")
-            syncFrameLevelMissing(hb, bestName, bestMap, frame, healthBar, healthBar, mw, mh, 1, coSig,
-                function(handle) styleTintMissingBadge(handle, r, g, b, blend) end, filt)
-          else
-            local r, g, b, a = readADColor(bestCfg.color)
-            local mode = slower(bestCfg.mode or "replace")
-            -- Whole-bar flat tint only exists in tint mode (mirror Indicators.lua:1338):
-            -- replace mode always uses the fill-matched mirror.
-            local wholeBar = (mode == "tint") and (bestCfg.tintWholeBar and true or false) or false
-
-            -- The tracked map AND the filter string are live-tunable (overlay slots take
-            -- SetAuraSlotCandidateFilters / SetAuraSlotFilterString), so both ride the
-            -- tuning sig rather than forcing a teardown+recreate. wholeBar STAYS
-            -- structural: it picks a different config builder entirely.
-            local structSig = (wholeBar and "flat" or "cover")
-            local tuningSig = placedTuningSig(bestMap, filt)
-            local entry = hb[bestName]
-
-            if wholeBar then
-                -- LEGACY FLAT PATH — whole-bar tint texture, no mirror.
-                local blend = healthbarBlend(mode, bestCfg.blend, a)
-                local coSig = tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
-                if not entry then
-                        local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt))
-                    if handle then
-                        hb[bestName] = { handle = handle, structSig = structSig,
-                                         tuningSig = tuningSig, coSig = coSig }
-                    end
-                elseif entry.structSig ~= structSig then
-                        entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                    entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt), structSig)
-                else
-                    if entry.tuningSig ~= tuningSig then
-                        entry.tuningSig = tuningSig
-                        entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt))
-                    end
-                    if entry.coSig ~= coSig then
-                        entry.coSig = coSig
-                        entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
-                    end
-                end
-            else
-                -- FILLED MIRROR PATH — duplicate StatusBar fed the secret health percent.
-                local alpha = (mode == "replace") and 1 or healthbarBlend(mode, bestCfg.blend, a)
-                local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
-                local tex = (fdb and fdb.healthTexture) or DF.STOCK_BAR_TEXTURE
-                -- Anchor target: the REAL health bar's fill texture. Its rect is already
-                -- driven by the bar's value, so the cover follows health for free --
-                -- no feed, no per-tick work, nothing read, nothing written from our
-                -- (tainted) update path. Resolved fresh each pass: changing the frame's
-                -- health texture from the settings panel replaces this region.
-                local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
-                local coSig = tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo) }, "|")
-                if not entry then
-                    local handle = DF.AuraContainer:Create(healthBar, buildHealthFillConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
-                    if handle then
-                        hb[bestName] = { handle = handle, structSig = structSig,
-                                         tuningSig = tuningSig, coSig = coSig }
-                    end
-                elseif entry.structSig ~= structSig then
-                    entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                    entry.handle:Rebuild(buildHealthFillConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt), structSig)
-                else
-                    if entry.tuningSig ~= tuningSig then
-                        -- A tuning pass keeps the SAME slot and the same cover, so it
-                        -- only needs the style re-applied, not a rebuild.
-                        entry.tuningSig = tuningSig
-                        entry.handle:ApplyTuning(buildHealthFillConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
-                    end
-                    if entry.coSig ~= coSig then
-                        entry.coSig = coSig
-                        entry.handle:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo } } })
-                    end
-                end
-            end
-          end
-            end  -- if chainHB
+        local tints = collectFrameTints(spec, specAuras, otherAuras, "healthbar")
+        if tints then
+            syncTintFamily(tints, hb, store, "healthbarOrder", spec,
+                function(key, cfg, map, mine, asMissing)
+                    return syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine, asMissing)
+                end)
+        else
+            -- No health-bar tints configured → the mirror bars are gone; drop the refs.
+            teardownExcept(hb, nil)
+            store.healthbarOrder = nil
         end
-        teardownExcept(hb, bestName)
-        -- No health-bar winner this pass → the mirror bar is gone; drop the ref.
     end
 
     -- ---- BACKGROUND TINT (child of frame.background, overlay tint) -------------------
@@ -5012,104 +5252,18 @@ function Factory:SyncFrame(frame)
         local bg = store.background
         if not bg then bg = {}; store.background = bg end
 
-        local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, "background",
-            function(c) return c.color end)
-
-        if bestName then
-            local filt = poolFilter(bestCfg, resolvePoolMode(spec, bestName, frame, bestPool == 1))
-            -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
-            -- the border consumer: a conjunction of presence gates does not express "while
-            -- all of these are absent".
-            local chainBG = resolveConditions(spec, bestCfg, bestPool == 1)
-            if chainBG then
-                local r, g, b, a = readADColor(bestCfg.color)
-                local mode = slower(bestCfg.mode or "tint")
-                local blend = healthbarBlend(mode, bestCfg.blend, a)
-                -- Same parked anchor the single-container path uses: frame.background is a
-                -- TEXTURE and can't parent a container, and the tint has to sit at
-                -- healthBar-3 so it lands above the background but below every bar.
-                local bgHost = store.bgAnchor
-                if not bgHost then
-                    bgHost = CreateFrame("Frame", nil, frame)
-                    bgHost:SetAllPoints(frame.background)
-                    store.bgAnchor = bgHost
-                end
-                local hbLvl = frame.healthBar and frame.healthBar:GetFrameLevel() or 3
-                bgHost:SetFrameLevel(math.max(0, hbLvl - 3))
-                -- Level-neutral gates: the chain's visual seats at bgHost+2 = healthBar-1,
-                -- same as the flat path below, whatever the chain length.
-                syncConditionChain(bg, bestName, bgHost, frame.unit, chainBG, filt, "bgtint",
-                    tconcat({ "bg", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|"),
-                    function(map, f) return buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, f) end,
-                    function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end,
-                    AD_CHAIN_GATE_OFFSET)
-            else
-            dropChainEntry(bg, bestName)
-            local existingBG = bg[bestName]
-            local wantMissingBG = bestCfg.showWhenMissing and true or false
-            if existingBG and (existingBG.missing and true or false) ~= wantMissingBG then
-                destroyEntry(existingBG); bg[bestName] = nil
-            end
-          if wantMissingBG then
-            -- SHOW-WHEN-MISSING: flat tint over the background region while the buff is ABSENT.
-            -- Sized read-free from config; anchored to frame.background (parents to `frame`, which
-            -- must be a Frame). z-order below the bars is a P4.7 polish concern (uses offset 0).
-            local r, g, b, a = readADColor(bestCfg.color)
-            local mode = slower(bestCfg.mode or "tint")
-            local blend = healthbarBlend(mode, bestCfg.blend, a)
-            local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
-            local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
-            local coSig = tconcat({ "miss", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(mw), tostring(mh) }, "|")
-            syncFrameLevelMissing(bg, bestName, bestMap, frame, frame, frame.background, mw, mh, 0, coSig,
-                function(handle) styleTintMissingBadge(handle, r, g, b, blend) end, filt)
-          else
-            local bgAnchor = store.bgAnchor
-            if not bgAnchor then
-                bgAnchor = CreateFrame("Frame", nil, frame)
-                bgAnchor:SetAllPoints(frame.background)
-                store.bgAnchor = bgAnchor
-            end
-            -- (Re)assert level every pass — the health bar's level is stable post-create,
-            -- but keep it robust to a frame rebuild that recreates healthBar.
-            local hbLevel = frame.healthBar and frame.healthBar:GetFrameLevel() or 3
-            bgAnchor:SetFrameLevel(math.max(0, hbLevel - 3))
-
-            local r, g, b, a = readADColor(bestCfg.color)
-            local mode = slower(bestCfg.mode or "tint")   -- background defaults to tint
-            local blend = healthbarBlend(mode, bestCfg.blend, a)
-
-            -- Nothing structural left: this family declares one overlay slot with a
-            -- fixed region set, and both the map and the filter string tune live.
-            local structSig = "bgtint"
-            local tuningSig = placedTuningSig(bestMap, filt)
-            local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
-
-            local entry = bg[bestName]
-            if not entry then
-                local handle = DF.AuraContainer:Create(bgAnchor, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt))
-                if handle then
-                    bg[bestName] = { handle = handle, structSig = structSig,
-                                     tuningSig = tuningSig, coSig = coSig }
-                end
-            elseif entry.structSig ~= structSig then
-                entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt), structSig)
-            else
-                if entry.tuningSig ~= tuningSig then
-                    entry.tuningSig = tuningSig
-                    entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt))
-                end
-                if entry.coSig ~= coSig then
-                    entry.coSig = coSig
-                    entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
-                end
-            end
-          end
-            end  -- if chainBG
+        local tints = collectFrameTints(spec, specAuras, otherAuras, "background")
+        if tints then
+            syncTintFamily(tints, bg, store, "backgroundOrder", spec,
+                function(key, cfg, map, mine, asMissing)
+                    return syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, asMissing)
+                end)
+        else
+            -- No background tints configured → the containers are gone; drop the anchor too.
+            teardownExcept(bg, nil)
+            store.backgroundOrder = nil
+            releaseBgAnchor(store)
         end
-        teardownExcept(bg, bestName)
-        -- No background winner this pass → the containers are gone; drop the anchor too.
-        if not bestName then releaseBgAnchor(store) end
     end
 
     -- ---- BORDER (whole-frame static ring via DF.Border, overlay) ---------------------
@@ -5517,6 +5671,9 @@ function Factory:ClearFrame(frame)
     if not store then return end
     teardownExcept(store.healthbar or {}, nil)
     teardownExcept(store.background or {}, nil)
+    -- Multi-tint order signatures: stale sigs are harmless (a fully-empty store always
+    -- recreates in list order) but keep the teardown honest.
+    store.healthbarOrder, store.backgroundOrder = nil, nil
     teardownExcept(store.border or {}, nil)
     teardownExcept(store.placed or {}, nil)   -- per-indicator icon/square/bar containers
     -- (Expiry-alert COMPANION handles live in store.placed too — covered above.)

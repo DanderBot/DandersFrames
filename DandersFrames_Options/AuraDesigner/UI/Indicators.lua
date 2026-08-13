@@ -25,6 +25,28 @@ local AddPandemicControls = P.AddPandemicControls
 local AddDurationColorsLink = P.AddDurationColorsLink
 local CreateProxy = P.CreateProxy
 
+-- Count the configured colour effects of `typeKey` across BOTH pools — the same
+-- candidate set the factory's multi-tint collector renders together (Factory.lua
+-- collectFrameTints) — for the shared-region heads-up banner on the healthbar /
+-- background sections. Editor-selected spec; read-only (the other pool is read only
+-- when it already exists — merely building this page must not create it).
+local function CountTypeColorConfigs(typeKey)
+    local n = 0
+    local adDB = P.GetAuraDesignerDB()
+    if not adDB then return 0 end
+    local spec = ResolveSpec()
+    local function countPool(pool)
+        if not pool then return end
+        for _, auraCfg in pairs(pool) do
+            local c = (type(auraCfg) == "table") and auraCfg[typeKey]
+            if c and c.enabled ~= false and c.color then n = n + 1 end
+        end
+    end
+    countPool(spec and P.GetSpecAuras(spec))
+    countPool(adDB.otherAuras and P.GetOtherAuras())
+    return n
+end
+
 -- ============================================================
 -- INDICATOR TYPE WIDGET BUILDER
 -- (Tile strip removed in v4 redesign)
@@ -972,6 +994,27 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     elseif typeKey == "healthbar" then
         -- Appearance
         AddGroup(L["Appearance"], function(g)
+            -- MULTI-TINT heads-up (mirrors Factory.lua collectFrameTints): several
+            -- indicators colouring the same region all render now — presence decides
+            -- which shows; simultaneous buffs arbitrate by priority draw order, and
+            -- translucent Tints compose. Shown only when the user actually has 2+
+            -- health-bar colours configured; silent otherwise.
+            if CountTypeColorConfigs("healthbar") >= 2 then
+                local topSpacer = CreateFrame("Frame", nil, parent)
+                topSpacer:SetHeight(4)
+                g:AddWidget(topSpacer, 4)
+
+                local banner = GUI:CreateInfoBanner(parent, {
+                    tone = "info",
+                    text = L["Multiple effects color the health bar. Whichever buff is active shows; if several are active at once, the highest priority draws on top and translucent tints blend together."],
+                })
+                banner:SetWidth(contentWidth - 10)
+                g:AddWidget(banner, banner.layoutHeight)
+
+                local spacer = CreateFrame("Frame", nil, parent)
+                spacer:SetHeight(6)
+                g:AddWidget(spacer, 6)
+            end
             g:AddWidget(GUI:CreateDropdown(parent, L["Mode"], OPTS.HEALTHBAR_MODE_OPTIONS, proxy, "mode", function()
                 -- Rebuild so the Blend % slider's hideOn re-evaluates and the
                 -- group's height recomputes for the new visible-widget set.
@@ -1002,6 +1045,23 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- background (visible in the missing-health area). Replace = opaque cover;
         -- Tint = blend × colour alpha so the normal background shows through.
         AddGroup(L["Appearance"], function(g)
+            -- MULTI-TINT heads-up — the background twin of the health-bar banner above.
+            if CountTypeColorConfigs("background") >= 2 then
+                local topSpacer = CreateFrame("Frame", nil, parent)
+                topSpacer:SetHeight(4)
+                g:AddWidget(topSpacer, 4)
+
+                local banner = GUI:CreateInfoBanner(parent, {
+                    tone = "info",
+                    text = L["Multiple effects color the background. Whichever buff is active shows; if several are active at once, the highest priority draws on top and translucent tints blend together."],
+                })
+                banner:SetWidth(contentWidth - 10)
+                g:AddWidget(banner, banner.layoutHeight)
+
+                local spacer = CreateFrame("Frame", nil, parent)
+                spacer:SetHeight(6)
+                g:AddWidget(spacer, 6)
+            end
             g:AddWidget(GUI:CreateDropdown(parent, L["Mode"], OPTS.HEALTHBAR_MODE_OPTIONS, proxy, "mode", function()
                 DF:AuraDesigner_RefreshPage()
             end), 54)
