@@ -1213,15 +1213,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 LEFT = L["Left of Owner"],
                 RIGHT = L["Right of Owner"],
             }
+            -- ☠ LightweightUpdatePetFrames, NOT UpdateAllPetFramePositions: the
+            -- latter branches only on the LIVE tracks (party/raid/arena), so in
+            -- test mode these controls silently did nothing on keyboard entry —
+            -- mouse drags only "worked" because drag-release runs a full update
+            -- that happens to cover test pets (#1047). The lightweight pass is
+            -- track-aware, test modes included.
             positionGroup:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorValues, db, "petAnchor", function()
-                if DF.UpdateAllPetFramePositions then DF:UpdateAllPetFramePositions() end
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
             end), 55)
             positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "petOffsetX", function()
-                if DF.UpdateAllPetFramePositions then DF:UpdateAllPetFramePositions() end
-            end, function() if DF.UpdateAllPetFramePositions then DF:UpdateAllPetFramePositions() end end, true), 55)
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
             positionGroup:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "petOffsetY", function()
-                if DF.UpdateAllPetFramePositions then DF:UpdateAllPetFramePositions() end
-            end, function() if DF.UpdateAllPetFramePositions then DF:UpdateAllPetFramePositions() end end, true), 55)
+                if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
+            end, function() if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end end, true), 55)
             
             Add(positionGroup, nil, 1)
         end
@@ -1665,8 +1671,14 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             else
                 DF:UpdateAllFrames()
             end
+            -- Match-owner pets follow an owner resize made by KEYBOARD too:
+            -- this callback had no pet call at all, so a typed Frame Width/
+            -- Height never reached pets until some full pet pass ran (mouse
+            -- drags only worked via the drag-release full update, #1047). The
+            -- lightweight pass is track-aware and re-reads owner dimensions.
+            if DF.LightweightUpdatePetFrames then DF:LightweightUpdatePetFrames() end
         end
-        
+
         -- Store references to sliders so we can update their labels
         local groupsPerRowSlider, rowColSpacingSlider, playersPerRowSlider
         
