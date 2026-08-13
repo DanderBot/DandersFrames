@@ -1160,8 +1160,14 @@ function DF:UpdateAbsorbBarAppearance(frame)
     if not IsDandersFrame(frame) then return end
     if not frame.dfAbsorbBar then return end
 
-    -- PERF: Skip if absorb bar isn't visible
-    if not frame.dfAbsorbBar:IsShown() then return end
+    -- ☠ NOT gated on :IsShown() — same reasoning as UpdateMissingBuffAppearance above,
+    -- which flagged these three as carrying the same guard. VERIFIED, not assumed: the
+    -- ONLY caller of this function is UpdateAllElementAppearance (the range-tick sweep),
+    -- and nothing re-runs it when the bar is shown. So a pass that lands while the bar is
+    -- hidden is skipped, the bar keeps whatever alpha it last got, and it comes back at a
+    -- stale value until the next range edge. Alpha on a hidden frame costs nothing and is
+    -- correct the instant it is shown; a visibility guard on an alpha updater buys nothing
+    -- but a stale value. (The old comment called this "PERF".)
 
     local db = GetDB(frame)
     if not db then return end
@@ -1207,9 +1213,10 @@ end
 function DF:UpdateHealAbsorbBarAppearance(frame)
     if not IsDandersFrame(frame) then return end
     if not frame.dfHealAbsorbBar then return end
-    
-    if not frame.dfHealAbsorbBar:IsShown() then return end
-    
+
+    -- ☠ NOT gated on :IsShown() — see UpdateAbsorbBarAppearance above for the verified
+    -- reasoning (one caller, the range-tick sweep; nothing re-runs it on show).
+
     local db = GetDB(frame)
     if not db then return end
     
@@ -1234,9 +1241,10 @@ end
 function DF:UpdateHealPredictionBarAppearance(frame)
     if not IsDandersFrame(frame) then return end
     if not frame.dfHealPredictionBar then return end
-    
-    if not frame.dfHealPredictionBar:IsShown() then return end
-    
+
+    -- ☠ NOT gated on :IsShown() — see UpdateAbsorbBarAppearance above for the verified
+    -- reasoning (one caller, the range-tick sweep; nothing re-runs it on show).
+
     local db = GetDB(frame)
     if not db then return end
     
@@ -1251,8 +1259,10 @@ function DF:UpdateHealPredictionBarAppearance(frame)
     if db.oorEnabled then
         local oorAlpha = db.oorAbsorbBarAlpha or 0.5
         ApplyOORAlpha(frame.dfHealPredictionBar, inRange, 1.0, oorAlpha)
-        -- Second segment (others' heals in SPLIT mode) fades to match.
-        if frame.dfHealPredictionBar2 and frame.dfHealPredictionBar2:IsShown() then
+        -- Second segment (others' heals in SPLIT mode) fades to match. Nil-checked, not
+        -- shown-checked: the segment only exists in SPLIT mode, but a hidden one still
+        -- needs the current alpha for when it comes back (same rule as the bar itself).
+        if frame.dfHealPredictionBar2 then
             ApplyOORAlpha(frame.dfHealPredictionBar2, inRange, 1.0, oorAlpha)
         end
     end

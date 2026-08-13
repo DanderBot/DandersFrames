@@ -881,22 +881,11 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         frame.healthBar:SetValue(healthValue)
     end
 
-    -- Re-anchor the health bar with the frame padding inset, matching what
-    -- UpdateUnitFrame does unconditionally for live frames. Without this the
-    -- test path only re-anchored as a side effect of UpdateReducedMaxHealth,
-    -- so frames with no active reduced-max clipping kept a stale inset and the
-    -- padding looked inconsistent across test frames. UpdateReducedMaxHealth
-    -- below may re-clip the right edge afterwards.
-    local padding = db.framePadding or 0
-    frame.healthBar:ClearAllPoints()
-    frame.healthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
-    frame.healthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
-    -- Keep the missing-health overlay inside the padding too (matches live frames).
-    if frame.missingHealthBar then
-        frame.missingHealthBar:ClearAllPoints()
-        frame.missingHealthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
-        frame.missingHealthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
-    end
+    -- ★ LIVE'S INSET, not a restatement of it. This was ten lines that re-anchored both
+    -- bars by db.framePadding, under a comment saying it was "matching what UpdateUnitFrame
+    -- does unconditionally for live frames" — which is the divergence class named in every
+    -- audit of this file. UpdateReducedMaxHealth below may re-clip the right edge after.
+    DF:AnchorHealthBarsToPadding(frame, db)
 
     if db.testShowReducedMaxHealth ~= false then
         frame.dfTestReducedMaxPct = testData.reducedMaxPct or 0
@@ -2571,7 +2560,7 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
                 groupNum = groupNum
             })
             -- Set frame size
-            frame:SetSize(lp.frameWidth, lp.frameHeight)
+            DF:SetPixelPerfectSize(frame, lp.frameWidth, lp.frameHeight, db)
         end
     end
     
@@ -2725,7 +2714,7 @@ function DF:LightweightPositionRaidTestFramesFlat(testFrameCount)
                     testData = testData
                 })
                 -- Set frame size
-                frame:SetSize(lp.frameWidth, lp.frameHeight)
+                DF:SetPixelPerfectSize(frame, lp.frameWidth, lp.frameHeight, db)
             end
         end
         
@@ -2785,7 +2774,7 @@ function DF:LightweightPositionPartyTestFrames(testFrameCount)
                     isPlayer = (i == 0),
                     testData = testData
                 })
-                frame:SetSize(lp.frameWidth, lp.frameHeight)
+                DF:SetPixelPerfectSize(frame, lp.frameWidth, lp.frameHeight, db)
             end
         end
         

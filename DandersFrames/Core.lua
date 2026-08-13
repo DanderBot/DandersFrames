@@ -800,8 +800,8 @@ function DF:LightweightUpdateFrameSize(force)
 
         local frameWidth = db.frameWidth or 120
         local frameHeight = db.frameHeight or 50
-        local padding = db.framePadding or 0
-        
+        -- (the framePadding read moved into DF:AnchorHealthBarsToPadding with its only user)
+
         -- ☠ SetSize IS PROTECTED ON A SECURE HEADER CHILD. Party frames are
         -- SecureUnitButtonTemplate children of a secure header, so resizing one in
         -- combat raises a blocked-action error -- once per frame. This was only ever
@@ -819,11 +819,12 @@ function DF:LightweightUpdateFrameSize(force)
             if not (skipResize and frame.dfIsHeaderChild) then
                 frame:SetSize(frameWidth, frameHeight)
             end
-            if frame.healthBar then
-                frame.healthBar:ClearAllPoints()
-                frame.healthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
-                frame.healthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
-            end
+            -- Shared with ApplyFrameLayout and the test-mode update (see
+            -- DF:AnchorHealthBarsToPadding). This copy also re-anchored the health bar
+            -- ONLY, so during a width/padding slider drag the missing-health overlay sat
+            -- at the old inset until the next full layout pass; the shared version moves
+            -- both, which is what the live update path has always done.
+            DF:AnchorHealthBarsToPadding(frame, db)
             -- Update resource bar width to match new frame size
             if db.resourceBarMatchWidth and frame.dfPowerBar and DF.ApplyResourceBarLayout then
                 DF:ApplyResourceBarLayout(frame)
@@ -5794,6 +5795,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         sub("ppbadge",      "force the missing-buff badge to stay visible (geometry probe)", true)
         sub("ownpreview",   "A/B test mode: our own frames (default) vs the global sample provider", true)
         sub("admissing",    "Aura Designer missing-buff trace (add 'mark')", true, "[mark]")
+        sub("adpin",        "Aura Designer canvas: every slot's pin vs the live resolver", true)
         sub("cbt",          "colour-by-time curve dump", true, "<spellID>")
         -- Data integrity. Both dev-gated for the same reason as /df debug duration: they
         -- check OUR curation data against the client, so the output only means
@@ -6590,6 +6592,18 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Pixel-perfect geometry ground truth for aura containers (physical-px
                 -- rects + grid deviation per anchor-chain element)
                 if DF.AuraContainer and DF.AuraContainer.DebugDumpPP then DF.AuraContainer.DebugDumpPP() end
+            elseif msg == "adpin" then
+                -- Does every Aura Designer canvas slot sit where the LIVE pin resolver
+                -- says it should? A mismatch means something placed a slot with maths of
+                -- its own, or placed it twice — the divergence class that produced
+                -- "the AD preview does not match live frames". Lives in the Options
+                -- companion because the canvas does; absent until the designer is opened.
+                local AD = DF.AuraDesigner
+                if AD and AD.DebugDumpCanvasPins then
+                    AD.DebugDumpCanvasPins()
+                else
+                    DF:Say("Aura Designer canvas not loaded — open the Aura Designer first")
+                end
             elseif msg == "ownpreview" then
                 -- A/B the test-mode route: our own pooled frames (default) versus the
                 -- engine's per-slot groups fed by the GLOBAL sample provider, which
