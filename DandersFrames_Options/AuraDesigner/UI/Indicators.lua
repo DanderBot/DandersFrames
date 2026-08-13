@@ -288,7 +288,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     local live = LiveCount()
                     if live == 0 then
                         note:SetTextColor(0.91, 0.66, 0.25, 1)   -- the editor's warning amber
-                        note:SetText(L["Nothing ticked — this indicator will not show. The eye is unchanged."])
+                        note:SetText(L["Nothing ticked — this indicator will not show."])
                     else
                         note:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
                         note:SetText(format(L["Showing %d of %d effects. Untick any you don't want this indicator to show."],

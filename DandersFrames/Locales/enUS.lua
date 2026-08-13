@@ -1064,7 +1064,7 @@ L["Tracked Spells"] = true
 -- The zero state is spelled out because it looks identical to a hidden indicator, and the
 -- eye is a separate control that this never touches.
 L["Showing %d of %d effects. Untick any you don't want this indicator to show."] = true
-L["Nothing ticked — this indicator will not show. The eye is unchanged."] = true
+L["Nothing ticked — this indicator will not show."] = true
 L["Hide from Main Frames"] = true
 L["Hide on Tanks"] = true
 L["Hide from Main Frames Tooltip"] = "Removes this set's pinned members from your main party/raid frames so they appear only in the pinned set. Applies out of combat. Your frame sorting setting is preserved."

@@ -1750,8 +1750,12 @@ S.CreateEffectCard = function(parent, yPos, effect)
             end
         end)
 
-        -- Hidden rows dim (name/icon), like Text Designer's disabled elements
-        if not shown() then
+        -- Hidden rows dim (name/icon), like Text Designer's disabled elements.
+        -- ☠ The SAME condition the eye uses, or the row half-greys: the eye went inactive
+        -- for a placement tracking nothing while the name and icon beside it stayed bright,
+        -- which reads as the eye being wrong rather than the row being inert. Both states
+        -- mean "this is not going to render", so both dim the row.
+        if not shown() or tracksNothing() then
             spellIcon:SetAlpha(0.4)
             infoText:SetAlpha(0.5)
         end
