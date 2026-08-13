@@ -78,7 +78,12 @@ function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride)
         -- nil unit UnitClass returns nil and this filter would silently never apply, so a
         -- preview would have to re-implement it -- which is how these copies start.
         local classToken = classOverride
-        if not classToken then
+        -- ⚠ `and unit`: the preview hands unit=nil with class as DATA — and a
+        -- boss-NPC preview has no class either, so both are nil and this fell
+        -- through to UnitClass(nil), which 12.1 rejects with a Usage error (the
+        -- old "returns nil" behaviour this comment block relied on is gone).
+        -- No token = the filter silently doesn't apply, per the contract above.
+        if not classToken and unit then
             local _
             _, classToken = UnitClass(unit)
             -- Secret class (boss units): may not key the filter table. Treat as
