@@ -1219,13 +1219,31 @@ function DF:UpdateAbsorb(frame, testIndex)
         end
         
         local overflowBar = frame.absorbOverflowBar
+
+        -- ☠ THE OVERFLOW BAR HAD NO LEVEL OF ITS OWN. Created as a healthBar child and
+        -- never levelled, it inherited frame+3 -- the health bar's own level -- while its
+        -- sibling (the attached bar) sits at +11. That was invisible for as long as the
+        -- dispel wash lived above the whole band, and surfaced the moment the wash
+        -- dropped under it for "Show On Current Health Only": the attached absorb came
+        -- through and the overflow stripe stayed washed (field-caught, Krathe).
+        -- Two halves of ONE readout must share a level; anything else is a coin-flip the
+        -- next z-order change re-tosses.
         local overflowVisHelper = overflowBar.visibilityHelper
         local attachedVisHelper = customBar.visibilityHelper
-        
+
         -- Configure the overflow bar (always, so it's ready when needed)
         overflowBar:ClearAllPoints()
-        -- Overflow bar should be just above attached bar but still below dispel overlay (+6)
-        overflowBar:SetFrameLevel(healthLevel + 3)
+        -- ☠ DERIVED FROM THE ATTACHED BAR, one above it. The two are halves of one
+        -- readout, and their ORDER is the contract -- the absolute number is not.
+        -- A DF:ResolveAbsorbBarLevel call used to sit ten lines above this one and was
+        -- overwritten right here on every pass: dead code that read as a fix, and it
+        -- survived an in-game confirmation because what actually fixed that report was
+        -- the dispel wash dropping to +4, not this bar moving. Proved by
+        -- /df debug zorder -- attached +5, overflow +6, resolver claims +11 (2026-08-13).
+        -- ⚠ The comment here used to say "below dispel overlay (+6)". The overlay has
+        -- been at +16 since the 2026-08-07 z-order review, so that number was fiction
+        -- and it is what justified the hardcoded arithmetic.
+        overflowBar:SetFrameLevel(customBar:GetFrameLevel() + 1)
         
         -- Apply same texture/color as main absorb bar
         local texture = db.absorbBarTexture or DF.STOCK_BAR_TEXTURE

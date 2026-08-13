@@ -898,14 +898,19 @@ function DF:CreateFrameElementsExtended(frame, db)
     frame.dfPowerBar:SetMinMaxValues(0, 1)
     frame.dfPowerBar:SetValue(1)
     frame.dfPowerBar:SetAlpha(1)
-    -- ☠ SAME BAND AS ApplyResourceBarLayout (frame + resourceBarFrameLevel, default 20),
-    -- not healthBar+2 (frame+5). The layout normally supersedes this before the bar is
-    -- ever shown -- it is created hidden -- but the two values disagreed by fifteen
-    -- levels, which put the creation-time bar UNDER the dispel wash's full-frame band at
-    -- frame+17. Latent rather than live, and exactly the creation-vs-layout split that
-    -- hid the absorb overflow bar (see DF:ResolveAbsorbBarLevel). Any custom slider value
-    -- still arrives with the layout pass; this only fixes where it starts.
-    frame.dfPowerBar:SetFrameLevel(frame:GetFrameLevel() + 20)
+    -- ☠ SAME BAND AS ApplyResourceBarLayout, and READ FROM THE SAME KEY -- not
+    -- healthBar+2 (frame+5), and not a hardcoded 20 either. The layout normally
+    -- supersedes this before the bar is ever shown (it is created hidden), but the two
+    -- values disagreed by fifteen levels, which started the bar UNDER the dispel wash's
+    -- full-frame band at frame+17. Same creation-vs-layout split that left
+    -- DF:ResolveAbsorbBarLevel as dead code.
+    -- ⚠ A hardcoded 20 is only correct on a default profile: the key is user-facing
+    -- and a lowered value is normal (Krathe's own runs 10 -- /df debug zorder). Reading
+    -- the key is what keeps the two writers agreeing for everyone; a constant that
+    -- happens to match the default just hides the split again.
+    local powerDB = DF.GetFrameDB and DF:GetFrameDB(frame)
+    frame.dfPowerBar:SetFrameLevel(frame:GetFrameLevel()
+        + ((powerDB and powerDB.resourceBarFrameLevel) or 20))
     frame.dfPowerBar:Hide()
     
     local powerBg = frame.dfPowerBar:CreateTexture(nil, "BACKGROUND")
@@ -1288,14 +1293,19 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     frame.dfPowerBar:SetMinMaxValues(0, 1)
     frame.dfPowerBar:SetValue(1)
     frame.dfPowerBar:SetAlpha(1)
-    -- ☠ SAME BAND AS ApplyResourceBarLayout (frame + resourceBarFrameLevel, default 20),
-    -- not healthBar+2 (frame+5). The layout normally supersedes this before the bar is
-    -- ever shown -- it is created hidden -- but the two values disagreed by fifteen
-    -- levels, which put the creation-time bar UNDER the dispel wash's full-frame band at
-    -- frame+17. Latent rather than live, and exactly the creation-vs-layout split that
-    -- hid the absorb overflow bar (see DF:ResolveAbsorbBarLevel). Any custom slider value
-    -- still arrives with the layout pass; this only fixes where it starts.
-    frame.dfPowerBar:SetFrameLevel(frame:GetFrameLevel() + 20)
+    -- ☠ SAME BAND AS ApplyResourceBarLayout, and READ FROM THE SAME KEY -- not
+    -- healthBar+2 (frame+5), and not a hardcoded 20 either. The layout normally
+    -- supersedes this before the bar is ever shown (it is created hidden), but the two
+    -- values disagreed by fifteen levels, which started the bar UNDER the dispel wash's
+    -- full-frame band at frame+17. Same creation-vs-layout split that left
+    -- DF:ResolveAbsorbBarLevel as dead code.
+    -- ⚠ A hardcoded 20 is only correct on a default profile: the key is user-facing
+    -- and a lowered value is normal (Krathe's own runs 10 -- /df debug zorder). Reading
+    -- the key is what keeps the two writers agreeing for everyone; a constant that
+    -- happens to match the default just hides the split again.
+    local powerDB = DF.GetFrameDB and DF:GetFrameDB(frame)
+    frame.dfPowerBar:SetFrameLevel(frame:GetFrameLevel()
+        + ((powerDB and powerDB.resourceBarFrameLevel) or 20))
     frame.dfPowerBar:Hide()
     
     local powerBg = frame.dfPowerBar:CreateTexture(nil, "BACKGROUND")
