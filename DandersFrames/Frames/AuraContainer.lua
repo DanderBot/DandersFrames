@@ -2129,13 +2129,39 @@ local function snapPinOffsets(anchorFrame, anchor, px, py, scale)
     return px, py, false
 end
 
+-- ★ THE ONE PLACE A LAYOUT BOX IS PINNED TO ITS FRAME.
+-- Three surfaces render aura frames — the live container, the container's own test
+-- preview, and the Aura Designer's editor canvas — and all three must land the box on
+-- the same physical pixel. They used to pin it in three places; the canvas's copy was
+-- the shortest (anchor-to-anchor, user offsets, nothing else) and so it silently
+-- dropped BOTH corrections this returns:
+--   * the CENTER-growth fold (G.pinX/pinY): centred rows pin the box's centre-of-edge,
+--     not its corner, so a corner pin sits up to half an icon out.
+--   * the pixel-perfect nudge (snapPinOffsets), which is computed from the anchor
+--     frame's EFFECTIVE SCALE — so the error changed with the UI scale, and at some
+--     scales the unsnapped value happened to land on-grid and looked correct. Reported
+--     as "the AD preview does not match live frames... UI scale might be partly to
+--     blame" (2026-08-13); the reporter was reading a real symptom of this.
+-- ☠ Returns the pin rather than applying it: applyContainerLayout must wrap its own
+-- SetPoint in a pcall and stamp _ppDbg, so the CALLER still owns the write.
+local function resolveLayoutPin(L, anchorFrame, pp)
+    local G = resolveGrowthLayout(L)
+    local scale = tonumber(L.scale) or 1
+    local px = (L.offsetX or 0) + G.pinX
+    local py = (L.offsetY or 0) + G.pinY
+    local resolved = true
+    if pp then
+        px, py, resolved = snapPinOffsets(anchorFrame, G.anchor, px, py, scale)
+    end
+    return G, px, py, scale, resolved
+end
+
 local function applyContainerLayout(c, handle)
     local config = handle.config
     local L = config.layout or {}
-    local G = resolveGrowthLayout(L)
+    local G, px, py, scale, pinResolved = resolveLayoutPin(L, handle.frame, handle._pp)
     local sx = G.sx
     local spX = G.spX
-    local scale = tonumber(L.scale) or 1
     local wrap = tonumber(L.wrap) or 0
 
     -- Row cap: vertical-primary = one per row (column); wrap>0 = N per row; else unlimited.
@@ -2170,15 +2196,9 @@ local function applyContainerLayout(c, handle)
         end
     end
 
-    -- Pin offsets: user offset + growth fold, then (pp) nudged onto the physical
-    -- pixel grid — the container-era equivalent of the legacy per-icon
-    -- SnapPointToPixelGrid (see the PIXEL PERFECT block above).
-    local px = (L.offsetX or 0) + G.pinX
-    local py = (L.offsetY or 0) + G.pinY
-    local pinResolved = true
-    if handle._pp then
-        px, py, pinResolved = snapPinOffsets(handle.frame, G.anchor, px, py, scale)
-    end
+    -- Pin offsets (user offset + growth fold + pp nudge) come from resolveLayoutPin
+    -- above, hoisted to the top of this function so the preview surfaces can ask the
+    -- same question without a handle.
     -- /df debug ppdump ground truth: the last pin decision this handle rendered with.
     handle._ppDbg = { px = px, py = py, resolved = pinResolved, anchor = G.anchor, pin = G.pinPoint, scale = scale }
 
@@ -3928,21 +3948,26 @@ end
 -- Returns false on any doubt (no AnchorUtil, an enum that will not resolve, Apply
 -- throwing) and the caller falls back to layoutRow — a slightly-off preview beats no
 -- preview, and this must never be the thing that breaks test mode.
-function Handle:_flowPreviewLayout(slots, count)
+-- ★ THE ONE PLACE PREVIEW SLOTS ARE PLACED. Shared by the container's own test preview
+-- (Handle:_flowPreviewLayout, below) and by the Aura Designer's editor canvas, which
+-- reaches it through AuraContainer.FlowSlots. Both hand it plain CreateFrame("Frame")
+-- slots; neither computes a position of its own. A surface that wants a preview supplies
+-- FRAMES AND DATA — never a stride, a growth vector, a corner or a snap.
+-- ☠ If something live does is not reachable through here, that is a finding to report,
+-- not a gap to close by making a copy imitate live more closely. A second implementation
+-- off one config is exactly the divergence this exists to prevent.
+local function flowSlotsIntoBox(box, anchorFrame, slots, count, config, pp)
     local AU = AnchorUtil
     if not (AU and AU.CreateFlowLayout and AU.FlowDirection) then return false end
-    local box = self._ownPreviewBox
-    if not box then return false end
+    if not (box and anchorFrame) then return false end
 
-    local config = self.config
     local L = config.layout or {}
-    local G = resolveGrowthLayout(L)
-    local scale = tonumber(L.scale) or 1
+    local G, px, py, scale = resolveLayoutPin(L, anchorFrame, pp)
     local wrap = tonumber(L.wrap) or 0
 
     -- Strip reservation -> flow padding. Same exclusive branch as applyContainerLayout.
     local resv, topStrip = stripReservation(config)
-    if resv > 0 and self._pp then resv = ppSnapScaled(resv, scale) end
+    if resv > 0 and pp then resv = ppSnapScaled(resv, scale) end
     local padTop, padBottom = 0, 0
     if resv > 0 then
         if G.vName == "Up" then
@@ -3953,15 +3978,10 @@ function Handle:_flowPreviewLayout(slots, count)
     end
 
     -- Pin the box exactly where the container pins itself.
-    local px = (L.offsetX or 0) + G.pinX
-    local py = (L.offsetY or 0) + G.pinY
-    if self._pp then
-        px, py = snapPinOffsets(self.frame, G.anchor, px, py, scale)
-    end
     local okPin = pcall(function()
         box:SetScale(scale)
         box:ClearAllPoints()
-        box:SetPoint(G.pinPoint, self.frame, G.anchor, px, py)
+        box:SetPoint(G.pinPoint, anchorFrame, G.anchor, px, py)
     end)
     if not okPin then return false end
 
@@ -4004,6 +4024,10 @@ function Handle:_flowPreviewLayout(slots, count)
             elementHeight  = gl.elementHeight,
         } })
     end)
+end
+
+function Handle:_flowPreviewLayout(slots, count)
+    return flowSlotsIntoBox(self._ownPreviewBox, self.frame, slots, count, self.config, self._pp)
 end
 
 function Handle:_buildOwnPreview()
@@ -7347,6 +7371,52 @@ end
 
 function AuraContainer.StylePreviewSlot(slot, config)
     styleButton_regions(slot, config)
+end
+
+-- ★ PLACEMENT, PUBLISHED. The Aura Designer's editor canvas renders aura frames on a
+-- surface that has no unit and no handle, so it cannot Create a container — but it must
+-- still land every frame where the live container would. These two are the whole of the
+-- placement contract, and between them they are the ONLY way the canvas is allowed to
+-- position anything: it supplies frames and a layout table, and gets live's answer.
+--
+-- ☠ Defined here, BELOW resolveLayoutPin and flowSlotsIntoBox. A DF:* wrapper written
+-- above a `local function` it calls compiles as a nil GLOBAL lookup and dies at runtime
+-- with "attempt to call a nil value" — luac -p cannot see it, and it has bitten this
+-- file before. If either local moves, these move with it.
+
+-- Pin ONE box (a single-slot indicator, or a group's box) to `anchorFrame` exactly as
+-- applyContainerLayout pins a live container: growth-resolved pin point, the CENTER
+-- fold, the pixel-perfect nudge, and the layout scale. Returns false only if the write
+-- itself threw. `pp` is the host's pixelPerfect setting — callers pass what
+-- DF:GetFrameDB(host) says, so the preview obeys the same setting live obeys.
+function AuraContainer.PinLayoutBox(box, anchorFrame, layout, pp)
+    if not (box and anchorFrame and type(layout) == "table") then return false end
+    local pinPoint, anchor, px, py, scale = AuraContainer.ResolveLayoutPin(anchorFrame, layout, pp)
+    if not pinPoint then return false end
+    return (pcall(function()
+        box:SetScale(scale)
+        box:ClearAllPoints()
+        box:SetPoint(pinPoint, anchorFrame, anchor, px, py)
+    end))
+end
+
+-- The same answer WITHOUT applying it. Exists so a check can ask "where would live put
+-- this?" and compare it against where a frame actually sits — see /df debug adpin, which
+-- is what turns a reintroduced copy into a visible failure instead of a user report six
+-- weeks later. Read-only by construction: one resolver, two uses, no second maths.
+function AuraContainer.ResolveLayoutPin(anchorFrame, layout, pp)
+    if not (anchorFrame and type(layout) == "table") then return nil end
+    local G, px, py, scale = resolveLayoutPin(layout, anchorFrame, pp)
+    return G.pinPoint, G.anchor, px, py, scale
+end
+
+-- Flow `count` slot frames inside `box`, pinned to `anchorFrame`, exactly as the live
+-- container flows its buttons — same AnchorUtil flow, same growth, same wrap headroom,
+-- same strip reservation. Returns false when the flow is unavailable; the caller decides
+-- what to do, and MUST NOT substitute maths of its own.
+function AuraContainer.FlowSlots(box, anchorFrame, slots, count, config, pp)
+    if type(config) ~= "table" then return false end
+    return flowSlotsIntoBox(box, anchorFrame, slots, count, config, pp)
 end
 
 function AuraContainer.PaintPreviewSlot(slot, config, index, sharedDur)

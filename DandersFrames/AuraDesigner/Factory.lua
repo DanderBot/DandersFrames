@@ -3031,6 +3031,16 @@ function Factory:BuildGroupPreviewConfig(frame, group)
     return cfg, sig
 end
 
+-- The group's LIVE container layout (anchor, growth, wrap, size, spacing, offsets),
+-- published so the editor canvas can pin its block and flow its sample icons through
+-- AuraContainer.PinLayoutBox / AuraContainer.FlowSlots rather than deriving a corner and
+-- a stride of its own. Same builder the live filter/debuff group containers are built
+-- from — pass the same wrapDefault the live call site passes (8 filter, 4 debuff) or the
+-- preview wraps at a different column count than the frame does.
+function Factory:BuildGroupLayout(group, wrapDefault)
+    return buildFilterGroupLayout(group, wrapDefault)
+end
+
 -- Per-group sort (Wave 2): the group card's Sort Order dropdown + My Auras
 -- First / Reverse Order checkboxes, stored as OPTIONAL per-group fields
 -- (sortOrder / sortMineFirst / sortReverse — the othersOnly idiom: absent on
@@ -3378,28 +3388,75 @@ local function memberGrowthOffset(d, s)
     return 0, 0
 end
 
+-- ★ THE ONE PLACE A MEMBER'S GRID CELL IS COMPUTED. Live (arrangeGroupList, below) and
+-- the Aura Designer's editor canvas both ask this; neither keeps a copy. The maths lived
+-- in FOUR places at once — here and three times in the editor — and they had already
+-- drifted: one dropped `scale`, and a round of fixes converted exactly one of them while
+-- the commit implied the class was closed.
+--
+-- ☠ SCOPE: this answers for the members the container does NOT pack (bars, show-when-
+-- missing badges), which live places itself at their FULL member index. Packed members
+-- are placed by the group container's flow, and the canvas mirrors that through
+-- AuraContainer.FlowSlots — not by gridding them here. Feeding a packed member into this
+-- would reintroduce the hand-rolled flow this replaced.
+-- Stride comes from DF:ResolveAuraLayoutStep so there is one definition of it addon-wide.
+function Factory:MemberGridOffset(group, size, scale, memberIdx, totalCount)
+    local spacing = tonumber(group.spacing) or 2
+    local wrap = tonumber(group.iconsPerRow) or 8
+    if wrap <= 0 then wrap = 1 end
+    local primary, secondary = strsplit("_", group.growDirection or "RIGHT")
+    if not secondary then
+        secondary = (primary == "RIGHT" or primary == "LEFT") and "DOWN" or "RIGHT"
+    end
+    local gox, goy = tonumber(group.offsetX) or 0, tonumber(group.offsetY) or 0
+    local step = DF:ResolveAuraLayoutStep(tonumber(size) or 24, tonumber(size) or 24,
+        spacing, spacing, tonumber(scale) or 1, nil)
+    local total = math.max(1, tonumber(totalCount) or 1)
+    local activeIdx = math.max(0, (tonumber(memberIdx) or 1) - 1)
+    local col = activeIdx % wrap
+    local row = math.floor(activeIdx / wrap)
+    local sX, sY = memberGrowthOffset(secondary, step)
+    local oX, oY
+    if primary == "CENTER" then
+        local iconsInRow = wrap
+        local lastRow = math.floor((total - 1) / wrap)
+        if row == lastRow then
+            iconsInRow = ((total - 1) % wrap) + 1
+        end
+        local centerOff = -((iconsInRow - 1) * step) / 2
+        if sX ~= 0 then
+            oX = gox + (row * sX)
+            oY = goy + centerOff + (col * step)
+        else
+            oX = gox + centerOff + (col * step)
+            oY = goy + (row * sY)
+        end
+    else
+        local pX, pY = memberGrowthOffset(primary, step)
+        oX = gox + (col * pX) + (row * sX)
+        oY = goy + (col * pY) + (row * sY)
+    end
+    return (type(group.anchor) == "string" and group.anchor) or "TOPLEFT", oX, oY
+end
+
 -- Arrange one group array's members over ONE aura pool (no pass bump — the
 -- caller stamps the pass once for both pools). keyPrefix mirrors placedKey's:
 -- "" for the spec pool, OTHER_PREFIX for the other pool, so scratch keys line
 -- up with the instanceKeys syncPlacedPool feeds memberEffective. Returns true
--- when at least one member was arranged. The math is a verbatim mirror of the
--- editor preview (Options.lua RefreshPlacedIndicators group-position block)
--- so preview and live can never disagree.
+-- when at least one member was arranged.
+--
+-- ☠ This note used to read "the math is a verbatim mirror of the editor preview
+-- (Options.lua RefreshPlacedIndicators group-position block) so preview and live can
+-- never disagree." Every clause of that was false: it was not verbatim (the two called
+-- different stride helpers), the block had moved to another file, and there were three
+-- preview copies, not one. A comment cannot make two implementations agree — only one
+-- implementation can, which is why the cell now comes from Factory:MemberGridOffset.
 local function arrangeGroupList(groups, auras, adDB, keyPrefix)
     local any = false
     for _, group in ipairs(groups) do
         local members = type(group) == "table" and group.kind ~= "filter" and group.members
         if members and #members > 0 then
             local totalCount = #members
-            local gAnchor = (type(group.anchor) == "string" and group.anchor) or "TOPLEFT"
-            local spacing = tonumber(group.spacing) or 2
-            local wrap = tonumber(group.iconsPerRow) or 8
-            if wrap <= 0 then wrap = 1 end
-            local primary, secondary = strsplit("_", group.growDirection or "RIGHT")
-            if not secondary then
-                secondary = (primary == "RIGHT" or primary == "LEFT") and "DOWN" or "RIGHT"
-            end
-            local gox, goy = tonumber(group.offsetX) or 0, tonumber(group.offsetY) or 0
             for memberIdx, member in ipairs(members) do
                 -- Find the member's indicator record (size/scale feed the grid step).
                 local auraCfg = auras and auras[member.auraName]
@@ -3412,31 +3469,8 @@ local function arrangeGroupList(groups, auras, adDB, keyPrefix)
                 if indCfg then
                     local size = tonumber(indCfg.size) or (adDB.defaults and adDB.defaults.iconSize) or 24
                     local scale = tonumber(indCfg.scale) or (adDB.defaults and adDB.defaults.iconScale) or 1.0
-                    local step = (size * scale) + spacing
-                    local activeIdx = memberIdx - 1
-                    local col = activeIdx % wrap
-                    local row = math.floor(activeIdx / wrap)
-                    local sX, sY = memberGrowthOffset(secondary, step)
-                    local oX, oY
-                    if primary == "CENTER" then
-                        local iconsInRow = wrap
-                        local lastRow = math.floor((totalCount - 1) / wrap)
-                        if row == lastRow then
-                            iconsInRow = ((totalCount - 1) % wrap) + 1
-                        end
-                        local centerOff = -((iconsInRow - 1) * step) / 2
-                        if sX ~= 0 then
-                            oX = gox + (row * sX)
-                            oY = goy + centerOff + (col * step)
-                        else
-                            oX = gox + centerOff + (col * step)
-                            oY = goy + (row * sY)
-                        end
-                    else
-                        local pX, pY = memberGrowthOffset(primary, step)
-                        oX = gox + (col * pX) + (row * sX)
-                        oY = goy + (col * pY) + (row * sY)
-                    end
+                    local gAnchor, oX, oY =
+                        Factory:MemberGridOffset(group, size, scale, memberIdx, totalCount)
                     local key = keyPrefix .. member.auraName .. "#" .. tostring(member.indicatorID)
                     local e = mgScratch[key]
                     if not e or e.base ~= indCfg then
@@ -3932,7 +3966,8 @@ function Factory:SyncSound(frame)
     end
     reconcileSoundNow(frame)
 end
--- ☠ ONE predicate, two callers. The member-group container renders exactly the
+-- ☠ ONE predicate, three callers (the third is the editor canvas, through
+-- Factory:MemberRenderable below). The member-group container renders exactly the
 -- indicators this accepts, and syncPlacedPool skips exactly the ones it accepts. If
 -- these two ever disagree an icon renders TWICE (both paths claim it) or not at all
 -- (neither does), so they must not be two spellings of "the same" rule.
@@ -3940,6 +3975,15 @@ local function memberRenderable(ind)
     return ind ~= nil and ind.enabled ~= false
         and ind.type ~= "bar"          -- a bar is its own sized widget, not a flow icon
         and not ind.showWhenMissing    -- missing mode is a parked badge, never packed
+end
+
+-- Published for the editor canvas, which has to split a group's members exactly the way
+-- the renderer does — packed members flow inside the group's box, the rest take a grid
+-- cell. It kept its own spelling of this predicate (with a comment on each telling the
+-- reader they must stay identical, which is not a mechanism), so make it the same
+-- function. Three callers now, not "two" as the note above once said.
+function Factory:MemberRenderable(ind)
+    return memberRenderable(ind)
 end
 
 -- The set of member indicators a group container will draw, keyed exactly as
