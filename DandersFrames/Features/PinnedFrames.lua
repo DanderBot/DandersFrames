@@ -167,6 +167,41 @@ end
 -- 4 keeps the editor tab strip on one row and the active-header count sane.
 PinnedFrames.MAX_SETS = 4
 
+-- Visit every ACTIVE pinned unit frame — player-mode header children and
+-- boss-mode standalone frames — mirroring FindPinnedFrameForUnit's walk
+-- (Frames/Headers.lua) as a callback sweep. Added for #1046: the GUI's
+-- immediate factory-row drive iterated only party+raid frames, so a settings
+-- edit reached pinned frames "one aura event late" — which for a quiet unit
+-- means minutes late, and mid-fight not at all.
+function PinnedFrames:ForEachActiveFrame(callback)
+    if not self.initialized then return end
+    local CHILD_ATTR = DF.CHILD_ATTR
+    if self.headers and CHILD_ATTR then
+        for setIndex = 1, (self.MAX_SETS or 4) do
+            local header = self.headers[setIndex]
+            if header and header:IsShown() then
+                for i = 1, 40 do
+                    local child = header:GetAttribute(CHILD_ATTR[i])
+                    if child and child:IsVisible() and child.unit then
+                        callback(child)
+                    end
+                end
+            end
+        end
+    end
+    if self.bossFrames then
+        for setIndex = 1, (self.MAX_SETS or 4) do
+            local frames = self.bossFrames[setIndex]
+            if frames then
+                for i = 1, 8 do
+                    local f = frames[i]
+                    if f and f:IsShown() and f.unit then callback(f) end
+                end
+            end
+        end
+    end
+end
+
 
 -- Get the current actual mode (not cached)
 local function GetActualMode()
