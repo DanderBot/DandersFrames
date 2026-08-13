@@ -85,24 +85,15 @@ end
 
 -- Does this member take a slot in the group's PACKED flow?
 --
--- ☠ Must stay identical to Factory's memberRenderable. The group container draws
--- exactly these, and packs them — so the canvas has to number exactly these by their
--- packed position, or the preview shows a hole the game has already closed.
--- Everything else (a bar) is still placed by the full-member grid in arrangeGroupList
--- and keeps the full index, which is why bars do not move.
+-- ☠ THE FACTORY'S predicate, not a copy of it. This used to restate memberRenderable
+-- with a comment on each telling the reader they must stay identical — which is a wish,
+-- not a mechanism. The group container draws exactly the members this accepts and flows
+-- them; everything else (a bar, a show-when-missing badge) takes a grid cell at its full
+-- member index, which is why bars do not move when a neighbour is hidden.
 local function MemberPacksInFlow(ind)
-    return ind ~= nil and ind.enabled ~= false
-        and ind.type ~= "bar"
-        and not ind.showWhenMissing
-end
-
--- How many of a group's members the container will pack.
-local function PackedMemberCount(group, pool)
-    local n = 0
-    for _, m in ipairs(group.members or {}) do
-        if MemberPacksInFlow(GetIndicatorByID(m.auraName, m.indicatorID, pool)) then n = n + 1 end
-    end
-    return n
+    local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
+    if Factory and Factory.MemberRenderable then return Factory:MemberRenderable(ind) end
+    return false
 end
 
 -- Remove an indicator instance by its stable ID
@@ -1643,6 +1634,13 @@ local function ClearPlacedIndicators()
                 if rec.alertSlot then rec.alertSlot:Hide() end
             end
         end
+        -- The boxes the group flows lay out INSIDE. Their slots are hidden by the loop
+        -- above, but a box for a group that has since been deleted would otherwise stay
+        -- shown and empty — invisible on screen, yet reported by /df debug adpin, which
+        -- would make the check cry wolf. Park them with everything else.
+        if mock.dfADMemberGroupBoxes then
+            for _, box in pairs(mock.dfADMemberGroupBoxes) do box:Hide() end
+        end
         mock.dfAD = nil
     end
     S.placedCleared = true
@@ -1656,9 +1654,29 @@ P.ClearPlacedIndicators = ClearPlacedIndicators
 -- config the live factory builds (Factory:BuildPreviewConfig) — the
 -- preview IS the live rendering. Slots are pooled per instanceKey and
 -- recreated when the structural sig changes (regions are create-only).
+--
+-- ★ AND THE CANVAS DOES NOT PLACE THEM EITHER. Every position on this canvas comes from
+-- AuraContainer.PinLayoutBox / AuraContainer.FlowSlots — live's own placement, published
+-- for surfaces that have no unit and therefore cannot Create a container. This file
+-- computes no stride, no growth vector, no corner and no pixel snap of its own. If you
+-- are about to add arithmetic here because "the preview is slightly off", that is the
+-- bug, not the fix: the last three times, the copy was patched and it diverged again.
 -- ============================================================
 
-local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator, effectiveConfig, instanceKey)
+-- The pixelPerfect setting the canvas must obey — resolved through live's own
+-- DF:GetFrameDB, from the canvas host, so the preview reads the same key a unit frame
+-- reads rather than assuming a value. (A non-raid frame resolves to the party db, which
+-- is the mode the canvas depicts.)
+local function PreviewPixelPerfect(mockFrame)
+    local db = DF.GetFrameDB and DF:GetFrameDB(mockFrame)
+    return db and db.pixelPerfect and true or false
+end
+
+-- flowParent: when this indicator is a member the live group CONTAINER packs, the caller
+-- passes the group's flow box. The slot then parents to it and is deliberately left
+-- unpinned — AuraContainer.FlowSlots places it, exactly as the container's flow places
+-- the live button. Everything else pins itself through live's pin resolver.
+local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator, effectiveConfig, instanceKey, flowParent)
     local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
     local AC = DF.AuraContainer
     if not (Factory and Factory.BuildPreviewConfig and AC and AC.StylePreviewSlot) then return nil end
@@ -1716,17 +1734,34 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
     AC.StylePreviewSlot(slot, cfg)
 
     local lay = cfg.layout or {}
+    rec.layout = lay   -- what /df debug adpin re-asks live about; see DebugDumpCanvasPins
     if lay.sizeX then
         slot:SetSize(lay.sizeX, lay.sizeY or lay.sizeX)
     else
         local s = lay.size or 24
         slot:SetSize(s, s)
     end
-    slot:SetScale(lay.scale or 1)
-    slot:ClearAllPoints()
-    slot:SetPoint(lay.anchor or "TOPLEFT", mockFrame, lay.anchor or "TOPLEFT", lay.offsetX or 0, lay.offsetY or 0)
-    slot:SetFrameStrata(mockFrame:GetFrameStrata())
-    slot:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+    -- ☠ Scale + anchor + offsets + the pixel-perfect nudge, from LIVE's pin resolver.
+    -- This used to be SetScale + a bare anchor-to-anchor SetPoint, which dropped the pp
+    -- nudge entirely. That nudge is computed from the host's EFFECTIVE SCALE, so the
+    -- canvas drifted from the frame by an amount that changed with the UI scale — which
+    -- is exactly how it was reported ("AD preview does not match live frames... UI scale
+    -- might be partly to blame"). Fixing the number here would have been the third
+    -- version of this maths; asking live is the only thing that cannot drift again.
+    if flowParent then
+        -- Member of a group the live container PACKS. Its position is the group flow's to
+        -- give (AuraContainer.FlowSlots, run by the caller once the whole set exists), so
+        -- this must not also pin it: two writers for one position, with the loser looking
+        -- authoritative, is how the canvas drifted the last three times.
+        if slot:GetParent() ~= flowParent then slot:SetParent(flowParent) end
+        slot:SetFrameStrata(flowParent:GetFrameStrata())
+        slot:SetFrameLevel(flowParent:GetFrameLevel() + 1)
+    else
+        if slot:GetParent() ~= mockFrame then slot:SetParent(mockFrame) end
+        AC.PinLayoutBox(slot, mockFrame, lay, PreviewPixelPerfect(mockFrame))
+        slot:SetFrameStrata(mockFrame:GetFrameStrata())
+        slot:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+    end
     -- ★ ALPHA. The canvas set size, scale, anchor, strata and level but never alpha, so an
     -- indicator dropped to 40% rendered full-strength here while the live frame faded it
     -- correctly — the preview disagreeing with the thing it previews.
@@ -1917,6 +1952,8 @@ end
 -- caller's pool table (separate pools — the two id counters can collide);
 -- returns the slot for the placedIndicators list.
 local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, maxDefault, icons)
+    local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
+    local AC = DF.AuraContainer
     local slot = pool[group.id]
     if not slot then
         slot = CreateFrame("Frame", nil, mockFrame, "BackdropTemplate")
@@ -1936,6 +1973,16 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
     local spacing = tonumber(group.spacing) or 2
     local cols = min(maxIcons, wrap)
     local rows = floor((maxIcons - 1) / wrap) + 1
+    -- FOOTPRINT = scaffolding, and the only geometry this function still owns. It is the
+    -- block the group COULD fill (maxIcons cells), which live has no equivalent of — a
+    -- live container self-sizes to the auras actually present. The cell stride is live's:
+    -- a filter/debuff group's layout carries no scale (buildFilterGroupLayout sets none),
+    -- so the container runs at scale 1 and its stride is size + spacing.
+    -- ☠ A ☠-marked comment here used to claim this block "ignores icon SCALE entirely...
+    -- so any group at a scale other than 1.0 draws its placeholder at the wrong stride".
+    -- That was wrong on its own terms: iconScale is an AD DEFAULTS / per-indicator field,
+    -- and a group record has no scale at all. It described a divergence that could not
+    -- happen, and left the real ones (the pin, below) unnamed.
     slot:SetSize(max(cols * iconSize + (cols - 1) * spacing, 10),
                  max(rows * iconSize + (rows - 1) * spacing, 10))
     ApplyBackdrop(slot, {r = 0.91, g = 0.66, b = 0.25, a = 0.10},
@@ -1944,21 +1991,19 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
     slot.label:SetTextColor(0.91, 0.66, 0.25)
     slot.label:SetWidth(slot:GetWidth() - 4)
     slot.label:SetMaxLines(2)
-    -- Pin the block's grow-corner at the group's anchor point so it
-    -- extends in the grow direction (mirror the container's flow origin).
-    local p, s = strsplit("_", group.growDirection or "RIGHT_DOWN")
-    local vert, horiz = "TOP", "LEFT"
-    for _, d in ipairs({ p, s }) do
-        if d == "UP" then vert = "BOTTOM"
-        elseif d == "DOWN" then vert = "TOP"
-        elseif d == "LEFT" then horiz = "RIGHT"
-        elseif d == "RIGHT" then horiz = "LEFT"
-        elseif d == "CENTER" then horiz = "" end
+    -- ☠ PIN FROM LIVE. This used to re-derive a corner from the growth string ("grow
+    -- RIGHT_DOWN so pin my TOPLEFT") and SetPoint it at the group's anchor. That is a
+    -- second answer to a question applyContainerLayout already answers, and it differed
+    -- on both of the cases that matter: CENTER growth (live pins a centre-of-edge with a
+    -- half-icon fold; the derivation pinned a corner with none) and pixel-perfect (live
+    -- nudges the pin onto the physical grid; the derivation never did, so the block drifted
+    -- by an amount that changed with the UI scale). Live's pin, or nothing.
+    local pp = PreviewPixelPerfect(mockFrame)
+    local gLayout = Factory and Factory.BuildGroupLayout
+        and Factory:BuildGroupLayout(group, wrapDefault) or nil
+    if gLayout and AC and AC.PinLayoutBox then
+        AC.PinLayoutBox(slot, mockFrame, gLayout, pp)
     end
-    local selfPoint = (horiz == "") and vert or (vert .. horiz)
-    slot:ClearAllPoints()
-    slot:SetPoint(selfPoint, mockFrame, group.anchor or "TOPLEFT",
-        group.offsetX or 0, group.offsetY or 0)
     slot:SetFrameStrata(mockFrame:GetFrameStrata())
     slot:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
     -- Above the sample frames' text holders (slot+1 base + duration/stack
@@ -1982,8 +2027,6 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
     -- CENTER), so grow/wrap edits read directionally. Desaturation is the
     -- "example, not live" affordance; style-less groups render through the
     -- same pipeline with the default style (= today's live rendering).
-    local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
-    local AC = DF.AuraContainer
     local cfg, sig
     if icons and Factory and Factory.BuildGroupPreviewConfig and AC and AC.StylePreviewSlot then
         cfg, sig = Factory:BuildGroupPreviewConfig(mockFrame, group)
@@ -2017,41 +2060,48 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
         end
         cfg.testEntries = entries
     end
-    -- ☠ KNOWN DIVERGENCE, deliberately left: this placeholder ignores icon SCALE
-    -- entirely -- here in the stride, and above in the slot's own box size. The live
-    -- stride is DF:ResolveAuraLayoutStep(size, .., scale), so any group at a scale other
-    -- than 1.0 draws its placeholder at the wrong stride and the wrong box.
-    -- NOT fixed inline because there is no single right answer available here: the
-    -- function receives only `group`, and a group's MEMBERS can each carry their own
-    -- scale, so "the group's scale" has to be decided before it can be plumbed. Wiring
-    -- just this line while the box stayed unscaled would look like a fix and shift the
-    -- mismatch rather than remove it.
-    local step = iconSize + spacing
-    local xSign = (horiz == "RIGHT") and -1 or 1
-    local ySign = (vert == "TOP") and -1 or 1
+    -- ☠ THE SAMPLES ARE PLACED BY LIVE'S FLOW, NOT BY THIS FILE.
+    -- What was here: a stride, a pair of sign flips derived from the growth string, a
+    -- corner, and a hand-written CENTER branch — a fourth restatement of a layout the
+    -- container already performs. It drifted from live in the ways a restatement always
+    -- does (no pin fold, no pixel snap, its own idea of which corner fills first), and
+    -- every previous round of this bug was "correct the restatement".
+    -- Now: a box pinned exactly where the live container pins itself, and
+    -- AuraContainer.FlowSlots running the SAME AnchorUtil flow over the sample frames.
+    -- The samples are a child box rather than `slot` itself because `slot` is the
+    -- FOOTPRINT outline (scaffolding: the block the group could fill), while the flow
+    -- sizes its own box to the content — live has no footprint concept to borrow.
+    -- ☠ PARENTED TO `slot`, NOT to the canvas. ClearPlacedIndicators tears the canvas down
+    -- by hiding the placeholder slots; a box parented to mockFrame would survive that with
+    -- its sample icons still on screen, floating over a placeholder that is no longer
+    -- there. Parenting costs nothing here (FlowSlots still PINS it to mockFrame — anchoring
+    -- and parentage are independent, and slot inherits the canvas scale either way).
+    local flowBox = slot.flowBox
+    if not flowBox then
+        flowBox = CreateFrame("Frame", nil, slot)
+        slot.flowBox = flowBox
+    end
+    flowBox:SetFrameStrata(mockFrame:GetFrameStrata())
+    flowBox:SetFrameLevel(slot:GetFrameLevel() + 1)   -- over the outline backdrop
     for i = 1, count do
         local f = framePool[i]
         if not f then
-            f = CreateFrame("Frame", nil, slot)
+            f = CreateFrame("Frame", nil, flowBox)
             framePool[i] = f
         end
         AC.StylePreviewSlot(f, cfg)   -- sizes the frame from cfg.layout.size (= iconSize)
-        f:ClearAllPoints()
-        local col = (i - 1) % wrap
-        local row = floor((i - 1) / wrap)
-        if horiz == "" then
-            -- CENTER primary: rows centered on the block's vert edge
-            local lastRow = floor((count - 1) / wrap)
-            local iconsInRow = (row == lastRow) and (((count - 1) % wrap) + 1) or wrap
-            f:SetPoint(vert, slot, vert,
-                (col - (iconsInRow - 1) / 2) * step, ySign * row * step)
-        else
-            local corner = vert .. horiz
-            f:SetPoint(corner, slot, corner, xSign * col * step, ySign * row * step)
-        end
         AC.PaintPreviewSlot(f, cfg, i)
         if f.dfIcon then f.dfIcon:SetDesaturated(true) end -- example affordance
         f:Show()
+    end
+    if count > 0 and gLayout and AC.FlowSlots then
+        flowBox:Show()
+        -- style rides along so a group that ever grows a duration STRIP reserves the
+        -- same out-of-rect space live reserves (stripReservation reads config.style.bar).
+        AC.FlowSlots(flowBox, mockFrame, framePool, count,
+            { layout = gLayout, style = cfg and cfg.style or nil }, pp)
+    else
+        flowBox:Hide()
     end
     for i = count + 1, #framePool do
         local f = framePool[i]
@@ -2064,6 +2114,188 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
     slot:Show()
     return slot
 end
+
+-- ============================================================
+-- MEMBER-GROUP PLACEMENT (canvas side)
+-- Splits each group's members into the SAME two sets live splits them into, and hands
+-- each set to live's own placement:
+--   * members the container PACKS get no position from here at all. They are parented to
+--     the group's flow box and laid out by AuraContainer.FlowSlots — the same AnchorUtil
+--     flow the live group container runs — once the whole set has been rendered.
+--   * everything else (bars, show-when-missing badges) gets the grid cell live computes
+--     for it, from Factory:MemberGridOffset, at its FULL member index. That is why a bar
+--     does not move when a neighbour is hidden, on the canvas exactly as on the frame.
+-- ☠ What was here instead: the whole grid, hand-written, TWICE in this file (a third
+-- copy drew the group placeholders), each with its own stride, growth vector, wrap and
+-- CENTER branch. They had already drifted from live and from each other.
+-- ============================================================
+
+-- Returns positions ("<prefix>auraName#id" -> {anchor, offsetX, offsetY}) for the
+-- gridded members, flows (array of { group, box, keys }) for the packed ones, and
+-- parentOf (key -> flow box) so the render pass can hand each packed slot its box.
+local function ResolveMemberGroupPlacement(mockFrame, groups, spec, adDB, keyPrefix)
+    local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
+    local positions, flows, parentOf = {}, {}, {}
+    if not (Factory and Factory.MemberGridOffset) then return positions, flows, parentOf end
+    local pool = CurrentAuraPool(spec)
+    local boxes = mockFrame.dfADMemberGroupBoxes
+    if not boxes then boxes = {}; mockFrame.dfADMemberGroupBoxes = boxes end
+    for _, group in ipairs(groups) do
+        if group.members then
+            local total = #group.members
+            local keys
+            for memberIdx, member in ipairs(group.members) do
+                local key = keyPrefix .. member.auraName .. "#" .. member.indicatorID
+                local indCfg = GetIndicatorByID(member.auraName, member.indicatorID, pool)
+                if MemberPacksInFlow(indCfg) then
+                    keys = keys or {}
+                    keys[#keys + 1] = key
+                else
+                    local size = (indCfg and indCfg.size) or (adDB.defaults and adDB.defaults.iconSize) or 24
+                    local scale = (indCfg and indCfg.scale) or (adDB.defaults and adDB.defaults.iconScale) or 1.0
+                    local a, oX, oY = Factory:MemberGridOffset(group, size, scale, memberIdx, total)
+                    positions[key] = { anchor = a, offsetX = oX, offsetY = oY }
+                end
+            end
+            -- ☠ Keyed by POOL PREFIX + id, not id alone. The My Buffs and Other Buffs
+            -- stores run separate id counters, so "1" names a different group on each tab
+            -- — the filter-group placeholder pools already split for exactly this reason.
+            -- A shared key would hand one tab's box to the other tab's group.
+            local boxKey = keyPrefix .. tostring(group.id)
+            local box = boxes[boxKey]
+            if keys then
+                if not box then
+                    box = CreateFrame("Frame", nil, mockFrame)
+                    boxes[boxKey] = box
+                end
+                box.dfADGroup = group   -- what /df debug adpin re-derives the layout from
+                box:SetFrameStrata(mockFrame:GetFrameStrata())
+                box:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
+                box:Show()
+                flows[#flows + 1] = { group = group, box = box, keys = keys }
+                for _, k in ipairs(keys) do parentOf[k] = box end
+            elseif box then
+                box:Hide()
+            end
+        end
+    end
+    return positions, flows, parentOf
+end
+
+-- Run each group's packed set through live's flow. Called AFTER the render pass, because
+-- the flow needs the finished slots (their styled sizes are what it lays out).
+-- A member whose slot never rendered (hidden by the eye, unresolvable spell) is simply
+-- absent from the list — which is the packing live does, not a hole we close ourselves.
+local function ApplyMemberGroupFlows(mockFrame, flows)
+    local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
+    local AC = DF.AuraContainer
+    if not (flows and AC and AC.FlowSlots and Factory and Factory.BuildGroupLayout) then return end
+    local store = mockFrame.dfADPreviewSlots
+    if not store then return end
+    local pp = PreviewPixelPerfect(mockFrame)
+    for _, f in ipairs(flows) do
+        local slots, n = {}, 0
+        for _, key in ipairs(f.keys) do
+            local rec = store[key]
+            if rec and rec.slot and rec.slot:IsShown() then
+                n = n + 1
+                slots[n] = rec.slot
+            end
+        end
+        if n > 0 then
+            f.box:Show()
+            AC.FlowSlots(f.box, mockFrame, slots, n,
+                { layout = Factory:BuildGroupLayout(f.group) }, pp)
+        else
+            f.box:Hide()
+        end
+    end
+end
+
+-- ============================================================
+-- /df debug adpin — THE REGRESSION DETECTOR
+-- Asks live where every canvas slot should be (AuraContainer.ResolveLayoutPin, the same
+-- resolver that placed it) and compares that against where the slot actually sits. Two
+-- things it catches, both of which have shipped before:
+--   * a reintroduced copy — anything that positions a slot with maths of its own reports
+--     MISMATCH here on the first growth or pixel-perfect case that differs;
+--   * a slot pinned twice (its own pin plus a group flow), where the loser looks
+--     authoritative in the source and the winner is whichever ran last.
+-- ☠ This is a CHECK, not a fixer. If it prints a mismatch the answer is to delete the
+-- code that wrote the wrong position, never to add a correction on top.
+-- Exact equality on purpose: everything here comes from one resolver, so any difference
+-- at all means a second writer exists. Rounded only for display.
+-- ============================================================
+local function DebugDumpCanvasPins()
+    local AC = DF.AuraContainer
+    local mockFrame = S.framePreview and S.framePreview.mockFrame
+    if not (AC and AC.ResolveLayoutPin) then
+        print("|cffff5555AD pin check:|r AuraContainer.ResolveLayoutPin unavailable")
+        return
+    end
+    if not mockFrame then
+        print("|cffff5555AD pin check:|r the Aura Designer canvas is not built — open it first")
+        return
+    end
+    local pp = PreviewPixelPerfect(mockFrame)
+    local store = mockFrame.dfADPreviewSlots or {}
+    local checked, bad, flowed = 0, 0, 0
+    print(("|cff66ccffAD pin check|r  pixelPerfect=%s"):format(tostring(pp)))
+    for key, rec in pairs(store) do
+        local slot = rec and rec.slot
+        if slot and slot:IsShown() then
+            if slot:GetParent() ~= mockFrame then
+                -- Placed by its group's flow; the flow box is what gets pin-checked, and
+                -- the slot having a non-canvas parent is the evidence it was not pinned.
+                flowed = flowed + 1
+            else
+                checked = checked + 1
+                local lay = rec.layout
+                local point, relTo, relPoint, x, y = slot:GetPoint(1)
+                if not lay then
+                    print(("  |cffffcc00%s|r  no layout recorded — cannot check"):format(key))
+                else
+                    local wPoint, wAnchor, wx, wy = AC.ResolveLayoutPin(mockFrame, lay, pp)
+                    if point ~= wPoint or relPoint ~= wAnchor or relTo ~= mockFrame
+                       or x ~= wx or y ~= wy then
+                        bad = bad + 1
+                        print(("  |cffff5555MISMATCH|r %s\n    is   %s->%s (%.3f, %.3f)%s\n    live %s->%s (%.3f, %.3f)")
+                            :format(key, tostring(point), tostring(relPoint), x or 0, y or 0,
+                                (relTo ~= mockFrame) and "  [anchored off-canvas]" or "",
+                                tostring(wPoint), tostring(wAnchor), wx or 0, wy or 0))
+                    end
+                end
+            end
+        end
+    end
+    -- Group flow boxes: same question, asked of the box the flow lays out inside.
+    local boxes = mockFrame.dfADMemberGroupBoxes or {}
+    local Factory = DF.AuraDesigner and DF.AuraDesigner.Factory
+    for boxKey, box in pairs(boxes) do
+        if box:IsShown() and Factory and Factory.BuildGroupLayout then
+            -- The group is stamped on the box when it is placed, rather than looked up by
+            -- id: box keys carry the pool prefix (My Buffs and Other Buffs run separate id
+            -- counters), so an id lookup would match the wrong tab's group or nothing.
+            local group = box.dfADGroup
+            if group then
+                checked = checked + 1
+                local lay = Factory:BuildGroupLayout(group)
+                local point, relTo, relPoint, x, y = box:GetPoint(1)
+                local wPoint, wAnchor, wx, wy = AC.ResolveLayoutPin(mockFrame, lay, pp)
+                if point ~= wPoint or relPoint ~= wAnchor or relTo ~= mockFrame
+                   or x ~= wx or y ~= wy then
+                    bad = bad + 1
+                    print(("  |cffff5555MISMATCH|r group box %s\n    is   %s->%s (%.3f, %.3f)\n    live %s->%s (%.3f, %.3f)")
+                        :format(tostring(boxKey), tostring(point), tostring(relPoint), x or 0, y or 0,
+                            tostring(wPoint), tostring(wAnchor), wx or 0, wy or 0))
+                end
+            end
+        end
+    end
+    print(("  %d checked, %d flow-placed (not pinned), |c%s%d mismatched|r")
+        :format(checked, flowed, (bad > 0) and "ffff5555" or "ff55ff55", bad))
+end
+if DF.AuraDesigner then DF.AuraDesigner.DebugDumpCanvasPins = DebugDumpCanvasPins end
 
 local function RefreshPlacedIndicators()
     ClearPlacedIndicators()
@@ -2099,89 +2331,9 @@ local function RefreshPlacedIndicators()
     -- Other Buffs — read-only, never creates it); Debuffs has neither. Keys carry
     -- the B1 pool prefix so they line up with the instanceKeys built below.
     local keyPrefix = PoolKeyPrefix()
-    local groupPositions = {}  -- "<prefix>auraName#indicatorID" → { anchor, offsetX, offsetY }
     local specGroups = isDebuffs and EMPTY_POOL or CurrentLayoutGroups()
-    for _, group in ipairs(specGroups) do
-        if group.members then
-            local packedTotal = PackedMemberCount(group, CurrentAuraPool(spec))
-            local packedIdx = 0
-            for memberIdx, member in ipairs(group.members) do
-                local key = keyPrefix .. member.auraName .. "#" .. member.indicatorID
-                -- Need to find the indicator's size to compute step (members
-                -- live in the same pool as their group — the active pool)
-                local memberCfg = CurrentAuraPool(spec)[member.auraName]
-                    local indCfg = nil
-                    if memberCfg and memberCfg.indicators then
-                        for _, ind in ipairs(memberCfg.indicators) do
-                            if ind.id == member.indicatorID then
-                                indCfg = ind
-                                break
-                            end
-                        end
-                    end
-                    -- Packed members number by their PACKED position and count, so the
-                    -- canvas closes the same gaps live does; everything else keeps the
-                    -- full-member grid it is still positioned by. See MemberPacksInFlow.
-                    local packs = MemberPacksInFlow(indCfg)
-                    local activeIdx, totalCount   -- 0-based index, and the total it sits in
-                    if packs then
-                        activeIdx, totalCount = packedIdx, packedTotal
-                        packedIdx = packedIdx + 1
-                    else
-                        activeIdx, totalCount = memberIdx - 1, #group.members
-                    end
-                    local size = (indCfg and indCfg.size) or (adDB.defaults and adDB.defaults.iconSize) or 24
-                    local scale = (indCfg and indCfg.scale) or (adDB.defaults and adDB.defaults.iconScale) or 1.0
-                    -- ☠ Was this arithmetic inline. Identical answer today, but it
-                    -- was a SECOND copy of the stride rule -- the pair had already drifted
-                    -- apart once (the other copy ignored scale), so both now ask the live
-                    -- resolver instead of agreeing by coincidence.
-                    local step = DF:ResolveAuraLayoutStep(size, size,
-                        group.spacing or 2, group.spacing or 2, scale, nil)
-
-                    local growth = group.growDirection or "RIGHT"
-                    local primary, secondary = strsplit("_", growth)
-                    if not secondary then
-                        secondary = (primary == "RIGHT" or primary == "LEFT") and "DOWN" or "RIGHT"
-                    end
-                    local wrap = group.iconsPerRow or 8
-                    if wrap <= 0 then wrap = 1 end
-                    local col = activeIdx % wrap
-                    local row = floor(activeIdx / wrap)
-                    local function gOff(d, s)
-                        if d == "LEFT" then return -s, 0 elseif d == "RIGHT" then return s, 0
-                        elseif d == "UP" then return 0, s elseif d == "DOWN" then return 0, -s end
-                        return 0, 0
-                    end
-                    local sX, sY = gOff(secondary, step)
-                    local oX, oY
-                    if primary == "CENTER" then
-                        local iconsInRow = wrap
-                        local lastRow = floor((totalCount - 1) / wrap)
-                        if row == lastRow then
-                            iconsInRow = ((totalCount - 1) % wrap) + 1
-                        end
-                        local centerOff = -((iconsInRow - 1) * step) / 2
-                        if sX ~= 0 then
-                            oX = (group.offsetX or 0) + (row * sX)
-                            oY = (group.offsetY or 0) + centerOff + (col * step)
-                        else
-                            oX = (group.offsetX or 0) + centerOff + (col * step)
-                            oY = (group.offsetY or 0) + (row * sY)
-                        end
-                    else
-                        local pX, pY = gOff(primary, step)
-                        oX = (group.offsetX or 0) + (col * pX) + (row * sX)
-                        oY = (group.offsetY or 0) + (col * pY) + (row * sY)
-                    end
-                    groupPositions[key] = {
-                        anchor = group.anchor or "TOPLEFT",
-                        offsetX = oX,
-                        offsetY = oY,
-                    }
-                end
-            end
-        end
+    local groupPositions, groupFlows, groupFlowParent =
+        ResolveMemberGroupPlacement(mockFrame, specGroups, spec, adDB, keyPrefix)
 
     -- FILTER GROUP PLACEHOLDERS (My Buffs / Other Buffs): labeled outline
     -- blocks via the shared helper above. Pooled per group id — SEPARATE pool
@@ -2248,7 +2400,8 @@ local function RefreshPlacedIndicators()
                     }, { __index = indicator })
                 end
 
-                local slot = RenderPreviewIndicator(mockFrame, idSpec, auraName, info, indicator, effectiveConfig, instanceKey)
+                local slot = RenderPreviewIndicator(mockFrame, idSpec, auraName, info, indicator,
+                    effectiveConfig, instanceKey, groupFlowParent[instanceKey])
                 if slot then
                     WirePreviewIndicator(slot, capturedAura, capturedID, idSpec)
                     tinsert(placedIndicators, slot)
@@ -2257,6 +2410,9 @@ local function RefreshPlacedIndicators()
             end
         end
     end
+
+    -- Packed members are placed only now, by live's flow over the slots this pass built.
+    ApplyMemberGroupFlows(mockFrame, groupFlows)
 end
 P.RefreshPlacedIndicators = RefreshPlacedIndicators
 
@@ -2436,74 +2592,15 @@ S.RefreshPreviewLightweight = function()
     -- Build layout group position lookup (same as RefreshPlacedIndicators:
     -- active tab's group store over the active pool, pool-prefixed keys;
     -- Debuffs has no member groups so the pass reads empty there)
+    -- ☠ Was a THIRD hand-written copy of the member grid, and the one my last round of
+    -- fixes missed entirely: the sibling 300 lines above was routed through the shared
+    -- stride while this kept `(size * scale) + spacing` inline, and its own comment
+    -- pointed at ComputeGroupOffset — a symbol that exists nowhere. Same call as the
+    -- other pass now, so "the same split" is a fact rather than a claim.
     local keyPrefix = PoolKeyPrefix()
-    local groupPositions = {}
     local specGroups2 = isDebuffs and EMPTY_POOL or CurrentLayoutGroups()
-    for _, group in ipairs(specGroups2) do
-        if group.members then
-            local packedTotal = PackedMemberCount(group, CurrentAuraPool(spec))
-            local packedIdx = 0
-            for memberIdx, member in ipairs(group.members) do
-                local key = keyPrefix .. member.auraName .. "#" .. member.indicatorID
-                local memberCfg = CurrentAuraPool(spec)[member.auraName]
-                local indCfg = nil
-                if memberCfg and memberCfg.indicators then
-                    for _, ind in ipairs(memberCfg.indicators) do
-                        if ind.id == member.indicatorID then indCfg = ind; break end
-                    end
-                end
-                -- Packed position for members the container packs, full-member grid for
-                -- the rest — the same split as the other pass. See MemberPacksInFlow.
-                local activeIdx, totalCount
-                if MemberPacksInFlow(indCfg) then
-                    activeIdx, totalCount = packedIdx, packedTotal
-                    packedIdx = packedIdx + 1
-                else
-                    activeIdx, totalCount = memberIdx - 1, #group.members
-                end
-                local size = (indCfg and indCfg.size) or (adDB.defaults and adDB.defaults.iconSize) or 24
-                local scale = (indCfg and indCfg.scale) or (adDB.defaults and adDB.defaults.iconScale) or 1.0
-                local step = (size * scale) + (group.spacing or 2)
-                -- Grid-aware layout matching RefreshPlacedIndicators / ComputeGroupOffset
-                local growth = group.growDirection or "RIGHT"
-                local primary, secondary = strsplit("_", growth)
-                if not secondary then
-                    secondary = (primary == "RIGHT" or primary == "LEFT") and "DOWN" or "RIGHT"
-                end
-                local wrap = group.iconsPerRow or 8
-                if wrap <= 0 then wrap = 1 end
-                local col = activeIdx % wrap
-                local row = floor(activeIdx / wrap)
-                local function gOff(d, s)
-                    if d == "LEFT" then return -s, 0 elseif d == "RIGHT" then return s, 0
-                    elseif d == "UP" then return 0, s elseif d == "DOWN" then return 0, -s end
-                    return 0, 0
-                end
-                local sX, sY = gOff(secondary, step)
-                local oX, oY
-                if primary == "CENTER" then
-                    local iconsInRow = wrap
-                    local lastRow = floor((totalCount - 1) / wrap)
-                    if row == lastRow then
-                        iconsInRow = ((totalCount - 1) % wrap) + 1
-                    end
-                    local centerOff = -((iconsInRow - 1) * step) / 2
-                    if sX ~= 0 then
-                        oX = (group.offsetX or 0) + (row * sX)
-                        oY = (group.offsetY or 0) + centerOff + (col * step)
-                    else
-                        oX = (group.offsetX or 0) + centerOff + (col * step)
-                        oY = (group.offsetY or 0) + (row * sY)
-                    end
-                else
-                    local pX, pY = gOff(primary, step)
-                    oX = (group.offsetX or 0) + (col * pX) + (row * sX)
-                    oY = (group.offsetY or 0) + (col * pY) + (row * sY)
-                end
-                groupPositions[key] = { anchor = group.anchor or "TOPLEFT", offsetX = oX, offsetY = oY }
-            end
-        end
-    end
+    local groupPositions, groupFlows, groupFlowParent =
+        ResolveMemberGroupPlacement(mockFrame, specGroups2, spec, adDB, keyPrefix)
 
     -- Re-apply placed indicator instances using current settings
     -- (hidden indicators skipped — RenderPreviewIndicator would resurrect their
@@ -2532,7 +2629,8 @@ S.RefreshPreviewLightweight = function()
                         if ti.name == auraName then infoLW = ti; break end
                     end
                 end
-                local slot = RenderPreviewIndicator(mockFrame, idSpec, auraName, infoLW, indicator, effectiveConfig, instanceKey)
+                local slot = RenderPreviewIndicator(mockFrame, idSpec, auraName, infoLW, indicator,
+                    effectiveConfig, instanceKey, groupFlowParent[instanceKey])
                 if slot then
                     WirePreviewIndicator(slot, auraName, indicator.id, idSpec)
                 end
@@ -2540,6 +2638,9 @@ S.RefreshPreviewLightweight = function()
             end
         end
     end
+
+    -- Packed members are placed only now, by live's flow over the slots this pass built.
+    ApplyMemberGroupFlows(mockFrame, groupFlows)
 
     -- Also refresh frame-level preview effects (border, healthbar color, text colors, alpha)
     RefreshPreviewEffects()
