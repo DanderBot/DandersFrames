@@ -28,6 +28,7 @@ local addonName, DF = ...
 local pairs, ipairs = pairs, ipairs
 local UnitIsDeadOrGhost = UnitIsDeadOrGhost
 local UnitIsConnected = UnitIsConnected
+local UnitIsPlayer = UnitIsPlayer
 local UnitExists = UnitExists
 local UnitIsUnit = UnitIsUnit
 local UnitClass = UnitClass
@@ -148,7 +149,12 @@ local function IsDeadOrOffline(frame)
     if frame.dfIsDead ~= nil then return frame.dfIsDead end
     local unit = frame.unit
     if not unit or not UnitExists(unit) then return false end
-    return UnitIsDeadOrGhost(unit) or not UnitIsConnected(unit)
+    -- ☠ "Offline" is for PLAYERS only — an NPC has no connection, so the
+    -- unguarded term read pinned NPCs (Lura's crystals) as offline and painted
+    -- them grey instead of their health gradient (#989). Same gate as the
+    -- offline branches in Frames/Update.lua (the #1042 fix this completes).
+    return UnitIsDeadOrGhost(unit)
+        or (UnitIsPlayer(unit) and not UnitIsConnected(unit))
 end
 
 -- ★★ THE FADE MULTIPLIER FOR THE EIGHT STATUS ICONS, shared by live and the preview.
@@ -255,7 +261,8 @@ local function IsOffline(frame)
     if frame.dfIsOffline ~= nil then return frame.dfIsOffline end
     local unit = frame.unit
     if not unit or not UnitExists(unit) then return false end
-    return not UnitIsConnected(unit)
+    -- Players only — see IsDeadOrOffline above.
+    return UnitIsPlayer(unit) and not UnitIsConnected(unit)
 end
 
 -- Check if health threshold fade is enabled

@@ -1744,7 +1744,13 @@ local function buildPlacedStyle(indicator, isSquare, borderSpec, defs)
     else
         -- Spell icon. hideIcon = text-only: skip the icon texture, keep cooldown/border/
         -- stacks. Art inset matches the border thickness so the ring frames the art.
-        local inset = borderSpec and borderArtInset(borderSpec) or 1
+        -- ☠ Border OFF = inset 0, full-bleed art — the 4.x behaviour users expect
+        -- ("icon scales up with border off"). This was `or 1`, an accidental copy of
+        -- the container's generic 1px row default: with the default BorderSize of 1,
+        -- toggling Show Border changed the inset from 1 to 1 — i.e. nothing (#1035).
+        -- Every sibling path (square fill above, filter/debuff groups, missing badge)
+        -- already used 0.
+        local inset = borderSpec and borderArtInset(borderSpec) or 0
         style.icon = { show = not hideIcon, inset = inset }
     end
 

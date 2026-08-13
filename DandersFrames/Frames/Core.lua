@@ -188,8 +188,10 @@ local function SetMissingHealthBarValue(bar, unit, frame)
     if frame and frame.dfIsDead ~= nil then
         isDeadOrOffline = frame.dfIsDead
     else
+        -- Offline term gated to players — an NPC has no connection (#989).
         isDeadOrOffline = unit and UnitExists(unit)
-            and (UnitIsDeadOrGhost(unit) or not UnitIsConnected(unit))
+            and (UnitIsDeadOrGhost(unit)
+                or (UnitIsPlayer(unit) and not UnitIsConnected(unit)))
     end
     local useDeadColor = isDeadOrOffline and db.fadeDeadFrames and db.fadeDeadUseCustomColor
     
