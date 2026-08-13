@@ -4554,6 +4554,17 @@ end
 -- but it is the same latent bug and worth a look.)
 -- Fail-open on a refused or secret read, matching every other probe in this gate: any
 -- doubt SHOWS.
+-- ★ DELIBERATELY NOT PROBED: connection state and dead/ghost.
+-- A peer's gate additionally requires UnitIsConnected and not UnitIsDeadOrGhost before
+-- treating a unit as identity-sound. That is a DIFFERENT POLICY, not a gap we have: they
+-- hide whenever identity is doubtful; this gate hides only where the engine demonstrably
+-- drops the filter. Neither state does that — an offline or dead unit has no aura data
+-- streaming, so there is no pool to fail open, and UnitCanAssist stays true for both (you
+-- can still rez and still assist a corpse). Adding them would blank correctly-filtered
+-- rows for every dead raider in a wipe, which is a false positive of exactly the kind
+-- this gate exists to avoid.
+-- ⇒ If either is ever added, it needs a live repro showing unfiltered auras on an
+-- offline/dead unit first. Presence in someone else's implementation is not evidence.
 local function SelfIsUsingVehicle(unit)
     if not unit then return false end
     local okSame, same = pcall(UnitIsUnit, unit, "player")
@@ -4589,7 +4600,13 @@ function Handle:_applyIdentityGate()
         -- ⚠ Branch (2) keeps isOwn: you are always UnitIsVisible to yourself, so it is
         -- belt-and-braces there rather than a behaviour decision.
         if type(unit) == "string" and UnitExists(unit) then
-            local isOwn = (unit == "player")
+            -- ☠ UnitIsUnit, not a string compare: in raid layouts your own token is
+            -- `raidN`, so `unit == "player"` never matched your own frame there and the
+            -- exemption below silently did not apply to you. A no-op in practice today
+            -- (you are always visible and same-phase to yourself, so neither probe trips)
+            -- — but the compare is wrong, and the next probe added here may not be as kind.
+            local okOwn, ownSame = pcall(UnitIsUnit, unit, "player")
+            local isOwn = (okOwn and ownSame) and true or false
             -- (1) Cross-faction / non-assistable: includeSpellIDs / category tokens
             --     fail open. Signal: UnitCanAssist.
             if self._idGateVulnerable then
@@ -4618,6 +4635,21 @@ function Handle:_applyIdentityGate()
                 local okv, vis = pcall(UnitIsVisible, unit)
                 if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
                     hide = true
+                end
+                -- ☠ THE "/phase" HALF OF THE COMMENT ABOVE WAS NEVER IMPLEMENTED. A unit
+                -- in another phase, layer or Chromie time can be UnitIsVisible TRUE and
+                -- still be unattributable, so the source-relative filter fails open with
+                -- the visibility probe perfectly happy. UnitPhaseReason returns nil for
+                -- same-phase and a reason otherwise (Features/Range.lua reads it the same
+                -- way).
+                -- ⚠ Only reliable within ~250yd (Frames/StatusIcons.lua). Past that it
+                -- returns nil, which reads as "same phase", which SHOWS — the
+                -- unreliability fails in the safe direction, so no distance guard.
+                if not hide and UnitPhaseReason then
+                    local okp, reason = pcall(UnitPhaseReason, unit)
+                    if okp and not (issecretvalue and issecretvalue(reason)) and reason then
+                        hide = true
+                    end
                 end
             end
         end
@@ -6205,7 +6237,13 @@ function SlotHandle:_applyIdentityGate()
         -- applied to the un-latched case — a vehicle — where it left the player's own
         -- slots rendering an unfiltered pool.
         if type(unit) == "string" and UnitExists(unit) then
-            local isOwn = (unit == "player")
+            -- ☠ UnitIsUnit, not a string compare: in raid layouts your own token is
+            -- `raidN`, so `unit == "player"` never matched your own frame there and the
+            -- exemption below silently did not apply to you. A no-op in practice today
+            -- (you are always visible and same-phase to yourself, so neither probe trips)
+            -- — but the compare is wrong, and the next probe added here may not be as kind.
+            local okOwn, ownSame = pcall(UnitIsUnit, unit, "player")
+            local isOwn = (okOwn and ownSame) and true or false
             if self._idGateVulnerable then
                 local ok, can = pcall(UnitCanAssist, "player", unit)
                 if ok then
@@ -6220,6 +6258,21 @@ function SlotHandle:_applyIdentityGate()
                 local okv, vis = pcall(UnitIsVisible, unit)
                 if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
                     hide = true
+                end
+                -- ☠ THE "/phase" HALF OF THE COMMENT ABOVE WAS NEVER IMPLEMENTED. A unit
+                -- in another phase, layer or Chromie time can be UnitIsVisible TRUE and
+                -- still be unattributable, so the source-relative filter fails open with
+                -- the visibility probe perfectly happy. UnitPhaseReason returns nil for
+                -- same-phase and a reason otherwise (Features/Range.lua reads it the same
+                -- way).
+                -- ⚠ Only reliable within ~250yd (Frames/StatusIcons.lua). Past that it
+                -- returns nil, which reads as "same phase", which SHOWS — the
+                -- unreliability fails in the safe direction, so no distance guard.
+                if not hide and UnitPhaseReason then
+                    local okp, reason = pcall(UnitPhaseReason, unit)
+                    if okp and not (issecretvalue and issecretvalue(reason)) and reason then
+                        hide = true
+                    end
                 end
             end
         end
