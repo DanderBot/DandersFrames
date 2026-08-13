@@ -6901,9 +6901,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         if t then blend = t:GetBlendMode(); alpha = t:GetAlpha(); shown = t:IsShown() end
                     end)
                     pcall(function() if hostFrame and hostFrame.healthBar then pw = hostFrame.healthBar:GetWidth() end end)
+                    -- num() on everything — the secret-line-vanishes trap; see dumpTex.
+                    local barShown; pcall(function() barShown = bar:IsShown() end)
                     o:Line(("%s: shown=%s rect=%sx%s (hb w=%s) val=%s/%s-%s orient=%s rev=%s blend=%s texAlpha=%s texShown=%s lvl=%s"):format(
-                        tag, tostring(bar:IsShown()), num(w), num(h), num(pw), num(val), num(mn), num(mx),
-                        tostring(orient), tostring(rev), tostring(blend), num(alpha), tostring(shown), num(lvl)))
+                        tag, num(barShown), num(w), num(h), num(pw), num(val), num(mn), num(mx),
+                        num(orient), num(rev), num(blend), num(alpha), num(shown), num(lvl)))
                 end
                 local function dumpTex(tag, tex)
                     if not tex then return end
@@ -6913,8 +6915,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     pcall(function() alpha = tex:GetAlpha() end)
                     pcall(function() shown = tex:IsShown() end)
                     pcall(function() layer, sub = tex:GetDrawLayer() end)
+                    -- ☠ num() ON EVERY VALUE, not just the numeric ones. Getters on
+                    -- aspect-marked textures return SECRETS; tostring() of a secret makes
+                    -- the WHOLE formatted line secret, and the output layer silently drops
+                    -- it — which is how this dump's most important lines simply vanished
+                    -- from a paste (2026-08-13) while their neighbours printed. num()
+                    -- checks issecretvalue first and substitutes the literal "SECRET".
                     o:Line(("%s: shown=%s rect=%sx%s blend=%s alpha=%s layer=%s/%s"):format(
-                        tag, tostring(shown), num(w), num(h), tostring(blend), num(alpha), tostring(layer), tostring(sub)))
+                        tag, num(shown), num(w), num(h), num(blend), num(alpha), num(layer), num(sub)))
                 end
                 local function dumpFrame(frame, label)
                     if not frame then return end
@@ -6967,8 +6975,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
                             local okSlot = pcall(function()
                                 local wdg = btn.dfDispelWidget
                                 if wdg then
+                                    -- num() on the widget reads too — IsShown on a
+                                    -- descendant of a secret-shown button returns a
+                                    -- SECRET, and tostring'ing it vanished this line.
+                                    local wShown; pcall(function() wShown = wdg:IsShown() end)
                                     o:Line(("slot[%s] widget shown=%s lvl=%s tracks=%s"):format(
-                                        tostring(key), tostring(wdg:IsShown()), tostring(wdg:GetFrameLevel()),
+                                        tostring(key), num(wShown), num(wdg:GetFrameLevel()),
                                         tostring(wdg.gradientTracksHealth)))
                                     dumpBar("slot.gradient", wdg.gradient, frame)
                                     dumpTex("slot.nativeGradient", wdg.nativeGradient)
@@ -6982,8 +6994,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
                                         elseif frame.healthBar and relTo == frame.healthBar:GetStatusBarTexture() then relName = "healthFill"
                                         elseif relTo == wdg then relName = "widget"
                                         elseif relTo == nil then relName = "nil" end
-                                        o:Line(("slot[%s] carrier points=%s rel=%s"):format(
-                                            tostring(key), tostring(nPts), relName))
+                                        -- The DIM HOSTS are plain DF frames — their alpha
+                                        -- is the number that matters now, and it is
+                                        -- always readable. See the dim-host rule in
+                                        -- Features/Dispel.lua DispelSlotSecureInit.
+                                        local dimA = wdg.nativeGradientDim and wdg.nativeGradientDim:GetAlpha()
+                                        local ringA = btn.dfDispelRingDim and btn.dfDispelRingDim:GetAlpha()
+                                        local badgeA = btn.dfDispelBadgeDim and btn.dfDispelBadgeDim:GetAlpha()
+                                        o:Line(("slot[%s] carrier points=%s rel=%s gradDim=%s ringDim=%s badgeDim=%s"):format(
+                                            tostring(key), tostring(nPts), relName,
+                                            num(dimA), num(ringA), num(badgeA)))
                                     end
                                 end
                                 if btn.dfDispelRing then dumpTex("slot[" .. tostring(key) .. "].ring", btn.dfDispelRing) end

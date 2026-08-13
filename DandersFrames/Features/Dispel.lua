@@ -1615,30 +1615,36 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         --   The anchor itself is applied in StyleGameMainSlot (tainted, and legal), not
         -- here, because the frame's health texture can be swapped from the settings panel
         -- and a create-once anchor would go stale.
+        -- ☠☠ OPACITY LIVES ON A DF-OWNED DIM HOST, NEVER ON THE BOUND TEXTURE.
+        -- The bind below (AddDispelTypeTexture) adds SecretAspect.Alpha to the carrier —
+        -- from then on the alpha channel is the ENGINE'S, and the documented options
+        -- struct offers no substitute: no alpha field, and customDispelColorMap is
+        -- typed colorRGB (no alpha channel to bake into). Proven live 2026-08-13: a
+        -- COMPLETED style pass (styledVer latched, styleErr=nil, bind ok) that executed
+        -- carrier:SetAlpha(0.3) still rendered the wash at 1.0.
+        -- So the carrier is created on a plain DF frame whose FRAME alpha multiplies
+        -- into the render regardless of what the aspect does to the texture's own
+        -- property — the same alpha-host pattern the AD out-of-range fade runs live in
+        -- combat every day. The ring / badge / edge strips already sit on DF holders;
+        -- the gradient was the ONE carrier drawn hostless, which is why it was the one
+        -- element whose opacity could not be controlled.
+        -- Born with the user's value because birth is usually MID-COMBAT (Blizzard
+        -- creates these buttons lazily on the first dispellable debuff) and the style
+        -- pass is OOC-only. The dim host is ours, so later slider edits can write it
+        -- at any time. Show Gradient off = alpha 0 (the carrier exists regardless;
+        -- show/hide via alpha is the standing design).
+        if not w.nativeGradientDim then
+            w.nativeGradientDim = CreateFrame("Frame", nil, w)
+            w.nativeGradientDim:SetAllPoints(btn)
+            w.nativeGradientDim:SetFrameLevel(w:GetFrameLevel())
+        end
         if not w.nativeGradient then
-            w.nativeGradient = w:CreateTexture(nil, "ARTWORK", nil, 2)
+            w.nativeGradient = w.nativeGradientDim:CreateTexture(nil, "ARTWORK", nil, 2)
         end
         w.nativeGradient:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
         w.nativeGradient:SetAllPoints(btn)
-        -- ☠ BORN WITH THE USER'S COSMETICS, because birth is usually MID-COMBAT.
-        -- This init is the only hook that runs at slot creation (the header above says
-        -- why), and the style pass that applies opacity/blend is version-gated AND
-        -- out-of-combat only. A texture defaults to alpha 1 and BLEND — so every slot
-        -- whose first dispellable debuff landed in combat rendered at FULL brightness,
-        -- ignoring the Gradient Opacity slider until a pass after regen, by which time
-        -- the debuff was gone. That is the live lane's entire experience of the
-        -- feature: dispellable debuffs arrive in combat.
-        -- Field-proof it was the LANE and not the data: same profile, test mode obeyed
-        -- the slider (its legacy widget repaints per update), live sat at 100%
-        -- (Krathe, 2026-08-13; matches Jaidy's report). The earlier "both lanes read
-        -- the same resolver, so the difference is the data" claim was falsified by
-        -- exactly that observation.
-        -- Expressions mirror StyleGameMainSlot verbatim — the gradient carrier exists
-        -- even when Show Gradient is off (show/hide is a live tunable via alpha 0), so
-        -- the show term must ride along. Later slider edits still land through the
-        -- style pass; this covers the window it cannot reach.
         w.nativeGradient:SetBlendMode(db.dispelGradientBlendMode or "ADD")
-        w.nativeGradient:SetAlpha(db.dispelShowGradient ~= false and ResolveGradientAlpha(db) or 0)
+        w.nativeGradientDim:SetAlpha(db.dispelShowGradient ~= false and ResolveGradientAlpha(db) or 0)
         carriers[#carriers + 1] = { tex = w.nativeGradient }
         -- Name the gradient carrier explicitly. StyleGameMainSlot must dress THIS one;
         -- addressing it as "the bound carrier" only worked while a slot held exactly one,
@@ -1655,14 +1661,21 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
             local holder = CreateFrame("Frame", nil, btn)
             holder:SetAllPoints(btn)
             holder:SetFrameLevel(edgeLvl)   -- level with the widget; see edgeLvl above
-            local tex = holder:CreateTexture(nil, "ARTWORK", nil, 2)
+            -- ☠ DIM INSIDE, PULSE OUTSIDE. The holder is ApplySlotPulse's target and the
+            -- pulse's stop handler resets its alpha to 1 — opacity on the holder itself
+            -- would be clobbered by every animate toggle. A dim frame between them keeps
+            -- the two multiplicative: holder (pulse) × dim (opacity) × texture, exactly
+            -- the layering the gradient gets from w (pulse) × nativeGradientDim.
+            local dim = CreateFrame("Frame", nil, holder)
+            dim:SetAllPoints(btn)
+            dim:SetFrameLevel(edgeLvl)
+            dim:SetAlpha(ResolveGradientAlpha(db))   -- born with the user's value (mid-combat creation)
+            local tex = dim:CreateTexture(nil, "ARTWORK", nil, 2)
             tex:SetTexture(EDGE_GRADIENT_TEXTURES[edge])
             tex:SetAllPoints(btn)   -- anchored for the bind; StyleGameEdgeSlot positions the strip
-            -- Born with the user's blend + opacity (mirror StyleGameEdgeSlot) — see the
-            -- gradient carrier above for why: creation is usually mid-combat and the
-            -- style pass cannot reach it until regen.
             tex:SetBlendMode(db.dispelGradientBlendMode or "ADD")
-            tex:SetAlpha(ResolveGradientAlpha(db))
+            btn.dfDispelEdgeDim = btn.dfDispelEdgeDim or {}
+            btn.dfDispelEdgeDim[edge] = dim
             btn.dfDispelEdgeHolder[edge] = holder
             btn.dfDispelEdgeTex[edge] = tex
             carriers[#carriers + 1] = { tex = tex }
@@ -1674,12 +1687,15 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         local holder = CreateFrame("Frame", nil, btn)
         holder:SetAllPoints(btn)
         holder:SetFrameLevel(hbLvl + 15)   -- above the strips; see EnsureSlotWidget
-        local ring = holder:CreateTexture(nil, "ARTWORK")
+        -- Dim inside, pulse outside — the edge-strip layering note above.
+        local ringDim = CreateFrame("Frame", nil, holder)
+        ringDim:SetAllPoints(btn)
+        ringDim:SetFrameLevel(hbLvl + 15)
+        ringDim:SetAlpha(db.dispelBorderAlpha or 0.8)   -- born with the user's value
+        local ring = ringDim:CreateTexture(nil, "ARTWORK")
         ring:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_SquareBorder")
         ring:SetAllPoints(btn)   -- anchored for the bind; StyleGameBorderSlot crops/insets
-        -- Born with the user's Border Opacity (mirror StyleGameBorderSlot) — the
-        -- mid-combat-creation reasoning on the gradient carrier above.
-        ring:SetAlpha(db.dispelBorderAlpha or 0.8)
+        btn.dfDispelRingDim = ringDim
         btn.dfDispelRing = ring
         btn.dfDispelRingHolder = holder
         carriers[#carriers + 1] = { tex = ring }
@@ -1703,11 +1719,14 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         holder:SetAllPoints(btn)
         holder:SetFrameLevel(((frame.contentOverlay and frame.contentOverlay:GetFrameLevel())
             or (frame:GetFrameLevel() + 25)) + 1)
-        local badge = holder:CreateTexture(nil, "OVERLAY")
+        -- Dim inside, pulse outside — the edge-strip layering note above.
+        local badgeDim = CreateFrame("Frame", nil, holder)
+        badgeDim:SetAllPoints(btn)
+        badgeDim:SetFrameLevel(holder:GetFrameLevel())
+        badgeDim:SetAlpha(db.dispelIconAlpha or 1)   -- born with the user's value
+        local badge = badgeDim:CreateTexture(nil, "OVERLAY")
         badge:SetAllPoints(btn)   -- anchored for the bind; StyleGameBadge sizes/places it
-        -- Born with the user's Symbol Opacity (mirror StyleGameBadge) — the
-        -- mid-combat-creation reasoning on the gradient carrier above.
-        badge:SetAlpha(db.dispelIconAlpha or 1)
+        btn.dfDispelBadgeDim = badgeDim
         btn.dfDispelBadge = badge
         btn.dfDispelBadgeHolder = holder
         carriers[#carriers + 1] = { tex = badge, opts = BadgeCarrierOptions() }
@@ -1773,8 +1792,19 @@ local function StyleGameMainSlot(btn, frame, db)
                 carrier:SetAllPoints(w.gradient)
             end
             carrier:SetBlendMode(db.dispelGradientBlendMode or "ADD")
-            -- Intensity rides alpha here; RGB is Blizzard's after the bind.
-            carrier:SetAlpha(showGradient and ResolveGradientAlpha(db) or 0)
+            -- ☠ OPACITY ON THE DIM HOST, NOT THE CARRIER. The bind added
+            -- SecretAspect.Alpha to this texture, and a completed, error-free pass that
+            -- wrote carrier:SetAlpha(0.3) still rendered at 1.0 (field-proven
+            -- 2026-08-13) — the alpha channel is the engine's once bound. The dim host
+            -- is a plain DF frame, so this write is ours at any time, combat included.
+            if w.nativeGradientDim then
+                w.nativeGradientDim:SetAlpha(showGradient and ResolveGradientAlpha(db) or 0)
+            end
+            -- Normalise the carrier's own alpha where the write still lands (older
+            -- builds left 0.3 here; a client where region writes work would otherwise
+            -- double-dim against the host). pcall'd: a refused write must not skip the
+            -- darken/pulse below.
+            pcall(carrier.SetAlpha, carrier, 1)
         end
     end
 
@@ -1820,7 +1850,9 @@ local function StyleGameBadge(btn, frame, db)
     badge:ClearAllPoints()
     badge:SetPoint(pos, btn.dfDispelBadgeHolder, pos, db.dispelIconOffsetX or 0, db.dispelIconOffsetY or 0)
     badge:SetSize(size, size)
-    badge:SetAlpha(db.dispelIconAlpha or 1)
+    -- Opacity on the dim host; bound texture normalised (dim-host rule, StyleGameMainSlot).
+    if btn.dfDispelBadgeDim then btn.dfDispelBadgeDim:SetAlpha(db.dispelIconAlpha or 1) end
+    pcall(badge.SetAlpha, badge, 1)
     ApplySlotPulse(btn.dfDispelBadgeHolder, db.dispelAnimate)
 end
 
@@ -1840,7 +1872,9 @@ local function StyleGameBorderSlot(btn, frame, db)
     -- SetAuraBorder validation. The frame rect is OURS (readable); style re-runs on
     -- layout-version bumps, so a resize catches up on the next dispel pass.
     ApplyDispelRingGeometry(ring, btn, db, frame:GetWidth(), frame:GetHeight())
-    ring:SetAlpha(db.dispelBorderAlpha or 0.8)
+    -- Opacity on the dim host; bound texture normalised (dim-host rule, StyleGameMainSlot).
+    if btn.dfDispelRingDim then btn.dfDispelRingDim:SetAlpha(db.dispelBorderAlpha or 0.8) end
+    pcall(ring.SetAlpha, ring, 1)
     ring:SetBlendMode("BLEND")
     ApplySlotPulse(btn.dfDispelRingHolder, db.dispelAnimate)
 end
@@ -1882,7 +1916,12 @@ local function StyleGameEdgeSlot(btn, frame, db, edge)
         tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -pad, pad)
     end
     tex:SetBlendMode(db.dispelGradientBlendMode or "ADD")
-    tex:SetAlpha(ResolveGradientAlpha(db))
+    -- Opacity on the dim host; the bound texture normalised to 1 (dim-host rule,
+    -- StyleGameMainSlot). ☠ tex:SetAlpha here LOOKED like it worked for the strip
+    -- styles — that was the pre-bind default surviving, not the write landing.
+    local dim = btn.dfDispelEdgeDim and btn.dfDispelEdgeDim[edge]
+    if dim then dim:SetAlpha(ResolveGradientAlpha(db)) end
+    pcall(tex.SetAlpha, tex, 1)
     ApplySlotPulse(btn.dfDispelEdgeHolder and btn.dfDispelEdgeHolder[edge], db.dispelAnimate)
 end
 
@@ -1951,10 +1990,16 @@ local function ResetSlotArt(btn)
     btn._dfDispelGradientCarrier = nil
     btn.dfDispelEdgeTex = nil
     btn.dfDispelEdgeHolder = nil
+    -- Dim hosts go with their holders (☠ check EVERY sibling on a reset like this —
+    -- a survivor would be re-alpha'd by the stylers while its texture hangs off the
+    -- abandoned generation).
+    btn.dfDispelEdgeDim = nil
     btn.dfDispelRing = nil
     btn.dfDispelRingHolder = nil
+    btn.dfDispelRingDim = nil
     btn.dfDispelBadge = nil
     btn.dfDispelBadgeHolder = nil
+    btn.dfDispelBadgeDim = nil
 end
 
 -- Style every live slot button per the plan. Returns false while no buttons exist
