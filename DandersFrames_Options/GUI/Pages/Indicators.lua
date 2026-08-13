@@ -1816,18 +1816,25 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- the stack text was a hardcoded 14pt in Features/Auras.lua with no keys at all,
         -- which a user hit when 12.1 pushed some counts to three digits (report,
         -- 2026-08-13: "I can only change the duration text for it").
-        -- ⚠ NO colour control here, unlike the Buffs page. The render deliberately keeps
-        -- `defensiveIconStackColor` absent so the colour stays untouched exactly as the
-        -- old hardcoded table left it; seeding a default to feed a picker would restyle
-        -- every existing profile. Adding it is a follow-up that needs a decision on what
-        -- the current native colour actually is, not a guess.
+        -- ☠ FULL CONTROLS, INCLUDING COLOUR, WITH NO DEFAULT COLOUR KEY. Those are not in
+        -- tension: CreateColorPicker seeds {1,1,1,1} inside its own OnClick when the key
+        -- is absent, and UpdateSwatch skips a nil key entirely — so the control works and
+        -- writes NOTHING until a user actually picks a colour. Until then BuildSpec reads
+        -- nil and TextStyle leaves the colour alone, exactly as the old hardcoded table
+        -- did by omission.
+        -- ⚠ That is why `defensiveIconStackColor` has no Config default and must not gain
+        -- one. A seeded default would restyle every existing profile the moment they
+        -- update, and nobody has established what the untouched native colour actually is
+        -- — the picker's white is its own fallback, not a measurement.
         local defStackGroup = GUI:CreateSettingsGroup(self.child, 280)
         defStackGroup.hideOn = function(d) return not DF:FactoryOwnsDefensiveRow(d) end
         defStackGroup:AddWidget(GUI:CreateHeader(self.child, L["Stack Count"]), 40)
         GUI:CreateTextControls(defStackGroup, db, "defensiveIconStack", {
-            parent   = self.child,
-            onChange = function() if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end end,
-            onDrag   = function() DF:LightweightUpdateDefensiveIcons() end,
+            parent     = self.child,
+            include    = { color = true },
+            colorLabel = L["Stack Text Color"],
+            onChange   = function() if DF.UpdateAllDefensiveBars then DF:UpdateAllDefensiveBars() end end,
+            onDrag     = function() DF:LightweightUpdateDefensiveIcons() end,
         })
         -- Grey with the feature, same as the Duration group above.
         defStackGroup.disableChildrenOn = HideDefensiveIconOptions
