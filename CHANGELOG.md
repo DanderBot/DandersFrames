@@ -1,6 +1,18 @@
 # DandersFrames Changelog
 
-## [Unreleased]
+## [5.1.3]
+
+### New Features
+
+* (Debuff Bar) New "Non-Player Debuffs" category — show only debuffs applied by enemies and the environment, dropping player-cast clutter such as Sated or Forbearance. (by Krathe)
+* (Frames) New frame level sliders for the aggro, hover, and selection highlights, the dispel display, and the heal prediction bar, so they can be reordered against other frame elements. (by Krathe)
+
+### Bug Fixes
+
+* (Aura Designer) Fix placed indicators sometimes getting stuck at their out-of-range transparency until a reload. (by Krathe)
+* (Frames) Fix missing-buff icons coming back dim after the unit was out of range. (by Krathe)
+* (Debuff Bar) Fix the boss, role, and priority categories showing miscategorised debuffs on group members in another phase or instance. (by Krathe)
+* (Buffs & Debuffs) Filter checkbox tooltips now show their explanations instead of repeating the label. (by Krathe)
 
 ## [5.1.2]
 
