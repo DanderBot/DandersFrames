@@ -295,7 +295,11 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                             local muted = indRec.mutedSpellIDs
                             return not (muted and muted[id])
                         end,
-                        function(_, checked)
+                        -- ☠ ONE argument. CreateCheckbox calls `customSet(val)`, not
+                        -- `customSet(self, val)` — this was written `function(_, checked)`,
+                        -- so `checked` was always nil, every click fell to the else branch,
+                        -- and the box could be unticked but never re-ticked.
+                        function(checked)
                             if checked then
                                 local muted = indRec.mutedSpellIDs
                                 if muted then
