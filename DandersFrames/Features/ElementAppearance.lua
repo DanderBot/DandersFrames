@@ -1330,7 +1330,9 @@ local AD_STORE_KEYS = { "healthbar", "background", "border", "placed",
 -- ⚠ The latch is per HANDLE, so it clears naturally when the slot is rebuilt or re-acquired.
 -- If a build makes the restriction descend permanently, the visible symptom is AD indicators
 -- that no longer fade out of range — not an error storm, and not a dead range pass.
-function DF:ForEachAuraDesignerAlphaHost(frame, fn)
+-- `retryDenied` re-arms the refusal latch for ONE pass. See the note on the latch below
+-- and the range-edge call in UpdateAuraDesignerAppearance.
+function DF:ForEachAuraDesignerAlphaHost(frame, fn, retryDenied)
     local store = frame and frame.dfADFactory
     if not (store and fn) then return end
     for _, storeKey in ipairs(AD_STORE_KEYS) do
@@ -1346,8 +1348,21 @@ function DF:ForEachAuraDesignerAlphaHost(frame, fn)
                 -- later. Keying the skip to DF.auraLayoutVersion means any settings change
                 -- or rebuild re-arms it instead of leaving that indicator dark for the
                 -- session — and it still costs one failed call per version, not per tick.
+                -- ☠ AND THE LAYOUT VERSION IS NOT ENOUGH EITHER. A refusal is usually
+                -- TRANSIENT, but the layout version only moves on a settings change or a
+                -- rebuild — so a host that was faded out of range and then refused one
+                -- write stayed faded until the user happened to change a setting. Krathe
+                -- hit this repeatedly: "I can let the buff drop, put it back up and it's
+                -- still faded", and changing any AD setting cleared it instantly, which is
+                -- what proved the refusal transient rather than the host unwritable
+                -- (2026-08-13).
+                -- ⇒ `retryDenied` re-arms for one pass on a RANGE EDGE, which is exactly
+                -- when a stale alpha becomes visible and exactly when the value we want to
+                -- write has changed. Cost stays bounded: one failed call per transition,
+                -- not per tick — the thing the latch was protecting.
                 local ver = DF.auraLayoutVersion or 0
-                local denied = h and h._dfAlphaHostDeniedVer == ver
+                local denied = h and h._dfAlphaHostDeniedVer == ver and not retryDenied
+                if retryDenied and h then h._dfAlphaHostDeniedVer = nil end
                 local f = (h and not denied and h.GetAlphaHost) and h:GetAlphaHost() or nil
                 if f then
                     local ok, err = pcall(fn, f, h._dfADBaseAlpha or 1.0)
@@ -1403,13 +1418,28 @@ function DF:UpdateAuraDesignerAppearance(frame)
     local oorOn = db.oorEnabled
     local oorAlpha = db.oorAuraDesignerAlpha or 0.2
 
+    -- ★ RANGE EDGE ⇒ retry any host whose write was refused. A refusal parks the host at
+    -- whatever alpha it last took, and out of range that is the FADED value — so a single
+    -- transient refusal left the indicator dark until a settings change happened to bump
+    -- the layout version. The edge is the right trigger twice over: it is when the stale
+    -- alpha becomes wrong, and it is when the value we want to write has changed.
+    -- ⚠ Only stamped for a PLAIN boolean. GetInRange passes a secret through for classes
+    -- with no friendly spells, and comparing those is not ours to do — a secret range just
+    -- keeps the existing latch behaviour rather than forcing a retry every pass.
+    local rangeEdge = false
+    if not (issecretvalue and issecretvalue(inRange)) then
+        local now = inRange and true or false
+        rangeEdge = (frame._dfADLastInRange ~= nil) and (frame._dfADLastInRange ~= now)
+        frame._dfADLastInRange = now
+    end
+
     DF:ForEachAuraDesignerAlphaHost(frame, function(f, base)
         if oorOn then
             ApplyOORAlpha(f, inRange, base, oorAlpha)
         else
             f:SetAlpha(base)
         end
-    end)
+    end, rangeEdge)
 
     -- ★ SLOT-BACKED INDICATORS FADE HERE, not in the walk above. Their per-button alpha
     -- host lives inside the aura button and is forbidden to tainted code, so every write
