@@ -4536,6 +4536,36 @@ function Handle:_noteGateRecovery(can)
     end
 end
 
+-- ★ THE BOARDING WINDOW. `UnitCanAssist` does not flip the instant you take control of
+-- an NPC -- it flips once the seated state lands, and the gap is a visible flash of
+-- unfiltered icons on your own frame (Krathe, on 851917eb, which fixed the steady state
+-- and left this).
+--
+-- `UnitUsingVehicle` is true through the BOARDING and EXITING transitions as well as the
+-- seated state, so it closes that gap. This is a better SIGNAL, not another event to
+-- catch -- the same correction as measuring a level from the frame rather than from
+-- whatever it happens to be parented to.
+--
+-- ⚠ Self only, deliberately. Another player in a vehicle is still assistable and their
+-- pool is still filtered; it is the OCCUPANT whose own identity data goes away.
+-- ☠ `UnitIsUnit`, not `unit == "player"` -- in raid frames your own token is `raidN`, so
+-- a string compare misses your own frame entirely. (The existing `isOwn` below still uses
+-- the string compare; it only feeds branch (2), where the test is belt-and-braces,
+-- but it is the same latent bug and worth a look.)
+-- Fail-open on a refused or secret read, matching every other probe in this gate: any
+-- doubt SHOWS.
+local function SelfIsUsingVehicle(unit)
+    if not unit then return false end
+    local okSame, same = pcall(UnitIsUnit, unit, "player")
+    if not okSame or not same then return false end
+    local probe = UnitUsingVehicle or UnitInVehicle
+    if not probe then return false end
+    local ok, v = pcall(probe, "player")
+    if not ok then return false end
+    if issecretvalue and issecretvalue(v) then return false end
+    return v and true or false
+end
+
 function Handle:_applyIdentityGate()
     local hide = false
     if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
@@ -4566,6 +4596,13 @@ function Handle:_applyIdentityGate()
                 local ok, can = pcall(UnitCanAssist, "player", unit)
                 if ok then
                     if issecretvalue and issecretvalue(can) then can = true end
+                    -- ★ Overrides a still-true assist during the boarding window, before
+                    -- the seated state lands — see SelfIsUsingVehicle. Folded into `can`
+                    -- rather than straight into `hide` on purpose: _noteGateRecovery then
+                    -- records the false, so leaving the vehicle is a real false→true edge
+                    -- and re-parses. Setting `hide` alone would hide correctly and never
+                    -- rebuild the pool.
+                    if can and SelfIsUsingVehicle(unit) then can = false end
                     self:_noteGateRecovery(can)
                     -- ☠ NOT `and not isOwn` — see the block above. Cinematics are the
                     -- latch's job; this branch is what covers a vehicle.
@@ -6173,6 +6210,8 @@ function SlotHandle:_applyIdentityGate()
                 local ok, can = pcall(UnitCanAssist, "player", unit)
                 if ok then
                     if issecretvalue and issecretvalue(can) then can = true end
+                    -- ★ Boarding window — see SelfIsUsingVehicle and the Handle twin.
+                    if can and SelfIsUsingVehicle(unit) then can = false end
                     self:_noteGateRecovery(can)
                     if not can then hide = true end
                 end
@@ -6605,6 +6644,13 @@ idGateWatch:RegisterEvent("GROUP_ROSTER_UPDATE")
 idGateWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
 idGateWatch:RegisterEvent("PLAYER_TARGET_CHANGED")
 idGateWatch:RegisterEvent("PLAYER_FOCUS_CHANGED")
+-- ★ Vehicle occupancy flips your own assistability. Confirmed by /etrace on a live
+-- boarding: none of the events above fire at the moment control is TAKEN — the ones that
+-- do (PARTY_MEMBER_ENABLE / UNIT_PHASE / UNIT_FACTION) arrive ~350ms later, at the end of
+-- the transition, which is the flash.
+idGateWatch:RegisterEvent("UNIT_ENTERING_VEHICLE")
+idGateWatch:RegisterEvent("UNIT_ENTERED_VEHICLE")
+idGateWatch:RegisterEvent("UNIT_EXITED_VEHICLE")
 local gateSweepQueued
 local function IdentityGateSweep()
     gateSweepQueued = nil
@@ -6623,6 +6669,19 @@ local function IdentityGateSweep()
     end
 end
 idGateWatch:SetScript("OnEvent", function(_, event)
+    -- ★ TWO LANES. The 0.05s debounce exists for the noisy events — roster, name and
+    -- phase updates arrive in bursts and a sweep per event would re-probe every
+    -- vulnerable handle each time. Vehicle edges are the opposite: rare, so there is no
+    -- storm to coalesce, and the deferral is precisely what reads on screen as a flash of
+    -- unfiltered icons on your own frame. So they sweep on the spot.
+    -- ⚠ Cinematics deliberately stay OUT of this lane. They are the latch's job
+    -- (cineWatch, below) and that path is confirmed working — an immediate sweep here
+    -- would be redundant work at best and a second writer racing the latch at worst.
+    if event == "UNIT_ENTERING_VEHICLE" or event == "UNIT_ENTERED_VEHICLE"
+        or event == "UNIT_EXITED_VEHICLE" then
+        IdentityGateSweep()
+        return
+    end
     if not gateSweepQueued then
         gateSweepQueued = true
         C_Timer.After(0.05, IdentityGateSweep)
