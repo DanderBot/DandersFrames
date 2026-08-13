@@ -94,16 +94,30 @@ function Border:New(parent, opts)
 
     local layer = opts.layer or "BORDER"
     border._layer = layer   -- texture-piece renderer creates on the same layer
-    border.top = border:CreateTexture(nil, layer)
+    -- ☠ SNAPPING OFF on the four solid edges, same as the texture-piece path
+    -- (and NineSlice.lua). Default pixel-grid snapping can COLLAPSE a 1px edge
+    -- that straddles a fractional physical-pixel coordinate to zero columns —
+    -- live secure-header frames are never grid-snapped (only test-mode paths
+    -- get SnapPointToPixelGrid), so a fractionally-positioned container lost a
+    -- whole side while its opposite edge survived (#1013: "left border missing
+    -- on every frame"). With snapping off the worst case is an antialiased
+    -- edge across two columns — visible, never gone.
+    local function edge()
+        local t = border:CreateTexture(nil, layer)
+        if t.SetTexelSnappingBias then t:SetTexelSnappingBias(0) end
+        if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false) end
+        return t
+    end
+    border.top = edge()
     border.top:SetPoint("TOPLEFT", 0, 0)
     border.top:SetPoint("TOPRIGHT", 0, 0)
-    border.bottom = border:CreateTexture(nil, layer)
+    border.bottom = edge()
     border.bottom:SetPoint("BOTTOMLEFT", 0, 0)
     border.bottom:SetPoint("BOTTOMRIGHT", 0, 0)
-    border.left = border:CreateTexture(nil, layer)
+    border.left = edge()
     border.left:SetPoint("TOPLEFT", 0, 0)
     border.left:SetPoint("BOTTOMLEFT", 0, 0)
-    border.right = border:CreateTexture(nil, layer)
+    border.right = edge()
     border.right:SetPoint("TOPRIGHT", 0, 0)
     border.right:SetPoint("BOTTOMRIGHT", 0, 0)
 

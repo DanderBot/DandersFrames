@@ -97,14 +97,18 @@ function DF:CreateStatusIcons(frame)
     frame.resurrectionIcon.text:SetTextColor(0.2, 1, 0.2, 1)  -- Green for res
     frame.resurrectionIcon.unitFrame = frame
     frame.resurrectionIcon:EnableMouse(true)
-    if frame.resurrectionIcon.SetPropagateMouseMotion then
-        frame.resurrectionIcon:SetPropagateMouseMotion(true)
-    end
-    -- SetPropagateMouseClicks is protected on 12.1 (ADDON_ACTION_BLOCKED under
-    -- combat lockdown); skip it in combat — a res icon can be (re)built on a
-    -- roster change mid-combat.
-    if frame.resurrectionIcon.SetPropagateMouseClicks and not InCombatLockdown() then
-        frame.resurrectionIcon:SetPropagateMouseClicks(true)
+    -- BOTH propagation setters are protected on 12.1 (ADDON_ACTION_BLOCKED under
+    -- combat lockdown — Motion proven by the #1029 field log, not just Clicks);
+    -- skip both in combat — a res icon can be (re)built on a roster change
+    -- mid-combat, and it still functions without propagation until the next
+    -- out-of-combat rebuild re-applies it.
+    if not InCombatLockdown() then
+        if frame.resurrectionIcon.SetPropagateMouseMotion then
+            frame.resurrectionIcon:SetPropagateMouseMotion(true)
+        end
+        if frame.resurrectionIcon.SetPropagateMouseClicks then
+            frame.resurrectionIcon:SetPropagateMouseClicks(true)
+        end
     end
     if frame.resurrectionIcon.SetMouseClickEnabled then
         frame.resurrectionIcon:SetMouseClickEnabled(false)

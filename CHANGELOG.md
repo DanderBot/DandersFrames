@@ -2,9 +2,19 @@
 
 ## [Unreleased]
 
+## [5.1.2]
+
 ### Bug Fixes
 
+* (Aura Designer) Fix placed indicators always showing tooltips (and blocking clicks) no matter what the tooltip settings said.
+* (Aura Designer) Fix icons not filling their configured size when Show Border is off.
+* (Pinned Frames) NPC frames follow their configured health colours again instead of rendering grey.
 * (Pinned Frames) Fix an error when switching a pinned frame to a Friendly Boss NPC while a resource bar class filter is set.
+* (Test Mode) Fix disabled elements (borders, duration bars, timers, stack counts, dispel text) sticking to the preview icons until a reload.
+* (Frames) Fix a missing frame border side at certain positions and UI scales.
+* (Pet Frames) Pet frames no longer hide behind neighbouring frames' health bars, and their position and size settings apply immediately when typed in - including in test mode.
+* (Click-Casting) Spells in the binding picker sort into the right Spec/Class/General sections on every language.
+* (Filter Designer) Fix errors when opening the Filter Designer during combat.
 
 ## [5.1.1]
 
@@ -13,7 +23,10 @@
 * (Aura Designer) Fix layout groups showing only their first member when the group mixes different spells.
 * (Pinned Frames) Fix constant error spam on boss frames from role and class colour lookups; boss frames now fall back to their configured colours cleanly.
 * (Pinned Frames) Fix pinned NPC frames showing as offline players, with a stuck "Offline" text and a full grey health bar.
-* (Aura Designer) The three Aura Designer tooltip settings now apply immediately instead of needing a reload.
+* (Aura Designer) Fix aura tooltips staying on after being turned off (and staying off after being turned on) — the Aura Designer tooltip settings now apply immediately instead of after a reload.
+* (Auras) Fix the brief flash of unfiltered buffs when a cinematic ends. (by Krathe)
+* (Test Mode) Test mode no longer fills other addons' aura displays with sample icons while it is open. (by Krathe)
+* (Auras) Fix the absorb bar hiding behind the Dispel Overlay while a dispellable debuff was active. (by Krathe)
 
 ## [5.1.0]
 

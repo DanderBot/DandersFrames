@@ -794,8 +794,24 @@ function DF:ApplyPetFrameStyle(frame)
             height = frame.ownerFrame:GetHeight()
         end
     end
-    
+
     frame:SetSize(width, height)
+
+    -- ☠ Z-ORDER (#1047). PositionPetFrame reparents the pet next to the unit
+    -- frames, which puts it at the same STRATA but container-level+1 — below
+    -- every neighbour's health/absorb fill (owner-level +2..+12). The pet then
+    -- rendered above a neighbour's background but UNDER its fills, showing
+    -- through whenever range fade lowered that neighbour's alpha. The LEVEL is
+    -- the load-bearing half (strata alone is a no-op — it already matches);
+    -- +15 clears the highest bound bar default (heal prediction, +12). Done
+    -- here, not in PositionPetFrame, so GROUPED mode (which early-returns
+    -- there) is covered too.
+    if frame.ownerFrame then
+        pcall(function()
+            frame:SetFrameStrata(frame.ownerFrame:GetFrameStrata())
+            frame:SetFrameLevel(frame.ownerFrame:GetFrameLevel() + 15)
+        end)
+    end
     
     -- Update health bar texture - use path directly (dropdown saves paths)
     local texture = db.petTexture or "Interface\\TargetingFrame\\UI-StatusBar"

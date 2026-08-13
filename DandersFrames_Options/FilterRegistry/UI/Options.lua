@@ -2278,9 +2278,30 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
 
     -- Spell rows
     local spellRows = {}
+    -- ☠ MOUSE PROPAGATION IS COMBAT-PROTECTED on 12.1 — SetPropagateMouseMotion
+    -- fires ADDON_ACTION_BLOCKED in lockdown (field report #1029: opening the
+    -- designer mid-combat spammed it per row). It's an event, not an error, so
+    -- pcall can't hush it — the only correct move is to not make the call, and
+    -- to HEAL later: rows are created once and pooled, so a row born in combat
+    -- would otherwise keep broken hover/click propagation for the session. This
+    -- runs at creation AND on every reuse; the first out-of-combat page open
+    -- applies whatever combat skipped.
+    local function ApplyRowPropagation(row)
+        if row._propagationApplied or InCombatLockdown() then return end
+        local hot, chipHot = row.hot, row.chipHot
+        if hot then
+            if hot.SetPropagateMouseMotion then hot:SetPropagateMouseMotion(true) end
+            if hot.SetPropagateMouseClicks then hot:SetPropagateMouseClicks(true) end
+        end
+        if chipHot and chipHot.SetPropagateMouseMotion then
+            chipHot:SetPropagateMouseMotion(true)
+        end
+        row._propagationApplied = true
+    end
     local function AcquireSpellRow(i)
         local row = spellRows[i]
         if row then
+            ApplyRowPropagation(row)
             row:Show()
             return row
         end
@@ -2375,10 +2396,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         hot:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
         hot:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, 0)
         hot:EnableMouse(true)
-        if hot.SetPropagateMouseMotion then hot:SetPropagateMouseMotion(true) end
-        if hot.SetPropagateMouseClicks and not InCombatLockdown() then
-            hot:SetPropagateMouseClicks(true)
-        end
+        -- Propagation applied by ApplyRowPropagation below (combat-deferred).
         -- The ID line rides along with the game tooltip now that the 'i' button is
         -- gone. Raw rows (an id typed into a custom filter that the database does not
         -- know) have no game tooltip to hang it on, and used to have NO hover at all
@@ -2422,7 +2440,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         chipHot:SetPoint("TOP", row, "TOP", 0, 0)
         chipHot:SetPoint("BOTTOM", row, "BOTTOM", 0, 0)
         chipHot:EnableMouse(true)
-        if chipHot.SetPropagateMouseMotion then chipHot:SetPropagateMouseMotion(true) end
+        -- Propagation applied by ApplyRowPropagation below (combat-deferred).
         chipHot:SetScript("OnClick", function()
             if row._onChip then row._onChip() end
         end)
@@ -2432,6 +2450,7 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         end)
         chipHot:SetScript("OnLeave", function() GUI:HideTooltip() end)
         row.chipHot = chipHot
+        ApplyRowPropagation(row)   -- no-op in combat; healed on the next OOC acquire
 
         -- Row click mirrors the action button in the preset view
         row:SetScript("OnClick", function(self)

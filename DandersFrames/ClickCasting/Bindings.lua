@@ -1645,39 +1645,47 @@ function CC:GetAllPlayerSpells()
     -- Get number of skill lines (tabs)
     local numTabs = C_SpellBook.GetNumSpellBookSkillLines()
     
-    -- Get current spec name for identification
+    -- Current spec ID for structural identification — the FIRST return of
+    -- GetSpecializationInfo, never the localized name.
     local currentSpecIndex = GetSpecialization()
-    local currentSpecName = currentSpecIndex and select(2, GetSpecializationInfo(currentSpecIndex)) or ""
-    
+    local currentSpecID = currentSpecIndex and GetSpecializationInfo(currentSpecIndex) or nil
+
     for tabIndex = 1, numTabs do
         local skillLineInfo = C_SpellBook.GetSpellBookSkillLineInfo(tabIndex)
-        
+
         if skillLineInfo and not skillLineInfo.shouldHide then
             local offset = skillLineInfo.itemIndexOffset
             local numSlots = skillLineInfo.numSpellBookItems
+            -- Display data only (stored on the spell record) — never compared.
             local tabName = skillLineInfo.name or ""
-            
-            -- Determine category priority (lower = higher priority)
+
+            -- ☠ CLASSIFY STRUCTURALLY, NEVER BY LOCALIZED NAME (#990). This used
+            -- to compare the tab's localized name against the localized spec
+            -- name, the localized class name and the ENGLISH literals "Racial"/
+            -- "General" — so non-English clients scattered spells across the
+            -- wrong sections, varying by spec AND character gender (gendered
+            -- class names need not match the tab string). The struct carries
+            -- identity directly:
+            --   * specID set     -> a spec tab; == current spec -> "spec"
+            --   * isGuildPerkTab -> guild
+            --   * tab 1          -> General (fixed spellbook layout; racials
+            --                       live here — a "Racial" tab no longer exists)
+            --   * tab 2          -> the class tab (fixed layout)
             local categoryPriority = 4 -- Default: other
             local category = "other"
-            
-            if tabName == currentSpecName then
+
+            if skillLineInfo.specID and currentSpecID
+                and skillLineInfo.specID == currentSpecID then
                 categoryPriority = 1
                 category = "spec"
             elseif skillLineInfo.isGuildPerkTab then
                 categoryPriority = 5
                 category = "guild"
-            else
-                -- Check if it's a class tab (usually the class name)
-                local _, className = UnitClass("player")
-                local localizedClassName = UnitClass("player")
-                if tabName == localizedClassName or tabName == className then
+            elseif not skillLineInfo.specID then
+                if tabIndex == 2 then
                     categoryPriority = 2
                     category = "class"
-                elseif tabName == "Racial" or tabName:find("Racial") then
-                    categoryPriority = 3
-                    category = "racial"
-                elseif tabName == "General" then
+                elseif tabIndex == 1 then
                     categoryPriority = 4
                     category = "general"
                 end
