@@ -4848,13 +4848,35 @@ function Handle:_applyIdentityGate()
     -- now", which is what BOTH directions actually turn on.
     local newParked = (hide or self._idGateUntrusted) and true or nil
     if self._idGateParked ~= newParked then
+        local prevParked = self._idGateParked
+        -- ☠ THE FLAG IS AN INPUT, NOT A RECORD. ApplyTuning READS _idGateParked to decide
+        -- each gated group's maxFrameCount, so it has to be set before the call — which is
+        -- why this cannot simply latch on success.
         self._idGateParked = newParked
-        DF:Debug("AURACONTAINER", "identity park %s for unit=%s",
+        DF:Debug(DBG, "identity park %s for unit=%s",
             newParked and "PARKING gated groups" or "restoring gated groups",
             tostring(self.config and self.config.unit))
         -- ApplyTuning is the LIVE setter path and reads _idGateParked, so this is one
         -- call rather than a rebuild.
-        if self.ApplyTuning then pcall(function() self:ApplyTuning() end) end
+        local ok = true
+        if self.ApplyTuning then ok = pcall(function() self:ApplyTuning() end) end
+        if not ok then
+            -- ☠ REVERT ON FAILURE, OR THE REPAIR IS SUPPRESSED FOREVER. This same flag is
+            -- the change detection two lines up, so leaving it on the INTENDED value after
+            -- a failed apply records a state the container is not in — and the next sweep
+            -- then sees flag == verdict and skips, permanently. The bad direction is the
+            -- restore: trust comes back, ApplyTuning throws, and the gated records sit at
+            -- maxFrameCount 0 with debuffs simply missing until some unrelated tuning pass
+            -- happens by. The pcall is what makes that silent, and the pcall is here
+            -- because we do not yet believe every setter in this family is combat-legal
+            -- (SetUnit is queued for exactly that reason).
+            -- Reverting costs one retried call per sweep while the failure persists; the
+            -- sweep recomputes the verdict from live conditions each time, so it converges
+            -- on whatever is true then rather than on what was true when it broke.
+            self._idGateParked = prevParked
+            DF:DebugWarn(DBG, "identity park apply FAILED for unit=%s — reverted, will retry",
+                tostring(self.config and self.config.unit))
+        end
     end
 
     local newHidden = hide or nil
