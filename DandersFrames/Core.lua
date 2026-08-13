@@ -6935,6 +6935,21 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     local hnd = frame.dispelFactory
                     local slots = hnd and hnd.GetOverlaySlots and hnd:GetOverlaySlots()
                     if slots then
+                        -- ★ THE THREE FACTS THAT DECIDE A STUCK-ALPHA REPORT (2026-08-13,
+                        -- "Full Frame ignores Gradient Opacity while Top/Left Edge obey it"):
+                        --   1. ver/gen latch — has the style pass RUN on these buttons at all?
+                        --      (Buttons are born mid-combat; the pass is OOC-only.)
+                        --   2. styleErr — did the last StyleOneSlot THROW? The per-button
+                        --      pcall swallows it and warns once on a debug channel.
+                        --   3. the carrier's anchor target — "btn" means the secure init's
+                        --      SetAllPoints(btn) is still in force and the style pass never
+                        --      re-anchored it; gradRect/healthFill mean the pass completed.
+                        -- Plus configured-vs-actual alpha side by side, so one paste answers.
+                        o:Line(("factory styledVer=%s (cur=%s) styledGen=%s (cur=%s) cfgAlpha=%s resolved=%s"):format(
+                            tostring(frame.dfDispelFactoryVersion), tostring(DF.auraLayoutVersion),
+                            tostring(frame.dfDispelStyledGen), tostring(hnd and hnd._gen),
+                            tostring(db2 and db2.dispelGradientAlpha),
+                            tostring(db2 and DF.ResolveDispelGradientAlpha and DF:ResolveDispelGradientAlpha(db2))))
                         for key, btn in pairs(slots) do
                             local wdg = btn.dfDispelWidget
                             if wdg then
@@ -6943,6 +6958,22 @@ DF._MainEventDispatcher = function(self, event, arg1)
                                     tostring(wdg.gradientTracksHealth)))
                                 dumpBar("slot.gradient", wdg.gradient, frame)
                                 dumpTex("slot.nativeGradient", wdg.nativeGradient)
+                                pcall(function()
+                                    local ng = wdg.nativeGradient
+                                    if not ng then return end
+                                    local nPts = ng:GetNumPoints()
+                                    local _, relTo = ng:GetPoint(1)
+                                    local relName = "?"
+                                    if relTo == btn then relName = "btn"
+                                    elseif relTo == wdg.gradient then relName = "gradRect"
+                                    elseif frame.healthBar and relTo == frame.healthBar:GetStatusBarTexture() then relName = "healthFill"
+                                    elseif relTo == wdg then relName = "widget"
+                                    elseif relTo == nil then relName = "nil" end
+                                    o:Line(("slot[%s] carrier points=%s rel=%s styleErr=%s bind=%s"):format(
+                                        tostring(key), tostring(nPts), relName,
+                                        tostring(btn._dfDispelStyleErr),
+                                        tostring(DF._dispelBindErr and DF._dispelBindErr[key])))
+                                end)
                             end
                             if btn.dfDispelRing then dumpTex("slot[" .. tostring(key) .. "].ring", btn.dfDispelRing) end
                             -- Edge strips are keyed BY SIDE now (all four ride the one
