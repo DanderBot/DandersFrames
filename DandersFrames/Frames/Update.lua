@@ -560,6 +560,17 @@ function DF:UpdateUnitFrame(frame, source)
         DF:UpdateRaidTargetIcon(frame)
         -- Apply dead fade for dead/ghost units
         DF:ApplyDeadFade(frame, "Dead")
+        -- ☠ DEATH LATCH belt (#1043): a frame can be handed an already-dead
+        -- unit by a roster shuffle before any UNIT_HEALTH tick reaches the
+        -- fast path — edge-detect here too so the corpse never shows the
+        -- previous occupant's (or pre-death) icon set. Same flag as the fast
+        -- path, so the alive edge there clears both.
+        if not frame.dfLastKnownDead then
+            frame.dfLastKnownDead = true
+            if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
+                DF.AuraContainer.SetUnitDeathLatched(unit, true)
+            end
+        end
         -- See the note on the offline branch above: this return skips the TD
         -- render and the missing-buff gate, which is why "Dead" never appeared
         -- while the Text Designer owned the text.
@@ -570,6 +581,14 @@ function DF:UpdateUnitFrame(frame, source)
 
     -- Unit is alive and connected - reset dead fade if it was applied
     DF:ResetDeadFade(frame)
+    if frame.dfLastKnownDead then
+        -- Alive edge (full-update twin of the fast path's): clear the death
+        -- latch so the rows come back re-parsed.
+        if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
+            DF.AuraContainer.SetUnitDeathLatched(unit, nil)
+        end
+        frame.dfLastKnownDead = nil
+    end
     frame.dfLastKnownConnected = true
 
     -- Clear status text for alive units
@@ -837,6 +856,13 @@ function DF:UpdateHealthFast(frame)
         if not frame.dfLastKnownDead then
             frame.dfLastKnownDead = true
             if DF.UpdateAuras_Enhanced then DF:UpdateAuras_Enhanced(frame) end
+            -- ☠ DEATH LATCH (#1043): death strips auras with NO aura event, so
+            -- the native containers keep painting the pre-death icon set on the
+            -- corpse. Latch this unit's aura handles hidden; the alive edge
+            -- below clears the latch and re-parses.
+            if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
+                DF.AuraContainer.SetUnitDeathLatched(unit, true)
+            end
         end
         -- Same early-return gap as UpdateUnitFrame. Note the comment above: WoW
         -- does not fire UNIT_AURA on death, which is exactly why the aura-driven
@@ -849,6 +875,13 @@ function DF:UpdateHealthFast(frame)
 
     -- Unit is alive and connected - reset dead fade if it was applied
     DF:ResetDeadFade(frame)
+    if frame.dfLastKnownDead then
+        -- Alive edge: clear the death latch — the rows come back re-parsed
+        -- (the latch clear bounces the containers; see _setDeathLatch).
+        if DF.AuraContainer and DF.AuraContainer.SetUnitDeathLatched then
+            DF.AuraContainer.SetUnitDeathLatched(unit, nil)
+        end
+    end
     frame.dfLastKnownDead = nil
     frame.dfLastKnownConnected = true
 

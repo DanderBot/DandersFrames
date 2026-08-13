@@ -4483,7 +4483,7 @@ function Handle:_applyVisibility()
     -- shows and hides the whole subtree, which is the entire reason for nesting.
     if self.config and self.config.parentDrivenVisibility then return end
     local want = (self._intendedShown ~= false) and not self._idGateHidden
-        and not self._cineLatched
+        and not self._cineLatched and not self._deathLatched
     -- Respect the fake-data park (Edit Mode etc.): while parked, this handle is
     -- hidden regardless of intent/gate — otherwise a hover-deferred retry could
     -- ping-pong against the park's own deferred hide.
@@ -4563,6 +4563,27 @@ function Handle:_setCineLatch(on)
     if self._cineLatched == on then return end
     self._cineLatched = on
     self:_applyVisibility()
+end
+
+-- DEATH LATCH (#1043) — same lever, different trigger. Death strips a unit's
+-- auras WITHOUT firing UNIT_AURA (documented in Frames/Update.lua), and the
+-- engine only re-parses on aura events — so every aura row froze its pre-death
+-- icon set on a corpse, durations counting into the negative, until res or
+-- release finally produced an event. While dead the rows latch hidden; the
+-- alive edge clears the latch and BOUNCES, so the rows come back re-parsed
+-- rather than stale. Deliberate tradeoff (Danders, 2026-08-13): auras that
+-- legitimately persist through death are hidden while dead too.
+function Handle:_setDeathLatch(on)
+    on = on or nil
+    if self._deathLatched == on then return end
+    self._deathLatched = on
+    self:_applyVisibility()
+    if not on then
+        -- Re-parse on revival: the death window produced no aura events, so the
+        -- standing parse predates the death. Refresh() is combat-aware (falls
+        -- back to a mark-dirty that the next aura event flushes).
+        self:Refresh()
+    end
 end
 
 function Handle:_noteGateRecovery(can)
@@ -4661,6 +4682,10 @@ end
 function Handle:SetUnit(unit)
     self.config.unit = unit
     self:_updateDynRefresh()   -- re-evaluate dynamic-unit auto-refresh for the new token
+    -- A retarget is a new identity: a death latch taken for the OLD unit is
+    -- meaningless now (and would stick until the NEW unit died and revived).
+    -- The new unit's own dead edge re-latches if it is also a corpse.
+    if self._deathLatched then self:_setDeathLatch(nil) end
     self:_applyIdentityGate()  -- the last gate verdict was for the OLD unit (plain frame; combat-safe)
     -- In combat, defer JUST the retarget (a full rebuild would leak a container + N
     -- buttons every combat on roster churn); "retarget" re-runs SetUnit at regen.
@@ -6088,7 +6113,8 @@ end
 function SlotHandle:_pushFilter()
     local c = self.owner and self.owner.container
     if not c then return false end
-    local want = (self.parked or self._gateHidden or self._cineLatched) and "" or self.liveFilter
+    local want = (self.parked or self._gateHidden or self._cineLatched or self._deathLatched)
+        and "" or self.liveFilter
     return pcall(c.SetAuraSlotFilterString, c, self.key, want)
 end
 
@@ -6170,6 +6196,27 @@ function SlotHandle:_setCineLatch(on)
     if not ok or InCombatLockdown() then
         self._pendingTuning = true
         registerSlotRegen(self)
+    end
+end
+
+-- DEATH LATCH, slot half (#1043) — see Handle:_setDeathLatch for the mechanism
+-- and the tradeoff. Same actuation and failure contract as the cine latch; the
+-- CLEAR also re-pushes candidates (the standard replay covers it in lockdown),
+-- because the death window produced no aura events and the standing parse
+-- predates the death.
+function SlotHandle:_setDeathLatch(on)
+    on = on or nil
+    if self._deathLatched == on then return end
+    self._deathLatched = on
+    local ok = self:_pushFilter()
+    if not ok or InCombatLockdown() then
+        self._pendingTuning = true
+        registerSlotRegen(self)
+        return
+    end
+    if not on and self._lastCandidateFilters ~= nil then
+        local c = self.owner and self.owner.container
+        if c then pcall(c.SetAuraSlotCandidateFilters, c, self.key, self._lastCandidateFilters) end
     end
 end
 
@@ -6645,6 +6692,30 @@ idGateWatch:RegisterEvent("PLAYER_ENTERING_WORLD")
 idGateWatch:RegisterEvent("PLAYER_TARGET_CHANGED")
 idGateWatch:RegisterEvent("PLAYER_FOCUS_CHANGED")
 local gateSweepQueued
+-- ============================================================
+-- DEATH LATCH — unit-keyed sweep (#1043)
+-- ============================================================
+-- Driven from the dead/alive edges in Frames/Update.lua (the dfLastKnownDead
+-- transitions). Unit-keyed so every display of that unit latches together —
+-- a party frame and a pinned frame for the same unit both show the corpse.
+-- Skipped wholesale in test mode: preview units fabricate "dead" status and
+-- latching them would blank the preview rows.
+function AuraContainer.SetUnitDeathLatched(unit, on)
+    if type(unit) ~= "string" then return end
+    if AuraContainer._testMode then return end
+    for h in pairs(AuraContainer._handles or {}) do
+        if not h._destroyed and h.config and h.config.unit == unit
+            and not h.config.parentDrivenVisibility then
+            pcall(function() h:_setDeathLatch(on) end)
+        end
+    end
+    for s in pairs(AuraContainer._slotHandles or {}) do
+        if s.owner and s.owner.unit == unit then
+            pcall(function() s:_setDeathLatch(on) end)
+        end
+    end
+end
+
 local function IdentityGateSweep()
     gateSweepQueued = nil
     for h in pairs(AuraContainer._handles or {}) do
