@@ -5868,6 +5868,20 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
             -- when auras are secret.
             local host = makeSlotLevelHost(b)
             b.dfLevelHost = host
+            -- ☠ THE MOUSE GATE, same as _makeInitializeFrame's (the group path). This
+            -- initializer never applied it, and Blizzard aura buttons default to mouse
+            -- ENABLED — so every placed indicator on the shared-slot path showed
+            -- tooltips (and swallowed clicks) REGARDLESS of the tooltip settings,
+            -- while the same indicator built through the per-container fallback
+            -- honoured them. Field report #1044: profile with every tooltip key false
+            -- in both modes, tooltips only on AD-placed icons. Pre-seal window, so
+            -- the writes are legal; the AD tooltip toggle reaches existing slots via
+            -- the struct sig (a flip declares a new slot with the new gate value).
+            if b.SetMouseClickEnabled then pcall(b.SetMouseClickEnabled, b, false) end
+            if b.SetMouseMotionEnabled then
+                pcall(b.SetMouseMotionEnabled, b,
+                    (config and config.tooltips) == true and not AuraContainer._testMode)
+            end
             if config then
                 -- Per-slot layering, pre-seal (see the header above AcquireSlot).
                 if config.frameStrata then pcall(b.SetFrameStrata, b, config.frameStrata) end
