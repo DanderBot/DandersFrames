@@ -257,14 +257,31 @@ end
 -- draw at the perimeter so they cannot obscure content" argument above never
 -- considered. That argument holds for the name and health text, not for icons
 -- parked on the edge.
+-- ★ USER-SETTABLE NOW, via <type>HighlightFrameLevel. The numbers here are the fallbacks
+-- and match the Config defaults exactly, so an untouched profile renders identically to
+-- before the keys existed. The reasoning above -- "raise the element above the highlight
+-- instead" -- is sound but only solves it in ONE direction, and it cannot reorder the
+-- three highlights against each other at all, which is what people actually asked for.
+-- ☠ Keyed by the SAME type string GetOrCreateHighlight is called with. Keep the two
+-- tables in step: a missing entry reads nil and falls back to the constant, which looks
+-- like the slider doing nothing rather than like a bug.
 local HIGHLIGHT_LEVEL = { Aggro = 75, Hover = 76, Selection = 77 }
+local HIGHLIGHT_LEVEL_KEY = {
+    Aggro     = "aggroHighlightFrameLevel",
+    Hover     = "hoverHighlightFrameLevel",
+    Selection = "selectionHighlightFrameLevel",
+}
 
 -- Applied on REUSE as well as creation: the level is absolute, derived from the
 -- owner's level at the time it is set, so a highlight created before the owner's
 -- level changed would otherwise keep a stale one forever.
 local function ApplyHighlightZOrder(ch, frame, highlightType)
     ch:SetFrameStrata(frame:GetFrameStrata())
-    ch:SetFrameLevel(frame:GetFrameLevel() + (HIGHLIGHT_LEVEL[highlightType] or HIGHLIGHT_LEVEL.Aggro))
+    local fallback = HIGHLIGHT_LEVEL[highlightType] or HIGHLIGHT_LEVEL.Aggro
+    local key = HIGHLIGHT_LEVEL_KEY[highlightType]
+    local db = key and DF.GetFrameDB and DF:GetFrameDB(frame)
+    local offset = (db and key and db[key]) or fallback
+    ch:SetFrameLevel(frame:GetFrameLevel() + offset)
 end
 
 local function GetOrCreateHighlight(frame, highlightType)

@@ -746,6 +746,13 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local selInset = selGroup:AddWidget(GUI:CreateSlider(self.child, L["Inset"], -10, 10, 1, db, "selectionHighlightInset", nil, function() DF:LightweightUpdateHighlight("selection") end, true), 55)
         selInset.hideOn = HideSelectionOptions
         selInset.tooltip = TIP_HL_INSET
+
+        -- ★ Frame Level. Highlights were pinned at 75/76/77 in Highlights.lua with no way
+        -- to reach them. The old answer was "raise the element above the highlight", which
+        -- only works in one direction and cannot reorder the three against each other.
+        -- Defaults keep the pinned values, so nothing moves until someone drags this.
+        local selLevel = selGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "selectionHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("selection") end, true)), 55)
+        selLevel.hideOn = HideSelectionOptions
         local selAlpha = selGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "selectionHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("selection") end, true), 55)
         selAlpha.hideOn = HideSelectionOptions
         local selCol = selGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "selectionHighlightColor", false, nil, function() DF:LightweightUpdateSelectionHighlightColor() end, true), 35)
@@ -773,6 +780,13 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local hoverInset = hoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Inset"], -10, 10, 1, db, "hoverHighlightInset", nil, function() DF:LightweightUpdateHighlight("hover") end, true), 55)
         hoverInset.hideOn = HideHoverOptions
         hoverInset.tooltip = TIP_HL_INSET
+
+        -- ★ Frame Level. Highlights were pinned at 75/76/77 in Highlights.lua with no way
+        -- to reach them. The old answer was "raise the element above the highlight", which
+        -- only works in one direction and cannot reorder the three against each other.
+        -- Defaults keep the pinned values, so nothing moves until someone drags this.
+        local hoverLevel = hoverGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "hoverHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("hover") end, true)), 55)
+        hoverLevel.hideOn = HideHoverOptions
         local hoverAlpha = hoverGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "hoverHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("hover") end, true), 55)
         hoverAlpha.hideOn = HideHoverOptions
         local hoverCol = hoverGroup:AddWidget(GUI:CreateColorPicker(self.child, L["Color"], db, "hoverHighlightColor", false, nil, function() DF:LightweightUpdateHighlight("hover") end, true), 35)
@@ -828,6 +842,13 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local aggroInset = aggroGroup:AddWidget(GUI:CreateSlider(self.child, L["Inset"], -10, 10, 1, db, "aggroHighlightInset", nil, function() DF:LightweightUpdateHighlight("aggro") end, true), 55)
         aggroInset.hideOn = HideAggroOptions
         aggroInset.tooltip = TIP_HL_INSET
+
+        -- ★ Frame Level. Highlights were pinned at 75/76/77 in Highlights.lua with no way
+        -- to reach them. The old answer was "raise the element above the highlight", which
+        -- only works in one direction and cannot reorder the three against each other.
+        -- Defaults keep the pinned values, so nothing moves until someone drags this.
+        local aggroLevel = aggroGroup:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "aggroHighlightFrameLevel", nil, function() DF:LightweightUpdateHighlight("aggro") end, true)), 55)
+        aggroLevel.hideOn = HideAggroOptions
         local aggroAlpha = aggroGroup:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "aggroHighlightAlpha", nil, function() DF:LightweightUpdateHighlight("aggro") end, true), 55)
         aggroAlpha.hideOn = HideAggroOptions
         AddToSection(aggroGroup, nil, 1)

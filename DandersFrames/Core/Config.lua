@@ -1287,6 +1287,13 @@ DF.PartyDefaults = {
     aggroColorHighThreat = {r = 1, g = 1, b = 0.47},
     aggroColorHighestThreat = {r = 1, g = 0.6, b = 0},
     aggroColorTanking = {r = 1, g = 0, b = 0},
+    -- ☠ DEFAULTS ARE THE OLD HARDCODED CONSTANTS (Features/Auras... Highlights.lua's
+    -- HIGHLIGHT_LEVEL = { Aggro = 75, Hover = 76, Selection = 77 }), so no existing frame
+    -- moves. They sit high on purpose: highlights draw at the PERIMETER, so clearing the
+    -- default stack costs nothing in readability. The per-element sliders run 0-100, so an
+    -- element can still be pushed above a highlight -- the leader icon ships at 80 doing
+    -- exactly that, because a crown on the frame edge was being crossed by the border.
+    aggroHighlightFrameLevel = 75,
     aggroHighlightAlpha = 0.7500000596046448,
     aggroHighlightInset = 0,
     aggroHighlightMode = "GLOW",
@@ -1979,6 +1986,7 @@ DF.PartyDefaults = {
     showBlizzardSideMenu = true,
 
     -- Hover Highlight
+    hoverHighlightFrameLevel = 76,   -- see the aggroHighlightFrameLevel note
     hoverHighlightAlpha = 0.8,
     hoverHighlightColor = {r = 1, g = 1, b = 1, a = 1},
     hoverHighlightInset = 0,
@@ -2421,6 +2429,7 @@ DF.PartyDefaults = {
     roleIconY = -2,
 
     -- Selection Highlight
+    selectionHighlightFrameLevel = 77,   -- see the aggroHighlightFrameLevel note
     selectionHighlightAlpha = 1,
     selectionHighlightColor = {r = 1, g = 1, b = 1, a = 1},
     selectionHighlightInset = 0,
