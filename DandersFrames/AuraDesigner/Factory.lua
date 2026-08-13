@@ -3159,15 +3159,17 @@ local function buildMemberGroupConfig(frame, group, recs, mine, defs)
             -- Resolved per member, so a self-only aura drops the caster filter for
             -- its own record while every neighbour keeps theirs.
             filter = poolFilter(group, rm),
-            -- ☠ Keyed by the member's FULL identity — (auraName, indicatorID) — the
-            -- same pair the rest of the codebase treats as a member's identity.
-            -- Indicator ids are per-AURA counters, so every aura's first indicator
-            -- is id 1 and a group of four different spells produced four records
-            -- ALL keyed "m1": AddAuraGroup asserted on the duplicates, the pcall
-            -- swallowed it, and members 2..n silently never rendered (live report,
-            -- day one of 5.1.0 — resto druid HoT group showed only its first
-            -- member). Stable across reorders, so reordering still moves icons via
-            -- layoutIndex without re-keying and forcing a rebuild.
+            -- ☠ THE AURA NAME IS LOAD-BEARING, NOT DECORATION. Indicator ids are
+            -- unique only WITHIN one aura (nextIndicatorID is a per-aura counter
+            -- starting at 1), so "m1" collided for every user who placed one
+            -- indicator per spell -- and the engine ASSERTS on a duplicate group
+            -- key ("aura group 'm1' already exists", CustomAuraContainer), which
+            -- our pcall swallowed. First member rendered, the rest silently never
+            -- did. Shipped that way; two field reports on release day. It passed
+            -- in-game testing only because a dev profile's add/delete history
+            -- happens to produce distinct ids.
+            -- Still keyed by identity rather than ordinal: reordering the group
+            -- must move icons, not re-key every group and force a rebuild.
             key = "m:" .. tostring(r.auraName) .. ":" .. tostring(r.indicatorID),
             candidateFilters = { includeSpellIDs = r.map },
             style = {

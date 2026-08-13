@@ -161,6 +161,53 @@ end
 -- optional layering parents (the unit frame passes healthBar/contentOverlay;
 -- a slot button passes nothing and everything hangs off the widget itself).
 -- No caching here — callers own the widget's home.
+-- ☠ THE WASH'S LEVEL IS THE WHOLE "Show On Current Health Only" CONTRACT.
+-- Offsets are from the FRAME, against the ladder documented in
+-- BuildDispelOverlayWidget below:
+--
+--   FULL FRAME (option OFF)  -> +17: over EVERYTHING -- absorb, heal
+--       prediction, reduced-max. That is what "full frame" means, and it is the
+--       mode to use with a low-alpha wash if you want to see through it.
+--
+--   SHOW ON CURRENT HEALTH   -> +4: above the health FILL and nothing
+--       else. It must stay under heal-absorb (+8), reduced-max (+9), absorb (+11)
+--       and heal prediction (+12), because the entire point of the option is that
+--       the wash marks the HEALTH and leaves those indicators readable. Burying
+--       them loses the information the option exists to preserve -- and at full
+--       health with a solid blend the wash swallowed the frame whole
+--       (Kaldoran/Lethas, 5.1.1; reproduced in test mode).
+--
+-- ⚠ Reported as "only with poison". It is not type-specific: Poison appears once in
+-- this file, for an icon atlas, and no dispel colour carries its own alpha. Green
+-- just swallows a cyan absorb most completely -- the absorb was under the wash for
+-- every type, and only the BLEND/ADD difference made it obvious.
+-- ☠ THE STYLE GATE IS NOT OPTIONAL. "Show On Current Health Only" is a FULL-style
+-- setting; the EDGE styles ignore it and always span the whole bar. The first cut of
+-- this function tested the checkbox alone, so Top Edge with the box still ticked --
+-- which is the shipped default, and invisible in the UI because the option does not
+-- apply to that style -- dropped the wash to the low band and the absorb bar at +11
+-- covered it. The edge band rendered over the health and vanished across the absorb
+-- (field-caught, Krathe). This condition MUST stay byte-identical to the layout's own
+-- (`gradientStyle == "FULL" and ...`), or the level and the geometry disagree again.
+--
+-- ☠☠ THE BASE IS THE FRAME, never whatever the gradient happens to be parented to.
+-- Everything else in the ladder is frame + N (Bars.lua). The wash was the one
+-- exception: <its own parent>:GetFrameLevel() + N. That parent is chosen ONCE, in
+-- BuildDispelOverlayWidget, and it is the health bar's pulse box (frame+3) only when
+-- frame.healthBar already exists. healthBar is nil for a pass during init (the slot
+-- path documents that window itself), the gradient family then falls back to `overlay`
+-- at frame+16, and the wash sits at frame+30 for the life of that frame -- over the
+-- resource bar, over the icons, over everything, in BOTH modes. Two frames, identical
+-- settings, one broken and its neighbour fine, decided purely by build order
+-- (field-caught, Krathe). Measuring from the frame removes the dependency rather than
+-- adding another number to compensate for it.
+function DF:ResolveDispelGradientLevel(frameLevel, db)
+    local style = (db and db.dispelGradientStyle) or "FULL"
+    local onCurrentHealth = style == "FULL"
+        and db and db.dispelGradientOnCurrentHealth ~= false
+    return (frameLevel or 0) + (onCurrentHealth and 4 or 17)
+end
+
 local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     local overlay = CreateFrame("Frame", nil, host)
     overlay:SetAllPoints(host)
@@ -658,11 +705,53 @@ local function ApplyOverlayLayout(overlay, db, frame)
         -- a mismatch between the two decisions shows different coverage in the
         -- preview than in a group.
         --
+        -- ★ The level follows the option, every layout pass. Creation picks a default
+        -- before any db is in scope, so this is where the two modes actually diverge.
+        -- ☠ Base it on the FRAME, not on overlay.gradient's parent -- that parent is
+        -- whichever host existed at build time and is frame+16 instead of frame+3 when
+        -- the widget was built before frame.healthBar (see ResolveDispelGradientLevel).
+        -- `overlay`'s own parent is the host the widget was built on, which is the frame
+        -- on this path, so it is the correct fallback when no frame was passed in.
+        local levelHost = frame or overlay:GetParent()
+        overlay.gradient:SetFrameLevel(
+            DF:ResolveDispelGradientLevel(levelHost and levelHost:GetFrameLevel() or 0, db))
+
         if onCurrentHealth and frame then
-            -- Position gradient to match health bar
-            overlay.gradient:SetAllPoints(gradientParent)
-            if overlay.gradientDarken then
-                overlay.gradientDarken:SetAllPoints(gradientParent)
+            -- ☠ ANCHOR TO THE HEALTH BAR, NOT THE FULL-FRAME PROXY.
+            -- dfGradientAnchorProxy spans the whole padded frame ON PURPOSE: "Clip
+            -- Health Bar" shrinks the healthBar to the un-reduced portion, and an EDGE
+            -- gradient that shrank with it stopped short of the frame edge (live-caught,
+            -- Top Edge). That reasoning is right for the edge styles and wrong here.
+            --
+            -- "Show On Current Health Only" means the wash marks the CURRENT HEALTH, and
+            -- the reduced-max region is by definition not health -- it is max health that
+            -- has been taken away. With the proxy the wash spanned it anyway and bled
+            -- through the reduced bar's striped texture, so the region read as tinted
+            -- (field-caught with Clip Health Bar ON; with it off the two rects coincide,
+            -- which is why the setting looked like the trigger).
+            -- The clipped healthBar already IS "the health", so anchoring to it gets the
+            -- reduced region excluded for free and stays correct when the user toggles
+            -- clipping.
+            --
+            -- ⚠ Falls back to the proxy if there is no healthBar or the anchor is
+            -- refused: on the 12.1 slot path the carrier's anchor chain must terminate at
+            -- the aura button (see the proxy's own note), and a wash one region too wide
+            -- beats a wash that fails to render.
+            local healthAnchor = frame.healthBar
+            local anchored = false
+            if healthAnchor then
+                anchored = pcall(function()
+                    overlay.gradient:SetAllPoints(healthAnchor)
+                    if overlay.gradientDarken then
+                        overlay.gradientDarken:SetAllPoints(healthAnchor)
+                    end
+                end)
+            end
+            if not anchored then
+                overlay.gradient:SetAllPoints(gradientParent)
+                if overlay.gradientDarken then
+                    overlay.gradientDarken:SetAllPoints(gradientParent)
+                end
             end
             
             -- Match health bar orientation and fill direction
@@ -1339,7 +1428,16 @@ local function EnsureSlotWidget(btn, frame)
         -- +13/+14 clears both (frame+16/+17) and still sits under the resource bar at 20
         -- and the content overlay at 25. (Z-order review, 2026-08-07.)
         w:SetFrameLevel(hbLvl + 13)
-        w.gradient:SetFrameLevel(hbLvl + 14)
+        -- ★ The GRADIENT's level is not fixed: it follows "Show On Current Health Only"
+        -- (see DF:ResolveDispelGradientLevel). Full frame lands at frame+17 and covers the
+        -- band; current-health drops to frame+4, under absorb / heal prediction /
+        -- reduced-max so those stay readable. The widget frame above keeps +13 either way
+        -- -- it carries the ring and icons, not the wash.
+        -- ☠ `base`, not `hbLvl`: the resolver's offsets are measured from the FRAME now,
+        -- so passing the health bar's level would land the wash three levels high.
+        w.gradient:SetFrameLevel(DF:ResolveDispelGradientLevel(base,
+            (frame.isRaidFrame and DF.GetRaidDB and DF:GetRaidDB())
+            or (DF.GetDB and DF:GetDB())))
         if w.borderRingHost then w.borderRingHost:SetFrameLevel(base + 7) end   -- legacy overlay(+6)+1
         local iconLevel = ((frame.contentOverlay and frame.contentOverlay:GetFrameLevel())
             or (base + 25)) + 1                -- legacy contentOverlay+26
