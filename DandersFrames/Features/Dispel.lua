@@ -1620,6 +1620,25 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         end
         w.nativeGradient:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
         w.nativeGradient:SetAllPoints(btn)
+        -- ☠ BORN WITH THE USER'S COSMETICS, because birth is usually MID-COMBAT.
+        -- This init is the only hook that runs at slot creation (the header above says
+        -- why), and the style pass that applies opacity/blend is version-gated AND
+        -- out-of-combat only. A texture defaults to alpha 1 and BLEND — so every slot
+        -- whose first dispellable debuff landed in combat rendered at FULL brightness,
+        -- ignoring the Gradient Opacity slider until a pass after regen, by which time
+        -- the debuff was gone. That is the live lane's entire experience of the
+        -- feature: dispellable debuffs arrive in combat.
+        -- Field-proof it was the LANE and not the data: same profile, test mode obeyed
+        -- the slider (its legacy widget repaints per update), live sat at 100%
+        -- (Krathe, 2026-08-13; matches Jaidy's report). The earlier "both lanes read
+        -- the same resolver, so the difference is the data" claim was falsified by
+        -- exactly that observation.
+        -- Expressions mirror StyleGameMainSlot verbatim — the gradient carrier exists
+        -- even when Show Gradient is off (show/hide is a live tunable via alpha 0), so
+        -- the show term must ride along. Later slider edits still land through the
+        -- style pass; this covers the window it cannot reach.
+        w.nativeGradient:SetBlendMode(db.dispelGradientBlendMode or "ADD")
+        w.nativeGradient:SetAlpha(db.dispelShowGradient ~= false and ResolveGradientAlpha(db) or 0)
         carriers[#carriers + 1] = { tex = w.nativeGradient }
         -- Name the gradient carrier explicitly. StyleGameMainSlot must dress THIS one;
         -- addressing it as "the bound carrier" only worked while a slot held exactly one,
@@ -1639,6 +1658,11 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
             local tex = holder:CreateTexture(nil, "ARTWORK", nil, 2)
             tex:SetTexture(EDGE_GRADIENT_TEXTURES[edge])
             tex:SetAllPoints(btn)   -- anchored for the bind; StyleGameEdgeSlot positions the strip
+            -- Born with the user's blend + opacity (mirror StyleGameEdgeSlot) — see the
+            -- gradient carrier above for why: creation is usually mid-combat and the
+            -- style pass cannot reach it until regen.
+            tex:SetBlendMode(db.dispelGradientBlendMode or "ADD")
+            tex:SetAlpha(ResolveGradientAlpha(db))
             btn.dfDispelEdgeHolder[edge] = holder
             btn.dfDispelEdgeTex[edge] = tex
             carriers[#carriers + 1] = { tex = tex }
@@ -1653,6 +1677,9 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         local ring = holder:CreateTexture(nil, "ARTWORK")
         ring:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_SquareBorder")
         ring:SetAllPoints(btn)   -- anchored for the bind; StyleGameBorderSlot crops/insets
+        -- Born with the user's Border Opacity (mirror StyleGameBorderSlot) — the
+        -- mid-combat-creation reasoning on the gradient carrier above.
+        ring:SetAlpha(db.dispelBorderAlpha or 0.8)
         btn.dfDispelRing = ring
         btn.dfDispelRingHolder = holder
         carriers[#carriers + 1] = { tex = ring }
@@ -1678,6 +1705,9 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
             or (frame:GetFrameLevel() + 25)) + 1)
         local badge = holder:CreateTexture(nil, "OVERLAY")
         badge:SetAllPoints(btn)   -- anchored for the bind; StyleGameBadge sizes/places it
+        -- Born with the user's Symbol Opacity (mirror StyleGameBadge) — the
+        -- mid-combat-creation reasoning on the gradient carrier above.
+        badge:SetAlpha(db.dispelIconAlpha or 1)
         btn.dfDispelBadge = badge
         btn.dfDispelBadgeHolder = holder
         carriers[#carriers + 1] = { tex = badge, opts = BadgeCarrierOptions() }
