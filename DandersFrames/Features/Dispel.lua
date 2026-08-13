@@ -905,7 +905,15 @@ end
 -- silently dimming. It cannot double-apply -- the fold and the nil are one call.
 function DF:ResolveDispelGradientAlpha(db)
     if not db then return 1.0 end
-    return math.min((db.dispelGradientAlpha or 1) * (db.dispelGradientIntensity or 1.0), 1.0)
+    -- ☠ NO INTENSITY TERM. It was `min(alpha * intensity, 1)` — and intensity has ALREADY
+    -- been multiplied into alpha by the v5 fold (Core.lua DropDispelCustomMode), so any
+    -- profile that still carried the key had it applied TWICE. With v4's 2.6 default that
+    -- clamps to 1.0 from alpha ~0.385 up, i.e. the Gradient Opacity slider did nothing
+    -- across most of its range and the wash rendered at full brightness.
+    -- The fold now clears the key in the same block that consumes it, so this term could
+    -- only ever double-apply again. Removed rather than left as a "safe fallback": a
+    -- fallback that re-applies a value already folded in is not safety, it is the bug.
+    return math.min(db.dispelGradientAlpha or 1, 1.0)
 end
 
 local function ResolveGradientAlpha(db)

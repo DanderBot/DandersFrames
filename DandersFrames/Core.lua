@@ -5574,16 +5574,34 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- skip exactly the profiles it exists to repair; gating it on its own flag
             -- keeps it idempotent while still reaching a v4 profile that arrives later
             -- (fresh install, import, or a profile that has never been loaded on v5).
+            -- ☠☠ THE NIL BELONGS HERE, WITH THE FOLD. It used to sit below the
+            -- _dispelCustomRemovedV5 early return, and the comment above explains exactly
+            -- why that could not work: every existing v5 alpha tester ALREADY has
+            -- _dispelCustomRemovedV5 = true. So the fold ran, set its own flag, and then
+            -- returned before the nil — leaving dispelGradientIntensity in the profile
+            -- with its value ALREADY multiplied into dispelGradientAlpha.
+            --
+            -- ResolveDispelGradientAlpha then computed min(alpha * intensity, 1) a SECOND
+            -- time on every render. With v4's 2.6 default that clamps to 1.0 for any alpha
+            -- at or above ~0.385 — so the Gradient Opacity slider (0.1..1.0 in 0.1 steps)
+            -- rendered IDENTICALLY at full brightness from 0.4 upward, and a user who set
+            -- 0.25 got 0.65. Reported as "adjusting the gradient opacity doesn't change
+            -- anything" plus "it's so incredibly bright", by someone who needs the glare
+            -- down for an accessibility reason (Jaidy, 2026-08-13).
+            --
+            -- Whether a profile was affected depended purely on migration history — which
+            -- is why it reproduced for one person and not another, and why test mode
+            -- looked fine on a profile whose key had already been cleared.
             if not modeDb._dispelGradientIntensityFoldedV5 then
                 if type(modeDb.dispelGradientIntensity) == "number" then
                     modeDb.dispelGradientAlpha = math.min(
                         (modeDb.dispelGradientAlpha or 1) * modeDb.dispelGradientIntensity, 1.0)
                 end
+                modeDb.dispelGradientIntensity = nil   -- consumed by the fold; never read again
                 modeDb._dispelGradientIntensityFoldedV5 = true
             end
             if modeDb._dispelCustomRemovedV5 then return end
             modeDb.dispelOverlayColorSource = nil
-            modeDb.dispelGradientIntensity = nil
             modeDb.dispelMagicColor = nil
             modeDb.dispelCurseColor = nil
             modeDb.dispelDiseaseColor = nil
