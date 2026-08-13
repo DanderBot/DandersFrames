@@ -13,6 +13,9 @@
 * (Pet Frames) Pet frames no longer hide behind neighbouring frames' health bars, and their position and size settings apply immediately when typed in - including in test mode.
 * (Click-Casting) Spells in the binding picker sort into the right Spec/Class/General sections on every language.
 * (Filter Designer) Fix errors when opening the Filter Designer during combat.
+* (Frames) Aura icons no longer linger on dead players; they clear on death and return refreshed on revival.
+* (Pinned Frames) Story-mode NPC companions no longer show a missing-buff icon for buffs they cannot receive.
+* (Pinned Frames) Buff, debuff and defensive icon settings apply to pinned frames immediately instead of waiting for the next aura change.
 
 ## [5.1.1]
 
