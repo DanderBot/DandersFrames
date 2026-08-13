@@ -6951,41 +6951,54 @@ DF._MainEventDispatcher = function(self, event, arg1)
                             tostring(db2 and db2.dispelGradientAlpha),
                             tostring(db2 and DF.ResolveDispelGradientAlpha and DF:ResolveDispelGradientAlpha(db2))))
                         for key, btn in pairs(slots) do
-                            local wdg = btn.dfDispelWidget
-                            if wdg then
-                                o:Line(("slot[%s] widget shown=%s lvl=%s tracks=%s"):format(
-                                    tostring(key), tostring(wdg:IsShown()), tostring(wdg:GetFrameLevel()),
-                                    tostring(wdg.gradientTracksHealth)))
-                                dumpBar("slot.gradient", wdg.gradient, frame)
-                                dumpTex("slot.nativeGradient", wdg.nativeGradient)
-                                pcall(function()
+                            -- ☠ PLAIN LUA FIELDS FIRST, WIDGET CALLS GUARDED. Running this
+                            -- IN COMBAT threw "calling 'IsShown' on bad self ... forbidden
+                            -- object" — which is itself a finding: while auras are secret,
+                            -- even READS on the slot widget hierarchy are forbidden to
+                            -- addon code, not just writes. So the fields that are ours
+                            -- (latches, error stamps, carrier count) print unconditionally,
+                            -- and every widget/texture method call rides one pcall that
+                            -- degrades to a FORBIDDEN line instead of killing the dump at
+                            -- the exact moment it is most needed.
+                            o:Line(("slot[%s] styleErr=%s bind=%s carriers=%s"):format(
+                                tostring(key), tostring(btn._dfDispelStyleErr),
+                                tostring(DF._dispelBindErr and DF._dispelBindErr[key]),
+                                tostring(btn._dfDispelCarriers and #btn._dfDispelCarriers)))
+                            local okSlot = pcall(function()
+                                local wdg = btn.dfDispelWidget
+                                if wdg then
+                                    o:Line(("slot[%s] widget shown=%s lvl=%s tracks=%s"):format(
+                                        tostring(key), tostring(wdg:IsShown()), tostring(wdg:GetFrameLevel()),
+                                        tostring(wdg.gradientTracksHealth)))
+                                    dumpBar("slot.gradient", wdg.gradient, frame)
+                                    dumpTex("slot.nativeGradient", wdg.nativeGradient)
                                     local ng = wdg.nativeGradient
-                                    if not ng then return end
-                                    local nPts = ng:GetNumPoints()
-                                    local _, relTo = ng:GetPoint(1)
-                                    local relName = "?"
-                                    if relTo == btn then relName = "btn"
-                                    elseif relTo == wdg.gradient then relName = "gradRect"
-                                    elseif frame.healthBar and relTo == frame.healthBar:GetStatusBarTexture() then relName = "healthFill"
-                                    elseif relTo == wdg then relName = "widget"
-                                    elseif relTo == nil then relName = "nil" end
-                                    o:Line(("slot[%s] carrier points=%s rel=%s styleErr=%s bind=%s"):format(
-                                        tostring(key), tostring(nPts), relName,
-                                        tostring(btn._dfDispelStyleErr),
-                                        tostring(DF._dispelBindErr and DF._dispelBindErr[key])))
-                                end)
-                            end
-                            if btn.dfDispelRing then dumpTex("slot[" .. tostring(key) .. "].ring", btn.dfDispelRing) end
-                            -- Edge strips are keyed BY SIDE now (all four ride the one
-                            -- overlay slot since the carriers were consolidated).
-                            if type(btn.dfDispelEdgeTex) == "table" then
-                                for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
-                                    local et = btn.dfDispelEdgeTex[side]
-                                    if et then dumpTex("slot[" .. tostring(key) .. "].edge" .. side, et) end
+                                    if ng then
+                                        local nPts = ng:GetNumPoints()
+                                        local _, relTo = ng:GetPoint(1)
+                                        local relName = "?"
+                                        if relTo == btn then relName = "btn"
+                                        elseif relTo == wdg.gradient then relName = "gradRect"
+                                        elseif frame.healthBar and relTo == frame.healthBar:GetStatusBarTexture() then relName = "healthFill"
+                                        elseif relTo == wdg then relName = "widget"
+                                        elseif relTo == nil then relName = "nil" end
+                                        o:Line(("slot[%s] carrier points=%s rel=%s"):format(
+                                            tostring(key), tostring(nPts), relName))
+                                    end
                                 end
-                            end
-                            if btn._dfDispelCarriers then
-                                o:Line(("slot[%s] bound carriers=%d"):format(tostring(key), #btn._dfDispelCarriers))
+                                if btn.dfDispelRing then dumpTex("slot[" .. tostring(key) .. "].ring", btn.dfDispelRing) end
+                                -- Edge strips are keyed BY SIDE now (all four ride the one
+                                -- overlay slot since the carriers were consolidated).
+                                if type(btn.dfDispelEdgeTex) == "table" then
+                                    for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+                                        local et = btn.dfDispelEdgeTex[side]
+                                        if et then dumpTex("slot[" .. tostring(key) .. "].edge" .. side, et) end
+                                    end
+                                end
+                            end)
+                            if not okSlot then
+                                o:Line(("slot[%s] widget state FORBIDDEN (in combat / auras secret) — run again out of combat for carrier alpha/anchors"):format(
+                                    tostring(key)), "neutral")
                             end
                         end
                     end
