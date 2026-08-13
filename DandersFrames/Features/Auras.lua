@@ -379,10 +379,28 @@ local function BuildDirectDebuffFilters(db, claimed)
             filters[#filters + 1] = { filter = "HARMFUL", key = "dispel", candidateFilters = cf }
         end
     end
+    -- ★ NON-PLAYER: everything the engine says no player or player pet applied.
+    -- ☠ THIS CANNOT BE A TOKEN. `!PLAYER` negates only YOUR OWN casts, so every other
+    -- player's Sated / Exhaustion / Forbearance still comes through — which is precisely
+    -- the noise this category exists to remove. The candidate boolean is engine-evaluated
+    -- against the real caster, so isFromPlayerOrPlayerPet = false is the only way to say
+    -- "applied by nobody in the group".
+    -- ⚠ The field name reads like "the player" and means "A player" — it matches ANY
+    -- player's casts, not just yours. Hence false = "no player at all" rather than "not
+    -- me", and hence it is not interchangeable with the PLAYER token.
+    -- ⚠ No claim key yet: an Aura Designer group cannot claim this category, so the
+    -- record always builds when the option is on. Add one beside the others if a group
+    -- ever needs to take it over.
+    if db.debuffFilterNonPlayer then
+        filters[#filters + 1] = { filter = "HARMFUL", key = "nonplayer",
+                                  candidateFilters = cfFor(false,
+                                      notImportant({ isFromPlayerOrPlayerPet = false })) }
+    end
     if #filters == 0 then
         -- Claims emptied a NON-empty selection: EMPTY array = render nothing
         -- (DriveDebuffFactory intercepts — see the header comment).
-        if claimed and (boss or role or db.debuffFilterPriority or ccToken or raidOn or dispelOn) then
+        if claimed and (boss or role or db.debuffFilterPriority or ccToken or raidOn or dispelOn
+                        or db.debuffFilterNonPlayer) then
             return filters
         end
         return nil  -- nothing selected: safe fallback = show all

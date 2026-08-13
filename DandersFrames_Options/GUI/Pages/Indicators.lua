@@ -776,6 +776,10 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 { key = "debuffFilterPriority",     name = "Priority Debuffs",    desc = "Debuffs Blizzard flags as high priority." },
                 { key = "debuffFilterCrowdControl", name = "Crowd Control",       desc = "CC effects like stuns, roots, and incapacitates." },
                 { key = "debuffFilterRaid",         name = "Raid Debuffs",        desc = "Other debuffs Blizzard flags for raid frames." },
+                -- ⚠ Inserted BEFORE Dispellable, not appended: the entry below claims the
+                -- dispel-mode dropdown is "just below", which is only true while it is the
+                -- last row in this group.
+                { key = "debuffFilterNonPlayer",    name = "Non-Player Debuffs",  desc = "Debuffs applied by enemies and the environment, never by a player or their pet. Use it to keep boss and trash effects while dropping player-cast clutter such as Sated or Forbearance." },
                 -- ⚠ "just below" stays true on this page: the dispel-mode dropdown
                 -- is the next widget in this same group.
                 { key = "debuffFilterDispellable",  name = "Dispellable Debuffs", desc = "Debuffs that can be dispelled. Which dispels count is set just below." },

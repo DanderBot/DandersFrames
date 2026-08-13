@@ -1502,6 +1502,11 @@ DF.PartyDefaults = {
     debuffFilterCrowdControl = true,          -- Crowd control (CROWD_CONTROL token)
     debuffFilterRaid = false,                 -- Other raid-flagged debuffs (RAID token)
     debuffFilterDispellable = true,           -- Dispellable debuffs (mode below)
+    -- Non-player debuffs (isFromPlayerOrPlayerPet = false — see BuildDirectDebuffFilters).
+    -- ☠ DEFAULTS OFF. Every other category here is a filter over what already renders, but
+    -- this one ADDS a record, so defaulting it on would put new icons on every existing
+    -- user's frames the moment they updated.
+    debuffFilterNonPlayer = false,
     -- IMPORTANT DEBUFF HIGHLIGHT. Boss/role and priority auras already render as their
     -- OWN aura groups (keys "bossrole"/"priority" in BuildDirectDebuffFilters) and those
     -- groups are declared first, so they already lead the row. These keys style them.
