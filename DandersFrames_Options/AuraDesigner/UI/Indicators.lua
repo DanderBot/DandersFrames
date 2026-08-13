@@ -272,7 +272,20 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
 
                 for _, id in ipairs(idList) do
                     local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id)
-                    local label = (name and (name .. "  |cff808080" .. id .. "|r")) or tostring(id)
+                    -- ★ THE ICON IS THE DISAMBIGUATOR. The case this section exists for often
+                    -- has both ids under the SAME NAME (Angelic Bulwark 114214/114216), so a
+                    -- name + number row leaves the player guessing which is which. The art is
+                    -- usually the thing they recognise -- and where two ids share a name AND
+                    -- an icon, seeing that they match is itself the answer.
+                    -- Inline |T escape rather than a texture widget: the label is a plain
+                    -- fontstring, so this needs no change to the checkbox factory and cannot
+                    -- disturb the row height the factory owns.
+                    -- 64px source cropped 5..59 is the standard trim that removes an icon's
+                    -- built-in border; without it every row shows a grey frame around the art.
+                    local tex = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id)
+                    local iconStr = tex and ("|T" .. tex .. ":14:14:0:0:64:64:5:59:5:59|t ") or ""
+                    local label = iconStr ..
+                        ((name and (name .. "  |cff808080" .. id .. "|r")) or tostring(id))
                     local cb
                     cb = GUI:CreateCheckbox(parent, label, nil, nil, nil,
                         -- get: ticked = TRACKED, stored = MUTED. The store is inverted
