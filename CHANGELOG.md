@@ -5,6 +5,9 @@
 ### Bug Fixes
 
 * (Aura Designer) Fix placed indicators always showing tooltips (and blocking clicks) no matter what the tooltip settings said.
+* (Aura Designer) Fix icons not filling their configured size when Show Border is off.
+* (Pinned Frames) NPC frames follow their configured health colours again instead of rendering grey.
+* (Test Mode) Fix disabled elements (borders, duration bars, timers, stack counts, dispel text) sticking to the preview icons until a reload.
 
 ## [5.1.1]
 
