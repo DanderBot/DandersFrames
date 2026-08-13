@@ -4554,17 +4554,35 @@ end
 -- but it is the same latent bug and worth a look.)
 -- Fail-open on a refused or secret read, matching every other probe in this gate: any
 -- doubt SHOWS.
--- ★ DELIBERATELY NOT PROBED: connection state and dead/ghost.
--- A peer's gate additionally requires UnitIsConnected and not UnitIsDeadOrGhost before
--- treating a unit as identity-sound. That is a DIFFERENT POLICY, not a gap we have: they
--- hide whenever identity is doubtful; this gate hides only where the engine demonstrably
--- drops the filter. Neither state does that — an offline or dead unit has no aura data
--- streaming, so there is no pool to fail open, and UnitCanAssist stays true for both (you
--- can still rez and still assist a corpse). Adding them would blank correctly-filtered
--- rows for every dead raider in a wipe, which is a false positive of exactly the kind
--- this gate exists to avoid.
--- ⇒ If either is ever added, it needs a live repro showing unfiltered auras on an
--- offline/dead unit first. Presence in someone else's implementation is not evidence.
+-- ★ DISCONNECTED and DEAD/GHOST — two more states with no identity to filter on.
+--
+-- ☠ THESE WERE EXCLUDED EARLIER THE SAME DAY AND THE REASONING WAS WRONG. It ran:
+-- "an offline or dead unit has no aura data streaming, so there is no pool to fail open."
+-- Ghost auras stream. A user reported unfiltered debuffs on players who had died and were
+-- carrying the ghost aura (Discord, 2026-08-13) — which is exactly the evidence that
+-- exclusion named as the condition for reversing it, so it is reversed here rather than
+-- argued with. ★ Worth keeping as the shape of the mistake: the claim was about the
+-- ENGINE's behaviour and was reasoned out rather than measured, in a file where that has
+-- now cost a full day.
+--
+-- ⚠ NON-SELF ONLY, matching the assist probe's own shape. Your own frame while dead is
+-- still yours to read, and blanking it is the failure the original isOwn exemption was
+-- written to prevent.
+-- ⚠ Accepted cost, Krathe's call with the tradeoff stated: filtered rows go EMPTY for
+-- every corpse in a wipe. They currently render unfiltered, so empty is the better
+-- failure — but it is a visible change, not a silent one.
+-- Fail-open on a refused or secret read, like every other probe in this gate.
+local function IdentityUnavailable(unit)
+    local okC, connected = pcall(UnitIsConnected, unit)
+    if okC and not (issecretvalue and issecretvalue(connected)) and connected == false then
+        return true
+    end
+    local okD, dead = pcall(UnitIsDeadOrGhost, unit)
+    if okD and not (issecretvalue and issecretvalue(dead)) and dead == true then
+        return true
+    end
+    return false
+end
 local function SelfIsUsingVehicle(unit)
     if not unit then return false end
     local okSame, same = pcall(UnitIsUnit, unit, "player")
@@ -4620,6 +4638,11 @@ function Handle:_applyIdentityGate()
                     -- and re-parses. Setting `hide` alone would hide correctly and never
                     -- rebuild the pool.
                     if can and SelfIsUsingVehicle(unit) then can = false end
+                    -- ★ Disconnected / dead / ghost — see IdentityUnavailable. Folded
+                    -- into `can` like the vehicle probe, so a rez or a reconnect is a
+                    -- real false→true edge and re-parses the pool rather than just
+                    -- un-hiding a stale one.
+                    if can and not isOwn and IdentityUnavailable(unit) then can = false end
                     self:_noteGateRecovery(can)
                     -- ☠ NOT `and not isOwn` — see the block above. Cinematics are the
                     -- latch's job; this branch is what covers a vehicle.
@@ -6250,6 +6273,11 @@ function SlotHandle:_applyIdentityGate()
                     if issecretvalue and issecretvalue(can) then can = true end
                     -- ★ Boarding window — see SelfIsUsingVehicle and the Handle twin.
                     if can and SelfIsUsingVehicle(unit) then can = false end
+                    -- ★ Disconnected / dead / ghost — see IdentityUnavailable. Folded
+                    -- into `can` like the vehicle probe, so a rez or a reconnect is a
+                    -- real false→true edge and re-parses the pool rather than just
+                    -- un-hiding a stale one.
+                    if can and not isOwn and IdentityUnavailable(unit) then can = false end
                     self:_noteGateRecovery(can)
                     if not can then hide = true end
                 end
