@@ -2,8 +2,15 @@
 
 ## [5.1.2]
 
+### New Features
+
+* (Indicators) Defensive icons can now show a stack count, with its own font, size, and colour settings. (by Krathe)
+
 ### Bug Fixes
 
+* (Aura Designer) Fix wrong buffs flooding placed indicators while in a vehicle, phased far away, dead, or disconnected. (by Krathe)
+* (Dispel Highlight) "Show On Current Health Only" now tints just the health bar instead of washing over the absorb bar and icons above it. (by Krathe)
+* (Frames) Fix health, absorb, heal prediction, and resource bars occasionally stacking in the wrong order. (by Krathe)
 * (Aura Designer) Fix placed indicators always showing tooltips (and blocking clicks) no matter what the tooltip settings said.
 * (Aura Designer) Fix icons not filling their configured size when Show Border is off.
 * (Pinned Frames) NPC frames follow their configured health colours again instead of rendering grey.
