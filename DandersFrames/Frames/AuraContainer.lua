@@ -1941,6 +1941,27 @@ local FLOW_NAME = { RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down" }
 -- single-row case lands where the legacy pass put it. Multi-row blocks fill from
 -- the box corner (flow order) rather than centring each row individually —
 -- accepted approximation, the flow owns button placement.
+-- ★ THE ONE PLACE THE LAYOUT STRIDE IS DEFINED. Published on DF because the Aura
+-- Designer's editor preview needs the identical answer: it used to compute its own, in
+-- TWO different ways (one of which dropped `scale` outright), so a group with any scale
+-- other than 1.0 previewed at a stride the live frame never used. Reported as "preview
+-- is not staying true to the actual frame", and the reporter isolated it themselves:
+-- "setting icon scale to 1.0 seems to fix the spacing" (2026-08-13).
+-- ☠ Offsets computed from this live in the BUTTON'S SCALED SPACE -- callers must
+-- SetScale(scale) the positioned frame, or the stride renders at the wrong size. That
+-- coupling is why this returns the step rather than a finished position: the caller still
+-- owns the scale it applies, and the two have to agree.
+--   preScaledStep ~= false : stepX = size*scale + spacing  (buff/debuff/AD rows)
+--   preScaledStep == false : stepX = size + spacing        (legacy defensive stride)
+function DF:ResolveAuraLayoutStep(sizeX, sizeY, spacingX, spacingY, scale, preScaledStep)
+    scale = tonumber(scale) or 1
+    if preScaledStep == false then
+        return sizeX + spacingX, sizeY + spacingY
+    end
+    return sizeX * scale + spacingX, sizeY * scale + spacingY
+end
+
+
 local function resolveGrowthLayout(L)
     local sx = (L.sizeX or L.size or 32)
     local sy = (L.sizeY or L.size or sx)
@@ -2337,14 +2358,7 @@ local function layoutRow(handle)
     -- preScaledStep=false (defensive row) uses the legacy DEFENSIVE stride: the icon-size term
     -- is UNSCALED, so — offsets living in the button's scaled space — the rendered stride is
     -- (size+spacing)*scale and the gap is spacing*scale (no double-scale of the size term).
-    local stepX, stepY
-    if L.preScaledStep == false then
-        stepX = sx + spX
-        stepY = sy + spY
-    else
-        stepX = sx * scale + spX
-        stepY = sy * scale + spY
-    end
+    local stepX, stepY = DF:ResolveAuraLayoutStep(sx, sy, spX, spY, scale, L.preScaledStep)
     for i, b in ipairs(handle.buttons) do
         local idx = i - 1
         local col = idx % wrap

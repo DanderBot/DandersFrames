@@ -2017,6 +2017,15 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
         end
         cfg.testEntries = entries
     end
+    -- ☠ KNOWN DIVERGENCE, deliberately left: this placeholder ignores icon SCALE
+    -- entirely -- here in the stride, and above in the slot's own box size. The live
+    -- stride is DF:ResolveAuraLayoutStep(size, .., scale), so any group at a scale other
+    -- than 1.0 draws its placeholder at the wrong stride and the wrong box.
+    -- NOT fixed inline because there is no single right answer available here: the
+    -- function receives only `group`, and a group's MEMBERS can each carry their own
+    -- scale, so "the group's scale" has to be decided before it can be plumbed. Wiring
+    -- just this line while the box stayed unscaled would look like a fix and shift the
+    -- mismatch rather than remove it.
     local step = iconSize + spacing
     local xSign = (horiz == "RIGHT") and -1 or 1
     local ySign = (vert == "TOP") and -1 or 1
@@ -2123,7 +2132,12 @@ local function RefreshPlacedIndicators()
                     end
                     local size = (indCfg and indCfg.size) or (adDB.defaults and adDB.defaults.iconSize) or 24
                     local scale = (indCfg and indCfg.scale) or (adDB.defaults and adDB.defaults.iconScale) or 1.0
-                    local step = (size * scale) + (group.spacing or 2)
+                    -- ☠ Was this arithmetic inline. Identical answer today, but it
+                    -- was a SECOND copy of the stride rule -- the pair had already drifted
+                    -- apart once (the other copy ignored scale), so both now ask the live
+                    -- resolver instead of agreeing by coincidence.
+                    local step = DF:ResolveAuraLayoutStep(size, size,
+                        group.spacing or 2, group.spacing or 2, scale, nil)
 
                     local growth = group.growDirection or "RIGHT"
                     local primary, secondary = strsplit("_", growth)
