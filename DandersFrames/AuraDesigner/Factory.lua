@@ -964,7 +964,7 @@ local function buildHealthFillConfig(unit, map, r, g, b, alpha, texture, clampTo
         filter = filter or "HELPFUL",
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
-        frameLevelOffset = AD_HEALTHBAR_COVER_OFFSET,
+        frameLevelOffset = (opts and opts.levelOffset) or AD_HEALTHBAR_COVER_OFFSET,
         style = { overlay = { healthFill = {
             texture = texture, color = { r, g, b }, alpha = alpha, clampTo = clampTo,
         },
@@ -4853,13 +4853,14 @@ local function syncTintFamily(tints, tstore, store, orderKey, spec, syncOne)
     for i = 1, #tints do
         local s = tints[i]
         s.sublevel = math.max(1, 7 - (n - i))
+        s.rank = i
         if forceFrom then
             -- Ladder repair: an earlier tint took a fresh draw index this pass, so every
             -- later non-chained tint must be recreated to land back above it.
             local e = tstore[s.key]
             if e and not e.chain then destroyEntry(e); tstore[s.key] = nil end
         end
-        local kept, created = syncOne(s.key, s.cfg, s.map, s.mine, s.key == missingKey, s.sublevel)
+        local kept, created = syncOne(s.key, s.cfg, s.map, s.mine, s.key == missingKey, s.sublevel, s.rank)
         if kept then keep[s.key] = true end
         if created and not forceFrom then forceFrom = i end
     end
@@ -4881,15 +4882,31 @@ local function resolvePandemicGate(cfg)
     return (AC and AC.HasPandemic and AC.HasPandemic()) and true or false
 end
 
-local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine, asMissing, sublevel)
+local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine, asMissing, sublevel, rank)
     local filt = poolFilter(cfg, resolvePoolMode(spec, key, frame, mine))
     local pdOnly = resolvePandemicGate(cfg)
+    -- ☠ FRAME LEVEL IS THE ONLY THING THAT ORDERS THESE. Creation order does not (frames
+    -- at equal level have no guaranteed order) and neither does the draw-layer sublevel
+    -- (it only orders within ONE frame). Both were tried and both failed the same way in
+    -- game: whichever buff was CAST FIRST stayed on top, because Blizzard creates each
+    -- container's button when its aura lands — a moment no config-time ordering controls.
+    --
+    -- The headroom is real, contrary to the note that used to sit on
+    -- AD_HEALTHBAR_COVER_OFFSET claiming the attached absorb sat at healthBar+2 with no
+    -- room above the cover. Measured from the code instead: healthBar is frame+3
+    -- (Create.lua) and the attached absorb resolves to frame+8
+    -- (DF:ResolveHealAbsorbBarLevel), so covers can occupy healthBar+1..+4 — four levels —
+    -- and still stay under the shield (#1027). Rank 1 is the lowest priority and keeps the
+    -- original seat, so a single tint renders exactly where it always did.
+    -- Beyond four stacked tints the top ones share the ceiling level and fall back to
+    -- cast order between themselves; four deep on one region is already unusual.
+    local lvlOffset = AD_HEALTHBAR_COVER_OFFSET + math.min((rank or 1) - 1, 3)
     -- ☠ CARRIED IN EVERY ApplyStyle PAYLOAD BELOW, not just at build. ApplyStyle REPLACES
     -- config.style wholesale, so a payload that omits these drops them — and Blizzard
     -- creates buttons in LAZY BATCHES, so the next button to arrive would be styled from
     -- the stripped copy: no sublevel, and (worse) no pandemic bind, silently ungating the
     -- wash. That is why the opts table is threaded through the restyle closures too.
-    local tintOpts = { pandemicOnly = pdOnly or nil, sublevel = sublevel }
+    local tintOpts = { pandemicOnly = pdOnly or nil, sublevel = sublevel, levelOffset = lvlOffset }
     -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
     -- the border consumer: a conjunction of presence gates does not express "while
     -- all of these are absent".
@@ -4904,9 +4921,9 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
         -- (and, one-link, a different rect) per condition SHAPE. Bug #1027.
         if wholeBar then
             local blend = healthbarBlend(mode, cfg.blend, a)
-            syncConditionChain(hb, key, healthBar, frame.unit, chainHB, filt, "flat" .. (pdOnly and "|pd" or ""),
+            syncConditionChain(hb, key, healthBar, frame.unit, chainHB, filt, "flat" .. (pdOnly and "|pd" or "") .. "|l" .. tostring(lvlOffset),
                 tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(sublevel) }, "|"),
-                function(m, f) return buildOverlayTintConfig(frame.unit, m, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, f, tintOpts) end,
+                function(m, f) return buildOverlayTintConfig(frame.unit, m, r, g, b, blend, lvlOffset, f, tintOpts) end,
                 function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend },
                     pandemicOnly = tintOpts.pandemicOnly, sublevel = tintOpts.sublevel } }) end,
                 AD_CHAIN_GATE_OFFSET)
@@ -4915,7 +4932,7 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
             local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
             local tex = (fdb and fdb.healthTexture) or "Interface\\TargetingFrame\\UI-StatusBar"
             local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
-            syncConditionChain(hb, key, healthBar, frame.unit, chainHB, filt, "cover" .. (pdOnly and "|pd" or ""),
+            syncConditionChain(hb, key, healthBar, frame.unit, chainHB, filt, "cover" .. (pdOnly and "|pd" or "") .. "|l" .. tostring(lvlOffset),
                 tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo), tostring(sublevel) }, "|"),
                 function(m, f) return buildHealthFillConfig(frame.unit, m, r, g, b, alpha, tex, clampTo, f, tintOpts) end,
                 function(h) h:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo },
@@ -4963,7 +4980,9 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
     -- structural: it picks a different config builder entirely.
     -- pdOnly is STRUCTURAL: the AddPandemicRegion bind needs secure context, so toggling
     -- it must hand over a fresh button rather than restyle in place.
-    local structSig = (wholeBar and "flat" or "cover") .. (pdOnly and "|pd" or "")
+    -- lvlOffset joins the sig: frameLevelOffset is read at Create, so a rank change (a
+    -- priority edit that reorders the stack) has to hand over a fresh container.
+    local structSig = (wholeBar and "flat" or "cover") .. (pdOnly and "|pd" or "") .. "|l" .. tostring(lvlOffset)
     local tuningSig = placedTuningSig(map, filt)
     local entry = hb[key]
     local created = false
@@ -4973,7 +4992,7 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
         local blend = healthbarBlend(mode, cfg.blend, a)
         local coSig = tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(sublevel) }, "|")
         if not entry then
-            local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt, tintOpts))
+            local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, map, r, g, b, blend, lvlOffset, filt, tintOpts))
             if handle then
                 hb[key] = { handle = handle, structSig = structSig,
                             tuningSig = tuningSig, coSig = coSig }
@@ -4981,12 +5000,12 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
             end
         elseif entry.structSig ~= structSig then
             entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-            entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt, tintOpts), structSig)
+            entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, lvlOffset, filt, tintOpts), structSig)
             created = true
         else
             if entry.tuningSig ~= tuningSig then
                 entry.tuningSig = tuningSig
-                entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt, tintOpts))
+                entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, lvlOffset, filt, tintOpts))
             end
             if entry.coSig ~= coSig then
                 entry.coSig = coSig
@@ -5042,6 +5061,11 @@ local function syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, a
     local pdOnly = resolvePandemicGate(cfg)
     -- Same contract as the health-bar twin: these ride every ApplyStyle payload.
     local tintOpts = { pandemicOnly = pdOnly or nil, sublevel = sublevel }
+    -- (No per-rank LEVEL here, unlike the health-bar twin: the background tint's band is
+    -- genuinely one level wide — its host parks at frame+0 and the cover lands at frame+2,
+    -- directly under the health/missing bars at frame+3. So stacked BACKGROUND tints still
+    -- fall back to cast order between themselves. Fixing that needs the bars to move, which
+    -- is a frame-wide z-order change and not worth it for the rarer surface.)
     -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
     -- the border consumer: a conjunction of presence gates does not express "while
     -- all of these are absent".
@@ -5278,8 +5302,8 @@ function Factory:SyncFrame(frame)
         local tints = collectFrameTints(spec, specAuras, otherAuras, "healthbar")
         if tints then
             syncTintFamily(tints, hb, store, "healthbarOrder", spec,
-                function(key, cfg, map, mine, asMissing)
-                    return syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine, asMissing)
+                function(key, cfg, map, mine, asMissing, sublevel, rank)
+                    return syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine, asMissing, sublevel, rank)
                 end)
         else
             -- No health-bar tints configured → the mirror bars are gone; drop the refs.
@@ -5305,8 +5329,8 @@ function Factory:SyncFrame(frame)
         local tints = collectFrameTints(spec, specAuras, otherAuras, "background")
         if tints then
             syncTintFamily(tints, bg, store, "backgroundOrder", spec,
-                function(key, cfg, map, mine, asMissing)
-                    return syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, asMissing)
+                function(key, cfg, map, mine, asMissing, sublevel)
+                    return syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, asMissing, sublevel)
                 end)
         else
             -- No background tints configured → the containers are gone; drop the anchor too.
