@@ -5993,6 +5993,22 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Strata is printed per row too: it outranks level, so a row that looks
                 -- correctly ordered here can still render wrong if one member escaped
                 -- the frame's strata.
+                -- ☠ EVERY WIDGET READ BELOW MUST BE pcall'ed. Aura buttons and their
+                -- containers carry 12.1 forbidden aspects, and reading one from tainted
+                -- code THROWS -- which aborted the whole dump partway through its first
+                -- in-combat run, before the Alpha and Aura Designer sections that a fade
+                -- report actually needs (Krathe, 2026-08-13). A diagnostic that dies in
+                -- combat is no diagnostic: combat is when the interesting states happen.
+                local function zLvl(w)
+                    if not w or not w.GetFrameLevel then return "-" end
+                    local ok, v = pcall(w.GetFrameLevel, w)
+                    return ok and tostring(v) or "|cffff4040refused|r"
+                end
+                local function zStrata(w)
+                    if not w or not w.GetFrameStrata then return "-" end
+                    local ok, v = pcall(w.GetFrameStrata, w)
+                    return ok and tostring(v) or "?"
+                end
                 o:Section("Bars")
                 local base = frame:GetFrameLevel()
                 local bdb = DF.GetFrameDB and DF:GetFrameDB(frame)
@@ -6061,17 +6077,17 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         local btn = h.buttons and h.buttons[1]
                         print(("  %-10s anchor=%s  container=%s  button1=%s  cfgOffset=%s  strata=%s")
                             :format(name,
-                                hf and tostring(hf:GetFrameLevel()) or "-",
-                                cont and tostring(cont:GetFrameLevel()) or "-",
-                                btn and tostring(btn:GetFrameLevel()) or "-",
+                                zLvl(hf),
+                                zLvl(cont),
+                                zLvl(btn),
                                 tostring(h.config and h.config.frameLevelOffset or "nil(->40)"),
-                                hf and tostring(hf:GetFrameStrata()) or "-"))
+                                zStrata(hf)))
                         -- Any DF-owned art parented to the first button (border host etc.)
                         if btn then
                             for _, k in ipairs({ "dfBorderHost", "dfBorder", "dfCD", "dfBar" }) do
                                 local w = btn[k]
                                 if w and w.GetFrameLevel then
-                                    print(("      .%-14s level=%d"):format(k, w:GetFrameLevel()))
+                                    print(("      .%-14s level=%s"):format(k, zLvl(w)))
                                 end
                             end
                         end
@@ -6102,17 +6118,17 @@ DF._MainEventDispatcher = function(self, event, arg1)
                                     local btn = h.buttons and h.buttons[1]
                                     print(("  %-9s %-12s anchor=%s  container=%s  button1=%s  cfgOffset=%s  strata=%s")
                                         :format(storeKey, tostring(id):sub(1, 12),
-                                            hf and tostring(hf:GetFrameLevel()) or "-",
-                                            cont and tostring(cont:GetFrameLevel()) or "-",
-                                            btn and tostring(btn:GetFrameLevel()) or "-",
+                                            zLvl(hf),
+                                            zLvl(cont),
+                                            zLvl(btn),
                                             tostring(h.config and h.config.frameLevelOffset or "nil"),
-                                            hf and tostring(hf:GetFrameStrata()) or "-"))
+                                            zStrata(hf)))
                                     if btn then
                                         for _, k in ipairs({ "dfBorderHost", "dfBorder", "dfADBorder",
                                                              "dfCD", "dfBar" }) do
                                             local w = btn[k]
                                             if w and w.GetFrameLevel then
-                                                print(("      .%-14s level=%d"):format(k, w:GetFrameLevel()))
+                                                print(("      .%-14s level=%s"):format(k, zLvl(w)))
                                             end
                                         end
                                     end
@@ -6169,7 +6185,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                             local badge = h and h.GetBadgeFrame and h:GetBadgeFrame()
                             print(("    %-12s anchor=%s  badge=%s  cfgOffset=%s")
                                 :format(tostring(key):sub(1, 12),
-                                    hf and tostring(hf:GetFrameLevel()) or "-",
+                                    zLvl(hf),
                                     badge and tostring(badge:GetFrameLevel()) or "-",
                                     tostring(h and h.config and h.config.frameLevelOffset or "nil(->40)")))
                             local bw = badge and badge.dfBorder
@@ -6238,6 +6254,39 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     -- screen means the AD fade is a silent no-op, not that it ran and went stale.
                     o:Field("AD hosts", "NONE WALKED (dfADFactory="
                         .. tostring(frame.dfADFactory ~= nil) .. ")", "WARN")
+                    -- ☠ WHY it walked nothing, per entry. ForEachAuraDesignerAlphaHost has
+                    -- TWO silent skips and they need OPPOSITE fixes: a handle latched by
+                    -- _dfAlphaHostDeniedVer (a write was refused at that layout version, so
+                    -- we can neither fade NOR restore it) versus GetAlphaHost returning nil
+                    -- (no host to write at all -- in which case a visible fade has to be
+                    -- coming from a PARENT's alpha, not this indicator's own).
+                    -- "NONE WALKED" alone cannot separate them, which is how a fade report
+                    -- reached this line twice without being settled (Krathe, 2026-08-13).
+                    local adStore = frame.dfADFactory
+                    if adStore then
+                        local ver = DF.auraLayoutVersion or 0
+                        o:Field("AD layoutVersion", tostring(ver), "NEUTRAL")
+                        for _, bucket in pairs(adStore) do
+                            if type(bucket) == "table" then
+                                for id, entry in pairs(bucket) do
+                                    local h = type(entry) == "table" and entry.handle
+                                    if h then
+                                        local okH, host = pcall(function()
+                                            return h.GetAlphaHost and h:GetAlphaHost() or nil
+                                        end)
+                                        local okA, alpha
+                                        if okH and host then okA, alpha = pcall(host.GetAlpha, host) end
+                                        o:Field("  entry " .. tostring(id),
+                                            ("deniedVer=%s  host=%s  alpha=%s"):format(
+                                                tostring(h._dfAlphaHostDeniedVer),
+                                                okH and (host and "yes" or "NIL") or "refused",
+                                                okA and A(alpha) or "-"),
+                                            (h._dfAlphaHostDeniedVer == ver) and "WARN" or "NEUTRAL")
+                                    end
+                                end
+                            end
+                        end
+                    end
                 end
 
                 -- ☠ DOES THE WRITE LAND? An AD host reading 1.00 on an out-of-range frame has
