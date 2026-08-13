@@ -15,6 +15,14 @@
 * (Frames) Fix missing-buff icons coming back dim after the unit was out of range. (by Krathe)
 * (Debuff Bar) Fix the boss, role, and priority categories showing miscategorised debuffs on group members in another phase or instance. (by Krathe)
 * (Buffs & Debuffs) Filter checkbox tooltips now show their explanations instead of repeating the label. (by Krathe)
+### New Features
+
+* (Aura Designer) Spells with more than one effect now show a "Tracked Spells" list on their indicator card — untick any effect you don't want that indicator to show. Each row shows the effect's own icon, and unticking everything simply shows nothing without touching the visibility eye. (by Krathe)
+
+### Bug Fixes
+
+* (Dispel Highlight) Gradient, border and symbol opacity now actually apply in game — the overlay previously rendered at full brightness no matter what the sliders said, including for debuffs gained mid-combat. (by Krathe)
+* (Dispel Highlight) Fix gradient opacity being applied twice for profiles upgraded from v4, which locked the overlay at full brightness across most of the slider's range. (by Krathe)
 
 ## [5.1.2]
 
