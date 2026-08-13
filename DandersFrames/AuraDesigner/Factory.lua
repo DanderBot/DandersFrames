@@ -4731,6 +4731,26 @@ function Factory:SyncFrame(frame)
     -- NIL spec (ad-hoc "#id" -> SpellDB by name; per-spec Config tables never apply).
     local otherAuras = adDB.otherAuras
 
+    -- ☠ THE PROFILE'S GLOBAL DEFAULTS, RESOLVED ONCE FOR THE WHOLE SYNC — and declared HERE,
+    -- at function scope, rather than inside any of the do-blocks below.
+    --
+    -- It used to be declared inside the placed-pool block, then AGAIN inside the filter-group
+    -- block when that one was found to be reading a nil global. The third sibling — the debuff
+    -- category groups — was never given one, so it kept reading `defs` as a GLOBAL and kept
+    -- getting nil, exactly as the first two had. The whole class was a block-scoped local being
+    -- reached for from sibling scopes, and fixing it per-site could only ever fix the sites
+    -- someone happened to look at. One declaration above all three ends it.
+    --
+    -- The failure is silent by construction: every consumer reads it as
+    -- `(defs and defs.level) or 40`, so a nil `defs` renders at a hardcoded level rather than
+    -- throwing. `luac -l -p <file> | grep '_ENV "defs"'` is what proves it — a GETTABUP on
+    -- _ENV means the compiler resolved that read as a global, and it must return nothing here.
+    --
+    -- Resolved once per sync (the pool walk is allocation-free and this path is per-UNIT_AURA
+    -- hot), and threaded into every placed/bar/group spec + struct sig, so nil-instance
+    -- indicators follow adDB.defaults exactly like the editor's proxy does.
+    local defs = resolveDefs(adDB)
+
     -- ---- HEALTH BAR (child of frame.healthBar, overlay) -----------------------------
     -- Two render paths, chosen by config:
     --   * FILL COVER (replace, or tint without "Tint Entire Bar") — a texture anchored to the
@@ -5213,12 +5233,8 @@ function Factory:SyncFrame(frame)
         -- only, all else raw record).
         local hasMG, hasOtherMG = arrangeMemberGroups(adDB, spec, specAuras, otherAuras)
 
-        -- The profile's global colour-by-time default — resolved ONCE per sync (the pool
-        -- walk is allocation-free and per-UNIT_AURA hot) and threaded into every placed/
-        -- bar spec + struct sig, so nil-instance indicators follow adDB.defaults exactly
-        -- like the editor's proxy does.
-        local defs = resolveDefs(adDB)
-
+        -- (`defs` is the function-scoped one above — see the note there for why it must not
+        -- be re-declared inside a block.)
         if specAuras then
             syncPlacedPool(frame, placed, live, hasMG, specAuras, "", spec, defs,
                 adDB.layoutGroups and adDB.layoutGroups[spec])
@@ -5260,19 +5276,15 @@ function Factory:SyncFrame(frame)
         local fg = store.fgroups
         if not fg then fg = {}; store.fgroups = fg end
         local live = {}
-        -- ☠ RESOLVED HERE, not inherited. The `defs` further up is scoped to the
-        -- placed-pool do-block and is NOT visible in this one, so every call below was
-        -- handing out a nil — and had been for as long as one has taken it.
-        --
-        -- It degraded silently instead of erroring, because the filter-group path reads
-        -- it as `(defs and defs.level) or 40`: groups have been pinned to frame level 40
-        -- whatever the account-wide Default Frame Level slider said. That is precisely
-        -- the "AD output split across two planes, groups stranded underneath their own
-        -- indicators" that buildFilterGroupConfig's comment describes having fixed.
-        -- Surfaced by the member-group sync, which reaches defs.level bare through
-        -- placedStructSig and so could not fail quietly.
-        local defs = resolveDefs(adDB)
-
+        -- ☠ `defs` is the FUNCTION-SCOPED one now. This block used to declare its own,
+        -- because the original lived in the placed-pool do-block and was invisible here —
+        -- every call below handed out a nil, and had for as long as one had been taken.
+        -- It degraded silently rather than erroring: the reads are `(defs and defs.level)
+        -- or 40`, so groups were pinned to level 40 whatever the account-wide Default
+        -- Frame Level slider said — the "AD output split across two planes, groups
+        -- stranded underneath their own indicators" buildFilterGroupConfig describes.
+        -- A second block-scoped declaration fixed this block and left the debuff-group
+        -- block below with the identical bug, which is why there is now exactly one.
         local R = DF.FilterRegistry
         if R then
             syncFilterGroupList(frame, fg, live, R, adDB.layoutGroups and adDB.layoutGroups[spec], "", defs)
