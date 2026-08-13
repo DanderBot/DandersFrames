@@ -1112,7 +1112,21 @@ function DF:UpdateMissingBuffAppearance(frame)
     -- badges are plain DF frames (alpha is ours; the secret geometry only drives
     -- position).
     local strip = frame.missingBuffStrip
-    if not (strip and strip:IsShown()) then return end
+    -- ☠ DELIBERATELY NOT GATED ON :IsShown(). The strip is HIDDEN while the unit is out of
+    -- range (DriveMissingBuffFactory, Features/Auras.lua) — so a pass that writes the
+    -- out-of-range alpha just before the driver hides it leaves the strip carrying that
+    -- faded value, and the pass that would restore it skips, because at the moment it ran
+    -- the strip was hidden. Nothing recomputes until the next range edge, so it comes back
+    -- dim and stays dim.
+    -- Alpha on a hidden frame costs nothing and is correct the instant it is shown. A
+    -- visibility guard on an alpha updater buys nothing but a stale value.
+    -- ⚠ The three bars below (absorb / heal-absorb / heal prediction) carry the SAME guard
+    -- and the same latent staleness — hidden when the effect expires, re-shown later at
+    -- whatever alpha they last took, which UpdateAbsorbBarAppearance's own comment already
+    -- describes for the overflow bar. NOT changed here: those do more than set alpha (the
+    -- overflow path re-drives visibilityHelpers), so they want their own pass and their own
+    -- test rather than riding along with a missing-buff fix.
+    if not strip then return end
 
     local db = GetDB(frame)
     if not db then return end
