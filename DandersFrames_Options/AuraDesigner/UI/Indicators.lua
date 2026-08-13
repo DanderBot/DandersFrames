@@ -253,15 +253,24 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         if indRec and idList and #idList > 1 then
             AddGroup(L["Tracked Spells"], function(g)
                 local note = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                note:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
-                note:SetText(L["This spell has more than one effect. Untick any you don't want this indicator to show."])
                 note:SetWordWrap(true)
                 note:SetWidth(contentWidth - 30)
                 g:AddWidget(note, 30)
 
-                -- How many are still live, so the LAST one cannot be turned off. Mirrors
-                -- R:SetSpellIDMuted's guard: an indicator that matches nothing renders
-                -- nothing and reads as broken rather than as configured.
+                -- ☠ NO "you cannot untick the last one" GUARD, deliberately.
+                -- It was here, and it was wrong twice over. Wrong in behaviour: unticking
+                -- everything is a legitimate thing to express — it means "match nothing",
+                -- which renders nothing, and refusing it forces the eye to be used for a
+                -- job the eye should not have. Wrong in implementation: it tried to snap
+                -- the tick back with cb:SetChecked(true), but CreateCheckbox returns the
+                -- CONTAINER, which has no SetChecked — so the call silently did nothing,
+                -- the box stayed drawn as unticked, and the mute was never written. The
+                -- next card rebuild re-read the truth and the row appeared to tick itself,
+                -- which read as "toggling the eye changed my spell selection".
+                -- ★ The two controls answer two questions and neither writes the other's:
+                --     eye  = do I want this indicator at all
+                --     ticks = what does it match
+                -- All-off is the empty set, and the empty set renders nothing on its own.
                 local function LiveCount()
                     local muted, n = indRec.mutedSpellIDs, 0
                     for _, id in ipairs(idList) do
@@ -269,6 +278,24 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                     end
                     return n
                 end
+
+                -- ★ THE ZERO STATE HAS TO BE VISIBLE, or it looks like a bug. With nothing
+                -- ticked the indicator renders nothing — same picture as hidden — so the
+                -- note says so outright instead of leaving the player staring at an empty
+                -- frame and a lit eye wondering which control betrayed them. Re-run after
+                -- every toggle; the rows are the only thing that changes it.
+                local function UpdateNote()
+                    local live = LiveCount()
+                    if live == 0 then
+                        note:SetTextColor(0.91, 0.66, 0.25, 1)   -- the editor's warning amber
+                        note:SetText(L["Nothing ticked — this indicator will not show. The eye is unchanged."])
+                    else
+                        note:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
+                        note:SetText(format(L["Showing %d of %d effects. Untick any you don't want this indicator to show."],
+                            live, #idList))
+                    end
+                end
+                UpdateNote()
 
                 for _, id in ipairs(idList) do
                     local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id)
@@ -309,14 +336,10 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                                     if not next(muted) then indRec.mutedSpellIDs = nil end
                                 end
                             else
-                                if LiveCount() <= 1 then
-                                    -- Refuse and snap the tick back: this is the only id left.
-                                    if cb and cb.SetChecked then cb:SetChecked(true) end
-                                    return
-                                end
                                 indRec.mutedSpellIDs = indRec.mutedSpellIDs or {}
                                 indRec.mutedSpellIDs[id] = true
                             end
+                            UpdateNote()
                             -- ☠ Through P, not a bare call: this file does not import
                             -- RefreshPlacedIndicators, so the bare name compiled to a nil
                             -- GLOBAL — clean parse, "attempt to call a nil value" on the

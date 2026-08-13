@@ -220,13 +220,18 @@ local function narrowByPlacementMutes(out, indicator)
     for id in pairs(src) do
         if not mutes[id] then kept[id] = true; n = n + 1 end
     end
-    -- ☠ EVERY id muted -> keep the FULL set, don't return an empty map or nil. An empty
-    -- includeSpellIDs matches every helpful aura (the failure this whole resolver guards
-    -- against), and returning nil would make the indicator vanish with no way to tell why.
-    -- The card refuses to mute the last live id, mirroring R:SetSpellIDMuted — this is the
-    -- render-side backstop for a config that got there anyway (an id retired from curation
-    -- under a profile that had muted its siblings).
-    if n == 0 then return out end
+    -- ★ EVERY id muted = MATCHES NOTHING, and that is a legitimate thing to configure.
+    -- Return nil (+ the muted flag), which is this resolver's existing "no identity, skip
+    -- it" contract — the caller then renders no container at all.
+    -- ☠ NEVER an empty includeSpellIDs. An empty include map matches EVERY helpful aura,
+    -- which is the exact failure this resolver exists to prevent; "shows nothing" and
+    -- "shows everything" are one typo apart here.
+    -- The second return distinguishes "the user ticked nothing" from "we could not resolve
+    -- this aura", so the unresolved warning does not fire on a deliberate choice.
+    -- (This used to keep the FULL set instead, back when the card refused to untick the
+    -- last id. That refusal is gone — it forced the eye to do a job the ticks should do —
+    -- so the render has to be able to express the empty set.)
+    if n == 0 then return nil, true end
     return { includeSpellIDs = kept }
 end
 
@@ -4130,9 +4135,11 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                     -- render nothing. Not marking the key `live` lets the
                     -- end-of-pass sweep destroy any existing handle.
                 elseif isBar then
-                    local ids = DF:BuildADIdentityFilters(idSpec, auraName, indicator)
+                    -- mutedEmpty = the user ticked nothing, which is a CHOICE and must not
+                    -- be reported as an unresolved aura. Same nil map, different reason.
+                    local ids, mutedEmpty = DF:BuildADIdentityFilters(idSpec, auraName, indicator)
                     local map = ids and ids.includeSpellIDs
-                    if not map then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
+                    if not map and not mutedEmpty then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
                     if map then
                         local key = placedKey(keyPrefix, auraName, indicator)
                         live[key] = true
@@ -4190,9 +4197,11 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         syncAlertCompanion(frame, placed, live, key, map, eff, true, alpha, mine, defs)
                     end
                 elseif isSquare or indicator.type == "icon" then
-                    local ids = DF:BuildADIdentityFilters(idSpec, auraName, indicator)
+                    -- mutedEmpty = the user ticked nothing, which is a CHOICE and must not
+                    -- be reported as an unresolved aura. Same nil map, different reason.
+                    local ids, mutedEmpty = DF:BuildADIdentityFilters(idSpec, auraName, indicator)
                     local map = ids and ids.includeSpellIDs
-                    if not map then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
+                    if not map and not mutedEmpty then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
                     if map then
                         local key = placedKey(keyPrefix, auraName, indicator)
                         live[key] = true
