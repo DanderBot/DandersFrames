@@ -1880,6 +1880,11 @@ local function StyleGameBadge(btn, frame, db)
     -- Opacity on the dim host; bound texture normalised (dim-host rule, StyleGameMainSlot).
     if btn.dfDispelBadgeDim then btn.dfDispelBadgeDim:SetAlpha(db.dispelIconAlpha or 1) end
     pcall(badge.SetAlpha, badge, 1)
+    -- The badge holder re-levels above (contentOverlay band); the DIM must follow or the
+    -- art — the dim's region — stays at the stale level. Same rule as ring and edges.
+    if btn.dfDispelBadgeDim and btn.dfDispelBadgeHolder then
+        btn.dfDispelBadgeDim:SetFrameLevel(btn.dfDispelBadgeHolder:GetFrameLevel())
+    end
     ApplySlotPulse(btn.dfDispelBadgeHolder, db.dispelAnimate)
 end
 
@@ -1903,6 +1908,14 @@ local function StyleGameBorderSlot(btn, frame, db)
     if btn.dfDispelRingDim then btn.dfDispelRingDim:SetAlpha(db.dispelBorderAlpha or 0.8) end
     pcall(ring.SetAlpha, ring, 1)
     ring:SetBlendMode("BLEND")
+    -- ☠ RE-LEVEL EVERY PASS — the init's value goes stale when the Frame Level slider
+    -- moves the band (the legacy widget had this exact bug on its ring host). The DIM
+    -- must move too: the ring is the DIM'S region, so the art draws at the dim's level,
+    -- and a re-levelled holder with a stale dim moves nothing visible.
+    local ringLvl = ((frame.healthBar and frame.healthBar:GetFrameLevel())
+        or (frame:GetFrameLevel() + 3)) + 15
+    if btn.dfDispelRingHolder then btn.dfDispelRingHolder:SetFrameLevel(ringLvl) end
+    if btn.dfDispelRingDim then btn.dfDispelRingDim:SetFrameLevel(ringLvl) end
     ApplySlotPulse(btn.dfDispelRingHolder, db.dispelAnimate)
 end
 
@@ -1949,7 +1962,15 @@ local function StyleGameEdgeSlot(btn, frame, db, edge)
     local dim = btn.dfDispelEdgeDim and btn.dfDispelEdgeDim[edge]
     if dim then dim:SetAlpha(ResolveGradientAlpha(db)) end
     pcall(tex.SetAlpha, tex, 1)
-    ApplySlotPulse(btn.dfDispelEdgeHolder and btn.dfDispelEdgeHolder[edge], db.dispelAnimate)
+    -- ☠ RE-LEVEL EVERY PASS — the init's edgeLvl goes stale when the Frame Level
+    -- slider moves the band. Holder AND dim: the strip is the dim's region, so the
+    -- art draws at the dim's level. Same resolver as the init (the wash's level:
+    -- band+1, clearing the absorb and heal prediction — the 2026-08-13 ruling).
+    local lvl = DF:ResolveDispelGradientLevel(frame:GetFrameLevel(), db)
+    local holder = btn.dfDispelEdgeHolder and btn.dfDispelEdgeHolder[edge]
+    if holder then holder:SetFrameLevel(lvl) end
+    if dim then dim:SetFrameLevel(lvl) end
+    ApplySlotPulse(holder, db.dispelAnimate)
 end
 
 -- All the styling for ONE slot button. Split out of StyleDispelSlots so the whole
