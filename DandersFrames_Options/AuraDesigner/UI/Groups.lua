@@ -1697,6 +1697,24 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         local rec = R and R.GetSpellByName and R:GetSpellByName(auraName)
         spellID = rec and rec.id
     end
+    -- ☠ TRACKS NOTHING = DRAWS NOTHING, HERE TOO. With every spell id unticked the live
+    -- render builds no container, so a canvas that kept drawing would be showing something
+    -- the frame will not — the exact preview/live divergence this file exists to avoid.
+    -- The canvas picks ONE representative id for its art and never consults the include
+    -- map, which is why it happily rendered an indicator that matches nothing: reported as
+    -- "if I unselect both IDs I still see the preview on AD".
+    -- Asked through the shared predicate rather than re-deriving it, so the canvas, the
+    -- render and the card's eye cannot drift apart on what "nothing" means.
+    if DF.ADPlacementTracksNothing and DF:ADPlacementTracksNothing(spec, auraName, indicator) then
+        local store0 = mockFrame.dfADPreviewSlots
+        local rec0 = store0 and store0[instanceKey]
+        if rec0 then
+            if rec0.slot.dfBorder and DF.Border then DF.Border:StopAnimation(rec0.slot.dfBorder) end
+            rec0.slot:Hide()
+            if rec0.alertSlot then rec0.alertSlot:Hide() end
+        end
+        return nil
+    end
     -- Resolve the global defaults with the Factory's OWN resolver so the canvas preview and
     -- the live render can never disagree on the fallback chain. (Level/strata come along in
     -- the table but the preview ignores them: the canvas is standalone, not layered over a

@@ -235,6 +235,23 @@ local function narrowByPlacementMutes(out, indicator)
     return { includeSpellIDs = kept }
 end
 
+-- ★ Does this placement currently match NOTHING — i.e. has the user unticked every one of
+-- its spell ids? ONE answer with three consumers that must never disagree:
+--   * the render, which builds no container at all;
+--   * the editor canvas, which must draw no preview (a canvas showing what the frame will
+--     not is the divergence class this addon keeps paying for);
+--   * the card, which greys the eye so the state is legible instead of mysterious.
+-- ☠ NOT the same as "unresolvable". An aura the resolver cannot identify also yields no
+-- map, but that is a data problem rather than a choice — which is why the resolver returns
+-- a second value instead of leaving every call site to guess from a nil.
+-- Cheap-exits before resolving when there are no mutes at all, which is every indicator in
+-- every profile that has not touched this feature.
+function DF:ADPlacementTracksNothing(spec, auraName, indicator)
+    if type(indicator) ~= "table" or type(indicator.mutedSpellIDs) ~= "table" then return false end
+    local _, mutedEmpty = DF:BuildADIdentityFilters(spec, auraName, indicator)
+    return mutedEmpty and true or false
+end
+
 function DF:BuildADIdentityFilters(spec, auraName, indicator)
     -- Curated identity, resolved by AuraAdapter:GetSpecIdentity -- the ONE place
     -- the ID set is decided, shared with the editor's add-by-ID snap so a

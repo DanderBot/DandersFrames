@@ -327,6 +327,13 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                         -- so `checked` was always nil, every click fell to the else branch,
                         -- and the box could be unticked but never re-ticked.
                         function(checked)
+                            -- The EYE lives on the card header (Cards.lua) and only
+                            -- repaints when the card is built, so crossing into or out of
+                            -- "tracks nothing" has to ask for that rebuild or the eye keeps
+                            -- showing the old state until something else redraws it.
+                            -- Gated on the CROSSING, not on every tick: a full page rebuild
+                            -- per click would be heavy and would fight the user mid-edit.
+                            local wasZero = (LiveCount() == 0)
                             if checked then
                                 local muted = indRec.mutedSpellIDs
                                 if muted then
@@ -347,6 +354,9 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                             -- the only check that sees this class.
                             if P.RefreshPlacedIndicators then P.RefreshPlacedIndicators() end
                             RefreshLiveFramesThrottled()
+                            if (LiveCount() == 0) ~= wasZero and S.SwitchTab then
+                                S.SwitchTab("effects")   -- repaint the header's eye
+                            end
                         end)
                     g:AddWidget(cb, 28)
                 end

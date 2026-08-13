@@ -1698,15 +1698,31 @@ S.CreateEffectCard = function(parent, yPos, effect)
             eyeBtn:SetPoint("RIGHT", header, "RIGHT", -6, 0)
         end
         local function shown() return not cfgTable or cfgTable.enabled ~= false end
+        -- ★ TRACKS NOTHING = GREYED, WITHOUT TOUCHING THE STORED VALUE.
+        -- With every spell id unticked the indicator cannot render, so the eye shows the
+        -- inactive glyph whatever `enabled` says. It is a DERIVED look, not a write: tick
+        -- an id back on and the eye simply resumes reflecting what the user set — on if
+        -- they had it on, still off if they had it off. Nothing "forces the eye on",
+        -- because nothing ever writes it but the click below.
+        -- Dimmer than the ordinary hidden state so the two read apart: hidden-by-choice is
+        -- 0.45, cannot-show is 0.3.
+        local function tracksNothing()
+            return DF.ADPlacementTracksNothing
+                and DF:ADPlacementTracksNothing((not IsOtherTab()) and ResolveSpec() or nil,
+                        effect.auraName, cfgTable) or false
+        end
         -- SetGlyph makes the state colour the new REST colour, so OnLeave
         -- restores the state; hover is suppressed while hidden.
         local function updateEyeIcon()
-            if shown() then
+            local dead = tracksNothing()
+            if dead then
+                eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.3, 0.3, 0.3 })
+            elseif shown() then
                 eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
             else
                 eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
             end
-            eyeBtn:SetGlyphHover(shown())
+            eyeBtn:SetGlyphHover(shown() and not dead)
         end
         updateEyeIcon()
         eyeBtn:RegisterForClicks("LeftButtonUp")
