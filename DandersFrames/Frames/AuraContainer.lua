@@ -1329,6 +1329,48 @@ local function styleButton_regions(slot, config)
     if isRow and not pdSpec and slot.dfPandemicHolder and not slot.AddPandemicRegion then
         slot.dfPandemicHolder:Hide()
     end
+    -- ☠ THE SAME SWEEP, GENERALIZED — every other create-once region. The pandemic
+    -- note above predicted this class ("every OTHER create-once region relies on
+    -- 'off = never created'"), and the 5.1.1 self-contained test mode made it real:
+    -- its preview POOL reuses slots across passes, so a disabled duration bar /
+    -- border / dispel text / stack count survived its own off-toggle on the preview
+    -- until reload (field report, day one of 5.1.1). Same gate as above — registrar
+    -- ABSENT means the slot is a preview and the Shown aspect is ours; a native
+    -- button gets a fresh frame per Rebuild and Blizzard owns its visibility.
+    -- SetShown both ways: these pooled slots also need the re-SHOW half, because
+    -- no native bind ever runs to bring a region back.
+    if isRow and not slot.AddPandemicRegion then
+        if slot.dfCD then
+            slot.dfCD:SetShown(style.cooldown == nil or style.cooldown.show ~= false)
+        end
+        if slot.dfDurHolder then
+            slot.dfDurHolder:SetShown((style.duration and style.duration.show) and true or false)
+        end
+        if slot.dfStackHolder then
+            slot.dfStackHolder:SetShown((style.stacks and style.stacks.show) and true or false)
+        end
+        if slot.dfBar then
+            slot.dfBar:SetShown((style.bar and style.bar.show) and true or false)
+        end
+        if slot.dfNameHolder then
+            slot.dfNameHolder:SetShown((style.spellName and style.spellName.show) and true or false)
+        end
+        if slot.dfDispelHolder then
+            slot.dfDispelHolder:SetShown((style.dispel and style.dispel.nativeBorder) and true or false)
+        end
+        if slot.dfSymbolHolder then
+            slot.dfSymbolHolder:SetShown((style.dispel and style.dispel.nativeSymbol) and true or false)
+        end
+        if slot.dfBorder and not style.border and DF.Border then
+            -- The border widget hides through its own Apply (edges + backdrop +
+            -- texture pieces + glow teardown); a re-enable re-applies through the
+            -- normal border block above.
+            pcall(function()
+                DF.Border:StopAnimation(slot.dfBorder)
+                DF.Border:Apply(slot.dfBorder, { enabled = false })
+            end)
+        end
+    end
     if isRow and pdSpec then
         if not slot.dfPandemicHolder then
             -- ⚠ The level comes from the SPEC, because the two pandemic modes want

@@ -2275,13 +2275,23 @@ function DF:DriveBuffFactory(frame, db)
             -- layout version bumped, so it is free at steady state.
             DF:Debug("AURAROW", "buff: REBUILD - struct sig %s -> %s",
                 tostring(frame.buffFactoryStructSig), tostring(structSig))
+            local prevStruct, prevTuning = frame.buffFactoryStructSig, frame.buffFactoryTuningSig
             frame.buffFactoryStructSig = structSig
             frame.buffFactoryTuningSig = tuningSig
             -- structSig doubles as the container PARKING key: its definition is exactly
             -- "changing this needs a new container", which is precisely the condition
             -- for safely re-adopting a parked one. A/B/A (profile swap, preset toggle,
             -- AutoProfiles zone transition) now reuses instead of stranding.
-            h:Rebuild(cfg, structSig)           -- structural (filter set/regions/tooltips) — discrete, leak-safe
+            -- ☠ SIGS RESTORED ON ERROR. An error mid-rebuild (e.g. a forbidden write
+            -- during PvP prep) used to leave the NEW sig recorded against an OLD
+            -- container — the edit silently stranded for the whole session, because
+            -- every later drive compared equal and took the no-op branch. A restored
+            -- sig makes the next drive simply retry.
+            local okRB, errRB = pcall(h.Rebuild, h, cfg, structSig)   -- structural (filter set/regions/tooltips) — discrete, leak-safe
+            if not okRB then
+                frame.buffFactoryStructSig, frame.buffFactoryTuningSig = prevStruct, prevTuning
+                DF:DebugWarn("AURAROW", "buff: rebuild failed (sig restored for retry): %s", tostring(errRB))
+            end
         else
             if frame.buffFactoryTuningSig ~= tuningSig then
                 DF:Debug("AURAROW", "buff: TUNING - tuning sig %s -> %s (struct unchanged)",
@@ -2467,9 +2477,15 @@ function DF:DriveDebuffFactory(frame, db)
             -- layout version bumped, so it is free at steady state.
             DF:Debug("AURAROW", "debuff: REBUILD - struct sig %s -> %s",
                 tostring(frame.debuffFactoryStructSig), tostring(structSig))
+            local prevStruct, prevTuning = frame.debuffFactoryStructSig, frame.debuffFactoryTuningSig
             frame.debuffFactoryStructSig = structSig
             frame.debuffFactoryTuningSig = tuningSig
-            h:Rebuild(cfg, structSig)           -- structural — REPLACES the config wholesale (structSig = park key)
+            -- Sigs restored on error — see the buff drive above.
+            local okRB, errRB = pcall(h.Rebuild, h, cfg, structSig)   -- structural — REPLACES the config wholesale (structSig = park key)
+            if not okRB then
+                frame.debuffFactoryStructSig, frame.debuffFactoryTuningSig = prevStruct, prevTuning
+                DF:DebugWarn("AURAROW", "debuff: rebuild failed (sig restored for retry): %s", tostring(errRB))
+            end
         else
             if frame.debuffFactoryTuningSig ~= tuningSig then
                 DF:Debug("AURAROW", "debuff: TUNING - tuning sig %s -> %s (struct unchanged)",
@@ -2747,9 +2763,15 @@ function DF:DriveDefensiveFactory(frame, db)
             -- layout version bumped, so it is free at steady state.
             DF:Debug("AURAROW", "defensive: REBUILD - struct sig %s -> %s",
                 tostring(frame.defensiveFactoryStructSig), tostring(structSig))
+            local prevStruct, prevTuning = frame.defensiveFactoryStructSig, frame.defensiveFactoryTuningSig
             frame.defensiveFactoryStructSig = structSig
             frame.defensiveFactoryTuningSig = tuningSig
-            h:Rebuild(cfg, structSig)           -- structural (filter set/regions/tooltips); structSig = park key
+            -- Sigs restored on error — see the buff drive above.
+            local okRB, errRB = pcall(h.Rebuild, h, cfg, structSig)   -- structural (filter set/regions/tooltips); structSig = park key
+            if not okRB then
+                frame.defensiveFactoryStructSig, frame.defensiveFactoryTuningSig = prevStruct, prevTuning
+                DF:DebugWarn("AURAROW", "defensive: rebuild failed (sig restored for retry): %s", tostring(errRB))
+            end
         else
             if frame.defensiveFactoryTuningSig ~= tuningSig then
                 DF:Debug("AURAROW", "defensive: TUNING - tuning sig %s -> %s (struct unchanged)",
