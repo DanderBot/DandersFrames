@@ -5348,8 +5348,16 @@ function Factory:SyncFrame(frame)
         local tints = collectFrameTints(spec, specAuras, otherAuras, "healthbar")
         if tints then
             syncTintFamily(tints, hb, store, "healthbarOrder", spec,
-                function(key, cfg, map, mine, asMissing, sublevel, rank)
-                    return syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine, asMissing, sublevel, rank)
+                -- ☠ KEEP THIS ARITY IN STEP WITH syncTintFamily's syncOne CALL. Lua fills a
+                -- missing parameter with nil and says nothing, so a short closure silently
+                -- drops the tail: this one declared seven while nine were passed, eating
+                -- auraKey and the pandemic flag. The variant then painted the BASE colour,
+                -- ungated — an invisible duplicate of its own base, reported as "the colour
+                -- never changes". Neither luac nor the _ENV globals diff can see an arity
+                -- mismatch; only the screen shows it.
+                function(key, cfg, map, mine, asMissing, sublevel, rank, auraKey, isPandemic)
+                    return syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine,
+                                             asMissing, sublevel, rank, auraKey, isPandemic)
                 end)
         else
             -- No health-bar tints configured → the mirror bars are gone; drop the refs.
