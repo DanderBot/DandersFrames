@@ -580,35 +580,21 @@ end
 -- ☠ A cache key MUST derive from the same read as the thing it guards: an earlier cut
 -- compared a stamp written only at UpdateHealPrediction's tail, which four hide paths
 -- bypass, and the cache froze on "segment 1" while the resolver picked "fill".
--- ★ BLIZZARD'S HEAL-ABSORB NETTING (Krathe, 2026-08-14: "the heal absorb will indeed
--- eat the inc heal"). A CONSUMING heal absorb eats the first N points of any incoming
--- heal, so Blizzard back-shifts the heal to start at the heal-absorb region's inner
--- edge — the eaten share refills eaten health, only the remainder extends past the
--- fill — and hangs the shield at the HEALTH EDGE (its append target is the healAbsorb
--- texture, whose outer edge IS the fill edge). Where shield and surviving heal overlap,
--- the shield wins (+11 over +10), same as Blizzard's draw order.
--- Active only for the ATTACHED heal absorb: OVERLAY/FLOATING have no fill texture at
--- the right place to anchor to, and keep the simple model.
--- ☠ ANCHORS ONLY, NO ARITHMETIC — the heal-absorb amount is secret on live; everything
--- here rides the heal-absorb bar's own fill texture, which the engine sizes.
-local function HealAbsorbShiftActive(frame, db)
-    if not frame or not db then return false end
-    if (db.healAbsorbBarMode or "OVERLAY") ~= "ATTACHED" then return false end
-    local ha = frame.dfHealAbsorbBar
-    return (ha and ha.IsShown and ha:IsShown()) and true or false
-end
-DF.HealAbsorbShiftActive = HealAbsorbShiftActive
-
+-- ☠☠ TOMBSTONE: BLIZZARD'S HEAL-ABSORB NETTING WAS BUILT HERE AND REVERTED SAME-DAY
+-- (2026-08-14). The model is right — a consuming heal absorb eats the first N points
+-- of an incoming heal, so Blizzard back-shifts the heal to start at the heal-absorb
+-- region's inner edge and hangs the shield at the health edge. The anchor-only
+-- implementation rode the ATTACHED heal-absorb bar's fill texture. IT CANNOT BE MADE
+-- SAFE ON LIVE: the heal-absorb amount is SECRET, so Lua can never ask "is it zero",
+-- the bar stays shown once created, and the whole design silently rested on a
+-- zero-value fill texture's rect collapsing exactly to the health edge. Krathe's
+-- in-game test disproved that trust in minutes — Healsworth's heal moved with a heal
+-- absorb of ZERO. ⇒ Do not rebuild this on IsShown()+fill-rect; it needs a handle
+-- that is reliable at zero, or it stays divergent-from-Blizzard by design.
 local function ChainEndKey(frame, db)
     if not frame then return "fill" end
     -- A FLOATING prediction is not on the health bar, so it never joins the chain.
     if db and (db.healPredictionMode or "OVERLAY") == "FLOATING" then return "fill" end
-    -- Consuming heal absorb active: Blizzard model — the shield hangs at the HEALTH
-    -- EDGE and overlaps the (back-shifted) heal, it does not chain after it. Returning
-    -- "fill" here does the whole job downstream: the clamp is not promoted to the
-    -- heals-subtracted mode, the test clamp stops subtracting the heal, and the absorb
-    -- anchors to the health fill.
-    if HealAbsorbShiftActive(frame, db) then return "fill" end
     local s2, s1 = frame.dfHealPredictionBar2, frame.dfHealPredictionBar
     if s2 and s2.IsShown and s2:IsShown() then return "seg2" end
     if s1 and s1.IsShown and s1:IsShown() then return "seg1" end
@@ -2180,13 +2166,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         -- with it on the overhang is the point and the bar is parented to the frame
         -- rather than the health bar so it can spill.
         if not db.healPredictionShowOverheal then
-            -- With a consuming heal absorb the heal's first points refill EATEN health
-            -- (the bar back-shifts its start — see HealAbsorbShiftActive), so the
-            -- no-overheal cap allows that share on top of missing health, exactly as
-            -- the live calculator's heal-absorb awareness does.
-            local haAllow = (DF.HealAbsorbShiftActive and DF.HealAbsorbShiftActive(frame, db))
-                and ((testData and testData.healAbsorbPercent or 0) * maxHealth) or 0
-            total = math.min(total, math.max(0, maxHealth - healthPct * maxHealth + haAllow))
+            total = math.min(total, math.max(0, maxHealth - healthPct * maxHealth))
         end
         -- The breakdown live gets from the calculator. An even split is the only
         -- honest preview: there is no real healer to attribute to.
@@ -2475,60 +2455,33 @@ function DF:UpdateHealPrediction(frame, testIndex)
         local barWidth = frame.healthBar:GetWidth() - (inset * 2)
         local barHeight = frame.healthBar:GetHeight() - (inset * 2)
 
-        -- ★ BLIZZARD'S HEAL-ABSORB NETTING (see HealAbsorbShiftActive). With a consuming
-        -- heal absorb showing, the heal starts at the heal-absorb region's INNER edge —
-        -- the first N points of the heal refill eaten health, only the remainder extends
-        -- past the fill. The heal-absorb bar reverse-fills from the fill edge inward, so
-        -- its fill texture's far edge IS that inner edge: anchoring SAME-corner to it is
-        -- the back-shift, with zero arithmetic (the amount is secret on live).
-        local haShift = DF.HealAbsorbShiftActive and DF.HealAbsorbShiftActive(frame, db)
-        local haFill = haShift and frame.dfHealAbsorbBar
-            and frame.dfHealAbsorbBar:GetStatusBarTexture() or nil
+        -- (Heal-absorb netting was here and was reverted — see the tombstone above
+        -- ChainEndKey. The prediction starts at the health fill edge, always.)
         if healthOrient == "HORIZONTAL" then
             bar:SetOrientation("HORIZONTAL")
             bar:SetReverseFill(false)
             bar:SetWidth(barWidth)
-            if haFill then
-                bar:SetPoint("TOPLEFT", haFill, "TOPLEFT", 0, 0)
-                bar:SetPoint("BOTTOMLEFT", haFill, "BOTTOMLEFT", 0, 0)
-            else
-                -- Use two-point anchoring to match health fill texture height exactly
-                bar:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, 0)
-                bar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
-            end
+            -- Use two-point anchoring to match health fill texture height exactly
+            bar:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, 0)
+            bar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
         elseif healthOrient == "HORIZONTAL_INV" then
             bar:SetOrientation("HORIZONTAL")
             bar:SetReverseFill(true)
             bar:SetWidth(barWidth)
-            if haFill then
-                bar:SetPoint("TOPRIGHT", haFill, "TOPRIGHT", 0, 0)
-                bar:SetPoint("BOTTOMRIGHT", haFill, "BOTTOMRIGHT", 0, 0)
-            else
-                bar:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, 0)
-                bar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-            end
+            bar:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, 0)
+            bar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, 0)
         elseif healthOrient == "VERTICAL" then
             bar:SetOrientation("VERTICAL")
             bar:SetReverseFill(false)
             bar:SetHeight(barHeight)
-            if haFill then
-                bar:SetPoint("BOTTOMLEFT", haFill, "BOTTOMLEFT", 0, 0)
-                bar:SetPoint("BOTTOMRIGHT", haFill, "BOTTOMRIGHT", 0, 0)
-            else
-                bar:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-                bar:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
-            end
+            bar:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", 0, 0)
+            bar:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
         elseif healthOrient == "VERTICAL_INV" then
             bar:SetOrientation("VERTICAL")
             bar:SetReverseFill(true)
             bar:SetHeight(barHeight)
-            if haFill then
-                bar:SetPoint("TOPLEFT", haFill, "TOPLEFT", 0, 0)
-                bar:SetPoint("TOPRIGHT", haFill, "TOPRIGHT", 0, 0)
-            else
-                bar:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-                bar:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
-            end
+            bar:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
+            bar:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
         end
 
         -- Let WoW's StatusBar handle the percentage calculation internally

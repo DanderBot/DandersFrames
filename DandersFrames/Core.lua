@@ -6172,15 +6172,10 @@ DF._MainEventDispatcher = function(self, event, arg1)
                             and f.healthBar:GetStatusBarTexture()
                         local pb = f.dfHealPredictionBar
                         local predFill = pb and pb.GetStatusBarTexture and pb:GetStatusBarTexture()
-                        -- "haNet" = anchored to the heal-absorb fill: the Blizzard
-                        -- back-shift for a consuming heal absorb, a LEGITIMATE target.
-                        local ha = f.dfHealAbsorbBar
-                        local haFill = ha and ha.GetStatusBarTexture and ha:GetStatusBarTexture()
                         local ok, s = pcall(function()
                             local _, rel = bar:GetPoint(1)
                             local which = (rel == hbFill and "fill")
                                 or (rel == predFill and "pred")
-                                or (rel == haFill and "haNet")
                                 or (rel and "STALE" or "nil")
                             local v = bar:GetValue()
                             local _, mx = bar:GetMinMaxValues()
