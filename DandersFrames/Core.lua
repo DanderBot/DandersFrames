@@ -6154,17 +6154,24 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- fill from before a texture swap. STALE on first entry, healthy after
                 -- a toggle, is the orphan mechanism caught red-handed.
                 do
-                    local hbFill = frame.healthBar and frame.healthBar.GetStatusBarTexture
-                        and frame.healthBar:GetStatusBarTexture()
-                    local pb = frame.dfHealPredictionBar
-                    local predFill = pb and pb.GetStatusBarTexture and pb:GetStatusBarTexture()
                     local function sv(x)
                         if issecretvalue and issecretvalue(x) then return "secret" end
                         if type(x) == "number" then return string.format("%.0f", x) end
                         return tostring(x)
                     end
-                    local function probe(bar)
+                    -- Per frame, not per dump: each frame's health/prediction fills are
+                    -- different objects, so anchor identity must be judged against the
+                    -- probed frame's own bars. ☠ The first cut probed only the DUMPED
+                    -- frame — the player, which sits at FULL health with reduced max, so
+                    -- both its bars are LEGITIMATELY zero (heals clamp to missing health,
+                    -- the shield to the usable bar) and the probe said nothing about the
+                    -- frames that were actually broken.
+                    local function probe(f, bar)
                         if not bar then return "(absent)" end
+                        local hbFill = f.healthBar and f.healthBar.GetStatusBarTexture
+                            and f.healthBar:GetStatusBarTexture()
+                        local pb = f.dfHealPredictionBar
+                        local predFill = pb and pb.GetStatusBarTexture and pb:GetStatusBarTexture()
                         local ok, s = pcall(function()
                             local _, rel = bar:GetPoint(1)
                             local which = (rel == hbFill and "fill")
@@ -6180,8 +6187,17 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         end)
                         return ok and s or "(read refused)"
                     end
-                    print("  Pred      " .. probe(frame.dfHealPredictionBar))
-                    print("  Absorb    " .. probe(frame.dfAbsorbBar))
+                    print("  Pred      " .. probe(frame, frame.dfHealPredictionBar))
+                    print("  Absorb    " .. probe(frame, frame.dfAbsorbBar))
+                    if DF.testPartyFrames then
+                        for i = 0, 4 do
+                            local f = DF.testPartyFrames[i]
+                            if f and f ~= frame and f:IsShown() then
+                                print(("    party %d pred   %s"):format(i, probe(f, f.dfHealPredictionBar)))
+                                print(("    party %d absorb %s"):format(i, probe(f, f.dfAbsorbBar)))
+                            end
+                        end
+                    end
                 end
 
                 local rows = {
