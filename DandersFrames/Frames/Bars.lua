@@ -33,8 +33,30 @@ local ResolveBarTextureForFill = function(...) return DF:ResolveBarTextureForFil
 -- below. resourceBarShowInSoloMode defaults to true and test mode is almost always driven
 -- solo, so live showed the bar on every frame while the preview showed it only on the
 -- role-filtered subset -- a setting you could not judge from the preview at all.
-function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride)
+--
+-- ☠ THE SOLO ARM IS SCOPED TO YOUR OWN FRAME, and that scope is the whole point.
+-- "Show in Solo Mode" answers "when I'm not in a group, put a resource bar on MY frame
+-- regardless of the role filters" -- solo there is nothing else on screen, so the
+-- unscoped arm read as correct for years. It is not: a preview (five fake party members)
+-- and a pinned set both render other units WHILE the client is solo, and every one of
+-- them took the bypass. Field-reported as "enabling Show in Solo Mode enables the
+-- resource bar for every frame" (Aphoex, 2026-08-14).
+-- `selfOverride` is the DATA half, exactly like roleOverride/classOverride: the preview
+-- has no real unit to answer UnitIsUnit with, and its own frame is the first slot.
+function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride, selfOverride)
     if not db.resourceBarEnabled then return false end
+
+    -- Is this the player's own frame? nil selfOverride = resolve from the unit. ⚠ `unit and`
+    -- guards the nil-unit preview call the same way the class filter below has to: 12.1
+    -- rejects UnitIsUnit(nil, ...) with a Usage error rather than returning nil, and a
+    -- SECRET answer (boss units) must be folded to false before anything branches on it --
+    -- branching on a secret throws, and this one is read twice below.
+    local isSelf = selfOverride
+    if isSelf == nil then
+        local self_ = unit and UnitIsUnit(unit, "player")
+        if issecretvalue(self_) then self_ = false end
+        isSelf = self_ and true or false
+    end
 
     -- Role filter
     local roleAllowed = false
@@ -52,7 +74,7 @@ function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride)
         local role = roleOverride or DF:GetUnitRole(unit)
         local inSoloMode = not IsInGroup() and not IsInRaid()
 
-        if inSoloMode and db.resourceBarShowInSoloMode then
+        if inSoloMode and isSelf and db.resourceBarShowInSoloMode then
             roleAllowed = true
         elseif role == "HEALER" then
             roleAllowed = db.resourceBarShowHealer == true
@@ -66,7 +88,7 @@ function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride)
         end
     else
         local inSoloMode = not IsInGroup() and not IsInRaid()
-        roleAllowed = inSoloMode and db.resourceBarShowInSoloMode == true
+        roleAllowed = inSoloMode and isSelf and db.resourceBarShowInSoloMode == true
     end
 
     if not roleAllowed then return false end
