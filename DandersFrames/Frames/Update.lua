@@ -94,7 +94,34 @@ function DF:ApplyFrameLayout(frame)
         -- is missing (imported profiles referencing another addon's media render
         -- solid green otherwise). Frame CREATION already used the safe setter,
         -- but this per-update raw call immediately clobbered its fallback.
+        local prevFill = healthBar:GetStatusBarTexture()
         DF:SafeSetStatusBarTexture(healthBar, healthTex)
+        -- ☠☠ SETTING THE TEXTURE CAN REPLACE THE FILL TEXTURE OBJECT, and three bars
+        -- anchor to that object: the heal prediction, the heal absorb, and the attached
+        -- absorb (which chains off the prediction's segment). A swap orphans their
+        -- anchors -- they keep rendering against a dead rect, usually invisibly, which
+        -- is exactly "the bar is on but nothing shows until I toggle something".
+        -- EllesmereUI carries the same rule ("must be called whenever
+        -- SetStatusBarTexture replaces the fill object"); this is that rule placed AT
+        -- the swap, so no ordering between styling and painting can strand a bar.
+        -- Prediction first, absorb LAST -- it chains onto the prediction's segment.
+        -- ⚠ On a test frame the drives re-run with that frame's OWN test data; painting
+        -- them from live values is the poisoning the guards in Frames/Bars.lua stop, so
+        -- when test data cannot be resolved the bars are left alone (their own test
+        -- drive owns them).
+        local newFill = healthBar:GetStatusBarTexture()
+        if newFill ~= prevFill then
+            local isTest = (DF.testMode or DF.raidTestMode) and frame.dfIsTestFrame
+            local ti = nil
+            if isTest and DF.GetTestUnitData and frame.index ~= nil then
+                ti = DF:GetTestUnitData(frame.index, frame.isRaidFrame)
+            end
+            if not isTest or ti then
+                if DF.UpdateHealPrediction then DF:UpdateHealPrediction(frame, ti) end
+                if DF.UpdateHealAbsorb then DF:UpdateHealAbsorb(frame, ti) end
+                if DF.UpdateAbsorb then DF:UpdateAbsorb(frame, ti) end
+            end
+        end
         
         -- Orientation
         --
