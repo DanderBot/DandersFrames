@@ -581,12 +581,15 @@ function DF:ResolveAbsorbChainAnchor(frame, db)
     if not db or (db.healPredictionMode or "OVERLAY") == "FLOATING" then return fill end
     -- Walk the chain BACKWARDS: segment 2 (others' heals) hangs off segment 1 (mine),
     -- which hangs off the fill. The last one actually showing is the cursor.
-    for _, seg in ipairs({ frame.dfHealPredictionBar2, frame.dfHealPredictionBar }) do
+    for i, seg in ipairs({ frame.dfHealPredictionBar2, frame.dfHealPredictionBar }) do
         if seg and seg.IsShown and seg:IsShown() and seg.GetStatusBarTexture then
             local t = seg:GetStatusBarTexture()
-            if t then return t end
+            -- Diagnostic stamp, printed by /df debug zorder. Plain Lua strings only: no
+            -- rect or health reads, so it is safe in combat and cannot trip a secret value.
+            if t then frame.dfAbsorbChainPick = (i == 1) and "seg2" or "seg1"; return t end
         end
     end
+    frame.dfAbsorbChainPick = "fill"
     return fill
 end
 
@@ -658,7 +661,10 @@ function DF:UpdateAbsorb(frame, testIndex)
     -- only the absorb value (and possibly isClamped for ATTACHED modes)
     -- has changed. Skip ~90% of the function body.
     local customBar = frame.dfAbsorbBar
+    -- Diagnostic: did this call re-anchor, or short-circuit? Printed by /df debug zorder.
+    frame.dfAbsorbFastPath = false
     if customBar and customBar:IsShown() and not AbsorbLayoutStateChanged(frame, db) then
+        frame.dfAbsorbFastPath = true
         if mode == "ATTACHED" or mode == "ATTACHED_OVERFLOW" then
             -- Need the calculator for clamped state (secret, can't cache).
             -- The calculator object itself is already cached on the frame.

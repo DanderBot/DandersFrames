@@ -6091,6 +6091,17 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     end
                 end
 
+                -- Health-bar CHAIN (health -> incoming heals -> absorb). Says which segment
+                -- the absorb is hanging off and whether the last UpdateAbsorb actually
+                -- re-anchored or short-circuited on its layout-state cache. All plain Lua
+                -- stamps -- no rect or health reads, so nothing here can touch a secret.
+                print(("  %-10s pick=%-5s fastPath=%-5s chainEnd=%-4s predShown=%-5s pred2Shown=%s")
+                    :format("Chain",
+                        tostring(frame.dfAbsorbChainPick), tostring(frame.dfAbsorbFastPath),
+                        tostring(frame.dfHealPredChainEnd),
+                        tostring(frame.dfHealPredictionBar and frame.dfHealPredictionBar:IsShown()),
+                        tostring(frame.dfHealPredictionBar2 and frame.dfHealPredictionBar2:IsShown())))
+
                 local rows = {
                     { "buff", frame.buffFactory }, { "debuff", frame.debuffFactory },
                     { "defensive", frame.defensiveFactory },
