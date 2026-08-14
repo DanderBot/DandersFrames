@@ -170,8 +170,8 @@ end
 --       mode to use with a low-alpha wash if you want to see through it.
 --
 --   SHOW ON CURRENT HEALTH   -> +4: above the health FILL and nothing
---       else. It must stay under heal-absorb (+8), reduced-max (+9), absorb (+11)
---       and heal prediction (+12), because the entire point of the option is that
+--       else. It must stay under heal-absorb (+8), reduced-max (+9), heal
+--       prediction (+10) and absorb (+11), because the entire point of the option is that
 --       the wash marks the HEALTH and leaves those indicators readable. Burying
 --       them loses the information the option exists to preserve -- and at full
 --       health with a solid blend the wash swallowed the frame whole
@@ -215,7 +215,7 @@ function DF:ResolveDispelGradientLevel(frameLevel, db)
         and db and db.dispelGradientOnCurrentHealth ~= false
     -- ☠ CURRENT HEALTH IS PINNED AT +4 AND THE SLIDER DOES NOT MOVE IT. The entire
     -- contract of "Show On Current Health Only" is that the wash marks the health and
-    -- leaves reduced-max (+9), absorb (+11) and heal prediction (+12) readable above it.
+    -- leaves reduced-max (+9), heal prediction (+10) and absorb (+11) readable above it.
     -- A slider here would let a user silently re-create the exact bug this option was
     -- rewritten to fix, and they would read the result as the option being broken rather
     -- than as their own setting. The slider governs the widget and the FULL-FRAME wash,
@@ -231,8 +231,9 @@ local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     overlay:SetAllPoints(host)
     -- ★ THE FRAME'S LEVEL LADDER, as it actually stands (offsets from the unit frame):
     --   +0..+8   background, health/missing +3, power +5, heal-absorb +8
+    --   +10      heal prediction    (healPredictionFrameLevel)
     --   +11      absorb bar         (absorbBarFrameLevel)
-    --   +12      heal prediction    (healPredictionFrameLevel)
+    --   +13      overshield host,   +14 frame border
     --   +16/+17  dispel overlay / gradient + ring   <- HERE
     --   +20      resource bar       (resourceBarFrameLevel)
     --   +25      content overlay,   +26 dispel badge
@@ -801,7 +802,7 @@ local function ApplyOverlayLayout(overlay, db, frame)
     -- re-applied ANY level and kept whatever creation assigned. Creation pins the pulse
     -- box (whose REGIONS are the four edge strips and the darken) at the gradient
     -- host's own level, i.e. the healthBar band — which is how EDGE mode rendered
-    -- under the absorb bar (+11) and heal prediction (+12) on the test widget while
+    -- under the heal prediction (+10) and absorb bar (+11) on the test widget while
     -- TOP, which draws through the resolver-levelled gradient StatusBar, cleared them.
     -- Field-caught in two rounds: "edge mode is not showing over the absorb... top edge
     -- works now but not edge glow" (Krathe, 2026-08-13), with the z-order dump showing
@@ -819,11 +820,22 @@ local function ApplyOverlayLayout(overlay, db, frame)
     do
         local levelHost = frame or overlay:GetParent()
         local hostLvl = levelHost and levelHost:GetFrameLevel() or 0
+        local gradientLvl = DF:ResolveDispelGradientLevel(hostLvl, db)
         pcall(overlay.SetFrameLevel, overlay, DF:ResolveDispelOverlayLevel(hostLvl, db))
-        overlay.gradient:SetFrameLevel(DF:ResolveDispelGradientLevel(hostLvl, db))
+        -- ☠ PARENT BEFORE CHILD. SetFrameLevel on a frame shifts every DESCENDANT by the
+        -- same delta, so levelling the gradient and THEN its pulse host re-shifted the
+        -- child that had just been placed. On the legacy path gradientParent IS
+        -- gradientPulseHost, so the host started at frame+3, the gradient was set to +17,
+        -- and moving the host +3 -> +17 dragged the gradient to +31 -- above the resource
+        -- bar (+20), the content overlay (+25) and the status icons (+30). It stuck until
+        -- a pass beat the LayoutStateChanged early-return, and drifted another step per
+        -- drag of the Frame Level slider. (Danders's review, PR #236 B3.)
+        -- The overlay/borderRingHost pair below was always in the right order; this now
+        -- matches it. One resolve, reused, so the two can never be handed different values.
         if overlay.gradientPulseHost then
-            overlay.gradientPulseHost:SetFrameLevel(DF:ResolveDispelGradientLevel(hostLvl, db))
+            overlay.gradientPulseHost:SetFrameLevel(gradientLvl)
         end
+        overlay.gradient:SetFrameLevel(gradientLvl)
         if overlay.borderRingHost then
             overlay.borderRingHost:SetFrameLevel(overlay:GetFrameLevel() + 1)
         end
@@ -1908,8 +1920,14 @@ local function StyleGameBorderSlot(btn, frame, db)
     -- moves the band (the legacy widget had this exact bug on its ring host). The DIM
     -- must move too: the ring is the DIM'S region, so the art draws at the dim's level,
     -- and a re-levelled holder with a stale dim moves nothing visible.
-    local ringLvl = ((frame.healthBar and frame.healthBar:GetFrameLevel())
-        or (frame:GetFrameLevel() + 3)) + 15
+    -- ⚠ THROUGH THE RESOLVER, so it follows the slider it exists to follow. This computed
+    -- healthBar + 15 flat while the wash and the edge strips take
+    -- DF:ResolveDispelOverlayLevel(..., db) -- so pushing dispelOverlayFrameLevel up put
+    -- the wash ABOVE its own ring, which is the one relationship the ring has. The +1 keeps
+    -- the ring exactly one step over the overlay, matching borderRingHost. (Review, S3.)
+    local ringHostLvl = (frame.healthBar and frame.healthBar:GetFrameLevel())
+        or (frame:GetFrameLevel() + 3)
+    local ringLvl = DF:ResolveDispelOverlayLevel(ringHostLvl, db) + 1
     if btn.dfDispelRingHolder then btn.dfDispelRingHolder:SetFrameLevel(ringLvl) end
     if btn.dfDispelRingDim then btn.dfDispelRingDim:SetFrameLevel(ringLvl) end
     ApplySlotPulse(btn.dfDispelRingHolder, db.dispelAnimate)
