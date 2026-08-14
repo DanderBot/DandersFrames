@@ -1773,6 +1773,7 @@ function DF:UpdateHealAbsorb(frame, testIndex)
     
     -- Get values - either from test data or real unit
     local maxHealth, healAbsorb
+    local isTestRender = false
     
     if DF.testMode and testIndex ~= nil then
         -- testIndex may be a numeric index or a ready testData TABLE (the
@@ -1786,6 +1787,7 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             -- nothing -- that healing is already spoken for and will land.
             healAbsorb = math.max(0, (testData.healAbsorbPercent or 0)
                 - (testData.healPredictionPercent or 0)) * maxHealth
+            isTestRender = true
         else
             maxHealth = 100000
             healAbsorb = 0
@@ -1800,6 +1802,7 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             -- nothing -- that healing is already spoken for and will land.
             healAbsorb = math.max(0, (testData.healAbsorbPercent or 0)
                 - (testData.healPredictionPercent or 0)) * maxHealth
+            isTestRender = true
         else
             maxHealth = 100000
             healAbsorb = 0
@@ -1946,10 +1949,16 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             return
         end
         
-        -- Use the calculator API for ATTACHED mode
+        -- Use the calculator API for ATTACHED mode.
+        -- ☠ NOT ON TEST FRAMES. This block ran unconditionally and overwrote the test
+        -- value with the REAL unit's heal absorb — zero — so the attached wash rendered
+        -- nothing in test mode while OVERLAY (which never consults the calculator)
+        -- worked. The same poisoning class as the no-testIndex callers, one layer
+        -- deeper: inside the function, after the test value was already correct.
+        -- UpdateAbsorb has forked on isTestRender here all along; now this does too.
         local attachedHealAbsorb = healAbsorb
-        
-        if CreateUnitHealPredictionCalculator and unit then
+
+        if not isTestRender and CreateUnitHealPredictionCalculator and unit then
             if not frame.healAbsorbCalculator then
                 frame.healAbsorbCalculator = CreateUnitHealPredictionCalculator()
             end
