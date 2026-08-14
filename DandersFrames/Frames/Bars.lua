@@ -638,7 +638,9 @@ function DF:UpdateAbsorb(frame, testIndex)
 
     -- Get values - either from test data or real unit
     local maxHealth, absorbs
-    local isTestRender, testHealthPercent = false, nil
+    -- testIncomingPercent feeds the chained clamp: with the shield sitting after the
+    -- incoming heal, the heal's share of the bar is no longer available to it.
+    local isTestRender, testHealthPercent, testIncomingPercent = false, nil, nil
 
     if DF.testMode and testIndex ~= nil then
         -- testIndex may be a numeric index or a ready testData TABLE (the
@@ -649,6 +651,7 @@ function DF:UpdateAbsorb(frame, testIndex)
             absorbs = testData.absorbPercent * maxHealth
             isTestRender = true
             testHealthPercent = testData.healthPercent or 1
+            testIncomingPercent = testData.healPredictionPercent or 0
         else
             maxHealth = 100000
             absorbs = 0
@@ -660,6 +663,7 @@ function DF:UpdateAbsorb(frame, testIndex)
             absorbs = testData.absorbPercent * maxHealth
             isTestRender = true
             testHealthPercent = testData.healthPercent or 1
+            testIncomingPercent = testData.healPredictionPercent or 0
         else
             maxHealth = 100000
             absorbs = 0
@@ -699,9 +703,16 @@ function DF:UpdateAbsorb(frame, testIndex)
             if isTestRender then
                 -- Test data: the calculator can only query the REAL unit (0 solo),
                 -- so derive the clamped value from the mock percentages instead.
+                -- ☠ MUST MATCH THE FULL PATH'S SUM. This is the fast path's own copy of
+                -- the clamp, and it kept the pre-chain formula when the full path learned
+                -- to subtract the incoming heal -- so the shield's length depended on
+                -- which path happened to run. One rule: chained behind a heal, the space
+                -- left is missing health MINUS that heal.
                 local curHealth = testHealthPercent * maxHealth
-                if curHealth + absorbs > maxHealth then
-                    attachedAbsorbs = maxHealth - curHealth
+                local incoming = (DF.ChainEndKey and DF.ChainEndKey(frame, db) ~= "fill")
+                    and (testIncomingPercent or 0) * maxHealth or 0
+                if curHealth + incoming + absorbs > maxHealth then
+                    attachedAbsorbs = math.max(0, maxHealth - curHealth - incoming)
                     isClamped = true
                 end
             elseif frame.absorbCalculator and unit and CreateUnitHealPredictionCalculator then
@@ -998,10 +1009,20 @@ function DF:UpdateAbsorb(frame, testIndex)
         
         -- Create/reuse the calculator (test data: derive from mock percentages
         -- instead — the calculator can only query the REAL unit, 0 when solo)
+        -- ☠ THE CLAMP HAS TO KNOW ABOUT THE HEAL PREDICTION NOW THAT THE ABSORB SITS AFTER
+        -- IT. While the shield started at the health fill it could occupy missing health
+        -- freely; chained behind the incoming heal, the space left to it is missing health
+        -- MINUS that heal. Without this the bar is allowed its full length from a later
+        -- start and simply runs off the end (reported 2026-08-14: "the absorb is now
+        -- breaking out of the bar").
+        local chained = DF.ChainEndKey and DF.ChainEndKey(frame, db) ~= "fill"
         if isTestRender then
             local curHealth = testHealthPercent * maxHealth
-            if curHealth + absorbs > maxHealth then
-                attachedAbsorbs = maxHealth - curHealth
+            -- Preview values are plain numbers, so the arithmetic the live path defers to
+            -- the calculator is done here directly -- the same sum, not a second policy.
+            local incoming = chained and (testIncomingPercent or 0) * maxHealth or 0
+            if curHealth + incoming + absorbs > maxHealth then
+                attachedAbsorbs = math.max(0, maxHealth - curHealth - incoming)
                 isClamped = true
             end
         elseif CreateUnitHealPredictionCalculator and unit then
@@ -1009,9 +1030,18 @@ function DF:UpdateAbsorb(frame, testIndex)
                 frame.absorbCalculator = CreateUnitHealPredictionCalculator()
             end
             local calc = frame.absorbCalculator
-            
-            -- Set clamp mode from settings (default to 1 = Missing Health)
-            local clampMode = db.absorbBarAttachedClampMode or 1
+
+            -- Clamp mode, from Blizzard's UnitDamageAbsorbClampMode enum:
+            --   0 MissingHealth ................. missing health WITH incoming heals subtracted
+            --   1 MissingHealthWithoutIncomingHeals
+            --   2 MaximumHealth
+            -- ☠ 1 IS ONLY CORRECT FOR AN UNCHAINED BAR. It was right while the shield
+            -- started at the health fill and shared the prediction's span; once chained
+            -- behind the heal it hands the bar a length that no longer fits, and the
+            -- overrun is the visible result. 0 is the mode Blizzard's own raid frames
+            -- clamp by, and it keeps the secret arithmetic inside the calculator where it
+            -- belongs rather than doing it in Lua. The user setting still wins when set.
+            local clampMode = db.absorbBarAttachedClampMode or (chained and 0 or 1)
             if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
 
             -- Populate the calculator
@@ -1252,10 +1282,20 @@ function DF:UpdateAbsorb(frame, testIndex)
         
         -- Create/reuse the calculator (test data: derive from mock percentages
         -- instead — the calculator can only query the REAL unit, 0 when solo)
+        -- ☠ THE CLAMP HAS TO KNOW ABOUT THE HEAL PREDICTION NOW THAT THE ABSORB SITS AFTER
+        -- IT. While the shield started at the health fill it could occupy missing health
+        -- freely; chained behind the incoming heal, the space left to it is missing health
+        -- MINUS that heal. Without this the bar is allowed its full length from a later
+        -- start and simply runs off the end (reported 2026-08-14: "the absorb is now
+        -- breaking out of the bar").
+        local chained = DF.ChainEndKey and DF.ChainEndKey(frame, db) ~= "fill"
         if isTestRender then
             local curHealth = testHealthPercent * maxHealth
-            if curHealth + absorbs > maxHealth then
-                attachedAbsorbs = maxHealth - curHealth
+            -- Preview values are plain numbers, so the arithmetic the live path defers to
+            -- the calculator is done here directly -- the same sum, not a second policy.
+            local incoming = chained and (testIncomingPercent or 0) * maxHealth or 0
+            if curHealth + incoming + absorbs > maxHealth then
+                attachedAbsorbs = math.max(0, maxHealth - curHealth - incoming)
                 isClamped = true
             end
         elseif CreateUnitHealPredictionCalculator and unit then
@@ -1263,9 +1303,18 @@ function DF:UpdateAbsorb(frame, testIndex)
                 frame.absorbCalculator = CreateUnitHealPredictionCalculator()
             end
             local calc = frame.absorbCalculator
-            
-            -- Set clamp mode from settings (default to 1 = Missing Health)
-            local clampMode = db.absorbBarAttachedClampMode or 1
+
+            -- Clamp mode, from Blizzard's UnitDamageAbsorbClampMode enum:
+            --   0 MissingHealth ................. missing health WITH incoming heals subtracted
+            --   1 MissingHealthWithoutIncomingHeals
+            --   2 MaximumHealth
+            -- ☠ 1 IS ONLY CORRECT FOR AN UNCHAINED BAR. It was right while the shield
+            -- started at the health fill and shared the prediction's span; once chained
+            -- behind the heal it hands the bar a length that no longer fits, and the
+            -- overrun is the visible result. 0 is the mode Blizzard's own raid frames
+            -- clamp by, and it keeps the secret arithmetic inside the calculator where it
+            -- belongs rather than doing it in Lua. The user setting still wins when set.
+            local clampMode = db.absorbBarAttachedClampMode or (chained and 0 or 1)
             if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
 
             -- Populate the calculator
