@@ -89,6 +89,16 @@ jobs:
       - name: Validate locale files
         if: steps.guard.outputs.skip != 'true'
         run: |
+          # ★ The packager can DECLINE to package and still exit 0 — e.g. a branch
+          # push racing a just-pushed tag prints 'Found future tag "...", not
+          # packaging.' and leaves no .release at all (v5.1.3's main sync hit
+          # exactly this). That is not a locale problem, so don't fail on it.
+          # The distinction: NO package dir = packager declined (benign, skip);
+          # package dir present but locales missing = broken layout (fail below).
+          if [ ! -d .release/DandersFrames ]; then
+            echo "No package was produced (packager declined) — nothing to validate."
+            exit 0
+          fi
           # ☠ A glob that matches nothing must FAIL, not pass silently.
           # Without nullglob an unmatched pattern stays literal, grep errors on the
           # missing file, ERRORS stays 0, and this step prints "validated OK" while
