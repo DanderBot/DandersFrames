@@ -1002,6 +1002,30 @@ local function styleButton_regions(slot, config)
             if subLvl then slot.dfTint:SetDrawLayer("OVERLAY", subLvl) end
             slot.dfTint:SetColorTexture(readColor(ov.tintColor))
         end
+        -- ★ PANDEMIC COVER — the SECOND colour, on the SAME BUTTON as the base above.
+        --
+        -- ☠ SAME BUTTON IS THE WHOLE POINT. The first build made this a second CONTAINER
+        -- drawing over the first, which cost a frame level; the background and border bands
+        -- have none spare, so the feature could not reach them. Two regions under ONE button
+        -- need no level at all: they are siblings of one parent, so the draw-layer sublevel
+        -- orders them reliably (sublevel orders WITHIN a frame — it was useless across
+        -- frames, which is what the earlier attempt got wrong).
+        --
+        -- The two gates stay independent and both stay engine-owned: the slot's own secret
+        -- show/hide gates the BASE (buff present), and AddPandemicRegion in bindNative gates
+        -- THIS ONE (inside the refresh window). Nothing in Lua combines them.
+        --
+        -- ☠ CREATE-ONCE, so the pandemic colour's ON/OFF must stay STRUCTURAL: a region can
+        -- only be created inside initializeFrame (secure), never from a tainted ApplyStyle,
+        -- so enabling it has to hand over a fresh button. The COLOUR itself restyles live.
+        if ov and ov.tintPandemicColor then
+            if not slot.dfTintPandemic then
+                slot.dfTintPandemic = host:CreateTexture(nil, "OVERLAY")
+                slot.dfTintPandemic:SetAllPoints(host)
+            end
+            slot.dfTintPandemic:SetDrawLayer("OVERLAY", math.min((subLvl or 0) + 1, 7))
+            slot.dfTintPandemic:SetColorTexture(readColor(ov.tintPandemicColor))
+        end
         -- (Removed 2026-08-04) FILLED HEALTH MIRROR. It was a StatusBar parented under
         -- the slot, fed the secret health percent per health tick. Aura frames carry
         -- Enum.ScriptObjectAccessRestriction.DenyTaintedAccessWhenAurasAreSecret, so
@@ -1047,6 +1071,25 @@ local function styleButton_regions(slot, config)
                 t:SetColorTexture(fr, fg, fb)
             end
             t:SetAlpha(hf.alpha or 1)
+            -- The pandemic twin of the fill cover: same anchor, same texture, second
+            -- colour, one sublevel up. See the PANDEMIC COVER note above the tint.
+            if hf.pandemicColor then
+                if not slot.dfHealthFillPandemic then
+                    slot.dfHealthFillPandemic = host:CreateTexture(nil, "OVERLAY")
+                end
+                local pt = slot.dfHealthFillPandemic
+                pt:SetDrawLayer("OVERLAY", math.min((subLvl or 0) + 1, 7))
+                pt:ClearAllPoints()
+                pt:SetAllPoints(hf.clampTo)
+                local pr, pg, pb = readColor(hf.pandemicColor)
+                if hf.texture then
+                    DF:SafeSetTexture(pt, hf.texture)
+                    pt:SetVertexColor(pr, pg, pb)
+                else
+                    pt:SetColorTexture(pr, pg, pb)
+                end
+                pt:SetAlpha(hf.alpha or 1)
+            end
         end
         -- MIRROR HOST — a plain child frame of the slot handed back to the consumer
         -- (the Aura Designer name/health text colour-by-cover). The consumer parents
@@ -1810,12 +1853,15 @@ local function bindNative(slot, config)
         end
     end
 
-    -- PANDEMIC-GATED FRAME COVER (AD Health Bar Color / Background Color). Same
-    -- registrar as the icon cue above, pointed at the OVERLAY COVER instead of a holder.
-    -- The cover is already a child region of this slot, so handing its Shown aspect to
-    -- the engine gates the whole wash on the refresh window while the SLOT still gates
-    -- on the buff being present: buff up AND window open -> the frame colours. Nothing
-    -- is read, and no Lua decides anything — the engine owns both gates.
+    -- PANDEMIC COVER (AD frame tints). Same registrar as the icon cue above, pointed at
+    -- the SECOND overlay cover on this button — the one carrying the pandemic colour.
+    -- The base cover beneath it is left alone and keeps rendering on the slot's own
+    -- presence gate, so the pair reads as "colour A while the buff is up, colour B inside
+    -- the refresh window". Both gates are the engine's; no Lua combines them.
+    --
+    -- ☠ REGISTER THE PANDEMIC COVER, NEVER THE BASE. Registering the base (the first
+    -- build did, when the variant was a separate container) hands the engine the wash
+    -- that is supposed to show for the buff's whole life.
     --
     -- ☠ THE REGION IS REGISTERED DIRECTLY, no holder — deliberately the opposite of the
     -- icon cue's rule, for the reason that rule exists. There the holder protects
@@ -1832,9 +1878,10 @@ local function bindNative(slot, config)
     -- On a PREVIEW slot there is no registrar, so the cover renders ungated — the same
     -- behaviour the icon cue has on the AD canvas, and the reason test mode cannot show
     -- this gate (a preview aura has no auraInstanceID, so no window ever opens).
-    local ovPd = style.overlay
-    if ovPd and ovPd.pandemicOnly and slot.AddPandemicRegion and not slot._boundPandemicCover then
-        local cover = slot.dfHealthFill or slot.dfTint
+    -- No flag to read: the pandemic cover only EXISTS when a pandemic colour is
+    -- configured, and its creation is structural, so its presence is the condition.
+    if slot.AddPandemicRegion and not slot._boundPandemicCover then
+        local cover = slot.dfHealthFillPandemic or slot.dfTintPandemic
         if cover then
             local ok, err = pcall(slot.AddPandemicRegion, slot, cover)
             if ok then
