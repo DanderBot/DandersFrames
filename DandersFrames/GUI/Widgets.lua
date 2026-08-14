@@ -105,7 +105,7 @@ function GUI:AttachTooltip(widget, label, labelRegion)
         -- ★ GAME-DATA TOOLTIPS ride the same hit frame: a widget stamped with
         -- .tooltipSpellID shows the SPELL's own tooltip (via GUI:ShowGameTooltip,
         -- which owns the cold-cache retry) instead of a text spec. Wanted first by
-        -- the Tracked Spells rows, where two ids share one NAME and the tooltip
+        -- the Tracked IDs rows, where two ids share one NAME and the tooltip
         -- body is the only thing that tells them apart. Duck-typed guard because
         -- ShowGameTooltip lives in the Options companion: a resident-only consumer
         -- without the panel loaded simply falls through to the text path.

@@ -1779,7 +1779,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
         -- that responds to a click by doing nothing visible reads as broken. Refusing it
         -- is only half the fix — a refusal with no reason reads as broken too, so the
         -- tooltip names the actual cause (set in updateEyeIcon), which is fixable one card
-        -- down: tick an effect in Tracked Spells.
+        -- down: tick an effect in Tracked IDs.
         eyeBtn:SetScript("OnClick", function()
             if not cfgTable then return end
             if tracksNothing() then return end

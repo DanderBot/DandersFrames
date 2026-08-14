@@ -546,7 +546,7 @@ local function unionIdentity(spec, auraName, typeCfg)
         end
         return map
     end
-    -- ★ typeCfg rides along as the MUTE CARRIER: the Tracked Spells ticks store
+    -- ★ typeCfg rides along as the MUTE CARRIER: the Tracked IDs ticks store
     -- mutedSpellIDs on this same sub-table, and BuildADIdentityFilters narrows by
     -- whatever table it is handed (see narrowByPlacementMutes). Ids are globally
     -- unique, so one mute set correctly narrows every trigger's contribution too.
@@ -1200,7 +1200,7 @@ local function pickWinner(spec, specAuras, otherAuras, typeKey, validate)
                 local typeCfg = (type(auraCfg) == "table") and auraCfg[typeKey]
                 if typeCfg and typeCfg.enabled ~= false and (not validate or validate(typeCfg)) then
                     local map, mutedEmpty = unionIdentity(idSpec, auraName, typeCfg)
-                    -- mutedEmpty = every id unticked in Tracked Spells: a choice, not a data problem.
+                    -- mutedEmpty = every id unticked in Tracked IDs: a choice, not a data problem.
                     if not map and not mutedEmpty then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
                     if map then
                         local prio = auraCfg.priority or 5
@@ -4027,7 +4027,7 @@ local function collectDesiredSounds(desired, unit, auras, keyPrefix, idSpec, cha
         -- offer sound on them either; this is the render-side backstop for hand-edited
         -- or imported data.
         if sc and sc.enabled and not DF:ParseADFilterRef(auraName) then
-            -- sc carries the sound effect's Tracked Spells mutes (same table the card
+            -- sc carries the sound effect's Tracked IDs mutes (same table the card
             -- writes mutedSpellIDs to); mutedEmpty is a choice, not a data problem.
             local ids, mutedEmpty = DF:BuildADIdentityFilters(idSpec, auraName, sc)
             local map = ids and ids.includeSpellIDs
@@ -4819,7 +4819,7 @@ local function collectStackedBorders(spec, specAuras, otherAuras)
                 if typeCfg and typeCfg.enabled ~= false and typeCfg.ShowBorder ~= false
                    and typeCfg.borderMode == "custom" then
                     local map, mutedEmpty = unionIdentity(idSpec, auraName, typeCfg)
-                    -- mutedEmpty = every id unticked in Tracked Spells: a choice, not a data problem.
+                    -- mutedEmpty = every id unticked in Tracked IDs: a choice, not a data problem.
                     if not map and not mutedEmpty then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
                     if map then
                         stackedBorders = stackedBorders or {}
@@ -4890,7 +4890,7 @@ local function collectFrameTints(spec, specAuras, otherAuras, typeKey)
                 local typeCfg = (type(auraCfg) == "table") and auraCfg[typeKey]
                 if typeCfg and typeCfg.enabled ~= false and typeCfg.color then
                     local map, mutedEmpty = unionIdentity(idSpec, auraName, typeCfg)
-                    -- mutedEmpty = every id unticked in Tracked Spells: a choice, not a data problem.
+                    -- mutedEmpty = every id unticked in Tracked IDs: a choice, not a data problem.
                     if not map and not mutedEmpty then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
                     if map then
                         list = list or {}

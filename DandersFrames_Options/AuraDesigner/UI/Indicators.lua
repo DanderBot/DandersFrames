@@ -334,7 +334,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             end
         end
         if indRec and idList and #idList > 1 then
-            AddGroup(L["Tracked Spells"], function(g)
+            AddGroup(L["Tracked IDs"], function(g)
                 local note = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
                 note:SetWordWrap(true)
                 note:SetWidth(contentWidth - 30)

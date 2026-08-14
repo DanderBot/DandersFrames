@@ -1060,7 +1060,7 @@ L["Solid Square"] = true
 L["Square Color"] = true
 -- Per-placement spell-ID narrowing (Aura Designer indicator card). Shown only when a
 -- spell resolves to more than one ID, e.g. a buff that also applies its own absorb.
-L["Tracked Spells"] = true
+L["Tracked IDs"] = true
 -- The zero state is spelled out because it looks identical to a hidden indicator, and the
 -- eye is a separate control that this never touches.
 L["Showing %d of %d effects. Untick any you don't want this indicator to show."] = true
