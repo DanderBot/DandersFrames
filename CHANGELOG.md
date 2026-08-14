@@ -18,9 +18,11 @@
 ### New Features
 
 * (Aura Designer) Spells with more than one effect now show a "Tracked Spells" list on their indicator card — untick any effect you don't want that indicator to show. Each row shows the effect's own icon, and unticking everything simply shows nothing without touching the visibility eye. (by Krathe)
+* (Aura Designer) Health Bar Color can switch to a second colour while a buff is inside its refresh window, so a heal-over-time can read one colour normally and another the moment recasting it wastes nothing. The game sets that window per spell, and buffs you cannot refresh never have one. (by Krathe)
 
 ### Bug Fixes
 
+* (Aura Designer) Every configured Health Bar Color and Background Color now shows. Previously only the highest-priority one ever did, so a lower-priority buff coloured nothing even when it was the only one on the unit. With several active at once the highest priority draws on top. (by Krathe)
 * (Dispel Highlight) Gradient, border and symbol opacity now actually apply in game — the overlay previously rendered at full brightness no matter what the sliders said, including for debuffs gained mid-combat. (by Krathe)
 * (Dispel Highlight) Fix gradient opacity being applied twice for profiles upgraded from v4, which locked the overlay at full brightness across most of the slider's range. (by Krathe)
 
