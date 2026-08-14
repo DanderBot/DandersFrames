@@ -1285,6 +1285,21 @@ local function styleButton_regions(slot, config)
                         warnedBorder = true
                         DF:DebugWarn(DBG, "pandemic border apply failed: %s", tostring(errA))
                     end
+                    -- AURA DESIGNER CANVAS ONLY — the same branch, the same guard and the
+                    -- same reasoning as the icon cue's holder further down. A plain frame
+                    -- has no AddPandemicRegion, so nothing will ever drive this holder's
+                    -- visibility there, and the canvas is where the user styles the cue.
+                    -- On a real container button this stays false and the engine owns
+                    -- Shown, so the never-Show-a-bound-region rule is untouched.
+                    -- ☠ This was missing entirely: the holder was hidden once at creation
+                    -- and never shown again, so a Border effect's pandemic colour previewed
+                    -- as nothing at all while the icon cue previewed fine. It reads as the
+                    -- feature being broken rather than as a preview gap.
+                    -- ⚠ And in-game TEST slots are handled where the icon cue is handled —
+                    -- armTestPandemicWindow, which now drives this holder too, so the cue
+                    -- opens and closes with the fake duration instead of sitting on. Do not
+                    -- add a Show() here for them; that is the exact mistake 07804854 made.
+                    if not slot.AddPandemicRegion then slot.dfBorderPandemicHolder:Show() end
                 end
             end
             if not ok and not warnedBorder then
@@ -3768,19 +3783,30 @@ local PANDEMIC_PREVIEW_OPEN_AT = 0.7
 -- `elapsed` is how far into the cycle we already are (armTestDuration starts the
 -- duration in the past by the per-slot stagger), so the first window lands in phase
 -- with the bar and swipe instead of a full cycle late.
+-- ☠ BOTH HOLDERS, ON ONE WINDOW. There are two pandemic cues on a slot — the icon cue
+-- (dfPandemicHolder) and the BORDER twin an Aura Designer Border effect builds
+-- (dfBorderPandemicHolder) — and this drove only the first. The border twin was hidden
+-- once at creation with nothing to show it, so in test mode a Border effect's second
+-- colour previewed as nothing while the icon cue previewed correctly. They are one
+-- feature on one duration and must open and close together, or the preview says the two
+-- behave differently when live drives them from the same engine window.
 local function armTestPandemicWindow(handle, slot, d, gen, elapsed)
-    local holder = slot.dfPandemicHolder
-    if not holder then return end
-    holder:Hide()
+    local h1, h2 = slot.dfPandemicHolder, slot.dfBorderPandemicHolder
+    if not (h1 or h2) then return end
+    local function setShown(shown)
+        if h1 then h1:SetShown(shown) end
+        if h2 then h2:SetShown(shown) end
+    end
+    setShown(false)
     if not (d and d > 0) then return end
     local openIn = d * PANDEMIC_PREVIEW_OPEN_AT - (elapsed or 0)
-    if openIn <= 0 then holder:Show() return end
+    if openIn <= 0 then setShown(true) return end
     C_Timer.After(openIn, function()
         -- Same gen guard as the re-arm: a repaint or teardown must not leave a stale
         -- closure showing the cue on a slot that has moved on.
         if handle._destroyed or slot._dfTestGen ~= gen then return end
         if not AuraContainer._testMode then return end
-        holder:Show()
+        setShown(true)
     end)
 end
 

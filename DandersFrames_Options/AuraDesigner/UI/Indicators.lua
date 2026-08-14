@@ -13,6 +13,9 @@ local Adapter = DF.AuraDesigner.Adapter
 local S = DF.AuraDesigner._uiState
 local P = DF.AuraDesigner._priv
 local C_TEXT_DIM = GUI.Colors.textDim
+-- The editor's "configured, but this will not render" amber. Shared (GUI.Colors.notice),
+-- not the raw triple this file had copied four times.
+local C_NOTICE = GUI.Colors.notice
 local OPTS = P.OPTS
 local ResolveSpec = P.ResolveSpec
 local IsOtherTab = P.IsOtherTab
@@ -342,7 +345,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                 local function UpdateNote()
                     local live = LiveCount()
                     if live == 0 then
-                        note:SetTextColor(0.91, 0.66, 0.25, 1)   -- the editor's warning amber
+                        note:SetTextColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b, 1)
                         note:SetText(L["Nothing ticked — this indicator will not show."])
                     else
                         note:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
@@ -502,7 +505,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         AddGroup(L["Position"], function(g)
             if layoutGroup then
                 local groupNote = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                groupNote:SetTextColor(0.91, 0.66, 0.25, 0.8)
+                groupNote:SetTextColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b, 0.8)
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else
@@ -671,7 +674,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         AddGroup(L["Position"], function(g)
             if layoutGroup then
                 local groupNote = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                groupNote:SetTextColor(0.91, 0.66, 0.25, 0.8)
+                groupNote:SetTextColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b, 0.8)
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else
@@ -797,7 +800,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         AddGroup(L["Position"], function(g)
             if layoutGroup then
                 local groupNote = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                groupNote:SetTextColor(0.91, 0.66, 0.25, 0.8)
+                groupNote:SetTextColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b, 0.8)
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else

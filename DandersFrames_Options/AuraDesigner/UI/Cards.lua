@@ -17,6 +17,8 @@ local C_BORDER = GUI.Colors.border
 local C_HOVER = GUI.Colors.hover
 local C_TEXT = GUI.Colors.text
 local C_TEXT_DIM = GUI.Colors.textDim
+-- The editor's "configured, but this will not render" amber (GUI.Colors.notice).
+local C_NOTICE = GUI.Colors.notice
 local OPTS = P.OPTS
 local GetAuraDesignerDB = P.GetAuraDesignerDB
 local GetThemeColor = P.GetThemeColor
@@ -471,7 +473,7 @@ local function CreateEnableBanner(parent)
                 if targetDB.showBuffs ~= keepBuffs then
                     targetDB.showBuffs = keepBuffs
                     DF:Say(keepBuffs and L["Buffs kept alongside Aura Designer."]
-                        or L["Buffs turned off - Aura Designer is replacing them."])
+                        or L["Buffs turned off — Aura Designer is replacing them."])
                 end
                 DF:AuraDesigner_RefreshPage()
                 DF:InvalidateAuraLayout()
@@ -1763,12 +1765,24 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
             end
             eyeBtn:SetGlyphHover(shown() and not dead)
+            -- Only in the dead state: a tooltip on a working eye would explain a problem
+            -- it does not have.
+            eyeBtn.tooltip = dead and L["Nothing ticked — this indicator will not show."] or nil
         end
         updateEyeIcon()
         eyeBtn:RegisterForClicks("LeftButtonUp")
         eyeBtn:SetFrameLevel(header:GetFrameLevel() + 2)
+        -- ☠ INERT WHEN IT TRACKS NOTHING, AND IT HAS TO SAY WHY. The glyph already goes
+        -- dead-grey and drops its hover for this state, but the click still fired: it
+        -- flipped `enabled`, ran the whole refresh path, and changed nothing on screen,
+        -- because tracksNothing() wins in updateEyeIcon regardless of the flag. A control
+        -- that responds to a click by doing nothing visible reads as broken. Refusing it
+        -- is only half the fix — a refusal with no reason reads as broken too, so the
+        -- tooltip names the actual cause (set in updateEyeIcon), which is fixable one card
+        -- down: tick an effect in Tracked Spells.
         eyeBtn:SetScript("OnClick", function()
             if not cfgTable then return end
+            if tracksNothing() then return end
             cfgTable.enabled = (cfgTable.enabled == false) and true or false
             updateEyeIcon()
             -- Sound rides the same flag as its "Enable Sound Alert" checkbox —
@@ -1917,7 +1931,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 GUI:SetSettingsFont(sep, 9, "OUTLINE")
                 sep:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
                 sep:SetText(condMode == "ALL" and L["AND"] or L["OR"])
-                sep:SetTextColor(0.91, 0.66, 0.25)
+                sep:SetTextColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
 
                 -- Removal belongs to the group BELOW the rule, and sits at the far right so
                 -- it can never be mistaken for a tag's own X.
@@ -1942,7 +1956,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 rule:SetPoint("LEFT", sep, "RIGHT", 8, 0)
                 rule:SetPoint("RIGHT", delG, "LEFT", -8, 0)
                 rule:SetHeight(1)
-                rule:SetColorTexture(0.91, 0.66, 0.25, 0.22)
+                rule:SetColorTexture(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b, 0.22)
                 tagY = tagY - 22
                 tagX = 0
             end
@@ -2887,7 +2901,24 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
             square = L["Solid Square"],
             _order = { "icon", "square" },
         }, proxy, "shape", refresh), 54)
-        g:AddWidget(GUI:CreateColorPicker(body, L["Square Color"], proxy, "color", true, refresh, refresh, true), 32)
+        -- ⚠ Held in a local BEFORE AddWidget: nothing else in this file reads AddWidget's
+        -- return, so it is not a contract to lean on.
+        local sqColor = GUI:CreateColorPicker(body, L["Square Color"], proxy, "color", true, refresh, refresh, true)
+        g:AddWidget(sqColor, 32)
+        -- ⚠ ALWAYS PRESENT, BUT GREYED OFF-SHAPE. The note above is right that this card
+        -- cannot HIDE a widget — AddSection pins each one at a fixed y, so a conditional
+        -- widget leaves a gap. It can still GREY one, which is what the duration-bar block
+        -- further down does by hand, and a live-but-inert picker was the remaining half of
+        -- the problem: on an icon group the colour changed nothing and said nothing. The
+        -- Shape dropdown's callback is `refresh`, so the card rebuilds on every change and
+        -- this is evaluated fresh each time.
+        if sqColor and (proxy.shape or "icon") ~= "square" then
+            if sqColor.SetEnabled then sqColor:SetEnabled(false)
+            else
+                sqColor:SetAlpha(0.4)
+                if sqColor.EnableMouse then sqColor:EnableMouse(false) end
+            end
+        end
         g:AddWidget(GUI:CreateCheckbox(body, L["Hide Cooldown Swipe"], proxy, "hideSwipe", refresh), 28)
     end)
 

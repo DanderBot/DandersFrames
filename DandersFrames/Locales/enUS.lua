@@ -1891,8 +1891,11 @@ L["Import Buffs Tab Defaults"] = true
 L["Import from Buffs Tab"] = true
 L["Import your existing Buffs tab settings as defaults for all auras. Compatible settings will be applied automatically."] = true
 L["Imported!"] = true
+-- Chat confirmations for the Aura Designer's keep-or-replace question: it writes the Buff
+-- Bar's own Show Buffs setting, which lives on another page, so the answer has to say so.
+-- Sits beside "Keep Buffs" / "Replace Buffs", the buttons that produce it.
 L["Buffs kept alongside Aura Designer."] = true
-L["Buffs turned off - Aura Designer is replacing them."] = true
+L["Buffs turned off — Aura Designer is replacing them."] = true
 L["Keep Buffs"] = true
 L["LINKED FILTERS"] = true
 L["Layout Group"] = true

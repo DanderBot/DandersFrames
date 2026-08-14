@@ -2009,9 +2009,9 @@ local function DrawGroupPlaceholderSlot(mockFrame, pool, group, wrapDefault, max
     slot:SetSize(max(cols * iconSize + (cols - 1) * spacing, 10),
                  max(rows * iconSize + (rows - 1) * spacing, 10))
     ApplyBackdrop(slot, {r = 0.91, g = 0.66, b = 0.25, a = 0.10},
-        {r = 0.91, g = 0.66, b = 0.25, a = 0.8})
+        {r = GUI.Colors.notice.r, g = GUI.Colors.notice.g, b = GUI.Colors.notice.b, a = 0.8})
     slot.label:SetText(group.name)
-    slot.label:SetTextColor(0.91, 0.66, 0.25)
+    slot.label:SetTextColor(GUI.Colors.notice.r, GUI.Colors.notice.g, GUI.Colors.notice.b)
     slot.label:SetWidth(slot:GetWidth() - 4)
     slot.label:SetMaxLines(2)
     -- ☠ PIN FROM LIVE. This used to re-derive a corner from the growth string ("grow
