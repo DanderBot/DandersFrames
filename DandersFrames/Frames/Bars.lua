@@ -354,6 +354,16 @@ local function AbsorbLayoutStateChanged(frame, db)
 
     -- Mode + appearance (all modes)
     if s.mode            ~= (db.absorbBarMode or "OVERLAY")               then return true end
+    -- ☠ THE CHAIN ANCHOR IS A LAYOUT INPUT, AND IT IS THE ONLY ONE HERE THAT IS NOT A DB
+    -- SETTING. The absorb hangs off the last visible heal-prediction segment
+    -- (DF:ResolveAbsorbChainAnchor), so which segment that is decides where the bar
+    -- STARTS. This gate only ever compared db values, so UpdateHealPrediction's re-anchor
+    -- call hit the fast path and returned before the anchoring block ever ran -- the
+    -- shield stayed pinned to the health fill and the whole chain looked like it did
+    -- nothing (reported as "nothing looks any different", 2026-08-14).
+    -- ⇒ If you add another anchor input that lives on the FRAME rather than in the db,
+    -- it has to be compared here too, or the fast path will silently swallow it.
+    if s.chainEnd        ~= (frame.dfHealPredChainEnd or 0)               then return true end
     if s.texture         ~= (db.absorbBarTexture or DF.STOCK_BAR_TEXTURE)  then return true end
     if s.blendMode       ~= (db.absorbBarBlendMode or "BLEND")            then return true end
     if s.pixelPerfect    ~= db.pixelPerfect                               then return true end
@@ -413,6 +423,8 @@ local function CacheAbsorbLayoutState(frame, db)
         frame.dfAbsorbState = s
     end
     s.mode            = db.absorbBarMode or "OVERLAY"
+    -- Frame state, not a db setting — see the note beside its comparison above.
+    s.chainEnd        = frame.dfHealPredChainEnd or 0
     s.texture         = db.absorbBarTexture or DF.STOCK_BAR_TEXTURE
     s.blendMode       = db.absorbBarBlendMode or "BLEND"
     s.pixelPerfect    = db.pixelPerfect
