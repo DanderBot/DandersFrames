@@ -18,7 +18,7 @@
 ### New Features
 
 * (Aura Designer) Spells with more than one effect now show a "Tracked Spells" list on their indicator card — untick any effect you don't want that indicator to show. Each row shows the effect's own icon, and unticking everything simply shows nothing without touching the visibility eye. (by Krathe)
-* (Aura Designer) Health Bar Color can switch to a second colour while a buff is inside its refresh window, so a heal-over-time can read one colour normally and another the moment recasting it wastes nothing. The game sets that window per spell, and buffs you cannot refresh never have one. (by Krathe)
+* (Aura Designer) Health Bar Color and Border can switch to a second colour while a buff is inside its refresh window, so a heal-over-time can read one colour normally and another the moment recasting it wastes nothing. The game sets that window per spell, and buffs you cannot refresh never have one. (by Krathe)
 
 ### Bug Fixes
 
