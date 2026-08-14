@@ -441,6 +441,12 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                                 S.SwitchTab("effects")   -- repaint the header's eye
                             end
                         end)
+                    -- Hovering the row shows the SPELL's own tooltip. Two ids under one
+                    -- name (the case this section exists for) often differ only in their
+                    -- tooltip body, so the name+id label alone still leaves the player
+                    -- guessing — the hover is the disambiguator the icon can't always be.
+                    cb.tooltipSpellID = id
+                    cb.tooltipSpellFallback = name or tostring(id)
                     g:AddWidget(cb, 28)
                 end
             end)
