@@ -26,6 +26,12 @@
 * (Dispel Highlight) Gradient, border and symbol opacity now actually apply in game — the overlay previously rendered at full brightness no matter what the sliders said, including for debuffs gained mid-combat. (by Krathe)
 * (Dispel Highlight) Fix gradient opacity being applied twice for profiles upgraded from v4, which locked the overlay at full brightness across most of the slider's range. (by Krathe)
 * (Test Mode) Position settings now apply to the preview straight away. Changing an aura row's Anchor or Offset did nothing until test mode was switched off and on again, so placing a row meant toggling after every nudge — Growth, Spacing and Wrap were stuck the same way. (by Krathe)
+* (Bars) The absorb shield now sits beside incoming heals instead of on top of them: the bar reads health, then incoming healing, then shield — the same order the game's own frames use — and a shield always draws above a heal where the two meet. (by Krathe)
+* (Bars) Incoming heals account for consuming heal absorbs (like Necrotic): the heal bar only promises healing that will actually land, while the red wash shows the full amount it will eat — so a 25k heal against a 15k heal absorb shows the surviving 10k next to the wash. (by Krathe)
+* (Bars) Fix the frame border rendering underneath the absorb and heal prediction bars. (by Krathe)
+* (Bars) Display Mode changes for the absorb shield, heal absorb and heal prediction apply immediately, instead of waiting for that unit's next absorb or heal event. (by Krathe)
+* (Bars) The absorb Clamp Mode "None" now truly leaves the shield unclamped — it previously applied the strictest clamp of the three. (by Krathe)
+* (Test Mode) Absorbs, heal absorbs and incoming heals preview reliably on the first entry after a reload, follow the test panel's toggles, respect reduced max health, and demonstrate the heal-absorb interplay: one unit shows its heal shortened by a wash with the shield beside it, another shows a wash consuming its heal entirely. (by Krathe)
 * (Indicators) "Hide in Combat" now works for every icon that offers it. The Leader and MT/MA icons stayed on screen through a whole fight no matter what the setting said, and the AFK, Phased, Vehicle, Summon, Raid Target and Ready Check icons shared the same fault — they all hide when the fight starts and come back when it ends. Reloading mid-fight no longer leaves them showing for the rest of the pull either. (by Krathe)
 
 ## [5.1.2]
