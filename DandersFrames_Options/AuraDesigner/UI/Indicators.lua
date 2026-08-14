@@ -283,13 +283,38 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     --
     -- Only rendered when the aura resolves to more than one id: a single-id spell would get
     -- a section holding one permanently-disabled row, which is noise, not information.
-    if indicatorID and (typeKey == "icon" or typeKey == "square" or typeKey == "bar") then
+    --
+    -- ★ EVERY indicator type, not just the placed three. Frame effects (health bar,
+    -- background, border, texts, sound) resolve the same union and had the same problem —
+    -- a two-id spell coloured the health bar on either id with no way to narrow it. Their
+    -- mute store is the TYPE SUB-TABLE (auraCfg[typeKey]), the same table unionIdentity
+    -- hands to BuildADIdentityFilters, so ticks here reach the render with no extra plumbing.
+    -- ☠ HIDDEN when the effect runs on custom triggers or condition groups: the list below
+    -- shows THIS aura's ids, but a triggered effect fires on other auras entirely, and
+    -- condition chains resolve link-by-link where the mutes deliberately do not reach
+    -- (narrowing one link of an ALL chain is a different feature). Showing ticks that
+    -- don't do anything is worse than not showing them.
+    local isPlacedType = indicatorID and
+        (typeKey == "icon" or typeKey == "square" or typeKey == "bar")
+    local isFrameEffectType = typeKey == "healthbar" or typeKey == "background"
+        or typeKey == "border" or typeKey == "nametext" or typeKey == "healthtext"
+        or typeKey == "sound"
+    if isPlacedType or isFrameEffectType then
         local indRec, idList
         local pool = CurrentAuraPool()
         local auraCfg = pool and pool[auraName]
-        if type(auraCfg) == "table" and auraCfg.indicators then
-            for _, x in ipairs(auraCfg.indicators) do
-                if x.id == indicatorID then indRec = x; break end
+        if isPlacedType then
+            if type(auraCfg) == "table" and auraCfg.indicators then
+                for _, x in ipairs(auraCfg.indicators) do
+                    if x.id == indicatorID then indRec = x; break end
+                end
+            end
+        else
+            local typeCfg = type(auraCfg) == "table" and auraCfg[typeKey]
+            if type(typeCfg) == "table"
+                and not (type(typeCfg.triggers) == "table" and #typeCfg.triggers > 0)
+                and type(typeCfg.conditions) ~= "table" then
+                indRec = typeCfg
             end
         end
         -- Prefer the ADAPTER's array: it is the curated order (canonical first, then alts),
@@ -410,7 +435,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
                             -- GLOBAL — clean parse, "attempt to call a nil value" on the
                             -- first tick. Caught by diffing the file's _ENV reads, which is
                             -- the only check that sees this class.
-                            if P.RefreshPlacedIndicators then P.RefreshPlacedIndicators() end
+                            if isPlacedType and P.RefreshPlacedIndicators then P.RefreshPlacedIndicators() end
                             RefreshLiveFramesThrottled()
                             if (LiveCount() == 0) ~= wasZero and S.SwitchTab then
                                 S.SwitchTab("effects")   -- repaint the header's eye

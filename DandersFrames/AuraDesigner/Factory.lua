@@ -546,19 +546,31 @@ local function unionIdentity(spec, auraName, typeCfg)
         end
         return map
     end
+    -- ★ typeCfg rides along as the MUTE CARRIER: the Tracked Spells ticks store
+    -- mutedSpellIDs on this same sub-table, and BuildADIdentityFilters narrows by
+    -- whatever table it is handed (see narrowByPlacementMutes). Ids are globally
+    -- unique, so one mute set correctly narrows every trigger's contribution too.
+    -- ☠ The CONDITIONS path above deliberately takes no mutes — narrowing one link
+    -- of an ALL chain changes what the chain means, and the card hides the ticks
+    -- for condition-driven effects for the same reason.
+    -- The second return is "empty BY CHOICE": every id muted is a deliberate
+    -- match-nothing, and callers must not fire the unresolved-aura warning on it.
+    local sawMuted
     if triggers and #triggers > 0 then
         for _, name in ipairs(triggers) do
-            local f = DF:BuildADIdentityFilters(spec, name)
+            local f, mutedEmpty = DF:BuildADIdentityFilters(spec, name, typeCfg)
             if f and f.includeSpellIDs then
                 map = map or {}
                 for id in pairs(f.includeSpellIDs) do map[id] = true end
             end
+            sawMuted = sawMuted or mutedEmpty
         end
     else
-        local f = DF:BuildADIdentityFilters(spec, auraName)
+        local f, mutedEmpty = DF:BuildADIdentityFilters(spec, auraName, typeCfg)
         if f then map = f.includeSpellIDs end
+        sawMuted = mutedEmpty
     end
-    return map
+    return map, ((not map) and sawMuted) or nil
 end
 
 local function auraHasTrackedIndicator(auraCfg)
@@ -1187,8 +1199,9 @@ local function pickWinner(spec, specAuras, otherAuras, typeKey, validate)
             for auraName, auraCfg in pairs(auras) do
                 local typeCfg = (type(auraCfg) == "table") and auraCfg[typeKey]
                 if typeCfg and typeCfg.enabled ~= false and (not validate or validate(typeCfg)) then
-                    local map = unionIdentity(idSpec, auraName, typeCfg)
-                    if not map then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
+                    local map, mutedEmpty = unionIdentity(idSpec, auraName, typeCfg)
+                    -- mutedEmpty = every id unticked in Tracked Spells: a choice, not a data problem.
+                    if not map and not mutedEmpty then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
                     if map then
                         local prio = auraCfg.priority or 5
                         if (not bestName)
@@ -4014,9 +4027,11 @@ local function collectDesiredSounds(desired, unit, auras, keyPrefix, idSpec, cha
         -- offer sound on them either; this is the render-side backstop for hand-edited
         -- or imported data.
         if sc and sc.enabled and not DF:ParseADFilterRef(auraName) then
-            local ids = DF:BuildADIdentityFilters(idSpec, auraName)
+            -- sc carries the sound effect's Tracked Spells mutes (same table the card
+            -- writes mutedSpellIDs to); mutedEmpty is a choice, not a data problem.
+            local ids, mutedEmpty = DF:BuildADIdentityFilters(idSpec, auraName, sc)
             local map = ids and ids.includeSpellIDs
-            if not map then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
+            if not map and not mutedEmpty then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
             if map then
                 for _, ev in ipairs(SOUND_EVENTS) do
                     if ev.enabled(sc) then
@@ -4803,8 +4818,9 @@ local function collectStackedBorders(spec, specAuras, otherAuras)
                 local typeCfg = (type(auraCfg) == "table") and auraCfg.border
                 if typeCfg and typeCfg.enabled ~= false and typeCfg.ShowBorder ~= false
                    and typeCfg.borderMode == "custom" then
-                    local map = unionIdentity(idSpec, auraName, typeCfg)
-                    if not map then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
+                    local map, mutedEmpty = unionIdentity(idSpec, auraName, typeCfg)
+                    -- mutedEmpty = every id unticked in Tracked Spells: a choice, not a data problem.
+                    if not map and not mutedEmpty then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
                     if map then
                         stackedBorders = stackedBorders or {}
                         stackedBorders[#stackedBorders + 1] = {
@@ -4873,8 +4889,9 @@ local function collectFrameTints(spec, specAuras, otherAuras, typeKey)
             for auraName, auraCfg in pairs(auras) do
                 local typeCfg = (type(auraCfg) == "table") and auraCfg[typeKey]
                 if typeCfg and typeCfg.enabled ~= false and typeCfg.color then
-                    local map = unionIdentity(idSpec, auraName, typeCfg)
-                    if not map then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
+                    local map, mutedEmpty = unionIdentity(idSpec, auraName, typeCfg)
+                    -- mutedEmpty = every id unticked in Tracked Spells: a choice, not a data problem.
+                    if not map and not mutedEmpty then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
                     if map then
                         list = list or {}
                         list[#list + 1] = {
