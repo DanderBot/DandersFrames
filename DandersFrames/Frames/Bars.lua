@@ -469,7 +469,7 @@ end
 
 -- Edge inset for absorb / heal-absorb overlays. Returns 0 (flush to the health
 -- bar) when the frame border is off or fully OPAQUE. This works by Z-ORDER, not
--- geometry: the border frame draws at parent frame level +13 while the absorb
+-- geometry: the border frame draws at parent frame level +14 while the absorb
 -- overlay sits at +11, so an opaque border paints OVER a flush overlay and the
 -- shield covers the health fill exactly with nothing showing through — no inset
 -- needed.
@@ -1059,9 +1059,29 @@ function DF:UpdateAbsorb(frame, testIndex)
 
         -- Create/update overshield glow at max health position
         if db.absorbBarShowOvershield then
-            -- Create glow texture if needed (directly on health bar)
+            -- ★ THE GLOW NEEDS ITS OWN HOST, ABOVE THE WHOLE BAND.
+            -- It used to be a texture created straight on frame.healthBar (frame+3). A
+            -- draw layer only orders textures WITHIN one frame, so against the heal
+            -- prediction -- a separate frame at +12 -- the level won and the glow was
+            -- buried no matter which OVERLAY sublevel it was given. "Is the overshield
+            -- above or below the incoming heal?" had a structural answer: below, always
+            -- (Krathe, 2026-08-14).
+            -- Blizzard puts the equivalent (overAbsorbGlow) at ARTWORK sublevel 2, above
+            -- the prediction and the absorb both -- it is the alert that the shield has
+            -- run past the bar, so it is the one element here that must win.
+            -- ⚠ The host is anchored to the HEALTH BAR, and every glow anchor below names
+            -- frame.healthBar explicitly, so re-parenting the texture moves nothing.
+            -- ☠ Sits at +13, one under the frame border, which moved to +14 to make room:
+            -- there is no integer between the prediction at +12 and a border at +13, and
+            -- the border has to keep framing everything.
+            if not frame.dfOvershieldHost then
+                frame.dfOvershieldHost = CreateFrame("Frame", nil, frame)
+                frame.dfOvershieldHost:SetAllPoints(frame.healthBar)
+            end
+            frame.dfOvershieldHost:SetFrameLevel(frame:GetFrameLevel() + 13)
+            frame.dfOvershieldHost:Show()
             if not frame.absorbOvershieldGlow then
-                frame.absorbOvershieldGlow = frame.healthBar:CreateTexture(nil, "OVERLAY", nil, 7)
+                frame.absorbOvershieldGlow = frame.dfOvershieldHost:CreateTexture(nil, "OVERLAY", nil, 7)
             end
             
             local glow = frame.absorbOvershieldGlow

@@ -63,14 +63,17 @@ function DF:CreateFrameBorder(frame, db)
     --
     -- Measured by /df debug zorder on a live frame 2026-08-14, frame-relative:
     --   health +3 · heal-absorb +8 · absorb +11 · overflow +11 · heal prediction +12
-    --   >> FRAME BORDER +13 <<  power +20 · contentOverlay +25
-    -- +13 is the free slot: above every bar, below the resource bar and the text/icon
-    -- layer -- and both of those already drew above the border at +10, so that pairing
-    -- is unchanged.
+    --   overshield glow +13  >> FRAME BORDER +14 <<  power +20 · contentOverlay +25
+    -- Above every bar, below the resource bar and the text/icon layer -- and both of
+    -- those already drew above the border at +10, so that pairing is unchanged.
+    -- ⚠ +13 BECAME +14 LATER THE SAME DAY, which is this comment's own warning playing
+    -- out inside one session: the overshield glow needed a host above the heal prediction
+    -- (+12), there is no integer between 12 and 13, so the glow took +13 and the border
+    -- stepped up to keep framing everything. The band grows; this number follows it.
     -- ⚠ absorbBarFrameLevel / healPredictionFrameLevel are USER SLIDERS (0-100). This
-    -- clears their DEFAULTS; a user who raises one past 13 is deliberately putting that
+    -- clears their DEFAULTS; a user who raises one past 14 is deliberately putting that
     -- bar over the border, which is the slider doing its job.
-    frame.border = DF.Border:New(frame, { frameLevelOffset = 13 })
+    frame.border = DF.Border:New(frame, { frameLevelOffset = 14 })
     DF:ApplyFrameBorder(frame, db)
     return frame.border
 end

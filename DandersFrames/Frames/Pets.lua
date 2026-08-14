@@ -204,7 +204,7 @@ function DF:CreatePetFrame(unit, ownerFrame, isRaid, track)
     -- Same +13 as the unit frame (Frames/Create.lua CreateFrameBorder, which carries the
     -- measured band and why it is 13, not 10). Kept identical so the two cannot drift:
     -- the +10 they shared was buried by the bar band once it grew to +12.
-    frame.border = DF.Border:New(frame, { frameLevelOffset = 13 })
+    frame.border = DF.Border:New(frame, { frameLevelOffset = 14 })
     
     -- Name text — do NOT use SetFont() directly; use SetFontObject so that
     -- later SafeSetFont calls with font families can properly override
@@ -349,7 +349,7 @@ function DF:CreateTestPetFrame(unit, ownerTestFrame, isRaid)
     -- Same +13 as the unit frame (Frames/Create.lua CreateFrameBorder, which carries the
     -- measured band and why it is 13, not 10). Kept identical so the two cannot drift:
     -- the +10 they shared was buried by the bar band once it grew to +12.
-    frame.border = DF.Border:New(frame, { frameLevelOffset = 13 })
+    frame.border = DF.Border:New(frame, { frameLevelOffset = 14 })
 
     -- Name text — do NOT use SetFont() directly; use SafeSetFont or SetFontObject
     -- so that later SafeSetFont calls with font families can properly override

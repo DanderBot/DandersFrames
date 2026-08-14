@@ -6060,7 +6060,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     -- quietly drawing over a frame border still pinned at +10, because the
                     -- border was never one of the rows. Reported in game the next day.
                     -- ⇒ Anything the band can BURY has to be printed beside the band.
-                    { "frame.border",    frame.border,               13 },
+                    -- The overshield glow's HOST. The glow itself is a texture, so it has
+                    -- no level of its own -- printing the host is what makes "is it above
+                    -- the heal prediction?" answerable at all. It was a texture on
+                    -- healthBar (+3) until 2026-08-14 and could never win.
+                    { "overshieldHost", frame.dfOvershieldHost,      13 },
+                    { "frame.border",    frame.border,               14 },
                     { "dfPowerBar",      frame.dfPowerBar,
                         (bdb and bdb.resourceBarFrameLevel) or 20 },
                     { "contentOverlay",  frame.contentOverlay,       25 },
