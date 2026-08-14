@@ -413,6 +413,7 @@ DF.COMMAND_SIBLINGS = {
     -- "checked, takes nothing" where a missing key says nothing at all.
     idgate    = {},
     guiwidth  = {},
+    adpin     = {},
     gapcheck  = { "all", "clear" },
     -- (Removed) pixelcheck = {}. Unlike those two it was never looked up at all -- no
     -- Siblings("pixelcheck") call exists -- so it was an entry for a question nobody
@@ -3860,15 +3861,34 @@ end
 -- Only 12 -> 10, because 12 was the shipped default: anyone who typed a different number
 -- is left alone, and the slider still reaches 12 for anyone who wants the heal on top.
 -- Idempotent (10 is not 12), so it is safe to run on every load.
+-- The heal prediction moved from +12 (over the absorb) to +10 (under it). Value-gated on
+-- the OLD DEFAULT, so a level the user chose deliberately is left alone, and unflagged,
+-- so re-running is a no-op.
+--
+-- ☠ IT HAS TO REACH RAID AUTO-LAYOUT OVERRIDES, and every other value migration in this
+-- file does not. OVERRIDE_TAB_MAP (Core/AutoProfiles.lua) matches by PREFIX, and
+-- "healPrediction" is one of its rows -- so healPredictionFrameLevel is a legal per-layout
+-- override, and v5.1.3 shipped the very slider that mints one. A profile whose raid layout
+-- carried 12 kept it, and the incoming heal drew back over the shield the moment that
+-- layout activated: the exact bug this migration exists to end, surviving inside the one
+-- place the migration could not see. The walk is the published one
+-- (DF.ForEachRaidLayoutOverride, Designer/Presets.lua) rather than a second copy of it.
 function DF:MigrateHealPredictionBelowAbsorb()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    local function fold(t)
+        if type(t) == "table" and t.healPredictionFrameLevel == 12 then
+            t.healPredictionFrameLevel = 10
+        end
+    end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
         if type(profile) == "table" then
             for _, modeKey in ipairs({ "party", "raid" }) do
-                local m = profile[modeKey]
-                if type(m) == "table" and m.healPredictionFrameLevel == 12 then
-                    m.healPredictionFrameLevel = 10
-                end
+                fold(profile[modeKey])
+            end
+            if DF.ForEachRaidLayoutOverride then
+                DF.ForEachRaidLayoutOverride(profile, function(layout)
+                    fold(layout.overrides)
+                end)
             end
         end
     end

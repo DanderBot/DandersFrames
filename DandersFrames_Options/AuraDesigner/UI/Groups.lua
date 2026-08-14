@@ -2244,21 +2244,34 @@ end
 -- Exact equality on purpose: everything here comes from one resolver, so any difference
 -- at all means a second writer exists. Rounded only for display.
 -- ============================================================
+-- ⚠ THROUGH DF:Out, like every other dump. This printed raw — the only bare print() in
+-- either addon outside the Out builder — so it arrived with no title rule, no sections,
+-- none of the shared tones and no siblings footer, in the middle of pasted logs where
+-- telling one dump from the next is the whole point.
 local function DebugDumpCanvasPins()
     local AC = DF.AuraContainer
     local mockFrame = S.framePreview and S.framePreview.mockFrame
+    local o = DF:Out("AD pin check")
     if not (AC and AC.ResolveLayoutPin) then
-        print("|cffff5555AD pin check:|r AuraContainer.ResolveLayoutPin unavailable")
-        return
+        o:Line("AuraContainer.ResolveLayoutPin unavailable", "BAD")
+        return o:Siblings("adpin")
     end
     if not mockFrame then
-        print("|cffff5555AD pin check:|r the Aura Designer canvas is not built — open it first")
-        return
+        o:Line("the Aura Designer canvas is not built — open it first", "BAD")
+        return o:Siblings("adpin")
     end
     local pp = PreviewPixelPerfect(mockFrame)
     local store = mockFrame.dfADPreviewSlots or {}
     local checked, bad, flowed = 0, 0, 0
-    print(("|cff66ccffAD pin check|r  pixelPerfect=%s"):format(tostring(pp)))
+    -- Collected, not printed as they are found: Section wants its count up front, and a
+    -- mismatch is three lines, which reads as noise interleaved with anything else.
+    local findings = {}
+    local function Mismatch(label, point, relPoint, x, y, offCanvas, wPoint, wAnchor, wx, wy)
+        findings[#findings + 1] = { ("%s%s"):format(label, offCanvas and "  [anchored off-canvas]" or ""),
+            ("  is   %s->%s (%.3f, %.3f)"):format(tostring(point), tostring(relPoint), x or 0, y or 0),
+            ("  live %s->%s (%.3f, %.3f)"):format(tostring(wPoint), tostring(wAnchor), wx or 0, wy or 0) }
+    end
+    o:Field("pixel perfect", pp and true or false)
     for key, rec in pairs(store) do
         local slot = rec and rec.slot
         if slot and slot:IsShown() then
@@ -2271,16 +2284,13 @@ local function DebugDumpCanvasPins()
                 local lay = rec.layout
                 local point, relTo, relPoint, x, y = slot:GetPoint(1)
                 if not lay then
-                    print(("  |cffffcc00%s|r  no layout recorded — cannot check"):format(key))
+                    findings[#findings + 1] = { ("%s  no layout recorded — cannot check"):format(key) }
                 else
                     local wPoint, wAnchor, wx, wy = AC.ResolveLayoutPin(mockFrame, lay, pp)
                     if point ~= wPoint or relPoint ~= wAnchor or relTo ~= mockFrame
                        or x ~= wx or y ~= wy then
                         bad = bad + 1
-                        print(("  |cffff5555MISMATCH|r %s\n    is   %s->%s (%.3f, %.3f)%s\n    live %s->%s (%.3f, %.3f)")
-                            :format(key, tostring(point), tostring(relPoint), x or 0, y or 0,
-                                (relTo ~= mockFrame) and "  [anchored off-canvas]" or "",
-                                tostring(wPoint), tostring(wAnchor), wx or 0, wy or 0))
+                        Mismatch(key, point, relPoint, x, y, relTo ~= mockFrame, wPoint, wAnchor, wx, wy)
                     end
                 end
             end
@@ -2303,15 +2313,25 @@ local function DebugDumpCanvasPins()
                 if point ~= wPoint or relPoint ~= wAnchor or relTo ~= mockFrame
                    or x ~= wx or y ~= wy then
                     bad = bad + 1
-                    print(("  |cffff5555MISMATCH|r group box %s\n    is   %s->%s (%.3f, %.3f)\n    live %s->%s (%.3f, %.3f)")
-                        :format(tostring(boxKey), tostring(point), tostring(relPoint), x or 0, y or 0,
-                            tostring(wPoint), tostring(wAnchor), wx or 0, wy or 0))
+                    Mismatch("group box " .. tostring(boxKey), point, relPoint, x, y,
+                        relTo ~= mockFrame, wPoint, wAnchor, wx, wy)
                 end
             end
         end
     end
-    print(("  %d checked, %d flow-placed (not pinned), |c%s%d mismatched|r")
-        :format(checked, flowed, (bad > 0) and "ffff5555" or "ff55ff55", bad))
+    if #findings > 0 then
+        o:Section("Mismatches", #findings)
+        for _, lines in ipairs(findings) do
+            for i, text in ipairs(lines) do
+                o:Line(text, (i == 1) and "BAD" or nil)
+            end
+        end
+    end
+    o:Section("Totals")
+    o:Field("checked", checked)
+    o:Field("flow-placed (not pinned)", flowed)
+    o:Field("mismatched", bad, (bad > 0) and "BAD" or "GOOD")
+    o:Siblings("adpin")
 end
 if DF.AuraDesigner then DF.AuraDesigner.DebugDumpCanvasPins = DebugDumpCanvasPins end
 

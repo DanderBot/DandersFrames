@@ -34,28 +34,41 @@ local ResolveBarTextureForFill = function(...) return DF:ResolveBarTextureForFil
 -- solo, so live showed the bar on every frame while the preview showed it only on the
 -- role-filtered subset -- a setting you could not judge from the preview at all.
 --
--- ☠ THE SOLO ARM IS SCOPED TO YOUR OWN FRAME, and that scope is the whole point.
--- "Show in Solo Mode" answers "when I'm not in a group, put a resource bar on MY frame
--- regardless of the role filters" -- solo there is nothing else on screen, so the
--- unscoped arm read as correct for years. It is not: a preview (five fake party members)
--- and a pinned set both render other units WHILE the client is solo, and every one of
+-- ☠ THE SOLO ARM IS SCOPED, and that scope is the whole point.
+-- "Show in Solo Mode" answers "when I'm not in a group, put a resource bar on the frame
+-- I actually asked for, regardless of the role filters". Solo, the party header holds
+-- exactly one frame -- yours -- so an UNSCOPED arm read as correct for years. It is not:
+-- a preview renders five fake party members while the client is solo and every one of
 -- them took the bypass. Field-reported as "enabling Show in Solo Mode enables the
 -- resource bar for every frame" (Aphoex, 2026-08-14).
--- `selfOverride` is the DATA half, exactly like roleOverride/classOverride: the preview
--- has no real unit to answer UnitIsUnit with, and its own frame is the first slot.
-function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride, selfOverride)
+--
+-- ⚠ PINNED FRAMES KEEP THE BYPASS, deliberately. They are the other thing on screen
+-- while solo, and unlike a preview slot they are there because the user pinned that unit
+-- by hand -- an explicit request, the same kind of claim your own frame makes. Scoping
+-- them out silently took the power bar off pinned boss/NPC frames (no role resolves, so
+-- they fall to the DPS toggle, off by default), which no report asked for.
+--
+-- `selfOverride` is the DATA half, exactly like roleOverride/classOverride -- a preview
+-- has no real unit to answer UnitIsUnit with. `frame` is the live half: pinned-ness is a
+-- property of the FRAME, not of the unit token, so the gate cannot see it from `unit`.
+-- Exactly one of the two is ever supplied.
+function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride, selfOverride, frame)
     if not db.resourceBarEnabled then return false end
 
-    -- Is this the player's own frame? nil selfOverride = resolve from the unit. ⚠ `unit and`
-    -- guards the nil-unit preview call the same way the class filter below has to: 12.1
-    -- rejects UnitIsUnit(nil, ...) with a Usage error rather than returning nil, and a
-    -- SECRET answer (boss units) must be folded to false before anything branches on it --
-    -- branching on a secret throws, and this one is read twice below.
-    local isSelf = selfOverride
-    if isSelf == nil then
-        local self_ = unit and UnitIsUnit(unit, "player")
-        if issecretvalue(self_) then self_ = false end
-        isSelf = self_ and true or false
+    -- Does the solo bypass apply to THIS frame? nil selfOverride = resolve it live.
+    -- ⚠ `unit and` guards the nil-unit preview call the same way the class filter below
+    -- has to: 12.1 rejects UnitIsUnit(nil, ...) with a Usage error rather than returning
+    -- nil, and a SECRET answer (boss units) must be folded to false before anything
+    -- branches on it -- branching on a secret throws, and this is read twice below.
+    local soloScoped = selfOverride
+    if soloScoped == nil then
+        if frame and frame.isPinnedFrame then
+            soloScoped = true
+        else
+            local isSelf = unit and UnitIsUnit(unit, "player")
+            if issecretvalue(isSelf) then isSelf = false end
+            soloScoped = isSelf and true or false
+        end
     end
 
     -- Role filter
@@ -74,7 +87,7 @@ function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride, selfOve
         local role = roleOverride or DF:GetUnitRole(unit)
         local inSoloMode = not IsInGroup() and not IsInRaid()
 
-        if inSoloMode and isSelf and db.resourceBarShowInSoloMode then
+        if inSoloMode and soloScoped and db.resourceBarShowInSoloMode then
             roleAllowed = true
         elseif role == "HEALER" then
             roleAllowed = db.resourceBarShowHealer == true
@@ -88,7 +101,7 @@ function DF:ShouldShowResourceBar(unit, db, roleOverride, classOverride, selfOve
         end
     else
         local inSoloMode = not IsInGroup() and not IsInRaid()
-        roleAllowed = inSoloMode and isSelf and db.resourceBarShowInSoloMode == true
+        roleAllowed = inSoloMode and soloScoped and db.resourceBarShowInSoloMode == true
     end
 
     if not roleAllowed then return false end
@@ -271,7 +284,8 @@ function DF:ApplyResourceBarLayout(frame)
     -- Enabled + unit + role gates
     if not db.resourceBarEnabled then bar:Hide() return end
     if not frame.unit then bar:Hide() return end
-    if not DF:ShouldShowResourceBar(frame.unit, db) then bar:Hide() return end
+    -- `frame` last: the gate reads isPinnedFrame off it for the solo-bypass scope.
+    if not DF:ShouldShowResourceBar(frame.unit, db, nil, nil, nil, frame) then bar:Hide() return end
 
     -- Shared geometry/appearance (size, anchor, level, background, border).
     DF:LayoutResourceBar(frame, db)

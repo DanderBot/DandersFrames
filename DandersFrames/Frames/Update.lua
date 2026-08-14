@@ -691,7 +691,8 @@ function DF:UpdateUnitFrame(frame, source)
     -- ========================================
     -- POWER BAR
     -- ========================================
-    local showPower = DF:ShouldShowResourceBar(unit, db)
+    -- `frame` last: the gate reads isPinnedFrame off it for the solo-bypass scope.
+    local showPower = DF:ShouldShowResourceBar(unit, db, nil, nil, nil, frame)
 
     -- Health bar positioning (resource bar is floating, doesn't affect health bar size)
     DF:AnchorHealthBarsToPadding(frame, db)
@@ -1023,8 +1024,9 @@ function DF:UpdatePower(frame)
     local unit = frame.unit
     local db = DF:GetFrameDB(frame)
     
-    -- Check if power bar should be shown (uses centralized role filter)
-    local showPower = DF:ShouldShowResourceBar(unit, db)
+    -- Check if power bar should be shown (uses centralized role filter).
+    -- `frame` last: the gate reads isPinnedFrame off it for the solo-bypass scope.
+    local showPower = DF:ShouldShowResourceBar(unit, db, nil, nil, nil, frame)
 
     if not showPower then
         frame.dfPowerBar:Hide()

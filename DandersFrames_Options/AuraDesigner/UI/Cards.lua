@@ -434,6 +434,15 @@ local function CreateEnableBanner(parent)
 
     cb:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
+        -- ⚠ ONE resolve, nil-guarded. GetAuraDesignerDB can answer nil before the profile
+        -- DB exists, and both branches below read AND write through it; the build above
+        -- guards its own read (`adDB and adDB.enabled`) and this has to match. With no
+        -- config to toggle there is nothing this click can mean.
+        local clickDB = GetAuraDesignerDB()
+        if not clickDB then
+            self:SetChecked(false)
+            return
+        end
         if checked then
             -- ☠ NEVER RE-RUN THE ENABLE FLOW ON AN ALREADY-ENABLED DESIGNER. The popup's
             -- answer WRITES db.showBuffs, so every spurious trip through here silently
@@ -442,7 +451,7 @@ local function CreateEnableBanner(parent)
             -- cascade", and as buffs being on with the Buff Bar option off (Aphoex,
             -- 2026-08-14). A checkbox that is already checked has nothing to ask and
             -- nothing to write; re-sync it and stop.
-            if GetAuraDesignerDB().enabled then
+            if clickDB.enabled then
                 self:SetChecked(true)
                 return
             end
@@ -453,7 +462,9 @@ local function CreateEnableBanner(parent)
             local targetDB = S.db
             -- Show popup asking about buff coexistence
             ShowBuffCoexistPopup(function(keepBuffs)
-                GetAuraDesignerDB().enabled = true
+                -- clickDB, captured with targetDB above and for the same reason: the
+                -- answer must land on the config the click was made against.
+                clickDB.enabled = true
                 -- This is a real edit to another page's setting, so SAY so. It is the
                 -- whole point of the question, but the page that owns the key is two
                 -- clicks away and the user has no other way to know it moved.
@@ -475,11 +486,11 @@ local function CreateEnableBanner(parent)
         else
             -- Mirror of the guard above: an already-disabled designer has nothing to turn
             -- off, and the teardown below is not free (ForceRefreshAllFrames).
-            if not GetAuraDesignerDB().enabled then
+            if not clickDB.enabled then
                 self:SetChecked(false)
                 return
             end
-            GetAuraDesignerDB().enabled = false
+            clickDB.enabled = false
             DF:AuraDesigner_RefreshPage()
             DF:InvalidateAuraLayout()
             DF:UpdateAllFrames()

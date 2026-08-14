@@ -1735,14 +1735,17 @@ function DF:UpdateTestPowerBar(frame, testData)
     -- with five frames on screen, is where that finally showed; see below.
     -- Role AND class both handed over as data, so the ENTIRE gate is the live one.
     --
-    -- ★ WHICH SLOT IS *YOU* is the fourth piece of data the gate needs, and without it the
-    -- solo arm applied to all five previews -- "Show in Solo Mode enables the resource bar
-    -- for every frame" (Aphoex, 2026-08-14). The preview's own frame is the first slot in
-    -- both containers (party is 0-based, raid 1-based); a PINNED set previews other units
-    -- by definition, so none of its slots is self.
+    -- ★ WHO THE SOLO BYPASS APPLIES TO is the fourth piece of data the gate needs, and
+    -- without it the solo arm applied to all five previews -- "Show in Solo Mode enables
+    -- the resource bar for every frame" (Aphoex, 2026-08-14).
+    -- The two arms of live's own scope, mirrored: your own frame -- the FIRST slot in
+    -- either container (party is 0-based, raid 1-based) -- and any pinned frame, which
+    -- keeps the bypass live because the user pinned that unit by hand. Live resolves the
+    -- first arm with UnitIsUnit and the second off frame.isPinnedFrame; a preview slot
+    -- carries a real token belonging to somebody else, so it must answer as DATA.
     local selfIndex = frame.isRaidFrame and 1 or 0
-    local isSelfPreview = (not frame.isPinnedFrame) and (testData.index == selfIndex)
-    local showBar = DF:ShouldShowResourceBar(nil, db, testData.role, testData.class, isSelfPreview)
+    local soloScoped = (frame.isPinnedFrame and true) or (testData.index == selfIndex)
+    local showBar = DF:ShouldShowResourceBar(nil, db, testData.role, testData.class, soloScoped)
 
     if not showBar then
         if frame.dfPowerBar then frame.dfPowerBar:Hide() end
