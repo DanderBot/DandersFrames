@@ -451,7 +451,26 @@ function DF:ApplyFrameLayout(frame)
         -- Delegate color to ElementAppearance for centralized handling
         DF:UpdateBackgroundAppearance(frame)
     end
-    
+
+    -- ☠ THE BAR TRIGGER LIVES HERE, NOT ONLY IN DF:UpdateFrame -- and putting it only
+    -- there was a fix that could never run. DF:UpdateAllFrames takes the `headersCreated`
+    -- branch on every modern client and RETURNS out of it (Frames/Init.lua); the
+    -- DF:UpdateFrame calls it was added beside are in the LEGACY arm below that return,
+    -- reachable only on a client with no headers. So a Display Mode change still sat
+    -- unapplied on every party, raid and arena frame until that unit's next
+    -- UNIT_ABSORB / UNIT_HEAL_PREDICTION wandered by -- the exact reported bug, "fixed"
+    -- against a code path the user does not run. (Danders's review, PR #236 B2.)
+    -- ApplyFrameLayout is what the header branch DOES call, per child, so the trigger
+    -- belongs at the end of it: after the fill-swap re-drive above (which is a different
+    -- job -- it re-anchors at the swap so ordering cannot strand a bar) and after the
+    -- geometry those bars anchor to has settled.
+    -- Heal absorb, prediction, absorb LAST -- it chains onto the prediction's segment.
+    -- Cheap on the no-change path: each updater's layout cache short-circuits. Test
+    -- frames are no-ops here by the test-data guards in Frames/Bars.lua; the preview is
+    -- repainted through RefreshTestFramesWithLayout instead.
+    if DF.UpdateHealAbsorb then DF:UpdateHealAbsorb(frame) end
+    if DF.UpdateHealPrediction then DF:UpdateHealPrediction(frame) end
+    if DF.UpdateAbsorb then DF:UpdateAbsorb(frame) end
 end
 
 -- ============================================================
