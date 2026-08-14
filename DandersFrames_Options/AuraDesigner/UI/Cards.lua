@@ -435,10 +435,33 @@ local function CreateEnableBanner(parent)
     cb:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
         if checked then
+            -- ☠ NEVER RE-RUN THE ENABLE FLOW ON AN ALREADY-ENABLED DESIGNER. The popup's
+            -- answer WRITES db.showBuffs, so every spurious trip through here silently
+            -- flipped the Buff Bar's own Show Buffs behind the user's back -- reported as
+            -- "enabling an already 'enabled' Aura Designer can corrupt other settings and
+            -- cascade", and as buffs being on with the Buff Bar option off (Aphoex,
+            -- 2026-08-14). A checkbox that is already checked has nothing to ask and
+            -- nothing to write; re-sync it and stop.
+            if GetAuraDesignerDB().enabled then
+                self:SetChecked(true)
+                return
+            end
+            -- ⚠ CAPTURE THE MODE DB NOW, at the click, not when the answer arrives. The
+            -- popup is modeless: the user can change the mode tab while it is open, and
+            -- S.db is rebound by the page build — reading it in the callback would land
+            -- the Show Buffs write on whichever mode they happened to switch to.
+            local targetDB = S.db
             -- Show popup asking about buff coexistence
             ShowBuffCoexistPopup(function(keepBuffs)
                 GetAuraDesignerDB().enabled = true
-                S.db.showBuffs = keepBuffs
+                -- This is a real edit to another page's setting, so SAY so. It is the
+                -- whole point of the question, but the page that owns the key is two
+                -- clicks away and the user has no other way to know it moved.
+                if targetDB.showBuffs ~= keepBuffs then
+                    targetDB.showBuffs = keepBuffs
+                    DF:Say(keepBuffs and L["Buffs kept alongside Aura Designer."]
+                        or L["Buffs turned off - Aura Designer is replacing them."])
+                end
                 DF:AuraDesigner_RefreshPage()
                 DF:InvalidateAuraLayout()
                 DF:UpdateAllFrames()
@@ -450,6 +473,12 @@ local function CreateEnableBanner(parent)
                 self:SetChecked(false)
             end)
         else
+            -- Mirror of the guard above: an already-disabled designer has nothing to turn
+            -- off, and the teardown below is not free (ForceRefreshAllFrames).
+            if not GetAuraDesignerDB().enabled then
+                self:SetChecked(false)
+                return
+            end
             GetAuraDesignerDB().enabled = false
             DF:AuraDesigner_RefreshPage()
             DF:InvalidateAuraLayout()

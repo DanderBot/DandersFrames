@@ -317,6 +317,7 @@ local function ShowBuffCoexistPopup(onConfirm, onCancel)
         title:SetPoint("TOP", 0, -12)
         title:SetText(L["Aura Designer"])
         title:SetTextColor(tc.r, tc.g, tc.b)
+        f._title = title
 
         local desc = f:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         desc:SetPoint("TOP", title, "BOTTOM", 0, -6)
@@ -354,6 +355,21 @@ local function ShowBuffCoexistPopup(onConfirm, onCancel)
 
     local f = S.buffCoexistPopup
     f._onCancel = onCancel
+
+    -- ☠ RE-THEME ON EVERY SHOW. The popup is a singleton built on first use, and the
+    -- three theme-coloured pieces above (border, stripe, title) were written once at
+    -- CREATION -- so it kept the accent of whichever mode tab happened to open it first
+    -- and wore party orange in raid for the rest of the session: "the text box inherits
+    -- the color of the tab it was first enabled at the start of the session or after a
+    -- reload" (Aphoex, 2026-08-14). The mode tabs recolour their own widgets through
+    -- ThemeListeners; a UIParent-parented singleton has no such parent to listen to, so
+    -- it has to re-read the theme itself.
+    -- ⚠ Through ApplyBackdrop, not a raw SetBackdropBorderColor: it caches the last
+    -- colour it wrote, and a raw write would leave that cache lying about the border.
+    local tc = GetThemeColor()
+    ApplyBackdrop(f, nil, {r = tc.r, g = tc.g, b = tc.b, a = 1})
+    if f._stripe then f._stripe:SetColorTexture(tc.r, tc.g, tc.b, 0.8) end
+    if f._title then f._title:SetTextColor(tc.r, tc.g, tc.b) end
 
     f.keepBtn:SetScript("OnClick", function()
         f:Hide()
