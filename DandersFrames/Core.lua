@@ -6133,8 +6133,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- token that forces one full rebuild per toggle (pooled frames keep the
                 -- cache otherwise). predShown answers "is there an incoming heal at all",
                 -- which is the first thing to check when the shield looks wrong.
-                print(("  %-10s fastPath=%-5s session=%-3s predShown=%-5s pred2Shown=%s")
-                    :format("Bars/dbg",
+                -- key = the LIVE chain answer; pick = what the last absorb resolve used.
+                -- They must agree. fillOK = the absorb cache's fill-texture identity still
+                -- matches the health bar's live fill — false means the styling replaced
+                -- the fill object and the next UpdateAbsorb call will re-anchor.
+                print(("  %-10s key=%-5s pick=%-5s fillOK=%-5s fastPath=%-5s session=%-3s predShown=%-5s pred2Shown=%s")
+                    :format("Chain",
+                        tostring(DF.ChainEndKey and DF.ChainEndKey(frame, bdb)),
+                        tostring(frame.dfAbsorbChainPick),
+                        tostring(frame.dfAbsorbState and frame.healthBar
+                            and frame.dfAbsorbState.healthFillTex == frame.healthBar:GetStatusBarTexture()),
                         tostring(frame.dfAbsorbFastPath), tostring(DF.testSessionId),
                         tostring(frame.dfHealPredictionBar and frame.dfHealPredictionBar:IsShown()),
                         tostring(frame.dfHealPredictionBar2 and frame.dfHealPredictionBar2:IsShown())))
