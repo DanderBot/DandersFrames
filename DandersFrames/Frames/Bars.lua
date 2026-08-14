@@ -610,9 +610,23 @@ function DF:ResolveAbsorbChainAnchor(frame, db)
     return fill
 end
 
+-- ☠ TEST FRAMES ARE PAINTED ONLY BY CALLERS THAT BRING TEST DATA. Styling and
+-- health-change passes call the three bar updaters WITHOUT testIndex; on a test
+-- frame whose unit happens to exist for real (the player's own), that call fell
+-- through to the live branch and repainted the bar from real values -- solo, zero:
+-- the heal prediction the test drive had just painted was hidden again, and the
+-- chained absorb was left hanging behind an empty segment (the "black gap"). The
+-- test drives are the only writers for a test frame; everyone else must leave it
+-- alone. Previews differ in DATA, never in which caller happens to run last.
+local function testFrameNeedsData(frame, testIndex)
+    return (DF.testMode or DF.raidTestMode) and testIndex == nil
+        and frame and frame.dfIsTestFrame
+end
+
 function DF:UpdateAbsorb(frame, testIndex)
     if not frame then return end
     if not frame.healthBar then return end
+    if testFrameNeedsData(frame, testIndex) then return end
 
     -- MEMORY TEST: Skip if disabled (but allow test mode to still work)
     if DF:MemTestDisabled("enableAbsorbs") and not DF.testMode and not DF.raidTestMode then
@@ -685,7 +699,10 @@ function DF:UpdateAbsorb(frame, testIndex)
     -- only the absorb value (and possibly isClamped for ATTACHED modes)
     -- has changed. Skip ~90% of the function body.
     local customBar = frame.dfAbsorbBar
+    -- Diagnostic for /df debug zorder: did this call short-circuit or re-anchor?
+    frame.dfAbsorbFastPath = false
     if customBar and customBar:IsShown() and not AbsorbLayoutStateChanged(frame, db) then
+        frame.dfAbsorbFastPath = true
         if mode == "ATTACHED" or mode == "ATTACHED_OVERFLOW" then
             -- Need the calculator for clamped state (secret, can't cache).
             -- The calculator object itself is already cached on the frame.
@@ -1650,6 +1667,8 @@ end
 function DF:UpdateHealAbsorb(frame, testIndex)
     if not frame then return end
     if not frame.healthBar then return end
+    -- Test frames only accept test data — see testFrameNeedsData above UpdateAbsorb.
+    if (DF.testMode or DF.raidTestMode) and testIndex == nil and frame.dfIsTestFrame then return end
     
     local unit = frame.unit
     local db = DF:GetFrameDB(frame)
@@ -2021,6 +2040,8 @@ end
 
 function DF:UpdateHealPrediction(frame, testIndex)
     if not frame or not frame.healthBar then return end
+    -- Test frames only accept test data — see testFrameNeedsData above UpdateAbsorb.
+    if (DF.testMode or DF.raidTestMode) and testIndex == nil and frame.dfIsTestFrame then return end
     
     -- MEMORY TEST: Skip if disabled (but allow test mode to still work)
     if DF:MemTestDisabled("enableHealPrediction") and not DF.testMode and not DF.raidTestMode then

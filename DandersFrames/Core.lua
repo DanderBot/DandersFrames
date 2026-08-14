@@ -7219,6 +7219,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 DF:MigrateOORTextAlpha()
             end
 
+            -- Heal prediction under the absorb (12 -> 10, value-gated).
+            -- ☠ THIS BATTERY IS THE LOGIN PATH. The first cut wired this migration
+            -- into Profile.lua's two sites only, which are the create/import paths --
+            -- so on a normal login it never ran, the db kept 12, and the "fixed"
+            -- ordering shipped twice while every frame still read the old level.
+            -- A migration is not wired until it is in the SAME battery as its peers.
+            if DF.MigrateHealPredictionBelowAbsorb then
+                DF:MigrateHealPredictionBelowAbsorb()
+            end
+
             -- Retire the deprecated raidGroupOrder reverse toggle (NORMAL-ize any
             -- stale "REVERSE"); group order now comes from Group Display Order.
             if DF.MigrateDeprecateRaidGroupOrder then
