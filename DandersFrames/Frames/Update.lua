@@ -101,9 +101,9 @@ function DF:ApplyFrameLayout(frame)
         -- absorb (which chains off the prediction's segment). A swap orphans their
         -- anchors -- they keep rendering against a dead rect, usually invisibly, which
         -- is exactly "the bar is on but nothing shows until I toggle something".
-        -- EllesmereUI carries the same rule ("must be called whenever
-        -- SetStatusBarTexture replaces the fill object"); this is that rule placed AT
-        -- the swap, so no ordering between styling and painting can strand a bar.
+        -- The rule is "re-anchor whenever SetStatusBarTexture replaces the fill object",
+        -- and this is that rule placed AT the swap, so no ordering between styling and
+        -- painting can strand a bar.
         -- Prediction first, absorb LAST -- it chains onto the prediction's segment.
         -- ⚠ On a test frame the drives re-run with that frame's OWN test data; painting
         -- them from live values is the poisoning the guards in Frames/Bars.lua stop, so

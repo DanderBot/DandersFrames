@@ -383,8 +383,9 @@ local function AbsorbLayoutStateChanged(frame, db)
     -- test mode again. The token is bumped where testMode/raidTestMode are set.
     if s.testSession     ~= (DF.testSessionId or 0)                       then return true end
     -- ☠☠ THE FILL TEXTURE OBJECT IS REPLACED when a health bar texture is applied
-    -- (styling on test entry, texture dropdown live) -- EllesmereUI carries the same
-    -- lesson: "must be called whenever SetStatusBarTexture replaces the fill object".
+    -- (styling on test entry, texture dropdown live). SetStatusBarTexture does not simply
+    -- retexture the existing fill: it can hand back a NEW object, so anything anchored to
+    -- the old one has to be re-anchored every time the texture is set.
     -- The attached absorb anchors to that OBJECT, so a swap orphans its anchors: the
     -- bar keeps rendering against a dead rect (usually invisible), and this cache --
     -- which compared only db settings -- said "nothing changed" forever after. THAT is
@@ -591,12 +592,13 @@ function DF:ResolveHealPredictionBarLevel(frame, db)
     return frame:GetFrameLevel() + ((db and db.healPredictionFrameLevel) or 10)
 end
 
--- ★ THE HEALTH BAR IS A CHAIN: health -> incoming heals -> absorb. All three references
--- agree. Blizzard's CompactUnitFrameUtil_UpdateFillBar walks a running cursor, anchoring
--- each segment to the previous one's far edge and returning the cursor unchanged for an
--- empty segment. Grid2's IndicatorMultiBar carries the same cursor as prevTex. oUF
--- (ElvUI) chains its healthprediction segments the same way and defaults
--- damageAbsorbClampMode to Enum 0, MissingHealth -- the heals-subtracted clamp.
+-- ★ THE HEALTH BAR IS A CHAIN: health -> incoming heals -> absorb. Blizzard's
+-- CompactUnitFrameUtil_UpdateFillBar walks a running cursor, anchoring each segment to
+-- the previous one's far edge and returning the cursor UNCHANGED for an empty segment --
+-- which is what makes a missing middle segment collapse instead of leaving a gap. The
+-- clamp that belongs with that chain is Enum 0, MissingHealth: the heals-subtracted one,
+-- because the heals have already taken their share of the bar by the time the shield is
+-- measured.
 --
 -- ONE live read, used by the resolver, the cache and the prediction-tail prompt alike.
 -- ☠ A cache key MUST derive from the same read as the thing it guards: an earlier cut
@@ -1117,7 +1119,7 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- while the shield started at the health fill, but chained BEHIND the heal it
             -- hands the bar a length that no longer fits and it runs off the end. When the
             -- chain is active, 1 is promoted to 0: the same "Missing Health" intent the
-            -- label promises, heals-aware -- and the clamp oUF itself defaults to. The
+            -- label promises, but heals-aware, which is what a chained bar has to mean. The
             -- arithmetic stays inside the calculator, where secret values are legal.
             -- 0 ("None") and 2 ("Max Health") pass through untouched.
             local clampMode = db.absorbBarAttachedClampMode or 1
@@ -1436,7 +1438,7 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- while the shield started at the health fill, but chained BEHIND the heal it
             -- hands the bar a length that no longer fits and it runs off the end. When the
             -- chain is active, 1 is promoted to 0: the same "Missing Health" intent the
-            -- label promises, heals-aware -- and the clamp oUF itself defaults to. The
+            -- label promises, but heals-aware, which is what a chained bar has to mean. The
             -- arithmetic stays inside the calculator, where secret values are legal.
             -- 0 ("None") and 2 ("Max Health") pass through untouched.
             local clampMode = db.absorbBarAttachedClampMode or 1
