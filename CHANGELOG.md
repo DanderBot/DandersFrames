@@ -25,6 +25,7 @@
 * (Aura Designer) Every configured Health Bar Color and Background Color now shows. Previously only the highest-priority one ever did, so a lower-priority buff coloured nothing even when it was the only one on the unit. With several active at once the highest priority draws on top. (by Krathe)
 * (Dispel Highlight) Gradient, border and symbol opacity now actually apply in game — the overlay previously rendered at full brightness no matter what the sliders said, including for debuffs gained mid-combat. (by Krathe)
 * (Dispel Highlight) Fix gradient opacity being applied twice for profiles upgraded from v4, which locked the overlay at full brightness across most of the slider's range. (by Krathe)
+* (Test Mode) Position settings now apply to the preview straight away. Changing an aura row's Anchor or Offset did nothing until test mode was switched off and on again, so placing a row meant toggling after every nudge — Growth, Spacing and Wrap were stuck the same way. (by Krathe)
 * (Indicators) "Hide in Combat" now works for every icon that offers it. The Leader and MT/MA icons stayed on screen through a whole fight no matter what the setting said, and the AFK, Phased, Vehicle, Summon, Raid Target and Ready Check icons shared the same fault — they all hide when the fight starts and come back when it ends. Reloading mid-fight no longer leaves them showing for the rest of the pull either. (by Krathe)
 
 ## [5.1.2]
