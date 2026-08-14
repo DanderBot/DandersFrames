@@ -3845,12 +3845,12 @@ function DF:MigrateHealthColorStops()
     end
 end
 
--- Fold the legacy per-element OOR name-text alpha into the unified oorTextAlpha.
--- The Text Designer now renders all unit text, so a single OOR "Text Alpha" dims
--- every TD element out of range. Carry the user's old name-text value only when
--- they changed it from the prior default (1); default-config users get the new
--- oorTextAlpha default instead. Per-profile guarded so later oorTextAlpha edits stick.
 -- Drop the heal prediction under the absorb on profiles that stored the old default.
+-- ⚠ The five lines that used to open this block described MigrateOORTextAlpha (the OOR
+-- name-text fold), which lives BELOW this function — the doc was orphaned onto its new
+-- neighbour when this one was inserted above it. That function carries its own, fuller
+-- comment; this is not a deletion of documentation, it is the removal of a duplicate
+-- pointing at the wrong body.
 --
 -- ☠ VALUE-GATED, NOT PRESENCE-GATED, AND THAT IS THE WHOLE POINT. Config.lua seeds
 -- healPredictionFrameLevel for every profile, so the key is ALWAYS present and a
@@ -3858,12 +3858,16 @@ end
 -- Every one of the dev's ten profiles had 12 stored, which is exactly how "the fix
 -- changes nothing" happens. See [[feedback-migration-before-defaults-backfill]].
 --
--- Only 12 -> 10, because 12 was the shipped default: anyone who typed a different number
--- is left alone, and the slider still reaches 12 for anyone who wants the heal on top.
--- Idempotent (10 is not 12), so it is safe to run on every load.
--- The heal prediction moved from +12 (over the absorb) to +10 (under it). Value-gated on
--- the OLD DEFAULT, so a level the user chose deliberately is left alone, and unflagged,
--- so re-running is a no-op.
+-- ☠☠ AND ONE-SHOT, PER PROFILE — value-gating ALONE is a trap here, which is exactly what
+-- shipped for review. The control is a 0-100 SLIDER (Pages/Auras.lua), so 12 is a value a
+-- user can deliberately pick: someone who wants the heal drawn OVER the shield sets 12,
+-- and an unflagged value-gated fold reverts it on the next reload, profile switch or
+-- import. 11 sticks, 13 sticks, 12 silently snaps back — the one number the user is most
+-- likely to choose for that effect is the one they cannot keep. The old comment here said
+-- "a level the user chose deliberately is left alone", which was true of every value
+-- except the only one this function touches.
+-- ⇒ The value gate says WHICH profiles the default moved under; the flag says the move
+-- has happened. Both are needed, and neither substitutes for the other.
 --
 -- ☠ IT HAS TO REACH RAID AUTO-LAYOUT OVERRIDES, and every other value migration in this
 -- file does not. OVERRIDE_TAB_MAP (Core/AutoProfiles.lua) matches by PREFIX, and
@@ -3881,7 +3885,10 @@ function DF:MigrateHealPredictionBelowAbsorb()
         end
     end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
-        if type(profile) == "table" then
+        -- The flag is checked and set PER PROFILE, not once for the run: an inactive
+        -- profile is reached by the login battery's whole-table walk, but an imported one
+        -- arrives later, and a per-run guard would skip it forever.
+        if type(profile) == "table" and not profile._healPredBelowAbsorbV1 then
             for _, modeKey in ipairs({ "party", "raid" }) do
                 fold(profile[modeKey])
             end
@@ -3890,6 +3897,7 @@ function DF:MigrateHealPredictionBelowAbsorb()
                     fold(layout.overrides)
                 end)
             end
+            profile._healPredBelowAbsorbV1 = true
         end
     end
 end
@@ -4224,6 +4232,10 @@ local FRESH_PROFILE_MIGRATION_FLAGS = {
     -- profile is unflagged and every reload re-forces it -- silently undoing the user
     -- turning it off, which is precisely what the feature request ruled out.
     _importantDebuffOnV1    = true,
+    -- Born at the new default (10), so the 12 -> 10 fold has nothing to do. Stamped for
+    -- the same reason as the rest: a fresh profile must never be re-migrated, and here
+    -- that matters because 12 is a value the slider can reach deliberately.
+    _healPredBelowAbsorbV1  = true,
     -- ☠ _staleTexturePathV1 DELIBERATELY REMOVED. The texture repair is HEALING, not a
     -- migration: it must re-check on every login, because a file can go missing at any
     -- future update, not just once in a profile's life. Stamping a flag here would have
