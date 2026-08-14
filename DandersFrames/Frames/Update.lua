@@ -117,8 +117,10 @@ function DF:ApplyFrameLayout(frame)
                 ti = DF:GetTestUnitData(frame.index, frame.isRaidFrame)
             end
             if not isTest or ti then
-                if DF.UpdateHealPrediction then DF:UpdateHealPrediction(frame, ti) end
+                -- Heal absorb FIRST (the prediction back-shifts onto its fill when it is
+                -- consuming), prediction second, absorb LAST (it chains / overlaps both).
                 if DF.UpdateHealAbsorb then DF:UpdateHealAbsorb(frame, ti) end
+                if DF.UpdateHealPrediction then DF:UpdateHealPrediction(frame, ti) end
                 if DF.UpdateAbsorb then DF:UpdateAbsorb(frame, ti) end
             end
         end
@@ -1083,11 +1085,12 @@ function DF:UpdateFrame(frame)
     -- event wandered by, which for a unit with a static shield is "a while" (reported
     -- 2026-08-14). The absorb's layout cache invalidates on the mode change and its
     -- fast path makes the no-change case cheap; what was missing was any TRIGGER.
-    -- Prediction first, absorb LAST (it chains onto the prediction's segment). On test
-    -- frames these are no-ops by the test-data guards -- the test branch of
-    -- UpdateAllFrames repaints those through RefreshTestFramesWithLayout.
-    if DF.UpdateHealPrediction then DF:UpdateHealPrediction(frame) end
+    -- Heal absorb FIRST (the prediction back-shifts onto its fill when it is consuming),
+    -- prediction second, absorb LAST (it chains / overlaps both). On test frames these
+    -- are no-ops by the test-data guards -- the test branch of UpdateAllFrames repaints
+    -- those through RefreshTestFramesWithLayout.
     if DF.UpdateHealAbsorb then DF:UpdateHealAbsorb(frame) end
+    if DF.UpdateHealPrediction then DF:UpdateHealPrediction(frame) end
     if DF.UpdateAbsorb then DF:UpdateAbsorb(frame) end
 end
 

@@ -580,10 +580,35 @@ end
 -- ☠ A cache key MUST derive from the same read as the thing it guards: an earlier cut
 -- compared a stamp written only at UpdateHealPrediction's tail, which four hide paths
 -- bypass, and the cache froze on "segment 1" while the resolver picked "fill".
+-- ★ BLIZZARD'S HEAL-ABSORB NETTING (Krathe, 2026-08-14: "the heal absorb will indeed
+-- eat the inc heal"). A CONSUMING heal absorb eats the first N points of any incoming
+-- heal, so Blizzard back-shifts the heal to start at the heal-absorb region's inner
+-- edge — the eaten share refills eaten health, only the remainder extends past the
+-- fill — and hangs the shield at the HEALTH EDGE (its append target is the healAbsorb
+-- texture, whose outer edge IS the fill edge). Where shield and surviving heal overlap,
+-- the shield wins (+11 over +10), same as Blizzard's draw order.
+-- Active only for the ATTACHED heal absorb: OVERLAY/FLOATING have no fill texture at
+-- the right place to anchor to, and keep the simple model.
+-- ☠ ANCHORS ONLY, NO ARITHMETIC — the heal-absorb amount is secret on live; everything
+-- here rides the heal-absorb bar's own fill texture, which the engine sizes.
+local function HealAbsorbShiftActive(frame, db)
+    if not frame or not db then return false end
+    if (db.healAbsorbBarMode or "OVERLAY") ~= "ATTACHED" then return false end
+    local ha = frame.dfHealAbsorbBar
+    return (ha and ha.IsShown and ha:IsShown()) and true or false
+end
+DF.HealAbsorbShiftActive = HealAbsorbShiftActive
+
 local function ChainEndKey(frame, db)
     if not frame then return "fill" end
     -- A FLOATING prediction is not on the health bar, so it never joins the chain.
     if db and (db.healPredictionMode or "OVERLAY") == "FLOATING" then return "fill" end
+    -- Consuming heal absorb active: Blizzard model — the shield hangs at the HEALTH
+    -- EDGE and overlaps the (back-shifted) heal, it does not chain after it. Returning
+    -- "fill" here does the whole job downstream: the clamp is not promoted to the
+    -- heals-subtracted mode, the test clamp stops subtracting the heal, and the absorb
+    -- anchors to the health fill.
+    if HealAbsorbShiftActive(frame, db) then return "fill" end
     local s2, s1 = frame.dfHealPredictionBar2, frame.dfHealPredictionBar
     if s2 and s2.IsShown and s2:IsShown() then return "seg2" end
     if s1 and s1.IsShown and s1:IsShown() then return "seg1" end
@@ -711,26 +736,23 @@ function DF:UpdateAbsorb(frame, testIndex)
             if isTestRender then
                 -- Test data: the calculator can only query the REAL unit (0 solo),
                 -- so derive the clamped value from the mock percentages instead.
-                -- ☠ SAME SUM AS THE FULL PATH, always. This fast-path copy once kept an
-                -- older formula and the shield's length depended on which path ran.
-                -- ☠ ONE RULER. When reduced-max CLIPPING is active the health bar is
-            -- physically shrunk to the usable width, so every test percentage already
-            -- renders on the USABLE ruler -- subtracting the reduced share here as well
-            -- double-counts it, and the shield reads "no room" on a bar with visible
-            -- missing health (Xx: black + overshield at once; the per-frame forensics
-            -- proved it -- same 25% heal, 27px of fill on an unclipped bar, 17px on
-            -- Xx's clipped one). Only a non-clipped reduced render, where percentages
-            -- still span the full bar and the striped zone merely overlays it, needs
-            -- the subtraction.
-            local reducedShare = ((db.reducedMaxHealthEnabled ~= false)
-                and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
-            local usable = maxHealth * (1 - reducedShare)
-                local curHealth = testHealthPercent * maxHealth
-                local incoming = (DF.ChainEndKey(frame, db) ~= "fill") and (testIncomingPercent or 0) * maxHealth or 0
-                local available = usable - curHealth - incoming
-                if absorbs > available then
-                    attachedAbsorbs = math.max(0, available)
-                    isClamped = true
+                -- ☠ SAME SUM AND SAME GATE AS THE FULL PATH, always. This fast-path copy
+                -- once kept an older formula and the shield's length depended on which
+                -- path ran; then it missed the clamp-mode gate the same way. One rule:
+                -- only "Missing Health" (1) space-clamps; clipping-aware reduced share
+                -- (see the full path's ONE RULER note); heals subtracted only when the
+                -- shield chains behind them.
+                if (db.absorbBarAttachedClampMode or 1) == 1 then
+                    local reducedShare = ((db.reducedMaxHealthEnabled ~= false)
+                        and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
+                    local usable = maxHealth * (1 - reducedShare)
+                    local curHealth = testHealthPercent * maxHealth
+                    local incoming = (DF.ChainEndKey(frame, db) ~= "fill") and (testIncomingPercent or 0) * maxHealth or 0
+                    local available = usable - curHealth - incoming
+                    if absorbs > available then
+                        attachedAbsorbs = math.max(0, available)
+                        isClamped = true
+                    end
                 end
             elseif frame.absorbCalculator and unit and CreateUnitHealPredictionCalculator then
                 UnitGetDetailedHealPrediction(unit, nil, frame.absorbCalculator)
@@ -1040,15 +1062,21 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- Xx's clipped one). Only a non-clipped reduced render, where percentages
             -- still span the full bar and the striped zone merely overlays it, needs
             -- the subtraction.
-            local reducedShare = ((db.reducedMaxHealthEnabled ~= false)
-                and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
-            local usable = maxHealth * (1 - reducedShare)
-            local curHealth = testHealthPercent * maxHealth
-            local incoming = (DF.ChainEndKey(frame, db) ~= "fill") and (testIncomingPercent or 0) * maxHealth or 0
-            local available = usable - curHealth - incoming
-            if absorbs > available then
-                attachedAbsorbs = math.max(0, available)
-                isClamped = true
+            -- Honour the Clamp Mode setting, mirroring live: only "Missing Health" (1)
+            -- space-clamps. "None" (0) and "Max Health" (2) don't constrain the preview
+            -- (test values never exceed max), so the shield may overrun — exactly what
+            -- those settings mean on live frames.
+            if (db.absorbBarAttachedClampMode or 1) == 1 then
+                local reducedShare = ((db.reducedMaxHealthEnabled ~= false)
+                    and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
+                local usable = maxHealth * (1 - reducedShare)
+                local curHealth = testHealthPercent * maxHealth
+                local incoming = (DF.ChainEndKey(frame, db) ~= "fill") and (testIncomingPercent or 0) * maxHealth or 0
+                local available = usable - curHealth - incoming
+                if absorbs > available then
+                    attachedAbsorbs = math.max(0, available)
+                    isClamped = true
+                end
             end
         elseif CreateUnitHealPredictionCalculator and unit then
             if not frame.absorbCalculator then
@@ -1340,15 +1368,21 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- Xx's clipped one). Only a non-clipped reduced render, where percentages
             -- still span the full bar and the striped zone merely overlays it, needs
             -- the subtraction.
-            local reducedShare = ((db.reducedMaxHealthEnabled ~= false)
-                and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
-            local usable = maxHealth * (1 - reducedShare)
-            local curHealth = testHealthPercent * maxHealth
-            local incoming = (DF.ChainEndKey(frame, db) ~= "fill") and (testIncomingPercent or 0) * maxHealth or 0
-            local available = usable - curHealth - incoming
-            if absorbs > available then
-                attachedAbsorbs = math.max(0, available)
-                isClamped = true
+            -- Honour the Clamp Mode setting, mirroring live: only "Missing Health" (1)
+            -- space-clamps. "None" (0) and "Max Health" (2) don't constrain the preview
+            -- (test values never exceed max), so the shield may overrun — exactly what
+            -- those settings mean on live frames.
+            if (db.absorbBarAttachedClampMode or 1) == 1 then
+                local reducedShare = ((db.reducedMaxHealthEnabled ~= false)
+                    and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
+                local usable = maxHealth * (1 - reducedShare)
+                local curHealth = testHealthPercent * maxHealth
+                local incoming = (DF.ChainEndKey(frame, db) ~= "fill") and (testIncomingPercent or 0) * maxHealth or 0
+                local available = usable - curHealth - incoming
+                if absorbs > available then
+                    attachedAbsorbs = math.max(0, available)
+                    isClamped = true
+                end
             end
         elseif CreateUnitHealPredictionCalculator and unit then
             if not frame.absorbCalculator then
@@ -2146,7 +2180,13 @@ function DF:UpdateHealPrediction(frame, testIndex)
         -- with it on the overhang is the point and the bar is parented to the frame
         -- rather than the health bar so it can spill.
         if not db.healPredictionShowOverheal then
-            total = math.min(total, math.max(0, maxHealth - healthPct * maxHealth))
+            -- With a consuming heal absorb the heal's first points refill EATEN health
+            -- (the bar back-shifts its start — see HealAbsorbShiftActive), so the
+            -- no-overheal cap allows that share on top of missing health, exactly as
+            -- the live calculator's heal-absorb awareness does.
+            local haAllow = (DF.HealAbsorbShiftActive and DF.HealAbsorbShiftActive(frame, db))
+                and ((testData and testData.healAbsorbPercent or 0) * maxHealth) or 0
+            total = math.min(total, math.max(0, maxHealth - healthPct * maxHealth + haAllow))
         end
         -- The breakdown live gets from the calculator. An even split is the only
         -- honest preview: there is no real healer to attribute to.
@@ -2435,31 +2475,60 @@ function DF:UpdateHealPrediction(frame, testIndex)
         local barWidth = frame.healthBar:GetWidth() - (inset * 2)
         local barHeight = frame.healthBar:GetHeight() - (inset * 2)
 
+        -- ★ BLIZZARD'S HEAL-ABSORB NETTING (see HealAbsorbShiftActive). With a consuming
+        -- heal absorb showing, the heal starts at the heal-absorb region's INNER edge —
+        -- the first N points of the heal refill eaten health, only the remainder extends
+        -- past the fill. The heal-absorb bar reverse-fills from the fill edge inward, so
+        -- its fill texture's far edge IS that inner edge: anchoring SAME-corner to it is
+        -- the back-shift, with zero arithmetic (the amount is secret on live).
+        local haShift = DF.HealAbsorbShiftActive and DF.HealAbsorbShiftActive(frame, db)
+        local haFill = haShift and frame.dfHealAbsorbBar
+            and frame.dfHealAbsorbBar:GetStatusBarTexture() or nil
         if healthOrient == "HORIZONTAL" then
             bar:SetOrientation("HORIZONTAL")
             bar:SetReverseFill(false)
             bar:SetWidth(barWidth)
-            -- Use two-point anchoring to match health fill texture height exactly
-            bar:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, 0)
-            bar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+            if haFill then
+                bar:SetPoint("TOPLEFT", haFill, "TOPLEFT", 0, 0)
+                bar:SetPoint("BOTTOMLEFT", haFill, "BOTTOMLEFT", 0, 0)
+            else
+                -- Use two-point anchoring to match health fill texture height exactly
+                bar:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, 0)
+                bar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+            end
         elseif healthOrient == "HORIZONTAL_INV" then
             bar:SetOrientation("HORIZONTAL")
             bar:SetReverseFill(true)
             bar:SetWidth(barWidth)
-            bar:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, 0)
-            bar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, 0)
+            if haFill then
+                bar:SetPoint("TOPRIGHT", haFill, "TOPRIGHT", 0, 0)
+                bar:SetPoint("BOTTOMRIGHT", haFill, "BOTTOMRIGHT", 0, 0)
+            else
+                bar:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, 0)
+                bar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, 0)
+            end
         elseif healthOrient == "VERTICAL" then
             bar:SetOrientation("VERTICAL")
             bar:SetReverseFill(false)
             bar:SetHeight(barHeight)
-            bar:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", 0, 0)
-            bar:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
+            if haFill then
+                bar:SetPoint("BOTTOMLEFT", haFill, "BOTTOMLEFT", 0, 0)
+                bar:SetPoint("BOTTOMRIGHT", haFill, "BOTTOMRIGHT", 0, 0)
+            else
+                bar:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", 0, 0)
+                bar:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", 0, 0)
+            end
         elseif healthOrient == "VERTICAL_INV" then
             bar:SetOrientation("VERTICAL")
             bar:SetReverseFill(true)
             bar:SetHeight(barHeight)
-            bar:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
-            bar:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+            if haFill then
+                bar:SetPoint("TOPLEFT", haFill, "TOPLEFT", 0, 0)
+                bar:SetPoint("TOPRIGHT", haFill, "TOPRIGHT", 0, 0)
+            else
+                bar:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", 0, 0)
+                bar:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", 0, 0)
+            end
         end
 
         -- Let WoW's StatusBar handle the percentage calculation internally
