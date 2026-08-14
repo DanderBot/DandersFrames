@@ -874,73 +874,123 @@ local function OpenFilterPicker(opts)
     drop:SetWidth(DROP_W)
     ApplyBackdrop(drop, GUI.Colors.background, GUI.Colors.border)
 
+    -- Search box + themed scrollbar, mirroring GUI:CreateDropdown's searchable
+    -- menus (GUI/Widgets.lua) — same construction, same L["Search..."], same
+    -- StyleScrollBar pill. This picker predated opts.searchable and hand-rolled
+    -- a bare ScrollFrame: scrollable but with no scrollbar and no way to narrow
+    -- a long registry list. ScrollFrameTemplate, NOT UIPanelScrollFrameTemplate
+    -- — StyleScrollBar styles the template's .ScrollBar and documents that rule.
+    local SEARCH_H = 26
     if not drop._scrollFrame then
-        local sf = CreateFrame("ScrollFrame", nil, drop)
-        sf:SetPoint("TOPLEFT", 0, 0)
-        sf:SetPoint("BOTTOMRIGHT", 0, 0)
+        local sb = CreateFrame("EditBox", nil, drop, "BackdropTemplate")
+        sb:SetPoint("TOPLEFT", 4, -4)
+        sb:SetPoint("TOPRIGHT", -4, -4)
+        sb:SetHeight(22)
+        sb:SetAutoFocus(false)
+        sb:SetFontObject(DFFontHighlightSmall)
+        sb:SetTextInsets(24, 8, 0, 0)
+        ApplyBackdrop(sb, GUI.Colors.background, GUI.Colors.border)
+        sb:SetBackdropColor(0.1, 0.1, 0.1, 1)
+        drop._searchBox = sb
+
+        local icon = sb:CreateTexture(nil, "OVERLAY")
+        icon:SetPoint("LEFT", 6, 0)
+        icon:SetSize(12, 12)
+        icon:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\search")
+        local dim = GUI.Colors.textDim
+        icon:SetVertexColor(dim.r, dim.g, dim.b)
+
+        local ph = sb:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+        ph:SetPoint("LEFT", 24, 0)
+        ph:SetText(L["Search..."])
+        ph:SetTextColor(dim.r, dim.g, dim.b, 0.6)
+        drop._searchPlaceholder = ph
+
+        sb:SetScript("OnEditFocusGained", function() ph:Hide() end)
+        sb:SetScript("OnEditFocusLost", function()
+            if sb:GetText() == "" then ph:Show() end
+        end)
+        sb:SetScript("OnEscapePressed", function() drop:Hide() end)
+
+        local sf = CreateFrame("ScrollFrame", nil, drop, "ScrollFrameTemplate")
+        sf:SetPoint("TOPLEFT", 2, -(SEARCH_H + 4))
+        sf:SetPoint("BOTTOMRIGHT", -20, 2)
         drop._scrollFrame = sf
         local sc = CreateFrame("Frame", nil, sf)
-        sc:SetWidth(DROP_W)
+        sc:SetWidth(DROP_W - 22)
         sf:SetScrollChild(sc)
         drop._scrollChild = sc
-        sf:SetScript("OnMouseWheel", function(self2, delta2)
-            local cur = self2:GetVerticalScroll()
-            local maxS = max(0, self2:GetVerticalScrollRange())
-            self2:SetVerticalScroll(max(0, min(maxS, cur - (delta2 * 24))))
-        end)
+        if GUI.StyleScrollBar then GUI.StyleScrollBar(sf) end
     end
     local scrollChild = drop._scrollChild
     local scrollFrame = drop._scrollFrame
-    scrollChild:SetWidth(DROP_W)
-    for _, child in ipairs({scrollChild:GetChildren()}) do child:Hide(); child:SetParent(nil) end
-    for _, rgn in ipairs({scrollChild:GetRegions()}) do
-        if rgn:GetObjectType() == "FontString" or rgn:GetObjectType() == "Texture" then rgn:Hide() end
-    end
     scrollFrame:Show()
-    scrollChild:EnableMouseWheel(true)
-    scrollChild:SetScript("OnMouseWheel", function(_, delta2)
-        scrollFrame:GetScript("OnMouseWheel")(scrollFrame, delta2)
-    end)
 
     local C_TEXT, C_TEXT_DIM = GUI.Colors.text, GUI.Colors.textDim
-    local dy2 = -4
-    if #candidates == 0 then
-        local none = scrollChild:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(none, 9, "")
-        none:SetPoint("TOPLEFT", 8, dy2 - 4)
-        none:SetText(opts.emptyText or L["No filters available"])
-        none:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
-        dy2 = dy2 - 24
+    -- Rebuild the visible rows for one search term. Rows are cheap enough to
+    -- recreate per keystroke at registry scale; the per-open child sweep this
+    -- picker always did now just runs per rebuild.
+    local function buildRows(filterText)
+        for _, child in ipairs({scrollChild:GetChildren()}) do child:Hide(); child:SetParent(nil) end
+        for _, rgn in ipairs({scrollChild:GetRegions()}) do
+            if rgn:GetObjectType() == "FontString" or rgn:GetObjectType() == "Texture" then rgn:Hide() end
+        end
+        -- Match on what the row SHOWS, minus colour codes — otherwise "ff8"
+        -- finds every row via the grey count markup.
+        local filter = filterText and filterText ~= "" and filterText:lower() or nil
+        local dy2 = -4
+        local shownAny = false
+        for _, cand in ipairs(candidates) do
+            local plain = cand.label:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+            if not filter or plain:lower():find(filter, 1, true) then
+                shownAny = true
+                local ROW_H = 24
+                local row = CreateFrame("Button", nil, scrollChild)
+                row:SetHeight(ROW_H)
+                row:SetPoint("TOPLEFT", 4, dy2)
+                row:SetPoint("RIGHT", scrollChild, "RIGHT", -4, 0)
+
+                local rName = row:CreateFontString(nil, "OVERLAY")
+                GUI:SetSettingsFont(rName, 9, "")
+                rName:SetPoint("LEFT", 8, 0)
+                rName:SetText(cand.label)
+                rName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+
+                local hl = row:CreateTexture(nil, "BACKGROUND")
+                hl:SetAllPoints()
+                hl:SetColorTexture(1, 1, 1, 0)
+                row:SetScript("OnEnter", function() hl:SetColorTexture(1, 1, 1, 0.03) end)
+                row:SetScript("OnLeave", function() hl:SetColorTexture(1, 1, 1, 0) end)
+
+                local capturedCand = cand
+                row:SetScript("OnClick", function()
+                    drop:Hide()
+                    if opts.onPick then opts.onPick(capturedCand.kind, capturedCand.key, capturedCand.label) end
+                end)
+                dy2 = dy2 - ROW_H
+            end
+        end
+        if not shownAny then
+            local none = scrollChild:CreateFontString(nil, "OVERLAY")
+            GUI:SetSettingsFont(none, 9, "")
+            none:SetPoint("TOPLEFT", 8, dy2 - 4)
+            none:SetText(opts.emptyText or L["No filters available"])
+            none:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
+            dy2 = dy2 - 24
+        end
+        local totalH = -dy2 + 4
+        scrollChild:SetHeight(totalH)
+        scrollFrame:SetVerticalScroll(0)
+        drop:SetHeight(math.min(totalH, MAX_H) + SEARCH_H + 4)
     end
-    for _, cand in ipairs(candidates) do
-        local ROW_H = 24
-        local row = CreateFrame("Button", nil, scrollChild)
-        row:SetHeight(ROW_H)
-        row:SetPoint("TOPLEFT", 4, dy2)
-        row:SetPoint("RIGHT", scrollChild, "RIGHT", -4, 0)
 
-        local rName = row:CreateFontString(nil, "OVERLAY")
-        GUI:SetSettingsFont(rName, 9, "")
-        rName:SetPoint("LEFT", 8, 0)
-        rName:SetText(cand.label)
-        rName:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
-
-        local hl = row:CreateTexture(nil, "BACKGROUND")
-        hl:SetAllPoints()
-        hl:SetColorTexture(1, 1, 1, 0)
-        row:SetScript("OnEnter", function() hl:SetColorTexture(1, 1, 1, 0.03) end)
-        row:SetScript("OnLeave", function() hl:SetColorTexture(1, 1, 1, 0) end)
-
-        local capturedCand = cand
-        row:SetScript("OnClick", function()
-            drop:Hide()
-            if opts.onPick then opts.onPick(capturedCand.kind, capturedCand.key, capturedCand.label) end
-        end)
-        dy2 = dy2 - ROW_H
-    end
-    local totalH = -dy2 + 4
-    scrollChild:SetHeight(totalH)
-    drop:SetHeight(math.min(totalH, MAX_H))
+    drop._searchBox:SetText("")
+    drop._searchPlaceholder:Show()
+    -- Rebind per open: buildRows closes over THIS open's candidates and onPick.
+    drop._searchBox:SetScript("OnTextChanged", function(self2, userInput)
+        if userInput then buildRows(self2:GetText()) end
+    end)
+    buildRows(nil)
 
     drop:ClearAllPoints()
     drop:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -2)

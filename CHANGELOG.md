@@ -1,11 +1,12 @@
 # DandersFrames Changelog
 
-## [Unreleased]
+## [5.2.0]
 
 ### New Features
 
 * (Aura Designer) Spells with more than one effect now show a "Tracked Spells" list on their indicator card — untick any effect you don't want that indicator to show. Each row shows the effect's own icon, and unticking everything simply shows nothing without touching the visibility eye. (by Krathe)
 * (Aura Designer) Health Bar Color, Background Color and Border can switch to a second colour while a buff is inside its refresh window, so a heal-over-time can read one colour normally and another the moment recasting it wastes nothing. The game sets that window per spell, and buffs you cannot refresh never have one. (by Krathe)
+* (Aura Designer) Filter groups can now render as solid coloured squares instead of spell icons — pick a Shape on the group's Appearance card. (by Krathe)
 
 ### Bug Fixes
 
@@ -22,6 +23,14 @@
 * (Bars) The absorb Clamp Mode "None" now truly leaves the shield unclamped — it previously applied the strictest clamp of the three. (by Krathe)
 * (Test Mode) Absorbs, heal absorbs and incoming heals preview reliably on the first entry after a reload, follow the test panel's toggles, respect reduced max health, and demonstrate the heal-absorb interplay: one unit shows its heal shortened by a wash with the shield beside it, another shows a wash consuming its heal entirely. (by Krathe)
 * (Indicators) "Hide in Combat" now works for every icon that offers it. The Leader and MT/MA icons stayed on screen through a whole fight no matter what the setting said, and the AFK, Phased, Vehicle, Summon, Raid Target and Ready Check icons shared the same fault — they all hide when the fight starts and come back when it ends. Reloading mid-fight no longer leaves them showing for the rest of the pull either. (by Krathe)
+* (Layout) The raid Growth Direction dropdown and its related labels now agree — choosing Rows or Columns configures exactly what it says. (by Krathe)
+* (Bars) Fix solo-mode resource bars appearing on frames other than your own. (by Krathe)
+* (Aura Designer) Fix the enable toggle silently changing your Show Buffs setting when nothing needed to change. (by Krathe)
+* (Test Mode) The preview honours Smooth Bar Animation and labels which slot is you. (by Krathe)
+
+### Improvements
+
+* (Aura Designer) The filter picker now has a scrollbar and a search box, matching the addon's other dropdowns.
 
 ## [5.1.3]
 
