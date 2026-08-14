@@ -39,6 +39,12 @@ local C_HOVER      = {r = 0.22, g = 0.22, b = 0.22, a = 1}
 local C_TEXT       = {r = 0.9, g = 0.9, b = 0.9, a = 1}
 local C_TEXT_DIM   = {r = 0.6, g = 0.6, b = 0.6, a = 1}
 local C_WARNING    = {r = 0.95, g = 0.35, b = 0.35, a = 1}     -- Soft red: behaviour-change / caution notes
+-- Amber: "configured, but this will not render" notes in the Aura Designer — a state the
+-- user can fix, so it reads softer than the red above, which marks a behaviour change.
+-- ⚠ ADDED because the raw triple was hardcoded at SEVEN sites across three files, four of
+-- them added in one round — and the first even carried the comment "the editor's warning
+-- amber", naming a shared colour that did not exist. Theme against this, never the numbers.
+local C_NOTICE     = {r = 0.91, g = 0.66, b = 0.25, a = 1}
 
 -- Exported palette: other files should theme against these shared tables instead
 -- of re-declaring private copies or hardcoding the raw numbers. These are the
@@ -55,6 +61,7 @@ GUI.Colors = {
     text       = C_TEXT,
     textDim    = C_TEXT_DIM,
     warning    = C_WARNING,  -- soft red for behaviour-change / caution notes
+    notice     = C_NOTICE,   -- amber for "configured but will not render" notes
 }
 
 -- Dialog chrome. Popup.lua is a standalone dialog rather than a settings page and

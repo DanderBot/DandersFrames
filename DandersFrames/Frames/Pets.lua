@@ -201,7 +201,10 @@ function DF:CreatePetFrame(unit, ownerFrame, isRaid, track)
     -- border at +2 happens to clear it. That is luck, not design: level the health bar
     -- for any reason and the border silently disappears, which is precisely what
     -- happened on the unit frame in alpha 15. Pin it above the whole bar stack.
-    frame.border = DF.Border:New(frame, { frameLevelOffset = 10 })
+    -- Same +14 as the unit frame (Frames/Create.lua CreateFrameBorder, which carries the
+    -- measured band and why it is 14, not 10). Kept identical so the two cannot drift:
+    -- the +10 they shared was buried by the bar band as it grew.
+    frame.border = DF.Border:New(frame, { frameLevelOffset = 14 })
     
     -- Name text — do NOT use SetFont() directly; use SetFontObject so that
     -- later SafeSetFont calls with font families can properly override
@@ -343,7 +346,10 @@ function DF:CreateTestPetFrame(unit, ownerTestFrame, isRaid)
     -- border at +2 happens to clear it. That is luck, not design: level the health bar
     -- for any reason and the border silently disappears, which is precisely what
     -- happened on the unit frame in alpha 15. Pin it above the whole bar stack.
-    frame.border = DF.Border:New(frame, { frameLevelOffset = 10 })
+    -- Same +14 as the unit frame (Frames/Create.lua CreateFrameBorder, which carries the
+    -- measured band and why it is 14, not 10). Kept identical so the two cannot drift:
+    -- the +10 they shared was buried by the bar band as it grew.
+    frame.border = DF.Border:New(frame, { frameLevelOffset = 14 })
 
     -- Name text — do NOT use SetFont() directly; use SafeSetFont or SetFontObject
     -- so that later SafeSetFont calls with font families can properly override

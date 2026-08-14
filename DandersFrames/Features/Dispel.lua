@@ -170,8 +170,8 @@ end
 --       mode to use with a low-alpha wash if you want to see through it.
 --
 --   SHOW ON CURRENT HEALTH   -> +4: above the health FILL and nothing
---       else. It must stay under heal-absorb (+8), reduced-max (+9), absorb (+11)
---       and heal prediction (+12), because the entire point of the option is that
+--       else. It must stay under heal-absorb (+8), reduced-max (+9), heal
+--       prediction (+10) and absorb (+11), because the entire point of the option is that
 --       the wash marks the HEALTH and leaves those indicators readable. Burying
 --       them loses the information the option exists to preserve -- and at full
 --       health with a solid blend the wash swallowed the frame whole
@@ -215,7 +215,7 @@ function DF:ResolveDispelGradientLevel(frameLevel, db)
         and db and db.dispelGradientOnCurrentHealth ~= false
     -- ☠ CURRENT HEALTH IS PINNED AT +4 AND THE SLIDER DOES NOT MOVE IT. The entire
     -- contract of "Show On Current Health Only" is that the wash marks the health and
-    -- leaves reduced-max (+9), absorb (+11) and heal prediction (+12) readable above it.
+    -- leaves reduced-max (+9), heal prediction (+10) and absorb (+11) readable above it.
     -- A slider here would let a user silently re-create the exact bug this option was
     -- rewritten to fix, and they would read the result as the option being broken rather
     -- than as their own setting. The slider governs the widget and the FULL-FRAME wash,
@@ -231,8 +231,9 @@ local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     overlay:SetAllPoints(host)
     -- ★ THE FRAME'S LEVEL LADDER, as it actually stands (offsets from the unit frame):
     --   +0..+8   background, health/missing +3, power +5, heal-absorb +8
+    --   +10      heal prediction    (healPredictionFrameLevel)
     --   +11      absorb bar         (absorbBarFrameLevel)
-    --   +12      heal prediction    (healPredictionFrameLevel)
+    --   +13      overshield host,   +14 frame border
     --   +16/+17  dispel overlay / gradient + ring   <- HERE
     --   +20      resource bar       (resourceBarFrameLevel)
     --   +25      content overlay,   +26 dispel badge
@@ -472,6 +473,10 @@ local function LayoutStateChanged(overlay, db)
         or overlay.dfL_gradientSize            ~= db.dispelGradientSize
         or overlay.dfL_gradientOnCurrentHealth ~= db.dispelGradientOnCurrentHealth
         or overlay.dfL_healthOrientation       ~= db.healthOrientation
+        -- ☠ The Frame Level slider must invalidate this fast path, or the band
+        -- re-apply below it is skipped and the slider silently does nothing on the
+        -- test widget until some other tracked field changes.
+        or overlay.dfL_overlayFrameLevel       ~= db.dispelOverlayFrameLevel
         or overlay.dfL_parentH                 ~= parentH
         or overlay.dfL_parentW                 ~= parentW
 end
@@ -493,6 +498,7 @@ local function CacheLayoutState(overlay, db)
     overlay.dfL_gradientSize            = db.dispelGradientSize
     overlay.dfL_gradientOnCurrentHealth = db.dispelGradientOnCurrentHealth
     overlay.dfL_healthOrientation       = db.healthOrientation
+    overlay.dfL_overlayFrameLevel       = db.dispelOverlayFrameLevel
     local parentH, parentW = SafeRectSize(gradientParent)
     overlay.dfL_parentH                 = parentH or 40
     overlay.dfL_parentW                 = parentW or 80
@@ -723,22 +729,6 @@ local function ApplyOverlayLayout(overlay, db, frame)
         -- a mismatch between the two decisions shows different coverage in the
         -- preview than in a group.
         --
-        -- ★ The level follows the option, every layout pass. Creation picks a default
-        -- before any db is in scope, so this is where the two modes actually diverge.
-        -- ☠ Base it on the FRAME, not on overlay.gradient's parent -- that parent is
-        -- whichever host existed at build time and is frame+16 instead of frame+3 when
-        -- the widget was built before frame.healthBar (see ResolveDispelGradientLevel).
-        -- `overlay`'s own parent is the host the widget was built on, which is the frame
-        -- on this path, so it is the correct fallback when no frame was passed in.
-        local levelHost = frame or overlay:GetParent()
-        local hostLvl = levelHost and levelHost:GetFrameLevel() or 0
-        -- ★ The WIDGET's band is re-applied here too, not just at creation. Creation hard
-        -- codes 16 with no db in scope, so without this the new slider would need a UI
-        -- rebuild to take effect — the same creation-vs-layout split that hid the absorb
-        -- overflow bar and the resource bar earlier today. Resolve it every layout pass.
-        pcall(overlay.SetFrameLevel, overlay, DF:ResolveDispelOverlayLevel(hostLvl, db))
-        overlay.gradient:SetFrameLevel(DF:ResolveDispelGradientLevel(hostLvl, db))
-
         if onCurrentHealth and frame then
             -- ☠ ANCHOR TO THE HEALTH BAR, NOT THE FULL-FRAME PROXY.
             -- dfGradientAnchorProxy spans the whole padded frame ON PURPOSE: "Clip
@@ -806,6 +796,50 @@ local function ApplyOverlayLayout(overlay, db, frame)
         end
     end
 
+    -- ★★ THE LEVEL RE-APPLY RUNS FOR EVERY STYLE. It used to live inside the FULL
+    -- branch of the style chain above — reasonable-looking, because that is where the
+    -- onCurrentHealth mode split happens — so EDGE / TOP / BOTTOM / LEFT / RIGHT never
+    -- re-applied ANY level and kept whatever creation assigned. Creation pins the pulse
+    -- box (whose REGIONS are the four edge strips and the darken) at the gradient
+    -- host's own level, i.e. the healthBar band — which is how EDGE mode rendered
+    -- under the heal prediction (+10) and absorb bar (+11) on the test widget while
+    -- TOP, which draws through the resolver-levelled gradient StatusBar, cleared them.
+    -- Field-caught in two rounds: "edge mode is not showing over the absorb... top edge
+    -- works now but not edge glow" (Krathe, 2026-08-13), with the z-order dump showing
+    -- gradient at +17 over absorb +11 while the strips stayed at the healthBar's +3.
+    --
+    -- ☠ Base the host level on the FRAME, not on overlay.gradient's parent -- that
+    -- parent is whichever host existed at build time. `overlay`'s own parent is the
+    -- correct fallback when no frame was passed in.
+    -- The ruling (Krathe, 2026-08-13): ONLY Full Frame + Show On Current Health Only
+    -- sits low (ResolveDispelGradientLevel's +4 pin, which reads the mode from db
+    -- itself); every other overlay shape clears the health-content band. The box takes
+    -- the GRADIENT level so the strips ride exactly where the wash would.
+    -- The ring host re-derives from the overlay level JUST applied — its creation
+    -- value goes stale the moment the Frame Level slider moves the band.
+    do
+        local levelHost = frame or overlay:GetParent()
+        local hostLvl = levelHost and levelHost:GetFrameLevel() or 0
+        local gradientLvl = DF:ResolveDispelGradientLevel(hostLvl, db)
+        pcall(overlay.SetFrameLevel, overlay, DF:ResolveDispelOverlayLevel(hostLvl, db))
+        -- ☠ PARENT BEFORE CHILD. SetFrameLevel on a frame shifts every DESCENDANT by the
+        -- same delta, so levelling the gradient and THEN its pulse host re-shifted the
+        -- child that had just been placed. On the legacy path gradientParent IS
+        -- gradientPulseHost, so the host started at frame+3, the gradient was set to +17,
+        -- and moving the host +3 -> +17 dragged the gradient to +31 -- above the resource
+        -- bar (+20), the content overlay (+25) and the status icons (+30). It stuck until
+        -- a pass beat the LayoutStateChanged early-return, and drifted another step per
+        -- drag of the Frame Level slider. (Danders's review, PR #236 B3.)
+        -- The overlay/borderRingHost pair below was always in the right order; this now
+        -- matches it. One resolve, reused, so the two can never be handed different values.
+        if overlay.gradientPulseHost then
+            overlay.gradientPulseHost:SetFrameLevel(gradientLvl)
+        end
+        overlay.gradient:SetFrameLevel(gradientLvl)
+        if overlay.borderRingHost then
+            overlay.borderRingHost:SetFrameLevel(overlay:GetFrameLevel() + 1)
+        end
+    end
     -- Cache the current layout settings so subsequent calls can
     -- short-circuit via LayoutStateChanged.
     CacheLayoutState(overlay, db)
@@ -851,15 +885,11 @@ function DF:UpdateDispelGradientHealth(frame)
     local maxHealth = UnitHealthMax(unit)
     local currentHealth = UnitHealth(unit, true)
 
-    -- Use same smooth interpolation as health bar when enabled
-    local interp
-    if smoothEnabled and Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut then
-        interp = Enum.StatusBarInterpolation.ExponentialEaseOut
-    end
+    -- Same smooth interpolation as the health bar, through the shared branch
+    -- (DF.SetBarValueSmoothed, Frames/Core.lua) rather than a local copy of it.
     if legacy then
         legacy.gradient:SetMinMaxValues(0, maxHealth)
-        if interp then legacy.gradient:SetValue(currentHealth, interp)
-        else legacy.gradient:SetValue(currentHealth) end
+        DF.SetBarValueSmoothed(legacy.gradient, currentHealth, smoothEnabled)
     end
     -- ★ NO SLOT LOOP. The 12.1 native slot gradient is no longer fed from here at all:
     -- its carrier is a plain texture ANCHORED to the real health bar's fill texture, so
@@ -905,7 +935,15 @@ end
 -- silently dimming. It cannot double-apply -- the fold and the nil are one call.
 function DF:ResolveDispelGradientAlpha(db)
     if not db then return 1.0 end
-    return math.min((db.dispelGradientAlpha or 1) * (db.dispelGradientIntensity or 1.0), 1.0)
+    -- ☠ NO INTENSITY TERM. It was `min(alpha * intensity, 1)` — and intensity has ALREADY
+    -- been multiplied into alpha by the v5 fold (Core.lua DropDispelCustomMode), so any
+    -- profile that still carried the key had it applied TWICE. With v4's 2.6 default that
+    -- clamps to 1.0 from alpha ~0.385 up, i.e. the Gradient Opacity slider did nothing
+    -- across most of its range and the wash rendered at full brightness.
+    -- The fold now clears the key in the same block that consumes it, so this term could
+    -- only ever double-apply again. Removed rather than left as a "safe fallback": a
+    -- fallback that re-applies a value already folded in is not safety, it is the bug.
+    return math.min(db.dispelGradientAlpha or 1, 1.0)
 end
 
 local function ResolveGradientAlpha(db)
@@ -1577,7 +1615,12 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
     -- user-settable now (dispelOverlayFrameLevel). A hardcoded hbLvl + 13 here would sit
     -- still while the slider moved the widget -- the drift this file has already produced
     -- twice today. Resolved from the same function EnsureSlotWidget uses.
-    local edgeLvl = DF:ResolveDispelOverlayLevel(frame:GetFrameLevel(),
+    -- ☠ The GRADIENT resolver, not the overlay one: the strips are the wash's shape in
+    -- EDGE mode and must sit where the wash would (band+1, clearing the absorb and heal
+    -- prediction) — the overlay band alone ties with a user's bar levels one lower. Same
+    -- ruling as the legacy widget's pulse box; ResolveDispelGradientLevel reads the
+    -- FULL+onCurrentHealth low-pin from db itself, which cannot apply in EDGE mode.
+    local edgeLvl = DF:ResolveDispelGradientLevel(frame:GetFrameLevel(),
         (frame.isRaidFrame and DF.GetRaidDB and DF:GetRaidDB()) or (DF.GetDB and DF:GetDB()))
     local w = EnsureSlotWidget(btn, frame)
     local carriers = {}
@@ -1607,11 +1650,36 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         --   The anchor itself is applied in StyleGameMainSlot (tainted, and legal), not
         -- here, because the frame's health texture can be swapped from the settings panel
         -- and a create-once anchor would go stale.
+        -- ☠☠ OPACITY LIVES ON A DF-OWNED DIM HOST, NEVER ON THE BOUND TEXTURE.
+        -- The bind below (AddDispelTypeTexture) adds SecretAspect.Alpha to the carrier —
+        -- from then on the alpha channel is the ENGINE'S, and the documented options
+        -- struct offers no substitute: no alpha field, and customDispelColorMap is
+        -- typed colorRGB (no alpha channel to bake into). Proven live 2026-08-13: a
+        -- COMPLETED style pass (styledVer latched, styleErr=nil, bind ok) that executed
+        -- carrier:SetAlpha(0.3) still rendered the wash at 1.0.
+        -- So the carrier is created on a plain DF frame whose FRAME alpha multiplies
+        -- into the render regardless of what the aspect does to the texture's own
+        -- property — the same alpha-host pattern the AD out-of-range fade runs live in
+        -- combat every day. The ring / badge / edge strips already sit on DF holders;
+        -- the gradient was the ONE carrier drawn hostless, which is why it was the one
+        -- element whose opacity could not be controlled.
+        -- Born with the user's value because birth is usually MID-COMBAT (Blizzard
+        -- creates these buttons lazily on the first dispellable debuff) and the style
+        -- pass is OOC-only. The dim host is ours, so later slider edits can write it
+        -- at any time. Show Gradient off = alpha 0 (the carrier exists regardless;
+        -- show/hide via alpha is the standing design).
+        if not w.nativeGradientDim then
+            w.nativeGradientDim = CreateFrame("Frame", nil, w)
+            w.nativeGradientDim:SetAllPoints(btn)
+            w.nativeGradientDim:SetFrameLevel(w:GetFrameLevel())
+        end
         if not w.nativeGradient then
-            w.nativeGradient = w:CreateTexture(nil, "ARTWORK", nil, 2)
+            w.nativeGradient = w.nativeGradientDim:CreateTexture(nil, "ARTWORK", nil, 2)
         end
         w.nativeGradient:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
         w.nativeGradient:SetAllPoints(btn)
+        w.nativeGradient:SetBlendMode(db.dispelGradientBlendMode or "ADD")
+        w.nativeGradientDim:SetAlpha(db.dispelShowGradient ~= false and ResolveGradientAlpha(db) or 0)
         carriers[#carriers + 1] = { tex = w.nativeGradient }
         -- Name the gradient carrier explicitly. StyleGameMainSlot must dress THIS one;
         -- addressing it as "the bound carrier" only worked while a slot held exactly one,
@@ -1628,9 +1696,21 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
             local holder = CreateFrame("Frame", nil, btn)
             holder:SetAllPoints(btn)
             holder:SetFrameLevel(edgeLvl)   -- level with the widget; see edgeLvl above
-            local tex = holder:CreateTexture(nil, "ARTWORK", nil, 2)
+            -- ☠ DIM INSIDE, PULSE OUTSIDE. The holder is ApplySlotPulse's target and the
+            -- pulse's stop handler resets its alpha to 1 — opacity on the holder itself
+            -- would be clobbered by every animate toggle. A dim frame between them keeps
+            -- the two multiplicative: holder (pulse) × dim (opacity) × texture, exactly
+            -- the layering the gradient gets from w (pulse) × nativeGradientDim.
+            local dim = CreateFrame("Frame", nil, holder)
+            dim:SetAllPoints(btn)
+            dim:SetFrameLevel(edgeLvl)
+            dim:SetAlpha(ResolveGradientAlpha(db))   -- born with the user's value (mid-combat creation)
+            local tex = dim:CreateTexture(nil, "ARTWORK", nil, 2)
             tex:SetTexture(EDGE_GRADIENT_TEXTURES[edge])
             tex:SetAllPoints(btn)   -- anchored for the bind; StyleGameEdgeSlot positions the strip
+            tex:SetBlendMode(db.dispelGradientBlendMode or "ADD")
+            btn.dfDispelEdgeDim = btn.dfDispelEdgeDim or {}
+            btn.dfDispelEdgeDim[edge] = dim
             btn.dfDispelEdgeHolder[edge] = holder
             btn.dfDispelEdgeTex[edge] = tex
             carriers[#carriers + 1] = { tex = tex }
@@ -1642,9 +1722,15 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         local holder = CreateFrame("Frame", nil, btn)
         holder:SetAllPoints(btn)
         holder:SetFrameLevel(hbLvl + 15)   -- above the strips; see EnsureSlotWidget
-        local ring = holder:CreateTexture(nil, "ARTWORK")
+        -- Dim inside, pulse outside — the edge-strip layering note above.
+        local ringDim = CreateFrame("Frame", nil, holder)
+        ringDim:SetAllPoints(btn)
+        ringDim:SetFrameLevel(hbLvl + 15)
+        ringDim:SetAlpha(db.dispelBorderAlpha or 0.8)   -- born with the user's value
+        local ring = ringDim:CreateTexture(nil, "ARTWORK")
         ring:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_SquareBorder")
         ring:SetAllPoints(btn)   -- anchored for the bind; StyleGameBorderSlot crops/insets
+        btn.dfDispelRingDim = ringDim
         btn.dfDispelRing = ring
         btn.dfDispelRingHolder = holder
         carriers[#carriers + 1] = { tex = ring }
@@ -1668,8 +1754,14 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         holder:SetAllPoints(btn)
         holder:SetFrameLevel(((frame.contentOverlay and frame.contentOverlay:GetFrameLevel())
             or (frame:GetFrameLevel() + 25)) + 1)
-        local badge = holder:CreateTexture(nil, "OVERLAY")
+        -- Dim inside, pulse outside — the edge-strip layering note above.
+        local badgeDim = CreateFrame("Frame", nil, holder)
+        badgeDim:SetAllPoints(btn)
+        badgeDim:SetFrameLevel(holder:GetFrameLevel())
+        badgeDim:SetAlpha(db.dispelIconAlpha or 1)   -- born with the user's value
+        local badge = badgeDim:CreateTexture(nil, "OVERLAY")
         badge:SetAllPoints(btn)   -- anchored for the bind; StyleGameBadge sizes/places it
+        btn.dfDispelBadgeDim = badgeDim
         btn.dfDispelBadge = badge
         btn.dfDispelBadgeHolder = holder
         carriers[#carriers + 1] = { tex = badge, opts = BadgeCarrierOptions() }
@@ -1735,8 +1827,19 @@ local function StyleGameMainSlot(btn, frame, db)
                 carrier:SetAllPoints(w.gradient)
             end
             carrier:SetBlendMode(db.dispelGradientBlendMode or "ADD")
-            -- Intensity rides alpha here; RGB is Blizzard's after the bind.
-            carrier:SetAlpha(showGradient and ResolveGradientAlpha(db) or 0)
+            -- ☠ OPACITY ON THE DIM HOST, NOT THE CARRIER. The bind added
+            -- SecretAspect.Alpha to this texture, and a completed, error-free pass that
+            -- wrote carrier:SetAlpha(0.3) still rendered at 1.0 (field-proven
+            -- 2026-08-13) — the alpha channel is the engine's once bound. The dim host
+            -- is a plain DF frame, so this write is ours at any time, combat included.
+            if w.nativeGradientDim then
+                w.nativeGradientDim:SetAlpha(showGradient and ResolveGradientAlpha(db) or 0)
+            end
+            -- Normalise the carrier's own alpha where the write still lands (older
+            -- builds left 0.3 here; a client where region writes work would otherwise
+            -- double-dim against the host). pcall'd: a refused write must not skip the
+            -- darken/pulse below.
+            pcall(carrier.SetAlpha, carrier, 1)
         end
     end
 
@@ -1782,7 +1885,14 @@ local function StyleGameBadge(btn, frame, db)
     badge:ClearAllPoints()
     badge:SetPoint(pos, btn.dfDispelBadgeHolder, pos, db.dispelIconOffsetX or 0, db.dispelIconOffsetY or 0)
     badge:SetSize(size, size)
-    badge:SetAlpha(db.dispelIconAlpha or 1)
+    -- Opacity on the dim host; bound texture normalised (dim-host rule, StyleGameMainSlot).
+    if btn.dfDispelBadgeDim then btn.dfDispelBadgeDim:SetAlpha(db.dispelIconAlpha or 1) end
+    pcall(badge.SetAlpha, badge, 1)
+    -- The badge holder re-levels above (contentOverlay band); the DIM must follow or the
+    -- art — the dim's region — stays at the stale level. Same rule as ring and edges.
+    if btn.dfDispelBadgeDim and btn.dfDispelBadgeHolder then
+        btn.dfDispelBadgeDim:SetFrameLevel(btn.dfDispelBadgeHolder:GetFrameLevel())
+    end
     ApplySlotPulse(btn.dfDispelBadgeHolder, db.dispelAnimate)
 end
 
@@ -1802,8 +1912,24 @@ local function StyleGameBorderSlot(btn, frame, db)
     -- SetAuraBorder validation. The frame rect is OURS (readable); style re-runs on
     -- layout-version bumps, so a resize catches up on the next dispel pass.
     ApplyDispelRingGeometry(ring, btn, db, frame:GetWidth(), frame:GetHeight())
-    ring:SetAlpha(db.dispelBorderAlpha or 0.8)
+    -- Opacity on the dim host; bound texture normalised (dim-host rule, StyleGameMainSlot).
+    if btn.dfDispelRingDim then btn.dfDispelRingDim:SetAlpha(db.dispelBorderAlpha or 0.8) end
+    pcall(ring.SetAlpha, ring, 1)
     ring:SetBlendMode("BLEND")
+    -- ☠ RE-LEVEL EVERY PASS — the init's value goes stale when the Frame Level slider
+    -- moves the band (the legacy widget had this exact bug on its ring host). The DIM
+    -- must move too: the ring is the DIM'S region, so the art draws at the dim's level,
+    -- and a re-levelled holder with a stale dim moves nothing visible.
+    -- ⚠ THROUGH THE RESOLVER, so it follows the slider it exists to follow. This computed
+    -- healthBar + 15 flat while the wash and the edge strips take
+    -- DF:ResolveDispelOverlayLevel(..., db) -- so pushing dispelOverlayFrameLevel up put
+    -- the wash ABOVE its own ring, which is the one relationship the ring has. The +1 keeps
+    -- the ring exactly one step over the overlay, matching borderRingHost. (Review, S3.)
+    local ringHostLvl = (frame.healthBar and frame.healthBar:GetFrameLevel())
+        or (frame:GetFrameLevel() + 3)
+    local ringLvl = DF:ResolveDispelOverlayLevel(ringHostLvl, db) + 1
+    if btn.dfDispelRingHolder then btn.dfDispelRingHolder:SetFrameLevel(ringLvl) end
+    if btn.dfDispelRingDim then btn.dfDispelRingDim:SetFrameLevel(ringLvl) end
     ApplySlotPulse(btn.dfDispelRingHolder, db.dispelAnimate)
 end
 
@@ -1844,8 +1970,21 @@ local function StyleGameEdgeSlot(btn, frame, db, edge)
         tex:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -pad, pad)
     end
     tex:SetBlendMode(db.dispelGradientBlendMode or "ADD")
-    tex:SetAlpha(ResolveGradientAlpha(db))
-    ApplySlotPulse(btn.dfDispelEdgeHolder and btn.dfDispelEdgeHolder[edge], db.dispelAnimate)
+    -- Opacity on the dim host; the bound texture normalised to 1 (dim-host rule,
+    -- StyleGameMainSlot). ☠ tex:SetAlpha here LOOKED like it worked for the strip
+    -- styles — that was the pre-bind default surviving, not the write landing.
+    local dim = btn.dfDispelEdgeDim and btn.dfDispelEdgeDim[edge]
+    if dim then dim:SetAlpha(ResolveGradientAlpha(db)) end
+    pcall(tex.SetAlpha, tex, 1)
+    -- ☠ RE-LEVEL EVERY PASS — the init's edgeLvl goes stale when the Frame Level
+    -- slider moves the band. Holder AND dim: the strip is the dim's region, so the
+    -- art draws at the dim's level. Same resolver as the init (the wash's level:
+    -- band+1, clearing the absorb and heal prediction — the 2026-08-13 ruling).
+    local lvl = DF:ResolveDispelGradientLevel(frame:GetFrameLevel(), db)
+    local holder = btn.dfDispelEdgeHolder and btn.dfDispelEdgeHolder[edge]
+    if holder then holder:SetFrameLevel(lvl) end
+    if dim then dim:SetFrameLevel(lvl) end
+    ApplySlotPulse(holder, db.dispelAnimate)
 end
 
 -- All the styling for ONE slot button. Split out of StyleDispelSlots so the whole
@@ -1913,10 +2052,16 @@ local function ResetSlotArt(btn)
     btn._dfDispelGradientCarrier = nil
     btn.dfDispelEdgeTex = nil
     btn.dfDispelEdgeHolder = nil
+    -- Dim hosts go with their holders (☠ check EVERY sibling on a reset like this —
+    -- a survivor would be re-alpha'd by the stylers while its texture hangs off the
+    -- abandoned generation).
+    btn.dfDispelEdgeDim = nil
     btn.dfDispelRing = nil
     btn.dfDispelRingHolder = nil
+    btn.dfDispelRingDim = nil
     btn.dfDispelBadge = nil
     btn.dfDispelBadgeHolder = nil
+    btn.dfDispelBadgeDim = nil
 end
 
 -- Style every live slot button per the plan. Returns false while no buttons exist

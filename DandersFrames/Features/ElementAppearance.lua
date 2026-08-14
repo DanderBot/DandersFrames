@@ -1061,21 +1061,25 @@ function DF:UpdateDispelOverlayAppearance(frame)
         deadAlpha = db.fadeDeadBackground or 1
     end
 
-    -- Gradient alpha reads the configured value — this was the bug: using 1.0 here
-    -- caused the gradient to snap back to full brightness after OOR->in-range
-    -- transitions because UpdateDispelOverlayAppearance overwrote the value that
-    -- ShowOverlayWithSecretColor had applied.
-    -- Borders and icons stay at 1.0 to match what ShowOverlayWithSecretColor
-    -- hardcodes. Until that function is updated to read the user settings, using
-    -- db.dispelBorderAlpha/db.dispelIconAlpha here would cause ~5Hz flicker
-    -- (ShowOverlayWithSecretColor sets 1.0, range ticker dims them back).
-    -- ⚠ Shared resolver, not a fourth inline copy. This line WAS the copy that made the
-    -- "all four sites share it" claim in Features/Dispel.lua false, and it carried a
-    -- different fallback (0.5 vs Config's 1) so the two disagreed on an unset profile.
-    local gradAlpha = (DF.ResolveDispelGradientAlpha
-        and DF:ResolveDispelGradientAlpha(db) or 1.0) * deadAlpha
+    -- ★ ONE CHANNEL PER VALUE. The paint (StyleOverlayRegions) owns the CONFIGURED
+    -- opacity and puts it on the gradient texture's VERTEX alpha and the ring's vertex;
+    -- this sweep owns only the dead/out-of-range FADES, on the FRAME alpha. The two
+    -- channels multiply at render, so putting the configured value in both — which is
+    -- what the line below used to do, via the resolver — rendered it SQUARED whenever
+    -- both had run: dragging the opacity slider showed the test preview at alpha²
+    -- while release showed alpha ("about half", exactly half at 0.5 — field-caught,
+    -- Krathe 2026-08-13).
+    -- ☠ The old comment here justified the resolver read with an OOR snap-back from an
+    -- era when the FRAME alpha was the configured value's carrier. It is not any more;
+    -- vertex holds the config through every fade transition, so base 1 cannot snap
+    -- anything bright.
+    -- ICONS are the one element whose config lives on the FRAME alpha (the paint sets
+    -- icon:SetAlpha(dispelIconAlpha) — vertex there is the bleed-colour tint), so this
+    -- sweep must COMPOSE the config in rather than overwrite it: the old hardcoded 1.0
+    -- clobbered Symbol Opacity back to full on every range tick.
+    local gradAlpha = 1.0 * deadAlpha
     local brdAlpha  = 1.0 * deadAlpha
-    local icnAlpha  = 1.0 * deadAlpha
+    local icnAlpha  = (db.dispelIconAlpha or 1) * deadAlpha
 
     if db.oorEnabled then
         local oorAlpha = db.oorDispelOverlayAlpha or 0.2
@@ -1160,8 +1164,14 @@ function DF:UpdateAbsorbBarAppearance(frame)
     if not IsDandersFrame(frame) then return end
     if not frame.dfAbsorbBar then return end
 
-    -- PERF: Skip if absorb bar isn't visible
-    if not frame.dfAbsorbBar:IsShown() then return end
+    -- ☠ NOT gated on :IsShown() — same reasoning as UpdateMissingBuffAppearance above,
+    -- which flagged these three as carrying the same guard. VERIFIED, not assumed: the
+    -- ONLY caller of this function is UpdateAllElementAppearance (the range-tick sweep),
+    -- and nothing re-runs it when the bar is shown. So a pass that lands while the bar is
+    -- hidden is skipped, the bar keeps whatever alpha it last got, and it comes back at a
+    -- stale value until the next range edge. Alpha on a hidden frame costs nothing and is
+    -- correct the instant it is shown; a visibility guard on an alpha updater buys nothing
+    -- but a stale value. (The old comment called this "PERF".)
 
     local db = GetDB(frame)
     if not db then return end
@@ -1207,9 +1217,10 @@ end
 function DF:UpdateHealAbsorbBarAppearance(frame)
     if not IsDandersFrame(frame) then return end
     if not frame.dfHealAbsorbBar then return end
-    
-    if not frame.dfHealAbsorbBar:IsShown() then return end
-    
+
+    -- ☠ NOT gated on :IsShown() — see UpdateAbsorbBarAppearance above for the verified
+    -- reasoning (one caller, the range-tick sweep; nothing re-runs it on show).
+
     local db = GetDB(frame)
     if not db then return end
     
@@ -1234,9 +1245,10 @@ end
 function DF:UpdateHealPredictionBarAppearance(frame)
     if not IsDandersFrame(frame) then return end
     if not frame.dfHealPredictionBar then return end
-    
-    if not frame.dfHealPredictionBar:IsShown() then return end
-    
+
+    -- ☠ NOT gated on :IsShown() — see UpdateAbsorbBarAppearance above for the verified
+    -- reasoning (one caller, the range-tick sweep; nothing re-runs it on show).
+
     local db = GetDB(frame)
     if not db then return end
     
@@ -1251,8 +1263,10 @@ function DF:UpdateHealPredictionBarAppearance(frame)
     if db.oorEnabled then
         local oorAlpha = db.oorAbsorbBarAlpha or 0.5
         ApplyOORAlpha(frame.dfHealPredictionBar, inRange, 1.0, oorAlpha)
-        -- Second segment (others' heals in SPLIT mode) fades to match.
-        if frame.dfHealPredictionBar2 and frame.dfHealPredictionBar2:IsShown() then
+        -- Second segment (others' heals in SPLIT mode) fades to match. Nil-checked, not
+        -- shown-checked: the segment only exists in SPLIT mode, but a hidden one still
+        -- needs the current alpha for when it comes back (same rule as the bar itself).
+        if frame.dfHealPredictionBar2 then
             ApplyOORAlpha(frame.dfHealPredictionBar2, inRange, 1.0, oorAlpha)
         end
     end

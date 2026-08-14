@@ -466,9 +466,10 @@ function AuraContainer.SetTestMode(on)
 
     -- TEST HANDLES ONLY. A container has to be REBUILT across a test transition
     -- because the two shapes declare different groups and groups can never be
-    -- removed: test mode declares dfTestStyled/dfTestPlain and skips the real
-    -- filter loop entirely (build(), `filters = {}`), so neither shape can be
-    -- reached from the other in place.
+    -- removed: test mode skips the real filter loop entirely (build(),
+    -- `filters = {}`) and declares per-slot dfTest<k> groups (engine route) or
+    -- nothing at all (own-frame preview), so neither shape can be reached from
+    -- the other in place.
     --
     -- But that only ever applied to the handles that RENDER the preview. Live
     -- frames are hidden for the whole session by SetTestModeStateDrivers, so
@@ -761,6 +762,25 @@ end
 -- auraData.spellId, so their categorisation is only as good as the identity data behind
 -- it, and a mis-categorised aura lands in the wrong record or none. That is why the peer
 -- this mirrors parks exactly these four records on its debuff row and nothing else.
+--
+-- ☠☠ ASSERTED (`true`), NEVER MERELY MENTIONED. This tested `~= nil`, and `false ~= nil`
+-- is true — so every record carrying a category boolean as a DEDUP SUBTRACTION counted as
+-- identity-gated. BuildDirectDebuffFilters' notImportant() stamps isBossOrRoleAura=false
+-- and isPriorityAura=false onto the CC, Raid, Dispellable and Non-Player records purely so
+-- they do not re-render what the important records already claimed, so with Boss/Role or
+-- Priority enabled -- the default -- EVERY record in the row was gated and a loss of trust
+-- parked the lot to maxFrameCount 0. That is the wholesale blanking the note above says
+-- this design exists to avoid, arriving through the dedup flags instead of the spell-ID
+-- back door it was watching. Field symptom: the dispel OVERLAY fires (its own container
+-- carries no category booleans, so it never parks) while the debuff row shows nothing,
+-- intermittently, because trust follows unit assistability. Reported by two testers on
+-- 5.1.3, the build the park shipped in.
+--
+-- The distinction is membership vs subtraction. `= true` means "this record's CONTENTS are
+-- defined by a categorisation that reads spellId" — untrustworthy identity makes the whole
+-- record meaningless, so park it. `= false` only removes what a sibling claimed: with
+-- identity lost, an aura may be wrongly subtracted, but the rest of the record is still
+-- real, and showing most of a row beats showing none of it.
 local GATED_CANDIDATE_KEYS = {
     "isBossAura", "isBossOrRoleAura", "isRoleAura", "isPriorityAura",
 }
@@ -995,12 +1015,57 @@ local function styleButton_regions(slot, config)
     -- it's also the fake backend's icon mechanism); the native SetIcon bind is in bindNative.
     if config.mode == "overlay" then
         local ov = style.overlay
+        -- ORDER KEY for stacked frame tints (AD multi-tint). Several tint containers
+        -- cover the SAME region at the SAME frame level — the cover band is one level
+        -- wide, with the attached absorb directly above it (#1027), so there is no room
+        -- for a frame-level ladder. Frames at equal level have no guaranteed draw order,
+        -- so creation order cannot arbitrate: field-reported as the lower-priority colour
+        -- staying on top while both buffs were up. The draw-layer SUBLEVEL is the ordering
+        -- key that does not need headroom — higher priority gets a higher sublevel.
+        -- Re-applied on every style pass, so a priority edit reorders without a rebuild.
+        local subLvl = ov and ov.sublevel
         if ov and ov.tintColor then
             if not slot.dfTint then
                 slot.dfTint = host:CreateTexture(nil, "OVERLAY")
                 slot.dfTint:SetAllPoints(host)
             end
+            if subLvl then slot.dfTint:SetDrawLayer("OVERLAY", subLvl) end
             slot.dfTint:SetColorTexture(readColor(ov.tintColor))
+        end
+        -- ★ PANDEMIC COVER — the SECOND colour, on the SAME BUTTON as the base above.
+        --
+        -- ☠ SAME BUTTON IS THE WHOLE POINT. The first build made this a second CONTAINER
+        -- drawing over the first, which cost a frame level; the background and border bands
+        -- have none spare, so the feature could not reach them. Two regions under ONE button
+        -- need no level at all: they are siblings of one parent, so the draw-layer sublevel
+        -- orders them reliably (sublevel orders WITHIN a frame — it was useless across
+        -- frames, which is what the earlier attempt got wrong).
+        --
+        -- The two gates stay independent and both stay engine-owned: the slot's own secret
+        -- show/hide gates the BASE (buff present), and AddPandemicRegion in bindNative gates
+        -- THIS ONE (inside the refresh window). Nothing in Lua combines them.
+        --
+        -- ☠ CREATE-ONCE, so the pandemic colour's ON/OFF must stay STRUCTURAL: a region can
+        -- only be created inside initializeFrame (secure), never from a tainted ApplyStyle,
+        -- so enabling it has to hand over a fresh button. The COLOUR itself restyles live.
+        if ov and ov.tintPandemicColor then
+            if not slot.dfTintPandemic then
+                slot.dfTintPandemic = host:CreateTexture(nil, "OVERLAY")
+                slot.dfTintPandemic:SetAllPoints(host)
+            end
+            slot.dfTintPandemic:SetDrawLayer("OVERLAY", math.min((subLvl or 0) + 1, 7))
+            -- ☠ THE BLEND COMES FROM THE BASE TINT, NOT FROM THE PICKER. tintColor's
+            -- fourth component IS the mode-derived blend (Factory hands over
+            -- { r, g, b, blend }), while tintPandemicColor is the raw picker colour whose
+            -- alpha defaults to 1. Passing that straight through made the pandemic window
+            -- render FULLY OPAQUE over a base washing at, say, 20% -- the second colour
+            -- ignored the Blend slider entirely. The healthFill twin below already reuses
+            -- its base's alpha; this is the same rule, and taking it from the base rather
+            -- than re-deriving it is what stops the two drifting. (Review, PR #236 B6.)
+            local pr, pg, pb = readColor(ov.tintPandemicColor)
+            local _, _, _, blend = readColor(ov.tintColor)
+            slot.dfTintPandemic:SetColorTexture(pr, pg, pb)
+            slot.dfTintPandemic:SetAlpha(blend or 1)
         end
         -- (Removed 2026-08-04) FILLED HEALTH MIRROR. It was a StatusBar parented under
         -- the slot, fed the secret health percent per health tick. Aura frames carry
@@ -1036,6 +1101,7 @@ local function styleButton_regions(slot, config)
                 slot.dfHealthFill = host:CreateTexture(nil, "OVERLAY")
             end
             local t = slot.dfHealthFill
+            if subLvl then t:SetDrawLayer("OVERLAY", subLvl) end
             t:ClearAllPoints()
             t:SetAllPoints(hf.clampTo)
             local fr, fg, fb = readColor(hf.color)
@@ -1046,6 +1112,25 @@ local function styleButton_regions(slot, config)
                 t:SetColorTexture(fr, fg, fb)
             end
             t:SetAlpha(hf.alpha or 1)
+            -- The pandemic twin of the fill cover: same anchor, same texture, second
+            -- colour, one sublevel up. See the PANDEMIC COVER note above the tint.
+            if hf.pandemicColor then
+                if not slot.dfHealthFillPandemic then
+                    slot.dfHealthFillPandemic = host:CreateTexture(nil, "OVERLAY")
+                end
+                local pt = slot.dfHealthFillPandemic
+                pt:SetDrawLayer("OVERLAY", math.min((subLvl or 0) + 1, 7))
+                pt:ClearAllPoints()
+                pt:SetAllPoints(hf.clampTo)
+                local pr, pg, pb = readColor(hf.pandemicColor)
+                if hf.texture then
+                    DF:SafeSetTexture(pt, hf.texture)
+                    pt:SetVertexColor(pr, pg, pb)
+                else
+                    pt:SetColorTexture(pr, pg, pb)
+                end
+                pt:SetAlpha(hf.alpha or 1)
+            end
         end
         -- MIRROR HOST — a plain child frame of the slot handed back to the consumer
         -- (the Aura Designer name/health text colour-by-cover). The consumer parents
@@ -1173,6 +1258,61 @@ local function styleButton_regions(slot, config)
                     DF.Border:Apply(slot.dfBorder, spec)
                 end
             end)
+            -- ★ PANDEMIC BORDER TWIN — the ring in its second colour, on THIS button.
+            -- Same shape as the pandemic covers above: a sibling under one parent, so we
+            -- own both levels and the order is ours. It sits in the PANDEMIC_BORDER band
+            -- (7), above the base ring at BORDER (3) — deliberately NOT BORDER+1, which is
+            -- DISPEL_RING (4). See DF.AuraButtonLevels.
+            --
+            -- ☠ REGISTER THE HOLDER, NEVER DF.Border'S PIECES. applyTexPieces calls Show()
+            -- on every edge piece on every Apply, so registering pieces would hand their
+            -- Shown aspect to the engine and turn DF.Border's routine writes into forbidden
+            -- writes on a button child. DF.Border never shows/hides its own frame, which is
+            -- what makes a holder around it safe.
+            -- ☠ Hidden ONCE at creation, strictly before the bind — after that the engine
+            -- owns Shown and we must never touch it.
+            if borderSpec.pandemicSpec and DF.Border then
+                if not slot.dfBorderPandemicHolder then
+                    slot.dfBorderPandemicHolder = makeHolder(host, LEVELS.PANDEMIC_BORDER)
+                    slot.dfBorderPandemicHolder:Hide()
+                    local okP, wP = pcall(function()
+                        return DF.Border:New(slot.dfBorderPandemicHolder, {
+                            solidOnly = true, secretRect = true, frameLevelOffset = 0,
+                        })
+                    end)
+                    if okP then slot.dfBorderPandemic = wP end
+                end
+                if slot.dfBorderPandemic then
+                    local okA, errA = pcall(function()
+                        local pspec = borderSpec.pandemicSpec
+                        pspec.animation = nil   -- same blanket strip as the base ring
+                        if pspec.renderScale == nil then
+                            pspec.renderScale = tonumber(config.layout and config.layout.scale) or 1
+                        end
+                        pspec.knownWidth, pspec.knownHeight = sx, sy
+                        DF.Border:Apply(slot.dfBorderPandemic, pspec)
+                    end)
+                    if not okA and not warnedBorder then
+                        warnedBorder = true
+                        DF:DebugWarn(DBG, "pandemic border apply failed: %s", tostring(errA))
+                    end
+                    -- AURA DESIGNER CANVAS ONLY — the same branch, the same guard and the
+                    -- same reasoning as the icon cue's holder further down. A plain frame
+                    -- has no AddPandemicRegion, so nothing will ever drive this holder's
+                    -- visibility there, and the canvas is where the user styles the cue.
+                    -- On a real container button this stays false and the engine owns
+                    -- Shown, so the never-Show-a-bound-region rule is untouched.
+                    -- ☠ This was missing entirely: the holder was hidden once at creation
+                    -- and never shown again, so a Border effect's pandemic colour previewed
+                    -- as nothing at all while the icon cue previewed fine. It reads as the
+                    -- feature being broken rather than as a preview gap.
+                    -- ⚠ And in-game TEST slots are handled where the icon cue is handled —
+                    -- armTestPandemicWindow, which now drives this holder too, so the cue
+                    -- opens and closes with the fake duration instead of sitting on. Do not
+                    -- add a Show() here for them; that is the exact mistake 07804854 made.
+                    if not slot.AddPandemicRegion then slot.dfBorderPandemicHolder:Show() end
+                end
+            end
             if not ok and not warnedBorder then
                 warnedBorder = true
                 DF:DebugWarn(DBG, "DF.Border on aura button failed (taint?): %s", tostring(err))
@@ -1376,14 +1516,22 @@ local function styleButton_regions(slot, config)
     -- the widget is created only when the feature is ON: turning it off is a Rebuild
     -- (DF.Pandemic:StructSig), not a hide.
     --
-    -- ☠ WHAT IS REGISTERED IS THE HOLDER FRAME, for both types. Verified in game
-    -- 2026-08-05 that Frame:IsObjectType("Region") is true, so AddPandemicRegion takes
-    -- one. That is load-bearing for BORDER: DF.Border's applyTexPieces calls Show() on
-    -- every edge piece on every Apply, so registering the PIECES would hand their Shown
-    -- aspect to the engine and turn DF.Border's own routine writes into forbidden writes
-    -- on a button child. Registering the holder leaves DF.Border in full control of
-    -- everything inside it. TINT uses the same shape, so there is one code path and one
-    -- place for the flash animation to live.
+    -- ☠ WHAT IS REGISTERED DEPENDS ON WHAT ELSE DRIVES Shown, and the rule is the reason,
+    -- not the shape. AddPandemicRegion hands the region's Shown aspect to the engine, so
+    -- whatever is registered must be something NOTHING ELSE ever shows or hides.
+    --   * BORDER registers a HOLDER FRAME, and that is load-bearing: DF.Border's
+    --     applyTexPieces calls Show() on every edge piece on every Apply, so registering
+    --     the PIECES would hand their Shown to the engine and turn DF.Border's routine
+    --     writes into forbidden writes on a button child. The holder leaves DF.Border in
+    --     full control of everything inside it. (Verified in game 2026-08-05 that
+    --     Frame:IsObjectType("Region") is true, so AddPandemicRegion accepts a frame.)
+    --   * TINT and the health-fill cover register the TEXTURE directly. They are plain
+    --     regions with no other writer, so there is nothing for a holder to protect, and
+    --     the extra frame would buy only symmetry.
+    -- ⚠ This note used to say "the HOLDER FRAME, for both types", which described neither
+    -- the code nor the constraint — the border reasoning is border-specific and does not
+    -- generalise. Whichever way a future region goes, decide it by asking who else writes
+    -- Shown, and record THAT.
     --
     -- Create-once: the holder, its contents, the bind, and the flash animation. That is
     -- exactly what DF.Pandemic:StructSig covers. Colours / thickness / inset / offsets all
@@ -1809,6 +1957,49 @@ local function bindNative(slot, config)
         end
     end
 
+    -- PANDEMIC COVER (AD frame tints). Same registrar as the icon cue above, pointed at
+    -- the SECOND overlay cover on this button — the one carrying the pandemic colour.
+    -- The base cover beneath it is left alone and keeps rendering on the slot's own
+    -- presence gate, so the pair reads as "colour A while the buff is up, colour B inside
+    -- the refresh window". Both gates are the engine's; no Lua combines them.
+    --
+    -- ☠ REGISTER THE PANDEMIC COVER, NEVER THE BASE. Registering the base (the first
+    -- build did, when the variant was a separate container) hands the engine the wash
+    -- that is supposed to show for the buff's whole life.
+    --
+    -- ☠ THE REGION IS REGISTERED DIRECTLY, no holder — deliberately the opposite of the
+    -- icon cue's rule, for the reason that rule exists. There the holder protects
+    -- DF.Border, whose Apply calls Show() on every edge piece, so registering pieces
+    -- would turn routine writes into forbidden writes. Nothing ever calls Show/Hide on
+    -- these covers (the pooled-slot re-show sweep in styleButton_regions is isRow-gated),
+    -- so there is no write to protect. A holder would also add a frame to the level
+    -- chain, and the cover sits exactly ONE level under the attached absorb bar — a +1
+    -- shift would put the wash over the shield (bug #1027 territory).
+    -- ☠ SO: never add a Show/Hide of dfHealthFill / dfTint. That is now load-bearing.
+    --
+    -- Only Shown is stamped (unlike AddDispelTypeTexture, which also takes Alpha and
+    -- VertexColor), so the per-style-pass colour/alpha/anchor writes below stay legal.
+    -- On a PREVIEW slot there is no registrar, so the cover renders ungated — the same
+    -- behaviour the icon cue has on the AD canvas, and the reason test mode cannot show
+    -- this gate (a preview aura has no auraInstanceID, so no window ever opens).
+    -- No flag to read: the pandemic cover only EXISTS when a pandemic colour is
+    -- configured, and its creation is structural, so its presence is the condition.
+    if slot.AddPandemicRegion and not slot._boundPandemicCover then
+        -- One of the three, by effect type: health-bar fill cover, background/whole-bar
+        -- tint, or the border ring's holder. An AD effect is one type per container, so
+        -- exactly one of these ever exists on a given button.
+        local cover = slot.dfHealthFillPandemic or slot.dfTintPandemic or slot.dfBorderPandemicHolder
+        if cover then
+            local ok, err = pcall(slot.AddPandemicRegion, slot, cover)
+            if ok then
+                slot._boundPandemicCover = true
+            elseif not warnedPandemic then
+                warnedPandemic = true
+                DF:DebugWarn(DBG, "AddPandemicRegion (cover) failed: %s", tostring(err))
+            end
+        end
+    end
+
     local dispelSpec = style.dispel
     if dispelSpec then
         if slot.dfAuraBorder and (slot.AddDispelTypeTexture or slot.SetAuraBorder)
@@ -1952,6 +2143,27 @@ local FLOW_NAME = { RIGHT = "Right", LEFT = "Left", UP = "Up", DOWN = "Down" }
 -- single-row case lands where the legacy pass put it. Multi-row blocks fill from
 -- the box corner (flow order) rather than centring each row individually —
 -- accepted approximation, the flow owns button placement.
+-- ★ THE ONE PLACE THE LAYOUT STRIDE IS DEFINED. Published on DF because the Aura
+-- Designer's editor preview needs the identical answer: it used to compute its own, in
+-- TWO different ways (one of which dropped `scale` outright), so a group with any scale
+-- other than 1.0 previewed at a stride the live frame never used. Reported as "preview
+-- is not staying true to the actual frame", and the reporter isolated it themselves:
+-- "setting icon scale to 1.0 seems to fix the spacing" (2026-08-13).
+-- ☠ Offsets computed from this live in the BUTTON'S SCALED SPACE -- callers must
+-- SetScale(scale) the positioned frame, or the stride renders at the wrong size. That
+-- coupling is why this returns the step rather than a finished position: the caller still
+-- owns the scale it applies, and the two have to agree.
+--   preScaledStep ~= false : stepX = size*scale + spacing  (buff/debuff/AD rows)
+--   preScaledStep == false : stepX = size + spacing        (legacy defensive stride)
+function DF:ResolveAuraLayoutStep(sizeX, sizeY, spacingX, spacingY, scale, preScaledStep)
+    scale = tonumber(scale) or 1
+    if preScaledStep == false then
+        return sizeX + spacingX, sizeY + spacingY
+    end
+    return sizeX * scale + spacingX, sizeY * scale + spacingY
+end
+
+
 local function resolveGrowthLayout(L)
     local sx = (L.sizeX or L.size or 32)
     local sy = (L.sizeY or L.size or sx)
@@ -2119,13 +2331,39 @@ local function snapPinOffsets(anchorFrame, anchor, px, py, scale)
     return px, py, false
 end
 
+-- ★ THE ONE PLACE A LAYOUT BOX IS PINNED TO ITS FRAME.
+-- Three surfaces render aura frames — the live container, the container's own test
+-- preview, and the Aura Designer's editor canvas — and all three must land the box on
+-- the same physical pixel. They used to pin it in three places; the canvas's copy was
+-- the shortest (anchor-to-anchor, user offsets, nothing else) and so it silently
+-- dropped BOTH corrections this returns:
+--   * the CENTER-growth fold (G.pinX/pinY): centred rows pin the box's centre-of-edge,
+--     not its corner, so a corner pin sits up to half an icon out.
+--   * the pixel-perfect nudge (snapPinOffsets), which is computed from the anchor
+--     frame's EFFECTIVE SCALE — so the error changed with the UI scale, and at some
+--     scales the unsnapped value happened to land on-grid and looked correct. Reported
+--     as "the AD preview does not match live frames... UI scale might be partly to
+--     blame" (2026-08-13); the reporter was reading a real symptom of this.
+-- ☠ Returns the pin rather than applying it: applyContainerLayout must wrap its own
+-- SetPoint in a pcall and stamp _ppDbg, so the CALLER still owns the write.
+local function resolveLayoutPin(L, anchorFrame, pp)
+    local G = resolveGrowthLayout(L)
+    local scale = tonumber(L.scale) or 1
+    local px = (L.offsetX or 0) + G.pinX
+    local py = (L.offsetY or 0) + G.pinY
+    local resolved = true
+    if pp then
+        px, py, resolved = snapPinOffsets(anchorFrame, G.anchor, px, py, scale)
+    end
+    return G, px, py, scale, resolved
+end
+
 local function applyContainerLayout(c, handle)
     local config = handle.config
     local L = config.layout or {}
-    local G = resolveGrowthLayout(L)
+    local G, px, py, scale, pinResolved = resolveLayoutPin(L, handle.frame, handle._pp)
     local sx = G.sx
     local spX = G.spX
-    local scale = tonumber(L.scale) or 1
     local wrap = tonumber(L.wrap) or 0
 
     -- Row cap: vertical-primary = one per row (column); wrap>0 = N per row; else unlimited.
@@ -2160,15 +2398,9 @@ local function applyContainerLayout(c, handle)
         end
     end
 
-    -- Pin offsets: user offset + growth fold, then (pp) nudged onto the physical
-    -- pixel grid — the container-era equivalent of the legacy per-icon
-    -- SnapPointToPixelGrid (see the PIXEL PERFECT block above).
-    local px = (L.offsetX or 0) + G.pinX
-    local py = (L.offsetY or 0) + G.pinY
-    local pinResolved = true
-    if handle._pp then
-        px, py, pinResolved = snapPinOffsets(handle.frame, G.anchor, px, py, scale)
-    end
+    -- Pin offsets (user offset + growth fold + pp nudge) come from resolveLayoutPin
+    -- above, hoisted to the top of this function so the preview surfaces can ask the
+    -- same question without a handle.
     -- /df debug ppdump ground truth: the last pin decision this handle rendered with.
     handle._ppDbg = { px = px, py = py, resolved = pinResolved, anchor = G.anchor, pin = G.pinPoint, scale = scale }
 
@@ -2348,14 +2580,7 @@ local function layoutRow(handle)
     -- preScaledStep=false (defensive row) uses the legacy DEFENSIVE stride: the icon-size term
     -- is UNSCALED, so — offsets living in the button's scaled space — the rendered stride is
     -- (size+spacing)*scale and the gap is spacing*scale (no double-scale of the size term).
-    local stepX, stepY
-    if L.preScaledStep == false then
-        stepX = sx + spX
-        stepY = sy + spY
-    else
-        stepX = sx * scale + spX
-        stepY = sy * scale + spY
-    end
+    local stepX, stepY = DF:ResolveAuraLayoutStep(sx, sy, spX, spY, scale, L.preScaledStep)
     for i, b in ipairs(handle.buttons) do
         local idx = i - 1
         local col = idx % wrap
@@ -2616,6 +2841,25 @@ function NativeBackend:build()
     -- The per-slot-group shape below is the engine route, kept behind the toggle so
     -- the two can be compared side by side in game (/df debug ownpreview).
     if testMode and AuraContainer._ownTestPreview and not isOverlay and not isMissing then
+        -- RECORD STYLES (important-debuff highlight / layout-group members) die with
+        -- the real records, so lift them BEFORE the wipe — the same capture as the
+        -- engine route below, same two shapes: all records styled = a layout group
+        -- (slot k wears member k's style), else the single-styled-slot A/B against
+        -- plain neighbours. Dropping this capture was the own-preview regression:
+        -- the important-debuff highlight vanished from test mode entirely (field
+        -- report 2026-08-14). _buildOwnPreview resolves slot k's style from this.
+        local testStyles, allStyled = {}, true
+        for _, r in ipairs(filters) do
+            if r.style then testStyles[#testStyles + 1] = r.style else allStyled = false end
+        end
+        local perSlotStyles = (allStyled and #testStyles > 1) and testStyles or nil
+        -- Assigned UNCONDITIONALLY (nil when no styles): the pooled preview slots
+        -- persist across rebuilds, so a rebuild with the highlight switched off must
+        -- clear the previous build's styles or they would re-stamp forever.
+        handle._ownPreviewStyles = (perSlotStyles or testStyles[1]) and {
+            perSlot = perSlotStyles,
+            single  = (not perSlotStyles) and testStyles[1] or nil,
+        } or nil
         filters = {}   -- declare nothing; the loop below is skipped
     elseif testMode and not isOverlay and not isMissing then
         -- PER-SLOT TEST GROUPS (P5). Two hard-won facts drive this shape:
@@ -3550,19 +3794,30 @@ local PANDEMIC_PREVIEW_OPEN_AT = 0.7
 -- `elapsed` is how far into the cycle we already are (armTestDuration starts the
 -- duration in the past by the per-slot stagger), so the first window lands in phase
 -- with the bar and swipe instead of a full cycle late.
+-- ☠ BOTH HOLDERS, ON ONE WINDOW. There are two pandemic cues on a slot — the icon cue
+-- (dfPandemicHolder) and the BORDER twin an Aura Designer Border effect builds
+-- (dfBorderPandemicHolder) — and this drove only the first. The border twin was hidden
+-- once at creation with nothing to show it, so in test mode a Border effect's second
+-- colour previewed as nothing while the icon cue previewed correctly. They are one
+-- feature on one duration and must open and close together, or the preview says the two
+-- behave differently when live drives them from the same engine window.
 local function armTestPandemicWindow(handle, slot, d, gen, elapsed)
-    local holder = slot.dfPandemicHolder
-    if not holder then return end
-    holder:Hide()
+    local h1, h2 = slot.dfPandemicHolder, slot.dfBorderPandemicHolder
+    if not (h1 or h2) then return end
+    local function setShown(shown)
+        if h1 then h1:SetShown(shown) end
+        if h2 then h2:SetShown(shown) end
+    end
+    setShown(false)
     if not (d and d > 0) then return end
     local openIn = d * PANDEMIC_PREVIEW_OPEN_AT - (elapsed or 0)
-    if openIn <= 0 then holder:Show() return end
+    if openIn <= 0 then setShown(true) return end
     C_Timer.After(openIn, function()
         -- Same gen guard as the re-arm: a repaint or teardown must not leave a stale
         -- closure showing the cue on a slot that has moved on.
         if handle._destroyed or slot._dfTestGen ~= gen then return end
         if not AuraContainer._testMode then return end
-        holder:Show()
+        setShown(true)
     end)
 end
 
@@ -3610,14 +3865,20 @@ function Handle:_paintTestSlot(slot, index)
     -- hidden SAMPLE aura). Re-asserted every paint pass, not just at creation.
     if slot.SetMouseMotionEnabled then pcall(function() slot:SetMouseMotionEnabled(false) end) end
 
-    -- Validate the entry's spell ID up front (FAIL-CLOSED: kept only when the
-    -- game POSITIVELY confirms the name) — it drives BOTH the icon and the
-    -- tooltip below, so they can never disagree. Stale ID? Try resolving by
-    -- NAME (cached per entry; the name-equality gate rejects override results).
-    local sid
+    -- Resolve the entry to a spell ID up front — it drives BOTH the icon and the
+    -- tooltip below, so they can never disagree. THREE TIERS, in order:
+    --   1. the ID whose name matches the table's English `name` (exact, enUS);
+    --   2. failing that, resolve by that English name, so a STALE ID self-heals
+    --      (cached per entry; the name-equality check rejects override results);
+    --   3. failing that, the ID itself if the client still knows it — see below.
+    -- Only a spell the client knows NOTHING about now reaches `e.icon`.
+    local sid, clientName
     if e.spellID and C_Spell and C_Spell.GetSpellName then
         local ok, nm = pcall(C_Spell.GetSpellName, e.spellID)
-        if ok and nm == e.name then sid = e.spellID end
+        if ok and type(nm) == "string" and nm ~= "" then
+            clientName = nm                       -- the spell AS THIS CLIENT NAMES IT
+            if nm == e.name then sid = e.spellID end
+        end
     end
     if not sid and C_Spell and C_Spell.GetSpellInfo and e._resolvedID ~= false then
         if e._resolvedID then
@@ -3633,12 +3894,28 @@ function Handle:_paintTestSlot(slot, index)
         end
     end
 
+    -- ☠ THIRD TIER, AND IT IS THE ONLY REASON THIS WORKS OUTSIDE enUS. `e.name` is
+    -- ENGLISH, so tier 1 (name equality) can NEVER match on a localised client and
+    -- tier 2 has no localised name to look up — every entry fell through to the
+    -- hardcoded `e.icon`, and 19 of those 25 paths are mangled by Lua's escape
+    -- handling, so the whole preview rendered as blank squares. Shipped in v5.0.0
+    -- (the 12.1 rework replaced an ID-only painter with this gate); reported on
+    -- 5.1.3. If the client still knows the ID it IS the spell the curator named,
+    -- so trust it and carry the client's own name with it — icon, name and tooltip
+    -- move TOGETHER, the same rule the spec override below follows.
+    -- ⚠ ORDERED LAST ON PURPOSE: enUS still takes tiers 1/2 exactly as before, so a
+    -- stale ID there self-heals by name rather than being adopted here.
+    if not sid and clientName then sid = e.spellID end
+
     -- Adopt the player's SPEC OVERRIDE wholesale (Krathe's call): the preview
     -- shows the spell as this spec knows it — icon, name and tooltip move
     -- TOGETHER (a 12.1 Holy priest previews Holy Fire, not Shadow Word: Pain).
     -- GetSpellTexture resolves overrides anyway; resolving explicitly here keeps
     -- all three surfaces on the same spell instead of a mixed identity.
-    local dispName = e.name
+    -- Localised when tier 3 adopted the ID (clientName is that client's own wording);
+    -- e.name otherwise, which covers tier 1 (identical by definition) and tier 2
+    -- (resolved BY e.name, so it is the right label).
+    local dispName = (sid == e.spellID and clientName) or e.name
     if sid and C_Spell.GetOverrideSpell then
         local ok, oid = pcall(C_Spell.GetOverrideSpell, sid)
         if ok and type(oid) == "number" and oid ~= 0 and oid ~= sid then
@@ -3925,21 +4202,26 @@ end
 -- Returns false on any doubt (no AnchorUtil, an enum that will not resolve, Apply
 -- throwing) and the caller falls back to layoutRow — a slightly-off preview beats no
 -- preview, and this must never be the thing that breaks test mode.
-function Handle:_flowPreviewLayout(slots, count)
+-- ★ THE ONE PLACE PREVIEW SLOTS ARE PLACED. Shared by the container's own test preview
+-- (Handle:_flowPreviewLayout, below) and by the Aura Designer's editor canvas, which
+-- reaches it through AuraContainer.FlowSlots. Both hand it plain CreateFrame("Frame")
+-- slots; neither computes a position of its own. A surface that wants a preview supplies
+-- FRAMES AND DATA — never a stride, a growth vector, a corner or a snap.
+-- ☠ If something live does is not reachable through here, that is a finding to report,
+-- not a gap to close by making a copy imitate live more closely. A second implementation
+-- off one config is exactly the divergence this exists to prevent.
+local function flowSlotsIntoBox(box, anchorFrame, slots, count, config, pp)
     local AU = AnchorUtil
     if not (AU and AU.CreateFlowLayout and AU.FlowDirection) then return false end
-    local box = self._ownPreviewBox
-    if not box then return false end
+    if not (box and anchorFrame) then return false end
 
-    local config = self.config
     local L = config.layout or {}
-    local G = resolveGrowthLayout(L)
-    local scale = tonumber(L.scale) or 1
+    local G, px, py, scale = resolveLayoutPin(L, anchorFrame, pp)
     local wrap = tonumber(L.wrap) or 0
 
     -- Strip reservation -> flow padding. Same exclusive branch as applyContainerLayout.
     local resv, topStrip = stripReservation(config)
-    if resv > 0 and self._pp then resv = ppSnapScaled(resv, scale) end
+    if resv > 0 and pp then resv = ppSnapScaled(resv, scale) end
     local padTop, padBottom = 0, 0
     if resv > 0 then
         if G.vName == "Up" then
@@ -3950,15 +4232,10 @@ function Handle:_flowPreviewLayout(slots, count)
     end
 
     -- Pin the box exactly where the container pins itself.
-    local px = (L.offsetX or 0) + G.pinX
-    local py = (L.offsetY or 0) + G.pinY
-    if self._pp then
-        px, py = snapPinOffsets(self.frame, G.anchor, px, py, scale)
-    end
     local okPin = pcall(function()
         box:SetScale(scale)
         box:ClearAllPoints()
-        box:SetPoint(G.pinPoint, self.frame, G.anchor, px, py)
+        box:SetPoint(G.pinPoint, anchorFrame, G.anchor, px, py)
     end)
     if not okPin then return false end
 
@@ -3986,6 +4263,16 @@ function Handle:_flowPreviewLayout(slots, count)
         -- over the measured button, which is what folds the strip reservation into
         -- the row stride.
         layout.GetElementSize = function(_, _, element, group)
+            -- Styled preview slot (important-debuff highlight / layout-group member):
+            -- its cell is the record-scaled cell, exactly what the engine route
+            -- declares per group via recordGroupLayout — the button alone growing
+            -- would overlap its neighbour (button size and layout cell are separate
+            -- things, re-learned the hard way on the live containers).
+            local rs = element.dfImpRecStyle
+            if rs then
+                local cell = recordGroupLayout(gl, rs)
+                return cell.elementWidth, cell.elementHeight
+            end
             local w, hgt = element:GetSize()
             return group.elementWidth or w, group.elementHeight or hgt
         end
@@ -4001,6 +4288,10 @@ function Handle:_flowPreviewLayout(slots, count)
             elementHeight  = gl.elementHeight,
         } })
     end)
+end
+
+function Handle:_flowPreviewLayout(slots, count)
+    return flowSlotsIntoBox(self._ownPreviewBox, self.frame, slots, count, self.config, self._pp)
 end
 
 function Handle:_buildOwnPreview()
@@ -4024,6 +4315,12 @@ function Handle:_buildOwnPreview()
     end)
     box:Show()
 
+    -- ONE source for "how many slots does the preview currently have", so a later
+    -- re-flow (Handle:ApplyStyle) cannot ask the box to lay out a slot that was never
+    -- created. Stamped before the loop that creates 1..want.
+    self._ownPreviewCount = want
+
+    local ps = self._ownPreviewStyles
     for i = 1, want do
         local slot = slots[i]
         if not slot then
@@ -4031,6 +4328,15 @@ function Handle:_buildOwnPreview()
             slots[i] = slot
         end
         slot:Show()
+        -- Per-slot record style, the same rule as the engine route's per-slot groups:
+        -- a layout group styles slot k as member k; Important Debuffs styles slot 1
+        -- against plain neighbours (the positioning A/B). Stamped DIRECTLY rather than
+        -- through _acceptSlot's recStyle arg: pooled slots persist across rebuilds and
+        -- _acceptSlot deliberately leaves a nil recStyle untouched, so a stale stamp
+        -- from the previous build must be CLEARED here (applyRecordStyle's nil path
+        -- then hides a leftover badge).
+        slot.dfImpRecStyle = ps and (ps.perSlot and ps.perSlot[i]
+            or (i == 1 and ps.single) or nil) or nil
         -- Same styling seam as a native button. _acceptSlot fills self.buttons[i],
         -- so ApplyStyle / teardown pick these up unchanged.
         self:_acceptSlot(slot, i)
@@ -4259,7 +4565,15 @@ function styleConfigFor(handle, button)   -- assigns the forward-declared local
 end
 
 function applyRecordStyle(button, handle, recStyle)
-    if not recStyle then return end
+    if not recStyle then
+        -- Styled -> plain TRANSITION (own-preview pool only): a native button belongs
+        -- to one group for life, so it can never lose its record style — but the test
+        -- pool's slots persist across rebuilds, and toggling the highlight off leaves
+        -- a stamped badge shown unless the off-path runs here. Size needs no revert:
+        -- _acceptSlot has just re-sized the button from the shared layout.
+        if button and button.dfImpBadgeHost then button.dfImpBadgeHost:SetShown(false) end
+        return
+    end
 
     if recStyle.scale and recStyle.scale ~= 1 then
         local lay = handle.config and handle.config.layout
@@ -4338,9 +4652,10 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
     local seq = seqStart
     -- ☠ THE CONTAINER'S BUILD-TIME SHAPE, CAPTURED HERE — never the live global.
     --
-    -- build() picks its SHAPE from AuraContainer._testMode: a test container declares
-    -- dfTestStyled/dfTestPlain and skips the real filter loop, and groups can never be
-    -- removed, so that shape is fixed for the container's whole life. This closure used
+    -- build() picks its SHAPE from AuraContainer._testMode: a test container skips the
+    -- real filter loop and declares per-slot dfTest<k> groups (or, own-preview,
+    -- nothing), and groups can never be removed, so that shape is fixed for the
+    -- container's whole life. This closure used
     -- to decide paint-vs-bind by reading the GLOBAL again -- but buttons are created in
     -- LAZY BATCHES long after build (AddAuraGroup allocates FrameCreationBatchSize at a
     -- time, and more arrive on later aura events). Any test transition between build and
@@ -5046,6 +5361,25 @@ function Handle:ApplyStyle(style, layout)
             warnedRestyle = true
             DF:DebugWarn(DBG, "ApplyStyle restyle failed: %s", tostring(err))
         end
+    end
+
+    -- ★ OWN-FRAME PREVIEW: RE-PIN THE BOX, or a layout change never previews.
+    -- The loop above restyles the BUTTONS, which is why style edits (text toggles,
+    -- colours, fonts) always previewed correctly and made this look fine. But the
+    -- preview's slots hang off `_ownPreviewBox`, NOT off the native container — so
+    -- backend:applyLayout re-pinning the container moves nothing here, and
+    -- `_flowPreviewLayout` was reachable ONLY from _buildOwnPreview. Anchor, offsets,
+    -- growth, spacing and wrap therefore sat unapplied until the next REBUILD, i.e.
+    -- until test mode was switched off and on again — exactly how it was reported
+    -- ("have to do this over and over until desired position", defensive row, 5.1.3).
+    -- ⇒ Previews differ in DATA, never in RENDERING: live re-pins on a layout change,
+    -- so the preview re-pins too, through the same shared flow.
+    -- ☠ LAST, AND THAT IS LOAD-BEARING: the flow measures each button, and the restyle
+    -- loop above has only just re-applied their size. Flowing first lays the box out
+    -- against the PREVIOUS icon size.
+    if self._ownPreviewBox and self._ownPreviewSlots then
+        local count = math.min(self._ownPreviewCount or 0, #self._ownPreviewSlots)
+        if count > 0 then self:_flowPreviewLayout(self._ownPreviewSlots, count) end
     end
 end
 
@@ -7344,6 +7678,52 @@ end
 
 function AuraContainer.StylePreviewSlot(slot, config)
     styleButton_regions(slot, config)
+end
+
+-- ★ PLACEMENT, PUBLISHED. The Aura Designer's editor canvas renders aura frames on a
+-- surface that has no unit and no handle, so it cannot Create a container — but it must
+-- still land every frame where the live container would. These two are the whole of the
+-- placement contract, and between them they are the ONLY way the canvas is allowed to
+-- position anything: it supplies frames and a layout table, and gets live's answer.
+--
+-- ☠ Defined here, BELOW resolveLayoutPin and flowSlotsIntoBox. A DF:* wrapper written
+-- above a `local function` it calls compiles as a nil GLOBAL lookup and dies at runtime
+-- with "attempt to call a nil value" — luac -p cannot see it, and it has bitten this
+-- file before. If either local moves, these move with it.
+
+-- Pin ONE box (a single-slot indicator, or a group's box) to `anchorFrame` exactly as
+-- applyContainerLayout pins a live container: growth-resolved pin point, the CENTER
+-- fold, the pixel-perfect nudge, and the layout scale. Returns false only if the write
+-- itself threw. `pp` is the host's pixelPerfect setting — callers pass what
+-- DF:GetFrameDB(host) says, so the preview obeys the same setting live obeys.
+function AuraContainer.PinLayoutBox(box, anchorFrame, layout, pp)
+    if not (box and anchorFrame and type(layout) == "table") then return false end
+    local pinPoint, anchor, px, py, scale = AuraContainer.ResolveLayoutPin(anchorFrame, layout, pp)
+    if not pinPoint then return false end
+    return (pcall(function()
+        box:SetScale(scale)
+        box:ClearAllPoints()
+        box:SetPoint(pinPoint, anchorFrame, anchor, px, py)
+    end))
+end
+
+-- The same answer WITHOUT applying it. Exists so a check can ask "where would live put
+-- this?" and compare it against where a frame actually sits — see /df debug adpin, which
+-- is what turns a reintroduced copy into a visible failure instead of a user report six
+-- weeks later. Read-only by construction: one resolver, two uses, no second maths.
+function AuraContainer.ResolveLayoutPin(anchorFrame, layout, pp)
+    if not (anchorFrame and type(layout) == "table") then return nil end
+    local G, px, py, scale = resolveLayoutPin(layout, anchorFrame, pp)
+    return G.pinPoint, G.anchor, px, py, scale
+end
+
+-- Flow `count` slot frames inside `box`, pinned to `anchorFrame`, exactly as the live
+-- container flows its buttons — same AnchorUtil flow, same growth, same wrap headroom,
+-- same strip reservation. Returns false when the flow is unavailable; the caller decides
+-- what to do, and MUST NOT substitute maths of its own.
+function AuraContainer.FlowSlots(box, anchorFrame, slots, count, config, pp)
+    if type(config) ~= "table" then return false end
+    return flowSlotsIntoBox(box, anchorFrame, slots, count, config, pp)
 end
 
 function AuraContainer.PaintPreviewSlot(slot, config, index, sharedDur)

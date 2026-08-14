@@ -48,7 +48,15 @@ DF.TestData = {
         -- The DEFENSIVE ICON + summon frame (HEALER, so the defensive row shows by the
         -- role rule — no override needed). The missing-buff strip is off: with both, this
         -- became the busiest frame of the five and the two strips sat in the same region.
-        {name = "Healsworth", class = "PRIEST", role = "HEALER", specID = 257, health = 0.95, maxHealth = 85000, absorb = 0.10, healAbsorb = 0, healPrediction = 0.05, status = nil, outOfRange = false, isAssist = true, raidTarget = nil, dispelType = "Magic", centerStatus = "summon", isMainAssist = true, isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0, showMissingBuff = false},  -- Assistant, main assist, summon pending, defensive icon
+        -- ☠ health 0.70 IS LOAD-BEARING, NOT A COSMETIC CHOICE — DO NOT PUT IT BACK TO 0.95.
+        -- Heal prediction and an attached absorb can only render into EMPTY bar, and
+        -- "Show Overheal" is off by default, so at 0.95 there were five percent of bar for
+        -- both to share: raising healPrediction did nothing at all, because the ceiling was
+        -- the headroom, not the value. Reported as "hard to notice" (Krathe, 2026-08-14).
+        -- ⇒ A preview value is only visible if the frame has ROOM for it. Same trap on
+        -- Tankerino below, which is at health 1.0 and therefore cannot show its
+        -- healPrediction at all.
+        {name = "Healsworth", class = "PRIEST", role = "HEALER", specID = 257, health = 0.70, maxHealth = 85000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.22, status = nil, outOfRange = false, isAssist = true, raidTarget = nil, dispelType = "Magic", centerStatus = "summon", isMainAssist = true, isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0, showMissingBuff = false},  -- Assistant, main assist, summon pending, defensive icon
         -- THE out-of-range unit, and the only one — so the fade has a subject with
         -- plenty to dim: 60% health, a HoT, a dispel type, a raid marker. ⚠ Keep TIMED
         -- elements off it (see the note on Tankerino); it also carries the threat-2
@@ -57,7 +65,15 @@ DF.TestData = {
         -- would not show here otherwise) and showMissingBuff = false swaps the badge
         -- strip out for it — one surface per frame rather than both stacked on the one
         -- unit that is also faded (Krathe, 2026-08-08).
-        {name = "Мишок", class = "MAGE", role = "DAMAGER", specID = 63, health = 0.60, maxHealth = 75000, absorb = 0, healAbsorb = 0.15, healPrediction = 0.15, status = nil, outOfRange = true, raidTarget = 1, dispelType = "Curse", centerStatus = nil, isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0, showDefensive = true, showMissingBuff = false, showReadyCheck = true},  -- Star marker, out of range, has HoT, defensive icon, ready check (no missing-buff strip)
+        -- ☠ NETTING IS ASYMMETRIC (Blizzard's model, see the heal-absorb calculator in
+        -- Frames/Bars.lua): the WASH renders at its FULL amount, the incoming HEAL
+        -- renders NET of it — full wash + shortened heal is what makes the interplay
+        -- visible. (A symmetric build shipped briefly and one side was always zero.)
+        -- Coverage: ★ Xx IS THE INTERPLAY DEMO — 15% wash INTO health, its 25% heal
+        -- showing only the surviving 10%, shield chained after: all three at once.
+        -- THIS unit is the full-consumption contrast: a 0.30 wash that eats its 0.15
+        -- HoT entirely, so a big wash renders with NO heal beside it.
+        {name = "Мишок", class = "MAGE", role = "DAMAGER", specID = 63, health = 0.60, maxHealth = 75000, absorb = 0, healAbsorb = 0.30, healPrediction = 0.15, status = nil, outOfRange = true, raidTarget = 1, dispelType = "Curse", centerStatus = nil, isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0, showDefensive = true, showMissingBuff = false, showReadyCheck = true},  -- Star marker, out of range, heavy consuming wash over its HoT, defensive icon, ready check (no missing-buff strip)
         {name = "Alexandrosthegreat", class = "PALADIN", role = "DAMAGER", specID = 70, health = 0, maxHealth = 90000, absorb = 0, healAbsorb = 0, healPrediction = 0, status = "Dead", outOfRange = false, raidTarget = nil, dispelType = nil, centerStatus = "resurrect", isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0},  -- Dead unit, being resurrected
         -- ★ THE ONLY MISSING-BUFF FRAME now (it shows here by default — no field needed).
         -- ⚠ If this unit ever gains showMissingBuff = false, the strip is previewed
@@ -72,7 +88,7 @@ DF.TestData = {
         -- game alike — no preview-only offset, which would have broken "previews differ in
         -- DATA, never RENDERING". This frame's centre still belongs to phasedIcon.
         -- ⚠ Nothing draws until the user opts in — bgCarrierIconEnabled defaults false.
-        {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.05, healAbsorb = 0.12, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, isBGCarrier = true, reducedMaxPct = 0.45},  -- Missing buffs, phased, in vehicle, BG carrier, has HoT
+        {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.16, healAbsorb = 0.15, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, isBGCarrier = true, reducedMaxPct = 0.45},  -- Missing buffs, phased, in vehicle, BG carrier, has HoT
     },
     -- Test aura data - expanded for testing layouts. spellID (where a stable,
     -- still-live spell matches) lets the 12.1 container preview show the REAL
@@ -115,25 +131,28 @@ DF.TestData = {
     -- ⚠ Adding an entry breaks the arithmetic. Keep the pool at 10 and swap, or redo the
     -- spacing for the new size.
     buffs = {
-        {icon = "Interface\Icons\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0, spellID = 1022},
+        {icon = "Interface\\Icons\\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0, spellID = 1022},
         -- Stacks are REAL here (charges remaining), which is why PoM keeps its slot: the
         -- previous stack case was "Heal" with 2 stacks, a spell that applies no aura.
-        {icon = "Interface\Icons\spell_holy_prayerofmending", name = "Prayer of Mending", duration = 30, stacks = 5, spellID = 41635},
-        {icon = "Interface\Icons\Spell_Nature_Rejuvenation", name = "Rejuvenation", duration = 12, stacks = 0, spellID = 774},
-        {icon = "Interface\Icons\Spell_Nature_Riptide", name = "Riptide", duration = 8, stacks = 0, spellID = 61295},
-        -- ☠ ESCAPED PATH, ON PURPOSE. Every other icon here uses single backslashes, which
-        -- works only because Lua 5.1 passes an UNKNOWN escape straight through (\I -> I,
-        -- \s -> s). "\a" is NOT unknown -- it is BEL (0x07) -- so the single-backslash form
-        -- of this one silently became "Interface\Icons" + chr(7) + "bility_monk_renewingmists"
-        -- and the icon could never load. Its neighbours are safe purely because none of them
-        -- happens to start a segment with a b f n r t v or a digit.
-        -- Do NOT "tidy" this back to match the others.
+        {icon = "Interface\\Icons\\spell_holy_prayerofmending", name = "Prayer of Mending", duration = 30, stacks = 5, spellID = 41635},
+        {icon = "Interface\\Icons\\Spell_Nature_Rejuvenation", name = "Rejuvenation", duration = 12, stacks = 0, spellID = 774},
+        {icon = "Interface\\Icons\\Spell_Nature_Riptide", name = "Riptide", duration = 8, stacks = 0, spellID = 61295},
+        -- ☠ EVERY icon path in this file MUST use DOUBLE backslashes. Lua 5.1 passes an
+        -- unknown escape through WITHOUT the backslash (\I -> I), so the single-backslash
+        -- form of a path silently collapses to "InterfaceIconsSpell_Foo" -- it parses, it
+        -- never loads. "\a" is worse still: it is a KNOWN escape (BEL, 0x07), which is how
+        -- this one entry was caught while its 18 neighbours stayed broken for months.
+        -- ⚠ THE REASON NOBODY SAW IT: these paths are a FALLBACK. _paintTestSlot prefers
+        -- the game's own texture for the resolved spell ID and only reaches for `icon`
+        -- when the client cannot resolve the spell at all -- so on enUS they were never
+        -- rendered, and a comment here used to claim they "work". They do not.
+        -- Do NOT "tidy" any of these back to single backslashes.
         {icon = "Interface\\Icons\\ability_monk_renewingmists", name = "Renewing Mist", duration = 20, stacks = 0, spellID = 119611},
         -- duration = 0 is the PERMANENT case, and it drives "Hide Duration on Permanent
         -- Auras". Beacon holds until the paladin moves it, so it is a real one rather
         -- than a made-up zero. ⚠ If a patch ever gives Beacon a timer this stops
         -- exercising that setting — the pool then needs another duration-less buff.
-        {icon = "Interface\Icons\Ability_Paladin_BeaconofLight", name = "Beacon of Light", duration = 0, stacks = 0, spellID = 53563},
+        {icon = "Interface\\Icons\\Ability_Paladin_BeaconofLight", name = "Beacon of Light", duration = 0, stacks = 0, spellID = 53563},
         -- ☠ NO RAID BUFFS IN THIS POOL. Slots 7, 9 and 10 used to be Power Word:
         -- Fortitude, Arcane Intellect and Battle Shout at 1 hour each. All three are
         -- entries in `DF.RaidBuffs` (Frames/Bars.lua) — i.e. the spells MISSING BUFFS
@@ -144,8 +163,8 @@ DF.TestData = {
         -- a live buff row can never show them and the preview showed three — a
         -- test-vs-live divergence, not just a confusing choice.
         -- ⇒ Anything added here must NOT appear in `DF.RaidBuffs`. Check it.
-        {icon = "Interface\Icons\Spell_Holy_Renew", name = "Renew", duration = 15, stacks = 0, spellID = 139},
-        {icon = "Interface\Icons\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
+        {icon = "Interface\\Icons\\Spell_Holy_Renew", name = "Renew", duration = 15, stacks = 0, spellID = 139},
+        {icon = "Interface\\Icons\\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
         -- ★ THE ONE LONG BUFF, and the pool needs exactly one: it is the only entry that
         -- exercises the minutes side of the countdown formats and a duration bar that
         -- barely moves. 10 minutes is Earth Shield's real duration — durations here are
@@ -153,8 +172,8 @@ DF.TestData = {
         -- which the old 3600s entries did; that format is now unpreviewed. Deliberate —
         -- Krathe's call was "keep just 1 longer buff... maybe 5min or something", and an
         -- hour-long buff on a party frame only ever means a raid buff.
-        {icon = "Interface\Icons\Spell_Nature_SkinofEarth", name = "Earth Shield", duration = 600, stacks = 0, spellID = 974},
-        {icon = "Interface\Icons\Ability_Warrior_RallyingCry", name = "Rallying Cry", duration = 10, stacks = 0, spellID = 97463},
+        {icon = "Interface\\Icons\\Spell_Nature_SkinofEarth", name = "Earth Shield", duration = 600, stacks = 0, spellID = 974},
+        {icon = "Interface\\Icons\\Ability_Warrior_RallyingCry", name = "Rallying Cry", duration = 10, stacks = 0, spellID = 97463},
     },
     debuffs = {
         -- ☠ POSITIONS 5, 6, 9 AND 10 CARRY NO DISPEL TYPE, AND THAT IS THE DENSITY DIAL.
@@ -176,19 +195,19 @@ DF.TestData = {
         -- partner is already DRUID (Rake at 6), so a druid bleed fits without breaking
         -- the class spacing. Converting Rake or Rend instead would have been simpler and
         -- was rejected: they are two of the four untyped slots that set the 60% density.
-        {icon = "Interface\Icons\Ability_Gouge", name = "Rend", duration = 15, stacks = 0, debuffType = "Bleed", spellID = 772},
-        {icon = "Interface\Icons\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 0, debuffType = "Disease", spellID = 55095},
-        {icon = "Interface\Icons\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
+        {icon = "Interface\\Icons\\Ability_Gouge", name = "Rend", duration = 15, stacks = 0, debuffType = "Bleed", spellID = 772},
+        {icon = "Interface\\Icons\\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 0, debuffType = "Disease", spellID = 55095},
+        {icon = "Interface\\Icons\\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
         -- 2818 = the DoT. NOT 2823, which is the weapon imbue of the same name, and the
         -- reason a party frame once previewed "Requires One-Handed Melee Weapon".
         -- Deadly Poison genuinely stacks to 5, so this is an honest stack case.
-        {icon = "Interface\Icons\Spell_Nature_NullifyPoison", name = "Deadly Poison", duration = 12, stacks = 5, debuffType = "Poison", spellID = 2818},
-        {icon = "Interface\Icons\Spell_Holy_RemoveCurse", name = "Forbearance", duration = 30, stacks = 0, debuffType = nil, spellID = 25771},
-        {icon = "Interface\Icons\Ability_Warrior_SavageBlow", name = "Mortal Wounds", duration = 10, stacks = 0, debuffType = nil, spellID = 115804},
-        {icon = "Interface\Icons\Spell_Shadow_ShadowWordPain", name = "Shadow Word: Pain", duration = 18, stacks = 0, debuffType = "Magic", spellID = 589},
-        {icon = "Interface\Icons\Spell_Shaman_Hex", name = "Hex", duration = 8, stacks = 0, debuffType = "Curse", spellID = 51514},
-        {icon = "Interface\Icons\Ability_CheapShot", name = "Dazed", duration = 4, stacks = 0, debuffType = nil, spellID = 1604},
-        {icon = "Interface\Icons\Spell_Holy_Resurrection", name = "Resurrection Sickness", duration = 600, stacks = 0, debuffType = nil, spellID = 15007},
+        {icon = "Interface\\Icons\\Spell_Nature_NullifyPoison", name = "Deadly Poison", duration = 12, stacks = 5, debuffType = "Poison", spellID = 2818},
+        {icon = "Interface\\Icons\\Spell_Holy_RemoveCurse", name = "Forbearance", duration = 30, stacks = 0, debuffType = nil, spellID = 25771},
+        {icon = "Interface\\Icons\\Ability_Warrior_SavageBlow", name = "Mortal Wounds", duration = 10, stacks = 0, debuffType = nil, spellID = 115804},
+        {icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain", name = "Shadow Word: Pain", duration = 18, stacks = 0, debuffType = "Magic", spellID = 589},
+        {icon = "Interface\\Icons\\Spell_Shaman_Hex", name = "Hex", duration = 8, stacks = 0, debuffType = "Curse", spellID = 51514},
+        {icon = "Interface\\Icons\\Ability_CheapShot", name = "Dazed", duration = 4, stacks = 0, debuffType = nil, spellID = 1604},
+        {icon = "Interface\\Icons\\Spell_Holy_Resurrection", name = "Resurrection Sickness", duration = 600, stacks = 0, debuffType = nil, spellID = 15007},
     },
     -- Defensive externals for the 12.1 container preview (config.testPool =
     -- "defensives" on the defensive row). Same spells the legacy test painter
@@ -700,7 +719,7 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     
     -- Dead or offline units should always show 0 health - no animation
     if testData.status then
-        frame.healthBar:SetValue(0)
+        DF.SetBarValueSmoothed(frame.healthBar, 0, db and db.smoothBars)
         frame.testAnimatedHealth = 0
         if frame.healthText and frame.healthText:IsShown() then
             frame.healthText:SetText("")
@@ -723,9 +742,15 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
 
     -- Store animated health for bar updates
     frame.testAnimatedHealth = health
-    
-    -- Update health bar
-    frame.healthBar:SetValue(health)
+
+    -- ☠ THE ANIMATION TICKER WAS THE ONE SITE WITH A BARE SetValue. Every other health
+    -- write -- live, the full test render, and the missing-health companion five lines
+    -- below -- goes through the smoothed setter, so with Smooth Bar Animation on the two
+    -- halves of an animated preview bar moved on different rules and the setting read as
+    -- having no effect in test mode (Aphoex, 2026-08-14). Interpolation and a 20 Hz ticker
+    -- compose: each tick eases toward the new target instead of snapping to it, which is
+    -- exactly what live does when health events arrive.
+    DF.SetBarValueSmoothed(frame.healthBar, health, db and db.smoothBars)
 
     -- ☠ A THIRD HEALTH-FADE RULE LIVED HERE and it disagreed with the real one on
     -- both counts: it crossed at `>= threshold - 0.5` where DF:ApplyHealthFadeAlpha
@@ -875,28 +900,13 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     frame.healthBar:SetMinMaxValues(0, 1)
     local healthValue = testData.healthPercent
     
-    if db.smoothBars and Enum and Enum.StatusBarInterpolation then
-        frame.healthBar:SetValue(healthValue, Enum.StatusBarInterpolation.ExponentialEaseOut)
-    else
-        frame.healthBar:SetValue(healthValue)
-    end
+    DF.SetBarValueSmoothed(frame.healthBar, healthValue, db.smoothBars)
 
-    -- Re-anchor the health bar with the frame padding inset, matching what
-    -- UpdateUnitFrame does unconditionally for live frames. Without this the
-    -- test path only re-anchored as a side effect of UpdateReducedMaxHealth,
-    -- so frames with no active reduced-max clipping kept a stale inset and the
-    -- padding looked inconsistent across test frames. UpdateReducedMaxHealth
-    -- below may re-clip the right edge afterwards.
-    local padding = db.framePadding or 0
-    frame.healthBar:ClearAllPoints()
-    frame.healthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
-    frame.healthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
-    -- Keep the missing-health overlay inside the padding too (matches live frames).
-    if frame.missingHealthBar then
-        frame.missingHealthBar:ClearAllPoints()
-        frame.missingHealthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
-        frame.missingHealthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
-    end
+    -- ★ LIVE'S INSET, not a restatement of it. This was ten lines that re-anchored both
+    -- bars by db.framePadding, under a comment saying it was "matching what UpdateUnitFrame
+    -- does unconditionally for live frames" — which is the divergence class named in every
+    -- audit of this file. UpdateReducedMaxHealth below may re-clip the right edge after.
+    DF:AnchorHealthBarsToPadding(frame, db)
 
     if db.testShowReducedMaxHealth ~= false then
         frame.dfTestReducedMaxPct = testData.reducedMaxPct or 0
@@ -1006,7 +1016,13 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     if db.testShowHealPrediction ~= false then
         DF:UpdateHealPrediction(frame, testData)
     else
+        -- ☠ BOTH SEGMENTS. Only segment 1 was hidden, and ChainEndKey tests seg2 FIRST --
+        -- so with Show Heal Prediction off the preview's shield still chained behind a
+        -- segment the user had just switched off, hanging in the gap where the other-heal
+        -- bar used to be. The toggle has to leave the same rendered state the live
+        -- pathway would, or the chain reads a bar nobody can see.
         if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
+        if frame.dfHealPredictionBar2 then frame.dfHealPredictionBar2:Hide() end
     end
 
     -- Update power/resource bar
@@ -1717,12 +1733,25 @@ function DF:UpdateTestPowerBar(frame, testData)
     --
     -- ☠ Do not reinstate a local copy of the role logic. The copy that used to live here
     -- had lost BOTH of the live function's solo arms (`inSoloMode and
-    -- db.resourceBarShowInSoloMode`), and since resourceBarShowInSoloMode defaults to
-    -- true and test mode is nearly always driven solo, live showed the bar on every frame
-    -- while the preview showed it only on the role-filtered subset. The setting was
-    -- simply not previewable.
+    -- db.resourceBarShowInSoloMode`), so the preview showed only the role-filtered subset
+    -- while live, driven solo, put a bar on your frame regardless. The setting was simply
+    -- not previewable.
+    -- ⚠ That older note said live "showed the bar on every frame". It only ever showed it
+    -- on the one frame solo HAS -- yours. The gate itself was unscoped and the preview,
+    -- with five frames on screen, is where that finally showed; see below.
     -- Role AND class both handed over as data, so the ENTIRE gate is the live one.
-    local showBar = DF:ShouldShowResourceBar(nil, db, testData.role, testData.class)
+    --
+    -- ★ WHO THE SOLO BYPASS APPLIES TO is the fourth piece of data the gate needs, and
+    -- without it the solo arm applied to all five previews -- "Show in Solo Mode enables
+    -- the resource bar for every frame" (Aphoex, 2026-08-14).
+    -- The two arms of live's own scope, mirrored: your own frame -- the FIRST slot in
+    -- either container (party is 0-based, raid 1-based) -- and any pinned frame, which
+    -- keeps the bypass live because the user pinned that unit by hand. Live resolves the
+    -- first arm with UnitIsUnit and the second off frame.isPinnedFrame; a preview slot
+    -- carries a real token belonging to somebody else, so it must answer as DATA.
+    local selfIndex = frame.isRaidFrame and 1 or 0
+    local soloScoped = (frame.isPinnedFrame and true) or (testData.index == selfIndex)
+    local showBar = DF:ShouldShowResourceBar(nil, db, testData.role, testData.class, soloScoped)
 
     if not showBar then
         if frame.dfPowerBar then frame.dfPowerBar:Hide() end
@@ -1791,6 +1820,13 @@ function DF:ShowTestFrames(silent)
 
     local db = DF:GetDB()
     DF.testMode = true
+    -- ☠ NEW SESSION TOKEN. Test frames are POOLED and their per-frame layout caches
+    -- survive a toggle, so a cache that only compares db settings sees "nothing changed"
+    -- and short-circuits on the very first pass -- with anchors left over from a layout
+    -- that was torn down. That is why absorbs were missing on some units until you
+    -- toggled test mode off and on again. Bumping this invalidates those caches once per
+    -- session (see AbsorbLayoutStateChanged). Must be set BEFORE any test frame renders.
+    DF.testSessionId = (DF.testSessionId or 0) + 1
     -- 12.1 container preview (P5): flip the factory into test mode BEFORE any test
     -- frame renders — handle builds read the flag (sample provider + curated paint).
     if DF.AuraContainer and DF.AuraContainer.SetTestMode then
@@ -1831,6 +1867,19 @@ function DF:ShowTestFrames(silent)
             end
         end
     end
+    -- ☠ ONE REPAINT NEXT TICK, AND IT IS GEOMETRY, NOT A WORKAROUND. On the FIRST entry
+    -- after a /reload the frames were created THIS tick, and healthBar is sized by
+    -- anchors (SetAllPoints) — an anchor-derived rect resolves at the end of the frame's
+    -- layout pass, so healthBar:GetWidth() is 0 for the whole entry pass. Every bar that
+    -- sizes itself from it (heal prediction, heal absorb, attached absorb) painted with
+    -- width 0: the forensics showed correct values and healthy anchors with fillW=0 on
+    -- every frame. Later entries reuse pooled frames with resolved rects, which is why
+    -- only the first entry per reload was broken and any toggle fixed it. Repainting on
+    -- the next tick, when rects exist, goes through the SAME UpdateTestFrame pathway —
+    -- no second painter.
+    C_Timer.After(0, function()
+        if DF.testMode and DF.RefreshTestFrames then DF:RefreshTestFrames() end
+    end)
     
     -- Position test frames
     DF:LightweightPositionPartyTestFrames(testFrameCount)
@@ -2214,6 +2263,13 @@ function DF:ShowRaidTestFrames(silent)
 
     local db = DF:GetRaidDB()
     DF.raidTestMode = true
+    -- ☠ NEW SESSION TOKEN. Test frames are POOLED and their per-frame layout caches
+    -- survive a toggle, so a cache that only compares db settings sees "nothing changed"
+    -- and short-circuits on the very first pass -- with anchors left over from a layout
+    -- that was torn down. That is why absorbs were missing on some units until you
+    -- toggled test mode off and on again. Bumping this invalidates those caches once per
+    -- session (see AbsorbLayoutStateChanged). Must be set BEFORE any test frame renders.
+    DF.testSessionId = (DF.testSessionId or 0) + 1
     -- 12.1 container preview (P5): flip the factory into test mode BEFORE any test
     -- frame renders — handle builds read the flag (sample provider + curated paint).
     if DF.AuraContainer and DF.AuraContainer.SetTestMode then
@@ -2253,6 +2309,12 @@ function DF:ShowRaidTestFrames(silent)
     
     -- Update raid frames with test data
     DF:UpdateRaidTestFrames()
+    -- Same next-tick repaint as the party entry (see the note there): freshly created
+    -- frames have anchor-derived rects that are 0 for this whole tick, so the first
+    -- paint sizes every fill-anchored bar to width 0. Repaint once when rects exist.
+    C_Timer.After(0, function()
+        if DF.raidTestMode then DF:UpdateRaidTestFrames() end
+    end)
     
     -- Update group labels for test mode
     if DF.UpdateRaidGroupLabels then
@@ -2571,7 +2633,7 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
                 groupNum = groupNum
             })
             -- Set frame size
-            frame:SetSize(lp.frameWidth, lp.frameHeight)
+            DF:SetPixelPerfectSize(frame, lp.frameWidth, lp.frameHeight, db)
         end
     end
     
@@ -2725,7 +2787,7 @@ function DF:LightweightPositionRaidTestFramesFlat(testFrameCount)
                     testData = testData
                 })
                 -- Set frame size
-                frame:SetSize(lp.frameWidth, lp.frameHeight)
+                DF:SetPixelPerfectSize(frame, lp.frameWidth, lp.frameHeight, db)
             end
         end
         
@@ -2785,7 +2847,7 @@ function DF:LightweightPositionPartyTestFrames(testFrameCount)
                     isPlayer = (i == 0),
                     testData = testData
                 })
-                frame:SetSize(lp.frameWidth, lp.frameHeight)
+                DF:SetPixelPerfectSize(frame, lp.frameWidth, lp.frameHeight, db)
             end
         end
         

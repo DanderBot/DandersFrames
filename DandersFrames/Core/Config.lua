@@ -1914,7 +1914,10 @@ DF.PartyDefaults = {
     healPredictionBackgroundColor = {r = 0, g = 0, b = 0, a = 0.5},
     healPredictionBlendMode = "BLEND",
     healPredictionEnabled = true,
-    healPredictionFrameLevel = 12,
+    -- ☠ UNDER THE ABSORB (+11) BY DESIGN. Was 12, which drew the incoming heal OVER the
+    -- shield where the two overlap; the shield is the more important readout (Krathe,
+    -- 2026-08-14). See DF:ResolveHealPredictionBarLevel for the band around it.
+    healPredictionFrameLevel = 10,
     healPredictionHeight = 6,
     healPredictionMode = "OVERLAY",
     healPredictionMyColor = {r = 0, g = 0.8, b = 0.2, a = 0.7},

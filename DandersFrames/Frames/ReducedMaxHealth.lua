@@ -45,6 +45,10 @@ function DF:RestoreHealthBarFromReducedMax(frame)
     frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
     frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
     frame.dfReducedMaxHealthClipping = nil
+    -- Same reason as the clip path: this restores the health bar's full rect, and the
+    -- absorb layout cache detects a resize by MEASURING that rect — which will not have
+    -- caught up in this tick. Drop the cache so the next absorb pass re-derives.
+    frame.dfAbsorbState = nil
 end
 
 function DF:UpdateReducedMaxHealth(frame)
@@ -161,6 +165,21 @@ function DF:UpdateReducedMaxHealth(frame)
             frame.healthBar:SetPoint("BOTTOMRIGHT", tex, "BOTTOMLEFT")
         end
         frame.dfReducedMaxHealthClipping = true
+        -- ☠ THE ABSORB CACHE DEPENDS ON THE RECT WE JUST MOVED. UpdateAbsorb keeps a
+        -- layout cache (frame.dfAbsorbState) and short-circuits when nothing changed; it
+        -- detects a resize by comparing frame.healthBar:GetWidth(). Those SetPoints above
+        -- do not change the measured width until the next draw, so an absorb pass in the
+        -- same tick reads the PRE-CLIP width, concludes nothing moved, and takes the fast
+        -- path -- leaving the absorb bar anchored to the unclipped edge, i.e. underneath
+        -- the reduced-max region. Field-caught on test-mode re-entry: absorb + reduced max
+        -- rendered side by side on the first entry, then the absorb vanished on a later
+        -- one, and turning reduced max off revealed it sitting under there all along.
+        -- Toggling absorbs off/on "fixed" it only because hiding the bar fails the fast
+        -- path's IsShown() gate and forces the full rebuild.
+        -- Invalidating here is causal: the thing that moved the anchor drops the cache
+        -- that depends on it, so the next pass re-derives instead of measuring a rect
+        -- that has not caught up.
+        frame.dfAbsorbState = nil
     else
         DF:RestoreHealthBarFromReducedMax(frame)
     end

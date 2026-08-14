@@ -1052,6 +1052,19 @@ L["Hide Blizzard Player Frame"] = true
 L["Hides buffs that are already shown elsewhere — by an Aura Designer indicator, or on the Defensive Bar — so they don't appear twice."] = true
 L["Hide Auras"] = true
 L["Hide Cooldown Swipe"] = true
+-- Filter/debuff group shape (Aura Designer group card). "Spell Icon" is what groups
+-- have always rendered; "Solid Square" matches the placed square indicator's look.
+L["Shape"] = true
+L["Spell Icon"] = true
+L["Solid Square"] = true
+L["Square Color"] = true
+-- Per-placement spell-ID narrowing (Aura Designer indicator card). Shown only when a
+-- spell resolves to more than one ID, e.g. a buff that also applies its own absorb.
+L["Tracked Spells"] = true
+-- The zero state is spelled out because it looks identical to a hidden indicator, and the
+-- eye is a separate control that this never touches.
+L["Showing %d of %d effects. Untick any you don't want this indicator to show."] = true
+L["Nothing ticked — this indicator will not show."] = true
 L["Hide from Main Frames"] = true
 L["Hide on Tanks"] = true
 L["Hide from Main Frames Tooltip"] = "Removes this set's pinned members from your main party/raid frames so they appear only in the pinned set. Applies out of combat. Your frame sorting setting is preserved."
@@ -1219,6 +1232,11 @@ L["Monochrome Thick Outline"] = true
 L["Most Urgent"] = true
 L["Movement"] = true
 L["Moves the glow to the opposite side (no HP side instead of max HP side)."] = true
+L["Different color in pandemic window"] = true
+L["Pandemic Color"] = true
+L["Switches to a second color while the buff is inside its refresh window — the moment when recasting wastes none of the remaining time. The game sets this window per spell, so there is no threshold to choose. Buffs you cannot refresh never have one."] = true
+L["Multiple effects color the background. Whichever buff is active shows; if several are active at once, the highest priority draws on top and translucent tints blend together."] = true
+L["Multiple effects color the health bar. Whichever buff is active shows; if several are active at once, the highest priority draws on top and translucent tints blend together."] = true
 L["My Auras First"] = true
 L["My Buffs"] = true
 L["My Group First"] = true
@@ -1873,6 +1891,11 @@ L["Import Buffs Tab Defaults"] = true
 L["Import from Buffs Tab"] = true
 L["Import your existing Buffs tab settings as defaults for all auras. Compatible settings will be applied automatically."] = true
 L["Imported!"] = true
+-- Chat confirmations for the Aura Designer's keep-or-replace question: it writes the Buff
+-- Bar's own Show Buffs setting, which lives on another page, so the answer has to say so.
+-- Sits beside "Keep Buffs" / "Replace Buffs", the buttons that produce it.
+L["Buffs kept alongside Aura Designer."] = true
+L["Buffs turned off — Aura Designer is replacing them."] = true
 L["Keep Buffs"] = true
 L["LINKED FILTERS"] = true
 L["Layout Group"] = true

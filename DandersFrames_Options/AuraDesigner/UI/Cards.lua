@@ -17,6 +17,8 @@ local C_BORDER = GUI.Colors.border
 local C_HOVER = GUI.Colors.hover
 local C_TEXT = GUI.Colors.text
 local C_TEXT_DIM = GUI.Colors.textDim
+-- The editor's "configured, but this will not render" amber (GUI.Colors.notice).
+local C_NOTICE = GUI.Colors.notice
 local OPTS = P.OPTS
 local GetAuraDesignerDB = P.GetAuraDesignerDB
 local GetThemeColor = P.GetThemeColor
@@ -434,11 +436,45 @@ local function CreateEnableBanner(parent)
 
     cb:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
+        -- ⚠ ONE resolve, nil-guarded. GetAuraDesignerDB can answer nil before the profile
+        -- DB exists, and both branches below read AND write through it; the build above
+        -- guards its own read (`adDB and adDB.enabled`) and this has to match. With no
+        -- config to toggle there is nothing this click can mean.
+        local clickDB = GetAuraDesignerDB()
+        if not clickDB then
+            self:SetChecked(false)
+            return
+        end
         if checked then
+            -- ☠ NEVER RE-RUN THE ENABLE FLOW ON AN ALREADY-ENABLED DESIGNER. The popup's
+            -- answer WRITES db.showBuffs, so every spurious trip through here silently
+            -- flipped the Buff Bar's own Show Buffs behind the user's back -- reported as
+            -- "enabling an already 'enabled' Aura Designer can corrupt other settings and
+            -- cascade", and as buffs being on with the Buff Bar option off (Aphoex,
+            -- 2026-08-14). A checkbox that is already checked has nothing to ask and
+            -- nothing to write; re-sync it and stop.
+            if clickDB.enabled then
+                self:SetChecked(true)
+                return
+            end
+            -- ⚠ CAPTURE THE MODE DB NOW, at the click, not when the answer arrives. The
+            -- popup is modeless: the user can change the mode tab while it is open, and
+            -- S.db is rebound by the page build — reading it in the callback would land
+            -- the Show Buffs write on whichever mode they happened to switch to.
+            local targetDB = S.db
             -- Show popup asking about buff coexistence
             ShowBuffCoexistPopup(function(keepBuffs)
-                GetAuraDesignerDB().enabled = true
-                S.db.showBuffs = keepBuffs
+                -- clickDB, captured with targetDB above and for the same reason: the
+                -- answer must land on the config the click was made against.
+                clickDB.enabled = true
+                -- This is a real edit to another page's setting, so SAY so. It is the
+                -- whole point of the question, but the page that owns the key is two
+                -- clicks away and the user has no other way to know it moved.
+                if targetDB.showBuffs ~= keepBuffs then
+                    targetDB.showBuffs = keepBuffs
+                    DF:Say(keepBuffs and L["Buffs kept alongside Aura Designer."]
+                        or L["Buffs turned off — Aura Designer is replacing them."])
+                end
                 DF:AuraDesigner_RefreshPage()
                 DF:InvalidateAuraLayout()
                 DF:UpdateAllFrames()
@@ -450,7 +486,13 @@ local function CreateEnableBanner(parent)
                 self:SetChecked(false)
             end)
         else
-            GetAuraDesignerDB().enabled = false
+            -- Mirror of the guard above: an already-disabled designer has nothing to turn
+            -- off, and the teardown below is not free (ForceRefreshAllFrames).
+            if not clickDB.enabled then
+                self:SetChecked(false)
+                return
+            end
+            clickDB.enabled = false
             DF:AuraDesigner_RefreshPage()
             DF:InvalidateAuraLayout()
             DF:UpdateAllFrames()
@@ -939,6 +981,13 @@ local function IsCandidateCrossBlocked(auraName, spec)
     local cached = spellPickerBlockCache[key]
     if cached ~= nil then return cached end
     local blocked = false
+    -- ☠ NO per-placement mutes here, deliberately. This asks "would adding this spell
+    -- collide with something already tracked", and the honest answer is about the AURA, not
+    -- about one indicator's narrowing: an aura can carry several indicators and only some of
+    -- them may have muted an id. Narrowing on one of them would let a real duplicate through,
+    -- which is a worse failure than the cautious answer. A properly narrowed version has to
+    -- union each indicator's own set — worth doing, but it is a different question from
+    -- "which ids does this placement render".
     local f = DF:BuildADIdentityFilters(effSpec, auraName)
     local map = f and f.includeSpellIDs
     if map then
@@ -1691,21 +1740,49 @@ S.CreateEffectCard = function(parent, yPos, effect)
             eyeBtn:SetPoint("RIGHT", header, "RIGHT", -6, 0)
         end
         local function shown() return not cfgTable or cfgTable.enabled ~= false end
+        -- ★ TRACKS NOTHING = GREYED, WITHOUT TOUCHING THE STORED VALUE.
+        -- With every spell id unticked the indicator cannot render, so the eye shows the
+        -- inactive glyph whatever `enabled` says. It is a DERIVED look, not a write: tick
+        -- an id back on and the eye simply resumes reflecting what the user set — on if
+        -- they had it on, still off if they had it off. Nothing "forces the eye on",
+        -- because nothing ever writes it but the click below.
+        -- Dimmer than the ordinary hidden state so the two read apart: hidden-by-choice is
+        -- 0.45, cannot-show is 0.3.
+        local function tracksNothing()
+            return DF.ADPlacementTracksNothing
+                and DF:ADPlacementTracksNothing((not IsOtherTab()) and ResolveSpec() or nil,
+                        effect.auraName, cfgTable) or false
+        end
         -- SetGlyph makes the state colour the new REST colour, so OnLeave
         -- restores the state; hover is suppressed while hidden.
         local function updateEyeIcon()
-            if shown() then
+            local dead = tracksNothing()
+            if dead then
+                eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.3, 0.3, 0.3 })
+            elseif shown() then
                 eyeBtn:SetGlyph(mediaPath .. "visibility", { 0.95, 0.95, 0.95 })
             else
                 eyeBtn:SetGlyph(mediaPath .. "visibility_off", { 0.45, 0.45, 0.45 })
             end
-            eyeBtn:SetGlyphHover(shown())
+            eyeBtn:SetGlyphHover(shown() and not dead)
+            -- Only in the dead state: a tooltip on a working eye would explain a problem
+            -- it does not have.
+            eyeBtn.tooltip = dead and L["Nothing ticked — this indicator will not show."] or nil
         end
         updateEyeIcon()
         eyeBtn:RegisterForClicks("LeftButtonUp")
         eyeBtn:SetFrameLevel(header:GetFrameLevel() + 2)
+        -- ☠ INERT WHEN IT TRACKS NOTHING, AND IT HAS TO SAY WHY. The glyph already goes
+        -- dead-grey and drops its hover for this state, but the click still fired: it
+        -- flipped `enabled`, ran the whole refresh path, and changed nothing on screen,
+        -- because tracksNothing() wins in updateEyeIcon regardless of the flag. A control
+        -- that responds to a click by doing nothing visible reads as broken. Refusing it
+        -- is only half the fix — a refusal with no reason reads as broken too, so the
+        -- tooltip names the actual cause (set in updateEyeIcon), which is fixable one card
+        -- down: tick an effect in Tracked Spells.
         eyeBtn:SetScript("OnClick", function()
             if not cfgTable then return end
+            if tracksNothing() then return end
             cfgTable.enabled = (cfgTable.enabled == false) and true or false
             updateEyeIcon()
             -- Sound rides the same flag as its "Enable Sound Alert" checkbox —
@@ -1727,8 +1804,12 @@ S.CreateEffectCard = function(parent, yPos, effect)
             end
         end)
 
-        -- Hidden rows dim (name/icon), like Text Designer's disabled elements
-        if not shown() then
+        -- Hidden rows dim (name/icon), like Text Designer's disabled elements.
+        -- ☠ The SAME condition the eye uses, or the row half-greys: the eye went inactive
+        -- for a placement tracking nothing while the name and icon beside it stayed bright,
+        -- which reads as the eye being wrong rather than the row being inert. Both states
+        -- mean "this is not going to render", so both dim the row.
+        if not shown() or tracksNothing() then
             spellIcon:SetAlpha(0.4)
             infoText:SetAlpha(0.5)
         end
@@ -1850,7 +1931,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 GUI:SetSettingsFont(sep, 9, "OUTLINE")
                 sep:SetPoint("TOPLEFT", trigContainer, "TOPLEFT", 0, tagY)
                 sep:SetText(condMode == "ALL" and L["AND"] or L["OR"])
-                sep:SetTextColor(0.91, 0.66, 0.25)
+                sep:SetTextColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b)
 
                 -- Removal belongs to the group BELOW the rule, and sits at the far right so
                 -- it can never be mistaken for a tag's own X.
@@ -1875,7 +1956,7 @@ S.CreateEffectCard = function(parent, yPos, effect)
                 rule:SetPoint("LEFT", sep, "RIGHT", 8, 0)
                 rule:SetPoint("RIGHT", delG, "LEFT", -8, 0)
                 rule:SetHeight(1)
-                rule:SetColorTexture(0.91, 0.66, 0.25, 0.22)
+                rule:SetColorTexture(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b, 0.22)
                 tagY = tagY - 22
                 tagX = 0
             end
@@ -2684,6 +2765,9 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     -- reads sensible values on first open (ShowBorder overridden OFF — a group has
     -- no ring until the user enables one).
     local defaults = {
+        -- "icon" is what every group shipped as, so an untouched group reads the same
+        -- value it always rendered with and its struct sig does not move on upgrade.
+        shape = "icon", color = { r = 1, g = 1, b = 1, a = 1 },
         hideSwipe = false, showDuration = true, showStacks = true,
         durationFormat = "NUMBER",
         durationFont = "DF Roboto SemiBold", durationScale = 1.0, durationOutline = "SHADOW;OUTLINE",
@@ -2801,6 +2885,40 @@ local function AddGroupAppearanceSection(body, group, bodyWidth, by, cardKey)
     -- the swipe applies at group level — size/scale live in the card's layout
     -- sliders, alpha/level/strata/text-only are per-indicator concepts)
     AddSection(L["Appearance"], "appearance", function(g)
+        -- SHAPE. A group used to be spell icons and nothing else, so a filter could only
+        -- ever be shown as icons — the reason someone with a filtered set of Beacons could
+        -- not render them as squares the way a placed indicator can. Icon and square only:
+        -- a bar is its own sized widget with its own layout reservation, not a cell the
+        -- group flow lays out, so offering it here would promise something the row cannot do.
+        --
+        -- ☠ Both controls are ALWAYS shown rather than hiding the colour on icon groups.
+        -- AddSection pins each section at a fixed y and greys imperatively — it never runs
+        -- hideOn/disableOn (the same limitation that kept pandemic controls off this card),
+        -- so a conditionally-present widget would leave a gap or an overlap. The label says
+        -- what the colour is for instead.
+        g:AddWidget(GUI:CreateDropdown(body, L["Shape"], {
+            icon   = L["Spell Icon"],
+            square = L["Solid Square"],
+            _order = { "icon", "square" },
+        }, proxy, "shape", refresh), 54)
+        -- ⚠ Held in a local BEFORE AddWidget: nothing else in this file reads AddWidget's
+        -- return, so it is not a contract to lean on.
+        local sqColor = GUI:CreateColorPicker(body, L["Square Color"], proxy, "color", true, refresh, refresh, true)
+        g:AddWidget(sqColor, 32)
+        -- ⚠ ALWAYS PRESENT, BUT GREYED OFF-SHAPE. The note above is right that this card
+        -- cannot HIDE a widget — AddSection pins each one at a fixed y, so a conditional
+        -- widget leaves a gap. It can still GREY one, which is what the duration-bar block
+        -- further down does by hand, and a live-but-inert picker was the remaining half of
+        -- the problem: on an icon group the colour changed nothing and said nothing. The
+        -- Shape dropdown's callback is `refresh`, so the card rebuilds on every change and
+        -- this is evaluated fresh each time.
+        if sqColor and (proxy.shape or "icon") ~= "square" then
+            if sqColor.SetEnabled then sqColor:SetEnabled(false)
+            else
+                sqColor:SetAlpha(0.4)
+                if sqColor.EnableMouse then sqColor:EnableMouse(false) end
+            end
+        end
         g:AddWidget(GUI:CreateCheckbox(body, L["Hide Cooldown Swipe"], proxy, "hideSwipe", refresh), 28)
     end)
 
