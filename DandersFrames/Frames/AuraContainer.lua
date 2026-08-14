@@ -762,13 +762,32 @@ end
 -- auraData.spellId, so their categorisation is only as good as the identity data behind
 -- it, and a mis-categorised aura lands in the wrong record or none. That is why the peer
 -- this mirrors parks exactly these four records on its debuff row and nothing else.
+--
+-- ☠☠ ASSERTED (`true`), NEVER MERELY MENTIONED. This tested `~= nil`, and `false ~= nil`
+-- is true — so every record carrying a category boolean as a DEDUP SUBTRACTION counted as
+-- identity-gated. BuildDirectDebuffFilters' notImportant() stamps isBossOrRoleAura=false
+-- and isPriorityAura=false onto the CC, Raid, Dispellable and Non-Player records purely so
+-- they do not re-render what the important records already claimed, so with Boss/Role or
+-- Priority enabled -- the default -- EVERY record in the row was gated and a loss of trust
+-- parked the lot to maxFrameCount 0. That is the wholesale blanking the note above says
+-- this design exists to avoid, arriving through the dedup flags instead of the spell-ID
+-- back door it was watching. Field symptom: the dispel OVERLAY fires (its own container
+-- carries no category booleans, so it never parks) while the debuff row shows nothing,
+-- intermittently, because trust follows unit assistability. Reported by two testers on
+-- 5.1.3, the build the park shipped in.
+--
+-- The distinction is membership vs subtraction. `= true` means "this record's CONTENTS are
+-- defined by a categorisation that reads spellId" — untrustworthy identity makes the whole
+-- record meaningless, so park it. `= false` only removes what a sibling claimed: with
+-- identity lost, an aura may be wrongly subtracted, but the rest of the record is still
+-- real, and showing most of a row beats showing none of it.
 local GATED_CANDIDATE_KEYS = {
     "isBossAura", "isBossOrRoleAura", "isRoleAura", "isPriorityAura",
 }
 function AuraContainer.RecordIdentityGated(cf)
     if type(cf) ~= "table" then return false end
     for i = 1, #GATED_CANDIDATE_KEYS do
-        if cf[GATED_CANDIDATE_KEYS[i]] ~= nil then return true end
+        if cf[GATED_CANDIDATE_KEYS[i]] == true then return true end
     end
     return false
 end
