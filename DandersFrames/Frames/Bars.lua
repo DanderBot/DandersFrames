@@ -354,16 +354,21 @@ local function AbsorbLayoutStateChanged(frame, db)
 
     -- Mode + appearance (all modes)
     if s.mode            ~= (db.absorbBarMode or "OVERLAY")               then return true end
-    -- ☠ THE CHAIN ANCHOR IS A LAYOUT INPUT, AND IT IS THE ONLY ONE HERE THAT IS NOT A DB
-    -- SETTING. The absorb hangs off the last visible heal-prediction segment
-    -- (DF:ResolveAbsorbChainAnchor), so which segment that is decides where the bar
-    -- STARTS. This gate only ever compared db values, so UpdateHealPrediction's re-anchor
-    -- call hit the fast path and returned before the anchoring block ever ran -- the
-    -- shield stayed pinned to the health fill and the whole chain looked like it did
-    -- nothing (reported as "nothing looks any different", 2026-08-14).
-    -- ⇒ If you add another anchor input that lives on the FRAME rather than in the db,
-    -- it has to be compared here too, or the fast path will silently swallow it.
-    if s.chainEnd        ~= (frame.dfHealPredChainEnd or 0)               then return true end
+    -- ☠ TWO INPUTS HERE ARE NOT DB SETTINGS, and both were learned the hard way.
+    --
+    -- 1. THE CHAIN ANCHOR. The absorb hangs off the last visible heal-prediction segment,
+    --    so which segment that is decides where the bar STARTS. Derived by calling
+    --    ChainEndKey -- the SAME read DF:ResolveAbsorbChainAnchor uses. It must not be a
+    --    stamp written elsewhere: the first cut compared a dfHealPredChainEnd stamp set
+    --    only at the end of UpdateHealPrediction, which four paths bypass (its three early
+    --    returns, plus TestMode hiding the bar directly), so the cache said "chain end 1"
+    --    while the resolver was picking "fill" and every call short-circuited.
+    -- 2. THE TEST SESSION. Test frames are POOLED, nothing clears this cache on a test
+    --    toggle, and the bar is usually still IsShown() from the last session -- so the
+    --    first pass took the fast path with anchors left over from a torn-down layout and
+    --    the shield simply did not appear until you toggled again.
+    if s.chainEnd        ~= DF.ChainEndKey(frame, db)                     then return true end
+    if s.testSession     ~= (DF.testSessionId or 0)                       then return true end
     if s.texture         ~= (db.absorbBarTexture or DF.STOCK_BAR_TEXTURE)  then return true end
     if s.blendMode       ~= (db.absorbBarBlendMode or "BLEND")            then return true end
     if s.pixelPerfect    ~= db.pixelPerfect                               then return true end
@@ -423,8 +428,10 @@ local function CacheAbsorbLayoutState(frame, db)
         frame.dfAbsorbState = s
     end
     s.mode            = db.absorbBarMode or "OVERLAY"
-    -- Frame state, not a db setting — see the note beside its comparison above.
-    s.chainEnd        = frame.dfHealPredChainEnd or 0
+    -- Not db settings — see the note beside their comparisons above. Both are re-derived
+    -- here from the same source the comparison uses, never from a stamp written elsewhere.
+    s.chainEnd        = DF.ChainEndKey(frame, db)
+    s.testSession     = DF.testSessionId or 0
     s.texture         = db.absorbBarTexture or DF.STOCK_BAR_TEXTURE
     s.blendMode       = db.absorbBarBlendMode or "BLEND"
     s.pixelPerfect    = db.pixelPerfect
@@ -575,21 +582,40 @@ end
 -- anchoring to one would park the absorb at a stale offset with a gap in front of it.
 -- Falling through to the previous segment is Blizzard's "return previousTexture" rule.
 -- ⚠ A FLOATING prediction is not on the health bar at all, so it never joins the chain.
+-- ☠☠ ONE LIVE READ, USED BY BOTH THE RESOLVER AND THE CACHE. This returns which segment
+-- the absorb should hang off: "seg2", "seg1" or "fill".
+--
+-- The first cut had TWO sources of truth -- the resolver read the segments' live
+-- IsShown(), while the fast-path cache compared a `dfHealPredChainEnd` stamp written only
+-- at the end of UpdateHealPrediction. They drift the moment the bar is hidden by a path
+-- that skips that tail, and there are four: UpdateHealPrediction's three early returns
+-- (no unit, no incoming heal, no fill texture) and TestMode's own direct
+-- dfHealPredictionBar:Hide(). The dump caught it exactly -- chainEnd=1 and predShown=true
+-- while the resolver had picked "fill" and every call since had short-circuited.
+-- ⇒ A cache key MUST be derived from the same read as the thing it guards. Two stamps
+-- describing one fact will always find a path that updates one and not the other.
+local function ChainEndKey(frame, db)
+    if not frame then return "fill" end
+    -- A FLOATING prediction is not on the health bar, so it never joins the chain.
+    if db and (db.healPredictionMode or "OVERLAY") == "FLOATING" then return "fill" end
+    local s2, s1 = frame.dfHealPredictionBar2, frame.dfHealPredictionBar
+    if s2 and s2.IsShown and s2:IsShown() then return "seg2" end
+    if s1 and s1.IsShown and s1:IsShown() then return "seg1" end
+    return "fill"
+end
+DF.ChainEndKey = ChainEndKey   -- exposed for the /df debug zorder line
+
 function DF:ResolveAbsorbChainAnchor(frame, db)
     local hb = frame and frame.healthBar
     local fill = hb and hb.GetStatusBarTexture and hb:GetStatusBarTexture() or nil
-    if not db or (db.healPredictionMode or "OVERLAY") == "FLOATING" then return fill end
-    -- Walk the chain BACKWARDS: segment 2 (others' heals) hangs off segment 1 (mine),
-    -- which hangs off the fill. The last one actually showing is the cursor.
-    for i, seg in ipairs({ frame.dfHealPredictionBar2, frame.dfHealPredictionBar }) do
-        if seg and seg.IsShown and seg:IsShown() and seg.GetStatusBarTexture then
-            local t = seg:GetStatusBarTexture()
-            -- Diagnostic stamp, printed by /df debug zorder. Plain Lua strings only: no
-            -- rect or health reads, so it is safe in combat and cannot trip a secret value.
-            if t then frame.dfAbsorbChainPick = (i == 1) and "seg2" or "seg1"; return t end
-        end
+    local key = ChainEndKey(frame, db)
+    frame.dfAbsorbChainPick = key   -- diagnostic only; the cache re-derives, never reads this
+    local seg = (key == "seg2" and frame.dfHealPredictionBar2)
+        or (key == "seg1" and frame.dfHealPredictionBar) or nil
+    if seg and seg.GetStatusBarTexture then
+        local t = seg:GetStatusBarTexture()
+        if t then return t end
     end
-    frame.dfAbsorbChainPick = "fill"
     return fill
 end
 
@@ -2373,9 +2399,12 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- ⚠ testIndex IS FORWARDED. The preview's absorb amount is a PARAMETER of this same
     -- live function, so dropping it here would repaint a test frame's shield from live
     -- (zero) values and blank it. See DF:UpdateAbsorb's test path.
-    local chainEnd = (frame.dfHealPredictionBar2 and frame.dfHealPredictionBar2:IsShown() and 2)
-        or (frame.dfHealPredictionBar and frame.dfHealPredictionBar:IsShown() and 1)
-        or 0
+    -- ☠ ChainEndKey, not a hand-rolled copy of it. This used to recompute the same idea
+    -- inline and stamp the answer on the frame, which is precisely how the cache and the
+    -- resolver ended up disagreeing. One function, called from all three places.
+    -- This is now only a PROMPT -- the cache re-derives the key itself, so a missed call
+    -- here costs latency, not correctness.
+    local chainEnd = DF.ChainEndKey and DF.ChainEndKey(frame, db) or "fill"
     if frame.dfHealPredChainEnd ~= chainEnd then
         frame.dfHealPredChainEnd = chainEnd
         if DF.UpdateAbsorb then DF:UpdateAbsorb(frame, testIndex) end

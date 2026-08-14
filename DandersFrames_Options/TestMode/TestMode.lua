@@ -1791,6 +1791,13 @@ function DF:ShowTestFrames(silent)
 
     local db = DF:GetDB()
     DF.testMode = true
+    -- ☠ NEW SESSION TOKEN. Test frames are POOLED and their per-frame layout caches
+    -- survive a toggle, so a cache that only compares db settings sees "nothing changed"
+    -- and short-circuits on the very first pass -- with anchors left over from a layout
+    -- that was torn down. That is why absorbs were missing on some units until you
+    -- toggled test mode off and on again. Bumping this invalidates those caches once per
+    -- session (see AbsorbLayoutStateChanged). Must be set BEFORE any test frame renders.
+    DF.testSessionId = (DF.testSessionId or 0) + 1
     -- 12.1 container preview (P5): flip the factory into test mode BEFORE any test
     -- frame renders — handle builds read the flag (sample provider + curated paint).
     if DF.AuraContainer and DF.AuraContainer.SetTestMode then
@@ -2214,6 +2221,13 @@ function DF:ShowRaidTestFrames(silent)
 
     local db = DF:GetRaidDB()
     DF.raidTestMode = true
+    -- ☠ NEW SESSION TOKEN. Test frames are POOLED and their per-frame layout caches
+    -- survive a toggle, so a cache that only compares db settings sees "nothing changed"
+    -- and short-circuits on the very first pass -- with anchors left over from a layout
+    -- that was torn down. That is why absorbs were missing on some units until you
+    -- toggled test mode off and on again. Bumping this invalidates those caches once per
+    -- session (see AbsorbLayoutStateChanged). Must be set BEFORE any test frame renders.
+    DF.testSessionId = (DF.testSessionId or 0) + 1
     -- 12.1 container preview (P5): flip the factory into test mode BEFORE any test
     -- frame renders — handle builds read the flag (sample provider + curated paint).
     if DF.AuraContainer and DF.AuraContainer.SetTestMode then

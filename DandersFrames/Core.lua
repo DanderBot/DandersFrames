@@ -6095,10 +6095,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- the absorb is hanging off and whether the last UpdateAbsorb actually
                 -- re-anchored or short-circuited on its layout-state cache. All plain Lua
                 -- stamps -- no rect or health reads, so nothing here can touch a secret.
-                print(("  %-10s pick=%-5s fastPath=%-5s chainEnd=%-4s predShown=%-5s pred2Shown=%s")
+                -- `key` is the LIVE answer; `pick` is what the last resolve actually used.
+                -- They must agree — a disagreement is the cache-vs-resolver drift that made
+                -- the chain look inert while reading as correct.
+                print(("  %-10s key=%-5s pick=%-5s fastPath=%-5s session=%-3s predShown=%-5s pred2Shown=%s")
                     :format("Chain",
+                        tostring(DF.ChainEndKey and DF.ChainEndKey(frame, bdb)),
                         tostring(frame.dfAbsorbChainPick), tostring(frame.dfAbsorbFastPath),
-                        tostring(frame.dfHealPredChainEnd),
+                        tostring(DF.testSessionId),
                         tostring(frame.dfHealPredictionBar and frame.dfHealPredictionBar:IsShown()),
                         tostring(frame.dfHealPredictionBar2 and frame.dfHealPredictionBar2:IsShown())))
 
