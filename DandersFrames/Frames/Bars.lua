@@ -411,6 +411,18 @@ local function AbsorbLayoutStateChanged(frame, db)
     if s.healthFillTex   ~= (frame.healthBar and frame.healthBar:GetStatusBarTexture()) then return true end
     -- Which chain segment the absorb hangs off (live-derived, never a stamp).
     if s.chainEnd        ~= DF.ChainEndKey(frame, db)                     then return true end
+    -- ☠ AND THE SEGMENT'S OWN FILL OBJECT. The line above watches the HEALTH fill, which
+    -- is only the anchor while the chain end is "fill"; chained behind the prediction the
+    -- absorb hangs off the PREDICTION bar's fill texture (ResolveAbsorbChainAnchor), and
+    -- that object is replaced by exactly the same SetStatusBarTexture swap -- a Heal
+    -- Prediction texture change, or LibSharedMedia registering the real file late. The key
+    -- string does not move when that happens, so the fast path kept saying "nothing
+    -- changed" while the shield rendered against a dead rect: the identical orphan class,
+    -- fixed for the health fill and not for its sibling. (Danders's review, PR #236 B5.)
+    -- Kept ALONGSIDE the two checks above rather than replacing them: the key still drives
+    -- the clamp's heals subtraction, and the health fill still matters when the chain end
+    -- is "fill". One extra identity compare on a path that is already comparing thirty.
+    if s.chainAnchorTex  ~= DF:ResolveAbsorbChainAnchor(frame, db)        then return true end
     if s.texture         ~= (db.absorbBarTexture or DF.STOCK_BAR_TEXTURE)  then return true end
     if s.blendMode       ~= (db.absorbBarBlendMode or "BLEND")            then return true end
     if s.pixelPerfect    ~= db.pixelPerfect                               then return true end
@@ -474,6 +486,9 @@ local function CacheAbsorbLayoutState(frame, db)
     -- Frame state, re-derived from the same reads the comparisons use.
     s.healthFillTex   = frame.healthBar and frame.healthBar:GetStatusBarTexture()
     s.chainEnd        = DF.ChainEndKey(frame, db)
+    -- The OBJECT the absorb actually anchors to — the health fill or the prediction
+    -- segment's fill, whichever the chain resolved. See the note on the matching compare.
+    s.chainAnchorTex  = DF:ResolveAbsorbChainAnchor(frame, db)
     s.texture         = db.absorbBarTexture or DF.STOCK_BAR_TEXTURE
     s.blendMode       = db.absorbBarBlendMode or "BLEND"
     s.pixelPerfect    = db.pixelPerfect
