@@ -2530,8 +2530,17 @@ function DF:UpdateLeaderIcon(frame)
         return
     end
     
-    -- Hide in combat check
-    if db.leaderIconHideInCombat and InCombatLockdown() then
+    -- Hide in combat check.
+    -- ☠ DF.playerInCombat, NOT InCombatLockdown(). InCombatLockdown() answers "are
+    -- secure frames locked?", which is NOT the same question as "is the player in
+    -- combat?" -- using it as a combat proxy left this icon (and MT/MA, and five
+    -- others) visible in combat with the option ticked, while the role icon, which
+    -- has always read the tracked flag, hid correctly. Proven in game 2026-08-14 by
+    -- A/B: role hid, leader and MT/MA did not, and the ONLY difference is this call.
+    -- DF.playerInCombat is set in Core.lua from PLAYER_REGEN_DISABLED/ENABLED, and
+    -- is set BEFORE the icon refreshes those handlers drive.
+    -- ⇒ One combat-state source for the whole addon. Do not reintroduce the other.
+    if db.leaderIconHideInCombat and DF.playerInCombat then
         frame.leaderIcon:Hide()
         return
     end
@@ -2582,7 +2591,7 @@ function DF:UpdateRaidTargetIcon(frame)
     end
     
     -- Hide in combat check
-    if db.raidTargetIconHideInCombat and InCombatLockdown() then
+    if db.raidTargetIconHideInCombat and DF.playerInCombat then
         frame.raidTargetIcon:Hide()
         return
     end
@@ -2647,7 +2656,7 @@ function DF:UpdateReadyCheckIcon(frame)
     end
     
     -- Hide in combat check
-    if db.readyCheckIconHideInCombat and InCombatLockdown() then
+    if db.readyCheckIconHideInCombat and DF.playerInCombat then
         frame.readyCheckIcon:Hide()
         return
     end

@@ -7337,6 +7337,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
         end
         
     elseif event == "PLAYER_ENTERING_WORLD" then
+        -- ☠ SEED THE TRACKED COMBAT STATE. DF.playerInCombat is only ever written by
+        -- PLAYER_REGEN_DISABLED/ENABLED, so a /reload (or a zone-in) DURING a fight
+        -- left it nil until that fight ended — and every "Hide in Combat" icon reads
+        -- it, so they would all sit visible for the rest of the pull.
+        DF.playerInCombat = UnitAffectingCombat("player") and true or false
+
         -- ☠ ARENA PET ENTRY POINT. See the RegisterEvent comment: ProcessRosterUpdate
         -- returns in its arena branch long before the pet dispatch, so without this
         -- nothing ever calls the arena pet track and pets simply never appear in
@@ -7489,8 +7495,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
         if DF.UpdateAllAuras then
             DF:UpdateAllAuras()
         end
-        -- Update role icons (in case hideInCombat is enabled)
-        if DF.UpdateAllRoleIcons then
+        -- Restore every "Hide in Combat" icon now that combat is over.
+        -- ☠ UpdateAllRoleIcons reaches ONLY the role and leader icons; MT/MA, AFK,
+        -- phased, vehicle, summon, raid target and ready check have the same option
+        -- and were never refreshed here, so they stayed hidden after the fight.
+        -- The entering-combat half is covered by RefreshAllVisibleFrames below.
+        if DF.UpdateAllCombatGatedIcons then
+            DF:UpdateAllCombatGatedIcons()
+        elseif DF.UpdateAllRoleIcons then
             DF:UpdateAllRoleIcons()
         end
         -- Update permanent mover combat state (color/visibility) — delayed to run

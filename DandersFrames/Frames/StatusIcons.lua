@@ -380,7 +380,7 @@ function DF:UpdateSummonIcon(frame)
     end
     
     -- Hide in combat check
-    if db.summonIconHideInCombat and InCombatLockdown() then
+    if db.summonIconHideInCombat and DF.playerInCombat then
         frame.summonIcon:Hide()
         return
     end
@@ -731,7 +731,7 @@ function DF:UpdatePhasedIcon(frame)
     end
     
     -- Hide in combat check
-    if db.phasedIconHideInCombat and InCombatLockdown() then
+    if db.phasedIconHideInCombat and DF.playerInCombat then
         frame.phasedIcon:Hide()
         return
     end
@@ -830,7 +830,7 @@ function DF:UpdateAFKIcon(frame, isAFKOverride)
     end
     
     -- Hide in combat check
-    if db.afkIconHideInCombat and InCombatLockdown() then
+    if db.afkIconHideInCombat and DF.playerInCombat then
         frame.afkIcon:Hide()
         if frame.afkIcon.timerText then frame.afkIcon.timerText:Hide() end
         return
@@ -932,7 +932,7 @@ function DF:UpdateVehicleIcon(frame)
     end
     
     -- Hide in combat check
-    if db.vehicleIconHideInCombat and InCombatLockdown() then
+    if db.vehicleIconHideInCombat and DF.playerInCombat then
         frame.vehicleIcon:Hide()
         return
     end
@@ -976,7 +976,11 @@ function DF:UpdateRaidRoleIcon(frame)
     end
     
     -- Hide in combat check
-    if db.raidRoleIconHideInCombat and InCombatLockdown() then
+    -- ☠ DF.playerInCombat, NOT InCombatLockdown() — see the note on the leader icon
+    -- in Bars.lua (DF:UpdateLeaderIcon). Secure-frame lockdown is a different question
+    -- from player combat state, and this icon was one of the two reported as never
+    -- hiding. Every "Hide in Combat" gate in the addon reads the tracked flag now.
+    if db.raidRoleIconHideInCombat and DF.playerInCombat then
         frame.raidRoleIcon:Hide()
         return
     end
@@ -1175,6 +1179,29 @@ function DF:UpdateAllFramesStatusIcons()
     if DF.testMode or DF.raidTestMode then
         DF:RefreshTestFrames()
     end
+end
+
+-- ============================================================
+-- COMBAT-GATED ICONS
+-- ============================================================
+-- Every icon carrying a "Hide in Combat" option, refreshed in ONE pass on a combat
+-- transition. ☠ A GATE IS ONLY AS GOOD AS THE REFRESH THAT RE-EVALUATES IT. Entering
+-- combat is covered by RefreshAllVisibleFrames -> FullFrameRefresh (PLAYER_REGEN_DISABLED),
+-- but LEAVING combat only ever refreshed the role and leader icons via UpdateAllRoleIcons
+-- -- so MT/MA, AFK, phased, vehicle, summon, raid target and ready check would hide on the
+-- way in and stay hidden until some unrelated event happened to repaint the frame.
+-- ⇒ ADD ANY NEW `<icon>HideInCombat` UPDATER HERE. The option is not finished without it.
+function DF:UpdateAllCombatGatedIcons()
+    if not DF.IterateAllFrames then return end
+    DF:IterateAllFrames(function(frame)
+        if not frame or not frame.unit then return end
+        if DF.UpdateRoleIcon then DF:UpdateRoleIcon(frame, "CombatTransition") end
+        if DF.UpdateLeaderIcon then DF:UpdateLeaderIcon(frame) end
+        if DF.UpdateRaidTargetIcon then DF:UpdateRaidTargetIcon(frame) end
+        if DF.UpdateReadyCheckIcon then DF:UpdateReadyCheckIcon(frame) end
+        -- Covers summon / resurrection / phased / AFK / vehicle / MT-MA / BG carrier / combat.
+        if DF.UpdateAllStatusIcons then DF:UpdateAllStatusIcons(frame) end
+    end)
 end
 
 -- ============================================================
