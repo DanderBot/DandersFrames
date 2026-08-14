@@ -4240,6 +4240,11 @@ function Handle:_buildOwnPreview()
     end)
     box:Show()
 
+    -- ONE source for "how many slots does the preview currently have", so a later
+    -- re-flow (Handle:ApplyStyle) cannot ask the box to lay out a slot that was never
+    -- created. Stamped before the loop that creates 1..want.
+    self._ownPreviewCount = want
+
     local ps = self._ownPreviewStyles
     for i = 1, want do
         local slot = slots[i]
@@ -5281,6 +5286,25 @@ function Handle:ApplyStyle(style, layout)
             warnedRestyle = true
             DF:DebugWarn(DBG, "ApplyStyle restyle failed: %s", tostring(err))
         end
+    end
+
+    -- ★ OWN-FRAME PREVIEW: RE-PIN THE BOX, or a layout change never previews.
+    -- The loop above restyles the BUTTONS, which is why style edits (text toggles,
+    -- colours, fonts) always previewed correctly and made this look fine. But the
+    -- preview's slots hang off `_ownPreviewBox`, NOT off the native container — so
+    -- backend:applyLayout re-pinning the container moves nothing here, and
+    -- `_flowPreviewLayout` was reachable ONLY from _buildOwnPreview. Anchor, offsets,
+    -- growth, spacing and wrap therefore sat unapplied until the next REBUILD, i.e.
+    -- until test mode was switched off and on again — exactly how it was reported
+    -- ("have to do this over and over until desired position", defensive row, 5.1.3).
+    -- ⇒ Previews differ in DATA, never in RENDERING: live re-pins on a layout change,
+    -- so the preview re-pins too, through the same shared flow.
+    -- ☠ LAST, AND THAT IS LOAD-BEARING: the flow measures each button, and the restyle
+    -- loop above has only just re-applied their size. Flowing first lays the box out
+    -- against the PREVIOUS icon size.
+    if self._ownPreviewBox and self._ownPreviewSlots then
+        local count = math.min(self._ownPreviewCount or 0, #self._ownPreviewSlots)
+        if count > 0 then self:_flowPreviewLayout(self._ownPreviewSlots, count) end
     end
 end
 
