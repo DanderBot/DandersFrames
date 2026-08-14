@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* (Aura Designer) Fix indicators on shared slots fading twice as much as intended out of range, and staying faded after entering combat while someone was out of range.
+
 ## [5.1.3]
 
 ### New Features
