@@ -2222,7 +2222,13 @@ function DF:UpdateHealPrediction(frame, testIndex)
         -- Net of the unit's consuming heal absorb, mirroring the live calculator's
         -- HealAbsorbMode 0: the absorb eats the first points of incoming healing, so
         -- only the remainder is a real promise of future health.
-        local haPct = (testData and testData.healAbsorbPercent) or 0
+        -- ☠ GATED ON THE TEST PANEL'S ABSORBS TOGGLE. In the preview, what is rendered
+        -- IS the data: Absorbs off means "these units have no absorbs", so a hidden
+        -- wash must not go on eating the heal -- toggling Absorbs off and watching the
+        -- heal NOT grow back is exactly how this shipped wrong (Krathe, 2026-08-14).
+        -- Live is deliberately different: a real heal absorb eats healing whether or
+        -- not it is displayed; only the preview's fiction follows its toggles.
+        local haPct = (db.testShowAbsorbs and testData and testData.healAbsorbPercent) or 0
         local total = math.max(0, healPct - haPct) * maxHealth   -- safe: nothing is secret in test
         -- Mirrors SetIncomingHealClampMode. With overheal off the calculator would
         -- never report more than the missing health, so neither may the preview;
