@@ -83,9 +83,15 @@ function Border:New(parent, opts)
     -- frame is exactly that: healthBar is a child at frame+3 with SetAllPoints and
     -- framePadding defaulting to 0, so it covers the whole rect and buries a border at +2 —
     -- completely at 100% health, half of it at 50%. Shipped that way briefly in alpha 15;
-    -- caught in review, never released. The measured unit-frame stack is health +3, power
-    -- +5, absorb +7, heal-absorb +8, contentOverlay +25 — hence the explicit +10 those
-    -- consumers now pass, which is the free band between the bars and the text/icon layer.
+    -- caught in review, never released. The measured unit-frame stack (/df debug zorder,
+    -- 2026-08-14) is health +3, heal-absorb +8, absorb +11, overflow +11, heal prediction
+    -- +12, power +20, contentOverlay +25 — hence the explicit +13 those consumers now
+    -- pass, the free slot between the bars and the resource/text/icon layer.
+    -- ☠ THAT NUMBER WAS +10, AND IT WENT STALE UNDER A GROWING BAND. It was right while
+    -- the band ended at absorb +7 / heal-absorb +8; the 2026-08-13 z-order convergence
+    -- lifted absorb to +11 and prediction to +12 without moving the frame border, so both
+    -- drew OVER it until 2026-08-14. A consumer's offset is a claim about its PARENT'S
+    -- CHILDREN, and it expires when they move.
     --
     -- ⚠ The rule, for anyone adding a consumer: read the PARENT's children, not its regions,
     -- and not its siblings. If any child covers the parent's rect, this default will hide

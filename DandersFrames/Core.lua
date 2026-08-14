@@ -6053,6 +6053,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     { "dispelOverlay",   ov,                         nil },
                     { "dispel gradient", ov and ov.gradient,
                         DF.ResolveDispelGradientLevel and DF:ResolveDispelGradientLevel(0, bdb) },
+                    -- ☠ THE FRAME BORDER BELONGS IN THIS TABLE, and its absence is why a
+                    -- real regression passed a clean dump. On 2026-08-13 this section
+                    -- printed "zero <- EXPECTED mismatches" and was taken as proof the
+                    -- ladder was sound — while absorb (+11) and heal prediction (+12) were
+                    -- quietly drawing over a frame border still pinned at +10, because the
+                    -- border was never one of the rows. Reported in game the next day.
+                    -- ⇒ Anything the band can BURY has to be printed beside the band.
+                    { "frame.border",    frame.border,               13 },
                     { "dfPowerBar",      frame.dfPowerBar,
                         (bdb and bdb.resourceBarFrameLevel) or 20 },
                     { "contentOverlay",  frame.contentOverlay,       25 },

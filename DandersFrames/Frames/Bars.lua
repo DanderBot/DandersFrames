@@ -204,8 +204,10 @@ function DF:LayoutResourceBar(frame, db)
         end
     end
 
-    -- Frame level - relative to the main frame. Default 2 puts it below the frame
-    -- border (at +10); values above 10 render above it.
+    -- Frame level - relative to the main frame. The default 20 puts it ABOVE the frame
+    -- border (+13, see Frames/Create.lua CreateFrameBorder); below 13 renders under it.
+    -- ⚠ This comment used to read "Default 2 ... below the frame border (at +10)" — the
+    -- default has been 20 on the line below, and the border moved to 13 on 2026-08-14.
     local frameLevelOffset = db.resourceBarFrameLevel or 20
     bar:SetFrameLevel(frame:GetFrameLevel() + frameLevelOffset)
     if bar.border then
@@ -448,10 +450,15 @@ end
 
 -- Edge inset for absorb / heal-absorb overlays. Returns 0 (flush to the health
 -- bar) when the frame border is off or fully OPAQUE. This works by Z-ORDER, not
--- geometry: the border frame draws at parent frame level +10 while the absorb
--- overlay is only +2/+3, so an opaque border paints OVER a flush overlay and the
+-- geometry: the border frame draws at parent frame level +13 while the absorb
+-- overlay sits at +11, so an opaque border paints OVER a flush overlay and the
 -- shield covers the health fill exactly with nothing showing through — no inset
--- needed. Returns the pixel-snapped border size only when the border is
+-- needed.
+-- ☠ THIS PREMISE WAS SILENTLY FALSE between 2026-08-13 and 2026-08-14: the z-order
+-- convergence lifted the absorb overlay to +11 and left the border at +10, so the
+-- border stopped painting over it and this function kept returning 0 for a case it
+-- no longer covered. The border moving to +13 is what makes the sentence above true
+-- again. If either number moves, RE-READ THIS — it is a dependency, not a note. Returns the pixel-snapped border size only when the border is
 -- TRANSLUCENT, so the shield doesn't bleed through the border's edge band.
 -- dfReducedMaxHealthClipping => 0 (the clip edge is internal, no border there).
 function DF:GetAbsorbEdgeInset(frame, db)
