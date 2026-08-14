@@ -719,7 +719,7 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     
     -- Dead or offline units should always show 0 health - no animation
     if testData.status then
-        frame.healthBar:SetValue(0)
+        DF.SetBarValueSmoothed(frame.healthBar, 0, db and db.smoothBars)
         frame.testAnimatedHealth = 0
         if frame.healthText and frame.healthText:IsShown() then
             frame.healthText:SetText("")
@@ -742,9 +742,15 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
 
     -- Store animated health for bar updates
     frame.testAnimatedHealth = health
-    
-    -- Update health bar
-    frame.healthBar:SetValue(health)
+
+    -- ☠ THE ANIMATION TICKER WAS THE ONE SITE WITH A BARE SetValue. Every other health
+    -- write -- live, the full test render, and the missing-health companion five lines
+    -- below -- goes through the smoothed setter, so with Smooth Bar Animation on the two
+    -- halves of an animated preview bar moved on different rules and the setting read as
+    -- having no effect in test mode (Aphoex, 2026-08-14). Interpolation and a 20 Hz ticker
+    -- compose: each tick eases toward the new target instead of snapping to it, which is
+    -- exactly what live does when health events arrive.
+    DF.SetBarValueSmoothed(frame.healthBar, health, db and db.smoothBars)
 
     -- ☠ A THIRD HEALTH-FADE RULE LIVED HERE and it disagreed with the real one on
     -- both counts: it crossed at `>= threshold - 0.5` where DF:ApplyHealthFadeAlpha
@@ -894,11 +900,7 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     frame.healthBar:SetMinMaxValues(0, 1)
     local healthValue = testData.healthPercent
     
-    if db.smoothBars and Enum and Enum.StatusBarInterpolation then
-        frame.healthBar:SetValue(healthValue, Enum.StatusBarInterpolation.ExponentialEaseOut)
-    else
-        frame.healthBar:SetValue(healthValue)
-    end
+    DF.SetBarValueSmoothed(frame.healthBar, healthValue, db.smoothBars)
 
     -- ★ LIVE'S INSET, not a restatement of it. This was ten lines that re-anchored both
     -- bars by db.framePadding, under a comment saying it was "matching what UpdateUnitFrame
@@ -1725,12 +1727,22 @@ function DF:UpdateTestPowerBar(frame, testData)
     --
     -- ☠ Do not reinstate a local copy of the role logic. The copy that used to live here
     -- had lost BOTH of the live function's solo arms (`inSoloMode and
-    -- db.resourceBarShowInSoloMode`), and since resourceBarShowInSoloMode defaults to
-    -- true and test mode is nearly always driven solo, live showed the bar on every frame
-    -- while the preview showed it only on the role-filtered subset. The setting was
-    -- simply not previewable.
+    -- db.resourceBarShowInSoloMode`), so the preview showed only the role-filtered subset
+    -- while live, driven solo, put a bar on your frame regardless. The setting was simply
+    -- not previewable.
+    -- ⚠ That older note said live "showed the bar on every frame". It only ever showed it
+    -- on the one frame solo HAS -- yours. The gate itself was unscoped and the preview,
+    -- with five frames on screen, is where that finally showed; see below.
     -- Role AND class both handed over as data, so the ENTIRE gate is the live one.
-    local showBar = DF:ShouldShowResourceBar(nil, db, testData.role, testData.class)
+    --
+    -- ★ WHICH SLOT IS *YOU* is the fourth piece of data the gate needs, and without it the
+    -- solo arm applied to all five previews -- "Show in Solo Mode enables the resource bar
+    -- for every frame" (Aphoex, 2026-08-14). The preview's own frame is the first slot in
+    -- both containers (party is 0-based, raid 1-based); a PINNED set previews other units
+    -- by definition, so none of its slots is self.
+    local selfIndex = frame.isRaidFrame and 1 or 0
+    local isSelfPreview = (not frame.isPinnedFrame) and (testData.index == selfIndex)
+    local showBar = DF:ShouldShowResourceBar(nil, db, testData.role, testData.class, isSelfPreview)
 
     if not showBar then
         if frame.dfPowerBar then frame.dfPowerBar:Hide() end
