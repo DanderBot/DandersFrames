@@ -2,19 +2,6 @@
 
 ## [Unreleased]
 
-## [5.1.3]
-
-### New Features
-
-* (Debuff Bar) New "Non-Player Debuffs" category — show only debuffs applied by enemies and the environment, dropping player-cast clutter such as Sated or Forbearance. (by Krathe)
-* (Frames) New frame level sliders for the aggro, hover, and selection highlights, the dispel display, and the heal prediction bar, so they can be reordered against other frame elements. (by Krathe)
-
-### Bug Fixes
-
-* (Aura Designer) Fix placed indicators sometimes getting stuck at their out-of-range transparency until a reload. (by Krathe)
-* (Frames) Fix missing-buff icons coming back dim after the unit was out of range. (by Krathe)
-* (Debuff Bar) Fix the boss, role, and priority categories showing miscategorised debuffs on group members in another phase or instance. (by Krathe)
-* (Buffs & Debuffs) Filter checkbox tooltips now show their explanations instead of repeating the label. (by Krathe)
 ### New Features
 
 * (Aura Designer) Spells with more than one effect now show a "Tracked Spells" list on their indicator card — untick any effect you don't want that indicator to show. Each row shows the effect's own icon, and unticking everything simply shows nothing without touching the visibility eye. (by Krathe)
@@ -33,6 +20,20 @@
 * (Bars) The absorb Clamp Mode "None" now truly leaves the shield unclamped — it previously applied the strictest clamp of the three. (by Krathe)
 * (Test Mode) Absorbs, heal absorbs and incoming heals preview reliably on the first entry after a reload, follow the test panel's toggles, respect reduced max health, and demonstrate the heal-absorb interplay: one unit shows its heal shortened by a wash with the shield beside it, another shows a wash consuming its heal entirely. (by Krathe)
 * (Indicators) "Hide in Combat" now works for every icon that offers it. The Leader and MT/MA icons stayed on screen through a whole fight no matter what the setting said, and the AFK, Phased, Vehicle, Summon, Raid Target and Ready Check icons shared the same fault — they all hide when the fight starts and come back when it ends. Reloading mid-fight no longer leaves them showing for the rest of the pull either. (by Krathe)
+
+## [5.1.3]
+
+### New Features
+
+* (Debuff Bar) New "Non-Player Debuffs" category — show only debuffs applied by enemies and the environment, dropping player-cast clutter such as Sated or Forbearance. (by Krathe)
+* (Frames) New frame level sliders for the aggro, hover, and selection highlights, the dispel display, and the heal prediction bar, so they can be reordered against other frame elements. (by Krathe)
+
+### Bug Fixes
+
+* (Aura Designer) Fix placed indicators sometimes getting stuck at their out-of-range transparency until a reload. (by Krathe)
+* (Frames) Fix missing-buff icons coming back dim after the unit was out of range. (by Krathe)
+* (Debuff Bar) Fix the boss, role, and priority categories showing miscategorised debuffs on group members in another phase or instance. (by Krathe)
+* (Buffs & Debuffs) Filter checkbox tooltips now show their explanations instead of repeating the label. (by Krathe)
 
 ## [5.1.2]
 
