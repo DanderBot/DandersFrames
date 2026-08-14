@@ -729,7 +729,10 @@ function DF:UpdateAbsorb(frame, testIndex)
                 -- (see the full path's ONE RULER note); heals subtracted only when the
                 -- shield chains behind them.
                 if (db.absorbBarAttachedClampMode or 1) == 1 then
-                    local reducedShare = ((db.reducedMaxHealthEnabled ~= false)
+                    -- Render-derived, same rule as the full path: reduced subtracts only
+                    -- when its overlay bar is actually SHOWN and the bar is not clipped.
+                    local rmb = frame.dfReducedMaxHealthBar
+                    local reducedShare = (rmb and rmb:IsShown()
                         and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
                     local usable = maxHealth * (1 - reducedShare)
                     local curHealth = testHealthPercent * maxHealth
@@ -1053,7 +1056,15 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- (test values never exceed max), so the shield may overrun — exactly what
             -- those settings mean on live frames.
             if (db.absorbBarAttachedClampMode or 1) == 1 then
-                local reducedShare = ((db.reducedMaxHealthEnabled ~= false)
+                -- ☠ KEYED ON WHAT IS RENDERED, NOT ON A SETTINGS KEY. This read the LIVE
+                -- enable (reducedMaxHealthEnabled) and subtracted the reduced share even
+                -- while the test panel's Reduced Max Health display was OFF -- no stripes
+                -- on screen, full-width bar, and the clamp still gave away 45% of it
+                -- (Xx: detached band again, 2026-08-14). The ruler is whatever the frame
+                -- DRAWS: reduced subtracts only when its overlay bar is actually shown
+                -- and the bar is not clipped (clipping already shrinks the ruler itself).
+                local rmb = frame.dfReducedMaxHealthBar
+                local reducedShare = (rmb and rmb:IsShown()
                     and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
                 local usable = maxHealth * (1 - reducedShare)
                 local curHealth = testHealthPercent * maxHealth
@@ -1359,7 +1370,15 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- (test values never exceed max), so the shield may overrun — exactly what
             -- those settings mean on live frames.
             if (db.absorbBarAttachedClampMode or 1) == 1 then
-                local reducedShare = ((db.reducedMaxHealthEnabled ~= false)
+                -- ☠ KEYED ON WHAT IS RENDERED, NOT ON A SETTINGS KEY. This read the LIVE
+                -- enable (reducedMaxHealthEnabled) and subtracted the reduced share even
+                -- while the test panel's Reduced Max Health display was OFF -- no stripes
+                -- on screen, full-width bar, and the clamp still gave away 45% of it
+                -- (Xx: detached band again, 2026-08-14). The ruler is whatever the frame
+                -- DRAWS: reduced subtracts only when its overlay bar is actually shown
+                -- and the bar is not clipped (clipping already shrinks the ruler itself).
+                local rmb = frame.dfReducedMaxHealthBar
+                local reducedShare = (rmb and rmb:IsShown()
                     and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
                 local usable = maxHealth * (1 - reducedShare)
                 local curHealth = testHealthPercent * maxHealth
