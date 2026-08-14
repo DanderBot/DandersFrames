@@ -537,6 +537,47 @@ function DF:ResolveHealPredictionBarLevel(frame, db)
     return frame:GetFrameLevel() + ((db and db.healPredictionFrameLevel) or 12)
 end
 
+-- ★ THE HEALTH BAR IS A CHAIN, NOT A PILE OF BARS THAT ALL START AT THE FILL EDGE.
+-- Returns the texture the absorb should hang off: the LAST VISIBLE heal-prediction
+-- segment, or the health fill when no heal is inbound.
+--
+-- ☠ WITHOUT THIS THE ABSORB AND THE HEAL PREDICTION OCCUPY THE SAME SPAN. Both anchored
+-- to healthFillTexture's far edge, so they drew over each other and the higher level
+-- (prediction +12) simply hid the absorb (+11). Reported in game 2026-08-14 once the
+-- preview values were big enough to see it; it was live's behaviour too, not test-only.
+--
+-- The method is Blizzard's, reimplemented: CompactUnitFrameUtil_UpdateFillBar walks a
+-- running cursor, anchoring each segment TOPLEFT-to-previous-TOPRIGHT and returning the
+-- cursor UNCHANGED for a segment with nothing to show. Grid2's IndicatorMultiBar carries
+-- the same cursor as prevTex. DF already used the idea one level down --
+-- AnchorHealPredSegment takes a prevTex to chain others' heals onto mine -- and simply
+-- never extended it to the absorb. Order is Blizzard's: health -> incoming heals -> absorb.
+-- (EllesmereUI deliberately does NOT chain: it gives the absorb its own edge mode and lets
+-- an overlay be a named choice. DF already spells that as absorbBarMode = OVERLAY, which
+-- is why this only applies to the ATTACHED family.)
+--
+-- ☠ RETURNING A TEXTURE IS WHAT MAKES IT SELF-MAINTAINING: the layout engine re-resolves
+-- the absorb whenever the prediction resizes, so there is no arithmetic and no update-order
+-- dependency between the two updaters -- which also keeps it clear of secret aura values.
+-- ⚠ THE HIDDEN CASE IS THE WHOLE TRICK. A hidden StatusBar keeps its last rect, so
+-- anchoring to one would park the absorb at a stale offset with a gap in front of it.
+-- Falling through to the previous segment is Blizzard's "return previousTexture" rule.
+-- ⚠ A FLOATING prediction is not on the health bar at all, so it never joins the chain.
+function DF:ResolveAbsorbChainAnchor(frame, db)
+    local hb = frame and frame.healthBar
+    local fill = hb and hb.GetStatusBarTexture and hb:GetStatusBarTexture() or nil
+    if not db or (db.healPredictionMode or "OVERLAY") == "FLOATING" then return fill end
+    -- Walk the chain BACKWARDS: segment 2 (others' heals) hangs off segment 1 (mine),
+    -- which hangs off the fill. The last one actually showing is the cursor.
+    for _, seg in ipairs({ frame.dfHealPredictionBar2, frame.dfHealPredictionBar }) do
+        if seg and seg.IsShown and seg:IsShown() and seg.GetStatusBarTexture then
+            local t = seg:GetStatusBarTexture()
+            if t then return t end
+        end
+    end
+    return fill
+end
+
 function DF:UpdateAbsorb(frame, testIndex)
     if not frame then return end
     if not frame.healthBar then return end
@@ -1093,30 +1134,36 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- when the frame border is translucent (so the shield doesn't show through it);
         -- it is 0 for an opaque/absent border. The PRIMARY axis keeps its sized extent.
         local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
+        -- ★ CHAIN, don't restack: hang off the last visible heal-prediction segment so the
+        -- shield sits BESIDE the incoming heal instead of on top of it (Blizzard order:
+        -- health -> heals -> absorb). Falls back to the health fill when no heal is
+        -- inbound, so the no-heal case is byte-identical to before. See
+        -- DF:ResolveAbsorbChainAnchor for why this is a texture and not a computed offset.
+        local chainTex = DF:ResolveAbsorbChainAnchor(frame, db) or healthFillTexture
         if healthOrient == "HORIZONTAL" then
             customBar:SetOrientation("HORIZONTAL")
             customBar:SetReverseFill(false)
             customBar:SetWidth(barWidth)
-            customBar:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, -edgeInset)
-            customBar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, edgeInset)
+            customBar:SetPoint("TOPLEFT", chainTex, "TOPRIGHT", 0, -edgeInset)
+            customBar:SetPoint("BOTTOMLEFT", chainTex, "BOTTOMRIGHT", 0, edgeInset)
         elseif healthOrient == "HORIZONTAL_INV" then
             customBar:SetOrientation("HORIZONTAL")
             customBar:SetReverseFill(true)
             customBar:SetWidth(barWidth)
-            customBar:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, -edgeInset)
-            customBar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, edgeInset)
+            customBar:SetPoint("TOPRIGHT", chainTex, "TOPLEFT", 0, -edgeInset)
+            customBar:SetPoint("BOTTOMRIGHT", chainTex, "BOTTOMLEFT", 0, edgeInset)
         elseif healthOrient == "VERTICAL" then
             customBar:SetOrientation("VERTICAL")
             customBar:SetReverseFill(false)
             customBar:SetHeight(barHeight)
-            customBar:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", edgeInset, 0)
-            customBar:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", -edgeInset, 0)
+            customBar:SetPoint("BOTTOMLEFT", chainTex, "TOPLEFT", edgeInset, 0)
+            customBar:SetPoint("BOTTOMRIGHT", chainTex, "TOPRIGHT", -edgeInset, 0)
         elseif healthOrient == "VERTICAL_INV" then
             customBar:SetOrientation("VERTICAL")
             customBar:SetReverseFill(true)
             customBar:SetHeight(barHeight)
-            customBar:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", edgeInset, 0)
-            customBar:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", -edgeInset, 0)
+            customBar:SetPoint("TOPLEFT", chainTex, "BOTTOMLEFT", edgeInset, 0)
+            customBar:SetPoint("TOPRIGHT", chainTex, "BOTTOMRIGHT", -edgeInset, 0)
         end
         
         -- Let WoW's StatusBar handle the percentage calculation internally
@@ -1205,30 +1252,36 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- shield matches the fill with no sliver/gap. edgeInset insets that axis ONLY
         -- when the frame border is translucent (so the shield doesn't show through it).
         local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
+        -- ★ CHAIN, don't restack: hang off the last visible heal-prediction segment so the
+        -- shield sits BESIDE the incoming heal instead of on top of it (Blizzard order:
+        -- health -> heals -> absorb). Falls back to the health fill when no heal is
+        -- inbound, so the no-heal case is byte-identical to before. See
+        -- DF:ResolveAbsorbChainAnchor for why this is a texture and not a computed offset.
+        local chainTex = DF:ResolveAbsorbChainAnchor(frame, db) or healthFillTexture
         if healthOrient == "HORIZONTAL" then
             customBar:SetOrientation("HORIZONTAL")
             customBar:SetReverseFill(false)
             customBar:SetWidth(barWidth)
-            customBar:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, -edgeInset)
-            customBar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, edgeInset)
+            customBar:SetPoint("TOPLEFT", chainTex, "TOPRIGHT", 0, -edgeInset)
+            customBar:SetPoint("BOTTOMLEFT", chainTex, "BOTTOMRIGHT", 0, edgeInset)
         elseif healthOrient == "HORIZONTAL_INV" then
             customBar:SetOrientation("HORIZONTAL")
             customBar:SetReverseFill(true)
             customBar:SetWidth(barWidth)
-            customBar:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, -edgeInset)
-            customBar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, edgeInset)
+            customBar:SetPoint("TOPRIGHT", chainTex, "TOPLEFT", 0, -edgeInset)
+            customBar:SetPoint("BOTTOMRIGHT", chainTex, "BOTTOMLEFT", 0, edgeInset)
         elseif healthOrient == "VERTICAL" then
             customBar:SetOrientation("VERTICAL")
             customBar:SetReverseFill(false)
             customBar:SetHeight(barHeight)
-            customBar:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", edgeInset, 0)
-            customBar:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", -edgeInset, 0)
+            customBar:SetPoint("BOTTOMLEFT", chainTex, "TOPLEFT", edgeInset, 0)
+            customBar:SetPoint("BOTTOMRIGHT", chainTex, "TOPRIGHT", -edgeInset, 0)
         elseif healthOrient == "VERTICAL_INV" then
             customBar:SetOrientation("VERTICAL")
             customBar:SetReverseFill(true)
             customBar:SetHeight(barHeight)
-            customBar:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", edgeInset, 0)
-            customBar:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", -edgeInset, 0)
+            customBar:SetPoint("TOPLEFT", chainTex, "BOTTOMLEFT", edgeInset, 0)
+            customBar:SetPoint("TOPRIGHT", chainTex, "BOTTOMRIGHT", -edgeInset, 0)
         end
         
         -- Let WoW's StatusBar handle the percentage calculation internally
@@ -2288,6 +2341,26 @@ function DF:UpdateHealPrediction(frame, testIndex)
         elseif frame.dfHealPredictionBar2 then
             frame.dfHealPredictionBar2:Hide()
         end
+    end
+
+    -- ☠ THE ABSORB HANGS OFF THESE SEGMENTS NOW (DF:ResolveAbsorbChainAnchor). The layout
+    -- engine follows a segment's RESIZE on its own, but it cannot re-pick WHICH texture to
+    -- follow -- so when the end of the chain changes the absorb has to be re-anchored, or
+    -- it stays pinned to a hidden segment's stale rect and floats with a gap in front.
+    -- Tracks WHICH segment is the end (2 / 1 / fill), not merely "is anything shown":
+    -- segment 2 appearing while segment 1 was already up moves the end without changing
+    -- any yes/no, and that case would otherwise leave the absorb on top of segment 2.
+    -- ⚠ EDGE-TRIGGERED. The prediction repaints on every UNIT_HEAL_PREDICTION and the
+    -- absorb does not; an unconditional call would redo the absorb several times a second.
+    -- ⚠ testIndex IS FORWARDED. The preview's absorb amount is a PARAMETER of this same
+    -- live function, so dropping it here would repaint a test frame's shield from live
+    -- (zero) values and blank it. See DF:UpdateAbsorb's test path.
+    local chainEnd = (frame.dfHealPredictionBar2 and frame.dfHealPredictionBar2:IsShown() and 2)
+        or (frame.dfHealPredictionBar and frame.dfHealPredictionBar:IsShown() and 1)
+        or 0
+    if frame.dfHealPredChainEnd ~= chainEnd then
+        frame.dfHealPredChainEnd = chainEnd
+        if DF.UpdateAbsorb then DF:UpdateAbsorb(frame, testIndex) end
     end
 end
 
