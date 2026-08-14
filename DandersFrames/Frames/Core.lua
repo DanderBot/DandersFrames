@@ -77,6 +77,31 @@ end
 -- Export for use in other files
 DF.GetSafeHealthPercent = GetSafeHealthPercent
 
+-- ============================================================
+-- THE ONE SMOOTHED SetValue
+-- The 12.0.5 StatusBar interpolation or a plain write, chosen by an ALREADY-RESOLVED
+-- flag -- resolved, because the callers disagree about where the flag comes from and
+-- they are each right: the health/missing-health pair reads db.smoothBars off the
+-- frame's own resolved db, the resource bar has its own resourceBarSmooth key, and
+-- DF.SetBarValue (Frames/Colors.lua) takes an explicit override for exactly that. Only
+-- the BRANCH is shared, so no caller's db resolution changes.
+--   This branch had been hand-written at five sites and the preview's ANIMATION ticker
+-- was the one that never got it: an animated test frame wrote a bare SetValue while its
+-- own missing-health companion smoothed, so the two halves of one bar moved on different
+-- rules and Smooth Bar Animation read as doing nothing in test mode (Aphoex, 2026-08-14).
+-- `value` is passed straight through and never read, so a SECRET is safe here.
+-- ============================================================
+local function SetBarValueSmoothed(bar, value, smoothEnabled)
+    if not bar or not bar.SetValue then return end
+    if smoothEnabled and Enum and Enum.StatusBarInterpolation
+        and Enum.StatusBarInterpolation.ExponentialEaseOut then
+        bar:SetValue(value, Enum.StatusBarInterpolation.ExponentialEaseOut)
+    else
+        bar:SetValue(value)
+    end
+end
+DF.SetBarValueSmoothed = SetBarValueSmoothed
+
 -- Helper to set health bar value safely
 -- Uses CurveConstants.ScaleTo100 for the bar value, then delegates
 -- threshold fading to HealthFade.lua's curve-based system.
@@ -96,13 +121,7 @@ local function SetHealthBarValue(bar, unit, frame)
     else
         db = DF.GetDB and DF:GetDB()
     end
-    local smoothEnabled = db and db.smoothBars
-
-    if smoothEnabled and Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut then
-        bar:SetValue(pct, Enum.StatusBarInterpolation.ExponentialEaseOut)
-    else
-        bar:SetValue(pct)
-    end
+    SetBarValueSmoothed(bar, pct, db and db.smoothBars)
 
     -- Health threshold fading (curve-based, no Lua-side secret comparison)
     if frame then
@@ -165,13 +184,8 @@ local function SetMissingHealthBarValue(bar, unit, frame)
         bar:SetMinMaxValues(0, UnitHealthMax(unit))
     end
 
-    local smoothEnabled = db and db.smoothBars
-    if smoothEnabled and Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut then
-        bar:SetValue(missingHealth, Enum.StatusBarInterpolation.ExponentialEaseOut)
-    else
-        bar:SetValue(missingHealth)
-    end
-    
+    SetBarValueSmoothed(bar, missingHealth, db and db.smoothBars)
+
     -- Update texture before color (SetStatusBarTexture resets vertex color)
     local texture = db and db.missingHealthTexture
     if not texture or texture == "" then

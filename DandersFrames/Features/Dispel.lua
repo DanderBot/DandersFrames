@@ -873,15 +873,11 @@ function DF:UpdateDispelGradientHealth(frame)
     local maxHealth = UnitHealthMax(unit)
     local currentHealth = UnitHealth(unit, true)
 
-    -- Use same smooth interpolation as health bar when enabled
-    local interp
-    if smoothEnabled and Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut then
-        interp = Enum.StatusBarInterpolation.ExponentialEaseOut
-    end
+    -- Same smooth interpolation as the health bar, through the shared branch
+    -- (DF.SetBarValueSmoothed, Frames/Core.lua) rather than a local copy of it.
     if legacy then
         legacy.gradient:SetMinMaxValues(0, maxHealth)
-        if interp then legacy.gradient:SetValue(currentHealth, interp)
-        else legacy.gradient:SetValue(currentHealth) end
+        DF.SetBarValueSmoothed(legacy.gradient, currentHealth, smoothEnabled)
     end
     -- ★ NO SLOT LOOP. The 12.1 native slot gradient is no longer fed from here at all:
     -- its carrier is a plain texture ANCHORED to the real health bar's fill texture, so
