@@ -3849,6 +3849,31 @@ end
 -- every TD element out of range. Carry the user's old name-text value only when
 -- they changed it from the prior default (1); default-config users get the new
 -- oorTextAlpha default instead. Per-profile guarded so later oorTextAlpha edits stick.
+-- Drop the heal prediction under the absorb on profiles that stored the old default.
+--
+-- ☠ VALUE-GATED, NOT PRESENCE-GATED, AND THAT IS THE WHOLE POINT. Config.lua seeds
+-- healPredictionFrameLevel for every profile, so the key is ALWAYS present and a
+-- presence test can never fire — changing the default alone reaches new profiles only.
+-- Every one of the dev's ten profiles had 12 stored, which is exactly how "the fix
+-- changes nothing" happens. See [[feedback-migration-before-defaults-backfill]].
+--
+-- Only 12 -> 10, because 12 was the shipped default: anyone who typed a different number
+-- is left alone, and the slider still reaches 12 for anyone who wants the heal on top.
+-- Idempotent (10 is not 12), so it is safe to run on every load.
+function DF:MigrateHealPredictionBelowAbsorb()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        if type(profile) == "table" then
+            for _, modeKey in ipairs({ "party", "raid" }) do
+                local m = profile[modeKey]
+                if type(m) == "table" and m.healPredictionFrameLevel == 12 then
+                    m.healPredictionFrameLevel = 10
+                end
+            end
+        end
+    end
+end
+
 function DF:MigrateOORTextAlpha()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
@@ -6050,6 +6075,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                             local v = DF:ResolveHealPredictionBarLevel(frame, bdb)
                             return v and (v - base)
                         end)) },
+                    -- ⚠ ORDER OF THIS TABLE IS THE DOCUMENTED LADDER. dfHealPrediction is
+                    -- printed before the absorbs above because it now sits UNDER them
+                    -- (+10 vs +11) — heals must never hide a shield.
                     { "dispelOverlay",   ov,                         nil },
                     { "dispel gradient", ov and ov.gradient,
                         DF.ResolveDispelGradientLevel and DF:ResolveDispelGradientLevel(0, bdb) },
@@ -6100,14 +6128,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- the absorb is hanging off and whether the last UpdateAbsorb actually
                 -- re-anchored or short-circuited on its layout-state cache. All plain Lua
                 -- stamps -- no rect or health reads, so nothing here can touch a secret.
-                -- `key` is the LIVE answer; `pick` is what the last resolve actually used.
-                -- They must agree — a disagreement is the cache-vs-resolver drift that made
-                -- the chain look inert while reading as correct.
-                print(("  %-10s key=%-5s pick=%-5s fastPath=%-5s session=%-3s predShown=%-5s pred2Shown=%s")
-                    :format("Chain",
-                        tostring(DF.ChainEndKey and DF.ChainEndKey(frame, bdb)),
-                        tostring(frame.dfAbsorbChainPick), tostring(frame.dfAbsorbFastPath),
-                        tostring(DF.testSessionId),
+                -- Health-bar band diagnostics. fastPath says whether the last UpdateAbsorb
+                -- re-laid the bar or short-circuited on its cache; session is the test-mode
+                -- token that forces one full rebuild per toggle (pooled frames keep the
+                -- cache otherwise). predShown answers "is there an incoming heal at all",
+                -- which is the first thing to check when the shield looks wrong.
+                print(("  %-10s fastPath=%-5s session=%-3s predShown=%-5s pred2Shown=%s")
+                    :format("Bars/dbg",
+                        tostring(frame.dfAbsorbFastPath), tostring(DF.testSessionId),
                         tostring(frame.dfHealPredictionBar and frame.dfHealPredictionBar:IsShown()),
                         tostring(frame.dfHealPredictionBar2 and frame.dfHealPredictionBar2:IsShown())))
 

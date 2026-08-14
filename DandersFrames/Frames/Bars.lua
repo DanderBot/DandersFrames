@@ -205,7 +205,7 @@ function DF:LayoutResourceBar(frame, db)
     end
 
     -- Frame level - relative to the main frame. The default 20 puts it ABOVE the frame
-    -- border (+14, see Frames/Create.lua CreateFrameBorder); below 14 renders under it.
+    -- border (+13, see Frames/Create.lua CreateFrameBorder); below 13 renders under it.
     -- ⚠ This comment used to read "Default 2 ... below the frame border (at +10)" — the
     -- default has been 20 on the line below, and the border moved to 13 on 2026-08-14.
     local frameLevelOffset = db.resourceBarFrameLevel or 20
@@ -354,20 +354,11 @@ local function AbsorbLayoutStateChanged(frame, db)
 
     -- Mode + appearance (all modes)
     if s.mode            ~= (db.absorbBarMode or "OVERLAY")               then return true end
-    -- ☠ TWO INPUTS HERE ARE NOT DB SETTINGS, and both were learned the hard way.
-    --
-    -- 1. THE CHAIN ANCHOR. The absorb hangs off the last visible heal-prediction segment,
-    --    so which segment that is decides where the bar STARTS. Derived by calling
-    --    ChainEndKey -- the SAME read DF:ResolveAbsorbChainAnchor uses. It must not be a
-    --    stamp written elsewhere: the first cut compared a dfHealPredChainEnd stamp set
-    --    only at the end of UpdateHealPrediction, which four paths bypass (its three early
-    --    returns, plus TestMode hiding the bar directly), so the cache said "chain end 1"
-    --    while the resolver was picking "fill" and every call short-circuited.
-    -- 2. THE TEST SESSION. Test frames are POOLED, nothing clears this cache on a test
-    --    toggle, and the bar is usually still IsShown() from the last session -- so the
-    --    first pass took the fast path with anchors left over from a torn-down layout and
-    --    the shield simply did not appear until you toggled again.
-    if s.chainEnd        ~= DF.ChainEndKey(frame, db)                     then return true end
+    -- ☠ THE ONE INPUT HERE THAT IS NOT A DB SETTING. Test frames are POOLED, nothing
+    -- clears this cache on a test toggle, and the bar is usually still IsShown() from the
+    -- last session -- so the first pass of a new session took the fast path with anchors
+    -- left over from a torn-down layout, and the shield did not appear until you toggled
+    -- test mode again. The token is bumped where testMode/raidTestMode are set.
     if s.testSession     ~= (DF.testSessionId or 0)                       then return true end
     if s.texture         ~= (db.absorbBarTexture or DF.STOCK_BAR_TEXTURE)  then return true end
     if s.blendMode       ~= (db.absorbBarBlendMode or "BLEND")            then return true end
@@ -428,10 +419,7 @@ local function CacheAbsorbLayoutState(frame, db)
         frame.dfAbsorbState = s
     end
     s.mode            = db.absorbBarMode or "OVERLAY"
-    -- Not db settings — see the note beside their comparisons above. Both are re-derived
-    -- here from the same source the comparison uses, never from a stamp written elsewhere.
-    s.chainEnd        = DF.ChainEndKey(frame, db)
-    s.testSession     = DF.testSessionId or 0
+    s.testSession     = DF.testSessionId or 0   -- not a db setting; see the note above
     s.texture         = db.absorbBarTexture or DF.STOCK_BAR_TEXTURE
     s.blendMode       = db.absorbBarBlendMode or "BLEND"
     s.pixelPerfect    = db.pixelPerfect
@@ -469,14 +457,14 @@ end
 
 -- Edge inset for absorb / heal-absorb overlays. Returns 0 (flush to the health
 -- bar) when the frame border is off or fully OPAQUE. This works by Z-ORDER, not
--- geometry: the border frame draws at parent frame level +14 while the absorb
+-- geometry: the border frame draws at parent frame level +13 while the absorb
 -- overlay sits at +11, so an opaque border paints OVER a flush overlay and the
 -- shield covers the health fill exactly with nothing showing through — no inset
 -- needed.
 -- ☠ THIS PREMISE WAS SILENTLY FALSE between 2026-08-13 and 2026-08-14: the z-order
 -- convergence lifted the absorb overlay to +11 and left the border at +10, so the
 -- border stopped painting over it and this function kept returning 0 for a case it
--- no longer covered. The border moving above the band is what makes the sentence above true
+-- no longer covered. The border moving to +13 is what makes the sentence above true
 -- again. If either number moves, RE-READ THIS — it is a dependency, not a note. Returns the pixel-snapped border size only when the border is
 -- TRANSLUCENT, so the shield doesn't bleed through the border's edge band.
 -- dfReducedMaxHealthClipping => 0 (the clip edge is internal, no border there).
@@ -553,70 +541,15 @@ end
 -- ⚠ The key is user-facing so it wins; 12 is the ladder's slot and the shipped default.
 function DF:ResolveHealPredictionBarLevel(frame, db)
     if not frame or not frame.GetFrameLevel then return nil end
-    return frame:GetFrameLevel() + ((db and db.healPredictionFrameLevel) or 12)
-end
-
--- ★ THE HEALTH BAR IS A CHAIN, NOT A PILE OF BARS THAT ALL START AT THE FILL EDGE.
--- Returns the texture the absorb should hang off: the LAST VISIBLE heal-prediction
--- segment, or the health fill when no heal is inbound.
---
--- ☠ WITHOUT THIS THE ABSORB AND THE HEAL PREDICTION OCCUPY THE SAME SPAN. Both anchored
--- to healthFillTexture's far edge, so they drew over each other and the higher level
--- (prediction +12) simply hid the absorb (+11). Reported in game 2026-08-14 once the
--- preview values were big enough to see it; it was live's behaviour too, not test-only.
---
--- The method is Blizzard's, reimplemented: CompactUnitFrameUtil_UpdateFillBar walks a
--- running cursor, anchoring each segment TOPLEFT-to-previous-TOPRIGHT and returning the
--- cursor UNCHANGED for a segment with nothing to show. Grid2's IndicatorMultiBar carries
--- the same cursor as prevTex. DF already used the idea one level down --
--- AnchorHealPredSegment takes a prevTex to chain others' heals onto mine -- and simply
--- never extended it to the absorb. Order is Blizzard's: health -> incoming heals -> absorb.
--- (EllesmereUI deliberately does NOT chain: it gives the absorb its own edge mode and lets
--- an overlay be a named choice. DF already spells that as absorbBarMode = OVERLAY, which
--- is why this only applies to the ATTACHED family.)
---
--- ☠ RETURNING A TEXTURE IS WHAT MAKES IT SELF-MAINTAINING: the layout engine re-resolves
--- the absorb whenever the prediction resizes, so there is no arithmetic and no update-order
--- dependency between the two updaters -- which also keeps it clear of secret aura values.
--- ⚠ THE HIDDEN CASE IS THE WHOLE TRICK. A hidden StatusBar keeps its last rect, so
--- anchoring to one would park the absorb at a stale offset with a gap in front of it.
--- Falling through to the previous segment is Blizzard's "return previousTexture" rule.
--- ⚠ A FLOATING prediction is not on the health bar at all, so it never joins the chain.
--- ☠☠ ONE LIVE READ, USED BY BOTH THE RESOLVER AND THE CACHE. This returns which segment
--- the absorb should hang off: "seg2", "seg1" or "fill".
---
--- The first cut had TWO sources of truth -- the resolver read the segments' live
--- IsShown(), while the fast-path cache compared a `dfHealPredChainEnd` stamp written only
--- at the end of UpdateHealPrediction. They drift the moment the bar is hidden by a path
--- that skips that tail, and there are four: UpdateHealPrediction's three early returns
--- (no unit, no incoming heal, no fill texture) and TestMode's own direct
--- dfHealPredictionBar:Hide(). The dump caught it exactly -- chainEnd=1 and predShown=true
--- while the resolver had picked "fill" and every call since had short-circuited.
--- ⇒ A cache key MUST be derived from the same read as the thing it guards. Two stamps
--- describing one fact will always find a path that updates one and not the other.
-local function ChainEndKey(frame, db)
-    if not frame then return "fill" end
-    -- A FLOATING prediction is not on the health bar, so it never joins the chain.
-    if db and (db.healPredictionMode or "OVERLAY") == "FLOATING" then return "fill" end
-    local s2, s1 = frame.dfHealPredictionBar2, frame.dfHealPredictionBar
-    if s2 and s2.IsShown and s2:IsShown() then return "seg2" end
-    if s1 and s1.IsShown and s1:IsShown() then return "seg1" end
-    return "fill"
-end
-DF.ChainEndKey = ChainEndKey   -- exposed for the /df debug zorder line
-
-function DF:ResolveAbsorbChainAnchor(frame, db)
-    local hb = frame and frame.healthBar
-    local fill = hb and hb.GetStatusBarTexture and hb:GetStatusBarTexture() or nil
-    local key = ChainEndKey(frame, db)
-    frame.dfAbsorbChainPick = key   -- diagnostic only; the cache re-derives, never reads this
-    local seg = (key == "seg2" and frame.dfHealPredictionBar2)
-        or (key == "seg1" and frame.dfHealPredictionBar) or nil
-    if seg and seg.GetStatusBarTexture then
-        local t = seg:GetStatusBarTexture()
-        if t then return t end
-    end
-    return fill
+    -- ☠ DEFAULT 10, AND IT MUST STAY UNDER THE ABSORB (+11). Krathe's rule, 2026-08-14:
+    -- "incoming heals ... never sitting above absorbs, as they are more important." The
+    -- two bars share the missing-health region, so whichever is higher HIDES the other
+    -- where they overlap -- and the shield is the one you must not lose. This was 12,
+    -- which put the heal on top and buried the absorb behind it.
+    -- Band around it: heal-absorb +8 · >> heal prediction +10 << · absorb / overflow +11.
+    -- ⚠ Still a user slider (0-100): raising it past 11 puts the heal back over the
+    -- shield, which is then the user's explicit choice rather than the default.
+    return frame:GetFrameLevel() + ((db and db.healPredictionFrameLevel) or 10)
 end
 
 function DF:UpdateAbsorb(frame, testIndex)
@@ -638,9 +571,7 @@ function DF:UpdateAbsorb(frame, testIndex)
 
     -- Get values - either from test data or real unit
     local maxHealth, absorbs
-    -- testIncomingPercent feeds the chained clamp: with the shield sitting after the
-    -- incoming heal, the heal's share of the bar is no longer available to it.
-    local isTestRender, testHealthPercent, testIncomingPercent = false, nil, nil
+    local isTestRender, testHealthPercent = false, nil
 
     if DF.testMode and testIndex ~= nil then
         -- testIndex may be a numeric index or a ready testData TABLE (the
@@ -651,7 +582,6 @@ function DF:UpdateAbsorb(frame, testIndex)
             absorbs = testData.absorbPercent * maxHealth
             isTestRender = true
             testHealthPercent = testData.healthPercent or 1
-            testIncomingPercent = testData.healPredictionPercent or 0
         else
             maxHealth = 100000
             absorbs = 0
@@ -663,7 +593,6 @@ function DF:UpdateAbsorb(frame, testIndex)
             absorbs = testData.absorbPercent * maxHealth
             isTestRender = true
             testHealthPercent = testData.healthPercent or 1
-            testIncomingPercent = testData.healPredictionPercent or 0
         else
             maxHealth = 100000
             absorbs = 0
@@ -691,10 +620,7 @@ function DF:UpdateAbsorb(frame, testIndex)
     -- only the absorb value (and possibly isClamped for ATTACHED modes)
     -- has changed. Skip ~90% of the function body.
     local customBar = frame.dfAbsorbBar
-    -- Diagnostic: did this call re-anchor, or short-circuit? Printed by /df debug zorder.
-    frame.dfAbsorbFastPath = false
     if customBar and customBar:IsShown() and not AbsorbLayoutStateChanged(frame, db) then
-        frame.dfAbsorbFastPath = true
         if mode == "ATTACHED" or mode == "ATTACHED_OVERFLOW" then
             -- Need the calculator for clamped state (secret, can't cache).
             -- The calculator object itself is already cached on the frame.
@@ -703,16 +629,9 @@ function DF:UpdateAbsorb(frame, testIndex)
             if isTestRender then
                 -- Test data: the calculator can only query the REAL unit (0 solo),
                 -- so derive the clamped value from the mock percentages instead.
-                -- ☠ MUST MATCH THE FULL PATH'S SUM. This is the fast path's own copy of
-                -- the clamp, and it kept the pre-chain formula when the full path learned
-                -- to subtract the incoming heal -- so the shield's length depended on
-                -- which path happened to run. One rule: chained behind a heal, the space
-                -- left is missing health MINUS that heal.
                 local curHealth = testHealthPercent * maxHealth
-                local incoming = (DF.ChainEndKey and DF.ChainEndKey(frame, db) ~= "fill")
-                    and (testIncomingPercent or 0) * maxHealth or 0
-                if curHealth + incoming + absorbs > maxHealth then
-                    attachedAbsorbs = math.max(0, maxHealth - curHealth - incoming)
+                if curHealth + absorbs > maxHealth then
+                    attachedAbsorbs = maxHealth - curHealth
                     isClamped = true
                 end
             elseif frame.absorbCalculator and unit and CreateUnitHealPredictionCalculator then
@@ -1009,20 +928,10 @@ function DF:UpdateAbsorb(frame, testIndex)
         
         -- Create/reuse the calculator (test data: derive from mock percentages
         -- instead — the calculator can only query the REAL unit, 0 when solo)
-        -- ☠ THE CLAMP HAS TO KNOW ABOUT THE HEAL PREDICTION NOW THAT THE ABSORB SITS AFTER
-        -- IT. While the shield started at the health fill it could occupy missing health
-        -- freely; chained behind the incoming heal, the space left to it is missing health
-        -- MINUS that heal. Without this the bar is allowed its full length from a later
-        -- start and simply runs off the end (reported 2026-08-14: "the absorb is now
-        -- breaking out of the bar").
-        local chained = DF.ChainEndKey and DF.ChainEndKey(frame, db) ~= "fill"
         if isTestRender then
             local curHealth = testHealthPercent * maxHealth
-            -- Preview values are plain numbers, so the arithmetic the live path defers to
-            -- the calculator is done here directly -- the same sum, not a second policy.
-            local incoming = chained and (testIncomingPercent or 0) * maxHealth or 0
-            if curHealth + incoming + absorbs > maxHealth then
-                attachedAbsorbs = math.max(0, maxHealth - curHealth - incoming)
+            if curHealth + absorbs > maxHealth then
+                attachedAbsorbs = maxHealth - curHealth
                 isClamped = true
             end
         elseif CreateUnitHealPredictionCalculator and unit then
@@ -1030,18 +939,9 @@ function DF:UpdateAbsorb(frame, testIndex)
                 frame.absorbCalculator = CreateUnitHealPredictionCalculator()
             end
             local calc = frame.absorbCalculator
-
-            -- Clamp mode, from Blizzard's UnitDamageAbsorbClampMode enum:
-            --   0 MissingHealth ................. missing health WITH incoming heals subtracted
-            --   1 MissingHealthWithoutIncomingHeals
-            --   2 MaximumHealth
-            -- ☠ 1 IS ONLY CORRECT FOR AN UNCHAINED BAR. It was right while the shield
-            -- started at the health fill and shared the prediction's span; once chained
-            -- behind the heal it hands the bar a length that no longer fits, and the
-            -- overrun is the visible result. 0 is the mode Blizzard's own raid frames
-            -- clamp by, and it keeps the secret arithmetic inside the calculator where it
-            -- belongs rather than doing it in Lua. The user setting still wins when set.
-            local clampMode = db.absorbBarAttachedClampMode or (chained and 0 or 1)
+            
+            -- Set clamp mode from settings (default to 1 = Missing Health)
+            local clampMode = db.absorbBarAttachedClampMode or 1
             if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
 
             -- Populate the calculator
@@ -1061,19 +961,13 @@ function DF:UpdateAbsorb(frame, testIndex)
         if db.absorbBarShowOvershield then
             -- ★ THE GLOW NEEDS ITS OWN HOST, ABOVE THE WHOLE BAND.
             -- It used to be a texture created straight on frame.healthBar (frame+3). A
-            -- draw layer only orders textures WITHIN one frame, so against the heal
-            -- prediction -- a separate frame at +12 -- the level won and the glow was
-            -- buried no matter which OVERLAY sublevel it was given. "Is the overshield
-            -- above or below the incoming heal?" had a structural answer: below, always
-            -- (Krathe, 2026-08-14).
-            -- Blizzard puts the equivalent (overAbsorbGlow) at ARTWORK sublevel 2, above
-            -- the prediction and the absorb both -- it is the alert that the shield has
-            -- run past the bar, so it is the one element here that must win.
-            -- ⚠ The host is anchored to the HEALTH BAR, and every glow anchor below names
-            -- frame.healthBar explicitly, so re-parenting the texture moves nothing.
-            -- ☠ Sits at +13, one under the frame border, which moved to +14 to make room:
-            -- there is no integer between the prediction at +12 and a border at +13, and
-            -- the border has to keep framing everything.
+            -- draw layer only orders textures WITHIN one frame, so against any bar that
+            -- is a separate frame the level wins and the glow was buried whatever OVERLAY
+            -- sublevel it was given. Blizzard puts the equivalent (overAbsorbGlow) at
+            -- ARTWORK sublevel 2, above the prediction and the absorb both: it is the
+            -- alert that the shield ran past the bar, so it is the one element that wins.
+            -- ⚠ Every glow anchor below names frame.healthBar explicitly, so re-parenting
+            -- the texture moves nothing.
             if not frame.dfOvershieldHost then
                 frame.dfOvershieldHost = CreateFrame("Frame", nil, frame)
                 frame.dfOvershieldHost:SetAllPoints(frame.healthBar)
@@ -1228,36 +1122,30 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- when the frame border is translucent (so the shield doesn't show through it);
         -- it is 0 for an opaque/absent border. The PRIMARY axis keeps its sized extent.
         local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
-        -- ★ CHAIN, don't restack: hang off the last visible heal-prediction segment so the
-        -- shield sits BESIDE the incoming heal instead of on top of it (Blizzard order:
-        -- health -> heals -> absorb). Falls back to the health fill when no heal is
-        -- inbound, so the no-heal case is byte-identical to before. See
-        -- DF:ResolveAbsorbChainAnchor for why this is a texture and not a computed offset.
-        local chainTex = DF:ResolveAbsorbChainAnchor(frame, db) or healthFillTexture
         if healthOrient == "HORIZONTAL" then
             customBar:SetOrientation("HORIZONTAL")
             customBar:SetReverseFill(false)
             customBar:SetWidth(barWidth)
-            customBar:SetPoint("TOPLEFT", chainTex, "TOPRIGHT", 0, -edgeInset)
-            customBar:SetPoint("BOTTOMLEFT", chainTex, "BOTTOMRIGHT", 0, edgeInset)
+            customBar:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, -edgeInset)
+            customBar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, edgeInset)
         elseif healthOrient == "HORIZONTAL_INV" then
             customBar:SetOrientation("HORIZONTAL")
             customBar:SetReverseFill(true)
             customBar:SetWidth(barWidth)
-            customBar:SetPoint("TOPRIGHT", chainTex, "TOPLEFT", 0, -edgeInset)
-            customBar:SetPoint("BOTTOMRIGHT", chainTex, "BOTTOMLEFT", 0, edgeInset)
+            customBar:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, -edgeInset)
+            customBar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, edgeInset)
         elseif healthOrient == "VERTICAL" then
             customBar:SetOrientation("VERTICAL")
             customBar:SetReverseFill(false)
             customBar:SetHeight(barHeight)
-            customBar:SetPoint("BOTTOMLEFT", chainTex, "TOPLEFT", edgeInset, 0)
-            customBar:SetPoint("BOTTOMRIGHT", chainTex, "TOPRIGHT", -edgeInset, 0)
+            customBar:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", edgeInset, 0)
+            customBar:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", -edgeInset, 0)
         elseif healthOrient == "VERTICAL_INV" then
             customBar:SetOrientation("VERTICAL")
             customBar:SetReverseFill(true)
             customBar:SetHeight(barHeight)
-            customBar:SetPoint("TOPLEFT", chainTex, "BOTTOMLEFT", edgeInset, 0)
-            customBar:SetPoint("TOPRIGHT", chainTex, "BOTTOMRIGHT", -edgeInset, 0)
+            customBar:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", edgeInset, 0)
+            customBar:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", -edgeInset, 0)
         end
         
         -- Let WoW's StatusBar handle the percentage calculation internally
@@ -1302,20 +1190,10 @@ function DF:UpdateAbsorb(frame, testIndex)
         
         -- Create/reuse the calculator (test data: derive from mock percentages
         -- instead — the calculator can only query the REAL unit, 0 when solo)
-        -- ☠ THE CLAMP HAS TO KNOW ABOUT THE HEAL PREDICTION NOW THAT THE ABSORB SITS AFTER
-        -- IT. While the shield started at the health fill it could occupy missing health
-        -- freely; chained behind the incoming heal, the space left to it is missing health
-        -- MINUS that heal. Without this the bar is allowed its full length from a later
-        -- start and simply runs off the end (reported 2026-08-14: "the absorb is now
-        -- breaking out of the bar").
-        local chained = DF.ChainEndKey and DF.ChainEndKey(frame, db) ~= "fill"
         if isTestRender then
             local curHealth = testHealthPercent * maxHealth
-            -- Preview values are plain numbers, so the arithmetic the live path defers to
-            -- the calculator is done here directly -- the same sum, not a second policy.
-            local incoming = chained and (testIncomingPercent or 0) * maxHealth or 0
-            if curHealth + incoming + absorbs > maxHealth then
-                attachedAbsorbs = math.max(0, maxHealth - curHealth - incoming)
+            if curHealth + absorbs > maxHealth then
+                attachedAbsorbs = maxHealth - curHealth
                 isClamped = true
             end
         elseif CreateUnitHealPredictionCalculator and unit then
@@ -1323,18 +1201,9 @@ function DF:UpdateAbsorb(frame, testIndex)
                 frame.absorbCalculator = CreateUnitHealPredictionCalculator()
             end
             local calc = frame.absorbCalculator
-
-            -- Clamp mode, from Blizzard's UnitDamageAbsorbClampMode enum:
-            --   0 MissingHealth ................. missing health WITH incoming heals subtracted
-            --   1 MissingHealthWithoutIncomingHeals
-            --   2 MaximumHealth
-            -- ☠ 1 IS ONLY CORRECT FOR AN UNCHAINED BAR. It was right while the shield
-            -- started at the health fill and shared the prediction's span; once chained
-            -- behind the heal it hands the bar a length that no longer fits, and the
-            -- overrun is the visible result. 0 is the mode Blizzard's own raid frames
-            -- clamp by, and it keeps the secret arithmetic inside the calculator where it
-            -- belongs rather than doing it in Lua. The user setting still wins when set.
-            local clampMode = db.absorbBarAttachedClampMode or (chained and 0 or 1)
+            
+            -- Set clamp mode from settings (default to 1 = Missing Health)
+            local clampMode = db.absorbBarAttachedClampMode or 1
             if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
 
             -- Populate the calculator
@@ -1365,36 +1234,30 @@ function DF:UpdateAbsorb(frame, testIndex)
         -- shield matches the fill with no sliver/gap. edgeInset insets that axis ONLY
         -- when the frame border is translucent (so the shield doesn't show through it).
         local edgeInset = DF:GetAbsorbEdgeInset(frame, db)
-        -- ★ CHAIN, don't restack: hang off the last visible heal-prediction segment so the
-        -- shield sits BESIDE the incoming heal instead of on top of it (Blizzard order:
-        -- health -> heals -> absorb). Falls back to the health fill when no heal is
-        -- inbound, so the no-heal case is byte-identical to before. See
-        -- DF:ResolveAbsorbChainAnchor for why this is a texture and not a computed offset.
-        local chainTex = DF:ResolveAbsorbChainAnchor(frame, db) or healthFillTexture
         if healthOrient == "HORIZONTAL" then
             customBar:SetOrientation("HORIZONTAL")
             customBar:SetReverseFill(false)
             customBar:SetWidth(barWidth)
-            customBar:SetPoint("TOPLEFT", chainTex, "TOPRIGHT", 0, -edgeInset)
-            customBar:SetPoint("BOTTOMLEFT", chainTex, "BOTTOMRIGHT", 0, edgeInset)
+            customBar:SetPoint("TOPLEFT", healthFillTexture, "TOPRIGHT", 0, -edgeInset)
+            customBar:SetPoint("BOTTOMLEFT", healthFillTexture, "BOTTOMRIGHT", 0, edgeInset)
         elseif healthOrient == "HORIZONTAL_INV" then
             customBar:SetOrientation("HORIZONTAL")
             customBar:SetReverseFill(true)
             customBar:SetWidth(barWidth)
-            customBar:SetPoint("TOPRIGHT", chainTex, "TOPLEFT", 0, -edgeInset)
-            customBar:SetPoint("BOTTOMRIGHT", chainTex, "BOTTOMLEFT", 0, edgeInset)
+            customBar:SetPoint("TOPRIGHT", healthFillTexture, "TOPLEFT", 0, -edgeInset)
+            customBar:SetPoint("BOTTOMRIGHT", healthFillTexture, "BOTTOMLEFT", 0, edgeInset)
         elseif healthOrient == "VERTICAL" then
             customBar:SetOrientation("VERTICAL")
             customBar:SetReverseFill(false)
             customBar:SetHeight(barHeight)
-            customBar:SetPoint("BOTTOMLEFT", chainTex, "TOPLEFT", edgeInset, 0)
-            customBar:SetPoint("BOTTOMRIGHT", chainTex, "TOPRIGHT", -edgeInset, 0)
+            customBar:SetPoint("BOTTOMLEFT", healthFillTexture, "TOPLEFT", edgeInset, 0)
+            customBar:SetPoint("BOTTOMRIGHT", healthFillTexture, "TOPRIGHT", -edgeInset, 0)
         elseif healthOrient == "VERTICAL_INV" then
             customBar:SetOrientation("VERTICAL")
             customBar:SetReverseFill(true)
             customBar:SetHeight(barHeight)
-            customBar:SetPoint("TOPLEFT", chainTex, "BOTTOMLEFT", edgeInset, 0)
-            customBar:SetPoint("TOPRIGHT", chainTex, "BOTTOMRIGHT", -edgeInset, 0)
+            customBar:SetPoint("TOPLEFT", healthFillTexture, "BOTTOMLEFT", edgeInset, 0)
+            customBar:SetPoint("TOPRIGHT", healthFillTexture, "BOTTOMRIGHT", -edgeInset, 0)
         end
         
         -- Let WoW's StatusBar handle the percentage calculation internally
@@ -2253,7 +2116,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- stored value was always the "SANDWICH" default. Two of the three branches produced
     -- the SAME +1 anyway, and the third (+14) was unreachable. Collapsed; nothing moved.
     local healthLevel = frame.healthBar:GetFrameLevel()
-    -- ☠ The ladder's slot (healPredictionFrameLevel, default 12), not healthLevel + 1.
+    -- ☠ The ladder's slot (healPredictionFrameLevel, default 10), not healthLevel + 1.
     -- The FLOATING branch below already read the key; every other branch used +1, so the
     -- same bar sat eight levels apart depending only on mode.
     local predictionLevel = DF:ResolveHealPredictionBarLevel(frame, db) or (healthLevel + 1)
@@ -2291,7 +2154,7 @@ function DF:UpdateHealPrediction(frame, testIndex)
         -- SANDWICH, which selected exactly this branch; the other one was unreachable.)
         bar:SetFrameStrata(frame:GetFrameStrata())
 
-        bar:SetFrameLevel(frame:GetFrameLevel() + (db.healPredictionFrameLevel or 12))
+        bar:SetFrameLevel(frame:GetFrameLevel() + (db.healPredictionFrameLevel or 10))
         
         -- Dimensions & Orientation
         local orientation = db.healPredictionOrientation or "HORIZONTAL"
@@ -2454,29 +2317,6 @@ function DF:UpdateHealPrediction(frame, testIndex)
         elseif frame.dfHealPredictionBar2 then
             frame.dfHealPredictionBar2:Hide()
         end
-    end
-
-    -- ☠ THE ABSORB HANGS OFF THESE SEGMENTS NOW (DF:ResolveAbsorbChainAnchor). The layout
-    -- engine follows a segment's RESIZE on its own, but it cannot re-pick WHICH texture to
-    -- follow -- so when the end of the chain changes the absorb has to be re-anchored, or
-    -- it stays pinned to a hidden segment's stale rect and floats with a gap in front.
-    -- Tracks WHICH segment is the end (2 / 1 / fill), not merely "is anything shown":
-    -- segment 2 appearing while segment 1 was already up moves the end without changing
-    -- any yes/no, and that case would otherwise leave the absorb on top of segment 2.
-    -- ⚠ EDGE-TRIGGERED. The prediction repaints on every UNIT_HEAL_PREDICTION and the
-    -- absorb does not; an unconditional call would redo the absorb several times a second.
-    -- ⚠ testIndex IS FORWARDED. The preview's absorb amount is a PARAMETER of this same
-    -- live function, so dropping it here would repaint a test frame's shield from live
-    -- (zero) values and blank it. See DF:UpdateAbsorb's test path.
-    -- ☠ ChainEndKey, not a hand-rolled copy of it. This used to recompute the same idea
-    -- inline and stamp the answer on the frame, which is precisely how the cache and the
-    -- resolver ended up disagreeing. One function, called from all three places.
-    -- This is now only a PROMPT -- the cache re-derives the key itself, so a missed call
-    -- here costs latency, not correctness.
-    local chainEnd = DF.ChainEndKey and DF.ChainEndKey(frame, db) or "fill"
-    if frame.dfHealPredChainEnd ~= chainEnd then
-        frame.dfHealPredChainEnd = chainEnd
-        if DF.UpdateAbsorb then DF:UpdateAbsorb(frame, testIndex) end
     end
 end
 
