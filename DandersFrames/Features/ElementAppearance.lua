@@ -1379,7 +1379,7 @@ function DF:ForEachAuraDesignerAlphaHost(frame, fn, retryDenied)
                 if retryDenied and h then h._dfAlphaHostDeniedVer = nil end
                 local f = (h and not denied and h.GetAlphaHost) and h:GetAlphaHost() or nil
                 if f then
-                    local ok, err = pcall(fn, f, h._dfADBaseAlpha or 1.0)
+                    local ok, err = pcall(fn, f, h._dfADBaseAlpha or 1.0, h)
                     if not ok then
                         -- ☠ A REFUSAL IS NOT EVIDENCE THE HOST IS UNWRITABLE, and latching
                         -- on it alone is what froze indicators at the FADE value.
@@ -1404,6 +1404,19 @@ function DF:ForEachAuraDesignerAlphaHost(frame, fn, retryDenied)
                         local okPlain = pcall(f.SetAlpha, f, h._dfADBaseAlpha or 1.0)
                         if not okPlain then
                             h._dfAlphaHostDeniedVer = ver
+                            -- ★ RESTRICTION-LIFT RE-QUEUE (EllesmereUI's shape). A host that
+                            -- refuses even a plain write is restricted RIGHT NOW — for a
+                            -- slot host that means auras are secret, i.e. combat — and the
+                            -- range-edge retry can be consumed while that holds (edge fires
+                            -- mid-fight, write refused, re-latched, and no second edge comes
+                            -- after combat because the unit is already in range; field report
+                            -- 2026-08-14, "enter combat while someone is out of range").
+                            -- So remember the FRAME and retry its walk when combat drops,
+                            -- which is exactly when writability returns. The regen handler
+                            -- below clears the entry before retrying; a still-refused host
+                            -- lands back here and re-queues itself.
+                            DF._adDeniedHostFrames = DF._adDeniedHostFrames or {}
+                            DF._adDeniedHostFrames[frame] = true
                         end
                         -- Name the method that was refused, not just the error: whether
                         -- PLAIN SetAlpha is rejected or only the secret-aware setter is the
@@ -1435,7 +1448,7 @@ function DF:ForEachAuraDesignerAlphaHost(frame, fn, retryDenied)
     end
 end
 
-function DF:UpdateAuraDesignerAppearance(frame)
+function DF:UpdateAuraDesignerAppearance(frame, forceRetryDenied)
     if not IsDandersFrame(frame) then return end
 
     -- 12.1: AD indicators are factory containers; fade each container's plain
@@ -1464,6 +1477,8 @@ function DF:UpdateAuraDesignerAppearance(frame)
     -- ⚠ Only stamped for a PLAIN boolean. GetInRange passes a secret through for classes
     -- with no friendly spells, and comparing those is not ours to do — a secret range just
     -- keeps the existing latch behaviour rather than forcing a retry every pass.
+    -- `forceRetryDenied` is the restriction-lift re-queue's handle on the same machinery:
+    -- combat end is a WRITABILITY edge, not a range edge, so it arrives via parameter.
     local rangeEdge = false
     if not (issecretvalue and issecretvalue(inRange)) then
         local now = inRange and true or false
@@ -1471,19 +1486,34 @@ function DF:UpdateAuraDesignerAppearance(frame)
         frame._dfADLastInRange = now
     end
 
-    DF:ForEachAuraDesignerAlphaHost(frame, function(f, base)
-        if oorOn then
+    DF:ForEachAuraDesignerAlphaHost(frame, function(f, base, h)
+        -- ☠ SLOT-BACKED HOSTS TAKE BASE ONLY, NEVER THE FADE. Their range fade is the
+        -- slot OWNER host's job (below) — the walk writing fades here too meant the two
+        -- multiplied (0.2 × 0.2 = the "super faded" field report), and a fade written
+        -- out of combat could strand when combat made the host unwritable. The header
+        -- above the slot-owner block claims walk writes on these are "refused" — that
+        -- is only true IN COMBAT; out of combat they land, which is how the fade got in.
+        -- EllesmereUI reached the same rule from the same bug: never write fades into
+        -- a Blizzard button's subtree; fade the DF-owned ancestor and let it cascade.
+        -- Base still applies (it is per-indicator and the cascade cannot carry it),
+        -- and an unconditional base write self-repairs any fade stranded before this fix.
+        if h and h.button then
+            f:SetAlpha(base)
+        elseif oorOn then
             ApplyOORAlpha(f, inRange, base, oorAlpha)
         else
             f:SetAlpha(base)
         end
-    end, rangeEdge)
+    end, rangeEdge or forceRetryDenied)
 
-    -- ★ SLOT-BACKED INDICATORS FADE HERE, not in the walk above. Their per-button alpha
-    -- host lives inside the aura button and is forbidden to tainted code, so every write
-    -- the walk attempts on one is refused. The slot owner's DF-created anchor frame sits
-    -- ABOVE the container, is ours, and multiplies its alpha down over every slot — one
-    -- legal write covers all of them. Frame-wide is the correct grain for range anyway.
+    -- ★ SLOT-BACKED INDICATORS FADE HERE, not in the walk above — and now BY CHOICE,
+    -- not by refusal. This header used to claim every walk write on a per-slot host is
+    -- refused; that is only true in combat, and the out-of-combat writes that DID land
+    -- are how fades ended up on both layers at once (multiplied) and stranded across
+    -- combat. The walk now writes slot hosts base-only; range fade lives here alone.
+    -- The slot owner's DF-created anchor frame sits ABOVE the container, is ours, and
+    -- multiplies its alpha down over every slot — one legal write covers all of them.
+    -- Frame-wide is the correct grain for range anyway.
     -- No-op on frames that never took a shared slot (accessor returns nil).
     local slotHost = DF.AuraContainer and DF.AuraContainer.GetSlotOwnerAlphaHost
         and DF.AuraContainer:GetSlotOwnerAlphaHost(frame)
@@ -1495,6 +1525,33 @@ function DF:UpdateAuraDesignerAppearance(frame)
         end
     end
 end
+
+-- ============================================================
+-- RESTRICTION-LIFT RETRY
+-- Combat end is a writability edge for slot-backed alpha hosts
+-- ============================================================
+
+-- ★ THE OTHER EDGE THE LATCH NEEDS. The range-edge retry in
+-- UpdateAuraDesignerAppearance fires when the VALUE we want changes; this fires when
+-- the HOST becomes writable again. A denied host queued itself in _adDeniedHostFrames
+-- (see the walk's failure handler); combat dropping is when the secret-aura
+-- restriction lifts, so retry exactly those frames' walks then. Entries are cleared
+-- BEFORE the retry — a still-refused host re-queues itself from the failure handler,
+-- so a persistent restriction keeps costing one failed call per combat, not per tick.
+-- ⚠ A frame in test mode skips its retry (UpdateAuraDesignerAppearance's own guard);
+-- leaving test mode drives a full refresh anyway, so nothing is lost.
+local adRegenFrame = CreateFrame("Frame")
+adRegenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+adRegenFrame:SetScript("OnEvent", function()
+    local queued = DF._adDeniedHostFrames
+    if not queued or not next(queued) then return end
+    DF._adDeniedHostFrames = nil
+    for frame in pairs(queued) do
+        if frame.dfIsDandersFrame then
+            DF:UpdateAuraDesignerAppearance(frame, true)
+        end
+    end
+end)
 
 -- ============================================================
 -- FRAME-LEVEL APPEARANCE (for non-oorEnabled mode)
