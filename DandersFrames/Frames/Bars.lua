@@ -1069,6 +1069,11 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- 0 ("None") and 2 ("Max Health") pass through untouched.
             local clampMode = db.absorbBarAttachedClampMode or 1
             if clampMode == 1 and DF.ChainEndKey(frame, db) ~= "fill" then clampMode = 0 end
+            -- DF's "None (no clamping)" stores 0 — which in BLIZZARD's enum is
+            -- MissingHealth-with-heals, the HARSHEST clamp, the opposite of the label.
+            -- The enum has no true "off"; MaximumHealth (2) is the nearest thing (the
+            -- bar can never draw past max anyway), so "None" maps there.
+            if (db.absorbBarAttachedClampMode or 1) == 0 then clampMode = 2 end
             if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
 
             -- Populate the calculator
@@ -1364,6 +1369,11 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- 0 ("None") and 2 ("Max Health") pass through untouched.
             local clampMode = db.absorbBarAttachedClampMode or 1
             if clampMode == 1 and DF.ChainEndKey(frame, db) ~= "fill" then clampMode = 0 end
+            -- DF's "None (no clamping)" stores 0 — which in BLIZZARD's enum is
+            -- MissingHealth-with-heals, the HARSHEST clamp, the opposite of the label.
+            -- The enum has no true "off"; MaximumHealth (2) is the nearest thing (the
+            -- bar can never draw past max anyway), so "None" maps there.
+            if (db.absorbBarAttachedClampMode or 1) == 0 then clampMode = 2 end
             if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
 
             -- Populate the calculator
