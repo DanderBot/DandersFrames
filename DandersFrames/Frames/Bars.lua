@@ -654,10 +654,12 @@ function DF:UpdateAbsorb(frame, testIndex)
 
     -- Get values - either from test data or real unit
     local maxHealth, absorbs
-    -- testIncomingPercent / testReducedPct feed the clamp: chained behind the incoming
-    -- heal, the space left to the shield is missing health minus that heal -- and the bar
+    -- testIncomingPercent / testReducedPct / testHealAbsorbPct feed the clamp: chained
+    -- behind the incoming heal, the space left to the shield is missing health minus the
+    -- NET heal (the consuming heal absorb eats the first share of it) -- and the bar
     -- physically ends at the reduced max, so the reduced share is never available either.
-    local isTestRender, testHealthPercent, testIncomingPercent, testReducedPct = false, nil, nil, nil
+    local isTestRender, testHealthPercent, testIncomingPercent, testReducedPct, testHealAbsorbPct =
+        false, nil, nil, nil, nil
 
     if DF.testMode and testIndex ~= nil then
         -- testIndex may be a numeric index or a ready testData TABLE (the
@@ -670,6 +672,7 @@ function DF:UpdateAbsorb(frame, testIndex)
             testHealthPercent = testData.healthPercent or 1
             testIncomingPercent = testData.healPredictionPercent or 0
             testReducedPct = testData.reducedMaxPct or 0
+            testHealAbsorbPct = testData.healAbsorbPercent or 0
         else
             maxHealth = 100000
             absorbs = 0
@@ -683,6 +686,7 @@ function DF:UpdateAbsorb(frame, testIndex)
             testHealthPercent = testData.healthPercent or 1
             testIncomingPercent = testData.healPredictionPercent or 0
             testReducedPct = testData.reducedMaxPct or 0
+            testHealAbsorbPct = testData.healAbsorbPercent or 0
         else
             maxHealth = 100000
             absorbs = 0
@@ -736,7 +740,8 @@ function DF:UpdateAbsorb(frame, testIndex)
                         and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
                     local usable = maxHealth * (1 - reducedShare)
                     local curHealth = testHealthPercent * maxHealth
-                    local incoming = (DF.ChainEndKey(frame, db) ~= "fill") and (testIncomingPercent or 0) * maxHealth or 0
+                    local incoming = (DF.ChainEndKey(frame, db) ~= "fill")
+                        and math.max(0, (testIncomingPercent or 0) - (testHealAbsorbPct or 0)) * maxHealth or 0
                     local available = usable - curHealth - incoming
                     if absorbs > available then
                         attachedAbsorbs = math.max(0, available)
@@ -1068,7 +1073,8 @@ function DF:UpdateAbsorb(frame, testIndex)
                     and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
                 local usable = maxHealth * (1 - reducedShare)
                 local curHealth = testHealthPercent * maxHealth
-                local incoming = (DF.ChainEndKey(frame, db) ~= "fill") and (testIncomingPercent or 0) * maxHealth or 0
+                local incoming = (DF.ChainEndKey(frame, db) ~= "fill")
+                        and math.max(0, (testIncomingPercent or 0) - (testHealAbsorbPct or 0)) * maxHealth or 0
                 local available = usable - curHealth - incoming
                 if absorbs > available then
                     attachedAbsorbs = math.max(0, available)
@@ -1100,6 +1106,10 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- bar can never draw past max anyway), so "None" maps there.
             if (db.absorbBarAttachedClampMode or 1) == 0 then clampMode = 2 end
             if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
+            -- Same heal-absorb netting as the prediction and the wash (mode 0), so the
+            -- shield's missing-health clamp measures against the NET heal — the three
+            -- calculators must agree on one arithmetic or the bars disagree on screen.
+            if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(0) end
 
             -- Populate the calculator
             UnitGetDetailedHealPrediction(unit, nil, calc)
@@ -1382,7 +1392,8 @@ function DF:UpdateAbsorb(frame, testIndex)
                     and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
                 local usable = maxHealth * (1 - reducedShare)
                 local curHealth = testHealthPercent * maxHealth
-                local incoming = (DF.ChainEndKey(frame, db) ~= "fill") and (testIncomingPercent or 0) * maxHealth or 0
+                local incoming = (DF.ChainEndKey(frame, db) ~= "fill")
+                        and math.max(0, (testIncomingPercent or 0) - (testHealAbsorbPct or 0)) * maxHealth or 0
                 local available = usable - curHealth - incoming
                 if absorbs > available then
                     attachedAbsorbs = math.max(0, available)
@@ -1414,6 +1425,10 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- bar can never draw past max anyway), so "None" maps there.
             if (db.absorbBarAttachedClampMode or 1) == 0 then clampMode = 2 end
             if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
+            -- Same heal-absorb netting as the prediction and the wash (mode 0), so the
+            -- shield's missing-health clamp measures against the NET heal — the three
+            -- calculators must agree on one arithmetic or the bars disagree on screen.
+            if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(0) end
 
             -- Populate the calculator
             UnitGetDetailedHealPrediction(unit, nil, calc)
@@ -1765,7 +1780,12 @@ function DF:UpdateHealAbsorb(frame, testIndex)
         local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex)
         if testData then
             maxHealth = testData.maxHealth
-            healAbsorb = testData.healAbsorbPercent * maxHealth
+            -- Netted against pending heals, mirroring the live calculator's
+            -- HealAbsorbMode 0 ("reduce heal absorb values by incoming heals, and vice
+            -- versa, clamping to zero"). A wash fully covered by an incoming heal shows
+            -- nothing -- that healing is already spoken for and will land.
+            healAbsorb = math.max(0, (testData.healAbsorbPercent or 0)
+                - (testData.healPredictionPercent or 0)) * maxHealth
         else
             maxHealth = 100000
             healAbsorb = 0
@@ -1774,7 +1794,12 @@ function DF:UpdateHealAbsorb(frame, testIndex)
         local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true)  -- true = raid
         if testData then
             maxHealth = testData.maxHealth
-            healAbsorb = testData.healAbsorbPercent * maxHealth
+            -- Netted against pending heals, mirroring the live calculator's
+            -- HealAbsorbMode 0 ("reduce heal absorb values by incoming heals, and vice
+            -- versa, clamping to zero"). A wash fully covered by an incoming heal shows
+            -- nothing -- that healing is already spoken for and will land.
+            healAbsorb = math.max(0, (testData.healAbsorbPercent or 0)
+                - (testData.healPredictionPercent or 0)) * maxHealth
         else
             maxHealth = 100000
             healAbsorb = 0
@@ -1932,10 +1957,16 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             
             -- Set clamp mode: 0 = CurrentHealth (don't go past 0 health)
             if calc.SetHealAbsorbClampMode then calc:SetHealAbsorbClampMode(0) end
-            -- Set heal absorb mode: 1 = Total (return raw absorb values without
-            -- subtracting incoming heals). Default mode 0 reduces heal absorbs by
-            -- incoming heal amount, causing the bar to show less than actual absorb.
-            if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(1) end
+            -- Heal absorb mode 0, ReducedByIncomingHeals (Krathe, 2026-08-14: "the heal
+            -- absorb will indeed eat the inc heal"). The engine nets the wash against
+            -- pending heals and vice versa, clamping at zero — a wash fully covered by
+            -- an incoming heal shows nothing, because that healing is spoken for and
+            -- WILL land. ⚠ This was 1 (Total) by an earlier deliberate choice whose
+            -- comment called the netting "showing less than actual absorb" — that is
+            -- the netting working, not a bug: the un-netted wash overstates how much
+            -- future healing will be eaten. Mode 0 is also the engine default the
+            -- heal PREDICTION has ridden all along, so the two sides now agree.
+            if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(0) end
             
             -- Populate the calculator
             UnitGetDetailedHealPrediction(unit, nil, calc)
@@ -2179,7 +2210,11 @@ function DF:UpdateHealPrediction(frame, testIndex)
         maxHealth = (testData and testData.maxHealth) or 100000
         local healthPct = (testData and testData.healthPercent) or 0.75
         local healPct = (testData and testData.healPredictionPercent) or 0
-        local total = healPct * maxHealth   -- safe: nothing is secret in test
+        -- Net of the unit's consuming heal absorb, mirroring the live calculator's
+        -- HealAbsorbMode 0: the absorb eats the first points of incoming healing, so
+        -- only the remainder is a real promise of future health.
+        local haPct = (testData and testData.healAbsorbPercent) or 0
+        local total = math.max(0, healPct - haPct) * maxHealth   -- safe: nothing is secret in test
         -- Mirrors SetIncomingHealClampMode. With overheal off the calculator would
         -- never report more than the missing health, so neither may the preview;
         -- with it on the overhang is the point and the bar is parented to the frame
@@ -2231,14 +2266,21 @@ function DF:UpdateHealPrediction(frame, testIndex)
             
             local calc = frame.healPredictionCalculator
             
-            -- Configure the calculator based on settings
-            -- Overflow always at 100% (1.0)
-            -- Show Overheal checked = clamp to Missing Health (1)
-            -- Show Overheal unchecked = clamp to Max Health (0)
+            -- Configure the calculator based on settings. Enum, straight from the API
+            -- docs (the comment here used to state it BACKWARDS — the code was right):
+            --   UnitIncomingHealClampMode 0 = MissingHealth, 1 = MaximumHealth.
+            -- Show Overheal ON  -> 1 (MaximumHealth: the heal may exceed missing health)
+            -- Show Overheal OFF -> 0 (MissingHealth: capped at what fits)
             local clampMode = db.healPredictionShowOverheal and 1 or 0
-            
+
             calc:SetIncomingHealClampMode(clampMode)
             calc:SetIncomingHealOverflowPercent(1.0)  -- Always 100%
+            -- Heals NET of consuming heal absorbs (mode 0, ReducedByIncomingHeals).
+            -- This IS the engine default the bar has ridden all along — pinned
+            -- explicitly so it can never drift, and so the heal-absorb bar (now also
+            -- mode 0) provably agrees with it. The netting is engine-side, where
+            -- arithmetic on secret values is legal.
+            if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(0) end
             
             -- SPLIT needs the per-source breakdown, so query with the player as
             -- the healer for MINE/OTHERS/SPLIT.
