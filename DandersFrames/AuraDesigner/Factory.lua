@@ -874,11 +874,14 @@ local function pandemicCapable()
     return (AC and AC.HasPandemic and AC.HasPandemic()) and true or false
 end
 
--- Does this health-bar config ask for a second, pandemic-window colour?
--- ☠ HEALTH BAR ONLY. The pandemic wash has to draw OVER its own base wash, which costs a
--- frame level, and only the health-bar band has spare levels — the background band is one
--- level wide (see the note in syncBackgroundTint). Offering it there would render a
--- control that silently loses to whichever buff was cast first.
+-- Does this config ask for a second, pandemic-window colour?
+-- ⚠ NOT HEALTH-BAR ONLY ANY MORE, and this header said it was long after it stopped being
+-- true. Health Bar Color, Background Color and Border all route through here. The original
+-- objection was that the second wash needs a FRAME LEVEL to draw over its own base, and
+-- only the health-bar band had one spare — that was answered by putting both washes on the
+-- SAME BUTTON as sibling regions ordered by draw sublevel, which costs no level at all
+-- (see the PANDEMIC COVER note in Frames/AuraContainer.lua). The constraint was real; the
+-- solution removed it, and only the comment stayed behind.
 local function wantsPandemicColor(cfg)
     return (cfg and cfg.pandemicColorEnabled and cfg.pandemicColor and pandemicCapable()) and true or false
 end
@@ -5406,6 +5409,16 @@ function Factory:SyncFrame(frame)
                 function(key, cfg, map, mine, asMissing, sublevel)
                     return syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, asMissing, sublevel)
                 end)
+            -- ☠ AND RELEASE WHEN THE SYNC SEATED NOTHING. `tints` being non-empty says
+            -- only that something was CONFIGURED; syncTintFamily can still keep zero
+            -- containers (every tint a non-winner). The release lived in the else-branch
+            -- alone, so that case left a shown, empty anchor frame parked over
+            -- frame.background for the rest of the session — invisible, but a frame WoW
+            -- never frees, per unit, and it is the same emptiness the else-branch cleans.
+            if not next(bg) then
+                store.backgroundOrder = nil
+                releaseBgAnchor(store)
+            end
         else
             -- No background tints configured → the containers are gone; drop the anchor too.
             teardownExcept(bg, nil)

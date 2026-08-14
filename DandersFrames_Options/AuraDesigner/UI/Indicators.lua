@@ -1011,6 +1011,13 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             AddPandemicColor(g, parent, proxy, RPL)
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                -- ⚠ AND REBUILD THE PAGE. The pandemic pair above hides on exactly this
+                -- flag (AddPandemicColor's hideOn), and nothing else on this card asks for
+                -- a rebuild -- so the controls stayed on screen after Show When Missing was
+                -- ticked, letting a user enable a pandemic colour on a config the renderer
+                -- then drops, and vanishing on whatever rebuilt the page next. The pandemic
+                -- checkbox's own callback already does this, for the same reason.
+                DF:AuraDesigner_RefreshPage()
             end)
             g:AddWidget(swmCheck, 28)
             GateSWM(swmCheck)
@@ -1070,6 +1077,13 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             AddPandemicColor(g, parent, proxy, RPL)
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                -- ⚠ AND REBUILD THE PAGE. The pandemic pair above hides on exactly this
+                -- flag (AddPandemicColor's hideOn), and nothing else on this card asks for
+                -- a rebuild -- so the controls stayed on screen after Show When Missing was
+                -- ticked, letting a user enable a pandemic colour on a config the renderer
+                -- then drops, and vanishing on whatever rebuilt the page next. The pandemic
+                -- checkbox's own callback already does this, for the same reason.
+                DF:AuraDesigner_RefreshPage()
             end)
             g:AddWidget(swmCheck, 28)
             GateSWM(swmCheck)
@@ -1107,6 +1121,13 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             AddPandemicColor(g, parent, proxy, RPL)
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                -- ⚠ AND REBUILD THE PAGE. The pandemic pair above hides on exactly this
+                -- flag (AddPandemicColor's hideOn), and nothing else on this card asks for
+                -- a rebuild -- so the controls stayed on screen after Show When Missing was
+                -- ticked, letting a user enable a pandemic colour on a config the renderer
+                -- then drops, and vanishing on whatever rebuilt the page next. The pandemic
+                -- checkbox's own callback already does this, for the same reason.
+                DF:AuraDesigner_RefreshPage()
             end)
             g:AddWidget(swmCheck, 28)
             GateSWM(swmCheck)

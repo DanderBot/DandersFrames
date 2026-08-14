@@ -1159,9 +1159,14 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- bar can never draw past max anyway), so "None" maps there.
             if (db.absorbBarAttachedClampMode or 1) == 0 then clampMode = 2 end
             if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
-            -- Same heal-absorb netting as the prediction and the wash (mode 0), so the
-            -- shield's missing-health clamp measures against the NET heal — the three
-            -- calculators must agree on one arithmetic or the bars disagree on screen.
+            -- Same heal-absorb netting as the PREDICTION (mode 0), so the shield's
+            -- missing-health clamp measures against the NET heal.
+            -- ⚠ NOT "and the wash". The wash runs mode 1 (Total) on purpose — the netting
+            -- is ASYMMETRIC, and netting both sides guarantees one is always zero (see the
+            -- note on the heal-absorb calculator). This comment claimed all three agreed
+            -- on mode 0, which would have been an argument for the exact symmetry that was
+            -- tried and reverted. The rule is: everything measuring SPACE nets; the wash,
+            -- which reports how much healing will be eaten, does not.
             if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(0) end
 
             -- Populate the calculator
@@ -1478,9 +1483,14 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- bar can never draw past max anyway), so "None" maps there.
             if (db.absorbBarAttachedClampMode or 1) == 0 then clampMode = 2 end
             if calc.SetDamageAbsorbClampMode then calc:SetDamageAbsorbClampMode(clampMode) end
-            -- Same heal-absorb netting as the prediction and the wash (mode 0), so the
-            -- shield's missing-health clamp measures against the NET heal — the three
-            -- calculators must agree on one arithmetic or the bars disagree on screen.
+            -- Same heal-absorb netting as the PREDICTION (mode 0), so the shield's
+            -- missing-health clamp measures against the NET heal.
+            -- ⚠ NOT "and the wash". The wash runs mode 1 (Total) on purpose — the netting
+            -- is ASYMMETRIC, and netting both sides guarantees one is always zero (see the
+            -- note on the heal-absorb calculator). This comment claimed all three agreed
+            -- on mode 0, which would have been an argument for the exact symmetry that was
+            -- tried and reverted. The rule is: everything measuring SPACE nets; the wash,
+            -- which reports how much healing will be eaten, does not.
             if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(0) end
 
             -- Populate the calculator

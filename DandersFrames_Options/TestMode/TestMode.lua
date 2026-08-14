@@ -1016,7 +1016,13 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     if db.testShowHealPrediction ~= false then
         DF:UpdateHealPrediction(frame, testData)
     else
+        -- ☠ BOTH SEGMENTS. Only segment 1 was hidden, and ChainEndKey tests seg2 FIRST --
+        -- so with Show Heal Prediction off the preview's shield still chained behind a
+        -- segment the user had just switched off, hanging in the gap where the other-heal
+        -- bar used to be. The toggle has to leave the same rendered state the live
+        -- pathway would, or the chain reads a bar nobody can see.
         if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
+        if frame.dfHealPredictionBar2 then frame.dfHealPredictionBar2:Hide() end
     end
 
     -- Update power/resource bar

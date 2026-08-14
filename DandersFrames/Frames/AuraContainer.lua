@@ -1490,14 +1490,22 @@ local function styleButton_regions(slot, config)
     -- the widget is created only when the feature is ON: turning it off is a Rebuild
     -- (DF.Pandemic:StructSig), not a hide.
     --
-    -- ☠ WHAT IS REGISTERED IS THE HOLDER FRAME, for both types. Verified in game
-    -- 2026-08-05 that Frame:IsObjectType("Region") is true, so AddPandemicRegion takes
-    -- one. That is load-bearing for BORDER: DF.Border's applyTexPieces calls Show() on
-    -- every edge piece on every Apply, so registering the PIECES would hand their Shown
-    -- aspect to the engine and turn DF.Border's own routine writes into forbidden writes
-    -- on a button child. Registering the holder leaves DF.Border in full control of
-    -- everything inside it. TINT uses the same shape, so there is one code path and one
-    -- place for the flash animation to live.
+    -- ☠ WHAT IS REGISTERED DEPENDS ON WHAT ELSE DRIVES Shown, and the rule is the reason,
+    -- not the shape. AddPandemicRegion hands the region's Shown aspect to the engine, so
+    -- whatever is registered must be something NOTHING ELSE ever shows or hides.
+    --   * BORDER registers a HOLDER FRAME, and that is load-bearing: DF.Border's
+    --     applyTexPieces calls Show() on every edge piece on every Apply, so registering
+    --     the PIECES would hand their Shown to the engine and turn DF.Border's routine
+    --     writes into forbidden writes on a button child. The holder leaves DF.Border in
+    --     full control of everything inside it. (Verified in game 2026-08-05 that
+    --     Frame:IsObjectType("Region") is true, so AddPandemicRegion accepts a frame.)
+    --   * TINT and the health-fill cover register the TEXTURE directly. They are plain
+    --     regions with no other writer, so there is nothing for a holder to protect, and
+    --     the extra frame would buy only symmetry.
+    -- ⚠ This note used to say "the HOLDER FRAME, for both types", which described neither
+    -- the code nor the constraint — the border reasoning is border-specific and does not
+    -- generalise. Whichever way a future region goes, decide it by asking who else writes
+    -- Shown, and record THAT.
     --
     -- Create-once: the holder, its contents, the bind, and the flash animation. That is
     -- exactly what DF.Pandemic:StructSig covers. Colours / thickness / inset / offsets all
