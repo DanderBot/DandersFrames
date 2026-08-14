@@ -48,7 +48,15 @@ DF.TestData = {
         -- The DEFENSIVE ICON + summon frame (HEALER, so the defensive row shows by the
         -- role rule — no override needed). The missing-buff strip is off: with both, this
         -- became the busiest frame of the five and the two strips sat in the same region.
-        {name = "Healsworth", class = "PRIEST", role = "HEALER", specID = 257, health = 0.95, maxHealth = 85000, absorb = 0.10, healAbsorb = 0, healPrediction = 0.05, status = nil, outOfRange = false, isAssist = true, raidTarget = nil, dispelType = "Magic", centerStatus = "summon", isMainAssist = true, isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0, showMissingBuff = false},  -- Assistant, main assist, summon pending, defensive icon
+        -- ☠ health 0.70 IS LOAD-BEARING, NOT A COSMETIC CHOICE — DO NOT PUT IT BACK TO 0.95.
+        -- Heal prediction and an attached absorb can only render into EMPTY bar, and
+        -- "Show Overheal" is off by default, so at 0.95 there were five percent of bar for
+        -- both to share: raising healPrediction did nothing at all, because the ceiling was
+        -- the headroom, not the value. Reported as "hard to notice" (Krathe, 2026-08-14).
+        -- ⇒ A preview value is only visible if the frame has ROOM for it. Same trap on
+        -- Tankerino below, which is at health 1.0 and therefore cannot show its
+        -- healPrediction at all.
+        {name = "Healsworth", class = "PRIEST", role = "HEALER", specID = 257, health = 0.70, maxHealth = 85000, absorb = 0.20, healAbsorb = 0, healPrediction = 0.22, status = nil, outOfRange = false, isAssist = true, raidTarget = nil, dispelType = "Magic", centerStatus = "summon", isMainAssist = true, isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0, showMissingBuff = false},  -- Assistant, main assist, summon pending, defensive icon
         -- THE out-of-range unit, and the only one — so the fade has a subject with
         -- plenty to dim: 60% health, a HoT, a dispel type, a raid marker. ⚠ Keep TIMED
         -- elements off it (see the note on Tankerino); it also carries the threat-2
@@ -72,7 +80,7 @@ DF.TestData = {
         -- game alike — no preview-only offset, which would have broken "previews differ in
         -- DATA, never RENDERING". This frame's centre still belongs to phasedIcon.
         -- ⚠ Nothing draws until the user opts in — bgCarrierIconEnabled defaults false.
-        {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.05, healAbsorb = 0.12, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, isBGCarrier = true, reducedMaxPct = 0.45},  -- Missing buffs, phased, in vehicle, BG carrier, has HoT
+        {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.16, healAbsorb = 0.15, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, isBGCarrier = true, reducedMaxPct = 0.45},  -- Missing buffs, phased, in vehicle, BG carrier, has HoT
     },
     -- Test aura data - expanded for testing layouts. spellID (where a stable,
     -- still-live spell matches) lets the 12.1 container preview show the REAL
