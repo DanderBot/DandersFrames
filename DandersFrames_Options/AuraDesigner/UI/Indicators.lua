@@ -70,7 +70,7 @@ local function AddPandemicColor(g, parent, proxy, RPL)
         DF:AuraDesigner_RefreshPage()   -- the colour picker below appears/disappears
     end)
     cb.hideOn = function() return proxy.showWhenMissing and true or false end
-    cb.tooltip = L["Switches the bar to a second color while the buff is inside its refresh window — the moment when recasting wastes none of the remaining time. The game sets this window per spell, so there is no threshold to choose. Buffs you cannot refresh never have one."]
+    cb.tooltip = L["Switches to a second color while the buff is inside its refresh window — the moment when recasting wastes none of the remaining time. The game sets this window per spell, so there is no threshold to choose. Buffs you cannot refresh never have one."]
     g:AddWidget(cb, 28)
 
     local pick = GUI:CreateColorPicker(parent, L["Pandemic Color"], proxy, "pandemicColor", true, RPL, RPL, true)
@@ -1008,6 +1008,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- order. buildBorderConfig now resolves this flag to +11 (above) or +9 (below), and
             -- the flag rides the border structSig so toggling it rebuilds at the new offset.
             g:AddWidget(GUI:CreateCheckbox(parent, L["Draw above frame border"], proxy, "drawAboveFrameBorder", RPL), 28)
+            AddPandemicColor(g, parent, proxy, RPL)
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end)
@@ -1103,6 +1104,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             local blendSlider = GUI:CreateSlider(parent, L["Blend %"], 0, 1, 0.05, proxy, "blend")
             blendSlider.hideOn = function() return (proxy.mode or "Tint") == "Replace" end
             g:AddWidget(blendSlider, 54)
+            AddPandemicColor(g, parent, proxy, RPL)
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end)

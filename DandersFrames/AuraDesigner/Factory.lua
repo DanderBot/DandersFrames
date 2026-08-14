@@ -866,6 +866,23 @@ local function colSig(c)
     return tostring(r) .. "," .. tostring(g) .. "," .. tostring(b) .. "," .. tostring(a)
 end
 
+-- Does this client have the engine's refresh-window driver at all? Capability-gated
+-- everywhere: without it the pandemic variant is never emitted, so an ungated colour can
+-- never masquerade as a refresh cue.
+local function pandemicCapable()
+    local AC = DF.AuraContainer
+    return (AC and AC.HasPandemic and AC.HasPandemic()) and true or false
+end
+
+-- Does this health-bar config ask for a second, pandemic-window colour?
+-- ☠ HEALTH BAR ONLY. The pandemic wash has to draw OVER its own base wash, which costs a
+-- frame level, and only the health-bar band has spare levels — the background band is one
+-- level wide (see the note in syncBackgroundTint). Offering it there would render a
+-- control that silently loses to whichever buff was cast first.
+local function wantsPandemicColor(cfg)
+    return (cfg and cfg.pandemicColorEnabled and cfg.pandemicColor and pandemicCapable()) and true or false
+end
+
 -- Health-bar overlay alpha per mode — the exact semantics of the legacy Indicators:ApplyHealthBar (that module is gone;
 -- this is now the only implementation, so the comparison is against behaviour, not source)
 -- (Indicators.lua:1325-1329), read from CONFIG only:
@@ -988,7 +1005,10 @@ end
 -- creation sequence -- the toggle's whole point. 11 = definitively above (the legacy
 -- draw-above default), 9 = definitively tucked underneath. Wired 2026-07-25; the flag rides
 -- the border structSig so toggling it rebuilds with the new offset.
-local function buildBorderConfig(unit, map, spec, filter, drawAbove)
+-- `pandemicSpec` renders a SECOND ring on the same button in the pandemic colour,
+-- gated by the engine's refresh window (AuraContainer: PANDEMIC BORDER TWIN).
+-- Structural by presence, like the tint covers: its holder is created in the secure init.
+local function buildBorderConfig(unit, map, spec, filter, drawAbove, pandemicSpec)
     return {
         unit = unit,
         mode = "overlay",
@@ -996,7 +1016,7 @@ local function buildBorderConfig(unit, map, spec, filter, drawAbove)
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
         frameLevelOffset = (drawAbove ~= false) and 11 or 9,
-        style = { border = { spec = spec } },
+        style = { border = { spec = spec, pandemicSpec = pandemicSpec } },
     }
 end
 
@@ -4643,6 +4663,19 @@ end
 -- aura name in the per-type store. Factored out of the border block so BOTH the single
 -- Priority-mode winner and every Stacked-mode ring run the identical path -- there is one
 -- renderer, and "stacked" is only a statement about how many of them exist.
+-- The pandemic ring's spec: a COPY of the resolved base spec with only `color`
+-- swapped, so thickness, style, inset and the rest stay in lockstep with the base
+-- ring. ☠ Copy, never mutate — `spec` is the base ring's own table and is applied
+-- to the base widget on this same pass. Shared by the flat and chained paths.
+local function pandemicBorderSpec(spec, cfg)
+    if not (spec and wantsPandemicColor(cfg)) then return nil end
+    local out = {}
+    for k, v in pairs(spec) do out[k] = v end
+    local pr, pg, pb, pa = readADColor(cfg.pandemicColor)
+    out.color = { r = pr, g = pg, b = pb, a = pa }
+    return out
+end
+
 local function syncBorderEntry(bd, frame, key, cfg, map, mine)
     local spec = buildBorderSpec(frame, cfg)
     if not spec then return false end          -- resolved disabled -> render nothing
@@ -4674,28 +4707,31 @@ local function syncBorderEntry(bd, frame, key, cfg, map, mine)
     -- drawAboveFrameBorder rides the STRUCT sig: it resolves to frameLevelOffset in
     -- buildBorderConfig, which only a Rebuild re-reads (ApplyStyle carries the spec only).
     local drawAbove = cfg.drawAboveFrameBorder ~= false
-    local structSig = "da=" .. tostring(drawAbove)
+    local pdSpec = pandemicBorderSpec(spec, cfg)
+    -- The pandemic ring's PRESENCE joins the struct sig: its holder is created in the
+    -- secure init, so enabling it must hand over a fresh button.
+    local structSig = "da=" .. tostring(drawAbove) .. (pdSpec and "|pd" or "")
     local tuningSig = placedTuningSig(map, filt)
-    local coSig = borderSpecSig(spec)
+    local coSig = borderSpecSig(spec) .. (pdSpec and ("|pd=" .. colSig(cfg.pandemicColor)) or "")
 
     local entry = bd[key]
     if not entry then
-        local handle = DF.AuraContainer:Create(frame, buildBorderConfig(frame.unit, map, spec, filt, drawAbove))
+        local handle = DF.AuraContainer:Create(frame, buildBorderConfig(frame.unit, map, spec, filt, drawAbove, pdSpec))
         if handle then
             bd[key] = { handle = handle, structSig = structSig,
                         tuningSig = tuningSig, coSig = coSig }
         end
     elseif entry.structSig ~= structSig then
         entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-        entry.handle:Rebuild(buildBorderConfig(frame.unit, map, spec, filt, drawAbove), structSig)
+        entry.handle:Rebuild(buildBorderConfig(frame.unit, map, spec, filt, drawAbove, pdSpec), structSig)
     else
         if entry.tuningSig ~= tuningSig then
             entry.tuningSig = tuningSig
-            entry.handle:ApplyTuning(buildBorderConfig(frame.unit, map, spec, filt, drawAbove))
+            entry.handle:ApplyTuning(buildBorderConfig(frame.unit, map, spec, filt, drawAbove, pdSpec))
         end
         if entry.coSig ~= coSig then
             entry.coSig = coSig
-            entry.handle:ApplyStyle({ border = { spec = spec } })
+            entry.handle:ApplyStyle({ border = { spec = spec, pandemicSpec = pdSpec } })
         end
     end
     return true
@@ -4778,23 +4814,6 @@ end
 -- the resting state of most frames, so several missing badges would sit composed over
 -- every idle frame — the one-badge contract is kept deliberately.
 -- ============================================================
-
--- Does this client have the engine's refresh-window driver at all? Capability-gated
--- everywhere: without it the pandemic variant is never emitted, so an ungated colour can
--- never masquerade as a refresh cue.
-local function pandemicCapable()
-    local AC = DF.AuraContainer
-    return (AC and AC.HasPandemic and AC.HasPandemic()) and true or false
-end
-
--- Does this health-bar config ask for a second, pandemic-window colour?
--- ☠ HEALTH BAR ONLY. The pandemic wash has to draw OVER its own base wash, which costs a
--- frame level, and only the health-bar band has spare levels — the background band is one
--- level wide (see the note in syncBackgroundTint). Offering it there would render a
--- control that silently loses to whichever buff was cast first.
-local function wantsPandemicColor(cfg)
-    return (cfg and cfg.pandemicColorEnabled and cfg.pandemicColor and pandemicCapable()) and true or false
-end
 
 -- The same candidate set pickWinner scores, as a LIST — both pools, enabled, colour set,
 -- identity resolved. Sorted lowest priority first; ties reverse pickWinner's exactly
@@ -5094,11 +5113,11 @@ end
 -- every background tint parents to the one anchor, so the level assert is idempotent).
 local function syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, asMissing, sublevel)
     local filt = poolFilter(cfg, resolvePoolMode(spec, key, frame, mine))
-    -- Same contract as the health-bar twin: this rides every ApplyStyle payload.
-    -- ☠ NO PANDEMIC HERE. A second, window-gated wash has to draw OVER its own base
-    -- wash, which costs a frame level, and this band has none spare (see just below).
-    -- wantsPandemicColor is health-bar-only for exactly this reason.
-    local tintOpts = { sublevel = sublevel }
+    -- Same contract as the health-bar twin, pandemic cover included: both covers ride
+    -- ONE button, so the second colour costs no frame level and this band's lack of
+    -- headroom no longer rules it out.
+    local pdColor = wantsPandemicColor(cfg) and cfg.pandemicColor or nil
+    local tintOpts = { pandemicColor = pdColor, sublevel = sublevel }
     -- (No per-rank LEVEL here, unlike the health-bar twin: the background tint's band is
     -- genuinely one level wide — its host parks at frame+0 and the cover lands at frame+2,
     -- directly under the health/missing bars at frame+3. So stacked BACKGROUND tints still
@@ -5124,8 +5143,9 @@ local function syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, a
         bgHost:SetFrameLevel(math.max(0, hbLvl - 3))
         -- Level-neutral gates: the chain's visual seats at bgHost+2 = healthBar-1,
         -- same as the flat path, whatever the chain length.
-        syncConditionChain(bg, key, bgHost, frame.unit, chainBG, filt, "bgtint",
-            tconcat({ "bg", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(sublevel) }, "|"),
+        syncConditionChain(bg, key, bgHost, frame.unit, chainBG, filt, "bgtint" .. (pdColor and "|pd" or ""),
+            tconcat({ "bg", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(sublevel),
+                pdColor and colSig(pdColor) or "-" }, "|"),
             function(m, f) return buildOverlayTintConfig(frame.unit, m, r, g, b, blend, 0, f, tintOpts) end,
             function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend },
                     tintPandemicColor = tintOpts.pandemicColor, sublevel = tintOpts.sublevel } }) end,
@@ -5173,9 +5193,10 @@ local function syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, a
     -- Nothing structural left: this family declares one overlay slot with a
     -- fixed region set, and both the map and the filter string tune live.
     -- Structural for the same reason as the health-bar twin (secure-context bind).
-    local structSig = "bgtint"
+    local structSig = "bgtint" .. (pdColor and "|pd" or "")
     local tuningSig = placedTuningSig(map, filt)
-    local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend), tostring(sublevel) }, "|")
+    local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend), tostring(sublevel),
+        pdColor and colSig(pdColor) or "-" }, "|")
 
     local entry = bg[key]
     local created = false
@@ -5436,10 +5457,12 @@ function Factory:SyncFrame(frame)
             local drawAboveBD = bestCfg.drawAboveFrameBorder ~= false
             -- Level-neutral gates: the ring keeps its drawAboveFrameBorder 11/9 seat
             -- relative to `frame` (the flat path's parent) at any chain length.
+            local pdChain = pandemicBorderSpec(bestSpec, bestCfg)
             return syncConditionChain(bd, bestName, frame, frame.unit, chainLinks, filt,
-                "da=" .. tostring(drawAboveBD), borderSpecSig(bestSpec),
-                function(map, f) return buildBorderConfig(frame.unit, map, bestSpec, f, drawAboveBD) end,
-                function(h) h:ApplyStyle({ border = { spec = bestSpec } }) end,
+                "da=" .. tostring(drawAboveBD) .. (pdChain and "|pd" or ""),
+                borderSpecSig(bestSpec) .. (pdChain and ("|pd=" .. colSig(bestCfg.pandemicColor)) or ""),
+                function(map, f) return buildBorderConfig(frame.unit, map, bestSpec, f, drawAboveBD, pdChain) end,
+                function(h) h:ApplyStyle({ border = { spec = bestSpec, pandemicSpec = pdChain } }) end,
                 AD_CHAIN_GATE_OFFSET) and true or false
         end
 

@@ -1217,6 +1217,46 @@ local function styleButton_regions(slot, config)
                     DF.Border:Apply(slot.dfBorder, spec)
                 end
             end)
+            -- ★ PANDEMIC BORDER TWIN — the ring in its second colour, on THIS button.
+            -- Same shape as the pandemic covers above: a sibling under one parent, so we
+            -- own both levels and the order is ours. It sits in the PANDEMIC_BORDER band
+            -- (7), above the base ring at BORDER (3) — deliberately NOT BORDER+1, which is
+            -- DISPEL_RING (4). See DF.AuraButtonLevels.
+            --
+            -- ☠ REGISTER THE HOLDER, NEVER DF.Border'S PIECES. applyTexPieces calls Show()
+            -- on every edge piece on every Apply, so registering pieces would hand their
+            -- Shown aspect to the engine and turn DF.Border's routine writes into forbidden
+            -- writes on a button child. DF.Border never shows/hides its own frame, which is
+            -- what makes a holder around it safe.
+            -- ☠ Hidden ONCE at creation, strictly before the bind — after that the engine
+            -- owns Shown and we must never touch it.
+            if borderSpec.pandemicSpec and DF.Border then
+                if not slot.dfBorderPandemicHolder then
+                    slot.dfBorderPandemicHolder = makeHolder(host, LEVELS.PANDEMIC_BORDER)
+                    slot.dfBorderPandemicHolder:Hide()
+                    local okP, wP = pcall(function()
+                        return DF.Border:New(slot.dfBorderPandemicHolder, {
+                            solidOnly = true, secretRect = true, frameLevelOffset = 0,
+                        })
+                    end)
+                    if okP then slot.dfBorderPandemic = wP end
+                end
+                if slot.dfBorderPandemic then
+                    local okA, errA = pcall(function()
+                        local pspec = borderSpec.pandemicSpec
+                        pspec.animation = nil   -- same blanket strip as the base ring
+                        if pspec.renderScale == nil then
+                            pspec.renderScale = tonumber(config.layout and config.layout.scale) or 1
+                        end
+                        pspec.knownWidth, pspec.knownHeight = sx, sy
+                        DF.Border:Apply(slot.dfBorderPandemic, pspec)
+                    end)
+                    if not okA and not warnedBorder then
+                        warnedBorder = true
+                        DF:DebugWarn(DBG, "pandemic border apply failed: %s", tostring(errA))
+                    end
+                end
+            end
             if not ok and not warnedBorder then
                 warnedBorder = true
                 DF:DebugWarn(DBG, "DF.Border on aura button failed (taint?): %s", tostring(err))
@@ -1881,7 +1921,10 @@ local function bindNative(slot, config)
     -- No flag to read: the pandemic cover only EXISTS when a pandemic colour is
     -- configured, and its creation is structural, so its presence is the condition.
     if slot.AddPandemicRegion and not slot._boundPandemicCover then
-        local cover = slot.dfHealthFillPandemic or slot.dfTintPandemic
+        -- One of the three, by effect type: health-bar fill cover, background/whole-bar
+        -- tint, or the border ring's holder. An AD effect is one type per container, so
+        -- exactly one of these ever exists on a given button.
+        local cover = slot.dfHealthFillPandemic or slot.dfTintPandemic or slot.dfBorderPandemicHolder
         if cover then
             local ok, err = pcall(slot.AddPandemicRegion, slot, cover)
             if ok then

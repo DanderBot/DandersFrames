@@ -857,6 +857,8 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 BorderColor = {r = 1, g = 1, b = 1, a = 1},
                 drawAboveFrameBorder = true,
                 showWhenMissing = false,
+                pandemicColorEnabled = false,
+                pandemicColor = {r = 1, g = 0.5, b = 0, a = 1},
             }
         elseif typeKey == "healthbar" then
             auraCfg[typeKey] = {
@@ -872,6 +874,8 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
             auraCfg[typeKey] = {
                 mode = "Tint", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
                 showWhenMissing = false,
+                pandemicColorEnabled = false,
+                pandemicColor = {r = 1, g = 0.5, b = 0, a = 1},
             }
         elseif typeKey == "nametext" then
             auraCfg[typeKey] = {
@@ -1245,6 +1249,8 @@ local TYPE_DEFAULTS = {
         -- keys that no longer exist -- it was heading showWhenMissing, which is
         -- unrelated.)
         showWhenMissing = false,
+        pandemicColorEnabled = false,
+        pandemicColor = {r = 1, g = 0.5, b = 0, a = 1},
     },
     healthbar = {
         mode = "Replace", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
@@ -1256,6 +1262,8 @@ local TYPE_DEFAULTS = {
     background = {
         mode = "Tint", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
         showWhenMissing = false,
+        pandemicColorEnabled = false,
+        pandemicColor = {r = 1, g = 0.5, b = 0, a = 1},
     },
     nametext = {
         color = {r = 1, g = 1, b = 1, a = 1},
