@@ -1781,12 +1781,11 @@ function DF:UpdateHealAbsorb(frame, testIndex)
         local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex)
         if testData then
             maxHealth = testData.maxHealth
-            -- Netted against pending heals, mirroring the live calculator's
-            -- HealAbsorbMode 0 ("reduce heal absorb values by incoming heals, and vice
-            -- versa, clamping to zero"). A wash fully covered by an incoming heal shows
-            -- nothing -- that healing is already spoken for and will land.
-            healAbsorb = math.max(0, (testData.healAbsorbPercent or 0)
-                - (testData.healPredictionPercent or 0)) * maxHealth
+            -- FULL amount, not netted — the wash side of the ASYMMETRIC netting (see
+            -- the mode-1 comment in the attached branch): the wash shows everything it
+            -- will eat, the heal PREDICTION is what renders net. Netting both sides
+            -- made one always zero and the interplay invisible.
+            healAbsorb = (testData.healAbsorbPercent or 0) * maxHealth
             isTestRender = true
         else
             maxHealth = 100000
@@ -1796,12 +1795,11 @@ function DF:UpdateHealAbsorb(frame, testIndex)
         local testData = type(testIndex) == "table" and testIndex or DF:GetTestUnitData(testIndex, true)  -- true = raid
         if testData then
             maxHealth = testData.maxHealth
-            -- Netted against pending heals, mirroring the live calculator's
-            -- HealAbsorbMode 0 ("reduce heal absorb values by incoming heals, and vice
-            -- versa, clamping to zero"). A wash fully covered by an incoming heal shows
-            -- nothing -- that healing is already spoken for and will land.
-            healAbsorb = math.max(0, (testData.healAbsorbPercent or 0)
-                - (testData.healPredictionPercent or 0)) * maxHealth
+            -- FULL amount, not netted — the wash side of the ASYMMETRIC netting (see
+            -- the mode-1 comment in the attached branch): the wash shows everything it
+            -- will eat, the heal PREDICTION is what renders net. Netting both sides
+            -- made one always zero and the interplay invisible.
+            healAbsorb = (testData.healAbsorbPercent or 0) * maxHealth
             isTestRender = true
         else
             maxHealth = 100000
@@ -1966,16 +1964,18 @@ function DF:UpdateHealAbsorb(frame, testIndex)
             
             -- Set clamp mode: 0 = CurrentHealth (don't go past 0 health)
             if calc.SetHealAbsorbClampMode then calc:SetHealAbsorbClampMode(0) end
-            -- Heal absorb mode 0, ReducedByIncomingHeals (Krathe, 2026-08-14: "the heal
-            -- absorb will indeed eat the inc heal"). The engine nets the wash against
-            -- pending heals and vice versa, clamping at zero — a wash fully covered by
-            -- an incoming heal shows nothing, because that healing is spoken for and
-            -- WILL land. ⚠ This was 1 (Total) by an earlier deliberate choice whose
-            -- comment called the netting "showing less than actual absorb" — that is
-            -- the netting working, not a bug: the un-netted wash overstates how much
-            -- future healing will be eaten. Mode 0 is also the engine default the
-            -- heal PREDICTION has ridden all along, so the two sides now agree.
-            if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(0) end
+            -- ☠☠ THE NETTING IS ASYMMETRIC, AND THAT IS THE WHOLE DESIGN. Blizzard's
+            -- model: the WASH draws at its FULL amount (CompactUnitFrame uses the raw
+            -- heal-absorb value) while the incoming HEAL is what gets netted. Full wash
+            -- + shortened heal = the relationship is VISIBLE: "your 25% heal shows only
+            -- 10% because this 15% wash eats the rest."
+            -- Mode 1, Total, here — this file briefly set 0 (net) on BOTH calculators,
+            -- and symmetric netting mathematically guarantees one side is always zero
+            -- (net wash = max(0, w−h), net heal = max(0, h−w)) — the interplay could
+            -- never be seen, only its survivor (Krathe, 2026-08-14: "the entire idea
+            -- was to see the INCOMING HEAL reducing in relation to the heal absorb").
+            -- ⇒ The wash is Total (1). The PREDICTION is net (0). Do not "align" them.
+            if calc.SetHealAbsorbMode then calc:SetHealAbsorbMode(1) end
             
             -- Populate the calculator
             UnitGetDetailedHealPrediction(unit, nil, calc)

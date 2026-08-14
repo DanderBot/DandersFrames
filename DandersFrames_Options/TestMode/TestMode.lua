@@ -65,13 +65,14 @@ DF.TestData = {
         -- would not show here otherwise) and showMissingBuff = false swaps the badge
         -- strip out for it — one surface per frame rather than both stacked on the one
         -- unit that is also faded (Krathe, 2026-08-08).
-        -- ☠ NETTING COVERAGE: heal absorbs and incoming heals NET against each other
-        -- (HealAbsorbMode 0, both live and preview), so a wash only renders where it
-        -- EXCEEDS the unit's incoming heal. The pool must keep a unit on each side or a
-        -- feature previews nowhere: Xx demonstrates heal > wash (net heal, no wash);
-        -- THIS unit demonstrates wash > heal (net wash 0.15, its HoT fully eaten).
-        -- healAbsorb was 0.15 against a 0.15 heal — they cancelled exactly and the red
-        -- wash vanished from the whole preview (reported 2026-08-14).
+        -- ☠ NETTING IS ASYMMETRIC (Blizzard's model, see the heal-absorb calculator in
+        -- Frames/Bars.lua): the WASH renders at its FULL amount, the incoming HEAL
+        -- renders NET of it — full wash + shortened heal is what makes the interplay
+        -- visible. (A symmetric build shipped briefly and one side was always zero.)
+        -- Coverage: ★ Xx IS THE INTERPLAY DEMO — 15% wash INTO health, its 25% heal
+        -- showing only the surviving 10%, shield chained after: all three at once.
+        -- THIS unit is the full-consumption contrast: a 0.30 wash that eats its 0.15
+        -- HoT entirely, so a big wash renders with NO heal beside it.
         {name = "Мишок", class = "MAGE", role = "DAMAGER", specID = 63, health = 0.60, maxHealth = 75000, absorb = 0, healAbsorb = 0.30, healPrediction = 0.15, status = nil, outOfRange = true, raidTarget = 1, dispelType = "Curse", centerStatus = nil, isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0, showDefensive = true, showMissingBuff = false, showReadyCheck = true},  -- Star marker, out of range, heavy consuming wash over its HoT, defensive icon, ready check (no missing-buff strip)
         {name = "Alexandrosthegreat", class = "PALADIN", role = "DAMAGER", specID = 70, health = 0, maxHealth = 90000, absorb = 0, healAbsorb = 0, healPrediction = 0, status = "Dead", outOfRange = false, raidTarget = nil, dispelType = nil, centerStatus = "resurrect", isAFK = false, isPhased = false, inVehicle = false, reducedMaxPct = 0},  -- Dead unit, being resurrected
         -- ★ THE ONLY MISSING-BUFF FRAME now (it shows here by default — no field needed).
