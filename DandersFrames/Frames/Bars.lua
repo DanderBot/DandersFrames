@@ -713,7 +713,18 @@ function DF:UpdateAbsorb(frame, testIndex)
                 -- so derive the clamped value from the mock percentages instead.
                 -- ☠ SAME SUM AS THE FULL PATH, always. This fast-path copy once kept an
                 -- older formula and the shield's length depended on which path ran.
-                local usable = maxHealth * (1 - ((db.reducedMaxHealthEnabled ~= false) and (testReducedPct or 0) or 0))
+                -- ☠ ONE RULER. When reduced-max CLIPPING is active the health bar is
+            -- physically shrunk to the usable width, so every test percentage already
+            -- renders on the USABLE ruler -- subtracting the reduced share here as well
+            -- double-counts it, and the shield reads "no room" on a bar with visible
+            -- missing health (Xx: black + overshield at once; the per-frame forensics
+            -- proved it -- same 25% heal, 27px of fill on an unclipped bar, 17px on
+            -- Xx's clipped one). Only a non-clipped reduced render, where percentages
+            -- still span the full bar and the striped zone merely overlays it, needs
+            -- the subtraction.
+            local reducedShare = ((db.reducedMaxHealthEnabled ~= false)
+                and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
+            local usable = maxHealth * (1 - reducedShare)
                 local curHealth = testHealthPercent * maxHealth
                 local incoming = (DF.ChainEndKey(frame, db) ~= "fill") and (testIncomingPercent or 0) * maxHealth or 0
                 local available = usable - curHealth - incoming
@@ -1020,7 +1031,18 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- calculator is done directly. The space left to the shield is the USABLE bar
             -- (reduced max subtracted -- the bar physically ends there) minus current
             -- health minus, when the shield is chained behind it, the incoming heal.
-            local usable = maxHealth * (1 - ((db.reducedMaxHealthEnabled ~= false) and (testReducedPct or 0) or 0))
+            -- ☠ ONE RULER. When reduced-max CLIPPING is active the health bar is
+            -- physically shrunk to the usable width, so every test percentage already
+            -- renders on the USABLE ruler -- subtracting the reduced share here as well
+            -- double-counts it, and the shield reads "no room" on a bar with visible
+            -- missing health (Xx: black + overshield at once; the per-frame forensics
+            -- proved it -- same 25% heal, 27px of fill on an unclipped bar, 17px on
+            -- Xx's clipped one). Only a non-clipped reduced render, where percentages
+            -- still span the full bar and the striped zone merely overlays it, needs
+            -- the subtraction.
+            local reducedShare = ((db.reducedMaxHealthEnabled ~= false)
+                and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
+            local usable = maxHealth * (1 - reducedShare)
             local curHealth = testHealthPercent * maxHealth
             local incoming = (DF.ChainEndKey(frame, db) ~= "fill") and (testIncomingPercent or 0) * maxHealth or 0
             local available = usable - curHealth - incoming
@@ -1304,7 +1326,18 @@ function DF:UpdateAbsorb(frame, testIndex)
             -- calculator is done directly. The space left to the shield is the USABLE bar
             -- (reduced max subtracted -- the bar physically ends there) minus current
             -- health minus, when the shield is chained behind it, the incoming heal.
-            local usable = maxHealth * (1 - ((db.reducedMaxHealthEnabled ~= false) and (testReducedPct or 0) or 0))
+            -- ☠ ONE RULER. When reduced-max CLIPPING is active the health bar is
+            -- physically shrunk to the usable width, so every test percentage already
+            -- renders on the USABLE ruler -- subtracting the reduced share here as well
+            -- double-counts it, and the shield reads "no room" on a bar with visible
+            -- missing health (Xx: black + overshield at once; the per-frame forensics
+            -- proved it -- same 25% heal, 27px of fill on an unclipped bar, 17px on
+            -- Xx's clipped one). Only a non-clipped reduced render, where percentages
+            -- still span the full bar and the striped zone merely overlays it, needs
+            -- the subtraction.
+            local reducedShare = ((db.reducedMaxHealthEnabled ~= false)
+                and not frame.dfReducedMaxHealthClipping) and (testReducedPct or 0) or 0
+            local usable = maxHealth * (1 - reducedShare)
             local curHealth = testHealthPercent * maxHealth
             local incoming = (DF.ChainEndKey(frame, db) ~= "fill") and (testIncomingPercent or 0) * maxHealth or 0
             local available = usable - curHealth - incoming

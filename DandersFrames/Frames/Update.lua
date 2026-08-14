@@ -1075,6 +1075,20 @@ function DF:UpdateFrame(frame)
             DF:UpdatePower(frame)
         end
     end
+
+    -- ☠ THE HEALTH-ATTACHED BARS WERE MISSING FROM THIS PASS. This is the per-frame
+    -- worker behind DF:UpdateAllFrames -- the callback every absorb / heal-absorb /
+    -- heal-prediction OPTION runs -- and without these calls a Display Mode change sat
+    -- unapplied on live frames until each unit's next UNIT_ABSORB / UNIT_HEAL_PREDICTION
+    -- event wandered by, which for a unit with a static shield is "a while" (reported
+    -- 2026-08-14). The absorb's layout cache invalidates on the mode change and its
+    -- fast path makes the no-change case cheap; what was missing was any TRIGGER.
+    -- Prediction first, absorb LAST (it chains onto the prediction's segment). On test
+    -- frames these are no-ops by the test-data guards -- the test branch of
+    -- UpdateAllFrames repaints those through RefreshTestFramesWithLayout.
+    if DF.UpdateHealPrediction then DF:UpdateHealPrediction(frame) end
+    if DF.UpdateHealAbsorb then DF:UpdateHealAbsorb(frame) end
+    if DF.UpdateAbsorb then DF:UpdateAbsorb(frame) end
 end
 
 -- (Removed 2026-08-04) DF:UpdateHealth -- 142 lines, ZERO callers anywhere in either
