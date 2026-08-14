@@ -767,7 +767,18 @@ local GATED_CANDIDATE_KEYS = {
 function AuraContainer.RecordIdentityGated(cf)
     if type(cf) ~= "table" then return false end
     for i = 1, #GATED_CANDIDATE_KEYS do
-        if cf[GATED_CANDIDATE_KEYS[i]] ~= nil then return true end
+        -- ☠ == true, NOT ~= nil. A record REQUIRING one of these categories depends on
+        -- identity data; a record carrying `= false` is the OPPOSITE — the important-first
+        -- subtraction that BuildDirectDebuffFilters stamps onto every token record (cc /
+        -- raid / dispel / nonplayer) whenever boss/role/priority categories are also on.
+        -- Counting those meant every record in the row was "gated" and the park emptied
+        -- the whole row on lost trust — the exact wholesale blanking the park's own header
+        -- calls a far worse failure than the leak. Field sign: dispel overlay lit (its
+        -- slots are separate and never parked) with no debuff icon under it, amplified by
+        -- the other records excluding dispellable types in favour of the parked dispel
+        -- record. Subtraction is also SAFE on lost trust: the equality test just rejects
+        -- flagged auras, and boss/priority flags are not caster-attribution data.
+        if cf[GATED_CANDIDATE_KEYS[i]] == true then return true end
     end
     return false
 end

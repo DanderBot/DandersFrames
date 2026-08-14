@@ -5,6 +5,7 @@
 ### Bug Fixes
 
 * (Aura Designer) Fix indicators on shared slots fading twice as much as intended out of range, and staying faded after entering combat while someone was out of range.
+* (Debuff Bar) Fix the whole debuff row going empty on some group members — showing a dispel highlight with no debuff icon under it — when debuff categories were combined.
 
 ## [5.1.3]
 
