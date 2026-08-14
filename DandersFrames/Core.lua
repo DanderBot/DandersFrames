@@ -6147,6 +6147,43 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         tostring(frame.dfHealPredictionBar and frame.dfHealPredictionBar:IsShown()),
                         tostring(frame.dfHealPredictionBar2 and frame.dfHealPredictionBar2:IsShown())))
 
+                -- Anchor forensics for the fill-anchored bars. anchor= names what the
+                -- bar's first SetPoint actually targets RIGHT NOW: "fill" (health fill),
+                -- "pred" (the prediction's fill — correct for a chained absorb), or
+                -- "STALE" — anchored to an object that is neither, i.e. an orphaned
+                -- fill from before a texture swap. STALE on first entry, healthy after
+                -- a toggle, is the orphan mechanism caught red-handed.
+                do
+                    local hbFill = frame.healthBar and frame.healthBar.GetStatusBarTexture
+                        and frame.healthBar:GetStatusBarTexture()
+                    local pb = frame.dfHealPredictionBar
+                    local predFill = pb and pb.GetStatusBarTexture and pb:GetStatusBarTexture()
+                    local function sv(x)
+                        if issecretvalue and issecretvalue(x) then return "secret" end
+                        if type(x) == "number" then return string.format("%.0f", x) end
+                        return tostring(x)
+                    end
+                    local function probe(bar)
+                        if not bar then return "(absent)" end
+                        local ok, s = pcall(function()
+                            local _, rel = bar:GetPoint(1)
+                            local which = (rel == hbFill and "fill")
+                                or (rel == predFill and "pred")
+                                or (rel and "STALE" or "nil")
+                            local v = bar:GetValue()
+                            local _, mx = bar:GetMinMaxValues()
+                            local ft = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+                            local fw = ft and ft:GetWidth() or -1
+                            return ("anchor=%-5s val=%s/%s fillW=%s alpha=%.2f shown=%s")
+                                :format(which, sv(v), sv(mx), sv(fw),
+                                    bar:GetAlpha() or -1, tostring(bar:IsShown()))
+                        end)
+                        return ok and s or "(read refused)"
+                    end
+                    print("  Pred      " .. probe(frame.dfHealPredictionBar))
+                    print("  Absorb    " .. probe(frame.dfAbsorbBar))
+                end
+
                 local rows = {
                     { "buff", frame.buffFactory }, { "debuff", frame.debuffFactory },
                     { "defensive", frame.defensiveFactory },
