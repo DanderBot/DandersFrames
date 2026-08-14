@@ -115,25 +115,28 @@ DF.TestData = {
     -- ⚠ Adding an entry breaks the arithmetic. Keep the pool at 10 and swap, or redo the
     -- spacing for the new size.
     buffs = {
-        {icon = "Interface\Icons\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0, spellID = 1022},
+        {icon = "Interface\\Icons\\Spell_Holy_BlessingOfProtection", name = "Blessing of Protection", duration = 10, stacks = 0, spellID = 1022},
         -- Stacks are REAL here (charges remaining), which is why PoM keeps its slot: the
         -- previous stack case was "Heal" with 2 stacks, a spell that applies no aura.
-        {icon = "Interface\Icons\spell_holy_prayerofmending", name = "Prayer of Mending", duration = 30, stacks = 5, spellID = 41635},
-        {icon = "Interface\Icons\Spell_Nature_Rejuvenation", name = "Rejuvenation", duration = 12, stacks = 0, spellID = 774},
-        {icon = "Interface\Icons\Spell_Nature_Riptide", name = "Riptide", duration = 8, stacks = 0, spellID = 61295},
-        -- ☠ ESCAPED PATH, ON PURPOSE. Every other icon here uses single backslashes, which
-        -- works only because Lua 5.1 passes an UNKNOWN escape straight through (\I -> I,
-        -- \s -> s). "\a" is NOT unknown -- it is BEL (0x07) -- so the single-backslash form
-        -- of this one silently became "Interface\Icons" + chr(7) + "bility_monk_renewingmists"
-        -- and the icon could never load. Its neighbours are safe purely because none of them
-        -- happens to start a segment with a b f n r t v or a digit.
-        -- Do NOT "tidy" this back to match the others.
+        {icon = "Interface\\Icons\\spell_holy_prayerofmending", name = "Prayer of Mending", duration = 30, stacks = 5, spellID = 41635},
+        {icon = "Interface\\Icons\\Spell_Nature_Rejuvenation", name = "Rejuvenation", duration = 12, stacks = 0, spellID = 774},
+        {icon = "Interface\\Icons\\Spell_Nature_Riptide", name = "Riptide", duration = 8, stacks = 0, spellID = 61295},
+        -- ☠ EVERY icon path in this file MUST use DOUBLE backslashes. Lua 5.1 passes an
+        -- unknown escape through WITHOUT the backslash (\I -> I), so the single-backslash
+        -- form of a path silently collapses to "InterfaceIconsSpell_Foo" -- it parses, it
+        -- never loads. "\a" is worse still: it is a KNOWN escape (BEL, 0x07), which is how
+        -- this one entry was caught while its 18 neighbours stayed broken for months.
+        -- ⚠ THE REASON NOBODY SAW IT: these paths are a FALLBACK. _paintTestSlot prefers
+        -- the game's own texture for the resolved spell ID and only reaches for `icon`
+        -- when the client cannot resolve the spell at all -- so on enUS they were never
+        -- rendered, and a comment here used to claim they "work". They do not.
+        -- Do NOT "tidy" any of these back to single backslashes.
         {icon = "Interface\\Icons\\ability_monk_renewingmists", name = "Renewing Mist", duration = 20, stacks = 0, spellID = 119611},
         -- duration = 0 is the PERMANENT case, and it drives "Hide Duration on Permanent
         -- Auras". Beacon holds until the paladin moves it, so it is a real one rather
         -- than a made-up zero. ⚠ If a patch ever gives Beacon a timer this stops
         -- exercising that setting — the pool then needs another duration-less buff.
-        {icon = "Interface\Icons\Ability_Paladin_BeaconofLight", name = "Beacon of Light", duration = 0, stacks = 0, spellID = 53563},
+        {icon = "Interface\\Icons\\Ability_Paladin_BeaconofLight", name = "Beacon of Light", duration = 0, stacks = 0, spellID = 53563},
         -- ☠ NO RAID BUFFS IN THIS POOL. Slots 7, 9 and 10 used to be Power Word:
         -- Fortitude, Arcane Intellect and Battle Shout at 1 hour each. All three are
         -- entries in `DF.RaidBuffs` (Frames/Bars.lua) — i.e. the spells MISSING BUFFS
@@ -144,8 +147,8 @@ DF.TestData = {
         -- a live buff row can never show them and the preview showed three — a
         -- test-vs-live divergence, not just a confusing choice.
         -- ⇒ Anything added here must NOT appear in `DF.RaidBuffs`. Check it.
-        {icon = "Interface\Icons\Spell_Holy_Renew", name = "Renew", duration = 15, stacks = 0, spellID = 139},
-        {icon = "Interface\Icons\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
+        {icon = "Interface\\Icons\\Spell_Holy_Renew", name = "Renew", duration = 15, stacks = 0, spellID = 139},
+        {icon = "Interface\\Icons\\Spell_Nature_Regenerate", name = "Regrowth", duration = 12, stacks = 0, spellID = 8936},
         -- ★ THE ONE LONG BUFF, and the pool needs exactly one: it is the only entry that
         -- exercises the minutes side of the countdown formats and a duration bar that
         -- barely moves. 10 minutes is Earth Shield's real duration — durations here are
@@ -153,8 +156,8 @@ DF.TestData = {
         -- which the old 3600s entries did; that format is now unpreviewed. Deliberate —
         -- Krathe's call was "keep just 1 longer buff... maybe 5min or something", and an
         -- hour-long buff on a party frame only ever means a raid buff.
-        {icon = "Interface\Icons\Spell_Nature_SkinofEarth", name = "Earth Shield", duration = 600, stacks = 0, spellID = 974},
-        {icon = "Interface\Icons\Ability_Warrior_RallyingCry", name = "Rallying Cry", duration = 10, stacks = 0, spellID = 97463},
+        {icon = "Interface\\Icons\\Spell_Nature_SkinofEarth", name = "Earth Shield", duration = 600, stacks = 0, spellID = 974},
+        {icon = "Interface\\Icons\\Ability_Warrior_RallyingCry", name = "Rallying Cry", duration = 10, stacks = 0, spellID = 97463},
     },
     debuffs = {
         -- ☠ POSITIONS 5, 6, 9 AND 10 CARRY NO DISPEL TYPE, AND THAT IS THE DENSITY DIAL.
@@ -176,19 +179,19 @@ DF.TestData = {
         -- partner is already DRUID (Rake at 6), so a druid bleed fits without breaking
         -- the class spacing. Converting Rake or Rend instead would have been simpler and
         -- was rejected: they are two of the four untyped slots that set the 60% density.
-        {icon = "Interface\Icons\Ability_Gouge", name = "Rend", duration = 15, stacks = 0, debuffType = "Bleed", spellID = 772},
-        {icon = "Interface\Icons\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 0, debuffType = "Disease", spellID = 55095},
-        {icon = "Interface\Icons\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
+        {icon = "Interface\\Icons\\Ability_Gouge", name = "Rend", duration = 15, stacks = 0, debuffType = "Bleed", spellID = 772},
+        {icon = "Interface\\Icons\\Spell_DeathKnight_FrostFever", name = "Frost Fever", duration = 24, stacks = 0, debuffType = "Disease", spellID = 55095},
+        {icon = "Interface\\Icons\\Spell_Shadow_CurseOfSargeras", name = "Curse of Tongues", duration = 30, stacks = 0, debuffType = "Curse", spellID = 1714},
         -- 2818 = the DoT. NOT 2823, which is the weapon imbue of the same name, and the
         -- reason a party frame once previewed "Requires One-Handed Melee Weapon".
         -- Deadly Poison genuinely stacks to 5, so this is an honest stack case.
-        {icon = "Interface\Icons\Spell_Nature_NullifyPoison", name = "Deadly Poison", duration = 12, stacks = 5, debuffType = "Poison", spellID = 2818},
-        {icon = "Interface\Icons\Spell_Holy_RemoveCurse", name = "Forbearance", duration = 30, stacks = 0, debuffType = nil, spellID = 25771},
-        {icon = "Interface\Icons\Ability_Warrior_SavageBlow", name = "Mortal Wounds", duration = 10, stacks = 0, debuffType = nil, spellID = 115804},
-        {icon = "Interface\Icons\Spell_Shadow_ShadowWordPain", name = "Shadow Word: Pain", duration = 18, stacks = 0, debuffType = "Magic", spellID = 589},
-        {icon = "Interface\Icons\Spell_Shaman_Hex", name = "Hex", duration = 8, stacks = 0, debuffType = "Curse", spellID = 51514},
-        {icon = "Interface\Icons\Ability_CheapShot", name = "Dazed", duration = 4, stacks = 0, debuffType = nil, spellID = 1604},
-        {icon = "Interface\Icons\Spell_Holy_Resurrection", name = "Resurrection Sickness", duration = 600, stacks = 0, debuffType = nil, spellID = 15007},
+        {icon = "Interface\\Icons\\Spell_Nature_NullifyPoison", name = "Deadly Poison", duration = 12, stacks = 5, debuffType = "Poison", spellID = 2818},
+        {icon = "Interface\\Icons\\Spell_Holy_RemoveCurse", name = "Forbearance", duration = 30, stacks = 0, debuffType = nil, spellID = 25771},
+        {icon = "Interface\\Icons\\Ability_Warrior_SavageBlow", name = "Mortal Wounds", duration = 10, stacks = 0, debuffType = nil, spellID = 115804},
+        {icon = "Interface\\Icons\\Spell_Shadow_ShadowWordPain", name = "Shadow Word: Pain", duration = 18, stacks = 0, debuffType = "Magic", spellID = 589},
+        {icon = "Interface\\Icons\\Spell_Shaman_Hex", name = "Hex", duration = 8, stacks = 0, debuffType = "Curse", spellID = 51514},
+        {icon = "Interface\\Icons\\Ability_CheapShot", name = "Dazed", duration = 4, stacks = 0, debuffType = nil, spellID = 1604},
+        {icon = "Interface\\Icons\\Spell_Holy_Resurrection", name = "Resurrection Sickness", duration = 600, stacks = 0, debuffType = nil, spellID = 15007},
     },
     -- Defensive externals for the 12.1 container preview (config.testPool =
     -- "defensives" on the defensive row). Same spells the legacy test painter

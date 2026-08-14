@@ -3790,14 +3790,20 @@ function Handle:_paintTestSlot(slot, index)
     -- hidden SAMPLE aura). Re-asserted every paint pass, not just at creation.
     if slot.SetMouseMotionEnabled then pcall(function() slot:SetMouseMotionEnabled(false) end) end
 
-    -- Validate the entry's spell ID up front (FAIL-CLOSED: kept only when the
-    -- game POSITIVELY confirms the name) — it drives BOTH the icon and the
-    -- tooltip below, so they can never disagree. Stale ID? Try resolving by
-    -- NAME (cached per entry; the name-equality gate rejects override results).
-    local sid
+    -- Resolve the entry to a spell ID up front — it drives BOTH the icon and the
+    -- tooltip below, so they can never disagree. THREE TIERS, in order:
+    --   1. the ID whose name matches the table's English `name` (exact, enUS);
+    --   2. failing that, resolve by that English name, so a STALE ID self-heals
+    --      (cached per entry; the name-equality check rejects override results);
+    --   3. failing that, the ID itself if the client still knows it — see below.
+    -- Only a spell the client knows NOTHING about now reaches `e.icon`.
+    local sid, clientName
     if e.spellID and C_Spell and C_Spell.GetSpellName then
         local ok, nm = pcall(C_Spell.GetSpellName, e.spellID)
-        if ok and nm == e.name then sid = e.spellID end
+        if ok and type(nm) == "string" and nm ~= "" then
+            clientName = nm                       -- the spell AS THIS CLIENT NAMES IT
+            if nm == e.name then sid = e.spellID end
+        end
     end
     if not sid and C_Spell and C_Spell.GetSpellInfo and e._resolvedID ~= false then
         if e._resolvedID then
@@ -3813,12 +3819,28 @@ function Handle:_paintTestSlot(slot, index)
         end
     end
 
+    -- ☠ THIRD TIER, AND IT IS THE ONLY REASON THIS WORKS OUTSIDE enUS. `e.name` is
+    -- ENGLISH, so tier 1 (name equality) can NEVER match on a localised client and
+    -- tier 2 has no localised name to look up — every entry fell through to the
+    -- hardcoded `e.icon`, and 19 of those 25 paths are mangled by Lua's escape
+    -- handling, so the whole preview rendered as blank squares. Shipped in v5.0.0
+    -- (the 12.1 rework replaced an ID-only painter with this gate); reported on
+    -- 5.1.3. If the client still knows the ID it IS the spell the curator named,
+    -- so trust it and carry the client's own name with it — icon, name and tooltip
+    -- move TOGETHER, the same rule the spec override below follows.
+    -- ⚠ ORDERED LAST ON PURPOSE: enUS still takes tiers 1/2 exactly as before, so a
+    -- stale ID there self-heals by name rather than being adopted here.
+    if not sid and clientName then sid = e.spellID end
+
     -- Adopt the player's SPEC OVERRIDE wholesale (Krathe's call): the preview
     -- shows the spell as this spec knows it — icon, name and tooltip move
     -- TOGETHER (a 12.1 Holy priest previews Holy Fire, not Shadow Word: Pain).
     -- GetSpellTexture resolves overrides anyway; resolving explicitly here keeps
     -- all three surfaces on the same spell instead of a mixed identity.
-    local dispName = e.name
+    -- Localised when tier 3 adopted the ID (clientName is that client's own wording);
+    -- e.name otherwise, which covers tier 1 (identical by definition) and tier 2
+    -- (resolved BY e.name, so it is the right label).
+    local dispName = (sid == e.spellID and clientName) or e.name
     if sid and C_Spell.GetOverrideSpell then
         local ok, oid = pcall(C_Spell.GetOverrideSpell, sid)
         if ok and type(oid) == "number" and oid ~= 0 and oid ~= sid then
