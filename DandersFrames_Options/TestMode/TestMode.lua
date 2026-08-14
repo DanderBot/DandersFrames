@@ -1838,6 +1838,19 @@ function DF:ShowTestFrames(silent)
             end
         end
     end
+    -- ☠ ONE REPAINT NEXT TICK, AND IT IS GEOMETRY, NOT A WORKAROUND. On the FIRST entry
+    -- after a /reload the frames were created THIS tick, and healthBar is sized by
+    -- anchors (SetAllPoints) — an anchor-derived rect resolves at the end of the frame's
+    -- layout pass, so healthBar:GetWidth() is 0 for the whole entry pass. Every bar that
+    -- sizes itself from it (heal prediction, heal absorb, attached absorb) painted with
+    -- width 0: the forensics showed correct values and healthy anchors with fillW=0 on
+    -- every frame. Later entries reuse pooled frames with resolved rects, which is why
+    -- only the first entry per reload was broken and any toggle fixed it. Repainting on
+    -- the next tick, when rects exist, goes through the SAME UpdateTestFrame pathway —
+    -- no second painter.
+    C_Timer.After(0, function()
+        if DF.testMode and DF.RefreshTestFrames then DF:RefreshTestFrames() end
+    end)
     
     -- Position test frames
     DF:LightweightPositionPartyTestFrames(testFrameCount)
@@ -2267,6 +2280,12 @@ function DF:ShowRaidTestFrames(silent)
     
     -- Update raid frames with test data
     DF:UpdateRaidTestFrames()
+    -- Same next-tick repaint as the party entry (see the note there): freshly created
+    -- frames have anchor-derived rects that are 0 for this whole tick, so the first
+    -- paint sizes every fill-anchored bar to width 0. Repaint once when rects exist.
+    C_Timer.After(0, function()
+        if DF.raidTestMode then DF:UpdateRaidTestFrames() end
+    end)
     
     -- Update group labels for test mode
     if DF.UpdateRaidGroupLabels then
