@@ -3170,6 +3170,47 @@ function Factory:BuildGroupLayout(group, wrapDefault)
     return buildFilterGroupLayout(group, wrapDefault)
 end
 
+-- ============================================================
+-- MEMBER-GROUP FLOW, published for the canvas
+-- The three things live hands its member-group container that the canvas was deriving,
+-- approximating, or dropping. Published as builders rather than documented as rules,
+-- because a rule the canvas has to re-implement is a fork with extra steps — the whole
+-- lesson of the placement work these sit beside.
+-- ============================================================
+
+-- A member's LAYOUT SIZE. Live resolves it through the defaults chain and floors it at 8
+-- (collectGroupMembers); the canvas was reading indCfg.size with its own fallback and no
+-- floor, so a member inheriting its size from defaults measured differently on the canvas
+-- than on the frame, and an 8-or-under size disagreed outright.
+function Factory:MemberSize(ind, defs)
+    return math.max(8, tonumber(defOf(ind, "size", defs, 24)) or 24)
+end
+
+-- A member's PER-RECORD STYLE, in the shape recordGroupLayout reads (Frames/AuraContainer):
+-- layout.size gives the record its own cell, layoutIndex fixes its order in the flow. This
+-- is the same style buildMemberGroupConfig declares per record; the button half is omitted
+-- because the canvas styles its slots through StylePreviewSlot and nothing in the layout
+-- path reads it.
+-- ☠ THE CELL IS NOT THE BUTTON. Flowing every member at the group's fallback cell is what
+-- made a large member overlap its neighbour on the canvas and not in game — the flow asks
+-- for a declared cell first (GetElementSize) and only measures the button when there is
+-- none. Stamp this on the slot as dfImpRecStyle and the shared flow does the rest.
+function Factory:MemberRecordStyle(ind, defs, memberIdx)
+    return { layout = { size = self:MemberSize(ind, defs) }, layoutIndex = memberIdx }
+end
+
+-- The CONFIG a group's flow is laid out with: its layout AND its style.
+-- ☠ THE STYLE IS NOT OPTIONAL. stripReservation reads config.style.bar to reserve the
+-- duration strip's height, and that reservation is folded into elementHeight — so a config
+-- carrying layout alone silently drops the padding live applies, and every row of a group
+-- with a duration bar sat tighter on the canvas than on the frame.
+function Factory:BuildGroupFlowConfig(frame, group, wrapDefault)
+    return {
+        layout = buildFilterGroupLayout(group, wrapDefault),
+        style  = buildFilterGroupStyle(group, buildGroupBorderSpec(frame, group)),
+    }
+end
+
 -- Per-group sort (Wave 2): the group card's Sort Order dropdown + My Auras
 -- First / Reverse Order checkboxes, stored as OPTIONAL per-group fields
 -- (sortOrder / sortMineFirst / sortReverse — the othersOnly idiom: absent on

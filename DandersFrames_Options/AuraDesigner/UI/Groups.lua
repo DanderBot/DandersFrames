@@ -1776,6 +1776,11 @@ local function RenderPreviewIndicator(mockFrame, spec, auraName, info, indicator
         slot:SetFrameLevel(flowParent:GetFrameLevel() + 1)
     else
         if slot:GetParent() ~= mockFrame then slot:SetParent(mockFrame) end
+        -- ⚠ CLEAR THE FLOW STAMP. Slots are pooled, so one that used to be a packed group
+        -- member and is now pinned would carry the old record cell into whatever reads it
+        -- next. The flow pass stamps it on the way in; the pinned branch is the only other
+        -- way out, so it clears it here.
+        slot.dfImpRecStyle = nil
         AC.PinLayoutBox(slot, mockFrame, lay, PreviewPixelPerfect(mockFrame))
         slot:SetFrameStrata(mockFrame:GetFrameStrata())
         slot:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
@@ -2156,25 +2161,43 @@ local function ResolveMemberGroupPlacement(mockFrame, groups, spec, adDB, keyPre
     local positions, flows, parentOf = {}, {}, {}
     if not (Factory and Factory.MemberGridOffset) then return positions, flows, parentOf end
     local pool = CurrentAuraPool(spec)
+    -- Live's own defaults bundle: the member size below resolves through it, so the two
+    -- cannot answer differently for a member that inherits its size.
+    local defs = Factory.ResolveDefaults and Factory.ResolveDefaults(adDB) or nil
     local boxes = mockFrame.dfADMemberGroupBoxes
     if not boxes then boxes = {}; mockFrame.dfADMemberGroupBoxes = boxes end
     for _, group in ipairs(groups) do
         if group.members then
             local total = #group.members
-            local keys
+            -- ☠ A DISABLED GROUP PACKS NOTHING, and that is live's structure, not a
+            -- special case. Live builds a group CONTAINER only for `group.enabled ~= false`
+            -- (claimedGroupMembers / syncMemberGroupList), while arrangeGroupList hands
+            -- EVERY member a grid cell regardless — so switching the eye off leaves the
+            -- members scattered at their cells. The canvas routed on the member predicate
+            -- alone and kept them packed, so an eye-disabled group looked completely
+            -- different from the frame. Same two-stage rule now: the group decides whether
+            -- there is a flow at all, the member decides whether it joins it.
+            local groupFlows = group.enabled ~= false
+            local packed
             for memberIdx, member in ipairs(group.members) do
                 local key = keyPrefix .. member.auraName .. "#" .. member.indicatorID
                 local indCfg = GetIndicatorByID(member.auraName, member.indicatorID, pool)
-                if MemberPacksInFlow(indCfg) then
-                    keys = keys or {}
-                    keys[#keys + 1] = key
+                if groupFlows and MemberPacksInFlow(indCfg) then
+                    packed = packed or {}
+                    -- The record style travels with the key: the flow pass stamps it on
+                    -- the slot so live's GetElementSize gives this member its OWN cell.
+                    packed[#packed + 1] = { key = key,
+                        style = Factory.MemberRecordStyle
+                            and Factory:MemberRecordStyle(indCfg, defs, memberIdx) or nil }
                 else
-                    local size = (indCfg and indCfg.size) or (adDB.defaults and adDB.defaults.iconSize) or 24
+                    local size = Factory.MemberSize and Factory:MemberSize(indCfg, defs)
+                        or ((indCfg and indCfg.size) or (adDB.defaults and adDB.defaults.iconSize) or 24)
                     local scale = (indCfg and indCfg.scale) or (adDB.defaults and adDB.defaults.iconScale) or 1.0
                     local a, oX, oY = Factory:MemberGridOffset(group, size, scale, memberIdx, total)
                     positions[key] = { anchor = a, offsetX = oX, offsetY = oY }
                 end
             end
+            local keys = packed
             -- ☠ Keyed by POOL PREFIX + id, not id alone. The My Buffs and Other Buffs
             -- stores run separate id counters, so "1" names a different group on each tab
             -- — the filter-group placeholder pools already split for exactly this reason.
@@ -2191,7 +2214,7 @@ local function ResolveMemberGroupPlacement(mockFrame, groups, spec, adDB, keyPre
                 box:SetFrameLevel(mockFrame:GetFrameLevel() + 8)
                 box:Show()
                 flows[#flows + 1] = { group = group, box = box, keys = keys }
-                for _, k in ipairs(keys) do parentOf[k] = box end
+                for _, m in ipairs(keys) do parentOf[m.key] = box end
             elseif box then
                 box:Hide()
             end
@@ -2213,17 +2236,35 @@ local function ApplyMemberGroupFlows(mockFrame, flows)
     local pp = PreviewPixelPerfect(mockFrame)
     for _, f in ipairs(flows) do
         local slots, n = {}, 0
-        for _, key in ipairs(f.keys) do
-            local rec = store[key]
+        for _, m in ipairs(f.keys) do
+            local rec = store[m.key]
             if rec and rec.slot and rec.slot:IsShown() then
                 n = n + 1
                 slots[n] = rec.slot
+                -- ★ THE MEMBER'S OWN CELL. live's flow asks GetElementSize for a declared
+                -- cell before it measures the button, and reads it off this stamp — the
+                -- same per-record style buildMemberGroupConfig declares. Without it every
+                -- member flowed at the group's fallback cell, so a member larger than the
+                -- group size overlapped its neighbour on the canvas and not on the frame.
+                rec.slot.dfImpRecStyle = m.style
+                -- ☠ AND RESET THE SCALE. Only PinLayoutBox writes scale, so a slot that
+                -- was pinned while scaled and is now flowing keeps the old value until it
+                -- is recreated — drag a scaled placement into a layout group and it stayed
+                -- large in the flow. The cell above already carries the size; the flow
+                -- wants the slot at 1.
+                rec.slot:SetScale(1)
             end
         end
         if n > 0 then
             f.box:Show()
-            AC.FlowSlots(f.box, mockFrame, slots, n,
-                { layout = Factory:BuildGroupLayout(f.group) }, pp)
+            -- The group's LAYOUT AND STYLE, from the factory. The style is what carries the
+            -- duration-strip reservation into the row stride (stripReservation reads
+            -- config.style.bar); passing layout alone padded the canvas's rows differently
+            -- from live's for any group with a duration bar.
+            local cfg = Factory.BuildGroupFlowConfig
+                and Factory:BuildGroupFlowConfig(mockFrame, f.group)
+                or { layout = Factory:BuildGroupLayout(f.group) }
+            AC.FlowSlots(f.box, mockFrame, slots, n, cfg, pp)
         else
             f.box:Hide()
         end
