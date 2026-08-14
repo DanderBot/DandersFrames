@@ -1043,7 +1043,18 @@ local function styleButton_regions(slot, config)
                 slot.dfTintPandemic:SetAllPoints(host)
             end
             slot.dfTintPandemic:SetDrawLayer("OVERLAY", math.min((subLvl or 0) + 1, 7))
-            slot.dfTintPandemic:SetColorTexture(readColor(ov.tintPandemicColor))
+            -- ☠ THE BLEND COMES FROM THE BASE TINT, NOT FROM THE PICKER. tintColor's
+            -- fourth component IS the mode-derived blend (Factory hands over
+            -- { r, g, b, blend }), while tintPandemicColor is the raw picker colour whose
+            -- alpha defaults to 1. Passing that straight through made the pandemic window
+            -- render FULLY OPAQUE over a base washing at, say, 20% -- the second colour
+            -- ignored the Blend slider entirely. The healthFill twin below already reuses
+            -- its base's alpha; this is the same rule, and taking it from the base rather
+            -- than re-deriving it is what stops the two drifting. (Review, PR #236 B6.)
+            local pr, pg, pb = readColor(ov.tintPandemicColor)
+            local _, _, _, blend = readColor(ov.tintColor)
+            slot.dfTintPandemic:SetColorTexture(pr, pg, pb)
+            slot.dfTintPandemic:SetAlpha(blend or 1)
         end
         -- (Removed 2026-08-04) FILLED HEALTH MIRROR. It was a StatusBar parented under
         -- the slot, fed the secret health percent per health tick. Aura frames carry

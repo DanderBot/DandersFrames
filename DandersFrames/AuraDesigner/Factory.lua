@@ -4900,7 +4900,14 @@ local function syncTintFamily(tints, tstore, store, orderKey, spec, syncOne)
     local keep, forceFrom = {}, nil
     for i = 1, #tints do
         local s = tints[i]
-        s.sublevel = math.max(1, 7 - (n - i))
+        -- ☠ TOPS OUT AT 6, NOT 7, AND THE HEADROOM IS LOAD-BEARING. Each tint's pandemic
+        -- twin sits one sublevel above its base (AuraContainer.lua clamps it to
+        -- math.min(subLvl + 1, 7)), so a base of 7 handed the twin 7 as well: the highest
+        -- tint tied with its OWN second colour at EVERY stack size, and the winner fell
+        -- back to creation order -- the undefended tiebreak this ladder exists to remove.
+        -- Reserving 7 for the twin leaves 1..6 for the bases, still more distinct steps
+        -- than the stack usually has. (Danders's review, PR #236 B4.)
+        s.sublevel = math.max(1, 6 - (n - i))
         s.rank = i
         if forceFrom then
             -- Ladder repair: an earlier tint took a fresh draw index this pass, so every
