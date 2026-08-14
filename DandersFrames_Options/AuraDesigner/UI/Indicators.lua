@@ -49,7 +49,7 @@ end
 
 -- "Only during pandemic window" — the frame-level twin of the icon Pandemic cue.
 -- The colour wash is handed to the engine's refresh-window driver (Factory
--- resolvePandemicGate -> AuraContainer bindNative), so it shows only while a refresh
+-- wantsPandemicColor -> AuraContainer bindNative), so it shows only while a refresh
 -- would clip nothing. Shared by Health Bar Color and Background Color.
 --
 -- ☠ CAPABILITY-GATED: on a client without AddPandemicRegion the control is absent
@@ -57,16 +57,27 @@ end
 -- toggle would read as "the colour is broken".
 -- Hidden under Show When Missing: an absent buff has no refresh window, so the pair
 -- is meaningless and the renderer never passes the gate down that branch.
-local function AddPandemicOnly(g, parent, proxy)
+-- ☠ RPL is a BuildTypeContent local (the throttled live-refresh callback), so it must be
+-- passed in — reaching for it here resolved to a nil global and handed the colour picker
+-- nil callbacks, i.e. a picker that changed nothing until the page was rebuilt.
+local function AddPandemicColor(g, parent, proxy, RPL)
     local AC = DF.AuraContainer
     if not (AC and AC.HasPandemic and AC.HasPandemic()) then return end
-    local cb = GUI:CreateCheckbox(parent, L["Only during pandemic window"], proxy, "pandemicOnly", function()
-        -- STRUCTURAL (the bind needs secure context) -> a full refresh, not a restyle.
+    local cb = GUI:CreateCheckbox(parent, L["Different color in pandemic window"], proxy, "pandemicColorEnabled", function()
+        -- STRUCTURAL: enabling emits a SECOND container, and its engine bind needs
+        -- secure context -> a full refresh, not a restyle.
         DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+        DF:AuraDesigner_RefreshPage()   -- the colour picker below appears/disappears
     end)
     cb.hideOn = function() return proxy.showWhenMissing and true or false end
-    cb.tooltip = L["Colors the frame only while the buff is inside its refresh window — the moment when recasting wastes none of the remaining time. The game sets this window per spell, so there is no threshold to choose. Buffs you cannot refresh never have one."]
+    cb.tooltip = L["Switches the bar to a second color while the buff is inside its refresh window — the moment when recasting wastes none of the remaining time. The game sets this window per spell, so there is no threshold to choose. Buffs you cannot refresh never have one."]
     g:AddWidget(cb, 28)
+
+    local pick = GUI:CreateColorPicker(parent, L["Pandemic Color"], proxy, "pandemicColor", true, RPL, RPL, true)
+    pick.hideOn = function()
+        return (proxy.showWhenMissing or not proxy.pandemicColorEnabled) and true or false
+    end
+    g:AddWidget(pick, 28)
 end
 
 -- ============================================================
@@ -1055,7 +1066,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             wholeBarCheck = GUI:CreateCheckbox(parent, L["Tint Entire Bar"], proxy, "tintWholeBar", RPL)
             wholeBarCheck.hideOn = function() return (proxy.mode or "Replace") == "Replace" end
             g:AddWidget(wholeBarCheck, 28)
-            AddPandemicOnly(g, parent, proxy)
+            AddPandemicColor(g, parent, proxy, RPL)
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end)
@@ -1092,7 +1103,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             local blendSlider = GUI:CreateSlider(parent, L["Blend %"], 0, 1, 0.05, proxy, "blend")
             blendSlider.hideOn = function() return (proxy.mode or "Tint") == "Replace" end
             g:AddWidget(blendSlider, 54)
-            AddPandemicOnly(g, parent, proxy)
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
             end)

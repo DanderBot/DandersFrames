@@ -4776,6 +4776,23 @@ end
 -- every idle frame — the one-badge contract is kept deliberately.
 -- ============================================================
 
+-- Does this client have the engine's refresh-window driver at all? Capability-gated
+-- everywhere: without it the pandemic variant is never emitted, so an ungated colour can
+-- never masquerade as a refresh cue.
+local function pandemicCapable()
+    local AC = DF.AuraContainer
+    return (AC and AC.HasPandemic and AC.HasPandemic()) and true or false
+end
+
+-- Does this health-bar config ask for a second, pandemic-window colour?
+-- ☠ HEALTH BAR ONLY. The pandemic wash has to draw OVER its own base wash, which costs a
+-- frame level, and only the health-bar band has spare levels — the background band is one
+-- level wide (see the note in syncBackgroundTint). Offering it there would render a
+-- control that silently loses to whichever buff was cast first.
+local function wantsPandemicColor(cfg)
+    return (cfg and cfg.pandemicColorEnabled and cfg.pandemicColor and pandemicCapable()) and true or false
+end
+
 -- The same candidate set pickWinner scores, as a LIST — both pools, enabled, colour set,
 -- identity resolved. Sorted lowest priority first; ties reverse pickWinner's exactly
 -- (spec pool and alphabetically-smaller names sort LATER = draw on top), so with a single
@@ -4812,7 +4829,32 @@ local function collectFrameTints(spec, specAuras, otherAuras, typeKey)
         if a.mine ~= b.mine then return b.mine end
         return a.key > b.key
     end)
-    return list
+    -- ONE CONFIG CAN NEED TWO CONTAINERS. A health-bar effect with a pandemic colour
+    -- renders its base wash plus a second, engine-gated wash in the other colour directly
+    -- ABOVE it — so the bar switches colour inside the refresh window and switches back
+    -- out of it. It has to be two containers because presence and the refresh window are
+    -- two independent engine gates; nothing in Lua may combine them.
+    -- ☠ The variant is emitted RIGHT AFTER its base, so the level ranks assigned by
+    -- syncTintFamily put it exactly one level up — above its own base, still below the
+    -- next indicator's. A separate AD record per colour is NOT an option: the designer
+    -- allows one record per spell (Krathe, 2026-08-14), which is what makes this the
+    -- right shape rather than a convenience.
+    -- Store keys are suffixed so the two never collide, but `auraKey` keeps the real aura
+    -- name for the caster-pool lookups, which resolve by NAME.
+    local out
+    for i = 1, #list do
+        local s = list[i]
+        s.auraKey = s.key
+        out = out or {}
+        out[#out + 1] = s
+        if typeKey == "healthbar" and wantsPandemicColor(s.cfg) then
+            out[#out + 1] = {
+                key = s.key .. "#pd", auraKey = s.auraKey, cfg = s.cfg, map = s.map,
+                prio = s.prio, mine = s.mine, pandemic = true,
+            }
+        end
+    end
+    return out
 end
 
 -- Never written; the teardown-all argument for teardownExceptSet on an order change.
@@ -4835,7 +4877,9 @@ local function syncTintFamily(tints, tstore, store, orderKey, spec, syncOne)
     local missingKey
     for i = #tints, 1, -1 do
         local s = tints[i]
-        if s.cfg.showWhenMissing and not resolveConditions(spec, s.cfg, s.mine) then
+        -- A pandemic variant is never the missing badge: an absent buff has no refresh
+        -- window, so its own base entry is the only missing candidate for that config.
+        if not s.pandemic and s.cfg.showWhenMissing and not resolveConditions(spec, s.cfg, s.mine) then
             missingKey = s.key
             break
         end
@@ -4860,7 +4904,8 @@ local function syncTintFamily(tints, tstore, store, orderKey, spec, syncOne)
             local e = tstore[s.key]
             if e and not e.chain then destroyEntry(e); tstore[s.key] = nil end
         end
-        local kept, created = syncOne(s.key, s.cfg, s.map, s.mine, s.key == missingKey, s.sublevel, s.rank)
+        local kept, created = syncOne(s.key, s.cfg, s.map, s.mine, s.key == missingKey,
+                                      s.sublevel, s.rank, s.auraKey or s.key, s.pandemic)
         if kept then keep[s.key] = true end
         if created and not forceFrom then forceFrom = i end
     end
@@ -4872,19 +4917,18 @@ end
 -- created): kept = the entry under `key` should survive the keep-set sweep; created = a
 -- container was stood up or rebuilt THIS pass (fresh draw index — the ladder-repair
 -- signal). Chains always report created=false: they are exempt from the ladder.
--- PANDEMIC GATE, shared by both frame-tint consumers. Capability-gated: on a client
--- without the API the flag is DROPPED rather than rendering an ungated wash, so an
--- always-on colour can never masquerade as a refresh cue. Meaningless in missing mode
--- (an absent buff has no refresh window), so the missing branches never pass it.
-local function resolvePandemicGate(cfg)
-    if not (cfg and cfg.pandemicOnly) then return false end
-    local AC = DF.AuraContainer
-    return (AC and AC.HasPandemic and AC.HasPandemic()) and true or false
-end
-
-local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine, asMissing, sublevel, rank)
-    local filt = poolFilter(cfg, resolvePoolMode(spec, key, frame, mine))
-    local pdOnly = resolvePandemicGate(cfg)
+local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine, asMissing,
+                                 sublevel, rank, auraKey, isPandemic)
+    -- ☠ POOL LOOKUPS TAKE auraKey, NOT key. A pandemic variant's store key carries a
+    -- "#pd" suffix so it can sit beside its base in the store; resolvePoolMode resolves by
+    -- aura NAME, and a suffixed name matches nothing — the caster filter would silently
+    -- fall back and an "only mine" effect would start showing other people's buffs.
+    local filt = poolFilter(cfg, resolvePoolMode(spec, auraKey or key, frame, mine))
+    -- The variant IS the gated wash; the base is never gated.
+    local pdOnly = isPandemic and true or false
+    -- The variant paints the SECOND colour. Same identity, same filter, same geometry —
+    -- it differs only in colour and in being handed to the engine's window driver.
+    local colorCfg = isPandemic and cfg.pandemicColor or cfg.color
     -- ☠ FRAME LEVEL IS THE ONLY THING THAT ORDERS THESE. Creation order does not (frames
     -- at equal level have no guaranteed order) and neither does the draw-layer sublevel
     -- (it only orders within ONE frame). Both were tried and both failed the same way in
@@ -4912,7 +4956,7 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
     -- all of these are absent".
     local chainHB = resolveConditions(spec, cfg, mine)
     if chainHB then
-        local r, g, b, a = readADColor(cfg.color)
+        local r, g, b, a = readADColor(colorCfg)
         local mode = slower(cfg.mode or "replace")
         local wholeBar = (mode == "tint") and (cfg.tintWholeBar and true or false) or false
         -- Anchor = healthBar (the flat path's own Create parent) and level-neutral
@@ -4956,7 +5000,7 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
         -- secret on 12.1); single-anchored to the health bar's TOPLEFT so it covers the region
         -- (config-size approximation — precise region + z-order are P4.7 polish). The filled
         -- mirror is a present-only concept, so nil the feed ref while in missing mode.
-        local r, g, b, a = readADColor(cfg.color)
+        local r, g, b, a = readADColor(colorCfg)
         local mode = slower(cfg.mode or "replace")
         local blend = (mode == "replace") and a or healthbarBlend(mode, cfg.blend, a)
         local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
@@ -4968,7 +5012,7 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
         -- syncFrameLevelMissing replaces the entry TABLE on create/recreate.
         return true, hb[key] ~= before
     end
-    local r, g, b, a = readADColor(cfg.color)
+    local r, g, b, a = readADColor(colorCfg)
     local mode = slower(cfg.mode or "replace")
     -- Whole-bar flat tint only exists in tint mode (mirror Indicators.lua:1338):
     -- replace mode always uses the fill-matched mirror.
@@ -5058,9 +5102,11 @@ end
 -- every background tint parents to the one anchor, so the level assert is idempotent).
 local function syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, asMissing, sublevel)
     local filt = poolFilter(cfg, resolvePoolMode(spec, key, frame, mine))
-    local pdOnly = resolvePandemicGate(cfg)
-    -- Same contract as the health-bar twin: these ride every ApplyStyle payload.
-    local tintOpts = { pandemicOnly = pdOnly or nil, sublevel = sublevel }
+    -- Same contract as the health-bar twin: this rides every ApplyStyle payload.
+    -- ☠ NO PANDEMIC HERE. A second, window-gated wash has to draw OVER its own base
+    -- wash, which costs a frame level, and this band has none spare (see just below).
+    -- wantsPandemicColor is health-bar-only for exactly this reason.
+    local tintOpts = { sublevel = sublevel }
     -- (No per-rank LEVEL here, unlike the health-bar twin: the background tint's band is
     -- genuinely one level wide — its host parks at frame+0 and the cover lands at frame+2,
     -- directly under the health/missing bars at frame+3. So stacked BACKGROUND tints still
@@ -5086,7 +5132,7 @@ local function syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, a
         bgHost:SetFrameLevel(math.max(0, hbLvl - 3))
         -- Level-neutral gates: the chain's visual seats at bgHost+2 = healthBar-1,
         -- same as the flat path, whatever the chain length.
-        syncConditionChain(bg, key, bgHost, frame.unit, chainBG, filt, "bgtint" .. (pdOnly and "|pd" or ""),
+        syncConditionChain(bg, key, bgHost, frame.unit, chainBG, filt, "bgtint",
             tconcat({ "bg", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(sublevel) }, "|"),
             function(m, f) return buildOverlayTintConfig(frame.unit, m, r, g, b, blend, 0, f, tintOpts) end,
             function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend },
@@ -5135,7 +5181,7 @@ local function syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, a
     -- Nothing structural left: this family declares one overlay slot with a
     -- fixed region set, and both the map and the filter string tune live.
     -- Structural for the same reason as the health-bar twin (secure-context bind).
-    local structSig = "bgtint" .. (pdOnly and "|pd" or "")
+    local structSig = "bgtint"
     local tuningSig = placedTuningSig(map, filt)
     local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend), tostring(sublevel) }, "|")
 
