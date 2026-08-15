@@ -79,6 +79,11 @@ local CATEGORY_GROUPS = {
             -- firehose. Replaces BLIZAURA, which was declared but never logged.
             { key = "AURAROW",       desc = "Aura row drivers: rebuild vs tuning vs style, retargets" },
             { key = "AURACONTAINER", desc = "12.1 AuraContainer factory (build, filters, capability gate)" },
+            -- The identity gate's own lane, split out of AURACONTAINER so a tester
+            -- chasing "auras vanished" can enable JUST the verdict trail: park/hide
+            -- flips with the probe that broke trust, latches, recovery re-parses.
+            -- Edge-triggered only, so it is quiet outside actual gate activity.
+            { key = "IDGATE",        desc = "Identity gate: park/hide verdicts with reasons, latches, recovery" },
             -- ⚠ Was EMITTED BUT NOT REGISTERED, which defeats the point of this table:
             -- both of its sites are DebugWarn -- custom-filter import skipping an
             -- entry, and a scrub that could not reach ParseADFilterRef -- i.e. exactly

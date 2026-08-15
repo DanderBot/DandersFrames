@@ -5079,38 +5079,18 @@ function Handle:_setDeathLatch(on)
 end
 
 -- ============================================================
--- GATE EVENT LOG — always on, persistent, transitions only
+-- GATE EVENT LOG — the IDGATE debug category, transitions only
 -- ============================================================
--- Every gate flip lands in DandersFramesDB_v2.gateLog whether or not the debug
--- console is enabled — a field report ("my HoTs vanished in the BG") arrives
--- AFTER the fact, and the console is off for every user who isn't already
--- chasing a bug. Transitions are rare (a handful per fight), so an always-on
--- ring is cheap; the ring caps itself so an hour-long battleground cannot grow
--- it unbounded. `/df debug idgate` prints the tail. When the console IS on the
--- same line echoes there under the AURACONTAINER category, timestamped twice.
--- ⚠ Only pass plain strings/numbers — a secret arg would taint the formatted
--- line; the issecretvalue check below is the backstop, not a license.
-local GATE_LOG_CAP, GATE_LOG_KEEP = 300, 200
+-- Every gate flip (park/hide/recovery, slot twins, death and cinematic latches)
+-- logs under its OWN console category, IDGATE, so a tester chasing "auras
+-- vanished" can enable just the verdict trail without the rest of the
+-- AURACONTAINER firehose. Opt-in like every other category — nothing is written
+-- unless the user turns it on. Each verdict line carries the probe that broke
+-- trust (see IdentityUnavailable and the `why` locals). One shared helper so
+-- every writer lands in the same lane; DF:Debug already sanitises secret args.
 local function GateLog(fmt, ...)
-    local ok, msg = pcall(string.format, fmt, ...)
-    if not ok then msg = tostring(fmt) end
-    if issecretvalue and issecretvalue(msg) then msg = "<secret log arg>" end
-    local db = _G.DandersFramesDB_v2
-    if type(db) == "table" then
-        local log = db.gateLog
-        if type(log) ~= "table" then log = {}; db.gateLog = log end
-        log[#log + 1] = date("%m-%d %H:%M:%S  ") .. msg
-        if #log > GATE_LOG_CAP then
-            -- One-pass compaction to the newest KEEP (DebugConsole's overshoot idea):
-            -- never a per-line table.remove shift.
-            local keep = {}
-            for i = #log - (GATE_LOG_KEEP - 1), #log do keep[#keep + 1] = log[i] end
-            db.gateLog = keep
-        end
-    end
-    DF:Debug(DBG, "%s", msg)
+    DF:Debug("IDGATE", fmt, ...)
 end
-AuraContainer.GateLog = GateLog   -- shared with the death-latch/cine writers below
 
 function Handle:_noteGateRecovery(can)
     local was = self._idGateAssist
@@ -7605,6 +7585,11 @@ idGateWatch:SetScript("OnEvent", function(_, event)
         C_Timer.After(0.05, IdentityGateSweep)
     end
     if event == "PLAYER_ENTERING_WORLD" then
+        -- One-time scrub: a same-day reverted design (90fc296f) briefly wrote an
+        -- always-on gateLog ring into the SV before gate logging moved to the
+        -- IDGATE console category. Remove once shipped builds can't have it.
+        local sv = _G.DandersFramesDB_v2
+        if type(sv) == "table" and sv.gateLog ~= nil then sv.gateLog = nil end
         C_Timer.After(2, IdentityGateSweep)
         C_Timer.After(6, IdentityGateSweep)
     end
@@ -7832,18 +7817,26 @@ function AuraContainer.DebugDumpIdentityGate()
         o:Field("auras secret", okS and tostring(secret) or "ERR", "NEUTRAL")
     end
     o:Field("test mode", AuraContainer._testMode or false, "NEUTRAL")
-    -- ★ The persistent gate log's tail — every transition, timestamped, whether or
-    -- not the debug console was on when it happened. This is the half a field report
-    -- needs: the dump above is NOW, the tail is WHAT LED HERE.
-    local glog = type(_G.DandersFramesDB_v2) == "table" and _G.DandersFramesDB_v2.gateLog
-    if type(glog) == "table" and #glog > 0 then
-        o:Section(("Gate log — last %d of %d (persists across sessions)"):format(
-            math.min(15, #glog), #glog))
-        for i = math.max(1, #glog - 14), #glog do
-            print("    " .. tostring(glog[i]))
+    -- ★ The IDGATE trail's tail, pulled from the console log — the dump above is
+    -- NOW, the tail is WHAT LED HERE. Only populated while the IDGATE debug
+    -- category is enabled (opt-in like every category), so say so when empty
+    -- rather than reading as "no transitions happened".
+    local dlog = type(_G.DandersFramesDB_v2) == "table" and _G.DandersFramesDB_v2.debugLog
+    local tail = {}
+    if type(dlog) == "table" then
+        for i = #dlog, 1, -1 do
+            local e = dlog[i]
+            if type(e) == "table" and e[3] == "IDGATE" then
+                tail[#tail + 1] = tostring(e[1]) .. "  " .. tostring(e[4])
+                if #tail >= 15 then break end
+            end
         end
+    end
+    if #tail > 0 then
+        o:Section(("Gate log — last %d IDGATE lines"):format(#tail))
+        for i = #tail, 1, -1 do print("    " .. tail[i]) end
     else
-        o:Section("Gate log — empty (no transitions recorded yet)")
+        o:Section("Gate log — empty (enable the IDGATE debug category to record transitions)")
     end
     o:Siblings("idgate")
 end
