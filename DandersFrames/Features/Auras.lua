@@ -3046,10 +3046,24 @@ end
 -- Non-aura visibility for the missing-buff strip: the badge must never claim
 -- "missing" on a corpse / offline / out-of-range / unassistable unit. All
 -- non-secret reads; range mirrors the legacy issecretvalue guard. DELIBERATE
--- change vs legacy: no UnitIsPlayer — legacy excluded NPC group members because
--- its aura SCAN couldn't check them, but raid buffs are castable on
+-- change vs legacy: no UnitIsPlayer on GROUP frames — legacy excluded NPC group
+-- members because its aura SCAN couldn't check them, but raid buffs are castable on
 -- follower-dungeon NPCs (Krathe-verified) and the read-free widget works on any
 -- assistable unit. Pets stay excluded (pet frames don't run this feature).
+--
+-- ☠☠ THE PLAYERS-ONLY TERM IS SCOPED TO PINNED FRAMES, AND MUST STAY THAT WAY.
+-- It arrived unscoped and killed the feature outright in follower dungeons: every
+-- party member there is an NPC, so the strip hid on all of them and showed only on
+-- your own frame -- reported by Aur0r4 on 5.1.3 with a fresh profile, confirmed by
+-- Krathe in a follower dungeon. The bug it was fixing is real but NARROWER than the
+-- code it shipped as: a story-mode companion on a PINNED frame nagging about class
+-- raid buffs nobody can give it, which is exactly how the changelog scoped it
+-- ("(Pinned Frames) Story-mode NPC companions ..."). The paragraph above is the
+-- older claim and it was the correct one; the unscoped term was added beneath it
+-- without reconciling the two, so for a build the file argued with itself.
+-- ⚠ Residual, accepted: a story companion occupying a real PARTY slot rather than a
+-- pinned frame can still nag. A useless icon is cosmetic; a dead feature in every
+-- follower dungeon is not.
 --
 -- ☠ SPLIT OUT of DriveMissingBuffFactory on purpose. The drive only runs from
 -- RefreshFactoryRows, which fires on an aura-LAYOUT bump (a settings change) and
@@ -3074,12 +3088,14 @@ function DF:RefreshMissingBuffVisibility(frame)
         -- group is empty and every badge sits parked in its window.
         visible = true
     else
-        -- ☠ PLAYERS ONLY (#1046/S7): a missing CLASS raid buff is meaningless on
-        -- an NPC, but a story-mode companion passes every other term here
-        -- (assistable, alive — and UnitIsConnected can read secret-truthy on
-        -- such units, sailing through the `and` chain), so pinned NPCs nagged
-        -- about buffs nobody can give them.
-        visible = unit and UnitExists(unit) and UnitIsPlayer(unit)
+        -- ☠ PLAYERS ONLY ON PINNED FRAMES (#1046/S7) — see the header. A story-mode
+        -- companion passes every other term here (assistable, alive — and
+        -- UnitIsConnected can read secret-truthy on such units, sailing through the
+        -- `and` chain), so pinned NPCs nagged about buffs nobody can give them.
+        -- ☠ DO NOT DROP THE isPinnedFrame SCOPE. Unscoped, this term hides the strip
+        -- on every follower-dungeon party member, because they are all NPCs.
+        visible = unit and UnitExists(unit)
+            and (not frame.isPinnedFrame or UnitIsPlayer(unit))
             and not UnitIsDeadOrGhost(unit) and UnitIsConnected(unit)
             and not frame.isPetFrame and UnitCanAssist("player", unit)
         if visible then
