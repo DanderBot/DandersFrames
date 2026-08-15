@@ -401,8 +401,30 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             })
         end
 
+        -- ☠ RE-CLAMP ON EVERY CALL, not just at page build. The build-time clamp above
+        -- (see `persistedTab`) already knew the index could address a set that is gone
+        -- "or in the other mode" -- but it runs ONCE, when the page is constructed, and
+        -- a mode switch does not rebuild the page: it drives the REFRESH path. Joining a
+        -- raid while the party side had more pinned sets than the raid side therefore
+        -- left `activeHighlightTab` pointing past the end of the live list, and the ~27
+        -- call sites that index this directly threw "attempt to index a nil value" --
+        -- nine at once, one per refreshed control (Aphoex, 5.2.0-alpha.1, on entering a
+        -- raid; stack came in through the roster widget's getter).
+        -- ⚠ The clamp is the FIX; the nil return is only the last resort. RemoveSet
+        -- refuses to drop below one set, so an empty list is unreachable by design and a
+        -- nil here means something else is wrong -- callers that write must NOT silently
+        -- swallow that, which is why this does not hand back a scratch table.
         local function GetCurrentSet()
-            return db.pinnedFrames.sets[activeHighlightTab]
+            local sets = db.pinnedFrames and db.pinnedFrames.sets
+            if type(sets) ~= "table" then return nil end
+            local n = #sets
+            if n == 0 then return nil end
+            if activeHighlightTab > n then activeHighlightTab = n end
+            if activeHighlightTab < 1 then activeHighlightTab = 1 end
+            -- Keep the persisted value honest too, or the next page build re-reads the
+            -- stale index and the clamp has to happen all over again.
+            pagePinnedFrames.persistedTab = activeHighlightTab
+            return sets[activeHighlightTab]
         end
 
         local function IsCurrentBossMode()
@@ -1511,7 +1533,10 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 DF.PinnedFrames:UpdatePreviewSet(activeHighlightTab)
             end
         end)
-        nameInputContainer.Refresh = function() nameInput:SetText(GetCurrentSet().name or "") end
+        nameInputContainer.Refresh = function()
+            local s = GetCurrentSet()
+            nameInput:SetText((s and s.name) or "")
+        end
         -- SetEnabled shim: grey the label + editbox in place when the set is disabled.
         nameInputContainer.SetEnabled = function(_, enabled)
             nameInput:EnableMouse(enabled)
@@ -1813,7 +1838,9 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         rosterWidget = GUI:CreateHighlightRosterWidget(
             self.child,
-            function() return GetCurrentSet().players end,
+            -- Guarded as well as clamped: this is the getter the raid-join crash came
+            -- through, and a roster with no set to read is an empty roster, not an error.
+            function() local s = GetCurrentSet() return s and s.players or {} end,
             function(players)
                 local set = GetCurrentSet()
                 set.players = players
