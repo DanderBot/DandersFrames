@@ -37,6 +37,8 @@
 * (Pinned Frames) Fix the missing-buff strip never showing on follower dungeon companions. (by Krathe)
 * (Pet Frames) Pet frames no longer sit under neighbouring health bars on the first test mode entry. (by Krathe)
 * (Debug) The debug console no longer goes blank on very large logs, and exports of big logs are split into parts so nothing is cut off. (by Krathe)
+* (Defensive Icons) Fix the defensive row showing the previous occupant's defensives after a roster change moved someone else into that frame.
+* (Settings) Fix settings text such as tab labels rendering as boxes on Chinese, Korean and other non-Latin clients when the chosen Settings Font lacks those characters — including with the default font.
 
 ### Improvements
 

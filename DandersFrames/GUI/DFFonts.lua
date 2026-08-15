@@ -73,11 +73,26 @@ CreateDFFontObjects()
 -- any subsequent change via GUI:RefreshSettingsFont().
 --
 -- Implementation: for each DFFont object, read its current size
--- (from the Blizzard copy), then use CreateFontFamily via the
--- existing DF:SafeSetFont path so multi-alphabet fallbacks work.
--- We call SetFont directly on the DFFont object using the
--- resolved family path so inheritance propagates to all
--- FontStrings that use it.
+-- (from the Blizzard copy), build the multi-alphabet FAMILY for the
+-- chosen font at that size through Config.lua's family builder, and
+-- make the DFFont inherit it — the same relationship Blizzard's own
+-- GameFont* objects have with their SystemFont_* families. Every
+-- FontString inheriting the DFFont then gets the fallback per alphabet.
+--
+-- ☠ THIS USED TO CALL dfFont:SetFont(fontPath, ...) DIRECTLY — one file, no
+-- family — while the header comment above described the family path. So the
+-- fallback the header promised never existed for DFFont inheritors: on a
+-- zhTW / zhCN / koKR client, any Settings Font without CJK glyphs rendered
+-- those widgets as boxes (#1054, Click Casting tab labels), and the DEFAULT
+-- font ("DF Roboto SemiBold") is exactly such a font — so every CJK user hit
+-- it out of the box. Widgets routed through GUI:SetSettingsFont were fine
+-- because SafeSetFont already builds the family; only direct inheritors broke.
+--
+-- Colour is re-applied after the inherit: SetFontObject takes everything
+-- from the parent, and the family is white, but the templates carry their
+-- own colours (yellow headers, grey disabled). Falls back to the old direct
+-- SetFont if the family cannot be built or the inherit is refused, so this
+-- can only ever be an improvement over what shipped.
 function DF.GUI:ApplySettingsFont()
     if not DF.db then return end
 
@@ -104,9 +119,22 @@ function DF.GUI:ApplySettingsFont()
             -- on every DFFont, including templates that originally had an
             -- outline (e.g. GameFontHighlightSmallOutline). Users expect
             -- the dropdown to directly control the outline state.
-            pcall(function()
-                dfFont:SetFont(fontPath, size, outline)
-            end)
+            local r, g, b, a = dfFont:GetTextColor()
+            local applied = false
+            local familyName = DF.GetSettingsFontFamilyName
+                and DF:GetSettingsFontFamilyName(fontPath, outline, size)
+            local family = familyName and _G[familyName]
+            if family then
+                applied = pcall(dfFont.SetFontObject, dfFont, family)
+                if applied then
+                    pcall(dfFont.SetTextColor, dfFont, r or 1, g or 1, b or 1, a or 1)
+                end
+            end
+            if not applied then
+                pcall(function()
+                    dfFont:SetFont(fontPath, size, outline)
+                end)
+            end
         end
     end
 end

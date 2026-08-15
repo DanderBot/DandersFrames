@@ -709,6 +709,17 @@ local function GetOrCreateFontFamily(fontPath, outline, useShadow, size)
     return nil
 end
 
+-- ★ Exposed for the settings-UI font objects (GUI/DFFonts.lua). The DFFont* objects
+-- are Font OBJECTS, not FontStrings, so SafeSetFont (which also scales/re-renders a
+-- FontString) does not fit them — but they need the same multi-alphabet family, or
+-- every widget inheriting a DFFont renders tofu on a CJK client whenever the chosen
+-- Settings Font lacks those glyphs (#1054; the DEFAULT "DF Roboto SemiBold" does).
+-- Returns the family's global NAME (or nil when the API is unavailable), same as the
+-- local above; no shadow — the settings panel never uses one.
+function DF:GetSettingsFontFamilyName(fontPath, outline, size)
+    return GetOrCreateFontFamily(fontPath, outline or "", false, size)
+end
+
 -- 12.0.7: a font's drop shadow lives on its font-family per-alphabet font
 -- objects, not the fontstring (fontstring-level SetShadow* is a silent no-op).
 -- Update the already-built families' shadow in place so the Shadow X/Y/Color
