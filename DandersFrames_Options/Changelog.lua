@@ -15,6 +15,7 @@ DF.CHANGELOG_TEXT = [===[
 
 ### Bug Fixes
 
+* (Test Mode) The test panel's Absorbs and Heal Prediction toggles now apply fully when switched on mid-session — previously some frames were left without their shield or incoming heal until the toggle was flipped again. (by Krathe)
 * (Aura Designer) Fix indicators on shared slots fading twice as much as intended out of range, and staying faded after entering combat while someone was out of range.
 * (Debuff Bar) Fix the whole debuff row going empty on some group members — showing a dispel highlight with no debuff icon under it — when debuff categories were combined.
 * (Aura Designer) Every configured Health Bar Color and Background Color now shows. Previously only the highest-priority one ever did, so a lower-priority buff coloured nothing even when it was the only one on the unit. With several active at once the highest priority draws on top. (by Krathe)
@@ -32,10 +33,22 @@ DF.CHANGELOG_TEXT = [===[
 * (Bars) Fix solo-mode resource bars appearing on frames other than your own. (by Krathe)
 * (Aura Designer) Fix the enable toggle silently changing your Show Buffs setting when nothing needed to change. (by Krathe)
 * (Test Mode) The preview honours Smooth Bar Animation and labels which slot is you. (by Krathe)
+* (Auras) Fix buffs and debuffs sometimes staying hidden on group members after they died, released or disconnected — the frame only recovered when something else refreshed it, such as targeting that player. Most reported by healers missing HoTs on raid groups outside their own, and constant in battlegrounds. (by Krathe)
+* (Auras) Duration text now counts down cleanly to the end — 3, 2, 1, gone — instead of showing the final second twice. Applies to every duration format, the Aura Designer and the Defensive Icon. (by Krathe)
+* (Global Fonts) Apply to All now reaches the Aura Designer: the global text defaults, every placed indicator and all group text styles take the chosen font and outline. Previously it silently changed nothing there. (by Krathe)
+* (Bars) Show Overheal now actually lets incoming heals overflow past the end of the health bar — it never had before. (by Krathe)
+* (Raid Frames) Fix the unlock overlay box drawing half a group-row away from the frames with Center group alignment. (by Krathe)
+* (Pinned Frames) Fix pinned frames staying on screen after leaving a raid, and an error when entering a raid with more party pinned sets than raid ones. (by Krathe)
+* (Pinned Frames) Fix the missing-buff strip never showing on follower dungeon companions. (by Krathe)
+* (Pet Frames) Pet frames no longer sit under neighbouring health bars on the first test mode entry. (by Krathe)
+* (Debug) The debug console no longer goes blank on very large logs, and exports of big logs are split into parts so nothing is cut off. (by Krathe)
+* (Defensive Icons) Fix the defensive row showing the previous occupant's defensives after a roster change moved someone else into that frame.
+* (Settings) Fix settings text such as tab labels rendering as boxes on Chinese, Korean and other non-Latin clients when the chosen Settings Font lacks those characters — including with the default font.
 
 ### Improvements
 
 * (Aura Designer) The filter picker now has a scrollbar and a search box, matching the addon's other dropdowns.
+* (Debug) New IDGATE debug category traces every aura-visibility gate decision with its reason (dead, offline, cross-faction, in a vehicle, phased) — enable it when chasing a "my auras vanished" report, then check /df debug idgate. (by Krathe)
 
 ## [5.1.3]
 
