@@ -10,6 +10,7 @@
 
 ### Bug Fixes
 
+* (Test Mode) The test panel's Absorbs and Heal Prediction toggles now apply fully when switched on mid-session — previously some frames were left without their shield or incoming heal until the toggle was flipped again. (by Krathe)
 * (Aura Designer) Fix indicators on shared slots fading twice as much as intended out of range, and staying faded after entering combat while someone was out of range.
 * (Debuff Bar) Fix the whole debuff row going empty on some group members — showing a dispel highlight with no debuff icon under it — when debuff categories were combined.
 * (Aura Designer) Every configured Health Bar Color and Background Color now shows. Previously only the highest-priority one ever did, so a lower-priority buff coloured nothing even when it was the only one on the unit. With several active at once the highest priority draws on top. (by Krathe)
