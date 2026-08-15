@@ -821,6 +821,7 @@ function DF:InitializeHeaderChild(frame)
                             -- Fallback if FullFrameRefresh not yet loaded
                             if DF.UpdateUnitFrame then DF:UpdateUnitFrame(self) end
                             if DF.UpdateAuras then DF:UpdateAuras(self) end
+                            if DF.UpdateDefensiveBar then DF:UpdateDefensiveBar(self) end
                             if DF.UpdateRoleIcon then DF:UpdateRoleIcon(self) end
                         end
                     end
@@ -994,6 +995,10 @@ function DF:InitializeHeaderChild(frame)
                 -- Auras
                 if DF.UpdateAuras then
                     DF:UpdateAuras(self)
+                end
+                -- Defensive row: separate handle, not reached by UpdateAuras (#1063)
+                if DF.UpdateDefensiveBar then
+                    DF:UpdateDefensiveBar(self)
                 end
                 -- Missing buff icon
                 if DF.UpdateMissingBuffIcon then
@@ -3839,7 +3844,13 @@ function DF:FullFrameRefresh(frame)
 
     -- Auras (buffs/debuffs)
     if DF.UpdateAuras then DF:UpdateAuras(frame) end
-    
+    -- ☠ The defensive row is its OWN container handle (frame.defensiveFactory), driven
+    -- only through UpdateDefensiveBar — UpdateAuras never touches it. This refresh runs
+    -- on every header unit reassignment, so without the call the buff and debuff rows
+    -- retargeted to the new occupant while the defensive row kept showing the previous
+    -- one's defensives (#1063, "defensives get copied to Valeera").
+    if DF.UpdateDefensiveBar then DF:UpdateDefensiveBar(frame) end
+
     -- Icons
     if DF.UpdateRoleIcon then DF:UpdateRoleIcon(frame, "FullFrameRefresh") end
     if DF.UpdateLeaderIcon then DF:UpdateLeaderIcon(frame) end
