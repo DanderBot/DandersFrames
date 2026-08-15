@@ -535,10 +535,14 @@ end
 -- exceeds what the renderer will draw — the box goes COMPLETELY blank, with the
 -- "no entries match" message nowhere in sight (field report: 10k entries, every
 -- large category blanked the window, tiny ones like SYSTEM rendered fine). The
--- display code was built when maxLines defaulted to 500 (+500 overshoot), so
--- ~1000 lines is the proven envelope; when the retention default was raised to
--- 10000 the blank appeared. Retention and rendering are different budgets: keep
--- all 10000 in the log, show the newest 1000, and SAY the rest are held back.
+-- display code was built when maxLines defaulted to 500 (+500 overshoot); when
+-- the retention default was raised to 10000 the blank appeared. The ceiling is
+-- the region-size limit (~32,767px — roughly 2,700 lines at this font, but the
+-- font is user-scalable, which drags the true line count down). 1000 is the
+-- envelope the console demonstrably ran at for months, so it stays 1000
+-- (Krathe's call). Retention and rendering are different budgets: keep all
+-- 10000 in the log, show the newest window, and SAY the rest are held back.
+-- The export pages in chunks of this same size, losing nothing.
 local MAX_RENDER_LINES = 1000
 
 -- Shared per-entry sanitize + format. Legacy entries (logged before the
@@ -622,7 +626,7 @@ function DebugConsole:RefreshDisplay()
     local lines, matched = CollectFilteredLines(MAX_RENDER_LINES, true)
     if matched > #lines then
         tinsert(lines, 1, format(
-            "|cff666666… %d older matching lines held back (newest %d shown — narrow the filters to reach older lines; the full log is in the saved variables file)|r",
+            "|cff666666… %d older matching lines held back (newest %d shown — Copy to Clipboard exports every part, or narrow the filters)|r",
             matched - #lines, #lines))
     end
 
@@ -704,32 +708,40 @@ end
 -- EXPORT
 -- ============================================================
 
-function DebugConsole:GetExportText()
-    if not debugLog then return "No debug log available." end
+-- The export loses NOTHING: every matching line is formatted, then sliced into
+-- parts of MAX_RENDER_LINES — the popup's text area is a content-sized EditBox
+-- with the same region-size ceiling as the live box, so one giant string would
+-- blank it, but paged parts each render fine. One part = the common case (a
+-- filtered slice is almost always under the window); the caller shows a "next
+-- part" button only when there are more. Same filters, same formatter, same
+-- window as the display (CollectFilteredLines), so the views cannot disagree.
+function DebugConsole:GetExportChunks()
+    if not debugLog then return { "No debug log available." } end
 
-    -- Same filters, same formatter, same MAX_RENDER_LINES window as the live
-    -- display (CollectFilteredLines) — the export popup's text area is also a
-    -- content-sized EditBox, so an uncapped 10k-line export blanked exactly
-    -- like the live box did. The header names what was held back; the full
-    -- log always survives in the saved variables file.
-    local entries, matched = CollectFilteredLines(MAX_RENDER_LINES, false)
-
-    local result = {}
-    tinsert(result, "DandersFrames Debug Log")
-    tinsert(result, "Version: " .. (DF.VERSION or "unknown"))
-    tinsert(result, "Exported: " .. date("%Y-%m-%d %H:%M:%S"))
-    if matched > #entries then
-        tinsert(result, ("Entries: newest %d of %d matched (%d total in log; older lines are in the saved variables file)")
-            :format(#entries, matched, #debugLog))
-    else
-        tinsert(result, "Entries: " .. #entries .. " (filtered from " .. #debugLog .. " total)")
+    local entries = CollectFilteredLines(math.huge, false)
+    local total = #entries
+    local numChunks = math.max(1, math.ceil(total / MAX_RENDER_LINES))
+    local chunks = {}
+    for c = 1, numChunks do
+        local first = (c - 1) * MAX_RENDER_LINES + 1
+        local last  = math.min(total, c * MAX_RENDER_LINES)
+        local result = {}
+        tinsert(result, "DandersFrames Debug Log")
+        tinsert(result, "Version: " .. (DF.VERSION or "unknown"))
+        tinsert(result, "Exported: " .. date("%Y-%m-%d %H:%M:%S"))
+        if numChunks > 1 then
+            tinsert(result, ("Part %d of %d — lines %d-%d of %d matched (%d total in log)")
+                :format(c, numChunks, first, last, total, #debugLog))
+        else
+            tinsert(result, "Entries: " .. total .. " (filtered from " .. #debugLog .. " total)")
+        end
+        tinsert(result, "Min Level: " .. (debugDb and debugDb.logLevel or "INFO"))
+        tinsert(result, "========================================")
+        tinsert(result, "")
+        for i = first, last do
+            result[#result + 1] = entries[i]
+        end
+        chunks[#chunks + 1] = table.concat(result, "\n")
     end
-    tinsert(result, "Min Level: " .. (debugDb and debugDb.logLevel or "INFO"))
-    tinsert(result, "========================================")
-    tinsert(result, "")
-    for i = 1, #entries do
-        result[#result + 1] = entries[i]
-    end
-
-    return table.concat(result, "\n")
+    return chunks
 end
