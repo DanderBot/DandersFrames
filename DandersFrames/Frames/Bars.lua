@@ -2278,6 +2278,14 @@ function DF:UpdateHealPrediction(frame, testIndex)
     -- ★ Nothing in live's path is secret-bound here, so there is no reason to fork:
     -- test values are plain numbers, and a StatusBar fed a plain value behaves the
     -- same as one fed a secret. Standing rule -- test follows live wherever it can.
+    --
+    -- ★ ONE ceiling for live's calculator AND the test mirror, or they drift -- the
+    -- exact fast-path-copy trap this file has sprung twice. 1.05 is the field
+    -- consensus for the overheal tail: Blizzard's own compact party/raid frames cap
+    -- at 5% past the bar, and every surveyed implementation either matches that
+    -- sliver or shows no overhang at all. A first cut used 2.0 ("never the binding
+    -- constraint") -- functionally correct and visually an outlier nobody ships.
+    local OVERHEAL_CEILING = 1.05
     local function applyTestHeals(testData)
         maxHealth = (testData and testData.maxHealth) or 100000
         local healthPct = (testData and testData.healthPercent) or 0.75
@@ -2293,12 +2301,16 @@ function DF:UpdateHealPrediction(frame, testIndex)
         -- not it is displayed; only the preview's fiction follows its toggles.
         local haPct = (db.testShowAbsorbs and testData and testData.healAbsorbPercent) or 0
         local total = math.max(0, healPct - haPct) * maxHealth   -- safe: nothing is secret in test
-        -- Mirrors SetIncomingHealClampMode. With overheal off the calculator would
-        -- never report more than the missing health, so neither may the preview;
-        -- with it on the overhang is the point and the bar is parented to the frame
-        -- rather than the health bar so it can spill.
+        -- Mirrors SetIncomingHealClampMode + the overflow ceiling. With overheal off
+        -- the calculator never reports more than the missing health, so neither may
+        -- the preview; with it on the overhang spills past the bar (it is parented to
+        -- the frame, not the health bar, for exactly that) but is capped at the SAME
+        -- ceiling live's calculator enforces -- an uncapped preview promised a tail
+        -- live never draws.
         if not db.healPredictionShowOverheal then
             total = math.min(total, math.max(0, maxHealth - healthPct * maxHealth))
+        else
+            total = math.min(total, math.max(0, maxHealth * OVERHEAL_CEILING - healthPct * maxHealth))
         end
         -- The breakdown live gets from the calculator. An even split is the only
         -- honest preview: there is no real healer to attribute to.
@@ -2359,13 +2371,13 @@ function DF:UpdateHealPrediction(frame, testIndex)
             -- unconditional 1.0 here (commented "Always 100%", read backwards) is why
             -- Show Overheal never showed overheals: the clamp-mode line above did
             -- everything right and this line capped the sum anyway.
-            -- ON  -> 2.0: never the binding constraint (clamp mode 1 already caps the
-            --        VALUE at maxHealth, so the sum tops out at health + max <= 2x max).
-            --        The render is built for the spill — the bar is parented to the
-            --        frame, not the health bar, precisely so it can overhang — and the
-            --        test-mode mirror above previews the overhang uncapped.
+            -- ON  -> OVERHEAL_CEILING (1.05, declared above applyTestHeals so the test
+            --        mirror caps at the same number): a bounded 5% tail past the bar,
+            --        matching Blizzard's own compact frames. The render is built for
+            --        the spill — the bar is parented to the frame, not the health bar,
+            --        precisely so it can overhang.
             -- OFF -> 1.0: belt for mode 0, which already caps at missing health.
-            calc:SetIncomingHealOverflowPercent(db.healPredictionShowOverheal and 2.0 or 1.0)
+            calc:SetIncomingHealOverflowPercent(db.healPredictionShowOverheal and OVERHEAL_CEILING or 1.0)
             -- Heals NET of consuming heal absorbs (mode 0, ReducedByIncomingHeals).
             -- This IS the engine default the bar has ridden all along — pinned
             -- explicitly so it can never drift, and so the heal-absorb bar (now also
