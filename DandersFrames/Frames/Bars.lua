@@ -2356,14 +2356,20 @@ function DF:UpdateHealPrediction(frame, testIndex)
             
             local calc = frame.healPredictionCalculator
             
-            -- Configure the calculator based on settings. Enum, straight from the API
-            -- docs (the comment here used to state it BACKWARDS — the code was right):
-            --   UnitIncomingHealClampMode 0 = MissingHealth, 1 = MaximumHealth.
-            -- Show Overheal ON  -> 1 (MaximumHealth: the heal may exceed missing health)
-            -- Show Overheal OFF -> 0 (MissingHealth: capped at what fits)
-            local clampMode = db.healPredictionShowOverheal and 1 or 0
-
-            calc:SetIncomingHealClampMode(clampMode)
+            -- ☠ CLAMP MODE 0 IN BOTH STATES — the overheal toggle drives the OVERFLOW
+            -- PERCENT, never the mode. Per the enum docs the overflow belongs to mode 0
+            -- ("clamp to the amount of missing health WITH OVERFLOW APPLIED"), while
+            -- mode 1 (MaximumHealth) is a VALUE cap of the whole health pool with no
+            -- overflow term at all — so under mode 1 the ceiling never binds, the value
+            -- may reach maxHealth on its own, and a near-full unit renders health+heal
+            -- at close to DOUBLE the bar. That was field-caught as a full-bar blue
+            -- overhang (Kesara screenshot, 2026-08-15) the first time overheal actually
+            -- rendered: an earlier cut set mode 1 for ON on the assumption the ceiling
+            -- capped the sum in every mode. It caps only mode 0's.
+            -- Mode 0 + ceiling is also literally Blizzard's compact-frame formula
+            -- (trim when health + heals > max * 1.05): sum <= ceiling * max, i.e. a
+            -- bounded tail with overheal on, flush at the bar edge with it off.
+            calc:SetIncomingHealClampMode(0)
             -- ☠ THE OVERFLOW PERCENT IS A CEILING ON THE SUM, NOT A "SHOW THIS MUCH".
             -- Per the API doc: "Increasing this to a value OVER 1.0 will mean that
             -- incoming heals can extend beyond maximum health." So 1.0 pins
@@ -2372,11 +2378,12 @@ function DF:UpdateHealPrediction(frame, testIndex)
             -- Show Overheal never showed overheals: the clamp-mode line above did
             -- everything right and this line capped the sum anyway.
             -- ON  -> OVERHEAL_CEILING (1.05, declared above applyTestHeals so the test
-            --        mirror caps at the same number): a bounded 5% tail past the bar,
-            --        matching Blizzard's own compact frames. The render is built for
-            --        the spill — the bar is parented to the frame, not the health bar,
-            --        precisely so it can overhang.
-            -- OFF -> 1.0: belt for mode 0, which already caps at missing health.
+            --        mirror caps at the same number): mode 0's cap becomes
+            --        missing + 5% of max — a bounded tail past the bar, matching
+            --        Blizzard's own compact frames. The render is built for the spill —
+            --        the bar is parented to the frame, not the health bar, precisely so
+            --        it can overhang.
+            -- OFF -> 1.0: mode 0's cap is exactly the missing health — flush at the bar.
             calc:SetIncomingHealOverflowPercent(db.healPredictionShowOverheal and OVERHEAL_CEILING or 1.0)
             -- Heals NET of consuming heal absorbs (mode 0, ReducedByIncomingHeals).
             -- This IS the engine default the bar has ridden all along — pinned
