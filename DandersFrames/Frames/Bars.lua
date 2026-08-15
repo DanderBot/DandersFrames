@@ -2352,7 +2352,20 @@ function DF:UpdateHealPrediction(frame, testIndex)
             local clampMode = db.healPredictionShowOverheal and 1 or 0
 
             calc:SetIncomingHealClampMode(clampMode)
-            calc:SetIncomingHealOverflowPercent(1.0)  -- Always 100%
+            -- ☠ THE OVERFLOW PERCENT IS A CEILING ON THE SUM, NOT A "SHOW THIS MUCH".
+            -- Per the API doc: "Increasing this to a value OVER 1.0 will mean that
+            -- incoming heals can extend beyond maximum health." So 1.0 pins
+            -- health + heal at exactly the bar edge — zero overhang — and the old
+            -- unconditional 1.0 here (commented "Always 100%", read backwards) is why
+            -- Show Overheal never showed overheals: the clamp-mode line above did
+            -- everything right and this line capped the sum anyway.
+            -- ON  -> 2.0: never the binding constraint (clamp mode 1 already caps the
+            --        VALUE at maxHealth, so the sum tops out at health + max <= 2x max).
+            --        The render is built for the spill — the bar is parented to the
+            --        frame, not the health bar, precisely so it can overhang — and the
+            --        test-mode mirror above previews the overhang uncapped.
+            -- OFF -> 1.0: belt for mode 0, which already caps at missing health.
+            calc:SetIncomingHealOverflowPercent(db.healPredictionShowOverheal and 2.0 or 1.0)
             -- Heals NET of consuming heal absorbs (mode 0, ReducedByIncomingHeals).
             -- This IS the engine default the bar has ridden all along — pinned
             -- explicitly so it can never drift, and so the heal-absorb bar (now also
