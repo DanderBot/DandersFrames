@@ -517,6 +517,26 @@ function DF:SetPetFrameVisible(frame, visible)
         frame.dfPetHidden = false
         -- Set to 1 so range system can take over (don't compare current alpha - it may be secret)
         frame:SetAlpha(1)
+        -- ☠ RE-DERIVE THE Z-ORDER AT SHOW TIME, from the owner's CURRENT level. The
+        -- #1047 elevation (owner level + 15, clearing neighbours' bound fills) is
+        -- applied in ApplyPetFrameStyle -- but on the FIRST test entry of a session the
+        -- pet is styled in the same tick its owner frame is being built, so the style
+        -- pass captures a pre-layout owner level and the pet sits under neighbouring
+        -- health fills until something re-styles it. Second entry and any settings
+        -- change re-ran the style from the final level, which is exactly the field
+        -- report ("will fix the second time test mode is enabled or a frame is updated
+        -- by changing a setting"; toggles inside test mode showed/hid without
+        -- re-styling, so they never updated it either -- this covers them too, because
+        -- they route through here). Deriving at every SHOW makes the ordering
+        -- irrelevant: the level is read from what the owner IS, not what it was when
+        -- the pet was styled. Idempotent for live pets -- same formula
+        -- ApplyPetFrameStyle applies.
+        if frame.ownerFrame then
+            pcall(function()
+                frame:SetFrameStrata(frame.ownerFrame:GetFrameStrata())
+                frame:SetFrameLevel(frame.ownerFrame:GetFrameLevel() + 15)
+            end)
+        end
         -- Also try to show if not in combat (for proper click targeting)
         if not InCombatLockdown() then
             frame:Show()
