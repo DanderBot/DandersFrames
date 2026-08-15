@@ -796,9 +796,9 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
     -- know the total, so absolute-seconds bands are the 12.1 equivalent.)
     if hideAboveT or colorByTime or alertT then
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
-        -- %d throughout, matching the plain path and Blizzard's Truncate: %.0f rounds to
-        -- NEAREST, so 152s rendered "3m" and 3599s rendered "60m" one tick before flipping
-        -- to "1h".
+        -- %d throughout, matching the plain path: %.0f rounds to NEAREST, so 152s
+        -- rendered "3m" and 3599s rendered "60m" one tick before flipping to "1h".
+        -- (Rounding itself rides the breakpoint/component fields, not the directive.)
         local secFmt = (format == "SHORT" and "%ds") or (format == "FULL" and "%d Seconds")
                         or (format == "TIMER" and "%d") or "%d"
         local minFmt = (format == "FULL") and "%d Minutes" or "%dm"
@@ -826,11 +826,18 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
                                -- can be composed out of order; the pre-alert code
                                -- always emitted ascending, so keep that guarantee)
             -- Highest threshold <= remaining seconds wins.
+            -- ☠ Seconds-shaped bands (no components) round UP — a countdown's digit
+            -- means "at most this many seconds remain", so ceil gives each digit
+            -- exactly one second and the text ends "3, 2, 1, gone". The old floor +
+            -- min=1 pair clamped the sub-1s floor of 0 back to 1, so "1" rendered
+            -- for TWO seconds (field report). Component bands keep floor at the
+            -- breakpoint: their quotient rounding lives on the component itself.
             local function add(threshold, fstr, hex, components)
                 if colorByTime and hex then fstr = "|cff" .. hex .. fstr .. "|r" end
                 if glyphPfx and threshold < alertT then fstr = glyphPfx .. fstr end
                 cuts[threshold] = true
-                bands[#bands + 1] = { threshold = threshold, step = 1, rounding = down,
+                bands[#bands + 1] = { threshold = threshold, step = 1,
+                                      rounding = components and down or up,
                                       min = 1, format = fstr, components = components }
             end
             if alertMode == "TEXT" then
@@ -911,8 +918,11 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
         local ok, f = pcall(function()
             local down = Enum.NumericRuleFormatRounding.Down
+            local up   = Enum.NumericRuleFormatRounding.Up
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
-            fmt:AddBreakpoint({ threshold = 0,    step = 1, rounding = down, min = 1, format = "%d" })
+            -- Seconds band CEILS (see the NUMBER branch): the countdown must end
+            -- "3, 2, 1, gone", and floor + min=1 held the "1" for two seconds.
+            fmt:AddBreakpoint({ threshold = 0,    step = 1, rounding = up, min = 1, format = "%d" })
             fmt:AddBreakpoint({ threshold = PROMOTE_MIN, step = 1, rounding = down, format = "%d:%02d",
                                 components = { { div = 60 }, { mod = 60 } } })
             fmt:AddBreakpoint({ threshold = PROMOTE_HOUR, step = 1, rounding = down, format = "%dh",
@@ -932,8 +942,13 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
             local down = Enum.NumericRuleFormatRounding.Down
             local up   = Enum.NumericRuleFormatRounding.Up
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
-            -- Seconds band truncates: 45.6s remaining is "45", same as the game.
-            fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = down, min = 1, format = "%d" })
+            -- ☠ Seconds band CEILS, deliberately (field report: "3, 2, 1, 1, gone").
+            -- A countdown digit means "at most this many seconds remain": ceil shows
+            -- each digit for exactly one second and the text vanishes AT expiry. The
+            -- old floor ("45.6 is 45, like the game") + min=1 clamp made the sub-1s
+            -- floor of 0 render as a SECOND "1" — the lingering last second. min=1
+            -- stays as a guard against an exact-0.0 sample flashing "0".
+            fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = up, min = 1, format = "%d" })
             -- ☠ THE QUOTIENT ROUNDS UP, and that is Blizzard's behaviour, not a preference.
             -- Their formatter sets SetCanRoundUpLastUnit(true), so 2m32s reads "3m" and
             -- 1h03m reads "63m" -- odd-looking, but it is what the game's own frames show,
@@ -966,13 +981,16 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
         curve:AddPoint(1 + mult * SECONDS_PER_HOUR, Enum.SecondsFormatterInterval.Hours)
         curve:AddPoint(1 + mult * SECONDS_PER_DAY,  Enum.SecondsFormatterInterval.Days)
         fmt:SetDefaultAbbreviation(abbrev)
-        -- ☠ THE TWO CALLS THIS PATH USED TO OMIT. Blizzard's own aura formatter sets
-        -- both; without them a SecondsFormatter defaults to SecondsFormatterRounding
-        -- .RoundUp (enum 0 — and Blizzard setting Truncate explicitly is itself evidence
-        -- the default is not Truncate), so 44.6s remaining rendered "45s" here while the
-        -- game's frames rendered "44s". Guarded: the setters are newer than the type.
+        -- ☠ Rounding is RoundUp, a DELIBERATE break from Blizzard's aura formatter
+        -- (theirs sets Truncate; an earlier cut copied that for parity, so 44.6s read
+        -- "44s" like the game). Reversed with the countdown fix: every DF seconds
+        -- display now ceils — a digit means "at most this many seconds remain", each
+        -- digit holds exactly one second and the text ends "3s, 2s, 1s, gone" instead
+        -- of Truncate's lingering last digit. This also keeps SHORT/FULL agreeing
+        -- with NUMBER at every instant (mixed formats on one frame never differ by 1).
+        -- Guarded: the setters are newer than the type.
         if fmt.SetRounding and Enum.SecondsFormatterRounding then
-            fmt:SetRounding(Enum.SecondsFormatterRounding.Truncate)
+            fmt:SetRounding(Enum.SecondsFormatterRounding.RoundUp)
         end
         if fmt.SetCanRoundUpLastUnit then fmt:SetCanRoundUpLastUnit(true) end
         fmt:SetMinInterval(Enum.SecondsFormatterInterval.Seconds)
