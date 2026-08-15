@@ -690,9 +690,48 @@ end
 -- buffs), so hiding them would hide truth, not garbage. HARMFUL pools are out
 -- of scope (their gate is UnitCanAttack — owned by the debuff-filtering work).
 local GATED_CATEGORY_TOKENS = { BIG_DEFENSIVE = true, EXTERNAL_DEFENSIVE = true }
+
+-- ★ THE NeverSecret EXEMPTION, and why it is EXCLUDE-ONLY. The engine's identity gate has
+-- a per-AURA escape hatch (Blizzard_AuraContainerUtil, checked FIRST and it wins outright):
+-- a spell whose C_Secrets.GetSpellAuraSecrecy is NeverSecret stays filterable on any unit —
+-- that is how Blizzard itself drops Exhaustion/Sated from friendly frames.
+--   * An excludeSpellIDs pool whose ENTIRE set is NeverSecret can never change behaviour
+--     on lost trust: the excluded auras keep hitting the exclude test (their exemption
+--     holds the gate open for THEM), and every other aura was never excluded anyway. Same
+--     output in both trust states ⇒ genuinely not vulnerable ⇒ parking it would hide
+--     correct data for nothing. This also honours the 2026-07-18 uniform-blackout call
+--     better than the blackout did: the buffs the user chose to hide STAY hidden.
+--   * ☠ An includeSpellIDs pool can NEVER take this exemption, whatever its map holds.
+--     The leak is not the mapped spells — it is every OTHER secret helpful aura on the
+--     unit skipping the include test and pouring in. The exemption is a property of the
+--     AURA being tested, not of our map. Do not "symmetrise" this.
+-- Secrecy is a static DB2 property, so one session cache; pcall + guards because the
+-- C_Secrets surface is 12.x-only and a probe failure must degrade to "vulnerable"
+-- (park too much, never leak).
+local auraSecrecyCache
+local function excludeSetAllNeverSecret(map)
+    local CS = C_Secrets
+    if not (CS and CS.GetSpellAuraSecrecy and Enum and Enum.SecrecyLevel) then return false end
+    local never = Enum.SecrecyLevel.NeverSecret
+    auraSecrecyCache = auraSecrecyCache or {}
+    for id in pairs(map) do
+        local v = auraSecrecyCache[id]
+        if v == nil then
+            local ok, s = pcall(CS.GetSpellAuraSecrecy, id)
+            v = (ok and s == never) or false
+            auraSecrecyCache[id] = v
+        end
+        if not v then return false end
+    end
+    return true
+end
+
 local function filterVulnerableToIdentityGate(filterString, cf)
     if type(filterString) ~= "string" or not filterString:find("HELPFUL") then return false end
-    if cf and (cf.includeSpellIDs or cf.excludeSpellIDs) then return true end
+    if cf and cf.includeSpellIDs then return true end
+    if cf and cf.excludeSpellIDs and not excludeSetAllNeverSecret(cf.excludeSpellIDs) then
+        return true
+    end
     for token in filterString:gmatch("[^|%s]+") do
         if GATED_CATEGORY_TOKENS[(token:gsub("^!", ""))] then return true end
     end
@@ -2992,6 +3031,16 @@ function NativeBackend:build()
                 if okSlot and btn then
                     pcall(btn.SetAllPoints, btn, handle.frame)
                     self.slotButtons[key] = btn
+                    -- ☠ PARK KEYS AT BIRTH, mirroring the group branch. The tuning path
+                    -- rebuilds this set, but tuning only runs after something changes — a
+                    -- slot-backed handle built while trusted would meet its FIRST trust
+                    -- loss with no gated keys, and the hide fallback (gated on
+                    -- _hasGatedGroups()==false) would blank the whole handle on exactly
+                    -- the transition the park exists to narrow.
+                    if filterVulnerableToIdentityGate(f, cf) then
+                        self.gatedGroupKeys = self.gatedGroupKeys or {}
+                        self.gatedGroupKeys[key] = true
+                    end
                 elseif not okSlot then DF:DebugWarn(DBG, "AddAuraSlot failed: %s", tostring(btn)) end
             elseif isSingleSlot then
                 -- Same declaration as the overlay branch, different GEOMETRY: an
@@ -3012,6 +3061,11 @@ function NativeBackend:build()
                     pcall(btn.ClearAllPoints, btn)
                     pcall(btn.SetPoint, btn, fa, c, fa, 0, handle._flowPadY or 0)
                     self.slotButtons[key] = btn
+                    -- Park keys at birth — see the overlay branch above for why.
+                    if filterVulnerableToIdentityGate(f, cf) then
+                        self.gatedGroupKeys = self.gatedGroupKeys or {}
+                        self.gatedGroupKeys[key] = true
+                    end
                 elseif not okSlot then
                     DF:DebugWarn(DBG, "AddAuraSlot (single-slot row) failed: %s", tostring(btn))
                 end
