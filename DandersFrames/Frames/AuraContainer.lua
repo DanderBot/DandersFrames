@@ -730,98 +730,46 @@ end
 -- `_cf` is accepted and ignored ON PURPOSE — callers still hand over the
 -- candidateFilters, and the underscore is there so the next reader sees the omission
 -- as a decision rather than an oversight to fix.
--- ★ PER-RECORD identity dependence, for the PARK path -- distinct from
--- filterVulnerableToIdentityGate above, which answers "does this whole HELPFUL pool
--- fail open" and drives the HIDE path.
+-- ═══ RETIRED 2026-08-15: the four-boolean debuff park (RecordIdentityGated) ═══
 --
--- This one answers "is this record's CATEGORISATION only as good as the identity data",
--- and it covers HARMFUL rows, which the hide path deliberately does not.
--- ☠ Blizzard's two rules run in OPPOSITE directions
--- (Blizzard_AuraContainerUtil.CanApplyIdentityCandidateFilters):
---   helpful: spell-ID filters skipped when you CANNOT assist
---   harmful: spell-ID filters skipped when you CAN assist
--- which is why spell-ID filters are NOT what this keys on -- see GATED_CANDIDATE_KEYS.
--- ☠ The four category booleans count too. They sit outside Blizzard's identity block,
--- but IsRoleAura / IsPriorityDebuff read auraData.spellId to answer, so a record built on
--- them is only as trustworthy as the identity data behind it -- which is why a peer parks
--- exactly these four on their debuff rows and nothing else.
--- ☠ Token-only records (CROWD_CONTROL / RAID / dispel) are NOT gated: they are answered
--- by the filter string, need no identity, and parking them would empty the row. That
--- distinction is the whole reason this is per-record rather than per-container.
--- ☠ THE FOUR CATEGORY BOOLEANS ONLY. Spell-ID filters are deliberately NOT here,
--- for two independent reasons, either of which is disqualifying:
---   1. applyDebuffBlacklist stamps excludeSpellIDs onto EVERY debuff record as soon as
---      one Optional Debuff is configured. Including it would flag the whole row as
---      gated and park all of it -- exactly the wholesale blanking this design exists to
---      avoid, arriving through a back door.
---   2. It would be the wrong DIRECTION anyway. For a harmful aura Blizzard skips
---      spell-ID filters when you CAN assist, so they do not fail open when trust is
---      lost -- they start working. Parking on loss of trust would hide the record
---      precisely when its filtering became reliable.
--- The booleans are the real exposure: IsRoleAura / IsPriorityDebuff answer from
--- auraData.spellId, so their categorisation is only as good as the identity data behind
--- it, and a mis-categorised aura lands in the wrong record or none. That is why the peer
--- this mirrors parks exactly these four records on its debuff row and nothing else.
+-- It parked records asserting isBossAura / isBossOrRoleAura / isRoleAura / isPriorityAura
+-- whenever unit trust was lost. Removed because the engine never skips those filters, so
+-- there was no failure for it to prevent — only rows it could empty by mistake, which is
+-- what it did (dispel overlay lit with no debuff icon under it, two testers on 5.1.3).
 --
--- ☠☠☠ THE PARAGRAPH ABOVE DOES NOT MATCH THE ENGINE. Read from the shipped client
--- (Blizzard_AuraContainer/Blizzard_AuraContainerUtil.lua, DoesAuraPassCandidateFilters):
--- ONLY `excludeSpellIDs` and `includeSpellIDs` sit inside the
--- `if CanApplyIdentityCandidateFilters(...)` block. isBossAura, isBossOrRoleAura,
--- isRoleAura, isPriorityAura AND isFromPlayerOrPlayerPet are all evaluated AFTER it,
--- unconditionally. They are never skipped, so they never fail open, so there is nothing
--- for this park to protect against on those four keys.
--- ⚠ And the categorisation cannot be poisoned the way the paragraph claims: the engine
--- evaluates AuraUtil.IsRoleAura / IsPriorityDebuff itself, with the real auraData. It is
--- OUR Lua that cannot read spellId, not Blizzard's.
--- ⚠ There is also a THIRD exit we model nowhere: a spell whose
--- C_Secrets.GetSpellAuraSecrecy is Enum.SecrecyLevel.NeverSecret returns true from
--- CanApplyIdentityCandidateFilters regardless of assistability, so spell-ID filters keep
--- working on it in both directions. (DF already knows this set exists -- see
--- AuraBlacklist/Config.lua, ~62 IDs -- it just is not consulted here.)
--- ⇒ The park is guarding a mechanism that does not exist, which is one more reason it kept
--- emptying rows it should not. NOT removed here: that is a behaviour change on the debuff
--- row and wants Krathe's call plus an in-game check, not a quiet deletion inside an
--- unrelated fix. Do not "improve" this list until that decision is made.
+-- The three findings that settled it, all from the shipped client
+-- (Blizzard_AuraContainer/Blizzard_AuraContainerUtil.lua):
+--   1. In DoesAuraPassCandidateFilters, ONLY `includeSpellIDs` and `excludeSpellIDs` sit
+--      inside the `if CanApplyIdentityCandidateFilters(...)` block. All four booleans —
+--      and isFromPlayerOrPlayerPet — are evaluated after it, unconditionally.
+--   2. The categorisation cannot be poisoned by lost identity: the ENGINE evaluates
+--      AuraUtil.IsRoleAura (which reads auraData.isTank/isHealer/isDPSRoleAura, not
+--      spellId) and IsPriorityDebuff (a securecallfunction with the real ID). It is our
+--      Lua that cannot read spellId, not Blizzard's.
+--   3. Even under the one assumption source cannot settle — that those auraData fields
+--      might be unpopulated for an untrusted unit — each is applied as an EQUALITY test,
+--      so `nil ~= true` rejects and `nil ~= false` rejects. Both directions fail CLOSED.
+--      There is no direction in which they leak, therefore none in which parking helps.
 --
--- ☠☠ ASSERTED (`true`), NEVER MERELY MENTIONED. This tested `~= nil`, and `false ~= nil`
--- is true — so every record carrying a category boolean as a DEDUP SUBTRACTION counted as
--- identity-gated. BuildDirectDebuffFilters' notImportant() stamps isBossOrRoleAura=false
--- and isPriorityAura=false onto the CC, Raid, Dispellable and Non-Player records purely so
--- they do not re-render what the important records already claimed, so with Boss/Role or
--- Priority enabled -- the default -- EVERY record in the row was gated and a loss of trust
--- parked the lot to maxFrameCount 0. That is the wholesale blanking the note above says
--- this design exists to avoid, arriving through the dedup flags instead of the spell-ID
--- back door it was watching. Field symptom: the dispel OVERLAY fires (its own container
--- carries no category booleans, so it never parks) while the debuff row shows nothing,
--- intermittently, because trust follows unit assistability. Reported by two testers on
--- 5.1.3, the build the park shipped in.
+-- ⚠ We inherited the belief from a peer, which marks the identical four "identity-gated".
+-- VuhDo, which reached the same overall design independently, parks the opposite side:
+-- HELPFUL records carrying spell-ID filters, and never gates harmful at all. That is the
+-- keying the API supports, and it is what gatedGroupKeys carries now.
+-- ☠ HARMFUL must never take a TRANSIENT park: for a harmful aura the engine skips spell-ID
+-- filters when you CAN assist, so on a friendly they are permanently dead, not
+-- intermittently — parking on that would park forever.
 --
--- The distinction is membership vs subtraction. `= true` means "this record's CONTENTS are
--- defined by a categorisation that reads spellId" — untrustworthy identity makes the whole
--- record meaningless, so park it. `= false` only removes what a sibling claimed: with
--- identity lost, an aura may be wrongly subtracted, but the rest of the record is still
--- real, and showing most of a row beats showing none of it.
-local GATED_CANDIDATE_KEYS = {
-    "isBossAura", "isBossOrRoleAura", "isRoleAura", "isPriorityAura",
-}
-function AuraContainer.RecordIdentityGated(cf)
-    if type(cf) ~= "table" then return false end
-    for i = 1, #GATED_CANDIDATE_KEYS do
-        -- ☠ == true, NOT ~= nil. A record REQUIRING one of these categories depends on
-        -- identity data; a record carrying `= false` is the OPPOSITE — the important-first
-        -- subtraction that BuildDirectDebuffFilters stamps onto every token record (cc /
-        -- raid / dispel / nonplayer) whenever boss/role/priority categories are also on.
-        -- Counting those meant every record in the row was "gated" and the park emptied
-        -- the whole row on lost trust — the exact wholesale blanking the park's own header
-        -- calls a far worse failure than the leak. Field sign: dispel overlay lit (its
-        -- slots are separate and never parked) with no debuff icon under it, amplified by
-        -- the other records excluding dispellable types in favour of the parked dispel
-        -- record. Subtraction is also SAFE on lost trust: the equality test just rejects
-        -- flagged auras, and boss/priority flags are not caster-attribution data.
-        if cf[GATED_CANDIDATE_KEYS[i]] == true then return true end
-    end
-    return false
-end
+-- ═══════════════════════════════════════════════════════════════════════════════
+--
+-- ⚠ HISTORY, kept because it is the reason to distrust a "one-character fix". The park
+-- first tested `~= nil` rather than `== true`, and `false ~= nil` is true — so the dedup
+-- subtractions BuildDirectDebuffFilters stamps onto every token record (isBossOrRoleAura
+-- = false etc.) counted as gated, and losing trust emptied the ENTIRE debuff row. That was
+-- corrected to `== true` on 2026-08-14 and the row stopped blanking, which read as a fix
+-- and was really a mitigation: the predicate was still wrong, just less often. Both
+-- Danders and I wrote that one-liner independently the same day and neither of us went on
+-- to ask whether the four keys belonged there at all. A change that makes the symptom go
+-- away is the easiest place to stop looking.
 
 local function filterSourceRelative(filterString, _cf)
     if type(filterString) == "string" then
@@ -3084,11 +3032,19 @@ function NativeBackend:build()
                 if okGroup then
                     self.groupKeys[#self.groupKeys + 1] = key
                     self.groupStyles[key] = rec.style
-                    -- Remember which groups the identity park applies to (see
-                    -- AuraContainer.RecordIdentityGated). Per KEY, so token records stay
-                    -- live while the identity-dependent ones park.
+                    -- Remember which groups the identity park applies to. Per KEY, so
+                    -- token records stay live while the identity-dependent ones park.
+                    -- ☠ THE PREDICATE IS `filterVulnerableToIdentityGate`, i.e. exactly the
+                    -- records whose filters the ENGINE can skip: HELPFUL pools carrying
+                    -- include/excludeSpellIDs. It used to be RecordIdentityGated -- four
+                    -- category booleans on the DEBUFF row -- which the engine applies
+                    -- unconditionally (Blizzard_AuraContainerUtil: only the two spell-ID
+                    -- keys sit inside CanApplyIdentityCandidateFilters). Those booleans
+                    -- also fail CLOSED in both directions -- the test is an equality, so an
+                    -- unpopulated field rejects rather than passes -- so there was never a
+                    -- leak for that park to prevent, only rows it could empty by mistake.
                     self.gatedGroupKeys = self.gatedGroupKeys or {}
-                    self.gatedGroupKeys[key] = AuraContainer.RecordIdentityGated(cf) or nil
+                    self.gatedGroupKeys[key] = filterVulnerableToIdentityGate(f, cf) or nil
                 else
                     DF:DebugWarn(DBG, "AddAuraGroup failed: %s", tostring(err))
                 end
@@ -3385,6 +3341,10 @@ function NativeBackend:applyGroupTuning()
     local wasSourceRel  = self.handle._idGateSourceRelative
     self.handle._idGateVulnerable = nil
     self.handle._idGateSourceRelative = nil
+    -- ☠ REBUILT HERE TOO, or a string-only delta leaves the park set describing the
+    -- PREVIOUS filters. Same reason the vulnerability flag is recomputed on this path:
+    -- filter strings can now change without a rebuild, and the park keys off the string.
+    self.gatedGroupKeys = nil
     for i, rec in ipairs(normalizeFilters(config.filter)) do
         local key = rec.key or ("df" .. i)
         local cf = recordCandidateFilters(rec, config)
@@ -3396,6 +3356,12 @@ function NativeBackend:applyGroupTuning()
         -- always rebuilt, and build() recomputed the flag.)
         if filterVulnerableToIdentityGate(rec.f, cf) then
             self.handle._idGateVulnerable = true
+            -- ★ THE PARK SET IS THE SAME VERDICT, PER KEY. One record being vulnerable
+            -- used to mark the whole HANDLE and hide every row it owned; now only the
+            -- records the engine can actually skip go dark, and their token siblings
+            -- keep rendering.
+            self.gatedGroupKeys = self.gatedGroupKeys or {}
+            self.gatedGroupKeys[key] = true
         end
         if filterSourceRelative(rec.f, cf) then
             self.handle._idGateSourceRelative = true
@@ -3429,7 +3395,14 @@ function NativeBackend:applyGroupTuning()
         -- wins the one slot) are tunable. Same nil-CLEARS semantics as the group setter.
         for key in pairs(self.slotButtons) do
             if fsByKey[key] and c.SetAuraSlotFilterString then
-                if not pcall(c.SetAuraSlotFilterString, c, key, fsByKey[key]) then
+                -- ★ IDENTITY PARK, slot flavour. A slot has no maxFrameCount, so the park
+                -- is an EMPTY filter string — the same lever SlotHandle:_pushFilter uses,
+                -- and the one VuhDo uses for the same purpose. Without this the park
+                -- reached group-backed rows only, and a slot-backed row kept falling back
+                -- to the whole-handle hide it is meant to replace.
+                local parked = self.handle._idGateParked
+                    and self.gatedGroupKeys and self.gatedGroupKeys[key]
+                if not pcall(c.SetAuraSlotFilterString, c, key, parked and "" or fsByKey[key]) then
                     fsMissing = fsMissing or key
                 end
             end
@@ -5190,7 +5163,22 @@ function Handle:_applyIdentityGate()
                     self:_noteGateRecovery(can)
                     -- ☠ NOT `and not isOwn` — see the block above. Cinematics are the
                     -- latch's job; this branch is what covers a vehicle.
-                    if not can and self._idGateVulnerable then hide = true end
+                    --
+                    -- ★★ HIDE IS NOW THE FALLBACK, NOT THE RESPONSE. The park below empties
+                    -- exactly the records the engine can skip and leaves their siblings
+                    -- rendering; hiding empties the handle. Since ONE vulnerable record
+                    -- marks the whole handle (see the build loop), the old behaviour blanked
+                    -- a buff row's token groups because an unrelated spell-ID group sat
+                    -- beside them — over-hiding, and the opposite of what the gate is for.
+                    -- So hide only when the park cannot express it: no gated keys were
+                    -- registered at all, which means a build shape the park does not cover.
+                    -- ⚠ Deliberately NOT removed outright. If AddAuraGroup failed, or a
+                    -- consumer produced a handle with no keys, the vulnerable pool would
+                    -- otherwise render fully open with nothing suppressing it — the leak
+                    -- this whole mechanism exists to stop. Fallback, not dead code.
+                    if not can and self._idGateVulnerable and not self:_hasGatedGroups() then
+                        hide = true
+                    end
                 end
             end
             -- (2) Not in your visible world (different instance/phase): the
