@@ -1271,6 +1271,14 @@ local function styleButton_regions(slot, config)
             -- what makes a holder around it safe.
             -- ☠ Hidden ONCE at creation, strictly before the bind — after that the engine
             -- owns Shown and we must never touch it.
+            -- ☠ STAMP WANTED-NESS, because the HOLDER OUTLIVES THE SETTING. The holder is
+            -- create-once and merely hidden when the cue is switched off, so its existence
+            -- says nothing about whether the user still wants it -- and armTestPandemicWindow
+            -- runs from a timer that fires long after this pass. Without this stamp the
+            -- pending re-arm re-Show()s a holder this pass just hid, once per fake cycle,
+            -- forever: "pandemic still loops in the frame even if it's disabled, only a
+            -- reload fixes it" (Aphoex, 5.2.0-alpha.1). Guard the EFFECT, not the shape.
+            slot._dfBorderPandemicWanted = (borderSpec.pandemicSpec and DF.Border) and true or false
             if borderSpec.pandemicSpec and DF.Border then
                 if not slot.dfBorderPandemicHolder then
                     slot.dfBorderPandemicHolder = makeHolder(host, LEVELS.PANDEMIC_BORDER)
@@ -1551,6 +1559,11 @@ local function styleButton_regions(slot, config)
     if isRow and not pdSpec and slot.dfPandemicHolder and not slot.AddPandemicRegion then
         slot.dfPandemicHolder:Hide()
     end
+    -- ☠ Companion to the hide above, and the half that survives a TIMER. Hiding here only
+    -- wins until armTestPandemicWindow's pending C_Timer fires and shows it again, which
+    -- is why switching the cue off in test mode looked like it did nothing until a reload.
+    -- See the matching stamp on the border twin.
+    slot._dfPandemicWanted = pdSpec and true or false
     -- ☠ THE SAME SWEEP, GENERALIZED — every other create-once region. The pandemic
     -- note above predicted this class ("every OTHER create-once region relies on
     -- 'off = never created'"), and the 5.1.1 self-contained test mode made it real:
@@ -3802,7 +3815,16 @@ local PANDEMIC_PREVIEW_OPEN_AT = 0.7
 -- feature on one duration and must open and close together, or the preview says the two
 -- behave differently when live drives them from the same engine window.
 local function armTestPandemicWindow(handle, slot, d, gen, elapsed)
-    local h1, h2 = slot.dfPandemicHolder, slot.dfBorderPandemicHolder
+    -- ☠ WANTED, not merely PRESENT. Both holders are create-once and only hidden when the
+    -- cue is switched off, so testing for the object asked "was this ever configured?"
+    -- when the question is "is it configured NOW". The style pass hid the holder and this
+    -- timer showed it straight back, once per fake cycle, until a reload.
+    local h1 = slot._dfPandemicWanted and slot.dfPandemicHolder or nil
+    local h2 = slot._dfBorderPandemicWanted and slot.dfBorderPandemicHolder or nil
+    -- Anything switched off since the last pass is hidden here rather than left wherever
+    -- the previous cycle happened to leave it.
+    if slot.dfPandemicHolder and not h1 then slot.dfPandemicHolder:Hide() end
+    if slot.dfBorderPandemicHolder and not h2 then slot.dfBorderPandemicHolder:Hide() end
     if not (h1 or h2) then return end
     local function setShown(shown)
         if h1 then h1:SetShown(shown) end
@@ -3821,16 +3843,29 @@ local function armTestPandemicWindow(handle, slot, d, gen, elapsed)
     end)
 end
 
--- One re-arm per aura cycle, scheduled exactly at expiry — no polling. Mutating the
--- shared duration restarts bar, swipe and text together (proven in the lab), so this
--- is the ONLY Lua the native preview costs. `gen` invalidates pending re-arms across
--- a repaint/teardown: every paint bumps slot._dfTestGen, and a stale closure returns.
+-- One re-arm per aura cycle, scheduled exactly at expiry — no polling. `gen` invalidates
+-- pending re-arms across a repaint/teardown: every paint bumps slot._dfTestGen, and a
+-- stale closure returns.
+--
+-- ☠ THE DURATION OBJECT DOES NOT CARRY THE SWIPE. This used to claim that mutating the
+-- shared duration "restarts bar, swipe and text together (proven in the lab)". The bar and
+-- text, yes -- they are bound to _dfTestDurObj. The swipe is NOT: slot.dfCD is a
+-- DF-created CooldownFrame driven by SetCooldown, and nothing here re-drove it, so it ran
+-- its first cycle and then sat empty while the bar kept looping ("cooldown swipe only
+-- shows once, doesn't loop" -- Aphoex, 5.2.0-alpha.1). The fallback lane had always called
+-- SetCooldown; only the native lane assumed the duration object covered it.
+-- ⚠ Whoever verified that claim watched the bar and read the swipe's first cycle as proof.
 local function scheduleTestRearm(handle, slot, d, gen, delay)
     C_Timer.After(delay, function()
         if handle._destroyed or slot._dfTestGen ~= gen then return end
         if not AuraContainer._testMode or not slot._dfTestDurObj then return end
         local ok = pcall(function() slot._dfTestDurObj:SetTimeFromStart(GetTime(), d) end)
         if ok then
+            -- Re-drive the swipe on the same edge as the duration, or it loops out of step
+            -- with the bar it is supposed to be showing the same countdown as.
+            if slot.dfCD and slot.dfCD.SetCooldown then
+                pcall(slot.dfCD.SetCooldown, slot.dfCD, GetTime(), d)
+            end
             -- The cycle restarted, so the refresh window closed with it.
             armTestPandemicWindow(handle, slot, d, gen, 0)
             scheduleTestRearm(handle, slot, d, gen, d)
@@ -3970,6 +4005,15 @@ function Handle:_paintTestSlot(slot, index)
                 slot._dfTestText, slot._dfTestTextAt = nil, nil
                 slot._dfTestTimed = true
                 nativeBar = slot.dfBar and true or false
+                -- ☠ SEED THE SWIPE HERE TOO. "The C side owns bar, swipe and text" is true
+                -- of the NATIVE regions armTestDuration bound; slot.dfCD is a DF-created
+                -- CooldownFrame and is not one of them. Only the fallback lane below ever
+                -- called SetCooldown, so on the native lane the swipe was driven by
+                -- whatever a previous pass left on it. Matches the re-drive in
+                -- scheduleTestRearm; both are needed or the first cycle and the rest differ.
+                if slot.dfCD and slot.dfCD.SetCooldown then
+                    pcall(slot.dfCD.SetCooldown, slot.dfCD, GetTime() - offset, d)
+                end
                 armTestPandemicWindow(self, slot, d, slot._dfTestGen, offset)
                 scheduleTestRearm(self, slot, d, slot._dfTestGen, d - offset)
             else
