@@ -7639,13 +7639,30 @@ function AuraContainer.DebugDumpIdentityGate()
                 if cf and cf.includeSpellIDs then inc = true end
                 if cf and cf.excludeSpellIDs then exc = true end
             end
-            print(("    " .. DF.OUT.SECTION .. "%d|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s srcRel=%s exists=%s canAssist=%s vis=%s gateHidden=%s intent=%s shown=%s retry=%s"):format(
+            -- ☠ PARK, LATCHES AND THE RECOVERY EDGE BELONG HERE TOO. This line reported the
+            -- HIDE path only, and hide is one of FOUR writers that can blank a row --
+            -- _applyVisibility composes gateHidden with the cinematic and death latches, and
+            -- the debuff row does not hide at all, it PARKS its gated groups to
+            -- maxFrameCount 0. So the "dispel overlay lit with no debuff icon under it" bug
+            -- was invisible in the dump built to see exactly that class of fault: the row was
+            -- parked, and there was no column for parked. `assist` is the recovery-edge
+            -- tracker _noteGateRecovery compares against — it answers the question every one
+            -- of these reports turns on, "will this ever un-hide on its own".
+            local parkedTxt = tostring(h._idGateParked or false)
+            if h._idGateUntrusted then parkedTxt = parkedTxt .. "(untrusted)" end
+            local gatedN = 0
+            for _ in pairs((h.backend and h.backend.gatedGroupKeys) or {}) do gatedN = gatedN + 1 end
+            print(("    " .. DF.OUT.SECTION .. "%d|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s srcRel=%s exists=%s canAssist=%s vis=%s gateHidden=%s parked=%s gatedGroups=%d cine=%s death=%s assist=%s intent=%s shown=%s retry=%s"):format(
                 n, tostring(cfg.mode or "row"), tostring(unit),
                 table.concat(fParts, "&"), tostring(inc), tostring(exc),
                 tostring(h._idGateVulnerable or false),
                 tostring(h._idGateSourceRelative or false),
                 tostring(type(unit) == "string" and UnitExists(unit) or false), canTxt, visTxt,
                 tostring(h._idGateHidden or false),
+                parkedTxt, gatedN,
+                tostring(h._cineLatched or false),
+                tostring(h._deathLatched or false),
+                tostring(h._idGateAssist),
                 tostring(h._intendedShown ~= false),
                 tostring(h.config and h.config.parentDrivenVisibility and "(nested)"
                     or (h.frame and h.frame:IsShown()) or false),
@@ -7655,11 +7672,58 @@ function AuraContainer.DebugDumpIdentityGate()
     if n > CAP then
         o:Line(("… capped at %d lines"):format(CAP), "NEUTRAL")
     end
+    -- ☠ SLOTS SWEEP TOO, AND THIS DUMP DID NOT WALK THEM. They live in their own
+    -- registry (see AcquireSlot) because the loop above is Handle-shaped -- the exact
+    -- omission that left the collapsed AD path with no gate at all, repeated here in the
+    -- tool meant to catch it. Every Aura Designer PLACED indicator is a SlotHandle with
+    -- its own _applyIdentityGate and its own _gateHidden, so a dump that reports only
+    -- Handles is blind to the half the AD uses -- and the AD is where the stuck-indicator
+    -- reports came from.
+    local sn, svuln = 0, 0
+    for s in pairs(AuraContainer._slotHandles or {}) do
+        sn = sn + 1
+        if s._idGateVulnerable then svuln = svuln + 1 end
+        if sn <= CAP then
+            local unit = s.owner and s.owner.unit
+            local canTxt = "-"
+            if type(unit) == "string" and UnitExists(unit) then
+                local ok, can = pcall(UnitCanAssist, "player", unit)
+                if not ok then canTxt = "ERR"
+                elseif issecretvalue and issecretvalue(can) then canTxt = "SECRET"
+                else canTxt = tostring(can) end
+            end
+            print(("    " .. DF.OUT.SECTION .. "S%d|r key=%s unit=%s vuln=%s srcRel=%s canAssist=%s gateHidden=%s parked=%s cine=%s death=%s assist=%s filter=%s"):format(
+                sn, tostring(s.key), tostring(unit),
+                tostring(s._idGateVulnerable or false),
+                tostring(s._idGateSourceRelative or false),
+                canTxt,
+                tostring(s._gateHidden or false),
+                tostring(s.parked or false),
+                tostring(s._cineLatched or false),
+                tostring(s._deathLatched or false),
+                tostring(s._idGateAssist),
+                -- The pushed string IS the actuation: "" means parked/hidden by one of
+                -- the four writers above, whichever won in _pushFilter.
+                tostring(s.liveFilter)))
+        end
+    end
+    if sn > CAP then
+        o:Line(("… slots capped at %d lines"):format(CAP), "NEUTRAL")
+    end
     o:Section("Summary")
     o:Field("handles", n, n > 0 and "GOOD" or "NEUTRAL")
     -- A vulnerable handle is the whole point of this dump, so it is the one
     -- number that must not sit uncoloured in a wall of numbers.
     o:Field("gate-vulnerable", vuln, vuln > 0 and "WARN" or "GOOD")
+    o:Field("slots", sn, sn > 0 and "GOOD" or "NEUTRAL")
+    o:Field("slots gate-vulnerable", svuln, svuln > 0 and "WARN" or "GOOD")
+    -- ★ Global aura secrecy, printed because it frames every line above: it does NOT
+    -- switch the identity gate off (CanApplyIdentityCandidateFilters has no such bypass),
+    -- but it is the first thing you want to know when a filter behaves unexpectedly.
+    if C_Secrets and C_Secrets.ShouldAurasBeSecret then
+        local okS, secret = pcall(C_Secrets.ShouldAurasBeSecret)
+        o:Field("auras secret", okS and tostring(secret) or "ERR", "NEUTRAL")
+    end
     o:Field("test mode", AuraContainer._testMode or false, "NEUTRAL")
     o:Siblings("idgate")
 end
