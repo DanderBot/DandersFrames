@@ -791,9 +791,9 @@ end
 --      There is no direction in which they leak, therefore none in which parking helps.
 --
 -- ⚠ We inherited the belief from a peer, which marks the identical four "identity-gated".
--- VuhDo, which reached the same overall design independently, parks the opposite side:
--- HELPFUL records carrying spell-ID filters, and never gates harmful at all. That is the
--- keying the API supports, and it is what gatedGroupKeys carries now.
+-- Another 12.1 raid-frame implementation, arrived at independently, parks the opposite
+-- side: HELPFUL records carrying spell-ID filters, and never gates harmful at all. That is
+-- the keying the API supports, and it is what gatedGroupKeys carries now.
 -- ☠ HARMFUL must never take a TRANSIENT park: for a harmful aura the engine skips spell-ID
 -- filters when you CAN assist, so on a friendly they are permanently dead, not
 -- intermittently — parking on that would park forever.
@@ -3451,7 +3451,7 @@ function NativeBackend:applyGroupTuning()
             if fsByKey[key] and c.SetAuraSlotFilterString then
                 -- ★ IDENTITY PARK, slot flavour. A slot has no maxFrameCount, so the park
                 -- is an EMPTY filter string — the same lever SlotHandle:_pushFilter uses,
-                -- and the one VuhDo uses for the same purpose. Without this the park
+                -- and the one other 12.1 implementations use for it. Without this the park
                 -- reached group-backed rows only, and a slot-backed row kept falling back
                 -- to the whole-handle hide it is meant to replace.
                 local parked = self.handle._idGateParked
