@@ -28,10 +28,14 @@
 * (Bars) Fix solo-mode resource bars appearing on frames other than your own. (by Krathe)
 * (Aura Designer) Fix the enable toggle silently changing your Show Buffs setting when nothing needed to change. (by Krathe)
 * (Test Mode) The preview honours Smooth Bar Animation and labels which slot is you. (by Krathe)
+* (Auras) Fix buffs and debuffs sometimes staying hidden on group members after they died, released or disconnected — the frame only recovered when something else refreshed it, such as targeting that player. Most reported by healers missing HoTs on raid groups outside their own, and constant in battlegrounds. (by Krathe)
+* (Auras) Duration text now counts down cleanly to the end — 3, 2, 1, gone — instead of showing the final second twice. Applies to every duration format, the Aura Designer and the Defensive Icon. (by Krathe)
+* (Global Fonts) Apply to All now reaches the Aura Designer: the global text defaults, every placed indicator and all group text styles take the chosen font and outline. Previously it silently changed nothing there. (by Krathe)
 
 ### Improvements
 
 * (Aura Designer) The filter picker now has a scrollbar and a search box, matching the addon's other dropdowns.
+* (Debug) New IDGATE debug category traces every aura-visibility gate decision with its reason (dead, offline, cross-faction, in a vehicle, phased) — enable it when chasing a "my auras vanished" report, then check /df debug idgate. (by Krathe)
 
 ## [5.1.3]
 
