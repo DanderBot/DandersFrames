@@ -2836,7 +2836,17 @@ function PinnedFrames:Reinitialize()
     end
     if not anyEnabled then
         self.currentMode = GetActualMode()
-        DF:Debug("PINNED", "Reinitialize: skipped - no set enabled (mode now %s)",
+        -- ☠ SKIP THE REBUILD, NEVER THE TEARDOWN. anyEnabled is answered from the NEW
+        -- mode's sets, so the one case it is false in a mode CHANGE is precisely the one
+        -- where old-mode frames are on screen with nothing left to hide them: a raid-only
+        -- set enabled, you leave the raid, the party side has nothing enabled, and this
+        -- returned before any cleanup -- leaving the raid container up until a reload
+        -- ("Raid - Pinned Frame still can get stuck on screen after exiting a raid",
+        -- Aphoex, 5.2.0-alpha.1). The bail exists to skip WORK (the 270ms-per-arena-entry
+        -- fix), and pruning is not that work: it walks MAX_SETS once, hides by name, and
+        -- defers its protected writes to regen on its own.
+        self:PruneOrphanedSets()
+        DF:Debug("PINNED", "Reinitialize: skipped - no set enabled (mode now %s), pruned",
             tostring(self.currentMode))
         return
     end

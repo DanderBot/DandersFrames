@@ -805,15 +805,20 @@ function DF:UpdateTestFrameHealthOnly(frame, index)
     -- (Audit, 2026-08-07.)
     if DF.UpdateReducedMaxHealth then DF:UpdateReducedMaxHealth(frame) end
 
-    -- Update absorb bars if enabled
+    -- ☠ LIVE'S ORDER — heal absorb, prediction, absorb LAST. The absorb chains to the
+    -- prediction's tail and reads its stamps, so it must run after it; see the same
+    -- note at the UpdateTestFrame drive, which is where the one-pass version of this
+    -- ordering bug was field-caught. The ticker repeats every tick, so it self-healed
+    -- one tick late here — but a painter that is only accidentally correct is the
+    -- second-pathway class, and the two drive sites must stay identical.
     if db.testShowAbsorbs then
-        DF:UpdateAbsorb(frame, animatedTestData)
         DF:UpdateHealAbsorb(frame, animatedTestData)
     end
-    
-    -- Update heal prediction if enabled
     if db.testShowHealPrediction ~= false then
         DF:UpdateHealPrediction(frame, animatedTestData)
+    end
+    if db.testShowAbsorbs then
+        DF:UpdateAbsorb(frame, animatedTestData)
     end
     
     -- Update dispel gradient if it's tracking health
@@ -995,24 +1000,28 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
     -- Health text colour + alpha: DF:UpdateHealthTextAppearance owns both, same as the
     -- name text. Applied by the shared pass below.
     
-    -- Update absorb bars
+    -- ☠ LIVE'S ORDER — heal absorb, PREDICTION, absorb LAST — because the absorb DEPENDS
+    -- on the prediction: it chains to the prediction's tail (ResolveAbsorbChainAnchor)
+    -- and its clamp reads the netted-heal stamps UpdateHealPrediction writes
+    -- (dfTotalHeals). This ran absorb FIRST, so a single pass over frames with no
+    -- previous state computed the shield against a prediction that did not exist yet.
+    -- ENTRY hid that: its After(0) geometry repaint runs a second full pass that
+    -- converges everything. The panel-toggle path (RefreshTestFrames) runs ONE pass —
+    -- so flipping the toggles on after a reload that started with them off left the
+    -- cross-dependent frames wrong until the next repaint happened by: the interplay
+    -- unit lost its heal and shield, the reduced-max unit its heal, while a unit whose
+    -- bars barely depend on each other looked fine (Aphoex's video, 2026-08-15 — the
+    -- patchiness IS the dependency graph). ApplyFrameLayout has carried this exact
+    -- ordering note since the band rework; the preview painter just never matched it.
     if db.testShowAbsorbs then
-        DF:UpdateAbsorb(frame, testData)
         DF:UpdateHealAbsorb(frame, testData)
     else
-        if frame.dfAbsorbBar then frame.dfAbsorbBar:Hide() end
         if frame.dfHealAbsorbBar then frame.dfHealAbsorbBar:Hide() end
-        if frame.absorbOvershieldGlow then frame.absorbOvershieldGlow:Hide() end
-        if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
         if frame.healAbsorbOvershieldGlow then frame.healAbsorbOvershieldGlow:Hide() end
-        -- Hide attached textures used for ATTACHED mode test display
-        if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
         if frame.healAbsorbAttachedTexture then frame.healAbsorbAttachedTexture:Hide() end
-        -- Hide overflow bar
-        if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
     end
-    
-    -- Update heal prediction (check test mode setting)
+
+    -- Heal prediction (check test mode setting) — BEFORE the absorb, which chains to it.
     if db.testShowHealPrediction ~= false then
         DF:UpdateHealPrediction(frame, testData)
     else
@@ -1023,6 +1032,17 @@ function DF:UpdateTestFrame(frame, index, applyLayout)
         -- pathway would, or the chain reads a bar nobody can see.
         if frame.dfHealPredictionBar then frame.dfHealPredictionBar:Hide() end
         if frame.dfHealPredictionBar2 then frame.dfHealPredictionBar2:Hide() end
+    end
+
+    -- Damage absorb LAST — reads the prediction's chain tail and stamps.
+    if db.testShowAbsorbs then
+        DF:UpdateAbsorb(frame, testData)
+    else
+        if frame.dfAbsorbBar then frame.dfAbsorbBar:Hide() end
+        if frame.absorbOvershieldGlow then frame.absorbOvershieldGlow:Hide() end
+        if frame.absorbOverflowBar then frame.absorbOverflowBar:Hide() end
+        -- Hide attached texture used for ATTACHED mode test display
+        if frame.absorbAttachedTexture then frame.absorbAttachedTexture:Hide() end
     end
 
     -- Update power/resource bar
@@ -3902,9 +3922,33 @@ function DF:CreateTestPanel()
             if callback then callback(container.checked, isRaidMode) end
             if isRaidMode and DF.raidTestMode then
                 DF:UpdateRaidTestFrames()
+                -- ☠ SECOND PASS NEXT TICK — the same one ENTRY runs, for the same
+                -- reason. A toggle flipped on for the first time this session CREATES
+                -- its bars during this pass, and an anchor-derived rect is 0 for the
+                -- whole creation tick — so anything anchored to a new bar's own
+                -- texture (the absorb chained to the brand-new prediction fill)
+                -- painted at width 0 and stayed invisible until another toggle pass
+                -- happened by. That is exactly the trap entry's After(0) repaint
+                -- exists for; its comment even says "goes through the SAME
+                -- UpdateTestFrame pathway — no second painter". Field-caught twice on
+                -- the interplay unit (Aphoex + Krathe, 2026-08-15): the first fix
+                -- reordered the painters to live's order — necessary, but it fixed
+                -- the within-pass dependency, not the rects. Hide-then-reshow
+                -- "correcting" it was the tell: a second pass over settled rects.
+                C_Timer.After(0, function()
+                    if DF.raidTestMode and DF.UpdateRaidTestFrames then
+                        DF:UpdateRaidTestFrames()
+                    end
+                end)
             elseif not isRaidMode and DF.testMode then
                 DF:UpdateAllFrames()
                 if DF.RefreshTestFrames then DF:RefreshTestFrames() end
+                -- Same second pass as the raid branch above — see that comment.
+                C_Timer.After(0, function()
+                    if DF.testMode and DF.RefreshTestFrames then
+                        DF:RefreshTestFrames()
+                    end
+                end)
             end
             -- Update badge on parent section
             if container.section and container.section.UpdateBadge then

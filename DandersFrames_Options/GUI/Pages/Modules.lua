@@ -2103,22 +2103,42 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         AddToSection(entryCountLabel, 20, "both")
 
         -- Action buttons row (Refresh / Clear Log / Copy to Clipboard)
-        local function CopyLogToClipboard()
-            if not DF.DebugConsole then return end
-            -- Was a hand-rolled dialog: ~35 lines building its own frame, backdrop,
-            -- title, drag handlers and close button. ☠ It also called CreateFrame
-            -- with the FIXED global name "DFDebugExportPopup" on every click, so a
-            -- second export built a second frame over the same global and orphaned
-            -- the first — a leak per click. The shared input popup is a singleton
-            -- and is the same control the click-cast profile export already uses.
+        -- Was a hand-rolled dialog: ~35 lines building its own frame, backdrop,
+        -- title, drag handlers and close button. ☠ It also called CreateFrame
+        -- with the FIXED global name "DFDebugExportPopup" on every click, so a
+        -- second export built a second frame over the same global and orphaned
+        -- the first — a leak per click. The shared input popup is a singleton
+        -- and is the same control the click-cast profile export already uses.
+        --
+        -- PAGED: one giant export string blanks the popup's content-sized text
+        -- area exactly like the live box (region-size ceiling), so the console
+        -- slices the export into parts and this pages through them. One part =
+        -- the old single dialog; more parts add a "Next Part" button. The parts
+        -- with a Next button are not readOnly (the popup only offers an accept
+        -- button on editable inputs) — stray edits in a copy box are harmless.
+        local function ShowExportChunk(chunks, i)
+            local isLast = i >= #chunks
             DF:ShowPopupInput({
-                title       = L["Debug Log Export (Filtered)"],
+                title       = (#chunks > 1)
+                    and format(L["Debug Log Export (part %d of %d)"], i, #chunks)
+                    or L["Debug Log Export (Filtered)"],
                 message     = L["Press Ctrl+A to select all, then Ctrl+C to copy"],
-                text        = DF.DebugConsole:GetExportText(),
+                text        = chunks[i],
                 multiline   = true,
-                readOnly    = true,
+                readOnly    = isLast,
+                acceptLabel = (not isLast) and L["Next Part"] or nil,
+                onAccept    = (not isLast) and function()
+                    -- The popup hides itself right AFTER this callback runs
+                    -- (button onClick -> callback -> Hide), so reopening in the
+                    -- same tick would be hidden immediately. Next tick.
+                    C_Timer.After(0, function() ShowExportChunk(chunks, i + 1) end)
+                end or nil,
                 cancelLabel = L["Close"],
             })
+        end
+        local function CopyLogToClipboard()
+            if not DF.DebugConsole then return end
+            ShowExportChunk(DF.DebugConsole:GetExportChunks(), 1)
         end
 
         local actionRow = GUI:CreateButtonRow(self.child, {

@@ -79,6 +79,11 @@ local CATEGORY_GROUPS = {
             -- firehose. Replaces BLIZAURA, which was declared but never logged.
             { key = "AURAROW",       desc = "Aura row drivers: rebuild vs tuning vs style, retargets" },
             { key = "AURACONTAINER", desc = "12.1 AuraContainer factory (build, filters, capability gate)" },
+            -- The identity gate's own lane, split out of AURACONTAINER so a tester
+            -- chasing "auras vanished" can enable JUST the verdict trail: park/hide
+            -- flips with the probe that broke trust, latches, recovery re-parses.
+            -- Edge-triggered only, so it is quiet outside actual gate activity.
+            { key = "IDGATE",        desc = "Identity gate: park/hide verdicts with reasons, latches, recovery" },
             -- ⚠ Was EMITTED BUT NOT REGISTERED, which defeats the point of this table:
             -- both of its sites are DebugWarn -- custom-filter import skipping an
             -- entry, and a scrub that could not reach ParseADFilterRef -- i.e. exactly
@@ -525,57 +530,104 @@ end
 -- DISPLAY RENDERING
 -- ============================================================
 
+-- ☠ THE RENDER WINDOW IS A HARD CAP, NOT A NICETY. The EditBox grows its height
+-- to numLines * lineHeight below, and past a few thousand lines that height
+-- exceeds what the renderer will draw — the box goes COMPLETELY blank, with the
+-- "no entries match" message nowhere in sight (field report: 10k entries, every
+-- large category blanked the window, tiny ones like SYSTEM rendered fine). The
+-- display code was built when maxLines defaulted to 500 (+500 overshoot); when
+-- the retention default was raised to 10000 the blank appeared. The ceiling is
+-- the region-size limit (~32,767px — roughly 2,700 lines at this font, but the
+-- font is user-scalable, which drags the true line count down). 1000 is the
+-- envelope the console demonstrably ran at for months, so it stays 1000
+-- (Krathe's call). Retention and rendering are different budgets: keep all
+-- 10000 in the log, show the newest window, and SAY the rest are held back.
+-- The export pages in chunks of this same size, losing nothing.
+local MAX_RENDER_LINES = 1000
+
+-- Shared per-entry sanitize + format. Legacy entries (logged before the
+-- write-time sanitizer existed) may hold nil or secret-tainted fields which
+-- would crash format(); `colored` picks the console form vs the export form.
+local function FormatLogEntry(entry, colored)
+    local timestamp = entry[1] or "??:??:??"
+    local level     = entry[2] or "INFO"
+    local category  = entry[3] or "GENERAL"
+    local message   = entry[4]
+    if message == nil then
+        message = "<nil>"
+    elseif type(message) ~= "string" then
+        message = tostring(message) or "<nonstring>"
+    end
+    if isSecretValue(message) then
+        message = "<SECRET — legacy tainted entry>"
+    end
+    if type(timestamp) ~= "string" or isSecretValue(timestamp) then
+        timestamp = "??:??:??"
+    end
+    if type(category) ~= "string" or isSecretValue(category) then
+        category = "GENERAL"
+    end
+    local sev = SEVERITY[level] or SEVERITY.INFO
+    local ok, formatted
+    if colored then
+        ok, formatted = pcall(format, "%s %s[%s]|r [%s] %s",
+            timestamp, sev.color or "|cffffffff", sev.label, category, message)
+    else
+        ok, formatted = pcall(format, "%s [%s] [%s] %s",
+            timestamp, type(level) == "string" and level or "INFO", category, message)
+    end
+    if ok and not isSecretValue(formatted) then
+        return formatted
+    end
+    return timestamp .. " [" .. (sev.label or "?") .. "] [" .. category .. "] <unrenderable entry>"
+end
+
+-- Walk the log NEWEST-FIRST, format only the newest `cap` matching entries, and
+-- keep counting the older matches without paying for their strings. Returns the
+-- lines in chronological order plus the total match count. Shared by the live
+-- display and the export so the two can never disagree about filtering again.
+local function CollectFilteredLines(cap, colored)
+    local minLevel = SEVERITY[(debugDb and debugDb.logLevel) or "INFO"]
+    if not minLevel then minLevel = SEVERITY.INFO end
+    local minLevelNum = minLevel.level
+    local filters = (debugDb and debugDb.filters) or {}
+    local lines, matched = {}, 0
+    for i = #debugLog, 1, -1 do
+        local entry = debugLog[i]
+        local sev = SEVERITY[entry[2]]
+        if sev and sev.level >= minLevelNum then
+            -- Category filter (absent = visible, explicit false = hidden); the
+            -- category is sanitized to GENERAL inside FormatLogEntry, so mirror
+            -- that here or a tainted category would dodge the filter check.
+            local category = entry[3]
+            if type(category) ~= "string" or isSecretValue(category) then
+                category = "GENERAL"
+            end
+            if filters[category] ~= false then
+                matched = matched + 1
+                if #lines < cap then
+                    lines[#lines + 1] = FormatLogEntry(entry, colored)
+                end
+            end
+        end
+    end
+    -- Collected newest-first: reverse into chronological order.
+    local n = #lines
+    for i = 1, math.floor(n / 2) do
+        lines[i], lines[n + 1 - i] = lines[n + 1 - i], lines[i]
+    end
+    return lines, matched
+end
+
 function DebugConsole:RefreshDisplay()
     needsRefresh = false
     if not liveEditBox or not debugLog then return end
 
-    local minLevel = SEVERITY[debugDb.logLevel or "INFO"]
-    if not minLevel then minLevel = SEVERITY.INFO end
-    local minLevelNum = minLevel.level
-
-    local filters = debugDb.filters or {}
-    local lines = {}
-
-    for _, entry in ipairs(debugLog) do
-        local timestamp = entry[1] or "??:??:??"
-        local level     = entry[2] or "INFO"
-        local category  = entry[3] or "GENERAL"
-        local message   = entry[4]
-
-        -- Sanitize every field BEFORE passing to format. Legacy entries
-        -- (logged before the write-time sanitizer existed) may have nil or
-        -- secret-tainted messages which would crash format().
-        if message == nil then
-            message = "<nil>"
-        elseif type(message) ~= "string" then
-            message = tostring(message) or "<nonstring>"
-        end
-        if isSecretValue(message) then
-            message = "<SECRET — legacy tainted entry>"
-        end
-        if type(timestamp) ~= "string" or isSecretValue(timestamp) then
-            timestamp = "??:??:??"
-        end
-        if type(category) ~= "string" or isSecretValue(category) then
-            category = "GENERAL"
-        end
-
-        -- Check severity filter
-        local sev = SEVERITY[level]
-        if sev and sev.level >= minLevelNum then
-            -- Check category filter (absent = visible, explicit false = hidden)
-            if filters[category] ~= false then
-                local colorCode = sev.color or "|cffffffff"
-                local ok, formatted = pcall(format, "%s %s[%s]|r [%s] %s",
-                    timestamp, colorCode, sev.label, category, message)
-                if ok and not isSecretValue(formatted) then
-                    tinsert(lines, formatted)
-                else
-                    tinsert(lines, timestamp .. " [" .. (sev.label or "?") ..
-                        "] [" .. category .. "] <unrenderable entry>")
-                end
-            end
-        end
+    local lines, matched = CollectFilteredLines(MAX_RENDER_LINES, true)
+    if matched > #lines then
+        tinsert(lines, 1, format(
+            "|cff666666… %d older matching lines held back (newest %d shown — Copy to Clipboard exports every part, or narrow the filters)|r",
+            matched - #lines, #lines))
     end
 
     local text = #lines > 0 and table.concat(lines, "\n") or "|cff666666No log entries match current filters.|r"
@@ -656,60 +708,40 @@ end
 -- EXPORT
 -- ============================================================
 
-function DebugConsole:GetExportText()
-    if not debugLog then return "No debug log available." end
+-- The export loses NOTHING: every matching line is formatted, then sliced into
+-- parts of MAX_RENDER_LINES — the popup's text area is a content-sized EditBox
+-- with the same region-size ceiling as the live box, so one giant string would
+-- blank it, but paged parts each render fine. One part = the common case (a
+-- filtered slice is almost always under the window); the caller shows a "next
+-- part" button only when there are more. Same filters, same formatter, same
+-- window as the display (CollectFilteredLines), so the views cannot disagree.
+function DebugConsole:GetExportChunks()
+    if not debugLog then return { "No debug log available." } end
 
-    -- Respect current severity and category filters so the export
-    -- matches what the user sees in the debug console
-    local minLevel = SEVERITY[(debugDb and debugDb.logLevel) or "INFO"]
-    if not minLevel then minLevel = SEVERITY.INFO end
-    local minLevelNum = minLevel.level
-    local filters = (debugDb and debugDb.filters) or {}
-
-    local entries = {}
-    for _, entry in ipairs(debugLog) do
-        local sev = SEVERITY[entry[2]]
-        if sev and sev.level >= minLevelNum and filters[entry[3]] ~= false then
-            -- Sanitize each field before format — legacy entries may have
-            -- nil or secret-tainted values which would crash format/concat.
-            local ts  = entry[1]
-            local lvl = entry[2]
-            local cat = entry[3]
-            local msg = entry[4]
-            if type(ts)  ~= "string" or isSecretValue(ts)  then ts  = "??:??:??" end
-            if type(lvl) ~= "string" or isSecretValue(lvl) then lvl = "INFO" end
-            if type(cat) ~= "string" or isSecretValue(cat) then cat = "GENERAL" end
-            if msg == nil then
-                msg = "<nil>"
-            elseif type(msg) ~= "string" then
-                msg = tostring(msg) or "<nonstring>"
-            end
-            if isSecretValue(msg) then msg = "<SECRET — legacy tainted entry>" end
-
-            local ok, formatted = pcall(format, "%s [%s] [%s] %s", ts, lvl, cat, msg)
-            if ok and not isSecretValue(formatted) then
-                tinsert(entries, formatted)
-            else
-                tinsert(entries, ts .. " [" .. lvl .. "] [" .. cat .. "] <unrenderable entry>")
-            end
+    local entries = CollectFilteredLines(math.huge, false)
+    local total = #entries
+    local numChunks = math.max(1, math.ceil(total / MAX_RENDER_LINES))
+    local chunks = {}
+    for c = 1, numChunks do
+        local first = (c - 1) * MAX_RENDER_LINES + 1
+        local last  = math.min(total, c * MAX_RENDER_LINES)
+        local result = {}
+        tinsert(result, "DandersFrames Debug Log")
+        tinsert(result, "Version: " .. (DF.VERSION or "unknown"))
+        tinsert(result, "Exported: " .. date("%Y-%m-%d %H:%M:%S"))
+        if numChunks > 1 then
+            tinsert(result, ("Part %d of %d — lines %d-%d of %d matched (%d total in log)")
+                :format(c, numChunks, first, last, total, #debugLog))
+        else
+            tinsert(result, "Entries: " .. total .. " (filtered from " .. #debugLog .. " total)")
         end
-    end
-
-    local result = {}
-    tinsert(result, "DandersFrames Debug Log")
-    tinsert(result, "Version: " .. (DF.VERSION or "unknown"))
-    tinsert(result, "Exported: " .. date("%Y-%m-%d %H:%M:%S"))
-    tinsert(result, "Entries: " .. #entries .. " (filtered from " .. #debugLog .. " total)")
-    tinsert(result, "Min Level: " .. (debugDb and debugDb.logLevel or "INFO"))
-    tinsert(result, "========================================")
-    tinsert(result, "")
-    for i = 1, #entries do
-        local entry = entries[i]
-        if isSecretValue(entry) then
-            entry = "<SECRET — export line was tainted>"
+        tinsert(result, "Min Level: " .. (debugDb and debugDb.logLevel or "INFO"))
+        tinsert(result, "========================================")
+        tinsert(result, "")
+        for i = first, last do
+            result[#result + 1] = entries[i]
         end
-        result[#result + 1] = entry
+        chunks[#chunks + 1] = table.concat(result, "\n")
     end
-
-    return table.concat(result, "\n")
+    return chunks
 end

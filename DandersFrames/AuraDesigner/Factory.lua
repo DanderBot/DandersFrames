@@ -5326,7 +5326,30 @@ function Factory:SyncFrame(frame)
     frame.dfADMemTestCleared = nil
 
     local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
-    if not adDB then return end
+    if not adDB then
+        -- ☠ TEAR DOWN, DO NOT JUST LEAVE. This was a bare `return`, sitting three lines
+        -- above the `not spec` exit that DOES call ClearFrame -- two "nothing to render"
+        -- paths, one of which released its containers and one of which abandoned them.
+        -- Skipping the sync does not stop anything rendering: the containers are declared
+        -- to the engine and Blizzard keeps drawing them until they are released, so an
+        -- unresolvable config left the previous config's indicators on screen, at their
+        -- old positions, until a reload.
+        -- ☠ LATCHED, exactly like the MemTest branch above and for its stated reason:
+        -- "ClearFrame ends in SyncSound, which is not free to re-run per update."
+        -- An earlier comment here claimed the repeated case costs nothing because
+        -- ClearFrame "returns immediately when there is no store" -- false for exactly
+        -- the frames this fix targets: dfADFactory is created once and never nil'd, so
+        -- a frame that ever rendered AD re-ran the full clear (teardown walks plus a
+        -- SyncSound reconcile) on EVERY sync pass while its config stayed unresolvable.
+        -- The flag resets the moment adDB resolves, so a config coming back re-syncs
+        -- normally. (PR #237 self-review finding 1.)
+        if not frame.dfADNoCfgCleared then
+            frame.dfADNoCfgCleared = true
+            self:ClearFrame(frame)
+        end
+        return
+    end
+    frame.dfADNoCfgCleared = nil
 
     -- The factory owns AD here (the legacy read-path engine is gone), so nothing maintains the
     -- buff-bar dedup set. Clear any set left populated by a prior legacy run so it can't

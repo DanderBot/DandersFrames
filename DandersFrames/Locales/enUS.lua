@@ -40,6 +40,7 @@ L["Auto-create profiles enabled."] = true
 -- rest of the chat line. The caller wraps the substituted name instead.
 L["Auto-created profile: %s"] = true
 L["Auto-profile evaluation and runtime overlay"] = true
+L["Identity gate: park/hide verdicts with reasons, latches, recovery"] = true
 L["Cannot delete the default profile"] = true
 L["Cannot rename the default profile"] = true
 L["Click-casting binding apply, hover, PreClick state"] = true
@@ -769,6 +770,8 @@ L["Debuffs that can be dispelled. Use the dropdown below to choose which dispels
 L["Debuffs that can be dispelled. Which dispels count is set just below."] = true
 L["Debug"] = true
 L["Debug Log Export (Filtered)"] = true
+L["Debug Log Export (part %d of %d)"] = true
+L["Next Part"] = true
 L["Debug console module not loaded."] = true
 L["Debug logging %s"] = true
 L["Decimal Places"] = true
