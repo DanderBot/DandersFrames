@@ -5078,11 +5078,45 @@ function Handle:_setDeathLatch(on)
     end
 end
 
+-- ============================================================
+-- GATE EVENT LOG — always on, persistent, transitions only
+-- ============================================================
+-- Every gate flip lands in DandersFramesDB_v2.gateLog whether or not the debug
+-- console is enabled — a field report ("my HoTs vanished in the BG") arrives
+-- AFTER the fact, and the console is off for every user who isn't already
+-- chasing a bug. Transitions are rare (a handful per fight), so an always-on
+-- ring is cheap; the ring caps itself so an hour-long battleground cannot grow
+-- it unbounded. `/df debug idgate` prints the tail. When the console IS on the
+-- same line echoes there under the AURACONTAINER category, timestamped twice.
+-- ⚠ Only pass plain strings/numbers — a secret arg would taint the formatted
+-- line; the issecretvalue check below is the backstop, not a license.
+local GATE_LOG_CAP, GATE_LOG_KEEP = 300, 200
+local function GateLog(fmt, ...)
+    local ok, msg = pcall(string.format, fmt, ...)
+    if not ok then msg = tostring(fmt) end
+    if issecretvalue and issecretvalue(msg) then msg = "<secret log arg>" end
+    local db = _G.DandersFramesDB_v2
+    if type(db) == "table" then
+        local log = db.gateLog
+        if type(log) ~= "table" then log = {}; db.gateLog = log end
+        log[#log + 1] = date("%m-%d %H:%M:%S  ") .. msg
+        if #log > GATE_LOG_CAP then
+            -- One-pass compaction to the newest KEEP (DebugConsole's overshoot idea):
+            -- never a per-line table.remove shift.
+            local keep = {}
+            for i = #log - (GATE_LOG_KEEP - 1), #log do keep[#keep + 1] = log[i] end
+            db.gateLog = keep
+        end
+    end
+    DF:Debug(DBG, "%s", msg)
+end
+AuraContainer.GateLog = GateLog   -- shared with the death-latch/cine writers below
+
 function Handle:_noteGateRecovery(can)
     local was = self._idGateAssist
     self._idGateAssist = can and true or false
     if was == false and self._idGateAssist then
-        DF:Debug("AURACONTAINER", "gate recovered for unit=%s - re-parsing (pool was fail-open)",
+        GateLog("recovered unit=%s - re-parsing (pool was fail-open)",
             tostring(self.config and self.config.unit))
         self:Refresh()
         -- AFTER the bounce, deliberately: the whole point of the cinematic latch
@@ -5127,16 +5161,19 @@ end
 -- every corpse in a wipe. They currently render unfiltered, so empty is the better
 -- failure — but it is a visible change, not a silent one.
 -- Fail-open on a refused or secret read, like every other probe in this gate.
+-- Returns the REASON string when identity data is unavailable, nil otherwise —
+-- truthy exactly when the old boolean was true, and the string feeds GateLog so
+-- a field log says WHICH probe broke trust, not just that one did.
 local function IdentityUnavailable(unit)
     local okC, connected = pcall(UnitIsConnected, unit)
     if okC and not (issecretvalue and issecretvalue(connected)) and connected == false then
-        return true
+        return "offline"
     end
     local okD, dead = pcall(UnitIsDeadOrGhost, unit)
     if okD and not (issecretvalue and issecretvalue(dead)) and dead == true then
-        return true
+        return "dead/ghost"
     end
-    return false
+    return nil
 end
 local function SelfIsUsingVehicle(unit)
     if not unit then return false end
@@ -5159,6 +5196,7 @@ end
 
 function Handle:_applyIdentityGate()
     local hide = false
+    local why   -- the FIRST probe that broke trust this pass, for the gate log
     -- ★ `_hasGatedGroups` widens the probe to rows that are not HIDE-vulnerable but do
     -- carry identity-dependent GROUPS -- i.e. the debuff row. Without it the assist probe
     -- never ran for those handles and the park verdict could never flip.
@@ -5206,12 +5244,16 @@ function Handle:_applyIdentityGate()
                     -- records the false, so leaving the vehicle is a real false→true edge
                     -- and re-parses. Setting `hide` alone would hide correctly and never
                     -- rebuild the pool.
-                    if can and SelfIsUsingVehicle(unit) then can = false end
+                    if can and SelfIsUsingVehicle(unit) then can = false; why = "self-vehicle" end
                     -- ★ Disconnected / dead / ghost — see IdentityUnavailable. Folded
                     -- into `can` like the vehicle probe, so a rez or a reconnect is a
                     -- real false→true edge and re-parses the pool rather than just
                     -- un-hiding a stale one.
-                    if can and not isOwn and IdentityUnavailable(unit) then can = false end
+                    if can and not isOwn then
+                        local unavail = IdentityUnavailable(unit)
+                        if unavail then can = false; why = unavail end
+                    end
+                    if not can and not why then why = "cannot-assist" end
                     -- Trust verdict for the PARK path (see the park block below).
                     self._idGateUntrusted = (can == false) or nil
                     self:_noteGateRecovery(can)
@@ -5243,7 +5285,7 @@ function Handle:_applyIdentityGate()
             if not hide and not isOwn and self._idGateSourceRelative then
                 local okv, vis = pcall(UnitIsVisible, unit)
                 if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
-                    hide = true
+                    hide = true; why = why or "not-visible"
                 end
                 -- ☠ THE "/phase" HALF OF THE COMMENT ABOVE WAS NEVER IMPLEMENTED. A unit
                 -- in another phase, layer or Chromie time can be UnitIsVisible TRUE and
@@ -5257,12 +5299,15 @@ function Handle:_applyIdentityGate()
                 if not hide and UnitPhaseReason then
                     local okp, reason = pcall(UnitPhaseReason, unit)
                     if okp and not (issecretvalue and issecretvalue(reason)) and reason then
-                        hide = true
+                        hide = true; why = why or "phased"
                     end
                 end
             end
         end
     end
+    -- Stash for /df debug idgate: the reason column answers "why is this row
+    -- parked/hidden RIGHT NOW" without waiting for the next transition line.
+    self._idGateWhy = (hide or self._idGateUntrusted) and why or nil
     -- Transition only. "My cross-realm friend's auras vanished" produced no log at
     -- all before this: the gate is two pcall'ed probes with deliberate fail-open /
     -- fail-safe asymmetry, and which one tripped is the whole answer. Fires on a
@@ -5285,9 +5330,9 @@ function Handle:_applyIdentityGate()
         -- each gated group's maxFrameCount, so it has to be set before the call — which is
         -- why this cannot simply latch on success.
         self._idGateParked = newParked
-        DF:Debug(DBG, "identity park %s for unit=%s",
-            newParked and "PARKING gated groups" or "restoring gated groups",
-            tostring(self.config and self.config.unit))
+        GateLog("park %s unit=%s why=%s",
+            newParked and "ON (gated groups -> 0)" or "OFF (gated groups restored)",
+            tostring(self.config and self.config.unit), tostring(why or "-"))
         -- ApplyTuning is the LIVE setter path and reads _idGateParked, so this is one
         -- call rather than a rebuild.
         local ok = true
@@ -5306,16 +5351,17 @@ function Handle:_applyIdentityGate()
             -- sweep recomputes the verdict from live conditions each time, so it converges
             -- on whatever is true then rather than on what was true when it broke.
             self._idGateParked = prevParked
-            DF:DebugWarn(DBG, "identity park apply FAILED for unit=%s — reverted, will retry",
-                tostring(self.config and self.config.unit))
+            GateLog("PARK APPLY FAILED unit=%s (combat=%s) — reverted, retries on next sweep",
+                tostring(self.config and self.config.unit),
+                tostring(InCombatLockdown and InCombatLockdown() or false))
         end
     end
 
     local newHidden = hide or nil
     if self._idGateHidden ~= newHidden then
-        DF:Debug("AURACONTAINER", "identity gate %s for unit=%s (vulnerable=%s sourceRelative=%s)",
-            newHidden and "HIDING" or "showing",
-            tostring(self.config and self.config.unit),
+        GateLog("hide %s unit=%s why=%s (vuln=%s srcRel=%s)",
+            newHidden and "ON" or "OFF",
+            tostring(self.config and self.config.unit), tostring(why or "-"),
             tostring(self._idGateVulnerable or false),
             tostring(self._idGateSourceRelative or false))
         self._idGateHidden = newHidden
@@ -6920,7 +6966,7 @@ function SlotHandle:_noteGateRecovery(can)
     end
     local c = self.owner and self.owner.container
     if not c or self._lastCandidateFilters == nil then return end
-    DF:Debug(DBG, "slot gate recovered for key=%s unit=%s - re-parsing (pool was fail-open)",
+    GateLog("slot recovered key=%s unit=%s - re-parsing (pool was fail-open)",
         tostring(self.key), tostring(self.owner and self.owner.unit))
     -- ☠ No native tuning setter runs in lockdown (see ApplyTuning). Queue the standard
     -- replay, which re-pushes candidates, verdict and filter together on the way out.
@@ -6940,6 +6986,7 @@ end
 
 function SlotHandle:_applyIdentityGate()
     local hide = false
+    local why   -- the FIRST probe that broke trust this pass, for the gate log
     if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
         local unit = self.owner and self.owner.unit
         -- ☠ See Handle:_applyIdentityGate — the `unit ~= "player"` exemption moved off
@@ -6961,12 +7008,16 @@ function SlotHandle:_applyIdentityGate()
                 if ok then
                     if issecretvalue and issecretvalue(can) then can = true end
                     -- ★ Boarding window — see SelfIsUsingVehicle and the Handle twin.
-                    if can and SelfIsUsingVehicle(unit) then can = false end
+                    if can and SelfIsUsingVehicle(unit) then can = false; why = "self-vehicle" end
                     -- ★ Disconnected / dead / ghost — see IdentityUnavailable. Folded
                     -- into `can` like the vehicle probe, so a rez or a reconnect is a
                     -- real false→true edge and re-parses the pool rather than just
                     -- un-hiding a stale one.
-                    if can and not isOwn and IdentityUnavailable(unit) then can = false end
+                    if can and not isOwn then
+                        local unavail = IdentityUnavailable(unit)
+                        if unavail then can = false; why = unavail end
+                    end
+                    if not can and not why then why = "cannot-assist" end
                     self:_noteGateRecovery(can)
                     if not can then hide = true end
                 end
@@ -6974,7 +7025,7 @@ function SlotHandle:_applyIdentityGate()
             if not hide and not isOwn and self._idGateSourceRelative then
                 local okv, vis = pcall(UnitIsVisible, unit)
                 if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
-                    hide = true
+                    hide = true; why = why or "not-visible"
                 end
                 -- ☠ THE "/phase" HALF OF THE COMMENT ABOVE WAS NEVER IMPLEMENTED. A unit
                 -- in another phase, layer or Chromie time can be UnitIsVisible TRUE and
@@ -6988,18 +7039,20 @@ function SlotHandle:_applyIdentityGate()
                 if not hide and UnitPhaseReason then
                     local okp, reason = pcall(UnitPhaseReason, unit)
                     if okp and not (issecretvalue and issecretvalue(reason)) and reason then
-                        hide = true
+                        hide = true; why = why or "phased"
                     end
                 end
             end
         end
     end
+    -- Stash for /df debug idgate, mirroring the Handle.
+    self._idGateWhy = hide and why or nil
     local newHidden = hide or nil
     if self._gateHidden ~= newHidden then
         self._gateHidden = newHidden
-        DF:Debug(DBG, "slot identity gate %s for key=%s unit=%s",
-            newHidden and "HIDING" or "showing", tostring(self.key),
-            tostring(self.owner and self.owner.unit))
+        GateLog("slot %s key=%s unit=%s why=%s",
+            newHidden and "hide ON" or "hide OFF", tostring(self.key),
+            tostring(self.owner and self.owner.unit), tostring(why or "-"))
         self:_pushFilter()
     end
 end
@@ -7436,6 +7489,13 @@ idGateWatch:RegisterEvent("UNIT_EXITED_VEHICLE")
 -- relies on both for pet death detection (Frames/Pets.lua).
 idGateWatch:RegisterEvent("UNIT_FLAGS")
 idGateWatch:RegisterEvent("UNIT_CONNECTION")
+-- ★ Combat exit re-verifies the gate. A park/restore whose ApplyTuning failed IN combat
+-- reverts its flag and retries on the next sweep (see _applyIdentityGate) — but that
+-- retry needs a sweep to ride, and a post-fight lull can go minutes without one. Regen
+-- is the natural edge: it is exactly when every deferred container op flushes, and in
+-- a battleground (where trust flips constantly — deaths, releases, rezzes) combat
+-- drops often enough to make this the reliable repair lane.
+idGateWatch:RegisterEvent("PLAYER_REGEN_ENABLED")
 local gateSweepQueued
 
 -- ☠ THIS FILTER MUST MATCH _applyIdentityGate's OWN CONDITION, TERM FOR TERM. It did not:
@@ -7463,6 +7523,10 @@ end
 function AuraContainer.SetUnitDeathLatched(unit, on)
     if type(unit) ~= "string" then return end
     if AuraContainer._testMode then return end
+    -- Transition-driven (dfLastKnownDead edges in Frames/Update.lua), so one line
+    -- per real death/rez — the gate log's densest writer in a battleground, and
+    -- exactly the edge the missing-HoTs class turned on.
+    GateLog("death latch %s unit=%s", on and "ON" or "OFF", unit)
     for h in pairs(AuraContainer._handles or {}) do
         if not h._destroyed and h.config and h.config.unit == unit
             and not h.config.parentDrivenVisibility then
@@ -7607,7 +7671,7 @@ cineWatch:SetScript("OnEvent", function(_, event)
         -- the clear and the fallback timer while the gate guard suppresses the
         -- recovery edge — a latch stuck until reload.
         if AuraContainer._testMode then return end
-        DF:Debug(DBG, "cinematic start (%s): latching vulnerable pools", event)
+        GateLog("cinematic start (%s): latching vulnerable pools", event)
         CineLatchAll(true)
         return
     end
@@ -7631,7 +7695,7 @@ cineWatch:SetScript("OnEvent", function(_, event)
     local gen = cineGen
     C_Timer.After(3, function()
         if gen == cineGen then
-            DF:Debug(DBG, "cinematic latch fallback: showing whatever is still held")
+            GateLog("cinematic latch fallback: showing whatever is still held")
             CineLatchAll(false)
         end
     end)
@@ -7694,14 +7758,14 @@ function AuraContainer.DebugDumpIdentityGate()
             if h._idGateUntrusted then parkedTxt = parkedTxt .. "(untrusted)" end
             local gatedN = 0
             for _ in pairs((h.backend and h.backend.gatedGroupKeys) or {}) do gatedN = gatedN + 1 end
-            print(("    " .. DF.OUT.SECTION .. "%d|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s srcRel=%s exists=%s canAssist=%s vis=%s gateHidden=%s parked=%s gatedGroups=%d cine=%s death=%s assist=%s intent=%s shown=%s retry=%s"):format(
+            print(("    " .. DF.OUT.SECTION .. "%d|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s srcRel=%s exists=%s canAssist=%s vis=%s gateHidden=%s parked=%s why=%s gatedGroups=%d cine=%s death=%s assist=%s intent=%s shown=%s retry=%s"):format(
                 n, tostring(cfg.mode or "row"), tostring(unit),
                 table.concat(fParts, "&"), tostring(inc), tostring(exc),
                 tostring(h._idGateVulnerable or false),
                 tostring(h._idGateSourceRelative or false),
                 tostring(type(unit) == "string" and UnitExists(unit) or false), canTxt, visTxt,
                 tostring(h._idGateHidden or false),
-                parkedTxt, gatedN,
+                parkedTxt, tostring(h._idGateWhy or "-"), gatedN,
                 tostring(h._cineLatched or false),
                 tostring(h._deathLatched or false),
                 tostring(h._idGateAssist),
@@ -7734,13 +7798,14 @@ function AuraContainer.DebugDumpIdentityGate()
                 elseif issecretvalue and issecretvalue(can) then canTxt = "SECRET"
                 else canTxt = tostring(can) end
             end
-            print(("    " .. DF.OUT.SECTION .. "S%d|r key=%s unit=%s vuln=%s srcRel=%s canAssist=%s gateHidden=%s parked=%s cine=%s death=%s assist=%s filter=%s"):format(
+            print(("    " .. DF.OUT.SECTION .. "S%d|r key=%s unit=%s vuln=%s srcRel=%s canAssist=%s gateHidden=%s parked=%s why=%s cine=%s death=%s assist=%s filter=%s"):format(
                 sn, tostring(s.key), tostring(unit),
                 tostring(s._idGateVulnerable or false),
                 tostring(s._idGateSourceRelative or false),
                 canTxt,
                 tostring(s._gateHidden or false),
                 tostring(s.parked or false),
+                tostring(s._idGateWhy or "-"),
                 tostring(s._cineLatched or false),
                 tostring(s._deathLatched or false),
                 tostring(s._idGateAssist),
@@ -7767,6 +7832,19 @@ function AuraContainer.DebugDumpIdentityGate()
         o:Field("auras secret", okS and tostring(secret) or "ERR", "NEUTRAL")
     end
     o:Field("test mode", AuraContainer._testMode or false, "NEUTRAL")
+    -- ★ The persistent gate log's tail — every transition, timestamped, whether or
+    -- not the debug console was on when it happened. This is the half a field report
+    -- needs: the dump above is NOW, the tail is WHAT LED HERE.
+    local glog = type(_G.DandersFramesDB_v2) == "table" and _G.DandersFramesDB_v2.gateLog
+    if type(glog) == "table" and #glog > 0 then
+        o:Section(("Gate log — last %d of %d (persists across sessions)"):format(
+            math.min(15, #glog), #glog))
+        for i = math.max(1, #glog - 14), #glog do
+            print("    " .. tostring(glog[i]))
+        end
+    else
+        o:Section("Gate log — empty (no transitions recorded yet)")
+    end
     o:Siblings("idgate")
 end
 
