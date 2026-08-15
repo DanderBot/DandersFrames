@@ -7315,20 +7315,6 @@ idGateWatch:RegisterEvent("PLAYER_FOCUS_CHANGED")
 idGateWatch:RegisterEvent("UNIT_ENTERING_VEHICLE")
 idGateWatch:RegisterEvent("UNIT_ENTERED_VEHICLE")
 idGateWatch:RegisterEvent("UNIT_EXITED_VEHICLE")
--- ☠ THE ALIVE TERM NEEDS ITS OWN EDGE. IdentityUnavailable hides a helpful pool while
--- its unit is dead or a ghost (a released ghost is visible, unphased and assistable via
--- resurrection, yet the engine drops its spell-ID filters -- EUI's field note, and why
--- the term exists). Nothing above fires on death or resurrection, so a verdict formed
--- while a teammate was dead stuck until an unrelated target change or roster event
--- happened to sweep -- in PvP, where teammates die constantly, that read as "buffs
--- sometimes don't show" for the rest of the fight. UNIT_FLAGS signals the
--- death/release/resurrection transitions; chatty in combat, but it takes the same
--- 0.05s coalescer as the roster burst, and a stable gate costs one comparison per
--- handle. UNIT_CONNECTION is the disconnected term's own edge for the same reason
--- (PARTY_MEMBER_ENABLE covers it too, coarser). Same event set as EllesmereUI's
--- assist watch, reached from the same bug.
-idGateWatch:RegisterEvent("UNIT_FLAGS")
-idGateWatch:RegisterEvent("UNIT_CONNECTION")
 local gateSweepQueued
 -- ============================================================
 -- DEATH LATCH — unit-keyed sweep (#1043)
@@ -7357,15 +7343,7 @@ end
 local function IdentityGateSweep()
     gateSweepQueued = nil
     for h in pairs(AuraContainer._handles or {}) do
-        -- ☠ GATED GROUPS COUNT. A debuff row is neither hide-vulnerable nor
-        -- source-relative (both require HELPFUL), so this predicate skipped it --
-        -- and the identity PARK could engage at build or retarget while a unit was
-        -- dead or unloaded, then never release: the only sweep that could flip the
-        -- verdict never visited the handle. _applyIdentityGate already widens its
-        -- own probe on _hasGatedGroups; the sweep has to match it or the park is
-        -- one-way. (Slots have no groups, so the slot loop below is unchanged.)
-        if h._idGateVulnerable or h._idGateSourceRelative
-            or (h._hasGatedGroups and h:_hasGatedGroups()) then
+        if h._idGateVulnerable or h._idGateSourceRelative then
             pcall(function() h:_applyIdentityGate() end)
         end
     end
