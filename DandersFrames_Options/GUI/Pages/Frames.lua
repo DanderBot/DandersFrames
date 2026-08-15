@@ -66,25 +66,81 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- BASE resolver: "apply font globally" edits the user's base
             -- preset — with a runtime auto-layout active, the ACTIVE resolver
             -- would mutate the layout's preset instead (editor model is BASE).
+            -- ☠ Field report (5.1.3): this block silently did nothing. Three holes:
+            --   1. `if defaults then` skipped the whole write when the table was absent.
+            --   2. adDB.auras is SPEC-KEYED (auras[spec][auraName]) since the spec-scope
+            --      migration, and the old loop iterated one level short — the instance
+            --      clearing never matched anything, while EnsureTypeConfig stamps fonts
+            --      on every placed indicator at creation, so instances shadowed the
+            --      defaults write forever.
+            --   3. Layout / Other / debuff-category GROUPS carry their text style on
+            --      group.style with NO adDB.defaults fallback — untouched entirely.
             local _adMode = (db == DF.db.raid) and "raid" or "party"
             local _adCfg = (DF.GetModeBaseAuraDesigner and DF:GetModeBaseAuraDesigner(_adMode))
                 or (DF.GetModeAuraDesigner and DF:GetModeAuraDesigner(_adMode))
             if _adCfg then
-                if _adCfg.defaults then
-                    local adDefaults = _adCfg.defaults
-                    adDefaults.durationFont = font; adDefaults.durationOutline = outline
-                    adDefaults.stackFont = font; adDefaults.stackOutline = outline
-                end
-                -- Clear per-instance font overrides so all indicators inherit global
-                if _adCfg.auras then
-                    for _, auraCfg in pairs(_adCfg.auras) do
-                        if auraCfg.indicators then
-                            for _, inst in ipairs(auraCfg.indicators) do
+                if not _adCfg.defaults then _adCfg.defaults = {} end
+                local adDefaults = _adCfg.defaults
+                adDefaults.durationFont = font; adDefaults.durationOutline = outline
+                adDefaults.stackFont = font; adDefaults.stackOutline = outline
+                -- Clear per-instance font overrides so indicators inherit the
+                -- defaults written above. Covers the post-migration indicators
+                -- array AND the legacy per-type sub-tables ("icon"/"square"/"bar")
+                -- of a record the lazy instances migration hasn't touched yet.
+                local function _clearAuraRecord(rec)
+                    if type(rec) ~= "table" then return end
+                    if type(rec.indicators) == "table" then
+                        for _, inst in ipairs(rec.indicators) do
+                            if type(inst) == "table" then
                                 inst.durationFont = nil; inst.durationOutline = nil
                                 inst.stackFont = nil; inst.stackOutline = nil
                             end
                         end
                     end
+                    -- ☠ Not ipairs over {rec.icon, rec.square, rec.bar}: a nil hole
+                    -- (record with a bar but no icon) would end the walk early.
+                    for _, tk in pairs({ "icon", "square", "bar" }) do
+                        local t = rec[tk]
+                        if type(t) == "table" then
+                            t.durationFont = nil; t.durationOutline = nil
+                            t.stackFont = nil; t.stackOutline = nil
+                        end
+                    end
+                end
+                if type(_adCfg.auras) == "table" then
+                    for _, specAuras in pairs(_adCfg.auras) do
+                        if type(specAuras) == "table" then
+                            for _, rec in pairs(specAuras) do _clearAuraRecord(rec) end
+                        end
+                    end
+                end
+                if type(_adCfg.otherAuras) == "table" then
+                    for _, rec in pairs(_adCfg.otherAuras) do _clearAuraRecord(rec) end
+                end
+                -- Group buttons: SET the style explicitly (the opposite move from the
+                -- indicator clearing) — group.style has no defaults chain to inherit
+                -- from, so nil here would just mean the hardcoded factory default.
+                local function _styleGroup(g)
+                    if type(g) ~= "table" then return end
+                    local s = g.style
+                    if type(s) ~= "table" then s = {}; g.style = s end
+                    s.durationFont = font; s.durationOutline = outline
+                    s.stackFont = font; s.stackOutline = outline
+                end
+                if type(_adCfg.layoutGroups) == "table" then
+                    for _, v in pairs(_adCfg.layoutGroups) do
+                        if type(v) == "table" and v.id ~= nil then
+                            _styleGroup(v)   -- pre-spec-scope flat array entry
+                        elseif type(v) == "table" then
+                            for _, g in pairs(v) do _styleGroup(g) end
+                        end
+                    end
+                end
+                if type(_adCfg.otherLayoutGroups) == "table" then
+                    for _, g in pairs(_adCfg.otherLayoutGroups) do _styleGroup(g) end
+                end
+                if type(_adCfg.debuffGroups) == "table" then
+                    for _, g in pairs(_adCfg.debuffGroups) do _styleGroup(g) end
                 end
             end
 
@@ -102,10 +158,10 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                         el.font = font; el.outline = outline
                     end
                 end
-                if _tdCfg.globalDefaults then
-                    _tdCfg.globalDefaults.font = font
-                    _tdCfg.globalDefaults.outline = outline
-                end
+                -- Create-if-missing, same silent-skip hole the AD defaults had.
+                if not _tdCfg.globalDefaults then _tdCfg.globalDefaults = {} end
+                _tdCfg.globalDefaults.font = font
+                _tdCfg.globalDefaults.outline = outline
             end
 
             DF:UpdateAllFrames()
