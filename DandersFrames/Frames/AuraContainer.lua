@@ -7360,6 +7360,21 @@ idGateWatch:RegisterEvent("UNIT_ENTERING_VEHICLE")
 idGateWatch:RegisterEvent("UNIT_ENTERED_VEHICLE")
 idGateWatch:RegisterEvent("UNIT_EXITED_VEHICLE")
 local gateSweepQueued
+
+-- ☠ THIS FILTER MUST MATCH _applyIdentityGate's OWN CONDITION, TERM FOR TERM. It did not:
+-- the gate widened to `or self:_hasGatedGroups()` so the debuff row's park verdict could
+-- flip, and the sweep that DRIVES the gate was left on the old two-term test. A row that
+-- carries gated groups without being hide-vulnerable was therefore never swept, so its
+-- park could be set at build and never re-evaluated by any watcher event -- the same
+-- "fixed the class in one place, not its sibling" shape the park bug itself had.
+-- ⚠ Declared HERE, above SetUnitDeathLatched, because that is its first caller. Below it
+-- this reads as a nil GLOBAL: it parses clean, and every call site is inside a pcall, so
+-- the failure would have been completely silent. Caught by diffing _ENV reads, not by luac.
+local function GateAppliesTo(h)
+    return h._idGateVulnerable or h._idGateSourceRelative
+        or (h._hasGatedGroups and h:_hasGatedGroups())
+end
+
 -- ============================================================
 -- DEATH LATCH — unit-keyed sweep (#1043)
 -- ============================================================
@@ -7382,12 +7397,42 @@ function AuraContainer.SetUnitDeathLatched(unit, on)
             pcall(function() s:_setDeathLatch(on) end)
         end
     end
+    -- ☠☠ DEATH IS AN IDENTITY EDGE TOO, AND NOTHING ELSE DELIVERS IT. IdentityUnavailable
+    -- folds UnitIsDeadOrGhost / UnitIsConnected into the assist verdict, so a dead unit
+    -- makes _applyIdentityGate decide `can = false` -- which PARKS its gated groups and,
+    -- for a hide-vulnerable HELPFUL pool, hides the row outright. But idGateWatch registers
+    -- only faction / phase / name / roster / target / focus / vehicle events: there is no
+    -- death or resurrection event anywhere in that list.
+    --
+    -- So the gate could take the false while a unit was dead (any roster event during the
+    -- death is enough, and in a raid those never stop), and then never re-run on the alive
+    -- edge -- _noteGateRecovery never saw the false->true transition, so no re-parse and no
+    -- un-hide. The HoTs stayed gone until some unrelated watcher event happened to sweep.
+    -- Field shape: "sometimes my hots don't appear on some of my teammates", healer able to
+    -- target the player and confirm the HoTs are really there (targeting fires
+    -- PLAYER_TARGET_CHANGED, which sweeps -- so the act of checking could fix it and hide
+    -- the cause). Reported by several healers on 5.1.3.
+    --
+    -- The death latch is already driven off the real dead/alive transitions in
+    -- Frames/Update.lua and is unit-keyed, so it is exactly the edge the gate was missing.
+    -- Re-running the gate for this unit's handles is cheap: two pcall'ed unit probes each,
+    -- and only for handles the gate applies to at all.
+    for h in pairs(AuraContainer._handles or {}) do
+        if not h._destroyed and h.config and h.config.unit == unit and GateAppliesTo(h) then
+            pcall(function() h:_applyIdentityGate() end)
+        end
+    end
+    for s in pairs(AuraContainer._slotHandles or {}) do
+        if s.owner and s.owner.unit == unit and GateAppliesTo(s) then
+            pcall(function() s:_applyIdentityGate() end)
+        end
+    end
 end
 
 local function IdentityGateSweep()
     gateSweepQueued = nil
     for h in pairs(AuraContainer._handles or {}) do
-        if h._idGateVulnerable or h._idGateSourceRelative then
+        if GateAppliesTo(h) then
             pcall(function() h:_applyIdentityGate() end)
         end
     end
@@ -7395,7 +7440,7 @@ local function IdentityGateSweep()
     -- one is Handle-shaped; forgetting them is exactly how the collapsed AD path ended up
     -- with no gate at all despite every placed config being vulnerable.
     for h in pairs(AuraContainer._slotHandles or {}) do
-        if h._idGateVulnerable or h._idGateSourceRelative then
+        if GateAppliesTo(h) then
             pcall(function() h:_applyIdentityGate() end)
         end
     end
