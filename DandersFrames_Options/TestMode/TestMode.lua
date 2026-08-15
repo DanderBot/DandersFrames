@@ -3922,9 +3922,33 @@ function DF:CreateTestPanel()
             if callback then callback(container.checked, isRaidMode) end
             if isRaidMode and DF.raidTestMode then
                 DF:UpdateRaidTestFrames()
+                -- ☠ SECOND PASS NEXT TICK — the same one ENTRY runs, for the same
+                -- reason. A toggle flipped on for the first time this session CREATES
+                -- its bars during this pass, and an anchor-derived rect is 0 for the
+                -- whole creation tick — so anything anchored to a new bar's own
+                -- texture (the absorb chained to the brand-new prediction fill)
+                -- painted at width 0 and stayed invisible until another toggle pass
+                -- happened by. That is exactly the trap entry's After(0) repaint
+                -- exists for; its comment even says "goes through the SAME
+                -- UpdateTestFrame pathway — no second painter". Field-caught twice on
+                -- the interplay unit (Aphoex + Krathe, 2026-08-15): the first fix
+                -- reordered the painters to live's order — necessary, but it fixed
+                -- the within-pass dependency, not the rects. Hide-then-reshow
+                -- "correcting" it was the tell: a second pass over settled rects.
+                C_Timer.After(0, function()
+                    if DF.raidTestMode and DF.UpdateRaidTestFrames then
+                        DF:UpdateRaidTestFrames()
+                    end
+                end)
             elseif not isRaidMode and DF.testMode then
                 DF:UpdateAllFrames()
                 if DF.RefreshTestFrames then DF:RefreshTestFrames() end
+                -- Same second pass as the raid branch above — see that comment.
+                C_Timer.After(0, function()
+                    if DF.testMode and DF.RefreshTestFrames then
+                        DF:RefreshTestFrames()
+                    end
+                end)
             end
             -- Update badge on parent section
             if container.section and container.section.UpdateBadge then
