@@ -5326,7 +5326,19 @@ function Factory:SyncFrame(frame)
     frame.dfADMemTestCleared = nil
 
     local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
-    if not adDB then return end
+    if not adDB then
+        -- ☠ TEAR DOWN, DO NOT JUST LEAVE. This was a bare `return`, sitting three lines
+        -- above the `not spec` exit that DOES call ClearFrame -- two "nothing to render"
+        -- paths, one of which released its containers and one of which abandoned them.
+        -- Skipping the sync does not stop anything rendering: the containers are declared
+        -- to the engine and Blizzard keeps drawing them until they are released, so an
+        -- unresolvable config left the previous config's indicators on screen, at their
+        -- old positions, until a reload. ClearFrame is cheap on a frame that owns nothing
+        -- (it returns immediately when there is no store), so this costs nothing in the
+        -- ordinary early-login case where the profile has simply not loaded yet.
+        self:ClearFrame(frame)
+        return
+    end
 
     -- The factory owns AD here (the legacy read-path engine is gone), so nothing maintains the
     -- buff-bar dedup set. Clear any set left populated by a prior legacy run so it can't
