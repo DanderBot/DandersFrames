@@ -2351,19 +2351,29 @@ function DF:UpdateRaidContainerPosition()
     DF.raidContainer:ClearAllPoints()
     DF.raidContainer:SetPoint("CENTER", UIParent, "CENTER", cx / scale, cy / scale)
 
-    -- Mover/test container do NOT get the compensation: the mover represents
-    -- the user's saved position (centroid), and the test container has no
-    -- secure snippet running so populated-row drift never happens there.
+    -- ☠ MOVER AND TEST CONTAINER TAKE THE COMPENSATION TOO — all three read the one
+    -- number ComputeRaidContainerCompensation returns. The previous rule ("the mover
+    -- represents the user's saved position") kept the mover at the raw anchor while
+    -- the content sat at anchor + comp, so with Center alignment and groups-per-row
+    -- below 8 the unlock overlay drew half a group-row away from the frames it claims
+    -- to bound (Aphoex, 2026-08-15). The saved anchor is invisible to users; the
+    -- overlay's entire job is to be WHERE THE FRAMES ARE. Drag stays coherent: the
+    -- drag OnUpdate moves mover + both containers rigidly by the same raw offset, and
+    -- DragStop re-runs this function, so box and content keep one shared baseline
+    -- throughout.
+    -- ⚠ The test container now carries the comp ON THE CONTAINER, mirroring live —
+    -- the test frame calculator no longer folds it into frame offsets. One accounting
+    -- model in both modes; the calculator's testMode comp fork is retired.
     if DF.raidMoverFrame and DF.raidMoverFrame:IsShown() then
         DF.raidMoverFrame:SetScale(scale)
         DF.raidMoverFrame:ClearAllPoints()
-        DF.raidMoverFrame:SetPoint("CENTER", UIParent, "CENTER", x / scale, y / scale)
+        DF.raidMoverFrame:SetPoint("CENTER", UIParent, "CENTER", cx / scale, cy / scale)
     end
 
     if DF.testRaidContainer then
         DF.testRaidContainer:SetScale(scale)
         DF.testRaidContainer:ClearAllPoints()
-        DF.testRaidContainer:SetPoint("CENTER", UIParent, "CENTER", x / scale, y / scale)
+        DF.testRaidContainer:SetPoint("CENTER", UIParent, "CENTER", cx / scale, cy / scale)
     end
 end
 

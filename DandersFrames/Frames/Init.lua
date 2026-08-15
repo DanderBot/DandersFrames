@@ -981,7 +981,16 @@ function DF:UnlockRaidFrames()
             DF.testRaidContainer:SetSize(DF.raidContainer:GetSize())
         end
     end
-    
+
+    -- ★ CONVERGE THROUGH THE ONE POSITIONER. The hand-positioning above sets raw
+    -- anchors; UpdateRaidContainerPosition is the single owner of the CENTER
+    -- compensation (container + test container + mover, one number), so run it last
+    -- or the unlock path shows the box at the uncompensated anchor until the next
+    -- reposition happens by — the exact overlay drift this block otherwise
+    -- reintroduces. (Core.lua already routes its callers through it for the same
+    -- reason.) Safe here: unlock is OOC by construction (combat guard at the top).
+    if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
+
     -- Debug info
     if DF:DebugActive("HEADERS") then
         headerDebug("Raid unlock - container size:", DF.raidContainer:GetWidth(), "x", DF.raidContainer:GetHeight())
