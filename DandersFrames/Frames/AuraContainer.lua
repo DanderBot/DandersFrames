@@ -763,6 +763,26 @@ end
 -- it, and a mis-categorised aura lands in the wrong record or none. That is why the peer
 -- this mirrors parks exactly these four records on its debuff row and nothing else.
 --
+-- ☠☠☠ THE PARAGRAPH ABOVE DOES NOT MATCH THE ENGINE. Read from the shipped client
+-- (Blizzard_AuraContainer/Blizzard_AuraContainerUtil.lua, DoesAuraPassCandidateFilters):
+-- ONLY `excludeSpellIDs` and `includeSpellIDs` sit inside the
+-- `if CanApplyIdentityCandidateFilters(...)` block. isBossAura, isBossOrRoleAura,
+-- isRoleAura, isPriorityAura AND isFromPlayerOrPlayerPet are all evaluated AFTER it,
+-- unconditionally. They are never skipped, so they never fail open, so there is nothing
+-- for this park to protect against on those four keys.
+-- ⚠ And the categorisation cannot be poisoned the way the paragraph claims: the engine
+-- evaluates AuraUtil.IsRoleAura / IsPriorityDebuff itself, with the real auraData. It is
+-- OUR Lua that cannot read spellId, not Blizzard's.
+-- ⚠ There is also a THIRD exit we model nowhere: a spell whose
+-- C_Secrets.GetSpellAuraSecrecy is Enum.SecrecyLevel.NeverSecret returns true from
+-- CanApplyIdentityCandidateFilters regardless of assistability, so spell-ID filters keep
+-- working on it in both directions. (DF already knows this set exists -- see
+-- AuraBlacklist/Config.lua, ~62 IDs -- it just is not consulted here.)
+-- ⇒ The park is guarding a mechanism that does not exist, which is one more reason it kept
+-- emptying rows it should not. NOT removed here: that is a behaviour change on the debuff
+-- row and wants Krathe's call plus an in-game check, not a quiet deletion inside an
+-- unrelated fix. Do not "improve" this list until that decision is made.
+--
 -- ☠☠ ASSERTED (`true`), NEVER MERELY MENTIONED. This tested `~= nil`, and `false ~= nil`
 -- is true — so every record carrying a category boolean as a DEDUP SUBTRACTION counted as
 -- identity-gated. BuildDirectDebuffFilters' notImportant() stamps isBossOrRoleAura=false
@@ -7359,6 +7379,21 @@ idGateWatch:RegisterEvent("PLAYER_FOCUS_CHANGED")
 idGateWatch:RegisterEvent("UNIT_ENTERING_VEHICLE")
 idGateWatch:RegisterEvent("UNIT_ENTERED_VEHICLE")
 idGateWatch:RegisterEvent("UNIT_EXITED_VEHICLE")
+-- ☠☠ THE GATE READS DEAD AND DISCONNECTED, SO IT MUST HEAR THEM. IdentityUnavailable
+-- folds UnitIsDeadOrGhost and UnitIsConnected into the assist verdict, and until these two
+-- lines the watcher had no event for either. The consequence was one-way: a unit that died
+-- or dropped took the false on whatever unrelated event happened to sweep, and coming back
+-- produced NO sweep at all, so _noteGateRecovery never saw the false->true edge and a
+-- filtered helpful row stayed empty. Healers reported HoTs missing on some members with the
+-- auras verifiably still applied (5.1.3).
+-- ☠ PARTY_MEMBER_ENABLE / DISABLE above do NOT cover this. They are party-scoped and do not
+-- fire for raid members, which is why the clearest field report was a 40-player raid ("cannot
+-- see my riptides on group 5/6/7/8") -- past party size there was no connection signal at all.
+-- UNIT_CONNECTION is the group-wide equivalent and UNIT_FLAGS carries the death edge;
+-- Blizzard's own CompactUnitFrame registers exactly this pair per unit, and DF already
+-- relies on both for pet death detection (Frames/Pets.lua).
+idGateWatch:RegisterEvent("UNIT_FLAGS")
+idGateWatch:RegisterEvent("UNIT_CONNECTION")
 local gateSweepQueued
 
 -- ☠ THIS FILTER MUST MATCH _applyIdentityGate's OWN CONDITION, TERM FOR TERM. It did not:
