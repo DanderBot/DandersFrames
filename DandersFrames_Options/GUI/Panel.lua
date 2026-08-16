@@ -340,29 +340,41 @@ function DF:CreateGUI()
             elseif kind == "tex" then
                 obj = clChild:CreateTexture(nil, "ARTWORK")
             elseif kind == "card" then
-                -- A Button, so a card with a settings target can be clicked; static
-                -- cards get EnableMouse(false) at layout time.
-                obj = CreateFrame("Button", nil, clChild, "BackdropTemplate")
-                -- The METHOD, not the file-local: the local CreatePanelBackdrop
-                -- takes no opts and would paint the page background with a black
-                -- border; the card wants the element tone at half alpha.
-                GUI:CreatePanelBackdrop(obj, { bgColor = C_ELEMENT, bgAlpha = 0.45 })
-                obj.accent = obj:CreateTexture(nil, "ARTWORK")
-                obj.accent:SetPoint("TOPLEFT", 1, -1)
-                obj.accent:SetPoint("TOPRIGHT", -1, -1)
-                obj.accent:SetHeight(2)
+                -- ★ A FEATURE CALLOUT, not a card. No box, no fill, no grid: DF's own
+                -- note/banner idiom — a left accent RAIL with a STAR at its head (the
+                -- changelog's "new feature" glyph; fixes get a dot), title line, wrapping
+                -- body, and a CHEVRON at the title's right edge only when the feature
+                -- links to a settings page (the "go here" affordance the panel already
+                -- uses). Rail colour says clickable: theme when linked, dim when not.
+                -- A Button so a linked callout is one click; static ones mouse off.
+                obj = CreateFrame("Button", nil, clChild)
+                obj.rail = obj:CreateTexture(nil, "ARTWORK")
+                obj.rail:SetPoint("TOPLEFT", 6, -2)
+                obj.rail:SetPoint("BOTTOMLEFT", 6, 2)
+                obj.rail:SetWidth(2)
+                obj.star = obj:CreateTexture(nil, "OVERLAY")
+                obj.star:SetSize(14, 14)
+                obj.star:SetPoint("TOPLEFT", 0, 0)
+                obj.star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
+                obj.chev = obj:CreateTexture(nil, "OVERLAY")
+                obj.chev:SetSize(14, 14)
+                obj.chev:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
                 obj.title = obj:CreateFontString(nil, "OVERLAY")
                 obj.body  = obj:CreateFontString(nil, "OVERLAY")
                 obj.by    = obj:CreateFontString(nil, "OVERLAY")
-                obj.hint  = obj:CreateFontString(nil, "OVERLAY")
                 obj:SetScript("OnEnter", function(self)
                     if not self.navTarget then return end
-                    self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.6)
-                    self.hint:Show()
+                    local c = self.railColor
+                    self.rail:SetColorTexture(c.r, c.g, c.b, 1)
+                    self.chev:SetVertexColor(c.r, c.g, c.b, 1)
+                    self.title:SetTextColor(c.r, c.g, c.b, 1)
                 end)
                 obj:SetScript("OnLeave", function(self)
-                    self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.45)
-                    self.hint:Hide()
+                    if not self.navTarget then return end
+                    local c = self.railColor
+                    self.rail:SetColorTexture(c.r, c.g, c.b, 0.7)
+                    self.chev:SetVertexColor(c.r, c.g, c.b, 0.6)
+                    self.title:SetTextColor(c.r, c.g, c.b, 0.9)
                 end)
                 obj:SetScript("OnClick", function(self) navigateTo(self.navTarget) end)
             elseif kind == "sep" then
@@ -416,10 +428,6 @@ function DF:CreateGUI()
             return
         end
 
-        local twoCol = innerW >= 520
-        local CARD_GAP = 10
-        local cardW = twoCol and math.floor((innerW - CARD_GAP) / 2) or innerW
-
         for vi = 1, math.min(#clParsed, clShown) do
             local ver = clParsed[vi]
             -- Version title + hairline
@@ -436,91 +444,77 @@ function DF:CreateGUI()
 
             for _, sec in ipairs(ver.sections) do
                 if #sec.entries > 0 then
+                    -- Section title: a real heading (13px, full text colour) with its own
+                    -- hairline underneath, so New Features / Bug Fixes / Improvements read
+                    -- as three blocks rather than one grey caption in a wall of rows.
                     if sec.name ~= "" then
                         local lab = acquire("fs")
-                        GUI:SetSettingsFont(lab, 9, "")
+                        GUI:SetSettingsFont(lab, 13, "")
                         lab:SetPoint("TOPLEFT", PAD, y)
                         lab:SetText(sectionLabel(sec.name):upper())
-                        lab:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.9)
-                        y = y - 16
+                        lab:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 0.95)
+                        y = y - 20
+                        local ssep = acquire("sep")
+                        ssep:SetWidth(innerW)
+                        ssep:SetPoint("TOPLEFT", PAD, y)
+                        y = y - 12
                     end
                     local isFeatures = sec.name:lower():find("feature", 1, true) ~= nil
                     if isFeatures then
-                        -- CARDS, two per row when the panel is wide enough.
-                        local col, rowH = 0, 0
+                        -- FEATURE CALLOUTS, one per row, full width. See the pool
+                        -- constructor for the shape; this only lays out and measures.
+                        local RAIL_X = 22   -- text starts right of star + rail
+                        local dimRail = { r = C_TEXT_DIM.r, g = C_TEXT_DIM.g, b = C_TEXT_DIM.b }
                         for _, e in ipairs(sec.entries) do
-                            local card = acquire("card")
-                            local cx = PAD + col * (cardW + CARD_GAP)
-                            card:SetPoint("TOPLEFT", cx, y)
-                            card:SetWidth(cardW)
-                            card:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.45)
-                            card.accent:SetColorTexture(tc.r, tc.g, tc.b, 0.75)
-                            local CPAD = 14
-                            local textW = cardW - CPAD * 2
-                            GUI:SetSettingsFont(card.title, 12, "")
-                            card.title:ClearAllPoints()
-                            card.title:SetPoint("TOPLEFT", CPAD, -12)
-                            card.title:SetWidth(textW)
-                            card.title:SetJustifyH("LEFT")
-                            card.title:SetWordWrap(false)
-                            card.title:SetText(e.category or L["New Feature"])
-                            card.title:SetTextColor(tc.r, tc.g, tc.b, 0.95)
+                            local co = acquire("card")
+                            co:SetPoint("TOPLEFT", PAD, y)
+                            co:SetWidth(innerW)
+                            local target = navTargetFor(e.category)
+                            co.navTarget = target
+                            co:EnableMouse(target ~= nil)
+                            local rc = target and tc or dimRail
+                            co.railColor = rc
+                            co.rail:SetColorTexture(rc.r, rc.g, rc.b, target and 0.7 or 0.45)
+                            co.star:SetVertexColor(tc.r, tc.g, tc.b, 0.95)
+                            -- Title line: category in small caps; chevron only when linked.
+                            GUI:SetSettingsFont(co.title, 11, "")
+                            co.title:ClearAllPoints()
+                            co.title:SetPoint("TOPLEFT", RAIL_X, -1)
+                            co.title:SetWidth(innerW - RAIL_X - 24)
+                            co.title:SetJustifyH("LEFT")
+                            co.title:SetWordWrap(false)
+                            co.title:SetText((e.category or L["New Feature"]):upper())
+                            co.title:SetTextColor(rc.r, rc.g, rc.b, target and 0.9 or 0.85)
+                            co.chev:ClearAllPoints()
+                            co.chev:SetPoint("TOPRIGHT", -2, 0)
+                            co.chev:SetVertexColor(rc.r, rc.g, rc.b, 0.6)
+                            co.chev:SetShown(target ~= nil)
                             -- ☠ EXPLICIT WIDTH, NOT AN ANCHOR-DERIVED ONE. Wrapped height is
                             -- only measurable once the FontString knows its width, and a
                             -- two-anchor width is not guaranteed resolved in the frame that
                             -- set it — measured that way the rows came back one line tall
                             -- and every entry overlapped the next. A set width wraps
-                            -- deterministically, so the card always grows to fit its text.
-                            GUI:SetSettingsFont(card.body, 11, "")
-                            card.body:ClearAllPoints()
-                            card.body:SetPoint("TOPLEFT", card.title, "BOTTOMLEFT", 0, -7)
-                            card.body:SetWidth(textW)
-                            card.body:SetJustifyH("LEFT")
-                            card.body:SetJustifyV("TOP")
-                            card.body:SetWordWrap(true)
-                            card.body:SetNonSpaceWrap(false)
-                            card.body:SetText(e.text)
-                            card.body:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 0.8)
-                            local bh = math.ceil(card.body:GetStringHeight() or 14)
-                            local h = 12 + 14 + 7 + bh + 12
-                            -- Footer line: byline left-of-right, "Open settings" hint on hover.
-                            local target = navTargetFor(e.category)
-                            card.navTarget = target
-                            card:EnableMouse(target ~= nil)
-                            GUI:SetSettingsFont(card.hint, 9, "")
-                            card.hint:ClearAllPoints()
-                            card.hint:SetPoint("BOTTOMLEFT", CPAD, 7)
-                            card.hint:SetText(L["Click to open settings"])
-                            card.hint:SetTextColor(tc.r, tc.g, tc.b, 0.8)
-                            card.hint:Hide()
-                            GUI:SetSettingsFont(card.by, 9, "")
-                            card.by:ClearAllPoints()
-                            if e.author then
-                                card.by:SetPoint("BOTTOMRIGHT", -CPAD, 7)
-                                card.by:SetText(e.author)
-                                card.by:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
-                                card.by:Show()
-                            else
-                                card.by:Hide()
-                            end
-                            if e.author or target then h = h + 12 end
-                            card:SetHeight(h)
-                            if h > rowH then rowH = h end
-                            col = col + 1
-                            if not twoCol or col == 2 then
-                                -- Equalise the row's cards, then drop.
-                                if twoCol and col == 2 then
-                                    -- Previous card in this row gets the same height.
-                                    local prev = clPool.card[clUsed.card - 1]
-                                    if prev then prev:SetHeight(rowH) end
-                                    card:SetHeight(rowH)
-                                end
-                                y = y - rowH - CARD_GAP
-                                col, rowH = 0, 0
-                            end
+                            -- deterministically, so the callout always grows to fit.
+                            GUI:SetSettingsFont(co.body, 11, "")
+                            co.body:ClearAllPoints()
+                            co.body:SetPoint("TOPLEFT", co.title, "BOTTOMLEFT", 0, -5)
+                            co.body:SetWidth(innerW - RAIL_X - 8)
+                            co.body:SetJustifyH("LEFT")
+                            co.body:SetJustifyV("TOP")
+                            co.body:SetWordWrap(true)
+                            co.body:SetNonSpaceWrap(false)
+                            co.body:SetSpacing(2)
+                            local by = e.author and format("  |cff%02x%02x%02x%s|r",
+                                C_TEXT_DIM.r * 255, C_TEXT_DIM.g * 255, C_TEXT_DIM.b * 255, e.author) or ""
+                            co.body:SetText(e.text .. by)
+                            co.body:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 0.82)
+                            co.by:Hide()   -- byline rides the body's tail now
+                            local bh = math.ceil(co.body:GetStringHeight() or 14)
+                            local h = 1 + 14 + 5 + bh + 4
+                            co:SetHeight(h)
+                            y = y - h - 12
                         end
-                        if col == 1 then y = y - rowH - CARD_GAP end
-                        y = y - 4
+                        y = y - 2
                     else
                         -- ROWS, GROUPED BY CATEGORY. The tag used to sit inline at the
                         -- start of every sentence, so "Bars" appeared six times in a row
