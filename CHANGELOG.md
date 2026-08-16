@@ -28,6 +28,7 @@
 * (Bars) Fix solo-mode resource bars appearing on frames other than your own. (by Krathe)
 * (Aura Designer) Fix the enable toggle silently changing your Show Buffs setting when nothing needed to change. (by Krathe)
 * (Test Mode) The preview honours Smooth Bar Animation and labels which slot is you. (by Krathe)
+* (Click Casting) Fix importing per-character macros erroring out and showing nothing — the game moved the account-macro limit this build, and the import read the old name. (by Krathe)
 * (Debuff Bar) Fix debuffs appearing twice when Non-Player Debuffs was enabled alongside another category. Any mob-cast debuff that was also dispellable, crowd control or raid-flagged was counted by both categories, so trash packs applying poison and disease filled the row with pairs of identical icons and pushed past the icon limit. (by Krathe)
 * (Auras) Fix buffs and debuffs sometimes staying hidden on group members after they died, released or disconnected — the frame only recovered when something else refreshed it, such as targeting that player. Most reported by healers missing HoTs on raid groups outside their own, and constant in battlegrounds. (by Krathe)
 * (Auras) Duration text now counts down cleanly to the end — 3, 2, 1, gone — instead of showing the final second twice. Applies to every duration format, the Aura Designer and the Defensive Icon. (by Krathe)
