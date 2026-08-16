@@ -3205,9 +3205,18 @@ end
 function CC:GetWoWCharacterMacros()
     local macros = {}
     local numGlobal, numPerChar = GetNumMacros()
-    
-    -- Character macros start after global ones (index 121+)
-    local startIndex = MAX_ACCOUNT_MACROS + 1
+
+    -- Character macros start after the account block.
+    -- ☠ THE COUNT IS `Constants.MacroConsts.MAX_ACCOUNT_MACROS`, NOT A GLOBAL. The bare
+    -- global was removed; reading it here threw "attempt to perform arithmetic on global
+    -- 'MAX_ACCOUNT_MACROS' (a nil value)" and broke per-character macro import outright
+    -- (field-reported). Blizzard's own MacroUI reads the same constant table.
+    -- The literal is the LAST resort only: a hardcoded 120 silently reads the wrong slots
+    -- the day Blizzard changes the account allowance, so prefer the live constant and let
+    -- the fallback cover a client that lacks the table entirely.
+    local MC = _G.Constants and _G.Constants.MacroConsts
+    local accountMax = (MC and tonumber(MC.MAX_ACCOUNT_MACROS)) or 120
+    local startIndex = accountMax + 1
     for i = startIndex, startIndex + numPerChar - 1 do
         local name, icon, body = GetMacroInfo(i)
         if name then
