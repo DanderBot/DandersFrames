@@ -4645,6 +4645,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             { token = "FOCUS",        name = L["Focus"] },
             { token = "ENERGY",       name = L["Energy"] },
             { token = "RUNIC_POWER",  name = L["Runic Power"] },
+            { token = "MAELSTROM",    name = L["Maelstrom"] },
             { token = "INSANITY",     name = L["Insanity"] },
             { token = "FURY",         name = L["Fury"] },
             { token = "PAIN",         name = L["Pain"] },
