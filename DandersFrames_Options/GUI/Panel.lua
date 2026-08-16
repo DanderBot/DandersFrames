@@ -371,6 +371,9 @@ function DF:CreateGUI()
             p[u] = obj
         end
         obj:ClearAllPoints()
+        -- A pooled FontString carries its last role's width and leading; reset
+        -- so a title reused from a row does not inherit a wrap width or spacing.
+        if kind == "fs" then obj:SetWidth(0); obj:SetHeight(0); obj:SetSpacing(0) end
         obj:Show()
         return obj
     end
@@ -519,30 +522,62 @@ function DF:CreateGUI()
                         if col == 1 then y = y - rowH - CARD_GAP end
                         y = y - 4
                     else
-                        -- ROWS: accent bullet, category chip inline, dim wrapping body.
-                        local themeHex = format("%02x%02x%02x", tc.r * 255, tc.g * 255, tc.b * 255)
-                        for _, e in ipairs(sec.entries) do
+                        -- ROWS, GROUPED BY CATEGORY. The tag used to sit inline at the
+                        -- start of every sentence, so "Bars" appeared six times in a row
+                        -- and each line began with a coloured word the eye had to parse
+                        -- past. Now: a stable sort by category (authored order kept within
+                        -- one), ONE small caps sub-heading per category, and plain
+                        -- wrapping bullets under it with a little leading. Same scan-
+                        -- ability a category column would give, without spending a fixed
+                        -- column's width on every row.
+                        local ordered = {}
+                        for i, e in ipairs(sec.entries) do ordered[i] = { e = e, i = i } end
+                        table.sort(ordered, function(a, b)
+                            local ac, bc = a.e.category or "\255", b.e.category or "\255"
+                            if ac ~= bc then return ac < bc end
+                            return a.i < b.i
+                        end)
+                        local dimHex = format("%02x%02x%02x",
+                            C_TEXT_DIM.r * 255, C_TEXT_DIM.g * 255, C_TEXT_DIM.b * 255)
+                        local lastCat = false
+                        for _, o in ipairs(ordered) do
+                            local e = o.e
+                            local cat = e.category
+                            if cat ~= lastCat then
+                                if lastCat ~= false then y = y - 6 end   -- gap between groups
+                                lastCat = cat
+                                if cat then
+                                    local sub = acquire("fs")
+                                    GUI:SetSettingsFont(sub, 10, "")
+                                    sub:SetPoint("TOPLEFT", PAD + 2, y)
+                                    sub:SetWidth(innerW - 2)
+                                    sub:SetJustifyH("LEFT")
+                                    sub:SetWordWrap(false)
+                                    sub:SetText(cat:upper())
+                                    sub:SetTextColor(tc.r, tc.g, tc.b, 0.9)
+                                    y = y - 17
+                                end
+                            end
                             local dot = acquire("tex")
-                            dot:SetColorTexture(tc.r, tc.g, tc.b, 0.8)
+                            dot:SetColorTexture(tc.r, tc.g, tc.b, 0.55)
                             dot:SetSize(4, 4)
-                            dot:SetPoint("TOPLEFT", PAD + 4, y - 6)
+                            dot:SetPoint("TOPLEFT", PAD + 8, y - 6)
                             local fs = acquire("fs")
                             GUI:SetSettingsFont(fs, 11, "")
-                            fs:SetPoint("TOPLEFT", PAD + 16, y)
-                            fs:SetWidth(innerW - 16)   -- explicit: see the card body note
+                            fs:SetPoint("TOPLEFT", PAD + 20, y)
+                            fs:SetWidth(innerW - 20)   -- explicit: see the card body note
                             fs:SetJustifyH("LEFT")
                             fs:SetJustifyV("TOP")
                             fs:SetWordWrap(true)
                             fs:SetNonSpaceWrap(false)
-                            local pre = e.category and format("|cff%s%s|r  ", themeHex, e.category) or ""
-                            local by  = e.author and format("  |cff%02x%02x%02x%s|r",
-                                C_TEXT_DIM.r * 255, C_TEXT_DIM.g * 255, C_TEXT_DIM.b * 255, e.author) or ""
-                            fs:SetText(pre .. e.text .. by)
-                            fs:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 0.72)
+                            fs:SetSpacing(2)           -- leading: a wrapped entry is a paragraph, not a block
+                            local by = e.author and format("  |cff%s%s|r", dimHex, e.author) or ""
+                            fs:SetText(e.text .. by)
+                            fs:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 0.75)
                             local h = math.ceil(fs:GetStringHeight() or 14)
-                            y = y - h - 7
+                            y = y - h - 9
                         end
-                        y = y - 6
+                        y = y - 8
                     end
                 end
             end
