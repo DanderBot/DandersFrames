@@ -348,13 +348,18 @@ function DF:CreateGUI()
                 -- uses). Rail colour says clickable: theme when linked, dim when not.
                 -- A Button so a linked callout is one click; static ones mouse off.
                 obj = CreateFrame("Button", nil, clChild)
+                -- Faint fill so the callout reads as a surface you can press — no
+                -- border and no top accent (the rail is the accent). Hover lifts it.
+                obj.fill = obj:CreateTexture(nil, "BACKGROUND")
+                obj.fill:SetAllPoints()
+                obj.fill:SetColorTexture(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.35)
                 obj.rail = obj:CreateTexture(nil, "ARTWORK")
-                obj.rail:SetPoint("TOPLEFT", 6, -2)
-                obj.rail:SetPoint("BOTTOMLEFT", 6, 2)
-                obj.rail:SetWidth(2)
+                obj.rail:SetPoint("TOPLEFT", 0, 0)
+                obj.rail:SetPoint("BOTTOMLEFT", 0, 0)
+                obj.rail:SetWidth(3)
                 obj.star = obj:CreateTexture(nil, "OVERLAY")
                 obj.star:SetSize(14, 14)
-                obj.star:SetPoint("TOPLEFT", 0, 0)
+                obj.star:SetPoint("TOPLEFT", 10, -9)
                 obj.star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
                 obj.chev = obj:CreateTexture(nil, "OVERLAY")
                 obj.chev:SetSize(14, 14)
@@ -365,6 +370,7 @@ function DF:CreateGUI()
                 obj:SetScript("OnEnter", function(self)
                     if not self.navTarget then return end
                     local c = self.railColor
+                    self.fill:SetColorTexture(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.55)
                     self.rail:SetColorTexture(c.r, c.g, c.b, 1)
                     self.chev:SetVertexColor(c.r, c.g, c.b, 1)
                     self.title:SetTextColor(c.r, c.g, c.b, 1)
@@ -372,6 +378,7 @@ function DF:CreateGUI()
                 obj:SetScript("OnLeave", function(self)
                     if not self.navTarget then return end
                     local c = self.railColor
+                    self.fill:SetColorTexture(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.35)
                     self.rail:SetColorTexture(c.r, c.g, c.b, 0.7)
                     self.chev:SetVertexColor(c.r, c.g, c.b, 0.6)
                     self.title:SetTextColor(c.r, c.g, c.b, 0.9)
@@ -379,6 +386,20 @@ function DF:CreateGUI()
                 obj:SetScript("OnClick", function(self) navigateTo(self.navTarget) end)
             elseif kind == "sep" then
                 obj = GUI:CreateSeparator(clChild, { width = 100, alpha = 0.10 })
+            elseif kind == "band" then
+                -- Version band: a full-width theme-tinted strip with a 2px theme line
+                -- under it. THE patch divider — a hairline under a title was not
+                -- enough once sections got real headings of their own.
+                obj = CreateFrame("Frame", nil, clChild)
+                obj.fill = obj:CreateTexture(nil, "BACKGROUND")
+                obj.fill:SetAllPoints()
+                obj.line = obj:CreateTexture(nil, "ARTWORK")
+                obj.line:SetPoint("BOTTOMLEFT", 0, 0)
+                obj.line:SetPoint("BOTTOMRIGHT", 0, 0)
+                obj.line:SetHeight(2)
+                obj.text = obj:CreateFontString(nil, "OVERLAY")
+                obj.text:SetPoint("LEFT", 12, 1)
+                obj.text:SetJustifyH("LEFT")
             end
             p[u] = obj
         end
@@ -430,17 +451,19 @@ function DF:CreateGUI()
 
         for vi = 1, math.min(#clParsed, clShown) do
             local ver = clParsed[vi]
-            -- Version title + hairline
-            local title = acquire("fs")
-            GUI:SetSettingsFont(title, vi == 1 and 18 or 15, "")
-            title:SetPoint("TOPLEFT", PAD, y)
-            title:SetText(ver.version)
-            title:SetTextColor(tc.r, tc.g, tc.b, 0.95)
-            y = y - (vi == 1 and 26 or 22)
-            local sep = acquire("sep")
-            sep:SetWidth(innerW)
-            sep:SetPoint("TOPLEFT", PAD, y)
-            y = y - 12
+            -- Version band: the patch divider. Extra air above every band but the first
+            -- so a release starts with an unmistakable break, not a title in the flow.
+            if vi > 1 then y = y - 18 end
+            local band = acquire("band")
+            local bandH = vi == 1 and 34 or 30
+            band:SetPoint("TOPLEFT", PAD, y)
+            band:SetSize(innerW, bandH)
+            band.fill:SetColorTexture(tc.r, tc.g, tc.b, 0.12)
+            band.line:SetColorTexture(tc.r, tc.g, tc.b, 0.85)
+            GUI:SetSettingsFont(band.text, vi == 1 and 17 or 15, "")
+            band.text:SetText(ver.version)
+            band.text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 1)
+            y = y - bandH - 14
 
             for _, sec in ipairs(ver.sections) do
                 if #sec.entries > 0 then
@@ -463,7 +486,8 @@ function DF:CreateGUI()
                     if isFeatures then
                         -- FEATURE CALLOUTS, one per row, full width. See the pool
                         -- constructor for the shape; this only lays out and measures.
-                        local RAIL_X = 22   -- text starts right of star + rail
+                        local RAIL_X = 32   -- text starts right of rail + star, inside the fill
+                        local TOP_PAD, BOT_PAD = 9, 9
                         local dimRail = { r = C_TEXT_DIM.r, g = C_TEXT_DIM.g, b = C_TEXT_DIM.b }
                         for _, e in ipairs(sec.entries) do
                             local co = acquire("card")
@@ -474,19 +498,20 @@ function DF:CreateGUI()
                             co:EnableMouse(target ~= nil)
                             local rc = target and tc or dimRail
                             co.railColor = rc
+                            co.fill:SetColorTexture(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.35)
                             co.rail:SetColorTexture(rc.r, rc.g, rc.b, target and 0.7 or 0.45)
                             co.star:SetVertexColor(tc.r, tc.g, tc.b, 0.95)
                             -- Title line: category in small caps; chevron only when linked.
                             GUI:SetSettingsFont(co.title, 11, "")
                             co.title:ClearAllPoints()
-                            co.title:SetPoint("TOPLEFT", RAIL_X, -1)
-                            co.title:SetWidth(innerW - RAIL_X - 24)
+                            co.title:SetPoint("TOPLEFT", RAIL_X, -TOP_PAD)
+                            co.title:SetWidth(innerW - RAIL_X - 30)
                             co.title:SetJustifyH("LEFT")
                             co.title:SetWordWrap(false)
                             co.title:SetText((e.category or L["New Feature"]):upper())
                             co.title:SetTextColor(rc.r, rc.g, rc.b, target and 0.9 or 0.85)
                             co.chev:ClearAllPoints()
-                            co.chev:SetPoint("TOPRIGHT", -2, 0)
+                            co.chev:SetPoint("TOPRIGHT", -8, -TOP_PAD + 1)
                             co.chev:SetVertexColor(rc.r, rc.g, rc.b, 0.6)
                             co.chev:SetShown(target ~= nil)
                             -- ☠ EXPLICIT WIDTH, NOT AN ANCHOR-DERIVED ONE. Wrapped height is
@@ -498,7 +523,7 @@ function DF:CreateGUI()
                             GUI:SetSettingsFont(co.body, 11, "")
                             co.body:ClearAllPoints()
                             co.body:SetPoint("TOPLEFT", co.title, "BOTTOMLEFT", 0, -5)
-                            co.body:SetWidth(innerW - RAIL_X - 8)
+                            co.body:SetWidth(innerW - RAIL_X - 14)
                             co.body:SetJustifyH("LEFT")
                             co.body:SetJustifyV("TOP")
                             co.body:SetWordWrap(true)
@@ -510,11 +535,11 @@ function DF:CreateGUI()
                             co.body:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 0.82)
                             co.by:Hide()   -- byline rides the body's tail now
                             local bh = math.ceil(co.body:GetStringHeight() or 14)
-                            local h = 1 + 14 + 5 + bh + 4
+                            local h = TOP_PAD + 14 + 5 + bh + BOT_PAD
                             co:SetHeight(h)
-                            y = y - h - 12
+                            y = y - h - 10
                         end
-                        y = y - 2
+                        y = y - 4
                     else
                         -- ROWS, GROUPED BY CATEGORY. The tag used to sit inline at the
                         -- start of every sentence, so "Bars" appeared six times in a row
