@@ -284,18 +284,25 @@ local function BuildDirectDebuffFilters(db, claimed)
 
     -- Negation suffix for a group, given which higher-priority token filters
     -- apply to it. ALL-mode dispel dedups via excludeDispelTypes (see cfFor).
-    -- Token precedence among the NON-important records is dispel > CC > raid, so only
-    -- those two exclusions are ever needed. There is deliberately no raid exclusion:
-    -- raid is the last token record, and the important records above no longer negate
-    -- anything (they subtract via candidateFilters instead — see IMPORTANT-FIRST
-    -- PRECEDENCE below), so nothing is left that would need to exclude it.
-    local function neg(excludeDispel, excludeCC)
+    -- Token precedence among the NON-important records is dispel > CC > raid >
+    -- non-player, so each record excludes the ones above it.
+    -- ☠ THE RAID EXCLUSION IS NOT OPTIONAL ANY MORE, and the comment that used to sit
+    -- here said it was ("raid is the last token record, so nothing needs to exclude
+    -- it"). That was true when it was written and stopped being true the moment the
+    -- NON-PLAYER record was added below it — see that record's own note. Every
+    -- exclusion is keyed on the CONFIG flag, not on the record existing: a category
+    -- claimed by an Aura Designer group is shown there instead, so subtracting it
+    -- here is the dedup working, not a leak.
+    local function neg(excludeDispel, excludeCC, excludeRaid)
         local s = ""
         if excludeDispel then
             if playerMode then s = s .. "|!" .. dispelToken
             elseif anyToken then s = s .. "|!" .. anyToken end
         end
         if excludeCC and ccToken then s = s .. "|!" .. ccToken end
+        -- "RAID" is negatable (only INCLUDE_NAME_PLATE_ONLY and MAW are not —
+        -- AuraUtil.AuraFilters / IsValidFilterString).
+        if excludeRaid and raidOn then s = s .. "|!RAID" end
         return s
     end
     -- candidateFilters for one record. Hands each record its OWN table (extra
@@ -391,8 +398,21 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- ⚠ No claim key yet: an Aura Designer group cannot claim this category, so the
     -- record always builds when the option is on. Add one beside the others if a group
     -- ever needs to take it over.
+    -- ☠☠ IT MUST NEGATE THE TOKEN RECORDS ABOVE IT, and for its first months it did not.
+    -- Every other record in this function subtracts its higher-precedence siblings;
+    -- this one shipped as a bare "HARMFUL" plus one candidate boolean, so ANY mob-cast
+    -- debuff that was also dispellable / crowd-control / raid-flagged rendered TWICE —
+    -- once here and once in that record. There is NO cross-group dedup in the engine
+    -- (each AddAuraGroup parses the whole pool independently), so overlapping filters
+    -- are the only thing standing between a config and double-rendered icons.
+    -- Field shape: trash packs applying poison and disease (both dispellable, both
+    -- mob-cast) filled the row with pairs of identical icons and blew past the row's
+    -- Max Debuffs, because that cap is PER GROUP — 4 categories x 3 = up to 12
+    -- (Beans, 5.2.0-alpha.1, Vaults of Atal'Ulek and delves).
+    -- ⚠ In ALL-mode dispel the exclusion rides cfFor's excludeDispelTypes instead, so
+    -- neg's dispel half is correctly inert there — the two paths must not double up.
     if db.debuffFilterNonPlayer then
-        filters[#filters + 1] = { filter = "HARMFUL", key = "nonplayer",
+        filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "nonplayer",
                                   candidateFilters = cfFor(false,
                                       notImportant({ isFromPlayerOrPlayerPet = false })) }
     end
