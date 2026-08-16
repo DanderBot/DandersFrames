@@ -999,14 +999,42 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- placement. Every change is STRUCTURAL (region presence / group layout cell /
         -- the group's init closure), so each callback must invalidate rather than
         -- lightweight-reposition — same pair the Hide Duplicate Debuffs toggle uses.
+        local UpdateImportantSwatch   -- assigned below, once the header exists
         local function ImportantChanged()
             if DF.RebuildDirectFilterStrings then DF:RebuildDirectFilterStrings() end
             if DF.InvalidateAuraLayout then DF:InvalidateAuraLayout() end
+            -- The marker's own colour pickers change nothing structural on this page,
+            -- so nothing else would repaint the swatch.
+            if UpdateImportantSwatch then UpdateImportantSwatch() end
         end
         local function ImportantOff(d) return not d.showDebuffs or not d.debuffImportantHighlight end
 
         local impGroup = GUI:CreateSettingsGroup(self.child, 280)
-        impGroup:AddWidget(GUI:CreateHeader(self.child, L["Important Debuffs"]), 40)
+        -- Header carries a live preview of the corner marker itself (asked for in the
+        -- field: the section names a feature whose art you otherwise cannot see without
+        -- pulling a mob). Greys out — like the icon sections' previews — whenever the
+        -- marker is not actually rendering: debuffs off, highlight off, or marker off.
+        local impHeader = GUI:CreateHeader(self.child, L["Important Debuffs"])
+        impGroup:AddWidget(impHeader, 40)
+        -- 13px: the marker art is a filled disc, so it reads heavier than the padded
+        -- icon atlases the section previews use — matched to the header text rather
+        -- than to the other swatches' 16.
+        local impSwatch = GUI:AttachHeaderSwatch(impHeader, 13, 2)
+        UpdateImportantSwatch = function(d)
+            if not impSwatch then return end
+            d = d or DF.db[GUI.SelectedMode]
+            if not d then return end
+            impSwatch:SetSwatch({
+                { texture = "Interface\\AddOns\\DandersFrames\\Media\\DF_AlertBadge",
+                  color = d.debuffImportantBadgeColor },
+                { texture = "Interface\\AddOns\\DandersFrames\\Media\\DF_AlertMark",
+                  color = d.debuffImportantMarkColor },
+            }, not d.showDebuffs or not d.debuffImportantHighlight or d.debuffImportantBadge == false)
+        end
+        -- RefreshChildStates calls refreshContent(db) on every shown child, so the
+        -- swatch follows a mode switch / profile load without its own event.
+        impHeader.refreshContent = function(_, d) UpdateImportantSwatch(d) end
+        UpdateImportantSwatch(db)
         impGroup:AddWidget(GUI:CreateLabel(self.child,
             L["Makes boss, role and priority debuffs stand out in the normal debuff row."], 250), 30)
         local impOn = impGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Highlight Important Debuffs"],
