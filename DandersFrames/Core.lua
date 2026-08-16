@@ -1109,18 +1109,33 @@ function DF:SafeSetStatusBarTexture(bar, path, stock)
 end
 
 -- Plain Texture region with stock fallback (same semantics).
+--
+-- ☠ ONE SetTexture, with the wrap resolved UP FRONT. This used to set the file
+-- plain and then let ApplyTextureTiling re-set it with wrap args -- two sets on
+-- the same region in the same frame. On a FRESH session (file not yet in the
+-- texture cache) that pair misbehaved: the settings preview swatch could keep
+-- showing the previously-selected texture after picking a tiled one, until a
+-- panel reopen re-issued the set against a now-cached file (#1071, absorb /
+-- heal-absorb dropdowns, aphoex 5.2.0-alpha.2). Whether the second set restarted
+-- the pending load or the client deduped it, the cure is the same: never issue
+-- two. Resolve the tiling mode first, set once with its wrap, then let
+-- ApplyTextureTiling apply the flags only.
 function DF:SafeSetTexture(region, path, stock)
     if not region then return end
+    local applied, ok = path, true
     if textureKnown(path) == false then
-        local fallback = stock or DF.STOCK_BAR_TEXTURE
-        region:SetTexture(fallback)
+        applied = stock or DF.STOCK_BAR_TEXTURE
         warnMissingTexture(path)
-        DF:ApplyTextureTiling(region, fallback)
-        return false
+        ok = false
     end
-    region:SetTexture(path)
-    DF:ApplyTextureTiling(region, path)
-    return true
+    local mode = DF:GetBarTextureTiling(applied)
+    if mode and DF.TileWrapArgs then
+        region:SetTexture(applied, DF.TileWrapArgs(mode))
+    else
+        region:SetTexture(applied)
+    end
+    DF:ApplyTextureTiling(region, applied, true)
+    return ok
 end
 
 -- ============================================================
@@ -1293,6 +1308,9 @@ local function tileWrapArgs(mode)
     return (mode == "BOTH" or mode == "HORIZ") and "REPEAT" or "CLAMP",
            (mode == "BOTH" or mode == "VERT")  and "REPEAT" or "CLAMP"
 end
+-- Published for SafeSetTexture, which is defined ABOVE this local and needs the
+-- wrap args on its one and only SetTexture (see the note there).
+DF.TileWrapArgs = tileWrapArgs
 
 -- Apply the tiling mode a texture asks for to a StatusBar's CURRENT fill.
 -- Sets both flags EXPLICITLY either way, so a bar switched from a tiled texture
@@ -1341,14 +1359,17 @@ end
 -- Same, for a plain Texture region (backgrounds, GUI preview swatches). Sets the
 -- tile flags only — deliberately NOT the texcoords, because arbitrary regions may
 -- be cropping on purpose and a StatusBar fill is the only one we fully own.
-function DF:ApplyTextureTiling(region, path)
+function DF:ApplyTextureTiling(region, path, wrapAlreadySet)
     if not (region and region.SetHorizTile) then return false end
     local mode = DF:GetBarTextureTiling(path)
     -- Same wrap-with-the-file rule as ApplyBarTextureTiling above, unstamped:
     -- every caller here runs right after its own SetTexture (which clamps), and
     -- none is a per-update re-assert, so re-issuing the set is always both
     -- necessary and cheap.
-    if mode and region.SetTexture then
+    -- ⚠ EXCEPT SafeSetTexture, which now sets the file WITH its wrap in one call
+    -- and passes wrapAlreadySet: a second set on a fresh-session uncached file is
+    -- what left the preview swatch on the previous texture (#1071). Flags only.
+    if mode and region.SetTexture and not wrapAlreadySet then
         region:SetTexture(path, tileWrapArgs(mode))
     end
     region:SetHorizTile(mode == "BOTH" or mode == "HORIZ")
