@@ -224,6 +224,7 @@ L["Click item slot to bind"] = true
 L["Click macro to bind"] = true
 L["Click spell to bind"] = true
 L["Click to bind..."] = true
+L["Click to open settings"] = true
 L["Click to edit"] = true
 L["Click-Casting"] = true
 L["Click-Casting Addon Conflict"] = true

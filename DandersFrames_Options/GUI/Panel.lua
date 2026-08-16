@@ -249,14 +249,73 @@ function DF:CreateGUI()
                         end
                         local category, rest = body:match("^%(([^%)]+)%)%s*(.*)$")
                         if not category then category, rest = nil, body end
-                        local author
-                        rest, author = rest:gsub("%s*%(by%s+([^%)]+)%)%s*$", function(a) author = a; return "" end)
+                        -- ⚠ gsub returns (string, COUNT): capture the author from the
+                        -- match, and let the count fall into a throwaway — an earlier
+                        -- cut assigned the count to `author` and every row ended in "1".
+                        local author = rest:match("%(by%s+([^%)]+)%)%s*$")
+                        rest = rest:gsub("%s*%(by%s+[^%)]+%)%s*$", "")
                         sec.entries[#sec.entries + 1] = { category = category, text = rest, author = author }
                     end
                 end
             end
         end
         return versions
+    end
+
+    -- ★ DEEP LINKS. A feature card whose category names a settings page is a
+    -- button: click closes the changelog and lands on that page (EUI's rule —
+    -- no target, no click, mouse off so nothing invites a dead click). Keys are
+    -- the changelog's own "(Category)" tags, normalised to lowercase alnum, so
+    -- "Click-Casting" / "Click Casting" / "click casting" all resolve. Targets
+    -- are either a sub-tab id (party/raid mode) or the "clicks" mode.
+    -- ⚠ Not every category has a page (Test Mode is a toolbar button; Debug
+    -- has a console tab): those cards stay static, on purpose.
+    local CL_NAV = {
+        auradesigner = "auras_auradesigner",
+        auras = "auras_buffs", buffs = "auras_buffs", buffbar = "auras_buffs",
+        buffsdebuffs = "auras_buffs", buffsanddebuffs = "auras_buffs",
+        debuffs = "auras_debuffs", debuffbar = "auras_debuffs",
+        defensiveicons = "auras_defensiveicon", defensiveicon = "auras_defensiveicon",
+        dispelhighlight = "auras_dispel", dispel = "auras_dispel",
+        filterdesigner = "auras_filterdesigner", filters = "auras_filterdesigner",
+        missingbuffs = "auras_missingbuffs",
+        bars = "bars_health", healthbar = "bars_health", healthbars = "bars_health",
+        absorbs = "bars_absorb", absorb = "bars_absorb",
+        healprediction = "bars_healpred", resourcebar = "bars_resource", powerbar = "bars_resource",
+        pinnedframes = "general_pinnedframes", friendlybossnpcframes = "general_pinnedframes",
+        petframes = "display_pets", pets = "display_pets",
+        fonts = "general_fonts", globalfonts = "general_fonts",
+        nicknames = "general_nicknames", sorting = "general_sorting",
+        frames = "general_frame", layout = "general_frame", raidframes = "general_frame",
+        partyframes = "general_frame", frameborder = "general_frame",
+        settings = "general_settings", general = "general_settings",
+        integrations = "general_integrations",
+        indicators = "indicators_icons", icons = "indicators_icons", statusicons = "indicators_icons",
+        highlights = "indicators_highlights", targetedspells = "indicators_personal_targeted",
+        textdesigner = "text_designer", text = "text_designer",
+        range = "display_fading", fading = "display_fading", classcolors = "display_classcolors",
+        tooltips = "display_tooltips", visibility = "display_visibility",
+        profiles = "profiles_manage", importexport = "profiles_importexport",
+        debug = "debug_console", wizards = "wizards",
+        clickcasting = "clicks",
+    }
+    local function navTargetFor(category)
+        if type(category) ~= "string" then return nil end
+        return CL_NAV[(category:lower():gsub("[^%w]", ""))]
+    end
+    local function navigateTo(target)
+        if not target then return end
+        changelogOverlay:Hide()
+        if target == "clicks" then
+            if GUI.ClicksButton then GUI.ClicksButton:Click() end
+            return
+        end
+        -- Sub-tabs live under the party/raid modes; from Clicks, step back to
+        -- Party first (the toolbar button owns that transition and its cleanup).
+        if GUI.SelectedMode == "clicks" and GUI.PartyButton then GUI.PartyButton:Click() end
+        C_Timer.After(0, function()
+            if GUI.LinkToSetting then GUI:LinkToSetting({ page = target, flash = false }) end
+        end)
     end
 
     -- Scroll surface. ScrollFrameTemplate + the themed pill, like every list.
@@ -281,7 +340,9 @@ function DF:CreateGUI()
             elseif kind == "tex" then
                 obj = clChild:CreateTexture(nil, "ARTWORK")
             elseif kind == "card" then
-                obj = CreateFrame("Frame", nil, clChild)
+                -- A Button, so a card with a settings target can be clicked; static
+                -- cards get EnableMouse(false) at layout time.
+                obj = CreateFrame("Button", nil, clChild, "BackdropTemplate")
                 -- The METHOD, not the file-local: the local CreatePanelBackdrop
                 -- takes no opts and would paint the page background with a black
                 -- border; the card wants the element tone at half alpha.
@@ -293,6 +354,17 @@ function DF:CreateGUI()
                 obj.title = obj:CreateFontString(nil, "OVERLAY")
                 obj.body  = obj:CreateFontString(nil, "OVERLAY")
                 obj.by    = obj:CreateFontString(nil, "OVERLAY")
+                obj.hint  = obj:CreateFontString(nil, "OVERLAY")
+                obj:SetScript("OnEnter", function(self)
+                    if not self.navTarget then return end
+                    self:SetBackdropColor(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.6)
+                    self.hint:Show()
+                end)
+                obj:SetScript("OnLeave", function(self)
+                    self:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.45)
+                    self.hint:Hide()
+                end)
+                obj:SetScript("OnClick", function(self) navigateTo(self.navTarget) end)
             elseif kind == "sep" then
                 obj = GUI:CreateSeparator(clChild, { width = 100, alpha = 0.10 })
             end
@@ -378,37 +450,57 @@ function DF:CreateGUI()
                             local cx = PAD + col * (cardW + CARD_GAP)
                             card:SetPoint("TOPLEFT", cx, y)
                             card:SetWidth(cardW)
+                            card:SetBackdropColor(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.45)
                             card.accent:SetColorTexture(tc.r, tc.g, tc.b, 0.75)
+                            local CPAD = 14
+                            local textW = cardW - CPAD * 2
                             GUI:SetSettingsFont(card.title, 12, "")
                             card.title:ClearAllPoints()
-                            card.title:SetPoint("TOPLEFT", 12, -11)
-                            card.title:SetPoint("RIGHT", -12, 0)
+                            card.title:SetPoint("TOPLEFT", CPAD, -12)
+                            card.title:SetWidth(textW)
                             card.title:SetJustifyH("LEFT")
                             card.title:SetWordWrap(false)
                             card.title:SetText(e.category or L["New Feature"])
                             card.title:SetTextColor(tc.r, tc.g, tc.b, 0.95)
+                            -- ☠ EXPLICIT WIDTH, NOT AN ANCHOR-DERIVED ONE. Wrapped height is
+                            -- only measurable once the FontString knows its width, and a
+                            -- two-anchor width is not guaranteed resolved in the frame that
+                            -- set it — measured that way the rows came back one line tall
+                            -- and every entry overlapped the next. A set width wraps
+                            -- deterministically, so the card always grows to fit its text.
                             GUI:SetSettingsFont(card.body, 11, "")
                             card.body:ClearAllPoints()
-                            card.body:SetPoint("TOPLEFT", card.title, "BOTTOMLEFT", 0, -6)
-                            card.body:SetPoint("RIGHT", -12, 0)
+                            card.body:SetPoint("TOPLEFT", card.title, "BOTTOMLEFT", 0, -7)
+                            card.body:SetWidth(textW)
                             card.body:SetJustifyH("LEFT")
                             card.body:SetJustifyV("TOP")
                             card.body:SetWordWrap(true)
+                            card.body:SetNonSpaceWrap(false)
                             card.body:SetText(e.text)
                             card.body:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 0.8)
                             local bh = math.ceil(card.body:GetStringHeight() or 14)
-                            local h = 11 + 14 + 6 + bh + 10
+                            local h = 12 + 14 + 7 + bh + 12
+                            -- Footer line: byline left-of-right, "Open settings" hint on hover.
+                            local target = navTargetFor(e.category)
+                            card.navTarget = target
+                            card:EnableMouse(target ~= nil)
+                            GUI:SetSettingsFont(card.hint, 9, "")
+                            card.hint:ClearAllPoints()
+                            card.hint:SetPoint("BOTTOMLEFT", CPAD, 7)
+                            card.hint:SetText(L["Click to open settings"])
+                            card.hint:SetTextColor(tc.r, tc.g, tc.b, 0.8)
+                            card.hint:Hide()
                             GUI:SetSettingsFont(card.by, 9, "")
                             card.by:ClearAllPoints()
                             if e.author then
-                                card.by:SetPoint("BOTTOMRIGHT", -10, 6)
+                                card.by:SetPoint("BOTTOMRIGHT", -CPAD, 7)
                                 card.by:SetText(e.author)
                                 card.by:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
                                 card.by:Show()
-                                h = h + 10
                             else
                                 card.by:Hide()
                             end
+                            if e.author or target then h = h + 12 end
                             card:SetHeight(h)
                             if h > rowH then rowH = h end
                             col = col + 1
@@ -437,10 +529,11 @@ function DF:CreateGUI()
                             local fs = acquire("fs")
                             GUI:SetSettingsFont(fs, 11, "")
                             fs:SetPoint("TOPLEFT", PAD + 16, y)
-                            fs:SetPoint("RIGHT", clChild, "RIGHT", -PAD, 0)
+                            fs:SetWidth(innerW - 16)   -- explicit: see the card body note
                             fs:SetJustifyH("LEFT")
                             fs:SetJustifyV("TOP")
                             fs:SetWordWrap(true)
+                            fs:SetNonSpaceWrap(false)
                             local pre = e.category and format("|cff%s%s|r  ", themeHex, e.category) or ""
                             local by  = e.author and format("  |cff%02x%02x%02x%s|r",
                                 C_TEXT_DIM.r * 255, C_TEXT_DIM.g * 255, C_TEXT_DIM.b * 255, e.author) or ""
@@ -481,8 +574,10 @@ function DF:CreateGUI()
     -- ONE opener for both the info button and the first-open-after-update path.
     function GUI:ShowChangelog()
         clShown = CL_INITIAL_VERSIONS
-        BuildChangelog()
+        -- Show FIRST, then build: the scroll frame's width is what every wrap
+        -- measures against, and it is only trustworthy once the overlay is laid out.
         changelogOverlay:Show()
+        BuildChangelog()
     end
     -- A resize while the overlay is open changes every wrap; rebuild at the new width.
     changelogOverlay:SetScript("OnSizeChanged", function()
