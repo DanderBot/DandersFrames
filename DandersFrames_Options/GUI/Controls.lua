@@ -3659,10 +3659,7 @@ function DF:ToggleGUI()
         -- Auto-show changelog on first open after update
         if DandersFramesDB_v2 and DandersFramesDB_v2.lastSeenVersion ~= DF.VERSION then
             DandersFramesDB_v2.lastSeenVersion = DF.VERSION
-            if GUI.changelogOverlay and GUI.changelogArea then
-                GUI.changelogArea:SetText(GUI.FormatChangelog(DF.CHANGELOG_TEXT))
-                GUI.changelogOverlay:Show()
-            end
+            if GUI.ShowChangelog then GUI:ShowChangelog() end
         end
     end
 end

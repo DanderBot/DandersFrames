@@ -41,8 +41,11 @@
 * (Debug) The debug console no longer goes blank on very large logs, and exports of big logs are split into parts so nothing is cut off. (by Krathe)
 * (Defensive Icons) Fix the defensive row showing the previous occupant's defensives after a roster change moved someone else into that frame.
 * (Settings) Fix settings text such as tab labels rendering as boxes on Chinese, Korean and other non-Latin clients when the chosen Settings Font lacks those characters — including with the default font.
+* (Settings) Fix the absorb texture preview sometimes showing the wrong texture after a reload until the settings window was reopened.
 
 ### Improvements
+
+* (Settings) The in-game changelog is now a proper page instead of a wall of text: each release gets a title, new features show as cards, and fixes are compact rows with their category up front. Older releases load on demand.
 
 * (Aura Designer) The filter picker now has a scrollbar and a search box, matching the addon's other dropdowns.
 * (Debuff Bar) The Important Debuffs settings box now previews the corner marker beside its title, in the colours you picked, and greys it out while the marker is switched off. (by Krathe)

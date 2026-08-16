@@ -202,60 +202,301 @@ function DF:CreateGUI()
     GUI:StyleButton(backBtn, { width = 60, height = 22, text = L["Close"] })
     backBtn:SetScript("OnClick", function() changelogOverlay:Hide() end)
 
-    -- Convert markdown changelog to WoW color-coded plain text
-    local function FormatChangelog(text)
-        if not text or text == "" then return L["No changelog available."] end
-        local tc = GetThemeColor()
-        local themeHex = format("%02x%02x%02x", tc.r * 255, tc.g * 255, tc.b * 255)
-        local dimHex = format("%02x%02x%02x", C_TEXT_DIM.r * 255, C_TEXT_DIM.g * 255, C_TEXT_DIM.b * 255)
-        local textHex = format("%02x%02x%02x", C_TEXT.r * 255, C_TEXT.g * 255, C_TEXT.b * 255)
+    -- =========================================================================
+    -- CHANGELOG — RENDERED, NOT DUMPED
+    -- =========================================================================
+    -- ★ This used to be one EditBox holding the whole markdown as colour-coded
+    -- text: every release, every section, every entry at the same size and
+    -- weight — a wall. It now renders the same CHANGELOG.md structure as typed
+    -- pieces (the shape EllesmereUI's patch-notes page uses, reached from the
+    -- same complaint): a version title with a hairline underline, caps section
+    -- labels, feature CARDS (category as the accent-coloured title, wrapping
+    -- body, faint panel behind, 2px accent line on top) and compact fix ROWS
+    -- (accent bullet, category chip, wrapping dim body). Hierarchy comes from
+    -- size and alpha, and from actual space between things.
+    --
+    -- The data pipeline is untouched: DF.CHANGELOG_TEXT is still the generated
+    -- markdown, parsed here into version → section → entry. Only the newest
+    -- releases render up front (frames cost more than a text box); "Show older
+    -- releases" appends the next batch. All pieces are pooled so reopening or
+    -- resizing rebuilds without leaking frames.
+    -- =========================================================================
+    local CL_INITIAL_VERSIONS = 5
+    local CL_BATCH_VERSIONS   = 5
 
-        local lines = {}
+    -- Parse the markdown into { {version, sections = { {name, entries = { {category, text, author} } } } } }.
+    local function ParseChangelog(text)
+        local versions = {}
+        if not text or text == "" then return versions end
+        local cur, sec
         for line in text:gmatch("[^\n]*") do
-            if line:match("^# ") then
-                -- Main title — skip (already shown in header bar)
-            elseif line:match("^## ") then
-                -- Version header
-                local content = line:gsub("^##%s*", "")
-                lines[#lines + 1] = format("|cff%s%s|r", themeHex, content)
-            elseif line:match("^### ") then
-                -- Section header
-                local content = line:gsub("^###%s*", "")
-                lines[#lines + 1] = format("\n|cff%s%s|r", textHex, content)
-            elseif line:match("^%*%s") or line:match("^%-%s") then
-                -- Bullet point
-                local content = line:gsub("^[%*%-]%s*", "")
-                lines[#lines + 1] = format("  |cff%s\226\128\162|r  |cff%s%s|r", themeHex, dimHex, content)
-            elseif line:match("^%s*$") then
-                lines[#lines + 1] = ""
-            else
-                lines[#lines + 1] = format("|cff%s%s|r", dimHex, line)
+            local v = line:match("^##%s+%[?([^%]]+)%]?%s*$")
+            if v then
+                cur = { version = v, sections = {} }
+                versions[#versions + 1] = cur
+                sec = nil
+            elseif cur then
+                local h = line:match("^###%s+(.-)%s*$")
+                if h then
+                    sec = { name = h, entries = {} }
+                    cur.sections[#cur.sections + 1] = sec
+                else
+                    local body = line:match("^[%*%-]%s+(.-)%s*$")
+                    if body and body ~= "" then
+                        if not sec then
+                            sec = { name = "", entries = {} }
+                            cur.sections[#cur.sections + 1] = sec
+                        end
+                        local category, rest = body:match("^%(([^%)]+)%)%s*(.*)$")
+                        if not category then category, rest = nil, body end
+                        local author
+                        rest, author = rest:gsub("%s*%(by%s+([^%)]+)%)%s*$", function(a) author = a; return "" end)
+                        sec.entries[#sec.entries + 1] = { category = category, text = rest, author = author }
+                    end
+                end
             end
         end
-
-        return table.concat(lines, "\n")
+        return versions
     end
 
-    -- plain: the overlay already IS the panel, so the text area contributes only
-    -- the scrolling field. readOnly rather than EnableKeyboard(false) — the
-    -- changelog stays uneditable but becomes selectable and copyable.
-    local changelogArea = GUI:CreateTextArea(changelogOverlay, {
-        plain    = true,
-        readOnly = true,
-        text     = FormatChangelog(DF.CHANGELOG_TEXT),
-    })
-    changelogArea:SetPoint("TOPLEFT", 8, -38)
-    changelogArea:SetPoint("BOTTOMRIGHT", -8, 8)
-    GUI.FormatChangelog = FormatChangelog
-    GUI.changelogArea = changelogArea   -- .EditBox for the field itself
+    -- Scroll surface. ScrollFrameTemplate + the themed pill, like every list.
+    local clScroll = CreateFrame("ScrollFrame", nil, changelogOverlay, "ScrollFrameTemplate")
+    clScroll:SetPoint("TOPLEFT", 8, -38)
+    clScroll:SetPoint("BOTTOMRIGHT", -26, 8)
+    StyleScrollBar(clScroll)
+    local clChild = CreateFrame("Frame", nil, clScroll)
+    clChild:SetWidth(100)
+    clScroll:SetScrollChild(clChild)
+
+    -- Pools. Kinds: "fs" (FontString), "tex" (Texture), "card" (backdrop frame),
+    -- "sep" (separator frame). Everything is parented to clChild.
+    local clPool, clUsed = {}, {}
+    local function acquire(kind)
+        local p = clPool[kind]; if not p then p = {}; clPool[kind] = p end
+        local u = clUsed[kind] or 0; u = u + 1; clUsed[kind] = u
+        local obj = p[u]
+        if not obj then
+            if kind == "fs" then
+                obj = clChild:CreateFontString(nil, "OVERLAY")
+            elseif kind == "tex" then
+                obj = clChild:CreateTexture(nil, "ARTWORK")
+            elseif kind == "card" then
+                obj = CreateFrame("Frame", nil, clChild)
+                -- The METHOD, not the file-local: the local CreatePanelBackdrop
+                -- takes no opts and would paint the page background with a black
+                -- border; the card wants the element tone at half alpha.
+                GUI:CreatePanelBackdrop(obj, { bgColor = C_ELEMENT, bgAlpha = 0.45 })
+                obj.accent = obj:CreateTexture(nil, "ARTWORK")
+                obj.accent:SetPoint("TOPLEFT", 1, -1)
+                obj.accent:SetPoint("TOPRIGHT", -1, -1)
+                obj.accent:SetHeight(2)
+                obj.title = obj:CreateFontString(nil, "OVERLAY")
+                obj.body  = obj:CreateFontString(nil, "OVERLAY")
+                obj.by    = obj:CreateFontString(nil, "OVERLAY")
+            elseif kind == "sep" then
+                obj = GUI:CreateSeparator(clChild, { width = 100, alpha = 0.10 })
+            end
+            p[u] = obj
+        end
+        obj:ClearAllPoints()
+        obj:Show()
+        return obj
+    end
+    local function releaseAll()
+        for kind, p in pairs(clPool) do
+            for i = 1, #p do p[i]:Hide(); p[i]:ClearAllPoints() end
+            clUsed[kind] = 0
+        end
+    end
+
+    -- Section names come from CHANGELOG.md headings; translate when a key exists.
+    local function sectionLabel(name)
+        local key = name and L[name]
+        return (type(key) == "string" and key ~= name and key) or name or ""
+    end
+
+    local clParsed, clShown, clBuiltWidth = nil, CL_INITIAL_VERSIONS, nil
+    local clMoreBtn
+
+    local function BuildChangelog()
+        clParsed = clParsed or ParseChangelog(DF.CHANGELOG_TEXT)
+        releaseAll()
+        local tc = GetThemeColor()
+        local W = math.floor(clScroll:GetWidth())
+        if W < 100 then W = 400 end
+        clChild:SetWidth(W)
+        clBuiltWidth = W
+        local PAD = 6
+        local innerW = W - PAD * 2
+        local y = -4
+
+        if #clParsed == 0 then
+            local fs = acquire("fs")
+            GUI:SetSettingsFont(fs, 11, "")
+            fs:SetPoint("TOPLEFT", PAD, y)
+            fs:SetText(L["No changelog available."])
+            fs:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            clChild:SetHeight(40)
+            if clMoreBtn then clMoreBtn:Hide() end
+            return
+        end
+
+        local twoCol = innerW >= 520
+        local CARD_GAP = 10
+        local cardW = twoCol and math.floor((innerW - CARD_GAP) / 2) or innerW
+
+        for vi = 1, math.min(#clParsed, clShown) do
+            local ver = clParsed[vi]
+            -- Version title + hairline
+            local title = acquire("fs")
+            GUI:SetSettingsFont(title, vi == 1 and 18 or 15, "")
+            title:SetPoint("TOPLEFT", PAD, y)
+            title:SetText(ver.version)
+            title:SetTextColor(tc.r, tc.g, tc.b, 0.95)
+            y = y - (vi == 1 and 26 or 22)
+            local sep = acquire("sep")
+            sep:SetWidth(innerW)
+            sep:SetPoint("TOPLEFT", PAD, y)
+            y = y - 12
+
+            for _, sec in ipairs(ver.sections) do
+                if #sec.entries > 0 then
+                    if sec.name ~= "" then
+                        local lab = acquire("fs")
+                        GUI:SetSettingsFont(lab, 9, "")
+                        lab:SetPoint("TOPLEFT", PAD, y)
+                        lab:SetText(sectionLabel(sec.name):upper())
+                        lab:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.9)
+                        y = y - 16
+                    end
+                    local isFeatures = sec.name:lower():find("feature", 1, true) ~= nil
+                    if isFeatures then
+                        -- CARDS, two per row when the panel is wide enough.
+                        local col, rowH = 0, 0
+                        for _, e in ipairs(sec.entries) do
+                            local card = acquire("card")
+                            local cx = PAD + col * (cardW + CARD_GAP)
+                            card:SetPoint("TOPLEFT", cx, y)
+                            card:SetWidth(cardW)
+                            card.accent:SetColorTexture(tc.r, tc.g, tc.b, 0.75)
+                            GUI:SetSettingsFont(card.title, 12, "")
+                            card.title:ClearAllPoints()
+                            card.title:SetPoint("TOPLEFT", 12, -11)
+                            card.title:SetPoint("RIGHT", -12, 0)
+                            card.title:SetJustifyH("LEFT")
+                            card.title:SetWordWrap(false)
+                            card.title:SetText(e.category or L["New Feature"])
+                            card.title:SetTextColor(tc.r, tc.g, tc.b, 0.95)
+                            GUI:SetSettingsFont(card.body, 11, "")
+                            card.body:ClearAllPoints()
+                            card.body:SetPoint("TOPLEFT", card.title, "BOTTOMLEFT", 0, -6)
+                            card.body:SetPoint("RIGHT", -12, 0)
+                            card.body:SetJustifyH("LEFT")
+                            card.body:SetJustifyV("TOP")
+                            card.body:SetWordWrap(true)
+                            card.body:SetText(e.text)
+                            card.body:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 0.8)
+                            local bh = math.ceil(card.body:GetStringHeight() or 14)
+                            local h = 11 + 14 + 6 + bh + 10
+                            GUI:SetSettingsFont(card.by, 9, "")
+                            card.by:ClearAllPoints()
+                            if e.author then
+                                card.by:SetPoint("BOTTOMRIGHT", -10, 6)
+                                card.by:SetText(e.author)
+                                card.by:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 0.7)
+                                card.by:Show()
+                                h = h + 10
+                            else
+                                card.by:Hide()
+                            end
+                            card:SetHeight(h)
+                            if h > rowH then rowH = h end
+                            col = col + 1
+                            if not twoCol or col == 2 then
+                                -- Equalise the row's cards, then drop.
+                                if twoCol and col == 2 then
+                                    -- Previous card in this row gets the same height.
+                                    local prev = clPool.card[clUsed.card - 1]
+                                    if prev then prev:SetHeight(rowH) end
+                                    card:SetHeight(rowH)
+                                end
+                                y = y - rowH - CARD_GAP
+                                col, rowH = 0, 0
+                            end
+                        end
+                        if col == 1 then y = y - rowH - CARD_GAP end
+                        y = y - 4
+                    else
+                        -- ROWS: accent bullet, category chip inline, dim wrapping body.
+                        local themeHex = format("%02x%02x%02x", tc.r * 255, tc.g * 255, tc.b * 255)
+                        for _, e in ipairs(sec.entries) do
+                            local dot = acquire("tex")
+                            dot:SetColorTexture(tc.r, tc.g, tc.b, 0.8)
+                            dot:SetSize(4, 4)
+                            dot:SetPoint("TOPLEFT", PAD + 4, y - 6)
+                            local fs = acquire("fs")
+                            GUI:SetSettingsFont(fs, 11, "")
+                            fs:SetPoint("TOPLEFT", PAD + 16, y)
+                            fs:SetPoint("RIGHT", clChild, "RIGHT", -PAD, 0)
+                            fs:SetJustifyH("LEFT")
+                            fs:SetJustifyV("TOP")
+                            fs:SetWordWrap(true)
+                            local pre = e.category and format("|cff%s%s|r  ", themeHex, e.category) or ""
+                            local by  = e.author and format("  |cff%02x%02x%02x%s|r",
+                                C_TEXT_DIM.r * 255, C_TEXT_DIM.g * 255, C_TEXT_DIM.b * 255, e.author) or ""
+                            fs:SetText(pre .. e.text .. by)
+                            fs:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 0.72)
+                            local h = math.ceil(fs:GetStringHeight() or 14)
+                            y = y - h - 7
+                        end
+                        y = y - 6
+                    end
+                end
+            end
+            y = y - 14
+        end
+
+        -- "Show older releases" — appends the next batch; hidden once everything is out.
+        if #clParsed > clShown then
+            if not clMoreBtn then
+                clMoreBtn = CreateFrame("Button", nil, clChild, "BackdropTemplate")
+                GUI:StyleButton(clMoreBtn, { width = 160, height = 22, text = L["Show older releases"] })
+                clMoreBtn:SetScript("OnClick", function()
+                    clShown = clShown + CL_BATCH_VERSIONS
+                    BuildChangelog()
+                end)
+            end
+            clMoreBtn:ClearAllPoints()
+            clMoreBtn:SetPoint("TOP", clChild, "TOP", 0, y)
+            clMoreBtn:Show()
+            y = y - 30
+        elseif clMoreBtn then
+            clMoreBtn:Hide()
+        end
+
+        clChild:SetHeight(-y + 8)
+        clScroll:SetVerticalScroll(0)
+    end
+
+    -- ONE opener for both the info button and the first-open-after-update path.
+    function GUI:ShowChangelog()
+        clShown = CL_INITIAL_VERSIONS
+        BuildChangelog()
+        changelogOverlay:Show()
+    end
+    -- A resize while the overlay is open changes every wrap; rebuild at the new width.
+    changelogOverlay:SetScript("OnSizeChanged", function()
+        if changelogOverlay:IsShown() and clBuiltWidth
+            and math.abs(math.floor(clScroll:GetWidth()) - clBuiltWidth) >= 2 then
+            BuildChangelog()
+        end
+    end)
 
     infoBtn:SetScript("OnClick", function()
         if changelogOverlay:IsShown() then
             changelogOverlay:Hide()
         else
-            -- No width fix-up needed: the text area re-syncs its own scroll child.
-            changelogArea:SetText(FormatChangelog(DF.CHANGELOG_TEXT))
-            changelogOverlay:Show()
+            GUI:ShowChangelog()
         end
     end)
 
