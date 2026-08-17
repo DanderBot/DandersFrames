@@ -5143,7 +5143,32 @@ end
 local function IdentityUnavailable(unit)
     local okC, connected = pcall(UnitIsConnected, unit)
     if okC and not (issecretvalue and issecretvalue(connected)) and connected == false then
-        return "offline"
+        -- ☠☠ PLAYERS ONLY — AN NPC HAS NO CONNECTION, SO UnitIsConnected READS FALSE
+        -- FOR IT. This probe is the SEVENTH consumer of that API in the addon and was
+        -- the only one without the guard; the other six all carry it, added by #989 /
+        -- #1042, and one of them names the very unit class that broke here:
+        -- Frames/Update.lua:520 "a pinned NPC (Lura's healable crystals) rendered as an
+        -- offline player ... Only a player can be offline." (Also Update.lua's fast
+        -- path, ElementAppearance.lua twice, Frames/Core.lua and the missing-buff gate
+        -- in Features/Auras.lua.) This one arrived later, when dead/disconnected were
+        -- folded into the assist verdict, and the sibling sweep never reached it.
+        --
+        -- The consequence was total on a friendly NPC frame: "offline" makes the caller
+        -- set can = false, which marks the handle untrusted, which parks every gated
+        -- group at maxFrameCount 0 — and _noteGateRecovery only re-parses on a
+        -- false->true ASSIST edge, which an NPC never produces. So the row was dark from
+        -- the moment it was built and stayed dark for the container's whole life. Field
+        -- report: pinned boss frames on friendly NPCs showing no auras at all with Hide
+        -- Auras unchecked (Ruben, 2026-08-16, on "Dusk Crystal" — the same NPC family).
+        -- ⚠ Only the CONNECTED half is scoped. UnitIsDeadOrGhost below is meaningful for
+        -- an NPC and stays as it is.
+        -- ★ Fails OPEN on a refused or secret UnitIsPlayer, like every other probe in
+        -- this gate: if we cannot confirm the unit is a player we cannot conclude
+        -- "offline" means anything, and any doubt SHOWS.
+        local okP, isPlayer = pcall(UnitIsPlayer, unit)
+        if okP and not (issecretvalue and issecretvalue(isPlayer)) and isPlayer then
+            return "offline"
+        end
     end
     local okD, dead = pcall(UnitIsDeadOrGhost, unit)
     if okD and not (issecretvalue and issecretvalue(dead)) and dead == true then
