@@ -1686,13 +1686,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local groupsPerRowSlider, rowColSpacingSlider, playersPerRowSlider
         
         -- Function to update dynamic labels based on growth direction
+        -- ⚠ The two grouped-raid sliders USED to be re-labelled here on a direction change
+        -- (Groups Per Row <-> Groups Per Column, Row Spacing <-> Column Spacing). They are
+        -- now "Groups Before Wrap" and "Wrap Spacing", which describe the wrap rather than
+        -- the axis and so do not swap -- and leaving the writes in would have silently
+        -- restored the old names the first time anyone touched Growth Direction.
+        -- Only the flat grid's slider still names an axis.
         local function UpdateDynamicLabels()
-            if groupsPerRowSlider and groupsPerRowSlider.label then
-                groupsPerRowSlider.label:SetText(db.growDirection == "VERTICAL" and L["Groups Per Column"] or L["Groups Per Row"])
-            end
-            if rowColSpacingSlider and rowColSpacingSlider.label then
-                rowColSpacingSlider.label:SetText(db.growDirection == "VERTICAL" and L["Column Spacing"] or L["Row Spacing"])
-            end
             if playersPerRowSlider and playersPerRowSlider.label then
                 playersPerRowSlider.label:SetText(db.growDirection == "VERTICAL" and L["Players Per Column"] or L["Players Per Row"])
             end
@@ -1917,59 +1917,49 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         groupSpacingSlider.tooltip = isVert and L["Gap between one group and the next down the same column."]
             or L["Gap between one group and the next along the same row."]
 
-        local rowColLabel = isVert and L["Column Spacing"] or L["Row Spacing"]
-        rowColSpacingSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, rowColLabel, -5, 100, 1, db, "raidRowColSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
+        -- ⚠ "Row Spacing" and "Groups Per Row" are gone, and not for tidiness. With the
+        -- Growth Direction dropdown above reading "Columns" in horizontal mode, a box that
+        -- then said Row three times was the exact collision Aphoex reported -- "Columns"
+        -- names the group's shape, "Row" named the arrangement of groups, both true at
+        -- once. These two are the last places the word appeared in the second sense, so
+        -- they now describe the WRAP instead, and Row/Column means one thing on this page.
+        -- They also stop swapping with the orientation, because wrapping is wrapping.
+        rowColSpacingSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Wrap Spacing"], -5, 100, 1, db, "raidRowColSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
         rowColSpacingSlider.tooltip = isVert and L["Gap between one column of groups and the column beside it."]
             or L["Gap between one row of groups and the row below it."]
 
-        local groupsLabel = isVert and L["Groups Per Column"] or L["Groups Per Row"]
-        groupsPerRowSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, groupsLabel, 1, 8, 1, db, "raidGroupsPerRow", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
+        groupsPerRowSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Groups Before Wrap"], 1, 8, 1, db, "raidGroupsPerRow", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
         groupsPerRowSlider.tooltip = isVert and L["How many groups sit in a column before a new column starts. At 8, every group shares one column."]
             or L["How many groups sit on a row before a new row starts. At 8, every group shares one row."]
 
-        -- ☠ THIS IS THE CONTROL THAT SWAPS WHICH SIDE THE GROUPS SIT ON, AND ITS NAME
-        -- HAS TO SAY SO. It shipped as "Groups Grow From" in v4.0.5 and was renamed to
-        -- "Group Alignment" in bad7a7dc on the reasoning that Start/Center/End describes
-        -- an alignment rather than a direction. True in the abstract, wrong in practice:
-        -- raidGroupRowGrowth had taken the "... Grow From" wording three months earlier
-        -- for a much narrower job, so the panel ended up with a "Grow From" that is inert
-        -- at the default Groups Per Row = 8 and a side-swapper nobody could find. Both
-        -- Krathe and a field reporter went looking for the behaviour under the old name.
-        -- Note the party dropdown below kept "Frames Grow From" for the same Start/Center/
-        -- End shape, so the rename was never consistent anyway. Do not re-rename this.
-        local groupAnchorDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Groups Grow From"], anchorOptions, db, "raidGroupAnchor", UpdateFrames), 55)
+        -- ☠ ONE CORNER PICKER, REPLACING "Groups Grow From" + "Row Order". Do not split
+        -- them back apart. They were two axes of one question -- which corner of the
+        -- reserved area does the block sit in -- asked in two vocabularies, three controls
+        -- apart, and nobody read them as one thing (Aphoex 2026-08-14, Krathe 2026-08-17).
+        --
+        -- raidGroupAnchor is the horizontal half (START/CENTER/END), raidGroupRowGrowth the
+        -- vertical (START/END). Both keys, values and defaults are UNCHANGED -- this is a
+        -- widget swap, so no migration and nothing to do for existing profiles.
+        --
+        -- ⚠ The vertical half is inert whenever there is only one row of groups, which is
+        -- the case at the default Groups Before Wrap = 8: both positioners flip the row
+        -- index as `rcIdx = (fullGridRC - 1) - rcIdx` over `ceil(8 / groupsPerRow)`, so at
+        -- 8 the flip is the identity. The grid greys its bottom cells there rather than
+        -- offering a choice that cannot land -- and it does NOT write the key, so a stored
+        -- END survives and comes back the moment the slider drops below 8.
+        -- ⚠ NOT clamped to the POPULATED group count either. The flip is deliberately over
+        -- the full eight-group grid, so with five groups at four per row the bottom cell
+        -- legitimately moves them to the bottom of that grid, not of the populated rows.
+        local groupAnchorGrid = groupLayoutGroup:AddWidget(
+            GUI:CreateAnchorGrid(self.child, L["Groups Anchor"], db, "raidGroupAnchor", "raidGroupRowGrowth", UpdateFrames, {
+                verticalInertFn = function(d) return (d.raidGroupsPerRow or 8) >= 8 end,
+            }))
         -- The non-obvious half is the empty space: the frame area is sized for all EIGHT
-        -- groups so the drag box never resizes under you, so in a five-group raid Start
-        -- leaves three groups' worth of gap on the far side. That gap is what makes this
-        -- control look broken when it is in fact the only one doing anything.
-        -- ⚠ Deliberately does NOT name the options. They read Left/Right or Top/Bottom
-        -- depending on orientation now, so a tooltip saying "Start" or "End" would be
-        -- describing words that are not on screen.
-        groupAnchorDrop.tooltip = L["Which side of the frame area the groups sit on. The area is always sized for all eight groups, so the unused space falls on the opposite side."]
-
-        -- Row/Column Order chooses which END of the grid the SECOND and later rows
-        -- (columns) of groups stack from -- "whether additional rows of groups appear
-        -- above or below the first row", in the words of the release that added it. It
-        -- moves nothing sideways in horizontal mode, and with Groups Per Row at 8 there
-        -- is only ever one row, so it has nothing to do at all. It is deliberately NOT
-        -- called "Rows Grow From" any more: that name belongs to the control above,
-        -- which is what people mean when they say grow-from stopped working.
-        local rowOrderLabel = isVert and L["Column Order"] or L["Row Order"]
-        local rowOrderOptions = { START= CROSS_START, END= CROSS_END }
-        local rowOrderDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, rowOrderLabel, rowOrderOptions, db, "raidGroupRowGrowth", UpdateFrames), 55)
-        rowOrderDrop.tooltip = isVert and L["Which end extra columns of groups stack from. Does nothing while Groups Per Column is 8, because every group is already in one column."]
-            or L["Which end extra rows of groups stack from. Does nothing while Groups Per Row is 8, because every group is already on one row."]
-        -- ☠ INERT AT 8 PER ROW, WHICH IS THE DEFAULT — so grey it there. Both positioners
-        -- flip the row index as `rcIdx = (fullGridRC - 1) - rcIdx` and both derive
-        -- fullGridRC from the FULL eight groups, `ceil(8 / groupsPerRow)`. At 8 that is 1,
-        -- the flip is the IDENTITY, and End renders exactly like Start. Correct — one row
-        -- has no second end — but the control stayed live and said nothing.
-        -- ⚠ Greyed, NOT hidden: it is live the moment Groups Per Row drops below 8.
-        -- ⚠ Deliberately NOT clamped to the POPULATED group count. The flip is intentionally
-        -- over the full grid, so with five groups at four per row End legitimately moves them
-        -- to the bottom of the eight-group grid rather than the bottom of the populated two
-        -- rows. Only the one-row case is a true no-op.
-        rowOrderDrop.disableOn = function(d) return (d.raidGroupsPerRow or 8) >= 8 end
+        -- groups so the drag box never resizes under you, so in a five-group raid the left
+        -- corners leave three groups' worth of gap on the right. That gap is what made the
+        -- old dropdown look broken when it was in fact the only one of the two doing
+        -- anything.
+        groupAnchorGrid.tooltip = L["Which corner of the frame area the groups start from, and which way they fill. The area is always sized for all eight groups, so the unused space falls on the opposite side."]
 
         -- Players Grow From = the direction players fill the group's main axis.
         -- HORIZONTAL groups stack players vertically (Top/Bottom); VERTICAL groups

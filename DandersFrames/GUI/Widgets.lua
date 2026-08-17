@@ -1975,6 +1975,109 @@ function GUI:CloseAllMenus()
     if self._state then self._state.currentOpenDropdown = nil end
 end
 
+-- One corner picker standing in for TWO Start/End dropdowns that were really two axes
+-- of a single question: which corner of the reserved area does the block sit in?
+--
+-- ☠ WHY THIS EXISTS, so it does not get "simplified" back into two dropdowns.
+-- The grouped raid box had "Groups Grow From" (Left/Center/Right) and "Row Order"
+-- (Top/Bottom) three controls apart, in two different vocabularies. Nobody read them as
+-- one thing, and Row Order in particular reads as a sequencing control while in the
+-- common configuration it only moves the block to the other end of the reserved space.
+-- Field-reported twice (Aphoex 2026-08-14, Krathe 2026-08-17).
+--
+-- keyH takes START/CENTER/END, keyV takes START/END -- hence 3x2, not 3x3. Giving the
+-- vertical axis a CENTER means teaching all three positioners a CENTER branch for the
+-- row index; until that exists, do not add a middle row here.
+--
+-- opts.verticalInertFn: return true when the vertical axis cannot do anything (a single
+-- row of groups). The bottom cells grey and the top row reads as selected.
+-- ⚠ It NEVER writes the key. A UI fallback that persists its own display value is a
+-- silent second migration -- the stored END must survive being temporarily meaningless,
+-- or lowering Groups Before Wrap would not restore what the user picked.
+function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts)
+    opts = opts or {}
+    local CELL_W, CELL_H, GUTTER = 34, 18, 2
+    local COLS = { "START", "CENTER", "END" }
+    local ROWS = { "START", "END" }
+    local CAPTION = {
+        START = { START = L["Top left"],    CENTER = L["Top center"],    END = L["Top right"] },
+        END   = { START = L["Bottom left"], CENTER = L["Bottom center"], END = L["Bottom right"] },
+    }
+
+    local container = CreateFrame("Frame", nil, parent)
+    container:SetSize(260, GUI.RowHeight.anchorgrid)
+    container.preferredHeight = GUI.RowHeight.anchorgrid
+    container.rowKind = "anchorgrid"
+    container.fixedRowHeight = true
+
+    local lbl = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    lbl:SetPoint("TOPLEFT", 0, 0)
+    lbl:SetText(label)
+    lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    container.label = lbl
+
+    local grid = CreateFrame("Frame", nil, container, "BackdropTemplate")
+    grid:SetSize(#COLS * CELL_W + (#COLS + 1) * GUTTER, #ROWS * CELL_H + (#ROWS + 1) * GUTTER)
+    grid:SetPoint("TOPLEFT", 0, SnapLen(grid, -16) or -16)
+    CreateElementBackdrop(grid)
+
+    local caption = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    caption:SetPoint("LEFT", grid, "RIGHT", 8, 0)
+    caption:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+    local cells = {}
+    for r, vy in ipairs(ROWS) do
+        for c, vx in ipairs(COLS) do
+            local btn = CreateFrame("Button", nil, grid, "BackdropTemplate")
+            GUI:StyleButton(btn, { width = CELL_W, height = CELL_H })
+            btn:SetPoint("TOPLEFT", grid, "TOPLEFT",
+                GUTTER + (c - 1) * (CELL_W + GUTTER), -(GUTTER + (r - 1) * (CELL_H + GUTTER)))
+            btn.vx, btn.vy = vx, vy
+            btn:SetScript("OnClick", function(self)
+                if container.vInert and self.vy == "END" then return end
+                dbTable[keyH] = self.vx
+                if not container.vInert then dbTable[keyV] = self.vy end
+                container:Refresh()
+                if callback then callback() end
+            end)
+            cells[#cells + 1] = btn
+        end
+    end
+
+    function container:Refresh()
+        self.vInert = opts.verticalInertFn and opts.verticalInertFn(dbTable) or false
+        local curH = dbTable[keyH] or "START"
+        local curV = dbTable[keyV] or "START"
+        -- Display-only collapse: a stored END stays stored, it just cannot be shown.
+        local shownV = self.vInert and "START" or curV
+        for _, b in ipairs(cells) do
+            local dead = self.vInert and b.vy == "END"
+            b:SetActive(not dead and b.vx == curH and b.vy == shownV)
+            b:SetAlpha(dead and 0.35 or 1)
+            b:EnableMouse(not dead)
+        end
+        caption:SetText((CAPTION[shownV] and CAPTION[shownV][curH]) or "")
+    end
+    container.refreshContent = function(self) self:Refresh() end
+
+    container.SetEnabled = function(self, enabled)
+        self:SetAlpha(enabled and 1 or 0.4)
+        for _, b in ipairs(cells) do b:EnableMouse(enabled and not (self.vInert and b.vy == "END")) end
+    end
+
+    -- Tooltip: shared attach on the LABEL only (see GUI:AttachTooltip), matching every
+    -- other labelled factory. Hovering the cells themselves must stay quiet -- six of them
+    -- popping the same tooltip would fight the click target.
+    GUI:AttachTooltip(container, label, lbl)
+
+    container.UpdateTheme = function() container:Refresh() end
+    if not parent.ThemeListeners then parent.ThemeListeners = {} end
+    table.insert(parent.ThemeListeners, container)
+
+    container:Refresh()
+    return container
+end
+
 function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, customGet, customSet, opts)
     opts = opts or {}
     local accentColor = opts.accent
