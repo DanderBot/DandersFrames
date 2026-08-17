@@ -1669,6 +1669,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     DF.SecureSort:PushRaidGroupLayoutConfig()
                     DF.SecureSort:TriggerSecureRaidSort()
                 end
+                -- Redraw the reserved group-slot ghosts on the unlock overlay. Every
+                -- setting in this callback can change the eight-slot grid's shape, and
+                -- the whole point of the ghosts is that they show the grid the anchor
+                -- moves within -- stale ones would be worse than none.
+                if DF.UpdateRaidGroupSlotGhosts then DF:UpdateRaidGroupSlotGhosts() end
                 -- Update test mode frames if active
                 if DF.raidTestMode then DF:UpdateRaidTestFrames() end
             else

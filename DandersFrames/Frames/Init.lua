@@ -869,6 +869,83 @@ function DF:CreateRaidMoverFrame()
     DF.raidMoverFrame = mover
 end
 
+-- Ghost outlines for the EIGHT reserved group slots, drawn on the unlock overlay.
+--
+-- ☠ WHY: the grouped raid box is always sized for all eight groups so the drag frame
+-- never resizes when people join or leave. At Groups Before Wrap = 8 that is a single
+-- row and nobody notices. Below 8 it becomes two or more rows while a real raid fills
+-- one, so half the box is empty, the anchor appears to do nothing or to move the block
+-- by a whole row for no visible reason, and a wrapped group 8 turns up on its own above
+-- everything. Every "this setting is confusing" report on this panel traces back to that
+-- invisible grid. Drawing it costs no geometry and explains the rest for free.
+--
+-- ☠ POSITIONS COME FROM THE SHARED CALCULATOR, NOT FROM LOCAL MATHS. A fourth copy of
+-- the grouped geometry is exactly the fork the preview rules exist to prevent, and it
+-- would drift the first time anyone touched a positioner. Asking
+-- CalculateRaidGroupPosition for all eight groups with a synthetic full active list
+-- yields the reserved grid by construction.
+-- ⚠ Outlines, not fills: the mover sits above the unit frames, so a filled ghost would
+-- tint the populated groups. Edges read as "slot" over both empty and filled space.
+local GHOST_EDGE = 1
+function DF:UpdateRaidGroupSlotGhosts()
+    local mover = DF.raidMoverFrame
+    if not mover then return end
+    mover.groupSlotGhosts = mover.groupSlotGhosts or {}
+    local ghosts = mover.groupSlotGhosts
+    for i = 1, 8 do
+        if ghosts[i] then ghosts[i]:Hide() end
+    end
+
+    local db = DF:GetRaidDB()
+    if not db or db.raidLocked or not db.raidUseGroups then return end
+
+    local SS = DF.SecureSort
+    if not (SS and SS.UpdateRaidGroupLayoutParams and SS.CalculateRaidGroupPosition) then return end
+    -- ⚠ Refresh the params first, the way every other live caller does. That also clears
+    -- any lp.testMode a preview left behind, which is the documented contract for this
+    -- shared table -- do not read it stale to avoid the refresh.
+    SS:UpdateRaidGroupLayoutParams()
+    local lp = SS.raidGroupLayoutParams
+    if not lp then return end
+
+    local groupW, groupH
+    if lp.horizontal then
+        groupW = lp.frameWidth
+        groupH = 5 * lp.frameHeight + 4 * lp.playerSpacing
+    else
+        groupW = 5 * lp.frameWidth + 4 * lp.playerSpacing
+        groupH = lp.frameHeight
+    end
+    if not groupW or groupW <= 0 or not groupH or groupH <= 0 then return end
+
+    local allEight = {}
+    for i = 1, 8 do allEight[i] = i end
+
+    for i = 1, 8 do
+        local x, y = SS:CalculateRaidGroupPosition(i, 0, 5, allEight, lp)
+        local g = ghosts[i]
+        if not g then
+            g = CreateFrame("Frame", nil, mover)
+            g.edges = {}
+            for e = 1, 4 do
+                local t = g:CreateTexture(nil, "OVERLAY")
+                t:SetColorTexture(1, 0.65, 0.25, 0.30)
+                g.edges[e] = t
+            end
+            local edges = g.edges
+            edges[1]:SetPoint("TOPLEFT")     edges[1]:SetPoint("TOPRIGHT")     edges[1]:SetHeight(GHOST_EDGE)
+            edges[2]:SetPoint("BOTTOMLEFT")  edges[2]:SetPoint("BOTTOMRIGHT")  edges[2]:SetHeight(GHOST_EDGE)
+            edges[3]:SetPoint("TOPLEFT")     edges[3]:SetPoint("BOTTOMLEFT")   edges[3]:SetWidth(GHOST_EDGE)
+            edges[4]:SetPoint("TOPRIGHT")    edges[4]:SetPoint("BOTTOMRIGHT")  edges[4]:SetWidth(GHOST_EDGE)
+            ghosts[i] = g
+        end
+        g:SetSize(groupW, groupH)
+        g:ClearAllPoints()
+        g:SetPoint("TOPLEFT", mover, "TOPLEFT", x, y)
+        g:Show()
+    end
+end
+
 function DF:UnlockRaidFrames()
     if InCombatLockdown() then
         DF:Err("Cannot unlock raid frames during combat.")
@@ -987,6 +1064,10 @@ function DF:UnlockRaidFrames()
     -- reintroduces. (Core.lua already routes its callers through it for the same
     -- reason.) Safe here: unlock is OOC by construction (combat guard at the top).
     if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
+
+    -- After the mover is sized AND converged, so the slots land on the same rect the
+    -- groups do rather than on the pre-compensation anchor.
+    DF:UpdateRaidGroupSlotGhosts()
 
     -- Debug info
     if DF:DebugActive("HEADERS") then
