@@ -1864,14 +1864,25 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Group Alignment"], anchorOptions, db, "raidGroupAnchor", UpdateFrames), 55)
 
+        -- ☠ THESE TWO NAME AN AXIS, SO THEIR VALUES MUST NAME THAT AXIS' EDGES.
+        -- Both stack ACROSS the grow direction: with HORIZONTAL, rows of groups stack
+        -- downward and players stack downward, so the edges are Top/Bottom; with
+        -- VERTICAL, columns and players run sideways, so they are Left/Right. They were
+        -- flattened to the orientation-free "Start (Left/Top)" / "End (Right/Bottom)"
+        -- pair used by the CENTER-capable alignment dropdowns, which reads in horizontal
+        -- mode as a promise to move the groups RIGHT -- something neither key has ever
+        -- done there. Field-reported as "Rows Grow From does nothing" by someone
+        -- reaching for it to swap which side the groups sit on; that is Group Alignment.
+        -- Do not re-flatten: only a control that can also CENTER earns the combined pair.
+        local edgeOptions = db.growDirection == "VERTICAL"
+            and { START= L["Left"], END= L["Right"] }
+            or  { START= L["Top"],  END= L["Bottom"] }
+
         local rowGrowLabel = db.growDirection == "VERTICAL" and L["Columns Grow From"] or L["Rows Grow From"]
-        local rowGrowOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
-        groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, rowGrowLabel, rowGrowOptions, db, "raidGroupRowGrowth", UpdateFrames), 55)
+        groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, rowGrowLabel, edgeOptions, db, "raidGroupRowGrowth", UpdateFrames), 55)
 
         -- Players Grow From = the direction players fill the group's main axis.
-        -- HORIZONTAL groups stack players vertically (Top/Bottom); VERTICAL groups
-        -- stack players horizontally (Left/Right). Values map to START/END.
-        local playerAnchorOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
+        local playerAnchorOptions = edgeOptions
         groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], playerAnchorOptions, db, "raidPlayerAnchor", UpdateFrames), 55)
         
         Add(groupLayoutGroup, nil, 1)
