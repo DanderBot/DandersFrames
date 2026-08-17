@@ -2488,6 +2488,12 @@ function DF.BuildTextDesignerPage(GUI, page, db)
                 self.child:SetWidth(GUI.contentFrame:GetWidth() - 30)
             end
         end
+        -- Frame size and Preview Scale are settings like any other, so the mock
+        -- re-derives here rather than waiting for a page rebuild — the same hook
+        -- AuraDesigner_RefreshPage gives the Aura Designer's preview.
+        if state.previewPanel and state.previewPanel.RefreshGeometry then
+            state.previewPanel.RefreshGeometry()
+        end
     end
 
     -- Detect mode change OR auto-layout switch: tear down every cached widget so
@@ -2761,6 +2767,10 @@ function DF.BuildTextDesignerPage(GUI, page, db)
         healthFill:SetWidth(FRAME_W * 0.72)
         healthFill:SetTexture(healthTexPath)
         healthFill:SetVertexColor(0.18, 0.80, 0.44, 0.85)
+        -- Stashed for RefreshGeometry: both fills are sized in ABSOLUTE pixels off the
+        -- frame width read at build, so a live resize has to re-derive them or the bar
+        -- keeps the old frame's proportions inside the new outline.
+        previewPanel.healthFill = healthFill
 
         -- Missing health region
         local missingHealth = mockFrame:CreateTexture(nil, "ARTWORK")
@@ -2772,6 +2782,7 @@ function DF.BuildTextDesignerPage(GUI, page, db)
         end
         missingHealth:SetWidth(FRAME_W * 0.28)
         missingHealth:SetColorTexture(0, 0, 0, 0.4)
+        previewPanel.missingHealth = missingHealth
 
         -- Power bar (only if enabled in current frame settings)
         if showPower then
@@ -2797,15 +2808,57 @@ function DF.BuildTextDesignerPage(GUI, page, db)
         -- Anchor dots disabled until drag-to-place is implemented (Phase 2).
     end
 
+    -- Live geometry — the twin of AuraDesigner/UI/Cards.lua's container.RefreshGeometry,
+    -- and it is here for the same two reasons that fix names.
+    --   * Frame width/height and Preview Scale were read ONCE, at build, so the preview
+    --     only caught up when something else forced a full page rebuild — resizing the
+    --     window, or leaving the settings and coming back (Aphoex, 2026-08-17, reporting
+    --     it as the twin of the Aura Designer one).
+    --   * ☠ CLAMP BOTH AXES. The panel is anchored on all four sides and the mock is
+    --     centred inside at the configured size times the user's scale, with nothing
+    --     bounding it — so a tall frame or a high Preview Scale spilled the mock out
+    --     through the panel edge. Fitting to the smaller of the two ratios keeps the
+    --     preview honest about proportions: it shrinks, it does not letterbox.
+    -- ⚠ The two fills are re-derived as well. AD's version does not need to (its own
+    -- resize path rebuilds), but here they are absolute pixel widths taken from the
+    -- build-time frame width, so sizing the mock without them would leave a 72% bar
+    -- reading as some other fraction of the new outline.
+    previewPanel.RefreshGeometry = function()
+        local m = state.mockFrame
+        if not m then return end
+        local fdb = (DF.GetDB and DF:GetDB((GUI and GUI.SelectedMode) or "party")) or DF.PartyDefaults or {}
+        local w = fdb.frameWidth or 125
+        local h = fdb.frameHeight or 64
+        m:SetSize(w, h)
+        if previewPanel.healthFill then previewPanel.healthFill:SetWidth(w * 0.72) end
+        if previewPanel.missingHealth then previewPanel.missingHealth:SetWidth(w * 0.28) end
+
+        local want = tdDB.previewScale or 1.0
+        -- Before the first layout pass the panel has no size yet; honour the user's
+        -- scale rather than clamping against a zero and collapsing the mock.
+        local cw, ch = previewPanel:GetWidth() or 0, previewPanel:GetHeight() or 0
+        if cw < 2 or ch < 2 then
+            m:SetScale(want)
+            return
+        end
+        -- 16 = the panel's own left/right padding; 28 = that plus the "FRAME PREVIEW"
+        -- label strip along the top. Same constants as the Aura Designer's.
+        local fit = math.min((cw - 16) / w, (ch - 28) / h)
+        m:SetScale(math.max(0.2, math.min(want, fit)))
+    end
+    previewPanel.RefreshGeometry()
+
     -- Preview Scale slider (top-left of preview panel, below the FRAME PREVIEW
     -- label). Mirrors AuraDesigner/Options.lua:3872-3885 — release callback +
     -- lightweight per-tick callback so the mockFrame scales live during drag.
+    -- ⚠ BOTH callbacks go through RefreshGeometry, never SetScale directly — a raw
+    -- SetScale is exactly what let the mock climb out of its box.
     local scaleSlider = GUI:CreateSlider(previewPanel, L["Preview Scale"], 0.75, 2.5, 0.05, tdDB, "previewScale",
         function()
-            if state.mockFrame then state.mockFrame:SetScale(tdDB.previewScale or 1.0) end
+            if previewPanel.RefreshGeometry then previewPanel.RefreshGeometry() end
         end,
         function()
-            if state.mockFrame then state.mockFrame:SetScale(tdDB.previewScale or 1.0) end
+            if previewPanel.RefreshGeometry then previewPanel.RefreshGeometry() end
         end
     )
     scaleSlider:SetPoint("TOPLEFT", previewLabel, "BOTTOMLEFT", -4, -4)
