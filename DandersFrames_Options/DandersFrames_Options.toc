@@ -97,6 +97,8 @@ ClickCasting\UI\Dialogs.lua
 # the entry points; these overwrite the stubs when this addon loads.
 TestMode\TestFramePool.lua
 TestMode\TestMode.lua
+# After TestMode.lua: it reads the frame pools that file owns.
+TestMode\Labels.lua
 
 # Debug tools (DebugConsole and Profiler stay resident in the main addon)
 Debug\AuraExplorer.lua

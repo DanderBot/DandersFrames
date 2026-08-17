@@ -2689,6 +2689,11 @@ DF.PartyDefaults = {
     testShowPersonalTargeted = true,
     testShowAuraDesigner = false,
     testShowTextDesigner = true,
+    -- Test-mode section identification: highlights whichever element the cursor is
+    -- over and names it. OFF by default -- test mode is also how people pixel-tune
+    -- spacing. (A separate testShowLabelTips key existed for one build; the two were
+    -- merged into this one, since nobody wants half the answer.)
+    testShowLabels = false,
 
     -- Tooltip settings
     tooltipBuffAnchor = "FRAME",

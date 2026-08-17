@@ -62,6 +62,7 @@ L["Auto-create profiles enabled."] = true
 L["Auto-created profile: %s"] = true
 L["Auto-profile evaluation and runtime overlay"] = true
 L["Identity gate: park/hide verdicts with reasons, latches, recovery"] = true
+L["Indicator Info"] = true
 L["Cannot delete the default profile"] = true
 L["Cannot rename the default profile"] = true
 L["Click-casting binding apply, hover, PreClick state"] = true
