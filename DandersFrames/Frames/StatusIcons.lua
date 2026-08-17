@@ -1192,8 +1192,7 @@ end
 -- way in and stay hidden until some unrelated event happened to repaint the frame.
 -- ⇒ ADD ANY NEW `<icon>HideInCombat` UPDATER HERE. The option is not finished without it.
 function DF:UpdateAllCombatGatedIcons()
-    if not DF.IterateAllFrames then return end
-    DF:IterateAllFrames(function(frame)
+    local function regate(frame)
         if not frame or not frame.unit then return end
         if DF.UpdateRoleIcon then DF:UpdateRoleIcon(frame, "CombatTransition") end
         if DF.UpdateLeaderIcon then DF:UpdateLeaderIcon(frame) end
@@ -1201,7 +1200,17 @@ function DF:UpdateAllCombatGatedIcons()
         if DF.UpdateReadyCheckIcon then DF:UpdateReadyCheckIcon(frame) end
         -- Covers summon / resurrection / phased / AFK / vehicle / MT-MA / BG carrier / combat.
         if DF.UpdateAllStatusIcons then DF:UpdateAllStatusIcons(frame) end
-    end)
+    end
+    if DF.IterateAllFrames then DF:IterateAllFrames(regate) end
+    -- ☠☠ AND PINNED — DF:IterateAllFrames IS ARENA *OR* PARTY+RAID AND HAS NO PINNED ARM.
+    -- So the whole HideInCombat family was ONE-WAY on pinned frames: combat entry
+    -- (RefreshAllVisibleFrames -> FullFrameRefresh) hid the icon, and this — the only thing
+    -- that undoes it — could not see the frame. Any pinned frame repainted mid-combat kept
+    -- its icons hidden until something unrelated refreshed it, which for a quiet unit is
+    -- never. A boss frame makes it near-certain: its own UNIT_FACTION handler calls
+    -- FullFrameRefresh. ⇒ the EXIT half is the one that goes missing, every time.
+    -- ⚠ The pinned walker takes a bare callback and is called with a DOT. (Audit 2026-08-17.)
+    if DF.IteratePinnedFrames then DF.IteratePinnedFrames(regate) end
 end
 
 -- ============================================================
