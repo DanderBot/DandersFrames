@@ -3079,6 +3079,12 @@ TEST_PRESETS.DEFAULT = {
     testShowTargetedList     = true,
     testAnimateTargetedList  = true,
     testShowPersonalTargeted = true,
+    -- ☠ Count-shaped, so this `true` is written as 1 (see TEST_COUNT_KEYS). Present because
+    -- Config.lua's testDefensiveCount now defaults to 1 and the two MUST mirror — and
+    -- because a preset that omits a key ZEROES it, so without this the three presets that
+    -- left it out re-zeroed the row on every click. That is how the defensive preview came
+    -- to look as though it never worked at all (Aphoex 6).
+    testDefensiveCount       = true,
 }
 
 -- Full = every toggle on. Built from the key list so a newly added toggle is
