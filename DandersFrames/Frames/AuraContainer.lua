@@ -2868,11 +2868,18 @@ function NativeBackend:build()
         -- plain neighbours. Dropping this capture was the own-preview regression:
         -- the important-debuff highlight vanished from test mode entirely (field
         -- report 2026-08-14). _buildOwnPreview resolves slot k's style from this.
-        local testStyles, allStyled = {}, true
+        -- ☠ THE DISTINCTNESS TERM — see the long note on the engine route below. Two records
+        -- sharing ONE importantStyle table satisfied "all styled" and enlarged every slot.
+        local testStyles, allStyled, stylesDiffer = {}, true, false
         for _, r in ipairs(filters) do
-            if r.style then testStyles[#testStyles + 1] = r.style else allStyled = false end
+            if r.style then
+                testStyles[#testStyles + 1] = r.style
+                if testStyles[1] ~= r.style then stylesDiffer = true end
+            else
+                allStyled = false
+            end
         end
-        local perSlotStyles = (allStyled and #testStyles > 1) and testStyles or nil
+        local perSlotStyles = (allStyled and stylesDiffer and #testStyles > 1) and testStyles or nil
         -- Assigned UNCONDITIONALLY (nil when no styles): the pooled preview slots
         -- persist across rebuilds, so a rebuild with the highlight switched off must
         -- clear the previous build's styles or they would re-stamp forever.
@@ -2914,13 +2921,35 @@ function NativeBackend:build()
         -- leave the rest plain — a preview that differs from live in RENDERING rather
         -- than in data, which is the one thing a preview may never do.
         --
-        -- So: all records styled and more than one => per-slot, slot k wears member k's
-        -- style. Otherwise the original single-styled-slot behaviour, unchanged.
-        local testStyles, allStyled = {}, true
+        -- So: all records styled, more than one, AND THE STYLES ACTUALLY DIFFER => per-slot,
+        -- slot k wears member k's style. Otherwise the original single-styled-slot
+        -- behaviour, unchanged.
+        --
+        -- ☠☠ THE DISTINCTNESS TERM IS LOAD-BEARING AND WAS MISSING. "Every record styled"
+        -- was meant to identify a LAYOUT GROUP, where each member carries its OWN look. The
+        -- debuff row can satisfy it by accident: `bossrole` and `priority` are the only two
+        -- records that take a style and they take THE SAME `importantStyle` TABLE, so
+        -- ticking Boss and/or Role together with Priority — and nothing else — made
+        -- `allStyled` true with two entries and put the enlarged, badged important treatment
+        -- on BOTH preview slots instead of one styled against a plain neighbour. At the test
+        -- Debuffs count of 2 that is the whole row. Reported as the debuff preview "bugging
+        -- out" on particular checkbox combinations (Aphoex 7); the enormous icons in the
+        -- screenshots are this, and the mis-wrap beside it is the flow cap below.
+        -- ⚠ Identity, not deep-compare: two members with coincidentally equal looks are
+        -- still two members and must stay per-slot.
+        -- ☠ MIRRORED IN THREE PLACES — the own-preview route above, this engine route, and
+        -- the Indicator Info probe in DandersFrames_Options/TestMode/Labels.lua, which
+        -- measures the region and must agree with what renders. Change one, change all three.
+        local testStyles, allStyled, stylesDiffer = {}, true, false
         for _, r in ipairs(filters) do
-            if r.style then testStyles[#testStyles + 1] = r.style else allStyled = false end
+            if r.style then
+                testStyles[#testStyles + 1] = r.style
+                if testStyles[1] ~= r.style then stylesDiffer = true end
+            else
+                allStyled = false
+            end
         end
-        local perSlotStyles = (allStyled and #testStyles > 1) and testStyles or nil
+        local perSlotStyles = (allStyled and stylesDiffer and #testStyles > 1) and testStyles or nil
         local testStyle = testStyles[1]
         local testStyleSlots = (not perSlotStyles) and (testStyle and math.min(1, maxCount) or 0) or 0
         local testStyleLayout = recordGroupLayout(groupLayout, testStyle)
