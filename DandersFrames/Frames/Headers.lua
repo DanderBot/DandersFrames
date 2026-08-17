@@ -1856,6 +1856,36 @@ end
 --   * Single populated row (no drift)
 --   * Required handler / headers not yet created
 function DF:ComputeRaidContainerCompensation()
+    -- ☠ RETIRED, ALWAYS ZERO. Read this before reinstating any of it.
+    --
+    -- This shifted the container (and mover, and content with them) by half a group
+    -- whenever Groups Anchor was CENTER and more than one row/column was populated. It
+    -- was added 2026-08-15 to fix content sitting half a group-row outside the box --
+    -- but that symptom was NOT a container problem. Its cause was in the positioner:
+    -- the CENTER branch centred the populated block with yStart and then added rcIdx,
+    -- which had already been flipped over the FULL grid, so the two compounded. That is
+    -- fixed at source in 50a3e7c5, which leaves this correcting a drift that no longer
+    -- happens -- a second, opposite error.
+    --
+    -- Field-reported as the block jumping DOWN in Columns growth and LEFT in Rows growth
+    -- the moment CENTER was chosen with a full roster (Krathe, 2026-08-17), matching this
+    -- function's two return axes exactly. The give-away was the workaround: at one
+    -- populated row, or on any anchor other than Center, both gates below return zero --
+    -- and filling the roster back up does not re-run UpdateRaidContainerPosition, so the
+    -- uncompensated position survived and was the one that looked right. An offset that
+    -- only lands when something happens to re-run the positioner is worse than either
+    -- choice made consistently.
+    --
+    -- Zero also restores the OTHER thing that commit wanted: the container, the mover and
+    -- the frames now share one geometry by construction rather than by carrying the same
+    -- correction, so the unlock overlay is faithful without anything to keep in step.
+    -- ⚠ CENTER now means centred in the reserved grid, at every populated count. The block
+    -- no longer holds its leading edge as the raid fills -- that was the point of this
+    -- function and it is deliberately gone; keeping it required Center not to be centred.
+    -- ⚠ The body below is kept unreachable ONLY as the record of what was tried and why.
+    -- It should be deleted outright in the next tidy-up, not revived.
+    do return 0, 0 end
+
     local db = DF:GetRaidDB()
     if not db then return 0, 0 end
     if not db.raidUseGroups then return 0, 0 end
