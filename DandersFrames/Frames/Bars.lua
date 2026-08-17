@@ -2932,6 +2932,13 @@ function DF:UpdateAllRoleIcons()
     if DF.IterateRaidFrames then
         DF:IterateRaidFrames(updateFrame)
     end
+
+    -- ☠ AND PINNED. This runs on the combat-exit transition (see the HideInCombat note in
+    -- Frames/StatusIcons.lua), and neither iterator above reaches a pinned frame — so a
+    -- pinned role or leader icon hidden by roleIconHideInCombat never came back.
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(updateFrame)
+    end
 end
 
 function DF:UpdateLeaderIcon(frame)

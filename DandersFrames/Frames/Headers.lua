@@ -3920,6 +3920,19 @@ function DF:RefreshLiveFrames()
             end
         end)
     end
+
+    -- ☠ AND PINNED — a pinned frame IS a live frame. None of the three iterators above
+    -- reaches one, so every caller of this function silently skipped them: the combat-ENTRY
+    -- half of the HideInCombat gates (PLAYER_REGEN_DISABLED routes here through
+    -- RefreshAllVisibleFrames) plus every settings callback that refreshes data-driven
+    -- content. Boss sets included — they are unit frames for friendly, healable NPCs.
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(function(frame)
+            if frame and frame.unit then
+                DF:FullFrameRefresh(frame)
+            end
+        end)
+    end
 end
 
 -- Refresh ALL visible frames (both test and live)
@@ -7769,17 +7782,44 @@ headerChildEventFrame:RegisterEvent("READY_CHECK_FINISHED")
 headerChildEventFrame:RegisterEvent("PARTY_LEADER_CHANGED")
 
 -- Helper to iterate pinned frame children (forward-declared near file top)
+-- ☠ BOTH POOLS. This walked player-set header children ONLY, so every caller silently
+-- excluded pinned BOSS frames — which are real DF unit frames for friendly, healable
+-- NPCs, not a special case. The visible cost was raid-target markers: put a skull on a
+-- boss and the pinned frame kept the old icon until something else forced a
+-- FullFrameRefresh, because RAID_TARGET_UPDATE routes through here. Its own neighbour
+-- FindPinnedFrameForUnit has always walked bossFrames, so this was the odd one out.
+-- ⚠ The other callers (ready check, leader, AFK, summon, player flags, the roster
+-- name/leader safety net) are no-ops on an NPC rather than wrong — UnitIsPartyLeader and
+-- friends simply answer false — so widening costs them nothing.
+-- ★ PinnedFrames:ForEachActiveFrame is the same walk inside the pinned module; this one
+-- exists separately because it supports EARLY EXIT (a truthy callback stops the sweep)
+-- and that one does not. KEEP THEIR COVERAGE IDENTICAL.
 IteratePinnedFrames = function(callback)
-    if not DF.PinnedFrames or not DF.PinnedFrames.initialized or not DF.PinnedFrames.headers then
+    if not DF.PinnedFrames or not DF.PinnedFrames.initialized then
         return
     end
-    for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
-        local header = DF.PinnedFrames.headers[setIndex]
-        if header and header:IsShown() then
-            for i = 1, 40 do
-                local child = header:GetAttribute("child" .. i)
-                if child and child:IsVisible() then
-                    if callback(child) then return end
+    if DF.PinnedFrames.headers then
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
+            local header = DF.PinnedFrames.headers[setIndex]
+            if header and header:IsShown() then
+                for i = 1, 40 do
+                    local child = header:GetAttribute("child" .. i)
+                    if child and child:IsVisible() then
+                        if callback(child) then return end
+                    end
+                end
+            end
+        end
+    end
+    if DF.PinnedFrames.bossFrames then
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
+            local frames = DF.PinnedFrames.bossFrames[setIndex]
+            if frames then
+                for i = 1, 8 do
+                    local f = frames[i]
+                    if f and f:IsShown() and f.unit then
+                        if callback(f) then return end
+                    end
                 end
             end
         end
