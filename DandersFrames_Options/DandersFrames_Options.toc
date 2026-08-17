@@ -2,7 +2,7 @@
 ## Title: DandersFrames |cff9482c9Options|r
 ## Notes: Settings panel, editors and debug tools for DandersFrames. Loads on demand.
 ## Author: Danders
-## Version: v5.3.0-alpha.1
+## Version: v5.3.0-alpha.1-krathe
 ## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
 ## LoadOnDemand: 1
 ## RequiredDeps: DandersFrames
