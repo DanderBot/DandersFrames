@@ -1783,22 +1783,49 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
         layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Direction"]), 40)
         
-        -- ☠ ONE DROPDOWN FOR ALL THREE LAYOUTS, AND IT HAS TO STAY ONE.
-        -- There were three -- party, raid+groups and raid+flat -- mutually exclusive by
-        -- hideOn, and the raid+groups one INVERTED the pair: HORIZONTAL read as "Columns"
-        -- there and "Rows" in the other two. Every label that depends on the same key
-        -- (Groups Per Row / Row Spacing / Row Order, and the hint below) uses the
-        -- party reading, so picking "Rows" in a grouped raid produced a box full of
-        -- Column settings -- field-reported as "choosing columns enables rows
-        -- configuration, and viceversa" (Aphoex, 2026-08-14).
-        -- Both readings describe the same layout truthfully (HORIZONTAL lays the
-        -- repeating unit left-to-right, and in groups mode that unit IS a vertical column
-        -- of five players), which is exactly why the disagreement survived: neither side
-        -- looks wrong on its own. The union of the three hideOns is "never hidden", so
-        -- collapsing them costs nothing and makes a future divergence impossible.
-        -- ⇒ HORIZONTAL = the unit grows left-to-right = "Rows". Do not re-split this.
+        -- ☠☠ TWO DROPDOWNS, AND THE RAID+GROUPS ONE IS *DELIBERATELY* THE INVERSE.
+        -- DO NOT "unify" them again. That was tried (be7e61e1) and it is the regression
+        -- this comment exists to prevent.
+        --
+        -- Rows and Columns name THE SHAPE OF THE REPEATING UNIT -- the thing you can see:
+        --   * party / flat raid: the unit is a line of frames. HORIZONTAL lays them
+        --     left-to-right (party sets point="LEFT" + xOffset, Headers.lua ~1140), so
+        --     HORIZONTAL = "Rows".
+        --   * grouped raid: the unit is a GROUP, and HORIZONTAL builds each group as a
+        --     vertical stack of five (groupHeight = 5*frameHeight + 4*spacing) while
+        --     running the groups across. What you see is COLUMNS. So here the pair is
+        --     inverted, and that is correct, not a bug.
+        --
+        -- ⚠ This is the convention the rest of the game uses, verified in source, not
+        -- assumed: Blizzard's own raid option is "Horizontal Groups", and with it on
+        -- CompactRaidGroup_UpdateLayout anchors each member LEFT->RIGHT off the previous
+        -- one, i.e. horizontal describes the GROUP, not the arrangement of groups. Grid2
+        -- says "Horizontal groups" for the same thing and its SetOrientation(horizontal)
+        -- sets the header's xOffset, so again the group is the row. (ElvUI sidesteps the
+        -- word entirely with "Down and then Right" style pairs.)
+        -- ⇒ DandersFrames' internal HORIZONTAL/VERTICAL are the INVERSE of that
+        -- convention for grouped raid. The labels have to absorb that; the keys cannot
+        -- be renamed without a migration.
+        --
+        -- The history, so nobody re-derives it: three dropdowns originally, the
+        -- raid+groups one inverted as above and correct. Aphoex (2026-08-14) reported
+        -- "choosing columns enables rows configuration, and viceversa" -- real, but it
+        -- was a COLLISION, not an inversion: "Columns" names the group's shape while
+        -- "Groups Per Row" names the arrangement of groups, and both are true at once.
+        -- Collapsing the dropdowns onto the party reading "fixed" that by making the
+        -- grouped dropdown disagree with the frames instead, so "Growth Direction = Rows"
+        -- drew columns (Krathe, 2026-08-17). The tooltips below carry the disambiguation
+        -- that report actually needed.
         local growOptions = { HORIZONTAL = L["Rows"], VERTICAL = L["Columns"] }
-        layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
+        local growDrop = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
+        growDrop.hideOn = function() return GUI.SelectedMode == "raid" and db.raidUseGroups end
+        growDrop.tooltip = L["The shape each line of frames takes. Rows run left to right, Columns run top to bottom."]
+
+        -- Grouped raid: same key, inverted labels, because the repeating unit is a group.
+        local groupGrowOptions = { HORIZONTAL = L["Columns"], VERTICAL = L["Rows"] }
+        local groupGrowDrop = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], groupGrowOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
+        groupGrowDrop.hideOn = function() return not (GUI.SelectedMode == "raid" and db.raidUseGroups) end
+        groupGrowDrop.tooltip = L["The shape each raid group takes. Columns stack the five players downward and run the groups across; Rows lay them out sideways and stack the groups down.\n\nThe 'Groups Per Row' settings below count the GROUPS, not the players."]
 
         -- ☠ EVERY Start/End PAIR ON THIS PAGE SITS ON ONE OF TWO PERPENDICULAR AXES,
         -- AND WHICH ONE IS NOT GUESSABLE FROM THE CONTROL'S NAME. Get this wrong and the

@@ -564,6 +564,8 @@ L["Aura Designer is active alongside Buffs."] = true
 -- filter-as-trigger primitive. The per-filter claim is true through that route, not
 -- through groups — if the filter route is ever dropped, this clause goes with it.
 L["The buff bar shows auras. The Aura Designer makes the frame react to them — recolour the health bar, ring the frame, flash a corner icon, play a sound. Per spell, or per filter."] = true
+L["The shape each line of frames takes. Rows run left to right, Columns run top to bottom."] = true
+L["The shape each raid group takes. Columns stack the five players downward and run the groups across; Rows lay them out sideways and stack the groups down.\n\nThe 'Groups Per Row' settings below count the GROUPS, not the players."] = true
 L["Aura Duration Update Rate"] = true
 L["Auras"] = true
 L["Auras Alpha"] = true
