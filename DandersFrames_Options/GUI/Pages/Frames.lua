@@ -1840,20 +1840,22 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             end)
         end
 
-        local directionOptions = { HORIZONTAL= L["Horizontal"], VERTICAL= L["Vertical"] }
+        -- ☠ _order, or CreateDropdown sorts on the DISPLAY TEXT -- see the note beside the
+        -- raid page's growOptions. A Top/Bottom pair without it lists as "Bottom, Top".
+        local directionOptions = { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL= L["Horizontal"], VERTICAL= L["Vertical"] }
         arrangeGroup:AddWidget(CreateRefreshableDropdown(self.child, L["Direction"], directionOptions, "growDirection", OnPinnedDirectionChanged), 55)
 
         -- CENTER intentionally omitted: it isn't truly implemented for pinned
         -- frames (frames grow START-style; only the anchor/label shift). START/END
         -- only for now; a real centred layout can be added later.
-        local frameAnchorOptions = { START= PIN_MAIN_START, END= PIN_MAIN_END }
+        local frameAnchorOptions = { _order = { "START", "END" }, START= PIN_MAIN_START, END= PIN_MAIN_END }
         arrangeGroup:AddWidget(CreateRefreshableDropdown(self.child, L["Frames Grow From"], frameAnchorOptions, "frameAnchor", UpdateHighlightLayout), 55)
 
         -- CROSS axis, so the label follows the orientation too: horizontal frames wrap into
         -- new ROWS, vertical ones into new COLUMNS. This read "Columns Grow From" whatever
         -- the direction was, which is right in only one of the two.
         local columnAnchorLabel = pinVert and L["Columns Grow From"] or L["Rows Grow From"]
-        local columnAnchorOptions = { START= PIN_CROSS_START, END= PIN_CROSS_END }
+        local columnAnchorOptions = { _order = { "START", "END" }, START= PIN_CROSS_START, END= PIN_CROSS_END }
         arrangeGroup:AddWidget(CreateRefreshableDropdown(self.child, columnAnchorLabel, columnAnchorOptions, "columnAnchor", UpdateHighlightLayout), 55)
 
         local unitsPerLabel = pinVert and L["Units Per Column"] or L["Units Per Row"]
