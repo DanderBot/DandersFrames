@@ -1083,20 +1083,20 @@ local function UpdateAllHighlights()
         end)
     end
     
-    -- Update pinned frame children (they share units with main frames)
-    if DF.PinnedFrames and DF.PinnedFrames.initialized then
-        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
-            local header = DF.PinnedFrames.headers[setIndex]
-            if header and header:IsShown() then
-                local maxChildren = IsInRaid() and 40 or 5
-                for i = 1, maxChildren do
-                    local child = header:GetAttribute("child" .. i)
-                    if child and child:IsShown() and child.unit then
-                        DF:UpdateHighlights(child)
-                    end
-                end
+    -- Update pinned frames (they share units with main frames).
+    -- ☠ THROUGH THE SHARED WALKER, NOT A HAND-ROLLED HEADER LOOP. This walked
+    -- PinnedFrames.headers only, so pinned BOSS frames were never highlighted: target a
+    -- friendly healable NPC on a pinned boss set and the selection highlight never painted,
+    -- because PLAYER_TARGET_CHANGED lands here. DF.IteratePinnedFrames covers both pools.
+    -- ⚠ It also retires a second bug this loop carried: `IsInRaid() and 40 or 5` capped a
+    -- party-mode sweep at five children, so a pinned set holding more than five units —
+    -- which the set editor allows — left the rest unhighlighted. (Audit 2026-08-17.)
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(function(child)
+            if child and child:IsShown() and child.unit then
+                DF:UpdateHighlights(child)
             end
-        end
+        end)
     end
 end
 
