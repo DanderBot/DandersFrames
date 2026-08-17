@@ -1856,35 +1856,38 @@ end
 --   * Single populated row (no drift)
 --   * Required handler / headers not yet created
 function DF:ComputeRaidContainerCompensation()
-    -- ☠ RETIRED, ALWAYS ZERO. Read this before reinstating any of it.
+    -- ☠ DO NOT RETIRE THIS AGAIN. It was zeroed out in b0e84ae3 (2026-08-17) on the
+    -- reasoning that it existed only to cancel the CENTER compounding defect, and
+    -- restored the next day because that reasoning was wrong. The two are separate and
+    -- are easy to confuse: both apply only to CENTER, and both are worth about half a
+    -- group.
     --
-    -- This shifted the container (and mover, and content with them) by half a group
-    -- whenever Groups Anchor was CENTER and more than one row/column was populated. It
-    -- was added 2026-08-15 to fix content sitting half a group-row outside the box --
-    -- but that symptom was NOT a container problem. Its cause was in the positioner:
-    -- the CENTER branch centred the populated block with yStart and then added rcIdx,
-    -- which had already been flipped over the FULL grid, so the two compounded. That is
-    -- fixed at source in 50a3e7c5, which leaves this correcting a drift that no longer
-    -- happens -- a second, opposite error.
+    --   * THE COMPOUNDING (a defect, fixed): born 2026-03-10 in eb878888 with the wrap
+    --     growth setting. The CENTER branch centred the populated block and THEN added a
+    --     row index already flipped over the FULL grid -- two reference frames summed.
+    --     Error is (fullGridRC - popRows) group rows, which put frames outside their own
+    --     container. Fixed at source 2026-08-17 in 50a3e7c5. Nothing to do with here.
     --
-    -- Field-reported as the block jumping DOWN in Columns growth and LEFT in Rows growth
-    -- the moment CENTER was chosen with a full roster (Krathe, 2026-08-17), matching this
-    -- function's two return axes exactly. The give-away was the workaround: at one
-    -- populated row, or on any anchor other than Center, both gates below return zero --
-    -- and filling the roster back up does not re-run UpdateRaidContainerPosition, so the
-    -- uncompensated position survived and was the one that looked right. An offset that
-    -- only lands when something happens to re-run the positioner is worse than either
-    -- choice made consistently.
+    --   * THE DRIFT (inherent, and this function's whole job): a centred one-row block
+    --     and a centred two-row block do not sit in the same place. That is what
+    --     centring means, and it cannot be fixed inside the centring maths. As the raid
+    --     fills and popRows grows, every visible group moves. Reported as frames flying
+    --     off the top of the screen when someone joined a group (#867) and fixed by this
+    --     function in f3216d3c (2026-05-02, shipped 4.3.7).
     --
-    -- Zero also restores the OTHER thing that commit wanted: the container, the mover and
-    -- the frames now share one geometry by construction rather than by carrying the same
-    -- correction, so the unlock overlay is faithful without anything to keep in step.
-    -- ⚠ CENTER now means centred in the reserved grid, at every populated count. The block
-    -- no longer holds its leading edge as the raid fills -- that was the point of this
-    -- function and it is deliberately gone; keeping it required Center not to be centred.
-    -- ⚠ The body below is kept unreachable ONLY as the record of what was tried and why.
-    -- It should be deleted outright in the next tidy-up, not revived.
-    do return 0, 0 end
+    -- ☠ THE CONTAINER MOVING IS THE MECHANISM, NOT A FAULT. Holding the content still
+    -- means the box travels with it, or the frames leave the box. The live container,
+    -- the test container and the mover all read the SAME number (see below), so the
+    -- unlock overlay stays faithful. Seeing the container shift and "correcting" it
+    -- re-opens #867.
+    --
+    -- ☠ KNOWN HOLE -- IN COMBAT THIS DOES NOT FOLLOW THE CONTENT. Every caller is gated
+    -- on not InCombatLockdown() (SetScale on the container is protected), but the secure
+    -- snippet that moves the content has no such gate and re-runs on every roster
+    -- change. In combat the content drifts and this offset does not, then catches up on
+    -- the next out-of-combat update -- which reads as a snap. Closing that means
+    -- deriving the offset where the content is placed rather than nudging the container
+    -- from insecure Lua. Do not "close" it by deleting the compensation.
 
     local db = DF:GetRaidDB()
     if not db then return 0, 0 end
