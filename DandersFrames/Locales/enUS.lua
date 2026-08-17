@@ -998,6 +998,10 @@ L["Fury"] = true
 L["G1"] = true
 L["Game Default"] = true
 L["Gap"] = true
+L["Gap between one group and the next along the same row."] = true
+L["Gap between one group and the next down the same column."] = true
+L["Gap between one row of groups and the row below it."] = true
+L["Gap between one column of groups and the column beside it."] = true
 L["Generate Export String"] = true
 L["Ghost"] = true
 L["Gaining Aggro Text"] = true
@@ -1131,6 +1135,8 @@ L["Horizontal"] = true
 L["Horizontal Spacing"] = true
 L["Hover Highlight"] = true
 L["Hover Settings"] = true
+L["How many groups sit on a row before a new row starts. At 8, every group shares one row."] = true
+L["How many groups sit in a column before a new column starts. At 8, every group shares one column."] = true
 L["HP Deficit"] = true
 L["HP Percent"] = true
 L["How it works"] = true
@@ -2056,6 +2062,11 @@ L["The new profile changes which frame modes are enabled. A UI reload is require
 L["The same frame changes, driven by a whole filter"] = true
 L["The spell's own artwork"] = true
 L["Which incoming heals the bar shows: all sources, only yours, or only from others."] = true
+L["Which side of the frame area the groups sit on. The area is always eight groups wide, so Start leaves the gap on the right and End leaves it on the left."] = true
+L["Which end of the frame area the groups sit at. The area is always eight groups tall, so Start leaves the gap below and End leaves it above."] = true
+L["Which end extra rows of groups stack from. Does nothing while Groups Per Row is 8, because every group is already on one row."] = true
+L["Which end extra columns of groups stack from. Does nothing while Groups Per Column is 8, because every group is already in one column."] = true
+L["Which end of a group its players fill from. A group with fewer than five players leaves its empty space at the opposite end."] = true
 L["While in a raid group you can only edit the active layout. Leave the raid group to edit other layouts."] = true
 
 -- Nicknames

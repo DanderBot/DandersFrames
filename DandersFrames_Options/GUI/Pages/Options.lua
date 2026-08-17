@@ -1855,14 +1855,26 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local groupLayoutHint = db.growDirection == "VERTICAL" and L["Players stack horizontally, groups grow top-to-bottom."] or L["Players stack vertically, groups grow left-to-right."]
         groupLayoutGroup:AddWidget(GUI:CreateLabel(self.child, groupLayoutHint, 250), 25)
         
-        groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Group Spacing"], -5, 100, 1, db, "raidGroupSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
-        
-        local rowColLabel = db.growDirection == "VERTICAL" and L["Column Spacing"] or L["Row Spacing"]
+        -- Six controls, four of them directional, and their labels already swap with the
+        -- growth direction -- so the tooltips have to swap with it too, or half of them
+        -- describe the other orientation. The page rebuilds on a direction change
+        -- (OnGrowthDirectionChanged), which is what keeps these in step.
+        local isVert = db.growDirection == "VERTICAL"
+
+        local groupSpacingSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Group Spacing"], -5, 100, 1, db, "raidGroupSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
+        groupSpacingSlider.tooltip = isVert and L["Gap between one group and the next down the same column."]
+            or L["Gap between one group and the next along the same row."]
+
+        local rowColLabel = isVert and L["Column Spacing"] or L["Row Spacing"]
         rowColSpacingSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, rowColLabel, -5, 100, 1, db, "raidRowColSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
-        
-        local groupsLabel = db.growDirection == "VERTICAL" and L["Groups Per Column"] or L["Groups Per Row"]
+        rowColSpacingSlider.tooltip = isVert and L["Gap between one column of groups and the column beside it."]
+            or L["Gap between one row of groups and the row below it."]
+
+        local groupsLabel = isVert and L["Groups Per Column"] or L["Groups Per Row"]
         groupsPerRowSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, groupsLabel, 1, 8, 1, db, "raidGroupsPerRow", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
-        
+        groupsPerRowSlider.tooltip = isVert and L["How many groups sit in a column before a new column starts. At 8, every group shares one column."]
+            or L["How many groups sit on a row before a new row starts. At 8, every group shares one row."]
+
         -- ☠ THIS IS THE CONTROL THAT SWAPS WHICH SIDE THE GROUPS SIT ON, AND ITS NAME
         -- HAS TO SAY SO. It shipped as "Groups Grow From" in v4.0.5 and was renamed to
         -- "Group Alignment" in bad7a7dc on the reasoning that Start/Center/End describes
@@ -1873,7 +1885,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Krathe and a field reporter went looking for the behaviour under the old name.
         -- Note the party dropdown below kept "Frames Grow From" for the same Start/Center/
         -- End shape, so the rename was never consistent anyway. Do not re-rename this.
-        groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Groups Grow From"], anchorOptions, db, "raidGroupAnchor", UpdateFrames), 55)
+        local groupAnchorDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Groups Grow From"], anchorOptions, db, "raidGroupAnchor", UpdateFrames), 55)
+        -- The non-obvious half is the empty space: the frame area is sized for all EIGHT
+        -- groups so the drag box never resizes under you, so in a five-group raid Start
+        -- leaves three groups' worth of gap on the far side. That gap is what makes this
+        -- control look broken when it is in fact the only one doing anything.
+        groupAnchorDrop.tooltip = isVert and L["Which end of the frame area the groups sit at. The area is always eight groups tall, so Start leaves the gap below and End leaves it above."]
+            or L["Which side of the frame area the groups sit on. The area is always eight groups wide, so Start leaves the gap on the right and End leaves it on the left."]
 
         -- Row/Column Order chooses which END of the grid the SECOND and later rows
         -- (columns) of groups stack from -- "whether additional rows of groups appear
@@ -1882,15 +1900,29 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- is only ever one row, so it has nothing to do at all. It is deliberately NOT
         -- called "Rows Grow From" any more: that name belongs to the control above,
         -- which is what people mean when they say grow-from stopped working.
-        local rowOrderLabel = db.growDirection == "VERTICAL" and L["Column Order"] or L["Row Order"]
+        local rowOrderLabel = isVert and L["Column Order"] or L["Row Order"]
         local rowOrderOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
-        groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, rowOrderLabel, rowOrderOptions, db, "raidGroupRowGrowth", UpdateFrames), 55)
+        local rowOrderDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, rowOrderLabel, rowOrderOptions, db, "raidGroupRowGrowth", UpdateFrames), 55)
+        rowOrderDrop.tooltip = isVert and L["Which end extra columns of groups stack from. Does nothing while Groups Per Column is 8, because every group is already in one column."]
+            or L["Which end extra rows of groups stack from. Does nothing while Groups Per Row is 8, because every group is already on one row."]
+        -- ☠ INERT AT 8 PER ROW, WHICH IS THE DEFAULT — so grey it there. Both positioners
+        -- flip the row index as `rcIdx = (fullGridRC - 1) - rcIdx` and both derive
+        -- fullGridRC from the FULL eight groups, `ceil(8 / groupsPerRow)`. At 8 that is 1,
+        -- the flip is the IDENTITY, and End renders exactly like Start. Correct — one row
+        -- has no second end — but the control stayed live and said nothing.
+        -- ⚠ Greyed, NOT hidden: it is live the moment Groups Per Row drops below 8.
+        -- ⚠ Deliberately NOT clamped to the POPULATED group count. The flip is intentionally
+        -- over the full grid, so with five groups at four per row End legitimately moves them
+        -- to the bottom of the eight-group grid rather than the bottom of the populated two
+        -- rows. Only the one-row case is a true no-op.
+        rowOrderDrop.disableOn = function(d) return (d.raidGroupsPerRow or 8) >= 8 end
 
         -- Players Grow From = the direction players fill the group's main axis.
         -- HORIZONTAL groups stack players vertically (Top/Bottom); VERTICAL groups
         -- stack players horizontally (Left/Right). Values map to START/END.
         local playerAnchorOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
-        groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], playerAnchorOptions, db, "raidPlayerAnchor", UpdateFrames), 55)
+        local playerAnchorDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], playerAnchorOptions, db, "raidPlayerAnchor", UpdateFrames), 55)
+        playerAnchorDrop.tooltip = L["Which end of a group its players fill from. A group with fewer than five players leaves its empty space at the opposite end."]
         
         Add(groupLayoutGroup, nil, 1)
         
