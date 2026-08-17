@@ -1461,7 +1461,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             C_Timer.After(0, function()
                 if DF.RefreshMainFrameSorting then DF:RefreshMainFrameSorting() end
             end)
-        end, L["Hide from Main Frames Tooltip"]), 28)
+        end, L["Removes this set's pinned members from your main party/raid frames so they appear only in the pinned set. Applies out of combat. Your frame sorting setting is preserved."]), 28)
         hideMainCheck.hideOn = function() return IsCurrentBossMode() end
 
         -- Disable in PvP (GLOBAL across both modes, not per-set): keep pinned frames
@@ -1990,7 +1990,7 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 SyncPlayersOverride()
             end
         end), 28)
-        autoPopGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Keep when offline/left"], "keepOfflinePlayers", function() end, L["Keep when offline/left Tooltip"]), 28)
+        autoPopGroup:AddWidget(CreateRefreshableCheckbox(self.child, L["Keep when offline/left"], "keepOfflinePlayers", function() end, L["Players you add yourself (drag, the role buttons, or Add Offline Player) always stay pinned. This only affects members added automatically by role: leave it on to keep them after they go offline or leave the group, or off to drop them from the set."]), 28)
 
         Add(autoPopGroup, nil, "both")
         autoPopGroup.hideOn = membersHideOn

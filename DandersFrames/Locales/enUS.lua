@@ -1074,7 +1074,7 @@ L["Showing %d of %d effects. Untick any you don't want this indicator to show."]
 L["Nothing ticked — this indicator will not show."] = true
 L["Hide from Main Frames"] = true
 L["Hide on Tanks"] = true
-L["Hide from Main Frames Tooltip"] = "Removes this set's pinned members from your main party/raid frames so they appear only in the pinned set. Applies out of combat. Your frame sorting setting is preserved."
+L["Removes this set's pinned members from your main party/raid frames so they appear only in the pinned set. Applies out of combat. Your frame sorting setting is preserved."] = true
 L["Aura Designer Tooltips"] = true
 L["Groups"] = true
 L["Filter Groups and Debuff Groups. Their icons come from a filter rather than being placed one by one, so a tooltip is the only way to see what each one is."] = true
@@ -1150,7 +1150,7 @@ L["Keep important debuffs"] = true
 L["Keep when offline/left"] = true
 L["Key Already Bound"] = true
 L["Key Used Elsewhere"] = true
-L["Keep when offline/left Tooltip"] = "Players you add yourself (drag, the role buttons, or Add Offline Player) always stay pinned. This only affects members added automatically by role: leave it on to keep them after they go offline or leave the group, or off to drop them from the set."
+L["Players you add yourself (drag, the role buttons, or Add Offline Player) always stay pinned. This only affects members added automatically by role: leave it on to keep them after they go offline or leave the group, or off to drop them from the set."] = true
 L["Language"] = true
 L["Label (optional)"] = true
 L["Label Color"] = true
