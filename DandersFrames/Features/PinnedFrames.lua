@@ -3593,6 +3593,21 @@ local function CreatePlayerTestFrame(setIndex, index, container, isRaidMode, isB
     frame.dfIsTestFrame = true
     frame.dfIsDandersFrame = true
     frame.dfIsPinnedTestFrame = true  -- distinguish from testPartyFrames/testRaidFrames
+    -- ☠ THIS IS A PINNED FRAME, AND TWO LIVE GUARDS ALREADY ASSUME IT SAYS SO. The pool
+    -- stamped dfIsPinnedTestFrame and isPinnedBossFrame but never this one, so both of
+    -- them silently took their non-pinned branch on every preview slot:
+    --   * Frames/Update.lua:126 picks the preview's test data by it. Its own ☠ note
+    --     describes the bug it was written to fix — party pools are 0-based, pinned
+    --     pools 1-based, and the boss flag has to be passed — and the fix never ran,
+    --     because the flag it tests was nil. A pinned slot kept taking another
+    --     scenario's absorbs and heals whenever the fill object was replaced.
+    --   * Frames/Bars.lua:65 gives pinned frames the resource bar's solo-mode bypass;
+    --     TestMode.lua:1773 mirrors it for the preview. Without the stamp the preview
+    --     drew a bar the live frame would not (or the reverse).
+    -- Every other reader wants preview slots included too, so this is a plain fix
+    -- rather than a scope widening: Features/Auras.lua:3136's players-only missing-buff
+    -- term is bypassed wholesale in test mode, and the rest are debug.
+    frame.isPinnedFrame = true
     frame.isPinnedBossFrame = isBossSet or false
     frame.pinnedSetIndex = setIndex
 
