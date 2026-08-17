@@ -25,6 +25,27 @@ if not L then return end
 
 --@localization(locale="enUS", format="lua_additive_table", same-key-is-true=true)@
 
+-- ☠ EMPTY EXPORTS RENDER AS BLANK TEXT. CurseForge auto-discovers new phrases from
+-- the uploaded package, and for phrases it picked up that way (as opposed to ones
+-- pushed through an enUS import with a real string value) it stores an EMPTY English
+-- source text. The packager then writes them out verbatim as L["Key"] = "" -- 790 of
+-- them in v5.2.0 -- and since enUS is the baseline every client loads, every settings
+-- label among them vanished for everyone (field report, 2026-08-17: "some texts in
+-- menus are missing"). AceLocale's key-fallback only fires for keys that are ABSENT,
+-- so an empty string sails straight through to SetText.
+-- Sweep the app table right here, before any other file reads L at file scope: an
+-- empty value is never a legitimate translation, so it reverts to the key. The
+-- portal-side fix (an enUS import so the English text is really stored) is separate;
+-- this makes the addon immune to the export regardless.
+do
+    local app = LibStub("AceLocale-3.0"):GetLocale("DandersFrames", true)
+    if app then
+        for k, v in pairs(app) do
+            if v == "" then rawset(app, k, k) end
+        end
+    end
+end
+
 -- Development fallback: these strings are used when running
 -- from source (not a packaged build). Keep in sync with usage.
 --@do-not-package@

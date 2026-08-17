@@ -4474,8 +4474,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     -- AceLocale stores L["key"] = true as L["key"] = "key"
                     -- (the key string); we preserve that convention for
                     -- any `true` values in DF_AllLocales, though real
-                    -- translations are already strings.
-                    rawset(aceL, k, v == true and k or v)
+                    -- translations are already strings. An EMPTY string is
+                    -- never a real translation either -- CurseForge exports
+                    -- one for phrases whose stored text is blank (see the
+                    -- sweep in Locales/enUS.lua) -- so it falls back to the
+                    -- key rather than blanking the label.
+                    rawset(aceL, k, (v == true or v == "") and k or v)
                 end
             end
             -- Free the side-table now that the overlay is applied. Changing

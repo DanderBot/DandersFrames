@@ -1,5 +1,11 @@
 # DandersFrames Changelog
 
+## [5.2.1]
+
+### Bug Fixes
+
+* (Settings) Fix many labels in the settings panel showing up blank — page names, section titles, filter category names and info banners among them.
+
 ## [5.2.0]
 
 ### New Features
