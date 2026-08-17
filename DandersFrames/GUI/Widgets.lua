@@ -2067,14 +2067,15 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
             GUI:StyleButton(btn, { width = CELL_W, height = CELL_H })
             btn:SetPoint("TOPLEFT", grid, "TOPLEFT",
                 GUTTER + (c - 1) * (CELL_W + GUTTER), -(GUTTER + (r - 1) * (CELL_H + GUTTER)))
-            -- Screen position of the cell, and separately which KEY each of those carries.
+            -- SCREEN position of the cell. The align half is also the key value; the wrap
+            -- half is not, because it can be mirrored -- see WrapKey below.
             btn.vx, btn.vy = vx, vy
             btn.align = transposed and vy or vx
-            btn.wrap  = transposed and vx or vy
+            btn.screenWrap = transposed and vx or vy
             btn:SetScript("OnClick", function(self)
-                if container.wrapInert and self.wrap == "END" then return end
+                if container.wrapInert and self.screenWrap == "END" then return end
                 dbTable[keyH] = self.align
-                if not container.wrapInert then dbTable[keyV] = self.wrap end
+                if not container.wrapInert then dbTable[keyV] = container:WrapKey(self.screenWrap) end
                 container:Refresh()
                 if callback then callback() end
             end)
@@ -2082,15 +2083,32 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
         end
     end
 
+    -- ☠ THE WRAP AXIS CAN BE MIRRORED, AND THE FIX IS HERE, NOT IN THE POSITIONERS.
+    -- Players Grow From = End anchors each group to the FAR corner and measures the wrap
+    -- offset back from it (BOTTOMLEFT with +yOff horizontally, TOPRIGHT with -xOff
+    -- vertically), so the stored wrap value lands on the opposite side of the screen from
+    -- the one it names. The align axis is untouched -- both arms measure it from the same
+    -- edge whatever Players Grow From says.
+    -- The obvious fix, decoupling them in the positioners, MOVES EXISTING PEOPLE'S FRAMES
+    -- and is therefore off the table. So the grid speaks SCREEN POSITION and translates:
+    -- same geometry, same keys, same saved values, honest picker. This is an involution,
+    -- so one function converts in both directions.
+    function container:WrapKey(v)
+        if opts.wrapMirroredFn and opts.wrapMirroredFn(dbTable) then
+            return v == "START" and "END" or "START"
+        end
+        return v
+    end
+
     function container:Refresh()
         self.wrapInert = opts.verticalInertFn and opts.verticalInertFn(dbTable) or false
         local curAlign = dbTable[keyH] or "START"
         local curWrap  = dbTable[keyV] or "START"
-        -- Display-only collapse: a stored END stays stored, it just cannot be shown.
-        local shownWrap = self.wrapInert and "START" or curWrap
+        -- Display-only collapse: a stored value stays stored, it just cannot be shown.
+        local shownWrap = self.wrapInert and "START" or self:WrapKey(curWrap)
         for _, b in ipairs(cells) do
-            local dead = self.wrapInert and b.wrap == "END"
-            b:SetActive(not dead and b.align == curAlign and b.wrap == shownWrap)
+            local dead = self.wrapInert and b.screenWrap == "END"
+            b:SetActive(not dead and b.align == curAlign and b.screenWrap == shownWrap)
             b:SetAlpha(dead and 0.35 or 1)
             b:EnableMouse(not dead)
         end
@@ -2108,7 +2126,7 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
 
     container.SetEnabled = function(self, enabled)
         self:SetAlpha(enabled and 1 or 0.4)
-        for _, b in ipairs(cells) do b:EnableMouse(enabled and not (self.wrapInert and b.wrap == "END")) end
+        for _, b in ipairs(cells) do b:EnableMouse(enabled and not (self.wrapInert and b.screenWrap == "END")) end
     end
 
     -- Tooltip: shared attach on the LABEL only (see GUI:AttachTooltip), matching every

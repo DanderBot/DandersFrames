@@ -1978,6 +1978,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 -- exact transpose of Columns growth. Without this the grid draws a corner
                 -- that is 90 degrees from where the frames land.
                 transposedFn = function(d) return d.growDirection == "VERTICAL" end,
+                -- ☠ Players Grow From = End mirrors the WRAP axis (the group anchors to the
+                -- far corner and the wrap offset is measured back from it), so the grid has
+                -- to translate or it names the wrong side. Decoupling them in the
+                -- positioners would move existing users' frames, which is not on the table.
+                wrapMirroredFn = function(d) return (d.raidPlayerAnchor or "START") == "END" end,
             }))
         -- The non-obvious half is the empty space: the frame area is sized for all EIGHT
         -- groups so the drag box never resizes under you, so in a five-group raid the left
@@ -1990,7 +1995,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- HORIZONTAL groups stack players vertically (Top/Bottom); VERTICAL groups
         -- stack players horizontally (Left/Right). Values map to START/END. CROSS axis.
         local playerAnchorOptions = { _order = { "START", "END" }, START= CROSS_START, END= CROSS_END }
-        local playerAnchorDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], playerAnchorOptions, db, "raidPlayerAnchor", UpdateFrames), 55)
+        -- ⚠ UpdateFramesAndGates, not UpdateFrames: this key mirrors the anchor grid's wrap
+        -- axis, so the grid has to be re-asked or it keeps showing the pre-flip corner.
+        local playerAnchorDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], playerAnchorOptions, db, "raidPlayerAnchor", UpdateFramesAndGates), 55)
         playerAnchorDrop.tooltip = L["Which end of a group its players fill from. A group with fewer than five players leaves its empty space at the opposite end."]
         
         Add(groupLayoutGroup, nil, 1)
