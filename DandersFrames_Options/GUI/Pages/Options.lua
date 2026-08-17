@@ -1866,7 +1866,20 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         local rowGrowLabel = db.growDirection == "VERTICAL" and L["Columns Grow From"] or L["Rows Grow From"]
         local rowGrowOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
-        groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, rowGrowLabel, rowGrowOptions, db, "raidGroupRowGrowth", UpdateFrames), 55)
+        local rowGrowDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, rowGrowLabel, rowGrowOptions, db, "raidGroupRowGrowth", UpdateFrames), 55)
+        -- ☠ INERT AT 8 GROUPS PER ROW, WHICH IS THE DEFAULT. Both positioners flip the row
+        -- index as `rcIdx = (fullGridRC - 1) - rcIdx`, and both derive fullGridRC from the
+        -- FULL eight groups: `ceil(8 / groupsPerRow)`. At 8 per row that is 1, so the flip is
+        -- the IDENTITY and End renders exactly like Start — correct for a single row, since
+        -- one row cannot grow from either end differently, but the control stayed live and
+        -- said nothing. Reported as "Rows Grow From only applies Start, End doesn't do
+        -- anything", in both growth directions (Aphoex 8) — and both directions are the same
+        -- single-row case, because Columns Grow From is this very key under a swapped label.
+        -- ⚠ Greyed rather than hidden, and deliberately NOT clamped to the populated group
+        -- count: the flip is intentionally over the FULL grid (see the note in
+        -- Features/SecureSort.lua), so with fewer than eight groups End legitimately moves
+        -- them to the bottom of the eight-group grid. Only the one-row case is a true no-op.
+        rowGrowDrop.disableOn = function(d) return (d.raidGroupsPerRow or 8) >= 8 end
 
         -- Players Grow From = the direction players fill the group's main axis.
         -- HORIZONTAL groups stack players vertically (Top/Bottom); VERTICAL groups
