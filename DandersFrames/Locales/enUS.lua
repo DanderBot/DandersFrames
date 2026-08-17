@@ -2062,8 +2062,7 @@ L["The new profile changes which frame modes are enabled. A UI reload is require
 L["The same frame changes, driven by a whole filter"] = true
 L["The spell's own artwork"] = true
 L["Which incoming heals the bar shows: all sources, only yours, or only from others."] = true
-L["Which side of the frame area the groups sit on. The area is always eight groups wide, so Start leaves the gap on the right and End leaves it on the left."] = true
-L["Which end of the frame area the groups sit at. The area is always eight groups tall, so Start leaves the gap below and End leaves it above."] = true
+L["Which side of the frame area the groups sit on. The area is always sized for all eight groups, so the unused space falls on the opposite side."] = true
 L["Which end extra rows of groups stack from. Does nothing while Groups Per Row is 8, because every group is already on one row."] = true
 L["Which end extra columns of groups stack from. Does nothing while Groups Per Column is 8, because every group is already in one column."] = true
 L["Which end of a group its players fill from. A group with fewer than five players leaves its empty space at the opposite end."] = true

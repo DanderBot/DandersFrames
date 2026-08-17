@@ -1716,14 +1716,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     DF:UpdateRaidGroupLabels()
                 end
             end)
-            -- Rebuild the page so orientation-dependent dropdown TITLES refresh
-            -- live (e.g. "Column Order" vs "Row Order", "Columns Grow From" vs
-            -- "Rows Grow From" on the flat grid) without needing
-            -- to reopen the settings window. Dropdowns bake their label at build
-            -- time, so a rebuild is the only way to update it. (Option VALUES are
-            -- now the static "Start (Left/Top)" / "End (Right/Bottom)" form, so
-            -- only the titles need refreshing.) Deferred so it runs after the
-            -- triggering dropdown's own click handler has finished unwinding.
+            -- ☠ REBUILD THE PAGE, AND IT IS NOT OPTIONAL. Orientation decides both the
+            -- dropdown TITLES ("Column Order" vs "Row Order", "Columns Grow From" vs
+            -- "Rows Grow From" on the flat grid) AND their VALUES (Left/Right vs
+            -- Top/Bottom, per the MAIN/CROSS axis note further down). Both are baked at
+            -- build time, so without this rebuild a direction change leaves seven
+            -- dropdowns offering the previous orientation's edges until the window is
+            -- reopened. ⚠ An earlier comment here claimed the values were static
+            -- "Start (Left/Top)" / "End (Right/Bottom)" and only titles needed
+            -- refreshing -- true for a while, false again now. Deferred so it runs after
+            -- the triggering dropdown's own click handler has finished unwinding.
             C_Timer.After(0, function()
                 if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
             end)
@@ -1798,8 +1800,32 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local growOptions = { HORIZONTAL = L["Rows"], VERTICAL = L["Columns"] }
         layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
 
+        -- ☠ EVERY Start/End PAIR ON THIS PAGE SITS ON ONE OF TWO PERPENDICULAR AXES,
+        -- AND WHICH ONE IS NOT GUESSABLE FROM THE CONTROL'S NAME. Get this wrong and the
+        -- dropdown confidently offers "Right" for something that only ever moves up and
+        -- down -- which is precisely how "Rows Grow From is broken" got reported.
+        --   MAIN  = the axis Growth Direction names.        HORIZONTAL -> Left/Right
+        --   CROSS = the perpendicular one, where things wrap. HORIZONTAL -> Top/Bottom
+        -- The assignments, all verified against the positioners (not against the names):
+        --   MAIN  : growthAnchor (party frames), raidGroupAnchor (the group block),
+        --           raidFlatGrowthAnchor (the grid), raidFlatFrameAnchor (flat players,
+        --           which fill ALONG the main axis)
+        --   CROSS : raidGroupRowGrowth (extra rows of groups), raidPlayerAnchor (grouped
+        --           players, which stack ACROSS the main axis inside their group),
+        --           raidFlatColumnAnchor (where the grid wraps)
+        -- ⚠ The two "Players Grow From" controls are on OPPOSITE axes -- flat fills along,
+        -- grouped stacks across. Same label, same START/END values, different direction.
+        -- These were all flattened to one orientation-free "Start (Left/Top)" /
+        -- "End (Right/Bottom)" pair by a wording pass; the page already rebuilds on a
+        -- direction change (OnGrowthDirectionChanged), which is what lets them be live.
+        local isVert = db.growDirection == "VERTICAL"
+        local MAIN_START  = isVert and L["Top"]  or L["Left"]
+        local MAIN_END    = isVert and L["Bottom"] or L["Right"]
+        local CROSS_START = isVert and L["Left"] or L["Top"]
+        local CROSS_END   = isVert and L["Right"] or L["Bottom"]
+
         -- Growth anchor (party only)
-        local anchorOptions = { START= L["Start (Left/Top)"], CENTER= L["Center"], END= L["End (Right/Bottom)"] }
+        local anchorOptions = { START= MAIN_START, CENTER= L["Center"], END= MAIN_END }
         local anchorDropdown = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Frames Grow From"], anchorOptions, db, "growthAnchor", UpdateFrames), 55)
         anchorDropdown.hideOn = function() return GUI.SelectedMode == "raid" end
         
@@ -1858,9 +1884,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Six controls, four of them directional, and their labels already swap with the
         -- growth direction -- so the tooltips have to swap with it too, or half of them
         -- describe the other orientation. The page rebuilds on a direction change
-        -- (OnGrowthDirectionChanged), which is what keeps these in step.
-        local isVert = db.growDirection == "VERTICAL"
-
+        -- (OnGrowthDirectionChanged), which is what keeps these in step. isVert and the
+        -- MAIN_/CROSS_ edge words are declared once with the anchor options above.
         local groupSpacingSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Group Spacing"], -5, 100, 1, db, "raidGroupSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
         groupSpacingSlider.tooltip = isVert and L["Gap between one group and the next down the same column."]
             or L["Gap between one group and the next along the same row."]
@@ -1890,8 +1915,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- groups so the drag box never resizes under you, so in a five-group raid Start
         -- leaves three groups' worth of gap on the far side. That gap is what makes this
         -- control look broken when it is in fact the only one doing anything.
-        groupAnchorDrop.tooltip = isVert and L["Which end of the frame area the groups sit at. The area is always eight groups tall, so Start leaves the gap below and End leaves it above."]
-            or L["Which side of the frame area the groups sit on. The area is always eight groups wide, so Start leaves the gap on the right and End leaves it on the left."]
+        -- ⚠ Deliberately does NOT name the options. They read Left/Right or Top/Bottom
+        -- depending on orientation now, so a tooltip saying "Start" or "End" would be
+        -- describing words that are not on screen.
+        groupAnchorDrop.tooltip = L["Which side of the frame area the groups sit on. The area is always sized for all eight groups, so the unused space falls on the opposite side."]
 
         -- Row/Column Order chooses which END of the grid the SECOND and later rows
         -- (columns) of groups stack from -- "whether additional rows of groups appear
@@ -1901,7 +1928,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- called "Rows Grow From" any more: that name belongs to the control above,
         -- which is what people mean when they say grow-from stopped working.
         local rowOrderLabel = isVert and L["Column Order"] or L["Row Order"]
-        local rowOrderOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
+        local rowOrderOptions = { START= CROSS_START, END= CROSS_END }
         local rowOrderDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, rowOrderLabel, rowOrderOptions, db, "raidGroupRowGrowth", UpdateFrames), 55)
         rowOrderDrop.tooltip = isVert and L["Which end extra columns of groups stack from. Does nothing while Groups Per Column is 8, because every group is already in one column."]
             or L["Which end extra rows of groups stack from. Does nothing while Groups Per Row is 8, because every group is already on one row."]
@@ -1919,8 +1946,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
 
         -- Players Grow From = the direction players fill the group's main axis.
         -- HORIZONTAL groups stack players vertically (Top/Bottom); VERTICAL groups
-        -- stack players horizontally (Left/Right). Values map to START/END.
-        local playerAnchorOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
+        -- stack players horizontally (Left/Right). Values map to START/END. CROSS axis.
+        local playerAnchorOptions = { START= CROSS_START, END= CROSS_END }
         local playerAnchorDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], playerAnchorOptions, db, "raidPlayerAnchor", UpdateFrames), 55)
         playerAnchorDrop.tooltip = L["Which end of a group its players fill from. A group with fewer than five players leaves its empty space at the opposite end."]
         
@@ -2008,19 +2035,21 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local playersPerLabel = db.growDirection == "VERTICAL" and L["Players Per Column"] or L["Players Per Row"]
         playersPerRowSlider = flatGridGroup:AddWidget(GUI:CreateSlider(self.child, playersPerLabel, 1, 40, 1, db, "raidPlayersPerRow", UpdateFlatLayoutFull, UpdateFlatLayoutFull, true), 55)
         
-        local growthAnchorOptions = { START= L["Start (Left/Top)"], CENTER= L["Center"], END= L["End (Right/Bottom)"] }
+        -- MAIN axis: the grid's own direction.
+        local growthAnchorOptions = { START= MAIN_START, CENTER= L["Center"], END= MAIN_END }
         flatGridGroup:AddWidget(GUI:CreateDropdown(self.child, L["Grid Alignment"], growthAnchorOptions, db, "raidFlatGrowthAnchor", UpdateFrames), 55)
 
         -- Columns/Rows Grow From = the direction the grid wraps (secondary axis).
         -- VERTICAL (Columns) wraps left/right; HORIZONTAL (Rows) wraps top/bottom.
         local flatColumnLabel = db.growDirection == "VERTICAL" and L["Columns Grow From"] or L["Rows Grow From"]
-        local flatColumnOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
+        local flatColumnOptions = { START= CROSS_START, END= CROSS_END }
         flatGridGroup:AddWidget(GUI:CreateDropdown(self.child, flatColumnLabel, flatColumnOptions, db, "raidFlatColumnAnchor", UpdateFrames), 55)
 
         -- Players Grow From = the direction players fill the grid's main axis.
         -- HORIZONTAL (Rows) fills Left/Right; VERTICAL (Columns) fills Top/Bottom.
         -- Replaces the old "Reverse Order" checkbox; START/END values are identical.
-        local flatFillOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
+        -- ⚠ MAIN axis -- the OPPOSITE of the grouped Players Grow From, which is CROSS.
+        local flatFillOptions = { START= MAIN_START, END= MAIN_END }
         flatGridGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], flatFillOptions, db, "raidFlatFrameAnchor", UpdateFrames), 55)
         
         flatGridGroup:AddWidget(GUI:CreateSlider(self.child, L["Horizontal Spacing"], -5, 100, 1, db, "raidFlatHorizontalSpacing", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)
