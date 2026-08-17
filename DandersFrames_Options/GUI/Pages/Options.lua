@@ -2000,9 +2000,34 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- HORIZONTAL groups stack players vertically (Top/Bottom); VERTICAL groups
         -- stack players horizontally (Left/Right). Values map to START/END. CROSS axis.
         local playerAnchorOptions = { _order = { "START", "END" }, START= CROSS_START, END= CROSS_END }
-        -- ⚠ UpdateFramesAndGates, not UpdateFrames: this key mirrors the anchor grid's wrap
-        -- axis, so the grid has to be re-asked or it keeps showing the pre-flip corner.
-        local playerAnchorDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], playerAnchorOptions, db, "raidPlayerAnchor", UpdateFramesAndGates), 55)
+        -- ☠ FLIPPING THIS MUST NOT MOVE THE BLOCK, AND THAT IS WHY IT WRITES TWO KEYS.
+        -- raidPlayerAnchor mirrors the WRAP axis in the positioners (the group anchors to
+        -- the far corner and the wrap offset is measured back from it), so changing it
+        -- slid the whole raid to the other end of the reserved grid -- a control named
+        -- "Players Grow From" reaching well outside a group. Decoupling them in the
+        -- positioners would move existing users' frames and is not on the table, so the
+        -- compensation lives here: invert the stored wrap key at the same moment, and the
+        -- corner Groups Anchor names stays exactly where it was while only the gap inside
+        -- a partial group moves. The two controls become independent from the user's side
+        -- without a single line of geometry changing.
+        --
+        -- ⚠ ONLY WHEN THE WRAP AXIS CAN BE SEEN. At 8 before wrap there is one row, the
+        -- mirror has nowhere to move anything, and inverting the key would silently flip a
+        -- value whose effect only appears later when the slider drops below 8.
+        -- ⚠ A write triggered by another write is a pattern this addon has been bitten by
+        -- three times, so: this runs ONLY from this dropdown's own click handler. It never
+        -- fires at load, on a profile switch or on import, so no existing setup changes on
+        -- its own -- which is the whole reason it is safe to do here and not in a migration.
+        local function SetPlayerAnchorKeepingBlock(v)
+            local prev = db.raidPlayerAnchor or "START"
+            db.raidPlayerAnchor = v
+            if prev ~= v and (db.raidGroupsPerRow or 8) < 8 then
+                db.raidGroupRowGrowth = (db.raidGroupRowGrowth == "END") and "START" or "END"
+            end
+        end
+        -- ⚠ UpdateFramesAndGates, not UpdateFrames: this rewrites the wrap key, so the
+        -- anchor grid has to be re-asked or it keeps showing the pre-flip corner.
+        local playerAnchorDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], playerAnchorOptions, db, "raidPlayerAnchor", UpdateFramesAndGates, nil, SetPlayerAnchorKeepingBlock), 55)
         playerAnchorDrop.tooltip = L["Which end of a group its players fill from. A group with fewer than five players leaves its empty space at the opposite end."]
         
         Add(groupLayoutGroup, nil, 1)
