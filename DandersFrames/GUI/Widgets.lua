@@ -2015,9 +2015,9 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
     -- occurs transposed, and vice versa, but the table carries all nine so neither
     -- orientation can fall through to an empty string.
     local CAPTION = {
-        START  = { START = L["Top left"],    CENTER = L["Top center"],    END = L["Top right"] },
-        CENTER = { START = L["Center left"], CENTER = L["Center"],        END = L["Center right"] },
-        END    = { START = L["Bottom left"], CENTER = L["Bottom center"], END = L["Bottom right"] },
+        START  = { START = L["Top Left"],    CENTER = L["Top Center"],    END = L["Top Right"] },
+        CENTER = { START = L["Center Left"], CENTER = L["Center"],        END = L["Center Right"] },
+        END    = { START = L["Bottom Left"], CENTER = L["Bottom Center"], END = L["Bottom Right"] },
     }
     -- When the wrap axis is inert there is only one real choice being made, so the caption
     -- names just that one. "Top center" at 8 groups before wrap described a corner that
@@ -2106,12 +2106,21 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
         local curWrap  = dbTable[keyV] or "START"
         -- Display-only collapse: a stored value stays stored, it just cannot be shown.
         local shownWrap = self.wrapInert and "START" or self:WrapKey(curWrap)
+        -- ⚠ HIDDEN, not dimmed. These cells are empty rectangles, so a 0.35 alpha on a dark
+        -- panel is nearly indistinguishable from a live one -- the dead half read as
+        -- selectable and got clicked. Hiding is also the honest picture: at 8 groups before
+        -- wrap there IS only one row of slots, so the control should show one row.
         for _, b in ipairs(cells) do
             local dead = self.wrapInert and b.screenWrap == "END"
+            b:SetShown(not dead)
             b:SetActive(not dead and b.align == curAlign and b.screenWrap == shownWrap)
-            b:SetAlpha(dead and 0.35 or 1)
             b:EnableMouse(not dead)
         end
+        -- Shrink the recessed track to the cells that remain, or it frames a phantom row.
+        local liveCols = (self.wrapInert and transposed) and 1 or #COLS
+        local liveRows = (self.wrapInert and not transposed) and 1 or #ROWS
+        grid:SetSize(liveCols * CELL_W + (liveCols + 1) * GUTTER,
+                     liveRows * CELL_H + (liveRows + 1) * GUTTER)
         -- The caption names the SCREEN position, so it reads off the row/column the live
         -- cell actually sits in -- never off the keys, which swap axes when transposed.
         if self.wrapInert then
