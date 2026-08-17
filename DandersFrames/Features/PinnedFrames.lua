@@ -4100,7 +4100,13 @@ end
 -- those are entry-only concerns.
 function PinnedFrames:RefreshTestMode(withLayout)
     if not self.testModeActive then return end
-    if InCombatLockdown() then return end
+    -- ☠ NO COMBAT GUARD, DELIBERATELY. There was one, and it bought nothing while costing
+    -- the feature: every frame this touches is a plain non-secure Button under UIParent,
+    -- and BOTH callers — DF:RefreshTestFrames and DF:RefreshTestFramesWithLayout — refresh
+    -- the main party/raid pools in combat with no guard at all. Nothing in the regen drain
+    -- replayed it either, so a settings edit made with test mode up in combat froze the
+    -- pinned previews while the main ones tracked it, and they stayed frozen until test
+    -- mode was toggled out of combat. (Audit, 2026-08-17.)
 
     local isRaidMode
     if DF.raidTestMode then
@@ -4143,6 +4149,22 @@ end
 -- manipulation needed — Test Mode never touched them.
 function PinnedFrames:ExitTestMode()
     if InCombatLockdown() then
+        -- ☠☠ HIDE THE PREVIEW *NOW*; ONLY THE SECURE HALF MAY BE DEFERRED. This used to
+        -- return outright, and the one thing in this function that actually needs lockdown
+        -- protection is `self.headers[setIndex]:Show()` on a secure group header. The test
+        -- frames and their containers are plain CreateFrame Buttons/Frames under UIParent
+        -- (see CreatePlayerTestFrame / EnsureTestContainer) — hiding them in combat is
+        -- legal, and the main party/raid pools are hidden inline on this very path.
+        -- The consequence of the blanket return: combat ends test mode, the main preview
+        -- vanishes, and the FAKE PINNED FRAMES STAY ON SCREEN OVER THE LIVE UI for the
+        -- whole fight. (Audit, 2026-08-17.)
+        for setIndex = 1, PinnedFrames.MAX_SETS do
+            self:HidePlayerTestFrames(setIndex)
+        end
+        -- ⚠ Hiding is not enough on its own: the Aura Designer parents its indicators to
+        -- UIParent, so they outlive the frame. TeardownTestFrameVisuals owns that teardown
+        -- for every pool including these, and its own header says it is combat-safe.
+        if DF.TeardownTestFrameVisuals then DF:TeardownTestFrameVisuals() end
         -- The global test flags may already be off (HideTestFrames runs in
         -- combat) — if we just drop this, testModeActive sticks true and
         -- Hide-from-Main + the solo gate stay disabled until /reload. Queue a

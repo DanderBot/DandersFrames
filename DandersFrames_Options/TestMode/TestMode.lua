@@ -2167,6 +2167,18 @@ function DF:TeardownTestFrameVisuals()
     if DF.testRaidFrames then
         for i = 1, 40 do cleanFrame(DF.testRaidFrames[i]) end
     end
+    -- ☠ AND THE PINNED POOLS — the paragraph above is about them too and they were the one
+    -- set it never reached. Pinned test frames run the same AD preview, so their indicators
+    -- are parented to UIParent by the same mechanism and survive the frame being hidden.
+    -- The pools are per-set and sparse, so walk what exists rather than a fixed range.
+    if DF.PinnedFrames and DF.PinnedFrames.testFrames then
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
+            local pool = DF.PinnedFrames.testFrames[setIndex]
+            if pool then
+                for _, f in pairs(pool) do cleanFrame(f) end
+            end
+        end
+    end
 
     if DF.HideAllTestPetFrames then DF:HideAllTestPetFrames() end
     if DF.HideAllTestRaidPetFrames then DF:HideAllTestRaidPetFrames() end
