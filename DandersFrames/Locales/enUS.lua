@@ -1773,6 +1773,7 @@ L["Unit Selection"] = true
 L["Unlock this layout's frames to drag them. Changes save to this layout."] = true
 L["Unlock to Move"] = true
 L["Units at or above this health percent are faded."] = true
+L["Units Per Column"] = true
 L["Units Per Row"] = true
 L["Unknown"] = true
 L["Unknown error"] = true
