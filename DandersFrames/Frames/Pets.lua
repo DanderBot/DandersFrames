@@ -201,7 +201,10 @@ function DF:CreatePetFrame(unit, ownerFrame, isRaid, track)
     -- border at +2 happens to clear it. That is luck, not design: level the health bar
     -- for any reason and the border silently disappears, which is precisely what
     -- happened on the unit frame in alpha 15. Pin it above the whole bar stack.
-    frame.border = DF.Border:New(frame, { frameLevelOffset = 10 })
+    -- Same +14 as the unit frame (Frames/Create.lua CreateFrameBorder, which carries the
+    -- measured band and why it is 14, not 10). Kept identical so the two cannot drift:
+    -- the +10 they shared was buried by the bar band as it grew.
+    frame.border = DF.Border:New(frame, { frameLevelOffset = 14 })
     
     -- Name text — do NOT use SetFont() directly; use SetFontObject so that
     -- later SafeSetFont calls with font families can properly override
@@ -343,7 +346,10 @@ function DF:CreateTestPetFrame(unit, ownerTestFrame, isRaid)
     -- border at +2 happens to clear it. That is luck, not design: level the health bar
     -- for any reason and the border silently disappears, which is precisely what
     -- happened on the unit frame in alpha 15. Pin it above the whole bar stack.
-    frame.border = DF.Border:New(frame, { frameLevelOffset = 10 })
+    -- Same +14 as the unit frame (Frames/Create.lua CreateFrameBorder, which carries the
+    -- measured band and why it is 14, not 10). Kept identical so the two cannot drift:
+    -- the +10 they shared was buried by the bar band as it grew.
+    frame.border = DF.Border:New(frame, { frameLevelOffset = 14 })
 
     -- Name text — do NOT use SetFont() directly; use SafeSetFont or SetFontObject
     -- so that later SafeSetFont calls with font families can properly override
@@ -511,8 +517,32 @@ function DF:SetPetFrameVisible(frame, visible)
         frame.dfPetHidden = false
         -- Set to 1 so range system can take over (don't compare current alpha - it may be secret)
         frame:SetAlpha(1)
+        -- ☠ RE-DERIVE THE Z-ORDER AT SHOW TIME, from the owner's CURRENT level. The
+        -- #1047 elevation (owner level + 15, clearing neighbours' bound fills) is
+        -- applied in ApplyPetFrameStyle -- but on the FIRST test entry of a session the
+        -- pet is styled in the same tick its owner frame is being built, so the style
+        -- pass captures a pre-layout owner level and the pet sits under neighbouring
+        -- health fills until something re-styles it. Second entry and any settings
+        -- change re-ran the style from the final level, which is exactly the field
+        -- report ("will fix the second time test mode is enabled or a frame is updated
+        -- by changing a setting"; toggles inside test mode showed/hid without
+        -- re-styling, so they never updated it either -- this covers them too, because
+        -- they route through here). Deriving at every SHOW makes the ordering
+        -- irrelevant: the level is read from what the owner IS, not what it was when
+        -- the pet was styled. Idempotent for live pets -- same formula
+        -- ApplyPetFrameStyle applies.
+        -- ⚠ Inside the lockdown guard, like its twin in ApplyPetFrameStyle: pet frames
+        -- are SecureUnitButtons, and this is the combat-tolerant path -- everything
+        -- else in it is alpha-only or guarded. UNIT_HEALTH re-shows every pet in a
+        -- raid, so an unguarded protected write here would be a per-event storm.
+        -- Method refs, not a closure: this runs per show on a hot path.
         -- Also try to show if not in combat (for proper click targeting)
         if not InCombatLockdown() then
+            local owner = frame.ownerFrame
+            if owner then
+                pcall(frame.SetFrameStrata, frame, owner:GetFrameStrata())
+                pcall(frame.SetFrameLevel, frame, owner:GetFrameLevel() + 15)
+            end
             frame:Show()
         else
             DF:Debug("PET", "SetPetFrameVisible: %s wants SHOW but InCombatLockdown - using alpha only", frame.unit or "?")

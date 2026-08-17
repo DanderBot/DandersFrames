@@ -284,18 +284,25 @@ local function BuildDirectDebuffFilters(db, claimed)
 
     -- Negation suffix for a group, given which higher-priority token filters
     -- apply to it. ALL-mode dispel dedups via excludeDispelTypes (see cfFor).
-    -- Token precedence among the NON-important records is dispel > CC > raid, so only
-    -- those two exclusions are ever needed. There is deliberately no raid exclusion:
-    -- raid is the last token record, and the important records above no longer negate
-    -- anything (they subtract via candidateFilters instead — see IMPORTANT-FIRST
-    -- PRECEDENCE below), so nothing is left that would need to exclude it.
-    local function neg(excludeDispel, excludeCC)
+    -- Token precedence among the NON-important records is dispel > CC > raid >
+    -- non-player, so each record excludes the ones above it.
+    -- ☠ THE RAID EXCLUSION IS NOT OPTIONAL ANY MORE, and the comment that used to sit
+    -- here said it was ("raid is the last token record, so nothing needs to exclude
+    -- it"). That was true when it was written and stopped being true the moment the
+    -- NON-PLAYER record was added below it — see that record's own note. Every
+    -- exclusion is keyed on the CONFIG flag, not on the record existing: a category
+    -- claimed by an Aura Designer group is shown there instead, so subtracting it
+    -- here is the dedup working, not a leak.
+    local function neg(excludeDispel, excludeCC, excludeRaid)
         local s = ""
         if excludeDispel then
             if playerMode then s = s .. "|!" .. dispelToken
             elseif anyToken then s = s .. "|!" .. anyToken end
         end
         if excludeCC and ccToken then s = s .. "|!" .. ccToken end
+        -- "RAID" is negatable (only INCLUDE_NAME_PLATE_ONLY and MAW are not —
+        -- AuraUtil.AuraFilters / IsValidFilterString).
+        if excludeRaid and raidOn then s = s .. "|!RAID" end
         return s
     end
     -- candidateFilters for one record. Hands each record its OWN table (extra
@@ -391,8 +398,21 @@ local function BuildDirectDebuffFilters(db, claimed)
     -- ⚠ No claim key yet: an Aura Designer group cannot claim this category, so the
     -- record always builds when the option is on. Add one beside the others if a group
     -- ever needs to take it over.
+    -- ☠☠ IT MUST NEGATE THE TOKEN RECORDS ABOVE IT, and for its first months it did not.
+    -- Every other record in this function subtracts its higher-precedence siblings;
+    -- this one shipped as a bare "HARMFUL" plus one candidate boolean, so ANY mob-cast
+    -- debuff that was also dispellable / crowd-control / raid-flagged rendered TWICE —
+    -- once here and once in that record. There is NO cross-group dedup in the engine
+    -- (each AddAuraGroup parses the whole pool independently), so overlapping filters
+    -- are the only thing standing between a config and double-rendered icons.
+    -- Field shape: trash packs applying poison and disease (both dispellable, both
+    -- mob-cast) filled the row with pairs of identical icons and blew past the row's
+    -- Max Debuffs, because that cap is PER GROUP — 4 categories x 3 = up to 12
+    -- (Beans, 5.2.0-alpha.1, Vaults of Atal'Ulek and delves).
+    -- ⚠ In ALL-mode dispel the exclusion rides cfFor's excludeDispelTypes instead, so
+    -- neg's dispel half is correctly inert there — the two paths must not double up.
     if db.debuffFilterNonPlayer then
-        filters[#filters + 1] = { filter = "HARMFUL", key = "nonplayer",
+        filters[#filters + 1] = { filter = "HARMFUL" .. neg(true, true, true), key = "nonplayer",
                                   candidateFilters = cfFor(false,
                                       notImportant({ isFromPlayerOrPlayerPet = false })) }
     end
@@ -796,9 +816,9 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
     -- know the total, so absolute-seconds bands are the 12.1 equivalent.)
     if hideAboveT or colorByTime or alertT then
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
-        -- %d throughout, matching the plain path and Blizzard's Truncate: %.0f rounds to
-        -- NEAREST, so 152s rendered "3m" and 3599s rendered "60m" one tick before flipping
-        -- to "1h".
+        -- %d throughout, matching the plain path: %.0f rounds to NEAREST, so 152s
+        -- rendered "3m" and 3599s rendered "60m" one tick before flipping to "1h".
+        -- (Rounding itself rides the breakpoint/component fields, not the directive.)
         local secFmt = (format == "SHORT" and "%ds") or (format == "FULL" and "%d Seconds")
                         or (format == "TIMER" and "%d") or "%d"
         local minFmt = (format == "FULL") and "%d Minutes" or "%dm"
@@ -826,11 +846,18 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
                                -- can be composed out of order; the pre-alert code
                                -- always emitted ascending, so keep that guarantee)
             -- Highest threshold <= remaining seconds wins.
+            -- ☠ Seconds-shaped bands (no components) round UP — a countdown's digit
+            -- means "at most this many seconds remain", so ceil gives each digit
+            -- exactly one second and the text ends "3, 2, 1, gone". The old floor +
+            -- min=1 pair clamped the sub-1s floor of 0 back to 1, so "1" rendered
+            -- for TWO seconds (field report). Component bands keep floor at the
+            -- breakpoint: their quotient rounding lives on the component itself.
             local function add(threshold, fstr, hex, components)
                 if colorByTime and hex then fstr = "|cff" .. hex .. fstr .. "|r" end
                 if glyphPfx and threshold < alertT then fstr = glyphPfx .. fstr end
                 cuts[threshold] = true
-                bands[#bands + 1] = { threshold = threshold, step = 1, rounding = down,
+                bands[#bands + 1] = { threshold = threshold, step = 1,
+                                      rounding = components and down or up,
                                       min = 1, format = fstr, components = components }
             end
             if alertMode == "TEXT" then
@@ -911,8 +938,11 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
         if not (C_StringUtil and C_StringUtil.CreateNumericRuleFormatter and Enum and Enum.NumericRuleFormatRounding) then return nil end
         local ok, f = pcall(function()
             local down = Enum.NumericRuleFormatRounding.Down
+            local up   = Enum.NumericRuleFormatRounding.Up
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
-            fmt:AddBreakpoint({ threshold = 0,    step = 1, rounding = down, min = 1, format = "%d" })
+            -- Seconds band CEILS (see the NUMBER branch): the countdown must end
+            -- "3, 2, 1, gone", and floor + min=1 held the "1" for two seconds.
+            fmt:AddBreakpoint({ threshold = 0,    step = 1, rounding = up, min = 1, format = "%d" })
             fmt:AddBreakpoint({ threshold = PROMOTE_MIN, step = 1, rounding = down, format = "%d:%02d",
                                 components = { { div = 60 }, { mod = 60 } } })
             fmt:AddBreakpoint({ threshold = PROMOTE_HOUR, step = 1, rounding = down, format = "%dh",
@@ -932,8 +962,13 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
             local down = Enum.NumericRuleFormatRounding.Down
             local up   = Enum.NumericRuleFormatRounding.Up
             local fmt = C_StringUtil.CreateNumericRuleFormatter()
-            -- Seconds band truncates: 45.6s remaining is "45", same as the game.
-            fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = down, min = 1, format = "%d" })
+            -- ☠ Seconds band CEILS, deliberately (field report: "3, 2, 1, 1, gone").
+            -- A countdown digit means "at most this many seconds remain": ceil shows
+            -- each digit for exactly one second and the text vanishes AT expiry. The
+            -- old floor ("45.6 is 45, like the game") + min=1 clamp made the sub-1s
+            -- floor of 0 render as a SECOND "1" — the lingering last second. min=1
+            -- stays as a guard against an exact-0.0 sample flashing "0".
+            fmt:AddBreakpoint({ threshold = 0, step = 1, rounding = up, min = 1, format = "%d" })
             -- ☠ THE QUOTIENT ROUNDS UP, and that is Blizzard's behaviour, not a preference.
             -- Their formatter sets SetCanRoundUpLastUnit(true), so 2m32s reads "3m" and
             -- 1h03m reads "63m" -- odd-looking, but it is what the game's own frames show,
@@ -966,13 +1001,16 @@ local function BuildDurationFormatter(format, hideAboveT, colorByTime, alertMode
         curve:AddPoint(1 + mult * SECONDS_PER_HOUR, Enum.SecondsFormatterInterval.Hours)
         curve:AddPoint(1 + mult * SECONDS_PER_DAY,  Enum.SecondsFormatterInterval.Days)
         fmt:SetDefaultAbbreviation(abbrev)
-        -- ☠ THE TWO CALLS THIS PATH USED TO OMIT. Blizzard's own aura formatter sets
-        -- both; without them a SecondsFormatter defaults to SecondsFormatterRounding
-        -- .RoundUp (enum 0 — and Blizzard setting Truncate explicitly is itself evidence
-        -- the default is not Truncate), so 44.6s remaining rendered "45s" here while the
-        -- game's frames rendered "44s". Guarded: the setters are newer than the type.
+        -- ☠ Rounding is RoundUp, a DELIBERATE break from Blizzard's aura formatter
+        -- (theirs sets Truncate; an earlier cut copied that for parity, so 44.6s read
+        -- "44s" like the game). Reversed with the countdown fix: every DF seconds
+        -- display now ceils — a digit means "at most this many seconds remain", each
+        -- digit holds exactly one second and the text ends "3s, 2s, 1s, gone" instead
+        -- of Truncate's lingering last digit. This also keeps SHORT/FULL agreeing
+        -- with NUMBER at every instant (mixed formats on one frame never differ by 1).
+        -- Guarded: the setters are newer than the type.
         if fmt.SetRounding and Enum.SecondsFormatterRounding then
-            fmt:SetRounding(Enum.SecondsFormatterRounding.Truncate)
+            fmt:SetRounding(Enum.SecondsFormatterRounding.RoundUp)
         end
         if fmt.SetCanRoundUpLastUnit then fmt:SetCanRoundUpLastUnit(true) end
         fmt:SetMinInterval(Enum.SecondsFormatterInterval.Seconds)
@@ -3046,10 +3084,24 @@ end
 -- Non-aura visibility for the missing-buff strip: the badge must never claim
 -- "missing" on a corpse / offline / out-of-range / unassistable unit. All
 -- non-secret reads; range mirrors the legacy issecretvalue guard. DELIBERATE
--- change vs legacy: no UnitIsPlayer — legacy excluded NPC group members because
--- its aura SCAN couldn't check them, but raid buffs are castable on
+-- change vs legacy: no UnitIsPlayer on GROUP frames — legacy excluded NPC group
+-- members because its aura SCAN couldn't check them, but raid buffs are castable on
 -- follower-dungeon NPCs (Krathe-verified) and the read-free widget works on any
 -- assistable unit. Pets stay excluded (pet frames don't run this feature).
+--
+-- ☠☠ THE PLAYERS-ONLY TERM IS SCOPED TO PINNED FRAMES, AND MUST STAY THAT WAY.
+-- It arrived unscoped and killed the feature outright in follower dungeons: every
+-- party member there is an NPC, so the strip hid on all of them and showed only on
+-- your own frame -- reported by Aur0r4 on 5.1.3 with a fresh profile, confirmed by
+-- Krathe in a follower dungeon. The bug it was fixing is real but NARROWER than the
+-- code it shipped as: a story-mode companion on a PINNED frame nagging about class
+-- raid buffs nobody can give it, which is exactly how the changelog scoped it
+-- ("(Pinned Frames) Story-mode NPC companions ..."). The paragraph above is the
+-- older claim and it was the correct one; the unscoped term was added beneath it
+-- without reconciling the two, so for a build the file argued with itself.
+-- ⚠ Residual, accepted: a story companion occupying a real PARTY slot rather than a
+-- pinned frame can still nag. A useless icon is cosmetic; a dead feature in every
+-- follower dungeon is not.
 --
 -- ☠ SPLIT OUT of DriveMissingBuffFactory on purpose. The drive only runs from
 -- RefreshFactoryRows, which fires on an aura-LAYOUT bump (a settings change) and
@@ -3074,12 +3126,14 @@ function DF:RefreshMissingBuffVisibility(frame)
         -- group is empty and every badge sits parked in its window.
         visible = true
     else
-        -- ☠ PLAYERS ONLY (#1046/S7): a missing CLASS raid buff is meaningless on
-        -- an NPC, but a story-mode companion passes every other term here
-        -- (assistable, alive — and UnitIsConnected can read secret-truthy on
-        -- such units, sailing through the `and` chain), so pinned NPCs nagged
-        -- about buffs nobody can give them.
-        visible = unit and UnitExists(unit) and UnitIsPlayer(unit)
+        -- ☠ PLAYERS ONLY ON PINNED FRAMES (#1046/S7) — see the header. A story-mode
+        -- companion passes every other term here (assistable, alive — and
+        -- UnitIsConnected can read secret-truthy on such units, sailing through the
+        -- `and` chain), so pinned NPCs nagged about buffs nobody can give them.
+        -- ☠ DO NOT DROP THE isPinnedFrame SCOPE. Unscoped, this term hides the strip
+        -- on every follower-dungeon party member, because they are all NPCs.
+        visible = unit and UnitExists(unit)
+            and (not frame.isPinnedFrame or UnitIsPlayer(unit))
             and not UnitIsDeadOrGhost(unit) and UnitIsConnected(unit)
             and not frame.isPetFrame and UnitCanAssist("player", unit)
         if visible then

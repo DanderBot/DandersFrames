@@ -317,6 +317,7 @@ local function ShowBuffCoexistPopup(onConfirm, onCancel)
         title:SetPoint("TOP", 0, -12)
         title:SetText(L["Aura Designer"])
         title:SetTextColor(tc.r, tc.g, tc.b)
+        f._title = title
 
         local desc = f:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
         desc:SetPoint("TOP", title, "BOTTOM", 0, -6)
@@ -354,6 +355,21 @@ local function ShowBuffCoexistPopup(onConfirm, onCancel)
 
     local f = S.buffCoexistPopup
     f._onCancel = onCancel
+
+    -- ☠ RE-THEME ON EVERY SHOW. The popup is a singleton built on first use, and the
+    -- three theme-coloured pieces above (border, stripe, title) were written once at
+    -- CREATION -- so it kept the accent of whichever mode tab happened to open it first
+    -- and wore party orange in raid for the rest of the session: "the text box inherits
+    -- the color of the tab it was first enabled at the start of the session or after a
+    -- reload" (Aphoex, 2026-08-14). The mode tabs recolour their own widgets through
+    -- ThemeListeners; a UIParent-parented singleton has no such parent to listen to, so
+    -- it has to re-read the theme itself.
+    -- ⚠ Through ApplyBackdrop, not a raw SetBackdropBorderColor: it caches the last
+    -- colour it wrote, and a raw write would leave that cache lying about the border.
+    local tc = GetThemeColor()
+    ApplyBackdrop(f, nil, {r = tc.r, g = tc.g, b = tc.b, a = 1})
+    if f._stripe then f._stripe:SetColorTexture(tc.r, tc.g, tc.b, 0.8) end
+    if f._title then f._title:SetTextColor(tc.r, tc.g, tc.b) end
 
     f.keepBtn:SetScript("OnClick", function()
         f:Hide()
@@ -702,6 +718,9 @@ local function PoolTrackedIDs(adDB, which)
     local out = {}
     if type(adDB) ~= "table" then return out end
     local function addIDs(spec, auraName)
+        -- ☠ Full union on purpose — see the matching note in Cards.lua's
+        -- IsCandidateCrossBlocked. This is cross-pool duplicate detection, which is a
+        -- question about the aura; per-indicator mutes narrow what one PLACEMENT renders.
         local f = DF:BuildADIdentityFilters(spec, auraName)
         local map = f and f.includeSpellIDs
         if map then
@@ -854,17 +873,25 @@ local function EnsureTypeConfig(auraName, typeKey, pool)
                 BorderColor = {r = 1, g = 1, b = 1, a = 1},
                 drawAboveFrameBorder = true,
                 showWhenMissing = false,
+                pandemicColorEnabled = false,
+                pandemicColor = {r = 1, g = 0.5, b = 0, a = 1},
             }
         elseif typeKey == "healthbar" then
             auraCfg[typeKey] = {
                 mode = "Replace", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
                 tintWholeBar = false,
                 showWhenMissing = false,
+                -- Second colour shown inside the engine's refresh window. Health bar
+                -- only — the background band has no spare level to draw it over.
+                pandemicColorEnabled = false,
+                pandemicColor = {r = 1, g = 0.5, b = 0, a = 1},
             }
         elseif typeKey == "background" then
             auraCfg[typeKey] = {
                 mode = "Tint", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
                 showWhenMissing = false,
+                pandemicColorEnabled = false,
+                pandemicColor = {r = 1, g = 0.5, b = 0, a = 1},
             }
         elseif typeKey == "nametext" then
             auraCfg[typeKey] = {
@@ -1238,15 +1265,21 @@ local TYPE_DEFAULTS = {
         -- keys that no longer exist -- it was heading showWhenMissing, which is
         -- unrelated.)
         showWhenMissing = false,
+        pandemicColorEnabled = false,
+        pandemicColor = {r = 1, g = 0.5, b = 0, a = 1},
     },
     healthbar = {
         mode = "Replace", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
         tintWholeBar = false,
         showWhenMissing = false,
+        pandemicColorEnabled = false,
+        pandemicColor = {r = 1, g = 0.5, b = 0, a = 1},
     },
     background = {
         mode = "Tint", color = {r = 1, g = 1, b = 1, a = 1}, blend = 0.5,
         showWhenMissing = false,
+        pandemicColorEnabled = false,
+        pandemicColor = {r = 1, g = 0.5, b = 0, a = 1},
     },
     nametext = {
         color = {r = 1, g = 1, b = 1, a = 1},

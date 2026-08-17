@@ -413,6 +413,7 @@ DF.COMMAND_SIBLINGS = {
     -- "checked, takes nothing" where a missing key says nothing at all.
     idgate    = {},
     guiwidth  = {},
+    adpin     = {},
     gapcheck  = { "all", "clear" },
     -- (Removed) pixelcheck = {}. Unlike those two it was never looked up at all -- no
     -- Siblings("pixelcheck") call exists -- so it was an entry for a question nobody
@@ -800,8 +801,8 @@ function DF:LightweightUpdateFrameSize(force)
 
         local frameWidth = db.frameWidth or 120
         local frameHeight = db.frameHeight or 50
-        local padding = db.framePadding or 0
-        
+        -- (the framePadding read moved into DF:AnchorHealthBarsToPadding with its only user)
+
         -- ☠ SetSize IS PROTECTED ON A SECURE HEADER CHILD. Party frames are
         -- SecureUnitButtonTemplate children of a secure header, so resizing one in
         -- combat raises a blocked-action error -- once per frame. This was only ever
@@ -819,11 +820,12 @@ function DF:LightweightUpdateFrameSize(force)
             if not (skipResize and frame.dfIsHeaderChild) then
                 frame:SetSize(frameWidth, frameHeight)
             end
-            if frame.healthBar then
-                frame.healthBar:ClearAllPoints()
-                frame.healthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
-                frame.healthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
-            end
+            -- Shared with ApplyFrameLayout and the test-mode update (see
+            -- DF:AnchorHealthBarsToPadding). This copy also re-anchored the health bar
+            -- ONLY, so during a width/padding slider drag the missing-health overlay sat
+            -- at the old inset until the next full layout pass; the shared version moves
+            -- both, which is what the live update path has always done.
+            DF:AnchorHealthBarsToPadding(frame, db)
             -- Update resource bar width to match new frame size
             if db.resourceBarMatchWidth and frame.dfPowerBar and DF.ApplyResourceBarLayout then
                 DF:ApplyResourceBarLayout(frame)
@@ -1107,18 +1109,33 @@ function DF:SafeSetStatusBarTexture(bar, path, stock)
 end
 
 -- Plain Texture region with stock fallback (same semantics).
+--
+-- ☠ ONE SetTexture, with the wrap resolved UP FRONT. This used to set the file
+-- plain and then let ApplyTextureTiling re-set it with wrap args -- two sets on
+-- the same region in the same frame. On a FRESH session (file not yet in the
+-- texture cache) that pair misbehaved: the settings preview swatch could keep
+-- showing the previously-selected texture after picking a tiled one, until a
+-- panel reopen re-issued the set against a now-cached file (#1071, absorb /
+-- heal-absorb dropdowns, aphoex 5.2.0-alpha.2). Whether the second set restarted
+-- the pending load or the client deduped it, the cure is the same: never issue
+-- two. Resolve the tiling mode first, set once with its wrap, then let
+-- ApplyTextureTiling apply the flags only.
 function DF:SafeSetTexture(region, path, stock)
     if not region then return end
+    local applied, ok = path, true
     if textureKnown(path) == false then
-        local fallback = stock or DF.STOCK_BAR_TEXTURE
-        region:SetTexture(fallback)
+        applied = stock or DF.STOCK_BAR_TEXTURE
         warnMissingTexture(path)
-        DF:ApplyTextureTiling(region, fallback)
-        return false
+        ok = false
     end
-    region:SetTexture(path)
-    DF:ApplyTextureTiling(region, path)
-    return true
+    local mode = DF:GetBarTextureTiling(applied)
+    if mode and DF.TileWrapArgs then
+        region:SetTexture(applied, DF.TileWrapArgs(mode))
+    else
+        region:SetTexture(applied)
+    end
+    DF:ApplyTextureTiling(region, applied, true)
+    return ok
 end
 
 -- ============================================================
@@ -1291,6 +1308,9 @@ local function tileWrapArgs(mode)
     return (mode == "BOTH" or mode == "HORIZ") and "REPEAT" or "CLAMP",
            (mode == "BOTH" or mode == "VERT")  and "REPEAT" or "CLAMP"
 end
+-- Published for SafeSetTexture, which is defined ABOVE this local and needs the
+-- wrap args on its one and only SetTexture (see the note there).
+DF.TileWrapArgs = tileWrapArgs
 
 -- Apply the tiling mode a texture asks for to a StatusBar's CURRENT fill.
 -- Sets both flags EXPLICITLY either way, so a bar switched from a tiled texture
@@ -1339,14 +1359,17 @@ end
 -- Same, for a plain Texture region (backgrounds, GUI preview swatches). Sets the
 -- tile flags only — deliberately NOT the texcoords, because arbitrary regions may
 -- be cropping on purpose and a StatusBar fill is the only one we fully own.
-function DF:ApplyTextureTiling(region, path)
+function DF:ApplyTextureTiling(region, path, wrapAlreadySet)
     if not (region and region.SetHorizTile) then return false end
     local mode = DF:GetBarTextureTiling(path)
     -- Same wrap-with-the-file rule as ApplyBarTextureTiling above, unstamped:
     -- every caller here runs right after its own SetTexture (which clamps), and
     -- none is a per-update re-assert, so re-issuing the set is always both
     -- necessary and cheap.
-    if mode and region.SetTexture then
+    -- ⚠ EXCEPT SafeSetTexture, which now sets the file WITH its wrap in one call
+    -- and passes wrapAlreadySet: a second set on a fresh-session uncached file is
+    -- what left the preview swatch on the previous texture (#1071). Flags only.
+    if mode and region.SetTexture and not wrapAlreadySet then
         region:SetTexture(path, tileWrapArgs(mode))
     end
     region:SetHorizTile(mode == "BOTH" or mode == "HORIZ")
@@ -3843,11 +3866,63 @@ function DF:MigrateHealthColorStops()
     end
 end
 
--- Fold the legacy per-element OOR name-text alpha into the unified oorTextAlpha.
--- The Text Designer now renders all unit text, so a single OOR "Text Alpha" dims
--- every TD element out of range. Carry the user's old name-text value only when
--- they changed it from the prior default (1); default-config users get the new
--- oorTextAlpha default instead. Per-profile guarded so later oorTextAlpha edits stick.
+-- Drop the heal prediction under the absorb on profiles that stored the old default.
+-- ⚠ The five lines that used to open this block described MigrateOORTextAlpha (the OOR
+-- name-text fold), which lives BELOW this function — the doc was orphaned onto its new
+-- neighbour when this one was inserted above it. That function carries its own, fuller
+-- comment; this is not a deletion of documentation, it is the removal of a duplicate
+-- pointing at the wrong body.
+--
+-- ☠ VALUE-GATED, NOT PRESENCE-GATED, AND THAT IS THE WHOLE POINT. Config.lua seeds
+-- healPredictionFrameLevel for every profile, so the key is ALWAYS present and a
+-- presence test can never fire — changing the default alone reaches new profiles only.
+-- Every one of the dev's ten profiles had 12 stored, which is exactly how "the fix
+-- changes nothing" happens. See [[feedback-migration-before-defaults-backfill]].
+--
+-- ☠☠ AND ONE-SHOT, PER PROFILE — value-gating ALONE is a trap here, which is exactly what
+-- shipped for review. The control is a 0-100 SLIDER (Pages/Auras.lua), so 12 is a value a
+-- user can deliberately pick: someone who wants the heal drawn OVER the shield sets 12,
+-- and an unflagged value-gated fold reverts it on the next reload, profile switch or
+-- import. 11 sticks, 13 sticks, 12 silently snaps back — the one number the user is most
+-- likely to choose for that effect is the one they cannot keep. The old comment here said
+-- "a level the user chose deliberately is left alone", which was true of every value
+-- except the only one this function touches.
+-- ⇒ The value gate says WHICH profiles the default moved under; the flag says the move
+-- has happened. Both are needed, and neither substitutes for the other.
+--
+-- ☠ IT HAS TO REACH RAID AUTO-LAYOUT OVERRIDES, and every other value migration in this
+-- file does not. OVERRIDE_TAB_MAP (Core/AutoProfiles.lua) matches by PREFIX, and
+-- "healPrediction" is one of its rows -- so healPredictionFrameLevel is a legal per-layout
+-- override, and v5.1.3 shipped the very slider that mints one. A profile whose raid layout
+-- carried 12 kept it, and the incoming heal drew back over the shield the moment that
+-- layout activated: the exact bug this migration exists to end, surviving inside the one
+-- place the migration could not see. The walk is the published one
+-- (DF.ForEachRaidLayoutOverride, Designer/Presets.lua) rather than a second copy of it.
+function DF:MigrateHealPredictionBelowAbsorb()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    local function fold(t)
+        if type(t) == "table" and t.healPredictionFrameLevel == 12 then
+            t.healPredictionFrameLevel = 10
+        end
+    end
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        -- The flag is checked and set PER PROFILE, not once for the run: an inactive
+        -- profile is reached by the login battery's whole-table walk, but an imported one
+        -- arrives later, and a per-run guard would skip it forever.
+        if type(profile) == "table" and not profile._healPredBelowAbsorbV1 then
+            for _, modeKey in ipairs({ "party", "raid" }) do
+                fold(profile[modeKey])
+            end
+            if DF.ForEachRaidLayoutOverride then
+                DF.ForEachRaidLayoutOverride(profile, function(layout)
+                    fold(layout.overrides)
+                end)
+            end
+            profile._healPredBelowAbsorbV1 = true
+        end
+    end
+end
+
 function DF:MigrateOORTextAlpha()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
@@ -4178,6 +4253,10 @@ local FRESH_PROFILE_MIGRATION_FLAGS = {
     -- profile is unflagged and every reload re-forces it -- silently undoing the user
     -- turning it off, which is precisely what the feature request ruled out.
     _importantDebuffOnV1    = true,
+    -- Born at the new default (10), so the 12 -> 10 fold has nothing to do. Stamped for
+    -- the same reason as the rest: a fresh profile must never be re-migrated, and here
+    -- that matters because 12 is a value the slider can reach deliberately.
+    _healPredBelowAbsorbV1  = true,
     -- ☠ _staleTexturePathV1 DELIBERATELY REMOVED. The texture repair is HEALING, not a
     -- migration: it must re-check on every login, because a file can go missing at any
     -- future update, not just once in a profile's life. Stamping a flag here would have
@@ -5573,16 +5652,34 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- skip exactly the profiles it exists to repair; gating it on its own flag
             -- keeps it idempotent while still reaching a v4 profile that arrives later
             -- (fresh install, import, or a profile that has never been loaded on v5).
+            -- ☠☠ THE NIL BELONGS HERE, WITH THE FOLD. It used to sit below the
+            -- _dispelCustomRemovedV5 early return, and the comment above explains exactly
+            -- why that could not work: every existing v5 alpha tester ALREADY has
+            -- _dispelCustomRemovedV5 = true. So the fold ran, set its own flag, and then
+            -- returned before the nil — leaving dispelGradientIntensity in the profile
+            -- with its value ALREADY multiplied into dispelGradientAlpha.
+            --
+            -- ResolveDispelGradientAlpha then computed min(alpha * intensity, 1) a SECOND
+            -- time on every render. With v4's 2.6 default that clamps to 1.0 for any alpha
+            -- at or above ~0.385 — so the Gradient Opacity slider (0.1..1.0 in 0.1 steps)
+            -- rendered IDENTICALLY at full brightness from 0.4 upward, and a user who set
+            -- 0.25 got 0.65. Reported as "adjusting the gradient opacity doesn't change
+            -- anything" plus "it's so incredibly bright", by someone who needs the glare
+            -- down for an accessibility reason (Jaidy, 2026-08-13).
+            --
+            -- Whether a profile was affected depended purely on migration history — which
+            -- is why it reproduced for one person and not another, and why test mode
+            -- looked fine on a profile whose key had already been cleared.
             if not modeDb._dispelGradientIntensityFoldedV5 then
                 if type(modeDb.dispelGradientIntensity) == "number" then
                     modeDb.dispelGradientAlpha = math.min(
                         (modeDb.dispelGradientAlpha or 1) * modeDb.dispelGradientIntensity, 1.0)
                 end
+                modeDb.dispelGradientIntensity = nil   -- consumed by the fold; never read again
                 modeDb._dispelGradientIntensityFoldedV5 = true
             end
             if modeDb._dispelCustomRemovedV5 then return end
             modeDb.dispelOverlayColorSource = nil
-            modeDb.dispelGradientIntensity = nil
             modeDb.dispelMagicColor = nil
             modeDb.dispelCurseColor = nil
             modeDb.dispelDiseaseColor = nil
@@ -5794,6 +5891,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         sub("ppbadge",      "force the missing-buff badge to stay visible (geometry probe)", true)
         sub("ownpreview",   "A/B test mode: our own frames (default) vs the global sample provider", true)
         sub("admissing",    "Aura Designer missing-buff trace (add 'mark')", true, "[mark]")
+        sub("adpin",        "Aura Designer canvas: every slot's pin vs the live resolver", true)
         sub("cbt",          "colour-by-time curve dump", true, "<spellID>")
         -- Data integrity. Both dev-gated for the same reason as /df debug duration: they
         -- check OUR curation data against the client, so the output only means
@@ -6030,9 +6128,25 @@ DF._MainEventDispatcher = function(self, event, arg1)
                             local v = DF:ResolveHealPredictionBarLevel(frame, bdb)
                             return v and (v - base)
                         end)) },
+                    -- ⚠ ORDER OF THIS TABLE IS THE DOCUMENTED LADDER. dfHealPrediction is
+                    -- printed before the absorbs above because it now sits UNDER them
+                    -- (+10 vs +11) — heals must never hide a shield.
                     { "dispelOverlay",   ov,                         nil },
                     { "dispel gradient", ov and ov.gradient,
                         DF.ResolveDispelGradientLevel and DF:ResolveDispelGradientLevel(0, bdb) },
+                    -- ☠ THE FRAME BORDER BELONGS IN THIS TABLE, and its absence is why a
+                    -- real regression passed a clean dump. On 2026-08-13 this section
+                    -- printed "zero <- EXPECTED mismatches" and was taken as proof the
+                    -- ladder was sound — while absorb (+11) and heal prediction (+12) were
+                    -- quietly drawing over a frame border still pinned at +10, because the
+                    -- border was never one of the rows. Reported in game the next day.
+                    -- ⇒ Anything the band can BURY has to be printed beside the band.
+                    -- The overshield glow's HOST. The glow itself is a texture, so it has
+                    -- no level of its own -- printing the host is what makes "is it above
+                    -- the heal prediction?" answerable at all. It was a texture on
+                    -- healthBar (+3) until 2026-08-14 and could never win.
+                    { "overshieldHost", frame.dfOvershieldHost,      13 },
+                    { "frame.border",    frame.border,               14 },
                     { "dfPowerBar",      frame.dfPowerBar,
                         (bdb and bdb.resourceBarFrameLevel) or 20 },
                     { "contentOverlay",  frame.contentOverlay,       25 },
@@ -6059,6 +6173,82 @@ DF._MainEventDispatcher = function(self, event, arg1)
                             end
                             print(("    %-16s level=%-4d (+%-3d) shown=%-5s%s")
                                 :format(nm, lvl, off, tostring(shown), tag))
+                        end
+                    end
+                end
+
+                -- Health-bar CHAIN (health -> incoming heals -> absorb). Says which segment
+                -- the absorb is hanging off and whether the last UpdateAbsorb actually
+                -- re-anchored or short-circuited on its layout-state cache. All plain Lua
+                -- stamps -- no rect or health reads, so nothing here can touch a secret.
+                -- Health-bar band diagnostics. fastPath says whether the last UpdateAbsorb
+                -- re-laid the bar or short-circuited on its cache; session is the test-mode
+                -- token that forces one full rebuild per toggle (pooled frames keep the
+                -- cache otherwise). predShown answers "is there an incoming heal at all",
+                -- which is the first thing to check when the shield looks wrong.
+                -- key = the LIVE chain answer; pick = what the last absorb resolve used.
+                -- They must agree. fillOK = the absorb cache's fill-texture identity still
+                -- matches the health bar's live fill — false means the styling replaced
+                -- the fill object and the next UpdateAbsorb call will re-anchor.
+                print(("  %-10s key=%-5s pick=%-5s fillOK=%-5s fastPath=%-5s session=%-3s predShown=%-5s pred2Shown=%s")
+                    :format("Chain",
+                        tostring(DF.ChainEndKey and DF.ChainEndKey(frame, bdb)),
+                        tostring(frame.dfAbsorbChainPick),
+                        tostring(frame.dfAbsorbState and frame.healthBar
+                            and frame.dfAbsorbState.healthFillTex == frame.healthBar:GetStatusBarTexture()),
+                        tostring(frame.dfAbsorbFastPath), tostring(DF.testSessionId),
+                        tostring(frame.dfHealPredictionBar and frame.dfHealPredictionBar:IsShown()),
+                        tostring(frame.dfHealPredictionBar2 and frame.dfHealPredictionBar2:IsShown())))
+
+                -- Anchor forensics for the fill-anchored bars. anchor= names what the
+                -- bar's first SetPoint actually targets RIGHT NOW: "fill" (health fill),
+                -- "pred" (the prediction's fill — correct for a chained absorb), or
+                -- "STALE" — anchored to an object that is neither, i.e. an orphaned
+                -- fill from before a texture swap. STALE on first entry, healthy after
+                -- a toggle, is the orphan mechanism caught red-handed.
+                do
+                    local function sv(x)
+                        if issecretvalue and issecretvalue(x) then return "secret" end
+                        if type(x) == "number" then return string.format("%.0f", x) end
+                        return tostring(x)
+                    end
+                    -- Per frame, not per dump: each frame's health/prediction fills are
+                    -- different objects, so anchor identity must be judged against the
+                    -- probed frame's own bars. ☠ The first cut probed only the DUMPED
+                    -- frame — the player, which sits at FULL health with reduced max, so
+                    -- both its bars are LEGITIMATELY zero (heals clamp to missing health,
+                    -- the shield to the usable bar) and the probe said nothing about the
+                    -- frames that were actually broken.
+                    local function probe(f, bar)
+                        if not bar then return "(absent)" end
+                        local hbFill = f.healthBar and f.healthBar.GetStatusBarTexture
+                            and f.healthBar:GetStatusBarTexture()
+                        local pb = f.dfHealPredictionBar
+                        local predFill = pb and pb.GetStatusBarTexture and pb:GetStatusBarTexture()
+                        local ok, s = pcall(function()
+                            local _, rel = bar:GetPoint(1)
+                            local which = (rel == hbFill and "fill")
+                                or (rel == predFill and "pred")
+                                or (rel and "STALE" or "nil")
+                            local v = bar:GetValue()
+                            local _, mx = bar:GetMinMaxValues()
+                            local ft = bar.GetStatusBarTexture and bar:GetStatusBarTexture()
+                            local fw = ft and ft:GetWidth() or -1
+                            return ("anchor=%-5s val=%s/%s fillW=%s alpha=%.2f shown=%s")
+                                :format(which, sv(v), sv(mx), sv(fw),
+                                    bar:GetAlpha() or -1, tostring(bar:IsShown()))
+                        end)
+                        return ok and s or "(read refused)"
+                    end
+                    print("  Pred      " .. probe(frame, frame.dfHealPredictionBar))
+                    print("  Absorb    " .. probe(frame, frame.dfAbsorbBar))
+                    if DF.testPartyFrames then
+                        for i = 0, 4 do
+                            local f = DF.testPartyFrames[i]
+                            if f and f ~= frame and f:IsShown() then
+                                print(("    party %d pred   %s"):format(i, probe(f, f.dfHealPredictionBar)))
+                                print(("    party %d absorb %s"):format(i, probe(f, f.dfAbsorbBar)))
+                            end
                         end
                     end
                 end
@@ -6590,6 +6780,18 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Pixel-perfect geometry ground truth for aura containers (physical-px
                 -- rects + grid deviation per anchor-chain element)
                 if DF.AuraContainer and DF.AuraContainer.DebugDumpPP then DF.AuraContainer.DebugDumpPP() end
+            elseif msg == "adpin" then
+                -- Does every Aura Designer canvas slot sit where the LIVE pin resolver
+                -- says it should? A mismatch means something placed a slot with maths of
+                -- its own, or placed it twice — the divergence class that produced
+                -- "the AD preview does not match live frames". Lives in the Options
+                -- companion because the canvas does; absent until the designer is opened.
+                local AD = DF.AuraDesigner
+                if AD and AD.DebugDumpCanvasPins then
+                    AD.DebugDumpCanvasPins()
+                else
+                    DF:Say("Aura Designer canvas not loaded — open the Aura Designer first")
+                end
             elseif msg == "ownpreview" then
                 -- A/B the test-mode route: our own pooled frames (default) versus the
                 -- engine's per-slot groups fed by the GLOBAL sample provider, which
@@ -6869,9 +7071,11 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         if t then blend = t:GetBlendMode(); alpha = t:GetAlpha(); shown = t:IsShown() end
                     end)
                     pcall(function() if hostFrame and hostFrame.healthBar then pw = hostFrame.healthBar:GetWidth() end end)
+                    -- num() on everything — the secret-line-vanishes trap; see dumpTex.
+                    local barShown; pcall(function() barShown = bar:IsShown() end)
                     o:Line(("%s: shown=%s rect=%sx%s (hb w=%s) val=%s/%s-%s orient=%s rev=%s blend=%s texAlpha=%s texShown=%s lvl=%s"):format(
-                        tag, tostring(bar:IsShown()), num(w), num(h), num(pw), num(val), num(mn), num(mx),
-                        tostring(orient), tostring(rev), tostring(blend), num(alpha), tostring(shown), num(lvl)))
+                        tag, num(barShown), num(w), num(h), num(pw), num(val), num(mn), num(mx),
+                        num(orient), num(rev), num(blend), num(alpha), num(shown), num(lvl)))
                 end
                 local function dumpTex(tag, tex)
                     if not tex then return end
@@ -6881,8 +7085,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     pcall(function() alpha = tex:GetAlpha() end)
                     pcall(function() shown = tex:IsShown() end)
                     pcall(function() layer, sub = tex:GetDrawLayer() end)
+                    -- ☠ num() ON EVERY VALUE, not just the numeric ones. Getters on
+                    -- aspect-marked textures return SECRETS; tostring() of a secret makes
+                    -- the WHOLE formatted line secret, and the output layer silently drops
+                    -- it — which is how this dump's most important lines simply vanished
+                    -- from a paste (2026-08-13) while their neighbours printed. num()
+                    -- checks issecretvalue first and substitutes the literal "SECRET".
                     o:Line(("%s: shown=%s rect=%sx%s blend=%s alpha=%s layer=%s/%s"):format(
-                        tag, tostring(shown), num(w), num(h), tostring(blend), num(alpha), tostring(layer), tostring(sub)))
+                        tag, num(shown), num(w), num(h), num(blend), num(alpha), num(layer), num(sub)))
                 end
                 local function dumpFrame(frame, label)
                     if not frame then return end
@@ -6903,26 +7113,82 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     local hnd = frame.dispelFactory
                     local slots = hnd and hnd.GetOverlaySlots and hnd:GetOverlaySlots()
                     if slots then
+                        -- ★ THE THREE FACTS THAT DECIDE A STUCK-ALPHA REPORT (2026-08-13,
+                        -- "Full Frame ignores Gradient Opacity while Top/Left Edge obey it"):
+                        --   1. ver/gen latch — has the style pass RUN on these buttons at all?
+                        --      (Buttons are born mid-combat; the pass is OOC-only.)
+                        --   2. styleErr — did the last StyleOneSlot THROW? The per-button
+                        --      pcall swallows it and warns once on a debug channel.
+                        --   3. the carrier's anchor target — "btn" means the secure init's
+                        --      SetAllPoints(btn) is still in force and the style pass never
+                        --      re-anchored it; gradRect/healthFill mean the pass completed.
+                        -- Plus configured-vs-actual alpha side by side, so one paste answers.
+                        o:Line(("factory styledVer=%s (cur=%s) styledGen=%s (cur=%s) cfgAlpha=%s resolved=%s"):format(
+                            tostring(frame.dfDispelFactoryVersion), tostring(DF.auraLayoutVersion),
+                            tostring(frame.dfDispelStyledGen), tostring(hnd and hnd._gen),
+                            tostring(db2 and db2.dispelGradientAlpha),
+                            tostring(db2 and DF.ResolveDispelGradientAlpha and DF:ResolveDispelGradientAlpha(db2))))
                         for key, btn in pairs(slots) do
-                            local wdg = btn.dfDispelWidget
-                            if wdg then
-                                o:Line(("slot[%s] widget shown=%s lvl=%s tracks=%s"):format(
-                                    tostring(key), tostring(wdg:IsShown()), tostring(wdg:GetFrameLevel()),
-                                    tostring(wdg.gradientTracksHealth)))
-                                dumpBar("slot.gradient", wdg.gradient, frame)
-                                dumpTex("slot.nativeGradient", wdg.nativeGradient)
-                            end
-                            if btn.dfDispelRing then dumpTex("slot[" .. tostring(key) .. "].ring", btn.dfDispelRing) end
-                            -- Edge strips are keyed BY SIDE now (all four ride the one
-                            -- overlay slot since the carriers were consolidated).
-                            if type(btn.dfDispelEdgeTex) == "table" then
-                                for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
-                                    local et = btn.dfDispelEdgeTex[side]
-                                    if et then dumpTex("slot[" .. tostring(key) .. "].edge" .. side, et) end
+                            -- ☠ PLAIN LUA FIELDS FIRST, WIDGET CALLS GUARDED. Running this
+                            -- IN COMBAT threw "calling 'IsShown' on bad self ... forbidden
+                            -- object" — which is itself a finding: while auras are secret,
+                            -- even READS on the slot widget hierarchy are forbidden to
+                            -- addon code, not just writes. So the fields that are ours
+                            -- (latches, error stamps, carrier count) print unconditionally,
+                            -- and every widget/texture method call rides one pcall that
+                            -- degrades to a FORBIDDEN line instead of killing the dump at
+                            -- the exact moment it is most needed.
+                            o:Line(("slot[%s] styleErr=%s bind=%s carriers=%s"):format(
+                                tostring(key), tostring(btn._dfDispelStyleErr),
+                                tostring(DF._dispelBindErr and DF._dispelBindErr[key]),
+                                tostring(btn._dfDispelCarriers and #btn._dfDispelCarriers)))
+                            local okSlot = pcall(function()
+                                local wdg = btn.dfDispelWidget
+                                if wdg then
+                                    -- num() on the widget reads too — IsShown on a
+                                    -- descendant of a secret-shown button returns a
+                                    -- SECRET, and tostring'ing it vanished this line.
+                                    local wShown; pcall(function() wShown = wdg:IsShown() end)
+                                    o:Line(("slot[%s] widget shown=%s lvl=%s tracks=%s"):format(
+                                        tostring(key), num(wShown), num(wdg:GetFrameLevel()),
+                                        tostring(wdg.gradientTracksHealth)))
+                                    dumpBar("slot.gradient", wdg.gradient, frame)
+                                    dumpTex("slot.nativeGradient", wdg.nativeGradient)
+                                    local ng = wdg.nativeGradient
+                                    if ng then
+                                        local nPts = ng:GetNumPoints()
+                                        local _, relTo = ng:GetPoint(1)
+                                        local relName = "?"
+                                        if relTo == btn then relName = "btn"
+                                        elseif relTo == wdg.gradient then relName = "gradRect"
+                                        elseif frame.healthBar and relTo == frame.healthBar:GetStatusBarTexture() then relName = "healthFill"
+                                        elseif relTo == wdg then relName = "widget"
+                                        elseif relTo == nil then relName = "nil" end
+                                        -- The DIM HOSTS are plain DF frames — their alpha
+                                        -- is the number that matters now, and it is
+                                        -- always readable. See the dim-host rule in
+                                        -- Features/Dispel.lua DispelSlotSecureInit.
+                                        local dimA = wdg.nativeGradientDim and wdg.nativeGradientDim:GetAlpha()
+                                        local ringA = btn.dfDispelRingDim and btn.dfDispelRingDim:GetAlpha()
+                                        local badgeA = btn.dfDispelBadgeDim and btn.dfDispelBadgeDim:GetAlpha()
+                                        o:Line(("slot[%s] carrier points=%s rel=%s gradDim=%s ringDim=%s badgeDim=%s"):format(
+                                            tostring(key), tostring(nPts), relName,
+                                            num(dimA), num(ringA), num(badgeA)))
+                                    end
                                 end
-                            end
-                            if btn._dfDispelCarriers then
-                                o:Line(("slot[%s] bound carriers=%d"):format(tostring(key), #btn._dfDispelCarriers))
+                                if btn.dfDispelRing then dumpTex("slot[" .. tostring(key) .. "].ring", btn.dfDispelRing) end
+                                -- Edge strips are keyed BY SIDE now (all four ride the one
+                                -- overlay slot since the carriers were consolidated).
+                                if type(btn.dfDispelEdgeTex) == "table" then
+                                    for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+                                        local et = btn.dfDispelEdgeTex[side]
+                                        if et then dumpTex("slot[" .. tostring(key) .. "].edge" .. side, et) end
+                                    end
+                                end
+                            end)
+                            if not okSlot then
+                                o:Line(("slot[%s] widget state FORBIDDEN (in combat / auras secret) — run again out of combat for carrier alpha/anchors"):format(
+                                    tostring(key)), "neutral")
                             end
                         end
                     end
@@ -7057,6 +7323,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- (Text Designer now renders all text). Per-profile guarded.
             if DF.MigrateOORTextAlpha then
                 DF:MigrateOORTextAlpha()
+            end
+
+            -- Heal prediction under the absorb (12 -> 10, value-gated).
+            -- ☠ THIS BATTERY IS THE LOGIN PATH. The first cut wired this migration
+            -- into Profile.lua's two sites only, which are the create/import paths --
+            -- so on a normal login it never ran, the db kept 12, and the "fixed"
+            -- ordering shipped twice while every frame still read the old level.
+            -- A migration is not wired until it is in the SAME battery as its peers.
+            if DF.MigrateHealPredictionBelowAbsorb then
+                DF:MigrateHealPredictionBelowAbsorb()
             end
 
             -- Retire the deprecated raidGroupOrder reverse toggle (NORMAL-ize any
@@ -7241,6 +7517,12 @@ DF._MainEventDispatcher = function(self, event, arg1)
         end
         
     elseif event == "PLAYER_ENTERING_WORLD" then
+        -- ☠ SEED THE TRACKED COMBAT STATE. DF.playerInCombat is only ever written by
+        -- PLAYER_REGEN_DISABLED/ENABLED, so a /reload (or a zone-in) DURING a fight
+        -- left it nil until that fight ended — and every "Hide in Combat" icon reads
+        -- it, so they would all sit visible for the rest of the pull.
+        DF.playerInCombat = UnitAffectingCombat("player") and true or false
+
         -- ☠ ARENA PET ENTRY POINT. See the RegisterEvent comment: ProcessRosterUpdate
         -- returns in its arena branch long before the pet dispatch, so without this
         -- nothing ever calls the arena pet track and pets simply never appear in
@@ -7393,8 +7675,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
         if DF.UpdateAllAuras then
             DF:UpdateAllAuras()
         end
-        -- Update role icons (in case hideInCombat is enabled)
-        if DF.UpdateAllRoleIcons then
+        -- Restore every "Hide in Combat" icon now that combat is over.
+        -- ☠ UpdateAllRoleIcons reaches ONLY the role and leader icons; MT/MA, AFK,
+        -- phased, vehicle, summon, raid target and ready check have the same option
+        -- and were never refreshed here, so they stayed hidden after the fight.
+        -- The entering-combat half is covered by RefreshAllVisibleFrames below.
+        if DF.UpdateAllCombatGatedIcons then
+            DF:UpdateAllCombatGatedIcons()
+        elseif DF.UpdateAllRoleIcons then
             DF:UpdateAllRoleIcons()
         end
         -- Update permanent mover combat state (color/visibility) — delayed to run

@@ -436,6 +436,9 @@ function DF:SetProfile(name)
     if DF.MigrateHealthColorStops then
         DF:MigrateHealthColorStops()
     end
+    if DF.MigrateHealPredictionBelowAbsorb then
+        DF:MigrateHealPredictionBelowAbsorb()
+    end
 
     -- Apply the profile — runtime state is already clear so the proxy reads
     -- the new profile directly with no stale overlay
@@ -1883,6 +1886,8 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     if DF.CorrectStrayMigratedHealthText then DF:CorrectStrayMigratedHealthText() end
     if DF.CleanupLegacyTextLayoutOverrides then DF:CleanupLegacyTextLayoutOverrides() end
     if DF.MigrateOORTextAlpha then DF:MigrateOORTextAlpha() end
+    -- An imported profile carries the old +12 too, so it needs the same drop.
+    if DF.MigrateHealPredictionBelowAbsorb then DF:MigrateHealPredictionBelowAbsorb() end
     -- ⚠ An imported profile can carry the OLD three-stage keys and no stop list, so the
     -- conversion has to run on the import path too -- otherwise the import renders from
     -- the legacy fallback until some later login happens to convert it.

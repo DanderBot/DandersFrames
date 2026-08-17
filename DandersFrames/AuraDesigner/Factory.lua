@@ -194,7 +194,65 @@ end
 -- (rec.n / localized) or ad-hoc keys; curated INTERNAL names ("PowerWordShield") only
 -- resolve through a spec.
 -- ============================================================
-function DF:BuildADIdentityFilters(spec, auraName)
+-- ★ PER-PLACEMENT NARROWING. A curated aura resolves to the UNION of its spell IDs, which
+-- is right for "never silently miss an effect" and wrong for anyone who wants one of them.
+-- Reported as: Beacon of the Savior carries the beacon buff (1244893) AND an absorb buff
+-- (1244878), and there was no way to place the beacon as a square without the absorb
+-- coming with it — adding it by ID snapped to the curated name and re-widened.
+--
+-- Stored as MUTES (ids to drop) rather than an include subset, matching the Filter page's
+-- own filterMutedSpellIDs: an id the SpellDB adds LATER keeps being tracked instead of
+-- silently going missing, and an absent key means today's behaviour byte-for-byte.
+-- ☠ SCOPE: this is placement-scoped and the filter store is filter-scoped. They are
+-- deliberately separate — muting an id for your Buff Bar filter must not silently retarget
+-- an AD square, and vice versa.
+--
+-- ☠ ALWAYS BUILDS A FRESH TABLE. Two of the resolver's paths hand back memory that is not
+-- ours: the filter-ref path returns a map held in adFilterRefCache, and the curated path is
+-- built from Adapter:GetAuraSpellIDs, whose array is cached and shared. Narrowing in place
+-- would corrupt the cache for every other consumer of that spell.
+local function narrowByPlacementMutes(out, indicator)
+    local mutes = type(indicator) == "table" and indicator.mutedSpellIDs
+    if type(mutes) ~= "table" or not next(mutes) then return out end
+    local src = out and out.includeSpellIDs
+    if type(src) ~= "table" then return out end
+    local kept, n = {}, 0
+    for id in pairs(src) do
+        if not mutes[id] then kept[id] = true; n = n + 1 end
+    end
+    -- ★ EVERY id muted = MATCHES NOTHING, and that is a legitimate thing to configure.
+    -- Return nil (+ the muted flag), which is this resolver's existing "no identity, skip
+    -- it" contract — the caller then renders no container at all.
+    -- ☠ NEVER an empty includeSpellIDs. An empty include map matches EVERY helpful aura,
+    -- which is the exact failure this resolver exists to prevent; "shows nothing" and
+    -- "shows everything" are one typo apart here.
+    -- The second return distinguishes "the user ticked nothing" from "we could not resolve
+    -- this aura", so the unresolved warning does not fire on a deliberate choice.
+    -- (This used to keep the FULL set instead, back when the card refused to untick the
+    -- last id. That refusal is gone — it forced the eye to do a job the ticks should do —
+    -- so the render has to be able to express the empty set.)
+    if n == 0 then return nil, true end
+    return { includeSpellIDs = kept }
+end
+
+-- ★ Does this placement currently match NOTHING — i.e. has the user unticked every one of
+-- its spell ids? ONE answer with three consumers that must never disagree:
+--   * the render, which builds no container at all;
+--   * the editor canvas, which must draw no preview (a canvas showing what the frame will
+--     not is the divergence class this addon keeps paying for);
+--   * the card, which greys the eye so the state is legible instead of mysterious.
+-- ☠ NOT the same as "unresolvable". An aura the resolver cannot identify also yields no
+-- map, but that is a data problem rather than a choice — which is why the resolver returns
+-- a second value instead of leaving every call site to guess from a nil.
+-- Cheap-exits before resolving when there are no mutes at all, which is every indicator in
+-- every profile that has not touched this feature.
+function DF:ADPlacementTracksNothing(spec, auraName, indicator)
+    if type(indicator) ~= "table" or type(indicator.mutedSpellIDs) ~= "table" then return false end
+    local _, mutedEmpty = DF:BuildADIdentityFilters(spec, auraName, indicator)
+    return mutedEmpty and true or false
+end
+
+function DF:BuildADIdentityFilters(spec, auraName, indicator)
     -- Curated identity, resolved by AuraAdapter:GetSpecIdentity -- the ONE place
     -- the ID set is decided, shared with the editor's add-by-ID snap so a
     -- placement and the picker can never disagree about a spell. Entries with no
@@ -210,14 +268,17 @@ function DF:BuildADIdentityFilters(spec, auraName)
             map[id] = true
         end
     end
-    if map then return { includeSpellIDs = map } end
+    if map then return narrowByPlacementMutes({ includeSpellIDs = map }, indicator) end
     -- Ad-hoc add-by-ID auras (picker "Add" with an ID the SpellDB doesn't
     -- know) are stored under the key "#<id>" — the name IS the identity, so
     -- resolving the embedded id here makes the record survive reload and
     -- profile export with no side table.
     local adHocID = type(auraName) == "string" and auraName:match("^#(%d+)$")
     if adHocID then
-        return { includeSpellIDs = { [tonumber(adHocID)] = true } }
+        -- Ad-hoc auras carry exactly one id, so a mute could only ever empty the set —
+        -- narrowByPlacementMutes keeps it whole in that case. Routed through it anyway so
+        -- every path answers the same way and none can be the one somebody forgot.
+        return narrowByPlacementMutes({ includeSpellIDs = { [tonumber(adHocID)] = true } }, indicator)
     end
     -- FILTER REFERENCES ("@preset:<key>" / "@custom:<id>"): a whole registry filter
     -- standing in for a single spell. Because this is the ONE resolver every effect
@@ -225,7 +286,7 @@ function DF:BuildADIdentityFilters(spec, auraName)
     -- and as the record a frame effect hangs off -- no second store, no extra pool.
     -- Collision-proof for the same reason "#<id>" is: no spell name starts with "@".
     local fref = DF.ResolveADFilterRef and DF:ResolveADFilterRef(auraName)
-    if fref then return fref end
+    if fref then return narrowByPlacementMutes(fref, indicator) end
     -- SpellDB fallback (all-spec support): a name the curated per-spec Config
     -- tables don't know resolves through the FilterRegistry SpellDB by display
     -- name (shipped English `rec.n` or the localized runtime name), unioning
@@ -247,7 +308,7 @@ function DF:BuildADIdentityFilters(spec, auraName)
                 map[altID] = true
             end
         end
-        return { includeSpellIDs = map }
+        return narrowByPlacementMutes({ includeSpellIDs = map }, indicator)
     end
     return nil
 end
@@ -485,19 +546,31 @@ local function unionIdentity(spec, auraName, typeCfg)
         end
         return map
     end
+    -- ★ typeCfg rides along as the MUTE CARRIER: the Tracked IDs ticks store
+    -- mutedSpellIDs on this same sub-table, and BuildADIdentityFilters narrows by
+    -- whatever table it is handed (see narrowByPlacementMutes). Ids are globally
+    -- unique, so one mute set correctly narrows every trigger's contribution too.
+    -- ☠ The CONDITIONS path above deliberately takes no mutes — narrowing one link
+    -- of an ALL chain changes what the chain means, and the card hides the ticks
+    -- for condition-driven effects for the same reason.
+    -- The second return is "empty BY CHOICE": every id muted is a deliberate
+    -- match-nothing, and callers must not fire the unresolved-aura warning on it.
+    local sawMuted
     if triggers and #triggers > 0 then
         for _, name in ipairs(triggers) do
-            local f = DF:BuildADIdentityFilters(spec, name)
+            local f, mutedEmpty = DF:BuildADIdentityFilters(spec, name, typeCfg)
             if f and f.includeSpellIDs then
                 map = map or {}
                 for id in pairs(f.includeSpellIDs) do map[id] = true end
             end
+            sawMuted = sawMuted or mutedEmpty
         end
     else
-        local f = DF:BuildADIdentityFilters(spec, auraName)
+        local f, mutedEmpty = DF:BuildADIdentityFilters(spec, auraName, typeCfg)
         if f then map = f.includeSpellIDs end
+        sawMuted = mutedEmpty
     end
-    return map
+    return map, ((not map) and sawMuted) or nil
 end
 
 local function auraHasTrackedIndicator(auraCfg)
@@ -805,6 +878,26 @@ local function colSig(c)
     return tostring(r) .. "," .. tostring(g) .. "," .. tostring(b) .. "," .. tostring(a)
 end
 
+-- Does this client have the engine's refresh-window driver at all? Capability-gated
+-- everywhere: without it the pandemic variant is never emitted, so an ungated colour can
+-- never masquerade as a refresh cue.
+local function pandemicCapable()
+    local AC = DF.AuraContainer
+    return (AC and AC.HasPandemic and AC.HasPandemic()) and true or false
+end
+
+-- Does this config ask for a second, pandemic-window colour?
+-- ⚠ NOT HEALTH-BAR ONLY ANY MORE, and this header said it was long after it stopped being
+-- true. Health Bar Color, Background Color and Border all route through here. The original
+-- objection was that the second wash needs a FRAME LEVEL to draw over its own base, and
+-- only the health-bar band had one spare — that was answered by putting both washes on the
+-- SAME BUTTON as sibling regions ordered by draw sublevel, which costs no level at all
+-- (see the PANDEMIC COVER note in Frames/AuraContainer.lua). The constraint was real; the
+-- solution removed it, and only the comment stayed behind.
+local function wantsPandemicColor(cfg)
+    return (cfg and cfg.pandemicColorEnabled and cfg.pandemicColor and pandemicCapable()) and true or false
+end
+
 -- Health-bar overlay alpha per mode — the exact semantics of the legacy Indicators:ApplyHealthBar (that module is gone;
 -- this is now the only implementation, so the comparison is against behaviour, not source)
 -- (Indicators.lua:1325-1329), read from CONFIG only:
@@ -859,7 +952,15 @@ local AD_TEXT_CHAIN_GATE_OFFSET = 30
 -- AD_HEALTHBAR_COVER_OFFSET (tint at healthBar+1 — above the fill, below the attached
 -- absorb bar); background tint hosts on a frame parked at healthBar-3 with offset 0 (tint
 -- at healthBar-1 — above frame.background, below every bar). See the call sites for the math.
-local function buildOverlayTintConfig(unit, map, r, g, b, blend, levelOffset, filter)
+-- `opts` carries the two cross-cutting tint options (nil for a lone tint):
+--   * pandemicColor — adds a SECOND cover on the SAME button in this colour, whose Shown
+--     aspect is handed to the engine's refresh-window driver (AuraContainer bindNative,
+--     PANDEMIC COVER). STRUCTURAL BY PRESENCE: the region can only be created in the
+--     secure init, so callers must fold "has one" into their struct signature or enabling
+--     it would never build the region. The colour VALUE restyles live.
+--   * sublevel — the draw-order key for stacked tints. COSMETIC (re-applied on every
+--     style pass), so a priority reorder restyles rather than rebuilds.
+local function buildOverlayTintConfig(unit, map, r, g, b, blend, levelOffset, filter, opts)
     return {
         unit = unit,
         mode = "overlay",
@@ -872,7 +973,10 @@ local function buildOverlayTintConfig(unit, map, r, g, b, blend, levelOffset, fi
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
         frameLevelOffset = levelOffset,
-        style = { overlay = { tintColor = { r, g, b, blend } } },
+        style = { overlay = { tintColor = { r, g, b, blend },
+            -- Second cover on the SAME button, gated by the engine's refresh window.
+            tintPandemicColor = opts and opts.pandemicColor or nil,
+            sublevel          = opts and opts.sublevel or nil } },
     }
 end
 
@@ -887,17 +991,20 @@ end
 -- comment used to claim "offset 1 = healthBar+1" — wrong by the nesting: offset 1 landed
 -- the cover at healthBar+3, over the absorb shield (bug #1027). Colour/texture/alpha are
 -- static config.
-local function buildHealthFillConfig(unit, map, r, g, b, alpha, texture, clampTo, filter)
+local function buildHealthFillConfig(unit, map, r, g, b, alpha, texture, clampTo, filter, opts)
     return {
         unit = unit,
         mode = "overlay",
         filter = filter or "HELPFUL",
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
-        frameLevelOffset = AD_HEALTHBAR_COVER_OFFSET,
+        frameLevelOffset = (opts and opts.levelOffset) or AD_HEALTHBAR_COVER_OFFSET,
         style = { overlay = { healthFill = {
             texture = texture, color = { r, g, b }, alpha = alpha, clampTo = clampTo,
-        } } },
+            -- Second cover on the SAME button, gated by the engine's refresh window.
+            pandemicColor = opts and opts.pandemicColor or nil,
+        },
+            sublevel = opts and opts.sublevel or nil } },
     }
 end
 
@@ -913,7 +1020,10 @@ end
 -- creation sequence -- the toggle's whole point. 11 = definitively above (the legacy
 -- draw-above default), 9 = definitively tucked underneath. Wired 2026-07-25; the flag rides
 -- the border structSig so toggling it rebuilds with the new offset.
-local function buildBorderConfig(unit, map, spec, filter, drawAbove)
+-- `pandemicSpec` renders a SECOND ring on the same button in the pandemic colour,
+-- gated by the engine's refresh window (AuraContainer: PANDEMIC BORDER TWIN).
+-- Structural by presence, like the tint covers: its holder is created in the secure init.
+local function buildBorderConfig(unit, map, spec, filter, drawAbove, pandemicSpec)
     return {
         unit = unit,
         mode = "overlay",
@@ -921,7 +1031,7 @@ local function buildBorderConfig(unit, map, spec, filter, drawAbove)
         candidateFilters = { includeSpellIDs = map },
         enabled = true,
         frameLevelOffset = (drawAbove ~= false) and 11 or 9,
-        style = { border = { spec = spec } },
+        style = { border = { spec = spec, pandemicSpec = pandemicSpec } },
     }
 end
 
@@ -1064,12 +1174,16 @@ end
 -- Pick the single highest-priority configured indicator of `typeKey` across all configured
 -- auras for this spec AND the spec-independent Other Buffs pool (adDB.otherAuras) —
 -- candidates from BOTH pools compete in the SAME pick, so there is one winner per effect
--- type per frame overall. Frame-level effects each target ONE region, so stacking two of
--- the same type conflicts (double-tint / double-border) — one winner per type, exactly like
--- the health bar. priority is static config (Engine.lua:502, default 5); ties broken by
+-- type per frame overall. Consumers: the Priority-mode border (one ring per Draw Above
+-- seat) and the text-mirror colours (one cover colour per element). Health-bar /
+-- background tints used to pick here too — they are MULTI now (every configured tint
+-- renders on its own presence-gated container; see collectFrameTints), because a static
+-- pick meant a lower-priority buff could never colour the bar even when it was the ONLY
+-- buff present — presence is secret, so the pick cannot ask what is actually on the unit.
+-- priority is static config (Engine.lua:502, default 5); ties broken by
 -- pool (spec pool wins — byte-identical to the old name order when the other pool is empty)
 -- then aura name, for a deterministic, non-flapping winner. `validate(typeCfg)` gates which
--- blocks count (e.g. healthbar/background need .color, border must be enabled). Read-free.
+-- blocks count (e.g. border must be enabled). Read-free.
 -- Hidden blocks (eye toggle, `enabled == false`; nil/true = shown for legacy records) never
 -- compete — the pick falls to the next candidate, or nothing.
 -- Returns the winner's STORE KEY (OTHER_PREFIX-prefixed for other-pool winners, so store
@@ -1085,8 +1199,9 @@ local function pickWinner(spec, specAuras, otherAuras, typeKey, validate)
             for auraName, auraCfg in pairs(auras) do
                 local typeCfg = (type(auraCfg) == "table") and auraCfg[typeKey]
                 if typeCfg and typeCfg.enabled ~= false and (not validate or validate(typeCfg)) then
-                    local map = unionIdentity(idSpec, auraName, typeCfg)
-                    if not map then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
+                    local map, mutedEmpty = unionIdentity(idSpec, auraName, typeCfg)
+                    -- mutedEmpty = every id unticked in Tracked IDs: a choice, not a data problem.
+                    if not map and not mutedEmpty then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
                     if map then
                         local prio = auraCfg.priority or 5
                         if (not bestName)
@@ -2953,11 +3068,32 @@ end
 -- group.style customises it through the SAME spec builders the placed indicators
 -- use (buildDurationTextSpec / buildStackSpec / the border spec passed in); with
 -- no style the output is byte-identical to the pre-style hardcoded table.
+-- Does this group draw solid squares instead of spell icons? nil/"icon" = icon, which is
+-- what every group shipped as, so an untouched group serializes and renders identically.
+-- Bar is deliberately NOT an option: a bar is its own sized widget with its own layout
+-- reservation, not a cell the group flow can lay out like the other two.
+local function groupIsSquare(group)
+    return groupStyle(group).shape == "square"
+end
+
 local function buildFilterGroupStyle(group, borderSpec)
     local s = groupStyle(group)
+    local artInset = borderSpec and borderArtInset(borderSpec) or 0
+    -- ☠ EXACTLY ONE of icon/square, and the square table is emitted even when hidden.
+    -- Its PRESENCE is what tells AuraContainer "this slot is a square, do not run the icon
+    -- path" — the placed builder carries the same warning, having shipped the bug where
+    -- omitting it turned a square back into an icon.
+    local art
+    if groupIsSquare(group) then
+        local r, g, b = readADColor(s.color)
+        art = { square = { show = true, color = { r, g, b, 1 }, inset = artInset } }
+    else
+        art = { icon = { show = true, zoom = true, inset = artInset } }
+    end
     local style = {
         -- Art insets by the border thickness so the ring frames it (placed-icon parity).
-        icon     = { show = true, zoom = true, inset = borderSpec and borderArtInset(borderSpec) or 0 },
+        icon     = art.icon,
+        square   = art.square,
         cooldown = { show = true, swipe = not s.hideSwipe, reverse = true, numbers = false },
         duration = buildDurationTextSpec(s, true),
         stacks   = (s.showStacks ~= false) and buildStackSpec(s, 2, -1) or nil,
@@ -2985,7 +3121,13 @@ end
 -- to each group's struct sig at the sync call sites. "" fields for style-less groups.
 local function groupStyleStructSig(group)
     local s = groupStyle(group)
-    return "|" .. ((s.showStacks ~= false) and "st" or "")
+    -- ☠ SHAPE IS STRUCTURAL. It decides which art region exists (style.square vs
+    -- style.icon), and regions are create-only — a cosmetic restyle cannot swap one for
+    -- the other, so a shape change has to Rebuild. Putting it in the cosmetic sig would
+    -- make the control appear to do nothing. "" for icon so every pre-shape group sigs
+    -- byte-identically and does not rebuild on upgrade.
+    return "|" .. (groupIsSquare(group) and "sq" or "")
+        .. "|" .. ((s.showStacks ~= false) and "st" or "")
         .. "|" .. ((s.showDuration ~= false) and "du" or "")
         .. "|" .. (s.ShowBorder == true and "bd" or "")
         -- ☠ "|df=" .. durationFmtKey(...) was here. Duration formatting is NOT
@@ -3029,6 +3171,57 @@ function Factory:BuildGroupPreviewConfig(frame, group)
     -- restyle in place instead of recreating the sample pool per slider tick.
     local sig = ("gslot" .. groupStyleStructSig(group)):gsub(":H[%d%.]+", ":H")
     return cfg, sig
+end
+
+-- The group's LIVE container layout (anchor, growth, wrap, size, spacing, offsets),
+-- published so the editor canvas can pin its block and flow its sample icons through
+-- AuraContainer.PinLayoutBox / AuraContainer.FlowSlots rather than deriving a corner and
+-- a stride of its own. Same builder the live filter/debuff group containers are built
+-- from — pass the same wrapDefault the live call site passes (8 filter, 4 debuff) or the
+-- preview wraps at a different column count than the frame does.
+function Factory:BuildGroupLayout(group, wrapDefault)
+    return buildFilterGroupLayout(group, wrapDefault)
+end
+
+-- ============================================================
+-- MEMBER-GROUP FLOW, published for the canvas
+-- The three things live hands its member-group container that the canvas was deriving,
+-- approximating, or dropping. Published as builders rather than documented as rules,
+-- because a rule the canvas has to re-implement is a fork with extra steps — the whole
+-- lesson of the placement work these sit beside.
+-- ============================================================
+
+-- A member's LAYOUT SIZE. Live resolves it through the defaults chain and floors it at 8
+-- (collectGroupMembers); the canvas was reading indCfg.size with its own fallback and no
+-- floor, so a member inheriting its size from defaults measured differently on the canvas
+-- than on the frame, and an 8-or-under size disagreed outright.
+function Factory:MemberSize(ind, defs)
+    return math.max(8, tonumber(defOf(ind, "size", defs, 24)) or 24)
+end
+
+-- A member's PER-RECORD STYLE, in the shape recordGroupLayout reads (Frames/AuraContainer):
+-- layout.size gives the record its own cell, layoutIndex fixes its order in the flow. This
+-- is the same style buildMemberGroupConfig declares per record; the button half is omitted
+-- because the canvas styles its slots through StylePreviewSlot and nothing in the layout
+-- path reads it.
+-- ☠ THE CELL IS NOT THE BUTTON. Flowing every member at the group's fallback cell is what
+-- made a large member overlap its neighbour on the canvas and not in game — the flow asks
+-- for a declared cell first (GetElementSize) and only measures the button when there is
+-- none. Stamp this on the slot as dfImpRecStyle and the shared flow does the rest.
+function Factory:MemberRecordStyle(ind, defs, memberIdx)
+    return { layout = { size = self:MemberSize(ind, defs) }, layoutIndex = memberIdx }
+end
+
+-- The CONFIG a group's flow is laid out with: its layout AND its style.
+-- ☠ THE STYLE IS NOT OPTIONAL. stripReservation reads config.style.bar to reserve the
+-- duration strip's height, and that reservation is folded into elementHeight — so a config
+-- carrying layout alone silently drops the padding live applies, and every row of a group
+-- with a duration bar sat tighter on the canvas than on the frame.
+function Factory:BuildGroupFlowConfig(frame, group, wrapDefault)
+    return {
+        layout = buildFilterGroupLayout(group, wrapDefault),
+        style  = buildFilterGroupStyle(group, buildGroupBorderSpec(frame, group)),
+    }
 end
 
 -- Per-group sort (Wave 2): the group card's Sort Order dropdown + My Auras
@@ -3219,6 +3412,10 @@ local function filterGroupCoSig(group, wrapDefault)
         -- It has to sit in SOME signature or a format change would move nothing and
         -- silently do nothing.
         "df=" .. durationFmtKey(s, true),
+        -- Square FILL COLOUR is cosmetic and belongs here, not in the struct sig: the
+        -- region already exists (shape is what's structural), so a colour change restyles
+        -- in place. "" for an icon group, so nothing pre-shape sigs differently.
+        "sc=" .. (groupIsSquare(group) and colSig(s.color) or ""),
         "sz=" .. tostring(math.max(8, tonumber(group.iconSize) or 24)),
         "an=" .. tostring(group.anchor or "TOPLEFT"),
         "ox=" .. tostring(tonumber(group.offsetX) or 0),
@@ -3378,28 +3575,75 @@ local function memberGrowthOffset(d, s)
     return 0, 0
 end
 
+-- ★ THE ONE PLACE A MEMBER'S GRID CELL IS COMPUTED. Live (arrangeGroupList, below) and
+-- the Aura Designer's editor canvas both ask this; neither keeps a copy. The maths lived
+-- in FOUR places at once — here and three times in the editor — and they had already
+-- drifted: one dropped `scale`, and a round of fixes converted exactly one of them while
+-- the commit implied the class was closed.
+--
+-- ☠ SCOPE: this answers for the members the container does NOT pack (bars, show-when-
+-- missing badges), which live places itself at their FULL member index. Packed members
+-- are placed by the group container's flow, and the canvas mirrors that through
+-- AuraContainer.FlowSlots — not by gridding them here. Feeding a packed member into this
+-- would reintroduce the hand-rolled flow this replaced.
+-- Stride comes from DF:ResolveAuraLayoutStep so there is one definition of it addon-wide.
+function Factory:MemberGridOffset(group, size, scale, memberIdx, totalCount)
+    local spacing = tonumber(group.spacing) or 2
+    local wrap = tonumber(group.iconsPerRow) or 8
+    if wrap <= 0 then wrap = 1 end
+    local primary, secondary = strsplit("_", group.growDirection or "RIGHT")
+    if not secondary then
+        secondary = (primary == "RIGHT" or primary == "LEFT") and "DOWN" or "RIGHT"
+    end
+    local gox, goy = tonumber(group.offsetX) or 0, tonumber(group.offsetY) or 0
+    local step = DF:ResolveAuraLayoutStep(tonumber(size) or 24, tonumber(size) or 24,
+        spacing, spacing, tonumber(scale) or 1, nil)
+    local total = math.max(1, tonumber(totalCount) or 1)
+    local activeIdx = math.max(0, (tonumber(memberIdx) or 1) - 1)
+    local col = activeIdx % wrap
+    local row = math.floor(activeIdx / wrap)
+    local sX, sY = memberGrowthOffset(secondary, step)
+    local oX, oY
+    if primary == "CENTER" then
+        local iconsInRow = wrap
+        local lastRow = math.floor((total - 1) / wrap)
+        if row == lastRow then
+            iconsInRow = ((total - 1) % wrap) + 1
+        end
+        local centerOff = -((iconsInRow - 1) * step) / 2
+        if sX ~= 0 then
+            oX = gox + (row * sX)
+            oY = goy + centerOff + (col * step)
+        else
+            oX = gox + centerOff + (col * step)
+            oY = goy + (row * sY)
+        end
+    else
+        local pX, pY = memberGrowthOffset(primary, step)
+        oX = gox + (col * pX) + (row * sX)
+        oY = goy + (col * pY) + (row * sY)
+    end
+    return (type(group.anchor) == "string" and group.anchor) or "TOPLEFT", oX, oY
+end
+
 -- Arrange one group array's members over ONE aura pool (no pass bump — the
 -- caller stamps the pass once for both pools). keyPrefix mirrors placedKey's:
 -- "" for the spec pool, OTHER_PREFIX for the other pool, so scratch keys line
 -- up with the instanceKeys syncPlacedPool feeds memberEffective. Returns true
--- when at least one member was arranged. The math is a verbatim mirror of the
--- editor preview (Options.lua RefreshPlacedIndicators group-position block)
--- so preview and live can never disagree.
+-- when at least one member was arranged.
+--
+-- ☠ This note used to read "the math is a verbatim mirror of the editor preview
+-- (Options.lua RefreshPlacedIndicators group-position block) so preview and live can
+-- never disagree." Every clause of that was false: it was not verbatim (the two called
+-- different stride helpers), the block had moved to another file, and there were three
+-- preview copies, not one. A comment cannot make two implementations agree — only one
+-- implementation can, which is why the cell now comes from Factory:MemberGridOffset.
 local function arrangeGroupList(groups, auras, adDB, keyPrefix)
     local any = false
     for _, group in ipairs(groups) do
         local members = type(group) == "table" and group.kind ~= "filter" and group.members
         if members and #members > 0 then
             local totalCount = #members
-            local gAnchor = (type(group.anchor) == "string" and group.anchor) or "TOPLEFT"
-            local spacing = tonumber(group.spacing) or 2
-            local wrap = tonumber(group.iconsPerRow) or 8
-            if wrap <= 0 then wrap = 1 end
-            local primary, secondary = strsplit("_", group.growDirection or "RIGHT")
-            if not secondary then
-                secondary = (primary == "RIGHT" or primary == "LEFT") and "DOWN" or "RIGHT"
-            end
-            local gox, goy = tonumber(group.offsetX) or 0, tonumber(group.offsetY) or 0
             for memberIdx, member in ipairs(members) do
                 -- Find the member's indicator record (size/scale feed the grid step).
                 local auraCfg = auras and auras[member.auraName]
@@ -3412,31 +3656,8 @@ local function arrangeGroupList(groups, auras, adDB, keyPrefix)
                 if indCfg then
                     local size = tonumber(indCfg.size) or (adDB.defaults and adDB.defaults.iconSize) or 24
                     local scale = tonumber(indCfg.scale) or (adDB.defaults and adDB.defaults.iconScale) or 1.0
-                    local step = (size * scale) + spacing
-                    local activeIdx = memberIdx - 1
-                    local col = activeIdx % wrap
-                    local row = math.floor(activeIdx / wrap)
-                    local sX, sY = memberGrowthOffset(secondary, step)
-                    local oX, oY
-                    if primary == "CENTER" then
-                        local iconsInRow = wrap
-                        local lastRow = math.floor((totalCount - 1) / wrap)
-                        if row == lastRow then
-                            iconsInRow = ((totalCount - 1) % wrap) + 1
-                        end
-                        local centerOff = -((iconsInRow - 1) * step) / 2
-                        if sX ~= 0 then
-                            oX = gox + (row * sX)
-                            oY = goy + centerOff + (col * step)
-                        else
-                            oX = gox + centerOff + (col * step)
-                            oY = goy + (row * sY)
-                        end
-                    else
-                        local pX, pY = memberGrowthOffset(primary, step)
-                        oX = gox + (col * pX) + (row * sX)
-                        oY = goy + (col * pY) + (row * sY)
-                    end
+                    local gAnchor, oX, oY =
+                        Factory:MemberGridOffset(group, size, scale, memberIdx, totalCount)
                     local key = keyPrefix .. member.auraName .. "#" .. tostring(member.indicatorID)
                     local e = mgScratch[key]
                     if not e or e.base ~= indCfg then
@@ -3806,9 +4027,11 @@ local function collectDesiredSounds(desired, unit, auras, keyPrefix, idSpec, cha
         -- offer sound on them either; this is the render-side backstop for hand-edited
         -- or imported data.
         if sc and sc.enabled and not DF:ParseADFilterRef(auraName) then
-            local ids = DF:BuildADIdentityFilters(idSpec, auraName)
+            -- sc carries the sound effect's Tracked IDs mutes (same table the card
+            -- writes mutedSpellIDs to); mutedEmpty is a choice, not a data problem.
+            local ids, mutedEmpty = DF:BuildADIdentityFilters(idSpec, auraName, sc)
             local map = ids and ids.includeSpellIDs
-            if not map then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
+            if not map and not mutedEmpty then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
             if map then
                 for _, ev in ipairs(SOUND_EVENTS) do
                     if ev.enabled(sc) then
@@ -3932,7 +4155,8 @@ function Factory:SyncSound(frame)
     end
     reconcileSoundNow(frame)
 end
--- ☠ ONE predicate, two callers. The member-group container renders exactly the
+-- ☠ ONE predicate, three callers (the third is the editor canvas, through
+-- Factory:MemberRenderable below). The member-group container renders exactly the
 -- indicators this accepts, and syncPlacedPool skips exactly the ones it accepts. If
 -- these two ever disagree an icon renders TWICE (both paths claim it) or not at all
 -- (neither does), so they must not be two spellings of "the same" rule.
@@ -3940,6 +4164,15 @@ local function memberRenderable(ind)
     return ind ~= nil and ind.enabled ~= false
         and ind.type ~= "bar"          -- a bar is its own sized widget, not a flow icon
         and not ind.showWhenMissing    -- missing mode is a parked badge, never packed
+end
+
+-- Published for the editor canvas, which has to split a group's members exactly the way
+-- the renderer does — packed members flow inside the group's box, the rest take a grid
+-- cell. It kept its own spelling of this predicate (with a comment on each telling the
+-- reader they must stay identical, which is not a mechanism), so make it the same
+-- function. Three callers now, not "two" as the note above once said.
+function Factory:MemberRenderable(ind)
+    return memberRenderable(ind)
 end
 
 -- The set of member indicators a group container will draw, keyed exactly as
@@ -4016,9 +4249,11 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                     -- render nothing. Not marking the key `live` lets the
                     -- end-of-pass sweep destroy any existing handle.
                 elseif isBar then
-                    local ids = DF:BuildADIdentityFilters(idSpec, auraName)
+                    -- mutedEmpty = the user ticked nothing, which is a CHOICE and must not
+                    -- be reported as an unresolved aura. Same nil map, different reason.
+                    local ids, mutedEmpty = DF:BuildADIdentityFilters(idSpec, auraName, indicator)
                     local map = ids and ids.includeSpellIDs
-                    if not map then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
+                    if not map and not mutedEmpty then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
                     if map then
                         local key = placedKey(keyPrefix, auraName, indicator)
                         live[key] = true
@@ -4076,9 +4311,11 @@ local function syncPlacedPool(frame, placed, live, hasMG, auras, keyPrefix, idSp
                         syncAlertCompanion(frame, placed, live, key, map, eff, true, alpha, mine, defs)
                     end
                 elseif isSquare or indicator.type == "icon" then
-                    local ids = DF:BuildADIdentityFilters(idSpec, auraName)
+                    -- mutedEmpty = the user ticked nothing, which is a CHOICE and must not
+                    -- be reported as an unresolved aura. Same nil map, different reason.
+                    local ids, mutedEmpty = DF:BuildADIdentityFilters(idSpec, auraName, indicator)
                     local map = ids and ids.includeSpellIDs
-                    if not map then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
+                    if not map and not mutedEmpty then warnOtherUnresolved(auraName, (keyPrefix ~= "") and "Other Buffs" or "Spec") end
                     if map then
                         local key = placedKey(keyPrefix, auraName, indicator)
                         live[key] = true
@@ -4291,7 +4528,9 @@ local function collectGroupMembers(frame, group, auras, idSpec, defs, mine)
             end
         end
         if memberRenderable(ind) then
-            local ids = DF:BuildADIdentityFilters(idSpec, m.auraName)
+            -- `ind` so a member of a layout group narrows exactly like a loose placement —
+            -- this is the reported case (a Beacon square inside a layout group).
+            local ids = DF:BuildADIdentityFilters(idSpec, m.auraName, ind)
             local map = ids and ids.includeSpellIDs
             if map then
                 local isSquare = ind.type == "square"
@@ -4483,6 +4722,19 @@ end
 -- aura name in the per-type store. Factored out of the border block so BOTH the single
 -- Priority-mode winner and every Stacked-mode ring run the identical path -- there is one
 -- renderer, and "stacked" is only a statement about how many of them exist.
+-- The pandemic ring's spec: a COPY of the resolved base spec with only `color`
+-- swapped, so thickness, style, inset and the rest stay in lockstep with the base
+-- ring. ☠ Copy, never mutate — `spec` is the base ring's own table and is applied
+-- to the base widget on this same pass. Shared by the flat and chained paths.
+local function pandemicBorderSpec(spec, cfg)
+    if not (spec and wantsPandemicColor(cfg)) then return nil end
+    local out = {}
+    for k, v in pairs(spec) do out[k] = v end
+    local pr, pg, pb, pa = readADColor(cfg.pandemicColor)
+    out.color = { r = pr, g = pg, b = pb, a = pa }
+    return out
+end
+
 local function syncBorderEntry(bd, frame, key, cfg, map, mine)
     local spec = buildBorderSpec(frame, cfg)
     if not spec then return false end          -- resolved disabled -> render nothing
@@ -4514,28 +4766,31 @@ local function syncBorderEntry(bd, frame, key, cfg, map, mine)
     -- drawAboveFrameBorder rides the STRUCT sig: it resolves to frameLevelOffset in
     -- buildBorderConfig, which only a Rebuild re-reads (ApplyStyle carries the spec only).
     local drawAbove = cfg.drawAboveFrameBorder ~= false
-    local structSig = "da=" .. tostring(drawAbove)
+    local pdSpec = pandemicBorderSpec(spec, cfg)
+    -- The pandemic ring's PRESENCE joins the struct sig: its holder is created in the
+    -- secure init, so enabling it must hand over a fresh button.
+    local structSig = "da=" .. tostring(drawAbove) .. (pdSpec and "|pd" or "")
     local tuningSig = placedTuningSig(map, filt)
-    local coSig = borderSpecSig(spec)
+    local coSig = borderSpecSig(spec) .. (pdSpec and ("|pd=" .. colSig(cfg.pandemicColor)) or "")
 
     local entry = bd[key]
     if not entry then
-        local handle = DF.AuraContainer:Create(frame, buildBorderConfig(frame.unit, map, spec, filt, drawAbove))
+        local handle = DF.AuraContainer:Create(frame, buildBorderConfig(frame.unit, map, spec, filt, drawAbove, pdSpec))
         if handle then
             bd[key] = { handle = handle, structSig = structSig,
                         tuningSig = tuningSig, coSig = coSig }
         end
     elseif entry.structSig ~= structSig then
         entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-        entry.handle:Rebuild(buildBorderConfig(frame.unit, map, spec, filt, drawAbove), structSig)
+        entry.handle:Rebuild(buildBorderConfig(frame.unit, map, spec, filt, drawAbove, pdSpec), structSig)
     else
         if entry.tuningSig ~= tuningSig then
             entry.tuningSig = tuningSig
-            entry.handle:ApplyTuning(buildBorderConfig(frame.unit, map, spec, filt, drawAbove))
+            entry.handle:ApplyTuning(buildBorderConfig(frame.unit, map, spec, filt, drawAbove, pdSpec))
         end
         if entry.coSig ~= coSig then
             entry.coSig = coSig
-            entry.handle:ApplyStyle({ border = { spec = spec } })
+            entry.handle:ApplyStyle({ border = { spec = spec, pandemicSpec = pdSpec } })
         end
     end
     return true
@@ -4563,8 +4818,9 @@ local function collectStackedBorders(spec, specAuras, otherAuras)
                 local typeCfg = (type(auraCfg) == "table") and auraCfg.border
                 if typeCfg and typeCfg.enabled ~= false and typeCfg.ShowBorder ~= false
                    and typeCfg.borderMode == "custom" then
-                    local map = unionIdentity(idSpec, auraName, typeCfg)
-                    if not map then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
+                    local map, mutedEmpty = unionIdentity(idSpec, auraName, typeCfg)
+                    -- mutedEmpty = every id unticked in Tracked IDs: a choice, not a data problem.
+                    if not map and not mutedEmpty then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
                     if map then
                         stackedBorders = stackedBorders or {}
                         stackedBorders[#stackedBorders + 1] = {
@@ -4591,15 +4847,465 @@ local function collectStackedBorders(spec, specAuras, otherAuras)
 end
 
 -- ============================================================
+-- MULTI-TINT HEALTH BAR / BACKGROUND  (one container per configured tint)
+-- These two used to run through pickWinner — ONE static winner per type — which meant a
+-- lower-priority buff could never colour the bar even when it was the ONLY buff present
+-- (presence is secret; a config-time pick cannot ask what is on the unit). Field report
+-- 2026-08-13. Now every configured tint gets its own engine presence-gated container, so
+-- whichever buff is actually up colours the frame. When SEVERAL are up at once the
+-- arbitration is DRAW ORDER: the family shares one frame level (the healthBar+1 cover
+-- band is a single level wide — the attached absorb at +2 is a hard ceiling, bug #1027 —
+-- so there is no room for a level ladder), and same-level render order follows frame
+-- creation order. The sync loop therefore enforces two rules:
+--   * CREATE ASCENDING: collectFrameTints sorts lowest priority FIRST (the exact reverse
+--     of pickWinner's winner-first order), so the highest-priority tint is created last
+--     and draws on top — an opaque Replace cover fully hides the rest, restoring the v4
+--     "highest present priority wins"; translucent Tints compose, top-most last.
+--   * REPAIR THE LADDER: a (re)created container takes a fresh global draw index, so a
+--     mid-list Create/Rebuild would jump above older higher-priority siblings. The loop
+--     recreates every non-chained tint AFTER the first (re)created one, and an
+--     order-signature change (a priority edit that crosses another tint, an add/remove)
+--     tears the whole family down to recreate in order.
+-- ☠ CONDITION-CHAINED tints are exempt from the ladder: their visual container is born
+-- when the last gating buff lands (buildConditionChain is lazy by necessity), a runtime
+-- the sync loop cannot order. A chained tint's draw position among simultaneous tints is
+-- best-effort — accepted; conditions are rare and curate their own visibility.
+-- SHOW-WHEN-MISSING stays SINGLE-WINNER (the highest-priority SWM config): "absent" is
+-- the resting state of most frames, so several missing badges would sit composed over
+-- every idle frame — the one-badge contract is kept deliberately.
+-- ============================================================
+
+-- The same candidate set pickWinner scores, as a LIST — both pools, enabled, colour set,
+-- identity resolved. Sorted lowest priority first; ties reverse pickWinner's exactly
+-- (spec pool and alphabetically-smaller names sort LATER = draw on top), so with a single
+-- candidate the rendered result is identical to the old winner's.
+local function collectFrameTints(spec, specAuras, otherAuras, typeKey)
+    local list
+    for pool = 1, 2 do
+        local auras = (pool == 1) and specAuras or otherAuras
+        -- Other-pool identity is spec-INDEPENDENT (see pickWinner).
+        local idSpec = (pool == 1) and spec or nil
+        if auras then
+            for auraName, auraCfg in pairs(auras) do
+                local typeCfg = (type(auraCfg) == "table") and auraCfg[typeKey]
+                if typeCfg and typeCfg.enabled ~= false and typeCfg.color then
+                    local map, mutedEmpty = unionIdentity(idSpec, auraName, typeCfg)
+                    -- mutedEmpty = every id unticked in Tracked IDs: a choice, not a data problem.
+                    if not map and not mutedEmpty then warnOtherUnresolved(auraName, (pool == 2) and "Other Buffs" or "Spec") end
+                    if map then
+                        list = list or {}
+                        list[#list + 1] = {
+                            key  = (pool == 2) and (OTHER_PREFIX .. auraName) or auraName,
+                            cfg  = typeCfg,
+                            map  = map,
+                            prio = auraCfg.priority or 5,
+                            mine = (pool == 1),
+                        }
+                    end
+                end
+            end
+        end
+    end
+    if not list then return nil end
+    table.sort(list, function(a, b)
+        if a.prio ~= b.prio then return a.prio < b.prio end
+        if a.mine ~= b.mine then return b.mine end
+        return a.key > b.key
+    end)
+    -- ONE CONTAINER PER CONFIGURED TINT, including one that carries a pandemic colour:
+    -- both covers live on the SAME slot button (see the PANDEMIC COVER note in
+    -- AuraContainer styleButton_regions), so the second colour costs no container and no
+    -- frame level. The first build emitted a separate "#pd" entry here and drew it one
+    -- level above its base — correct on the health bar, but it put the feature out of
+    -- reach of the background and border bands, which have no spare level.
+    for i = 1, #list do list[i].auraKey = list[i].key end
+    return list
+end
+
+-- Never written; the teardown-all argument for teardownExceptSet on an order change.
+local EMPTY_KEEP = {}
+
+-- The shared multi-tint loop: order signature (teardown-all when the priority order of
+-- keys changes — creation order IS the z-order), the single missing-winner scan (the
+-- highest-priority SWM config without a chain, mirroring each body's own precedence),
+-- ascending sync with ladder repair, then the keep-set sweep. `syncOne(key, cfg, map,
+-- mine, asMissing) -> kept, created` is the per-family body. Mutates tstore in place.
+local function syncTintFamily(tints, tstore, store, orderKey, spec, syncOne)
+    local parts = {}
+    for i = 1, #tints do parts[i] = tints[i].key end
+    local orderSig = tconcat(parts, "\1")
+    if store[orderKey] ~= orderSig then
+        store[orderKey] = orderSig
+        teardownExceptSet(tstore, EMPTY_KEEP)
+    end
+    -- List is ascending, so the missing winner is the LAST qualifying entry.
+    local missingKey
+    for i = #tints, 1, -1 do
+        local s = tints[i]
+        -- A pandemic variant is never the missing badge: an absent buff has no refresh
+        -- window, so its own base entry is the only missing candidate for that config.
+        if s.cfg.showWhenMissing and not resolveConditions(spec, s.cfg, s.mine) then
+            missingKey = s.key
+            break
+        end
+    end
+    -- DRAW ORDER KEY. The tints all cover one region at ONE frame level (the band is a
+    -- single level wide — the attached absorb sits directly above), and frames at equal
+    -- level have NO guaranteed draw order, so creation order cannot arbitrate: field
+    -- report 2026-08-14, "the first buff to show stays on top". The draw-layer sublevel
+    -- orders them without needing level headroom. The list is ascending, so the LAST
+    -- entry (highest priority) takes the top sublevel; when there are more tints than
+    -- the 7 available sublevels the TOP of the stack keeps distinct values and the tail
+    -- floors together, which is the right way round.
+    local n = #tints
+    local keep, forceFrom = {}, nil
+    for i = 1, #tints do
+        local s = tints[i]
+        -- ☠ TOPS OUT AT 6, NOT 7, AND THE HEADROOM IS LOAD-BEARING. Each tint's pandemic
+        -- twin sits one sublevel above its base (AuraContainer.lua clamps it to
+        -- math.min(subLvl + 1, 7)), so a base of 7 handed the twin 7 as well: the highest
+        -- tint tied with its OWN second colour at EVERY stack size, and the winner fell
+        -- back to creation order -- the undefended tiebreak this ladder exists to remove.
+        -- Reserving 7 for the twin leaves 1..6 for the bases, still more distinct steps
+        -- than the stack usually has. (Danders's review, PR #236 B4.)
+        s.sublevel = math.max(1, 6 - (n - i))
+        s.rank = i
+        if forceFrom then
+            -- Ladder repair: an earlier tint took a fresh draw index this pass, so every
+            -- later non-chained tint must be recreated to land back above it.
+            local e = tstore[s.key]
+            if e and not e.chain then destroyEntry(e); tstore[s.key] = nil end
+        end
+        local kept, created = syncOne(s.key, s.cfg, s.map, s.mine, s.key == missingKey,
+                                      s.sublevel, s.rank, s.auraKey or s.key)
+        if kept then keep[s.key] = true end
+        if created and not forceFrom then forceFrom = i end
+    end
+    teardownExceptSet(tstore, keep)
+end
+
+-- One health-bar tint consumer (condition chain / missing badge / flat-or-cover) — the
+-- old single-winner body, run per configured aura by syncTintFamily. Returns (kept,
+-- created): kept = the entry under `key` should survive the keep-set sweep; created = a
+-- container was stood up or rebuilt THIS pass (fresh draw index — the ladder-repair
+-- signal). Chains always report created=false: they are exempt from the ladder.
+local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine, asMissing,
+                                 sublevel, rank, auraKey)
+    -- ☠ POOL LOOKUPS TAKE auraKey, NOT key. A pandemic variant's store key carries a
+    -- "#pd" suffix so it can sit beside its base in the store; resolvePoolMode resolves by
+    -- aura NAME, and a suffixed name matches nothing — the caster filter would silently
+    -- fall back and an "only mine" effect would start showing other people's buffs.
+    local filt = poolFilter(cfg, resolvePoolMode(spec, auraKey or key, frame, mine))
+    -- The pandemic colour rides the SAME container: a second cover on the same button,
+    -- created only when configured. ☠ Its PRESENCE is creation-frozen (a region can only
+    -- be created in the secure init), so it belongs in the STRUCT sig; the colour VALUE
+    -- restyles live and belongs in the cosmetic sig.
+    local pdColor = wantsPandemicColor(cfg) and cfg.pandemicColor or nil
+    local colorCfg = cfg.color
+    -- ☠ FRAME LEVEL IS THE ONLY THING THAT ORDERS THESE. Creation order does not (frames
+    -- at equal level have no guaranteed order) and neither does the draw-layer sublevel
+    -- (it only orders within ONE frame). Both were tried and both failed the same way in
+    -- game: whichever buff was CAST FIRST stayed on top, because Blizzard creates each
+    -- container's button when its aura lands — a moment no config-time ordering controls.
+    --
+    -- The headroom is real, contrary to the note that used to sit on
+    -- AD_HEALTHBAR_COVER_OFFSET claiming the attached absorb sat at healthBar+2 with no
+    -- room above the cover. Measured from the code instead: healthBar is frame+3
+    -- (Create.lua) and the attached absorb resolves to frame+8
+    -- (DF:ResolveHealAbsorbBarLevel), so covers can occupy healthBar+1..+4 — four levels —
+    -- and still stay under the shield (#1027). Rank 1 is the lowest priority and keeps the
+    -- original seat, so a single tint renders exactly where it always did.
+    -- Beyond four stacked tints the top ones share the ceiling level and fall back to
+    -- cast order between themselves; four deep on one region is already unusual.
+    local lvlOffset = AD_HEALTHBAR_COVER_OFFSET + math.min((rank or 1) - 1, 3)
+    -- ☠ CARRIED IN EVERY ApplyStyle PAYLOAD BELOW, not just at build. ApplyStyle REPLACES
+    -- config.style wholesale, so a payload that omits these drops them — and Blizzard
+    -- creates buttons in LAZY BATCHES, so the next button to arrive would be styled from
+    -- the stripped copy: no sublevel, and (worse) no pandemic bind, silently ungating the
+    -- wash. That is why the opts table is threaded through the restyle closures too.
+    local tintOpts = { pandemicColor = pdColor, sublevel = sublevel, levelOffset = lvlOffset }
+    -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
+    -- the border consumer: a conjunction of presence gates does not express "while
+    -- all of these are absent".
+    local chainHB = resolveConditions(spec, cfg, mine)
+    if chainHB then
+        local r, g, b, a = readADColor(colorCfg)
+        local mode = slower(cfg.mode or "replace")
+        local wholeBar = (mode == "tint") and (cfg.tintWholeBar and true or false) or false
+        -- Anchor = healthBar (the flat path's own Create parent) and level-neutral
+        -- gates, so every chain shape seats the visual exactly where the flat path
+        -- does — chained on `frame` this effect rendered at a different z-level
+        -- (and, one-link, a different rect) per condition SHAPE. Bug #1027.
+        if wholeBar then
+            local blend = healthbarBlend(mode, cfg.blend, a)
+            syncConditionChain(hb, key, healthBar, frame.unit, chainHB, filt, "flat" .. (pdColor and "|pd" or "") .. "|l" .. tostring(lvlOffset),
+                tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(sublevel),
+                    pdColor and colSig(pdColor) or "-" }, "|"),
+                function(m, f) return buildOverlayTintConfig(frame.unit, m, r, g, b, blend, lvlOffset, f, tintOpts) end,
+                function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend },
+                    tintPandemicColor = tintOpts.pandemicColor, sublevel = tintOpts.sublevel } }) end,
+                AD_CHAIN_GATE_OFFSET)
+        else
+            local alpha = (mode == "replace") and 1 or healthbarBlend(mode, cfg.blend, a)
+            local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
+            local tex = (fdb and fdb.healthTexture) or "Interface\\TargetingFrame\\UI-StatusBar"
+            local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
+            syncConditionChain(hb, key, healthBar, frame.unit, chainHB, filt, "cover" .. (pdColor and "|pd" or "") .. "|l" .. tostring(lvlOffset),
+                tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo), tostring(sublevel),
+                    pdColor and colSig(pdColor) or "-" }, "|"),
+                function(m, f) return buildHealthFillConfig(frame.unit, m, r, g, b, alpha, tex, clampTo, f, tintOpts) end,
+                function(h) h:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo,
+                        pandemicColor = tintOpts.pandemicColor },
+                    sublevel = tintOpts.sublevel } }) end,
+                AD_CHAIN_GATE_OFFSET)
+        end
+        return true, false
+    end
+    dropChainEntry(hb, key)
+    local existing = hb[key]
+    local wantMissing = cfg.showWhenMissing and true or false
+    if existing and (existing.missing and true or false) ~= wantMissing then
+        destroyEntry(existing); hb[key] = nil
+    end
+    if wantMissing then
+        -- Missing stays single-winner: a non-winner SWM config renders nothing and its
+        -- stale entry (if any) falls to the keep-set sweep.
+        if not asMissing then return false, false end
+        -- SHOW-WHEN-MISSING: a flat tint over the health-bar region while the buff is ABSENT.
+        -- Window/badge sized read-free from the frame's CONFIGURED size (the live rect is
+        -- secret on 12.1); single-anchored to the health bar's TOPLEFT so it covers the region
+        -- (config-size approximation — precise region + z-order are P4.7 polish). The filled
+        -- mirror is a present-only concept, so nil the feed ref while in missing mode.
+        local r, g, b, a = readADColor(colorCfg)
+        local mode = slower(cfg.mode or "replace")
+        local blend = (mode == "replace") and a or healthbarBlend(mode, cfg.blend, a)
+        local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
+        local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
+        local coSig = tconcat({ "miss", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(mw), tostring(mh) }, "|")
+        local before = hb[key]
+        syncFrameLevelMissing(hb, key, map, frame, healthBar, healthBar, mw, mh, 1, coSig,
+            function(handle) styleTintMissingBadge(handle, r, g, b, blend) end, filt)
+        -- syncFrameLevelMissing replaces the entry TABLE on create/recreate.
+        return true, hb[key] ~= before
+    end
+    local r, g, b, a = readADColor(colorCfg)
+    local mode = slower(cfg.mode or "replace")
+    -- Whole-bar flat tint only exists in tint mode (mirror Indicators.lua:1338):
+    -- replace mode always uses the fill-matched mirror.
+    local wholeBar = (mode == "tint") and (cfg.tintWholeBar and true or false) or false
+
+    -- The tracked map AND the filter string are live-tunable (overlay slots take
+    -- SetAuraSlotCandidateFilters / SetAuraSlotFilterString), so both ride the
+    -- tuning sig rather than forcing a teardown+recreate. wholeBar STAYS
+    -- structural: it picks a different config builder entirely.
+    -- The pandemic cover's PRESENCE is structural: a region can only be created in the
+    -- secure init, so enabling it must hand over a fresh button, not restyle in place.
+    -- lvlOffset joins the sig: frameLevelOffset is read at Create, so a rank change (a
+    -- priority edit that reorders the stack) has to hand over a fresh container.
+    local structSig = (wholeBar and "flat" or "cover") .. (pdColor and "|pd" or "") .. "|l" .. tostring(lvlOffset)
+    local tuningSig = placedTuningSig(map, filt)
+    local entry = hb[key]
+    local created = false
+
+    if wholeBar then
+        -- LEGACY FLAT PATH — whole-bar tint texture, no mirror.
+        local blend = healthbarBlend(mode, cfg.blend, a)
+        local coSig = tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(sublevel),
+                    pdColor and colSig(pdColor) or "-" }, "|")
+        if not entry then
+            local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, map, r, g, b, blend, lvlOffset, filt, tintOpts))
+            if handle then
+                hb[key] = { handle = handle, structSig = structSig,
+                            tuningSig = tuningSig, coSig = coSig }
+                created = true
+            end
+        elseif entry.structSig ~= structSig then
+            entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
+            entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, lvlOffset, filt, tintOpts), structSig)
+            created = true
+        else
+            if entry.tuningSig ~= tuningSig then
+                entry.tuningSig = tuningSig
+                entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, lvlOffset, filt, tintOpts))
+            end
+            if entry.coSig ~= coSig then
+                entry.coSig = coSig
+                entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend },
+                    tintPandemicColor = tintOpts.pandemicColor, sublevel = tintOpts.sublevel } })
+            end
+        end
+    else
+        -- FILLED MIRROR PATH — duplicate StatusBar fed the secret health percent.
+        local alpha = (mode == "replace") and 1 or healthbarBlend(mode, cfg.blend, a)
+        local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
+        local tex = (fdb and fdb.healthTexture) or DF.STOCK_BAR_TEXTURE
+        -- Anchor target: the REAL health bar's fill texture. Its rect is already
+        -- driven by the bar's value, so the cover follows health for free --
+        -- no feed, no per-tick work, nothing read, nothing written from our
+        -- (tainted) update path. Resolved fresh each pass: changing the frame's
+        -- health texture from the settings panel replaces this region.
+        local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
+        local coSig = tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo), tostring(sublevel),
+                    pdColor and colSig(pdColor) or "-" }, "|")
+        if not entry then
+            local handle = DF.AuraContainer:Create(healthBar, buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, filt, tintOpts))
+            if handle then
+                hb[key] = { handle = handle, structSig = structSig,
+                            tuningSig = tuningSig, coSig = coSig }
+                created = true
+            end
+        elseif entry.structSig ~= structSig then
+            entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
+            entry.handle:Rebuild(buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, filt, tintOpts), structSig)
+            created = true
+        else
+            if entry.tuningSig ~= tuningSig then
+                -- A tuning pass keeps the SAME slot and the same cover, so it
+                -- only needs the style re-applied, not a rebuild.
+                entry.tuningSig = tuningSig
+                entry.handle:ApplyTuning(buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, filt, tintOpts))
+            end
+            if entry.coSig ~= coSig then
+                entry.coSig = coSig
+                entry.handle:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo,
+                        pandemicColor = tintOpts.pandemicColor },
+                    sublevel = tintOpts.sublevel } })
+            end
+        end
+    end
+    return true, created
+end
+
+-- The background twin — same contract as syncHealthbarTint. `store` is passed for the
+-- shared bgAnchor host (frame.background is a TEXTURE and can't parent a container;
+-- every background tint parents to the one anchor, so the level assert is idempotent).
+local function syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, asMissing, sublevel)
+    local filt = poolFilter(cfg, resolvePoolMode(spec, key, frame, mine))
+    -- Same contract as the health-bar twin, pandemic cover included: both covers ride
+    -- ONE button, so the second colour costs no frame level and this band's lack of
+    -- headroom no longer rules it out.
+    local pdColor = wantsPandemicColor(cfg) and cfg.pandemicColor or nil
+    local tintOpts = { pandemicColor = pdColor, sublevel = sublevel }
+    -- (No per-rank LEVEL here, unlike the health-bar twin: the background tint's band is
+    -- genuinely one level wide — its host parks at frame+0 and the cover lands at frame+2,
+    -- directly under the health/missing bars at frame+3. So stacked BACKGROUND tints still
+    -- fall back to cast order between themselves. Fixing that needs the bars to move, which
+    -- is a frame-wide z-order change and not worth it for the rarer surface.)
+    -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
+    -- the border consumer: a conjunction of presence gates does not express "while
+    -- all of these are absent".
+    local chainBG = resolveConditions(spec, cfg, mine)
+    if chainBG then
+        local r, g, b, a = readADColor(cfg.color)
+        local mode = slower(cfg.mode or "tint")
+        local blend = healthbarBlend(mode, cfg.blend, a)
+        -- Same parked anchor the flat path uses: the tint has to sit at healthBar-3 so
+        -- it lands above the background but below every bar.
+        local bgHost = store.bgAnchor
+        if not bgHost then
+            bgHost = CreateFrame("Frame", nil, frame)
+            bgHost:SetAllPoints(frame.background)
+            store.bgAnchor = bgHost
+        end
+        local hbLvl = frame.healthBar and frame.healthBar:GetFrameLevel() or 3
+        bgHost:SetFrameLevel(math.max(0, hbLvl - 3))
+        -- Level-neutral gates: the chain's visual seats at bgHost+2 = healthBar-1,
+        -- same as the flat path, whatever the chain length.
+        syncConditionChain(bg, key, bgHost, frame.unit, chainBG, filt, "bgtint" .. (pdColor and "|pd" or ""),
+            tconcat({ "bg", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(sublevel),
+                pdColor and colSig(pdColor) or "-" }, "|"),
+            function(m, f) return buildOverlayTintConfig(frame.unit, m, r, g, b, blend, 0, f, tintOpts) end,
+            function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend },
+                    tintPandemicColor = tintOpts.pandemicColor, sublevel = tintOpts.sublevel } }) end,
+            AD_CHAIN_GATE_OFFSET)
+        return true, false
+    end
+    dropChainEntry(bg, key)
+    local existing = bg[key]
+    local wantMissing = cfg.showWhenMissing and true or false
+    if existing and (existing.missing and true or false) ~= wantMissing then
+        destroyEntry(existing); bg[key] = nil
+    end
+    if wantMissing then
+        -- Missing stays single-winner, exactly as in the health-bar twin.
+        if not asMissing then return false, false end
+        -- SHOW-WHEN-MISSING: flat tint over the background region while the buff is ABSENT.
+        -- Sized read-free from config; anchored to frame.background (parents to `frame`, which
+        -- must be a Frame). z-order below the bars is a P4.7 polish concern (uses offset 0).
+        local r, g, b, a = readADColor(cfg.color)
+        local mode = slower(cfg.mode or "tint")
+        local blend = healthbarBlend(mode, cfg.blend, a)
+        local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
+        local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
+        local coSig = tconcat({ "miss", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(mw), tostring(mh) }, "|")
+        local before = bg[key]
+        syncFrameLevelMissing(bg, key, map, frame, frame, frame.background, mw, mh, 0, coSig,
+            function(handle) styleTintMissingBadge(handle, r, g, b, blend) end, filt)
+        return true, bg[key] ~= before
+    end
+    local bgAnchor = store.bgAnchor
+    if not bgAnchor then
+        bgAnchor = CreateFrame("Frame", nil, frame)
+        bgAnchor:SetAllPoints(frame.background)
+        store.bgAnchor = bgAnchor
+    end
+    -- (Re)assert level every pass — the health bar's level is stable post-create,
+    -- but keep it robust to a frame rebuild that recreates healthBar.
+    local hbLevel = frame.healthBar and frame.healthBar:GetFrameLevel() or 3
+    bgAnchor:SetFrameLevel(math.max(0, hbLevel - 3))
+
+    local r, g, b, a = readADColor(cfg.color)
+    local mode = slower(cfg.mode or "tint")   -- background defaults to tint
+    local blend = healthbarBlend(mode, cfg.blend, a)
+
+    -- Nothing structural left: this family declares one overlay slot with a
+    -- fixed region set, and both the map and the filter string tune live.
+    -- Structural for the same reason as the health-bar twin (secure-context bind).
+    local structSig = "bgtint" .. (pdColor and "|pd" or "")
+    local tuningSig = placedTuningSig(map, filt)
+    local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend), tostring(sublevel),
+        pdColor and colSig(pdColor) or "-" }, "|")
+
+    local entry = bg[key]
+    local created = false
+    if not entry then
+        local handle = DF.AuraContainer:Create(bgAnchor, buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, filt, tintOpts))
+        if handle then
+            bg[key] = { handle = handle, structSig = structSig,
+                        tuningSig = tuningSig, coSig = coSig }
+            created = true
+        end
+    elseif entry.structSig ~= structSig then
+        entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
+        entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, filt, tintOpts), structSig)
+        created = true
+    else
+        if entry.tuningSig ~= tuningSig then
+            entry.tuningSig = tuningSig
+            entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, filt, tintOpts))
+        end
+        if entry.coSig ~= coSig then
+            entry.coSig = coSig
+            entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend },
+                    tintPandemicColor = tintOpts.pandemicColor, sublevel = tintOpts.sublevel } })
+        end
+    end
+    return true, created
+end
+
+-- ============================================================
 -- PER-FRAME SYNC  (P4.1 health-bar + P4.2 frame-level family)
--- Reads the CONFIGURED indicators in adDB.auras[spec] (never a live aura list). Each
--- frame-level effect targets ONE region, so per type we pick the SINGLE highest-priority
--- winner (stacking two of a type conflicts) and stand it up / restyle / tear it down on
--- its own DF.AuraContainer. Types ported here: healthbar, background, border. framealpha /
--- nametext / healthtext RECOVERED via colour-by-cover (see the NAME / HEALTH TEXT block
--- below and the foot notes); framealpha stays a 12.1 casualty (P4.7 overlays its controls).
--- ☠ BORDER IS THE ONE EXCEPTION to "one winner per type": an indicator set to Stacked mode
--- opts out of the priority contest and gets its own ring, so several can show at once.
+-- Reads the CONFIGURED indicators in adDB.auras[spec] (never a live aura list). Types
+-- ported here: healthbar, background, border. framealpha / nametext / healthtext
+-- RECOVERED via colour-by-cover (see the NAME / HEALTH TEXT block below and the foot
+-- notes); framealpha stays a 12.1 casualty (P4.7 overlays its controls).
+-- Winner rules per type:
+--   * healthbar / background — MULTI-TINT: every configured tint renders on its own
+--     presence-gated container; draw order arbitrates simultaneous buffs (see the
+--     collectFrameTints block comment). Show-when-missing stays single-winner.
+--   * border — single highest-priority winner (one ring per Draw Above seat), EXCEPT
+--     an indicator set to Stacked mode, which opts out and gets its own ring.
+--   * nametext / healthtext — single highest-priority winner (one cover per element).
 -- ============================================================
 function Factory:SyncFrame(frame)
     if not frame or not frame.unit then return end
@@ -4620,7 +5326,30 @@ function Factory:SyncFrame(frame)
     frame.dfADMemTestCleared = nil
 
     local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
-    if not adDB then return end
+    if not adDB then
+        -- ☠ TEAR DOWN, DO NOT JUST LEAVE. This was a bare `return`, sitting three lines
+        -- above the `not spec` exit that DOES call ClearFrame -- two "nothing to render"
+        -- paths, one of which released its containers and one of which abandoned them.
+        -- Skipping the sync does not stop anything rendering: the containers are declared
+        -- to the engine and Blizzard keeps drawing them until they are released, so an
+        -- unresolvable config left the previous config's indicators on screen, at their
+        -- old positions, until a reload.
+        -- ☠ LATCHED, exactly like the MemTest branch above and for its stated reason:
+        -- "ClearFrame ends in SyncSound, which is not free to re-run per update."
+        -- An earlier comment here claimed the repeated case costs nothing because
+        -- ClearFrame "returns immediately when there is no store" -- false for exactly
+        -- the frames this fix targets: dfADFactory is created once and never nil'd, so
+        -- a frame that ever rendered AD re-ran the full clear (teardown walks plus a
+        -- SyncSound reconcile) on EVERY sync pass while its config stayed unresolvable.
+        -- The flag resets the moment adDB resolves, so a config coming back re-syncs
+        -- normally. (PR #237 self-review finding 1.)
+        if not frame.dfADNoCfgCleared then
+            frame.dfADNoCfgCleared = true
+            self:ClearFrame(frame)
+        end
+        return
+    end
+    frame.dfADNoCfgCleared = nil
 
     -- The factory owns AD here (the legacy read-path engine is gone), so nothing maintains the
     -- buff-bar dedup set. Clear any set left populated by a prior legacy run so it can't
@@ -4687,153 +5416,58 @@ function Factory:SyncFrame(frame)
     -- NIL spec (ad-hoc "#id" -> SpellDB by name; per-spec Config tables never apply).
     local otherAuras = adDB.otherAuras
 
+    -- ☠ THE PROFILE'S GLOBAL DEFAULTS, RESOLVED ONCE FOR THE WHOLE SYNC — and declared HERE,
+    -- at function scope, rather than inside any of the do-blocks below.
+    --
+    -- It used to be declared inside the placed-pool block, then AGAIN inside the filter-group
+    -- block when that one was found to be reading a nil global. The third sibling — the debuff
+    -- category groups — was never given one, so it kept reading `defs` as a GLOBAL and kept
+    -- getting nil, exactly as the first two had. The whole class was a block-scoped local being
+    -- reached for from sibling scopes, and fixing it per-site could only ever fix the sites
+    -- someone happened to look at. One declaration above all three ends it.
+    --
+    -- The failure is silent by construction: every consumer reads it as
+    -- `(defs and defs.level) or 40`, so a nil `defs` renders at a hardcoded level rather than
+    -- throwing. `luac -l -p <file> | grep '_ENV "defs"'` is what proves it — a GETTABUP on
+    -- _ENV means the compiler resolved that read as a global, and it must return nothing here.
+    --
+    -- Resolved once per sync (the pool walk is allocation-free and this path is per-UNIT_AURA
+    -- hot), and threaded into every placed/bar/group spec + struct sig, so nil-instance
+    -- indicators follow adDB.defaults exactly like the editor's proxy does.
+    local defs = resolveDefs(adDB)
+
     -- ---- HEALTH BAR (child of frame.healthBar, overlay) -----------------------------
-    -- Two render paths, chosen by config:
-    --   * FILL COVER (replace, or tint without "Tint Entire Bar") — a texture anchored to the
-    --     real health bar's fill region (healthBar:GetStatusBarTexture()), so it tracks health
-    --     with no feed and no reads. replace = opaque cover (alpha 1); tint = fill-matched
-    --     tint (alpha = blend).
-    --   * FLAT WHOLE-BAR TINT (tint + tintWholeBar) — the legacy flat texture overlay covering
-    --     the whole bar incl. the missing-health region. Unchanged behaviour.
-    -- Path (flat vs cover) is folded into structSig so toggling it rebuilds the region fresh.
+    -- MULTI-TINT (see the block comment above collectFrameTints): every configured
+    -- Health Bar Color renders on its own presence-gated container; draw order — not a
+    -- static pick — arbitrates when several buffs are up at once. Per-tint render paths
+    -- are unchanged (see syncHealthbarTint): FILL COVER (replace, or tint without "Tint
+    -- Entire Bar") anchored to the real fill region, or the legacy FLAT WHOLE-BAR TINT
+    -- (tint + tintWholeBar); flat vs cover is folded into structSig so toggling it
+    -- rebuilds the region fresh.
     local healthBar = frame.healthBar
     if healthBar then
         local hb = store.healthbar
         if not hb then hb = {}; store.healthbar = hb end
 
-        local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, "healthbar",
-            function(c) return c.color end)
-
-        if bestName then
-            local filt = poolFilter(bestCfg, resolvePoolMode(spec, bestName, frame, bestPool == 1))
-            -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
-            -- the border consumer: a conjunction of presence gates does not express "while
-            -- all of these are absent".
-            local chainHB = resolveConditions(spec, bestCfg, bestPool == 1)
-            if chainHB then
-                local r, g, b, a = readADColor(bestCfg.color)
-                local mode = slower(bestCfg.mode or "replace")
-                local wholeBar = (mode == "tint") and (bestCfg.tintWholeBar and true or false) or false
-                -- Anchor = healthBar (the flat path's own Create parent) and level-neutral
-                -- gates, so every chain shape seats the visual exactly where the flat path
-                -- does — chained on `frame` this effect rendered at a different z-level
-                -- (and, one-link, a different rect) per condition SHAPE. Bug #1027.
-                if wholeBar then
-                    local blend = healthbarBlend(mode, bestCfg.blend, a)
-                    syncConditionChain(hb, bestName, healthBar, frame.unit, chainHB, filt, "flat",
-                        tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|"),
-                        function(map, f) return buildOverlayTintConfig(frame.unit, map, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, f) end,
-                        function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end,
-                        AD_CHAIN_GATE_OFFSET)
-                else
-                    local alpha = (mode == "replace") and 1 or healthbarBlend(mode, bestCfg.blend, a)
-                    local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
-                    local tex = (fdb and fdb.healthTexture) or "Interface\\TargetingFrame\\UI-StatusBar"
-                    local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
-                    syncConditionChain(hb, bestName, healthBar, frame.unit, chainHB, filt, "cover",
-                        tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo) }, "|"),
-                        function(map, f) return buildHealthFillConfig(frame.unit, map, r, g, b, alpha, tex, clampTo, f) end,
-                        function(h) h:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo } } }) end,
-                        AD_CHAIN_GATE_OFFSET)
-                end
-            else
-            dropChainEntry(hb, bestName)
-            local existingHB = hb[bestName]
-            local wantMissingHB = bestCfg.showWhenMissing and true or false
-            if existingHB and (existingHB.missing and true or false) ~= wantMissingHB then
-                destroyEntry(existingHB); hb[bestName] = nil
-            end
-          if wantMissingHB then
-            -- SHOW-WHEN-MISSING: a flat tint over the health-bar region while the buff is ABSENT.
-            -- Window/badge sized read-free from the frame's CONFIGURED size (the live rect is
-            -- secret on 12.1); single-anchored to the health bar's TOPLEFT so it covers the region
-            -- (config-size approximation — precise region + z-order are P4.7 polish). The filled
-            -- mirror is a present-only concept, so nil the feed ref while in missing mode.
-            local r, g, b, a = readADColor(bestCfg.color)
-            local mode = slower(bestCfg.mode or "replace")
-            local blend = (mode == "replace") and a or healthbarBlend(mode, bestCfg.blend, a)
-            local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
-            local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
-            local coSig = tconcat({ "miss", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(mw), tostring(mh) }, "|")
-            syncFrameLevelMissing(hb, bestName, bestMap, frame, healthBar, healthBar, mw, mh, 1, coSig,
-                function(handle) styleTintMissingBadge(handle, r, g, b, blend) end, filt)
-          else
-            local r, g, b, a = readADColor(bestCfg.color)
-            local mode = slower(bestCfg.mode or "replace")
-            -- Whole-bar flat tint only exists in tint mode (mirror Indicators.lua:1338):
-            -- replace mode always uses the fill-matched mirror.
-            local wholeBar = (mode == "tint") and (bestCfg.tintWholeBar and true or false) or false
-
-            -- The tracked map AND the filter string are live-tunable (overlay slots take
-            -- SetAuraSlotCandidateFilters / SetAuraSlotFilterString), so both ride the
-            -- tuning sig rather than forcing a teardown+recreate. wholeBar STAYS
-            -- structural: it picks a different config builder entirely.
-            local structSig = (wholeBar and "flat" or "cover")
-            local tuningSig = placedTuningSig(bestMap, filt)
-            local entry = hb[bestName]
-
-            if wholeBar then
-                -- LEGACY FLAT PATH — whole-bar tint texture, no mirror.
-                local blend = healthbarBlend(mode, bestCfg.blend, a)
-                local coSig = tconcat({ "flat", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
-                if not entry then
-                        local handle = DF.AuraContainer:Create(healthBar, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt))
-                    if handle then
-                        hb[bestName] = { handle = handle, structSig = structSig,
-                                         tuningSig = tuningSig, coSig = coSig }
-                    end
-                elseif entry.structSig ~= structSig then
-                        entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                    entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt), structSig)
-                else
-                    if entry.tuningSig ~= tuningSig then
-                        entry.tuningSig = tuningSig
-                        entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, AD_HEALTHBAR_COVER_OFFSET, filt))
-                    end
-                    if entry.coSig ~= coSig then
-                        entry.coSig = coSig
-                        entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
-                    end
-                end
-            else
-                -- FILLED MIRROR PATH — duplicate StatusBar fed the secret health percent.
-                local alpha = (mode == "replace") and 1 or healthbarBlend(mode, bestCfg.blend, a)
-                local fdb = DF.GetFrameDB and DF:GetFrameDB(frame)
-                local tex = (fdb and fdb.healthTexture) or DF.STOCK_BAR_TEXTURE
-                -- Anchor target: the REAL health bar's fill texture. Its rect is already
-                -- driven by the bar's value, so the cover follows health for free --
-                -- no feed, no per-tick work, nothing read, nothing written from our
-                -- (tainted) update path. Resolved fresh each pass: changing the frame's
-                -- health texture from the settings panel replaces this region.
-                local clampTo = healthBar.GetStatusBarTexture and healthBar:GetStatusBarTexture() or nil
-                local coSig = tconcat({ "fill", tostring(r), tostring(g), tostring(b), tostring(alpha), tostring(tex), tostring(clampTo) }, "|")
-                if not entry then
-                    local handle = DF.AuraContainer:Create(healthBar, buildHealthFillConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
-                    if handle then
-                        hb[bestName] = { handle = handle, structSig = structSig,
-                                         tuningSig = tuningSig, coSig = coSig }
-                    end
-                elseif entry.structSig ~= structSig then
-                    entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                    entry.handle:Rebuild(buildHealthFillConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt), structSig)
-                else
-                    if entry.tuningSig ~= tuningSig then
-                        -- A tuning pass keeps the SAME slot and the same cover, so it
-                        -- only needs the style re-applied, not a rebuild.
-                        entry.tuningSig = tuningSig
-                        entry.handle:ApplyTuning(buildHealthFillConfig(frame.unit, bestMap, r, g, b, alpha, tex, clampTo, filt))
-                    end
-                    if entry.coSig ~= coSig then
-                        entry.coSig = coSig
-                        entry.handle:ApplyStyle({ overlay = { healthFill = { texture = tex, color = { r, g, b }, alpha = alpha, clampTo = clampTo } } })
-                    end
-                end
-            end
-          end
-            end  -- if chainHB
+        local tints = collectFrameTints(spec, specAuras, otherAuras, "healthbar")
+        if tints then
+            syncTintFamily(tints, hb, store, "healthbarOrder", spec,
+                -- ☠ KEEP THIS ARITY IN STEP WITH syncTintFamily's syncOne CALL. Lua fills a
+                -- missing parameter with nil and says nothing, so a short closure silently
+                -- drops the tail: this one declared seven while nine were passed, eating
+                -- auraKey and the pandemic flag. The variant then painted the BASE colour,
+                -- ungated — an invisible duplicate of its own base, reported as "the colour
+                -- never changes". Neither luac nor the _ENV globals diff can see an arity
+                -- mismatch; only the screen shows it.
+                function(key, cfg, map, mine, asMissing, sublevel, rank, auraKey)
+                    return syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine,
+                                             asMissing, sublevel, rank, auraKey)
+                end)
+        else
+            -- No health-bar tints configured → the mirror bars are gone; drop the refs.
+            teardownExcept(hb, nil)
+            store.healthbarOrder = nil
         end
-        teardownExcept(hb, bestName)
-        -- No health-bar winner this pass → the mirror bar is gone; drop the ref.
     end
 
     -- ---- BACKGROUND TINT (child of frame.background, overlay tint) -------------------
@@ -4850,104 +5484,28 @@ function Factory:SyncFrame(frame)
         local bg = store.background
         if not bg then bg = {}; store.background = bg end
 
-        local bestName, bestCfg, bestMap, _, bestPool = pickWinner(spec, specAuras, otherAuras, "background",
-            function(c) return c.color end)
-
-        if bestName then
-            local filt = poolFilter(bestCfg, resolvePoolMode(spec, bestName, frame, bestPool == 1))
-            -- CONDITION CHAIN takes precedence and suppresses missing mode, exactly as in
-            -- the border consumer: a conjunction of presence gates does not express "while
-            -- all of these are absent".
-            local chainBG = resolveConditions(spec, bestCfg, bestPool == 1)
-            if chainBG then
-                local r, g, b, a = readADColor(bestCfg.color)
-                local mode = slower(bestCfg.mode or "tint")
-                local blend = healthbarBlend(mode, bestCfg.blend, a)
-                -- Same parked anchor the single-container path uses: frame.background is a
-                -- TEXTURE and can't parent a container, and the tint has to sit at
-                -- healthBar-3 so it lands above the background but below every bar.
-                local bgHost = store.bgAnchor
-                if not bgHost then
-                    bgHost = CreateFrame("Frame", nil, frame)
-                    bgHost:SetAllPoints(frame.background)
-                    store.bgAnchor = bgHost
-                end
-                local hbLvl = frame.healthBar and frame.healthBar:GetFrameLevel() or 3
-                bgHost:SetFrameLevel(math.max(0, hbLvl - 3))
-                -- Level-neutral gates: the chain's visual seats at bgHost+2 = healthBar-1,
-                -- same as the flat path below, whatever the chain length.
-                syncConditionChain(bg, bestName, bgHost, frame.unit, chainBG, filt, "bgtint",
-                    tconcat({ "bg", tostring(r), tostring(g), tostring(b), tostring(blend) }, "|"),
-                    function(map, f) return buildOverlayTintConfig(frame.unit, map, r, g, b, blend, 0, f) end,
-                    function(h) h:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } }) end,
-                    AD_CHAIN_GATE_OFFSET)
-            else
-            dropChainEntry(bg, bestName)
-            local existingBG = bg[bestName]
-            local wantMissingBG = bestCfg.showWhenMissing and true or false
-            if existingBG and (existingBG.missing and true or false) ~= wantMissingBG then
-                destroyEntry(existingBG); bg[bestName] = nil
+        local tints = collectFrameTints(spec, specAuras, otherAuras, "background")
+        if tints then
+            syncTintFamily(tints, bg, store, "backgroundOrder", spec,
+                function(key, cfg, map, mine, asMissing, sublevel)
+                    return syncBackgroundTint(bg, store, frame, spec, key, cfg, map, mine, asMissing, sublevel)
+                end)
+            -- ☠ AND RELEASE WHEN THE SYNC SEATED NOTHING. `tints` being non-empty says
+            -- only that something was CONFIGURED; syncTintFamily can still keep zero
+            -- containers (every tint a non-winner). The release lived in the else-branch
+            -- alone, so that case left a shown, empty anchor frame parked over
+            -- frame.background for the rest of the session — invisible, but a frame WoW
+            -- never frees, per unit, and it is the same emptiness the else-branch cleans.
+            if not next(bg) then
+                store.backgroundOrder = nil
+                releaseBgAnchor(store)
             end
-          if wantMissingBG then
-            -- SHOW-WHEN-MISSING: flat tint over the background region while the buff is ABSENT.
-            -- Sized read-free from config; anchored to frame.background (parents to `frame`, which
-            -- must be a Frame). z-order below the bars is a P4.7 polish concern (uses offset 0).
-            local r, g, b, a = readADColor(bestCfg.color)
-            local mode = slower(bestCfg.mode or "tint")
-            local blend = healthbarBlend(mode, bestCfg.blend, a)
-            local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
-            local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
-            local coSig = tconcat({ "miss", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(mw), tostring(mh) }, "|")
-            syncFrameLevelMissing(bg, bestName, bestMap, frame, frame, frame.background, mw, mh, 0, coSig,
-                function(handle) styleTintMissingBadge(handle, r, g, b, blend) end, filt)
-          else
-            local bgAnchor = store.bgAnchor
-            if not bgAnchor then
-                bgAnchor = CreateFrame("Frame", nil, frame)
-                bgAnchor:SetAllPoints(frame.background)
-                store.bgAnchor = bgAnchor
-            end
-            -- (Re)assert level every pass — the health bar's level is stable post-create,
-            -- but keep it robust to a frame rebuild that recreates healthBar.
-            local hbLevel = frame.healthBar and frame.healthBar:GetFrameLevel() or 3
-            bgAnchor:SetFrameLevel(math.max(0, hbLevel - 3))
-
-            local r, g, b, a = readADColor(bestCfg.color)
-            local mode = slower(bestCfg.mode or "tint")   -- background defaults to tint
-            local blend = healthbarBlend(mode, bestCfg.blend, a)
-
-            -- Nothing structural left: this family declares one overlay slot with a
-            -- fixed region set, and both the map and the filter string tune live.
-            local structSig = "bgtint"
-            local tuningSig = placedTuningSig(bestMap, filt)
-            local coSig = tconcat({ tostring(r), tostring(g), tostring(b), tostring(blend) }, "|")
-
-            local entry = bg[bestName]
-            if not entry then
-                local handle = DF.AuraContainer:Create(bgAnchor, buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt))
-                if handle then
-                    bg[bestName] = { handle = handle, structSig = structSig,
-                                     tuningSig = tuningSig, coSig = coSig }
-                end
-            elseif entry.structSig ~= structSig then
-                entry.structSig, entry.tuningSig, entry.coSig = structSig, tuningSig, coSig
-                entry.handle:Rebuild(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt), structSig)
-            else
-                if entry.tuningSig ~= tuningSig then
-                    entry.tuningSig = tuningSig
-                    entry.handle:ApplyTuning(buildOverlayTintConfig(frame.unit, bestMap, r, g, b, blend, 0, filt))
-                end
-                if entry.coSig ~= coSig then
-                    entry.coSig = coSig
-                    entry.handle:ApplyStyle({ overlay = { tintColor = { r, g, b, blend } } })
-                end
-            end
-          end
-            end  -- if chainBG
+        else
+            -- No background tints configured → the containers are gone; drop the anchor too.
+            teardownExcept(bg, nil)
+            store.backgroundOrder = nil
+            releaseBgAnchor(store)
         end
-        teardownExcept(bg, bestName)
-        -- No background winner this pass → the containers are gone; drop the anchor too.
-        if not bestName then releaseBgAnchor(store) end
     end
 
     -- ---- BORDER (whole-frame static ring via DF.Border, overlay) ---------------------
@@ -5000,10 +5558,12 @@ function Factory:SyncFrame(frame)
             local drawAboveBD = bestCfg.drawAboveFrameBorder ~= false
             -- Level-neutral gates: the ring keeps its drawAboveFrameBorder 11/9 seat
             -- relative to `frame` (the flat path's parent) at any chain length.
+            local pdChain = pandemicBorderSpec(bestSpec, bestCfg)
             return syncConditionChain(bd, bestName, frame, frame.unit, chainLinks, filt,
-                "da=" .. tostring(drawAboveBD), borderSpecSig(bestSpec),
-                function(map, f) return buildBorderConfig(frame.unit, map, bestSpec, f, drawAboveBD) end,
-                function(h) h:ApplyStyle({ border = { spec = bestSpec } }) end,
+                "da=" .. tostring(drawAboveBD) .. (pdChain and "|pd" or ""),
+                borderSpecSig(bestSpec) .. (pdChain and ("|pd=" .. colSig(bestCfg.pandemicColor)) or ""),
+                function(map, f) return buildBorderConfig(frame.unit, map, bestSpec, f, drawAboveBD, pdChain) end,
+                function(h) h:ApplyStyle({ border = { spec = bestSpec, pandemicSpec = pdChain } }) end,
                 AD_CHAIN_GATE_OFFSET) and true or false
         end
 
@@ -5169,12 +5729,8 @@ function Factory:SyncFrame(frame)
         -- only, all else raw record).
         local hasMG, hasOtherMG = arrangeMemberGroups(adDB, spec, specAuras, otherAuras)
 
-        -- The profile's global colour-by-time default — resolved ONCE per sync (the pool
-        -- walk is allocation-free and per-UNIT_AURA hot) and threaded into every placed/
-        -- bar spec + struct sig, so nil-instance indicators follow adDB.defaults exactly
-        -- like the editor's proxy does.
-        local defs = resolveDefs(adDB)
-
+        -- (`defs` is the function-scoped one above — see the note there for why it must not
+        -- be re-declared inside a block.)
         if specAuras then
             syncPlacedPool(frame, placed, live, hasMG, specAuras, "", spec, defs,
                 adDB.layoutGroups and adDB.layoutGroups[spec])
@@ -5216,19 +5772,15 @@ function Factory:SyncFrame(frame)
         local fg = store.fgroups
         if not fg then fg = {}; store.fgroups = fg end
         local live = {}
-        -- ☠ RESOLVED HERE, not inherited. The `defs` further up is scoped to the
-        -- placed-pool do-block and is NOT visible in this one, so every call below was
-        -- handing out a nil — and had been for as long as one has taken it.
-        --
-        -- It degraded silently instead of erroring, because the filter-group path reads
-        -- it as `(defs and defs.level) or 40`: groups have been pinned to frame level 40
-        -- whatever the account-wide Default Frame Level slider said. That is precisely
-        -- the "AD output split across two planes, groups stranded underneath their own
-        -- indicators" that buildFilterGroupConfig's comment describes having fixed.
-        -- Surfaced by the member-group sync, which reaches defs.level bare through
-        -- placedStructSig and so could not fail quietly.
-        local defs = resolveDefs(adDB)
-
+        -- ☠ `defs` is the FUNCTION-SCOPED one now. This block used to declare its own,
+        -- because the original lived in the placed-pool do-block and was invisible here —
+        -- every call below handed out a nil, and had for as long as one had been taken.
+        -- It degraded silently rather than erroring: the reads are `(defs and defs.level)
+        -- or 40`, so groups were pinned to level 40 whatever the account-wide Default
+        -- Frame Level slider said — the "AD output split across two planes, groups
+        -- stranded underneath their own indicators" buildFilterGroupConfig describes.
+        -- A second block-scoped declaration fixed this block and left the debuff-group
+        -- block below with the identical bug, which is why there is now exactly one.
         local R = DF.FilterRegistry
         if R then
             syncFilterGroupList(frame, fg, live, R, adDB.layoutGroups and adDB.layoutGroups[spec], "", defs)
@@ -5363,6 +5915,9 @@ function Factory:ClearFrame(frame)
     if not store then return end
     teardownExcept(store.healthbar or {}, nil)
     teardownExcept(store.background or {}, nil)
+    -- Multi-tint order signatures: stale sigs are harmless (a fully-empty store always
+    -- recreates in list order) but keep the teardown honest.
+    store.healthbarOrder, store.backgroundOrder = nil, nil
     teardownExcept(store.border or {}, nil)
     teardownExcept(store.placed or {}, nil)   -- per-indicator icon/square/bar containers
     -- (Expiry-alert COMPANION handles live in store.placed too — covered above.)

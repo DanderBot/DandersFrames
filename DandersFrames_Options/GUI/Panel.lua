@@ -202,60 +202,450 @@ function DF:CreateGUI()
     GUI:StyleButton(backBtn, { width = 60, height = 22, text = L["Close"] })
     backBtn:SetScript("OnClick", function() changelogOverlay:Hide() end)
 
-    -- Convert markdown changelog to WoW color-coded plain text
-    local function FormatChangelog(text)
-        if not text or text == "" then return L["No changelog available."] end
-        local tc = GetThemeColor()
-        local themeHex = format("%02x%02x%02x", tc.r * 255, tc.g * 255, tc.b * 255)
-        local dimHex = format("%02x%02x%02x", C_TEXT_DIM.r * 255, C_TEXT_DIM.g * 255, C_TEXT_DIM.b * 255)
-        local textHex = format("%02x%02x%02x", C_TEXT.r * 255, C_TEXT.g * 255, C_TEXT.b * 255)
+    -- =========================================================================
+    -- CHANGELOG — RENDERED, NOT DUMPED
+    -- =========================================================================
+    -- ★ This used to be one EditBox holding the whole markdown as colour-coded
+    -- text: every release, every section, every entry at the same size and
+    -- weight — a wall. It now renders the same CHANGELOG.md structure as typed
+    -- pieces (the shape EllesmereUI's patch-notes page uses, reached from the
+    -- same complaint): a version title with a hairline underline, caps section
+    -- labels, feature CARDS (category as the accent-coloured title, wrapping
+    -- body, faint panel behind, 2px accent line on top) and compact fix ROWS
+    -- (accent bullet, category chip, wrapping dim body). Hierarchy comes from
+    -- size and alpha, and from actual space between things.
+    --
+    -- The data pipeline is untouched: DF.CHANGELOG_TEXT is still the generated
+    -- markdown, parsed here into version → section → entry. Only the newest
+    -- releases render up front (frames cost more than a text box); "Show older
+    -- releases" appends the next batch. All pieces are pooled so reopening or
+    -- resizing rebuilds without leaking frames.
+    -- =========================================================================
+    local CL_INITIAL_VERSIONS = 5
+    local CL_BATCH_VERSIONS   = 5
 
-        local lines = {}
+    -- Parse the markdown into { {version, sections = { {name, entries = { {category, text, author} } } } } }.
+    local function ParseChangelog(text)
+        local versions = {}
+        if not text or text == "" then return versions end
+        local cur, sec
         for line in text:gmatch("[^\n]*") do
-            if line:match("^# ") then
-                -- Main title — skip (already shown in header bar)
-            elseif line:match("^## ") then
-                -- Version header
-                local content = line:gsub("^##%s*", "")
-                lines[#lines + 1] = format("|cff%s%s|r", themeHex, content)
-            elseif line:match("^### ") then
-                -- Section header
-                local content = line:gsub("^###%s*", "")
-                lines[#lines + 1] = format("\n|cff%s%s|r", textHex, content)
-            elseif line:match("^%*%s") or line:match("^%-%s") then
-                -- Bullet point
-                local content = line:gsub("^[%*%-]%s*", "")
-                lines[#lines + 1] = format("  |cff%s\226\128\162|r  |cff%s%s|r", themeHex, dimHex, content)
-            elseif line:match("^%s*$") then
-                lines[#lines + 1] = ""
-            else
-                lines[#lines + 1] = format("|cff%s%s|r", dimHex, line)
+            local v = line:match("^##%s+%[?([^%]]+)%]?%s*$")
+            if v then
+                cur = { version = v, sections = {} }
+                versions[#versions + 1] = cur
+                sec = nil
+            elseif cur then
+                local h = line:match("^###%s+(.-)%s*$")
+                if h then
+                    sec = { name = h, entries = {} }
+                    cur.sections[#cur.sections + 1] = sec
+                else
+                    local body = line:match("^[%*%-]%s+(.-)%s*$")
+                    if body and body ~= "" then
+                        if not sec then
+                            sec = { name = "", entries = {} }
+                            cur.sections[#cur.sections + 1] = sec
+                        end
+                        local category, rest = body:match("^%(([^%)]+)%)%s*(.*)$")
+                        if not category then category, rest = nil, body end
+                        -- ⚠ gsub returns (string, COUNT): capture the author from the
+                        -- match, and let the count fall into a throwaway — an earlier
+                        -- cut assigned the count to `author` and every row ended in "1".
+                        local author = rest:match("%(by%s+([^%)]+)%)%s*$")
+                        rest = rest:gsub("%s*%(by%s+[^%)]+%)%s*$", "")
+                        sec.entries[#sec.entries + 1] = { category = category, text = rest, author = author }
+                    end
+                end
             end
         end
-
-        return table.concat(lines, "\n")
+        return versions
     end
 
-    -- plain: the overlay already IS the panel, so the text area contributes only
-    -- the scrolling field. readOnly rather than EnableKeyboard(false) — the
-    -- changelog stays uneditable but becomes selectable and copyable.
-    local changelogArea = GUI:CreateTextArea(changelogOverlay, {
-        plain    = true,
-        readOnly = true,
-        text     = FormatChangelog(DF.CHANGELOG_TEXT),
-    })
-    changelogArea:SetPoint("TOPLEFT", 8, -38)
-    changelogArea:SetPoint("BOTTOMRIGHT", -8, 8)
-    GUI.FormatChangelog = FormatChangelog
-    GUI.changelogArea = changelogArea   -- .EditBox for the field itself
+    -- ★ DEEP LINKS. A feature card whose category names a settings page is a
+    -- button: click closes the changelog and lands on that page (EUI's rule —
+    -- no target, no click, mouse off so nothing invites a dead click). Keys are
+    -- the changelog's own "(Category)" tags, normalised to lowercase alnum, so
+    -- "Click-Casting" / "Click Casting" / "click casting" all resolve. Targets
+    -- are either a sub-tab id (party/raid mode) or the "clicks" mode.
+    -- ⚠ Not every category has a page (Test Mode is a toolbar button; Debug
+    -- has a console tab): those cards stay static, on purpose.
+    local CL_NAV = {
+        auradesigner = "auras_auradesigner",
+        auras = "auras_buffs", buffs = "auras_buffs", buffbar = "auras_buffs",
+        buffsdebuffs = "auras_buffs", buffsanddebuffs = "auras_buffs",
+        debuffs = "auras_debuffs", debuffbar = "auras_debuffs",
+        defensiveicons = "auras_defensiveicon", defensiveicon = "auras_defensiveicon",
+        dispelhighlight = "auras_dispel", dispel = "auras_dispel",
+        filterdesigner = "auras_filterdesigner", filters = "auras_filterdesigner",
+        missingbuffs = "auras_missingbuffs",
+        bars = "bars_health", healthbar = "bars_health", healthbars = "bars_health",
+        absorbs = "bars_absorb", absorb = "bars_absorb",
+        healprediction = "bars_healpred", resourcebar = "bars_resource", powerbar = "bars_resource",
+        pinnedframes = "general_pinnedframes", friendlybossnpcframes = "general_pinnedframes",
+        petframes = "display_pets", pets = "display_pets",
+        fonts = "general_fonts", globalfonts = "general_fonts",
+        nicknames = "general_nicknames", sorting = "general_sorting",
+        frames = "general_frame", layout = "general_frame", raidframes = "general_frame",
+        partyframes = "general_frame", frameborder = "general_frame",
+        settings = "general_settings", general = "general_settings",
+        integrations = "general_integrations",
+        indicators = "indicators_icons", icons = "indicators_icons", statusicons = "indicators_icons",
+        highlights = "indicators_highlights", targetedspells = "indicators_personal_targeted",
+        textdesigner = "text_designer", text = "text_designer",
+        range = "display_fading", fading = "display_fading", classcolors = "display_classcolors",
+        tooltips = "display_tooltips", visibility = "display_visibility",
+        profiles = "profiles_manage", importexport = "profiles_importexport",
+        debug = "debug_console", wizards = "wizards",
+        clickcasting = "clicks",
+    }
+    local function navTargetFor(category)
+        if type(category) ~= "string" then return nil end
+        return CL_NAV[(category:lower():gsub("[^%w]", ""))]
+    end
+    local function navigateTo(target)
+        if not target then return end
+        changelogOverlay:Hide()
+        if target == "clicks" then
+            if GUI.ClicksButton then GUI.ClicksButton:Click() end
+            return
+        end
+        -- Sub-tabs live under the party/raid modes; from Clicks, step back to
+        -- Party first (the toolbar button owns that transition and its cleanup).
+        if GUI.SelectedMode == "clicks" and GUI.PartyButton then GUI.PartyButton:Click() end
+        C_Timer.After(0, function()
+            if GUI.LinkToSetting then GUI:LinkToSetting({ page = target, flash = false }) end
+        end)
+    end
+
+    -- Scroll surface. ScrollFrameTemplate + the themed pill, like every list.
+    local clScroll = CreateFrame("ScrollFrame", nil, changelogOverlay, "ScrollFrameTemplate")
+    clScroll:SetPoint("TOPLEFT", 8, -38)
+    clScroll:SetPoint("BOTTOMRIGHT", -26, 8)
+    StyleScrollBar(clScroll)
+    local clChild = CreateFrame("Frame", nil, clScroll)
+    clChild:SetWidth(100)
+    clScroll:SetScrollChild(clChild)
+
+    -- Pools. Kinds: "fs" (FontString), "tex" (Texture), "card" (backdrop frame),
+    -- "sep" (separator frame). Everything is parented to clChild.
+    local clPool, clUsed = {}, {}
+    local function acquire(kind)
+        local p = clPool[kind]; if not p then p = {}; clPool[kind] = p end
+        local u = clUsed[kind] or 0; u = u + 1; clUsed[kind] = u
+        local obj = p[u]
+        if not obj then
+            if kind == "fs" then
+                obj = clChild:CreateFontString(nil, "OVERLAY")
+            elseif kind == "tex" then
+                obj = clChild:CreateTexture(nil, "ARTWORK")
+            elseif kind == "card" then
+                -- ★ A FEATURE CALLOUT, not a card. No box, no fill, no grid: DF's own
+                -- note/banner idiom — a left accent RAIL with a STAR at its head (the
+                -- changelog's "new feature" glyph; fixes get a dot), title line, wrapping
+                -- body, and a CHEVRON at the title's right edge only when the feature
+                -- links to a settings page (the "go here" affordance the panel already
+                -- uses). Rail colour says clickable: theme when linked, dim when not.
+                -- A Button so a linked callout is one click; static ones mouse off.
+                obj = CreateFrame("Button", nil, clChild)
+                -- Faint fill so the callout reads as a surface you can press — no
+                -- border and no top accent (the rail is the accent). Hover lifts it.
+                obj.fill = obj:CreateTexture(nil, "BACKGROUND")
+                obj.fill:SetAllPoints()
+                obj.fill:SetColorTexture(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.35)
+                obj.rail = obj:CreateTexture(nil, "ARTWORK")
+                obj.rail:SetPoint("TOPLEFT", 0, 0)
+                obj.rail:SetPoint("BOTTOMLEFT", 0, 0)
+                obj.rail:SetWidth(3)
+                obj.star = obj:CreateTexture(nil, "OVERLAY")
+                obj.star:SetSize(14, 14)
+                obj.star:SetPoint("TOPLEFT", 10, -9)
+                obj.star:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\star")
+                obj.chev = obj:CreateTexture(nil, "OVERLAY")
+                obj.chev:SetSize(14, 14)
+                obj.chev:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\Icons\\chevron_right")
+                obj.title = obj:CreateFontString(nil, "OVERLAY")
+                obj.body  = obj:CreateFontString(nil, "OVERLAY")
+                obj.by    = obj:CreateFontString(nil, "OVERLAY")
+                obj:SetScript("OnEnter", function(self)
+                    if not self.navTarget then return end
+                    local c = self.railColor
+                    self.fill:SetColorTexture(C_HOVER.r, C_HOVER.g, C_HOVER.b, 0.55)
+                    self.rail:SetColorTexture(c.r, c.g, c.b, 1)
+                    self.chev:SetVertexColor(c.r, c.g, c.b, 1)
+                    self.title:SetTextColor(c.r, c.g, c.b, 1)
+                end)
+                obj:SetScript("OnLeave", function(self)
+                    if not self.navTarget then return end
+                    local c = self.railColor
+                    self.fill:SetColorTexture(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.35)
+                    self.rail:SetColorTexture(c.r, c.g, c.b, 0.7)
+                    self.chev:SetVertexColor(c.r, c.g, c.b, 0.6)
+                    self.title:SetTextColor(c.r, c.g, c.b, 0.9)
+                end)
+                obj:SetScript("OnClick", function(self) navigateTo(self.navTarget) end)
+            elseif kind == "sep" then
+                obj = GUI:CreateSeparator(clChild, { width = 100, alpha = 0.10 })
+            elseif kind == "band" then
+                -- Version band: a full-width theme-tinted strip with a 2px theme line
+                -- under it. THE patch divider — a hairline under a title was not
+                -- enough once sections got real headings of their own.
+                obj = CreateFrame("Frame", nil, clChild)
+                obj.fill = obj:CreateTexture(nil, "BACKGROUND")
+                obj.fill:SetAllPoints()
+                obj.line = obj:CreateTexture(nil, "ARTWORK")
+                obj.line:SetPoint("BOTTOMLEFT", 0, 0)
+                obj.line:SetPoint("BOTTOMRIGHT", 0, 0)
+                obj.line:SetHeight(2)
+                obj.text = obj:CreateFontString(nil, "OVERLAY")
+                obj.text:SetPoint("LEFT", 12, 1)
+                obj.text:SetJustifyH("LEFT")
+            end
+            p[u] = obj
+        end
+        obj:ClearAllPoints()
+        -- A pooled FontString carries its last role's width and leading; reset
+        -- so a title reused from a row does not inherit a wrap width or spacing.
+        if kind == "fs" then obj:SetWidth(0); obj:SetHeight(0); obj:SetSpacing(0) end
+        obj:Show()
+        return obj
+    end
+    local function releaseAll()
+        for kind, p in pairs(clPool) do
+            for i = 1, #p do p[i]:Hide(); p[i]:ClearAllPoints() end
+            clUsed[kind] = 0
+        end
+    end
+
+    -- Section names come from CHANGELOG.md headings; translate when a key exists.
+    local function sectionLabel(name)
+        local key = name and L[name]
+        return (type(key) == "string" and key ~= name and key) or name or ""
+    end
+
+    local clParsed, clShown, clBuiltWidth = nil, CL_INITIAL_VERSIONS, nil
+    local clMoreBtn
+
+    local function BuildChangelog()
+        clParsed = clParsed or ParseChangelog(DF.CHANGELOG_TEXT)
+        releaseAll()
+        local tc = GetThemeColor()
+        local W = math.floor(clScroll:GetWidth())
+        if W < 100 then W = 400 end
+        clChild:SetWidth(W)
+        clBuiltWidth = W
+        local PAD = 6
+        local innerW = W - PAD * 2
+        local y = -4
+
+        if #clParsed == 0 then
+            local fs = acquire("fs")
+            GUI:SetSettingsFont(fs, 11, "")
+            fs:SetPoint("TOPLEFT", PAD, y)
+            fs:SetText(L["No changelog available."])
+            fs:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+            clChild:SetHeight(40)
+            if clMoreBtn then clMoreBtn:Hide() end
+            return
+        end
+
+        for vi = 1, math.min(#clParsed, clShown) do
+            local ver = clParsed[vi]
+            -- Version band: the patch divider. Extra air above every band but the first
+            -- so a release starts with an unmistakable break, not a title in the flow.
+            if vi > 1 then y = y - 18 end
+            local band = acquire("band")
+            local bandH = vi == 1 and 34 or 30
+            band:SetPoint("TOPLEFT", PAD, y)
+            band:SetSize(innerW, bandH)
+            band.fill:SetColorTexture(tc.r, tc.g, tc.b, 0.12)
+            band.line:SetColorTexture(tc.r, tc.g, tc.b, 0.85)
+            GUI:SetSettingsFont(band.text, vi == 1 and 17 or 15, "")
+            band.text:SetText(ver.version)
+            band.text:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 1)
+            y = y - bandH - 14
+
+            for _, sec in ipairs(ver.sections) do
+                if #sec.entries > 0 then
+                    -- Section title: a real heading (13px, full text colour) with its own
+                    -- hairline underneath, so New Features / Bug Fixes / Improvements read
+                    -- as three blocks rather than one grey caption in a wall of rows.
+                    if sec.name ~= "" then
+                        local lab = acquire("fs")
+                        GUI:SetSettingsFont(lab, 13, "")
+                        lab:SetPoint("TOPLEFT", PAD, y)
+                        lab:SetText(sectionLabel(sec.name):upper())
+                        lab:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 0.95)
+                        y = y - 20
+                        local ssep = acquire("sep")
+                        ssep:SetWidth(innerW)
+                        ssep:SetPoint("TOPLEFT", PAD, y)
+                        y = y - 12
+                    end
+                    local isFeatures = sec.name:lower():find("feature", 1, true) ~= nil
+                    if isFeatures then
+                        -- FEATURE CALLOUTS, one per row, full width. See the pool
+                        -- constructor for the shape; this only lays out and measures.
+                        local RAIL_X = 32   -- text starts right of rail + star, inside the fill
+                        local TOP_PAD, BOT_PAD = 9, 9
+                        local dimRail = { r = C_TEXT_DIM.r, g = C_TEXT_DIM.g, b = C_TEXT_DIM.b }
+                        for _, e in ipairs(sec.entries) do
+                            local co = acquire("card")
+                            co:SetPoint("TOPLEFT", PAD, y)
+                            co:SetWidth(innerW)
+                            local target = navTargetFor(e.category)
+                            co.navTarget = target
+                            co:EnableMouse(target ~= nil)
+                            local rc = target and tc or dimRail
+                            co.railColor = rc
+                            co.fill:SetColorTexture(C_ELEMENT.r, C_ELEMENT.g, C_ELEMENT.b, 0.35)
+                            co.rail:SetColorTexture(rc.r, rc.g, rc.b, target and 0.7 or 0.45)
+                            co.star:SetVertexColor(tc.r, tc.g, tc.b, 0.95)
+                            -- Title line: category in small caps; chevron only when linked.
+                            GUI:SetSettingsFont(co.title, 11, "")
+                            co.title:ClearAllPoints()
+                            co.title:SetPoint("TOPLEFT", RAIL_X, -TOP_PAD)
+                            co.title:SetWidth(innerW - RAIL_X - 30)
+                            co.title:SetJustifyH("LEFT")
+                            co.title:SetWordWrap(false)
+                            co.title:SetText((e.category or L["New Feature"]):upper())
+                            co.title:SetTextColor(rc.r, rc.g, rc.b, target and 0.9 or 0.85)
+                            co.chev:ClearAllPoints()
+                            co.chev:SetPoint("TOPRIGHT", -8, -TOP_PAD + 1)
+                            co.chev:SetVertexColor(rc.r, rc.g, rc.b, 0.6)
+                            co.chev:SetShown(target ~= nil)
+                            -- ☠ EXPLICIT WIDTH, NOT AN ANCHOR-DERIVED ONE. Wrapped height is
+                            -- only measurable once the FontString knows its width, and a
+                            -- two-anchor width is not guaranteed resolved in the frame that
+                            -- set it — measured that way the rows came back one line tall
+                            -- and every entry overlapped the next. A set width wraps
+                            -- deterministically, so the callout always grows to fit.
+                            GUI:SetSettingsFont(co.body, 11, "")
+                            co.body:ClearAllPoints()
+                            co.body:SetPoint("TOPLEFT", co.title, "BOTTOMLEFT", 0, -5)
+                            co.body:SetWidth(innerW - RAIL_X - 14)
+                            co.body:SetJustifyH("LEFT")
+                            co.body:SetJustifyV("TOP")
+                            co.body:SetWordWrap(true)
+                            co.body:SetNonSpaceWrap(false)
+                            co.body:SetSpacing(2)
+                            local by = e.author and format("  |cff%02x%02x%02x%s|r",
+                                C_TEXT_DIM.r * 255, C_TEXT_DIM.g * 255, C_TEXT_DIM.b * 255, e.author) or ""
+                            co.body:SetText(e.text .. by)
+                            co.body:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 0.82)
+                            co.by:Hide()   -- byline rides the body's tail now
+                            local bh = math.ceil(co.body:GetStringHeight() or 14)
+                            local h = TOP_PAD + 14 + 5 + bh + BOT_PAD
+                            co:SetHeight(h)
+                            y = y - h - 10
+                        end
+                        y = y - 4
+                    else
+                        -- ROWS, GROUPED BY CATEGORY. The tag used to sit inline at the
+                        -- start of every sentence, so "Bars" appeared six times in a row
+                        -- and each line began with a coloured word the eye had to parse
+                        -- past. Now: a stable sort by category (authored order kept within
+                        -- one), ONE small caps sub-heading per category, and plain
+                        -- wrapping bullets under it with a little leading. Same scan-
+                        -- ability a category column would give, without spending a fixed
+                        -- column's width on every row.
+                        local ordered = {}
+                        for i, e in ipairs(sec.entries) do ordered[i] = { e = e, i = i } end
+                        table.sort(ordered, function(a, b)
+                            local ac, bc = a.e.category or "\255", b.e.category or "\255"
+                            if ac ~= bc then return ac < bc end
+                            return a.i < b.i
+                        end)
+                        local dimHex = format("%02x%02x%02x",
+                            C_TEXT_DIM.r * 255, C_TEXT_DIM.g * 255, C_TEXT_DIM.b * 255)
+                        local lastCat = false
+                        for _, o in ipairs(ordered) do
+                            local e = o.e
+                            local cat = e.category
+                            if cat ~= lastCat then
+                                if lastCat ~= false then y = y - 6 end   -- gap between groups
+                                lastCat = cat
+                                if cat then
+                                    local sub = acquire("fs")
+                                    GUI:SetSettingsFont(sub, 10, "")
+                                    sub:SetPoint("TOPLEFT", PAD + 2, y)
+                                    sub:SetWidth(innerW - 2)
+                                    sub:SetJustifyH("LEFT")
+                                    sub:SetWordWrap(false)
+                                    sub:SetText(cat:upper())
+                                    sub:SetTextColor(tc.r, tc.g, tc.b, 0.9)
+                                    y = y - 17
+                                end
+                            end
+                            local dot = acquire("tex")
+                            dot:SetColorTexture(tc.r, tc.g, tc.b, 0.55)
+                            dot:SetSize(4, 4)
+                            dot:SetPoint("TOPLEFT", PAD + 8, y - 6)
+                            local fs = acquire("fs")
+                            GUI:SetSettingsFont(fs, 11, "")
+                            fs:SetPoint("TOPLEFT", PAD + 20, y)
+                            fs:SetWidth(innerW - 20)   -- explicit: see the card body note
+                            fs:SetJustifyH("LEFT")
+                            fs:SetJustifyV("TOP")
+                            fs:SetWordWrap(true)
+                            fs:SetNonSpaceWrap(false)
+                            fs:SetSpacing(2)           -- leading: a wrapped entry is a paragraph, not a block
+                            local by = e.author and format("  |cff%s%s|r", dimHex, e.author) or ""
+                            fs:SetText(e.text .. by)
+                            fs:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b, 0.75)
+                            local h = math.ceil(fs:GetStringHeight() or 14)
+                            y = y - h - 9
+                        end
+                        y = y - 8
+                    end
+                end
+            end
+            y = y - 14
+        end
+
+        -- "Show older releases" — appends the next batch; hidden once everything is out.
+        if #clParsed > clShown then
+            if not clMoreBtn then
+                clMoreBtn = CreateFrame("Button", nil, clChild, "BackdropTemplate")
+                GUI:StyleButton(clMoreBtn, { width = 160, height = 22, text = L["Show older releases"] })
+                clMoreBtn:SetScript("OnClick", function()
+                    clShown = clShown + CL_BATCH_VERSIONS
+                    BuildChangelog()
+                end)
+            end
+            clMoreBtn:ClearAllPoints()
+            clMoreBtn:SetPoint("TOP", clChild, "TOP", 0, y)
+            clMoreBtn:Show()
+            y = y - 30
+        elseif clMoreBtn then
+            clMoreBtn:Hide()
+        end
+
+        clChild:SetHeight(-y + 8)
+        clScroll:SetVerticalScroll(0)
+    end
+
+    -- ONE opener for both the info button and the first-open-after-update path.
+    function GUI:ShowChangelog()
+        clShown = CL_INITIAL_VERSIONS
+        -- Show FIRST, then build: the scroll frame's width is what every wrap
+        -- measures against, and it is only trustworthy once the overlay is laid out.
+        changelogOverlay:Show()
+        BuildChangelog()
+    end
+    -- A resize while the overlay is open changes every wrap; rebuild at the new width.
+    changelogOverlay:SetScript("OnSizeChanged", function()
+        if changelogOverlay:IsShown() and clBuiltWidth
+            and math.abs(math.floor(clScroll:GetWidth()) - clBuiltWidth) >= 2 then
+            BuildChangelog()
+        end
+    end)
 
     infoBtn:SetScript("OnClick", function()
         if changelogOverlay:IsShown() then
             changelogOverlay:Hide()
         else
-            -- No width fix-up needed: the text area re-syncs its own scroll child.
-            changelogArea:SetText(FormatChangelog(DF.CHANGELOG_TEXT))
-            changelogOverlay:Show()
+            GUI:ShowChangelog()
         end
     end)
 

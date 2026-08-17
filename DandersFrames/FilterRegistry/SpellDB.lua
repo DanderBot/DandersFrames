@@ -47,8 +47,10 @@ R.Excluded = {
     [59752]   = "Will to Survive — 100ms stun-immunity blip; nothing to display",
     [422382]  = "Wild Growth log-side id — no client-side spell data (audit INVALID)",
     [1308649] = "Vampiric Insight — no client-side spell data (audit INVALID); re-add with the corrected id from the harvest",
-    [443113]  = "Strength of the Black Ox (ally absorb) — spec-variable rider, not worth tracking (maintainer curation)",
-    [443112]  = "Strength of the Black Ox (self cast-time buff) — same call as 443113",
+    -- (Removed 2026-08-15) 443113/443112 Strength of the Black Ox — un-excluded on
+    -- Krathe's ruling after user demand (lab thread dfc19c2f): "add it, default off".
+    -- Both ids already live upstream, so the next regen lands the record; the lab
+    -- side flags it as an off-by-default candidate so the flag arrives with it.
 }
 
 -- Maintainer category overrides — the FINAL category set for these ids, replacing

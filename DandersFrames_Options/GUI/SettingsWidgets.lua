@@ -204,8 +204,64 @@ function GUI:CreateHeader(parent, text)
     if DF.Search then
         DF.Search:SetCurrentSection(text)
     end
-    
+
     return container
+end
+
+--- Attach a small live preview swatch to a header built by GUI:CreateHeader —
+--- the plain-header counterpart of a collapsible section's SetPreviewIcons, for
+--- sections whose setting produces ONE small piece of art (the important-debuff
+--- corner marker). It sits immediately right of the title rather than at the
+--- group's right edge: a lone swatch only reads as "this is the thing this
+--- section makes" when it sits with the words.
+---
+--- `layers` draws 1..N textures in order with their own colours, because the real
+--- art is often layered (the marker is a tinted disc plus a tinted glyph) — a
+--- one-texture swatch would preview a white blob and lie about the colours, which
+--- is the exact fault the section-preview swatches were corrected for.
+---
+--- Greying: pass dimmed=true and every layer desaturates and drops alpha, matching
+--- the icon sections' `desaturate` convention. Drive it from the owning header's
+--- `refreshContent` so RefreshChildStates keeps it live (see CreateSettingsGroup).
+function GUI:AttachHeaderSwatch(header, size, layerCount)
+    if not header or not header.text then return nil end
+    if header.swatch then return header.swatch end
+    local SZ = size or 16
+    local sw = CreateFrame("Frame", nil, header)
+    sw:SetSize(SZ, SZ)
+    sw:SetPoint("LEFT", header.text, "RIGHT", 6, 0)
+    sw.layers = {}
+    for i = 1, (layerCount or 2) do
+        -- Ascending sublevel so layer 2 draws over layer 1 (disc, then glyph).
+        local t = sw:CreateTexture(nil, "OVERLAY", nil, i)
+        t:SetAllPoints()
+        t:Hide()
+        sw.layers[i] = t
+    end
+    --- layers: { { texture = path, color = {r,g,b,a}? }, ... }
+    sw.SetSwatch = function(self, layers, dimmed)
+        for i, t in ipairs(self.layers) do
+            local d = layers and layers[i]
+            if d and d.texture then
+                t:SetTexture(d.texture)
+                t:SetDesaturated(dimmed and true or false)
+                -- ⚠ AFTER the texture call — SetTexture/SetAtlas reset vertex colour.
+                -- Same trap documented on the section preview swatches.
+                if dimmed then
+                    t:SetVertexColor(0.5, 0.5, 0.5, 0.55)
+                elseif d.color then
+                    t:SetVertexColor(d.color.r or 1, d.color.g or 1, d.color.b or 1, d.color.a or 1)
+                else
+                    t:SetVertexColor(1, 1, 1, 1)
+                end
+                t:Show()
+            else
+                t:Hide()
+            end
+        end
+    end
+    header.swatch = sw
+    return sw
 end
 
 -- Collapsible section for grouping related settings.

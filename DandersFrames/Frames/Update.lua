@@ -32,9 +32,35 @@ local UnitPowerMax = UnitPowerMax
 -- tables under it -- whatever it introduced is long gone, and it read as a promise
 -- the file does not keep.
 
+-- ★ THE ONE PLACE THE HEALTH BARS ARE INSET BY THE FRAME PADDING.
+-- The rule ("both bars sit `framePadding` inside the frame rect, re-applied on every
+-- update because a padding change must move them") was written out longhand in three
+-- places: here, the resize path in Core.lua, and the TEST-mode update — whose comment
+-- said it was "matching what UpdateUnitFrame does unconditionally for live frames",
+-- which is the tell. A preview restating live's geometry is the divergence class this
+-- addon keeps paying for; it differs in DATA, never in rendering.
+-- (ReducedMaxHealth.lua insets its own bar by the same padding and then re-clips the
+-- right edge — that one is a different widget with an extra step, deliberately not
+-- folded in here.)
+function DF:AnchorHealthBarsToPadding(frame, db)
+    if not (frame and frame.healthBar) then return end
+    db = db or DF:GetFrameDB(frame)
+    local padding = (db and db.framePadding) or 0
+    frame.healthBar:ClearAllPoints()
+    frame.healthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
+    frame.healthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
+    -- Keep the missing-health overlay inside the padding too (anchored once
+    -- at creation, so it would otherwise sit over the padding after a change).
+    if frame.missingHealthBar then
+        frame.missingHealthBar:ClearAllPoints()
+        frame.missingHealthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
+        frame.missingHealthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
+    end
+end
+
 function DF:ApplyFrameLayout(frame)
     if not frame then return end
-    
+
     -- Skip SetSize operations on secure header children during combat
     -- These frames are protected and cannot be resized in combat
     local isSecureChild = frame.dfIsHeaderChild
@@ -68,7 +94,49 @@ function DF:ApplyFrameLayout(frame)
         -- is missing (imported profiles referencing another addon's media render
         -- solid green otherwise). Frame CREATION already used the safe setter,
         -- but this per-update raw call immediately clobbered its fallback.
+        local prevFill = healthBar:GetStatusBarTexture()
         DF:SafeSetStatusBarTexture(healthBar, healthTex)
+        -- ☠☠ SETTING THE TEXTURE CAN REPLACE THE FILL TEXTURE OBJECT, and three bars
+        -- anchor to that object: the heal prediction, the heal absorb, and the attached
+        -- absorb (which chains off the prediction's segment). A swap orphans their
+        -- anchors -- they keep rendering against a dead rect, usually invisibly, which
+        -- is exactly "the bar is on but nothing shows until I toggle something".
+        -- The rule is "re-anchor whenever SetStatusBarTexture replaces the fill object",
+        -- and this is that rule placed AT the swap, so no ordering between styling and
+        -- painting can strand a bar.
+        -- Prediction first, absorb LAST -- it chains onto the prediction's segment.
+        -- ⚠ On a test frame the drives re-run with that frame's OWN test data; painting
+        -- them from live values is the poisoning the guards in Frames/Bars.lua stop, so
+        -- when test data cannot be resolved the bars are left alone (their own test
+        -- drive owns them).
+        local newFill = healthBar:GetStatusBarTexture()
+        if newFill ~= prevFill then
+            local isTest = (DF.testMode or DF.raidTestMode) and frame.dfIsTestFrame
+            local ti = nil
+            if isTest and DF.GetTestUnitData and frame.index ~= nil then
+                -- ☠ A PINNED test frame is NOT a pool slot, and asking with pool arguments
+                -- answers about the wrong unit. The party/raid pools are 0- and 1-based
+                -- respectively and carry no boss flag; a pinned set is 1-based and may be
+                -- in BOSS mode, where the data comes from a different branch entirely. This
+                -- passed frame.index straight through with only isRaidFrame, so a pinned
+                -- slot got some other scenario's absorbs and heals on any texture swap --
+                -- intermittently, because it only fires when the fill object is replaced.
+                -- dfTestIndex is what the pinned pools stamp; fall back to frame.index for
+                -- the main pools, which is what it has always meant there.
+                if frame.isPinnedFrame then
+                    local pIdx = frame.dfTestIndex or frame.index
+                    ti = DF:GetTestUnitData(pIdx, false, frame.isPinnedBossFrame)
+                else
+                    ti = DF:GetTestUnitData(frame.index, frame.isRaidFrame)
+                end
+            end
+            if not isTest or ti then
+                -- Heal absorb, prediction, absorb LAST (it chains onto the prediction).
+                if DF.UpdateHealAbsorb then DF:UpdateHealAbsorb(frame, ti) end
+                if DF.UpdateHealPrediction then DF:UpdateHealPrediction(frame, ti) end
+                if DF.UpdateAbsorb then DF:UpdateAbsorb(frame, ti) end
+            end
+        end
         
         -- Orientation
         --
@@ -397,7 +465,26 @@ function DF:ApplyFrameLayout(frame)
         -- Delegate color to ElementAppearance for centralized handling
         DF:UpdateBackgroundAppearance(frame)
     end
-    
+
+    -- ☠ THE BAR TRIGGER LIVES HERE, NOT ONLY IN DF:UpdateFrame -- and putting it only
+    -- there was a fix that could never run. DF:UpdateAllFrames takes the `headersCreated`
+    -- branch on every modern client and RETURNS out of it (Frames/Init.lua); the
+    -- DF:UpdateFrame calls it was added beside are in the LEGACY arm below that return,
+    -- reachable only on a client with no headers. So a Display Mode change still sat
+    -- unapplied on every party, raid and arena frame until that unit's next
+    -- UNIT_ABSORB / UNIT_HEAL_PREDICTION wandered by -- the exact reported bug, "fixed"
+    -- against a code path the user does not run. (Danders's review, PR #236 B2.)
+    -- ApplyFrameLayout is what the header branch DOES call, per child, so the trigger
+    -- belongs at the end of it: after the fill-swap re-drive above (which is a different
+    -- job -- it re-anchors at the swap so ordering cannot strand a bar) and after the
+    -- geometry those bars anchor to has settled.
+    -- Heal absorb, prediction, absorb LAST -- it chains onto the prediction's segment.
+    -- Cheap on the no-change path: each updater's layout cache short-circuits. Test
+    -- frames are no-ops here by the test-data guards in Frames/Bars.lua; the preview is
+    -- repainted through RefreshTestFramesWithLayout instead.
+    if DF.UpdateHealAbsorb then DF:UpdateHealAbsorb(frame) end
+    if DF.UpdateHealPrediction then DF:UpdateHealPrediction(frame) end
+    if DF.UpdateAbsorb then DF:UpdateAbsorb(frame) end
 end
 
 -- ============================================================
@@ -637,23 +724,12 @@ function DF:UpdateUnitFrame(frame, source)
     -- ========================================
     -- POWER BAR
     -- ========================================
-    local showPower = DF:ShouldShowResourceBar(unit, db)
+    -- `frame` last: the gate reads isPinnedFrame off it for the solo-bypass scope.
+    local showPower = DF:ShouldShowResourceBar(unit, db, nil, nil, nil, frame)
 
     -- Health bar positioning (resource bar is floating, doesn't affect health bar size)
-    if frame.healthBar then
-        local padding = db.framePadding or 0
-        frame.healthBar:ClearAllPoints()
-        frame.healthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
-        frame.healthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
-        -- Keep the missing-health overlay inside the padding too (anchored once
-        -- at creation, so it would otherwise sit over the padding after a change).
-        if frame.missingHealthBar then
-            frame.missingHealthBar:ClearAllPoints()
-            frame.missingHealthBar:SetPoint("TOPLEFT", frame, "TOPLEFT", padding, -padding)
-            frame.missingHealthBar:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -padding, padding)
-        end
-    end
-    
+    DF:AnchorHealthBarsToPadding(frame, db)
+
     if frame.dfPowerBar then
         if showPower then
             local power = UnitPower(unit)
@@ -981,8 +1057,9 @@ function DF:UpdatePower(frame)
     local unit = frame.unit
     local db = DF:GetFrameDB(frame)
     
-    -- Check if power bar should be shown (uses centralized role filter)
-    local showPower = DF:ShouldShowResourceBar(unit, db)
+    -- Check if power bar should be shown (uses centralized role filter).
+    -- `frame` last: the gate reads isPinnedFrame off it for the solo-bypass scope.
+    local showPower = DF:ShouldShowResourceBar(unit, db, nil, nil, nil, frame)
 
     if not showPower then
         frame.dfPowerBar:Hide()
@@ -1034,6 +1111,20 @@ function DF:UpdateFrame(frame)
             DF:UpdatePower(frame)
         end
     end
+
+    -- ☠ THE HEALTH-ATTACHED BARS WERE MISSING FROM THIS PASS. This is the per-frame
+    -- worker behind DF:UpdateAllFrames -- the callback every absorb / heal-absorb /
+    -- heal-prediction OPTION runs -- and without these calls a Display Mode change sat
+    -- unapplied on live frames until each unit's next UNIT_ABSORB / UNIT_HEAL_PREDICTION
+    -- event wandered by, which for a unit with a static shield is "a while" (reported
+    -- 2026-08-14). The absorb's layout cache invalidates on the mode change and its
+    -- fast path makes the no-change case cheap; what was missing was any TRIGGER.
+    -- Heal absorb, prediction, absorb LAST (it chains onto the prediction). On test
+    -- frames these are no-ops by the test-data guards -- the test branch of
+    -- UpdateAllFrames repaints those through RefreshTestFramesWithLayout.
+    if DF.UpdateHealAbsorb then DF:UpdateHealAbsorb(frame) end
+    if DF.UpdateHealPrediction then DF:UpdateHealPrediction(frame) end
+    if DF.UpdateAbsorb then DF:UpdateAbsorb(frame) end
 end
 
 -- (Removed 2026-08-04) DF:UpdateHealth -- 142 lines, ZERO callers anywhere in either

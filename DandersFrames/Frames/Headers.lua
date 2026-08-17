@@ -821,6 +821,7 @@ function DF:InitializeHeaderChild(frame)
                             -- Fallback if FullFrameRefresh not yet loaded
                             if DF.UpdateUnitFrame then DF:UpdateUnitFrame(self) end
                             if DF.UpdateAuras then DF:UpdateAuras(self) end
+                            if DF.UpdateDefensiveBar then DF:UpdateDefensiveBar(self) end
                             if DF.UpdateRoleIcon then DF:UpdateRoleIcon(self) end
                         end
                     end
@@ -994,6 +995,10 @@ function DF:InitializeHeaderChild(frame)
                 -- Auras
                 if DF.UpdateAuras then
                     DF:UpdateAuras(self)
+                end
+                -- Defensive row: separate handle, not reached by UpdateAuras (#1063)
+                if DF.UpdateDefensiveBar then
+                    DF:UpdateDefensiveBar(self)
                 end
                 -- Missing buff icon
                 if DF.UpdateMissingBuffIcon then
@@ -1851,22 +1856,38 @@ end
 --   * Single populated row (no drift)
 --   * Required handler / headers not yet created
 function DF:ComputeRaidContainerCompensation()
-    if not DF.raidPositionHandler then return 0, 0 end
-    if not DF.raidSeparatedHeaders then return 0, 0 end
-
     local db = DF:GetRaidDB()
     if not db then return 0, 0 end
     if not db.raidUseGroups then return 0, 0 end
     if (db.raidGroupAnchor or "START") ~= "CENTER" then return 0, 0 end
 
-    -- Mirror the snippet: a group is "populated" when its child count > 0.
-    -- Read counts from the same handler attributes the snippet reads, so the
-    -- compensation always agrees with the snippet's view of the world.
-    local handler = DF.raidPositionHandler
+    -- ★ ONE compensation, MODE-AWARE — this function is now the single source of the
+    -- CENTER shift. The live container, the TEST container and the MOVER all take it
+    -- in UpdateRaidContainerPosition; the test frame calculator carries NONE of it
+    -- (its old lp.testMode comp block is retired — see CalculateRaidGroupPosition).
+    -- The unlock overlay is only faithful if all three read the SAME number, which is
+    -- why there is exactly one ("overlay is not faithful when groups-per-row < 8",
+    -- Aphoex 2026-08-15: content sat half a group-row below the box because the
+    -- container carried the shift and the mover never did).
+    -- In test mode the populated count comes from the TEST roster (5 per group,
+    -- mirroring LightweightPositionRaidTestFrames): the handler attributes describe
+    -- the LIVE roster, which solo is ZERO populated groups — the comp would read 0
+    -- while the preview simulates eight.
     local numPopulated = 0
-    for i = 1, 8 do
-        local count = handler:GetAttribute("group" .. i .. "count") or 0
-        if count > 0 then numPopulated = numPopulated + 1 end
+    if DF.raidTestMode then
+        local testCount = db.raidTestFrameCount or 10
+        numPopulated = math.min(8, math.ceil(testCount / 5))
+    else
+        if not DF.raidPositionHandler then return 0, 0 end
+        if not DF.raidSeparatedHeaders then return 0, 0 end
+        -- Mirror the snippet: a group is "populated" when its child count > 0.
+        -- Read counts from the same handler attributes the snippet reads, so the
+        -- compensation always agrees with the snippet's view of the world.
+        local handler = DF.raidPositionHandler
+        for i = 1, 8 do
+            local count = handler:GetAttribute("group" .. i .. "count") or 0
+            if count > 0 then numPopulated = numPopulated + 1 end
+        end
     end
     if numPopulated == 0 then return 0, 0 end
 
@@ -3823,7 +3844,13 @@ function DF:FullFrameRefresh(frame)
 
     -- Auras (buffs/debuffs)
     if DF.UpdateAuras then DF:UpdateAuras(frame) end
-    
+    -- ☠ The defensive row is its OWN container handle (frame.defensiveFactory), driven
+    -- only through UpdateDefensiveBar — UpdateAuras never touches it. This refresh runs
+    -- on every header unit reassignment, so without the call the buff and debuff rows
+    -- retargeted to the new occupant while the defensive row kept showing the previous
+    -- one's defensives (#1063, "defensives get copied to Valeera").
+    if DF.UpdateDefensiveBar then DF:UpdateDefensiveBar(frame) end
+
     -- Icons
     if DF.UpdateRoleIcon then DF:UpdateRoleIcon(frame, "FullFrameRefresh") end
     if DF.UpdateLeaderIcon then DF:UpdateLeaderIcon(frame) end

@@ -13,6 +13,9 @@ local Adapter = DF.AuraDesigner.Adapter
 local S = DF.AuraDesigner._uiState
 local P = DF.AuraDesigner._priv
 local C_TEXT_DIM = GUI.Colors.textDim
+-- The editor's "configured, but this will not render" amber. Shared (GUI.Colors.notice),
+-- not the raw triple this file had copied four times.
+local C_NOTICE = GUI.Colors.notice
 local OPTS = P.OPTS
 local ResolveSpec = P.ResolveSpec
 local IsOtherTab = P.IsOtherTab
@@ -24,6 +27,61 @@ local AddExpiryAlertControls = P.AddExpiryAlertControls
 local AddPandemicControls = P.AddPandemicControls
 local AddDurationColorsLink = P.AddDurationColorsLink
 local CreateProxy = P.CreateProxy
+
+-- Count the configured colour effects of `typeKey` across BOTH pools — the same
+-- candidate set the factory's multi-tint collector renders together (Factory.lua
+-- collectFrameTints) — for the shared-region heads-up banner on the healthbar /
+-- background sections. Editor-selected spec; read-only (the other pool is read only
+-- when it already exists — merely building this page must not create it).
+local function CountTypeColorConfigs(typeKey)
+    local n = 0
+    local adDB = P.GetAuraDesignerDB()
+    if not adDB then return 0 end
+    local spec = ResolveSpec()
+    local function countPool(pool)
+        if not pool then return end
+        for _, auraCfg in pairs(pool) do
+            local c = (type(auraCfg) == "table") and auraCfg[typeKey]
+            if c and c.enabled ~= false and c.color then n = n + 1 end
+        end
+    end
+    countPool(spec and P.GetSpecAuras(spec))
+    countPool(adDB.otherAuras and P.GetOtherAuras())
+    return n
+end
+
+-- "Only during pandemic window" — the frame-level twin of the icon Pandemic cue.
+-- The colour wash is handed to the engine's refresh-window driver (Factory
+-- wantsPandemicColor -> AuraContainer bindNative), so it shows only while a refresh
+-- would clip nothing. Shared by Health Bar Color and Background Color.
+--
+-- ☠ CAPABILITY-GATED: on a client without AddPandemicRegion the control is absent
+-- rather than dead, because the renderer DROPS the flag there — a visible-but-inert
+-- toggle would read as "the colour is broken".
+-- Hidden under Show When Missing: an absent buff has no refresh window, so the pair
+-- is meaningless and the renderer never passes the gate down that branch.
+-- ☠ RPL is a BuildTypeContent local (the throttled live-refresh callback), so it must be
+-- passed in — reaching for it here resolved to a nil global and handed the colour picker
+-- nil callbacks, i.e. a picker that changed nothing until the page was rebuilt.
+local function AddPandemicColor(g, parent, proxy, RPL)
+    local AC = DF.AuraContainer
+    if not (AC and AC.HasPandemic and AC.HasPandemic()) then return end
+    local cb = GUI:CreateCheckbox(parent, L["Different color in pandemic window"], proxy, "pandemicColorEnabled", function()
+        -- STRUCTURAL: enabling emits a SECOND container, and its engine bind needs
+        -- secure context -> a full refresh, not a restyle.
+        DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+        DF:AuraDesigner_RefreshPage()   -- the colour picker below appears/disappears
+    end)
+    cb.hideOn = function() return proxy.showWhenMissing and true or false end
+    cb.tooltip = L["Switches to a second color while the buff is inside its refresh window — the moment when recasting wastes none of the remaining time. The game sets this window per spell, so there is no threshold to choose. Buffs you cannot refresh never have one."]
+    g:AddWidget(cb, 28)
+
+    local pick = GUI:CreateColorPicker(parent, L["Pandemic Color"], proxy, "pandemicColor", true, RPL, RPL, true)
+    pick.hideOn = function()
+        return (proxy.showWhenMissing or not proxy.pandemicColorEnabled) and true or false
+    end
+    g:AddWidget(pick, 28)
+end
 
 -- ============================================================
 -- INDICATOR TYPE WIDGET BUILDER
@@ -208,6 +266,193 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     -- Color picker callback shorthand — refreshes both the AD preview and live frames
     local function RPL() if S.RefreshPreviewLightweight then S.RefreshPreviewLightweight() end RefreshLiveFramesThrottled() end
 
+    -- ── TRACKED SPELLS ──
+    -- A curated aura resolves to the UNION of its spell IDs. That is right by default
+    -- ("never silently miss an effect") and wrong for a spell whose ids are different
+    -- EFFECTS: Beacon of the Savior carries the beacon buff (1244893) AND a separate absorb
+    -- buff (1244878), so placing it as a square gave you both, and adding it by id snapped
+    -- to the curated name and re-widened. This is where one is turned off for THIS placement.
+    --
+    -- ☠ Placement-scoped, deliberately separate from the Filter page's own per-id mutes
+    -- (DF.db.filterMutedSpellIDs). Muting an id for a filter must not silently retarget an
+    -- Aura Designer square, and vice versa — they answer different questions about a spell.
+    --
+    -- ☠ Built ONCE here rather than inside the icon/square/bar branches below, which each
+    -- carry their own copy of the following sections. Three copies of a rule is how the
+    -- last few bugs in this addon happened.
+    --
+    -- Only rendered when the aura resolves to more than one id: a single-id spell would get
+    -- a section holding one permanently-disabled row, which is noise, not information.
+    --
+    -- ★ EVERY indicator type, not just the placed three. Frame effects (health bar,
+    -- background, border, texts, sound) resolve the same union and had the same problem —
+    -- a two-id spell coloured the health bar on either id with no way to narrow it. Their
+    -- mute store is the TYPE SUB-TABLE (auraCfg[typeKey]), the same table unionIdentity
+    -- hands to BuildADIdentityFilters, so ticks here reach the render with no extra plumbing.
+    -- ☠ HIDDEN when the effect runs on custom triggers or condition groups: the list below
+    -- shows THIS aura's ids, but a triggered effect fires on other auras entirely, and
+    -- condition chains resolve link-by-link where the mutes deliberately do not reach
+    -- (narrowing one link of an ALL chain is a different feature). Showing ticks that
+    -- don't do anything is worse than not showing them.
+    local isPlacedType = indicatorID and
+        (typeKey == "icon" or typeKey == "square" or typeKey == "bar")
+    local isFrameEffectType = typeKey == "healthbar" or typeKey == "background"
+        or typeKey == "border" or typeKey == "nametext" or typeKey == "healthtext"
+        or typeKey == "sound"
+    if isPlacedType or isFrameEffectType then
+        local indRec, idList
+        local pool = CurrentAuraPool()
+        local auraCfg = pool and pool[auraName]
+        if isPlacedType then
+            if type(auraCfg) == "table" and auraCfg.indicators then
+                for _, x in ipairs(auraCfg.indicators) do
+                    if x.id == indicatorID then indRec = x; break end
+                end
+            end
+        else
+            local typeCfg = type(auraCfg) == "table" and auraCfg[typeKey]
+            if type(typeCfg) == "table"
+                and not (type(typeCfg.triggers) == "table" and #typeCfg.triggers > 0)
+                and type(typeCfg.conditions) ~= "table" then
+                indRec = typeCfg
+            end
+        end
+        -- Prefer the ADAPTER's array: it is the curated order (canonical first, then alts),
+        -- so the rows read the way the spell is documented. The map from the resolver is
+        -- unordered and only used when there is no curated array (ad-hoc / SpellDB names).
+        if indRec then
+            local specForIDs = (not IsOtherTab()) and ResolveSpec() or nil
+            idList = Adapter and Adapter.GetAuraSpellIDs and Adapter:GetAuraSpellIDs(specForIDs, auraName)
+            if not idList then
+                local f = DF:BuildADIdentityFilters(specForIDs, auraName)
+                local map = f and f.includeSpellIDs
+                if map then
+                    idList = {}
+                    for id in pairs(map) do idList[#idList + 1] = id end
+                    table.sort(idList)
+                end
+            end
+        end
+        if indRec and idList and #idList > 1 then
+            AddGroup(L["Tracked IDs"], function(g)
+                local note = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+                note:SetWordWrap(true)
+                note:SetWidth(contentWidth - 30)
+                g:AddWidget(note, 30)
+
+                -- ☠ NO "you cannot untick the last one" GUARD, deliberately.
+                -- It was here, and it was wrong twice over. Wrong in behaviour: unticking
+                -- everything is a legitimate thing to express — it means "match nothing",
+                -- which renders nothing, and refusing it forces the eye to be used for a
+                -- job the eye should not have. Wrong in implementation: it tried to snap
+                -- the tick back with cb:SetChecked(true), but CreateCheckbox returns the
+                -- CONTAINER, which has no SetChecked — so the call silently did nothing,
+                -- the box stayed drawn as unticked, and the mute was never written. The
+                -- next card rebuild re-read the truth and the row appeared to tick itself,
+                -- which read as "toggling the eye changed my spell selection".
+                -- ★ The two controls answer two questions and neither writes the other's:
+                --     eye  = do I want this indicator at all
+                --     ticks = what does it match
+                -- All-off is the empty set, and the empty set renders nothing on its own.
+                local function LiveCount()
+                    local muted, n = indRec.mutedSpellIDs, 0
+                    for _, id in ipairs(idList) do
+                        if not (muted and muted[id]) then n = n + 1 end
+                    end
+                    return n
+                end
+
+                -- ★ THE ZERO STATE HAS TO BE VISIBLE, or it looks like a bug. With nothing
+                -- ticked the indicator renders nothing — same picture as hidden — so the
+                -- note says so outright instead of leaving the player staring at an empty
+                -- frame and a lit eye wondering which control betrayed them. Re-run after
+                -- every toggle; the rows are the only thing that changes it.
+                local function UpdateNote()
+                    local live = LiveCount()
+                    if live == 0 then
+                        note:SetTextColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b, 1)
+                        note:SetText(L["Nothing ticked — this indicator will not show."])
+                    else
+                        note:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b, 1)
+                        note:SetText(format(L["Showing %d of %d effects. Untick any you don't want this indicator to show."],
+                            live, #idList))
+                    end
+                end
+                UpdateNote()
+
+                for _, id in ipairs(idList) do
+                    local name = C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(id)
+                    -- ★ THE ICON IS THE DISAMBIGUATOR. The case this section exists for often
+                    -- has both ids under the SAME NAME (Angelic Bulwark 114214/114216), so a
+                    -- name + number row leaves the player guessing which is which. The art is
+                    -- usually the thing they recognise -- and where two ids share a name AND
+                    -- an icon, seeing that they match is itself the answer.
+                    -- Inline |T escape rather than a texture widget: the label is a plain
+                    -- fontstring, so this needs no change to the checkbox factory and cannot
+                    -- disturb the row height the factory owns.
+                    -- 64px source cropped 5..59 is the standard trim that removes an icon's
+                    -- built-in border; without it every row shows a grey frame around the art.
+                    local tex = C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(id)
+                    local iconStr = tex and ("|T" .. tex .. ":14:14:0:0:64:64:5:59:5:59|t ") or ""
+                    local label = iconStr ..
+                        ((name and (name .. "  |cff808080" .. id .. "|r")) or tostring(id))
+                    local cb
+                    cb = GUI:CreateCheckbox(parent, label, nil, nil, nil,
+                        -- get: ticked = TRACKED, stored = MUTED. The store is inverted
+                        -- because absent means "everything", which is what every existing
+                        -- profile has and must keep meaning.
+                        function()
+                            local muted = indRec.mutedSpellIDs
+                            return not (muted and muted[id])
+                        end,
+                        -- ☠ ONE argument. CreateCheckbox calls `customSet(val)`, not
+                        -- `customSet(self, val)` — this was written `function(_, checked)`,
+                        -- so `checked` was always nil, every click fell to the else branch,
+                        -- and the box could be unticked but never re-ticked.
+                        function(checked)
+                            -- The EYE lives on the card header (Cards.lua) and only
+                            -- repaints when the card is built, so crossing into or out of
+                            -- "tracks nothing" has to ask for that rebuild or the eye keeps
+                            -- showing the old state until something else redraws it.
+                            -- Gated on the CROSSING, not on every tick: a full page rebuild
+                            -- per click would be heavy and would fight the user mid-edit.
+                            local wasZero = (LiveCount() == 0)
+                            if checked then
+                                local muted = indRec.mutedSpellIDs
+                                if muted then
+                                    muted[id] = nil
+                                    -- Drop the table when it empties so an untouched-again
+                                    -- indicator serializes exactly as it did before.
+                                    if not next(muted) then indRec.mutedSpellIDs = nil end
+                                end
+                            else
+                                indRec.mutedSpellIDs = indRec.mutedSpellIDs or {}
+                                indRec.mutedSpellIDs[id] = true
+                            end
+                            UpdateNote()
+                            -- ☠ Through P, not a bare call: this file does not import
+                            -- RefreshPlacedIndicators, so the bare name compiled to a nil
+                            -- GLOBAL — clean parse, "attempt to call a nil value" on the
+                            -- first tick. Caught by diffing the file's _ENV reads, which is
+                            -- the only check that sees this class.
+                            if isPlacedType and P.RefreshPlacedIndicators then P.RefreshPlacedIndicators() end
+                            RefreshLiveFramesThrottled()
+                            if (LiveCount() == 0) ~= wasZero and S.SwitchTab then
+                                S.SwitchTab("effects")   -- repaint the header's eye
+                            end
+                        end)
+                    -- Hovering the row shows the SPELL's own tooltip. Two ids under one
+                    -- name (the case this section exists for) often differ only in their
+                    -- tooltip body, so the name+id label alone still leaves the player
+                    -- guessing — the hover is the disambiguator the icon can't always be.
+                    cb.tooltipSpellID = id
+                    cb.tooltipSpellFallback = name or tostring(id)
+                    g:AddWidget(cb, 28)
+                end
+            end)
+        end
+    end
+
     -- Shared Duration Bar section for the icon / square placed indicators — both carry
     -- durationBar* keys and the strip hangs off the slot edge regardless of shape. Same
     -- control set as the filter-group card and the buff/debuff rows (one shared spec
@@ -291,7 +536,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         AddGroup(L["Position"], function(g)
             if layoutGroup then
                 local groupNote = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                groupNote:SetTextColor(0.91, 0.66, 0.25, 0.8)
+                groupNote:SetTextColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b, 0.8)
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else
@@ -460,7 +705,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         AddGroup(L["Position"], function(g)
             if layoutGroup then
                 local groupNote = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                groupNote:SetTextColor(0.91, 0.66, 0.25, 0.8)
+                groupNote:SetTextColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b, 0.8)
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else
@@ -586,7 +831,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         AddGroup(L["Position"], function(g)
             if layoutGroup then
                 local groupNote = parent:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
-                groupNote:SetTextColor(0.91, 0.66, 0.25, 0.8)
+                groupNote:SetTextColor(C_NOTICE.r, C_NOTICE.g, C_NOTICE.b, 0.8)
                 groupNote:SetText(format(L["Position managed by: %s"], layoutGroup.name or L["Layout Group"]))
                 g:AddWidget(groupNote, 18)
             else
@@ -797,8 +1042,16 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- order. buildBorderConfig now resolves this flag to +11 (above) or +9 (below), and
             -- the flag rides the border structSig so toggling it rebuilds at the new offset.
             g:AddWidget(GUI:CreateCheckbox(parent, L["Draw above frame border"], proxy, "drawAboveFrameBorder", RPL), 28)
+            AddPandemicColor(g, parent, proxy, RPL)
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                -- ⚠ AND REBUILD THE PAGE. The pandemic pair above hides on exactly this
+                -- flag (AddPandemicColor's hideOn), and nothing else on this card asks for
+                -- a rebuild -- so the controls stayed on screen after Show When Missing was
+                -- ticked, letting a user enable a pandemic colour on a config the renderer
+                -- then drops, and vanishing on whatever rebuilt the page next. The pandemic
+                -- checkbox's own callback already does this, for the same reason.
+                DF:AuraDesigner_RefreshPage()
             end)
             g:AddWidget(swmCheck, 28)
             GateSWM(swmCheck)
@@ -816,6 +1069,27 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
     elseif typeKey == "healthbar" then
         -- Appearance
         AddGroup(L["Appearance"], function(g)
+            -- MULTI-TINT heads-up (mirrors Factory.lua collectFrameTints): several
+            -- indicators colouring the same region all render now — presence decides
+            -- which shows; simultaneous buffs arbitrate by priority draw order, and
+            -- translucent Tints compose. Shown only when the user actually has 2+
+            -- health-bar colours configured; silent otherwise.
+            if CountTypeColorConfigs("healthbar") >= 2 then
+                local topSpacer = CreateFrame("Frame", nil, parent)
+                topSpacer:SetHeight(4)
+                g:AddWidget(topSpacer, 4)
+
+                local banner = GUI:CreateInfoBanner(parent, {
+                    tone = "info",
+                    text = L["Multiple effects color the health bar. Whichever buff is active shows; if several are active at once, the highest priority draws on top and translucent tints blend together."],
+                })
+                banner:SetWidth(contentWidth - 10)
+                g:AddWidget(banner, banner.layoutHeight)
+
+                local spacer = CreateFrame("Frame", nil, parent)
+                spacer:SetHeight(6)
+                g:AddWidget(spacer, 6)
+            end
             g:AddWidget(GUI:CreateDropdown(parent, L["Mode"], OPTS.HEALTHBAR_MODE_OPTIONS, proxy, "mode", function()
                 -- Rebuild so the Blend % slider's hideOn re-evaluates and the
                 -- group's height recomputes for the new visible-widget set.
@@ -834,8 +1108,16 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             wholeBarCheck = GUI:CreateCheckbox(parent, L["Tint Entire Bar"], proxy, "tintWholeBar", RPL)
             wholeBarCheck.hideOn = function() return (proxy.mode or "Replace") == "Replace" end
             g:AddWidget(wholeBarCheck, 28)
+            AddPandemicColor(g, parent, proxy, RPL)
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                -- ⚠ AND REBUILD THE PAGE. The pandemic pair above hides on exactly this
+                -- flag (AddPandemicColor's hideOn), and nothing else on this card asks for
+                -- a rebuild -- so the controls stayed on screen after Show When Missing was
+                -- ticked, letting a user enable a pandemic colour on a config the renderer
+                -- then drops, and vanishing on whatever rebuilt the page next. The pandemic
+                -- checkbox's own callback already does this, for the same reason.
+                DF:AuraDesigner_RefreshPage()
             end)
             g:AddWidget(swmCheck, 28)
             GateSWM(swmCheck)
@@ -846,6 +1128,23 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- background (visible in the missing-health area). Replace = opaque cover;
         -- Tint = blend × colour alpha so the normal background shows through.
         AddGroup(L["Appearance"], function(g)
+            -- MULTI-TINT heads-up — the background twin of the health-bar banner above.
+            if CountTypeColorConfigs("background") >= 2 then
+                local topSpacer = CreateFrame("Frame", nil, parent)
+                topSpacer:SetHeight(4)
+                g:AddWidget(topSpacer, 4)
+
+                local banner = GUI:CreateInfoBanner(parent, {
+                    tone = "info",
+                    text = L["Multiple effects color the background. Whichever buff is active shows; if several are active at once, the highest priority draws on top and translucent tints blend together."],
+                })
+                banner:SetWidth(contentWidth - 10)
+                g:AddWidget(banner, banner.layoutHeight)
+
+                local spacer = CreateFrame("Frame", nil, parent)
+                spacer:SetHeight(6)
+                g:AddWidget(spacer, 6)
+            end
             g:AddWidget(GUI:CreateDropdown(parent, L["Mode"], OPTS.HEALTHBAR_MODE_OPTIONS, proxy, "mode", function()
                 DF:AuraDesigner_RefreshPage()
             end), 54)
@@ -853,8 +1152,16 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             local blendSlider = GUI:CreateSlider(parent, L["Blend %"], 0, 1, 0.05, proxy, "blend")
             blendSlider.hideOn = function() return (proxy.mode or "Tint") == "Replace" end
             g:AddWidget(blendSlider, 54)
+            AddPandemicColor(g, parent, proxy, RPL)
             swmCheck = GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
                 DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+                -- ⚠ AND REBUILD THE PAGE. The pandemic pair above hides on exactly this
+                -- flag (AddPandemicColor's hideOn), and nothing else on this card asks for
+                -- a rebuild -- so the controls stayed on screen after Show When Missing was
+                -- ticked, letting a user enable a pandemic colour on a config the renderer
+                -- then drops, and vanishing on whatever rebuilt the page next. The pandemic
+                -- checkbox's own callback already does this, for the same reason.
+                DF:AuraDesigner_RefreshPage()
             end)
             g:AddWidget(swmCheck, 28)
             GateSWM(swmCheck)

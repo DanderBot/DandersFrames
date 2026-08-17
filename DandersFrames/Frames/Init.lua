@@ -846,19 +846,16 @@ function DF:CreateRaidMoverFrame()
             end
         end
 
-        -- Apply final position to mover, container, and test container
-        local scale = self:GetScale() or 1
-        self:ClearAllPoints()
-        self:SetPoint("CENTER", UIParent, "CENTER", x / scale, y / scale)
+        -- ☠ ONE WRITER for the final position, and it is UpdateRaidContainerPosition.
+        -- The CENTER compensation (Position.lua) lives ON the containers and the
+        -- mover; the drag OnUpdate moves all three rigidly in raw-anchor space, so the
+        -- rest position has to be re-derived through the function that owns the comp
+        -- -- which is exactly what its comment says happens here. Hand-setting the raw
+        -- anchor on all three (what this used to do) dropped the comp at every release:
+        -- with Center alignment and 2+ group rows, box and content sat at the raw
+        -- anchor until the next reposition, then jumped by half a group-row.
+        DF:UpdateRaidContainerPosition()
 
-        DF.raidContainer:ClearAllPoints()
-        DF.raidContainer:SetPoint("CENTER", UIParent, "CENTER", x / scale, y / scale)
-
-        if DF.testRaidContainer then
-            DF.testRaidContainer:ClearAllPoints()
-            DF.testRaidContainer:SetPoint("CENTER", UIParent, "CENTER", x / scale, y / scale)
-        end
-        
         -- Update position panel
         DF:UpdatePositionPanel()
     end)
@@ -981,7 +978,16 @@ function DF:UnlockRaidFrames()
             DF.testRaidContainer:SetSize(DF.raidContainer:GetSize())
         end
     end
-    
+
+    -- ★ CONVERGE THROUGH THE ONE POSITIONER. The hand-positioning above sets raw
+    -- anchors; UpdateRaidContainerPosition is the single owner of the CENTER
+    -- compensation (container + test container + mover, one number), so run it last
+    -- or the unlock path shows the box at the uncompensated anchor until the next
+    -- reposition happens by — the exact overlay drift this block otherwise
+    -- reintroduces. (Core.lua already routes its callers through it for the same
+    -- reason.) Safe here: unlock is OOC by construction (combat guard at the top).
+    if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
+
     -- Debug info
     if DF:DebugActive("HEADERS") then
         headerDebug("Raid unlock - container size:", DF.raidContainer:GetWidth(), "x", DF.raidContainer:GetHeight())

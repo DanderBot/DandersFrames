@@ -102,6 +102,20 @@ function GUI:AttachTooltip(widget, label, labelRegion)
     hit:SetFrameLevel((widget:GetFrameLevel() or 0) + 5)
 
     hit:SetScript("OnEnter", function()
+        -- ★ GAME-DATA TOOLTIPS ride the same hit frame: a widget stamped with
+        -- .tooltipSpellID shows the SPELL's own tooltip (via GUI:ShowGameTooltip,
+        -- which owns the cold-cache retry) instead of a text spec. Wanted first by
+        -- the Tracked IDs rows, where two ids share one NAME and the tooltip
+        -- body is the only thing that tells them apart. Duck-typed guard because
+        -- ShowGameTooltip lives in the Options companion: a resident-only consumer
+        -- without the panel loaded simply falls through to the text path.
+        if widget.tooltipSpellID and GUI.ShowGameTooltip then
+            GUI:ShowGameTooltip(hit, {
+                spellID       = widget.tooltipSpellID,
+                fallbackTitle = widget.tooltipSpellFallback,
+            })
+            return
+        end
         local spec = ResolveTooltipSpec(widget, label)
         if spec then GUI:ShowTooltip(hit, spec) end
     end)

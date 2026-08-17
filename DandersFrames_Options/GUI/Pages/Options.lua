@@ -1627,9 +1627,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- growDirection is that key for most people; do not read "only one setting
         -- moved" as "small blast radius".
         --
-        -- The raid page's own dropdown inverts the labels (HORIZONTAL reads as
-        -- "Columns" there and "Rows" on party/flat), which is the clearest signal
-        -- these were never meant to be one shared setting.
+        -- ⚠ This block used to cite the raid dropdown's INVERTED labels (HORIZONTAL
+        -- reading as "Columns" there and "Rows" on party/flat) as the clearest signal
+        -- these were never meant to be one shared setting. That inversion was a plain
+        -- labelling bug and is gone -- there is one dropdown now, see the note beside
+        -- it. The exclusion below stands on its own: the key is per-mode and edited
+        -- from both pages, which is what makes owning it here destructive.
         Add(CreateCopyButton(self.child, {"frame", "permanentMover", "border", "anchor"}, L["Frame"], "general_frame"), 25, 2)
         
         -- Migration: Ensure new flat raid settings have defaults
@@ -1777,21 +1780,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
         layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Direction"]), 40)
         
-        -- Party dropdown
-        local partyGrowOptions = { HORIZONTAL= L["Rows"], VERTICAL= L["Columns"] }
-        local partyArrangeDropdown = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], partyGrowOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
-        partyArrangeDropdown.hideOn = function() return GUI.SelectedMode == "raid" end
-        
-        -- Raid GROUP dropdown (groups mode)
-        local raidGrowOptions = { HORIZONTAL= L["Columns"], VERTICAL= L["Rows"] }
-        local raidArrangeDropdown = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], raidGrowOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
-        raidArrangeDropdown.hideOn = function() return GUI.SelectedMode ~= "raid" or not db.raidUseGroups end
-        
-        -- Raid FLAT dropdown
-        local flatGrowOptions = { HORIZONTAL= L["Rows"], VERTICAL= L["Columns"] }
-        local flatArrangeDropdown = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], flatGrowOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
-        flatArrangeDropdown.hideOn = function() return GUI.SelectedMode ~= "raid" or db.raidUseGroups end
-        
+        -- ☠ ONE DROPDOWN FOR ALL THREE LAYOUTS, AND IT HAS TO STAY ONE.
+        -- There were three -- party, raid+groups and raid+flat -- mutually exclusive by
+        -- hideOn, and the raid+groups one INVERTED the pair: HORIZONTAL read as "Columns"
+        -- there and "Rows" in the other two. Every label that depends on the same key
+        -- (Groups Per Row / Row Spacing / Rows Grow From, and the hint below) uses the
+        -- party reading, so picking "Rows" in a grouped raid produced a box full of
+        -- Column settings -- field-reported as "choosing columns enables rows
+        -- configuration, and viceversa" (Aphoex, 2026-08-14).
+        -- Both readings describe the same layout truthfully (HORIZONTAL lays the
+        -- repeating unit left-to-right, and in groups mode that unit IS a vertical column
+        -- of five players), which is exactly why the disagreement survived: neither side
+        -- looks wrong on its own. The union of the three hideOns is "never hidden", so
+        -- collapsing them costs nothing and makes a future divergence impossible.
+        -- ⇒ HORIZONTAL = the unit grows left-to-right = "Rows". Do not re-split this.
+        local growOptions = { HORIZONTAL = L["Rows"], VERTICAL = L["Columns"] }
+        layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
+
         -- Growth anchor (party only)
         local anchorOptions = { START= L["Start (Left/Top)"], CENTER= L["Center"], END= L["End (Right/Bottom)"] }
         local anchorDropdown = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Frames Grow From"], anchorOptions, db, "growthAnchor", UpdateFrames), 55)

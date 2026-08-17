@@ -40,6 +40,7 @@ L["Auto-create profiles enabled."] = true
 -- rest of the chat line. The caller wraps the substituted name instead.
 L["Auto-created profile: %s"] = true
 L["Auto-profile evaluation and runtime overlay"] = true
+L["Identity gate: park/hide verdicts with reasons, latches, recovery"] = true
 L["Cannot delete the default profile"] = true
 L["Cannot rename the default profile"] = true
 L["Click-casting binding apply, hover, PreClick state"] = true
@@ -270,6 +271,7 @@ L["Having multiple click-casting addons enabled\nmay cause conflicts and unexpec
 L["Holy Bulwark and Sacred Weapon share the same aura signature and cannot be tracked separately. Both buffs will trigger this single indicator."] = true
 L["Hostile Only"] = true
 L["Ignore"] = true
+L["Improvements"] = true
 L["Import"] = true
 L["Import All"] = true
 L["Import All (%d)"] = true
@@ -295,6 +297,8 @@ L["Mouseover → Target (Harmful)"] = true
 L["Focus → Mouseover → Target"] = true
 L["Name:"] = true
 L["New"] = true
+L["New Feature"] = true
+L["New Features"] = true
 L["New Profile"] = true
 L["No default profile set"] = true
 L["Not Set"] = true
@@ -642,6 +646,7 @@ L["Bottom to Top"] = true
 L["Buff Icon"] = true
 L["Buff Tooltips"] = true
 L["Buffs"] = true
+L["Bug Fixes"] = true
 L["Buffs are disabled. Aura Designer is managing your auras."] = true
 L["Buffs from your own class, and only when you cast them."] = true
 L["Buffs to Check (Manual Mode)"] = true
@@ -769,6 +774,8 @@ L["Debuffs that can be dispelled. Use the dropdown below to choose which dispels
 L["Debuffs that can be dispelled. Which dispels count is set just below."] = true
 L["Debug"] = true
 L["Debug Log Export (Filtered)"] = true
+L["Debug Log Export (part %d of %d)"] = true
+L["Next Part"] = true
 L["Debug console module not loaded."] = true
 L["Debug logging %s"] = true
 L["Decimal Places"] = true
@@ -1052,9 +1059,22 @@ L["Hide Blizzard Player Frame"] = true
 L["Hides buffs that are already shown elsewhere — by an Aura Designer indicator, or on the Defensive Bar — so they don't appear twice."] = true
 L["Hide Auras"] = true
 L["Hide Cooldown Swipe"] = true
+-- Filter/debuff group shape (Aura Designer group card). "Spell Icon" is what groups
+-- have always rendered; "Solid Square" matches the placed square indicator's look.
+L["Shape"] = true
+L["Spell Icon"] = true
+L["Solid Square"] = true
+L["Square Color"] = true
+-- Per-placement spell-ID narrowing (Aura Designer indicator card). Shown only when a
+-- spell resolves to more than one ID, e.g. a buff that also applies its own absorb.
+L["Tracked IDs"] = true
+-- The zero state is spelled out because it looks identical to a hidden indicator, and the
+-- eye is a separate control that this never touches.
+L["Showing %d of %d effects. Untick any you don't want this indicator to show."] = true
+L["Nothing ticked — this indicator will not show."] = true
 L["Hide from Main Frames"] = true
 L["Hide on Tanks"] = true
-L["Hide from Main Frames Tooltip"] = "Removes this set's pinned members from your main party/raid frames so they appear only in the pinned set. Applies out of combat. Your frame sorting setting is preserved."
+L["Removes this set's pinned members from your main party/raid frames so they appear only in the pinned set. Applies out of combat. Your frame sorting setting is preserved."] = true
 L["Aura Designer Tooltips"] = true
 L["Groups"] = true
 L["Filter Groups and Debuff Groups. Their icons come from a filter rather than being placed one by one, so a tooltip is the only way to see what each one is."] = true
@@ -1130,7 +1150,7 @@ L["Keep important debuffs"] = true
 L["Keep when offline/left"] = true
 L["Key Already Bound"] = true
 L["Key Used Elsewhere"] = true
-L["Keep when offline/left Tooltip"] = "Players you add yourself (drag, the role buttons, or Add Offline Player) always stay pinned. This only affects members added automatically by role: leave it on to keep them after they go offline or leave the group, or off to drop them from the set."
+L["Players you add yourself (drag, the role buttons, or Add Offline Player) always stay pinned. This only affects members added automatically by role: leave it on to keep them after they go offline or leave the group, or off to drop them from the set."] = true
 L["Language"] = true
 L["Label (optional)"] = true
 L["Label Color"] = true
@@ -1219,6 +1239,11 @@ L["Monochrome Thick Outline"] = true
 L["Most Urgent"] = true
 L["Movement"] = true
 L["Moves the glow to the opposite side (no HP side instead of max HP side)."] = true
+L["Different color in pandemic window"] = true
+L["Pandemic Color"] = true
+L["Switches to a second color while the buff is inside its refresh window — the moment when recasting wastes none of the remaining time. The game sets this window per spell, so there is no threshold to choose. Buffs you cannot refresh never have one."] = true
+L["Multiple effects color the background. Whichever buff is active shows; if several are active at once, the highest priority draws on top and translucent tints blend together."] = true
+L["Multiple effects color the health bar. Whichever buff is active shows; if several are active at once, the highest priority draws on top and translucent tints blend together."] = true
 L["My Auras First"] = true
 L["My Buffs"] = true
 L["My Group First"] = true
@@ -1555,6 +1580,7 @@ L["Show Minimap Button"] = true
 L["Show On Current Health Only"] = true
 L["Show on Hover Only"] = true
 L["Show Overheal"] = true
+L["Show older releases"] = true
 L["Show Overlay For"] = true
 L["Show Overshield Glow"] = true
 L["Show Party/Raid Side Menu"] = true
@@ -1873,6 +1899,11 @@ L["Import Buffs Tab Defaults"] = true
 L["Import from Buffs Tab"] = true
 L["Import your existing Buffs tab settings as defaults for all auras. Compatible settings will be applied automatically."] = true
 L["Imported!"] = true
+-- Chat confirmations for the Aura Designer's keep-or-replace question: it writes the Buff
+-- Bar's own Show Buffs setting, which lives on another page, so the answer has to say so.
+-- Sits beside "Keep Buffs" / "Replace Buffs", the buttons that produce it.
+L["Buffs kept alongside Aura Designer."] = true
+L["Buffs turned off — Aura Designer is replacing them."] = true
 L["Keep Buffs"] = true
 L["LINKED FILTERS"] = true
 L["Layout Group"] = true

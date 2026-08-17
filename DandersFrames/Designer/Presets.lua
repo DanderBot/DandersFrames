@@ -263,6 +263,11 @@ end
 
 -- Invoke fn(overrideHolder) for every raid auto-layout entry that carries an
 -- `overrides` table (instanced/openWorld arrays + the single mythic profile).
+-- ★ PUBLISHED (DF.ForEachRaidLayoutOverride, below) because a per-KEY migration needs
+-- the same walk. Every value migration in the addon walks profile.party and profile.raid
+-- and stops there, so a key the auto-layout system can override -- and OVERRIDE_TAB_MAP
+-- matches by PREFIX, so most of them are -- survives untouched inside a layout and comes
+-- back the moment that layout activates. There is one walk; use it.
 local function ForEachRaidLayoutOverride(profile, fn)
     local rap = profile.raidAutoProfiles
     if type(rap) ~= "table" then return end
@@ -282,6 +287,7 @@ local function ForEachRaidLayoutOverride(profile, fn)
         end
     end
 end
+DF.ForEachRaidLayoutOverride = ForEachRaidLayoutOverride
 
 -- Deep value-equality for designer configs, IGNORING internal bookkeeping keys
 -- (leading underscore, e.g. _specScopedV1/V2). Used to detect a per-layout

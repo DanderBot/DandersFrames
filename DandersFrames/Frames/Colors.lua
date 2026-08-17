@@ -107,12 +107,10 @@ local function SetBarValue(bar, value, frame, smoothOverride)
     else
         smoothEnabled = db and db.smoothBars
     end
-    
-    if smoothEnabled and Enum and Enum.StatusBarInterpolation and Enum.StatusBarInterpolation.ExponentialEaseOut then
-        bar:SetValue(value, Enum.StatusBarInterpolation.ExponentialEaseOut)
-    else
-        bar:SetValue(value)
-    end
+
+    -- This function owns the db resolution + the override; the interpolation BRANCH is
+    -- shared with every other bar writer (DF.SetBarValueSmoothed, Frames/Core.lua).
+    DF.SetBarValueSmoothed(bar, value, smoothEnabled)
 end
 
 -- Export for use in other files

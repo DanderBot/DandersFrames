@@ -3764,26 +3764,18 @@ function SecureSort:CalculateRaidGroupPosition(groupNum, posInGroup, playersInGr
 
     local retY = -yDown
 
-    -- Test-mode CENTER compensation (mirrors DF:ComputeRaidContainerCompensation, #867).
-    -- The secure snippet centres visible groups in the full-grid container via
-    -- (totalDim - populatedDim)/2; on LIVE the raid container is then shifted by the
-    -- same magnitude (relative to a single-populated-row reference) so the visible
-    -- content does not drift as the roster grows. That container shift lives in
-    -- DF:UpdateRaidContainerPosition and is applied to DF.raidContainer only — the
-    -- test container (DF.testRaidContainer) is intentionally left uncompensated. So in
-    -- test mode the frames carry the snippet's centring offset but nothing cancels the
-    -- drift, leaving test CENTER disagreeing with live whenever popRows > 1. Fold the
-    -- identical shift into the test frame offsets here (equivalent to shifting the
-    -- container, and keeping the test mover/centroid at the saved anchor exactly like
-    -- live). Gated on lp.testMode so the live sorting-disabled Lua path -- which uses the
-    -- already-compensated raidContainer -- is untouched.
-    if lp.testMode and groupAnchor == "CENTER" and popRows > 1 then
-        if horizontal then
-            retY = retY + (groupH - populatedHeight) / 2
-        else
-            x = x + (groupW - populatedWidth) / 2
-        end
-    end
+    -- ═══ RETIRED 2026-08-15: the lp.testMode CENTER compensation block (#867). ═══
+    -- It folded the container's CENTER shift into TEST FRAME offsets because the test
+    -- container was "intentionally left uncompensated" while live's container carried
+    -- the shift. That split accounting is what made the unlock overlay unfaithful:
+    -- the mover was sized/positioned from the container, and in test mode the frames
+    -- drifted half a group-row out of the box it drew (Aphoex, 2026-08-15,
+    -- groups-per-row < 8). The compensation now lives in exactly ONE place —
+    -- DF:UpdateRaidContainerPosition applies ComputeRaidContainerCompensation (now
+    -- test-aware) to the live container, the TEST container and the MOVER alike — so
+    -- this calculator returns raw grid offsets in every mode and the preview differs
+    -- from live in data only. ⚠ lp.testMode itself STAYS: PositionRaidFrameToGroupSlot
+    -- still reads it for the playerAnchor=END BOTTOMLEFT mirror (#875).
 
     return x, retY
 end
