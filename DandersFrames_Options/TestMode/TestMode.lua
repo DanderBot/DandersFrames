@@ -2532,11 +2532,25 @@ function DF:UpdateRaidTestFrames()
         end
     end
     
+    -- ☠ PINNED TEST FRAMES FOLLOW RAID SETTINGS CHANGES TOO. This function is the
+    -- RAID arm of what DF:RefreshTestFrames does for party — every raid-side test
+    -- control lands here (the panel checkboxes, the Quick Presets, the sliders via
+    -- ThrottledUpdateRaidTestFrames, and DF:UpdateAll's raid branch) — and it was the
+    -- only one of the three refresh entry points that never touched the pinned pools.
+    -- So in RAID test mode a pinned set kept whatever it rendered at Test Mode entry:
+    -- unticking Show Auras / Missing Buff / Aura Designer emptied the raid grid and
+    -- left the pinned preview fully dressed. `true` because this pass applies layout
+    -- to each raid frame (ApplyTestFrameLayout above), so the pinned frames get the
+    -- same treatment their raid siblings just had. (Krathe, 2026-08-17.)
+    if DF.PinnedFrames and DF.PinnedFrames.RefreshTestMode then
+        DF.PinnedFrames:RefreshTestMode(true)
+    end
+
     -- Update group labels if enabled (only in group-based layout)
     if db.raidUseGroups and db.groupLabelEnabled and DF.UpdateRaidGroupLabels then
         DF:UpdateRaidGroupLabels()
     end
-    
+
     -- Handle animation
     if db.testAnimateHealth then
         DF:StartTestAnimation()
@@ -2546,6 +2560,12 @@ function DF:UpdateRaidTestFrames()
         if not (DF.testMode and partyDb.testAnimateHealth) then
             DF:StopTestAnimation()
         end
+    end
+
+    -- Indicator Info marks label the rows this pass just rebuilt, so they re-place
+    -- LAST and one tick later — same reason and same shape as DF:RefreshTestFrames.
+    if DF.UpdateTestLabels then
+        C_Timer.After(0, function() if DF.UpdateTestLabels then DF:UpdateTestLabels() end end)
     end
 end
 
