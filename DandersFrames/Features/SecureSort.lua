@@ -2736,6 +2736,7 @@ function SecureSort:PushRaidGroupLayoutConfig()
         raidGroupLayoutConfig.horizontal = %s
         raidGroupLayoutConfig.groupAnchor = "%s"
         raidGroupLayoutConfig.playerAnchor = "%s"
+        raidGroupLayoutConfig.groupRowGrowth = "%s"
         raidUseGroups = %s
     ]],
         lp.frameWidth,
@@ -2747,6 +2748,12 @@ function SecureSort:PushRaidGroupLayoutConfig()
         tostring(lp.horizontal),
         lp.groupAnchor or "CENTER",
         lp.playerAnchor or "START",
+        -- ☠ Rows/Columns Grow From reaches the secure grouped positioner ONLY through
+        -- this line. UpdateRaidGroupLayoutParams has carried lp.groupRowGrowth since the
+        -- setting shipped, but the push never sent it, so position_all_raid_frames_grouped
+        -- -- which is the LAST writer of every grouped raid frame's point -- could not see
+        -- it. Adding a field to raidGroupLayoutParams is not enough; add it here too.
+        lp.groupRowGrowth or "START",
         tostring(useGroups)
     )
     
@@ -4351,6 +4358,7 @@ function SecureSort:RegisterPhase25Snippets()
         local horizontal = lc.horizontal
         local groupAnchor = lc.groupAnchor or "CENTER"
         local playerAnchor = lc.playerAnchor or "START"
+        local groupRowGrowth = lc.groupRowGrowth or "START"
 
         -- Get frame count
         local frameCount = self:GetAttribute("raidFrameCount") or 0
@@ -4482,6 +4490,19 @@ function SecureSort:RegisterPhase25Snippets()
                         -- is deprecated and not applied (the header positioner never
                         -- honoured it). groupsInThisRC is still needed for rc sizing.
                         local groupsInThisRC = math.min(groupsPerRowCol, activeGroupCount - (rcIndex - 1) * groupsPerRowCol)
+
+                        -- Rows/Columns Grow From. Flip the row (column) index over the
+                        -- FULL eight-group grid -- the same flip the header snippet and
+                        -- CalculateRaidGroupPosition apply, over the same grid that
+                        -- totalWidth/totalHeight above are sized from (totalGroups = 8).
+                        -- ☠ groupsInThisRC MUST stay on the unflipped index: it counts the
+                        -- groups sharing this POPULATED row, and reading it off a flipped
+                        -- index yields an empty (or negative) row and breaks the END and
+                        -- CENTER group alignments below.
+                        if groupRowGrowth == "END" then
+                            local fullGridRC = math.ceil(8 / groupsPerRowCol)
+                            rcIndex = fullGridRC - (rcIndex - 1)
+                        end
 
                         -- Calculate row/column container dimensions
                         local rcWidth, rcHeight
