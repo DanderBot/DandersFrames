@@ -45,8 +45,7 @@
 
 ### Improvements
 
-* (Settings) The in-game changelog is now a proper page instead of a wall of text: each release gets a title, new features show as cards, and fixes are compact rows with their category up front. Older releases load on demand.
-
+* (Settings) The in-game changelog is now a proper page instead of a wall of text: each release gets its own banner, new features are highlighted and click through to their settings page, and fixes are grouped by area. Older releases load on demand.
 * (Aura Designer) The filter picker now has a scrollbar and a search box, matching the addon's other dropdowns.
 * (Debuff Bar) The Important Debuffs settings box now previews the corner marker beside its title, in the colours you picked, and greys it out while the marker is switched off. (by Krathe)
 * (Debug) New IDGATE debug category traces every aura-visibility gate decision with its reason (dead, offline, cross-faction, in a vehicle, phased) — enable it when chasing a "my auras vanished" report, then check /df debug idgate. (by Krathe)
