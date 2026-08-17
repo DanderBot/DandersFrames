@@ -2322,13 +2322,15 @@ function DF:UpdateRaidContainerPosition()
     local x, y = db.raidAnchorX or 0, db.raidAnchorY or 0
     local scale = db.frameScale or 1.0
 
-    -- CENTER-anchor compensation: when raidGroupAnchor == "CENTER", the secure
-    -- positioning snippet shifts visible groups inside the container by
-    -- (totalHeight - populatedHeight) / 2 to centre the visible content. As
-    -- populated rows grow with the roster, that offset shrinks and visible
-    -- frames snap upward inside the container. We undo the visual snap by
-    -- shifting the container itself by the same magnitude. The user's saved
-    -- anchor (x, y) is preserved as the centroid of the visible content. (#867)
+    -- ☠ CENTER-anchor compensation, RETIRED 2026-08-18 -- this now always adds (0, 0).
+    -- It shifted the container to hold CENTER content still as the roster grew, against
+    -- #867. That was a workaround one layer below the real bug (the CENTER compounding,
+    -- fixed at source in 50a3e7c5), and it was actively harmful: CENTER already grows
+    -- symmetrically about the container centre, so the centroid never moved, and this
+    -- pinned the leading edge instead -- measured in game as the container and mover
+    -- dragged 316px left at Wrap 7 / Center Right / 8 groups (Krathe, 2026-08-18).
+    -- The call stays so the reasoning has one home: see ComputeRaidContainerCompensation
+    -- in Headers.lua before reinstating anything here.
     local dx, dy = 0, 0
     if DF.ComputeRaidContainerCompensation then
         dx, dy = DF:ComputeRaidContainerCompensation()
