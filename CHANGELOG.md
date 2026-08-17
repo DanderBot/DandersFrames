@@ -4,51 +4,51 @@
 
 ### New Features
 
-* (Aura Designer) Spells with more than one effect now show a "Tracked IDs" list on their indicator card — untick any effect you don't want that indicator to show. Each row shows the effect's own icon, and unticking everything simply shows nothing without touching the visibility eye. (by Krathe)
-* (Aura Designer) Health Bar Color, Background Color and Border can switch to a second colour while a buff is inside its refresh window, so a heal-over-time can read one colour normally and another the moment recasting it wastes nothing. The game sets that window per spell, and buffs you cannot refresh never have one. (by Krathe)
+* (Aura Designer) Spells with more than one effect now show a "Tracked IDs" list on their indicator card — untick any effect you don't want that indicator to show. Each row shows the effect's own icon and hovering it shows the spell's tooltip. (by Krathe)
+* (Aura Designer) Health Bar Color, Background Color and Border can switch to a second colour while a buff is inside its refresh window — so a heal-over-time can change colour the moment recasting it wastes nothing. (by Krathe)
 * (Aura Designer) Filter groups can now render as solid coloured squares instead of spell icons — pick a Shape on the group's Appearance card. (by Krathe)
 
 ### Bug Fixes
 
-* (Test Mode) The test panel's Absorbs and Heal Prediction toggles now apply fully when switched on mid-session — previously some frames were left without their shield or incoming heal until the toggle was flipped again. (by Krathe)
 * (Aura Designer) Fix indicators on shared slots fading twice as much as intended out of range, and staying faded after entering combat while someone was out of range.
-* (Debuff Bar) Fix the whole debuff row going empty on some group members — showing a dispel highlight with no debuff icon under it — when debuff categories were combined.
-* (Aura Designer) Every configured Health Bar Color and Background Color now shows. Previously only the highest-priority one ever did, so a lower-priority buff coloured nothing even when it was the only one on the unit. With several active at once the highest priority draws on top. (by Krathe)
-* (Dispel Highlight) Gradient, border and symbol opacity now actually apply in game — the overlay previously rendered at full brightness no matter what the sliders said, including for debuffs gained mid-combat. (by Krathe)
-* (Dispel Highlight) Fix gradient opacity being applied twice for profiles upgraded from v4, which locked the overlay at full brightness across most of the slider's range. (by Krathe)
-* (Test Mode) Position settings now apply to the preview straight away. Changing an aura row's Anchor or Offset did nothing until test mode was switched off and on again, so placing a row meant toggling after every nudge — Growth, Spacing and Wrap were stuck the same way. (by Krathe)
-* (Bars) The absorb shield now sits beside incoming heals instead of on top of them: the bar reads health, then incoming healing, then shield — the same order the game's own frames use — and a shield always draws above a heal where the two meet. (by Krathe)
-* (Bars) Incoming heals account for consuming heal absorbs (like Necrotic): the heal bar only promises healing that will actually land, while the red wash shows the full amount it will eat — so a 25k heal against a 15k heal absorb shows the surviving 10k next to the wash. (by Krathe)
-* (Bars) Fix the frame border rendering underneath the absorb and heal prediction bars. (by Krathe)
-* (Bars) Display Mode changes for the absorb shield, heal absorb and heal prediction apply immediately, instead of waiting for that unit's next absorb or heal event. (by Krathe)
-* (Bars) The absorb Clamp Mode "None" now truly leaves the shield unclamped — it previously applied the strictest clamp of the three. (by Krathe)
-* (Test Mode) Absorbs, heal absorbs and incoming heals preview reliably on the first entry after a reload, follow the test panel's toggles, respect reduced max health, and demonstrate the heal-absorb interplay: one unit shows its heal shortened by a wash with the shield beside it, another shows a wash consuming its heal entirely. (by Krathe)
-* (Indicators) "Hide in Combat" now works for every icon that offers it. The Leader and MT/MA icons stayed on screen through a whole fight no matter what the setting said, and the AFK, Phased, Vehicle, Summon, Raid Target and Ready Check icons shared the same fault — they all hide when the fight starts and come back when it ends. Reloading mid-fight no longer leaves them showing for the rest of the pull either. (by Krathe)
-* (Layout) The raid Growth Direction dropdown and its related labels now agree — choosing Rows or Columns configures exactly what it says. (by Krathe)
-* (Bars) Fix solo-mode resource bars appearing on frames other than your own. (by Krathe)
+* (Aura Designer) Every configured Health Bar Color and Background Color now shows, not just the highest-priority one; when several are active the highest priority draws on top. (by Krathe)
 * (Aura Designer) Fix the enable toggle silently changing your Show Buffs setting when nothing needed to change. (by Krathe)
-* (Test Mode) The preview honours Smooth Bar Animation and labels which slot is you. (by Krathe)
-* (Click Casting) Fix importing per-character macros erroring out and showing nothing — the game moved the account-macro limit this build, and the import read the old name. (by Krathe)
-* (Debuff Bar) Fix debuffs appearing twice when Non-Player Debuffs was enabled alongside another category. Any mob-cast debuff that was also dispellable, crowd control or raid-flagged was counted by both categories, so trash packs applying poison and disease filled the row with pairs of identical icons and pushed past the icon limit. (by Krathe)
-* (Auras) Fix buffs and debuffs sometimes staying hidden on group members after they died, released or disconnected — the frame only recovered when something else refreshed it, such as targeting that player. Most reported by healers missing HoTs on raid groups outside their own, and constant in battlegrounds. (by Krathe)
-* (Auras) Duration text now counts down cleanly to the end — 3, 2, 1, gone — instead of showing the final second twice. Applies to every duration format, the Aura Designer and the Defensive Icon. (by Krathe)
-* (Global Fonts) Apply to All now reaches the Aura Designer: the global text defaults, every placed indicator and all group text styles take the chosen font and outline. Previously it silently changed nothing there. (by Krathe)
-* (Bars) Show Overheal now actually lets incoming heals overflow past the end of the health bar — it never had before. (by Krathe)
+* (Auras) Fix buffs and debuffs sometimes staying hidden on group members after they died, released or disconnected — most noticeable for healers in raids and battlegrounds. (by Krathe)
+* (Auras) Duration text now counts down cleanly to the end — 3, 2, 1, gone — instead of showing the final second twice. (by Krathe)
+* (Bars) The absorb shield now sits beside incoming heals instead of on top of them — health, then incoming healing, then shield, matching the game's own frames. (by Krathe)
+* (Bars) Incoming heals now account for consuming heal absorbs (like Necrotic): the heal bar shows only what will actually land, while the red wash shows the full amount eaten. (by Krathe)
+* (Bars) Show Overheal now actually lets incoming heals overflow past the end of the health bar. (by Krathe)
+* (Bars) Fix the frame border rendering underneath the absorb and heal prediction bars. (by Krathe)
+* (Bars) Display Mode changes for the absorb, heal absorb and heal prediction bars apply immediately. (by Krathe)
+* (Bars) The absorb Clamp Mode "None" now truly leaves the shield unclamped. (by Krathe)
+* (Bars) Fix solo-mode resource bars appearing on frames other than your own. (by Krathe)
+* (Debuff Bar) Fix the whole debuff row going empty on some group members — showing a dispel highlight with no debuff icon under it — when debuff categories were combined.
+* (Debuff Bar) Fix debuffs appearing twice when Non-Player Debuffs was enabled alongside another category. (by Krathe)
+* (Dispel Highlight) Gradient, border and symbol opacity now actually apply in game — the overlay previously rendered at full brightness regardless of the sliders. (by Krathe)
+* (Dispel Highlight) Fix gradient opacity being applied twice for profiles upgraded from v4, which locked the overlay at full brightness. (by Krathe)
+* (Indicators) "Hide in Combat" now works for every icon that offers it — Leader, MT/MA, AFK, Phased, Vehicle, Summon, Raid Target and Ready Check all hide when the fight starts and return when it ends. (by Krathe)
+* (Defensive Icons) Fix the defensive row showing the previous occupant's defensives after a roster change moved someone else into that frame.
+* (Layout) The raid Growth Direction dropdown and its labels now agree — Rows or Columns configures exactly what it says. (by Krathe)
 * (Raid Frames) Fix the unlock overlay box drawing half a group-row away from the frames with Center group alignment. (by Krathe)
 * (Pinned Frames) Fix pinned frames staying on screen after leaving a raid, and an error when entering a raid with more party pinned sets than raid ones. (by Krathe)
 * (Pinned Frames) Fix the missing-buff strip never showing on follower dungeon companions. (by Krathe)
 * (Pet Frames) Pet frames no longer sit under neighbouring health bars on the first test mode entry. (by Krathe)
-* (Debug) The debug console no longer goes blank on very large logs, and exports of big logs are split into parts so nothing is cut off. (by Krathe)
-* (Defensive Icons) Fix the defensive row showing the previous occupant's defensives after a roster change moved someone else into that frame.
-* (Settings) Fix settings text such as tab labels rendering as boxes on Chinese, Korean and other non-Latin clients when the chosen Settings Font lacks those characters — including with the default font.
+* (Click Casting) Fix importing per-character macros erroring out and showing nothing. (by Krathe)
+* (Global Fonts) Apply to All now reaches the Aura Designer's text defaults, placed indicators and group text styles. (by Krathe)
+* (Test Mode) The test panel's Absorbs and Heal Prediction toggles now apply to every frame when switched on mid-session. (by Krathe)
+* (Test Mode) Aura row Anchor, Offset, Growth, Spacing and Wrap changes now apply to the preview straight away instead of after toggling test mode. (by Krathe)
+* (Test Mode) Absorbs, heal absorbs and incoming heals preview reliably on the first entry after a reload and follow the test panel's toggles. (by Krathe)
+* (Test Mode) The preview honours Smooth Bar Animation and labels which slot is you. (by Krathe)
+* (Settings) Fix settings text rendering as boxes on Chinese, Korean and other non-Latin clients when the chosen Settings Font lacks those characters — including with the default font.
 * (Settings) Fix the absorb texture preview sometimes showing the wrong texture after a reload until the settings window was reopened.
+* (Debug) The debug console no longer goes blank on very large logs, and big exports are split into parts. (by Krathe)
 
 ### Improvements
 
-* (Settings) The in-game changelog is now a proper page instead of a wall of text: each release gets its own banner, new features are highlighted and click through to their settings page, and fixes are grouped by area. Older releases load on demand.
+* (Settings) The in-game changelog is now a proper page: each release gets its own banner, new features are highlighted and click through to their settings, and fixes are grouped by area.
 * (Aura Designer) The filter picker now has a scrollbar and a search box, matching the addon's other dropdowns.
-* (Debuff Bar) The Important Debuffs settings box now previews the corner marker beside its title, in the colours you picked, and greys it out while the marker is switched off. (by Krathe)
-* (Debug) New IDGATE debug category traces every aura-visibility gate decision with its reason (dead, offline, cross-faction, in a vehicle, phased) — enable it when chasing a "my auras vanished" report, then check /df debug idgate. (by Krathe)
+* (Debuff Bar) The Important Debuffs settings box now previews the corner marker beside its title in your chosen colours. (by Krathe)
+* (Debug) New IDGATE debug category traces every aura-visibility gate decision with its reason — enable it when chasing a "my auras vanished" report. (by Krathe)
 
 ## [5.1.3]
 
