@@ -1980,6 +1980,14 @@ function DF:RefreshTestFrames()
     if DF.PinnedFrames and DF.PinnedFrames.RefreshTestMode then
         DF.PinnedFrames:RefreshTestMode(false)
     end
+
+    -- Section labels re-place LAST and one tick later: they measure the rows they
+    -- label, and a row rebuilt during this pass has a zero rect until the layout
+    -- settles (the creation-tick rule that bit the bar toggles). A stale label is
+    -- worse than a late one — it points at where an element used to be.
+    if DF.UpdateTestLabels then
+        C_Timer.After(0, function() if DF.UpdateTestLabels then DF:UpdateTestLabels() end end)
+    end
 end
 
 -- Apply layout/style settings to a test frame (fonts, sizes, textures, borders, etc.)
@@ -2178,6 +2186,10 @@ function DF:HideTestFrames(silent)
         DF:StopTestAnimation()
     end
     
+    -- Labels first: their hit areas are mouse-enabled, and a pooled frame handed back
+    -- to live rendering with an invisible hit area over it eats hover on a real unit.
+    if DF.ClearTestLabels then DF:ClearTestLabels() end
+
     -- Hide all test party frames
     for i = 0, 4 do
         local frame = DF.testPartyFrames[i]
@@ -2405,6 +2417,10 @@ function DF:HideRaidTestFrames(silent)
         DF:StopTestAnimation()
     end
     
+    -- Labels first — see the party exit for why the hit areas must go before the
+    -- frames return to the pool.
+    if DF.ClearTestLabels then DF:ClearTestLabels() end
+
     -- Hide all test raid frames
     for i = 1, 40 do
         local frame = DF.testRaidFrames[i]
@@ -4301,6 +4317,16 @@ function DF:CreateTestPanel()
         end
     end)
 
+    -- Section labels: mark whichever element the cursor is over, on the FIRST preview
+    -- frame (they are identical, so labelling forty says nothing extra). Marking all
+    -- of them at once was unreadable at real frame sizes -- see Labels.lua.
+    -- Both OFF by default -- test mode is also how people pixel-tune spacing.
+    -- ONE toggle for both halves (highlight + naming): they are the same question
+    -- asked two ways, and a user who wants one always wants the other.
+    panel.showLabelsCheck = secGeneral:AddCheckbox(L["Indicator Info"], "testShowLabels", function()
+        if DF.UpdateTestLabels then DF:UpdateTestLabels() end
+    end)
+
     -- Frame count slider (below checkboxes)
     local fcRow = CreateFrame("Frame", nil, secGeneral.content)
     fcRow:SetHeight(28)
@@ -4792,6 +4818,13 @@ function DF:CreateTestPanel()
         self.showReducedMaxCheck:SetChecked(db.testShowReducedMaxHealth ~= false)
         if self.showTextDesignerCheck then
             self.showTextDesignerCheck:SetChecked(db.testShowTextDesigner ~= false)
+        end
+        -- ☠ EVERY CHECKBOX BELONGS IN THIS LIST. A toggle left out keeps the widget's
+        -- own default (unchecked) while the DB value stays true, so the feature runs
+        -- with its box showing off until the user clicks it twice -- exactly what was
+        -- reported for the section labels.
+        if self.showLabelsCheck then
+            self.showLabelsCheck:SetChecked(db.testShowLabels)
         end
         self.showAurasCheck:SetChecked(db.testShowAuras)
         self.showDispelGlowCheck:SetChecked(db.testShowDispelGlow)
