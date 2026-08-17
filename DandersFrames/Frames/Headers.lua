@@ -2287,7 +2287,17 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group1:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2319,7 +2329,11 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group1:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -2368,7 +2382,17 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group2:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2400,7 +2424,11 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group2:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -2449,7 +2477,17 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group3:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2481,7 +2519,11 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group3:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -2530,7 +2572,17 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group4:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2562,7 +2614,11 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group4:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -2611,7 +2667,17 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group5:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2643,7 +2709,11 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group5:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -2692,7 +2762,17 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group6:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2724,7 +2804,11 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group6:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -2773,7 +2857,17 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group7:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2805,7 +2899,11 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group7:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -2854,7 +2952,17 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group8:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2886,7 +2994,11 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group8:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else

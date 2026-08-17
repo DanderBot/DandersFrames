@@ -3734,7 +3734,14 @@ function SecureSort:CalculateRaidGroupPosition(groupNum, posInGroup, playersInGr
         elseif groupAnchor == "CENTER" then
             local rcW = gInRC * groupW + (gInRC - 1) * groupSpacing
             xOff = (totalWidth - rcW) / 2 + posInRC * (groupW + groupSpacing)
-            yOff = (totalHeight - populatedHeight) / 2 + rcIdx * (groupH + rowColSpacing)
+            -- ☠ Mirrors the header snippet's CENTER correction. rcIdx was already flipped
+            -- over fullGridRC, and adding that to a block that is already centred on the
+            -- wrap axis compounds -- one populated row in a two-row grid landed half a
+            -- group plus half the wrap spacing outside the container. Recover the
+            -- populated-row index: (popRows-1) - ((fullGridRC-1) - rcIdx).
+            local rcCentered = rcIdx
+            if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+            yOff = (totalHeight - populatedHeight) / 2 + rcCentered * (groupH + rowColSpacing)
         end
         x = xOff
         local hdrTop
@@ -3755,7 +3762,10 @@ function SecureSort:CalculateRaidGroupPosition(groupNum, posInGroup, playersInGr
         elseif groupAnchor == "CENTER" then
             local rcH = gInRC * groupH + (gInRC - 1) * groupSpacing
             yOff = (totalHeight - rcH) / 2 + posInRC * (groupH + groupSpacing)
-            xOff = (totalWidth - populatedWidth) / 2 + rcIdx * (groupW + rowColSpacing)
+            -- Same correction, wrap axis is X in vertical growth.
+            local rcCentered = rcIdx
+            if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+            xOff = (totalWidth - populatedWidth) / 2 + rcCentered * (groupW + rowColSpacing)
         end
         yDown = yOff
         local hdrLeft
