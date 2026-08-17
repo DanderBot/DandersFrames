@@ -1997,16 +1997,38 @@ end
 function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts)
     opts = opts or {}
     local CELL_W, CELL_H, GUTTER = 34, 18, 2
-    local COLS = { "START", "CENTER", "END" }
-    local ROWS = { "START", "END" }
+    -- ☠ THE TWO KEYS SWAP SCREEN AXES WITH THE GROWTH DIRECTION. Do not hard-code one
+    -- key to the columns. keyH (the ALIGN key, 3 values) moves things along the axis the
+    -- groups run down; keyV (the WRAP key, 2 values) moves them along the axis the grid
+    -- wraps on -- and which of those is left/right versus up/down flips:
+    --   Columns growth: groups run ACROSS, so align = Left/Center/Right, wrap = Top/Bottom
+    --   Rows growth:    groups run DOWN,   so align = Top/Center/Bottom, wrap = Left/Right
+    -- Verified in the positioners, not inferred: the vertical arm computes
+    -- `yOff = (totalHeight - rcH) + …` from groupAnchor and `rcX = xStart + rcIdx * …`
+    -- from the row-growth key, i.e. exactly the transpose of the horizontal arm. Shipping
+    -- this hard-coded made "Top right" drive bottom-right in Rows mode (Krathe,
+    -- 2026-08-17). opts.transposedFn returns true when the grid must be drawn 2 wide x 3
+    -- tall instead of 3 wide x 2 tall.
+    local ALIGN = { "START", "CENTER", "END" }
+    local WRAP  = { "START", "END" }
+    -- Caption words, indexed [vertical][horizontal]. CENTER on the vertical axis only
+    -- occurs transposed, and vice versa, but the table carries all nine so neither
+    -- orientation can fall through to an empty string.
     local CAPTION = {
-        START = { START = L["Top left"],    CENTER = L["Top center"],    END = L["Top right"] },
-        END   = { START = L["Bottom left"], CENTER = L["Bottom center"], END = L["Bottom right"] },
+        START  = { START = L["Top left"],    CENTER = L["Top center"],    END = L["Top right"] },
+        CENTER = { START = L["Center left"], CENTER = L["Center"],        END = L["Center right"] },
+        END    = { START = L["Bottom left"], CENTER = L["Bottom center"], END = L["Bottom right"] },
+    }
+    -- When the wrap axis is inert there is only one real choice being made, so the caption
+    -- names just that one. "Top center" at 8 groups before wrap described a corner that
+    -- does not exist -- it is simply Center.
+    local SOLO = {
+        [false] = { START = L["Left"], CENTER = L["Center"], END = L["Right"] },
+        [true]  = { START = L["Top"],  CENTER = L["Center"], END = L["Bottom"] },
     }
 
     local container = CreateFrame("Frame", nil, parent)
     container:SetSize(260, GUI.RowHeight.anchorgrid)
-    container.preferredHeight = GUI.RowHeight.anchorgrid
     container.rowKind = "anchorgrid"
     container.fixedRowHeight = true
 
@@ -2016,8 +2038,21 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
     lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
     container.label = lbl
 
+    local transposed = opts.transposedFn and opts.transposedFn(dbTable) or false
+    local COLS = transposed and WRAP or ALIGN
+    local ROWS = transposed and ALIGN or WRAP
+
+    -- ⚠ The slot height follows the ROW COUNT, which the transpose changes (2 rows one way,
+    -- 3 the other). GUI.RowHeight.anchorgrid is the untransposed case; the factory still
+    -- owns the number, it just cannot be a single constant. The page rebuilds on a growth
+    -- direction change, so this is only ever evaluated at construction.
+    local gridH = #ROWS * CELL_H + (#ROWS + 1) * GUTTER
+    local rowH = 16 + gridH + GUI.RowGap
+    container:SetHeight(rowH)
+    container.preferredHeight = rowH
+
     local grid = CreateFrame("Frame", nil, container, "BackdropTemplate")
-    grid:SetSize(#COLS * CELL_W + (#COLS + 1) * GUTTER, #ROWS * CELL_H + (#ROWS + 1) * GUTTER)
+    grid:SetSize(#COLS * CELL_W + (#COLS + 1) * GUTTER, gridH)
     grid:SetPoint("TOPLEFT", 0, SnapLen(grid, -16) or -16)
     CreateElementBackdrop(grid)
 
@@ -2032,11 +2067,14 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
             GUI:StyleButton(btn, { width = CELL_W, height = CELL_H })
             btn:SetPoint("TOPLEFT", grid, "TOPLEFT",
                 GUTTER + (c - 1) * (CELL_W + GUTTER), -(GUTTER + (r - 1) * (CELL_H + GUTTER)))
+            -- Screen position of the cell, and separately which KEY each of those carries.
             btn.vx, btn.vy = vx, vy
+            btn.align = transposed and vy or vx
+            btn.wrap  = transposed and vx or vy
             btn:SetScript("OnClick", function(self)
-                if container.vInert and self.vy == "END" then return end
-                dbTable[keyH] = self.vx
-                if not container.vInert then dbTable[keyV] = self.vy end
+                if container.wrapInert and self.wrap == "END" then return end
+                dbTable[keyH] = self.align
+                if not container.wrapInert then dbTable[keyV] = self.wrap end
                 container:Refresh()
                 if callback then callback() end
             end)
@@ -2045,24 +2083,32 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
     end
 
     function container:Refresh()
-        self.vInert = opts.verticalInertFn and opts.verticalInertFn(dbTable) or false
-        local curH = dbTable[keyH] or "START"
-        local curV = dbTable[keyV] or "START"
+        self.wrapInert = opts.verticalInertFn and opts.verticalInertFn(dbTable) or false
+        local curAlign = dbTable[keyH] or "START"
+        local curWrap  = dbTable[keyV] or "START"
         -- Display-only collapse: a stored END stays stored, it just cannot be shown.
-        local shownV = self.vInert and "START" or curV
+        local shownWrap = self.wrapInert and "START" or curWrap
         for _, b in ipairs(cells) do
-            local dead = self.vInert and b.vy == "END"
-            b:SetActive(not dead and b.vx == curH and b.vy == shownV)
+            local dead = self.wrapInert and b.wrap == "END"
+            b:SetActive(not dead and b.align == curAlign and b.wrap == shownWrap)
             b:SetAlpha(dead and 0.35 or 1)
             b:EnableMouse(not dead)
         end
-        caption:SetText((CAPTION[shownV] and CAPTION[shownV][curH]) or "")
+        -- The caption names the SCREEN position, so it reads off the row/column the live
+        -- cell actually sits in -- never off the keys, which swap axes when transposed.
+        if self.wrapInert then
+            caption:SetText(SOLO[transposed][curAlign] or "")
+        else
+            local vy = transposed and curAlign or shownWrap
+            local vx = transposed and shownWrap or curAlign
+            caption:SetText((CAPTION[vy] and CAPTION[vy][vx]) or "")
+        end
     end
     container.refreshContent = function(self) self:Refresh() end
 
     container.SetEnabled = function(self, enabled)
         self:SetAlpha(enabled and 1 or 0.4)
-        for _, b in ipairs(cells) do b:EnableMouse(enabled and not (self.vInert and b.vy == "END")) end
+        for _, b in ipairs(cells) do b:EnableMouse(enabled and not (self.wrapInert and b.wrap == "END")) end
     end
 
     -- Tooltip: shared attach on the LABEL only (see GUI:AttachTooltip), matching every

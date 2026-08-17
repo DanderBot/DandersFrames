@@ -1973,6 +1973,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local groupAnchorGrid = groupLayoutGroup:AddWidget(
             GUI:CreateAnchorGrid(self.child, L["Groups Anchor"], db, "raidGroupAnchor", "raidGroupRowGrowth", UpdateFrames, {
                 verticalInertFn = function(d) return (d.raidGroupsPerRow or 8) >= 8 end,
+                -- ☠ In Rows growth the two keys swap screen axes -- raidGroupAnchor moves
+                -- things UP/DOWN there and raidGroupRowGrowth moves them LEFT/RIGHT, the
+                -- exact transpose of Columns growth. Without this the grid draws a corner
+                -- that is 90 degrees from where the frames land.
+                transposedFn = function(d) return d.growDirection == "VERTICAL" end,
             }))
         -- The non-obvious half is the empty space: the frame area is sized for all EIGHT
         -- groups so the drag box never resizes under you, so in a five-group raid the left
