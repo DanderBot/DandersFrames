@@ -2443,11 +2443,18 @@ function DF:UpdateAllDispelOverlays()
         end
         return
     end
-    DF:IterateAllFrames(function(frame)
+    local function updateFrame(frame)
         if frame then
             DF:UpdateDispelOverlay(frame)
         end
-    end)
+    end
+    DF:IterateAllFrames(updateFrame)
+    -- ☠ AND PINNED — DF:IterateAllFrames is arena OR party+raid and has no pinned arm, so
+    -- the dispel settings toggle, PLAYER_ENTERING_WORLD and both test-mode exits all left
+    -- pinned frames on whatever overlay state they last happened to render. (Audit 2026-08-17.)
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(updateFrame)
+    end
 end
 
 -- ============================================================

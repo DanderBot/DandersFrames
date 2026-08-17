@@ -6862,19 +6862,13 @@ function DF:RefreshAllHeaderChildFrames()
         end
     end
     
-    -- Refresh PinnedFrames if active
-    if DF.PinnedFrames and DF.PinnedFrames.headers then
-        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
-            local header = DF.PinnedFrames.headers[setIndex]
-            if header then
-                for i = 1, 40 do
-                    local child = header:GetAttribute("child" .. i)
-                    if child then
-                        RefreshFrame(child)
-                    end
-                end
-            end
-        end
+    -- Refresh PinnedFrames if active.
+    -- ☠ THROUGH THE SHARED WALKER, NOT A HAND-ROLLED HEADER LOOP — this walked
+    -- PinnedFrames.headers only, so the whole per-frame refresh block (role, absorb, raid
+    -- target, dispel, missing buff, highlights) never reached a pinned BOSS frame.
+    -- (Audit 2026-08-17.)
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(RefreshFrame)
     end
 end
 
