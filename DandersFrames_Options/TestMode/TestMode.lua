@@ -4358,7 +4358,9 @@ function DF:CreateTestPanel()
     -- Section labels: mark whichever element the cursor is over, on the FIRST preview
     -- frame (they are identical, so labelling forty says nothing extra). Marking all
     -- of them at once was unreadable at real frame sizes -- see Labels.lua.
-    -- Both OFF by default -- test mode is also how people pixel-tune spacing.
+    -- ★ ON by default as of 2026-08-17 — see the key's note in Core/Config.lua. The marks
+    -- are hover-only and mark one element at a time, so a still cursor shows nothing and
+    -- the pixel-tuning case the old default protected is unaffected.
     -- ONE toggle for both halves (highlight + naming): they are the same question
     -- asked two ways, and a user who wants one always wants the other.
     panel.showLabelsCheck = secGeneral:AddCheckbox(L["Indicator Info"], "testShowLabels", function()

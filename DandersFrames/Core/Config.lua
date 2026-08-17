@@ -2698,11 +2698,19 @@ DF.PartyDefaults = {
     testShowPersonalTargeted = true,
     testShowAuraDesigner = false,
     testShowTextDesigner = true,
-    -- Test-mode section identification: highlights whichever element the cursor is
-    -- over and names it. OFF by default -- test mode is also how people pixel-tune
-    -- spacing. (A separate testShowLabelTips key existed for one build; the two were
-    -- merged into this one, since nobody wants half the answer.)
-    testShowLabels = false,
+    -- Test-mode indicator identification: highlights whichever element the cursor is
+    -- over and names it, with the settings page that owns it.
+    -- ★ ON by default (Krathe, 2026-08-17). It shipped OFF on the reasoning that test mode
+    -- is also how people pixel-tune spacing — but the marks are HOVER-ONLY and mark ONE
+    -- element at a time, so an untouched cursor shows nothing and the tuning case is
+    -- unaffected. Off by default mostly meant nobody found the feature.
+    -- ⚠ NOT in TEST_TOGGLE_KEYS, deliberately: the quick presets force every key in that
+    -- list off unless they name it, and this is a working preference like the count
+    -- sliders, not part of a preset's visual identity. Pressing Auras must not silently
+    -- take the labels away. Adding it there would undo this default on the first preset click.
+    -- (A separate testShowLabelTips key existed for one build; the two were merged into this
+    -- one, since nobody wants half the answer.)
+    testShowLabels = true,
 
     -- Tooltip settings
     tooltipBuffAnchor = "FRAME",
