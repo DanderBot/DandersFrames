@@ -1717,7 +1717,8 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 end
             end)
             -- Rebuild the page so orientation-dependent dropdown TITLES refresh
-            -- live (e.g. "Columns Grow From" vs "Rows Grow From") without needing
+            -- live (e.g. "Column Order" vs "Row Order", "Columns Grow From" vs
+            -- "Rows Grow From" on the flat grid) without needing
             -- to reopen the settings window. Dropdowns bake their label at build
             -- time, so a rebuild is the only way to update it. (Option VALUES are
             -- now the static "Start (Left/Top)" / "End (Right/Bottom)" form, so
@@ -1784,7 +1785,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- There were three -- party, raid+groups and raid+flat -- mutually exclusive by
         -- hideOn, and the raid+groups one INVERTED the pair: HORIZONTAL read as "Columns"
         -- there and "Rows" in the other two. Every label that depends on the same key
-        -- (Groups Per Row / Row Spacing / Rows Grow From, and the hint below) uses the
+        -- (Groups Per Row / Row Spacing / Row Order, and the hint below) uses the
         -- party reading, so picking "Rows" in a grouped raid produced a box full of
         -- Column settings -- field-reported as "choosing columns enables rows
         -- configuration, and viceversa" (Aphoex, 2026-08-14).
@@ -1862,11 +1863,28 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local groupsLabel = db.growDirection == "VERTICAL" and L["Groups Per Column"] or L["Groups Per Row"]
         groupsPerRowSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, groupsLabel, 1, 8, 1, db, "raidGroupsPerRow", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
         
-        groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Group Alignment"], anchorOptions, db, "raidGroupAnchor", UpdateFrames), 55)
+        -- ☠ THIS IS THE CONTROL THAT SWAPS WHICH SIDE THE GROUPS SIT ON, AND ITS NAME
+        -- HAS TO SAY SO. It shipped as "Groups Grow From" in v4.0.5 and was renamed to
+        -- "Group Alignment" in bad7a7dc on the reasoning that Start/Center/End describes
+        -- an alignment rather than a direction. True in the abstract, wrong in practice:
+        -- raidGroupRowGrowth had taken the "... Grow From" wording three months earlier
+        -- for a much narrower job, so the panel ended up with a "Grow From" that is inert
+        -- at the default Groups Per Row = 8 and a side-swapper nobody could find. Both
+        -- Krathe and a field reporter went looking for the behaviour under the old name.
+        -- Note the party dropdown below kept "Frames Grow From" for the same Start/Center/
+        -- End shape, so the rename was never consistent anyway. Do not re-rename this.
+        groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Groups Grow From"], anchorOptions, db, "raidGroupAnchor", UpdateFrames), 55)
 
-        local rowGrowLabel = db.growDirection == "VERTICAL" and L["Columns Grow From"] or L["Rows Grow From"]
-        local rowGrowOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
-        groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, rowGrowLabel, rowGrowOptions, db, "raidGroupRowGrowth", UpdateFrames), 55)
+        -- Row/Column Order chooses which END of the grid the SECOND and later rows
+        -- (columns) of groups stack from -- "whether additional rows of groups appear
+        -- above or below the first row", in the words of the release that added it. It
+        -- moves nothing sideways in horizontal mode, and with Groups Per Row at 8 there
+        -- is only ever one row, so it has nothing to do at all. It is deliberately NOT
+        -- called "Rows Grow From" any more: that name belongs to the control above,
+        -- which is what people mean when they say grow-from stopped working.
+        local rowOrderLabel = db.growDirection == "VERTICAL" and L["Column Order"] or L["Row Order"]
+        local rowOrderOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
+        groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, rowOrderLabel, rowOrderOptions, db, "raidGroupRowGrowth", UpdateFrames), 55)
 
         -- Players Grow From = the direction players fill the group's main axis.
         -- HORIZONTAL groups stack players vertically (Top/Bottom); VERTICAL groups
