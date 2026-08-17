@@ -1115,7 +1115,21 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local gridGroup = GUI:CreateSettingsGroup(self.child, 280)
         gridGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
         local debuffWrap = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 8, 1, db, "debuffWrap", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
-        debuffWrap.disableOn = function(d) return not d.showDebuffs end
+        -- ☠ THE SAME VERTICAL-GROWTH GUARD ITS TWO SIBLINGS CARRY. Both layout paths ignore
+        -- the wrap count outright under vertical-primary growth (the row renders a single
+        -- column), so without this the slider stayed live-looking and did nothing — in test
+        -- mode AND in game. The buff row has carried the guard since the factory rows landed
+        -- and the defensive row copies it; the debuff row never got one, which is what
+        -- "Icons Per Row doesn't preview" is once Growth Direction is vertical. (Aphoex 7.2.)
+        -- Kept term-for-term identical to the buff version rather than rephrased, so the
+        -- three read as one rule.
+        debuffWrap.disableOn = function(d)
+            if not d.showDebuffs then return true end
+            local g = d.debuffGrowth or ""
+            -- Vertical-primary AND vertical-centred growth both render a single column.
+            return DF:FactoryOwnsDebuffRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN"
+                or g == "CENTER_LEFT" or g == "CENTER_RIGHT")
+        end
         local debuffPaddingX = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing X"], -5, 10, 1, db, "debuffPaddingX", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
         debuffPaddingX.disableOn = function(d) return not d.showDebuffs end
         local debuffPaddingY = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing Y"], -5, 10, 1, db, "debuffPaddingY", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)

@@ -141,19 +141,24 @@ local function flowedRect(frame, key, h)
     -- ★ IMPORTANT DEBUFFS RENDER BIGGER, and the box has to contain them (field: the
     -- scaled icon poked out of the highlight). The preview's own choice of WHICH slots
     -- wear a record style is deterministic -- Handle._build's test branch: when every
-    -- record carries a style and there is more than one, slot k wears style k;
-    -- otherwise exactly ONE slot wears the first style -- so the probe mirrors that
-    -- rather than guessing, and the measured cells match the rendered ones instead of
+    -- record carries a style, there is more than one, AND THE STYLES DIFFER, slot k wears
+    -- style k; otherwise exactly ONE slot wears the first style -- so the probe mirrors
+    -- that rather than guessing, and the measured cells match the rendered ones instead of
     -- being padded to a worst case.
-    local styles, allStyled = {}, true
+    -- ☠ THE DISTINCTNESS TERM MUST MATCH Frames/AuraContainer.lua's TWO COPIES, where the
+    -- long note lives. Without it, two debuff records sharing one importantStyle table read
+    -- as a layout group and every slot measures enlarged — the mark would then be sized for
+    -- a row that is not what renders, which is the one thing this probe may never do.
+    local styles, allStyled, stylesDiffer = {}, true, false
     for _, rec in ipairs(type(cfg.filter) == "table" and cfg.filter or {}) do
         if type(rec) == "table" and rec.style then
             styles[#styles + 1] = rec.style
+            if styles[1] ~= rec.style then stylesDiffer = true end
         else
             allStyled = false
         end
     end
-    local perSlot = (allStyled and #styles > 1) and styles or nil
+    local perSlot = (allStyled and stylesDiffer and #styles > 1) and styles or nil
     local single  = (not perSlot) and styles[1] or nil
 
     for i = 1, count do
