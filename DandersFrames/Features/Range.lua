@@ -646,10 +646,7 @@ function DF:UpdatePetRange(frame)
     -- value that appears nowhere else: ElementAppearance and HealthFade both use
     -- `db.rangeFadeAlpha or 0.4` and Core/Config seeds 0.4. Invisible while the key is
     -- present, wrong on an old import or a hand-edited SavedVariables.
-    -- Through the shared resolver so the combat split reaches pets too (a pet that
-    -- dims to a different number than its owner reads as a bug, not a feature).
-    local outOfRangeAlpha = DF.GetRangeFadeAlpha and DF:GetRangeFadeAlpha(db)
-        or (db.rangeFadeAlpha or 0.4)
+    local outOfRangeAlpha = db.rangeFadeAlpha or 0.4
 
     -- ☠ FRAME ONLY -- NOT the health bar as well.
     -- The pet health bar is a plain child (CreateFrame("StatusBar", nil, frame),

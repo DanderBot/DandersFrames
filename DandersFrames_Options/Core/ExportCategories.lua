@@ -1094,8 +1094,6 @@ DF.ExportCategories = {
         "rangeAlpha",
         "rangeCheckSpellID",
         "rangeFadeAlpha",
-        "rangeFadeAlphaCombat",
-        "rangeFadeSplitCombat",
         "rangeUpdateInterval",
         "selectionHighlightAlpha",
         "selectionHighlightFrameLevel",
