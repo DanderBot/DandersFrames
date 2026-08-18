@@ -1635,8 +1635,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- from both pages, which is what makes owning it here destructive.
         Add(CreateCopyButton(self.child, {"frame", "permanentMover", "border", "anchor"}, L["Frame"], "general_frame"), 25, 2)
         
-        -- Migration: Ensure new flat raid settings have defaults
-        if db.raidFlatGrowthAnchor == nil then db.raidFlatGrowthAnchor = "START" end
+        -- Migration: Ensure new flat raid settings have defaults.
+        -- ☠ The raidFlatGrowthAnchor nil-check alone was DEAD: the Config default seeded
+        -- it as the legacy anchor point "TOPLEFT", so it was never nil and never migrated.
+        -- GetGrowthAnchorPoint's legacy passthrough made it behave, but "TOPLEFT" is not a
+        -- key in growthAnchorOptions, so the dropdown rendered the raw value. The default
+        -- is now "START" (Config.lua) and the legacy points are folded in here for
+        -- profiles that already stored one. Behaviour-preserving: START and TOPLEFT both
+        -- resolve to TOPLEFT, and the END points are exactly what END maps back to.
+        local legacyGrowthAnchor = {
+            TOPLEFT = "START", BOTTOMLEFT = "END", TOPRIGHT = "END", BOTTOMRIGHT = "END",
+        }
+        if db.raidFlatGrowthAnchor == nil then
+            db.raidFlatGrowthAnchor = "START"
+        elseif legacyGrowthAnchor[db.raidFlatGrowthAnchor] then
+            db.raidFlatGrowthAnchor = legacyGrowthAnchor[db.raidFlatGrowthAnchor]
+        end
         if db.raidFlatFrameAnchor == nil then db.raidFlatFrameAnchor = "START" end
         if db.raidFlatColumnAnchor == nil then db.raidFlatColumnAnchor = "START" end
         
@@ -1836,7 +1850,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local groupGrowOptions = { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL = L["Columns"], VERTICAL = L["Rows"] }
         local groupGrowDrop = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], groupGrowOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
         groupGrowDrop.hideOn = function() return not (GUI.SelectedMode == "raid" and db.raidUseGroups) end
-        groupGrowDrop.tooltip = L["The shape each raid group takes. Columns stack the five players downward and run the groups across; Rows lay them out sideways and stack the groups down.\n\nThe 'Groups Per Row' settings below count the GROUPS, not the players."]
+        groupGrowDrop.tooltip = L["The shape each raid group takes. Columns stack the five players downward and run the groups across; Rows lay them out sideways and stack the groups down.\n\nThe 'Groups Before Wrap' setting below counts the GROUPS, not the players."]
 
         -- ☠ EVERY Start/End PAIR ON THIS PAGE SITS ON ONE OF TWO PERPENDICULAR AXES,
         -- AND WHICH ONE IS NOT GUESSABLE FROM THE CONTROL'S NAME. Get this wrong and the
@@ -2114,8 +2128,15 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local playersPerLabel = db.growDirection == "VERTICAL" and L["Players Per Column"] or L["Players Per Row"]
         playersPerRowSlider = flatGridGroup:AddWidget(GUI:CreateSlider(self.child, playersPerLabel, 1, 40, 1, db, "raidPlayersPerRow", UpdateFlatLayoutFull, UpdateFlatLayoutFull, true), 55)
         
-        -- MAIN axis: the grid's own direction.
-        local growthAnchorOptions = { _order = { "START", "CENTER", "END" }, START= MAIN_START, CENTER= L["Center"], END= MAIN_END }
+        -- ☠ CROSS axis, NOT main -- these labels were MAIN_* and lied. GetGrowthAnchorPoint
+        -- pins innerContainer to a CORNER of raidContainer, and the block always matches
+        -- the container on the main axis (it is playersPerRow wide in Rows, five tall in
+        -- Columns), so only the cross component can move: END is BOTTOMLEFT in Rows and
+        -- TOPRIGHT in Columns. With MAIN_* the dropdown offered "Right" for Rows and moved
+        -- the grid DOWN. The sibling below is also cross-axis and that is not a duplicate:
+        -- this one ALIGNS the block in the reserved space, that one picks which end rows
+        -- stack FROM.
+        local growthAnchorOptions = { _order = { "START", "CENTER", "END" }, START= CROSS_START, CENTER= L["Center"], END= CROSS_END }
         flatGridGroup:AddWidget(GUI:CreateDropdown(self.child, L["Grid Alignment"], growthAnchorOptions, db, "raidFlatGrowthAnchor", UpdateFrames), 55)
 
         -- Columns/Rows Grow From = the direction the grid wraps (secondary axis).

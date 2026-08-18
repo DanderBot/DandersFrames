@@ -2666,10 +2666,18 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
     -- Update group layout params from current settings
     SecureSort:UpdateRaidGroupLayoutParams()
     local lp = SecureSort.raidGroupLayoutParams
-    -- Signal to PositionRaidFrameToGroupSlot that this is a test-mode call so it
-    -- mirrors the live secure snippet's BOTTOMLEFT anchor when playerAnchor=END.
-    -- Safe: UpdateRaidGroupLayoutParams replaces the whole table on its next call,
-    -- so the flag does not survive into the live-frame positioning path. (#875)
+    -- ☠ DEBUG-ONLY FLAG. The claim that used to sit here -- that this signals
+    -- PositionRaidFrameToGroupSlot to mirror the live snippet's BOTTOMLEFT anchor when
+    -- playerAnchor=END (#875) -- is false. Grep .testMode in SecureSort.lua: the only
+    -- remaining reads are the LEAK-TEST print and two params-swap log lines. The END
+    -- mirror comes from playerAnchor itself, in both the snippet and the calculator, which
+    -- is exactly why the preview matches live without this. Retiring the CENTER comp block
+    -- in 2026-08-15 took the last real consumer with it.
+    -- Kept because the leak test prints it and is the tripwire for test params reaching
+    -- live frames. Safe either way: UpdateRaidGroupLayoutParams replaces the whole table
+    -- on its next call, so the flag cannot survive into the live path.
+    -- ⚠ Do not build placement behaviour on this. A geometry fork keyed on mode is the
+    -- exact thing test-mode parity forbids.
     lp.testMode = true
 
     -- ☠ (Removed) the [LEAK-TEST] simulate block, which was gated on

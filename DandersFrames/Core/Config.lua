@@ -2298,7 +2298,11 @@ DF.PartyDefaults = {
     raidEnabled = true,
     raidFlatColumnAnchor = "START",
     raidFlatFrameAnchor = "START",
-    raidFlatGrowthAnchor = "TOPLEFT",
+    -- ☠ "START", not the legacy anchor point "TOPLEFT". The dropdown's keys are
+    -- START/CENTER/END, so seeding a raw point here left it showing an unmapped value
+    -- and made the presence-gated migration in Options.lua dead on arrival -- the
+    -- default filled the key, so it was never nil. Same resolved anchor either way.
+    raidFlatGrowthAnchor = "START",
     raidFlatHorizontalSpacing = 2,
     raidFlatPlayerAnchor = "CENTER",
     raidFlatReverseFillOrder = false,

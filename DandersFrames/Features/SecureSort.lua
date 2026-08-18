@@ -3535,6 +3535,15 @@ function SecureSort:UpdateRaidLayoutParams()
         growthAnchor = self:MapGrowthAnchor(db.raidFlatGrowthAnchor or "START", horizontal),
         -- Computed anchor point for frame positioning (matches FlatRaidFrames GetHeaderAnchorPoint)
         headerAnchorPoint = headerAnchorPoint,
+        -- ☠ SEPARATE VOCABULARY FROM growthAnchor ABOVE, AND BOTH ARE NEEDED. The flat
+        -- snippet compares lc.gridAnchor against "START"/"CENTER"/"END", so it cannot be
+        -- given a mapped WoW anchor point. This table REPLACES raidLayoutParams wholesale,
+        -- so the static gridAnchor/reverseFill defaults further down were shadowed off and
+        -- PushRaidLayoutConfig pushed a permanent "START"/false -- the flat snippet ignored
+        -- Grid Alignment and Reverse Fill entirely. Same class of gap as groupRowGrowth in
+        -- 0af5f379: the setting existed, the push dropped it.
+        gridAnchor = db.raidFlatGrowthAnchor or "START",
+        reverseFill = db.raidFlatReverseFillOrder and true or false,
     }
     
     -- Apply pixel-perfect adjustments if enabled
@@ -3791,8 +3800,12 @@ function SecureSort:CalculateRaidGroupPosition(groupNum, posInGroup, playersInGr
     -- DF:UpdateRaidContainerPosition applies ComputeRaidContainerCompensation (now
     -- test-aware) to the live container, the TEST container and the MOVER alike — so
     -- this calculator returns raw grid offsets in every mode and the preview differs
-    -- from live in data only. ⚠ lp.testMode itself STAYS: PositionRaidFrameToGroupSlot
-    -- still reads it for the playerAnchor=END BOTTOMLEFT mirror (#875).
+    -- from live in data only. ⚠ lp.testMode is now DEBUG-ONLY: the claim that used to sit
+    -- here -- that PositionRaidFrameToGroupSlot still reads it for a playerAnchor=END
+    -- BOTTOMLEFT mirror (#875) -- is false. Grep .testMode in this file: every remaining
+    -- read is the LEAK-TEST print and the two params-swap log lines. The END mirror is
+    -- driven by playerAnchor itself, not by the mode. Keep the field for the leak test;
+    -- do not build anything on it.
 
     return x, retY
 end

@@ -50,3 +50,6 @@ cache/
 # (ignore: docs), not by this file: tracked in git, never in the CurseForge zip.
 docs/*
 !docs/gui-conventions.md
+
+# luac -l artifact
+luac.out
