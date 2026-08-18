@@ -3445,6 +3445,12 @@ function DF:UpdatePlayerGroupTracking()
 end
 
 -- Update group display order attributes on the secure handler
+-- ☠ THE ORDER BUILDER LIVES IN Frames/Init.lua AS DF:GetEffectiveRaidGroupOrder, and
+-- this function used to carry a second copy of it. Do not reintroduce one here: a
+-- duplicate definition on DF silently wins or loses by file load order, and the two
+-- copies had already drifted on validation strictness. Init.lua's is now the single
+-- producer, shared with SecureSort:PushRaidGroupLayoutConfig (which ships it to the
+-- secure grouped positioner) and DF:SortActiveGroupListByDisplayOrder.
 function DF:UpdateRaidGroupOrderAttributes()
     if InCombatLockdown() then
         DF.pendingGroupOrderUpdate = true
@@ -3453,49 +3459,9 @@ function DF:UpdateRaidGroupOrderAttributes()
     
     if not DF.raidPositionHandler then return end
     
-    local db = DF:GetRaidDB()
     local handler = DF.raidPositionHandler
-    
-    -- Get the base display order from settings
-    local displayOrder = db.raidGroupDisplayOrder
-    -- Validate: must be a table with exactly 8 numeric entries covering groups 1-8
-    local isValid = type(displayOrder) == "table"
-    if isValid then
-        local seen = {}
-        for i = 1, 8 do
-            local v = displayOrder[i]
-            if type(v) ~= "number" or v < 1 or v > 8 or seen[v] then
-                isValid = false
-                break
-            end
-            seen[v] = true
-        end
-    end
-    if not isValid then
-        DF:DebugWarn("ROSTER", "UpdateRaidGroupOrderAttributes: raidGroupDisplayOrder is invalid or missing, using default order")
-        displayOrder = {1, 2, 3, 4, 5, 6, 7, 8}
-    end
-    
-    -- Build effective order (possibly with player's group first)
-    local effectiveOrder = {}
-    
-    if db.raidPlayerGroupFirst and DF.cachedPlayerGroup then
-        local playerGroup = DF.cachedPlayerGroup
-        -- Add player's group first
-        table.insert(effectiveOrder, playerGroup)
-        -- Add remaining groups in their display order
-        for _, groupNum in ipairs(displayOrder) do
-            if groupNum ~= playerGroup then
-                table.insert(effectiveOrder, groupNum)
-            end
-        end
-    else
-        -- Use display order as-is
-        for _, groupNum in ipairs(displayOrder) do
-            table.insert(effectiveOrder, groupNum)
-        end
-    end
-    
+    local effectiveOrder = DF:GetEffectiveRaidGroupOrder()
+
     -- Set attributes for each display position (1-8)
     -- displayorder1 = which group number should be in position 1, etc.
     for displayPos = 1, 8 do

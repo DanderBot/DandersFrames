@@ -2737,6 +2737,7 @@ function SecureSort:PushRaidGroupLayoutConfig()
         raidGroupLayoutConfig.groupAnchor = "%s"
         raidGroupLayoutConfig.playerAnchor = "%s"
         raidGroupLayoutConfig.groupRowGrowth = "%s"
+        raidGroupLayoutConfig.groupRank = newtable()
         raidUseGroups = %s
     ]],
         lp.frameWidth,
@@ -2756,7 +2757,24 @@ function SecureSort:PushRaidGroupLayoutConfig()
         lp.groupRowGrowth or "START",
         tostring(useGroups)
     )
-    
+
+    -- ☠ Group Display Order and My Group First reach the secure grouped positioner ONLY
+    -- through these lines. Without them position_all_raid_frames_grouped built its own
+    -- list by ascending group NUMBER, so both settings were invisible to the last writer
+    -- of every grouped frame's point -- exactly the gap groupRowGrowth had before
+    -- 0af5f379. groupRank[groupNum] = displayPosition, so the snippet's insertion sort
+    -- can order on rank instead of on the number itself.
+    -- The order comes from DF:GetEffectiveRaidGroupOrder, the same producer the live
+    -- header handler uses, so the two cannot drift.
+    local effectiveOrder = DF.GetEffectiveRaidGroupOrder and DF:GetEffectiveRaidGroupOrder()
+    if type(effectiveOrder) ~= "table" or #effectiveOrder < 8 then
+        effectiveOrder = { 1, 2, 3, 4, 5, 6, 7, 8 }
+    end
+    for displayPos, groupNum in ipairs(effectiveOrder) do
+        code = code .. string.format(
+            "\n        raidGroupLayoutConfig.groupRank[%d] = %d", groupNum, displayPos)
+    end
+
     SecureHandlerExecute(self.handler, code)
     
     if DF:DebugActive("SECURESORT") then
@@ -4412,7 +4430,11 @@ function SecureSort:RegisterPhase25Snippets()
         local activeGroups = newtable()       -- groupNum -> true
         local activeGroupList = newtable()    -- ordered list
         local frameToGroup = newtable()       -- frameIdx -> groupNum
-        
+        -- groupRank[groupNum] = display position, pushed by PushRaidGroupLayoutConfig from
+        -- DF:GetEffectiveRaidGroupOrder. Falls back to the group number, which is the
+        -- identity order this used to hard-code.
+        local groupRank = raidGroupLayoutConfig and raidGroupLayoutConfig.groupRank
+
         for slot = 0, frameCount - 1 do
             local frameIdx = self:GetAttribute("raidSortOrder" .. slot)
             if frameIdx then
@@ -4424,14 +4446,23 @@ function SecureSort:RegisterPhase25Snippets()
                 
                 if not activeGroups[groupNum] then
                     activeGroups[groupNum] = true
-                    -- Insert in sorted order
+                    -- Insert in DISPLAY-ORDER position, not by group number
+                    local gRank = (groupRank and groupRank[groupNum]) or groupNum
                     local inserted = false
                     for i = 1, 8 do
-                        if activeGroupList[i] == nil then
+                        -- ☠ `cur` IS NOT COSMETIC. This whole function lives inside a
+                        -- long-bracket string, so the natural spelling of the compare
+                        -- below -- indexing groupRank BY activeGroupList sub i -- would
+                        -- end in two adjacent closing square brackets, which terminate
+                        -- the string early and silently turn the rest of the snippet into
+                        -- file-level code. Keep nested table indexing out of this block,
+                        -- and never write that bracket pair in these comments either.
+                        local cur = activeGroupList[i]
+                        if cur == nil then
                             activeGroupList[i] = groupNum
                             inserted = true
                             break
-                        elseif activeGroupList[i] > groupNum then
+                        elseif ((groupRank and groupRank[cur]) or cur) > gRank then
                             -- Shift down
                             for j = 8, i + 1, -1 do
                                 activeGroupList[j] = activeGroupList[j - 1]

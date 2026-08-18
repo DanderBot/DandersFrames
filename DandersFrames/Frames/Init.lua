@@ -158,12 +158,32 @@ end
 -- via secure attributes) so the unit-frame positioner agrees with the headers.
 function DF:GetEffectiveRaidGroupOrder(db)
     db = db or DF:GetRaidDB()
-    local displayOrder = db.raidGroupDisplayOrder
-    if type(displayOrder) ~= "table" or #displayOrder ~= 8 then
+    -- ☠ VALIDATE EVERY ENTRY, not just the count. Headers.lua carried a second copy of
+    -- this builder that did the full check; the two were merged here, and the length-only
+    -- test was the weaker of the pair. A table of the right length holding a duplicate,
+    -- a nil, an out-of-range number or a non-number produces a rank map with holes, and
+    -- every consumer then silently falls back to raw group number for the affected group.
+    local displayOrder = db and db.raidGroupDisplayOrder
+    local isValid = type(displayOrder) == "table"
+    if isValid then
+        local seen = {}
+        for i = 1, 8 do
+            local v = displayOrder[i]
+            if type(v) ~= "number" or v < 1 or v > 8 or seen[v] then
+                isValid = false
+                break
+            end
+            seen[v] = true
+        end
+    end
+    if not isValid then
+        if DF.DebugWarn then
+            DF:DebugWarn("ROSTER", "GetEffectiveRaidGroupOrder: raidGroupDisplayOrder is invalid or missing, using default order")
+        end
         displayOrder = {1, 2, 3, 4, 5, 6, 7, 8}
     end
     local effectiveOrder = {}
-    if db.raidPlayerGroupFirst and DF.cachedPlayerGroup then
+    if db and db.raidPlayerGroupFirst and DF.cachedPlayerGroup then
         effectiveOrder[1] = DF.cachedPlayerGroup
         for _, g in ipairs(displayOrder) do
             if g ~= DF.cachedPlayerGroup then effectiveOrder[#effectiveOrder + 1] = g end
