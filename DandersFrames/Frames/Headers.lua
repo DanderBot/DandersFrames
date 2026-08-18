@@ -1834,34 +1834,23 @@ end
 -- Lua only sets attributes, secure code does all positioning
 -- ============================================================
 
--- Compensation offset for the raid container's anchor when raidGroupAnchor == "CENTER".
+-- ☠ RETIRED. Returns (0, 0) UNCONDITIONALLY. See the block inside the function for why,
+-- and read that before changing anything here.
 --
--- The secure positioning snippet (below) centers the *visible* groups inside a
--- fixed full-grid-sized container by offsetting each group by
---     yStart = (totalHeight - populatedHeight) / 2
--- Where totalHeight is the full 8-group grid capacity and populatedHeight grows
--- with the number of populated rows. As popRows changes (player joins/leaves
--- shifts a group across the groupsPerRow threshold), every visible group snaps
--- by (deltaPopulatedDim / 2) inside the container. Container itself does not
--- move — only the visible content. Users perceive this as the frames "jumping
--- upward off the screen" (bug #867).
+-- This header used to describe the live mechanism: an inverse offset that shifted the
+-- container to hold CENTER content still as popRows grew, against #867. Every word of
+-- that is now false, including the list of cases it claimed to return (0,0) for -- there
+-- are no cases, it always does. It is replaced rather than kept as history because a
+-- reader who stops above the signature would take the retired story as current fact, and
+-- the description it gave was itself the reasoning that got reversed twice in 24h.
 --
--- This helper returns the inverse offset so callers can shift the container by
--- the same amount, keeping the visible content's screen position stable across
--- roster transitions. The reference state is popRows=1 (one row populated) so
--- existing user positions don't shift on first load: with one populated row,
--- compensation is (0, 0) and the container sits exactly at db.raidAnchorX/Y
--- — identical to current behaviour. As popRows grows beyond 1, compensation
--- shifts the container away from the anchor by enough to cancel the snippet's
--- upward visual snap.
---
--- Returns (dx, dy) to add to the container's anchor coordinates BEFORE the
--- frameScale division. (0, 0) for any case the bug doesn't apply to:
---   * raidGroupAnchor != "CENTER"
---   * raidUseGroups == false (flat raid mode has its own positioning path)
---   * No populated groups (nothing visible yet)
---   * Single populated row (no drift)
---   * Required handler / headers not yet created
+-- Two facts worth having here so nobody re-derives them:
+--   * CENTER has no drift to cancel. The container is always sized for all eight groups
+--     and the block is centred with (total - populated) / 2, so it grows SYMMETRICALLY
+--     about the container centre and the centroid is invariant under popRows. Verified
+--     numerically across 512 configurations, both positioners, both axes.
+--   * #867 was the compounding defect (a centred block also taking a row index flipped
+--     over the FULL grid), fixed at source in 50a3e7c5 -- not centring drift.
 function DF:ComputeRaidContainerCompensation()
     -- ☠ RETIRED, ALWAYS ZERO. It was zeroed in b0e84ae3, restored in b0e58e79 on the
     -- argument below, and re-zeroed the same day when the restore was tested in game.
