@@ -567,6 +567,28 @@ local function FormatLogEntry(entry, colored)
     if type(category) ~= "string" or isSecretValue(category) then
         category = "GENERAL"
     end
+    -- ☠ ESCAPE THE PIPES, OR THE WHOLE CONSOLE RENDERS BLANK.
+    --
+    -- "|" is WoW's text-escape character, and log messages are full of raw ones: aura
+    -- filters are pipe-separated ("HELPFUL|PLAYER") and AD slot keys use "|" as their own
+    -- field separator ("PowerInfusion#1ic|||du|bd|fl=40|fs=MEDIUM||pd=BORDER:Fnil|tt=").
+    -- Concatenated into the EditBox those read as escapes: "|T" opens a texture and "|t"
+    -- closes one, while "|d"/"|b"/"|f" are not escapes at all. SetText fails on the
+    -- malformed result and the box goes EMPTY -- not the offending line, the entire
+    -- console, because every line shares one SetText.
+    --
+    -- ⚠ The guards above are all about VALUE safety (nil, non-string, secret) and none of
+    -- them looks at content, which is why this got through: the pcall(format,...) below
+    -- succeeds -- format has no problem with pipes -- and the failure surfaces later, in
+    -- DebugConsole:RefreshDisplay, far from the entry that caused it.
+    --
+    -- Escape the message and category ONLY. The severity colour and the |r that closes it
+    -- come from the format string below, and escaping those would print the codes instead
+    -- of colouring the line.
+    -- ⚠ Parens required: gsub returns (string, count) and the bare call would leak the
+    -- count into the surrounding expression.
+    message = (message:gsub("|", "||"):gsub("[%z\1-\31]", "?"))
+    category = (category:gsub("|", "||"))
     local sev = SEVERITY[level] or SEVERITY.INFO
     local ok, formatted
     if colored then

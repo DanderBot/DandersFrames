@@ -7812,6 +7812,27 @@ end)
 -- answer, the stored gate verdict, and the window's actual visibility
 -- (+ whether a hover-deferred flip is parked). Developer diagnostic: plain
 -- print by project convention.
+-- ☠ EVERY INTERPOLATED VALUE IN THIS DUMP GOES THROUGH THIS. Slot keys and filter
+-- strings are built with "|" as their own field separator ("HELPFUL|PLAYER",
+-- "PowerInfusion#1ic|||du|bd|fl=40|fs=MEDIUM||pd=BORDER:Fnil|tt="), and "|" is WoW's
+-- text-escape character. Printed raw, "|T" opens a texture escape and "|t" closes one,
+-- while "|d"/"|b"/"|f" are not escapes at all -- so chat rendered mojibake AND any
+-- EditBox handed the line (the usual way anyone gets this text OUT of the game) came up
+-- blank, because SetText fails on a malformed escape. The dump was unusable for the one
+-- job it exists to do: being pasted into a bug report.
+--
+-- "||" is the literal-pipe escape, so the text renders and copies as written. Control
+-- bytes go to "?" for the same reason -- one stray byte blanks the whole box.
+--
+-- ⚠ Values ONLY, never the format strings: those carry deliberate |cff.../|r colour
+-- codes and escaping them would print the codes instead of colouring the line.
+-- ⚠ The parens are load-bearing. gsub returns (string, count); without them the count
+-- becomes an extra argument to format and shifts every following field along one.
+local function safeTxt(v)
+    local s = tostring(v)
+    return (s:gsub("|", "||"):gsub("[%z\1-\31]", "?"))
+end
+
 function AuraContainer.DebugDumpIdentityGate()
     local o = DF:Out("Identity Gate")
     local CAP = 30
@@ -7864,8 +7885,8 @@ function AuraContainer.DebugDumpIdentityGate()
             local gatedN = 0
             for _ in pairs((h.backend and h.backend.gatedGroupKeys) or {}) do gatedN = gatedN + 1 end
             print(("    " .. DF.OUT.SECTION .. "%d|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s srcRel=%s exists=%s canAssist=%s vis=%s gateHidden=%s parked=%s why=%s gatedGroups=%d cine=%s death=%s assist=%s intent=%s shown=%s retry=%s"):format(
-                n, tostring(cfg.mode or "row"), tostring(unit),
-                table.concat(fParts, "&"), tostring(inc), tostring(exc),
+                n, safeTxt(cfg.mode or "row"), safeTxt(unit),
+                safeTxt(table.concat(fParts, "&")), tostring(inc), tostring(exc),
                 tostring(h._idGateVulnerable or false),
                 tostring(h._idGateSourceRelative or false),
                 tostring(type(unit) == "string" and UnitExists(unit) or false), canTxt, visTxt,
@@ -7904,7 +7925,7 @@ function AuraContainer.DebugDumpIdentityGate()
                 else canTxt = tostring(can) end
             end
             print(("    " .. DF.OUT.SECTION .. "S%d|r key=%s unit=%s vuln=%s srcRel=%s canAssist=%s gateHidden=%s parked=%s why=%s cine=%s death=%s assist=%s filter=%s"):format(
-                sn, tostring(s.key), tostring(unit),
+                sn, safeTxt(s.key), safeTxt(unit),
                 tostring(s._idGateVulnerable or false),
                 tostring(s._idGateSourceRelative or false),
                 canTxt,
@@ -7916,7 +7937,7 @@ function AuraContainer.DebugDumpIdentityGate()
                 tostring(s._idGateAssist),
                 -- The pushed string IS the actuation: "" means parked/hidden by one of
                 -- the four writers above, whichever won in _pushFilter.
-                tostring(s.liveFilter)))
+                safeTxt(s.liveFilter)))
         end
     end
     if sn > CAP then
