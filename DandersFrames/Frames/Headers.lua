@@ -2003,20 +2003,37 @@ function DF:CreateRaidPositionHandler()
     end
     
     -- Initialize layout attributes (all lowercase)
-    handler:SetAttribute("framewidth", db.frameWidth or 80)
-    handler:SetAttribute("frameheight", db.frameHeight or 40)
-    handler:SetAttribute("spacing", db.frameSpacing or 2)
-    handler:SetAttribute("groupspacing", db.raidGroupSpacing or 10)
+    -- ☠ SNAPPED, SAME FIVE VALUES. This is the SIXTH producer of the same geometry and it
+    -- was seeding RAW db numbers while UpdateRaidHeaderLayoutAttributes and
+    -- UpdateRaidGroupLayoutParams both pushed snapped ones. The snippet fires on
+    -- triggerposition, which the per-header child hook bumps independently, so between
+    -- handler creation and the first attribute update the live layout ran on unsnapped
+    -- geometry while SecureSort's side was snapped -- the exact producer split the rule at
+    -- UpdateRaidHeaderLayoutAttributes exists to prevent. Transient and sub-pixel, but it
+    -- is a real fork and it would bite whoever adds a sixth value.
+    local function snapInit(value)
+        if db.pixelPerfect and DF.PixelPerfect then
+            return DF:PixelPerfect(value)
+        end
+        return value
+    end
+    handler:SetAttribute("framewidth", snapInit(db.frameWidth or 80))
+    handler:SetAttribute("frameheight", snapInit(db.frameHeight or 40))
+    handler:SetAttribute("spacing", snapInit(db.frameSpacing or 2))
+    handler:SetAttribute("groupspacing", snapInit(db.raidGroupSpacing or 10))
     handler:SetAttribute("playergrowfrom", db.raidPlayerAnchor or "START")
     handler:SetAttribute("groupsgrowfrom", db.raidGroupAnchor or "START")
     handler:SetAttribute("growdirection", db.growDirection or "HORIZONTAL")
     handler:SetAttribute("groupsperrow", db.raidGroupsPerRow or 8)
-    handler:SetAttribute("rowcolspacing", db.raidRowColSpacing or 30)
+    handler:SetAttribute("rowcolspacing", snapInit(db.raidRowColSpacing or 30))
     handler:SetAttribute("grouprowgrowth", db.raidGroupRowGrowth or "START")
     handler:SetAttribute("flatmodeactive", (not db.raidUseGroups) and 1 or 0)
 
-    -- Initialize display order attributes (default 1-8)
-    local displayOrder = db.raidGroupDisplayOrder or {1, 2, 3, 4, 5, 6, 7, 8}
+    -- Initialize display order attributes.
+    -- ☠ Through the shared producer, not raw db. This read raidGroupDisplayOrder directly,
+    -- which ignored My Group First and skipped the per-entry validation, so the seed order
+    -- disagreed with what UpdateRaidGroupOrderAttributes writes moments later.
+    local displayOrder = DF:GetEffectiveRaidGroupOrder(db)
     for i = 1, 8 do
         handler:SetAttribute("displayorder" .. i, displayOrder[i] or i)
     end

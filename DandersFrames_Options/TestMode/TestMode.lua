@@ -2734,16 +2734,12 @@ function DF:LightweightPositionRaidTestFrames(testFrameCount)
         end
     end
     
-    -- Sort activeGroupList using custom display order from settings
-    local displayOrder = db.raidGroupDisplayOrder or {1, 2, 3, 4, 5, 6, 7, 8}
-    -- Build reverse lookup: group number -> display position
-    local displayPos = {}
-    for pos, groupNum in ipairs(displayOrder) do
-        displayPos[groupNum] = pos
-    end
-    table.sort(activeGroupList, function(a, b)
-        return (displayPos[a] or a) < (displayPos[b] or b)
-    end)
+    -- ☠ ONE PRODUCER. This was a third hand-rolled copy of the ordering and it was the
+    -- weakest: it read raidGroupDisplayOrder raw, so it ignored My Group First entirely
+    -- and skipped the per-entry validation, meaning the PREVIEW showed a different group
+    -- order from live whenever My Group First was on. Invisible solo, because
+    -- DF.cachedPlayerGroup is nil there. Use the shared helper the live paths use.
+    DF:SortActiveGroupListByDisplayOrder(activeGroupList, db)
     
     -- Calculate and set container size
     local totalWidth, totalHeight = SecureSort:CalculateRaidGroupContainerSize(#activeGroupList, lp)
