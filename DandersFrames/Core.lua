@@ -5946,6 +5946,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         sub("dispelids",    "dispel type-enum and colour probe (also: /dfdispel ids)", nil, nil, true)
         sub("dispeldbg",    "dispel gradient render state (also: /dfdispel render)", nil, nil, true)
         sub("idgate",       "container identity-gate dump", true)
+        sub("adgate",       "Aura Designer placement gate dump", true)
         sub("ppdump",       "missing-buff layout-push dump", true)
         -- Not logging, despite the old wording: it window-parks the badge so the
         -- anchor stays live and the badge shows even when the buff is present.
@@ -6878,6 +6879,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Identity-gate ground truth: per vulnerable handle, live UnitCanAssist
                 -- vs the stored gate verdict vs actual window visibility
                 if DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then DF.AuraContainer.DebugDumpIdentityGate() end
+            elseif msg == "adgate" then
+                -- The AD half of the same question: idgate sees a placement's handle but
+                -- not its chain, its parent-driven links or its badge — so an indicator
+                -- rendering against a hidden gate does not appear there at all.
+                if DF.AuraDesigner and DF.AuraDesigner.Factory
+                    and DF.AuraDesigner.Factory.DebugDumpADGate then
+                    DF.AuraDesigner.Factory:DebugDumpADGate()
+                end
             elseif msg == "dispelids" then
                 -- Custom dispel colours: the curve's X = the dispel type ID. The enum's
                 -- NAME is build-dependent, so FindDispelTypeEnum scans Enum for the

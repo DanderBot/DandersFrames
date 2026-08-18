@@ -5907,6 +5907,114 @@ function Factory:SyncFrame(frame)
 end
 
 -- ============================================================
+-- /df debug adgate — AURA DESIGNER gate ground truth
+-- ============================================================
+-- Companion to /df debug idgate, and it exists because that dump could not answer the
+-- question it kept being reached for. idgate walks AuraContainer._handles and
+-- _slotHandles, so it sees a placement's HANDLE but never the chain around it, never the
+-- DF-owned badge textures, and never that a link opted out of managing its own visibility.
+-- An AD indicator rendering while every handle in idgate reports hidden is invisible to
+-- it -- which is exactly the state that stalled this (Krathe, 2026-08-18).
+--
+-- Answers, per placement: chain length, which links are parent-driven (those NEVER hide
+-- themselves, see Handle:_applyVisibility), each link's gate verdict, and what each link's
+-- frame plus the badge is ACTUALLY showing. A row whose gate says hidden while the frame
+-- says shown is the fault, and the column it lands in names the layer to fix.
+--
+-- ☠ EVERY IsShown IS GUARDED. A container nested in another container's slot inherits a
+-- SECRET shown state, and tostring() on a secret makes the whole print VANISH rather than
+-- error -- an unguarded read would silently drop the very rows worth seeing.
+-- ☠ Keys are pipe-escaped, same as the idgate dump: AD keys use "|" as a field separator
+-- and raw pipes blank an EditBox on paste.
+local function adGateSafe(v)
+    local s = tostring(v)
+    return (s:gsub("|", "||"):gsub("[%z\1-\31]", "?"))
+end
+
+local function adGateShown(f)
+    if not f then return "-" end
+    local ok, s = pcall(f.IsShown, f)
+    if not ok then return "ERR" end
+    if issecretvalue and issecretvalue(s) then return "SECRET" end
+    return tostring(s)
+end
+
+-- Families in the per-frame store. ⚠ Keep in sync with ClearFrame below: a family added
+-- there and not here has its placements silently absent from this dump.
+local AD_GATE_FAMILIES = {
+    "placed", "fgroups", "dgroups", "border",
+    "healthbar", "background", "nametext", "healthtext",
+}
+
+function Factory:DebugDumpADGate()
+    local o = DF:Out("AD Gate")
+    local CAP = 80
+    local n, suspects = 0, 0
+
+    local function dumpFrame(frame)
+        local store = frame and frame.dfADFactory
+        if type(store) ~= "table" then return end
+        local unit = frame.unit
+        for _, fam in ipairs(AD_GATE_FAMILIES) do
+            local tbl = store[fam]
+            if type(tbl) == "table" then
+                for key, entry in pairs(tbl) do
+                    if type(entry) == "table" then
+                        n = n + 1
+                        if n <= CAP then
+                            local h = entry.handle
+                            local chain = entry.chain
+                            local hGate = (h and h._idGateHidden) and true or false
+                            local hShown = adGateShown(h and h.frame)
+                            local badge = (h and h.GetBadgeFrame) and h:GetBadgeFrame() or nil
+                            local bShown = badge and adGateShown(badge) or "-"
+                            -- The fault signature: gate believes hidden, frame or badge is up.
+                            if hGate and (hShown == "true" or bShown == "true") then
+                                suspects = suspects + 1
+                            end
+                            print(("    " .. DF.OUT.SECTION .. "%d|r %s key=%s unit=%s chain=%s gate=%s shown=%s badge=%s pdv=%s"):format(
+                                n, adGateSafe(fam), adGateSafe(key), adGateSafe(unit),
+                                chain and tostring(#chain) or "-",
+                                tostring(hGate), hShown, bShown,
+                                tostring((h and h.config and h.config.parentDrivenVisibility) or false)))
+                            if type(chain) == "table" then
+                                for i = 1, #chain do
+                                    local L = chain[i]
+                                    if L then
+                                        print(("        L%d gate=%s parked=%s shown=%s pdv=%s mode=%s"):format(
+                                            i,
+                                            tostring((L._idGateHidden) and true or false),
+                                            tostring((L._idGateParked) and true or false),
+                                            adGateShown(L.frame),
+                                            tostring((L.config and L.config.parentDrivenVisibility) or false),
+                                            adGateSafe(L.config and L.config.mode or "?")))
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if DF.IterateAllFrames then pcall(function() DF:IterateAllFrames(dumpFrame) end) end
+    -- ☠ Pinned frames are NOT in IterateAllFrames -- it has no pinned arm. A pinned display
+    -- of the same unit carries its own placements and must be walked separately.
+    -- ⚠ DOT, NOT COLON. IteratePinnedFrames is a plain function (see Engine.lua's call);
+    -- DF:IteratePinnedFrames would pass DF as the callback and silently walk nothing.
+    if DF.IteratePinnedFrames then pcall(function() DF.IteratePinnedFrames(dumpFrame) end) end
+
+    o:Section("Summary")
+    o:Line(("placements: %d"):format(n), n > 0 and "GOOD" or "NEUTRAL")
+    o:Line(("gated but still shown: %d"):format(suspects), suspects > 0 and "BAD" or "GOOD")
+    if n > CAP then o:Line(("… capped at %d rows"):format(CAP), "NEUTRAL") end
+    if suspects == 0 then
+        o:Line("Nothing is rendering against its gate verdict. If an icon is still visible it is drawn outside the handle/chain/badge set this dump covers.", "NEUTRAL")
+    end
+end
+
+-- ============================================================
 -- TEARDOWN  (hung off the AD clear path — Engine:ClearFrame calls this)
 -- Destroy is combat-safe (hides the plain anchor now, defers secure teardown to regen).
 -- ============================================================
