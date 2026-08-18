@@ -7280,7 +7280,18 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
     -- Re-evaluate before pushing, so a slot that just became vulnerable is dark on the
     -- very first pass rather than showing one frame of the wrong player's auras.
     self:_applyIdentityGate()
-    if filterChanged then self:_pushFilter() end
+    -- ☠ UNCONDITIONAL. This used to be `if filterChanged then`, which re-asserted the
+    -- slot's filter only when the FILTER moved -- but what must reach the engine is the
+    -- gate's verdict, and _applyIdentityGate pushes only on a VERDICT TRANSITION. A pass
+    -- where neither moved therefore pushed nothing, so anything that cleared the slot
+    -- engine-side since the last push stayed cleared: notably SetAuraSlotCandidateFilters
+    -- immediately above, which has no equality guard and reparses the slot on every call.
+    -- The gate stayed convinced the slot was hidden and never said so again -- an AD
+    -- indicator rendering with gateHidden=true (Krathe, 2026-08-18).
+    --
+    -- Free to do every pass: SetAuraSlotFilterString carries its own equality guard
+    -- engine-side, which is why the group path already pushes unconditionally.
+    self:_pushFilter()
     if sortMethod ~= nil then
         pcall(c.SetAuraSlotSortMethod, c, self.key, sortMethod, sortDirection or 0)
     end
