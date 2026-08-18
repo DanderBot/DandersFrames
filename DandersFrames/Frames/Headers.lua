@@ -610,7 +610,9 @@ function DF:InitializeHeaderChild(frame)
     local db = isRaid and DF:GetRaidDB() or DF:GetDB()
     local frameWidth = db.frameWidth or (isRaid and 80 or 120)
     local frameHeight = db.frameHeight or (isRaid and 40 or 50)
-    frame:SetSize(frameWidth, frameHeight)
+    -- Snapped: this creation-time size is what SecureGroupHeaderTemplate reads to size
+    -- the header until the first ApplyFrameLayout pass re-sizes it (which also snaps).
+    DF:SetPixelPerfectSize(frame, frameWidth, frameHeight, db)
     
     -- Create all visual elements
     DF:CreateFrameElements(frame)
@@ -5088,6 +5090,13 @@ function DF:UpdateRaidGroupFrameSizes()
     end
 
     -- Update separated headers child frame sizes
+    -- ☠ SNAPPED, via SetPixelPerfectSize — not a raw SetSize. SecureGroupHeaderTemplate
+    -- sizes the HEADER from child1:GetWidth()/GetHeight() (configureChildren, Blizzard's
+    -- SecureGroupHeaders.lua), and the position handler's framewidth/frameheight are
+    -- seeded snapped. A raw child here made the header's real extent disagree with the
+    -- reserved 5-slot extent by the rounding delta whenever this ran after
+    -- ApplyFrameLayout (which snaps). Same rule as the intra-group spacing at its
+    -- SetAttribute site: one stride, snapped everywhere.
     if DF.raidSeparatedHeaders then
         for g = 1, 8 do
             local header = DF.raidSeparatedHeaders[g]
@@ -5095,7 +5104,7 @@ function DF:UpdateRaidGroupFrameSizes()
                 for i = 1, 5 do
                     local child = header:GetAttribute("child" .. i)
                     if child then
-                        child:SetSize(frameWidth, frameHeight)
+                        DF:SetPixelPerfectSize(child, frameWidth, frameHeight, db)
                     end
                 end
             end
@@ -5120,7 +5129,9 @@ function DF:UpdateRaidFlatFrameSizes()
         for i = 1, 40 do
             local child = DF.FlatRaidFrames.header:GetAttribute("child" .. i)
             if child then
-                child:SetSize(frameWidth, frameHeight)
+                -- Snapped for the same reason as the grouped children above: the header
+                -- is sized from the child's live width, and the layout maths snap.
+                DF:SetPixelPerfectSize(child, frameWidth, frameHeight, db)
             end
         end
     end
