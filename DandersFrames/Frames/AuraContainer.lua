@@ -3296,6 +3296,16 @@ function NativeBackend:build()
     -- Initial identity-gate state for this build's unit (see _applyIdentityGate);
     -- the module watcher re-evaluates on faction/phase/roster/world changes.
     handle:_applyIdentityGate()
+    -- ☠ AND THE DEATH LATCH, which the gate above does NOT cover. The latch is edge-driven
+    -- from Frames/Update.lua's dead/alive transitions, so a container built after the death
+    -- edge has passed comes up unlatched and nothing re-latches it -- the next
+    -- SetUnitDeathLatched(unit, true) fires only on a NEW death, and the unit is already
+    -- dead. Reload beside a ghost and every row came back. See AuraContainer._deathLatchedUnits.
+    local dlu = handle.config and handle.config.unit
+    if dlu and AuraContainer._deathLatchedUnits[dlu]
+        and not (handle.config and handle.config.parentDrivenVisibility) then
+        pcall(function() handle:_setDeathLatch(true) end)
+    end
 end
 
 function NativeBackend:setUnit(unit)
@@ -5300,8 +5310,19 @@ function Handle:_applyIdentityGate()
     -- ★ `_hasGatedGroups` widens the probe to rows that are not HIDE-vulnerable but do
     -- carry identity-dependent GROUPS -- i.e. the debuff row. Without it the assist probe
     -- never ran for those handles and the park verdict could never flip.
-    if (self._idGateVulnerable or self._idGateSourceRelative or self:_hasGatedGroups())
-        and not AuraContainer._testMode then
+    -- ☠☠ EVERY HANDLE IS PROBED NOW, and the three-way test this replaced is why a unit in
+    -- another instance rendered a full debuff row.
+    --
+    -- filterVulnerableToIdentityGate returns false for ANY filter without "HELPFUL" on its
+    -- first line, and a HARMFUL row carrying only excludeSpellIDs registers no gated keys.
+    -- So the debuff row and the dispel overlay failed all three tests -- not vulnerable,
+    -- not source-relative, no gated groups -- and the gate never ran for them at all. No
+    -- probe, no verdict, nothing to actuate: /df debug idgate showed them vis=false why=-
+    -- shown=true while the pools beside them were correctly hidden (Krathe, 2026-08-18).
+    --
+    -- The inner branches keep their own conditions, so this widens only WHICH handles reach
+    -- the visibility probe. The assist/park logic below is untouched.
+    if not AuraContainer._testMode then
         local unit = self.config and self.config.unit
         -- ☠ `unit ~= "player"` USED TO SIT ON THIS LINE, so your own frame was never
         -- probed at all — nothing ever NOTICED your own pool falling open, so it never
@@ -5382,7 +5403,26 @@ function Handle:_applyIdentityGate()
             --     fails open — the engine can't attribute a caster. Signal: UnitIsVisible.
             --     Fail-safe (matches the assist gate): only hide on a definite,
             --     non-secret false; any doubt (pcall fail / secret) SHOWS.
-            if not hide and not isOwn and self._idGateSourceRelative then
+            -- ☠ NO LONGER GATED ON _idGateSourceRelative. It was from the day it landed
+            -- (ad0985c9), because it was written for one narrow failure: the PLAYER-token
+            -- "mine" filter passing every caster's aura when the engine cannot attribute a
+            -- caster. Sound reasoning, far too narrow for what the probe actually tells you.
+            --
+            -- UnitIsVisible is INSTANCE-SCOPED, not range-scoped -- true for a same-instance
+            -- member far outside 40yd, false only across instances and phases
+            -- (field-verified 3-case probe, see filterVulnerableToIdentityGate's header).
+            -- A unit reading false is not in your world at all, so EVERY pool it renders is
+            -- stale, not just the source-relative ones. Restricting the response to "mine"
+            -- filters left a cross-instance unit rendering a full debuff row and dispel
+            -- overlay while its buff bar was correctly blanked (Krathe, 2026-08-18).
+            --
+            -- ⚠ Widening is safe BECAUSE the signal is instance-scoped. Were it range-based
+            -- this would blank half a raid's debuffs -- the exact failure class
+            -- UNIT_CONNECTION / UNIT_FLAGS were registered for. Do not widen a range-based
+            -- probe by analogy with this one.
+            -- ⚠ isOwn still stands: you are always visible to yourself, so it stays
+            -- belt-and-braces rather than a behaviour decision.
+            if not hide and not isOwn then
                 local okv, vis = pcall(UnitIsVisible, unit)
                 if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
                     hide = true; why = why or "not-visible"
@@ -7087,7 +7127,11 @@ end
 function SlotHandle:_applyIdentityGate()
     local hide = false
     local why   -- the FIRST probe that broke trust this pass, for the gate log
-    if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
+    -- ☠ Widened with the Handle's entry test, for the reason stated there: an AD indicator
+    -- on a unit in another instance is as stale as any row, whatever its filter carries.
+    -- The verdict logic is deliberately identical to Handle:_applyIdentityGate, so the two
+    -- entry conditions must stay identical too -- two gates that disagree are worse than one.
+    if not AuraContainer._testMode then
         local unit = self.owner and self.owner.unit
         -- ☠ See Handle:_applyIdentityGate — the `unit ~= "player"` exemption moved off
         -- this line onto the hide branches so the player's own slot is PROBED, and has
@@ -7122,7 +7166,26 @@ function SlotHandle:_applyIdentityGate()
                     if not can then hide = true end
                 end
             end
-            if not hide and not isOwn and self._idGateSourceRelative then
+            -- ☠ NO LONGER GATED ON _idGateSourceRelative. It was from the day it landed
+            -- (ad0985c9), because it was written for one narrow failure: the PLAYER-token
+            -- "mine" filter passing every caster's aura when the engine cannot attribute a
+            -- caster. Sound reasoning, far too narrow for what the probe actually tells you.
+            --
+            -- UnitIsVisible is INSTANCE-SCOPED, not range-scoped -- true for a same-instance
+            -- member far outside 40yd, false only across instances and phases
+            -- (field-verified 3-case probe, see filterVulnerableToIdentityGate's header).
+            -- A unit reading false is not in your world at all, so EVERY pool it renders is
+            -- stale, not just the source-relative ones. Restricting the response to "mine"
+            -- filters left a cross-instance unit rendering a full debuff row and dispel
+            -- overlay while its buff bar was correctly blanked (Krathe, 2026-08-18).
+            --
+            -- ⚠ Widening is safe BECAUSE the signal is instance-scoped. Were it range-based
+            -- this would blank half a raid's debuffs -- the exact failure class
+            -- UNIT_CONNECTION / UNIT_FLAGS were registered for. Do not widen a range-based
+            -- probe by analogy with this one.
+            -- ⚠ isOwn still stands: you are always visible to yourself, so it stays
+            -- belt-and-braces rather than a behaviour decision.
+            if not hide and not isOwn then
                 local okv, vis = pcall(UnitIsVisible, unit)
                 if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
                     hide = true; why = why or "not-visible"
@@ -7607,9 +7670,17 @@ local gateSweepQueued
 -- ⚠ Declared HERE, above SetUnitDeathLatched, because that is its first caller. Below it
 -- this reads as a nil GLOBAL: it parses clean, and every call site is inside a pcall, so
 -- the failure would have been completely silent. Caught by diffing _ENV reads, not by luac.
+-- ☠ NOW TRUE FOR EVERY HANDLE, and it has to be, or the widened gate only ever runs once.
+-- This is the SWEEP filter: idGateWatch's events, the death latch and IdentityGateSweep all
+-- consult it before calling _applyIdentityGate. While it mirrored the gate's old three-way
+-- entry test, a handle that was neither vulnerable nor source-relative nor gated was
+-- invisible to every sweep -- so widening the gate itself would have given the debuff row a
+-- verdict at build and then never revisited it on a phase change, a zone-in or a rez.
+--
+-- Cost is a comparison per handle per sweep: _applyIdentityGate is transition-only, so a
+-- stable verdict allocates nothing and touches no frame.
 local function GateAppliesTo(h)
-    return h._idGateVulnerable or h._idGateSourceRelative
-        or (h._hasGatedGroups and h:_hasGatedGroups())
+    return h ~= nil
 end
 
 -- ============================================================
@@ -7620,9 +7691,27 @@ end
 -- a party frame and a pinned frame for the same unit both show the corpse.
 -- Skipped wholesale in test mode: preview units fabricate "dead" status and
 -- latching them would blank the preview rows.
+-- ☠ WHICH UNITS ARE CURRENTLY LATCHED. The latch used to be pure edge state living only
+-- on the handles, and a container built AFTER the death edge had passed came up unlatched
+-- with nothing to ever re-latch it: the next SetUnitDeathLatched(unit, true) only fires on
+-- a NEW death transition, and the unit is already dead, so that edge never comes again.
+--
+-- Field shape: reload while a party member is a ghost and their auras all come back --
+-- every row, because the latch is the ONLY cover for the ones the identity gate does not
+-- reach (a HARMFUL row with no includeSpellIDs reports zero gated groups, so it is neither
+-- vulnerable nor gated and never enters the assist branch at all).
+--
+-- Keyed by unit token, matching the latch's own unit-keyed design, so every display of
+-- that unit -- party frame, pinned frame, whatever is built later -- reads the same answer.
+AuraContainer._deathLatchedUnits = AuraContainer._deathLatchedUnits or {}
+
 function AuraContainer.SetUnitDeathLatched(unit, on)
     if type(unit) ~= "string" then return end
     if AuraContainer._testMode then return end
+    -- Recorded BEFORE the loops so a build racing this call still reads the new answer.
+    -- Test mode returns above, so preview units never enter the registry and the build-time
+    -- restore stays a no-op there -- same exemption the loops below already have.
+    AuraContainer._deathLatchedUnits[unit] = on and true or nil
     -- Transition-driven (dfLastKnownDead edges in Frames/Update.lua), so one line
     -- per real death/rez — the gate log's densest writer in a battleground, and
     -- exactly the edge the missing-HoTs class turned on.
