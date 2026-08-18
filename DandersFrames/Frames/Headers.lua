@@ -1767,7 +1767,14 @@ function DF:CreateRaidSeparatedHeaders()
         -- Layout depends on growDirection
         -- Note: point=TOP/LEFT keeps player order consistent (first at top/left)
         -- The secure snippet handles where the GROUP is positioned (START/END)
+        -- ☠ SNAPPED, per the rule in UpdateRaidHeaderLayoutAttributes. This is the
+        -- INTRA-group player stride, and a group's own size is derived as
+        -- 5 * frameHeight + 4 * spacing from the SNAPPED spacing. Feeding the raw value
+        -- here put the players inside a group on a different stride from the box the
+        -- group occupies -- the same producer split the five-value rule exists for, just
+        -- one level down. pixelPerfect defaults to TRUE.
         local spacing = db.frameSpacing or 2
+        if db.pixelPerfect and DF.PixelPerfect then spacing = DF:PixelPerfect(spacing) end
         if horizontal then
             -- HORIZONTAL: Groups as columns, players stacked vertically (top to bottom)
             header:SetAttribute("point", "TOP")
@@ -3264,7 +3271,11 @@ function DF:UpdateRaidHeaderLayoutAttributes()
 
     local db = DF:GetRaidDB()
     local horizontal = (db.growDirection == "HORIZONTAL")  -- Groups as columns
+    -- ☠ SNAPPED before the cache compare, not after: the cache must key on the value
+    -- actually pushed, or toggling pixelPerfect at an unchanged frameSpacing would be
+    -- read as "nothing changed" and skip the update entirely.
     local spacing = db.frameSpacing or 2
+    if db.pixelPerfect and DF.PixelPerfect then spacing = DF:PixelPerfect(spacing) end
 
     -- Skip entirely if nothing changed — avoids the destructive ClearAllPoints
     if horizontal == lastLayoutHorizontal and spacing == lastLayoutSpacing then

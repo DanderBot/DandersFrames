@@ -701,14 +701,22 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             tab:SetScript("OnClick", function()
                 local oldSet = GetCurrentSet()
                 local oldType = oldSet and oldSet.frameType
+                -- ☠ DIRECTION IS PART OF THE REBUILD KEY, NOT JUST FRAME TYPE. The arrange
+                -- controls bake orientation into their LABELS via pinVert, and a label is
+                -- fixed at build time -- RefreshControls only refreshes values. Gating on
+                -- frameType alone left two same-type sets of opposite direction showing
+                -- each other's edge names. Mirrors OnPinnedDirectionChanged, which already
+                -- rebuilds the whole page when this key changes on the current set.
+                local oldDir = oldSet and oldSet.growDirection
                 activeHighlightTab = i
                 pagePinnedFrames.persistedTab = i
                 local newSet = GetCurrentSet()
                 local newType = newSet and newSet.frameType
+                local newDir = newSet and newSet.growDirection
                 RefreshTabs()
-                if oldType ~= newType and GUI.RefreshCurrentPage then
-                    -- Frame type differs between tabs — invalidate cache so the page
-                    -- rebuilds with the correct set of widgets for the new frame type.
+                if (oldType ~= newType or oldDir ~= newDir) and GUI.RefreshCurrentPage then
+                    -- Frame type or direction differs between tabs — invalidate cache so the
+                    -- page rebuilds with the correct widgets and labels for the new set.
                     if GUI.InvalidatePage then GUI:InvalidatePage(GUI.CurrentPageName) end
                     GUI.RefreshCurrentPage()
                 else
