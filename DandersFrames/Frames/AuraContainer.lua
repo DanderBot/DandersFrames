@@ -7912,9 +7912,10 @@ end)
 -- (Krathe, 2026-08-18). Every gate bug to date has been a missed EDGE, never a wrong
 -- verdict at sweep time: the NPC-offline verdict aside, the pattern is a condition
 -- changing with no watched event firing (party-scoped events in a raid, death folded in
--- with no UNIT_FLAGS, a unit crossing an instance boundary). mini-auras reached the same
--- conclusion independently and POLLS, with the comment "neither [assist nor visibility]
--- has an event of its own". The event list above stays primary — it reacts in one frame —
+-- with no UNIT_FLAGS, a unit crossing an instance boundary). At least one other 12.1
+-- implementation reached the same conclusion independently and polls, on the reasoning
+-- that neither assist nor visibility has an event of its own. The event list above stays
+-- primary — it reacts in one frame —
 -- but this ticker guarantees that any edge it misses costs seconds, not a stuck frame
 -- until reload.
 --
