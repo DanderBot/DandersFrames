@@ -113,28 +113,88 @@ end
 -- in-combat value out of combat when asked, so a receded frame is readable while
 -- the mouse is on it. Combat edges: the REGEN sweep below; hover edges: the
 -- OnEnter/OnLeave hooks in Frames/Create.lua call DF:RefreshFrameFadeForHover.
+-- The frame the mouse is on right now (nil when none). One field, not a count: OnLeave
+-- can be skipped when a frame hides under the cursor, and a count would drift; a
+-- reference self-heals because we re-check its dfIsHovered before trusting it.
+DF._frameFadeHoveredFrame = nil
+
+local function AnyFrameHovered()
+    local f = DF._frameFadeHoveredFrame
+    return f ~= nil and f.dfIsHovered == true
+end
+
 function DF:GetFrameBaseAlpha(db, frame)
     if not db then return 1 end
     if db.frameFadeSplitCombat then
-        if UnitAffectingCombat("player")
-            or (db.frameFadeHoverUsesCombat and frame and frame.dfIsHovered) then
+        if UnitAffectingCombat("player") then
             return db.frameFadeAlphaInCombat or 1
+        end
+        if db.frameFadeHoverUsesCombat then
+            -- Scope: "ALL" lifts every frame while any one is hovered, so the whole
+            -- group is readable and clickable; "FRAME" lifts only the hovered unit.
+            local hovered = (db.frameFadeHoverScope == "FRAME")
+                and (frame and frame.dfIsHovered)
+                or (db.frameFadeHoverScope ~= "FRAME" and AnyFrameHovered())
+            if hovered then return db.frameFadeAlphaInCombat or 1 end
         end
         return db.frameFadeAlphaOutOfCombat or 1
     end
     return db.frameFadeAlpha or 1
 end
 
+-- Every unit frame through UpdateFrameAppearance: the combat-edge sweep and the
+-- all-frames hover scope share it. Pets are left to the next range tick.
+local function SweepFrameFade()
+    if DF.IterateAllFrames then
+        DF:IterateAllFrames(function(f)
+            if f and f.dfIsDandersFrame then DF:UpdateFrameAppearance(f) end
+        end)
+    end
+    if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
+            local header = DF.PinnedFrames.headers[setIndex]
+            if header then
+                for i = 1, 40 do
+                    local child = header:GetAttribute("child" .. i)
+                    if child and child.dfIsDandersFrame then DF:UpdateFrameAppearance(child) end
+                end
+            end
+        end
+    end
+end
+
 -- Hover edge for the "Show In-Combat Fade When Hovering" option. Cheap gate first --
 -- OnEnter/OnLeave fire constantly across a raid grid -- and a no-op unless the split
 -- and the hover option are both on and the player is out of combat (in combat the
--- frame already shows the in-combat value).
+-- frame already shows the in-combat value). Called AFTER the hook has written
+-- frame.dfIsHovered, so the flag is the truth here.
+-- Scope "ALL": track the hovered frame globally and sweep every frame on the
+-- none->some edge immediately; the some->none edge is settled one frame later, so
+-- crossing straight from one frame onto its neighbour (leave + enter in the same
+-- frame) costs one sweep and never flashes -- the deferred leave finds a new
+-- hovered frame and does nothing.
+local function SweepIfNothingHovered()
+    if DF._frameFadeHoveredFrame == nil and not UnitAffectingCombat("player") then
+        SweepFrameFade()
+    end
+end
 function DF:RefreshFrameFadeForHover(frame)
     if not (frame and frame.dfIsDandersFrame) then return end
     local db = DF:GetFrameDB(frame)
     if not (db and db.frameFadeSplitCombat and db.frameFadeHoverUsesCombat) then return end
-    if UnitAffectingCombat("player") then return end
-    if DF.UpdateFrameAppearance then DF:UpdateFrameAppearance(frame) end
+    if db.frameFadeHoverScope == "FRAME" then
+        if UnitAffectingCombat("player") then return end
+        if DF.UpdateFrameAppearance then DF:UpdateFrameAppearance(frame) end
+        return
+    end
+    if frame.dfIsHovered then
+        local wasNone = DF._frameFadeHoveredFrame == nil
+        DF._frameFadeHoveredFrame = frame
+        if wasNone and not UnitAffectingCombat("player") then SweepFrameFade() end
+    elseif DF._frameFadeHoveredFrame == frame then
+        DF._frameFadeHoveredFrame = nil
+        C_Timer.After(0, SweepIfNothingHovered)
+    end
 end
 
 -- Apply OOR alpha to any UI element (Frame, Texture, or FontString)
@@ -1687,22 +1747,7 @@ frameFadeCombatFrame:SetScript("OnEvent", function()
     if not ((partyDB and partyDB.frameFadeSplitCombat) or (raidDB and raidDB.frameFadeSplitCombat)) then
         return
     end
-    if DF.IterateAllFrames then
-        DF:IterateAllFrames(function(f)
-            if f and f.dfIsDandersFrame then DF:UpdateFrameAppearance(f) end
-        end)
-    end
-    if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
-        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
-            local header = DF.PinnedFrames.headers[setIndex]
-            if header then
-                for i = 1, 40 do
-                    local child = header:GetAttribute("child" .. i)
-                    if child and child.dfIsDandersFrame then DF:UpdateFrameAppearance(child) end
-                end
-            end
-        end
-    end
+    SweepFrameFade()
 end)
 
 -- ============================================================

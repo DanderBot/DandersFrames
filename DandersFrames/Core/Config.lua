@@ -2350,6 +2350,7 @@ DF.PartyDefaults = {
     frameFadeAlphaOutOfCombat = 1,
     frameFadeAlphaInCombat = 1,
     frameFadeHoverUsesCombat = false,
+    frameFadeHoverScope = "ALL",   -- "ALL" = every frame lifts while any is hovered; "FRAME" = just the hovered one
 
     -- Range Check
     rangeAlpha = 0.5,

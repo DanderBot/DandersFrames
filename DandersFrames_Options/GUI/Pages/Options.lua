@@ -1806,6 +1806,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local ffHover = frameFadeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show In-Combat Fade When Hovering"], db, "frameFadeHoverUsesCombat", RefreshFrameFade), 30)
         ffHover.disableOn = function(d) return not d.frameFadeSplitCombat end
         ffHover.tooltip = L["Out of combat, a frame under the mouse uses the in-combat opacity so you can still read and interact with it."]
+        local ffHoverScope = frameFadeGroup:AddWidget(GUI:CreateDropdown(self.child, L["Hover Applies To"], {
+            ALL   = L["All Frames"],
+            FRAME = L["Hovered Frame Only"],
+        }, db, "frameFadeHoverScope", RefreshFrameFade), 55)
+        ffHoverScope.disableOn = function(d) return not d.frameFadeSplitCombat or not d.frameFadeHoverUsesCombat end
+        ffHoverScope.tooltip = L["All Frames lifts every unit frame while the mouse is on any of them, so the whole group is readable and clickable."]
         Add(frameFadeGroup, nil, 2)
 
 
