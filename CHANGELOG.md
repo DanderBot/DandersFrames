@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### New Features
+
+* (Frames) New **Frame Fade** settings under Display > Fading. A Global Frame Fade slider sets the opacity of every unit frame so they can recede into your UI. Tick "Separate Combat Fade" for two values instead — one out of combat, one in combat — so frames can sit faded while you're idle and snap to full the moment a fight starts. "Show In-Combat Fade When Hovering" brings a faded frame back to its in-combat opacity while your mouse is on it, so you can still read and click it out of combat. Combines with the out-of-range and health fades.
+
 ### Bug Fixes
 
 * (Frames) Fix auras and Aura Designer indicators sometimes staying faded on a group member who is back in range — most often after combat, a phase change or someone reconnecting.

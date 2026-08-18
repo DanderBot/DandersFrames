@@ -1621,6 +1621,8 @@ function DF:CreateUnitFrame(unit, index, isRaid)
         if DF.UpdateHighlights then
             DF:UpdateHighlights(self)
         end
+        -- Frame Fade: hover may borrow the in-combat opacity (no-op unless enabled).
+        if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
 
         -- Check if we're actually hovering a child element with SetPropagateMouseMotion
         local focus = GetMouseFocus and GetMouseFocus() or GetMouseFoci and GetMouseFoci()[1]
@@ -1670,6 +1672,7 @@ function DF:CreateUnitFrame(unit, index, isRaid)
         if DF.UpdateHighlights then
             DF:UpdateHighlights(self)
         end
+        if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
 
         -- Don't hide tooltip if we're moving to a child (our icon or private aura)
         local focus = GetMouseFocus and GetMouseFocus() or GetMouseFoci and GetMouseFoci()[1]

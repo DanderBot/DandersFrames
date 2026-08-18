@@ -661,7 +661,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- "dead" and "offline" matched nothing: the keys are fadeDead*, which begins
         -- "fade". So the entire Dead/Offline Fading box was silently dropped from all
         -- three. Prefixes must be real key prefixes, not the box's name.
-        Add(CreateCopyButton(self.child, {"rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)
+        Add(CreateCopyButton(self.child, {"frameFade", "rangeFade", "rangeCheck", "rangeUpdate", "oor", "fadeDead", "healthFade", "hf"}, L["Fading"], "display_fading"), 25, 2)
         
         -- Element-specific alpha sliders grey out (disabled-in-place) when the
         -- "Enable Element-Specific Alpha" toggle is off. The frame-level alpha
@@ -676,6 +676,38 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             return d.oorEnabled
         end
         
+        -- ===== FRAME FADE GROUP (Column 1) =====
+        -- Whole-frame base opacity, multiplied with the range / health fades
+        -- (DF:GetFrameBaseAlpha, ElementAppearance). One global slider, or -- with the
+        -- split on -- an out-of-combat and an in-combat value, plus a hover option that
+        -- shows the in-combat value while the mouse is on a frame out of combat.
+        local frameFadeGroup = GUI:CreateSettingsGroup(self.child, 280)
+        frameFadeGroup:AddWidget(GUI:CreateHeader(self.child, L["Frame Fade"]), 40)
+        local function RefreshFrameFade()
+            if DF.InvalidateHealthFadeCurve then DF:InvalidateHealthFadeCurve() end
+            -- Pets re-apply their fade only on a range-cache miss; flush it so the
+            -- next tick picks up the new base instead of waiting for a range change.
+            if DF.ClearRangeCache then DF:ClearRangeCache() end
+            DF:RefreshAllVisibleFrames()
+            if DF.UpdateAllFrameAppearances then DF:UpdateAllFrameAppearances() end
+        end
+        local ffGlobal = frameFadeGroup:AddWidget(GUI:CreateSlider(self.child, L["Global Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlpha", nil, RefreshFrameFade, true), 55)
+        ffGlobal.hideOn = function(d) return d.frameFadeSplitCombat end
+        ffGlobal.tooltip = L["Opacity of every unit frame. Multiplies with the out-of-range and health fades."]
+        frameFadeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Separate Combat Fade"], db, "frameFadeSplitCombat", function()
+            self:RefreshStates()
+            RefreshFrameFade()
+        end), 30)
+        local ffOOC = frameFadeGroup:AddWidget(GUI:CreateSlider(self.child, L["Out of Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaOutOfCombat", nil, RefreshFrameFade, true), 55)
+        ffOOC.hideOn = function(d) return not d.frameFadeSplitCombat end
+        ffOOC.tooltip = L["Frame opacity while you are out of combat. The preview shows this value while you configure it."]
+        local ffCombat = frameFadeGroup:AddWidget(GUI:CreateSlider(self.child, L["In Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaInCombat", nil, RefreshFrameFade, true), 55)
+        ffCombat.hideOn = function(d) return not d.frameFadeSplitCombat end
+        local ffHover = frameFadeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show In-Combat Fade When Hovering"], db, "frameFadeHoverUsesCombat", RefreshFrameFade), 30)
+        ffHover.disableOn = function(d) return not d.frameFadeSplitCombat end
+        ffHover.tooltip = L["Out of combat, a frame under the mouse uses the in-combat opacity so you can still read and interact with it."]
+        Add(frameFadeGroup, nil, 1)
+
         -- ===== OUT OF RANGE GROUP (Column 1) =====
         local oorGroup = GUI:CreateSettingsGroup(self.child, 280)
         oorGroup:AddWidget(GUI:CreateHeader(self.child, L["Out of Range"]), 40)

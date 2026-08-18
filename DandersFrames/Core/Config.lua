@@ -2341,6 +2341,16 @@ DF.PartyDefaults = {
     raidTestFrameCount = 40,
     raidUseGroups = true,
 
+    -- Frame Fade: a whole-frame base opacity every unit frame carries, multiplied
+    -- with the range / health fades. Global by default; the split swaps in an
+    -- out-of-combat and an in-combat value (hover can borrow the in-combat one so a
+    -- receded frame is still readable while you interact with it).
+    frameFadeAlpha = 1,
+    frameFadeSplitCombat = false,
+    frameFadeAlphaOutOfCombat = 1,
+    frameFadeAlphaInCombat = 1,
+    frameFadeHoverUsesCombat = false,
+
     -- Range Check
     rangeAlpha = 0.5,
     rangeCheckSpellID = 0,

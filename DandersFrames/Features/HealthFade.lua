@@ -111,6 +111,13 @@ function DF:ApplyHealthFadeAlpha(frame)
     local aboveAlpha = db.healthFadeAlpha or 0.5
     local threshold = db.healthFadeThreshold or 100
 
+    -- Frame Fade base (ElementAppearance) folded into BOTH curve alphas, so the
+    -- engine-resolved value already carries it -- there is no Lua-side multiply
+    -- possible on the secret result. Curve cache keys are the scaled numbers.
+    local base = DF.GetFrameBaseAlpha and DF:GetFrameBaseAlpha(db, frame) or 1
+    belowAlpha = belowAlpha * base
+    aboveAlpha = aboveAlpha * base
+
     -- ☠ DATA FORK, NOT A RENDER FORK. Live must resolve the threshold through the
     -- ENGINE -- UnitHealthPercent(unit, true, curve) -- because the health value is
     -- secret and Lua may never compare it. A test frame's health is a plain number
@@ -229,7 +236,9 @@ function DF:UpdatePetHealthFade(frame)
     local threshold = db.healthFadeThreshold or 100
     local aboveAlpha = db.healthFadeAlpha or 0.5
 
-    local curve = BuildHealthFadeCurve(threshold, 1.0, aboveAlpha)
+    -- Frame Fade base folded into the curve, same as the unit-frame path.
+    local base = DF.GetFrameBaseAlpha and DF:GetFrameBaseAlpha(db, frame) or 1
+    local curve = BuildHealthFadeCurve(threshold, base, aboveAlpha * base)
     local color = UnitHealthPercent(frame.unit, true, curve)
     if not color then return end
 

@@ -32,6 +32,7 @@ local UnitIsPlayer = UnitIsPlayer
 local UnitExists = UnitExists
 local UnitIsUnit = UnitIsUnit
 local UnitClass = UnitClass
+local UnitAffectingCombat = UnitAffectingCombat
 local CreateColor = CreateColor
 local issecretvalue = issecretvalue  -- nil pre-Midnight, function in Midnight+
 
@@ -95,6 +96,45 @@ local function GetInRange(frame)
     
     -- Default to in-range if no cached value yet
     return true
+end
+
+-- ============================================================
+-- FRAME FADE (whole-frame base opacity)
+-- ============================================================
+-- ★ THE ONE PLACE A UNIT FRAME'S BASE OPACITY IS DECIDED. Every writer of a whole
+-- frame's alpha -- the range fade below (both modes), the health-fade curve
+-- (HealthFade.lua) and the pet fade (Range.lua) -- multiplies its own value by this,
+-- so "Global Frame Fade" composes with those fades instead of fighting them:
+-- base 0.5 x out-of-range 0.4 = 0.2. Per-element fades (dead, element-specific OOR)
+-- are untouched; the frame's alpha cascades over them.
+-- Split off = the global slider, one table read. Split on = the in-combat value
+-- while the PLAYER is fighting (UnitAffectingCombat, not InCombatLockdown -- lockdown
+-- lingers past the fight), the out-of-combat value otherwise. Hover borrows the
+-- in-combat value out of combat when asked, so a receded frame is readable while
+-- the mouse is on it. Combat edges: the REGEN sweep below; hover edges: the
+-- OnEnter/OnLeave hooks in Frames/Create.lua call DF:RefreshFrameFadeForHover.
+function DF:GetFrameBaseAlpha(db, frame)
+    if not db then return 1 end
+    if db.frameFadeSplitCombat then
+        if UnitAffectingCombat("player")
+            or (db.frameFadeHoverUsesCombat and frame and frame.dfIsHovered) then
+            return db.frameFadeAlphaInCombat or 1
+        end
+        return db.frameFadeAlphaOutOfCombat or 1
+    end
+    return db.frameFadeAlpha or 1
+end
+
+-- Hover edge for the "Show In-Combat Fade When Hovering" option. Cheap gate first --
+-- OnEnter/OnLeave fire constantly across a raid grid -- and a no-op unless the split
+-- and the hover option are both on and the player is out of combat (in combat the
+-- frame already shows the in-combat value).
+function DF:RefreshFrameFadeForHover(frame)
+    if not (frame and frame.dfIsDandersFrame) then return end
+    local db = DF:GetFrameDB(frame)
+    if not (db and db.frameFadeSplitCombat and db.frameFadeHoverUsesCombat) then return end
+    if UnitAffectingCombat("player") then return end
+    if DF.UpdateFrameAppearance then DF:UpdateFrameAppearance(frame) end
 end
 
 -- Apply OOR alpha to any UI element (Frame, Texture, or FontString)
@@ -1611,19 +1651,59 @@ function DF:UpdateFrameAppearance(frame)
     -- the colour stops and the mode branching are all shared.
     if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
+    -- The frame's base opacity (Frame Fade). Multiplied into every branch below;
+    -- the health-fade curve reads it itself (HealthFade.lua).
+    local base = DF:GetFrameBaseAlpha(db, frame)
     if db.oorEnabled then
-        ApplyOORAlpha(frame, true, 1.0, 1.0)
+        -- Element mode pins the frame so per-element fades own the look; the pin IS
+        -- the base now, not a hardcoded 1.0.
+        ApplyOORAlpha(frame, true, base, base)
     else
         local inRange = GetInRange(frame)
         -- Frame-level: health fade via curve (re-evaluate for range changes)
         if IsHealthFadeEnabled(db) and frame.dfHealthFadeActive and DF.ApplyHealthFadeAlpha and DF:ApplyHealthFadeAlpha(frame) then
-            -- Curve applied alpha directly, includes OOR state
+            -- Curve applied alpha directly, includes OOR state and the base
         else
             local outOfRangeAlpha = db.rangeFadeAlpha or 0.4
-            ApplyOORAlpha(frame, inRange, 1.0, outOfRangeAlpha)
+            ApplyOORAlpha(frame, inRange, base, outOfRangeAlpha * base)
         end
     end
 end
+
+-- ★ COMBAT EDGE SWEEP for the Frame Fade split. Range.lua flushes its cache on both
+-- REGEN events, so most frames re-apply on the next 0.5s tick anyway -- but the
+-- player's own frame never re-runs from the range path (always in range) and the
+-- pets only re-run when their cached range answer moves, and "the frames snap back
+-- when the pull starts" wants to be instant, not eventually. Every unit frame goes
+-- through UpdateFrameAppearance here; pets follow on the next range tick (their fade
+-- and health-fade writers both read the base). Skipped entirely unless a mode has
+-- the split on, so a stock profile pays one boolean per combat edge.
+local frameFadeCombatFrame = CreateFrame("Frame")
+frameFadeCombatFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+frameFadeCombatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+frameFadeCombatFrame:SetScript("OnEvent", function()
+    local partyDB = DF.GetDB and DF:GetDB()
+    local raidDB = DF.GetRaidDB and DF:GetRaidDB()
+    if not ((partyDB and partyDB.frameFadeSplitCombat) or (raidDB and raidDB.frameFadeSplitCombat)) then
+        return
+    end
+    if DF.IterateAllFrames then
+        DF:IterateAllFrames(function(f)
+            if f and f.dfIsDandersFrame then DF:UpdateFrameAppearance(f) end
+        end)
+    end
+    if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
+            local header = DF.PinnedFrames.headers[setIndex]
+            if header then
+                for i = 1, 40 do
+                    local child = header:GetAttribute("child" .. i)
+                    if child and child.dfIsDandersFrame then DF:UpdateFrameAppearance(child) end
+                end
+            end
+        end
+    end
+end)
 
 -- ============================================================
 -- RANGE-ONLY APPEARANCE UPDATE (Performance optimization)

@@ -658,10 +658,12 @@ function DF:UpdatePetRange(frame)
     --
     -- SetAlphaFromBoolean handles the secret boolean UnitInRange returns for non-healer
     -- specs on Midnight+; the plain branch is the pre-12.1 fallback.
+    -- Frame Fade base (ElementAppearance) multiplied in, so a pet recedes with its owner.
+    local base = DF.GetFrameBaseAlpha and DF:GetFrameBaseAlpha(db, frame) or 1
     if frame.SetAlphaFromBoolean then
-        frame:SetAlphaFromBoolean(inRange, 1.0, outOfRangeAlpha)
+        frame:SetAlphaFromBoolean(inRange, base, outOfRangeAlpha * base)
     else
-        frame:SetAlpha(inRange and 1.0 or outOfRangeAlpha)
+        frame:SetAlpha(inRange and base or outOfRangeAlpha * base)
     end
 end
 
