@@ -5976,10 +5976,15 @@ function Factory:DebugDumpADGate()
                             local oShown = "-"
                             if isSlot then
                                 hGate = (h and h._gateHidden) and true or false
-                                -- A slot has no frame of its own; its actuation IS the
-                                -- pushed filter string, so that is what "shown" means here.
-                                hShown = (h and h._pushedFilter == "") and "false"
-                                    or (h and h._pushedFilter) and "true" or "-"
+                                -- "shown" for a slot = is a LIVE filter pushed (vs the park
+                                -- string). ⚠ Compare against SLOT_PARK_FILTER, not "" --
+                                -- the empty-string park is retired, and deriving from ""
+                                -- made every correctly-parked slot read shown=true and trip
+                                -- the suspect counter while owner=false proved it dark.
+                                local pf = h and h._pushedFilter
+                                local park = DF.AuraContainer and DF.AuraContainer.SLOT_PARK_FILTER
+                                hShown = (pf == nil) and "-"
+                                    or ((pf == "" or pf == park) and "false" or "true")
                                 -- ★ THE BUTTON IS THE VISIBLE OBJECT. isSlotHandle is
                                 -- literally "has GetButton", so every slot can hand us the
                                 -- frame the player is looking at. An empty pushed filter
