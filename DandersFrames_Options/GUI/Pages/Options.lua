@@ -802,7 +802,27 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- Frame-level alpha (shown when element-specific is disabled)
         local frameLevelAlpha = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Alpha (Out of Range)"], 0.1, 1.0, 0.05, db, "rangeFadeAlpha", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
         frameLevelAlpha.hideOn = HideFrameLevelAlpha
-        
+
+        -- Combat split: the ONE slider above becomes the OUT-of-combat value and a second
+        -- slider carries the in-combat value. Off = the slider is the only thing read on
+        -- the fade path (DF:GetRangeFadeAlpha, ElementAppearance). The caption of the
+        -- existing slider follows the checkbox so the two never read as duplicates.
+        local function RelabelFrameLevelAlpha()
+            if frameLevelAlpha.label then
+                frameLevelAlpha.label:SetText(db.rangeFadeSplitCombat
+                    and L["Frame Alpha (Out of Range, Out of Combat)"]
+                    or L["Frame Alpha (Out of Range)"])
+            end
+        end
+        RelabelFrameLevelAlpha()
+        oorGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Separate In-Combat Fade"], db, "rangeFadeSplitCombat", function()
+            RelabelFrameLevelAlpha()
+            self:RefreshStates()
+            DF:RefreshAllVisibleFrames()
+        end), 30).hideOn = HideFrameLevelAlpha
+        local frameLevelAlphaCombat = oorGroup:AddWidget(GUI:CreateSlider(self.child, L["Frame Alpha (Out of Range, In Combat)"], 0.1, 1.0, 0.05, db, "rangeFadeAlphaCombat", nil, function() DF:RefreshAllVisibleFrames() end, true), 55)
+        frameLevelAlphaCombat.hideOn = function(d) return d.oorEnabled or not d.rangeFadeSplitCombat end
+
         -- Element-specific toggle
         oorGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Element-Specific Alpha"], db, "oorEnabled", function()
             self:RefreshStates()

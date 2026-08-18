@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### New Features
+
+* (Frames) Out-of-range fading can now use a different opacity in combat. Tick "Separate In-Combat Fade" under Display > Fading and the frame alpha slider splits into an out-of-combat and an in-combat value — the in-combat one defaults to fully visible.
+
 ### Bug Fixes
 
 * (Frames) Fix auras and Aura Designer indicators sometimes staying faded on a group member who is back in range — most often after combat, a phase change or someone reconnecting.

@@ -2345,6 +2345,10 @@ DF.PartyDefaults = {
     rangeAlpha = 0.5,
     rangeCheckSpellID = 0,
     rangeFadeAlpha = 0.40000000596046,
+    -- Whole-frame range fade, split by combat state. Off = rangeFadeAlpha alone (no
+    -- combat read on the fade path). On = rangeFadeAlpha out of combat, this in combat.
+    rangeFadeSplitCombat = false,
+    rangeFadeAlphaCombat = 1,
     rangeUpdateInterval = 0.5,
 
     -- Ready Check Icon

@@ -103,7 +103,7 @@ function DF:ApplyHealthFadeAlpha(frame)
     if not db.oorEnabled then
         local inRange = frame.dfInRange
         if not (issecretvalue and issecretvalue(inRange)) and inRange == false then
-            belowAlpha = db.rangeFadeAlpha or 0.4
+            belowAlpha = DF:GetRangeFadeAlpha(db)   -- combat-split aware; see ElementAppearance
         end
         -- Secret values: can't compare, leave belowAlpha at 1 (OOR handled by frame-level SetAlphaFromBoolean)
     end

@@ -32,6 +32,7 @@ local UnitIsPlayer = UnitIsPlayer
 local UnitExists = UnitExists
 local UnitIsUnit = UnitIsUnit
 local UnitClass = UnitClass
+local UnitAffectingCombat = UnitAffectingCombat
 local CreateColor = CreateColor
 local issecretvalue = issecretvalue  -- nil pre-Midnight, function in Midnight+
 
@@ -95,6 +96,24 @@ local function GetInRange(frame)
     
     -- Default to in-range if no cached value yet
     return true
+end
+
+-- ★ THE ONE PLACE THE WHOLE-FRAME RANGE FADE VALUE IS DECIDED. Four consumers read the
+-- "Frame Alpha (Out of Range)" slider -- the frame-level fade below, the status-icon
+-- multiplier, the pet fade (Range.lua) and the health-fade floor (HealthFade.lua) --
+-- and the combat split has to reach all four or a frame dims to one number while its
+-- pet and icons dim to another. Split off = the plain slider, one boolean test and no
+-- combat read; split on = the in-combat slider while the PLAYER is in combat.
+-- UnitAffectingCombat, not InCombatLockdown: the question is "am I fighting", and
+-- lockdown lingers on edges (leaving a vehicle, spell queue) where the fight has ended.
+-- Combat edges need no wiring: Range.lua clears its cache on both REGEN events, so
+-- every frame re-applies on the next tick.
+function DF:GetRangeFadeAlpha(db)
+    if not db then return 0.4 end
+    if db.rangeFadeSplitCombat and UnitAffectingCombat("player") then
+        return db.rangeFadeAlphaCombat or 1.0
+    end
+    return db.rangeFadeAlpha or 0.4
 end
 
 -- Apply OOR alpha to any UI element (Frame, Texture, or FontString)
@@ -211,7 +230,7 @@ function DF:GetStatusIconFadeAlpha(frame, prefix)
             -- SetIgnoreParentAlpha(true), so the cascade never reaches them and an
             -- explicit multiply is the only route either way.
             alpha = alpha * (db.oorEnabled and (db.oorIconsAlpha or 0.5)
-                or (db.rangeFadeAlpha or db.rangeAlpha or 0.4))
+                or DF:GetRangeFadeAlpha(db))
         end
     end
     return alpha
@@ -1619,7 +1638,7 @@ function DF:UpdateFrameAppearance(frame)
         if IsHealthFadeEnabled(db) and frame.dfHealthFadeActive and DF.ApplyHealthFadeAlpha and DF:ApplyHealthFadeAlpha(frame) then
             -- Curve applied alpha directly, includes OOR state
         else
-            local outOfRangeAlpha = db.rangeFadeAlpha or 0.4
+            local outOfRangeAlpha = DF:GetRangeFadeAlpha(db)
             ApplyOORAlpha(frame, inRange, 1.0, outOfRangeAlpha)
         end
     end
