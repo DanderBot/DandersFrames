@@ -892,6 +892,8 @@ function DF:InitializeHeaderChild(frame)
         if DF.UpdateHighlights then
             DF:UpdateHighlights(self)
         end
+        -- Frame Fade: hover may borrow the in-combat opacity (no-op unless enabled).
+        if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
 
         -- Binding tooltip (independent of unit tooltip settings)
         if DF.ShowBindingTooltip then DF:ShowBindingTooltip(self) end
@@ -944,6 +946,7 @@ function DF:InitializeHeaderChild(frame)
         if DF.UpdateHighlights then
             DF:UpdateHighlights(self)
         end
+        if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
 
         -- Stop tooltip refresh ticker
         if DF.StopTooltipRefresh then DF:StopTooltipRefresh() end

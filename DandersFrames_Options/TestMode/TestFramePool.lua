@@ -112,11 +112,13 @@ local function CreateTestFrame(index, isRaid)
     frame:SetScript("OnEnter", function(self)
         self.dfIsHovered = true
         if DF.UpdateHighlights then DF:UpdateHighlights(self) end
+        if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
         if DF.ShowBindingTooltip then DF:ShowBindingTooltip(self) end
     end)
     frame:SetScript("OnLeave", function(self)
         self.dfIsHovered = false
         if DF.UpdateHighlights then DF:UpdateHighlights(self) end
+        if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
         if DFBindingTooltip then DFBindingTooltip:Hide(); DFBindingTooltip.anchorFrame = nil end
     end)
 
