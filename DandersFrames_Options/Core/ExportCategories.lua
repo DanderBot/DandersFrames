@@ -61,7 +61,6 @@ DF.ExportCategories = {
         "raidFlatFrameAnchor",
         "raidFlatGrowthAnchor",
         "raidFlatHorizontalSpacing",
-        "raidFlatPlayerAnchor",
         "raidFlatReverseFillOrder",
         "raidFlatVerticalSpacing",
         "raidGroupAnchor",

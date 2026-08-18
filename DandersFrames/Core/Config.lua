@@ -2304,7 +2304,11 @@ DF.PartyDefaults = {
     -- default filled the key, so it was never nil. Same resolved anchor either way.
     raidFlatGrowthAnchor = "START",
     raidFlatHorizontalSpacing = 2,
-    raidFlatPlayerAnchor = "CENTER",
+    -- ☠ raidFlatPlayerAnchor was here, seeded "CENTER". No control has ever written it;
+    -- it was a duplicate of raidFlatFrameAnchor ("Players Grow From"), and seeding it
+    -- pinned every reader in Headers.lua to a constant while the dropdown moved only the
+    -- geometry. Readers now use raidFlatFrameAnchor. The key is left out on purpose --
+    -- re-adding a default is what made the duplicate invisible for so long.
     raidFlatReverseFillOrder = false,
     raidFlatVerticalSpacing = 2,
     raidGroupAnchor = "CENTER",

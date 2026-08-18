@@ -1553,7 +1553,7 @@ function DF:CreateFlatDebugOverlay()
     local horizontal = (db.growDirection == "HORIZONTAL")
     local playersPerUnit = db.raidPlayersPerRow or 5
     local reverseFill = db.raidFlatReverseFillOrder or false
-    local anchor = db.raidFlatPlayerAnchor or "START"
+    local anchor = db.raidFlatFrameAnchor or "START"
     local maxColumns = math.ceil(40 / playersPerUnit)
     
     -- Create overlay container if needed
@@ -6022,7 +6022,12 @@ function DF:SetRaidOrientation(horizontal, growFrom)
     local db = DF:GetRaidDB()
     
     -- Default growFrom for combined header (if not provided)
-    growFrom = growFrom or db.raidFlatPlayerAnchor or "START"
+    -- ☠ Reads raidFlatFrameAnchor, NOT raidFlatPlayerAnchor. The latter was a second
+    -- key for the same concept that no control has ever written in this repo's history
+    -- (only the defaults table seeded it, to "CENTER"), so every reader here was pinned
+    -- to a constant while "Players Grow From" wrote raidFlatFrameAnchor and moved only
+    -- the geometry. Setting End flipped the header's anchor corner but left sortDir ASC.
+    growFrom = growFrom or db.raidFlatFrameAnchor or "START"
     
     -- Combined header (flat layout) - just set sortDir, PositionRaidHeaders handles the rest
     if DF.FlatRaidFrames and DF.FlatRaidFrames.header then
@@ -6628,8 +6633,8 @@ function DF:ApplyHeaderSettings()
     local db = DF:GetDB()
     local raidDb = DF:GetRaidDB()
     
-    DF:Debug("FLATRAID", "ApplyHeaderSettings: raidUseGroups=%s growDirection=%s raidFlatPlayerAnchor=%s",
-        tostring(raidDb.raidUseGroups), tostring(raidDb.growDirection), tostring(raidDb.raidFlatPlayerAnchor))
+    DF:Debug("FLATRAID", "ApplyHeaderSettings: raidUseGroups=%s growDirection=%s raidFlatFrameAnchor=%s",
+        tostring(raidDb.raidUseGroups), tostring(raidDb.growDirection), tostring(raidDb.raidFlatFrameAnchor))
     
     -- Apply orientation from growDirection, growthAnchor, and selfPosition settings
     local horizontal = (db.growDirection == "HORIZONTAL")
@@ -6647,8 +6652,8 @@ function DF:ApplyHeaderSettings()
         local raidGrowFrom = raidDb.raidGroupAnchor or "START"
         DF:SetRaidOrientation(false, raidGrowFrom)
     else
-        -- Combined/flat mode: use raidFlatPlayerAnchor (different setting!)
-        local raidGrowFrom = raidDb.raidFlatPlayerAnchor or "START"
+        -- Combined/flat mode: use raidFlatFrameAnchor (different setting to the grouped one)
+        local raidGrowFrom = raidDb.raidFlatFrameAnchor or "START"
         DF:Debug("FLATRAID", "ApplyHeaderSettings:   FLAT MODE: SetRaidOrientation(%s, %s)",
             tostring(raidHorizontal), raidGrowFrom)
         DF:SetRaidOrientation(raidHorizontal, raidGrowFrom)
@@ -6684,50 +6689,18 @@ function DF:ApplyHeaderSettings()
         DF:Debug("FLATRAID", "ApplyHeaderSettings:   -> calling ApplyRaidFlatSorting")
         DF:ApplyRaidFlatSorting()
         
-        -- ============================================================
-        -- FINAL SIZE FORCING for flat layout
-        -- ApplyRaidFlatSorting sets attributes (nameList, sortMethod, etc.)
-        -- which trigger SecureGroupHeader_Update and resize the header.
-        -- We must force the size ONE MORE TIME after all attributes are set,
-        -- then trigger a re-layout so children are positioned for the new size.
-        -- ============================================================
-        if DF.FlatRaidFrames and DF.FlatRaidFrames.header then
-            local anchor = raidDb.raidFlatPlayerAnchor or "START"
-            if anchor ~= "CENTER" then
-                local horizontal = (raidDb.growDirection == "HORIZONTAL")
-                local playersPerUnit = raidDb.raidPlayersPerRow or 5
-                local hSpacing = raidDb.raidFlatHorizontalSpacing or 2
-                local vSpacing = raidDb.raidFlatVerticalSpacing or 2
-                local frameWidth = raidDb.frameWidth or 80
-                local frameHeight = raidDb.frameHeight or 40
-                local maxColumns = math.ceil(40 / playersPerUnit)
-                
-                local fullWidth, fullHeight
-                if horizontal then
-                    fullWidth = playersPerUnit * frameWidth + (playersPerUnit - 1) * hSpacing
-                    fullHeight = maxColumns * frameHeight + (maxColumns - 1) * vSpacing
-                else
-                    fullWidth = maxColumns * frameWidth + (maxColumns - 1) * hSpacing
-                    fullHeight = playersPerUnit * frameHeight + (playersPerUnit - 1) * vSpacing
-                end
-                
-                -- Force the size
-                DF.FlatRaidFrames.header:SetSize(fullWidth, fullHeight)
-                
-                DF:Debug("FLATRAID", "ApplyHeaderSettings:   FINAL size forcing: %s x %s",
-                    tostring(fullWidth), tostring(fullHeight))
-                
-                -- Trigger re-layout by toggling showRaid attribute
-                -- This causes SecureGroupHeader_Update to run again with the correct header size
-                DF.FlatRaidFrames.header:SetAttribute("showRaid", false)
-                DF.FlatRaidFrames.header:SetAttribute("showRaid", true)
-                
-                -- Force size again after re-layout (since SecureGroupHeader_Update resizes)
-                DF.FlatRaidFrames.header:SetSize(fullWidth, fullHeight)
-                
-                DF:Debug("FLATRAID", "ApplyHeaderSettings:   triggered re-layout and re-forced size")
-            end
-        end
+        -- ☠ A "FINAL SIZE FORCING" block used to sit here. It has never run for anyone.
+        -- Its gate was `raidFlatPlayerAnchor ~= "CENTER"` and that key is seeded "CENTER"
+        -- by the defaults table and written by no control anywhere in this repo's
+        -- history, so the condition was false on every profile, on every apply.
+        --
+        -- It is deleted rather than repointed at raidFlatFrameAnchor along with the
+        -- readers above. That key only offers START/END, so repointing would have turned
+        -- a block that has executed zero times into one that executes on every settings
+        -- apply -- force-sizing the flat header and toggling showRaid off/on to provoke
+        -- a re-layout. Untested code that moves live frames is not something to switch on
+        -- as a side effect of fixing a different bug. If flat mode ever does need the
+        -- size forcing, it should be added deliberately and confirmed in game.
     end
     
     -- Schedule private aura reanchor after ALL attribute changes settle.
@@ -8611,7 +8584,7 @@ SlashCmdList["DFHEADERS"] = function(msg)
         local growFrom = db.growthAnchor or "START"
         local selfPos = db.sortSelfPosition or "FIRST"
         -- Use correct anchor based on raid layout mode
-        local raidGrowFrom = raidDb.raidUseGroups and (raidDb.raidGroupAnchor or "START") or (raidDb.raidFlatPlayerAnchor or "START")
+        local raidGrowFrom = raidDb.raidUseGroups and (raidDb.raidGroupAnchor or "START") or (raidDb.raidFlatFrameAnchor or "START")
         DF:SetPartyOrientation(true, growFrom, selfPos)
         DF:SetRaidOrientation(true, raidGrowFrom)
     
@@ -8621,7 +8594,7 @@ SlashCmdList["DFHEADERS"] = function(msg)
         local growFrom = db.growthAnchor or "START"
         local selfPos = db.sortSelfPosition or "FIRST"
         -- Use correct anchor based on raid layout mode
-        local raidGrowFrom = raidDb.raidUseGroups and (raidDb.raidGroupAnchor or "START") or (raidDb.raidFlatPlayerAnchor or "START")
+        local raidGrowFrom = raidDb.raidUseGroups and (raidDb.raidGroupAnchor or "START") or (raidDb.raidFlatFrameAnchor or "START")
         DF:SetPartyOrientation(false, growFrom, selfPos)
         DF:SetRaidOrientation(false, raidGrowFrom)
     

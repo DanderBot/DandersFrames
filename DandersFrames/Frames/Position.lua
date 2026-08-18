@@ -2230,58 +2230,29 @@ function DF:CenterFrames()
         DF:Say(L["Raid frames centered."])
     else
         local db = DF:GetDB()
-        local horizontal = db.growDirection == "HORIZONTAL"
-        local growthAnchor = db.growthAnchor or "START"
-        local spacing = db.frameSpacing or 4
-        
-        -- Calculate full 5-frame size
-        local frameCount = 5
-        local totalWidth = frameCount * (db.frameWidth + spacing) - spacing
-        local totalHeight = frameCount * (db.frameHeight + spacing) - spacing
-        
-        -- Calculate offset needed to visually center the frames
-        -- The container anchor point is at CENTER of UIParent
-        -- We need to offset the container so the visual center of frames is at screen center
-        local offsetX, offsetY = 0, 0
-        
-        if horizontal then
-            -- For horizontal layout, adjust X based on growth anchor
-            if growthAnchor == "START" then
-                -- Anchor is at left edge, frames grow right
-                -- Visual center is at anchor + totalWidth/2
-                -- To center: anchor needs to be at -totalWidth/2
-                offsetX = -totalWidth / 2
-            elseif growthAnchor == "CENTER" then
-                -- Anchor is already at center of frames
-                offsetX = 0
-            elseif growthAnchor == "END" then
-                -- Anchor is at right edge, frames grow left
-                -- Visual center is at anchor - totalWidth/2
-                -- To center: anchor needs to be at +totalWidth/2
-                offsetX = totalWidth / 2
-            end
-            offsetY = 0
-        else
-            -- For vertical layout, adjust Y based on growth anchor
-            if growthAnchor == "START" then
-                -- Anchor is at top edge, frames grow down
-                -- Visual center is at anchor - totalHeight/2
-                -- To center: anchor needs to be at +totalHeight/2
-                offsetY = totalHeight / 2
-            elseif growthAnchor == "CENTER" then
-                -- Anchor is already at center of frames
-                offsetY = 0
-            elseif growthAnchor == "END" then
-                -- Anchor is at bottom edge, frames grow up
-                -- Visual center is at anchor + totalHeight/2
-                -- To center: anchor needs to be at -totalHeight/2
-                offsetY = -totalHeight / 2
-            end
-            offsetX = 0
-        end
-        
-        db.anchorX = offsetX
-        db.anchorY = offsetY
+
+        -- Centering the party is the same 0,0 write every other branch of this function
+        -- makes, and for the same reason: the container is placed by its CENTER
+        -- (UpdateContainerPosition SetPoints "CENTER" to UIParent "CENTER"), and it is
+        -- sized to the FULL five-frame extent regardless of party size -- the same
+        -- 5 * (frameWidth + spacing) - spacing this branch used to compute for itself.
+        -- A full party therefore fills the container exactly and its visual centre IS
+        -- the container centre, so the offset that centres it is zero.
+        --
+        -- ☠ What was here instead applied a growth-anchor correction: START wrote
+        -- -totalWidth/2, END wrote +totalWidth/2. That is a leftward (or rightward) drag
+        -- of half a full row -- roughly 210px at default size -- against a container
+        -- model that no longer exists, from back when the container point was the growth
+        -- edge rather than the centre. Only CENTER, which wrote 0, produced a centred
+        -- result, and CENTER is the default, which is why this survived.
+        --
+        -- Compensating for a PARTIAL party (offsetting by half the unused width) is
+        -- deliberately not done. It would make "Center" depend on who is currently
+        -- grouped, so the frames would move again as people joined -- the same
+        -- roster-dependent instability that was just removed from the raid path, which
+        -- centres the reserved area and leaves it there.
+        db.anchorX = 0
+        db.anchorY = 0
         DF:UpdateContainerPosition()
         DF:UpdatePositionPanel()
         DF:UpdateAllFrames()
