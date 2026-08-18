@@ -64,6 +64,7 @@ DF.ExportCategories = {
         "raidFlatReverseFillOrder",
         "raidFlatVerticalSpacing",
         "raidGroupAnchor",
+        "raidGroupCenterMode",
         "raidGroupDisplayOrder",
         "raidGroupOrder",
         "raidGroupRowGrowth",

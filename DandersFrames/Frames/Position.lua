@@ -2306,6 +2306,14 @@ function DF:UpdateRaidContainerPosition()
     if DF.ComputeRaidContainerCompensation then
         dx, dy = DF:ComputeRaidContainerCompensation()
     end
+    -- Anchor To: Main Group — a CONSTANT anchor-reference shift (settings only, never
+    -- roster). NOT the retired compensation above: see ComputeRaidMainGroupAnchorOffset
+    -- in Headers.lua for the distinction and the sign rules. Container, mover and test
+    -- container all take it below, so the drag box always frames what it claims to.
+    if DF.ComputeRaidMainGroupAnchorOffset then
+        local ax, ay = DF:ComputeRaidMainGroupAnchorOffset()
+        dx, dy = dx + ax, dy + ay
+    end
     local cx, cy = x + dx, y + dy
 
     -- ☠ DebugActive, not `DF.Debug`: ShortCaller runs debugstack(), and this

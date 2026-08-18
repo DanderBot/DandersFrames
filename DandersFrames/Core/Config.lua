@@ -2312,6 +2312,17 @@ DF.PartyDefaults = {
     raidFlatReverseFillOrder = false,
     raidFlatVerticalSpacing = 2,
     raidGroupAnchor = "CENTER",
+    -- "Center Mode" for the centred grouped layout, once the groups wrap.
+    --   "ALL"  (default) — the whole reserved frame area stays centred on the saved
+    --                      anchor, so the groups shift sideways as more fill in. This
+    --                      is the shipped behaviour.
+    --   "MAIN"           — the FIRST wrap unit's centreline is pinned to the anchor and
+    --                      the overflow extends one way without moving it.
+    -- ☠ Every quantity that implements MAIN is a constant of the SETTINGS, never of the
+    -- roster — that is the design line separating it from the retired, roster-dependent
+    -- compensation. ⚠ A STRING, not a boolean: it is written by a dropdown, and the
+    -- AutoProfiles override paths store whatever the control hands them.
+    raidGroupCenterMode = "ALL",
     raidGroupDisplayOrder = {1, 2, 3, 4, 5, 6, 7, 8},
     raidGroupOrder = "NORMAL",
     raidGroupRowGrowth = "START",

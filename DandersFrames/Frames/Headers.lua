@@ -1978,6 +1978,83 @@ function DF:ComputeRaidContainerCompensation()
     end
 end
 
+-- "Anchor To: Main Group" — the CONSTANT anchor-reference offset.
+--
+-- ☠ THIS IS NOT THE COMPENSATION ABOVE, AND MUST NEVER GROW A ROSTER TERM. The retired
+-- ComputeRaidContainerCompensation failed because it computed from popRows — a value
+-- that changes as people join — and then three surfaces (container, mover, test) each
+-- needed their own copy of the lie. This function reads SETTINGS ONLY. Same inputs,
+-- same output, whether the raid has 1 group or 8.
+--
+-- What it does: with Groups Anchor = CENTER and Anchor To = Main Group, the positioner
+-- places wrap units at FIXED slots (see anchorToMain in the snippet), so the first wrap
+-- unit always occupies the same slot of the reserved grid. This returns the constant
+-- shift that puts THAT unit's centreline on the saved anchor instead of the grid's
+-- centre. Which end the main unit sits at depends on the wrap key AND the players
+-- anchor (players = END mirrors the wrap axis in the snippet corners; the two flips
+-- cancel, hence the equality test below).
+--
+-- Returns (dx, dy) added to the container anchor BEFORE the frameScale division, for
+-- container, mover and test container alike — one number, three consumers, like every
+-- other piece of this geometry. (0, 0) unless the mode is on and the grid actually
+-- wraps.
+function DF:ComputeRaidMainGroupAnchorOffset()
+    local db = DF:GetRaidDB()
+    if not db then return 0, 0 end
+    if not db.raidUseGroups then return 0, 0 end
+    if (db.raidGroupAnchor or "START") ~= "CENTER" then return 0, 0 end
+    if (db.raidGroupCenterMode or "ALL") ~= "MAIN" then return 0, 0 end
+
+    local groupsPerRow = db.raidGroupsPerRow or 8
+    if groupsPerRow < 1 then groupsPerRow = 1 end
+    if groupsPerRow > 8 then groupsPerRow = 8 end
+    local rem8 = 8 % groupsPerRow
+    local fullGridRC = (8 - rem8) / groupsPerRow
+    if rem8 > 0 then fullGridRC = fullGridRC + 1 end
+    -- One wrap unit = nothing hangs off = the grid centre IS the unit centre.
+    if fullGridRC <= 1 then return 0, 0 end
+
+    -- Snapped like the handler's snapInit seeds, so this offset lives on the same
+    -- stride as the geometry it repositions.
+    local frameWidth = db.frameWidth or 80
+    local frameHeight = db.frameHeight or 40
+    local spacing = db.frameSpacing or 2
+    local rowColSpacing = db.raidRowColSpacing or 30
+    if db.pixelPerfect and DF.PixelPerfect then
+        frameWidth = DF:PixelPerfect(frameWidth)
+        frameHeight = DF:PixelPerfect(frameHeight)
+        spacing = DF:PixelPerfect(spacing)
+        rowColSpacing = DF:PixelPerfect(rowColSpacing)
+    end
+
+    local isHorizontal = (db.growDirection or "HORIZONTAL") == "HORIZONTAL"
+    local groupDim
+    if isHorizontal then
+        groupDim = 5 * frameHeight + 4 * spacing   -- wrap axis is Y
+    else
+        groupDim = 5 * frameWidth + 4 * spacing    -- wrap axis is X
+    end
+    local total = fullGridRC * groupDim + (fullGridRC - 1) * rowColSpacing
+    local m = (total - groupDim) / 2
+
+    -- Where does the main unit sit inside the grid? Players = END mirrors the wrap
+    -- axis (TOPRIGHT/BOTTOMLEFT corners with negated offsets); wrap = END flips the
+    -- slot index over the full grid. Both flips together cancel.
+    local playersEnd = (db.raidPlayerAnchor or "START") == "END"
+    local wrapEnd = (db.raidGroupRowGrowth or "START") == "END"
+    local mainAtNear = (playersEnd == wrapEnd)   -- near = TOP (horizontal) / LEFT (vertical)
+
+    if isHorizontal then
+        -- Main at the top of the grid means its centre sits m ABOVE the grid centre,
+        -- so the container moves DOWN (negative y) to land it on the anchor.
+        return 0, mainAtNear and -m or m
+    else
+        -- Main at the left means its centre sits m LEFT of the grid centre, so the
+        -- container moves RIGHT (positive x).
+        return mainAtNear and m or -m, 0
+    end
+end
+
 function DF:CreateRaidPositionHandler()
     if DF.raidPositionHandler then return end
     if not DF.raidContainer then return end
@@ -2029,6 +2106,10 @@ function DF:CreateRaidPositionHandler()
     handler:SetAttribute("groupsperrow", db.raidGroupsPerRow or 8)
     handler:SetAttribute("rowcolspacing", snapInit(db.raidRowColSpacing or 30))
     handler:SetAttribute("grouprowgrowth", db.raidGroupRowGrowth or "START")
+    -- Anchor To: Main Group. 1 = pin the first wrap unit at a fixed, centred slot
+    -- (constant placement); 0 = centre the whole populated block (default). Numeric,
+    -- like centerless flags elsewhere -- string compares in snippets are a needless risk.
+    handler:SetAttribute("anchortomain", ((db.raidGroupCenterMode or "ALL") == "MAIN") and 1 or 0)
     handler:SetAttribute("flatmodeactive", (not db.raidUseGroups) and 1 or 0)
 
     -- Initialize display order attributes.
@@ -2078,6 +2159,7 @@ function DF:CreateRaidPositionHandler()
         local groupsPerRow = handler:GetAttribute("groupsperrow") or 8
         local rowColSpacing = handler:GetAttribute("rowcolspacing") or 30
         local groupRowGrowth = handler:GetAttribute("grouprowgrowth") or "START"
+        local anchorToMain = handler:GetAttribute("anchortomain") or 0
 
         if groupsPerRow < 1 then groupsPerRow = 1 end
         if groupsPerRow > 8 then groupsPerRow = 8 end
@@ -2344,6 +2426,10 @@ function DF:CreateRaidPositionHandler()
                     -- START needs no correction: rcIdx is already the raw index there.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
                     yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group1:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
@@ -2380,6 +2466,8 @@ function DF:CreateRaidPositionHandler()
                     -- VERTICAL growth, so a centred block gets the same compounding.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
                     xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group1:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
@@ -2439,6 +2527,10 @@ function DF:CreateRaidPositionHandler()
                     -- START needs no correction: rcIdx is already the raw index there.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
                     yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group2:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
@@ -2475,6 +2567,8 @@ function DF:CreateRaidPositionHandler()
                     -- VERTICAL growth, so a centred block gets the same compounding.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
                     xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group2:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
@@ -2534,6 +2628,10 @@ function DF:CreateRaidPositionHandler()
                     -- START needs no correction: rcIdx is already the raw index there.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
                     yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group3:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
@@ -2570,6 +2668,8 @@ function DF:CreateRaidPositionHandler()
                     -- VERTICAL growth, so a centred block gets the same compounding.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
                     xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group3:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
@@ -2629,6 +2729,10 @@ function DF:CreateRaidPositionHandler()
                     -- START needs no correction: rcIdx is already the raw index there.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
                     yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group4:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
@@ -2665,6 +2769,8 @@ function DF:CreateRaidPositionHandler()
                     -- VERTICAL growth, so a centred block gets the same compounding.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
                     xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group4:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
@@ -2724,6 +2830,10 @@ function DF:CreateRaidPositionHandler()
                     -- START needs no correction: rcIdx is already the raw index there.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
                     yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group5:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
@@ -2760,6 +2870,8 @@ function DF:CreateRaidPositionHandler()
                     -- VERTICAL growth, so a centred block gets the same compounding.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
                     xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group5:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
@@ -2819,6 +2931,10 @@ function DF:CreateRaidPositionHandler()
                     -- START needs no correction: rcIdx is already the raw index there.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
                     yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group6:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
@@ -2855,6 +2971,8 @@ function DF:CreateRaidPositionHandler()
                     -- VERTICAL growth, so a centred block gets the same compounding.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
                     xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group6:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
@@ -2914,6 +3032,10 @@ function DF:CreateRaidPositionHandler()
                     -- START needs no correction: rcIdx is already the raw index there.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
                     yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group7:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
@@ -2950,6 +3072,8 @@ function DF:CreateRaidPositionHandler()
                     -- VERTICAL growth, so a centred block gets the same compounding.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
                     xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group7:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
@@ -3009,6 +3133,10 @@ function DF:CreateRaidPositionHandler()
                     -- START needs no correction: rcIdx is already the raw index there.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
                     yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group8:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
@@ -3045,6 +3173,8 @@ function DF:CreateRaidPositionHandler()
                     -- VERTICAL growth, so a centred block gets the same compounding.
                     local rcCentered = rcIdx
                     if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
                     xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group8:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
@@ -3383,6 +3513,7 @@ function DF:UpdateRaidPositionAttributes()
         handler:SetAttribute("groupsperrow", db.raidGroupsPerRow or 8)
         handler:SetAttribute("rowcolspacing", snap(db.raidRowColSpacing or 30))
         handler:SetAttribute("grouprowgrowth", db.raidGroupRowGrowth or "START")
+        handler:SetAttribute("anchortomain", ((db.raidGroupCenterMode or "ALL") == "MAIN") and 1 or 0)
 
         -- Update custom group display order
         DF:UpdateRaidGroupOrderAttributes()

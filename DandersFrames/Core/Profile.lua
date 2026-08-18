@@ -439,6 +439,9 @@ function DF:SetProfile(name)
     if DF.MigrateHealPredictionBelowAbsorb then
         DF:MigrateHealPredictionBelowAbsorb()
     end
+    if DF.MigrateRaidCenterMode then
+        DF:MigrateRaidCenterMode()
+    end
 
     -- Apply the profile — runtime state is already clear so the proxy reads
     -- the new profile directly with no stale overlay
@@ -1847,6 +1850,24 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     --
     -- Same shape as the login pass (Core.lua): fill only ABSENT keys, so nothing the
     -- payload actually carried is touched.
+    -- ☠ THIS RUNS BEFORE THE BACKFILL, and it has to.
+    --
+    -- One line further down the defaults seed raidGroupCenterMode = "ALL", after which a
+    -- pre-Center-Mode payload is indistinguishable from a payload that deliberately chose
+    -- Default. Right now the absence still means something, so capture it: an old payload
+    -- gets its flag dropped and is put through the migration below (which then decides on
+    -- its own terms whether the payload qualifies), while a payload that carried the key
+    -- is left exactly as it was sent.
+    --
+    -- The flag itself rides across from the SOURCE profile on the new-profile branch (the
+    -- `_`-prefixed copy convention), which is why it needs clearing at all -- otherwise a
+    -- migrated importer would veto the migration of the un-migrated data that just
+    -- replaced their own. Same failure the three flags below were cleared for.
+    if type(DF.db) == "table" and type(DF.db.raid) == "table"
+        and DF.db.raid.raidGroupCenterMode == nil then
+        DF.db._raidCenterModeV1 = nil
+    end
+
     local function backfillDefaults(modeTable, defaults)
         if type(modeTable) ~= "table" or type(defaults) ~= "table" then return end
         for key, value in pairs(defaults) do
@@ -1888,6 +1909,9 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     if DF.MigrateOORTextAlpha then DF:MigrateOORTextAlpha() end
     -- An imported profile carries the old +12 too, so it needs the same drop.
     if DF.MigrateHealPredictionBelowAbsorb then DF:MigrateHealPredictionBelowAbsorb() end
+    -- No-op unless the pre-backfill check above dropped the flag, i.e. the payload
+    -- predates Center Mode. A payload that carried the key keeps whatever it chose.
+    if DF.MigrateRaidCenterMode then DF:MigrateRaidCenterMode() end
     -- ⚠ An imported profile can carry the OLD three-stage keys and no stop list, so the
     -- conversion has to run on the import path too -- otherwise the import renders from
     -- the legacy fallback until some later login happens to convert it.

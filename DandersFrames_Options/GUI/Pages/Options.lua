@@ -1976,7 +1976,12 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- the full eight-group grid, so with five groups at four per row the bottom cell
         -- legitimately moves them to the bottom of that grid, not of the populated rows.
         local groupAnchorGrid = groupLayoutGroup:AddWidget(
-            GUI:CreateAnchorGrid(self.child, L["Groups Anchor"], db, "raidGroupAnchor", "raidGroupRowGrowth", UpdateFrames, {
+            -- ⚠ Plain UpdateFramesAndGates again. The pin toggle used to be a separate
+            -- row whose hideOn only a page layout pass could re-evaluate, so a cell click
+            -- that changed the centre-ness had to force GUI:RefreshCurrentPage or the
+            -- checkbox appeared a click late. The toggle now lives inside this widget and
+            -- its own Refresh runs on every cell click, so that machinery is gone.
+            GUI:CreateAnchorGrid(self.child, L["Groups Anchor"], db, "raidGroupAnchor", "raidGroupRowGrowth", UpdateFramesAndGates, {
                 verticalInertFn = function(d) return (d.raidGroupsPerRow or 8) >= 8 end,
                 -- ☠ In Rows growth the two keys swap screen axes -- raidGroupAnchor moves
                 -- things UP/DOWN there and raidGroupRowGrowth moves them LEFT/RIGHT, the
@@ -1987,7 +1992,23 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 -- far corner and the wrap offset is measured back from it), so the grid has
                 -- to translate or it names the wrong side. Decoupling them in the
                 -- positioners would move existing users' frames, which is not on the table.
-                wrapMirroredFn = function(d) return (d.raidPlayerAnchor or "START") == "END" end,
+                --
+                -- ⚠ With Pin Main Group on, the meaning of the wrap cell CHANGES: the main
+                -- group is nailed to the anchor, so the only directional thing a user can
+                -- see is which side the OVERFLOW extends — the cell must name that side or
+                -- it reads as wrong (Krathe, 2026-08-18: "Center Left" with overflow going
+                -- right). Overflow sits opposite the main unit, and the main unit's screen
+                -- side is (playersEnd == wrapEnd), so displayed-side == overflow-side works
+                -- out to mirroring exactly when players is START — the inverse of the
+                -- unpinned rule. Derived against WrapKey's involution in Widgets.lua, not
+                -- assumed; the geometry itself never changes, only the translation.
+                wrapMirroredFn = function(d)
+                    local playersEnd = (d.raidPlayerAnchor or "START") == "END"
+                    if (d.raidGroupCenterMode or "ALL") == "MAIN" and (d.raidGroupAnchor or "START") == "CENTER" then
+                        return not playersEnd
+                    end
+                    return playersEnd
+                end,
             }))
         -- The non-obvious half is the empty space: the frame area is sized for all EIGHT
         -- groups so the drag box never resizes under you, so in a five-group raid the left
@@ -1995,6 +2016,45 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- old dropdown look broken when it was in fact the only one of the two doing
         -- anything.
         groupAnchorGrid.tooltip = L["Which corner of the frame area the groups start from, and which way they fill. The area is always sized for all eight groups, so the unused space falls on the opposite side."]
+
+        -- ☠ ITS OWN ROW, AND GREYED -- NEVER HIDDEN. Four arrangements have been tried and
+        -- this is the one that survives: flush row, indented row, a schematic, and finally
+        -- inline inside the picker beside the cells. The inline version broke on the
+        -- TRANSPOSE -- Rows growth draws the grid 2 wide x 3 tall instead of 3 x 2, so the
+        -- space the toggle sat in changes shape and it no longer lines up with anything
+        -- (Krathe, 2026-08-18).
+        --
+        -- ⚠ disableOn covers BOTH conditions and there is no hideOn. A control that
+        -- vanishes when it does not apply cannot be discovered, and it made the rows below
+        -- jump as the anchor or the wrap slider changed. Greyed in place is what the anchor
+        -- grid already does with its own inert half, so the page stays consistent.
+        --
+        -- ⚠ The callback must reposition the CONTAINER as well as the frames -- half of
+        -- this setting is a container anchor-reference shift, consumed only in
+        -- DF:UpdateRaidContainerPosition -- AND refresh the picker, because the meaning of
+        -- its wrap cell flips with this toggle (see wrapMirroredFn above).
+        local function UpdatePinMainGroup()
+            UpdateFrames()
+            if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
+            if groupAnchorGrid and groupAnchorGrid.Refresh then groupAnchorGrid:Refresh() end
+        end
+        -- ☠ A STRING KEY, NOT THE BOOLEAN THIS REPLACED. A dropdown writes an option key,
+        -- and mapping string <-> boolean through customGet/customSet would have fed the
+        -- STRING into two AutoProfiles paths that take dbKey verbatim (HandleRuntimeWrite
+        -- and SetProfileSetting). An override of "ALL" is truthy, so it would have
+        -- switched the pin ON where it means OFF. raidGroupPinMainGroup never shipped, so
+        -- the type change costs no migration.
+        -- ⚠ The labels are deliberately bare -- the tooltip carries the meaning. "Default"
+        -- reuses the existing shared string; the key values stay ALL/MAIN so the geometry
+        -- and the saved setting are unaffected by any future relabelling.
+        local centerModeOptions = { _order = { "ALL", "MAIN" },
+            ALL = L["Default"], MAIN = L["Fixed"] }
+        local centerModeDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Center Mode"], centerModeOptions, db, "raidGroupCenterMode", UpdatePinMainGroup), 55)
+        centerModeDrop.disableOn = function(d)
+            d = d or db
+            return (d.raidGroupAnchor or "START") ~= "CENTER" or (d.raidGroupsPerRow or 8) >= 8
+        end
+        centerModeDrop.tooltip = L["What happens when your groups wrap onto more than one row. Needs Groups Anchor on a centre position.\n\nDefault: all groups stay centred together, so they shift sideways as the raid fills up.\n\nFixed: the first groups stay put, and extra groups appear to one side of them."]
 
         -- Players Grow From = the direction players fill the group's main axis.
         -- HORIZONTAL groups stack players vertically (Top/Bottom); VERTICAL groups

@@ -3974,6 +3974,63 @@ end
 -- payload actually carrying a non-zero inset -- see DF:ApplyImportedProfile.
 --
 -- Anything added here must state which of the two shapes it is.
+-- Step existing centred-and-wrapping raid layouts onto Center Mode = Fixed, so their
+-- frames stay where they have always been instead of picking up the corrected Default.
+--
+-- ☠ FLAG-GATED, NOT PRESENCE-GATED, and that is the whole point.
+-- raidGroupCenterMode HAS a defaults entry ("ALL"), so the backfill seeds it before this
+-- ever runs and `if raid.raidGroupCenterMode == nil` would be false on every profile,
+-- forever. That exact mistake has been made three times in this codebase. The flag lives
+-- on the profile and is deliberately NOT in the defaults, so it cannot be seeded.
+--
+-- WHO IS TOUCHED: grouped raid, Groups Anchor on CENTER, Groups Before Wrap below 8, AND
+-- Players Grow From opposite to Groups Grow From. At 8 the grid never wraps and the old
+-- compensation was always (0,0), so those profiles already match Default.
+--
+-- ☠ THE LAST CLAUSE IS THE ONE THAT IS EASY TO GET WRONG, AND I DID GET IT WRONG.
+-- The predicate is the PAIR, not Players Grow From on its own. It is the same XOR that
+-- ComputeRaidMainGroupAnchorOffset uses for its sign -- there as
+-- `mainAtNear = (playersEnd == wrapEnd)`, here as the two being different:
+--
+--   start/end and end/start  -> the old build genuinely pinned the main block.
+--                               Fixed reproduces it, so these frames do not move at all.
+--   start/start and end/end  -> the old build was broken in both directions: the block
+--                               drifted with the roster AND jumped at the wrap point.
+--                               No mode reproduces that, so there is nothing to preserve
+--                               and they are LEFT ON DEFAULT to choose for themselves.
+--
+-- An earlier version of this header claimed the rule was "exact only for Players Grow
+-- From = End", from a measurement that varied only that axis with Groups Grow From held
+-- at its default. It named the wrong variable and was outright wrong for end/end.
+-- Corrected against in-game PTR testing of all four pairs (Krathe, 2026-08-18).
+--
+-- VALUE-IDEMPOTENT: no. It writes a mode the user may later change on purpose, so the
+-- flag is stamped for every profile it inspects, changed or not, and this must NOT be
+-- re-armed on import the way step 1 of the inset fold is.
+function DF:MigrateRaidCenterMode()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        if type(profile) == "table" and not profile._raidCenterModeV1 then
+            local raid = profile.raid
+            if type(raid) == "table" then
+                -- raidUseGroups defaults to true, so nil means grouped, not flat.
+                local grouped = raid.raidUseGroups ~= false
+                local wrap = tonumber(raid.raidGroupsPerRow) or 8
+                -- Opposite grow directions == the old build pinned the main block, so
+                -- Fixed lands pixel-identical. Matching directions had no stable
+                -- position at all; see the header before touching this test.
+                local playersEnd = (raid.raidPlayerAnchor or "START") == "END"
+                local wrapEnd = (raid.raidGroupRowGrowth or "START") == "END"
+                if grouped and (raid.raidGroupAnchor or "START") == "CENTER"
+                    and wrap < 8 and playersEnd ~= wrapEnd then
+                    raid.raidGroupCenterMode = "MAIN"
+                end
+            end
+            profile._raidCenterModeV1 = true
+        end
+    end
+end
+
 function DF:MigrateBorderInsetFold()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
@@ -7348,6 +7405,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- Turn Important Debuffs ON once for profiles that predate the baseline
             -- flip. Writes unconditionally behind a per-profile flag, so it runs exactly
             -- once and a later user OFF is permanent. See DF:MigrateImportantDebuffOn.
+            -- Keep existing centred-and-wrapping raid layouts on the old geometry by
+            -- stepping them to Center Mode = Fixed. Same shape as the line below it:
+            -- writes behind a per-profile flag, so a later user switch to Default is
+            -- permanent. New profiles take the corrected Default.
+            if DF.MigrateRaidCenterMode then
+                DF:MigrateRaidCenterMode()
+            end
+
             if DF.MigrateImportantDebuffOn then
                 DF:MigrateImportantDebuffOn()
             end

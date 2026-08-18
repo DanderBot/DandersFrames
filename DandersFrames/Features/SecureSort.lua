@@ -838,6 +838,10 @@ function SecureSort:UpdateRaidGroupLayoutParams()
         groupAnchor = db.raidGroupAnchor or "START",
         playerAnchor = db.raidPlayerAnchor or "START",
         groupRowGrowth = db.raidGroupRowGrowth or "START",
+        -- Pin Main Group — mirrors the header snippet's anchortomain attribute
+        -- (the internal name predates the checkbox rename; same meaning).
+        -- ☠ Sourced here or test mode places wrap units differently from live.
+        anchorToMain = (db.raidGroupCenterMode or "ALL") == "MAIN",
     }
     
     -- Apply pixel-perfect adjustments if enabled
@@ -968,7 +972,11 @@ function SecureSort:CalculateRaidGroupPosition(groupNum, posInGroup, playersInGr
             -- populated-row index: (popRows-1) - ((fullGridRC-1) - rcIdx).
             local rcCentered = rcIdx
             if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
-            yOff = (totalHeight - populatedHeight) / 2 + rcCentered * (groupH + rowColSpacing)
+            local wStart = (totalHeight - populatedHeight) / 2
+            -- Anchor To Main Group: fixed slots, no populated centring — mirrors the
+            -- snippet's anchorToMain branch exactly (constant, roster-free).
+            if lp.anchorToMain then wStart = 0; rcCentered = rcIdx end
+            yOff = wStart + rcCentered * (groupH + rowColSpacing)
         end
         x = xOff
         local hdrTop
@@ -992,7 +1000,10 @@ function SecureSort:CalculateRaidGroupPosition(groupNum, posInGroup, playersInGr
             -- Same correction, wrap axis is X in vertical growth.
             local rcCentered = rcIdx
             if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
-            xOff = (totalWidth - populatedWidth) / 2 + rcCentered * (groupW + rowColSpacing)
+            local wStart = (totalWidth - populatedWidth) / 2
+            -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+            if lp.anchorToMain then wStart = 0; rcCentered = rcIdx end
+            xOff = wStart + rcCentered * (groupW + rowColSpacing)
         end
         yDown = yOff
         local hdrLeft
