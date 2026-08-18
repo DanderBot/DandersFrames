@@ -1678,11 +1678,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
             if GUI.SelectedMode == "raid" then
                 DF:UpdateRaidLayout()
-                if DF.SecureSort and DF.SecureSort.raidFramesRegistered then
-                    DF.SecureSort:PushRaidLayoutConfig()
-                    DF.SecureSort:PushRaidGroupLayoutConfig()
-                    DF.SecureSort:TriggerSecureRaidSort()
-                end
                 -- Redraw the reserved group-slot ghosts on the unlock overlay. Every
                 -- setting in this callback can change the eight-slot grid's shape, and
                 -- the whole point of the ghosts is that they show the grid the anchor
@@ -1890,10 +1885,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         raidModeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Group-Based Layout"], db, "raidUseGroups", function()
             UpdateFrames()
-            if DF.SecureSort then
-                DF.SecureSort:PushRaidGroupLayoutConfig()
-                DF.SecureSort:TriggerSecureRaidSort()
-            end
             -- Branch on the SETTING only. Folding `not InCombatLockdown()` into this
             -- test meant that switching TO flat mode while in combat fell into the
             -- else branch and disabled flat mode outright -- the opposite of what
