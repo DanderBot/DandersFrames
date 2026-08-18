@@ -9,6 +9,7 @@
 ### Bug Fixes
 
 * (Frames) Fix auras and Aura Designer indicators sometimes staying faded on a group member who is back in range — most often after combat, a phase change or someone reconnecting.
+* (Auras) Fix an error storm on entering an instance after the 18 Aug client update, which also left aura rows, dispel borders and overlays blank until a reload.
 
 ## [5.2.1]
 

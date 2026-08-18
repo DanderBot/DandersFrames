@@ -1869,6 +1869,26 @@ end
 -- present; the driver Hide is a no-op when no driver exists.
 function Border:StopAnimation(border)
     if not border then return end
+    -- ☠ NEVER-ANIMATED BORDERS: leave without touching a single region.
+    -- Every write below (overlay Hides, resetEdgeAlphas' SetAlpha(1) on the four
+    -- edges) is undoing state that ONLY StartAnimation creates, so on a border
+    -- that never started an animation they are pure no-ops -- and on an aura
+    -- CONTAINER border they are no-ops on a Blizzard aura button's descendants.
+    -- Those buttons carry DenyTaintedAccessWhenAurasAreSecret; the 12.1.0.69382
+    -- client (2026-08-18) refuses tainted writes on their DESCENDANTS too, where
+    -- earlier builds refused only the button itself. Container borders have
+    -- animation stripped unconditionally (AuraContainer's ANIMATION FILTER), so
+    -- this reset was the one write _teardownContainer still made to a restricted
+    -- subtree -- and it threw on entering an instance, aborting the whole
+    -- FullFrameRefresh above it (bug #1079: 197x "calling 'SetAlpha' on bad self",
+    -- dispel borders/overlays gone). Skipping is not a guard around a needed
+    -- write; there is nothing to reset. Only borders that DID animate reach the
+    -- teardown below, and those are DF-owned frames off the button.
+    if not border._animEver then
+        border.activeAnimation = nil
+        border._animHash = nil
+        return
+    end
     unregisterAnimTick(border)
     -- Hide all overlay sets from prior animation passes. The cornerExtras
     -- field is from a previous-rev CORNERS_ONLY implementation; we keep
@@ -2007,6 +2027,9 @@ function Border:StartAnimation(border, spec)
     -- restarts the effect, making it flicker on every re-apply.
     self:StopAnimation(border)
     border._animHash = newHash
+    -- From here on this border owns animation state; StopAnimation must do its
+    -- full teardown on it from now on (see the never-animated early-out there).
+    border._animEver = true
 
     -- Custom OnUpdate effects — render their own overlay textures, so the
     -- effect's visibility doesn't depend on the border's own thickness.

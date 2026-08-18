@@ -5665,6 +5665,13 @@ function Handle:_teardownContainer(park)
     -- clears the OnUpdate + hides the driver; idempotent on borders that had no
     -- animation running. This is the single teardown chokepoint for winner
     -- change / de-config / rebuild / destroy (all route through here).
+    -- ☠ These buttons are RESTRICTED by the time we get here (auras secret ->
+    -- DenyTaintedAccessWhenAurasAreSecret, and from 12.1.0.69382 that covers their
+    -- descendants, i.e. these very borders). Container borders never animate (the
+    -- ANIMATION FILTER strips it), so StopAnimation must -- and does -- return
+    -- before touching a region on a never-animated border; the old unconditional
+    -- edge-alpha reset threw here on entering an instance and aborted the whole
+    -- refresh (bug #1079). Do not add any other write to slot subtrees in here.
     if DF.Border then
         for _, slot in pairs(self.buttons) do
             if slot and slot.dfBorder then DF.Border:StopAnimation(slot.dfBorder) end
