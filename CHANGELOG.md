@@ -5,6 +5,8 @@
 ### New Features
 
 * (Raid Frames) New "Center Mode" for centred group layouts. "Fixed" pins your first groups to the anchor and grows the extra groups off to one side, so the frames you watch most stop sliding sideways as the raid fills up and wraps onto another row. "Default" keeps the whole block centred, as before. Only applies with a centred Groups Anchor and Groups Before Wrap under 8. (by Krathe)
+* (Raid Frames) "Groups Grow From" and "Row Order" are now one corner picker. They were two axes of a single question — which corner of the reserved area the groups sit in — asked in two vocabularies, three controls apart. Click the cell you want; cells that cannot apply at your current settings grey out instead of offering a choice that cannot land. The grid also reshapes with Growth Direction, so the cell you click is always the corner you get. (by Krathe)
+* (Debug) New `/df debug adgate` command showing every Aura Designer placement's hide/show state, alongside the existing `/df debug idgate`. Both outputs can now be copied out of the game cleanly. (by Krathe)
 
 ### Changes
 
@@ -20,6 +22,12 @@
 * (Raid Frames) Fix the unlock overlay drawing reserved slots for groups that are not in the raid. (by Krathe)
 * (Raid Frames) Fix group headers being sized from a stale frame size, so layouts using pixel-perfect snapping could be off by a pixel. (by Krathe)
 * (Test Mode) Fix Center Mode "Fixed" being ignored when entering test mode — the preview sat where "Default" would put it until you changed any setting. (by Krathe)
+* (Auras) Auras on a group member who is not in your part of the world — another instance, another phase, a ghost after releasing — now hide on every display: the debuff row, the dispel highlight and Aura Designer indicators, not just the buff bar. Previously those displays could fill with the wrong auras entirely, because the game stops evaluating aura filters for such units. (by Krathe)
+* (Auras) Fix a dead group member's auras all reappearing if you reloaded your UI while they were a ghost. (by Krathe)
+* (Aura Designer) Fix indicators continuing to show — or a newly placed indicator instantly filling with the wrong aura — on group members outside your instance. (by Krathe)
+* (Auras) Fix a frame reused for a different player after a roster change keeping the previous player's hidden or shown aura state. (by Krathe)
+* (Auras) Aura displays now re-check their hide conditions every few seconds as a safety net, so a missed game event can no longer leave auras stuck shown or stuck hidden until a reload. (by Krathe)
+* (Settings) Fix the debug console rendering as an empty window when the log contained certain aura filter text. (by Krathe)
 
 ## [5.2.1]
 
