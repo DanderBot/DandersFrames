@@ -1532,10 +1532,21 @@ function DF:UpdateAuraDesignerAppearance(frame, forceRetryDenied)
     local slotHost = DF.AuraContainer and DF.AuraContainer.GetSlotOwnerAlphaHost
         and DF.AuraContainer:GetSlotOwnerAlphaHost(frame)
     if slotHost then
+        -- ☠ PROTECTED, like every other write in this block. This was the ONE alpha
+        -- write in the AD pass outside a pcall; a refusal here (the anchor is ours,
+        -- but the engine's restriction surface has moved twice this year) threw out
+        -- of UpdateAllElementAppearances and stranded every element after it — the
+        -- buff and debuff rows included — at their pre-transition alpha. Refused ⇒
+        -- queue the frame for the restriction-lift retry, same as a denied host.
+        local okSlot
         if oorOn then
-            ApplyOORAlpha(slotHost, inRange, 1.0, oorAlpha)
+            okSlot = pcall(ApplyOORAlpha, slotHost, inRange, 1.0, oorAlpha)
         else
-            slotHost:SetAlpha(1.0)
+            okSlot = pcall(slotHost.SetAlpha, slotHost, 1.0)
+        end
+        if not okSlot then
+            DF._adDeniedHostFrames = DF._adDeniedHostFrames or {}
+            DF._adDeniedHostFrames[frame] = true
         end
     end
 end
@@ -1554,11 +1565,29 @@ end
 -- so a persistent restriction keeps costing one failed call per combat, not per tick.
 -- ⚠ A frame in test mode skips its retry (UpdateAuraDesignerAppearance's own guard);
 -- leaving test mode drives a full refresh anyway, so nothing is lost.
+--
+-- ★ EVERY LIFT EDGE, NOT JUST COMBAT END — and only when the restriction has actually
+-- lifted. Aura secrecy is instance-gated: it can hold through a regen inside an
+-- encounter and drop on ENCOUNTER_END or a zone change instead, so a queue drained
+-- on PLAYER_REGEN_ENABLED alone could retry while still restricted, fail, re-queue,
+-- and then wait for a combat that never comes (the unit is already in range, so no
+-- range edge arrives either). EllesmereUI's AuraKit converged on the same watcher
+-- shape from the same bug: regen + PEW + zone + encounter end, gated on
+-- C_Secrets.ShouldAurasBeSecret(). If the probe says still secret, keep the queue
+-- and wait for the next edge -- a retry now would only re-fail.
+local function AurasStillSecret()
+    return C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret() or false
+end
+
 local adRegenFrame = CreateFrame("Frame")
 adRegenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+adRegenFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+adRegenFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+adRegenFrame:RegisterEvent("ENCOUNTER_END")
 adRegenFrame:SetScript("OnEvent", function()
     local queued = DF._adDeniedHostFrames
     if not queued or not next(queued) then return end
+    if AurasStillSecret() then return end
     DF._adDeniedHostFrames = nil
     for frame in pairs(queued) do
         if frame.dfIsDandersFrame then
@@ -1636,43 +1665,79 @@ end
 -- Master function to update all elements at once
 -- ============================================================
 
-function DF:UpdateAllElementAppearances(frame)
-    if not IsDandersFrame(frame) then return end
-    
-    -- Update frame-level appearance first
-    DF:UpdateFrameAppearance(frame)
-    
-    -- Update each element
-    -- AD appearance first: it writes healthbarEffectiveBlend (the OOR-aware bar
-    -- alpha) that UpdateHealthBarAppearance reads below. Running it afterwards left a
+-- ☠ EVERY STEP IS PROTECTED, AND A FAILED PASS RE-ARMS THE RANGE TICK.
+-- Range applies appearance ONCE PER TRANSITION (Range.lua's cache only re-drives this
+-- when dfInRange changes), so the chain below is the one shot each element gets. It
+-- ran unprotected in a fixed order, AD first and the buff/debuff rows near the end: a
+-- single throw anywhere ahead of a step (a secret comparison, a forbidden object, a
+-- nil during a rebuild) left every later element at its PRE-transition alpha until
+-- the next transition -- which for a unit that walked in and stayed is never. That is
+-- "auras faded on a member standing next to me, and touching any setting clears it",
+-- and it is invisible unless the user has Lua errors on.
+-- So: each step under pcall, the first failure per session named on the RANGE debug
+-- channel, and dfInRange cleared so the next range tick sees a change and re-drives
+-- the whole chain rather than treating the broken pass as applied.
+-- Method names, not closures: no allocation on a path that can run per tick while a
+-- range answer is secret.
+local ELEMENT_APPEARANCE_STEPS = {
+    -- Frame-level first, then AD: it writes healthbarEffectiveBlend (the OOR-aware bar
+    -- alpha) that UpdateHealthBarAppearance reads next. Running it later left a
     -- one-tick lag where, on first going out of range, the underlying replace-mode
     -- bar texture kept its in-range (full) alpha for a frame while the border had
     -- already faded — so the AD colour briefly bled through the border.
-    DF:UpdateAuraDesignerAppearance(frame)
-    DF:UpdateHealthBarAppearance(frame)
-    DF:UpdateMissingHealthBarAppearance(frame)
-    DF:UpdateBackgroundAppearance(frame)
-    DF:UpdateBorderAppearance(frame)
-    DF:UpdateNameTextAppearance(frame)
-    DF:UpdateHealthTextAppearance(frame)
-    DF:UpdateStatusTextAppearance(frame)
-    DF:UpdatePowerBarAppearance(frame)
-    DF:UpdateBuffIconsAppearance(frame)
-    DF:UpdateDebuffIconsAppearance(frame)
-    DF:UpdateRoleIconAppearance(frame)
-    DF:UpdateLeaderIconAppearance(frame)
-    DF:UpdateRaidTargetIconAppearance(frame)
-    DF:UpdateReadyCheckIconAppearance(frame)
-    DF:UpdateDispelOverlayAppearance(frame)
-    DF:UpdateMissingBuffAppearance(frame)
-    DF:UpdateAbsorbBarAppearance(frame)
-    DF:UpdateHealAbsorbBarAppearance(frame)
-    DF:UpdateHealPredictionBarAppearance(frame)
-    DF:UpdateDefensiveIconAppearance(frame)
+    "UpdateFrameAppearance",
+    "UpdateAuraDesignerAppearance",
+    "UpdateHealthBarAppearance",
+    "UpdateMissingHealthBarAppearance",
+    "UpdateBackgroundAppearance",
+    "UpdateBorderAppearance",
+    "UpdateNameTextAppearance",
+    "UpdateHealthTextAppearance",
+    "UpdateStatusTextAppearance",
+    "UpdatePowerBarAppearance",
+    "UpdateBuffIconsAppearance",
+    "UpdateDebuffIconsAppearance",
+    "UpdateRoleIconAppearance",
+    "UpdateLeaderIconAppearance",
+    "UpdateRaidTargetIconAppearance",
+    "UpdateReadyCheckIconAppearance",
+    "UpdateDispelOverlayAppearance",
+    "UpdateMissingBuffAppearance",
+    "UpdateAbsorbBarAppearance",
+    "UpdateHealAbsorbBarAppearance",
+    "UpdateHealPredictionBarAppearance",
+    "UpdateDefensiveIconAppearance",
     -- The eight status icons. They were absent from this list entirely, which is why
     -- their range/dead fade never fired on a range change -- see
     -- DF:UpdateStatusIconsAppearance for the full reasoning.
-    DF:UpdateStatusIconsAppearance(frame)
+    "UpdateStatusIconsAppearance",
+}
+
+function DF:UpdateAllElementAppearances(frame)
+    if not IsDandersFrame(frame) then return end
+
+    local failed = false
+    for i = 1, #ELEMENT_APPEARANCE_STEPS do
+        local name = ELEMENT_APPEARANCE_STEPS[i]
+        local fn = DF[name]
+        if fn then
+            local ok, err = pcall(fn, DF, frame)
+            if not ok then
+                failed = true
+                if not DF._warnedElementAppearance then
+                    DF._warnedElementAppearance = true
+                    if DF.DebugWarn then
+                        DF:DebugWarn("RANGE", "%s threw during the appearance pass on %s: %s",
+                            name, tostring(frame.unit), tostring(err))
+                    end
+                end
+            end
+        end
+    end
+    -- A broken pass must not be remembered as applied. Clearing the range stamp makes
+    -- the next UpdateRange see a change and re-run everything; until then GetInRange
+    -- reads "in range", which only matters to a pass that isn't going to run.
+    if failed then frame.dfInRange = nil end
 end
 
 -- ============================================================

@@ -924,6 +924,48 @@ function rangeSubscriber:OnUnitInRange(event, unit)
 end
 DF:RegisterRosterUnitEvent(rangeSubscriber, "UNIT_IN_RANGE_UPDATE", "OnUnitInRange")
 
+-- ★ RE-SEED ON THE EDGES UNIT_IN_RANGE_UPDATE DOES NOT COVER. Phasing and connection
+-- changes move a unit's range answer (CheckUnitRange reads UnitPhaseReason; an offline
+-- unit re-connecting comes back with whatever it last had) without firing the range
+-- event, and the appearance chain only re-runs when the cached answer CHANGES -- so
+-- until the poll happened to disagree with the cache, the frame kept the old alpha.
+-- Forget the unit's cache and the frame's stamp, then re-evaluate: UpdateRange sees a
+-- change no matter what the answer is and re-drives the whole element chain. Same
+-- shape as the roster re-assignment reset in Frames/Headers.lua, and the two events
+-- EllesmereUI re-seeds on for the same reason. Rare events, so the full sweep of a
+-- unit's frames (main + pinned) is affordable.
+function rangeSubscriber:OnUnitRangeReseed(event, unit)
+    if not unit or unit == "player" then return end
+    DF:ClearRangeCacheForUnit(unit)
+    if not unitFrameMap then
+        unitFrameMap = DF.unitFrameMap
+        if not unitFrameMap then return end
+    end
+    local frame = unitFrameMap[unit]
+    if frame and frame:IsShown() then
+        frame.dfInRange = nil
+        DF:UpdateRange(frame)
+    end
+    if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
+            local header = DF.PinnedFrames.headers[setIndex]
+            if header and header:IsShown() then
+                local maxChildren = DF.PinnedFrames.currentMode == "raid" and 40 or 5
+                for i = 1, maxChildren do
+                    local child = header:GetAttribute(DF.CHILD_ATTR[i])
+                    if child and child:IsShown() and child.unit == unit then
+                        child.dfInRange = nil
+                        DF:UpdateRange(child)
+                    end
+                end
+            end
+        end
+    end
+    UpdatePetForOwner(unit)
+end
+DF:RegisterRosterUnitEvent(rangeSubscriber, "UNIT_PHASE", "OnUnitRangeReseed")
+DF:RegisterRosterUnitEvent(rangeSubscriber, "UNIT_CONNECTION", "OnUnitRangeReseed")
+
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_SPECIALIZATION_CHANGED" or event == "PLAYER_TALENT_UPDATE" then
         local unit = ...
