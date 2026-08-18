@@ -3306,6 +3306,13 @@ function NativeBackend:build()
         and not (handle.config and handle.config.parentDrivenVisibility) then
         pcall(function() handle:_setDeathLatch(true) end)
     end
+    -- Same reasoning for the cinematic latch: CineLatchAll only reaches what exists at
+    -- CINEMATIC_START, so a build during one must latch itself. Vulnerable-only, matching
+    -- CineLatchAll's own scope; the STOP sweep and its fallback timer clear it.
+    if AuraContainer._cineActive and handle._idGateVulnerable
+        and not (handle.config and handle.config.parentDrivenVisibility) then
+        pcall(function() handle:_setCineLatch(true) end)
+    end
 end
 
 function NativeBackend:setUnit(unit)
@@ -5548,8 +5555,11 @@ function Handle:SetUnit(unit)
     self:_updateDynRefresh()   -- re-evaluate dynamic-unit auto-refresh for the new token
     -- A retarget is a new identity: a death latch taken for the OLD unit is
     -- meaningless now (and would stick until the NEW unit died and revived).
-    -- The new unit's own dead edge re-latches if it is also a corpse.
-    if self._deathLatched then self:_setDeathLatch(nil) end
+    -- ☠ RE-SEED, don't just clear. The latch is UNIT state: dropping the old unit's is
+    -- half the retarget — the NEW unit may already be dead, and the next death edge for
+    -- an already-dead unit never comes, so a clear-only retarget onto a ghost rendered
+    -- the corpse's auras until an unrelated edge swept (2026-08-18 audit).
+    self:_setDeathLatch(AuraContainer._deathLatchedUnits[unit] or nil)
     self:_applyIdentityGate()  -- the last gate verdict was for the OLD unit (plain frame; combat-safe)
     -- In combat, defer JUST the retarget (a full rebuild would leak a container + N
     -- buttons every combat on roster churn); "retarget" re-runs SetUnit at regen.
@@ -6899,6 +6909,18 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
     handle._idGateSourceRelative = filterSourceRelative(filter, spec.candidateFilters)
     handle._lastCandidateFilters = spec.candidateFilters
     handle:_applyIdentityGate()
+    -- ☠ SEED THE LATCHES TOO — both are edge-driven, and a slot born AFTER the edge hears
+    -- nothing. SetUnitDeathLatched / CineLatchAll loop the registries at the transition;
+    -- a slot created later (indicator re-enabled beside a ghost, options touched during a
+    -- cinematic) starts unlatched and renders until the NEXT edge, which for an
+    -- already-dead unit never comes. The Handle build has the same seed; re-adopted slots
+    -- do not need it — they sat in _slotHandles the whole time, so the edges reached them.
+    if AuraContainer._deathLatchedUnits[spec.unit] then
+        pcall(function() handle:_setDeathLatch(true) end)
+    end
+    if AuraContainer._cineActive and handle._idGateVulnerable then
+        pcall(function() handle:_setCineLatch(true) end)
+    end
 
     -- Enabled defaults true on the template, but assert it once the container actually
     -- has a slot: registration needs HasAnyAuraSlots, which only became true just now.
@@ -7538,14 +7560,19 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     end
     owner.unit = unit
     local ok = pcall(owner.container.SetUnit, owner.container, unit)
-    -- ⚠ The stored gate verdict was computed for the OLD unit. Re-run it for every slot
-    -- on this owner, exactly as Handle:SetUnit re-runs its own gate on retarget --
-    -- otherwise a slot that was hidden for a cross-faction opponent stays hidden after
-    -- the frame is reused for a friendly, and vice versa.
+    -- ⚠ The stored gate verdict was computed for the OLD unit. Re-run it for EVERY slot
+    -- on this owner, exactly as Handle:SetUnit re-runs its own gate on retarget.
+    -- ☠ EVERY slot, not just vulnerable/source-relative ones — this loop kept the gate's
+    -- old three-way entry test after the 2026-08-18 widening, and it is the loop that
+    -- decides the owner ANCHOR: had no slot here passed the filter, an anchor hidden for
+    -- a not-visible old unit stayed hidden over the NEW unit's frame — a fail-to-unhide
+    -- on plain roster churn. The death latch is unit state too, so it re-seeds from the
+    -- registry the same way Handle:SetUnit does: the new unit may already be dead, and
+    -- that edge will never fire again.
+    local latched = AuraContainer._deathLatchedUnits[unit] or nil
     for _, h in pairs(owner.slots) do
-        if h._idGateVulnerable or h._idGateSourceRelative then
-            pcall(function() h:_applyIdentityGate() end)
-        end
+        pcall(function() h:_setDeathLatch(latched) end)
+        pcall(function() h:_applyIdentityGate() end)
     end
     return ok
 end
@@ -7881,6 +7908,28 @@ idGateWatch:SetScript("OnEvent", function(_, event)
     end
 end)
 
+-- ★★ THE SAFETY-NET SWEEP — the "never fail to hide, never fail to unhide" backstop
+-- (Krathe, 2026-08-18). Every gate bug to date has been a missed EDGE, never a wrong
+-- verdict at sweep time: the NPC-offline verdict aside, the pattern is a condition
+-- changing with no watched event firing (party-scoped events in a raid, death folded in
+-- with no UNIT_FLAGS, a unit crossing an instance boundary). mini-auras reached the same
+-- conclusion independently and POLLS, with the comment "neither [assist nor visibility]
+-- has an event of its own". The event list above stays primary — it reacts in one frame —
+-- but this ticker guarantees that any edge it misses costs seconds, not a stuck frame
+-- until reload.
+--
+-- Cheap by construction: the sweep is transition-only end to end (verdicts are two
+-- pcall'd probes per handle; a stable verdict compares and returns, no frame ops, no
+-- allocation), so a quiet tick is ~2 probes x handle count. Combat-safe: hides are plain
+-- DF-frame ops, parks that fail in lockdown revert and retry on the regen sweep.
+-- ⚠ Do NOT shorten the period to make the gate "snappier" — events are the fast path;
+-- this exists only to bound the damage of the next missing one.
+C_Timer.NewTicker(5, function()
+    if AuraContainer._testMode then return end
+    IdentityGateSweep()
+end)
+
+
 -- ============================================================
 -- CINEMATIC LATCH — no flash of the fail-open parse
 -- ============================================================
@@ -7943,9 +7992,14 @@ cineWatch:SetScript("OnEvent", function(_, event)
         -- recovery edge — a latch stuck until reload.
         if AuraContainer._testMode then return end
         GateLog("cinematic start (%s): latching vulnerable pools", event)
+        -- ★ The flag the BUILD paths consult. CineLatchAll only reaches what already
+        -- exists; a handle or slot born mid-cinematic must seed its own latch, and this
+        -- is how it knows to (see the build/AcquireSlot seeds).
+        AuraContainer._cineActive = true
         CineLatchAll(true)
         return
     end
+    AuraContainer._cineActive = nil
     -- STOP: fire any pending recovery NOW rather than waiting out the coalesce —
     -- if the engine restored assist before this event, the sweep bounces and
     -- clears those latches in one pass.
