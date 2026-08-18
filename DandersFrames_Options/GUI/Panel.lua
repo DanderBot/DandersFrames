@@ -1745,12 +1745,11 @@ function DF:CreateGUI()
     -- previews, which size their mock frame to the layout's frameWidth/Height at
     -- build time and so stay stuck at the first-edited layout's size. Call this
     -- whenever the active layout changes (enter/exit auto-profile editing).
-    GUI.InvalidateAllPages = function()
-        if not GUI.Pages then return end
-        for _, page in pairs(GUI.Pages) do
-            if page.Invalidate then page:Invalidate() end
-        end
-    end
+    -- ☠ GUI.InvalidateAllPages was DEFINED TWICE, both inside DF:CreateGUI, so both ran on
+    -- every panel build and the later one silently won. The copy that used to sit here had
+    -- the `if not GUI.Pages` guard; the survivor did not, so the version actually in force
+    -- was the less defensive of the pair. There is now one definition, further down, with
+    -- the guard folded into it. Do not reintroduce a second.
 
     -- Category system
     GUI.Categories = {}
@@ -2506,7 +2505,11 @@ function DF:CreateGUI()
 
     -- Invalidate all page caches (call before profile/mode switches so each
     -- page rebuilds with a fresh db reference on its next visit).
+    -- ☠ THE ONLY DEFINITION. A second one used to exist earlier in this same function and
+    -- was shadowed by this one at every panel build; the guard below came from that copy.
+    -- Callers guard the FUNCTION but not the TABLE, so the guard has to live here.
     function GUI:InvalidateAllPages()
+        if not self.Pages then return end
         for _, page in pairs(self.Pages) do
             if page.Invalidate then page:Invalidate() end
         end
