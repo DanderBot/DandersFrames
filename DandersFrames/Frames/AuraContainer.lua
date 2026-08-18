@@ -3524,9 +3524,14 @@ function NativeBackend:applyGroupTuning()
                 -- and the one other 12.1 implementations use for it. Without this the park
                 -- reached group-backed rows only, and a slot-backed row kept falling back
                 -- to the whole-handle hide it is meant to replace.
+                -- ⚠ Same park string as SlotHandle:_pushFilter, and it must stay the same.
+                -- Two writers pushing different "parked" values means whichever ran last
+                -- decides, and one of them would be the string the engine no longer treats
+                -- as a park. See SLOT_PARK_FILTER for why "" was retired.
                 local parked = self.handle._idGateParked
                     and self.gatedGroupKeys and self.gatedGroupKeys[key]
-                if not pcall(c.SetAuraSlotFilterString, c, key, parked and "" or fsByKey[key]) then
+                if not pcall(c.SetAuraSlotFilterString, c, key,
+                    parked and AuraContainer.SLOT_PARK_FILTER or fsByKey[key]) then
                     fsMissing = fsMissing or key
                 end
             end
@@ -6557,11 +6562,16 @@ end
 -- ☠ PARKING IS THE WHOLE MECHANISM, and it is why this could not be built before now.
 -- AddAuraSlot is add-only -- Blizzard's ClearAuraGroups is "intentionally not exposed via
 -- the inbound interface" because pooled frames would become irrecoverable -- and slots
--- have no maxFrameCount. That SetAuraSlotFilterString(key, "") empties a slot is not
--- determinable from the Lua source -- AuraUtil.IsValidFilterString("") returns true
--- because every component is skipped, but what the engine does with an empty predicate is
--- invisible. Proved in game with /alpark on 2026-08-05: it matches nothing (it does NOT
--- fall back to a default), and a bare re-Set restores it live.
+-- have no maxFrameCount, so an unwanted slot must be made to match nothing.
+--
+-- ☠☠ THE EMPTY STRING IS RETIRED -- see SLOT_PARK_FILTER. That
+-- SetAuraSlotFilterString(key, "") empties a slot was never determinable from the Lua
+-- source (AuraUtil.IsValidFilterString("") returns true because every component is
+-- skipped, but what the engine does with an empty predicate is invisible), and was proved
+-- in game with /alpark on 2026-08-05 -- on THAT build. It stopped holding: an AD indicator
+-- kept rendering with the gate hidden, the empty string pushed and the engine accepting it
+-- (Krathe, 2026-08-18). The park is now a self-contradicting filter, which cannot match
+-- under any reading of the predicate. A bare re-Set still restores live.
 --
 -- ★ Z-ORDER: the dfLevelHost. Sharing a container means sharing its frame level, but AD
 -- indicators need independent layering. Writing the level on the slot BUTTON is legal
@@ -6988,11 +6998,35 @@ end
 -- `_gateHidden` is the IDENTITY GATE's. Before this there was only `parked`, so whichever
 -- wrote last won -- a consumer Restore would have un-hidden a gated slot and leaked the
 -- auras the gate exists to suppress. One writer, one resolution.
+-- ☠ THE SLOT PARK STRING. Was "" and is no longer, because an empty filter parking a slot
+-- is a CONVENTION the engine is free to change, not a guarantee.
+--
+-- It was proven in game on the 2026-08-05 build (`/alpark`, two side-by-side slots: the
+-- emptied plate went blank, the control kept its icon) and the note written at the time
+-- named this exact fallback for the day it stopped holding: a filter that matches nothing
+-- BY CONSTRUCTION rather than by convention. That day arrived -- an AD indicator kept
+-- rendering with gate=true, pushed=[] and pushOK=true, i.e. the gate decided correctly,
+-- the empty string was pushed, the engine accepted it, and the artwork stayed on screen
+-- (Krathe, 2026-08-18).
+--
+-- "HELPFUL|!HELPFUL" cannot match: the same token is required and forbidden in one
+-- predicate. No engine reading of it produces an aura, so this does not depend on how an
+-- empty predicate is interpreted. It is valid to IsValidFilterString either way.
+-- ⚠ Deliberately not HARMFUL-flavoured for harmful slots. The contradiction is what parks
+-- it, not the polarity, so one constant serves every slot and there is no branch to get
+-- wrong.
+local SLOT_PARK_FILTER = "HELPFUL|!HELPFUL"
+-- ⚠ Also on the module table: NativeBackend:ApplyTuning pushes the park string for
+-- slot-backed rows and sits EARLIER in this file, where the local is not yet in scope. The
+-- field resolves at call time, so both writers park with the identical string -- which they
+-- must, or whichever runs last decides and one of them is the retired convention.
+AuraContainer.SLOT_PARK_FILTER = SLOT_PARK_FILTER
+
 function SlotHandle:_pushFilter()
     local c = self.owner and self.owner.container
     if not c then return false end
     local want = (self.parked or self._gateHidden or self._cineLatched or self._deathLatched)
-        and "" or self.liveFilter
+        and SLOT_PARK_FILTER or self.liveFilter
     local ok = pcall(c.SetAuraSlotFilterString, c, self.key, want)
     -- ☠ RECORD WHAT WAS ACTUALLY PUSHED, AND WHETHER IT TOOK. /df debug idgate used to
     -- print liveFilter under a comment calling it "the pushed string" -- it is not, it is
