@@ -5964,19 +5964,52 @@ function Factory:DebugDumpADGate()
                         if n <= CAP then
                             local h = entry.handle
                             local chain = entry.chain
-                            local hGate = (h and h._idGateHidden) and true or false
-                            local hShown = adGateShown(h and h.frame)
-                            local badge = (h and h.GetBadgeFrame) and h:GetBadgeFrame() or nil
-                            local bShown = badge and adGateShown(badge) or "-"
-                            -- The fault signature: gate believes hidden, frame or badge is up.
+                            -- ☠ TWO HANDLE KINDS, DIFFERENT FIELDS. A slot-backed placement
+                            -- is a SlotHandle: no .frame, no GetBadgeFrame, and its verdict
+                            -- lives in _gateHidden -- NOT _idGateHidden, which is the
+                            -- Handle's. Reading the Handle fields on a slot printed
+                            -- gate=false shown=- badge=- for a slot that /df debug idgate
+                            -- simultaneously reported gateHidden=true. A dump that
+                            -- contradicts the other dump is worse than no dump.
+                            local isSlot = isSlotHandle and isSlotHandle(h) or false
+                            local hGate, hShown, bShown, extra
+                            if isSlot then
+                                hGate = (h and h._gateHidden) and true or false
+                                -- A slot has no frame of its own; its actuation IS the
+                                -- pushed filter string, so that is what "shown" means here.
+                                hShown = (h and h._pushedFilter == "") and "false"
+                                    or (h and h._pushedFilter) and "true" or "-"
+                                -- ★ THE BUTTON IS THE VISIBLE OBJECT. isSlotHandle is
+                                -- literally "has GetButton", so every slot can hand us the
+                                -- frame the player is looking at. An empty pushed filter
+                                -- means the engine binds no aura -- it does NOT by itself
+                                -- mean the button is down, and DF paints its own square
+                                -- fill / border / icon onto that button. A slot reading
+                                -- pushed=[] with btn=true is an indicator whose artwork
+                                -- outlived the aura that justified it.
+                                local btn = (h and h.GetButton) and h:GetButton() or nil
+                                bShown = btn and adGateShown(btn) or "-"
+                                extra = ("SLOT pushed=[%s] pushOK=%s parked=%s btn=%s"):format(
+                                    adGateSafe(h and h._pushedFilter),
+                                    tostring(h and h._pushOK),
+                                    tostring((h and h.parked) or false),
+                                    bShown)
+                            else
+                                hGate = (h and h._idGateHidden) and true or false
+                                hShown = adGateShown(h and h.frame)
+                                local badge = (h and h.GetBadgeFrame) and h:GetBadgeFrame() or nil
+                                bShown = badge and adGateShown(badge) or "-"
+                                extra = ("pdv=%s"):format(
+                                    tostring((h and h.config and h.config.parentDrivenVisibility) or false))
+                            end
+                            -- The fault signature: gate believes hidden, something is up.
                             if hGate and (hShown == "true" or bShown == "true") then
                                 suspects = suspects + 1
                             end
-                            print(("    " .. DF.OUT.SECTION .. "%d|r %s key=%s unit=%s chain=%s gate=%s shown=%s badge=%s pdv=%s"):format(
+                            print(("    " .. DF.OUT.SECTION .. "%d|r %s key=%s unit=%s chain=%s gate=%s shown=%s badge=%s %s"):format(
                                 n, adGateSafe(fam), adGateSafe(key), adGateSafe(unit),
                                 chain and tostring(#chain) or "-",
-                                tostring(hGate), hShown, bShown,
-                                tostring((h and h.config and h.config.parentDrivenVisibility) or false)))
+                                tostring(hGate), hShown, bShown, extra))
                             if type(chain) == "table" then
                                 for i = 1, #chain do
                                     local L = chain[i]
