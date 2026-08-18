@@ -5973,6 +5973,7 @@ function Factory:DebugDumpADGate()
                             -- contradicts the other dump is worse than no dump.
                             local isSlot = isSlotHandle and isSlotHandle(h) or false
                             local hGate, hShown, bShown, extra
+                            local oShown = "-"
                             if isSlot then
                                 hGate = (h and h._gateHidden) and true or false
                                 -- A slot has no frame of its own; its actuation IS the
@@ -5989,11 +5990,19 @@ function Factory:DebugDumpADGate()
                                 -- outlived the aura that justified it.
                                 local btn = (h and h.GetButton) and h:GetButton() or nil
                                 bShown = btn and adGateShown(btn) or "-"
-                                extra = ("SLOT pushed=[%s] pushOK=%s parked=%s btn=%s"):format(
+                                -- ★ owner= is the ACTUATION for a gated slot. The engine
+                                -- fails open for a distrusted unit and never re-parses, so
+                                -- the filter push cannot clear a stale bound aura; the gate
+                                -- hides the DF-owned owner ANCHOR instead (see
+                                -- SlotHandle:_pushFilter). gate=true with owner=true is the
+                                -- fault; owner=false is the gate working.
+                                local oAnchor = h and h.owner and h.owner.anchor
+                                oShown = oAnchor and adGateShown(oAnchor) or "-"
+                                extra = ("SLOT pushed=[%s] pushOK=%s parked=%s btn=%s owner=%s"):format(
                                     adGateSafe(h and h._pushedFilter),
                                     tostring(h and h._pushOK),
                                     tostring((h and h.parked) or false),
-                                    bShown)
+                                    bShown, oShown)
                             else
                                 hGate = (h and h._idGateHidden) and true or false
                                 hShown = adGateShown(h and h.frame)
@@ -6003,7 +6012,11 @@ function Factory:DebugDumpADGate()
                                     tostring((h and h.config and h.config.parentDrivenVisibility) or false))
                             end
                             -- The fault signature: gate believes hidden, something is up.
-                            if hGate and (hShown == "true" or bShown == "true") then
+                            -- For a slot the decisive column is owner= -- btn is SECRET on
+                            -- a distrusted unit, but the owner anchor is DF-owned and
+                            -- always readable, so gate=true owner=true is a real fault.
+                            if hGate and (hShown == "true" or bShown == "true"
+                                or oShown == "true") then
                                 suspects = suspects + 1
                             end
                             print(("    " .. DF.OUT.SECTION .. "%d|r %s key=%s unit=%s chain=%s gate=%s shown=%s badge=%s %s"):format(

@@ -7025,7 +7025,30 @@ AuraContainer.SLOT_PARK_FILTER = SLOT_PARK_FILTER
 function SlotHandle:_pushFilter()
     local c = self.owner and self.owner.container
     if not c then return false end
-    local want = (self.parked or self._gateHidden or self._cineLatched or self._deathLatched)
+    -- ☠☠ THE FILTER PUSH CANNOT HIDE A SLOT ON A UNIT THE GATE DISTRUSTS, and that is not
+    -- a defect in the park string -- it is the fail-open mechanism itself. For a unit whose
+    -- identity data is unavailable (not visible / cross-instance / cinematic) the engine
+    -- fails open and NOTHING RE-PARSES (proven for cinematics in the UNIT_FACTION
+    -- investigation; reproduced here in game: gate=true, pushed=[], pushOK=true, artwork
+    -- still on screen, and a freshly placed indicator INSTANTLY bound the unit's top aura
+    -- because the initial parse skipped its candidate filters too -- Krathe, 2026-08-18).
+    -- Any filter we push -- empty, contradictory, anything -- lands in the engine and sits
+    -- there unconsulted until identity recovers. The stale bound aura keeps rendering.
+    --
+    -- The Handles never had this failure because they hide a DF-OWNED FRAME. The slot
+    -- equivalent is the owner ANCHOR: ensureOwner's plain frame between the unit frame and
+    -- the shared container, already the OOR fade's alpha host, ours to write in or out of
+    -- combat. Hiding it hides every slot button under it.
+    --
+    -- ⚠ UNIT-LEVEL VERDICTS ONLY. gate/cine/death are properties of the UNIT, so every
+    -- slot on this owner computes the same answer and the shared anchor is the right
+    -- grain. `parked` is per-slot consumer state (one disabled indicator) and must NOT
+    -- hide the owner -- it stays filter-only.
+    local unitHidden = (self._gateHidden or self._cineLatched or self._deathLatched)
+        and true or false
+    local anchor = self.owner.anchor
+    if anchor then pcall(anchor.SetShown, anchor, not unitHidden) end
+    local want = (self.parked or unitHidden)
         and SLOT_PARK_FILTER or self.liveFilter
     local ok = pcall(c.SetAuraSlotFilterString, c, self.key, want)
     -- ☠ RECORD WHAT WAS ACTUALLY PUSHED, AND WHETHER IT TOOK. /df debug idgate used to
