@@ -6993,7 +6993,16 @@ function SlotHandle:_pushFilter()
     if not c then return false end
     local want = (self.parked or self._gateHidden or self._cineLatched or self._deathLatched)
         and "" or self.liveFilter
-    return pcall(c.SetAuraSlotFilterString, c, self.key, want)
+    local ok = pcall(c.SetAuraSlotFilterString, c, self.key, want)
+    -- ☠ RECORD WHAT WAS ACTUALLY PUSHED, AND WHETHER IT TOOK. /df debug idgate used to
+    -- print liveFilter under a comment calling it "the pushed string" -- it is not, it is
+    -- the STORED filter, which never changes when the gate hides a slot. So a slot could
+    -- read gateHidden=true filter=HELPFUL|PLAYER and that told you nothing about whether
+    -- the empty string ever reached the engine. Diagnosing an indicator that renders while
+    -- the gate believes it hidden needs the pushed value, not the intended one.
+    self._pushedFilter = want
+    self._pushOK = ok and true or false
+    return ok
 end
 
 -- ☠ A REFUSED PUSH MUST NOT BE LATCHED AND FORGOTTEN. `parked` records the consumer's
@@ -8013,7 +8022,7 @@ function AuraContainer.DebugDumpIdentityGate()
                 elseif issecretvalue and issecretvalue(can) then canTxt = "SECRET"
                 else canTxt = tostring(can) end
             end
-            print(("    " .. DF.OUT.SECTION .. "S%d|r key=%s unit=%s vuln=%s srcRel=%s canAssist=%s gateHidden=%s parked=%s why=%s cine=%s death=%s assist=%s filter=%s"):format(
+            print(("    " .. DF.OUT.SECTION .. "S%d|r key=%s unit=%s vuln=%s srcRel=%s canAssist=%s gateHidden=%s parked=%s why=%s cine=%s death=%s assist=%s live=%s pushed=[%s] pushOK=%s"):format(
                 sn, safeTxt(s.key), safeTxt(unit),
                 tostring(s._idGateVulnerable or false),
                 tostring(s._idGateSourceRelative or false),
@@ -8024,9 +8033,12 @@ function AuraContainer.DebugDumpIdentityGate()
                 tostring(s._cineLatched or false),
                 tostring(s._deathLatched or false),
                 tostring(s._idGateAssist),
-                -- The pushed string IS the actuation: "" means parked/hidden by one of
-                -- the four writers above, whichever won in _pushFilter.
-                safeTxt(s.liveFilter)))
+                -- ⚠ live= is the INTENDED filter and never changes when the gate hides a
+                -- slot. pushed= is the actuation: "" means one of the four writers in
+                -- _pushFilter won. pushOK= is whether the setter was refused (lockdown).
+                -- A slot reading gateHidden=true with a non-empty pushed= is an actuation
+                -- failure; nil pushed= means _pushFilter has not run since load.
+                safeTxt(s.liveFilter), safeTxt(s._pushedFilter), tostring(s._pushOK)))
         end
     end
     if sn > CAP then
