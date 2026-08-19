@@ -470,14 +470,29 @@ local function CreateEnableBanner(parent)
                 -- This is a real edit to another page's setting, so SAY so. It is the
                 -- whole point of the question, but the page that owns the key is two
                 -- clicks away and the user has no other way to know it moved.
+                local buffsChanged = false
                 if targetDB.showBuffs ~= keepBuffs then
                     targetDB.showBuffs = keepBuffs
+                    buffsChanged = true
                     DF:Say(keepBuffs and L["Buffs kept alongside Aura Designer."]
                         or L["Buffs turned off — Aura Designer is replacing them."])
                 end
                 DF:AuraDesigner_RefreshPage()
                 DF:InvalidateAuraLayout()
                 DF:UpdateAllFrames()
+                -- ☠ UpdateAllFrames IS LAYOUT-ONLY, and this popup WRITES showBuffs. The
+                -- buff row's show/hide gate lives in the UNIT_AURA-driven UpdateAuras
+                -- path, so a layout pass leaves already-shown buff icons on screen until
+                -- the next aura event on that unit -- the row stayed up after answering
+                -- "replace my buffs" until Show Buffs was toggled by hand or the UI
+                -- reloaded (Krathe, 2026-08-19). The Show Buffs checkbox itself carries
+                -- exactly this call, with this reasoning written next to it; the popup
+                -- that writes the same key never got it.
+                -- ⚠ Gated on an actual change: this re-scans auras on every visible frame
+                -- and is not free, and the popup can be answered with the value unchanged.
+                if buffsChanged and DF.RefreshAllVisibleFrames then
+                    DF:RefreshAllVisibleFrames()
+                end
                 if DF.AuraDesigner and DF.AuraDesigner.Engine and DF.AuraDesigner.Engine.ForceRefreshAllFrames then
                     DF.AuraDesigner.Engine:ForceRefreshAllFrames()
                 end

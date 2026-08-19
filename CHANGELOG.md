@@ -13,6 +13,9 @@
 * (Auras) Fix an error storm on entering an instance after the 18 Aug client update, which also left aura rows, dispel borders and overlays blank until a reload.
 * (Dispel Highlight) Fix the overlay washing whole frames in flat white (or the wrong colour) in dungeons. (by Krathe)
 * (Dispel Highlight) "Show On Current Health Only" now applies from the moment the overlay first appears mid-fight, instead of covering the whole frame until you next leave combat. (by Krathe)
+* (Dispel Highlight) Your own dispel colours now apply to the debuff icon border. They were meant to before, but the palette could never be built, so the game's default colours were drawn instead — if your border colours look different after this update, that is the setting working for the first time. (by Krathe)
+* (Auras) Fix auras staying on screen after a cinematic showing effects that had already gone — including on your own frame, where the defensive and debuff rows could sit stale until a UI reload. (by Krathe)
+* (Aura Designer) Fix the Buff Bar still showing after answering "replace my buffs" when enabling the Aura Designer, and the Buff Bar banner's "Enable Buffs" link having the same problem in reverse. (by Krathe)
 * (Aura Designer) Fix indicators stuck under the health bar with the Frame Level slider doing nothing — a leftover setting from an old version was pinning them below the frame. It is cleared automatically. (by Krathe)
 * (Aura Designer) Bar indicators now use the same section names and order as icons and squares: "Texture & Colors" is now "Appearance", so Frame Level and Alpha live under the same heading on every indicator type, and "Show When Missing" leads the square card the way it leads the icon card. (by Krathe)
 * (Pinned Frames) Fix friendly NPC boss frames showing no auras or Aura Designer indicators at all. (by Krathe)

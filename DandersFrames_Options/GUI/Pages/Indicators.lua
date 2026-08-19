@@ -34,6 +34,13 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 self:RefreshStates()
                 DF:InvalidateAuraLayout()
                 DF:UpdateAllFrames()
+                -- Mirror of the Show Buffs checkbox below, for its reason: the show/hide
+                -- gate lives in the UNIT_AURA-driven UpdateAuras path, so a layout-only
+                -- pass leaves the row in its previous state until the next aura event on
+                -- that unit. EVERY writer of showBuffs needs this, not just the checkbox
+                -- -- the Aura Designer's replace-buffs popup was the third writer and had
+                -- the same gap (Krathe, 2026-08-19).
+                DF:RefreshAllVisibleFrames()
             elseif data == "openAD" then
                 if GUI.SelectTab then GUI.SelectTab("auras_auradesigner") end
             end

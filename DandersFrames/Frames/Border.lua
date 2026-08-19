@@ -813,6 +813,28 @@ function DF:FindDispelTypeEnum()
             end
         end
     end
+    -- ☠☠ NO Enum TABLE EXISTS — FALL BACK TO THE DB2 VALUES, or the curve can never be
+    -- built and every curve-based tint silently degrades to the name-keyed map.
+    --
+    -- The scan above has never found anything: probed nil on 68824, and confirmed again on
+    -- live 69382 by /df debug dispelids ("no Enum table with Magic/Curse/Disease/Poison
+    -- found", "curve built: no") while GetAuraDispelTypeColor reported PRESENT. So the
+    -- dispel overlay kept falling back to customDispelColorMap and kept rendering white on
+    -- secret dispel names — the fix in 81122cb1 was a no-op for exactly this reason
+    -- (Krathe, 2026-08-19).
+    --
+    -- These are the SpellDispelType DB2 ids, i.e. game data rather than anyone's
+    -- invention, and they are the same values another 12.1 unit-frame addon hardcodes for
+    -- its own dispel curve (citing the same DB2 table). The gaps are real: 5-8 and 10 are
+    -- unused by the dispel types we colour.
+    -- ⚠ The SCAN STILL WINS. If Blizzard ever ships a real enum, it is authoritative and
+    -- this table is dead weight; do not reorder that.
+    -- ⚠ Curve X values must be the dispel-type IDs, which is what makes exact-integer
+    -- lookups land on their own point (see GetDispelColorCurve's Linear note).
+    if not found then
+        found = { None = 0, Magic = 1, Curse = 2, Disease = 3, Poison = 4, Enrage = 9, Bleed = 11 }
+        foundName = "DB2 fallback (SpellDispelType)"
+    end
     DF._dispelTypeEnum = found or false
     DF._dispelTypeEnumName = foundName
     return found

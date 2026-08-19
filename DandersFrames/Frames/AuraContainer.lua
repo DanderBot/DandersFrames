@@ -5152,9 +5152,32 @@ end
 -- same combat-safe render-side lever the identity gate uses. The latch exists so
 -- the fail-open parse a cinematic leaves behind is never SEEN: the frames come
 -- back only after the recovery re-parse below has run.
-function Handle:_setCineLatch(on)
+-- ☠☠ CLEARING THIS LATCH MUST RE-PARSE — the death latch below has always done so and
+-- this one never did, which is the whole difference between "stale icons on your own
+-- frame until /reload" and not.
+--
+-- A cinematic flips UNIT_FACTION, the ENGINE fails open and re-parses the pool
+-- unfiltered; that is why this latch exists. The only re-parse used to come from
+-- _noteGateRecovery, which fires on a false->true ASSIST edge — and CINEMATIC_STOP
+-- deliberately un-latches every handle whose assist "never dropped", on the reasoning
+-- that it was therefore never fail-open. ☠ THAT REASONING IS WRONG: the fail-open is
+-- caused by the engine's UNIT_FACTION flip, not by whether one of our coalesced sweeps
+-- happened to land inside the window and observe UnitCanAssist dipping. Lose that race —
+-- easy, the dip is brief, and briefest of all on the PLAYER'S OWN unit — and the handle
+-- un-latches with the fail-open parse still standing, showing auras that no longer exist
+-- until something else forces a rebuild (Krathe's own defensive + debuff rows,
+-- 2026-08-19).
+--
+-- ⚠ REFRESH BEFORE THE FLAG CLEARS, so the rows reappear ALREADY re-parsed rather than
+-- one frame early — the same ordering _noteGateRecovery documents for its own bounce.
+-- ⚠ skipReparse is for that caller only: it has just Refreshed and would otherwise pay
+-- for a second bounce on the same edge.
+function Handle:_setCineLatch(on, skipReparse)
     on = on or nil
     if self._cineLatched == on then return end
+    if not on and not skipReparse then
+        self:Refresh()
+    end
     self._cineLatched = on
     self:_applyVisibility()
 end
@@ -5203,7 +5226,9 @@ function Handle:_noteGateRecovery(can)
         self:Refresh()
         -- AFTER the bounce, deliberately: the whole point of the cinematic latch
         -- is that the frames reappear already re-parsed, not one frame before.
-        self:_setCineLatch(nil)
+        -- skipReparse: the Refresh above IS that bounce; the latch clear would
+        -- otherwise run a second one on the same edge.
+        self:_setCineLatch(nil, true)
     end
 end
 
@@ -7040,14 +7065,30 @@ end
 -- contract as Park/Restore -- a refused CLEAR would otherwise leave the slot dark
 -- forever, so failure or lockdown queues the regen replay, which re-derives from
 -- whatever the latch state is by drain time.
-function SlotHandle:_setCineLatch(on)
+-- ☠☠ AND THE CLEAR RE-PARSES, for the reason written on Handle:_setCineLatch: the
+-- cinematic window is fail-open BY DEFINITION, so "assist never dropped" is not evidence
+-- the slot's parse is clean. Re-pushing candidateFilters is the slot's re-parse (the same
+-- lever _noteGateRecovery uses), and it is what stops a stale fail-open selection
+-- surviving the cinematic.
+-- ⚠ Deferred in lockdown to the SAME replay the actuation already queues below — no
+-- native tuning setter runs in combat, and the replay re-pushes candidates, verdict and
+-- filter together on the way out.
+-- ⚠ skipReparse is for _noteGateRecovery, which has just re-pushed candidates itself.
+function SlotHandle:_setCineLatch(on, skipReparse)
     on = on or nil
     if self._cineLatched == on then return end
     self._cineLatched = on
     local ok = self:_pushFilter()
+    local wantReparse = (not on) and not skipReparse
+        and self._lastCandidateFilters ~= nil
     if not ok or InCombatLockdown() then
         self._pendingTuning = true
         registerSlotRegen(self)
+    elseif wantReparse then
+        local c = self.owner and self.owner.container
+        if c then
+            pcall(c.SetAuraSlotCandidateFilters, c, self.key, self._lastCandidateFilters)
+        end
     end
 end
 
@@ -7095,7 +7136,8 @@ function SlotHandle:_noteGateRecovery(can)
     end
     pcall(c.SetAuraSlotCandidateFilters, c, self.key, self._lastCandidateFilters)
     -- After the bounce, matching the Handle: the slot un-parks already re-parsed.
-    self:_setCineLatch(nil)
+    -- skipReparse: the candidate re-push above IS that bounce.
+    self:_setCineLatch(nil, true)
 end
 
 function SlotHandle:_applyIdentityGate()
