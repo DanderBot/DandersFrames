@@ -9,6 +9,8 @@
 * (Aura Designer) Fix indicators stuck rendering under the health bar with the Frame Level slider doing nothing. A leftover per-indicator Frame Strata setting from an old version — no longer editable anywhere — pinned them to a layer below the frame, where no frame level could lift them. Leftover values are cleared and can no longer bury an indicator. (by Krathe)
 * (Aura Designer) Bar indicators now use the same section names and order as icons and squares: the bar's "Texture & Colors" is now "Appearance", so Frame Level and Alpha live under the same heading on every indicator type, and "Show When Missing" leads the square card the way it leads the icon card. (by Krathe)
 * (Debug) `/df debug dispeldbg` now reports correctly in combat instead of dropping its most important lines. (by Krathe)
+* (Auras) Fix auras staying on screen after a cinematic showing effects that had already gone — including on your own frame, where the defensive and debuff rows could sit stale until a UI reload. (by Krathe)
+* (Aura Designer) Fix the Buff Bar still showing after answering "replace my buffs" when enabling the Aura Designer. The setting was applied correctly; the row just wasn't refreshed until you toggled Show Buffs by hand or reloaded. The Buff Bar banner's "Enable Buffs" link had the same problem in reverse. (by Krathe)
 
 ## [5.2.1]
 
