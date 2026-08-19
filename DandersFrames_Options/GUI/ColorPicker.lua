@@ -1792,7 +1792,35 @@ local function OpenDFColorPickerWithBlizzard(info, useBlizzardAsBackend)
         
         -- Set up previousValues for Blizzard UI compatibility
         ColorPickerFrame.previousValues = { r = r, g = g, b = b, a = a }
-        
+
+        -- ☠☠ TAKE OWNERSHIP OF THE BLIZZARD FRAME'S CALLBACKS, OR THE LAST ADDON TO USE
+        -- IT KEEPS THEM. Direct mode never calls SetupColorPickerAndShow -- that is the
+        -- point of it -- but ApplyColor below still writes into ColorPickerFrame so DF's
+        -- own swatchFunc can read the values back from there. Blizzard's OnColorSelect
+        -- fires on EVERY SetColorRGB, shown or not, and calls self.swatchFunc,
+        -- self.opacityFunc and self.swatch:SetColorRGB (Blizzard_ColorPickerFrame /
+        -- Mainline / ColorPickerFrame.lua, verified against live) -- and Setup is the ONLY
+        -- writer of those fields, with nothing clearing them on Hide.
+        --
+        -- So after "Use DF Color Picker for All Addons" had routed another addon's picker
+        -- through here, that addon's swatchFunc was still armed on the frame, and the next
+        -- DF colour edit drove it too: picking a DF colour changed the other addon's colour
+        -- as well. Reported by Aphoex (2026-08-17) against Chattynator, Platynator and
+        -- WarpDeplete, with the two tells that name this exactly -- /reload fixed it (the
+        -- fields go with the frame), and closing DF's window did not (nothing touches
+        -- them); and it never happened between two NON-DF addons, because each of those
+        -- opens runs Setup, which replaces the callbacks.
+        --
+        -- Cleared rather than swapped: direct mode invokes info's own swatch / opacity /
+        -- cancel functions explicitly below, so the frame needs no callbacks of its own,
+        -- and nil is precisely the state a fresh /reload leaves behind. The next foreign
+        -- open re-arms them through Setup as usual.
+        ColorPickerFrame.swatchFunc  = nil
+        ColorPickerFrame.opacityFunc = nil
+        ColorPickerFrame.cancelFunc  = nil
+        ColorPickerFrame.swatch      = nil
+
+
         local function ApplyColor(newColor)
             -- Set values on ColorPickerFrame for addons that read from there
             if ColorPickerFrame.Content and ColorPickerFrame.Content.ColorPicker then

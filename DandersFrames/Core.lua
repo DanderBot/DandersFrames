@@ -1425,25 +1425,38 @@ function DF:LightweightUpdateFontShadows()
     end
 end
 
--- Update only power/resource bar height
-function DF:LightweightUpdatePowerBarSize()
+-- ☠☠ THE RESOURCE-BAR DRAG PREVIEW RUNS THE LIVE LAYOUT. Both of these were hand-rolled
+-- forks of DF:LayoutResourceBar, and both were wrong in ways only visible mid-drag —
+-- which is exactly where a "lightweight" copy is least likely to be checked.
+--
+--   * POSITION forked `ClearAllPoints()` + ONE `SetPoint`. With "Match Health Bar
+--     Width/Height" on — the DEFAULT — the real layout sizes the matched axis purely by
+--     TWO anchor points and never calls SetWidth, so the bar carries no explicit width for
+--     its whole life. Dropping to a single point collapsed it to width 0: the bar VANISHED
+--     for the duration of the drag and returned on release, when the full update
+--     re-applied both points. (Aphoex 3.1, party and raid alike.)
+--   * SIZE forked the axis mapping and never read `resourceBarOrientation`, while the real
+--     layout swaps the axes for a vertical bar — so on a vertical bar the two sliders drove
+--     the wrong dimensions mid-drag and snapped back on release.
+--
+-- Routing both at the live function retires the fork rather than patching each symptom,
+-- and it is the standing rule for every preview surface: differ in DATA, never in
+-- RENDERING.
+-- ⚠ It costs more per tick than the old copies. That is the point — they were cheap
+-- because they were not doing the job. The callbacks are already throttled, and the full
+-- update on release ran this very function anyway.
+local function RelayoutResourceBars()
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
-    if not db then return end
-    
-    local height = db.resourceBarHeight or 4
-    local width = db.resourceBarWidth or 50
-    
-    local function UpdateBar(frame)
-        if frame and frame.dfPowerBar then
-            frame.dfPowerBar:SetHeight(height)
-            if not db.resourceBarMatchWidth then
-                frame.dfPowerBar:SetWidth(width)
-            end
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateBar)
+    if not db or not DF.LayoutResourceBar then return end
+    IterateFramesInMode(mode, function(frame)
+        if frame and frame.dfPowerBar then DF:LayoutResourceBar(frame, db) end
+    end)
+end
+
+-- Drag callback for Width / Length and Height / Thickness
+function DF:LightweightUpdatePowerBarSize()
+    RelayoutResourceBars()
 end
 
 -- Update only border thickness
@@ -1729,24 +1742,11 @@ function DF:LightweightUpdateHighlight(highlightType)
     IterateFramesInMode(mode, UpdateHighlight)
 end
 
--- Update power bar position
+-- Drag callback for Anchor / Offset X / Offset Y. See RelayoutResourceBars above for why
+-- this no longer places the bar itself — the single-SetPoint fork is what made the bar
+-- disappear for the whole drag.
 function DF:LightweightUpdatePowerBarPosition()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    local anchor = db.resourceBarAnchor or "BOTTOM"
-    local x = db.resourceBarX or 0
-    local y = db.resourceBarY or 0
-    
-    local function UpdateBar(frame)
-        if frame and frame.dfPowerBar then
-            frame.dfPowerBar:ClearAllPoints()
-            frame.dfPowerBar:SetPoint(anchor, frame, anchor, x, y)
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateBar)
+    RelayoutResourceBars()
 end
 
 -- Update absorb bar size/position

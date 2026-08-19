@@ -1185,8 +1185,13 @@ function PinnedFrames:UpdateBossHandlerConfig(setIndex)
             if f then
                 f.dfPinnedWidth, f.dfPinnedHeight = frameWidth, frameHeight
                 f.dfPinnedBorderDB = borderDB
+                -- ☠ `dfPinnedEffDB` IS the Hide Auras / Hide Icons mechanism — BuildPinnedEffDB
+                -- forces showBuffs/showDebuffs/defensiveIconEnabled/missingBuffIconEnabled
+                -- false on it and every updater reads it through DF:GetFrameDB. A
+                -- `dfPinnedHideAuras` stamp used to sit beside this on all four sites and was
+                -- READ NOWHERE — dead state that reads exactly like the implementation, so the
+                -- next person to "fix Hide Auras" would have edited it and changed nothing.
                 f.dfPinnedEffDB = effDB
-                f.dfPinnedHideAuras = set.hideAuras
                 -- Per-set Aura/Text Designer preset (nil = inherit the mode's preset;
                 -- the resolver falls back to FrameMode when the stamp is nil).
                 f.dfAuraPresetOverride = set.auraDesignerPreset
@@ -1966,8 +1971,7 @@ function PinnedFrames:ApplyLayoutSettings(setIndex)
             -- sizes from the shared per-mode db) keeps this set's Match/Custom size.
             child.dfPinnedWidth, child.dfPinnedHeight = frameWidth, frameHeight
             child.dfPinnedBorderDB = borderDB
-            child.dfPinnedEffDB = effDB
-            child.dfPinnedHideAuras = set.hideAuras
+            child.dfPinnedEffDB = effDB   -- the Hide Auras/Icons mechanism; see the note at the boss site
             -- Per-set Aura/Text Designer preset (nil = inherit the mode's preset).
             child.dfAuraPresetOverride = set.auraDesignerPreset
             child.dfTextPresetOverride = set.textDesignerPreset
@@ -3593,6 +3597,21 @@ local function CreatePlayerTestFrame(setIndex, index, container, isRaidMode, isB
     frame.dfIsTestFrame = true
     frame.dfIsDandersFrame = true
     frame.dfIsPinnedTestFrame = true  -- distinguish from testPartyFrames/testRaidFrames
+    -- ☠ THIS IS A PINNED FRAME, AND TWO LIVE GUARDS ALREADY ASSUME IT SAYS SO. The pool
+    -- stamped dfIsPinnedTestFrame and isPinnedBossFrame but never this one, so both of
+    -- them silently took their non-pinned branch on every preview slot:
+    --   * Frames/Update.lua:126 picks the preview's test data by it. Its own ☠ note
+    --     describes the bug it was written to fix — party pools are 0-based, pinned
+    --     pools 1-based, and the boss flag has to be passed — and the fix never ran,
+    --     because the flag it tests was nil. A pinned slot kept taking another
+    --     scenario's absorbs and heals whenever the fill object was replaced.
+    --   * Frames/Bars.lua:65 gives pinned frames the resource bar's solo-mode bypass;
+    --     TestMode.lua:1773 mirrors it for the preview. Without the stamp the preview
+    --     drew a bar the live frame would not (or the reverse).
+    -- Every other reader wants preview slots included too, so this is a plain fix
+    -- rather than a scope widening: Features/Auras.lua:3136's players-only missing-buff
+    -- term is bypassed wholesale in test mode, and the rest are debug.
+    frame.isPinnedFrame = true
     frame.isPinnedBossFrame = isBossSet or false
     frame.pinnedSetIndex = setIndex
 
@@ -3855,7 +3874,6 @@ function PinnedFrames:EnsurePlayerTestFramePool(setIndex, count, isRaidMode, isB
             pool[i].dfPinnedWidth, pool[i].dfPinnedHeight = fw, fh
             pool[i].dfPinnedBorderDB = GetSetBorderDB(setDB, GetSetBaselineDB(setDB, db))
             pool[i].dfPinnedEffDB = setDB and BuildPinnedEffDB(db, setDB.hideAuras, setDB.hideIcons) or nil
-            pool[i].dfPinnedHideAuras = setDB and setDB.hideAuras
             pool[i].dfAuraPresetOverride = setDB and setDB.auraDesignerPreset
             pool[i].dfTextPresetOverride = setDB and setDB.textDesignerPreset
             pool[i]:SetSize(fw, fh)
@@ -3913,7 +3931,6 @@ function PinnedFrames:ApplyPlayerTestLayout(setIndex, set, isRaidMode)
                 f.dfPinnedWidth, f.dfPinnedHeight = frameWidth, frameHeight
                 f.dfPinnedBorderDB = borderDB
                 f.dfPinnedEffDB = effDB
-                f.dfPinnedHideAuras = set.hideAuras
                 f.dfAuraPresetOverride = set.auraDesignerPreset
                 f.dfTextPresetOverride = set.textDesignerPreset
                 f:SetSize(frameWidth, frameHeight)
@@ -4085,7 +4102,13 @@ end
 -- those are entry-only concerns.
 function PinnedFrames:RefreshTestMode(withLayout)
     if not self.testModeActive then return end
-    if InCombatLockdown() then return end
+    -- ☠ NO COMBAT GUARD, DELIBERATELY. There was one, and it bought nothing while costing
+    -- the feature: every frame this touches is a plain non-secure Button under UIParent,
+    -- and BOTH callers — DF:RefreshTestFrames and DF:RefreshTestFramesWithLayout — refresh
+    -- the main party/raid pools in combat with no guard at all. Nothing in the regen drain
+    -- replayed it either, so a settings edit made with test mode up in combat froze the
+    -- pinned previews while the main ones tracked it, and they stayed frozen until test
+    -- mode was toggled out of combat. (Audit, 2026-08-17.)
 
     local isRaidMode
     if DF.raidTestMode then
@@ -4128,6 +4151,22 @@ end
 -- manipulation needed — Test Mode never touched them.
 function PinnedFrames:ExitTestMode()
     if InCombatLockdown() then
+        -- ☠☠ HIDE THE PREVIEW *NOW*; ONLY THE SECURE HALF MAY BE DEFERRED. This used to
+        -- return outright, and the one thing in this function that actually needs lockdown
+        -- protection is `self.headers[setIndex]:Show()` on a secure group header. The test
+        -- frames and their containers are plain CreateFrame Buttons/Frames under UIParent
+        -- (see CreatePlayerTestFrame / EnsureTestContainer) — hiding them in combat is
+        -- legal, and the main party/raid pools are hidden inline on this very path.
+        -- The consequence of the blanket return: combat ends test mode, the main preview
+        -- vanishes, and the FAKE PINNED FRAMES STAY ON SCREEN OVER THE LIVE UI for the
+        -- whole fight. (Audit, 2026-08-17.)
+        for setIndex = 1, PinnedFrames.MAX_SETS do
+            self:HidePlayerTestFrames(setIndex)
+        end
+        -- ⚠ Hiding is not enough on its own: the Aura Designer parents its indicators to
+        -- UIParent, so they outlive the frame. TeardownTestFrameVisuals owns that teardown
+        -- for every pool including these, and its own header says it is combat-safe.
+        if DF.TeardownTestFrameVisuals then DF:TeardownTestFrameVisuals() end
         -- The global test flags may already be off (HideTestFrames runs in
         -- combat) — if we just drop this, testModeActive sticks true and
         -- Hide-from-Main + the solo gate stay disabled until /reload. Queue a

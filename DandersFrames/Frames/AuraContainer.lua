@@ -2385,6 +2385,36 @@ local function resolveLayoutPin(L, anchorFrame, pp)
     return G, px, py, scale, resolved
 end
 
+-- ☠ THE LINE CAP MUST ALLOW FOR RECORD-STYLED CELLS, WHICH ARE BIGGER THAN `sx`.
+-- The flow wraps when the running row width exceeds the cap, and it measures each button's
+-- ACTUAL width — but the cap was built from the plain cell size alone. An important debuff
+-- renders at `debuffImportantScale` (default 1.25), so a row containing one overruns its cap
+-- by (scale-1)*sx against only half an icon of rounding slack, and the flow wraps a whole
+-- icon early: "Icons Per Row" set to 3 lays out 2+1. Reported as the debuff preview
+-- mis-flowing (Aphoex 7); it is equally wrong on live frames, the preview is just where you
+-- see it. Returns the slack to add to the cap: rounding headroom plus the widest styled
+-- cell's overhang.
+-- ☠☠ CLAMPED, AND THE CLAMP IS THE WHOLE SAFETY ARGUMENT. Slack must stay strictly under
+-- one full extra cell (`sx + spX`), or a row of PLAIN icons — the case where the styled aura
+-- simply is not up right now — would fit one more icon than the user asked for. Widening a
+-- cap can only ever cause that failure, so the bound is what makes this safe rather than a
+-- trade of one bug for another.
+local function flowLineSlack(sx, spX, records)
+    local styleExtra = 0
+    if type(records) == "table" then
+        for _, r in ipairs(records) do
+            local st = type(r) == "table" and r.style
+            local s = st and tonumber(st.scale)
+            if s and s > 1 then
+                local e = (s - 1) * sx
+                if e > styleExtra then styleExtra = e end
+            end
+        end
+    end
+    -- Half an icon absorbs pixel rounding and the border inset; see the note this replaces.
+    return math.min(sx * 0.5 + styleExtra, sx + spX - 0.5)
+end
+
 local function applyContainerLayout(c, handle)
     local config = handle.config
     local L = config.layout or {}
@@ -2399,7 +2429,8 @@ local function applyContainerLayout(c, handle)
     -- our `sx` (pixel rounding + border inset). A tight +0.5 slack let that fraction wrap
     -- one icon early. Half an icon of headroom absorbs the rounding yet stays well under
     -- the (sx + spX) a whole extra icon would need — so exactly `wrap` icons fit per row.
-    local headroom = sx * 0.5
+    -- ★ Slack now also covers a record-styled cell's overhang — see flowLineSlack.
+    local headroom = flowLineSlack(sx, spX, config.filter)
     local rowWidth
     if G.verticalPrimary then
         rowWidth = sx + headroom
@@ -2875,11 +2906,18 @@ function NativeBackend:build()
         -- plain neighbours. Dropping this capture was the own-preview regression:
         -- the important-debuff highlight vanished from test mode entirely (field
         -- report 2026-08-14). _buildOwnPreview resolves slot k's style from this.
-        local testStyles, allStyled = {}, true
+        -- ☠ THE DISTINCTNESS TERM — see the long note on the engine route below. Two records
+        -- sharing ONE importantStyle table satisfied "all styled" and enlarged every slot.
+        local testStyles, allStyled, stylesDiffer = {}, true, false
         for _, r in ipairs(filters) do
-            if r.style then testStyles[#testStyles + 1] = r.style else allStyled = false end
+            if r.style then
+                testStyles[#testStyles + 1] = r.style
+                if testStyles[1] ~= r.style then stylesDiffer = true end
+            else
+                allStyled = false
+            end
         end
-        local perSlotStyles = (allStyled and #testStyles > 1) and testStyles or nil
+        local perSlotStyles = (allStyled and stylesDiffer and #testStyles > 1) and testStyles or nil
         -- Assigned UNCONDITIONALLY (nil when no styles): the pooled preview slots
         -- persist across rebuilds, so a rebuild with the highlight switched off must
         -- clear the previous build's styles or they would re-stamp forever.
@@ -2921,13 +2959,35 @@ function NativeBackend:build()
         -- leave the rest plain — a preview that differs from live in RENDERING rather
         -- than in data, which is the one thing a preview may never do.
         --
-        -- So: all records styled and more than one => per-slot, slot k wears member k's
-        -- style. Otherwise the original single-styled-slot behaviour, unchanged.
-        local testStyles, allStyled = {}, true
+        -- So: all records styled, more than one, AND THE STYLES ACTUALLY DIFFER => per-slot,
+        -- slot k wears member k's style. Otherwise the original single-styled-slot
+        -- behaviour, unchanged.
+        --
+        -- ☠☠ THE DISTINCTNESS TERM IS LOAD-BEARING AND WAS MISSING. "Every record styled"
+        -- was meant to identify a LAYOUT GROUP, where each member carries its OWN look. The
+        -- debuff row can satisfy it by accident: `bossrole` and `priority` are the only two
+        -- records that take a style and they take THE SAME `importantStyle` TABLE, so
+        -- ticking Boss and/or Role together with Priority — and nothing else — made
+        -- `allStyled` true with two entries and put the enlarged, badged important treatment
+        -- on BOTH preview slots instead of one styled against a plain neighbour. At the test
+        -- Debuffs count of 2 that is the whole row. Reported as the debuff preview "bugging
+        -- out" on particular checkbox combinations (Aphoex 7); the enormous icons in the
+        -- screenshots are this, and the mis-wrap beside it is the flow cap below.
+        -- ⚠ Identity, not deep-compare: two members with coincidentally equal looks are
+        -- still two members and must stay per-slot.
+        -- ☠ MIRRORED IN THREE PLACES — the own-preview route above, this engine route, and
+        -- the Indicator Info probe in DandersFrames_Options/TestMode/Labels.lua, which
+        -- measures the region and must agree with what renders. Change one, change all three.
+        local testStyles, allStyled, stylesDiffer = {}, true, false
         for _, r in ipairs(filters) do
-            if r.style then testStyles[#testStyles + 1] = r.style else allStyled = false end
+            if r.style then
+                testStyles[#testStyles + 1] = r.style
+                if testStyles[1] ~= r.style then stylesDiffer = true end
+            else
+                allStyled = false
+            end
         end
-        local perSlotStyles = (allStyled and #testStyles > 1) and testStyles or nil
+        local perSlotStyles = (allStyled and stylesDiffer and #testStyles > 1) and testStyles or nil
         local testStyle = testStyles[1]
         local testStyleSlots = (not perSlotStyles) and (testStyle and math.min(1, maxCount) or 0) or 0
         local testStyleLayout = recordGroupLayout(groupLayout, testStyle)
@@ -4333,9 +4393,12 @@ local function flowSlotsIntoBox(box, anchorFrame, slots, count, config, pp)
     end)
     if not okPin then return false end
 
-    -- Row cap, including the half-icon headroom that stops the flow wrapping one
-    -- icon early on the measured button width (see applyContainerLayout).
-    local headroom = G.sx * 0.5
+    -- Row cap, including the slack that stops the flow wrapping one icon early on the
+    -- measured button width — and, since it shares flowLineSlack with the live path, the
+    -- overhang of a record-styled cell too. ☠ This is the entry point the AD canvas and the
+    -- Indicator Info probe measure through, so a cap that disagreed with the live one would
+    -- make every one of them flow differently from what renders.
+    local headroom = flowLineSlack(G.sx, G.spX, config and config.filter)
     local rowWidth
     if G.verticalPrimary then
         rowWidth = G.sx + headroom
@@ -4523,11 +4586,31 @@ end
 -- vocabulary applyContainerLayout translates onto the native flow, so the zones
 -- land on the rendered buttons; layoutRow is the reference math). Settings-derived
 -- by necessity — the buttons' own rects are off-limits to insecure anchors.
+-- ☠ A RECORD-STYLED SLOT IS BIGGER, AND THE HOVER GRID HAS TO KNOW. The zones were a
+-- uniform grid of BASE-size cells, so an important debuff (which renders at
+-- `debuffImportantScale`) got a zone the wrong size AND displaced every zone after it in
+-- its row by the width the real flow had already consumed. Symptom: the aura tooltip does
+-- not follow "Size Step" (Aphoex 7.1). Returns slot k's scale; the caller also sums the
+-- overhang of the slots BEFORE k in the same row.
+-- ⚠ Resolved from `_ownPreviewStyles`, the same table _buildOwnPreview paints from, so the
+-- zone and the icon cannot disagree about which slots are styled.
+local function testSlotScale(handle, slotIndex)
+    local ps = handle._ownPreviewStyles
+    if not ps then return 1 end
+    local st = (ps.perSlot and ps.perSlot[slotIndex])
+        or (ps.single and slotIndex == 1 and ps.single)
+        or nil
+    return (st and tonumber(st.scale)) or 1
+end
+
 function Handle:_positionTestTip(tip, index)
     local L = self.config.layout or {}
     local G = resolveGrowthLayout(L)
     local sx, sy, spX, spY = G.sx, G.sy, G.spX, G.spY
     local scale = tonumber(L.scale) or 1
+    -- This slot's own scale, and the overhang the styled slots before it in the SAME row
+    -- have already pushed along the primary axis.
+    local mine = testSlotScale(self, index)
     local n = math.max(self:_slotCount(), 1)
     -- Vertical-primary growth renders as a single column on the native flow.
     local wrap = G.verticalPrimary and 1 or (tonumber(L.wrap) or 0)
@@ -4547,7 +4630,14 @@ function Handle:_positionTestTip(tip, index)
         end
     end
     local strideY = sy + resv + spY
-    tip:SetSize(sx * scale, sy * scale)
+    -- Overhang accumulated by the styled slots earlier in this row (0 when nothing is
+    -- styled, which is every row that has no important debuff up).
+    local rowFirst = math.floor(idx / wrap) * wrap
+    local leadExtra = 0
+    for j = rowFirst, idx - 1 do
+        leadExtra = leadExtra + (testSlotScale(self, j + 1) - 1) * sx
+    end
+    tip:SetSize(sx * scale * mine, sy * scale * mine)
     tip:ClearAllPoints()
     if G.center then
         -- Mirror the centre-pinned box (resolveGrowthLayout): the box's
@@ -4565,9 +4655,16 @@ function Handle:_positionTestTip(tip, index)
             local col = idx % wrap
             local row = math.floor(idx / wrap)
             local m = math.min(wrap, n)
-            local rowW = m * sx + (m - 1) * spX
+            -- Row width includes every styled slot's overhang, or a centred row would sit
+            -- off to one side by half of it.
+            local rowExtra = 0
+            for j = rowFirst, rowFirst + m - 1 do
+                rowExtra = rowExtra + (testSlotScale(self, j + 1) - 1) * sx
+            end
+            local rowW = m * sx + (m - 1) * spX + rowExtra
             local rowDir = (G.secondary == "UP") and 1 or -1
-            x = (L.offsetX or 0) + (G.pinX + col * (sx + spX) - rowW / 2 + sx / 2) * scale
+            x = (L.offsetX or 0)
+                + (G.pinX + col * (sx + spX) + leadExtra - rowW / 2 + sx * mine / 2) * scale
             y = (L.offsetY or 0) + (G.pinY + rowDir * (inset + row * strideY + sy / 2)) * scale
         end
         tip:SetPoint("CENTER", self.frame, G.anchor, x, y)
@@ -4583,8 +4680,10 @@ function Handle:_positionTestTip(tip, index)
     local vSign = (G.vName == "Up") and 1 or -1
     local col = idx % wrap
     local row = math.floor(idx / wrap)
-    local x = (L.offsetX or 0) + (pAxis.x * col + sAxis.x * row) * (sx + spX) * scale
-    local y = (L.offsetY or 0) + ((pAxis.y * col + sAxis.y * row) * strideY + vSign * inset) * scale
+    local x = (L.offsetX or 0)
+        + ((pAxis.x * col + sAxis.x * row) * (sx + spX) + pAxis.x * leadExtra) * scale
+    local y = (L.offsetY or 0)
+        + ((pAxis.y * col + sAxis.y * row) * strideY + pAxis.y * leadExtra + vSign * inset) * scale
     tip:SetPoint(G.anchor, self.frame, G.anchor, x, y)
 end
 
@@ -5150,7 +5249,32 @@ end
 local function IdentityUnavailable(unit)
     local okC, connected = pcall(UnitIsConnected, unit)
     if okC and not (issecretvalue and issecretvalue(connected)) and connected == false then
-        return "offline"
+        -- ☠☠ PLAYERS ONLY — AN NPC HAS NO CONNECTION, SO UnitIsConnected READS FALSE
+        -- FOR IT. This probe is the SEVENTH consumer of that API in the addon and was
+        -- the only one without the guard; the other six all carry it, added by #989 /
+        -- #1042, and one of them names the very unit class that broke here:
+        -- Frames/Update.lua:520 "a pinned NPC (Lura's healable crystals) rendered as an
+        -- offline player ... Only a player can be offline." (Also Update.lua's fast
+        -- path, ElementAppearance.lua twice, Frames/Core.lua and the missing-buff gate
+        -- in Features/Auras.lua.) This one arrived later, when dead/disconnected were
+        -- folded into the assist verdict, and the sibling sweep never reached it.
+        --
+        -- The consequence was total on a friendly NPC frame: "offline" makes the caller
+        -- set can = false, which marks the handle untrusted, which parks every gated
+        -- group at maxFrameCount 0 — and _noteGateRecovery only re-parses on a
+        -- false->true ASSIST edge, which an NPC never produces. So the row was dark from
+        -- the moment it was built and stayed dark for the container's whole life. Field
+        -- report: pinned boss frames on friendly NPCs showing no auras at all with Hide
+        -- Auras unchecked (Ruben, 2026-08-16, on "Dusk Crystal" — the same NPC family).
+        -- ⚠ Only the CONNECTED half is scoped. UnitIsDeadOrGhost below is meaningful for
+        -- an NPC and stays as it is.
+        -- ★ Fails OPEN on a refused or secret UnitIsPlayer, like every other probe in
+        -- this gate: if we cannot confirm the unit is a player we cannot conclude
+        -- "offline" means anything, and any doubt SHOWS.
+        local okP, isPlayer = pcall(UnitIsPlayer, unit)
+        if okP and not (issecretvalue and issecretvalue(isPlayer)) and isPlayer then
+            return "offline"
+        end
     end
     local okD, dead = pcall(UnitIsDeadOrGhost, unit)
     if okD and not (issecretvalue and issecretvalue(dead)) and dead == true then

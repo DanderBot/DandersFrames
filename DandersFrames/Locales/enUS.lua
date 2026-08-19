@@ -62,6 +62,7 @@ L["Auto-create profiles enabled."] = true
 L["Auto-created profile: %s"] = true
 L["Auto-profile evaluation and runtime overlay"] = true
 L["Identity gate: park/hide verdicts with reasons, latches, recovery"] = true
+L["Indicator Info"] = true
 L["Cannot delete the default profile"] = true
 L["Cannot rename the default profile"] = true
 L["Click-casting binding apply, hover, PreClick state"] = true
@@ -2425,7 +2426,7 @@ L["Attached puts each pet beside its owner's frame, so you read them together. S
 L["Which side of your party or raid frames the whole pet block sits on. Use the offsets below to nudge it from there."] = true
 L["Sizes each pet frame to its owner's, so the pair stays aligned when you resize the unit frames. The Width slider below greys out while this is on."] = true
 L["Sizes each pet frame to its owner's, so the pair stays aligned when you resize the unit frames. The Height slider below greys out while this is on."] = true
-L["Keeps the resource bar the same width as the health bar it sits under, so it stays lined up when you resize the frame. The Width slider below greys out while this is on."] = true
+L["Keeps the resource bar the same length as the health bar it sits under, so it stays lined up when you resize the frame. The Width / Length slider greys out while this is on, and because the bar is pinned by its ends the Anchor only takes effect along the other axis."] = true
 L["Power Type gives each resource its own game colour — blue mana, yellow energy, red rage. Class colours every bar by the unit's class instead, and Custom uses one fixed colour for everyone."] = true
 L["Watches whichever raid buff your own class provides, and follows you when you change character. Turn it off to pick the buffs to watch by hand below."] = true
 L["Stops the raid buffs tracked here from also taking up a slot in the normal buff row, so the missing-buff icon is the only place they appear."] = true

@@ -208,7 +208,26 @@ function DF:LayoutResourceBar(frame, db)
     -- every border size (field-confirmed: bar x = 1.6 vs border width = 0.8).
     -- Flush against whichever boundary is innermost: the border band when it
     -- is thicker than the padding, the health bar's own inset otherwise.
-    local edgeInset = math.max(padding, bInset)
+    --
+    -- ☠☠ BUT ONLY WHILE THE BORDER CAN ACTUALLY HIDE THE BAR. The health bar this option
+    -- promises to match insets by `framePadding` ALONE (DF:AnchorHealthBarsToPadding), so
+    -- once Border Thickness exceeds the padding the resource bar lost 2px of length per
+    -- extra border pixel and stopped matching — Border Thickness read as padding on the
+    -- resource bar (Aphoex 5). The sliver the max() exists to prevent is only visible
+    -- through a TRANSLUCENT border; an opaque one covers whatever runs under it, which is
+    -- exactly the rule DF:GetAbsorbEdgeInset already applies a few hundred lines down
+    -- ("if alpha >= 1 then return 0"). Adopting it here makes the two bars agree and makes
+    -- the option's name true, without reopening the field-confirmed hairline.
+    -- ⚠ The old comment claimed this "matches other bar calculations". It did not — the
+    -- absorb bar has always had the alpha test and the health bar has never inset by the
+    -- border at all. That line is why the mismatch survived review.
+    local borderCanHide = true
+    if db.frameShowBorder ~= false then
+        local bc = db.frameBorderColor
+        local balpha = (bc and (bc.a or bc[4])) or 1
+        borderCanHide = balpha >= 1
+    end
+    local edgeInset = borderCanHide and padding or math.max(padding, bInset)
 
     if isVertical then
         -- SWAP: "Width" applies to Height (Length), "Height" applies to Width (Thickness)
@@ -2931,6 +2950,13 @@ function DF:UpdateAllRoleIcons()
     -- Raid frames via iterator
     if DF.IterateRaidFrames then
         DF:IterateRaidFrames(updateFrame)
+    end
+
+    -- ☠ AND PINNED. This runs on the combat-exit transition (see the HideInCombat note in
+    -- Frames/StatusIcons.lua), and neither iterator above reaches a pinned frame — so a
+    -- pinned role or leader icon hidden by roleIconHideInCombat never came back.
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(updateFrame)
     end
 end
 

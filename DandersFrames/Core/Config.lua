@@ -2674,13 +2674,22 @@ DF.PartyDefaults = {
     -- ☠ 0 = the defensive row does not preview, and that is DELIBERATE: this key
     -- replaced the `testShowExternalDef` checkbox, which shipped OFF, and these defaults
     -- must mirror TEST_PRESETS.DEFAULT (see the note further down) or a fresh profile
-    -- matches no preset and the panel highlights nothing. Default does not include the
-    -- defensive icon; HEALER and Full do.
-    -- Raise it and the row previews that many icons - 1 is the natural working value,
-    -- since the defensive icon is a single-slot cue in the common case and this row only
-    -- previews on TANK/HEALER frames. Before the key existed the preview borrowed
-    -- testBuffCount and drew 2 whatever the row's own Max Icons said.
-    testDefensiveCount = 0,
+    -- matches no preset and the panel highlights nothing.
+    -- The row previews this many icons - 1 is the natural working value, since the
+    -- defensive icon is a single-slot cue in the common case and this row only previews on
+    -- TANK/HEALER frames. Before the key existed the preview borrowed testBuffCount and
+    -- drew 2 whatever the row's own Max Icons said.
+    --
+    -- ☠ 1, NOT 0 — AND TEST_PRESETS.DEFAULT LISTS IT TO MATCH. It shipped at 0, inherited
+    -- from the `testShowExternalDef` checkbox it replaced, which also shipped off. A COUNT
+    -- reads differently from a checkbox though: 0 is indistinguishable from a broken
+    -- feature, and three of the five presets (Default, Auras, Combat) re-zero it on click
+    -- because the preset tables are exhaustive. Net effect was "Defensive Icons don't show
+    -- up in test mode frames — ever" (Aphoex 6), which is what a whole feature looks like
+    -- when its only control is off and nothing says so.
+    -- ⚠ This is a DEFAULT CHANGE, not a bug fix, and it is Krathe's to reverse: set this to
+    -- 0 and drop the key from TEST_PRESETS.DEFAULT to restore the old behaviour exactly.
+    testDefensiveCount = 1,
     testFrameCount = 5,
     testPreset = "DEFAULT",
     testShowAbsorbs = false,
@@ -2700,6 +2709,11 @@ DF.PartyDefaults = {
     testShowPersonalTargeted = true,
     testShowAuraDesigner = false,
     testShowTextDesigner = true,
+    -- Test-mode section identification: highlights whichever element the cursor is
+    -- over and names it. OFF by default -- test mode is also how people pixel-tune
+    -- spacing. (A separate testShowLabelTips key existed for one build; the two were
+    -- merged into this one, since nobody wants half the answer.)
+    testShowLabels = false,
 
     -- Tooltip settings
     tooltipBuffAnchor = "FRAME",

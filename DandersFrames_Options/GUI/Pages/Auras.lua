@@ -1469,7 +1469,16 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Size"]), 40)
         sizeGroup.disableChildrenOn = function(d) return not d.resourceBarEnabled end
         local rbMatch = sizeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Match Health Bar Width/Height"], db, "resourceBarMatchWidth", function() DF:UpdateAllFrames() end), 30)
-        rbMatch.tooltip = L["Keeps the resource bar the same width as the health bar it sits under, so it stays lined up when you resize the frame. The Width slider below greys out while this is on."]
+        -- ☠ THE SECOND SENTENCE IS THE ONE THAT WAS MISSING, AND IT COST A BUG REPORT.
+        -- Matching pins the bar by its two ENDS, so the Anchor dropdown's left/right half
+        -- stops applying: Top Left, Top and Top Right all render the same row, and the same
+        -- for the bottom trio (Aphoex 3.2, "only 3 position anchors work"). The dropdown
+        -- keeps all nine because they are all live the moment Match is off — the honest fix
+        -- is to say so here rather than to silently drop six entries the user may be about
+        -- to need. Also drops the old claim that "the Width slider greys out", which is only
+        -- true for a horizontal bar; on a vertical one the matched dimension is the length,
+        -- and Width / Length is exactly the control that owns it.
+        rbMatch.tooltip = L["Keeps the resource bar the same length as the health bar it sits under, so it stays lined up when you resize the frame. The Width / Length slider greys out while this is on, and because the bar is pinned by its ends the Anchor only takes effect along the other axis."]
         local widthSlider = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Width / Length"], 10, 200, 1, db, "resourceBarWidth", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)
         widthSlider.disableOn = function(d) return d.resourceBarMatchWidth end
         sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Height / Thickness"], 1, 20, 1, db, "resourceBarHeight", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)

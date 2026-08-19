@@ -90,16 +90,11 @@ function Engine:ForceRefreshAllFrames()
     if DF.IterateRaidFrames then
         DF:IterateRaidFrames(TryUpdate)
     end
-    if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
-        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
-            local header = DF.PinnedFrames.headers[setIndex]
-            if header and header:IsShown() then
-                for i = 1, 40 do
-                    local child = header:GetAttribute("child" .. i)
-                    if child then TryUpdate(child) end
-                end
-            end
-        end
+    -- ☠ THROUGH THE SHARED WALKER, NOT A HAND-ROLLED HEADER LOOP — this walked
+    -- PinnedFrames.headers only, so an Aura Designer edit never reached a pinned BOSS
+    -- frame, and neither did the AD-off teardown. (Audit 2026-08-17.)
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(TryUpdate)
     end
 
     -- The native factory buff row derives its Aura-Designer dedup set from the AD

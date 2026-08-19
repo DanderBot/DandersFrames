@@ -1980,6 +1980,14 @@ function DF:RefreshTestFrames()
     if DF.PinnedFrames and DF.PinnedFrames.RefreshTestMode then
         DF.PinnedFrames:RefreshTestMode(false)
     end
+
+    -- Section labels re-place LAST and one tick later: they measure the rows they
+    -- label, and a row rebuilt during this pass has a zero rect until the layout
+    -- settles (the creation-tick rule that bit the bar toggles). A stale label is
+    -- worse than a late one — it points at where an element used to be.
+    if DF.UpdateTestLabels then
+        C_Timer.After(0, function() if DF.UpdateTestLabels then DF:UpdateTestLabels() end end)
+    end
 end
 
 -- Apply layout/style settings to a test frame (fonts, sizes, textures, borders, etc.)
@@ -2159,6 +2167,18 @@ function DF:TeardownTestFrameVisuals()
     if DF.testRaidFrames then
         for i = 1, 40 do cleanFrame(DF.testRaidFrames[i]) end
     end
+    -- ☠ AND THE PINNED POOLS — the paragraph above is about them too and they were the one
+    -- set it never reached. Pinned test frames run the same AD preview, so their indicators
+    -- are parented to UIParent by the same mechanism and survive the frame being hidden.
+    -- The pools are per-set and sparse, so walk what exists rather than a fixed range.
+    if DF.PinnedFrames and DF.PinnedFrames.testFrames then
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
+            local pool = DF.PinnedFrames.testFrames[setIndex]
+            if pool then
+                for _, f in pairs(pool) do cleanFrame(f) end
+            end
+        end
+    end
 
     if DF.HideAllTestPetFrames then DF:HideAllTestPetFrames() end
     if DF.HideAllTestRaidPetFrames then DF:HideAllTestRaidPetFrames() end
@@ -2178,6 +2198,10 @@ function DF:HideTestFrames(silent)
         DF:StopTestAnimation()
     end
     
+    -- Labels first: their hit areas are mouse-enabled, and a pooled frame handed back
+    -- to live rendering with an invisible hit area over it eats hover on a real unit.
+    if DF.ClearTestLabels then DF:ClearTestLabels() end
+
     -- Hide all test party frames
     for i = 0, 4 do
         local frame = DF.testPartyFrames[i]
@@ -2405,6 +2429,10 @@ function DF:HideRaidTestFrames(silent)
         DF:StopTestAnimation()
     end
     
+    -- Labels first — see the party exit for why the hit areas must go before the
+    -- frames return to the pool.
+    if DF.ClearTestLabels then DF:ClearTestLabels() end
+
     -- Hide all test raid frames
     for i = 1, 40 do
         local frame = DF.testRaidFrames[i]
@@ -2516,11 +2544,25 @@ function DF:UpdateRaidTestFrames()
         end
     end
     
+    -- ☠ PINNED TEST FRAMES FOLLOW RAID SETTINGS CHANGES TOO. This function is the
+    -- RAID arm of what DF:RefreshTestFrames does for party — every raid-side test
+    -- control lands here (the panel checkboxes, the Quick Presets, the sliders via
+    -- ThrottledUpdateRaidTestFrames, and DF:UpdateAll's raid branch) — and it was the
+    -- only one of the three refresh entry points that never touched the pinned pools.
+    -- So in RAID test mode a pinned set kept whatever it rendered at Test Mode entry:
+    -- unticking Show Auras / Missing Buff / Aura Designer emptied the raid grid and
+    -- left the pinned preview fully dressed. `true` because this pass applies layout
+    -- to each raid frame (ApplyTestFrameLayout above), so the pinned frames get the
+    -- same treatment their raid siblings just had. (Krathe, 2026-08-17.)
+    if DF.PinnedFrames and DF.PinnedFrames.RefreshTestMode then
+        DF.PinnedFrames:RefreshTestMode(true)
+    end
+
     -- Update group labels if enabled (only in group-based layout)
     if db.raidUseGroups and db.groupLabelEnabled and DF.UpdateRaidGroupLabels then
         DF:UpdateRaidGroupLabels()
     end
-    
+
     -- Handle animation
     if db.testAnimateHealth then
         DF:StartTestAnimation()
@@ -2530,6 +2572,12 @@ function DF:UpdateRaidTestFrames()
         if not (DF.testMode and partyDb.testAnimateHealth) then
             DF:StopTestAnimation()
         end
+    end
+
+    -- Indicator Info marks label the rows this pass just rebuilt, so they re-place
+    -- LAST and one tick later — same reason and same shape as DF:RefreshTestFrames.
+    if DF.UpdateTestLabels then
+        C_Timer.After(0, function() if DF.UpdateTestLabels then DF:UpdateTestLabels() end end)
     end
 end
 
@@ -3031,6 +3079,12 @@ TEST_PRESETS.DEFAULT = {
     testShowTargetedList     = true,
     testAnimateTargetedList  = true,
     testShowPersonalTargeted = true,
+    -- ☠ Count-shaped, so this `true` is written as 1 (see TEST_COUNT_KEYS). Present because
+    -- Config.lua's testDefensiveCount now defaults to 1 and the two MUST mirror — and
+    -- because a preset that omits a key ZEROES it, so without this the three presets that
+    -- left it out re-zeroed the row on every click. That is how the defensive preview came
+    -- to look as though it never worked at all (Aphoex 6).
+    testDefensiveCount       = true,
 }
 
 -- Full = every toggle on. Built from the key list so a newly added toggle is
@@ -4301,6 +4355,16 @@ function DF:CreateTestPanel()
         end
     end)
 
+    -- Section labels: mark whichever element the cursor is over, on the FIRST preview
+    -- frame (they are identical, so labelling forty says nothing extra). Marking all
+    -- of them at once was unreadable at real frame sizes -- see Labels.lua.
+    -- Both OFF by default -- test mode is also how people pixel-tune spacing.
+    -- ONE toggle for both halves (highlight + naming): they are the same question
+    -- asked two ways, and a user who wants one always wants the other.
+    panel.showLabelsCheck = secGeneral:AddCheckbox(L["Indicator Info"], "testShowLabels", function()
+        if DF.UpdateTestLabels then DF:UpdateTestLabels() end
+    end)
+
     -- Frame count slider (below checkboxes)
     local fcRow = CreateFrame("Frame", nil, secGeneral.content)
     fcRow:SetHeight(28)
@@ -4792,6 +4856,13 @@ function DF:CreateTestPanel()
         self.showReducedMaxCheck:SetChecked(db.testShowReducedMaxHealth ~= false)
         if self.showTextDesignerCheck then
             self.showTextDesignerCheck:SetChecked(db.testShowTextDesigner ~= false)
+        end
+        -- ☠ EVERY CHECKBOX BELONGS IN THIS LIST. A toggle left out keeps the widget's
+        -- own default (unchecked) while the DB value stays true, so the feature runs
+        -- with its box showing off until the user clicks it twice -- exactly what was
+        -- reported for the section labels.
+        if self.showLabelsCheck then
+            self.showLabelsCheck:SetChecked(db.testShowLabels)
         end
         self.showAurasCheck:SetChecked(db.testShowAuras)
         self.showDispelGlowCheck:SetChecked(db.testShowDispelGlow)
