@@ -11,6 +11,8 @@ DF.CHANGELOG_TEXT = [===[
 
 * (Frames) New **Frame Fade** settings under General > Frame. A Global Frame Fade slider sets the opacity of every unit frame so they can recede into your UI. Tick "Separate Combat Fade" for two values instead — one out of combat, one in combat — so frames can sit faded while you're idle and snap to full the moment a fight starts. "Show In-Combat Fade When Hovering" brings the frames back to their in-combat opacity while your mouse is on one — every frame, or just the hovered one, your choice — so you can still read and click them out of combat. Combines with the out-of-range and health fades.
 * (Test Mode) New **Indicator Info** toggle in the Test Mode panel. With it on, hover any element on a test frame — buff bar, debuff bar, defensive icon, missing buffs, Aura Designer indicators — to highlight it and see its name plus the settings page that controls it. (by Krathe)
+* (Raid Frames) New **Center Mode** for centred group layouts (Frames > Raid Frames > Group Layout). "Fixed" pins your first groups to the anchor and grows extra groups off to one side, so the frames you watch stop sliding sideways as the raid fills and wraps. "Default" keeps the whole block centred. Only applies with a centred Groups Anchor and Groups Before Wrap under 8. (by Krathe)
+* (Raid Frames) "Groups Grow From" and "Row Order" are now a single corner picker: click the corner of the frame area you want the groups to sit in. Cells that can't apply at your current settings are hidden. (by Krathe)
 
 ### Bug Fixes
 
@@ -18,6 +20,9 @@ DF.CHANGELOG_TEXT = [===[
 * (Auras) Fix an error storm on entering an instance after the 18 Aug client update, which also left aura rows, dispel borders and overlays blank until a reload.
 * (Dispel Highlight) Fix the overlay washing whole frames in flat white (or the wrong colour) in dungeons. (by Krathe)
 * (Dispel Highlight) "Show On Current Health Only" now applies from the moment the overlay first appears mid-fight, instead of covering the whole frame until you next leave combat. (by Krathe)
+* (Dispel Highlight) Your own dispel colours now apply to the debuff icon border. They were meant to before, but the palette could never be built, so the game's default colours were drawn instead — if your border colours look different after this update, that is the setting working for the first time. (by Krathe)
+* (Auras) Fix auras staying on screen after a cinematic showing effects that had already gone — including on your own frame, where the defensive and debuff rows could sit stale until a UI reload. (by Krathe)
+* (Aura Designer) Fix the Buff Bar still showing after answering "replace my buffs" when enabling the Aura Designer, and the Buff Bar banner's "Enable Buffs" link having the same problem in reverse. (by Krathe)
 * (Aura Designer) Fix indicators stuck under the health bar with the Frame Level slider doing nothing — a leftover setting from an old version was pinning them below the frame. It is cleared automatically. (by Krathe)
 * (Aura Designer) Bar indicators now use the same section names and order as icons and squares: "Texture & Colors" is now "Appearance", so Frame Level and Alpha live under the same heading on every indicator type, and "Show When Missing" leads the square card the way it leads the icon card. (by Krathe)
 * (Pinned Frames) Fix friendly NPC boss frames showing no auras or Aura Designer indicators at all. (by Krathe)
@@ -34,6 +39,23 @@ DF.CHANGELOG_TEXT = [===[
 * (Test Mode) The defensive icon now previews by default (Defensive Icons count defaults to 1 instead of 0). (by Krathe)
 * (Text Designer) The Frame Preview now follows frame size and Preview Scale live and stays inside its panel. (by Krathe)
 * (Settings) Fix editing a colour in DandersFrames also changing the last colour edited in another addon when "Use DF Color Picker for All Addons" is on. (by Krathe)
+* (Party Frames) Fix "Center" in the position panel not actually centring the party frames. (by Krathe)
+* (Raid Frames) Fix group headers occasionally sized a pixel off with pixel-perfect snapping on. (by Krathe)
+* (Test Mode) Fix Center Mode "Fixed" being ignored when entering test mode until a setting was changed. (by Krathe)
+* (Auras) Auras on a group member who isn't in your part of the world — another instance, another phase, a ghost after releasing — now hide on every display (debuff row, dispel highlight, Aura Designer indicators), not just the buff bar. (by Krathe)
+* (Auras) Fix a dead group member's auras all reappearing if you reloaded your UI while they were a ghost. (by Krathe)
+* (Aura Designer) Fix indicators still showing — or a newly placed indicator instantly filling with the wrong aura — on group members outside your instance. (by Krathe)
+* (Auras) Fix a frame reused for a different player after a roster change keeping the previous player's hidden or shown aura state. (by Krathe)
+* (Auras) Aura displays now re-check their hide conditions every few seconds as a safety net, so a missed game event can no longer leave auras stuck shown or hidden until a reload. (by Krathe)
+* (Debug) Fix the debug console showing an empty window when the log contained certain aura filter text. (by Krathe)
+
+### Changes
+
+**If you use a centred Groups Anchor or a flat raid layout, some frames may move once after this update — on purpose.**
+
+* (Raid Frames) Centred group layouts now sit exactly where the anchor says. An old hidden offset could drag them (and the unlock box) sideways by up to a few hundred pixels at some settings; it has been removed. If your raid frames appear somewhere new, drag them once and they will stay. (by Krathe)
+* (Raid Frames) Profiles using a centred anchor with Groups Before Wrap under 8 are switched to Center Mode "Fixed" automatically where that reproduces the old layout exactly — those frames don't move at all. Profiles the old layout couldn't hold steady are left on "Default" to choose for themselves. (by Krathe)
+* (Raid Frames) "Players Grow From" now reverses the fill order in flat (non-grouped) raid layouts as it always should have. If you had it set to End, players now fill in the opposite order to before. (by Krathe)
 
 ## [5.2.1]
 
