@@ -1580,9 +1580,10 @@ local function BindDispelCarriers(btn, carriers, db, key)
         --   * the curve resolves C-SIDE: GetAuraDispelTypeColor(unit, auraInstanceID,
         --     curve) — no table index, no name read, works while auras are secret. It is
         --     applied AFTER the style step and overrides it, for every style.
-        -- The debuff-row icon ring has passed this curve since 68824 (Auras.lua), which
-        -- is why the reporters' screenshots show correctly-coloured row borders NEXT TO a
-        -- white overlay — the two lanes differed in exactly this field.
+        -- The debuff-row icon ring (Frames/AuraContainer.lua, the slot dispel bind) passes
+        -- the same curve alongside its map for the "Color" style; its Atlas style passes
+        -- no map at all and keeps the engine palette, which is why the reporters' row
+        -- borders were coloured next to a white overlay.
         -- nil when C_CurveUtil / the dispel-type enum is absent: the engine then falls
         -- back to the map, i.e. exactly the previous behaviour. Cache is invalidated
         -- with the map (DF:InvalidateDispelColorCurve), and the palette-edit re-bind
@@ -1673,8 +1674,9 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         -- is already driven by the bar's own value — so it tracks health exactly, with
         -- zero per-tick writes and nothing read. Anchor-derived geometry is the one
         -- geometry route that stays legal on these buttons.
-        --   The anchor itself is applied in StyleGameMainSlot (tainted, and legal), not
-        -- here, because the frame's health texture can be swapped from the settings panel
+        --   The anchor is seeded at birth below (so a combat-born carrier clips to
+        -- health from its first frame) and RE-APPLIED by StyleGameMainSlot on every style
+        -- pass, because the frame's health texture can be swapped from the settings panel
         -- and a create-once anchor would go stale.
         -- ☠☠ OPACITY LIVES ON A DF-OWNED DIM HOST, NEVER ON THE BOUND TEXTURE.
         -- The bind below (AddDispelTypeTexture) adds SecretAspect.Alpha to the carrier —

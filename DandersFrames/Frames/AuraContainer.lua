@@ -2037,14 +2037,21 @@ local function bindNative(slot, config)
             -- Custom dispel colours: Color-style rings recolour from the shared
             -- account palette via customDispelColorMap — keyed by dispel NAME,
             -- indexed private-side against auraData.dispelName (nil → game palette).
-            local map
-            if styleName == "Color" and DF.GetDispelColorMap then
-                map = DF:GetDispelColorMap()
+            -- ☠ The map is NOT secret-safe on its own: it is a raw table index against
+            -- auraData.dispelName private-side, and a SECRET name matches no key (the
+            -- dispel-overlay white-wash report, 2026-08-19 — see Features/Dispel.lua's
+            -- BindDispelCarriers). The curve resolves C-side by auraInstanceID and wins
+            -- when present; the map stays as the pre-curve fallback.
+            local map, curve
+            if styleName == "Color" then
+                if DF.GetDispelColorMap then map = DF:GetDispelColorMap() end
+                if DF.GetDispelColorCurve then curve = DF:GetDispelColorCurve() end
             end
             local ok, err = pcall(function()
                 local opts = {
                     style = styleEnum,
                     customDispelColorMap = map,
+                    customDispelColorCurve = curve,
                     showWhenHarmful = dispelSpec.showWhenHarmful ~= false,
                     showWhenHelpful = dispelSpec.showWhenHelpful == true,
                     showIcon = false,

@@ -518,7 +518,8 @@ end
 -- matches no key and the colour apply no-ops, leaving the style step's white base coat
 -- (the "dispel overlay goes white in dungeons" field report, 2026-08-19). The
 -- SECRET-SAFE tint is the curve — resolved C-side by auraInstanceID — and both bind
--- sites now pass both, the curve winning when present.
+-- sites (the overlay in Features/Dispel.lua, the row ring in Frames/AuraContainer.lua)
+-- pass both, the curve winning when present.
 -- Blizzard's LIVE dispel-type border palette, queried from AuraUtil.GetAuraBorderColor
 -- (the exact colours the game paints), cached. Per-type fallback to DF.DispelDefaultColors
 -- (which mirror the classic DebuffTypeColor values) if the API is missing / returns nil.
