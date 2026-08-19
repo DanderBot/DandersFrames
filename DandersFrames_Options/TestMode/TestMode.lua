@@ -2198,8 +2198,8 @@ function DF:HideTestFrames(silent)
         DF:StopTestAnimation()
     end
     
-    -- Labels first: their hit areas are mouse-enabled, and a pooled frame handed back
-    -- to live rendering with an invisible hit area over it eats hover on a real unit.
+    -- Labels first: the region registry must be wiped before a pooled frame goes back
+    -- to live rendering, or real spell tooltips keep getting "Buff Bar" appended.
     if DF.ClearTestLabels then DF:ClearTestLabels() end
 
     -- Hide all test party frames
@@ -3024,6 +3024,9 @@ local TEST_PRESETS = {
         testShowDispelGlow       = true,
         testShowMissingBuff      = true,
         testShowAuraDesigner     = true,
+        -- Count-shaped (written as 1, see TEST_COUNT_KEYS): the defensive icon IS an
+        -- aura surface, and a preset that omits a key zeroes it.
+        testDefensiveCount       = true,
         testShowTargetedList     = true,
         testAnimateTargetedList  = true,
         testShowPersonalTargeted = true,
@@ -4355,10 +4358,10 @@ function DF:CreateTestPanel()
         end
     end)
 
-    -- Section labels: mark whichever element the cursor is over, on the FIRST preview
-    -- frame (they are identical, so labelling forty says nothing extra). Marking all
-    -- of them at once was unreadable at real frame sizes -- see Labels.lua.
-    -- Both OFF by default -- test mode is also how people pixel-tune spacing.
+    -- Section labels: mark whichever element the cursor is over, on any visible
+    -- preview frame. Marking every element at once was unreadable at real frame
+    -- sizes -- see Labels.lua.
+    -- OFF by default -- test mode is also how people pixel-tune spacing.
     -- ONE toggle for both halves (highlight + naming): they are the same question
     -- asked two ways, and a user who wants one always wants the other.
     panel.showLabelsCheck = secGeneral:AddCheckbox(L["Indicator Info"], "testShowLabels", function()

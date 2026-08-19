@@ -5,6 +5,7 @@
 ### New Features
 
 * (Frames) New **Frame Fade** settings under General > Frame. A Global Frame Fade slider sets the opacity of every unit frame so they can recede into your UI. Tick "Separate Combat Fade" for two values instead — one out of combat, one in combat — so frames can sit faded while you're idle and snap to full the moment a fight starts. "Show In-Combat Fade When Hovering" brings the frames back to their in-combat opacity while your mouse is on one — every frame, or just the hovered one, your choice — so you can still read and click them out of combat. Combines with the out-of-range and health fades.
+* (Test Mode) New **Indicator Info** toggle in the Test Mode panel. With it on, hover any element on a test frame — buff bar, debuff bar, defensive icon, missing buffs, Aura Designer indicators — to highlight it and see its name plus the settings page that controls it. (by Krathe)
 
 ### Bug Fixes
 
@@ -14,6 +15,20 @@
 * (Dispel Highlight) "Show On Current Health Only" now applies from the moment the overlay first appears mid-fight, instead of covering the whole frame until you next leave combat. (by Krathe)
 * (Aura Designer) Fix indicators stuck under the health bar with the Frame Level slider doing nothing — a leftover setting from an old version was pinning them below the frame. It is cleared automatically. (by Krathe)
 * (Aura Designer) Bar indicators now use the same section names and order as icons and squares: "Texture & Colors" is now "Appearance", so Frame Level and Alpha live under the same heading on every indicator type, and "Show When Missing" leads the square card the way it leads the icon card. (by Krathe)
+* (Pinned Frames) Fix friendly NPC boss frames showing no auras or Aura Designer indicators at all. (by Krathe)
+* (Pinned Frames) Fix icons set to "Hide In Combat" staying hidden on pinned frames after combat ends. (by Krathe)
+* (Pinned Frames) Fix pinned test frames staying on screen over the real UI when combat starts during Test Mode. (by Krathe)
+* (Pinned Frames) Pinned boss frames now pick up settings changes, highlights, raid target markers, defensive/missing-buff/dispel updates and appearance changes like every other frame. (by Krathe)
+* (Pinned Frames) Pinned test frames now follow raid Test Mode settings changes, and settings changes made while in combat. (by Krathe)
+* (Auras) Fix an enlarged important debuff making the row wrap one icon early (Icons Per Row 3 laying out as 2+1), and its tooltip hover area not matching the bigger icon. (by Krathe)
+* (Auras) Fix the debuff preview enlarging every icon when Priority is ticked together with Boss and/or Role. (by Krathe)
+* (Auras) The debuff Icons Per Row slider now greys out under vertical growth, where it has no effect, like the buff and defensive sliders. (by Krathe)
+* (Resource Bar) Fix the bar vanishing while dragging Offset X/Y with Match Health Bar on, and the size sliders moving the wrong axis on a vertical bar mid-drag. (by Krathe)
+* (Resource Bar) Fix Border Thickness shortening the bar behind an opaque border — it now matches the health bar's length as the option says. (by Krathe)
+* (Aura Designer) Fix the Aura Designer appearing to enable itself when switching between the Party and Raid tabs — the two modes could end up sharing one preset. (by Krathe)
+* (Test Mode) The defensive icon now previews by default (Defensive Icons count defaults to 1 instead of 0). (by Krathe)
+* (Text Designer) The Frame Preview now follows frame size and Preview Scale live and stays inside its panel. (by Krathe)
+* (Settings) Fix editing a colour in DandersFrames also changing the last colour edited in another addon when "Use DF Color Picker for All Addons" is on. (by Krathe)
 
 ## [5.2.1]
 

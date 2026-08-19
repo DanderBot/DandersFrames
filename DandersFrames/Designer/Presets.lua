@@ -381,7 +381,10 @@ local function MigrateDesigner(profile, libKey, refKey, inlineKey, factory)
                 local ref = modeDb[refKey]
                 if not ref or not lib[ref] then
                     if not lib[presetName] then
-                        lib[presetName] = DF:DeepCopy(lib[DF.DEFAULT_PRESET] or {})
+                        -- Copy Default when it exists (it is what the old fallback pointed
+                        -- at); a pristine factory config otherwise, never an empty table.
+                        lib[presetName] = lib[DF.DEFAULT_PRESET]
+                            and DF:DeepCopy(lib[DF.DEFAULT_PRESET]) or factory()
                     end
                     modeDb[refKey] = presetName
                 end

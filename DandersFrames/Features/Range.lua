@@ -948,20 +948,15 @@ function rangeSubscriber:OnUnitRangeReseed(event, unit)
         frame.dfInRange = nil
         DF:UpdateRange(frame)
     end
-    if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
-        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
-            local header = DF.PinnedFrames.headers[setIndex]
-            if header and header:IsShown() then
-                local maxChildren = DF.PinnedFrames.currentMode == "raid" and 40 or 5
-                for i = 1, maxChildren do
-                    local child = header:GetAttribute(DF.CHILD_ATTR[i])
-                    if child and child:IsShown() and child.unit == unit then
-                        child.dfInRange = nil
-                        DF:UpdateRange(child)
-                    end
-                end
+    -- Pinned frames (both pools) through the shared walker: a pinned set may show the
+    -- same unit on a second frame, and a party-mode set can hold more than five.
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(function(child)
+            if child.unit == unit then
+                child.dfInRange = nil
+                DF:UpdateRange(child)
             end
-        end
+        end)
     end
     UpdatePetForOwner(unit)
 end

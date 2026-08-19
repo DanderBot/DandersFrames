@@ -150,16 +150,12 @@ local function SweepFrameFade()
             if f and f.dfIsDandersFrame then DF:UpdateFrameAppearance(f) end
         end)
     end
-    if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
-        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
-            local header = DF.PinnedFrames.headers[setIndex]
-            if header then
-                for i = 1, 40 do
-                    local child = header:GetAttribute("child" .. i)
-                    if child and child.dfIsDandersFrame then DF:UpdateFrameAppearance(child) end
-                end
-            end
-        end
+    -- Pinned through the shared walker (player-set children AND boss sets), never a
+    -- hand-rolled header loop -- see IteratePinnedFrames in Frames/Headers.lua.
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(function(child)
+            if child and child.dfIsDandersFrame then DF:UpdateFrameAppearance(child) end
+        end)
     end
 end
 
