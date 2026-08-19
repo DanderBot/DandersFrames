@@ -500,16 +500,38 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
 
     if typeKey == "icon" then
         -- ── THE CANONICAL CARD ORDER, shared by every indicator type that has the section:
-        --   Show When Missing → Position → Appearance → Border
+        --   Show When Missing → Position → [Size] → Appearance → Border
         --     → Duration Text → Stack Count → Duration Bar
         --     → Expiration → Pandemic
-        -- Reads as: does it show → where → what it looks like → what is drawn on it → what
-        -- changes it over time. A type that lacks a section just skips it (the bar card has
-        -- no Stack Count or Duration Bar; only the icon has Show When Missing), so the
-        -- surviving sections still appear in the same relative order on every card.
+        -- Reads as: does it show → where → how big → what it looks like → what is drawn on
+        -- it → what changes it over time. A type that lacks a section just skips it (the bar
+        -- card has no Stack Count or Duration Bar; only the bar has Size), so the surviving
+        -- sections still appear in the same relative order on every card.
         --
         -- Show When Missing leads because it answers the prior question to all the rest —
         -- whether the indicator appears at all, rather than how it looks once it does.
+        --
+        -- ☠☠ THE NAMING RULES. This order drifted once already and the tell was subtle: the
+        -- bar card called its looks section "Texture & Colors", which sounds harmless until
+        -- you notice Frame Level and Alpha were living under it while every other card kept
+        -- them in Appearance -- the same setting under three headings depending on which
+        -- indicator you opened (Krathe, 2026-08-19). Hold to these:
+        --
+        --   * "Appearance" means what the thing looks like IN ISOLATION -- size, scale,
+        --     colour, alpha, texture, frame level. ☠ NEVER split it by material ("Texture
+        --     & Colors", "Fill & Outline"): that split has no natural seam, and every
+        --     control added afterwards then has two plausible homes and picks one at random.
+        --   * "Size" is its own section ONLY where a type has geometry the others lack (the
+        --     bar's orientation, match-frame-width, inset). It sits between Position and
+        --     Appearance. A type whose only size control is one slider keeps it inside
+        --     Appearance rather than minting a one-row section.
+        --   * Border / Duration Text / Stack Count / Duration Bar are things drawn ON TOP,
+        --     and always follow Appearance in that order.
+        --   * Expiration / Pandemic are what changes OVER TIME, and always come last.
+        --   * A type lacking a section SKIPS it. It never reorders the survivors.
+        --
+        -- ★ Frame Level and Alpha are the canaries: they belong to Appearance on every type,
+        -- without exception. If a review finds either anywhere else, the card has drifted.
         AddGroup(L["Show When Missing"], function(g)
             local desatCb
             local function UpdateDesatState()
@@ -701,6 +723,16 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         end)
 
     elseif typeKey == "square" then
+        -- Show When Missing — leading section, matching the icon card. It was a checkbox
+        -- buried mid-Appearance here while the icon gave it a section of its own, so the
+        -- same feature looked like two different features depending on the type you opened.
+        -- ⚠ One control, not two: Desaturate is icon-art only (Factory's SetDesaturated
+        -- acts on the icon texture), so the square deliberately has no companion checkbox.
+        AddGroup(L["Show When Missing"], function(g)
+            g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
+                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
+            end), 28)
+        end)
         -- Position
         AddGroup(L["Position"], function(g)
             if layoutGroup then
@@ -723,9 +755,6 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             g:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(parent, L["Frame Level"], 0, 100, 1, proxy, "frameLevel")), 54)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Cooldown Swipe"], proxy, "hideSwipe"), 28)
             g:AddWidget(GUI:CreateCheckbox(parent, L["Hide Icon (Text Only)"], proxy, "hideIcon"), 28)
-            g:AddWidget(GUI:CreateCheckbox(parent, L["Show When Missing"], proxy, "showWhenMissing", function()
-                DF.AuraDesigner.Engine:ForceRefreshAllFrames()
-            end), 28)
         end)
         -- Border (Stage 5.2 — unified controls via CreateBorderControls).
         -- Same full toolkit as the icon's base border: Style / Texture / Colour
@@ -869,9 +898,13 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             end
             matchInset.tooltip = L["Trims the matched size on every side. Use it to clear an Aura Designer border indicator, which the frame's own border inset does not know about. Negative values push the bar back out past the health bar's edge."]
         end)
-        -- Texture & Colors  (group captured to scroll to; the Color Mode widget to flash)
+        -- Appearance  (group captured to scroll to; the Color Mode widget to flash)
+        -- ⚠ Named "Texture & Colors" until 2026-08-19. It held Frame Level and Alpha, which
+        -- live in Appearance on every other card — see the naming rules on the icon card.
+        -- The local stays `texColorsGroup` only because the |H link route below is keyed
+        -- "dfADScroll:texcolors" and renaming that would break saved links in old tooltips.
         local colorModeDrop
-        local texColorsGroup = AddGroup(L["Texture & Colors"], function(g)
+        local texColorsGroup = AddGroup(L["Appearance"], function(g)
             -- Colour Mode: Static uses Bar Texture + Fill Color; a curve (DF / Classic) swaps in a
             -- green->red ramp the drain reveals — so the bar reddens as the aura expires — and
             -- forces a white tint, so those two grey out (curveGated) while a curve is selected.
@@ -974,7 +1007,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
         -- click target, with "Color Mode" tinted to signal it, like the cross-S.page links.)
         AddGroup(L["Expiration"], function(g)
             -- Note with a jump-link: only "Color Mode" is clickable — clicking scrolls the card
-            -- up to Texture & Colors and flashes it. GUI:CreateLink = fixed-layout inline links
+            -- up to Appearance and flashes it. GUI:CreateLink = fixed-layout inline links
             -- (safe in the reflowing card); GUI:LinkToSetting = scroll + "show me" flash. The |c
             -- placeholder only satisfies the markup parser; CreateLink themes the link itself.
             local function scrollToTexColors()
@@ -989,7 +1022,7 @@ local function BuildTypeContent(parent, typeKey, auraName, width, optProxy, yOff
             -- Fixed-layout note: hand it the group's inner width so its wrapped (2-line) height is
             -- known before AddWidget — else it falls back to a fixed slot the text overflows.
             local innerW = GUI:GroupInnerWidth(g)
-            local note = GUI:CreateLink(parent, format(L["For expiry colour, set the %s in Texture & Colors."], link), {
+            local note = GUI:CreateLink(parent, format(L["For expiry colour, set the %s in Appearance."], link), {
                 width = innerW,
                 onLinkClick = function()
                     -- Scroll the section into view, but FLASH the specific Color Mode widget
