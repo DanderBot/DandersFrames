@@ -586,6 +586,105 @@ end
 DF.MigrateAuraDesignerAbsoluteLevelsLazy = MigrateAbsoluteLevelsLazy
 DF.MigrateAuraDesignerAbsoluteLevelsV2Lazy = MigrateAbsoluteLevelsV2Lazy
 
+-- ☠ STRAND: a per-indicator frameStrata of BACKGROUND buries the indicator where NO frame
+-- level can reach it, and there is no longer any control that can clear it.
+--
+-- The per-indicator Frame Strata picker was removed from the editor (only the GLOBAL
+-- default survives, and it ships "INHERIT"). The stored values were never migrated, and
+-- resolveStrata still honours them — so a profile carrying a legacy "BACKGROUND" pins that
+-- indicator below every MEDIUM frame on the unit button, health bar included. Strata
+-- outranks level absolutely, which is why raising Frame Level to 100 changed nothing.
+--
+-- Field-proven by a /df debug zorder dump (2026-08-19): on one frame, three indicators read
+-- strata=BACKGROUND at levels 51/67/106 while their siblings on MEDIUM at level 46 rendered
+-- correctly. The user's reported symptom was exactly "bar indicators are below the health
+-- bar … I can't seem to get it to change even though the square indicators do rest on top" —
+-- the squares happened to be the MEDIUM ones.
+--
+-- The baseline is: nobody carries a per-indicator strata, everything inherits the unit
+-- frame's, and FRAME LEVEL makes every ordering decision. That is what the levels being
+-- absolute (V1/V2 above) was for; the strata half was simply never done.
+--
+-- ☠☠ VALUE-TARGETED: ONLY the burying strata. A blanket clear is WRONG here, and the first
+-- cut of this migration got it wrong — resolveStrata documents that a stored literal
+-- "INHERIT" is an explicit CHOICE that STOPS the fallback chain, while a genuinely unset key
+-- falls through to the global default. Nil-ing an "INHERIT" therefore does not preserve
+-- behaviour: it re-opens that indicator to a global default it was deliberately opted out of.
+-- The real profile that produced this report carries 18 "INHERIT" and 10 "MEDIUM" values;
+-- a blanket clear would have silently rewired all 28 to fix the zero BACKGROUND ones.
+-- MEDIUM and HIGH are equally left alone: they order against the frame's band, not beneath it.
+-- ⚠ Clears the legacy per-type sub-tables too (icon/square/bar), which pre-date the
+-- instances migration and are the shape old profiles still carry — see the AD storage map.
+local BURYING_STRATA = { BACKGROUND = true, LOW = true }
+
+local function ClearIndicatorStrata(auraCfg, counter)
+    if type(auraCfg) ~= "table" then return end
+    local inds = auraCfg.indicators
+    if type(inds) == "table" then
+        for _, ind in pairs(inds) do
+            if type(ind) == "table" and BURYING_STRATA[ind.frameStrata] then
+                ind.frameStrata = nil
+                counter.n = counter.n + 1
+            end
+        end
+    end
+    for _, k in ipairs({ "icon", "square", "bar" }) do
+        local t = auraCfg[k]
+        if type(t) == "table" and BURYING_STRATA[t.frameStrata] then
+            t.frameStrata = nil
+            counter.n = counter.n + 1
+        end
+    end
+end
+
+local function MigrateIndicatorStrataLazy(adDB)
+    if type(adDB) ~= "table" or adDB._indicatorStrataV1 then return end
+    local counter = { n = 0 }
+
+    -- auras: SPEC-KEYED since MigrateToSpecScoped, but a pre-migration flat shape can still
+    -- arrive here (this runs on the resolved db, and the spec migration is lazy too). Same
+    -- first-entry shape detection MigrateAbsoluteLevelsLazy uses, for the same reason.
+    local auras = adDB.auras
+    if type(auras) == "table" then
+        for _, val in pairs(auras) do
+            if type(val) == "table" then
+                if val.priority ~= nil or val.indicators ~= nil or val.icon ~= nil then
+                    for _, auraCfg in pairs(auras) do ClearIndicatorStrata(auraCfg, counter) end
+                else
+                    for _, specAuras in pairs(auras) do
+                        if type(specAuras) == "table" then
+                            for _, auraCfg in pairs(specAuras) do ClearIndicatorStrata(auraCfg, counter) end
+                        end
+                    end
+                end
+            end
+            break
+        end
+    end
+    -- ☠ otherAuras TOO. The levels migration above walks only adDB.auras, so an Other Buffs
+    -- record kept its pre-absolute level — do not inherit that gap here. Flat, same shape.
+    if type(adDB.otherAuras) == "table" then
+        for _, auraCfg in pairs(adDB.otherAuras) do ClearIndicatorStrata(auraCfg, counter) end
+    end
+
+    -- The global default is the same trap one level up: a stored BACKGROUND there buries
+    -- every indicator that has no per-instance value. INHERIT is the shipped baseline.
+    local defs = adDB.defaults
+    if type(defs) == "table" then
+        if BURYING_STRATA[defs.indicatorFrameStrata] then
+            defs.indicatorFrameStrata = "INHERIT"
+            counter.n = counter.n + 1
+        end
+    end
+
+    if counter.n > 0 and DF.Debug then
+        DF:Debug("AD", "indicator strata: cleared %d stranded value(s) onto the frame's own strata", counter.n)
+    end
+    adDB._indicatorStrataV1 = true
+end
+
+DF.MigrateAuraDesignerIndicatorStrataLazy = MigrateIndicatorStrataLazy
+
 
 -- Lazy, flag-gated ONE-TIME refresh of the AD global text defaults to the Midnight
 -- baseline: DF Roboto SemiBold + drop shadow, 1.2 duration scale, stack count seated
