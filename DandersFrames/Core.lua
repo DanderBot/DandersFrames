@@ -426,12 +426,8 @@ DF.COMMAND_SIBLINGS = {
     pinned    = { "info", "test", "reinit", "bosstest <1-8>", "bossspawn demo" },
     range     = { "stats", "spell", "dump", "clear" },
     sort      = { "refresh", "clear" },
-    -- Public half is read-only. The dev half must stay in step with
-    -- SECURE_MUTATORS in Features/SecureSort.lua, which is what refuses them.
-    -- "init" leads the dev list because every other one needs the handler.
-    secure    = { "help", "status", dev = { "init", "party", "raid", "all", "register",
-                  "test", "swap", "swapback", "debug", "ui", "show", "hide",
-                  "showbutton", "hidebutton" } },
+    -- /dfsecure was retired with the secure-sort half (its handler never armed); no
+    -- sibling entry, so nothing advertises a command that no longer registers.
     flatraid  = { "info", "reinit", "test" },
     -- (No "cc" entry.) /df debug cc's BARE form already prints its full subcommand
     -- table — that is its entire job — so a Siblings footer would repeat it.
@@ -525,7 +521,7 @@ DF.DEBUG_GROUP_OF = {
     ownpreview = "auras",
     admissing = "auras", cbt = "auras",
 
-    headers = "frames", flatraid = "frames", secure = "frames", sort = "frames",
+    headers = "frames", flatraid = "frames", sort = "frames",
     roster = "frames", pinned = "frames", range = "frames", arena = "frames",
     attached = "frames", zorder = "frames", mousefoci = "frames",
     flatdebug = "frames", flatoverlay = "frames", raidbg = "frames",

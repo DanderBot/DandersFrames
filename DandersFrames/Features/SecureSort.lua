@@ -756,10 +756,8 @@ function SecureSort:UpdateRaidLayoutParams()
         -- ☠ SEPARATE VOCABULARY FROM growthAnchor ABOVE, AND BOTH ARE NEEDED. The flat
         -- snippet compares lc.gridAnchor against "START"/"CENTER"/"END", so it cannot be
         -- given a mapped WoW anchor point. This table REPLACES raidLayoutParams wholesale,
-        -- so the static gridAnchor/reverseFill defaults further down were shadowed off and
-        -- PushRaidLayoutConfig pushed a permanent "START"/false -- the flat snippet ignored
-        -- Grid Alignment and Reverse Fill entirely. Same class of gap as groupRowGrowth in
-        -- 0af5f379: the setting existed, the push dropped it.
+        -- so the static gridAnchor/reverseFill defaults it once shadowed are gone (with the
+        -- secure-sort half that pushed them); the flat calculator below is the consumer.
         gridAnchor = db.raidFlatGrowthAnchor or "START",
         reverseFill = db.raidFlatReverseFillOrder and true or false,
     }
@@ -781,9 +779,6 @@ function SecureSort:UpdateRaidLayoutParams()
             " horizontal=" .. tostring(self.raidLayoutParams.horizontal) ..
             " headerAnchorPoint=" .. self.raidLayoutParams.headerAnchorPoint)
     end
-    
-    -- Note: Secure environment is updated via PushRaidLayoutConfig() which is called
-    -- separately when triggering secure raid sort
 end
 
 -- ============================================================

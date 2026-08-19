@@ -3591,8 +3591,8 @@ end
 -- this function used to carry a second copy of it. Do not reintroduce one here: a
 -- duplicate definition on DF silently wins or loses by file load order, and the two
 -- copies had already drifted on validation strictness. Init.lua's is now the single
--- producer, shared with SecureSort:PushRaidGroupLayoutConfig (which ships it to the
--- secure grouped positioner) and DF:SortActiveGroupListByDisplayOrder.
+-- producer, shared with this attribute push, CreateRaidPositionHandler's seed and
+-- DF:SortActiveGroupListByDisplayOrder.
 function DF:UpdateRaidGroupOrderAttributes()
     if InCombatLockdown() then
         DF.pendingGroupOrderUpdate = true

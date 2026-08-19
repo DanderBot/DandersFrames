@@ -6,6 +6,8 @@
 
 * (Frames) New **Frame Fade** settings under General > Frame. A Global Frame Fade slider sets the opacity of every unit frame so they can recede into your UI. Tick "Separate Combat Fade" for two values instead — one out of combat, one in combat — so frames can sit faded while you're idle and snap to full the moment a fight starts. "Show In-Combat Fade When Hovering" brings the frames back to their in-combat opacity while your mouse is on one — every frame, or just the hovered one, your choice — so you can still read and click them out of combat. Combines with the out-of-range and health fades.
 * (Test Mode) New **Indicator Info** toggle in the Test Mode panel. With it on, hover any element on a test frame — buff bar, debuff bar, defensive icon, missing buffs, Aura Designer indicators — to highlight it and see its name plus the settings page that controls it. (by Krathe)
+* (Raid Frames) New **Center Mode** for centred group layouts (Frames > Raid Frames > Group Layout). "Fixed" pins your first groups to the anchor and grows extra groups off to one side, so the frames you watch stop sliding sideways as the raid fills and wraps. "Default" keeps the whole block centred. Only applies with a centred Groups Anchor and Groups Before Wrap under 8. (by Krathe)
+* (Raid Frames) "Groups Grow From" and "Row Order" are now a single corner picker: click the corner of the frame area you want the groups to sit in. Cells that can't apply at your current settings are hidden. (by Krathe)
 
 ### Bug Fixes
 
@@ -32,33 +34,23 @@
 * (Test Mode) The defensive icon now previews by default (Defensive Icons count defaults to 1 instead of 0). (by Krathe)
 * (Text Designer) The Frame Preview now follows frame size and Preview Scale live and stays inside its panel. (by Krathe)
 * (Settings) Fix editing a colour in DandersFrames also changing the last colour edited in another addon when "Use DF Color Picker for All Addons" is on. (by Krathe)
-
-### New Features
-
-* (Raid Frames) New "Center Mode" for centred group layouts. "Fixed" pins your first groups to the anchor and grows the extra groups off to one side, so the frames you watch most stop sliding sideways as the raid fills up and wraps onto another row. "Default" keeps the whole block centred, as before. Only applies with a centred Groups Anchor and Groups Before Wrap under 8. (by Krathe)
-* (Raid Frames) "Groups Grow From" and "Row Order" are now one corner picker. They were two axes of a single question — which corner of the reserved area the groups sit in — asked in two vocabularies, three controls apart. Click the cell you want; cells that cannot apply at your current settings grey out instead of offering a choice that cannot land. The grid also reshapes with Growth Direction, so the cell you click is always the corner you get. (by Krathe)
-* (Debug) New `/df debug adgate` command showing every Aura Designer placement's hide/show state, alongside the existing `/df debug idgate`. Both outputs can now be copied out of the game cleanly. (by Krathe)
+* (Party Frames) Fix "Center" in the position panel not actually centring the party frames. (by Krathe)
+* (Raid Frames) Fix group headers occasionally sized a pixel off with pixel-perfect snapping on. (by Krathe)
+* (Test Mode) Fix Center Mode "Fixed" being ignored when entering test mode until a setting was changed. (by Krathe)
+* (Auras) Auras on a group member who isn't in your part of the world — another instance, another phase, a ghost after releasing — now hide on every display (debuff row, dispel highlight, Aura Designer indicators), not just the buff bar. (by Krathe)
+* (Auras) Fix a dead group member's auras all reappearing if you reloaded your UI while they were a ghost. (by Krathe)
+* (Aura Designer) Fix indicators still showing — or a newly placed indicator instantly filling with the wrong aura — on group members outside your instance. (by Krathe)
+* (Auras) Fix a frame reused for a different player after a roster change keeping the previous player's hidden or shown aura state. (by Krathe)
+* (Auras) Aura displays now re-check their hide conditions every few seconds as a safety net, so a missed game event can no longer leave auras stuck shown or hidden until a reload. (by Krathe)
+* (Debug) Fix the debug console showing an empty window when the log contained certain aura filter text. (by Krathe)
 
 ### Changes
 
-**Please read this section if you use a centred Groups Anchor or a flat raid layout — some frames will move once, on purpose.**
+**If you use a centred Groups Anchor or a flat raid layout, some frames may move once after this update — on purpose.**
 
-* (Raid Frames) Centred group layouts now sit where the anchor says. The old positioner added a hidden "compensation" offset meant to hold centred frames still as the roster grew, but a centred layout's centre does not move as players join, so there was never any drift to cancel — all the offset did was drag the frames, and the unlock box with them, up to 316px sideways at some settings. It has been removed. If you use a centred anchor your raid frames may appear in a different place the first time you log in; drag them once and they will stay put. (by Krathe)
-* (Raid Frames) Profiles already using a centred anchor with Groups Before Wrap under 8 are moved onto Center Mode "Fixed" automatically, but only where that reproduces the old layout exactly — for those profiles nothing moves at all. Where the old layout had no stable position to reproduce, because it both drifted with the roster and jumped again at the wrap point, the profile is left on "Default" so you can choose for yourself. (by Krathe)
-* (Raid Frames) "Players Grow From" now genuinely reverses the fill order in flat (non-grouped) raid layouts. It previously moved the geometry but never the player ordering, because a duplicate saved-variable key was shadowing the value the sorting code read — so the setting silently did half its job. If you had it set to End, your players will now fill in the opposite order to before. (by Krathe)
-
-### Bug Fixes
-
-* (Raid Frames) Fix party frames not centring correctly. (by Krathe)
-* (Raid Frames) Fix the unlock overlay drawing reserved slots for groups that are not in the raid. (by Krathe)
-* (Raid Frames) Fix group headers being sized from a stale frame size, so layouts using pixel-perfect snapping could be off by a pixel. (by Krathe)
-* (Test Mode) Fix Center Mode "Fixed" being ignored when entering test mode — the preview sat where "Default" would put it until you changed any setting. (by Krathe)
-* (Auras) Auras on a group member who is not in your part of the world — another instance, another phase, a ghost after releasing — now hide on every display: the debuff row, the dispel highlight and Aura Designer indicators, not just the buff bar. Previously those displays could fill with the wrong auras entirely, because the game stops evaluating aura filters for such units. (by Krathe)
-* (Auras) Fix a dead group member's auras all reappearing if you reloaded your UI while they were a ghost. (by Krathe)
-* (Aura Designer) Fix indicators continuing to show — or a newly placed indicator instantly filling with the wrong aura — on group members outside your instance. (by Krathe)
-* (Auras) Fix a frame reused for a different player after a roster change keeping the previous player's hidden or shown aura state. (by Krathe)
-* (Auras) Aura displays now re-check their hide conditions every few seconds as a safety net, so a missed game event can no longer leave auras stuck shown or stuck hidden until a reload. (by Krathe)
-* (Settings) Fix the debug console rendering as an empty window when the log contained certain aura filter text. (by Krathe)
+* (Raid Frames) Centred group layouts now sit exactly where the anchor says. An old hidden offset could drag them (and the unlock box) sideways by up to a few hundred pixels at some settings; it has been removed. If your raid frames appear somewhere new, drag them once and they will stay. (by Krathe)
+* (Raid Frames) Profiles using a centred anchor with Groups Before Wrap under 8 are switched to Center Mode "Fixed" automatically where that reproduces the old layout exactly — those frames don't move at all. Profiles the old layout couldn't hold steady are left on "Default" to choose for themselves. (by Krathe)
+* (Raid Frames) "Players Grow From" now reverses the fill order in flat (non-grouped) raid layouts as it always should have. If you had it set to End, players now fill in the opposite order to before. (by Krathe)
 
 ## [5.2.1]
 

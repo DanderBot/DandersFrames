@@ -54,7 +54,7 @@ local CATEGORY_GROUPS = {
             { key = "HEALTH",     desc = "Health bar value writes, including Reduced Max Health" },
             { key = "FLATRAID",   desc = "Flat raid layout and sorting", noisy = true },
             { key = "FRAMESORT",  desc = "FrameSort addon integration" },
-            { key = "SECURESORT", desc = "Secure sort handler, snippets and frame registration", noisy = true },
+            { key = "SECURESORT", desc = "Spec cache, inspect queue and the raid geometry calculators", noisy = true },
             -- noisy: driven by UNIT_IN_RANGE_UPDATE per unit, and fans out to pinned
             -- and boss frames — a moving raid produces a steady stream.
             { key = "RANGE",      desc = "Range fading checks and cache decisions", noisy = true },

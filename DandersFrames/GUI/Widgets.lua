@@ -2074,10 +2074,18 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
             btn.screenWrap = transposed and vx or vy
             btn:SetScript("OnClick", function(self)
                 if container.wrapInert and self.screenWrap == "END" then return end
-                dbTable[keyH] = self.align
-                if not container.wrapInert then dbTable[keyV] = container:WrapKey(self.screenWrap) end
+                -- Two keys, each through the SAME plumbing CreateDropdown gives one key:
+                -- a raid-mode runtime override redirects the write to the baseline and
+                -- skips the live refresh; an editing session records the override; a
+                -- plain write lands in the db. Per key, because one of the pair may be
+                -- overridden while the other is not.
+                local liveWrite = container:WriteKey(keyH, self.align)
+                if not container.wrapInert then
+                    liveWrite = container:WriteKey(keyV, container:WrapKey(self.screenWrap)) or liveWrite
+                end
                 container:Refresh()
-                if callback then callback() end
+                container:UpdateOverrideIndicatorsBoth()
+                if liveWrite and callback then callback() end
             end)
             cells[#cells + 1] = btn
         end
@@ -2110,11 +2118,15 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
         -- panel is nearly indistinguishable from a live one -- the dead half read as
         -- selectable and got clicked. Hiding is also the honest picture: at 8 groups before
         -- wrap there IS only one row of slots, so the control should show one row.
+        -- ⚠ Mouse state folds in SetEnabled: RefreshChildStates calls SetEnabled and THEN
+        -- refreshContent, so a Refresh that re-armed every live cell undid the grey-out
+        -- and left a 0.4-alpha grid fully clickable.
+        local enabled = self.enabled ~= false
         for _, b in ipairs(cells) do
             local dead = self.wrapInert and b.screenWrap == "END"
             b:SetShown(not dead)
             b:SetActive(not dead and b.align == curAlign and b.screenWrap == shownWrap)
-            b:EnableMouse(not dead)
+            b:EnableMouse(enabled and not dead)
         end
         -- Shrink the recessed track to the cells that remain, or it frames a phantom row.
         local liveCols = (self.wrapInert and transposed) and 1 or #COLS
@@ -2134,8 +2146,53 @@ function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts
     container.refreshContent = function(self) self:Refresh() end
 
     container.SetEnabled = function(self, enabled)
+        self.enabled = enabled and true or false
         self:SetAlpha(enabled and 1 or 0.4)
-        for _, b in ipairs(cells) do b:EnableMouse(enabled and not (self.wrapInert and b.screenWrap == "END")) end
+        for _, b in ipairs(cells) do b:EnableMouse(self.enabled and not (self.wrapInert and b.screenWrap == "END")) end
+    end
+
+    -- One db write with the auto-profile plumbing every other helper has. Returns true
+    -- when the value reached the LIVE table (the caller then refreshes frames); false
+    -- when a raid-mode runtime override redirected it to the baseline, where a live
+    -- refresh would only repaint the unchanged overlay.
+    function container:WriteKey(key, value)
+        if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+           and DF.AutoProfilesUI:HandleRuntimeWrite(key, value) then
+            return false
+        end
+        dbTable[key] = value
+        if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
+            DF.AutoProfilesUI:SetProfileSetting(key, value)
+        end
+        return true
+    end
+
+    -- Override indicators (star / reset / global value), one set PER KEY: the align key
+    -- on the container itself (reset at the container's top-right, global text after
+    -- the title), the wrap key on a small host just left of it (global text after the
+    -- corner caption). Both register with RefreshAllOverrideIndicators through
+    -- AddOverrideIndicators, so profile edits and runtime overlays light them like any
+    -- dropdown's.
+    local vHost = CreateFrame("Frame", nil, container)
+    vHost:SetSize(40, 16)
+    vHost:SetPoint("TOPRIGHT", container, "TOPRIGHT", -44, 0)
+    local function resetKey(host, key)
+        return function()
+            if not DF.AutoProfilesUI then return end
+            DF.AutoProfilesUI:ResetProfileSetting(key)
+            dbTable[key] = DF.AutoProfilesUI:GetGlobalValue(key)
+            container:Refresh()
+            if host.UpdateOverrideIndicators then host:UpdateOverrideIndicators(dbTable[key]) end
+            if callback then callback() end
+        end
+    end
+    local alignWords = { START = SOLO[transposed].START, CENTER = SOLO[transposed].CENTER, END = SOLO[transposed].END }
+    local wrapWords  = { START = L["Start"], END = L["End"] }
+    AddOverrideIndicators(container, lbl, keyH, resetKey(container, keyH), 6, alignWords, dbTable)
+    AddOverrideIndicators(vHost, caption, keyV, resetKey(vHost, keyV), 0, wrapWords, dbTable)
+    function container:UpdateOverrideIndicatorsBoth()
+        if self.UpdateOverrideIndicators then self:UpdateOverrideIndicators(dbTable[keyH]) end
+        if vHost.UpdateOverrideIndicators then vHost:UpdateOverrideIndicators(dbTable[keyV]) end
     end
 
     -- Tooltip: shared attach on the LABEL only (see GUI:AttachTooltip), matching every
@@ -2452,12 +2509,23 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
                 menuBtn:SetScript("OnClick", function(self)
                     local optKey = self.optKey
                     -- Runtime override protection: redirect to baseline, skip refresh
-                    if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-                       and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, optKey) then
-                        UpdateText()
-                        menuFrame:Hide()
-                        if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(optKey) end
-                        return
+                    if GUI.SelectedMode == "raid" and DF.AutoProfilesUI then
+                        -- The baseline value BEFORE the redirect, for opts.onRuntimeWrite:
+                        -- a customSet that writes a second key in step with this one
+                        -- (e.g. the raid wrap-axis compensation) needs the baseline's own
+                        -- previous value to decide, since customSet itself is skipped on
+                        -- this path.
+                        local prevGlobal
+                        if opts.onRuntimeWrite and DF.AutoProfilesUI.GetRuntimeGlobalValue then
+                            prevGlobal = DF.AutoProfilesUI:GetRuntimeGlobalValue(dbKey)
+                        end
+                        if DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, optKey) then
+                            if opts.onRuntimeWrite then opts.onRuntimeWrite(optKey, prevGlobal) end
+                            UpdateText()
+                            menuFrame:Hide()
+                            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(optKey) end
+                            return
+                        end
                     end
 
                     if customSet then

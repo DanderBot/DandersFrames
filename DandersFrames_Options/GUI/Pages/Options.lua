@@ -1981,10 +1981,10 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ☠ THIS SLIDER GATES THE ANCHOR GRID'S BOTTOM ROW, SO IT HAS TO REFRESH IT.
         -- RefreshChildStates is what re-runs a child's disableOn and refreshContent, and
         -- nothing calls it on a slider change -- CreateCheckbox self-calls it on toggle,
-        -- sliders never did. So moving 8 -> 7 left the bottom cells greyed until some
+        -- sliders never did. So moving 8 -> 7 left the wrap cells hidden until some
         -- unrelated control was touched: the grid was correct, it had just never been
         -- asked again. (This bit the old Row Order disableOn identically; it only became
-        -- visible once the gate had something to ungrey.)
+        -- visible once the gate had something to re-enable.)
         local function UpdateFramesAndGates()
             UpdateFrames()
             if groupLayoutGroup.RefreshChildStates then groupLayoutGroup:RefreshChildStates() end
@@ -2008,7 +2008,7 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- ⚠ The vertical half is inert whenever there is only one row of groups, which is
         -- the case at the default Groups Before Wrap = 8: both positioners flip the row
         -- index as `rcIdx = (fullGridRC - 1) - rcIdx` over `ceil(8 / groupsPerRow)`, so at
-        -- 8 the flip is the identity. The grid greys its bottom cells there rather than
+        -- 8 the flip is the identity. The grid hides its wrap cells there rather than
         -- offering a choice that cannot land -- and it does NOT write the key, so a stored
         -- END survives and comes back the moment the slider drops below 8.
         -- ⚠ NOT clamped to the POPULATED group count either. The flip is deliberately over
@@ -2065,8 +2065,11 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         --
         -- ⚠ disableOn covers BOTH conditions and there is no hideOn. A control that
         -- vanishes when it does not apply cannot be discovered, and it made the rows below
-        -- jump as the anchor or the wrap slider changed. Greyed in place is what the anchor
-        -- grid already does with its own inert half, so the page stays consistent.
+        -- jump as the anchor or the wrap slider changed. (The anchor grid is the one
+        -- exception: it HIDES its inert wrap cells, because at 8 before wrap there really
+        -- is only one row of slots and an empty dim cell read as selectable -- see
+        -- GUI:CreateAnchorGrid. That is a picker of positions, not a control that can be
+        -- discovered by its label, so the rule here does not apply to it.)
         --
         -- ⚠ The callback must reposition the CONTAINER as well as the frames -- half of
         -- this setting is a container anchor-reference shift, consumed only in
@@ -2124,9 +2127,28 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                 db.raidGroupRowGrowth = (db.raidGroupRowGrowth == "END") and "START" or "END"
             end
         end
+        -- ⚠ The auto-profile RUNTIME path skips customSet: CreateDropdown redirects the
+        -- write to the baseline and returns before it. The compensation still has to
+        -- happen there, or the baseline keeps the old wrap key and its block slides the
+        -- moment the overlay lifts. It is applied to the baseline ONLY when the wrap key
+        -- is itself overridden (HandleRuntimeWrite then lands it on the baseline and the
+        -- live overlay is untouched); when the wrap key is live, flipping it would move
+        -- the LIVE block under an unchanged live player anchor, which is the exact thing
+        -- this compensation exists to prevent -- so that half is deliberately left alone.
+        local function PlayerAnchorRuntimeWrite(v, prevGlobal)
+            local AP = DF.AutoProfilesUI
+            if not AP or (prevGlobal or "START") == v then return end
+            local base = DF._realRaidDB
+            if not base or (base.raidGroupsPerRow or 8) >= 8 then return end
+            if AP.IsOverriddenByRuntime and AP:IsOverriddenByRuntime("raidGroupRowGrowth") then
+                AP:HandleRuntimeWrite("raidGroupRowGrowth",
+                    (base.raidGroupRowGrowth == "END") and "START" or "END")
+            end
+        end
         -- ⚠ UpdateFramesAndGates, not UpdateFrames: this rewrites the wrap key, so the
         -- anchor grid has to be re-asked or it keeps showing the pre-flip corner.
-        local playerAnchorDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], playerAnchorOptions, db, "raidPlayerAnchor", UpdateFramesAndGates, nil, SetPlayerAnchorKeepingBlock), 55)
+        local playerAnchorDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], playerAnchorOptions, db, "raidPlayerAnchor", UpdateFramesAndGates, nil, SetPlayerAnchorKeepingBlock,
+            { onRuntimeWrite = PlayerAnchorRuntimeWrite }), 55)
         playerAnchorDrop.tooltip = L["Which end of a group its players fill from. A group with fewer than five players leaves its empty space at the opposite end."]
         
         Add(groupLayoutGroup, nil, 1)
@@ -2352,4 +2374,4 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
     
     -- General > Global Fonts
     DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L, AddColorsPageLink, CreateCopyButton, pagePinnedFrames, pageBuffs, pageIcons)
-end
+end

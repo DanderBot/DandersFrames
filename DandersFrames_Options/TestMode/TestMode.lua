@@ -2829,7 +2829,11 @@ function DF:LightweightPositionRaidTestFramesFlat(testFrameCount)
         SecureSort:UpdateRaidLayoutParams()
         
         -- Calculate container size (for max 40 players)
+        -- ⚠ The static default table was retired with the secure-sort half; this is nil
+        -- only if UpdateRaidLayoutParams bailed on a missing raid db, in which case there
+        -- is nothing to lay out.
         local lp = SecureSort.raidLayoutParams
+        if not lp then return end
         local playersPerRow = lp.playersPerRow or 5
         local maxNumRows, maxNumCols
         if lp.horizontal then
