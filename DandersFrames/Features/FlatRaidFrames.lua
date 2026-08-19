@@ -1552,7 +1552,7 @@ function FlatRaidFrames:DebugPrint()
         o:Field("raidUseGroups", db.raidUseGroups, "NEUTRAL")
         o:Field("growDirection", db.growDirection or "(none)", "NEUTRAL")
         o:Field("raidPlayersPerRow", db.raidPlayersPerRow or "(none)", "NEUTRAL")
-        o:Field("raidFlatPlayerAnchor", db.raidFlatPlayerAnchor or "(none)", "NEUTRAL")
+        o:Field("raidFlatFrameAnchor", db.raidFlatFrameAnchor or "(none)", "NEUTRAL")
         o:Field("sortSelfPosition", db.sortSelfPosition or "(none)", "NEUTRAL")
     end
 

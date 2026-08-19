@@ -186,6 +186,8 @@ GUI.RowHeight = {
     dropdown    = 54,   -- 39.8 content + RowGap
     colorpicker = 38,   -- 23.9 content + RowGap
     editbox     = 53,   -- 39.0 content + RowGap (box at -15, h24)
+    -- Label at 0, grid at -16, two 18px cells with a 2px gutter = 16 + 38 content.
+    anchorgrid  = 16 + 38 + GUI.RowGap,
     -- ⚠ NO `toggle` ENTRY, deliberately. One was declared here (35, "same content as a
     -- checkbox") and referenced by nothing: CreateRowToggle and CreateSegmentToggle are
     -- the only toggles and neither sets fixedRowHeight, so both take whatever height

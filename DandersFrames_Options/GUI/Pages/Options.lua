@@ -1635,8 +1635,22 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         -- from both pages, which is what makes owning it here destructive.
         Add(CreateCopyButton(self.child, {"frame", "permanentMover", "border", "anchor"}, L["Frame"], "general_frame"), 25, 2)
         
-        -- Migration: Ensure new flat raid settings have defaults
-        if db.raidFlatGrowthAnchor == nil then db.raidFlatGrowthAnchor = "START" end
+        -- Migration: Ensure new flat raid settings have defaults.
+        -- ☠ The raidFlatGrowthAnchor nil-check alone was DEAD: the Config default seeded
+        -- it as the legacy anchor point "TOPLEFT", so it was never nil and never migrated.
+        -- GetGrowthAnchorPoint's legacy passthrough made it behave, but "TOPLEFT" is not a
+        -- key in growthAnchorOptions, so the dropdown rendered the raw value. The default
+        -- is now "START" (Config.lua) and the legacy points are folded in here for
+        -- profiles that already stored one. Behaviour-preserving: START and TOPLEFT both
+        -- resolve to TOPLEFT, and the END points are exactly what END maps back to.
+        local legacyGrowthAnchor = {
+            TOPLEFT = "START", BOTTOMLEFT = "END", TOPRIGHT = "END", BOTTOMRIGHT = "END",
+        }
+        if db.raidFlatGrowthAnchor == nil then
+            db.raidFlatGrowthAnchor = "START"
+        elseif legacyGrowthAnchor[db.raidFlatGrowthAnchor] then
+            db.raidFlatGrowthAnchor = legacyGrowthAnchor[db.raidFlatGrowthAnchor]
+        end
         if db.raidFlatFrameAnchor == nil then db.raidFlatFrameAnchor = "START" end
         if db.raidFlatColumnAnchor == nil then db.raidFlatColumnAnchor = "START" end
         
@@ -1664,11 +1678,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
             end
             if GUI.SelectedMode == "raid" then
                 DF:UpdateRaidLayout()
-                if DF.SecureSort and DF.SecureSort.raidFramesRegistered then
-                    DF.SecureSort:PushRaidLayoutConfig()
-                    DF.SecureSort:PushRaidGroupLayoutConfig()
-                    DF.SecureSort:TriggerSecureRaidSort()
-                end
                 -- Update test mode frames if active
                 if DF.raidTestMode then DF:UpdateRaidTestFrames() end
             else
@@ -1686,13 +1695,13 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local groupsPerRowSlider, rowColSpacingSlider, playersPerRowSlider
         
         -- Function to update dynamic labels based on growth direction
+        -- ⚠ The two grouped-raid sliders USED to be re-labelled here on a direction change
+        -- (Groups Per Row <-> Groups Per Column, Row Spacing <-> Column Spacing). They are
+        -- now "Groups Before Wrap" and "Wrap Spacing", which describe the wrap rather than
+        -- the axis and so do not swap -- and leaving the writes in would have silently
+        -- restored the old names the first time anyone touched Growth Direction.
+        -- Only the flat grid's slider still names an axis.
         local function UpdateDynamicLabels()
-            if groupsPerRowSlider and groupsPerRowSlider.label then
-                groupsPerRowSlider.label:SetText(db.growDirection == "VERTICAL" and L["Groups Per Column"] or L["Groups Per Row"])
-            end
-            if rowColSpacingSlider and rowColSpacingSlider.label then
-                rowColSpacingSlider.label:SetText(db.growDirection == "VERTICAL" and L["Column Spacing"] or L["Row Spacing"])
-            end
             if playersPerRowSlider and playersPerRowSlider.label then
                 playersPerRowSlider.label:SetText(db.growDirection == "VERTICAL" and L["Players Per Column"] or L["Players Per Row"])
             end
@@ -1716,13 +1725,16 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
                     DF:UpdateRaidGroupLabels()
                 end
             end)
-            -- Rebuild the page so orientation-dependent dropdown TITLES refresh
-            -- live (e.g. "Columns Grow From" vs "Rows Grow From") without needing
-            -- to reopen the settings window. Dropdowns bake their label at build
-            -- time, so a rebuild is the only way to update it. (Option VALUES are
-            -- now the static "Start (Left/Top)" / "End (Right/Bottom)" form, so
-            -- only the titles need refreshing.) Deferred so it runs after the
-            -- triggering dropdown's own click handler has finished unwinding.
+            -- ☠ REBUILD THE PAGE, AND IT IS NOT OPTIONAL. Orientation decides both the
+            -- dropdown TITLES ("Column Order" vs "Row Order", "Columns Grow From" vs
+            -- "Rows Grow From" on the flat grid) AND their VALUES (Left/Right vs
+            -- Top/Bottom, per the MAIN/CROSS axis note further down). Both are baked at
+            -- build time, so without this rebuild a direction change leaves seven
+            -- dropdowns offering the previous orientation's edges until the window is
+            -- reopened. ⚠ An earlier comment here claimed the values were static
+            -- "Start (Left/Top)" / "End (Right/Bottom)" and only titles needed
+            -- refreshing -- true for a while, false again now. Deferred so it runs after
+            -- the triggering dropdown's own click handler has finished unwinding.
             C_Timer.After(0, function()
                 if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
             end)
@@ -1819,25 +1831,82 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local layoutGroup = GUI:CreateSettingsGroup(self.child, 280)
         layoutGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout Direction"]), 40)
         
-        -- ☠ ONE DROPDOWN FOR ALL THREE LAYOUTS, AND IT HAS TO STAY ONE.
-        -- There were three -- party, raid+groups and raid+flat -- mutually exclusive by
-        -- hideOn, and the raid+groups one INVERTED the pair: HORIZONTAL read as "Columns"
-        -- there and "Rows" in the other two. Every label that depends on the same key
-        -- (Groups Per Row / Row Spacing / Rows Grow From, and the hint below) uses the
-        -- party reading, so picking "Rows" in a grouped raid produced a box full of
-        -- Column settings -- field-reported as "choosing columns enables rows
-        -- configuration, and viceversa" (Aphoex, 2026-08-14).
-        -- Both readings describe the same layout truthfully (HORIZONTAL lays the
-        -- repeating unit left-to-right, and in groups mode that unit IS a vertical column
-        -- of five players), which is exactly why the disagreement survived: neither side
-        -- looks wrong on its own. The union of the three hideOns is "never hidden", so
-        -- collapsing them costs nothing and makes a future divergence impossible.
-        -- ⇒ HORIZONTAL = the unit grows left-to-right = "Rows". Do not re-split this.
-        local growOptions = { HORIZONTAL = L["Rows"], VERTICAL = L["Columns"] }
-        layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
+        -- ☠☠ TWO DROPDOWNS, AND THE RAID+GROUPS ONE IS *DELIBERATELY* THE INVERSE.
+        -- DO NOT "unify" them again. That was tried (be7e61e1) and it is the regression
+        -- this comment exists to prevent.
+        --
+        -- Rows and Columns name THE SHAPE OF THE REPEATING UNIT -- the thing you can see:
+        --   * party / flat raid: the unit is a line of frames. HORIZONTAL lays them
+        --     left-to-right (party sets point="LEFT" + xOffset, Headers.lua ~1140), so
+        --     HORIZONTAL = "Rows".
+        --   * grouped raid: the unit is a GROUP, and HORIZONTAL builds each group as a
+        --     vertical stack of five (groupHeight = 5*frameHeight + 4*spacing) while
+        --     running the groups across. What you see is COLUMNS. So here the pair is
+        --     inverted, and that is correct, not a bug.
+        --
+        -- ⚠ This is the convention the rest of the game uses, verified in source, not
+        -- assumed: Blizzard's own raid option is "Horizontal Groups", and with it on
+        -- CompactRaidGroup_UpdateLayout anchors each member LEFT->RIGHT off the previous
+        -- one, i.e. horizontal describes the GROUP, not the arrangement of groups. Grid2
+        -- says "Horizontal groups" for the same thing and its SetOrientation(horizontal)
+        -- sets the header's xOffset, so again the group is the row. (ElvUI sidesteps the
+        -- word entirely with "Down and then Right" style pairs.)
+        -- ⇒ DandersFrames' internal HORIZONTAL/VERTICAL are the INVERSE of that
+        -- convention for grouped raid. The labels have to absorb that; the keys cannot
+        -- be renamed without a migration.
+        --
+        -- The history, so nobody re-derives it: three dropdowns originally, the
+        -- raid+groups one inverted as above and correct. Aphoex (2026-08-14) reported
+        -- "choosing columns enables rows configuration, and viceversa" -- real, but it
+        -- was a COLLISION, not an inversion: "Columns" names the group's shape while
+        -- "Groups Per Row" names the arrangement of groups, and both are true at once.
+        -- Collapsing the dropdowns onto the party reading "fixed" that by making the
+        -- grouped dropdown disagree with the frames instead, so "Growth Direction = Rows"
+        -- drew columns (Krathe, 2026-08-17). The tooltips below carry the disambiguation
+        -- that report actually needed.
+        -- ☠ _order OR IT SORTS ALPHABETICALLY BY DISPLAY TEXT. Every directional dropdown
+        -- on this page needs it: without _order, CreateDropdown falls back to sorting on
+        -- the visible string, so a Top/Bottom pair lists as "Bottom, Top" and reads as
+        -- inverted before you have even opened it (Krathe, 2026-08-17). It survived this
+        -- long only because "Start (Left/Top)" / "End (Right/Bottom)" sorted E-then-S,
+        -- which was equally arbitrary but nobody expects an order from those.
+        local growOptions = { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL = L["Rows"], VERTICAL = L["Columns"] }
+        local growDrop = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], growOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
+        growDrop.hideOn = function() return GUI.SelectedMode == "raid" and db.raidUseGroups end
+        growDrop.tooltip = L["The shape each line of frames takes. Rows run left to right, Columns run top to bottom."]
+
+        -- Grouped raid: same key, inverted labels, because the repeating unit is a group.
+        local groupGrowOptions = { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL = L["Columns"], VERTICAL = L["Rows"] }
+        local groupGrowDrop = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Growth Direction"], groupGrowOptions, db, "growDirection", OnGrowthDirectionChanged), 55)
+        groupGrowDrop.hideOn = function() return not (GUI.SelectedMode == "raid" and db.raidUseGroups) end
+        groupGrowDrop.tooltip = L["The shape each raid group takes. Columns stack the five players downward and run the groups across; Rows lay them out sideways and stack the groups down.\n\nThe 'Groups Before Wrap' setting below counts the GROUPS, not the players."]
+
+        -- ☠ EVERY Start/End PAIR ON THIS PAGE SITS ON ONE OF TWO PERPENDICULAR AXES,
+        -- AND WHICH ONE IS NOT GUESSABLE FROM THE CONTROL'S NAME. Get this wrong and the
+        -- dropdown confidently offers "Right" for something that only ever moves up and
+        -- down -- which is precisely how "Rows Grow From is broken" got reported.
+        --   MAIN  = the axis Growth Direction names.        HORIZONTAL -> Left/Right
+        --   CROSS = the perpendicular one, where things wrap. HORIZONTAL -> Top/Bottom
+        -- The assignments, all verified against the positioners (not against the names):
+        --   MAIN  : growthAnchor (party frames), raidGroupAnchor (the group block),
+        --           raidFlatGrowthAnchor (the grid), raidFlatFrameAnchor (flat players,
+        --           which fill ALONG the main axis)
+        --   CROSS : raidGroupRowGrowth (extra rows of groups), raidPlayerAnchor (grouped
+        --           players, which stack ACROSS the main axis inside their group),
+        --           raidFlatColumnAnchor (where the grid wraps)
+        -- ⚠ The two "Players Grow From" controls are on OPPOSITE axes -- flat fills along,
+        -- grouped stacks across. Same label, same START/END values, different direction.
+        -- These were all flattened to one orientation-free "Start (Left/Top)" /
+        -- "End (Right/Bottom)" pair by a wording pass; the page already rebuilds on a
+        -- direction change (OnGrowthDirectionChanged), which is what lets them be live.
+        local isVert = db.growDirection == "VERTICAL"
+        local MAIN_START  = isVert and L["Top"]  or L["Left"]
+        local MAIN_END    = isVert and L["Bottom"] or L["Right"]
+        local CROSS_START = isVert and L["Left"] or L["Top"]
+        local CROSS_END   = isVert and L["Right"] or L["Bottom"]
 
         -- Growth anchor (party only)
-        local anchorOptions = { START= L["Start (Left/Top)"], CENTER= L["Center"], END= L["End (Right/Bottom)"] }
+        local anchorOptions = { _order = { "START", "CENTER", "END" }, START= MAIN_START, CENTER= L["Center"], END= MAIN_END }
         local anchorDropdown = layoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Frames Grow From"], anchorOptions, db, "growthAnchor", UpdateFrames), 55)
         anchorDropdown.hideOn = function() return GUI.SelectedMode == "raid" end
         
@@ -1850,10 +1919,6 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         
         raidModeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use Group-Based Layout"], db, "raidUseGroups", function()
             UpdateFrames()
-            if DF.SecureSort then
-                DF.SecureSort:PushRaidGroupLayoutConfig()
-                DF.SecureSort:TriggerSecureRaidSort()
-            end
             -- Branch on the SETTING only. Folding `not InCombatLockdown()` into this
             -- test meant that switching TO flat mode while in combat fell into the
             -- else branch and disabled flat mode outright -- the opposite of what
@@ -1893,25 +1958,176 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local groupLayoutHint = db.growDirection == "VERTICAL" and L["Players stack horizontally, groups grow top-to-bottom."] or L["Players stack vertically, groups grow left-to-right."]
         groupLayoutGroup:AddWidget(GUI:CreateLabel(self.child, groupLayoutHint, 250), 25)
         
-        groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Group Spacing"], -5, 100, 1, db, "raidGroupSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
-        
-        local rowColLabel = db.growDirection == "VERTICAL" and L["Column Spacing"] or L["Row Spacing"]
-        rowColSpacingSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, rowColLabel, -5, 100, 1, db, "raidRowColSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
-        
-        local groupsLabel = db.growDirection == "VERTICAL" and L["Groups Per Column"] or L["Groups Per Row"]
-        groupsPerRowSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, groupsLabel, 1, 8, 1, db, "raidGroupsPerRow", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
-        
-        groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Group Alignment"], anchorOptions, db, "raidGroupAnchor", UpdateFrames), 55)
+        -- Six controls, four of them directional, and their labels already swap with the
+        -- growth direction -- so the tooltips have to swap with it too, or half of them
+        -- describe the other orientation. The page rebuilds on a direction change
+        -- (OnGrowthDirectionChanged), which is what keeps these in step. isVert and the
+        -- MAIN_/CROSS_ edge words are declared once with the anchor options above.
+        local groupSpacingSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Group Spacing"], -5, 100, 1, db, "raidGroupSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
+        groupSpacingSlider.tooltip = isVert and L["Gap between one group and the next down the same column."]
+            or L["Gap between one group and the next along the same row."]
 
-        local rowGrowLabel = db.growDirection == "VERTICAL" and L["Columns Grow From"] or L["Rows Grow From"]
-        local rowGrowOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
-        groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, rowGrowLabel, rowGrowOptions, db, "raidGroupRowGrowth", UpdateFrames), 55)
+        -- ⚠ "Row Spacing" and "Groups Per Row" are gone, and not for tidiness. With the
+        -- Growth Direction dropdown above reading "Columns" in horizontal mode, a box that
+        -- then said Row three times was the exact collision Aphoex reported -- "Columns"
+        -- names the group's shape, "Row" named the arrangement of groups, both true at
+        -- once. These two are the last places the word appeared in the second sense, so
+        -- they now describe the WRAP instead, and Row/Column means one thing on this page.
+        -- They also stop swapping with the orientation, because wrapping is wrapping.
+        rowColSpacingSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Wrap Spacing"], -5, 100, 1, db, "raidRowColSpacing", UpdateFrames, function() DF:LightweightUpdateRaidLayout() end, true), 55)
+        rowColSpacingSlider.tooltip = isVert and L["Gap between one column of groups and the column beside it."]
+            or L["Gap between one row of groups and the row below it."]
+
+        -- ☠ THIS SLIDER GATES THE ANCHOR GRID'S BOTTOM ROW, SO IT HAS TO REFRESH IT.
+        -- RefreshChildStates is what re-runs a child's disableOn and refreshContent, and
+        -- nothing calls it on a slider change -- CreateCheckbox self-calls it on toggle,
+        -- sliders never did. So moving 8 -> 7 left the bottom cells greyed until some
+        -- unrelated control was touched: the grid was correct, it had just never been
+        -- asked again. (This bit the old Row Order disableOn identically; it only became
+        -- visible once the gate had something to ungrey.)
+        local function UpdateFramesAndGates()
+            UpdateFrames()
+            if groupLayoutGroup.RefreshChildStates then groupLayoutGroup:RefreshChildStates() end
+        end
+        groupsPerRowSlider = groupLayoutGroup:AddWidget(GUI:CreateSlider(self.child, L["Groups Before Wrap"], 1, 8, 1, db, "raidGroupsPerRow", UpdateFramesAndGates, function()
+            DF:LightweightUpdateRaidLayout()
+            if groupLayoutGroup.RefreshChildStates then groupLayoutGroup:RefreshChildStates() end
+        end, true), 55)
+        groupsPerRowSlider.tooltip = isVert and L["How many groups sit in a column before a new column starts. At 8, every group shares one column."]
+            or L["How many groups sit on a row before a new row starts. At 8, every group shares one row."]
+
+        -- ☠ ONE CORNER PICKER, REPLACING "Groups Grow From" + "Row Order". Do not split
+        -- them back apart. They were two axes of one question -- which corner of the
+        -- reserved area does the block sit in -- asked in two vocabularies, three controls
+        -- apart, and nobody read them as one thing (Aphoex 2026-08-14, Krathe 2026-08-17).
+        --
+        -- raidGroupAnchor is the horizontal half (START/CENTER/END), raidGroupRowGrowth the
+        -- vertical (START/END). Both keys, values and defaults are UNCHANGED -- this is a
+        -- widget swap, so no migration and nothing to do for existing profiles.
+        --
+        -- ⚠ The vertical half is inert whenever there is only one row of groups, which is
+        -- the case at the default Groups Before Wrap = 8: both positioners flip the row
+        -- index as `rcIdx = (fullGridRC - 1) - rcIdx` over `ceil(8 / groupsPerRow)`, so at
+        -- 8 the flip is the identity. The grid greys its bottom cells there rather than
+        -- offering a choice that cannot land -- and it does NOT write the key, so a stored
+        -- END survives and comes back the moment the slider drops below 8.
+        -- ⚠ NOT clamped to the POPULATED group count either. The flip is deliberately over
+        -- the full eight-group grid, so with five groups at four per row the bottom cell
+        -- legitimately moves them to the bottom of that grid, not of the populated rows.
+        local groupAnchorGrid = groupLayoutGroup:AddWidget(
+            -- ⚠ Plain UpdateFramesAndGates again. The pin toggle used to be a separate
+            -- row whose hideOn only a page layout pass could re-evaluate, so a cell click
+            -- that changed the centre-ness had to force GUI:RefreshCurrentPage or the
+            -- checkbox appeared a click late. The toggle now lives inside this widget and
+            -- its own Refresh runs on every cell click, so that machinery is gone.
+            GUI:CreateAnchorGrid(self.child, L["Groups Anchor"], db, "raidGroupAnchor", "raidGroupRowGrowth", UpdateFramesAndGates, {
+                verticalInertFn = function(d) return (d.raidGroupsPerRow or 8) >= 8 end,
+                -- ☠ In Rows growth the two keys swap screen axes -- raidGroupAnchor moves
+                -- things UP/DOWN there and raidGroupRowGrowth moves them LEFT/RIGHT, the
+                -- exact transpose of Columns growth. Without this the grid draws a corner
+                -- that is 90 degrees from where the frames land.
+                transposedFn = function(d) return d.growDirection == "VERTICAL" end,
+                -- ☠ Players Grow From = End mirrors the WRAP axis (the group anchors to the
+                -- far corner and the wrap offset is measured back from it), so the grid has
+                -- to translate or it names the wrong side. Decoupling them in the
+                -- positioners would move existing users' frames, which is not on the table.
+                --
+                -- ⚠ With Pin Main Group on, the meaning of the wrap cell CHANGES: the main
+                -- group is nailed to the anchor, so the only directional thing a user can
+                -- see is which side the OVERFLOW extends — the cell must name that side or
+                -- it reads as wrong (Krathe, 2026-08-18: "Center Left" with overflow going
+                -- right). Overflow sits opposite the main unit, and the main unit's screen
+                -- side is (playersEnd == wrapEnd), so displayed-side == overflow-side works
+                -- out to mirroring exactly when players is START — the inverse of the
+                -- unpinned rule. Derived against WrapKey's involution in Widgets.lua, not
+                -- assumed; the geometry itself never changes, only the translation.
+                wrapMirroredFn = function(d)
+                    local playersEnd = (d.raidPlayerAnchor or "START") == "END"
+                    if (d.raidGroupCenterMode or "ALL") == "MAIN" and (d.raidGroupAnchor or "START") == "CENTER" then
+                        return not playersEnd
+                    end
+                    return playersEnd
+                end,
+            }))
+        -- The non-obvious half is the empty space: the frame area is sized for all EIGHT
+        -- groups so the drag box never resizes under you, so in a five-group raid the left
+        -- corners leave three groups' worth of gap on the right. That gap is what made the
+        -- old dropdown look broken when it was in fact the only one of the two doing
+        -- anything.
+        groupAnchorGrid.tooltip = L["Which corner of the frame area the groups start from, and which way they fill. The area is always sized for all eight groups, so the unused space falls on the opposite side."]
+
+        -- ☠ ITS OWN ROW, AND GREYED -- NEVER HIDDEN. Four arrangements have been tried and
+        -- this is the one that survives: flush row, indented row, a schematic, and finally
+        -- inline inside the picker beside the cells. The inline version broke on the
+        -- TRANSPOSE -- Rows growth draws the grid 2 wide x 3 tall instead of 3 x 2, so the
+        -- space the toggle sat in changes shape and it no longer lines up with anything
+        -- (Krathe, 2026-08-18).
+        --
+        -- ⚠ disableOn covers BOTH conditions and there is no hideOn. A control that
+        -- vanishes when it does not apply cannot be discovered, and it made the rows below
+        -- jump as the anchor or the wrap slider changed. Greyed in place is what the anchor
+        -- grid already does with its own inert half, so the page stays consistent.
+        --
+        -- ⚠ The callback must reposition the CONTAINER as well as the frames -- half of
+        -- this setting is a container anchor-reference shift, consumed only in
+        -- DF:UpdateRaidContainerPosition -- AND refresh the picker, because the meaning of
+        -- its wrap cell flips with this toggle (see wrapMirroredFn above).
+        local function UpdatePinMainGroup()
+            UpdateFrames()
+            if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
+            if groupAnchorGrid and groupAnchorGrid.Refresh then groupAnchorGrid:Refresh() end
+        end
+        -- ☠ A STRING KEY, NOT THE BOOLEAN THIS REPLACED. A dropdown writes an option key,
+        -- and mapping string <-> boolean through customGet/customSet would have fed the
+        -- STRING into two AutoProfiles paths that take dbKey verbatim (HandleRuntimeWrite
+        -- and SetProfileSetting). An override of "ALL" is truthy, so it would have
+        -- switched the pin ON where it means OFF. raidGroupPinMainGroup never shipped, so
+        -- the type change costs no migration.
+        -- ⚠ The labels are deliberately bare -- the tooltip carries the meaning. "Default"
+        -- reuses the existing shared string; the key values stay ALL/MAIN so the geometry
+        -- and the saved setting are unaffected by any future relabelling.
+        local centerModeOptions = { _order = { "ALL", "MAIN" },
+            ALL = L["Default"], MAIN = L["Fixed"] }
+        local centerModeDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Center Mode"], centerModeOptions, db, "raidGroupCenterMode", UpdatePinMainGroup), 55)
+        centerModeDrop.disableOn = function(d)
+            d = d or db
+            return (d.raidGroupAnchor or "START") ~= "CENTER" or (d.raidGroupsPerRow or 8) >= 8
+        end
+        centerModeDrop.tooltip = L["What happens when your groups wrap onto more than one row. Needs Groups Anchor on a centre position.\n\nDefault: all groups stay centred together, so they shift sideways as the raid fills up.\n\nFixed: the first groups stay put, and extra groups appear to one side of them."]
 
         -- Players Grow From = the direction players fill the group's main axis.
         -- HORIZONTAL groups stack players vertically (Top/Bottom); VERTICAL groups
-        -- stack players horizontally (Left/Right). Values map to START/END.
-        local playerAnchorOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
-        groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], playerAnchorOptions, db, "raidPlayerAnchor", UpdateFrames), 55)
+        -- stack players horizontally (Left/Right). Values map to START/END. CROSS axis.
+        local playerAnchorOptions = { _order = { "START", "END" }, START= CROSS_START, END= CROSS_END }
+        -- ☠ FLIPPING THIS MUST NOT MOVE THE BLOCK, AND THAT IS WHY IT WRITES TWO KEYS.
+        -- raidPlayerAnchor mirrors the WRAP axis in the positioners (the group anchors to
+        -- the far corner and the wrap offset is measured back from it), so changing it
+        -- slid the whole raid to the other end of the reserved grid -- a control named
+        -- "Players Grow From" reaching well outside a group. Decoupling them in the
+        -- positioners would move existing users' frames and is not on the table, so the
+        -- compensation lives here: invert the stored wrap key at the same moment, and the
+        -- corner Groups Anchor names stays exactly where it was while only the gap inside
+        -- a partial group moves. The two controls become independent from the user's side
+        -- without a single line of geometry changing.
+        --
+        -- ⚠ ONLY WHEN THE WRAP AXIS CAN BE SEEN. At 8 before wrap there is one row, the
+        -- mirror has nowhere to move anything, and inverting the key would silently flip a
+        -- value whose effect only appears later when the slider drops below 8.
+        -- ⚠ A write triggered by another write is a pattern this addon has been bitten by
+        -- three times, so: this runs ONLY from this dropdown's own click handler. It never
+        -- fires at load, on a profile switch or on import, so no existing setup changes on
+        -- its own -- which is the whole reason it is safe to do here and not in a migration.
+        local function SetPlayerAnchorKeepingBlock(v)
+            local prev = db.raidPlayerAnchor or "START"
+            db.raidPlayerAnchor = v
+            if prev ~= v and (db.raidGroupsPerRow or 8) < 8 then
+                db.raidGroupRowGrowth = (db.raidGroupRowGrowth == "END") and "START" or "END"
+            end
+        end
+        -- ⚠ UpdateFramesAndGates, not UpdateFrames: this rewrites the wrap key, so the
+        -- anchor grid has to be re-asked or it keeps showing the pre-flip corner.
+        local playerAnchorDrop = groupLayoutGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], playerAnchorOptions, db, "raidPlayerAnchor", UpdateFramesAndGates, nil, SetPlayerAnchorKeepingBlock), 55)
+        playerAnchorDrop.tooltip = L["Which end of a group its players fill from. A group with fewer than five players leaves its empty space at the opposite end."]
         
         Add(groupLayoutGroup, nil, 1)
         
@@ -1997,19 +2213,28 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         local playersPerLabel = db.growDirection == "VERTICAL" and L["Players Per Column"] or L["Players Per Row"]
         playersPerRowSlider = flatGridGroup:AddWidget(GUI:CreateSlider(self.child, playersPerLabel, 1, 40, 1, db, "raidPlayersPerRow", UpdateFlatLayoutFull, UpdateFlatLayoutFull, true), 55)
         
-        local growthAnchorOptions = { START= L["Start (Left/Top)"], CENTER= L["Center"], END= L["End (Right/Bottom)"] }
+        -- ☠ CROSS axis, NOT main -- these labels were MAIN_* and lied. GetGrowthAnchorPoint
+        -- pins innerContainer to a CORNER of raidContainer, and the block always matches
+        -- the container on the main axis (it is playersPerRow wide in Rows, five tall in
+        -- Columns), so only the cross component can move: END is BOTTOMLEFT in Rows and
+        -- TOPRIGHT in Columns. With MAIN_* the dropdown offered "Right" for Rows and moved
+        -- the grid DOWN. The sibling below is also cross-axis and that is not a duplicate:
+        -- this one ALIGNS the block in the reserved space, that one picks which end rows
+        -- stack FROM.
+        local growthAnchorOptions = { _order = { "START", "CENTER", "END" }, START= CROSS_START, CENTER= L["Center"], END= CROSS_END }
         flatGridGroup:AddWidget(GUI:CreateDropdown(self.child, L["Grid Alignment"], growthAnchorOptions, db, "raidFlatGrowthAnchor", UpdateFrames), 55)
 
         -- Columns/Rows Grow From = the direction the grid wraps (secondary axis).
         -- VERTICAL (Columns) wraps left/right; HORIZONTAL (Rows) wraps top/bottom.
         local flatColumnLabel = db.growDirection == "VERTICAL" and L["Columns Grow From"] or L["Rows Grow From"]
-        local flatColumnOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
+        local flatColumnOptions = { _order = { "START", "END" }, START= CROSS_START, END= CROSS_END }
         flatGridGroup:AddWidget(GUI:CreateDropdown(self.child, flatColumnLabel, flatColumnOptions, db, "raidFlatColumnAnchor", UpdateFrames), 55)
 
         -- Players Grow From = the direction players fill the grid's main axis.
         -- HORIZONTAL (Rows) fills Left/Right; VERTICAL (Columns) fills Top/Bottom.
         -- Replaces the old "Reverse Order" checkbox; START/END values are identical.
-        local flatFillOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
+        -- ⚠ MAIN axis -- the OPPOSITE of the grouped Players Grow From, which is CROSS.
+        local flatFillOptions = { _order = { "START", "END" }, START= MAIN_START, END= MAIN_END }
         flatGridGroup:AddWidget(GUI:CreateDropdown(self.child, L["Players Grow From"], flatFillOptions, db, "raidFlatFrameAnchor", UpdateFrames), 55)
         
         flatGridGroup:AddWidget(GUI:CreateSlider(self.child, L["Horizontal Spacing"], -5, 100, 1, db, "raidFlatHorizontalSpacing", UpdateFrames, function() DF:LightweightUpdateFrameSize() end, true), 55)

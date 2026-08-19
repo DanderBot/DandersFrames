@@ -3303,6 +3303,23 @@ function NativeBackend:build()
     -- Initial identity-gate state for this build's unit (see _applyIdentityGate);
     -- the module watcher re-evaluates on faction/phase/roster/world changes.
     handle:_applyIdentityGate()
+    -- ☠ AND THE DEATH LATCH, which the gate above does NOT cover. The latch is edge-driven
+    -- from Frames/Update.lua's dead/alive transitions, so a container built after the death
+    -- edge has passed comes up unlatched and nothing re-latches it -- the next
+    -- SetUnitDeathLatched(unit, true) fires only on a NEW death, and the unit is already
+    -- dead. Reload beside a ghost and every row came back. See AuraContainer._deathLatchedUnits.
+    local dlu = handle.config and handle.config.unit
+    if dlu and AuraContainer._deathLatchedUnits[dlu]
+        and not (handle.config and handle.config.parentDrivenVisibility) then
+        pcall(function() handle:_setDeathLatch(true) end)
+    end
+    -- Same reasoning for the cinematic latch: CineLatchAll only reaches what exists at
+    -- CINEMATIC_START, so a build during one must latch itself. Vulnerable-only, matching
+    -- CineLatchAll's own scope; the STOP sweep and its fallback timer clear it.
+    if AuraContainer._cineActive and handle._idGateVulnerable
+        and not (handle.config and handle.config.parentDrivenVisibility) then
+        pcall(function() handle:_setCineLatch(true) end)
+    end
 end
 
 function NativeBackend:setUnit(unit)
@@ -3521,9 +3538,14 @@ function NativeBackend:applyGroupTuning()
                 -- and the one other 12.1 implementations use for it. Without this the park
                 -- reached group-backed rows only, and a slot-backed row kept falling back
                 -- to the whole-handle hide it is meant to replace.
+                -- ⚠ Same park string as SlotHandle:_pushFilter, and it must stay the same.
+                -- Two writers pushing different "parked" values means whichever ran last
+                -- decides, and one of them would be the string the engine no longer treats
+                -- as a park. See SLOT_PARK_FILTER for why "" was retired.
                 local parked = self.handle._idGateParked
                     and self.gatedGroupKeys and self.gatedGroupKeys[key]
-                if not pcall(c.SetAuraSlotFilterString, c, key, parked and "" or fsByKey[key]) then
+                if not pcall(c.SetAuraSlotFilterString, c, key,
+                    parked and AuraContainer.SLOT_PARK_FILTER or fsByKey[key]) then
                     fsMissing = fsMissing or key
                 end
             end
@@ -5332,8 +5354,19 @@ function Handle:_applyIdentityGate()
     -- ★ `_hasGatedGroups` widens the probe to rows that are not HIDE-vulnerable but do
     -- carry identity-dependent GROUPS -- i.e. the debuff row. Without it the assist probe
     -- never ran for those handles and the park verdict could never flip.
-    if (self._idGateVulnerable or self._idGateSourceRelative or self:_hasGatedGroups())
-        and not AuraContainer._testMode then
+    -- ☠☠ EVERY HANDLE IS PROBED NOW, and the three-way test this replaced is why a unit in
+    -- another instance rendered a full debuff row.
+    --
+    -- filterVulnerableToIdentityGate returns false for ANY filter without "HELPFUL" on its
+    -- first line, and a HARMFUL row carrying only excludeSpellIDs registers no gated keys.
+    -- So the debuff row and the dispel overlay failed all three tests -- not vulnerable,
+    -- not source-relative, no gated groups -- and the gate never ran for them at all. No
+    -- probe, no verdict, nothing to actuate: /df debug idgate showed them vis=false why=-
+    -- shown=true while the pools beside them were correctly hidden (Krathe, 2026-08-18).
+    --
+    -- The inner branches keep their own conditions, so this widens only WHICH handles reach
+    -- the visibility probe. The assist/park logic below is untouched.
+    if not AuraContainer._testMode then
         local unit = self.config and self.config.unit
         -- ☠ `unit ~= "player"` USED TO SIT ON THIS LINE, so your own frame was never
         -- probed at all — nothing ever NOTICED your own pool falling open, so it never
@@ -5414,7 +5447,26 @@ function Handle:_applyIdentityGate()
             --     fails open — the engine can't attribute a caster. Signal: UnitIsVisible.
             --     Fail-safe (matches the assist gate): only hide on a definite,
             --     non-secret false; any doubt (pcall fail / secret) SHOWS.
-            if not hide and not isOwn and self._idGateSourceRelative then
+            -- ☠ NO LONGER GATED ON _idGateSourceRelative. It was from the day it landed
+            -- (ad0985c9), because it was written for one narrow failure: the PLAYER-token
+            -- "mine" filter passing every caster's aura when the engine cannot attribute a
+            -- caster. Sound reasoning, far too narrow for what the probe actually tells you.
+            --
+            -- UnitIsVisible is INSTANCE-SCOPED, not range-scoped -- true for a same-instance
+            -- member far outside 40yd, false only across instances and phases
+            -- (field-verified 3-case probe, see filterVulnerableToIdentityGate's header).
+            -- A unit reading false is not in your world at all, so EVERY pool it renders is
+            -- stale, not just the source-relative ones. Restricting the response to "mine"
+            -- filters left a cross-instance unit rendering a full debuff row and dispel
+            -- overlay while its buff bar was correctly blanked (Krathe, 2026-08-18).
+            --
+            -- ⚠ Widening is safe BECAUSE the signal is instance-scoped. Were it range-based
+            -- this would blank half a raid's debuffs -- the exact failure class
+            -- UNIT_CONNECTION / UNIT_FLAGS were registered for. Do not widen a range-based
+            -- probe by analogy with this one.
+            -- ⚠ isOwn still stands: you are always visible to yourself, so it stays
+            -- belt-and-braces rather than a behaviour decision.
+            if not hide and not isOwn then
                 local okv, vis = pcall(UnitIsVisible, unit)
                 if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
                     hide = true; why = why or "not-visible"
@@ -5535,8 +5587,11 @@ function Handle:SetUnit(unit)
     self:_updateDynRefresh()   -- re-evaluate dynamic-unit auto-refresh for the new token
     -- A retarget is a new identity: a death latch taken for the OLD unit is
     -- meaningless now (and would stick until the NEW unit died and revived).
-    -- The new unit's own dead edge re-latches if it is also a corpse.
-    if self._deathLatched then self:_setDeathLatch(nil) end
+    -- ☠ RE-SEED, don't just clear. The latch is UNIT state: dropping the old unit's is
+    -- half the retarget — the NEW unit may already be dead, and the next death edge for
+    -- an already-dead unit never comes, so a clear-only retarget onto a ghost rendered
+    -- the corpse's auras until an unrelated edge swept (2026-08-18 audit).
+    self:_setDeathLatch(AuraContainer._deathLatchedUnits[unit] or nil)
     self:_applyIdentityGate()  -- the last gate verdict was for the OLD unit (plain frame; combat-safe)
     -- In combat, defer JUST the retarget (a full rebuild would leak a container + N
     -- buttons every combat on roster churn); "retarget" re-runs SetUnit at regen.
@@ -6556,11 +6611,16 @@ end
 -- ☠ PARKING IS THE WHOLE MECHANISM, and it is why this could not be built before now.
 -- AddAuraSlot is add-only -- Blizzard's ClearAuraGroups is "intentionally not exposed via
 -- the inbound interface" because pooled frames would become irrecoverable -- and slots
--- have no maxFrameCount. That SetAuraSlotFilterString(key, "") empties a slot is not
--- determinable from the Lua source -- AuraUtil.IsValidFilterString("") returns true
--- because every component is skipped, but what the engine does with an empty predicate is
--- invisible. Proved in game with /alpark on 2026-08-05: it matches nothing (it does NOT
--- fall back to a default), and a bare re-Set restores it live.
+-- have no maxFrameCount, so an unwanted slot must be made to match nothing.
+--
+-- ☠☠ THE EMPTY STRING IS RETIRED -- see SLOT_PARK_FILTER. That
+-- SetAuraSlotFilterString(key, "") empties a slot was never determinable from the Lua
+-- source (AuraUtil.IsValidFilterString("") returns true because every component is
+-- skipped, but what the engine does with an empty predicate is invisible), and was proved
+-- in game with /alpark on 2026-08-05 -- on THAT build. It stopped holding: an AD indicator
+-- kept rendering with the gate hidden, the empty string pushed and the engine accepting it
+-- (Krathe, 2026-08-18). The park is now a self-contradicting filter, which cannot match
+-- under any reading of the predicate. A bare re-Set still restores live.
 --
 -- ★ Z-ORDER: the dfLevelHost. Sharing a container means sharing its frame level, but AD
 -- indicators need independent layering. Writing the level on the slot BUTTON is legal
@@ -6888,6 +6948,18 @@ function AuraContainer:AcquireSlot(frame, slotKey, spec)
     handle._idGateSourceRelative = filterSourceRelative(filter, spec.candidateFilters)
     handle._lastCandidateFilters = spec.candidateFilters
     handle:_applyIdentityGate()
+    -- ☠ SEED THE LATCHES TOO — both are edge-driven, and a slot born AFTER the edge hears
+    -- nothing. SetUnitDeathLatched / CineLatchAll loop the registries at the transition;
+    -- a slot created later (indicator re-enabled beside a ghost, options touched during a
+    -- cinematic) starts unlatched and renders until the NEXT edge, which for an
+    -- already-dead unit never comes. The Handle build has the same seed; re-adopted slots
+    -- do not need it — they sat in _slotHandles the whole time, so the edges reached them.
+    if AuraContainer._deathLatchedUnits[spec.unit] then
+        pcall(function() handle:_setDeathLatch(true) end)
+    end
+    if AuraContainer._cineActive and handle._idGateVulnerable then
+        pcall(function() handle:_setCineLatch(true) end)
+    end
 
     -- Enabled defaults true on the template, but assert it once the container actually
     -- has a slot: registration needs HasAnyAuraSlots, which only became true just now.
@@ -6987,12 +7059,68 @@ end
 -- `_gateHidden` is the IDENTITY GATE's. Before this there was only `parked`, so whichever
 -- wrote last won -- a consumer Restore would have un-hidden a gated slot and leaked the
 -- auras the gate exists to suppress. One writer, one resolution.
+-- ☠ THE SLOT PARK STRING. Was "" and is no longer, because an empty filter parking a slot
+-- is a CONVENTION the engine is free to change, not a guarantee.
+--
+-- It was proven in game on the 2026-08-05 build (`/alpark`, two side-by-side slots: the
+-- emptied plate went blank, the control kept its icon) and the note written at the time
+-- named this exact fallback for the day it stopped holding: a filter that matches nothing
+-- BY CONSTRUCTION rather than by convention. That day arrived -- an AD indicator kept
+-- rendering with gate=true, pushed=[] and pushOK=true, i.e. the gate decided correctly,
+-- the empty string was pushed, the engine accepted it, and the artwork stayed on screen
+-- (Krathe, 2026-08-18).
+--
+-- "HELPFUL|!HELPFUL" cannot match: the same token is required and forbidden in one
+-- predicate. No engine reading of it produces an aura, so this does not depend on how an
+-- empty predicate is interpreted. It is valid to IsValidFilterString either way.
+-- ⚠ Deliberately not HARMFUL-flavoured for harmful slots. The contradiction is what parks
+-- it, not the polarity, so one constant serves every slot and there is no branch to get
+-- wrong.
+local SLOT_PARK_FILTER = "HELPFUL|!HELPFUL"
+-- ⚠ Also on the module table: NativeBackend:ApplyTuning pushes the park string for
+-- slot-backed rows and sits EARLIER in this file, where the local is not yet in scope. The
+-- field resolves at call time, so both writers park with the identical string -- which they
+-- must, or whichever runs last decides and one of them is the retired convention.
+AuraContainer.SLOT_PARK_FILTER = SLOT_PARK_FILTER
+
 function SlotHandle:_pushFilter()
     local c = self.owner and self.owner.container
     if not c then return false end
-    local want = (self.parked or self._gateHidden or self._cineLatched or self._deathLatched)
-        and "" or self.liveFilter
-    return pcall(c.SetAuraSlotFilterString, c, self.key, want)
+    -- ☠☠ THE FILTER PUSH CANNOT HIDE A SLOT ON A UNIT THE GATE DISTRUSTS, and that is not
+    -- a defect in the park string -- it is the fail-open mechanism itself. For a unit whose
+    -- identity data is unavailable (not visible / cross-instance / cinematic) the engine
+    -- fails open and NOTHING RE-PARSES (proven for cinematics in the UNIT_FACTION
+    -- investigation; reproduced here in game: gate=true, pushed=[], pushOK=true, artwork
+    -- still on screen, and a freshly placed indicator INSTANTLY bound the unit's top aura
+    -- because the initial parse skipped its candidate filters too -- Krathe, 2026-08-18).
+    -- Any filter we push -- empty, contradictory, anything -- lands in the engine and sits
+    -- there unconsulted until identity recovers. The stale bound aura keeps rendering.
+    --
+    -- The Handles never had this failure because they hide a DF-OWNED FRAME. The slot
+    -- equivalent is the owner ANCHOR: ensureOwner's plain frame between the unit frame and
+    -- the shared container, already the OOR fade's alpha host, ours to write in or out of
+    -- combat. Hiding it hides every slot button under it.
+    --
+    -- ⚠ UNIT-LEVEL VERDICTS ONLY. gate/cine/death are properties of the UNIT, so every
+    -- slot on this owner computes the same answer and the shared anchor is the right
+    -- grain. `parked` is per-slot consumer state (one disabled indicator) and must NOT
+    -- hide the owner -- it stays filter-only.
+    local unitHidden = (self._gateHidden or self._cineLatched or self._deathLatched)
+        and true or false
+    local anchor = self.owner.anchor
+    if anchor then pcall(anchor.SetShown, anchor, not unitHidden) end
+    local want = (self.parked or unitHidden)
+        and SLOT_PARK_FILTER or self.liveFilter
+    local ok = pcall(c.SetAuraSlotFilterString, c, self.key, want)
+    -- ☠ RECORD WHAT WAS ACTUALLY PUSHED, AND WHETHER IT TOOK. /df debug idgate used to
+    -- print liveFilter under a comment calling it "the pushed string" -- it is not, it is
+    -- the STORED filter, which never changes when the gate hides a slot. So a slot could
+    -- read gateHidden=true filter=HELPFUL|PLAYER and that told you nothing about whether
+    -- the empty string ever reached the engine. Diagnosing an indicator that renders while
+    -- the gate believes it hidden needs the pushed value, not the intended one.
+    self._pushedFilter = want
+    self._pushOK = ok and true or false
+    return ok
 end
 
 -- ☠ A REFUSED PUSH MUST NOT BE LATCHED AND FORGOTTEN. `parked` records the consumer's
@@ -7143,7 +7271,11 @@ end
 function SlotHandle:_applyIdentityGate()
     local hide = false
     local why   -- the FIRST probe that broke trust this pass, for the gate log
-    if (self._idGateVulnerable or self._idGateSourceRelative) and not AuraContainer._testMode then
+    -- ☠ Widened with the Handle's entry test, for the reason stated there: an AD indicator
+    -- on a unit in another instance is as stale as any row, whatever its filter carries.
+    -- The verdict logic is deliberately identical to Handle:_applyIdentityGate, so the two
+    -- entry conditions must stay identical too -- two gates that disagree are worse than one.
+    if not AuraContainer._testMode then
         local unit = self.owner and self.owner.unit
         -- ☠ See Handle:_applyIdentityGate — the `unit ~= "player"` exemption moved off
         -- this line onto the hide branches so the player's own slot is PROBED, and has
@@ -7178,7 +7310,26 @@ function SlotHandle:_applyIdentityGate()
                     if not can then hide = true end
                 end
             end
-            if not hide and not isOwn and self._idGateSourceRelative then
+            -- ☠ NO LONGER GATED ON _idGateSourceRelative. It was from the day it landed
+            -- (ad0985c9), because it was written for one narrow failure: the PLAYER-token
+            -- "mine" filter passing every caster's aura when the engine cannot attribute a
+            -- caster. Sound reasoning, far too narrow for what the probe actually tells you.
+            --
+            -- UnitIsVisible is INSTANCE-SCOPED, not range-scoped -- true for a same-instance
+            -- member far outside 40yd, false only across instances and phases
+            -- (field-verified 3-case probe, see filterVulnerableToIdentityGate's header).
+            -- A unit reading false is not in your world at all, so EVERY pool it renders is
+            -- stale, not just the source-relative ones. Restricting the response to "mine"
+            -- filters left a cross-instance unit rendering a full debuff row and dispel
+            -- overlay while its buff bar was correctly blanked (Krathe, 2026-08-18).
+            --
+            -- ⚠ Widening is safe BECAUSE the signal is instance-scoped. Were it range-based
+            -- this would blank half a raid's debuffs -- the exact failure class
+            -- UNIT_CONNECTION / UNIT_FLAGS were registered for. Do not widen a range-based
+            -- probe by analogy with this one.
+            -- ⚠ isOwn still stands: you are always visible to yourself, so it stays
+            -- belt-and-braces rather than a behaviour decision.
+            if not hide and not isOwn then
                 local okv, vis = pcall(UnitIsVisible, unit)
                 if okv and not (issecretvalue and issecretvalue(vis)) and not vis then
                     hide = true; why = why or "not-visible"
@@ -7264,7 +7415,18 @@ function SlotHandle:ApplyTuning(filter, candidateFilters, sortMethod, sortDirect
     -- Re-evaluate before pushing, so a slot that just became vulnerable is dark on the
     -- very first pass rather than showing one frame of the wrong player's auras.
     self:_applyIdentityGate()
-    if filterChanged then self:_pushFilter() end
+    -- ☠ UNCONDITIONAL. This used to be `if filterChanged then`, which re-asserted the
+    -- slot's filter only when the FILTER moved -- but what must reach the engine is the
+    -- gate's verdict, and _applyIdentityGate pushes only on a VERDICT TRANSITION. A pass
+    -- where neither moved therefore pushed nothing, so anything that cleared the slot
+    -- engine-side since the last push stayed cleared: notably SetAuraSlotCandidateFilters
+    -- immediately above, which has no equality guard and reparses the slot on every call.
+    -- The gate stayed convinced the slot was hidden and never said so again -- an AD
+    -- indicator rendering with gateHidden=true (Krathe, 2026-08-18).
+    --
+    -- Free to do every pass: SetAuraSlotFilterString carries its own equality guard
+    -- engine-side, which is why the group path already pushes unconditionally.
+    self:_pushFilter()
     if sortMethod ~= nil then
         pcall(c.SetAuraSlotSortMethod, c, self.key, sortMethod, sortDirection or 0)
     end
@@ -7454,14 +7616,19 @@ function AuraContainer:SetSlotOwnerUnit(frame, unit)
     end
     owner.unit = unit
     local ok = pcall(owner.container.SetUnit, owner.container, unit)
-    -- ⚠ The stored gate verdict was computed for the OLD unit. Re-run it for every slot
-    -- on this owner, exactly as Handle:SetUnit re-runs its own gate on retarget --
-    -- otherwise a slot that was hidden for a cross-faction opponent stays hidden after
-    -- the frame is reused for a friendly, and vice versa.
+    -- ⚠ The stored gate verdict was computed for the OLD unit. Re-run it for EVERY slot
+    -- on this owner, exactly as Handle:SetUnit re-runs its own gate on retarget.
+    -- ☠ EVERY slot, not just vulnerable/source-relative ones — this loop kept the gate's
+    -- old three-way entry test after the 2026-08-18 widening, and it is the loop that
+    -- decides the owner ANCHOR: had no slot here passed the filter, an anchor hidden for
+    -- a not-visible old unit stayed hidden over the NEW unit's frame — a fail-to-unhide
+    -- on plain roster churn. The death latch is unit state too, so it re-seeds from the
+    -- registry the same way Handle:SetUnit does: the new unit may already be dead, and
+    -- that edge will never fire again.
+    local latched = AuraContainer._deathLatchedUnits[unit] or nil
     for _, h in pairs(owner.slots) do
-        if h._idGateVulnerable or h._idGateSourceRelative then
-            pcall(function() h:_applyIdentityGate() end)
-        end
+        pcall(function() h:_setDeathLatch(latched) end)
+        pcall(function() h:_applyIdentityGate() end)
     end
     return ok
 end
@@ -7663,9 +7830,17 @@ local gateSweepQueued
 -- ⚠ Declared HERE, above SetUnitDeathLatched, because that is its first caller. Below it
 -- this reads as a nil GLOBAL: it parses clean, and every call site is inside a pcall, so
 -- the failure would have been completely silent. Caught by diffing _ENV reads, not by luac.
+-- ☠ NOW TRUE FOR EVERY HANDLE, and it has to be, or the widened gate only ever runs once.
+-- This is the SWEEP filter: idGateWatch's events, the death latch and IdentityGateSweep all
+-- consult it before calling _applyIdentityGate. While it mirrored the gate's old three-way
+-- entry test, a handle that was neither vulnerable nor source-relative nor gated was
+-- invisible to every sweep -- so widening the gate itself would have given the debuff row a
+-- verdict at build and then never revisited it on a phase change, a zone-in or a rez.
+--
+-- Cost is a comparison per handle per sweep: _applyIdentityGate is transition-only, so a
+-- stable verdict allocates nothing and touches no frame.
 local function GateAppliesTo(h)
-    return h._idGateVulnerable or h._idGateSourceRelative
-        or (h._hasGatedGroups and h:_hasGatedGroups())
+    return h ~= nil
 end
 
 -- ============================================================
@@ -7676,9 +7851,27 @@ end
 -- a party frame and a pinned frame for the same unit both show the corpse.
 -- Skipped wholesale in test mode: preview units fabricate "dead" status and
 -- latching them would blank the preview rows.
+-- ☠ WHICH UNITS ARE CURRENTLY LATCHED. The latch used to be pure edge state living only
+-- on the handles, and a container built AFTER the death edge had passed came up unlatched
+-- with nothing to ever re-latch it: the next SetUnitDeathLatched(unit, true) only fires on
+-- a NEW death transition, and the unit is already dead, so that edge never comes again.
+--
+-- Field shape: reload while a party member is a ghost and their auras all come back --
+-- every row, because the latch is the ONLY cover for the ones the identity gate does not
+-- reach (a HARMFUL row with no includeSpellIDs reports zero gated groups, so it is neither
+-- vulnerable nor gated and never enters the assist branch at all).
+--
+-- Keyed by unit token, matching the latch's own unit-keyed design, so every display of
+-- that unit -- party frame, pinned frame, whatever is built later -- reads the same answer.
+AuraContainer._deathLatchedUnits = AuraContainer._deathLatchedUnits or {}
+
 function AuraContainer.SetUnitDeathLatched(unit, on)
     if type(unit) ~= "string" then return end
     if AuraContainer._testMode then return end
+    -- Recorded BEFORE the loops so a build racing this call still reads the new answer.
+    -- Test mode returns above, so preview units never enter the registry and the build-time
+    -- restore stays a no-op there -- same exemption the loops below already have.
+    AuraContainer._deathLatchedUnits[unit] = on and true or nil
     -- Transition-driven (dfLastKnownDead edges in Frames/Update.lua), so one line
     -- per real death/rez — the gate log's densest writer in a battleground, and
     -- exactly the edge the missing-HoTs class turned on.
@@ -7771,6 +7964,29 @@ idGateWatch:SetScript("OnEvent", function(_, event)
     end
 end)
 
+-- ★★ THE SAFETY-NET SWEEP — the "never fail to hide, never fail to unhide" backstop
+-- (Krathe, 2026-08-18). Every gate bug to date has been a missed EDGE, never a wrong
+-- verdict at sweep time: the NPC-offline verdict aside, the pattern is a condition
+-- changing with no watched event firing (party-scoped events in a raid, death folded in
+-- with no UNIT_FLAGS, a unit crossing an instance boundary). At least one other 12.1
+-- implementation reached the same conclusion independently and polls, on the reasoning
+-- that neither assist nor visibility has an event of its own. The event list above stays
+-- primary — it reacts in one frame —
+-- but this ticker guarantees that any edge it misses costs seconds, not a stuck frame
+-- until reload.
+--
+-- Cheap by construction: the sweep is transition-only end to end (verdicts are two
+-- pcall'd probes per handle; a stable verdict compares and returns, no frame ops, no
+-- allocation), so a quiet tick is ~2 probes x handle count. Combat-safe: hides are plain
+-- DF-frame ops, parks that fail in lockdown revert and retry on the regen sweep.
+-- ⚠ Do NOT shorten the period to make the gate "snappier" — events are the fast path;
+-- this exists only to bound the damage of the next missing one.
+C_Timer.NewTicker(5, function()
+    if AuraContainer._testMode then return end
+    IdentityGateSweep()
+end)
+
+
 -- ============================================================
 -- CINEMATIC LATCH — no flash of the fail-open parse
 -- ============================================================
@@ -7833,9 +8049,14 @@ cineWatch:SetScript("OnEvent", function(_, event)
         -- recovery edge — a latch stuck until reload.
         if AuraContainer._testMode then return end
         GateLog("cinematic start (%s): latching vulnerable pools", event)
+        -- ★ The flag the BUILD paths consult. CineLatchAll only reaches what already
+        -- exists; a handle or slot born mid-cinematic must seed its own latch, and this
+        -- is how it knows to (see the build/AcquireSlot seeds).
+        AuraContainer._cineActive = true
         CineLatchAll(true)
         return
     end
+    AuraContainer._cineActive = nil
     -- STOP: fire any pending recovery NOW rather than waiting out the coalesce —
     -- if the engine restored assist before this event, the sweep bounces and
     -- clears those latches in one pass.
@@ -7868,6 +8089,27 @@ end)
 -- answer, the stored gate verdict, and the window's actual visibility
 -- (+ whether a hover-deferred flip is parked). Developer diagnostic: plain
 -- print by project convention.
+-- ☠ EVERY INTERPOLATED VALUE IN THIS DUMP GOES THROUGH THIS. Slot keys and filter
+-- strings are built with "|" as their own field separator ("HELPFUL|PLAYER",
+-- "PowerInfusion#1ic|||du|bd|fl=40|fs=MEDIUM||pd=BORDER:Fnil|tt="), and "|" is WoW's
+-- text-escape character. Printed raw, "|T" opens a texture escape and "|t" closes one,
+-- while "|d"/"|b"/"|f" are not escapes at all -- so chat rendered mojibake AND any
+-- EditBox handed the line (the usual way anyone gets this text OUT of the game) came up
+-- blank, because SetText fails on a malformed escape. The dump was unusable for the one
+-- job it exists to do: being pasted into a bug report.
+--
+-- "||" is the literal-pipe escape, so the text renders and copies as written. Control
+-- bytes go to "?" for the same reason -- one stray byte blanks the whole box.
+--
+-- ⚠ Values ONLY, never the format strings: those carry deliberate |cff.../|r colour
+-- codes and escaping them would print the codes instead of colouring the line.
+-- ⚠ The parens are load-bearing. gsub returns (string, count); without them the count
+-- becomes an extra argument to format and shifts every following field along one.
+local function safeTxt(v)
+    local s = tostring(v)
+    return (s:gsub("|", "||"):gsub("[%z\1-\31]", "?"))
+end
+
 function AuraContainer.DebugDumpIdentityGate()
     local o = DF:Out("Identity Gate")
     local CAP = 30
@@ -7920,8 +8162,8 @@ function AuraContainer.DebugDumpIdentityGate()
             local gatedN = 0
             for _ in pairs((h.backend and h.backend.gatedGroupKeys) or {}) do gatedN = gatedN + 1 end
             print(("    " .. DF.OUT.SECTION .. "%d|r mode=%s unit=%s filter=%s inc=%s exc=%s vuln=%s srcRel=%s exists=%s canAssist=%s vis=%s gateHidden=%s parked=%s why=%s gatedGroups=%d cine=%s death=%s assist=%s intent=%s shown=%s retry=%s"):format(
-                n, tostring(cfg.mode or "row"), tostring(unit),
-                table.concat(fParts, "&"), tostring(inc), tostring(exc),
+                n, safeTxt(cfg.mode or "row"), safeTxt(unit),
+                safeTxt(table.concat(fParts, "&")), tostring(inc), tostring(exc),
                 tostring(h._idGateVulnerable or false),
                 tostring(h._idGateSourceRelative or false),
                 tostring(type(unit) == "string" and UnitExists(unit) or false), canTxt, visTxt,
@@ -7959,8 +8201,8 @@ function AuraContainer.DebugDumpIdentityGate()
                 elseif issecretvalue and issecretvalue(can) then canTxt = "SECRET"
                 else canTxt = tostring(can) end
             end
-            print(("    " .. DF.OUT.SECTION .. "S%d|r key=%s unit=%s vuln=%s srcRel=%s canAssist=%s gateHidden=%s parked=%s why=%s cine=%s death=%s assist=%s filter=%s"):format(
-                sn, tostring(s.key), tostring(unit),
+            print(("    " .. DF.OUT.SECTION .. "S%d|r key=%s unit=%s vuln=%s srcRel=%s canAssist=%s gateHidden=%s parked=%s why=%s cine=%s death=%s assist=%s live=%s pushed=[%s] pushOK=%s"):format(
+                sn, safeTxt(s.key), safeTxt(unit),
                 tostring(s._idGateVulnerable or false),
                 tostring(s._idGateSourceRelative or false),
                 canTxt,
@@ -7970,9 +8212,12 @@ function AuraContainer.DebugDumpIdentityGate()
                 tostring(s._cineLatched or false),
                 tostring(s._deathLatched or false),
                 tostring(s._idGateAssist),
-                -- The pushed string IS the actuation: "" means parked/hidden by one of
-                -- the four writers above, whichever won in _pushFilter.
-                tostring(s.liveFilter)))
+                -- ⚠ live= is the INTENDED filter and never changes when the gate hides a
+                -- slot. pushed= is the actuation: "" means one of the four writers in
+                -- _pushFilter won. pushOK= is whether the setter was refused (lockdown).
+                -- A slot reading gateHidden=true with a non-empty pushed= is an actuation
+                -- failure; nil pushed= means _pushFilter has not run since load.
+                safeTxt(s.liveFilter), safeTxt(s._pushedFilter), tostring(s._pushOK)))
         end
     end
     if sn > CAP then

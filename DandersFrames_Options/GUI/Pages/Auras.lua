@@ -39,10 +39,11 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                     DF:ApplyArenaHeaderSorting()
                 end
             elseif GUI.SelectedMode == "raid" then
-                if DF.SecureSort then
-                    DF.SecureSort:PushRaidSortSettings()
-                    DF.SecureSort:TriggerSecureRaidSort()
-                end
+                -- Raid sorting is applied by DF:ApplyHeaderSettings above, which routes
+                -- to ApplyRaidGroupSorting / ApplyRaidFlatSorting. The SecureSort push
+                -- and trigger that used to sit here returned false on their first guard
+                -- (no handler is ever created), so they did nothing. This branch stays
+                -- so raid mode does not fall into the party resort below.
             else
                 if DF.Sort then DF.Sort:TriggerResort() end
             end
