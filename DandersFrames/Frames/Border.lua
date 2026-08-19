@@ -507,13 +507,18 @@ end
 -- DF.debuffBorderCurve; DF:InvalidateDispelColorCurve() nils it on any change.
 -- ⚠ The Enum.AuraDispelType field set needs an in-game confirm (/df debug dispelids).
 -- Name-keyed colour map for SetAuraBorder's customDispelColorMap: Blizzard indexes
--- auraData.dispelName ("Magic"/"Curse"/... ; "" when the aura has no dispel type)
--- straight into this table private-side, with map[""] as the no-type fallback —
--- confirmed from Blizzard_CustomAuraButton.lua (ptr). NO enum IDs involved (unlike
--- the curve form, whose ID axis is documented nowhere) — this is the primary
--- custom-colour carrier for both the overlay and the debuff-icon ring. Values are
--- ColorMixin objects (their code calls color:GetRGBA()). Cached; invalidated with
--- the curve by DF:InvalidateDispelColorCurve().
+-- auraData.dispelName ("Magic"/"Curse"/... ; live 69382 keys `dispelName or "None"`,
+-- and map[""] is kept as a belt-and-braces alias of None) straight into this table
+-- private-side. NO enum IDs involved (unlike the curve form, whose X axis is the
+-- Enum.AuraDispelType values). Values are ColorMixin objects (their code calls
+-- color:GetRGBA()). Cached; invalidated with the curve by DF:InvalidateDispelColorCurve().
+-- ☠ FALLBACK, not primary — this comment used to call the map "the primary
+-- custom-colour carrier for both the overlay and the debuff-icon ring", and that framing
+-- hid a real bug: the private-side index is a RAW TABLE LOOKUP, so a SECRET dispelName
+-- matches no key and the colour apply no-ops, leaving the style step's white base coat
+-- (the "dispel overlay goes white in dungeons" field report, 2026-08-19). The
+-- SECRET-SAFE tint is the curve — resolved C-side by auraInstanceID — and both bind
+-- sites now pass both, the curve winning when present.
 -- Blizzard's LIVE dispel-type border palette, queried from AuraUtil.GetAuraBorderColor
 -- (the exact colours the game paints), cached. Per-type fallback to DF.DispelDefaultColors
 -- (which mirror the classic DebuffTypeColor values) if the API is missing / returns nil.

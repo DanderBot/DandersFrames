@@ -1936,7 +1936,22 @@ end
 -- is also what RESTORES inheritance when a user switches back (a frame always has a strata;
 -- there is no "unset" to write). Whitelisted rather than passed through: SetFrameStrata
 -- errors on an unknown string, and this value can arrive from an imported profile.
-local STRATA_VALID = { BACKGROUND = true, LOW = true, MEDIUM = true, HIGH = true }
+-- ☠ BACKGROUND AND LOW ARE DELIBERATELY NOT HERE. They used to be, and a stored
+-- "BACKGROUND" pinned an indicator below every MEDIUM frame on the unit button — the health
+-- bar included — where no frame level could ever lift it, because strata outranks level
+-- absolutely. The per-indicator picker that wrote them was removed from the editor, so the
+-- values became unreachable AND still honoured: users saw an indicator buried under the
+-- health bar with a Frame Level slider that did nothing (field-proven by a /df debug zorder
+-- dump, 2026-08-19 — strata=BACKGROUND at level 106 losing to a health bar at level 7).
+--
+-- Rejecting them here makes resolveStrata fall through to the global default (INHERIT), so
+-- the indicator takes the unit frame's own strata and FRAME LEVEL decides the ordering —
+-- which is the baseline the absolute-levels migrations were built for.
+-- ⚠ This covers what the migration cannot: an IMPORTED profile or a shared preset carrying
+-- a legacy BACKGROUND arrives after the one-time pass has already stamped its flag.
+-- ⚠ MEDIUM and HIGH stay valid: they are at or above the frame's own band, so they order
+-- against it rather than hiding beneath it.
+local STRATA_VALID = { MEDIUM = true, HIGH = true }
 -- defStrata = the resolved GLOBAL default (defs.strata). Fallback order matches the editor
 -- proxy exactly: instance -> global default -> nothing. An instance holding the literal
 -- "INHERIT" is an explicit CHOICE and stops the chain (the editor shows Inherit for it), so
@@ -5384,6 +5399,10 @@ function Factory:SyncFrame(frame)
     -- ever being opened — a player who never opens settings would otherwise keep the
     -- undeletable indicator forever.
     if DF.MigrateAuraDesignerOrphanAuraKeysLazy then DF.MigrateAuraDesignerOrphanAuraKeysLazy(adDB) end
+    -- Clears stranded per-indicator frameStrata (see the migration's header). Runs on the
+    -- render-resolved db as well as the editor's, because the stranded indicator renders
+    -- buried whether or not the settings panel is ever opened.
+    if DF.MigrateAuraDesignerIndicatorStrataLazy then DF.MigrateAuraDesignerIndicatorStrataLazy(adDB) end
 
     local store = frame.dfADFactory
     if not store then store = {}; frame.dfADFactory = store end

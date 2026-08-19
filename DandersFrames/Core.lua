@@ -7061,6 +7061,22 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     if type(v) == "number" then return string.format("%.1f", v) end
                     return tostring(v)
                 end
+                -- ☠ ONE GUARD PER READ, not one guard per BLOCK. While auras are secret even
+                -- READS on the slot widget hierarchy are forbidden to addon code, and the
+                -- slot section below used to wrap a dozen of them in a single
+                -- pcall(function() … end): the FIRST forbidden call aborted the closure and
+                -- took every later line with it, including the carrier anchor target — the
+                -- one field that says whether the style pass ever ran. So the dump reported
+                -- least when it was needed most, and testers reported it as "doesn't work in
+                -- combat" (field-reported 2026-08-19).
+                -- Returns nil on refusal, which num() renders as "nil" rather than killing
+                -- the line. Two return values because GetPoint's relativeTo is the second.
+                local function tryv(fn, ...)
+                    if type(fn) ~= "function" then return nil end
+                    local ok, a, b = pcall(fn, ...)
+                    if ok then return a, b end
+                    return nil
+                end
                 local function dumpBar(tag, bar, hostFrame)
                     if not bar then return end
                     local mn, mx, val, w, h, pw, lvl, blend, alpha, shown, orient, rev
@@ -7146,35 +7162,49 @@ DF._MainEventDispatcher = function(self, event, arg1)
                                 tostring(key), tostring(btn._dfDispelStyleErr),
                                 tostring(DF._dispelBindErr and DF._dispelBindErr[key]),
                                 tostring(btn._dfDispelCarriers and #btn._dfDispelCarriers)))
-                            local okSlot = pcall(function()
+                            local okSlot = true
+                            do
                                 local wdg = btn.dfDispelWidget
                                 if wdg then
                                     -- num() on the widget reads too — IsShown on a
                                     -- descendant of a secret-shown button returns a
                                     -- SECRET, and tostring'ing it vanished this line.
-                                    local wShown; pcall(function() wShown = wdg:IsShown() end)
+                                    local wShown = tryv(wdg.IsShown, wdg)
+                                    local wLvl   = tryv(wdg.GetFrameLevel, wdg)
+                                    if wShown == nil and wLvl == nil then okSlot = false end
                                     o:Line(("slot[%s] widget shown=%s lvl=%s tracks=%s"):format(
-                                        tostring(key), num(wShown), num(wdg:GetFrameLevel()),
+                                        tostring(key), num(wShown), num(wLvl),
                                         tostring(wdg.gradientTracksHealth)))
                                     dumpBar("slot.gradient", wdg.gradient, frame)
                                     dumpTex("slot.nativeGradient", wdg.nativeGradient)
                                     local ng = wdg.nativeGradient
                                     if ng then
-                                        local nPts = ng:GetNumPoints()
-                                        local _, relTo = ng:GetPoint(1)
+                                        -- ★ THE LINE THIS WHOLE DUMP EXISTS FOR. rel= says
+                                        -- whether the style pass ever re-anchored the
+                                        -- carrier ("btn" = still on the secure init's
+                                        -- SetAllPoints, i.e. it never ran). Every read here
+                                        -- is individually guarded so a refusal costs one
+                                        -- FIELD, never this line.
+                                        local nPts = tryv(ng.GetNumPoints, ng)
+                                        local _, relTo = tryv(ng.GetPoint, ng, 1)
+                                        local healthFill = frame.healthBar
+                                            and tryv(frame.healthBar.GetStatusBarTexture, frame.healthBar)
                                         local relName = "?"
                                         if relTo == btn then relName = "btn"
                                         elseif relTo == wdg.gradient then relName = "gradRect"
-                                        elseif frame.healthBar and relTo == frame.healthBar:GetStatusBarTexture() then relName = "healthFill"
+                                        elseif healthFill and relTo == healthFill then relName = "healthFill"
                                         elseif relTo == wdg then relName = "widget"
-                                        elseif relTo == nil then relName = "nil" end
+                                        elseif relTo == nil then relName = "nil/refused" end
                                         -- The DIM HOSTS are plain DF frames — their alpha
                                         -- is the number that matters now, and it is
                                         -- always readable. See the dim-host rule in
                                         -- Features/Dispel.lua DispelSlotSecureInit.
-                                        local dimA = wdg.nativeGradientDim and wdg.nativeGradientDim:GetAlpha()
-                                        local ringA = btn.dfDispelRingDim and btn.dfDispelRingDim:GetAlpha()
-                                        local badgeA = btn.dfDispelBadgeDim and btn.dfDispelBadgeDim:GetAlpha()
+                                        local dimA = wdg.nativeGradientDim
+                                            and tryv(wdg.nativeGradientDim.GetAlpha, wdg.nativeGradientDim)
+                                        local ringA = btn.dfDispelRingDim
+                                            and tryv(btn.dfDispelRingDim.GetAlpha, btn.dfDispelRingDim)
+                                        local badgeA = btn.dfDispelBadgeDim
+                                            and tryv(btn.dfDispelBadgeDim.GetAlpha, btn.dfDispelBadgeDim)
                                         o:Line(("slot[%s] carrier points=%s rel=%s gradDim=%s ringDim=%s badgeDim=%s"):format(
                                             tostring(key), tostring(nPts), relName,
                                             num(dimA), num(ringA), num(badgeA)))
@@ -7189,9 +7219,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
                                         if et then dumpTex("slot[" .. tostring(key) .. "].edge" .. side, et) end
                                     end
                                 end
-                            end)
+                            end
                             if not okSlot then
-                                o:Line(("slot[%s] widget state FORBIDDEN (in combat / auras secret) — run again out of combat for carrier alpha/anchors"):format(
+                                o:Line(("slot[%s] widget reads REFUSED (auras secret) — the fields above are still valid; rel=/alpha need an out-of-combat run"):format(
                                     tostring(key)), "neutral")
                             end
                         end
