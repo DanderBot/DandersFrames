@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Bug Fixes
+
+* (Dispel Highlight) Fix the overlay washing whole frames in a flat white (or wrong) colour in dungeons. Dispel colours now resolve through the game's own colour-curve API, which keeps working while aura data is protected in combat — the previous per-name colour table could not match a protected dispel type, leaving the overlay unpainted white. (by Krathe)
+* (Dispel Highlight) "Show On Current Health Only" now applies from the moment the overlay first appears mid-fight, instead of covering the whole frame until your next moment out of combat. (by Krathe)
+* (Aura Designer) Fix indicators stuck rendering under the health bar with the Frame Level slider doing nothing. A leftover per-indicator Frame Strata setting from an old version — no longer editable anywhere — pinned them to a layer below the frame, where no frame level could lift them. Leftover values are cleared and can no longer bury an indicator. (by Krathe)
+* (Aura Designer) Bar indicators now use the same section names and order as icons and squares: the bar's "Texture & Colors" is now "Appearance", so Frame Level and Alpha live under the same heading on every indicator type, and "Show When Missing" leads the square card the way it leads the icon card. (by Krathe)
+* (Debug) `/df debug dispeldbg` now reports correctly in combat instead of dropping its most important lines. (by Krathe)
+
 ## [5.2.1]
 
 ### Bug Fixes
