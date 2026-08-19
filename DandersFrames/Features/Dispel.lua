@@ -83,9 +83,15 @@ local function BadgeCarrierOptions()
     }
 end
 
--- Dispel-colour map for the overlay: ALWAYS recolour the carriers from the shared
--- account palette via customDispelColorMap — keyed by dispel NAME, indexed private-side
--- against auraData.dispelName by Blizzard_CustomAuraButton.lua (secret-safe; no enum IDs).
+-- Dispel-colour map for the overlay: recolour the carriers from the shared account
+-- palette via customDispelColorMap — keyed by dispel NAME, indexed private-side against
+-- auraData.dispelName by Blizzard_CustomAuraButton.lua.
+-- ☠☠ NOT SECRET-SAFE, despite what this comment said for a month. The private-side index
+-- is a raw Lua table lookup, and a SECRET dispelName matches no key — the colour apply
+-- then no-ops and the carrier keeps the style step's paint (white, for the base-coating
+-- styles). That was the "dispel overlay goes white in dungeons" field report
+-- (2026-08-19). The map is kept as the pre-curve fallback and the OOC/test-mode path;
+-- the SECRET-SAFE tint is customDispelColorCurve — see tintOpts in BindDispelCarriers.
 -- The palette's defaults ARE the game colours, so this matches the game look until edited;
 -- there is no game-vs-custom mode — the Colors page + its "Reset to game defaults" is the
 -- single source of truth. Ignored on clients whose engine predates the field.
@@ -1562,6 +1568,26 @@ local function BindDispelCarriers(btn, carriers, db, key)
     local tintOpts = {
         style = DispelBorderStyle(),
         customDispelColorMap = DispelBorderMapFor(),
+        -- ☠☠ THE CURVE IS THE ONLY SECRET-SAFE TINT — the map is NOT, despite what this
+        -- file's header claimed for a month. Read from the LIVE client source
+        -- (Blizzard_CustomAuraButton.lua @ Gethe 9f2b839d, build 69382):
+        --   * the map is a RAW LUA TABLE INDEX: colorMap[auraData.dispelName or "None"].
+        --     A SECRET dispelName is truthy (the `or "None"` never fires) and matches no
+        --     stored key, so the lookup returns nil — and the colour apply is
+        --     `if color then SetVertexColor(...)` with NO else, leaving whatever the
+        --     style step painted. For the styles that base-coat white, that IS the
+        --     "whole frame goes white" field report (Choco/Ortemis, 2026-08-19).
+        --   * the curve resolves C-SIDE: GetAuraDispelTypeColor(unit, auraInstanceID,
+        --     curve) — no table index, no name read, works while auras are secret. It is
+        --     applied AFTER the style step and overrides it, for every style.
+        -- The debuff-row icon ring has passed this curve since 68824 (Auras.lua), which
+        -- is why the reporters' screenshots show correctly-coloured row borders NEXT TO a
+        -- white overlay — the two lanes differed in exactly this field.
+        -- nil when C_CurveUtil / the dispel-type enum is absent: the engine then falls
+        -- back to the map, i.e. exactly the previous behaviour. Cache is invalidated
+        -- with the map (DF:InvalidateDispelColorCurve), and the palette-edit re-bind
+        -- (dispelCurveGen) re-reads it here.
+        customDispelColorCurve = DF.GetDispelColorCurve and DF:GetDispelColorCurve() or nil,
         showWhenHarmful = true,
         showWhenHelpful = false,
         showIcon = false,
@@ -1677,7 +1703,25 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
             w.nativeGradient = w.nativeGradientDim:CreateTexture(nil, "ARTWORK", nil, 2)
         end
         w.nativeGradient:SetTexture(GRADIENT_TEXTURES[style] or GRADIENT_TEXTURES.FULL)
-        w.nativeGradient:SetAllPoints(btn)
+        -- ★ FULL + Show On Current Health Only: anchor to the health FILL at birth — the
+        -- same write-free clip StyleGameMainSlot applies, decided on the same condition
+        -- (the legacy path's :721). Birth is mid-combat (Blizzard creates these buttons
+        -- lazily on the first dispellable debuff) and the style pass is OOC-only, so
+        -- without this the wash spans the whole button for the entire fight it was born
+        -- into — "not reflecting lost hp", field-reported 2026-08-19. The fill texture is
+        -- our OWN healthBar's; its rect already tracks current health, so there is no
+        -- per-tick feed and nothing here reads the aura. The style pass still re-anchors
+        -- on later style edits; this covers the window it cannot reach — same doctrine as
+        -- the alpha seed above (c9047644), which fixed one third of this window's
+        -- cosmetics and stopped.
+        local hfBirth = style == "FULL" and db.dispelGradientOnCurrentHealth ~= false
+            and frame.healthBar and frame.healthBar.GetStatusBarTexture
+            and frame.healthBar:GetStatusBarTexture()
+        if hfBirth then
+            w.nativeGradient:SetAllPoints(hfBirth)
+        else
+            w.nativeGradient:SetAllPoints(btn)
+        end
         w.nativeGradient:SetBlendMode(db.dispelGradientBlendMode or "ADD")
         w.nativeGradientDim:SetAlpha(db.dispelShowGradient ~= false and ResolveGradientAlpha(db) or 0)
         carriers[#carriers + 1] = { tex = w.nativeGradient }
