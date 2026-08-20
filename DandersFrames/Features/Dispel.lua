@@ -1573,6 +1573,42 @@ end
 -- Pre-68914 fallback: the deprecated alias can only hold ONE region, so the first
 -- carrier wins there (matching the old one-slot-per-carrier behaviour as closely as a
 -- single slot can).
+-- ★ THE REVEAL. Every dispel carrier is born at alpha 0 on its DF-owned dim host and
+-- stays there until AddDispelTypeTexture has accepted it; this is what turns it back on.
+--
+-- ☠ WHY IT IS A SEPARATE STEP RATHER THAN A BIRTH VALUE. These carriers are OUR textures
+-- with the ENGINE'S colour. Between creating one and binding it, nothing colours it, so it
+-- renders at the default vertex colour -- WHITE -- across whatever it covers. For the
+-- gradient that is the whole frame. Birth used to hand each host the user's configured
+-- alpha immediately ("born with the user's value", because birth is usually mid-combat and
+-- the style pass is out-of-combat only), which is correct for cosmetics and exactly wrong
+-- for visibility: it made an unbound carrier maximally visible.
+--
+-- ☠ THE ALPHA MUST LIVE ON THE DIM HOST, NOT THE TEXTURE. AddDispelTypeTexture takes
+-- SecretAspect.Alpha and .Shown on the texture at bind time, after which neither is ours to
+-- write. The dim hosts are plain DF frames and are never restricted, so they are the only
+-- lever that still works on a slot whose subtree the client has locked -- which is the
+-- slot that needs it.
+--
+-- Mirrors the values the stylers apply, so a revealed carrier looks identical to one that
+-- was never held back. The stylers re-assert these every pass anyway; this only has to
+-- cover the window between a successful bind and the first out-of-combat style pass.
+function DF:RevealDispelCarriers(btn, db)
+    if not btn or not db then return end
+    local w = btn.dfDispelWidget
+    if w and w.nativeGradientDim then
+        w.nativeGradientDim:SetAlpha(db.dispelShowGradient ~= false and ResolveGradientAlpha(db) or 0)
+    end
+    if type(btn.dfDispelEdgeDim) == "table" then
+        local a = ResolveGradientAlpha(db)
+        for _, dim in pairs(btn.dfDispelEdgeDim) do
+            if dim then dim:SetAlpha(a) end
+        end
+    end
+    if btn.dfDispelRingDim then btn.dfDispelRingDim:SetAlpha(db.dispelBorderAlpha or 0.8) end
+    if btn.dfDispelBadgeDim then btn.dfDispelBadgeDim:SetAlpha(db.dispelIconAlpha or 1) end
+end
+
 local function BindDispelCarriers(btn, carriers, db, key)
     -- ☠ RECORD THE RESULT ON THE BUTTON, NOT ONLY IN THE GLOBAL. DF._dispelBindErr is
     -- keyed by SLOT KEY alone, so every frame's "main" slot overwrites every other
@@ -1643,6 +1679,15 @@ local function BindDispelCarriers(btn, carriers, db, key)
     btn._dfDispelBindRes = ok and ("ok x" .. #carriers) or tostring(err)
     if ok then
         btn._dfDispelCurveGen = DF.dispelCurveGen
+        -- ★ REVEAL ONLY NOW. The carriers were built at alpha 0 on their DF-owned dim
+        -- hosts, because until this call returns nothing colours them and an unowned
+        -- texture renders WHITE across whatever it covers -- frame-sized, in the gradient's
+        -- case. Restoring the configured alpha here, on the success branch only, makes a
+        -- refused bind cost the overlay rather than paint the frame white.
+        -- ☠ THE FAILURE BRANCH MUST NOT REVEAL, and must not "helpfully" hide either: the
+        -- hosts are already at 0, and a slot that never binds simply stays dark until the
+        -- recovery in StyleDispelSlots rebuilds it out of combat.
+        if DF.RevealDispelCarriers then DF:RevealDispelCarriers(btn, db) end
     elseif not warnedTintBind then
         warnedTintBind = true
         if DF.DebugWarn then DF:DebugWarn("DISPEL", "dispel bind %s failed: %s", tostring(key), tostring(err)) end
@@ -1766,7 +1811,19 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
             w.nativeGradient:SetAllPoints(btn)
         end
         w.nativeGradient:SetBlendMode(db.dispelGradientBlendMode or "ADD")
-        w.nativeGradientDim:SetAlpha(db.dispelShowGradient ~= false and ResolveGradientAlpha(db) or 0)
+        -- ☠☠ BORN INVISIBLE. HELD INVISIBLE UNTIL THE BIND IS CONFIRMED.
+        -- This carrier is OUR texture and the ENGINE is what colours it. Until
+        -- AddDispelTypeTexture has accepted it, nothing colours it at all -- it renders at
+        -- the default vertex colour, which is WHITE, across the whole frame. That is the
+        -- field report: not a wrong colour, an unowned texture.
+        --
+        -- The alpha lives on nativeGradientDim, a DF-OWNED frame, deliberately: the engine
+        -- takes SecretAspect.Alpha and .Shown on the texture itself at bind time, so the
+        -- texture's own visibility stops being ours to set. The dim host is never
+        -- restricted, so this is the one lever that still works on a slot whose subtree
+        -- the client has locked -- which is exactly the slot that needs it.
+        -- BindDispelCarriers restores the configured alpha, and ONLY on success.
+        w.nativeGradientDim:SetAlpha(0)
         carriers[#carriers + 1] = { tex = w.nativeGradient }
         -- Name the gradient carrier explicitly. StyleGameMainSlot must dress THIS one;
         -- addressing it as "the bound carrier" only worked while a slot held exactly one,
@@ -1791,7 +1848,7 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
             local dim = CreateFrame("Frame", nil, holder)
             dim:SetAllPoints(btn)
             dim:SetFrameLevel(edgeLvl)
-            dim:SetAlpha(ResolveGradientAlpha(db))   -- born with the user's value (mid-combat creation)
+            dim:SetAlpha(0)   -- born DARK; revealed only once the bind is confirmed
             local tex = dim:CreateTexture(nil, "ARTWORK", nil, 2)
             tex:SetTexture(EDGE_GRADIENT_TEXTURES[edge])
             tex:SetAllPoints(btn)   -- anchored for the bind; StyleGameEdgeSlot positions the strip
@@ -1813,7 +1870,7 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         local ringDim = CreateFrame("Frame", nil, holder)
         ringDim:SetAllPoints(btn)
         ringDim:SetFrameLevel(hbLvl + 15)
-        ringDim:SetAlpha(db.dispelBorderAlpha or 0.8)   -- born with the user's value
+        ringDim:SetAlpha(0)   -- born DARK; revealed only once the bind is confirmed
         local ring = ringDim:CreateTexture(nil, "ARTWORK")
         ring:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_SquareBorder")
         ring:SetAllPoints(btn)   -- anchored for the bind; StyleGameBorderSlot crops/insets
@@ -1845,7 +1902,7 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         local badgeDim = CreateFrame("Frame", nil, holder)
         badgeDim:SetAllPoints(btn)
         badgeDim:SetFrameLevel(holder:GetFrameLevel())
-        badgeDim:SetAlpha(db.dispelIconAlpha or 1)   -- born with the user's value
+        badgeDim:SetAlpha(0)   -- born DARK; revealed only once the bind is confirmed
         local badge = badgeDim:CreateTexture(nil, "OVERLAY")
         badge:SetAllPoints(btn)   -- anchored for the bind; StyleGameBadge sizes/places it
         btn.dfDispelBadgeDim = badgeDim
