@@ -27,6 +27,24 @@ local EDGE_GRADIENT_TEXTURES = {
     RIGHT = "Interface\\AddOns\\DandersFrames\\Media\\DF_Gradient_H_Rev",  -- Solid right, fades left
 }
 
+-- ☠☠ SEED THE GENERATION AT LOAD. It used to be created only by the first
+-- InvalidateDispelColorCurve call, whose ONLY callers are options-page callbacks and a
+-- debug command -- so on any session where nobody edited a dispel colour it stayed nil
+-- for the whole session.
+--
+-- That silently disabled the re-bind retry. BindDispelCarriers stamps
+-- btn._dfDispelCurveGen only on SUCCESS, so a failed bind leaves it nil, and the retry
+-- gate in StyleDispelSlots reads `btn._dfDispelCurveGen ~= DF.dispelCurveGen` --
+-- `nil ~= nil` -- which is FALSE. A carrier that failed to bind was therefore never
+-- retried, for the rest of the session, while its texture kept the default white vertex
+-- colour and was shown on every dispellable debuff. Seeding 0 makes the nil stamp
+-- genuinely unequal, so the existing gate does its job with no other change.
+--
+-- ☠ The tell that this was live: `/df debug dispelids` calls the invalidator, which
+-- bumps the counter -- so RUNNING THE DIAGNOSTIC HEALED THE BUG on the next
+-- out-of-combat style pass. Anyone who dumped first and looked second saw a clean frame.
+DF.dispelCurveGen = 0
+
 -- Invalidate the shared debuff-type colour curve when dispel colour settings
 -- change (Frames/Border.lua lazy-rebuilds it on next use).
 function DF:InvalidateDispelColorCurve()
@@ -2182,8 +2200,17 @@ local function StyleDispelSlots(frame, db, h, slots)
         -- next(info.roles) guards the all-disabled config (EDGE style with gradient, border
         -- and badge all off) -- roles is then an empty table, no carrier is meant to exist,
         -- and testing for one would rebuild on every pass.
+        -- ☠ TEST THE BIND RESULT, NOT JUST THE CARRIER LIST. The first version of this
+        -- gate asked `_dfDispelCarriers == nil`, which only catches "no carrier was ever
+        -- built". It CANNOT catch a carrier that was built and then failed to BIND,
+        -- because BindDispelCarriers stamps the carrier list BEFORE it attempts the bind
+        -- -- so a failed bind reads as complete, the art probes fine, and StyleOneSlot
+        -- succeeds because it only dresses. Same white outcome, different door.
+        -- _dfDispelBindRes records the truth: "ok x<n>" only on a completed bind.
+        local bindRes = btn and btn._dfDispelBindRes
+        local bound = type(bindRes) == "string" and bindRes:match("^ok x%d+$") ~= nil
         local incomplete = btn and info.roles and next(info.roles) ~= nil
-            and btn._dfDispelCarriers == nil
+            and (btn._dfDispelCarriers == nil or not bound)
         local unreachable = btn and btn.dfDispelWidget
             and not pcall(ProbeSlotArt, btn.dfDispelWidget)
         if btn and (unreachable or incomplete) then
