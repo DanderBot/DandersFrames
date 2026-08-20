@@ -1928,6 +1928,32 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
 
     -- ONE bind pass for every carrier (clear-once-then-append; see BindDispelCarriers).
     BindDispelCarriers(btn, carriers, db, key)
+
+    -- ★ THE LIFECYCLE LINE, AND WHY IT HAS TO EXIST. Every other DISPEL log call in this
+    -- file is a DebugWarn or DebugError on a failure path, and every one of them is a
+    -- session one-shot -- so a healthy client logged NOTHING, and a client where this
+    -- function never ran at all also logged nothing. Those two states were
+    -- indistinguishable from the log, which is the one thing a log has to do.
+    --
+    -- ☠ THAT MATTERS MORE SINCE THE OVERLAY STARTED FAILING DARK. Trading a white frame
+    -- for an invisible one is only honest if something still says so; otherwise a
+    -- completely dead overlay ships silently and nobody can tell. This line is that
+    -- something: one entry per slot birth naming the unit, what the slot declared, how
+    -- many carriers were built and what the bind returned. Healthy looks like
+    -- "carriers=3 result=ok x3"; every failure mode reads differently at a glance.
+    --
+    -- Guarded on DebugActive because the roles summary allocates -- the documented
+    -- pattern for a log whose ARGUMENTS cost something (see DF:DebugActive).
+    if DF.DebugActive and DF:DebugActive("DISPEL") then
+        local want = {}
+        if roles.gradient then want[#want + 1] = "gradient=" .. tostring(roles.gradient) end
+        if roles.border then want[#want + 1] = "border" end
+        if roles.edges then want[#want + 1] = "edges" end
+        if roles.badge then want[#want + 1] = "badge" end
+        DF:Debug("DISPEL", "slot %s unit=%s declares=[%s] carriers=%d result=%s",
+            tostring(key), tostring(frame and frame.unit),
+            table.concat(want, " "), #carriers, tostring(btn._dfDispelBindRes))
+    end
 end
 
 -- GAME-COLOUR mode, main slot. The ONE natively-tintable region per slot (source-
@@ -2300,6 +2326,14 @@ local function StyleDispelSlots(frame, db, h, slots)
                         tostring(frame.unit))
                 end
             else
+                -- ★ SAY THAT THE RECOVERY FIRED, not only that it failed. A rebuild is
+                -- the single most interesting thing this subsystem does -- it means a slot
+                -- was found broken and is being repaired -- and until now it produced no
+                -- entry at all unless the repair itself threw. A user reporting "it went
+                -- white once and came back" had nothing in the log to show for it.
+                DF:Debug("DISPEL", "slot %s on %s found %s - rebuilding",
+                    tostring(info.key), tostring(frame.unit),
+                    unreachable and "forbidden" or "without carriers")
                 btn._dfDispelArtStale = true
                 ResetSlotArt(btn)
                 -- pcall'd for the SAME reason as the style pass below (bug #1011):
