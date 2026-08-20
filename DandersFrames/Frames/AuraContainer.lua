@@ -102,8 +102,10 @@ local warnedCreate = false
 -- StopAnimation loop in _teardownContainer.
 local warnedLayout, warnedTeardownAnim = false, false
 -- Slot BIRTH. Deliberately not warnedRestyle: sharing that latch let whichever of the
--- two failed first permanently silence the other.
-local warnedInitFrame = false
+-- two failed first permanently silence the other. The consumer hook gets a third latch
+-- for the same reason -- it is a separate call now, and a fault in one must not hide the
+-- other.
+local warnedInitFrame, warnedInitHook = false, false
 -- Filter-string tuning rejected for a key the container does not have. Latched
 -- because applyGroupTuning runs per frame per settings change; one line is enough
 -- to name the offending consumer.
@@ -4983,13 +4985,8 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
                     handle:_paintTestSlot(button, testIndex)
                 else
                     handle:_bindNativeSlot(button)     -- native inbound setters
-                    -- Consumer secure init (overlay dispel carriers): runs in THIS
-                    -- securecallfunction pass, so any texture it creates on the button
-                    -- and binds via SetAuraBorder is created in secure context and is
-                    -- NOT access-constrained (the tainted style pass can't do the bind —
-                    -- cab.lua:15). Inside the pcall, so a fault warns and doesn't abort
-                    -- Blizzard's batch build.
-                    if onInit then onInit(button) end
+                    -- ☠ The consumer's onInit USED TO BE CALLED HERE, last inside this
+                    -- pcall. It now runs below, on its own. See the block after the pcall.
                 end
             end
         end)
@@ -5006,6 +5003,37 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
             warnedInitFrame = true
             DF:DebugWarn(DBG, "initializeFrame failed (slot art may be incomplete): %s",
                 tostring(err))
+        end
+        -- ☠☠ THE CONSUMER HOOK GETS ITS OWN CALL, BECAUSE IT WAS LAST IN A SHARED PCALL.
+        -- It used to sit at the END of the pass above, after the mouse setters,
+        -- _acceptSlot and _bindNativeSlot. Any throw in ANY of those skipped straight past
+        -- it, so the button came out with its own regions built and bound and the
+        -- consumer's carriers never created at all.
+        --
+        -- ★ THAT ASYMMETRY IS THE FIELD SIGNATURE. Every reported white dispel overlay had
+        -- a correctly coloured debuff-icon ring on the same frame at the same moment: the
+        -- ring is built and bound by _acceptSlot / _bindNativeSlot EARLIER in this pass, so
+        -- it always completed, while the overlay's init was the only thing an earlier fault
+        -- could silently cost. It was never a difference between the two lanes' colour
+        -- handling -- it was their position in this function.
+        --
+        -- Still inside the same securecallfunction pass, which is what the hook needs: the
+        -- engine applies its access restrictions only after this whole callback RETURNS, so
+        -- a texture created here is still made in secure context. A pcall boundary is error
+        -- handling, not a context change -- moving the call out of the inner one does not
+        -- move it out of the window.
+        --
+        -- Conditions replicated from where the call used to sit: not destroyed, same
+        -- generation, real button, not `missing` mode (which builds no regions at all), and
+        -- not a test-shaped container (which paints curated art instead of binding).
+        if onInit and button and not handle._destroyed and handle._gen == gen
+            and handle.config.mode ~= "missing" and not testShape then
+            local okHook, errHook = pcall(onInit, button)
+            if not okHook and not warnedInitHook then
+                warnedInitHook = true
+                DF:DebugWarn(DBG, "initializeFrame consumer hook failed (slot carriers "
+                    .. "will be missing until the out-of-combat rebuild): %s", tostring(errHook))
+            end
         end
     end
 end
