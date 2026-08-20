@@ -332,6 +332,21 @@ local function BuildDispelOverlayWidget(host, gradientHost, iconHost)
     -- Options: Create custom texture OR use existing WoW gradients
     overlay.gradient:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     overlay.gradient:GetStatusBarTexture():SetBlendMode("ADD")
+    -- ☠☠ THIS IS THE OBJECT THAT PAINTED THE FRAME WHITE. Solid WHITE8x8, value at full
+    -- extent, blend ADD, sized to the whole gradient parent -- and it was the ONLY region
+    -- in this builder created SHOWN. gradientDarken, gradientTop/Bottom/Left/Right and
+    -- borderRingHost are all :Hide()n on the line after they are made; this one was not.
+    --
+    -- On the 12.1 slot path it is not the carrier at all and never renders anything --
+    -- StyleGameMainSlot hides it and dresses btn._dfDispelGradientCarrier instead. But
+    -- that Hide sits INSIDE `if carrier then`, so a slot whose carrier was never built
+    -- skipped it, and this bar was left exactly as created: white, full width, additive,
+    -- across the frame. Two independent faults chained -- a missing carrier, and a legacy
+    -- region whose only reason to be invisible was a branch that had stopped running.
+    --
+    -- Born hidden now, like its siblings. The one path that genuinely uses it (the legacy
+    -- non-slot widget) calls Show() explicitly, so nothing that wants it loses it.
+    overlay.gradient:Hide()
     
     -- Store reference to set gradient texture later based on style
     overlay.gradientStyle = "FULL"
