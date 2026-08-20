@@ -1313,6 +1313,10 @@ end
 -- drift. See BadgeCarrierOptions and the badge block in DispelSlotSecureInit.
 local warnedTintBind = false
 local warnedSlotStyle = false
+-- Slot BIRTH refusal (the onInit hook), separate from the style-pass latch above: they
+-- are different failures on different paths, and one shared one-shot would let whichever
+-- fired first hide the other for the rest of the session.
+local warnedSlotInit = false
 
 -- Slot plan from settings.
 local function dispelSlotPlan(db)
@@ -2296,7 +2300,36 @@ local function dispelFilterRecords(slots, db, frame)
                     -- container's initializeFrame (the only context where a texture child
                     -- of the secret button isn't access-constrained). Geometry/alpha stay
                     -- in StyleGame*Slot.
-                    onInit = function(btn) DispelSlotSecureInit(btn, si, db, frame) end }
+                    -- ☠ REPORT OUR OWN BIRTH FAILURE, ON OUR OWN CHANNEL.
+                    -- The container pcalls this hook (Handle:_makeInitializeFrame), so a
+                    -- refusal here is SWALLOWED: the slot is left half built, nothing
+                    -- records it, and the container's own warning rides AURACONTAINER.
+                    -- That is how a refused init produced a dump in which every printed
+                    -- field looked healthy (2026-08-20). Birth is normally MID-COMBAT --
+                    -- the client creates these buttons lazily on the first dispellable
+                    -- debuff -- so the button subtree carries
+                    -- DenyTaintedAccessWhenAurasAreSecret and creating the gradient's dim
+                    -- host is refused exactly like a setter.
+                    -- Stamped as well as logged: the stamp is what /df debug dispeldbg
+                    -- prints, so one paste names the exact refused call even from a
+                    -- client that had the DISPEL category switched off at the time.
+                    onInit = function(btn)
+                        local okI, errI = pcall(DispelSlotSecureInit, btn, si, db, frame)
+                        if not okI then
+                            if btn then btn._dfDispelInitErr = tostring(errI) end
+                            if not warnedSlotInit then
+                                warnedSlotInit = true
+                                if DF.DebugWarn then
+                                    DF:DebugWarn("DISPEL",
+                                        "slot init %s refused at birth - carriers missing "
+                                        .. "until the next out-of-combat rebuild: %s",
+                                        tostring(si.key), tostring(errI))
+                                end
+                            end
+                        elseif btn then
+                            btn._dfDispelInitErr = nil
+                        end
+                    end }
     end
     return recs
 end

@@ -101,6 +101,9 @@ local warnedCreate = false
 -- Slot subtrees the client turned FORBIDDEN under us -- see placeButton and the
 -- StopAnimation loop in _teardownContainer.
 local warnedLayout, warnedTeardownAnim = false, false
+-- Slot BIRTH. Deliberately not warnedRestyle: sharing that latch let whichever of the
+-- two failed first permanently silence the other.
+local warnedInitFrame = false
 -- Filter-string tuning rejected for a key the container does not have. Latched
 -- because applyGroupTuning runs per frame per settings change; one line is enough
 -- to name the offending consumer.
@@ -4981,9 +4984,19 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
                 end
             end
         end)
-        if not ok and not warnedRestyle then
-            warnedRestyle = true
-            DF:DebugWarn(DBG, "initializeFrame styling failed: %s", tostring(err))
+        -- ☠ ITS OWN LATCH, AND ITS OWN WORDING. This shared `warnedRestyle` with
+        -- ApplyStyle's restyle loop, which is a one-shot for the session -- so whichever
+        -- of the two failed first permanently silenced the other. Slot birth and restyle
+        -- are unrelated failures on unrelated paths; one latch between them meant the
+        -- second was guaranteed to be invisible.
+        -- The wording said "styling failed", but everything from _acceptSlot to the
+        -- consumer's onInit hook lands here, and a message that names the wrong stage
+        -- sends the next reader to the wrong file. It names the button's group instead
+        -- and leaves the stage to the error text.
+        if not ok and not warnedInitFrame then
+            warnedInitFrame = true
+            DF:DebugWarn(DBG, "initializeFrame failed (slot art may be incomplete): %s",
+                tostring(err))
         end
     end
 end

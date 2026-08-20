@@ -7245,6 +7245,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
                             -- Declared vs built, on one line. The roles table says what
                             -- this slot is supposed to own; anything declared without a
                             -- carrier behind it is the fault, stated rather than implied.
+                            -- ★ THE BIRTH-TIME REFUSAL, NAMED. Slot init runs inside the
+                            -- container's pcall, so its error never reaches the user;
+                            -- Dispel's onInit stamps it here. This prints even on a client
+                            -- that had the DISPEL log category switched off when it
+                            -- happened, which is exactly the case that cost a diagnosis.
+                            if btn._dfDispelInitErr then
+                                o:Line(("slot[%s] INIT REFUSED AT BIRTH: %s"):format(
+                                    tostring(key), tostring(btn._dfDispelInitErr)), "bad")
+                            end
                             local dRoles = btn._dfDispelRoles
                             if dRoles then
                                 local want = {}
