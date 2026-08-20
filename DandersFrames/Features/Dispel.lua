@@ -1552,6 +1552,18 @@ end
 -- carrier wins there (matching the old one-slot-per-carrier behaviour as closely as a
 -- single slot can).
 local function BindDispelCarriers(btn, carriers, db, key)
+    -- ☠ RECORD THE RESULT ON THE BUTTON, NOT ONLY IN THE GLOBAL. DF._dispelBindErr is
+    -- keyed by SLOT KEY alone, so every frame's "main" slot overwrites every other
+    -- frame's -- last writer wins across the whole roster. A dump reading it reports one
+    -- frame's success against another frame's button, which is exactly how five frames
+    -- with no carriers at all printed "bind=ok x3" (2026-08-20). The global stays for the
+    -- site summary in /df debug dispelids, where cross-frame aggregation is the point.
+    --
+    -- Stamped BEFORE the early return, so "we got here and had nothing to bind" is a
+    -- recorded state rather than an absence indistinguishable from "never called".
+    if btn then
+        btn._dfDispelBindRes = (carriers and carriers[1]) and "pending" or "no carriers built"
+    end
     if not (btn and carriers and carriers[1]) then return end
     btn._dfDispelCarriers = carriers
     -- _dfDispelCurveGen is stamped AFTER a SUCCESSFUL bind (below), not here. The only
@@ -1606,6 +1618,7 @@ local function BindDispelCarriers(btn, carriers, db, key)
     end)
     DF._dispelBindErr = DF._dispelBindErr or {}
     DF._dispelBindErr[key or "?"] = ok and ("ok x" .. #carriers) or tostring(err)
+    btn._dfDispelBindRes = ok and ("ok x" .. #carriers) or tostring(err)
     if ok then
         btn._dfDispelCurveGen = DF.dispelCurveGen
     elseif not warnedTintBind then
@@ -1636,6 +1649,12 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
     local key = slotInfo.key
     local roles = slotInfo.roles
     if not roles then return end   -- icon slots bind nothing (plain art on the slot's SetShown)
+    -- ★ STAMP WHAT THIS SLOT IS SUPPOSED TO BUILD, BEFORE BUILDING IT. Absence is this
+    -- subsystem's failure mode, and a dump that renders a missing carrier as SILENCE
+    -- cannot show it -- which is precisely how a refused init read as healthy. With the
+    -- declaration recorded, the dump can say "declared gradient, no carrier" instead of
+    -- printing nothing for the one thing that mattered.
+    btn._dfDispelRoles = roles
     local hbLvl = (frame.healthBar and frame.healthBar:GetFrameLevel())
         or (frame:GetFrameLevel() + 3)
     -- ☠ The edge holders below must stay LEVEL WITH THE WIDGET, and the widget's band is
@@ -2094,6 +2113,11 @@ end
 local function ResetSlotArt(btn)
     btn.dfDispelWidget = nil
     btn._dfDispelCarriers = nil
+    -- The two diagnostic stamps go with the art they describe: a survivor would describe
+    -- the abandoned generation, which is the same trap as the dim hosts below.
+    -- DispelSlotSecureInit re-stamps both on the way back in.
+    btn._dfDispelRoles = nil
+    btn._dfDispelBindRes = nil
     btn._dfDispelCurveGen = nil
     btn._dfDispelGradientCarrier = nil
     btn.dfDispelEdgeTex = nil

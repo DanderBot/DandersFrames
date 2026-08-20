@@ -7139,8 +7139,16 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     if ok then return a, b end
                     return nil
                 end
+                -- ☠ AN ABSENT OBJECT PRINTS "ABSENT". IT DOES NOT PRINT NOTHING.
+                -- Both helpers used to `return` on nil, so a missing region rendered as
+                -- SILENCE -- indistinguishable from a region this style never builds, and
+                -- from a line the reader skimmed past. That cost a diagnosis: five frames
+                -- whose gradient carrier did not exist produced a dump whose every printed
+                -- field looked healthy, because the one that mattered was not printed at
+                -- all (2026-08-20). This dump's whole subject is whether the art exists,
+                -- so absence is the most important thing it can report.
                 local function dumpBar(tag, bar, hostFrame)
-                    if not bar then return end
+                    if not bar then o:Line(("%s: ABSENT"):format(tag), "bad") return end
                     local mn, mx, val, w, h, pw, lvl, blend, alpha, shown, orient, rev
                     pcall(function() mn, mx = bar:GetMinMaxValues() end)
                     pcall(function() val = bar:GetValue() end)
@@ -7160,7 +7168,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         num(orient), num(rev), num(blend), num(alpha), num(shown), num(lvl)))
                 end
                 local function dumpTex(tag, tex)
-                    if not tex then return end
+                    if not tex then o:Line(("%s: ABSENT"):format(tag), "bad") return end
                     local w, h, blend, alpha, shown, layer, sub
                     pcall(function() w, h = tex:GetSize() end)
                     pcall(function() blend = tex:GetBlendMode() end)
@@ -7220,10 +7228,36 @@ DF._MainEventDispatcher = function(self, event, arg1)
                             -- and every widget/texture method call rides one pcall that
                             -- degrades to a FORBIDDEN line instead of killing the dump at
                             -- the exact moment it is most needed.
+                            -- ☠ bind= READS THE BUTTON'S OWN STAMP, NOT THE GLOBAL.
+                            -- DF._dispelBindErr is keyed by slot key alone, so every
+                            -- frame's "main" overwrites every other frame's; printing it
+                            -- here reported one frame's success against another frame's
+                            -- button, and five carrier-less frames all read "ok x3".
+                            -- carriers= now separates "never stamped" from "stamped
+                            -- empty" -- BindDispelCarriers only stamps when it has one,
+                            -- so nil is the signal that the secure init did not finish.
+                            local nCar = btn._dfDispelCarriers and #btn._dfDispelCarriers
                             o:Line(("slot[%s] styleErr=%s bind=%s carriers=%s"):format(
                                 tostring(key), tostring(btn._dfDispelStyleErr),
-                                tostring(DF._dispelBindErr and DF._dispelBindErr[key]),
-                                tostring(btn._dfDispelCarriers and #btn._dfDispelCarriers)))
+                                tostring(btn._dfDispelBindRes or "never recorded"),
+                                nCar and tostring(nCar) or "NONE (init did not finish)"),
+                                nCar and "neutral" or "bad")
+                            -- Declared vs built, on one line. The roles table says what
+                            -- this slot is supposed to own; anything declared without a
+                            -- carrier behind it is the fault, stated rather than implied.
+                            local dRoles = btn._dfDispelRoles
+                            if dRoles then
+                                local want = {}
+                                if dRoles.gradient then want[#want + 1] = "gradient=" .. tostring(dRoles.gradient) end
+                                if dRoles.border then want[#want + 1] = "border" end
+                                if dRoles.edges then want[#want + 1] = "edges" end
+                                if dRoles.badge then want[#want + 1] = "badge" end
+                                o:Line(("slot[%s] declares: %s"):format(tostring(key),
+                                    #want > 0 and table.concat(want, " ") or "(nothing)"))
+                            else
+                                o:Line(("slot[%s] declares: NOTHING RECORDED — secure init never reached its roles stamp"):format(
+                                    tostring(key)), "bad")
+                            end
                             local okSlot = true
                             do
                                 local wdg = btn.dfDispelWidget
@@ -7240,19 +7274,28 @@ DF._MainEventDispatcher = function(self, event, arg1)
                                     dumpBar("slot.gradient", wdg.gradient, frame)
                                     dumpTex("slot.nativeGradient", wdg.nativeGradient)
                                     local ng = wdg.nativeGradient
-                                    if ng then
-                                        -- ★ THE LINE THIS WHOLE DUMP EXISTS FOR. rel= says
-                                        -- whether the style pass ever re-anchored the
-                                        -- carrier ("btn" = still on the secure init's
-                                        -- SetAllPoints, i.e. it never ran). Every read here
-                                        -- is individually guarded so a refusal costs one
-                                        -- FIELD, never this line.
-                                        local nPts = tryv(ng.GetNumPoints, ng)
-                                        local _, relTo = tryv(ng.GetPoint, ng, 1)
+                                    -- ★ THE LINE THIS WHOLE DUMP EXISTS FOR, AND IT NOW
+                                    -- PRINTS EVEN WHEN THE CARRIER IS GONE. It used to sit
+                                    -- inside `if ng then`, so the one state it most needed
+                                    -- to report -- no carrier at all -- was the one state
+                                    -- that silently skipped it (2026-08-20). rel= says
+                                    -- whether the style pass ever re-anchored the carrier
+                                    -- ("btn" = still on the secure init's SetAllPoints, i.e.
+                                    -- it never ran). The DIM HOSTS are plain DF frames whose
+                                    -- alpha is always readable, and they are worth printing
+                                    -- whether or not the carrier survived -- a live dim host
+                                    -- with no carrier localises the failure to the texture
+                                    -- create, one line below the frame create. Every read is
+                                    -- individually guarded so a refusal costs one FIELD.
+                                    do
+                                        local nPts = ng and tryv(ng.GetNumPoints, ng)
+                                        local _, relTo
+                                        if ng then _, relTo = tryv(ng.GetPoint, ng, 1) end
                                         local healthFill = frame.healthBar
                                             and tryv(frame.healthBar.GetStatusBarTexture, frame.healthBar)
                                         local relName = "?"
-                                        if relTo == btn then relName = "btn"
+                                        if not ng then relName = "NO CARRIER"
+                                        elseif relTo == btn then relName = "btn"
                                         elseif relTo == wdg.gradient then relName = "gradRect"
                                         elseif healthFill and relTo == healthFill then relName = "healthFill"
                                         elseif relTo == wdg then relName = "widget"
@@ -7269,21 +7312,32 @@ DF._MainEventDispatcher = function(self, event, arg1)
                                             and tryv(btn.dfDispelBadgeDim.GetAlpha, btn.dfDispelBadgeDim)
                                         o:Line(("slot[%s] carrier points=%s rel=%s gradDim=%s ringDim=%s badgeDim=%s"):format(
                                             tostring(key), tostring(nPts), relName,
-                                            num(dimA), num(ringA), num(badgeA)))
+                                            num(dimA), num(ringA), num(badgeA)),
+                                            ng and "neutral" or "bad")
                                     end
                                 end
-                                if btn.dfDispelRing then dumpTex("slot[" .. tostring(key) .. "].ring", btn.dfDispelRing) end
+                                -- ⚠ Dumped only when the slot DECLARED them, but then
+                                -- dumped unconditionally so a declared-and-missing one
+                                -- prints ABSENT. Gating on the object itself (the old
+                                -- `if btn.dfDispelRing then`) hid exactly the case worth
+                                -- seeing; gating on the declaration keeps a style that
+                                -- legitimately builds no ring from printing a false alarm.
+                                local dR = btn._dfDispelRoles
+                                if not dR or dR.border then
+                                    dumpTex("slot[" .. tostring(key) .. "].ring", btn.dfDispelRing)
+                                end
                                 -- Edge strips are keyed BY SIDE now (all four ride the one
                                 -- overlay slot since the carriers were consolidated).
-                                if type(btn.dfDispelEdgeTex) == "table" then
+                                if not dR or dR.edges then
+                                    local et = btn.dfDispelEdgeTex
                                     for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
-                                        local et = btn.dfDispelEdgeTex[side]
-                                        if et then dumpTex("slot[" .. tostring(key) .. "].edge" .. side, et) end
+                                        dumpTex("slot[" .. tostring(key) .. "].edge" .. side,
+                                            type(et) == "table" and et[side] or nil)
                                     end
                                 end
                             end
                             if not okSlot then
-                                o:Line(("slot[%s] widget reads REFUSED (auras secret) — the fields above are still valid; rel=/alpha need an out-of-combat run"):format(
+                                o:Line(("slot[%s] widget reads REFUSED (auras secret) — every DF-owned field above is still valid, including bind=, carriers=, declares= and rel=NO CARRIER; only values read OFF the slot widgets degrade, and those need an out-of-combat run"):format(
                                     tostring(key)), "neutral")
                             end
                         end
