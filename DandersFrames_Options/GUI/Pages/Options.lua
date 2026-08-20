@@ -1815,6 +1815,9 @@ function DF:SetupGUIPages(GUI, CreateCategory, CreateSubTab, BuildPage)
         ffOOC.tooltip = L["Frame opacity while you are out of combat. The preview shows this value while you configure it."]
         local ffCombat = frameFadeGroup:AddWidget(GUI:CreateSlider(self.child, L["In Combat Frame Fade"], 0.1, 1.0, 0.05, db, "frameFadeAlphaInCombat", nil, RefreshFrameFade, true), 55)
         ffCombat.hideOn = function(d) return not d.frameFadeSplitCombat end
+        local ffInstance = frameFadeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Use In-Combat Fade In Instances"], db, "frameFadeInstanceUsesCombat", RefreshFrameFade), 30)
+        ffInstance.disableOn = function(d) return not d.frameFadeSplitCombat end
+        ffInstance.tooltip = L["Inside dungeons, raids, arenas and battlegrounds the frames hold the in-combat opacity the whole visit — no fading out between pulls."]
         local ffHover = frameFadeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Show In-Combat Fade When Hovering"], db, "frameFadeHoverUsesCombat", RefreshFrameFade), 30)
         ffHover.disableOn = function(d) return not d.frameFadeSplitCombat end
         ffHover.tooltip = L["Out of combat, a frame under the mouse uses the in-combat opacity so you can still read and interact with it."]

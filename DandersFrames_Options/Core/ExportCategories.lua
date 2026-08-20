@@ -1013,6 +1013,7 @@ DF.ExportCategories = {
         "frameFadeAlphaInCombat",
         "frameFadeAlphaOutOfCombat",
         "frameFadeHoverScope",
+        "frameFadeInstanceUsesCombat",
         "frameFadeHoverUsesCombat",
         "frameFadeSplitCombat",
         "healthFadeAlpha",

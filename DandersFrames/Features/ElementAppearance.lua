@@ -33,6 +33,7 @@ local UnitExists = UnitExists
 local UnitIsUnit = UnitIsUnit
 local UnitClass = UnitClass
 local UnitAffectingCombat = UnitAffectingCombat
+local IsInInstance = IsInInstance
 local CreateColor = CreateColor
 local issecretvalue = issecretvalue  -- nil pre-Midnight, function in Midnight+
 
@@ -126,7 +127,12 @@ end
 function DF:GetFrameBaseAlpha(db, frame)
     if not db then return 1 end
     if db.frameFadeSplitCombat then
-        if UnitAffectingCombat("player") then
+        -- "In Instances" holds the in-combat value for the whole dungeon / raid /
+        -- arena / BG visit -- the M+ complaint: combat drops between every pack, so
+        -- the frames faded out and back on every single pull. IsInInstance is a
+        -- cheap C read; instance edges re-apply via the PEW sweep below.
+        if UnitAffectingCombat("player")
+            or (db.frameFadeInstanceUsesCombat and IsInInstance()) then
             return db.frameFadeAlphaInCombat or 1
         end
         if db.frameFadeHoverUsesCombat then
@@ -1737,6 +1743,9 @@ end
 local frameFadeCombatFrame = CreateFrame("Frame")
 frameFadeCombatFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 frameFadeCombatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+-- Instance edges for "Use In-Combat Fade In Instances" -- entering or leaving the
+-- dungeon changes the resolver's answer without any combat event.
+frameFadeCombatFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frameFadeCombatFrame:SetScript("OnEvent", function()
     local partyDB = DF.GetDB and DF:GetDB()
     local raidDB = DF.GetRaidDB and DF:GetRaidDB()

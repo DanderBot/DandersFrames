@@ -2370,6 +2370,7 @@ DF.PartyDefaults = {
     frameFadeAlphaInCombat = 1,
     frameFadeHoverUsesCombat = false,
     frameFadeHoverScope = "ALL",   -- "ALL" = every frame lifts while any is hovered; "FRAME" = just the hovered one
+    frameFadeInstanceUsesCombat = false,   -- inside a dungeon/raid/arena/BG, hold the in-combat value between pulls
 
     -- Range Check
     rangeAlpha = 0.5,
