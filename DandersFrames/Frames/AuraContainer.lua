@@ -98,6 +98,9 @@ local warnedCurve, warnedBorder, warnedNativeDispel = false, false, false
 -- (warnedMouse was a third latch here with no warning behind it — removed.)
 local warnedRestyle, warnedRefresh = false, false
 local warnedCreate = false
+-- Slot subtrees the client turned FORBIDDEN under us -- see placeButton and the
+-- StopAnimation loop in _teardownContainer.
+local warnedLayout, warnedTeardownAnim = false, false
 -- Filter-string tuning rejected for a key the container does not have. Latched
 -- because applyGroupTuning runs per frame per settings change; one line is enough
 -- to name the offending consumer.
@@ -2615,6 +2618,28 @@ local function buildGroupLayout(config)
     }
 end
 
+-- One button's placement, guarded by the caller.
+--
+-- ☠ ENGINE-OWNED BUTTONS CAN TURN FORBIDDEN UNDER US. Addons stopped creating AuraButtons
+-- at PTR-4 (see the header at the top of this file), so every entry in handle.buttons
+-- belongs to the client, and it can reclaim or re-initialise a slot's subtree at any point
+-- -- after which SetScale/SetPoint on that button throw "Attempt to access forbidden object
+-- from code tainted by an AddOn". Dispel.lua's ProbeSlotArt and TextDesigner/Render.lua's
+-- mirrorWrite already carry this guard for their own art; this is it for the row layout.
+--
+-- ★ THE COST OF NOT GUARDING WAS THE WHOLE ROW, NOT ONE ICON. The throw unwound out of the
+-- MIDDLE of layoutRow's loop, so every button after the forbidden one was left unpositioned.
+-- Reported in game as "no debuffs showing" after switching the debuff filter to All Debuffs
+-- inside a key (Krathe, 2026-08-20). Guarding per button costs one icon instead.
+--
+-- Declared once rather than inlined as a closure so the pcall stays allocation-free on this
+-- per-button-per-pass path -- same reasoning as ProbeSlotArt.
+local function placeButton(b, scale, anchor, parent, x, y)
+    b:SetScale(scale)
+    b:ClearAllPoints()
+    b:SetPoint(anchor, parent, anchor, x, y)
+end
+
 local function layoutRow(handle)
     local config = handle.config
     local L = config.layout or {}
@@ -2651,9 +2676,10 @@ local function layoutRow(handle)
             x = ppSnapScaled(x, scale)
             y = ppSnapScaled(y, scale)
         end
-        b:SetScale(scale)
-        b:ClearAllPoints()
-        b:SetPoint(anchor, handle.frame, anchor, x, y)
+        if not pcall(placeButton, b, scale, anchor, handle.frame, x, y) and not warnedLayout then
+            warnedLayout = true
+            DF:DebugWarn(DBG, "layoutRow: slot %d refused placement (forbidden subtree?)", i)
+        end
     end
 end
 
@@ -5885,7 +5911,22 @@ function Handle:_teardownContainer(park)
     -- refresh (bug #1079). Do not add any other write to slot subtrees in here.
     if DF.Border then
         for _, slot in pairs(self.buttons) do
-            if slot and slot.dfBorder then DF.Border:StopAnimation(slot.dfBorder) end
+            -- Guarded for the same reason as the binding loop just below, and as
+            -- layoutRow: the border's edge textures are children of the aura button, so
+            -- they go forbidden with it, and StopAnimation's resetEdgeAlphas then throws
+            -- on SetAlpha. Unguarded, that unwound out of THIS loop and the remaining
+            -- slots never got stopped at all -- their UIParent-hosted OnUpdate drivers
+            -- kept ticking against torn-down textures, which is the exact leak this
+            -- chokepoint exists to prevent (Krathe, 2026-08-20).
+            -- ⚠ unregisterAnimTick runs FIRST inside StopAnimation, so the driver for a
+            -- refused border is still stopped; what is lost is only its cosmetic alpha
+            -- reset, which cannot be applied to a forbidden object anyway.
+            if slot and slot.dfBorder then
+                if not pcall(DF.Border.StopAnimation, DF.Border, slot.dfBorder) and not warnedTeardownAnim then
+                    warnedTeardownAnim = true
+                    DF:DebugWarn(DBG, "_teardownContainer: StopAnimation refused (forbidden subtree?)")
+                end
+            end
         end
     end
     -- Test-mode native countdowns: a DurationTextBinding holds a reference to the
