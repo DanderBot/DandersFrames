@@ -2126,14 +2126,51 @@ local function StyleDispelSlots(frame, db, h, slots)
         -- error spam for a rebuild spam. The latch clears the moment a probe passes, so
         -- a later reclaim is still recoverable.
         local artOK = true
-        if btn and btn.dfDispelWidget and not pcall(ProbeSlotArt, btn.dfDispelWidget) then
+        -- ☠ TWO WAYS A SLOT CAN NEED REBUILDING, AND ONLY ONE OF THEM WAS TESTED.
+        -- ProbeSlotArt asks "is the art REACHABLE" -- a liveness test. The second failure
+        -- is COMPLETENESS: DispelSlotSecureInit ran, was refused partway, and left a slot
+        -- whose art is perfectly reachable and whose carriers do not exist. The probe
+        -- passes on such a slot, so the recovery below could never see it.
+        --
+        -- HOW IT HAPPENS: the client creates these buttons lazily on the first dispellable
+        -- debuff, i.e. MID-COMBAT, so onInit runs while auras are secret and the button
+        -- subtree carries DenyTaintedAccessWhenAurasAreSecret. Creating the gradient's dim
+        -- host is a child materialization on a denied subtree and is refused exactly like a
+        -- setter. Handle:_makeInitializeFrame pcalls onInit, so the refusal is SWALLOWED --
+        -- no error, no log, and a half-built slot with nothing recording that it is half
+        -- built. BindDispelCarriers only stamps btn._dfDispelCarriers when it has at least
+        -- one carrier, so its absence IS the completeness signal.
+        --
+        -- WHY IT NEVER HEALED: out of combat the art probes fine, so the branch below was
+        -- skipped and _dfDispelArtStale cleared; StyleOneSlot then succeeded (it only
+        -- DRESSES carriers, it never creates them) and the caller latched
+        -- dfDispelFactoryVersion / dfDispelStyledGen, after which the fast path in
+        -- DriveDispelOverlayFactory returns before reaching here at all. The overlay stayed
+        -- dead until a reload, and every field a dump could read looked healthy --
+        -- styleErr=nil, style latched, widget present. Field-reported as whole frames
+        -- washing white in a key (Krathe, 2026-08-20): with no DF carrier the engine's own
+        -- dispel texture renders at its white base coat, unopposed.
+        --
+        -- next(info.roles) guards the all-disabled config (EDGE style with gradient, border
+        -- and badge all off) -- roles is then an empty table, no carrier is meant to exist,
+        -- and testing for one would rebuild on every pass.
+        local incomplete = btn and info.roles and next(info.roles) ~= nil
+            and btn._dfDispelCarriers == nil
+        local unreachable = btn and btn.dfDispelWidget
+            and not pcall(ProbeSlotArt, btn.dfDispelWidget)
+        if btn and (unreachable or incomplete) then
             if btn._dfDispelArtStale then
                 artOK = false
                 if not frame.dfDispelArtForbiddenLogged then
                     frame.dfDispelArtForbiddenLogged = true
+                    -- Name WHICH test tripped: "forbidden" and "carriers never built"
+                    -- are different faults with different causes, and a message that
+                    -- asserts the wrong one sends the next reader after the wrong thing.
                     DF:DebugWarn("AURACONTAINER",
-                        "StyleDispelSlots: slot art still forbidden after a rebuild, "
-                        .. "skipping the dispel overlay on %s", tostring(frame.unit))
+                        "StyleDispelSlots: slot %s still %s after a rebuild, "
+                        .. "skipping the dispel overlay on %s", tostring(info.key),
+                        unreachable and "forbidden" or "missing its carriers",
+                        tostring(frame.unit))
                 end
             else
                 btn._dfDispelArtStale = true
