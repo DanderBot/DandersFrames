@@ -5295,6 +5295,10 @@ function Handle:_noteGateRecovery(can)
         -- skipReparse: the Refresh above IS that bounce; the latch clear would
         -- otherwise run a second one on the same edge.
         self:_setCineLatch(nil, true)
+        -- A pass can recover BEFORE the combat-end drain gets its turn. Clear the
+        -- retry debt too, or the drain would run a spurious bounce next regen on a
+        -- pool this pass just re-parsed.
+        self._pendingGateReparse = nil
     end
     self._idGateAssist = now
 end
@@ -6277,16 +6281,27 @@ function Handle:_registerRegen()
                     -- before a restyle would only be undone by it.
                     -- The flag is cleared only on success, so a bounce that still fails
                     -- leaves the verdict un-consumed and the next gate pass retries.
+                    -- ☠ THE DRAIN PAYS THE RE-PARSE DEBT BUT NEVER STAMPS THE VERDICT.
+                    -- It used to set _idGateAssist = true here, and that reintroduced the
+                    -- spent-edge bug on one corner (2026-08-21 review): if trust dropped
+                    -- AGAIN during the same combat, this bounce re-parsed an untrusted
+                    -- unit -- a fail-open parse, invisible only because the hide
+                    -- actuation covers it -- and the stamped true meant the REAL
+                    -- recovery, when trust returned, saw no false->true edge and never
+                    -- re-parsed. The anchor then un-hid an unfiltered pool.
+                    -- Leaving the verdict false costs one redundant bounce: the next
+                    -- gate pass (the 5s backstop at worst) sees the same edge out of
+                    -- combat, bounces instantly, and stamps through the normal flow --
+                    -- which re-asks the probes first, so a still-untrusted unit stays
+                    -- parked instead of being declared recovered by a timer.
                     if h._pendingGateReparse then
                         if rebuilt then
                             h._pendingGateReparse = nil
-                            h._idGateAssist = true
                         else
                             local done = false
                             pcall(function() done = h:Refresh() end)
                             if done then
                                 h._pendingGateReparse = nil
-                                h._idGateAssist = true
                                 pcall(function() h:_setCineLatch(nil, true) end)
                             end
                         end
