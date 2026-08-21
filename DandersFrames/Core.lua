@@ -7896,7 +7896,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
         
-        DF:Debug("ROLE", "PLAYER_REGEN_DISABLED (entering combat)")
+        -- ☠ (Removed) a bare "entering combat" constant. UpdateAllRoleIcons on the next
+        -- line logs "inCombat=true" itself, with more information and from the code that
+        -- actually acts on it.
         -- Update role icons (in case hideInCombat is enabled)
         if DF.UpdateAllRoleIcons then
             DF:UpdateAllRoleIcons()

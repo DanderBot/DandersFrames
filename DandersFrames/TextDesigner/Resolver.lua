@@ -354,12 +354,11 @@ RESOLVERS.group = function(elem, source)
         end
         return ""
     end
-    -- Guarded: the tostring() args are evaluated by the CALLER, so an unguarded
-    -- DF:Debug allocated two strings per call even with the trace off.
-    if DF:DebugActive("TD") then
-        DF:Debug("TD", "group resolver: elem id=%s items=%d separator=%q",
-            tostring(elem.id), #elem.groupItems, tostring(elem.groupSeparator or " / "))
-    end
+    -- ☠ (Removed) an ENTRY line reporting id/items/separator. Two lines per group element
+    -- per render, and this was the half that restated config. Its useful half -- how many
+    -- items survived -- is now folded into the single outcome line at the end of this
+    -- function, which reports items AND parts together so a DROP is visible on one line
+    -- instead of requiring the reader to diff two.
     local MS = getMS()
     local parts = groupParts
     for pi = #parts, 1, -1 do parts[pi] = nil end
@@ -413,8 +412,12 @@ RESOLVERS.group = function(elem, source)
             end
         end
     end
+    -- ★ ONE line per group element, carrying both counts. `parts < items` is the whole
+    -- diagnostic -- items were dropped -- and it used to require reading this line against
+    -- an entry line further up. Stated directly, and the entry line is gone.
     if DF:DebugActive("TD") then
-        DF:Debug("TD", "group resolver: parts collected=%d", #parts)
+        DF:Debug("TD", "group resolver: elem id=%s items=%d parts=%d",
+            tostring(elem.id), #elem.groupItems, #parts)
     end
     -- IMPORTANT: cannot use table.concat() here — it throws on secret-tainted
     -- entries ("invalid value (secret) at index N in table for 'concat'").
