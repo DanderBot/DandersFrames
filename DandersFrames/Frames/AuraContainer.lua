@@ -98,6 +98,14 @@ local warnedCurve, warnedBorder, warnedNativeDispel = false, false, false
 -- (warnedMouse was a third latch here with no warning behind it — removed.)
 local warnedRestyle, warnedRefresh = false, false
 local warnedCreate = false
+-- Slot subtrees the client turned FORBIDDEN under us -- see placeButton and the
+-- StopAnimation loop in _teardownContainer.
+local warnedLayout, warnedTeardownAnim = false, false
+-- Slot BIRTH. Deliberately not warnedRestyle: sharing that latch let whichever of the
+-- two failed first permanently silence the other. The consumer hook gets a third latch
+-- for the same reason -- it is a separate call now, and a fault in one must not hide the
+-- other.
+local warnedInitFrame, warnedInitHook = false, false
 -- Filter-string tuning rejected for a key the container does not have. Latched
 -- because applyGroupTuning runs per frame per settings change; one line is enough
 -- to name the offending consumer.
@@ -2047,6 +2055,15 @@ local function bindNative(slot, config)
                 if DF.GetDispelColorMap then map = DF:GetDispelColorMap() end
                 if DF.GetDispelColorCurve then curve = DF:GetDispelColorCurve() end
             end
+            -- ☠☠ THE CURVE, WHICH THIS LANE WAS MISSING. Two comments in this repo
+            -- asserted the ring had passed it "since 68824"; it never did, and one of
+            -- them was used to explain away a field report -- correctly-coloured row
+            -- borders sitting next to a white overlay were read as proof the two lanes
+            -- differed in this field, when in fact NEITHER lane had it.
+            -- The map alone is the original white bug: a raw table index that resolves
+            -- private-side, with the style step's paint left standing if it misses.
+            -- Same reasoning as the overlay's tintOpts in Features/Dispel.lua.
+            local curve = DF.GetDispelColorCurve and DF:GetDispelColorCurve() or nil
             local ok, err = pcall(function()
                 local opts = {
                     style = styleEnum,
@@ -2615,6 +2632,28 @@ local function buildGroupLayout(config)
     }
 end
 
+-- One button's placement, guarded by the caller.
+--
+-- ☠ ENGINE-OWNED BUTTONS CAN TURN FORBIDDEN UNDER US. Addons stopped creating AuraButtons
+-- at PTR-4 (see the header at the top of this file), so every entry in handle.buttons
+-- belongs to the client, and it can reclaim or re-initialise a slot's subtree at any point
+-- -- after which SetScale/SetPoint on that button throw "Attempt to access forbidden object
+-- from code tainted by an AddOn". Dispel.lua's ProbeSlotArt and TextDesigner/Render.lua's
+-- mirrorWrite already carry this guard for their own art; this is it for the row layout.
+--
+-- ★ THE COST OF NOT GUARDING WAS THE WHOLE ROW, NOT ONE ICON. The throw unwound out of the
+-- MIDDLE of layoutRow's loop, so every button after the forbidden one was left unpositioned.
+-- Reported in game as "no debuffs showing" after switching the debuff filter to All Debuffs
+-- inside a key (Krathe, 2026-08-20). Guarding per button costs one icon instead.
+--
+-- Declared once rather than inlined as a closure so the pcall stays allocation-free on this
+-- per-button-per-pass path -- same reasoning as ProbeSlotArt.
+local function placeButton(b, scale, anchor, parent, x, y)
+    b:SetScale(scale)
+    b:ClearAllPoints()
+    b:SetPoint(anchor, parent, anchor, x, y)
+end
+
 local function layoutRow(handle)
     local config = handle.config
     local L = config.layout or {}
@@ -2651,9 +2690,10 @@ local function layoutRow(handle)
             x = ppSnapScaled(x, scale)
             y = ppSnapScaled(y, scale)
         end
-        b:SetScale(scale)
-        b:ClearAllPoints()
-        b:SetPoint(anchor, handle.frame, anchor, x, y)
+        if not pcall(placeButton, b, scale, anchor, handle.frame, x, y) and not warnedLayout then
+            warnedLayout = true
+            DF:DebugWarn(DBG, "layoutRow: slot %d refused placement (forbidden subtree?)", i)
+        end
     end
 end
 
@@ -4945,19 +4985,55 @@ function Handle:_makeInitializeFrame(gen, fixedIndex, onInit, recStyle, seqStart
                     handle:_paintTestSlot(button, testIndex)
                 else
                     handle:_bindNativeSlot(button)     -- native inbound setters
-                    -- Consumer secure init (overlay dispel carriers): runs in THIS
-                    -- securecallfunction pass, so any texture it creates on the button
-                    -- and binds via SetAuraBorder is created in secure context and is
-                    -- NOT access-constrained (the tainted style pass can't do the bind —
-                    -- cab.lua:15). Inside the pcall, so a fault warns and doesn't abort
-                    -- Blizzard's batch build.
-                    if onInit then onInit(button) end
+                    -- ☠ The consumer's onInit USED TO BE CALLED HERE, last inside this
+                    -- pcall. It now runs below, on its own. See the block after the pcall.
                 end
             end
         end)
-        if not ok and not warnedRestyle then
-            warnedRestyle = true
-            DF:DebugWarn(DBG, "initializeFrame styling failed: %s", tostring(err))
+        -- ☠ ITS OWN LATCH, AND ITS OWN WORDING. This shared `warnedRestyle` with
+        -- ApplyStyle's restyle loop, which is a one-shot for the session -- so whichever
+        -- of the two failed first permanently silenced the other. Slot birth and restyle
+        -- are unrelated failures on unrelated paths; one latch between them meant the
+        -- second was guaranteed to be invisible.
+        -- The wording said "styling failed", but everything from _acceptSlot to the
+        -- consumer's onInit hook lands here, and a message that names the wrong stage
+        -- sends the next reader to the wrong file. It names the button's group instead
+        -- and leaves the stage to the error text.
+        if not ok and not warnedInitFrame then
+            warnedInitFrame = true
+            DF:DebugWarn(DBG, "initializeFrame failed (slot art may be incomplete): %s",
+                tostring(err))
+        end
+        -- ☠☠ THE CONSUMER HOOK GETS ITS OWN CALL, BECAUSE IT WAS LAST IN A SHARED PCALL.
+        -- It used to sit at the END of the pass above, after the mouse setters,
+        -- _acceptSlot and _bindNativeSlot. Any throw in ANY of those skipped straight past
+        -- it, so the button came out with its own regions built and bound and the
+        -- consumer's carriers never created at all.
+        --
+        -- ★ THAT ASYMMETRY IS THE FIELD SIGNATURE. Every reported white dispel overlay had
+        -- a correctly coloured debuff-icon ring on the same frame at the same moment: the
+        -- ring is built and bound by _acceptSlot / _bindNativeSlot EARLIER in this pass, so
+        -- it always completed, while the overlay's init was the only thing an earlier fault
+        -- could silently cost. It was never a difference between the two lanes' colour
+        -- handling -- it was their position in this function.
+        --
+        -- Still inside the same securecallfunction pass, which is what the hook needs: the
+        -- engine applies its access restrictions only after this whole callback RETURNS, so
+        -- a texture created here is still made in secure context. A pcall boundary is error
+        -- handling, not a context change -- moving the call out of the inner one does not
+        -- move it out of the window.
+        --
+        -- Conditions replicated from where the call used to sit: not destroyed, same
+        -- generation, real button, not `missing` mode (which builds no regions at all), and
+        -- not a test-shaped container (which paints curated art instead of binding).
+        if onInit and button and not handle._destroyed and handle._gen == gen
+            and handle.config.mode ~= "missing" and not testShape then
+            local okHook, errHook = pcall(onInit, button)
+            if not okHook and not warnedInitHook then
+                warnedInitHook = true
+                DF:DebugWarn(DBG, "initializeFrame consumer hook failed (slot carriers "
+                    .. "will be missing until the out-of-combat rebuild): %s", tostring(errHook))
+            end
         end
     end
 end
@@ -5885,7 +5961,22 @@ function Handle:_teardownContainer(park)
     -- refresh (bug #1079). Do not add any other write to slot subtrees in here.
     if DF.Border then
         for _, slot in pairs(self.buttons) do
-            if slot and slot.dfBorder then DF.Border:StopAnimation(slot.dfBorder) end
+            -- Guarded for the same reason as the binding loop just below, and as
+            -- layoutRow: the border's edge textures are children of the aura button, so
+            -- they go forbidden with it, and StopAnimation's resetEdgeAlphas then throws
+            -- on SetAlpha. Unguarded, that unwound out of THIS loop and the remaining
+            -- slots never got stopped at all -- their UIParent-hosted OnUpdate drivers
+            -- kept ticking against torn-down textures, which is the exact leak this
+            -- chokepoint exists to prevent (Krathe, 2026-08-20).
+            -- ⚠ unregisterAnimTick runs FIRST inside StopAnimation, so the driver for a
+            -- refused border is still stopped; what is lost is only its cosmetic alpha
+            -- reset, which cannot be applied to a forbidden object anyway.
+            if slot and slot.dfBorder then
+                if not pcall(DF.Border.StopAnimation, DF.Border, slot.dfBorder) and not warnedTeardownAnim then
+                    warnedTeardownAnim = true
+                    DF:DebugWarn(DBG, "_teardownContainer: StopAnimation refused (forbidden subtree?)")
+                end
+            end
         end
     end
     -- Test-mode native countdowns: a DurationTextBinding holds a reference to the

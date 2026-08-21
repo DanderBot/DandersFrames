@@ -1155,8 +1155,18 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         debuffOffsetY.disableOn = function(d) return not d.showDebuffs end
         Add(positionGroup, nil, 1)
 
+        -- ☠ A SECOND, DRIFTED COPY OF THE INVALIDATION CONTRACT. This nilled the curve by
+        -- hand and stopped there: it left DF.dispelColorMap cached and never bumped
+        -- DF.dispelCurveGen, so the curve was rebuilt while every live carrier kept a
+        -- reference to the OLD one and neither re-bind gate could fire -- colour changes
+        -- from this control did not reach the frames. Call the one owner instead: it nils
+        -- both caches, bumps the generation, and breaks the drive's fast-path latch.
         local function InvalidateAndUpdate()
-            DF.debuffBorderCurve = nil
+            if DF.InvalidateDispelColorCurve then
+                DF:InvalidateDispelColorCurve()
+            else
+                DF.debuffBorderCurve = nil
+            end
             DF:UpdateAllFrames()
         end
         

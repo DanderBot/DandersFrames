@@ -27,6 +27,24 @@ local EDGE_GRADIENT_TEXTURES = {
     RIGHT = "Interface\\AddOns\\DandersFrames\\Media\\DF_Gradient_H_Rev",  -- Solid right, fades left
 }
 
+-- ☠☠ SEED THE GENERATION AT LOAD. It used to be created only by the first
+-- InvalidateDispelColorCurve call, whose ONLY callers are options-page callbacks and a
+-- debug command -- so on any session where nobody edited a dispel colour it stayed nil
+-- for the whole session.
+--
+-- That silently disabled the re-bind retry. BindDispelCarriers stamps
+-- btn._dfDispelCurveGen only on SUCCESS, so a failed bind leaves it nil, and the retry
+-- gate in StyleDispelSlots reads `btn._dfDispelCurveGen ~= DF.dispelCurveGen` --
+-- `nil ~= nil` -- which is FALSE. A carrier that failed to bind was therefore never
+-- retried, for the rest of the session, while its texture kept the default white vertex
+-- colour and was shown on every dispellable debuff. Seeding 0 makes the nil stamp
+-- genuinely unequal, so the existing gate does its job with no other change.
+--
+-- ☠ The tell that this was live: `/df debug dispelids` calls the invalidator, which
+-- bumps the counter -- so RUNNING THE DIAGNOSTIC HEALED THE BUG on the next
+-- out-of-combat style pass. Anyone who dumped first and looked second saw a clean frame.
+DF.dispelCurveGen = 0
+
 -- Invalidate the shared debuff-type colour curve when dispel colour settings
 -- change (Frames/Border.lua lazy-rebuilds it on next use).
 function DF:InvalidateDispelColorCurve()
@@ -1313,6 +1331,10 @@ end
 -- drift. See BadgeCarrierOptions and the badge block in DispelSlotSecureInit.
 local warnedTintBind = false
 local warnedSlotStyle = false
+-- Slot BIRTH refusal (the onInit hook), separate from the style-pass latch above: they
+-- are different failures on different paths, and one shared one-shot would let whichever
+-- fired first hide the other for the rest of the session.
+local warnedSlotInit = false
 
 -- Slot plan from settings.
 local function dispelSlotPlan(db)
@@ -1551,7 +1573,55 @@ end
 -- Pre-68914 fallback: the deprecated alias can only hold ONE region, so the first
 -- carrier wins there (matching the old one-slot-per-carrier behaviour as closely as a
 -- single slot can).
+-- ★ THE REVEAL. Every dispel carrier is born at alpha 0 on its DF-owned dim host and
+-- stays there until AddDispelTypeTexture has accepted it; this is what turns it back on.
+--
+-- ☠ WHY IT IS A SEPARATE STEP RATHER THAN A BIRTH VALUE. These carriers are OUR textures
+-- with the ENGINE'S colour. Between creating one and binding it, nothing colours it, so it
+-- renders at the default vertex colour -- WHITE -- across whatever it covers. For the
+-- gradient that is the whole frame. Birth used to hand each host the user's configured
+-- alpha immediately ("born with the user's value", because birth is usually mid-combat and
+-- the style pass is out-of-combat only), which is correct for cosmetics and exactly wrong
+-- for visibility: it made an unbound carrier maximally visible.
+--
+-- ☠ THE ALPHA MUST LIVE ON THE DIM HOST, NOT THE TEXTURE. AddDispelTypeTexture takes
+-- SecretAspect.Alpha and .Shown on the texture at bind time, after which neither is ours to
+-- write. The dim hosts are plain DF frames and are never restricted, so they are the only
+-- lever that still works on a slot whose subtree the client has locked -- which is the
+-- slot that needs it.
+--
+-- Mirrors the values the stylers apply, so a revealed carrier looks identical to one that
+-- was never held back. The stylers re-assert these every pass anyway; this only has to
+-- cover the window between a successful bind and the first out-of-combat style pass.
+function DF:RevealDispelCarriers(btn, db)
+    if not btn or not db then return end
+    local w = btn.dfDispelWidget
+    if w and w.nativeGradientDim then
+        w.nativeGradientDim:SetAlpha(db.dispelShowGradient ~= false and ResolveGradientAlpha(db) or 0)
+    end
+    if type(btn.dfDispelEdgeDim) == "table" then
+        local a = ResolveGradientAlpha(db)
+        for _, dim in pairs(btn.dfDispelEdgeDim) do
+            if dim then dim:SetAlpha(a) end
+        end
+    end
+    if btn.dfDispelRingDim then btn.dfDispelRingDim:SetAlpha(db.dispelBorderAlpha or 0.8) end
+    if btn.dfDispelBadgeDim then btn.dfDispelBadgeDim:SetAlpha(db.dispelIconAlpha or 1) end
+end
+
 local function BindDispelCarriers(btn, carriers, db, key)
+    -- ☠ RECORD THE RESULT ON THE BUTTON, NOT ONLY IN THE GLOBAL. DF._dispelBindErr is
+    -- keyed by SLOT KEY alone, so every frame's "main" slot overwrites every other
+    -- frame's -- last writer wins across the whole roster. A dump reading it reports one
+    -- frame's success against another frame's button, which is exactly how five frames
+    -- with no carriers at all printed "bind=ok x3" (2026-08-20). The global stays for the
+    -- site summary in /df debug dispelids, where cross-frame aggregation is the point.
+    --
+    -- Stamped BEFORE the early return, so "we got here and had nothing to bind" is a
+    -- recorded state rather than an absence indistinguishable from "never called".
+    if btn then
+        btn._dfDispelBindRes = (carriers and carriers[1]) and "pending" or "no carriers built"
+    end
     if not (btn and carriers and carriers[1]) then return end
     btn._dfDispelCarriers = carriers
     -- _dfDispelCurveGen is stamped AFTER a SUCCESSFUL bind (below), not here. The only
@@ -1606,8 +1676,18 @@ local function BindDispelCarriers(btn, carriers, db, key)
     end)
     DF._dispelBindErr = DF._dispelBindErr or {}
     DF._dispelBindErr[key or "?"] = ok and ("ok x" .. #carriers) or tostring(err)
+    btn._dfDispelBindRes = ok and ("ok x" .. #carriers) or tostring(err)
     if ok then
         btn._dfDispelCurveGen = DF.dispelCurveGen
+        -- ★ REVEAL ONLY NOW. The carriers were built at alpha 0 on their DF-owned dim
+        -- hosts, because until this call returns nothing colours them and an unowned
+        -- texture renders WHITE across whatever it covers -- frame-sized, in the gradient's
+        -- case. Restoring the configured alpha here, on the success branch only, makes a
+        -- refused bind cost the overlay rather than paint the frame white.
+        -- ☠ THE FAILURE BRANCH MUST NOT REVEAL, and must not "helpfully" hide either: the
+        -- hosts are already at 0, and a slot that never binds simply stays dark until the
+        -- recovery in StyleDispelSlots rebuilds it out of combat.
+        if DF.RevealDispelCarriers then DF:RevealDispelCarriers(btn, db) end
     elseif not warnedTintBind then
         warnedTintBind = true
         if DF.DebugWarn then DF:DebugWarn("DISPEL", "dispel bind %s failed: %s", tostring(key), tostring(err)) end
@@ -1636,6 +1716,12 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
     local key = slotInfo.key
     local roles = slotInfo.roles
     if not roles then return end   -- icon slots bind nothing (plain art on the slot's SetShown)
+    -- ★ STAMP WHAT THIS SLOT IS SUPPOSED TO BUILD, BEFORE BUILDING IT. Absence is this
+    -- subsystem's failure mode, and a dump that renders a missing carrier as SILENCE
+    -- cannot show it -- which is precisely how a refused init read as healthy. With the
+    -- declaration recorded, the dump can say "declared gradient, no carrier" instead of
+    -- printing nothing for the one thing that mattered.
+    btn._dfDispelRoles = roles
     local hbLvl = (frame.healthBar and frame.healthBar:GetFrameLevel())
         or (frame:GetFrameLevel() + 3)
     -- ☠ The edge holders below must stay LEVEL WITH THE WIDGET, and the widget's band is
@@ -1725,7 +1811,19 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
             w.nativeGradient:SetAllPoints(btn)
         end
         w.nativeGradient:SetBlendMode(db.dispelGradientBlendMode or "ADD")
-        w.nativeGradientDim:SetAlpha(db.dispelShowGradient ~= false and ResolveGradientAlpha(db) or 0)
+        -- ☠☠ BORN INVISIBLE. HELD INVISIBLE UNTIL THE BIND IS CONFIRMED.
+        -- This carrier is OUR texture and the ENGINE is what colours it. Until
+        -- AddDispelTypeTexture has accepted it, nothing colours it at all -- it renders at
+        -- the default vertex colour, which is WHITE, across the whole frame. That is the
+        -- field report: not a wrong colour, an unowned texture.
+        --
+        -- The alpha lives on nativeGradientDim, a DF-OWNED frame, deliberately: the engine
+        -- takes SecretAspect.Alpha and .Shown on the texture itself at bind time, so the
+        -- texture's own visibility stops being ours to set. The dim host is never
+        -- restricted, so this is the one lever that still works on a slot whose subtree
+        -- the client has locked -- which is exactly the slot that needs it.
+        -- BindDispelCarriers restores the configured alpha, and ONLY on success.
+        w.nativeGradientDim:SetAlpha(0)
         carriers[#carriers + 1] = { tex = w.nativeGradient }
         -- Name the gradient carrier explicitly. StyleGameMainSlot must dress THIS one;
         -- addressing it as "the bound carrier" only worked while a slot held exactly one,
@@ -1750,7 +1848,7 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
             local dim = CreateFrame("Frame", nil, holder)
             dim:SetAllPoints(btn)
             dim:SetFrameLevel(edgeLvl)
-            dim:SetAlpha(ResolveGradientAlpha(db))   -- born with the user's value (mid-combat creation)
+            dim:SetAlpha(0)   -- born DARK; revealed only once the bind is confirmed
             local tex = dim:CreateTexture(nil, "ARTWORK", nil, 2)
             tex:SetTexture(EDGE_GRADIENT_TEXTURES[edge])
             tex:SetAllPoints(btn)   -- anchored for the bind; StyleGameEdgeSlot positions the strip
@@ -1772,7 +1870,7 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         local ringDim = CreateFrame("Frame", nil, holder)
         ringDim:SetAllPoints(btn)
         ringDim:SetFrameLevel(hbLvl + 15)
-        ringDim:SetAlpha(db.dispelBorderAlpha or 0.8)   -- born with the user's value
+        ringDim:SetAlpha(0)   -- born DARK; revealed only once the bind is confirmed
         local ring = ringDim:CreateTexture(nil, "ARTWORK")
         ring:SetTexture("Interface\\AddOns\\DandersFrames\\Media\\DF_SquareBorder")
         ring:SetAllPoints(btn)   -- anchored for the bind; StyleGameBorderSlot crops/insets
@@ -1804,7 +1902,7 @@ local function DispelSlotSecureInit(btn, slotInfo, db, frame)
         local badgeDim = CreateFrame("Frame", nil, holder)
         badgeDim:SetAllPoints(btn)
         badgeDim:SetFrameLevel(holder:GetFrameLevel())
-        badgeDim:SetAlpha(db.dispelIconAlpha or 1)   -- born with the user's value
+        badgeDim:SetAlpha(0)   -- born DARK; revealed only once the bind is confirmed
         local badge = badgeDim:CreateTexture(nil, "OVERLAY")
         badge:SetAllPoints(btn)   -- anchored for the bind; StyleGameBadge sizes/places it
         btn.dfDispelBadgeDim = badgeDim
@@ -2094,6 +2192,11 @@ end
 local function ResetSlotArt(btn)
     btn.dfDispelWidget = nil
     btn._dfDispelCarriers = nil
+    -- The two diagnostic stamps go with the art they describe: a survivor would describe
+    -- the abandoned generation, which is the same trap as the dim hosts below.
+    -- DispelSlotSecureInit re-stamps both on the way back in.
+    btn._dfDispelRoles = nil
+    btn._dfDispelBindRes = nil
     btn._dfDispelCurveGen = nil
     btn._dfDispelGradientCarrier = nil
     btn.dfDispelEdgeTex = nil
@@ -2126,14 +2229,60 @@ local function StyleDispelSlots(frame, db, h, slots)
         -- error spam for a rebuild spam. The latch clears the moment a probe passes, so
         -- a later reclaim is still recoverable.
         local artOK = true
-        if btn and btn.dfDispelWidget and not pcall(ProbeSlotArt, btn.dfDispelWidget) then
+        -- ☠ TWO WAYS A SLOT CAN NEED REBUILDING, AND ONLY ONE OF THEM WAS TESTED.
+        -- ProbeSlotArt asks "is the art REACHABLE" -- a liveness test. The second failure
+        -- is COMPLETENESS: DispelSlotSecureInit ran, was refused partway, and left a slot
+        -- whose art is perfectly reachable and whose carriers do not exist. The probe
+        -- passes on such a slot, so the recovery below could never see it.
+        --
+        -- HOW IT HAPPENS: the client creates these buttons lazily on the first dispellable
+        -- debuff, i.e. MID-COMBAT, so onInit runs while auras are secret and the button
+        -- subtree carries DenyTaintedAccessWhenAurasAreSecret. Creating the gradient's dim
+        -- host is a child materialization on a denied subtree and is refused exactly like a
+        -- setter. Handle:_makeInitializeFrame pcalls onInit, so the refusal is SWALLOWED --
+        -- no error, no log, and a half-built slot with nothing recording that it is half
+        -- built. BindDispelCarriers only stamps btn._dfDispelCarriers when it has at least
+        -- one carrier, so its absence IS the completeness signal.
+        --
+        -- WHY IT NEVER HEALED: out of combat the art probes fine, so the branch below was
+        -- skipped and _dfDispelArtStale cleared; StyleOneSlot then succeeded (it only
+        -- DRESSES carriers, it never creates them) and the caller latched
+        -- dfDispelFactoryVersion / dfDispelStyledGen, after which the fast path in
+        -- DriveDispelOverlayFactory returns before reaching here at all. The overlay stayed
+        -- dead until a reload, and every field a dump could read looked healthy --
+        -- styleErr=nil, style latched, widget present. Field-reported as whole frames
+        -- washing white in a key (Krathe, 2026-08-20): with no DF carrier the engine's own
+        -- dispel texture renders at its white base coat, unopposed.
+        --
+        -- next(info.roles) guards the all-disabled config (EDGE style with gradient, border
+        -- and badge all off) -- roles is then an empty table, no carrier is meant to exist,
+        -- and testing for one would rebuild on every pass.
+        -- ☠ TEST THE BIND RESULT, NOT JUST THE CARRIER LIST. The first version of this
+        -- gate asked `_dfDispelCarriers == nil`, which only catches "no carrier was ever
+        -- built". It CANNOT catch a carrier that was built and then failed to BIND,
+        -- because BindDispelCarriers stamps the carrier list BEFORE it attempts the bind
+        -- -- so a failed bind reads as complete, the art probes fine, and StyleOneSlot
+        -- succeeds because it only dresses. Same white outcome, different door.
+        -- _dfDispelBindRes records the truth: "ok x<n>" only on a completed bind.
+        local bindRes = btn and btn._dfDispelBindRes
+        local bound = type(bindRes) == "string" and bindRes:match("^ok x%d+$") ~= nil
+        local incomplete = btn and info.roles and next(info.roles) ~= nil
+            and (btn._dfDispelCarriers == nil or not bound)
+        local unreachable = btn and btn.dfDispelWidget
+            and not pcall(ProbeSlotArt, btn.dfDispelWidget)
+        if btn and (unreachable or incomplete) then
             if btn._dfDispelArtStale then
                 artOK = false
                 if not frame.dfDispelArtForbiddenLogged then
                     frame.dfDispelArtForbiddenLogged = true
+                    -- Name WHICH test tripped: "forbidden" and "carriers never built"
+                    -- are different faults with different causes, and a message that
+                    -- asserts the wrong one sends the next reader after the wrong thing.
                     DF:DebugWarn("AURACONTAINER",
-                        "StyleDispelSlots: slot art still forbidden after a rebuild, "
-                        .. "skipping the dispel overlay on %s", tostring(frame.unit))
+                        "StyleDispelSlots: slot %s still %s after a rebuild, "
+                        .. "skipping the dispel overlay on %s", tostring(info.key),
+                        unreachable and "forbidden" or "missing its carriers",
+                        tostring(frame.unit))
                 end
             else
                 btn._dfDispelArtStale = true
@@ -2235,7 +2384,36 @@ local function dispelFilterRecords(slots, db, frame)
                     -- container's initializeFrame (the only context where a texture child
                     -- of the secret button isn't access-constrained). Geometry/alpha stay
                     -- in StyleGame*Slot.
-                    onInit = function(btn) DispelSlotSecureInit(btn, si, db, frame) end }
+                    -- ☠ REPORT OUR OWN BIRTH FAILURE, ON OUR OWN CHANNEL.
+                    -- The container pcalls this hook (Handle:_makeInitializeFrame), so a
+                    -- refusal here is SWALLOWED: the slot is left half built, nothing
+                    -- records it, and the container's own warning rides AURACONTAINER.
+                    -- That is how a refused init produced a dump in which every printed
+                    -- field looked healthy (2026-08-20). Birth is normally MID-COMBAT --
+                    -- the client creates these buttons lazily on the first dispellable
+                    -- debuff -- so the button subtree carries
+                    -- DenyTaintedAccessWhenAurasAreSecret and creating the gradient's dim
+                    -- host is refused exactly like a setter.
+                    -- Stamped as well as logged: the stamp is what /df debug dispeldbg
+                    -- prints, so one paste names the exact refused call even from a
+                    -- client that had the DISPEL category switched off at the time.
+                    onInit = function(btn)
+                        local okI, errI = pcall(DispelSlotSecureInit, btn, si, db, frame)
+                        if not okI then
+                            if btn then btn._dfDispelInitErr = tostring(errI) end
+                            if not warnedSlotInit then
+                                warnedSlotInit = true
+                                if DF.DebugWarn then
+                                    DF:DebugWarn("DISPEL",
+                                        "slot init %s refused at birth - carriers missing "
+                                        .. "until the next out-of-combat rebuild: %s",
+                                        tostring(si.key), tostring(errI))
+                                end
+                            end
+                        elseif btn then
+                            btn._dfDispelInitErr = nil
+                        end
+                    end }
     end
     return recs
 end

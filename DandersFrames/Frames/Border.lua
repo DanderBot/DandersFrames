@@ -845,21 +845,53 @@ function DF:GetDispelColorCurve()
     if not (C_CurveUtil and C_CurveUtil.CreateColorCurve) then return nil end
     local E = DF:FindDispelTypeEnum()
     if not E then return nil end
-    local colors = (DF.db and DF.db.dispelColors) or DF:GetGameDispelPalette()
+    -- ☠☠ PER-KEY FALLBACK, NOT A WHOLE-TABLE `or`. GetDispelColorMap has always done
+    -- this; the curve did not, and the difference was a live bug.
+    -- `db.dispelColors` has NO defaults entry, so it does not exist until the user edits
+    -- a dispel colour -- and the Colors page only ever writes the five DISPELLABLE types
+    -- (Magic/Curse/Disease/Poison/Bleed). The moment it exists it SHADOWED the complete
+    -- game palette wholesale, so `colors.None` was nil and the loop below skipped the
+    -- point at index 0 entirely. Verified against a live profile carrying exactly those
+    -- five keys (2026-08-20).
+    --
+    -- ☠☠ WHY A HOLE AT 0 MATTERS MORE THAN IT LOOKS: the engine lets the curve
+    -- UNCONDITIONALLY OVERRIDE the colour map --
+    -- `if options.customDispelColorCurve then color = GetAuraDispelTypeColor(...) end`,
+    -- Blizzard_CustomAuraButton.lua:410-412, no test on the map result. So a curve with a
+    -- hole is WORSE than no curve at all: it discards a perfectly good map lookup and
+    -- substitutes whatever the curve clamps to. An aura with no dispel type keys "None",
+    -- which the map resolves correctly and the holed curve did not.
+    local D = DF:GetGameDispelPalette()
+    local colors = (DF.db and DF.db.dispelColors) or D
+    local function pick(c, fb) return (type(c) == "table" and c.r) and c or fb end
     local candidates = {
-        { E.Magic,   colors.Magic },
-        { E.Curse,   colors.Curse },
-        { E.Disease, colors.Disease },
-        { E.Poison,  colors.Poison },
-        { E.Bleed,   colors.Bleed },
-        { E.Enrage,  colors.Enrage or colors.Bleed },
-        { E.None,    colors.None },
+        { E.Magic,   pick(colors.Magic,   D.Magic) },
+        { E.Curse,   pick(colors.Curse,   D.Curse) },
+        { E.Disease, pick(colors.Disease, D.Disease) },
+        { E.Poison,  pick(colors.Poison,  D.Poison) },
+        { E.Bleed,   pick(colors.Bleed,   D.Bleed) },
+        { E.Enrage,  pick(colors.Enrage or colors.Bleed, D.Enrage) },
+        { E.None,    pick(colors.None,    D.None) },
     }
     local points = {}
+    local haveZero = false
     for _, pair in ipairs(candidates) do
         local x, c = pair[1], pair[2]
         if type(x) == "number" and type(c) == "table" then
             points[#points + 1] = { x, CreateColor(c.r or 0, c.g or 0, c.b or 0, 1) }
+            if x == 0 then haveZero = true end
+        end
+    end
+    -- ★ ANCHOR INDEX 0 EVEN IF THE ENUM LOOKUP FOR "None" FAILED. Index 0 is the
+    -- no-dispel-type case, and on a debuff row it is the value the curve is evaluated at
+    -- most often -- so it must never be one the curve has to extrapolate towards. An
+    -- unanchored 0 does not read as missing either: the curve still returns a colour, just
+    -- the wrong one, which is why this was invisible until the palette was compared
+    -- against the point set.
+    if not haveZero then
+        local n = pick(colors.None, D.None)
+        if type(n) == "table" then
+            table.insert(points, 1, { 0, CreateColor(n.r or 0, n.g or 0, n.b or 0, 1) })
         end
     end
     if #points == 0 then return nil end

@@ -1141,7 +1141,28 @@ function DF:CreatePartyHeader()
     -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
     -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
     local horizontal = (db.growDirection == "HORIZONTAL")
-    local spacing = db.frameSpacing or 2
+    -- ☠☠ SNAP THE STRIDE, or every frame after the first walks off the pixel grid.
+    -- Blizzard's header lays children out by REPEATED OFFSET, so a fractional spacing is
+    -- not a one-off rounding error — it ACCUMULATES down the party. Measured on a live
+    -- party at UIParent scale 0.64, where 1 UI unit = 1.2 physical px, so the default
+    -- spacing of 1 carries 0.2px of fraction: the five frames landed at -0.4, -0.2, 0.0,
+    -- +0.2 and +0.4 physical px, walking 0.8px across a pixel boundary. Anything anchored
+    -- to a frame inherits its host's sub-pixel offset and rounds differently per frame --
+    -- reported as the resource bar's Offset Y showing a gap on some frames and not others,
+    -- and as test mode disagreeing with live (Aphoex, 2026-08-19; /df debug ppdump showed
+    -- every live host frac at ±0.2/±0.4 against 0.000 for every test frame).
+    -- ⚠ Snap the LOCAL too, not just the stored attribute: the local feeds xOffset/yOffset,
+    -- which IS the stride the header repeats. Snapping only the "spacing" attribute below
+    -- would leave the actual layout fractional and look like a fix.
+    -- ★ The grouped raid handler has always done this (snapInit, ~:2101). Party and arena
+    -- were the two headers that never got it.
+    local function snapInit(value)
+        if db.pixelPerfect and DF.PixelPerfect then
+            return DF:PixelPerfect(value)
+        end
+        return value
+    end
+    local spacing = snapInit(db.frameSpacing or 2)
     DF.partyHeader:SetAttribute("point", horizontal and "LEFT" or "TOP")
     -- IMPORTANT: Don't use Lua ternary with 0! (0 is falsy)
     if horizontal then
@@ -1155,9 +1176,9 @@ function DF:CreatePartyHeader()
     DF.partyHeader:SetAttribute("unitsPerColumn", 5)
     
     -- Store layout values for secure positioning code
-    DF.partyHeader:SetAttribute("frameWidth", db.frameWidth or 120)
-    DF.partyHeader:SetAttribute("frameHeight", db.frameHeight or 50)
-    DF.partyHeader:SetAttribute("spacing", db.frameSpacing or 2)
+    DF.partyHeader:SetAttribute("frameWidth", snapInit(db.frameWidth or 120))
+    DF.partyHeader:SetAttribute("frameHeight", snapInit(db.frameHeight or 50))
+    DF.partyHeader:SetAttribute("spacing", spacing)
     DF.partyHeader:SetAttribute("horizontal", horizontal)
     -- (The `growFromCenter` attribute write that used to sit here was removed. It read a
     -- db key nothing defines or writes, and the ONLY snippet that consumed it was the
@@ -1242,7 +1263,17 @@ function DF:CreateArenaHeader()
     -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
     -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
     local horizontal = (db.growDirection == "HORIZONTAL")
-    local spacing = db.frameSpacing or 2
+    -- Same stride snap as the party header above, for the same reason — the arena header
+    -- is that code with a different frame set, so a fractional spacing accumulates here
+    -- identically. Fixed together deliberately: leaving one of a copied pair unsnapped is
+    -- how this survived in party while the grouped raid handler had it all along.
+    local function snapInit(value)
+        if db.pixelPerfect and DF.PixelPerfect then
+            return DF:PixelPerfect(value)
+        end
+        return value
+    end
+    local spacing = snapInit(db.frameSpacing or 2)
     DF.arenaHeader:SetAttribute("point", horizontal and "LEFT" or "TOP")
     if horizontal then
         DF.arenaHeader:SetAttribute("xOffset", spacing)
@@ -1255,9 +1286,9 @@ function DF:CreateArenaHeader()
     DF.arenaHeader:SetAttribute("unitsPerColumn", 5)  -- Max 5 for arena (2v2, 3v3, 5v5)
     
     -- Store layout values for secure positioning code
-    DF.arenaHeader:SetAttribute("frameWidth", db.frameWidth or 120)
-    DF.arenaHeader:SetAttribute("frameHeight", db.frameHeight or 50)
-    DF.arenaHeader:SetAttribute("spacing", db.frameSpacing or 2)
+    DF.arenaHeader:SetAttribute("frameWidth", snapInit(db.frameWidth or 120))
+    DF.arenaHeader:SetAttribute("frameHeight", snapInit(db.frameHeight or 50))
+    DF.arenaHeader:SetAttribute("spacing", spacing)
     DF.arenaHeader:SetAttribute("horizontal", horizontal)
 
     -- SetFrameRef for secure snippets
@@ -5450,10 +5481,18 @@ function DF:UpdateRaidHeaderLayout()
         for i = 1, 8 do
             local header = DF.raidSeparatedHeaders[i]
             if header then
-                header:SetAttribute("yOffset", -(db.frameSpacing or 2))
+                -- ☠ SNAP, matching CreateRaidSeparatedHeaders. The creator already snaps
+                -- this stride and this updater did not, so a separated-header layout was
+                -- born on the grid and walked off it on the next settings change -- the
+                -- worst version of this bug, because it looks correct until something
+                -- unrelated re-runs the layout. Same accumulation as the party header
+                -- above; see its note for the measurement.
+                local sp = db.frameSpacing or 2
+                if db.pixelPerfect and DF.PixelPerfect then sp = DF:PixelPerfect(sp) end
+                header:SetAttribute("yOffset", -sp)
                 header:SetAttribute("frameWidth", db.frameWidth or 80)
                 header:SetAttribute("frameHeight", db.frameHeight or 40)
-                header:SetAttribute("spacing", db.frameSpacing or 2)
+                header:SetAttribute("spacing", sp)
             end
         end
     end

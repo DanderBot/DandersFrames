@@ -443,6 +443,15 @@ function DF:SetProfile(name)
         DF:MigrateRaidCenterMode()
     end
 
+    -- ☠ The dispel palette is a PROCESS-LIFETIME cache, so it does not follow DF.db.
+    -- DF.debuffBorderCurve and DF.dispelColorMap are built once and reused; without this
+    -- the new profile renders the OLD profile's dispel colours, and because the generation
+    -- never moves, no carrier is ever re-bound to correct it -- wrong colours until a
+    -- reload. Worse when the incoming profile's dispelColors is partial or absent: the
+    -- curve rebuilds from a different source than the one the map was cached from, so the
+    -- two disagree. Must run BEFORE the refresh so the rebuild reads the new profile.
+    if DF.InvalidateDispelColorCurve then DF:InvalidateDispelColorCurve() end
+
     -- Apply the profile — runtime state is already clear so the proxy reads
     -- the new profile directly with no stale overlay
     DF:FullProfileRefresh()
@@ -1619,12 +1628,20 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     -- payload) rather than DF.db, so it is unaffected by the category merge dropping the
     -- legacy keys, and it must stay AHEAD of RunV5LegacyMigrations.
     local function importDispelColors()
+        local wrote = false
         if importData.dispelColors then
             DF.db.dispelColors = importData.dispelColors
+            wrote = true
         elseif DF.BuildDispelColorsFromLegacy then
             local legacy = DF:BuildDispelColorsFromLegacy(importData.party, importData.raid)
-            if legacy then DF.db.dispelColors = legacy end
+            if legacy then DF.db.dispelColors = legacy wrote = true end
         end
+        -- ☠ Same process-lifetime cache as the profile switch: writing dispelColors does
+        -- not invalidate the built curve or map, so an imported palette would not reach
+        -- any live carrier and the generation would never move to force a re-bind.
+        -- An imported table is also only shape-checked, never key-checked, so it can be
+        -- partial -- which is exactly the input the curve's per-key fallback exists for.
+        if wrote and DF.InvalidateDispelColorCurve then DF:InvalidateDispelColorCurve() end
     end
 
     -- If it's a full export (legacy or "all categories"), use direct replacement
