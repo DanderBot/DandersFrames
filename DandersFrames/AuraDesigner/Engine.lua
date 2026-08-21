@@ -107,5 +107,12 @@ function Engine:ForceRefreshAllFrames()
     -- Refresh the test previews too when the editor is used with test mode open.
     if (DF.testMode or DF.raidTestMode) and DF.UpdateAllTestAuraDesigner then
         DF:UpdateAllTestAuraDesigner()
+        -- ⚠ NO Indicator Info rebuild here, deliberately. One was added at this line
+        -- and it fixed only the editor's own actions: the designer PRESET bar changes
+        -- every indicator on screen without going through this function at all, so the
+        -- marks stayed stale exactly where they were first reported. The rebuild now
+        -- hangs off Factory:SyncFrame / Factory:ClearFrame — the mutation itself, which
+        -- every path reaches by definition. Do not re-add a caller-side hook here; it
+        -- would double-fire the one below and still not cover anything new.
     end
 end
