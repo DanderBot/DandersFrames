@@ -5371,8 +5371,20 @@ function DF:UpdatePartyHeaderLayout()
     -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
     -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
     local horizontal = (db.growDirection == "HORIZONTAL")
-    local spacing = db.frameSpacing or 2
-    
+    -- ☠ SNAP HERE TOO, or the create-time snap lasts until the first settings change.
+    -- CreatePartyHeader / CreateArenaHeader snap the stride; this updater rewrites the
+    -- same attributes on every layout edit, and an unsnapped write here put the
+    -- fractional stride straight back -- "born on the grid and walked off it on the
+    -- next settings change", the exact shape the separated-raid updater was fixed for.
+    local function snapUpd(value)
+        if db.pixelPerfect and DF.PixelPerfect then
+            return DF:PixelPerfect(value)
+        end
+        return value
+    end
+    local spacing = snapUpd(db.frameSpacing or 2)
+    local updW, updH = snapUpd(db.frameWidth or 120), snapUpd(db.frameHeight or 50)
+
     -- ============================================================
     -- UPDATE PARTY HEADER
     -- ============================================================
@@ -5392,8 +5404,8 @@ function DF:UpdatePartyHeaderLayout()
         end
         
         -- Update stored values for secure positioning
-        DF.partyHeader:SetAttribute("frameWidth", db.frameWidth or 120)
-        DF.partyHeader:SetAttribute("frameHeight", db.frameHeight or 50)
+        DF.partyHeader:SetAttribute("frameWidth", updW)
+        DF.partyHeader:SetAttribute("frameHeight", updH)
         DF.partyHeader:SetAttribute("spacing", spacing)
         DF.partyHeader:SetAttribute("horizontal", horizontal)
 
@@ -5428,8 +5440,8 @@ function DF:UpdatePartyHeaderLayout()
         end
         
         -- Update stored values for secure positioning
-        DF.arenaHeader:SetAttribute("frameWidth", db.frameWidth or 120)
-        DF.arenaHeader:SetAttribute("frameHeight", db.frameHeight or 50)
+        DF.arenaHeader:SetAttribute("frameWidth", updW)
+        DF.arenaHeader:SetAttribute("frameHeight", updH)
         DF.arenaHeader:SetAttribute("spacing", spacing)
         DF.arenaHeader:SetAttribute("horizontal", horizontal)
 
@@ -6359,9 +6371,17 @@ function DF:SetGrowFromCenter(enabled, selfPosition)
     
     local db = DF:GetDB()
     local horizontal = (db.growDirection == "HORIZONTAL")
-    local spacing = db.frameSpacing or 2
-    local frameWidth = db.frameWidth or 120
-    local frameHeight = db.frameHeight or 50
+    -- Snapped like the create and update paths (see UpdatePartyHeaderLayout): these
+    -- feed the same header attributes, and one unsnapped producer undoes the others.
+    local function snapGC(value)
+        if db.pixelPerfect and DF.PixelPerfect then
+            return DF:PixelPerfect(value)
+        end
+        return value
+    end
+    local spacing = snapGC(db.frameSpacing or 2)
+    local frameWidth = snapGC(db.frameWidth or 120)
+    local frameHeight = snapGC(db.frameHeight or 50)
     selfPosition = selfPosition or "FIRST"
     
     -- Count party children (visible frames in partyHeader - now includes player)

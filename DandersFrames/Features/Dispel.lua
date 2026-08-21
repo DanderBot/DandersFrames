@@ -991,6 +991,26 @@ end
 --
 -- ⚠ DF:RevealDispelCarriers is deliberately NOT gated: it is only ever called from
 -- the success branch of the bind, and it is what this predicate is waiting for.
+-- Darken every dim host on a button: the abandoned generation on a reset, or a carrier
+-- set whose bind just FAILED. The textures hanging off them cannot be destroyed, and a
+-- bound one keeps whatever the engine last painted on it; left at its revealed alpha it
+-- renders as a stale-colour ghost (or, unbound, as white). The dim hosts are DF-owned
+-- frames -- whether a tainted alpha write on them is ever refused inside a denied subtree
+-- is not something the addon source can settle, so every write is pcall'd: this runs on
+-- recovery and failure paths and must not throw out of them.
+local function DarkenAllDims(btn)
+    if not btn then return end
+    local w = btn.dfDispelWidget
+    if w and w.nativeGradientDim then pcall(w.nativeGradientDim.SetAlpha, w.nativeGradientDim, 0) end
+    if type(btn.dfDispelEdgeDim) == "table" then
+        for _, dim in pairs(btn.dfDispelEdgeDim) do
+            if dim then pcall(dim.SetAlpha, dim, 0) end
+        end
+    end
+    if btn.dfDispelRingDim then pcall(btn.dfDispelRingDim.SetAlpha, btn.dfDispelRingDim, 0) end
+    if btn.dfDispelBadgeDim then pcall(btn.dfDispelBadgeDim.SetAlpha, btn.dfDispelBadgeDim, 0) end
+end
+
 local function DispelCarriersBound(btn)
     local res = btn and btn._dfDispelBindRes
     return type(res) == "string" and res:match("^ok x%d+$") ~= nil
@@ -1685,20 +1705,30 @@ local function BindDispelCarriers(btn, carriers, db, key)
         showWhenHelpful = false,
         showIcon = false,
     }
+    -- nBound is what was ACTUALLY bound, and it is what the stamp reports. The
+    -- pre-68914 alias binds ONE carrier, and stamping "ok x" .. #carriers there lied
+    -- about the rest -- the reveal then lifted dims whose textures nothing owned.
+    local nBound = 0
     local ok, err = pcall(function()
         if btn.AddDispelTypeTexture then
             if btn.ClearDispelTypeTextures then btn:ClearDispelTypeTextures() end
             for i = 1, #carriers do
                 local c = carriers[i]
                 btn:AddDispelTypeTexture(c.tex, c.opts or tintOpts)
+                nBound = i
             end
         else
             btn:SetAuraBorder(carriers[1].tex, carriers[1].opts or tintOpts)
+            nBound = 1
         end
     end)
+    -- The whole set or nothing: a partial bind (one strip of four) is not a revealable
+    -- state, so it is recorded as the failure it is.
+    ok = ok and nBound == #carriers
     DF._dispelBindErr = DF._dispelBindErr or {}
-    DF._dispelBindErr[key or "?"] = ok and ("ok x" .. #carriers) or tostring(err)
-    btn._dfDispelBindRes = ok and ("ok x" .. #carriers) or tostring(err)
+    DF._dispelBindErr[key or "?"] = ok and ("ok x" .. nBound)
+        or (err and tostring(err) or ("partial bind " .. nBound .. "/" .. #carriers))
+    btn._dfDispelBindRes = DF._dispelBindErr[key or "?"]
     if ok then
         btn._dfDispelCurveGen = DF.dispelCurveGen
         -- ★ REVEAL ONLY NOW. The carriers were built at alpha 0 on their DF-owned dim
@@ -1706,13 +1736,23 @@ local function BindDispelCarriers(btn, carriers, db, key)
         -- texture renders WHITE across whatever it covers -- frame-sized, in the gradient's
         -- case. Restoring the configured alpha here, on the success branch only, makes a
         -- refused bind cost the overlay rather than paint the frame white.
-        -- ☠ THE FAILURE BRANCH MUST NOT REVEAL, and must not "helpfully" hide either: the
-        -- hosts are already at 0, and a slot that never binds simply stays dark until the
-        -- recovery in StyleDispelSlots rebuilds it out of combat.
         if DF.RevealDispelCarriers then DF:RevealDispelCarriers(btn, db) end
-    elseif not warnedTintBind then
-        warnedTintBind = true
-        if DF.DebugWarn then DF:DebugWarn("DISPEL", "dispel bind %s failed: %s", tostring(key), tostring(err)) end
+    else
+        -- ☠ THE FAILURE BRANCH DARKENS. "The hosts are already at 0" is only true at
+        -- BIRTH. On the palette re-bind (StyleOneSlot) the carriers were bound and
+        -- REVEALED, and ClearDispelTypeTextures has already run inside the pcall -- it
+        -- is a plain table reset engine-side, it hides nothing, and the engine stops
+        -- driving Shown on the dropped textures. A failed Add after it leaves a
+        -- frame-sized carrier shown at its last colour, at revealed alpha, owned by
+        -- nobody. The stylers' DispelCarriersBound gate would catch that later in the
+        -- same pass, except StyleGameMainSlot touches the carrier (ClearAllPoints) before
+        -- its alpha write, and a forbidden carrier -- the likeliest reason the Add failed
+        -- -- throws there first, so the gate is never reached. Darken here, now.
+        DarkenAllDims(btn)
+        if not warnedTintBind then
+            warnedTintBind = true
+            if DF.DebugWarn then DF:DebugWarn("DISPEL", "dispel bind %s failed: %s", tostring(key), tostring(err)) end
+        end
     end
 end
 
@@ -2220,26 +2260,8 @@ end
 -- Drop EVERY stash hanging off the button. The tainted painters (icon, and the widget
 -- itself via EnsureSlotWidget) rebuild lazily from nil; the bound carriers do not, which
 -- is why the caller re-runs DispelSlotSecureInit behind this.
--- Darken every dim host of the generation being abandoned. The textures hanging off them
--- cannot be destroyed, and a bound one keeps whatever the engine last painted on it; left
--- at its revealed alpha it renders as a stale-colour ghost under the next generation's art.
--- The dim hosts are plain DF frames and are never restricted, so this write is legal on
--- a slot whose subtree the client has locked -- that is the whole point of their existing.
--- pcall'd per host regardless: this is the recovery path and must not throw out of it.
-local function DarkenAbandonedDims(btn)
-    local w = btn.dfDispelWidget
-    if w and w.nativeGradientDim then pcall(w.nativeGradientDim.SetAlpha, w.nativeGradientDim, 0) end
-    if type(btn.dfDispelEdgeDim) == "table" then
-        for _, dim in pairs(btn.dfDispelEdgeDim) do
-            if dim then pcall(dim.SetAlpha, dim, 0) end
-        end
-    end
-    if btn.dfDispelRingDim then pcall(btn.dfDispelRingDim.SetAlpha, btn.dfDispelRingDim, 0) end
-    if btn.dfDispelBadgeDim then pcall(btn.dfDispelBadgeDim.SetAlpha, btn.dfDispelBadgeDim, 0) end
-end
-
 local function ResetSlotArt(btn)
-    DarkenAbandonedDims(btn)
+    DarkenAllDims(btn)
     btn.dfDispelWidget = nil
     btn._dfDispelCarriers = nil
     -- The two diagnostic stamps go with the art they describe: a survivor would describe
@@ -2477,7 +2499,11 @@ local function dispelFilterRecords(slots, db, frame)
                         -- inside it did not finish (a refused bind is caught INSIDE
                         -- BindDispelCarriers, so okI is true for it). Icon slots bind nothing
                         -- and never stamp a result, hence the roles test.
-                        if si.roles and frame and (not okI or not DispelCarriersBound(btn)) then
+                        -- next(): an all-disabled config (EDGE with gradient, border and
+                        -- badge off) has roles = {} -- nothing is meant to bind, so
+                        -- "no carriers built" is the correct state there, not a failure.
+                        if si.roles and next(si.roles) ~= nil and frame
+                            and (not okI or not DispelCarriersBound(btn)) then
                             frame.dfDispelFactoryVersion = nil
                         end
                     end }
