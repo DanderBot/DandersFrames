@@ -5519,6 +5519,9 @@ function Handle:_applyIdentityGate()
     -- skipped when you CAN assist, not when you cannot -- so this is not the same
     -- condition in a different hat. It is driven by "is identity data trustworthy right
     -- now", which is what BOTH directions actually turn on.
+    -- Collected across both blocks and emitted once at the end; see the note in the park
+    -- block for why these were two lines and why one is better.
+    local parkFlip, hideFlip
     local newParked = (hide or self._idGateUntrusted) and true or nil
     if self._idGateParked ~= newParked then
         local prevParked = self._idGateParked
@@ -5526,9 +5529,14 @@ function Handle:_applyIdentityGate()
         -- each gated group's maxFrameCount, so it has to be set before the call — which is
         -- why this cannot simply latch on success.
         self._idGateParked = newParked
-        GateLog("park %s unit=%s why=%s",
-            newParked and "ON (gated groups -> 0)" or "OFF (gated groups restored)",
-            tostring(self.config and self.config.unit), tostring(why or "-"))
+        -- ☠ LOG DEFERRED TO THE JOINT LINE BELOW. park and hide are computed from the
+        -- SAME probe and flip together on a HELPFUL pool, so this emitted two lines per
+        -- unit per transition carrying the same unit and the same why. The sweep walks
+        -- every handle and every slot handle, and its triggers are global -- one
+        -- PLAYER_ENTERING_WORLD re-sweeps at 0s, 2s and 6s -- so a 40-unit raid produced
+        -- hundreds of lines from a single zone-in, in a category that defaults ON. One
+        -- line per transition says strictly more, because it shows both halves together.
+        parkFlip = newParked and "ON" or "OFF"
         -- ApplyTuning is the LIVE setter path and reads _idGateParked, so this is one
         -- call rather than a rebuild.
         local ok = true
@@ -5547,7 +5555,13 @@ function Handle:_applyIdentityGate()
             -- sweep recomputes the verdict from live conditions each time, so it converges
             -- on whatever is true then rather than on what was true when it broke.
             self._idGateParked = prevParked
-            GateLog("PARK APPLY FAILED unit=%s (combat=%s) — reverted, retries on next sweep",
+            -- Cleared so the joint line cannot claim a flip that was just undone.
+            parkFlip = nil
+            -- ⚠ WARN, not the INFO GateLog path: this is a hard failure that re-fires
+            -- every sweep until it clears, and at INFO it was invisible to anyone with
+            -- the log level raised -- i.e. to anyone filtering out the chatter it is
+            -- buried in.
+            DF:DebugWarn("IDGATE", "PARK APPLY FAILED unit=%s (combat=%s) - reverted, retries on next sweep",
                 tostring(self.config and self.config.unit),
                 tostring(InCombatLockdown and InCombatLockdown() or false))
         end
@@ -5555,11 +5569,7 @@ function Handle:_applyIdentityGate()
 
     local newHidden = hide or nil
     if self._idGateHidden ~= newHidden then
-        GateLog("hide %s unit=%s why=%s (vuln=%s srcRel=%s)",
-            newHidden and "ON" or "OFF",
-            tostring(self.config and self.config.unit), tostring(why or "-"),
-            tostring(self._idGateVulnerable or false),
-            tostring(self._idGateSourceRelative or false))
+        hideFlip = newHidden and "ON" or "OFF"
         self._idGateHidden = newHidden
         -- ⚠ TRANSITION ONLY. The sweep runs on every target change / roster event /
         -- loading screen; applying visibility unconditionally made every pass a
@@ -5568,6 +5578,19 @@ function Handle:_applyIdentityGate()
         -- A stable verdict now touches nothing. The rebuilt-onto-non-vulnerable
         -- case still clears its stale flag: that IS a transition.
         self:_applyVisibility()
+    end
+
+    -- ★ ONE LINE PER GATE TRANSITION, carrying both halves. Reads
+    --   gate unit=party2 why=- park=OFF hide=OFF (vuln=true srcRel=true)
+    -- where a dash in a slot means that half did not flip on this pass -- which is itself
+    -- worth seeing, because park and hide flipping apart is the interesting case and used
+    -- to be indistinguishable from two ordinary lines that happened to arrive together.
+    if parkFlip or hideFlip then
+        GateLog("gate unit=%s why=%s park=%s hide=%s (vuln=%s srcRel=%s)",
+            tostring(self.config and self.config.unit), tostring(why or "-"),
+            parkFlip or "-", hideFlip or "-",
+            tostring(self._idGateVulnerable or false),
+            tostring(self._idGateSourceRelative or false))
     end
 end
 
