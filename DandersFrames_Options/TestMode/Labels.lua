@@ -86,11 +86,13 @@ end
 -- substitute maths of its own, and this one does not: when the flow is unavailable the
 -- element simply goes unlabelled.
 -- ⚠ COST, stated because it scales with the raid preview: one probe box plus `count`
--- slot frames per labelled element per visible test frame — roughly 9 frames a frame,
--- so ~90 at the default 10-frame raid preview and ~360 at a 40-frame one. Pooled and
--- created once, never per pass, and only while the option is on; WoW never frees a
--- frame, so if that ceiling ever matters the fix is to probe fewer frames rather than
--- to rebuild them.
+-- slot frames per labelled element per visible test frame. The three fixed rows are
+-- ~9 frames a frame; the Aura Designer adds one probe per PLACEMENT on top, and since
+-- layout groups became measurable those are no longer one slot each — a group probes
+-- its own `_slotCount()`, so a design with a few multi-icon groups can double the
+-- per-frame figure. Pooled and created once, never per pass, and only while the option
+-- is on; WoW never frees a frame, so if that ceiling ever matters the fix is to probe
+-- fewer frames rather than to rebuild them.
 local function ensureProbe(frame, key, count)
     frame.dfTestLabelProbes = frame.dfTestLabelProbes or {}
     local p = frame.dfTestLabelProbes[key]
@@ -228,31 +230,51 @@ local function handleRect(frame, key, h)
     return windowRect(h)
 end
 
--- The Aura Designer has no single window: each placed indicator is its own handle in
--- the factory's `placed` store. Label the UNION of their rects, so the tag names the
--- system once instead of once per indicator.
-local function adUnionRect(frame)
+-- The Aura Designer has no single window: every placement is its own handle in the
+-- per-frame factory store, bucketed by family.
+-- ☠ ALL THREE ICON-BEARING FAMILIES, NOT JUST `placed`. This walked `placed` alone,
+-- so LAYOUT GROUPS — filter groups and member groups (store.fgroups, keyed "fgroup:"
+-- / "mgroup:") and debuff category groups (store.dgroups) — were invisible to the
+-- whole feature: unhoverable, and with `placed` empty the element read as switched
+-- OFF entirely, so a design built only from groups got no marks at all (Krathe,
+-- 2026-08-21). ⚠ Keep in sync with the Factory's own family list (SyncFrame's unit
+-- retarget loop, and AD_GATE_FAMILIES beside DebugDumpADGate).
+-- The frame-level families are deliberately NOT here: `healthbar` / `background` /
+-- `border` / `nametext` / `healthtext` tint or edge an existing element rather than
+-- placing an icon, so a region for one would span the whole health bar and swallow
+-- the rows drawn over it. They are Aura Designer output too, and if they ever want
+-- naming it has to be as a distinct element key, not folded in with the icons.
+local AD_FAMILIES = { "placed", "fgroups", "dgroups" }
+
+-- ☠ ONE REGION PER PLACEMENT, NOT ONE UNION OF THEM ALL. The union was written when
+-- every element was marked at once, where one box per system beat one per indicator.
+-- With only the hovered region marked that reasoning is gone and the union actively
+-- breaks the feature twice over: it draws brackets around the empty space BETWEEN
+-- scattered indicators, and because the hit test resolves smallest-region-wins, a
+-- union spanning the frame loses to every row nested inside it — so the thing under
+-- the cursor is named as the buff row rather than as the indicator sitting on it.
+-- Per-placement regions all carry the same key, so they all tag "Aura Designer" and
+-- exactly one is ever on screen; the difference is that it is the right one, tight
+-- around what the cursor is actually over.
+local function adRegions(frame, out)
     local store = frame.dfADFactory
-    local placed = store and store.placed
-    if type(placed) ~= "table" then return nil end
-    local l, r, t, b
-    local hosts = {}
+    if type(store) ~= "table" then return end
     local i = 0
-    for _, entry in pairs(placed) do
-        i = i + 1
-        -- Each placed indicator is its own single-slot handle; give each probe its own
-        -- key so they do not share (and overwrite) one measuring box.
-        local fl, fr, ft, fb, anchor = handleRect(frame, "ad" .. i, entry and entry.handle)
-        if fl then
-            l = (l and math.min(l, fl)) or fl
-            r = (r and math.max(r, fr)) or fr
-            t = (t and math.max(t, ft)) or ft
-            b = (b and math.min(b, fb)) or fb
-            if anchor then hosts[#hosts + 1] = anchor end
+    for _, family in ipairs(AD_FAMILIES) do
+        local bucket = store[family]
+        if type(bucket) == "table" then
+            for _, entry in pairs(bucket) do
+                i = i + 1
+                -- Give each placement its own probe key so they do not share (and
+                -- overwrite) one measuring box. Numbered across ALL families in one
+                -- run, so a group never collides with a placed indicator.
+                local l, r, t, b, anchor = handleRect(frame, "ad" .. i, entry and entry.handle)
+                if l and anchor then
+                    out[#out + 1] = { l = l, r = r, t = t, b = b, host = anchor, hosts = { anchor } }
+                end
+            end
         end
     end
-    if not l then return nil end
-    return l, r, t, b, hosts
 end
 
 -- Returns the rect AND the frame to anchor against. ☠ ANCHOR TO THE TARGET, never to
@@ -290,11 +312,17 @@ end
 -- over EMPTY SPACE, which a false positive here cannot produce.
 local function elementShown(frame, key)
     if key == "ad" then
-        -- The AD has no row frame: Factory:ClearFrame empties `placed`, so an empty
-        -- store IS the off state (and adUnionRect then finds no rect anyway).
+        -- The AD has no row frame: Factory:ClearFrame empties every family, so an
+        -- empty store IS the off state (and adRegions then finds no rect anyway).
+        -- ☠ ASKED OF ALL THREE FAMILIES. Asking only `placed` meant a design built
+        -- from layout groups alone answered "off" and never got a mark.
         local store = frame.dfADFactory
-        local placed = store and store.placed
-        return type(placed) == "table" and next(placed) ~= nil
+        if type(store) ~= "table" then return false end
+        for _, family in ipairs(AD_FAMILIES) do
+            local bucket = store[family]
+            if type(bucket) == "table" and next(bucket) ~= nil then return true end
+        end
+        return false
     end
     if key == "missing" then
         local s = frame.missingBuffStrip
@@ -317,13 +345,14 @@ local function elementShown(frame, key)
     return shown and true or false
 end
 
+-- Single-region elements only. The Aura Designer produces MANY regions per frame and
+-- goes through adRegions instead — which is also why the unit frame is no longer
+-- handed back as an anchor here: the union needed a shared parent to anchor against,
+-- a per-placement region anchors to the placement itself, and the standing warning
+-- (never register the unit frame as a tooltip host, or the parent walk makes every
+-- aura on the frame claim to be an indicator) stops being something to work around.
 local function targetOf(frame, key)
     if not elementShown(frame, key) then return nil end
-    if key == "ad" then
-        local l, r, t, b, hosts = adUnionRect(frame)
-        if not l then return nil end
-        return l, r, t, b, frame, hosts
-    end
     -- ☠ MISSING BUFF IS NOT ONE HANDLE. `frame.missingFactory` is a MAP of spell key
     -- -> handle, one cell per tracked buff, so passing it where a handle is expected
     -- found nothing and the element never labelled at all (field-reported). Its cells
@@ -687,24 +716,52 @@ local hoverRegions = {}   -- { frame, key, color, l, r, t, b, host, scale }
 -- It also stops the preview lying by omission: the defensive icon previews on a
 -- tank/healer slot and the missing-buff badge on another, so a single claimed frame
 -- left whole elements unhoverable with nothing to say why.
+local function addRegion(frame, target, reg)
+    for _, hf in ipairs(reg.hosts or {}) do
+        if hf ~= frame then regionOf[hf] = target.key end
+    end
+    local okScale, scale = pcall(reg.host.GetEffectiveScale, reg.host)
+    hoverRegions[#hoverRegions + 1] = {
+        frame = frame, key = target.key, color = target.color,
+        l = reg.l, r = reg.r, t = reg.t, b = reg.b, host = reg.host,
+        scale = (okScale and scale) or 1,
+    }
+end
+
+-- Returns whether anything on this frame is RENDERING BUT NOT YET MEASURABLE, which is
+-- what the settle retry needs to know. See TL:Update.
 local function scanFrame(frame)
     if not frame or not frame.GetLeft or not frame:GetLeft() or not frame:IsShown() then
-        return
+        return false
     end
+    local pending = false
     for _, target in ipairs(TARGETS) do
-        local l, r, t, b, host, hosts = targetOf(frame, target.key)
-        if l and host then
-            for _, hf in ipairs(hosts or {}) do
-                if hf ~= frame then regionOf[hf] = target.key end
+        local before = #hoverRegions
+        if target.key == "ad" then
+            -- Many regions, one per placement. Gathered into a scratch list rather
+            -- than appended directly so the "did this element produce anything"
+            -- test below reads the same for every key.
+            if elementShown(frame, target.key) then
+                local regs = {}
+                adRegions(frame, regs)
+                for _, reg in ipairs(regs) do addRegion(frame, target, reg) end
             end
-            local okScale, scale = pcall(host.GetEffectiveScale, host)
-            hoverRegions[#hoverRegions + 1] = {
-                frame = frame, key = target.key, color = target.color,
-                l = l, r = r, t = t, b = b, host = host,
-                scale = (okScale and scale) or 1,
-            }
+        else
+            local l, r, t, b, host, hosts = targetOf(frame, target.key)
+            if l and host then
+                addRegion(frame, target, { l = l, r = r, t = t, b = b, host = host, hosts = hosts })
+            end
+        end
+        -- ★ THE ELEMENT SAYS IT IS ON SCREEN AND YET MEASURED TO NOTHING. That is the
+        -- signal a container has been rebuilt this tick and has no rect yet — the
+        -- creation-tick rule — and it is the ONLY thing that distinguishes "not ready"
+        -- from "legitimately switched off". Both used to look identical here, which is
+        -- what let a partial pass declare itself finished.
+        if #hoverRegions == before and elementShown(frame, target.key) then
+            pending = true
         end
     end
+    return pending
 end
 
 -- Smallest containing region wins, so an Aura Designer indicator sitting inside the
@@ -817,9 +874,12 @@ end
 local function beginFadeOut(reg, linger)
     local w = widgetFor(reg)
     if not w then return end
-    -- Resurrect rather than duplicate if this region is already fading.
+    -- ☠ MATCHED BY WIDGET, NOT BY REGION. The pool is keyed (frame, element key) and
+    -- the Aura Designer now registers one region per placement, so several regions on
+    -- one frame legitimately share a single widget. Comparing region tables let the
+    -- same widget be queued twice and fought over.
     for _, f in ipairs(fadingOut) do
-        if f.reg == reg then f.wait = linger; f.state = "wait"; return end
+        if widgetFor(f.reg) == w then f.wait = linger; f.state = "wait"; return end
     end
     fadingOut[#fadingOut + 1] = {
         reg = reg, alpha = w.host:GetAlpha() or 1, wait = linger, state = "wait",
@@ -879,7 +939,13 @@ local function ensureHoverDriver()
             -- the option is on and only in test mode.
             local reg = regionUnderCursor()
             if reg ~= hoverShown then
-                if hoverShown then
+                local w = reg and widgetFor(reg)
+                -- ☠ NEVER FADE OUT THE WIDGET WE ARE ABOUT TO FADE IN. Crossing between
+                -- two Aura Designer placements on one frame moves between two regions
+                -- that SHARE a pooled widget: queuing the old one for fade-out would
+                -- drive the very widget the new one is raising, and the mark would sink
+                -- while the cursor sat on it. Same widget = a re-place, not a crossing.
+                if hoverShown and widgetFor(hoverShown) ~= w then
                     -- Crossing to another region ends the old one promptly; leaving to
                     -- nothing gets the hold.
                     beginFadeOut(hoverShown, reg and 0 or LINGER)
@@ -887,10 +953,9 @@ local function ensureHoverDriver()
                 if reg then
                     -- Pick up where a fade left off, so sweeping back onto a region
                     -- that is still visible does not restart it from transparent.
-                    local w = widgetFor(reg)
                     inAlpha = (w and w.host:IsShown() and w.host:GetAlpha()) or 0
                     for i = #fadingOut, 1, -1 do
-                        if fadingOut[i].reg == reg then table.remove(fadingOut, i) end
+                        if widgetFor(fadingOut[i].reg) == w then table.remove(fadingOut, i) end
                     end
                 end
                 hoverShown = reg
@@ -994,19 +1059,37 @@ function TL:Update(settling)
     for i = #hoverRegions, 1, -1 do hoverRegions[i] = nil end
     for k in pairs(regionOf) do regionOf[k] = nil end
 
+    local pending = false
     if poolWants(false) then
-        for i = 0, 4 do scanFrame(DF.testPartyFrames[i]) end
+        for i = 0, 4 do if scanFrame(DF.testPartyFrames[i]) then pending = true end end
     end
     if poolWants(true) then
-        for i = 1, 40 do scanFrame(DF.testRaidFrames[i]) end
+        for i = 1, 40 do if scanFrame(DF.testRaidFrames[i]) then pending = true end end
     end
 
-    if #hoverRegions > 0 then
-        settleLeft = 0
-        ensureHoverDriver():Show()
-    elseif settleLeft > 0 and (poolWants(false) or poolWants(true)) then
+    -- Drive whatever DID measure straight away; a partial answer beats a blank one
+    -- while the rest settles.
+    if #hoverRegions > 0 then ensureHoverDriver():Show() end
+
+    -- ☠☠ A PASS THAT FOUND *SOMETHING* IS NOT A PASS THAT FOUND *EVERYTHING*. This
+    -- stood the retry down the moment one region measured, and elements rebuilt on the
+    -- same tick were never scanned again: switch the Aura Designer preset with test
+    -- mode open and the defensive icon — untouched, still measurable — ended the budget
+    -- on pass one, so every indicator the new preset had just created stayed unlabelled
+    -- until Indicator Info was toggled off and on (Krathe, 2026-08-21). The `pending`
+    -- term is the fix: keep going while anything reports itself rendering and refuses
+    -- to measure. The empty-result term stays exactly as it was, because on a fresh
+    -- login the handles do not exist yet and nothing can report itself pending at all.
+    -- ⚠ An element that reports shown but can never measure burns the whole budget on
+    -- every settings change (~1.5s of cheap self-cancelling timers). That is the state
+    -- worth retrying into, and elementShown fails OPEN on a refused read, so the cost
+    -- is bounded and the alternative is dropping the case this exists for.
+    if (pending or #hoverRegions == 0)
+        and settleLeft > 0 and (poolWants(false) or poolWants(true)) then
         settleLeft = settleLeft - 1
         scheduleSettle()
+    else
+        settleLeft = 0
     end
 end
 
