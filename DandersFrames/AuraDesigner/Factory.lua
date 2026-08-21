@@ -3876,13 +3876,17 @@ end
 
 -- Style a FRAME-LEVEL missing badge as a flat TINT fill (healthbar / background colour-when-
 -- missing). The fill covers the whole window (== the region). Colour/blend from config.
-local function styleTintMissingBadge(h, r, g, b, blend)
+-- `clampTo` (optional): anchor the fill to THAT region instead of to the whole badge.
+-- The health-bar consumer passes the real bar's fill texture so a missing-mode tint
+-- covers current health only, exactly as the present-mode cover does; the background
+-- consumer passes nothing, because a background has no fill to track.
+local function styleTintMissingBadge(h, r, g, b, blend, clampTo)
     local badge = h.GetBadgeFrame and h:GetBadgeFrame()
     if not badge then return end
     if not badge.dfADFill then badge.dfADFill = badge:CreateTexture(nil, "ARTWORK") end
     badge.dfADFill:SetColorTexture(r, g, b, blend)
     badge.dfADFill:ClearAllPoints()
-    badge.dfADFill:SetAllPoints(badge)
+    badge.dfADFill:SetAllPoints(clampTo or badge)
     badge.dfADFill:Show()
 end
 
@@ -5086,20 +5090,39 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
         -- Missing stays single-winner: a non-winner SWM config renders nothing and its
         -- stale entry (if any) falls to the keep-set sweep.
         if not asMissing then return false, false end
-        -- SHOW-WHEN-MISSING: a flat tint over the health-bar region while the buff is ABSENT.
+        -- SHOW-WHEN-MISSING: a tint over the health-bar region while the buff is ABSENT.
         -- Window/badge sized read-free from the frame's CONFIGURED size (the live rect is
         -- secret on 12.1); single-anchored to the health bar's TOPLEFT so it covers the region
-        -- (config-size approximation — precise region + z-order are P4.7 polish). The filled
-        -- mirror is a present-only concept, so nil the feed ref while in missing mode.
+        -- (config-size approximation — precise region + z-order are P4.7 polish).
+        --
+        -- ☠ THIS BRANCH USED TO IGNORE "Tint Entire Bar" ENTIRELY. It always painted the
+        -- badge's full rect, so an effect configured as Tint + entire-bar UNTICKED covered
+        -- the missing-health region too, and the frame read as permanently full: "the
+        -- preview shows it correctly, but the actual frame will not" (Eef, 2026-08-19,
+        -- attonement-missing recolour). The preview was right because the preview renders
+        -- the PRESENT-mode shape — a divergence in RENDERING, which is the one thing a
+        -- preview may never do.
+        -- The old note said "the filled mirror is a present-only concept". True of the
+        -- MIRROR, which needed a feed; false of what replaced it. The cover is a plain
+        -- texture anchored to the real bar's fill region, so it needs no aura and no feed
+        -- and works exactly as well with nothing present — see buildHealthFillConfig.
+        -- Same `wholeBar` expression as the present path below, so the two modes cannot
+        -- disagree about what the checkbox means (replace mode always tracks the fill).
         local r, g, b, a = readADColor(colorCfg)
         local mode = slower(cfg.mode or "replace")
+        local wholeBar = (mode == "tint") and (cfg.tintWholeBar and true or false) or false
         local blend = (mode == "replace") and a or healthbarBlend(mode, cfg.blend, a)
         local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
         local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
-        local coSig = tconcat({ "miss", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(mw), tostring(mh) }, "|")
+        local clampTo = (not wholeBar) and healthBar.GetStatusBarTexture
+            and healthBar:GetStatusBarTexture() or nil
+        -- clampTo joins the signature: toggling the checkbox has to restyle, and a health
+        -- TEXTURE swap replaces the fill region and would strand a create-once anchor.
+        local coSig = tconcat({ "miss", tostring(r), tostring(g), tostring(b), tostring(blend),
+            tostring(mw), tostring(mh), tostring(wholeBar), tostring(clampTo) }, "|")
         local before = hb[key]
         syncFrameLevelMissing(hb, key, map, frame, healthBar, healthBar, mw, mh, 1, coSig,
-            function(handle) styleTintMissingBadge(handle, r, g, b, blend) end, filt)
+            function(handle) styleTintMissingBadge(handle, r, g, b, blend, clampTo) end, filt)
         -- syncFrameLevelMissing replaces the entry TABLE on create/recreate.
         return true, hb[key] ~= before
     end
