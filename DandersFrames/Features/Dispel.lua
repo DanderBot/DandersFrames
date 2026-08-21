@@ -1312,6 +1312,11 @@ end
 -- own copy lives in AuraUtil (dispelIconAtlas), so ours was a duplicate that could
 -- drift. See BadgeCarrierOptions and the badge block in DispelSlotSecureInit.
 local warnedTintBind = false
+-- ☠ TWO LATCHES, TWO FAULTS. These shared one flag: the recovery path's re-init throw and
+-- the steady-state StyleOneSlot throw. Different causes, different fixes -- and because
+-- the re-init one fires first (it runs inside the recovery branch), a single early
+-- recovery failure blinded every later styling error for the whole session.
+local warnedSlotReinit = false
 local warnedSlotStyle = false
 
 -- Slot plan from settings.
@@ -2148,8 +2153,8 @@ local function StyleDispelSlots(frame, db, h, slots)
                 -- it is the likeliest place to throw: the art was just found forbidden.
                 if info.roles then
                     local okInit, errInit = pcall(DispelSlotSecureInit, btn, info, db, frame)
-                    if not okInit and not warnedSlotStyle then
-                        warnedSlotStyle = true
+                    if not okInit and not warnedSlotReinit then
+                        warnedSlotReinit = true
                         if DF.DebugWarn then
                             DF:DebugWarn("DISPEL", "slot re-init %s failed: %s",
                                 tostring(info.key), tostring(errInit))

@@ -6268,4 +6268,9 @@ do
     end
 end
 
-DF:Debug(DBG, "Factory (native AD bridge) loaded")
+-- ☠ (Removed) a file-scope `DF:Debug(DBG, "Factory (native AD bridge) loaded")`. It could
+-- never print: DebugConsole:Init binds debugDb from ADDON_LOADED, long after every file
+-- has been parsed, so a log call at chunk level is a guaranteed no-op -- it allocated its
+-- argument and returned nothing, in every session this addon has ever run. The same trap
+-- is documented in Core.lua's migration trace, which buffers until the console exists.
+-- Anything that genuinely needs to report at load must use that buffer, not a bare call.

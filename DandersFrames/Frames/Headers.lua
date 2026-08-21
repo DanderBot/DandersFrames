@@ -3621,7 +3621,11 @@ function DF:UpdateRaidGroupOrderAttributes()
         handler:SetAttribute("groupdisplaypos" .. groupNum, displayPos)
     end
     
-    if DF:DebugActive("HEADERS") then
+    -- ☠ The guard must name the category the LINE uses. This asked DebugActive("HEADERS")
+    -- and then logged to ROSTER, so enabling ROSTER alone -- the obvious choice for a
+    -- group-order problem -- produced nothing, and the line appeared only for someone who
+    -- happened to have HEADERS switched on as well.
+    if DF:DebugActive("ROSTER") then
         local orderStr = table.concat(effectiveOrder, ",")
         DF:Debug("ROSTER", "UpdateRaidGroupOrderAttributes: group display order: %s", orderStr)
     end
