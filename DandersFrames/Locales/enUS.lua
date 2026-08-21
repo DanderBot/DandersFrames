@@ -1261,6 +1261,7 @@ L["Medium Health (50%)"] = true
 L["Minimal"] = true
 L["Minimap"] = true
 L["Minimum Log Level"] = true
+L["Lines below this level are not recorded at all, so raising it keeps a long capture readable and stops chatter evicting the part you need. Lowering it again only affects what is logged from that point on."] = true
 L["Missing Buff Alpha"] = true
 L["Missing Buffs"] = true
 L["Missing Health"] = true

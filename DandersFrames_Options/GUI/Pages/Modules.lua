@@ -1946,9 +1946,14 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             ["WARN"]  = L["Warnings + Errors"],
             ["ERROR"] = L["Errors Only"],
         }
-        AddToSection(GUI:CreateDropdown(self.child, L["Minimum Log Level"], logLevelOptions, debugProxy, "logLevel", function()
+        local logLevelDrop = GUI:CreateDropdown(self.child, L["Minimum Log Level"], logLevelOptions, debugProxy, "logLevel", function()
             if DF.DebugConsole then DF.DebugConsole:RefreshDisplay() end
-        end), 55, 1)
+        end)
+        -- ☠ The control DROPS lines below the chosen level now rather than hiding them, so
+        -- it is a real buffer lever and the tooltip has to say so. Read as a view filter it
+        -- would be set, a bug reproduced, and the missing detail treated as a bug of its own.
+        logLevelDrop.tooltip = L["Lines below this level are not recorded at all, so raising it keeps a long capture readable and stops chatter evicting the part you need. Lowering it again only affects what is logged from that point on."]
+        AddToSection(logLevelDrop, 55, 1)
 
         AddToSection(GUI:CreateSlider(self.child, L["Max Log Entries"], 100, 10000, 100, debugProxy, "maxLines", function()
             if DF.DebugConsole then
