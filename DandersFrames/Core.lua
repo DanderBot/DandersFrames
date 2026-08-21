@@ -1042,7 +1042,11 @@ DF.IsTexturePresent = textureKnown
 local function warnMissingTexture(path)
     if not path or _df_warnedMissingTexture[path] then return end
     _df_warnedMissingTexture[path] = true
-    if DF.Debug then DF:Debug("TEXTURE", "Missing texture '%s' — using stock fallback", tostring(path)) end
+    -- ☠ WARN, not INFO. A missing texture is significant enough that the next lines print
+    -- it to chat, yet the log entry sat at INFO -- so anyone who raised the log level to
+    -- cut chatter lost the only line this category has. TEXTURE has exactly one call site;
+    -- filtering it out by severity left the category permanently empty.
+    if DF.DebugWarn then DF:DebugWarn("TEXTURE", "Missing texture '%s' — using stock fallback", tostring(path)) end
 
     local shown = tostring(path)
     -- Ours: show just the filename, and say plainly that it is not coming back.

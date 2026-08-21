@@ -960,7 +960,16 @@ function Search:ScrollToSection(tabName, sectionName)
         end
         if flashTarget then break end
     end
-    if not flashTarget then return end
+    -- ★ THE FAILURE THAT ACTUALLY HAPPENS. SEARCH's only other log call guards a load-order
+    -- slip that cannot occur in a shipped build, while THIS -- the section name no longer
+    -- resolving because it was renamed or moved into a group -- is the real "I clicked a
+    -- search result and nothing happened": the jump scrolls nowhere and never flashes, in
+    -- silence. Naming both halves makes it a one-line fix instead of a hunt.
+    if not flashTarget then
+        DF:DebugWarn("SEARCH", "ScrollToSection: %q not found on tab %q - jump did nothing",
+            tostring(sectionName), tostring(tabName))
+        return
+    end
 
     -- Put the section at the TOP of the viewport.
     --

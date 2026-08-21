@@ -809,7 +809,8 @@ end
 -- it expands symmetrically from its center point
 function FlatRaidFrames:ResizeInnerContainer()
     if not self.innerContainer or not self.header then return end
-    DF:Debug("FLATRAID", "ResizeInnerContainer: recalculating")
+    -- (Removed) an entry trace. This function logs its RESULT further down, which is the
+    -- part worth having; announcing that it had started added nothing.
     
     local db = GetRaidDB()
     if not db then return end
@@ -895,7 +896,8 @@ function FlatRaidFrames:UpdateContainerSize()
         math.floor(oldW + 0.5), math.floor(oldH + 0.5),
         math.floor(containerWidth + 0.5), math.floor(containerHeight + 0.5),
         tostring(db.raidUseGroups))
-    DebugPrint("Container size:", containerWidth, "x", containerHeight)
+    -- (Removed) a restatement: the line directly above already reports both dimensions,
+    -- rounded, alongside the grouped/flat mode that produced them.
 end
 
 -- ============================================================
@@ -924,7 +926,14 @@ function FlatRaidFrames:UpdateSorting()
     end
 
     -- FrameSort integration: yield sorting to FrameSort when active
-    if DF:IsFrameSortActive() then return end
+    -- ★ SAY SO. Handing sorting to another addon is a top-tier "my sorting stopped working"
+    -- cause, and it returned in silence one line above the "UpdateSorting: starting"
+    -- heartbeat -- so the log showed neither a start nor a reason, which reads as this
+    -- function never having been called.
+    if DF:IsFrameSortActive() then
+        DF:Debug("FLATRAID", "UpdateSorting: yielding to FrameSort, not sorting here")
+        return
+    end
 
     DF:Debug("FLATRAID", "UpdateSorting: starting")
 
@@ -1285,8 +1294,17 @@ function FlatRaidFrames:Initialize()
     
     self:CreateFrames()
     self.initialized = true
-    
-    DebugPrint("Initialization complete")
+
+    -- ☠ THIS SAID "Initialization complete" UNCONDITIONALLY. CreateFrames can bail for
+    -- several reasons and leave self.header nil, and `initialized` is set regardless -- so
+    -- the log asserted success on exactly the runs that failed, and the flag then stopped
+    -- anything from retrying. A line reporting an outcome it never checked is worse than no
+    -- line: it closes the investigation at the point it should open it.
+    if self.header then
+        DebugPrint("Initialization complete")
+    else
+        DebugPrint("WARNING: initialization finished with NO HEADER - CreateFrames bailed, flat raid will not render")
+    end
 end
 
 function FlatRaidFrames:Reinitialize()
