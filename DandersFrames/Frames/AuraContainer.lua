@@ -5374,11 +5374,37 @@ local function IdentityUnavailable(unit)
     end
     return nil
 end
+-- ☠☠ PROBE THE POOL SWAP, NOT THE PASSENGER FLAG. This asked UnitUsingVehicle, which is
+-- true for ANY vehicle association -- including riding an encounter's transport or
+-- platform entity, where your action bars, your unit token and YOUR AURA POOL all stay
+-- yours. Field-caught 2026-08-21 (Krathe, raid): the player was flagged self-vehicle for
+-- 5m38s of a fight (14:49:18 park -> 14:54:56 recover) while healing normally -- casting
+-- the whole time, so the bars were provably never swapped -- and every gated pool on the
+-- OWN frame parked for the duration: "my PoM was not showing on myself but was showing
+-- on other players". The backstop ticker re-probed every 5s throughout and UsingVehicle
+-- kept answering true, so this was the verdict being wrong, not an edge being missed.
+--
+-- ★ The signal the gate actually cares about is "does this frame's pool belong to the
+-- vehicle right now", and the client's own compact frames answer that with
+-- UnitHasVehicleUI (BlizzardInterfaceCode: CompactUnitFrame's shouldTargetVehicle) --
+-- the frame retargets to the vehicle unit exactly and only when that is true. No swap,
+-- no mismatch, nothing to distrust.
+--
+-- ⚠ THE TRADE, taken knowingly: the pre-seat boarding window this probe was added for
+-- (UsingVehicle true before HasVehicleUI lands) is now covered by the on-the-spot
+-- UNIT_ENTERING/ENTERED_VEHICLE sweeps instead of by the probe itself -- worst case is
+-- one dispatch of a real vehicle's swapped pool rendering before the ENTERED sweep
+-- parks it. The gate's stated fail-safe direction is SHOW; five minutes of your own
+-- tracked buffs hidden in a raid fight is the wrong side of that rule, one garbage
+-- frame on a genuine vehicle boarding is the right side.
 local function SelfIsUsingVehicle(unit)
     if not unit then return false end
     local okSame, same = pcall(UnitIsUnit, unit, "player")
     if not okSame or not same then return false end
-    local probe = UnitUsingVehicle or UnitInVehicle
+    -- Fallbacks kept for a client without the primary (belt-and-braces; all three are
+    -- ancient APIs) -- but never "UsingVehicle wins over HasVehicleUI": when the
+    -- precise signal exists it is the only one consulted.
+    local probe = UnitHasVehicleUI or UnitUsingVehicle or UnitInVehicle
     if not probe then return false end
     local ok, v = pcall(probe, "player")
     if not ok then return false end
