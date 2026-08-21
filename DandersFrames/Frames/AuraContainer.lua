@@ -2055,15 +2055,14 @@ local function bindNative(slot, config)
                 if DF.GetDispelColorMap then map = DF:GetDispelColorMap() end
                 if DF.GetDispelColorCurve then curve = DF:GetDispelColorCurve() end
             end
-            -- ☠☠ THE CURVE, WHICH THIS LANE WAS MISSING. Two comments in this repo
-            -- asserted the ring had passed it "since 68824"; it never did, and one of
-            -- them was used to explain away a field report -- correctly-coloured row
-            -- borders sitting next to a white overlay were read as proof the two lanes
-            -- differed in this field, when in fact NEITHER lane had it.
-            -- The map alone is the original white bug: a raw table index that resolves
-            -- private-side, with the style step's paint left standing if it misses.
-            -- Same reasoning as the overlay's tintOpts in Features/Dispel.lua.
-            local curve = DF.GetDispelColorCurve and DF:GetDispelColorCurve() or nil
+            -- ⚠ THE CURVE IS RESOLVED ABOVE, AND ONLY FOR "Color". A second,
+            -- unconditional `local curve` briefly lived here; it shadowed the one above
+            -- and handed the user's palette to EVERY style. That is not a widening of a
+            -- missing field -- the engine applies the curve unconditionally and lets it
+            -- override the map with no test on the result, so passing it outside "Color"
+            -- overrides the game's own dispel colours on styles that are meant to show
+            -- them. If this lane ever should carry the curve elsewhere, it is a
+            -- deliberate behaviour change, not a fix.
             local ok, err = pcall(function()
                 local opts = {
                     style = styleEnum,
