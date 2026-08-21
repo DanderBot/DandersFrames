@@ -1241,4 +1241,6 @@ specScanFrame:SetScript("OnEvent", function()
     end)
 end)
 
-DebugPrint("SecureSort.lua loaded (geometry calculators + spec cache)")
+-- (Removed) a file-scope load line. Never printed in any session: chunk-level logging
+-- runs before the console exists. Doubly pointless here since it announced a file that
+-- is mostly deleted.

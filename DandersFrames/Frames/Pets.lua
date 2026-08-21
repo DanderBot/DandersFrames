@@ -594,12 +594,34 @@ function DF:SetPetFrameVisible(frame, visible)
         if not InCombatLockdown() then
             local owner = frame.ownerFrame
             if owner then
-                pcall(frame.SetFrameStrata, frame, owner:GetFrameStrata())
-                pcall(frame.SetFrameLevel, frame, owner:GetFrameLevel() + 15)
+                -- ★ These pcalls were swallowing their result entirely. A refused strata or
+                -- level write is exactly the z-order fault this block exists to prevent --
+                -- the pet rendering under a neighbouring health bar -- and it degraded
+                -- silently and permanently, because nothing re-runs this on its own.
+                local okS = pcall(frame.SetFrameStrata, frame, owner:GetFrameStrata())
+                local okL = pcall(frame.SetFrameLevel, frame, owner:GetFrameLevel() + 15)
+                if not (okS and okL) and not frame._dfPetLayerWarned then
+                    frame._dfPetLayerWarned = true
+                    DF:DebugWarn("PET", "SetPetFrameVisible: %s layering refused (strata=%s level=%s) - pet may render under a neighbour",
+                        frame.unit or "?", tostring(okS), tostring(okL))
+                end
             end
             frame:Show()
+            -- Cleared on the successful out-of-combat show, so the next fight can report
+            -- again. A session-long latch would say "this happened once" when the useful
+            -- fact is "this happens every pull".
+            frame._dfPetLockdownWarned = nil
         else
-            DF:Debug("PET", "SetPetFrameVisible: %s wants SHOW but InCombatLockdown - using alpha only", frame.unit or "?")
+            -- ☠ LATCHED PER FRAME. This is the combat branch of a function called from every
+            -- owner UNIT_HEALTH and UNIT_FLAGS and from every pet UNIT_HEALTH, so ten pets
+            -- taking damage emitted dozens of identical lines per second -- into a category
+            -- that defaults ON, evicting whatever the console was opened to capture. The
+            -- frame write beside it was already guarded for exactly this reason and the log
+            -- line was not. The state is per frame and static for the fight, so one says it.
+            if not frame._dfPetLockdownWarned then
+                frame._dfPetLockdownWarned = true
+                DF:Debug("PET", "SetPetFrameVisible: %s wants SHOW but InCombatLockdown - using alpha only", frame.unit or "?")
+            end
         end
     else
         -- Mark as hidden and set alpha to 0

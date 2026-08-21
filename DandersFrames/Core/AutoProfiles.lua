@@ -1838,7 +1838,12 @@ function AutoProfilesUI:HandleRuntimeWrite(key, value)
             -- a metatable); sets without one are the real table by reference.
             isOverridden = overlaySet ~= nil and getmetatable(overlaySet) ~= nil
         end
-        DF:Debug("AUTOPROFILE", "HandleRuntimeWrite: pinned key %s — overridden=%s, wrote to real table", key, tostring(isOverridden))
+        -- Same correction as the table-key branch below: the write at :1825 is inside
+        -- `if pf and pf.sets and pf.sets[setIndex]`, so claiming it unconditionally
+        -- misreported the exact case worth seeing -- a pinned set that is not there.
+        DF:Debug("AUTOPROFILE", "HandleRuntimeWrite: pinned key %s — overridden=%s, wrote=%s",
+            key, tostring(isOverridden),
+            tostring(pf ~= nil and pf.sets ~= nil and pf.sets[setIndex] ~= nil))
         return isOverridden
     end
 
@@ -1857,7 +1862,13 @@ function AutoProfilesUI:HandleRuntimeWrite(key, value)
         -- overlay view (see ApplyRuntimeProfile); everything else reads through.
         local overlayTbl = DF.raidOverrides[tableName]
         local isOverridden = type(overlayTbl) == "table" and rawget(overlayTbl, index) ~= nil
-        DF:Debug("AUTOPROFILE", "HandleRuntimeWrite: table key %s — overridden=%s, wrote to real table", key, tostring(isOverridden))
+        -- ☠ REPORT THE WRITE, DO NOT ASSERT IT. This said "wrote to real table"
+        -- unconditionally, while the write above sits inside `if type(tbl) == "table"` --
+        -- so on the one path worth debugging, the table being absent, the log claimed a
+        -- write that never happened. A line that lies about its failure case is worse
+        -- than no line: it sends the reader straight past the fault.
+        DF:Debug("AUTOPROFILE", "HandleRuntimeWrite: table key %s — overridden=%s, wrote=%s",
+            key, tostring(isOverridden), tostring(type(tbl) == "table"))
         return isOverridden
     end
 

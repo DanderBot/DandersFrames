@@ -2870,6 +2870,18 @@ function DF:UpdateRoleIcon(frame, source, roleOverride)
 
     if not role or role == "NONE" then
         frame.roleIcon:Hide()
+        -- ☠ THE LATCH HAS TO BE WRITTEN HERE TOO, OR IT GOES STALE AND SWALLOWS THE RETURN
+        -- EDGE. This return bypassed the edge-trigger below, so a unit whose role dropped
+        -- to NONE and later resolved back to the SAME role compared equal against a latch
+        -- still holding the pre-drop state: no transition, no line, and the icon
+        -- reappearing with no record of having gone. Exactly the bug class the edge-trigger
+        -- was added to prevent, on the reverse edge.
+        if frame.dfLastRoleShown ~= false or frame.dfLastRole ~= role then
+            DF:Debug("ROLE", "%s: role=%s show=false (no role assigned)",
+                tostring(frame.unit), tostring(role))
+            frame.dfLastRoleShown = false
+            frame.dfLastRole = role
+        end
         return
     end
     

@@ -103,7 +103,7 @@ local function SortPartyFrames(units)
     local nameList = UnitsToNameList(units)
     if nameList == "" then return false end
 
-    DF:Debug("FRAMESORT", "Sorting party frames:", nameList)
+    DF:Debug("FRAMESORT", "Sorting party frames: %s", nameList)
 
     DF.partyHeader:SetAttribute("nameList", nameList)
     DF.partyHeader:SetAttribute("sortMethod", "NAMELIST")
@@ -124,7 +124,7 @@ local function SortFlatRaidFrames(units)
     local nameList = UnitsToNameList(units)
     if nameList == "" then return false end
 
-    DF:Debug("FRAMESORT", "Sorting flat raid frames:", nameList)
+    DF:Debug("FRAMESORT", "Sorting flat raid frames: %s", nameList)
 
     -- Set nameList FIRST, then clear group attrs (issue #543)
     header:SetAttribute("nameList", nameList)
@@ -184,7 +184,7 @@ local function SortGroupedRaidFrames(units)
             local nameList = tconcat(groupNamesBuf, ",")
 
             if nameList ~= "" then
-                DF:Debug("FRAMESORT", "Sorting raid group", groupIndex, ":", nameList)
+                DF:Debug("FRAMESORT", "Sorting raid group %d: %s", groupIndex, nameList)
                 -- Set nameList FIRST, then clear group attrs (issue #543)
                 header:SetAttribute("nameList", nameList)
                 header:SetAttribute("sortMethod", "NAMELIST")
@@ -250,7 +250,7 @@ local function SortArenaFrames(units)
     end
 
     local nameList = tconcat(namesBuf, ",")
-    DF:Debug("FRAMESORT", "Sorting arena frames:", nameList)
+    DF:Debug("FRAMESORT", "Sorting arena frames: %s", nameList)
 
     DF.arenaHeader:SetAttribute("nameList", nameList)
     DF.arenaHeader:SetAttribute("sortMethod", "NAMELIST")

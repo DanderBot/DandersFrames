@@ -472,4 +472,6 @@ function DF:RestoreMigratedHealthText()
     end
 end
 
-DF:Debug("TD", "Migration module loaded (channel=%s)", tostring(DF.RELEASE_CHANNEL))
+-- (Removed) a file-scope load line -- same guaranteed no-op as the one in
+-- TextDesigner.lua. The migration OUTCOMES below are the useful signal and they log
+-- from a real runtime path.

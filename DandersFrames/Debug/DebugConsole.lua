@@ -54,7 +54,12 @@ local CATEGORY_GROUPS = {
             { key = "HEALTH",     desc = "Health bar value writes, including Reduced Max Health" },
             { key = "FLATRAID",   desc = "Flat raid layout and sorting", noisy = true },
             { key = "FRAMESORT",  desc = "FrameSort addon integration" },
-            { key = "SECURESORT", desc = "Spec cache, inspect queue and the raid geometry calculators", noisy = true },
+            -- ⚠ NOT noisy. Most of this subsystem was deleted as unreachable; of the
+            -- survivors only two call sites are reachable in live play at all, so it was
+            -- hidden by default for a firehose that no longer exists -- and a defaulted-off
+            -- category with nothing in it is the worst outcome for whoever ticks it hoping
+            -- for a trace.
+            { key = "SECURESORT", desc = "Spec cache, inspect queue and the raid geometry calculators" },
             -- noisy: driven by UNIT_IN_RANGE_UPDATE per unit, and fans out to pinned
             -- and boss frames — a moving raid produces a steady stream.
             { key = "RANGE",      desc = "Range fading checks and cache decisions", noisy = true },
@@ -385,6 +390,27 @@ local function sanitizeLogMessage(msg)
 end
 
 function DebugConsole:Log(level, category, fmt, ...)
+    -- ☠☠ MINIMUM LOG LEVEL NOW DROPS THE LINE, IT DOES NOT JUST HIDE IT.
+    -- This used to be a VIEW filter only: CollectFilteredLines applied logLevel when
+    -- rendering the console and the export, while every INFO line was still formatted,
+    -- sanitised, stored and counted against maxLines. So "Errors Only" cost exactly as
+    -- much as "Info (All)" and gave exactly as little buffer -- the setting that looks
+    -- like the spam control was the one thing that could not control spam. A tester who
+    -- set it and then reproduced a bug still had their trace evicted by INFO chatter they
+    -- had explicitly asked not to see.
+    --
+    -- Filtering here instead makes it a real lever: no format, no pcall, no string, no
+    -- eviction. Combined with the per-category tickboxes it is the honest way to keep a
+    -- long capture readable, and it is reversible -- raise the level, reproduce again.
+    --
+    -- ⚠ The trade, stated: a line dropped here is GONE, not hidden, so raising the level
+    -- mid-session cannot recover earlier INFO. That is the same bargain as unticking a
+    -- category, and it is what "minimum log level" sitting directly above "max log
+    -- entries" reads as -- both are buffer controls.
+    local minLevel = SEVERITY[(debugDb and debugDb.logLevel) or "INFO"]
+    local thisLevel = SEVERITY[level]
+    if minLevel and thisLevel and thisLevel.level < minLevel.level then return end
+
     -- Format the message. If any format arg is a secret-tainted value, the
     -- resulting string inherits the taint and cannot be safely concatenated
     -- later. sanitizeLogMessage replaces tainted messages with a placeholder.

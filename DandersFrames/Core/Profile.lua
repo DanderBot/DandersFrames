@@ -456,6 +456,13 @@ function DF:SetProfile(name)
     -- the new profile directly with no stale overlay
     DF:FullProfileRefresh()
 
+    -- ★ THE COMPLETION MARKER. PROFILE logged the START of a switch and nothing else, with
+    -- eleven one-time migrations and a full refresh running in between -- so a log showing
+    -- "cleared runtime state before switching" and then nothing was indistinguishable from
+    -- a switch that half-applied and threw. That is precisely the failure worth catching
+    -- here, and it was the one state the category could not describe.
+    DF:Debug("PROFILE", "SetProfile: switch to %s complete", tostring(name))
+
     DF:Say(format(L["Switched to profile: %s"], name))
 
     -- If the new profile has a different enable-flag state, prompt to reload
@@ -1171,6 +1178,28 @@ function DF:ValidateImportString(str)
     end
     
     return nil, "Invalid format"
+end
+
+-- ★ ONE LINE FOR TWELVE SILENT REJECTIONS. ValidateImportString bails with a distinct
+-- reason in twelve places -- Invalid encoding, Decompression failed, Deserialization
+-- failed, Missing required libraries, Legacy format, Corrupt data and the rest -- and
+-- logged none of them. "My import string doesn't work" therefore produced a completely
+-- empty log, while the function had the exact reason in hand and handed it only to the UI.
+--
+-- Wrapped rather than edited at each return: twelve separate edits to add the same line is
+-- twelve chances to drift, and a future thirteenth return would miss it. The wrapper cannot
+-- be bypassed and needs no maintenance.
+--
+-- Length is included because the common causes are a truncated paste and a string mangled
+-- by a chat client, and both show up as a plausible-looking prefix with the wrong size.
+local ValidateImportStringInner = DF.ValidateImportString
+function DF:ValidateImportString(str)
+    local data, err = ValidateImportStringInner(self, str)
+    if not data then
+        DF:DebugWarn("PROFILE", "import rejected: %s (length=%s)",
+            tostring(err), type(str) == "string" and #str or "not a string")
+    end
+    return data, err
 end
 
 -- Get version info from validated import data

@@ -2775,6 +2775,15 @@ function PinnedFrames:PruneOrphanedSets()
             --    everything. Header/container hides are combat-protected; in
             --    lockdown the tracking is left intact too, so the pendingPrune
             --    re-run at regen repeats the full teardown.
+            -- ★ THE ORPHAN CASE, AND IT USED TO BE COMPLETELY SILENT. This whole function
+            -- exists for "a pinned frame stuck on screen after leaving a raid", and it
+            -- logged nothing at all -- not when it found an orphan, not when combat stopped
+            -- it from hiding one. So the exact report it was written to answer produced no
+            -- evidence that it had even run, let alone what it did.
+            if self.headers[i] or self.containers[i] or self.labels[i] then
+                DF:Debug("PINNED", "prune: set %d has no config in this mode%s - hiding and untracking",
+                    i, inCombat and " (in combat: hide deferred, tracking kept)" or "")
+            end
             if self.headers[i] then
                 if inCombat then
                     self.pendingPrune = true
@@ -3239,26 +3248,38 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
             return  -- Reinitialize handles everything
         end
         
+        -- ★ EVERY DEFERRAL IN THIS FILE WARNS AND NOTHING LOGGED THE RESUME. Six sites say
+        -- "in combat, deferring"; none of the drains below said anything, so a log ending
+        -- at "deferring" could not tell you whether the work ever happened -- which is the
+        -- difference between "combat delayed it" and "it never came back", and those get
+        -- reported identically. One line per drain closes it.
         -- Process pending initialization after combat
         if PinnedFrames.pendingInitialize then
             PinnedFrames.pendingInitialize = nil
+            DF:Debug("PINNED", "regen: resuming deferred Initialize")
             PinnedFrames:Initialize()
             PinnedFrames:ProcessAllSets()
         end
-        
+
         -- Process pending updates after combat
         if PinnedFrames.pendingNameListUpdate then
+            local n = 0
             for setIndex, _ in pairs(PinnedFrames.pendingNameListUpdate) do
+                n = n + 1
                 PinnedFrames:UpdateHeaderNameList(setIndex)
             end
             PinnedFrames.pendingNameListUpdate = nil
+            DF:Debug("PINNED", "regen: resumed %d deferred name-list update(s)", n)
         end
-        
+
         if PinnedFrames.pendingVisibilityUpdate then
+            local n = 0
             for setIndex, enabled in pairs(PinnedFrames.pendingVisibilityUpdate) do
+                n = n + 1
                 PinnedFrames:SetEnabled(setIndex, enabled)
             end
             PinnedFrames.pendingVisibilityUpdate = nil
+            DF:Debug("PINNED", "regen: resumed %d deferred visibility change(s)", n)
         end
 
         -- Replay a prune whose container/header hides were blocked by combat
@@ -3266,6 +3287,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
         -- After the SetEnabled replays above, so the re-run sees final state.
         if PinnedFrames.pendingPrune then
             PinnedFrames.pendingPrune = nil
+            DF:Debug("PINNED", "regen: replaying deferred prune")
             PinnedFrames:PruneOrphanedSets()
         end
 
@@ -3273,10 +3295,13 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
         -- in combat. Skipped harmlessly when pendingReinitialize already ran above
         -- (it returns early and re-applies every set's layout via ProcessAllSets).
         if PinnedFrames.pendingLayoutUpdate then
+            local n = 0
             for idx in pairs(PinnedFrames.pendingLayoutUpdate) do
+                n = n + 1
                 PinnedFrames:ApplyLayoutSettings(idx)
             end
             PinnedFrames.pendingLayoutUpdate = nil
+            DF:Debug("PINNED", "regen: resumed %d deferred layout update(s)", n)
         end
 
         -- Reset slot allocator + reapply layout now that we're out of combat.

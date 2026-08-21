@@ -30,12 +30,23 @@ function DF:RegisterLocaleRefresh(fn)
     DF._localeRefreshers[#DF._localeRefreshers + 1] = fn
 end
 function DF:RunLocaleRefreshers()
+    -- ★ SCRIPT had no success path at all -- three ERROR calls across the addon and nothing
+    -- else -- so a session where every refresher worked and one where this never ran
+    -- produced the same empty category. Silence is only worth reading as "healthy" if
+    -- something says so. One line at the end with the failure count gives the category a
+    -- heartbeat without adding per-refresher chatter.
+    local failed = 0
     for i = 1, #DF._localeRefreshers do
         local ok, err = pcall(DF._localeRefreshers[i])
-        if not ok and DF.DebugError then
-            DF:DebugError("SCRIPT", "LocaleRefresh failed: %s", tostring(err))
+        if not ok then
+            failed = failed + 1
+            if DF.DebugError then
+                DF:DebugError("SCRIPT", "LocaleRefresh failed: %s", tostring(err))
+            end
         end
     end
+    DF:Debug("SCRIPT", "RunLocaleRefreshers: %d refresher(s), %d failed",
+        #DF._localeRefreshers, failed)
 end
 
 -- Locale warnings: silent by default (see Locales/enUS.lua for rationale).
@@ -1031,7 +1042,11 @@ DF.IsTexturePresent = textureKnown
 local function warnMissingTexture(path)
     if not path or _df_warnedMissingTexture[path] then return end
     _df_warnedMissingTexture[path] = true
-    if DF.Debug then DF:Debug("TEXTURE", "Missing texture '%s' — using stock fallback", tostring(path)) end
+    -- ☠ WARN, not INFO. A missing texture is significant enough that the next lines print
+    -- it to chat, yet the log entry sat at INFO -- so anyone who raised the log level to
+    -- cut chatter lost the only line this category has. TEXTURE has exactly one call site;
+    -- filtering it out by severity left the category permanently empty.
+    if DF.DebugWarn then DF:DebugWarn("TEXTURE", "Missing texture '%s' — using stock fallback", tostring(path)) end
 
     local shown = tostring(path)
     -- Ours: show just the filename, and say plainly that it is not coming back.
@@ -7959,7 +7974,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
         
-        DF:Debug("ROLE", "PLAYER_REGEN_DISABLED (entering combat)")
+        -- ☠ (Removed) a bare "entering combat" constant. UpdateAllRoleIcons on the next
+        -- line logs "inCombat=true" itself, with more information and from the code that
+        -- actually acts on it.
         -- Update role icons (in case hideInCombat is enabled)
         if DF.UpdateAllRoleIcons then
             DF:UpdateAllRoleIcons()

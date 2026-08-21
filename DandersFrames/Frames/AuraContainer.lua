@@ -94,7 +94,13 @@ AuraContainer._ownTestPreview = true
 
 -- One-time-per-process warning latches so a guarded failure (curve bug, border
 -- taint, native dispel reject) logs ONCE, not once per button.
-local warnedCurve, warnedBorder, warnedNativeDispel = false, false, false
+local warnedCurve, warnedBorder = false, false
+-- ☠ ONE LATCH PER FAILURE, NOT PER SUBSYSTEM. warnedNativeDispel was shared between the
+-- dispel BORDER bind and the dispel TEXT bind -- two different calls with two different
+-- causes -- so whichever failed first silenced the other for the rest of the session.
+-- Same defect as the warnedRestyle/warnedInitFrame split below; found by audit, not by a
+-- report, because that is the nature of it: the second failure never spoke.
+local warnedDispelBorder, warnedDispelText = false, false
 -- (warnedMouse was a third latch here with no warning behind it — removed.)
 local warnedRestyle, warnedRefresh = false, false
 local warnedCreate = false
@@ -110,7 +116,10 @@ local warnedInitFrame, warnedInitHook = false, false
 -- because applyGroupTuning runs per frame per settings change; one line is enough
 -- to name the offending consumer.
 local warnedFilterString = false
-local warnedPandemic = false
+-- ☠ THREE SITES, THREE LATCHES. One `warnedPandemic` covered the border apply, the
+-- region add and the cover add -- so a single early failure in any one of them hid the
+-- other two for the session. Same split, same reasoning, as the dispel pair above.
+local warnedPandemicBorder, warnedPandemicRegion, warnedPandemicCover = false, false, false
 
 -- Animations SAFE to run on an OVERLAY-mode border (Aura Designer). These render
 -- entirely on DF-owned child regions of the border (edge alpha ticks + DF_DASH's
@@ -1720,8 +1729,8 @@ local function styleButton_regions(slot, config)
                     end
                     DF.Border:Apply(slot.dfPandemicBorder, bs)
                 end)
-                if not ok and not warnedPandemic then
-                    warnedPandemic = true
+                if not ok and not warnedPandemicBorder then
+                    warnedPandemicBorder = true
                     DF:DebugWarn(DBG, "pandemic border apply failed: %s", tostring(err))
                 end
             end
@@ -1979,17 +1988,20 @@ local function bindNative(slot, config)
     -- wrong before.
     --
     -- The stamp lands AFTER the pcall, not before: a bind-once flag set up front latches
-    -- a FAILED bind permanently, and warnedPandemic is one-shot per session, so the
+    -- a FAILED bind permanently, and the warn latch is one-shot per session, so the
     -- second failure would be silent too. (Same fix the duration-text and dispel binds
-    -- already carry.) A client older than PTR 8 has no AddPandemicRegion, so the gate
+    -- already carry.) ★ The latch is now warnedPandemicRegion, one of three -- this
+    -- comment said `warnedPandemic`, a single flag shared with the border and cover
+    -- sites, which meant the "second failure is silent" it warns about was ALSO true
+    -- across the three of them. Split; the reasoning here was right and under-applied. A client older than PTR 8 has no AddPandemicRegion, so the gate
     -- simply never matches and the feature is absent rather than erroring — the region
     -- is never created either, since the factory/rows only emit a spec when it exists.
     if slot.dfPandemicHolder and slot.AddPandemicRegion and not slot._boundPandemic then
         local ok, err = pcall(slot.AddPandemicRegion, slot, slot.dfPandemicHolder)
         if ok then
             slot._boundPandemic = true
-        elseif not warnedPandemic then
-            warnedPandemic = true
+        elseif not warnedPandemicRegion then
+            warnedPandemicRegion = true
             DF:DebugWarn(DBG, "AddPandemicRegion failed (build still ok): %s", tostring(err))
         end
     end
@@ -2030,8 +2042,8 @@ local function bindNative(slot, config)
             local ok, err = pcall(slot.AddPandemicRegion, slot, cover)
             if ok then
                 slot._boundPandemicCover = true
-            elseif not warnedPandemic then
-                warnedPandemic = true
+            elseif not warnedPandemicCover then
+                warnedPandemicCover = true
                 DF:DebugWarn(DBG, "AddPandemicRegion (cover) failed: %s", tostring(err))
             end
         end
@@ -2102,8 +2114,8 @@ local function bindNative(slot, config)
                 if slot.dfDispelHolder then slot.dfDispelHolder:SetAlpha(1) end
             else
                 if slot.dfDispelHolder then slot.dfDispelHolder:SetAlpha(0) end
-                if not warnedNativeDispel then
-                    warnedNativeDispel = true
+                if not warnedDispelBorder then
+                    warnedDispelBorder = true
                     DF:DebugWarn(DBG, "SetAuraBorder failed (build still ok): %s", tostring(err))
                 end
             end
@@ -2135,8 +2147,8 @@ local function bindNative(slot, config)
                     slot:SetAuraSymbol(slot.dfSymbol, opts)
                 end
             end)
-            if not ok and not warnedNativeDispel then
-                warnedNativeDispel = true
+            if not ok and not warnedDispelText then
+                warnedDispelText = true
                 DF:DebugWarn(DBG, "SetDispelTypeText failed (build still ok): %s", tostring(err))
             end
         end
@@ -5679,6 +5691,9 @@ function Handle:_applyIdentityGate()
     -- skipped when you CAN assist, not when you cannot -- so this is not the same
     -- condition in a different hat. It is driven by "is identity data trustworthy right
     -- now", which is what BOTH directions actually turn on.
+    -- Collected across both blocks and emitted once at the end; see the note in the park
+    -- block for why these were two lines and why one is better.
+    local parkFlip, hideFlip
     local newParked = (hide or self._idGateUntrusted) and true or nil
     if self._idGateParked ~= newParked then
         local prevParked = self._idGateParked
@@ -5686,9 +5701,14 @@ function Handle:_applyIdentityGate()
         -- each gated group's maxFrameCount, so it has to be set before the call — which is
         -- why this cannot simply latch on success.
         self._idGateParked = newParked
-        GateLog("park %s unit=%s why=%s",
-            newParked and "ON (gated groups -> 0)" or "OFF (gated groups restored)",
-            tostring(self.config and self.config.unit), tostring(why or "-"))
+        -- ☠ LOG DEFERRED TO THE JOINT LINE BELOW. park and hide are computed from the
+        -- SAME probe and flip together on a HELPFUL pool, so this emitted two lines per
+        -- unit per transition carrying the same unit and the same why. The sweep walks
+        -- every handle and every slot handle, and its triggers are global -- one
+        -- PLAYER_ENTERING_WORLD re-sweeps at 0s, 2s and 6s -- so a 40-unit raid produced
+        -- hundreds of lines from a single zone-in, in a category that defaults ON. One
+        -- line per transition says strictly more, because it shows both halves together.
+        parkFlip = newParked and "ON" or "OFF"
         -- ApplyTuning is the LIVE setter path and reads _idGateParked, so this is one
         -- call rather than a rebuild.
         local ok = true
@@ -5707,7 +5727,13 @@ function Handle:_applyIdentityGate()
             -- sweep recomputes the verdict from live conditions each time, so it converges
             -- on whatever is true then rather than on what was true when it broke.
             self._idGateParked = prevParked
-            GateLog("PARK APPLY FAILED unit=%s (combat=%s) — reverted, retries on next sweep",
+            -- Cleared so the joint line cannot claim a flip that was just undone.
+            parkFlip = nil
+            -- ⚠ WARN, not the INFO GateLog path: this is a hard failure that re-fires
+            -- every sweep until it clears, and at INFO it was invisible to anyone with
+            -- the log level raised -- i.e. to anyone filtering out the chatter it is
+            -- buried in.
+            DF:DebugWarn("IDGATE", "PARK APPLY FAILED unit=%s (combat=%s) - reverted, retries on next sweep",
                 tostring(self.config and self.config.unit),
                 tostring(InCombatLockdown and InCombatLockdown() or false))
         end
@@ -5715,11 +5741,7 @@ function Handle:_applyIdentityGate()
 
     local newHidden = hide or nil
     if self._idGateHidden ~= newHidden then
-        GateLog("hide %s unit=%s why=%s (vuln=%s srcRel=%s)",
-            newHidden and "ON" or "OFF",
-            tostring(self.config and self.config.unit), tostring(why or "-"),
-            tostring(self._idGateVulnerable or false),
-            tostring(self._idGateSourceRelative or false))
+        hideFlip = newHidden and "ON" or "OFF"
         self._idGateHidden = newHidden
         -- ⚠ TRANSITION ONLY. The sweep runs on every target change / roster event /
         -- loading screen; applying visibility unconditionally made every pass a
@@ -5728,6 +5750,19 @@ function Handle:_applyIdentityGate()
         -- A stable verdict now touches nothing. The rebuilt-onto-non-vulnerable
         -- case still clears its stale flag: that IS a transition.
         self:_applyVisibility()
+    end
+
+    -- ★ ONE LINE PER GATE TRANSITION, carrying both halves. Reads
+    --   gate unit=party2 why=- park=OFF hide=OFF (vuln=true srcRel=true)
+    -- where a dash in a slot means that half did not flip on this pass -- which is itself
+    -- worth seeing, because park and hide flipping apart is the interesting case and used
+    -- to be indistinguishable from two ordinary lines that happened to arrive together.
+    if parkFlip or hideFlip then
+        GateLog("gate unit=%s why=%s park=%s hide=%s (vuln=%s srcRel=%s)",
+            tostring(self.config and self.config.unit), tostring(why or "-"),
+            parkFlip or "-", hideFlip or "-",
+            tostring(self._idGateVulnerable or false),
+            tostring(self._idGateSourceRelative or false))
     end
 end
 
