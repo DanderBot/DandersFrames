@@ -1965,6 +1965,29 @@ end
 -- carrier pins to its rect). EDGE rides four dedicated strip slots
 -- (StyleGameEdgeSlot); the border rides its OWN slot (StyleGameBorderSlot) —
 -- one bindable region per slot.
+-- ☠☠ IS THIS SLOT'S BIND CURRENTLY CONFIRMED? The born-dark contract had three alpha
+-- writers and only one of them asked: RevealDispelCarriers runs on the bind's success
+-- branch, but the four stylers below raised their dim hosts on region EXISTENCE alone.
+-- The chain that slipped through review (found in the 2026-08-21 PR pass): a combat-born
+-- slot whose bind failed stays dark -- the fix working -- then out of combat the recovery
+-- re-init runs, the bind fails AGAIN (any deterministic AddDispelTypeTexture refusal),
+-- artOK is still true on that first pass because the stale latch only trips on the
+-- SECOND consecutive failure, StyleOneSlot runs, and the stylers revealed every unbound
+-- white texture at the configured opacity. One narrow door, but it was the last one.
+--
+-- _dfDispelCurveGen is the exact signal: stamped ONLY after a successful
+-- AddDispelTypeTexture pass, cleared by ResetSlotArt with the art it describes, and
+-- compared against the live generation -- so "equal" means "the carriers this styler is
+-- about to reveal are the ones the engine currently owns". A stale-but-once-bound slot
+-- reads unequal, and StyleOneSlot's re-bind runs BEFORE the stylers, so a successful
+-- re-bind still reveals on the same pass with no extra latency.
+-- ⚠ The stylers now assert `or 0` on the failure side rather than skipping the write:
+-- a slot that WAS revealed and then failed a palette re-bind must go back to dark, not
+-- keep last pass's alpha on carriers the engine may no longer colour.
+local function SlotBindConfirmed(btn)
+    return btn._dfDispelCurveGen ~= nil and btn._dfDispelCurveGen == DF.dispelCurveGen
+end
+
 local function StyleGameMainSlot(btn, frame, db)
     local w = EnsureSlotWidget(btn, frame)   -- created in DispelSlotSecureInit (secure)
 
@@ -2018,7 +2041,8 @@ local function StyleGameMainSlot(btn, frame, db)
             -- 2026-08-13) — the alpha channel is the engine's once bound. The dim host
             -- is a plain DF frame, so this write is ours at any time, combat included.
             if w.nativeGradientDim then
-                w.nativeGradientDim:SetAlpha(showGradient and ResolveGradientAlpha(db) or 0)
+                w.nativeGradientDim:SetAlpha((showGradient and SlotBindConfirmed(btn))
+                    and ResolveGradientAlpha(db) or 0)
             end
             -- Normalise the carrier's own alpha where the write still lands (older
             -- builds left 0.3 here; a client where region writes work would otherwise
@@ -2071,7 +2095,9 @@ local function StyleGameBadge(btn, frame, db)
     badge:SetPoint(pos, btn.dfDispelBadgeHolder, pos, db.dispelIconOffsetX or 0, db.dispelIconOffsetY or 0)
     badge:SetSize(size, size)
     -- Opacity on the dim host; bound texture normalised (dim-host rule, StyleGameMainSlot).
-    if btn.dfDispelBadgeDim then btn.dfDispelBadgeDim:SetAlpha(db.dispelIconAlpha or 1) end
+    if btn.dfDispelBadgeDim then
+        btn.dfDispelBadgeDim:SetAlpha(SlotBindConfirmed(btn) and (db.dispelIconAlpha or 1) or 0)
+    end
     pcall(badge.SetAlpha, badge, 1)
     -- The badge holder re-levels above (contentOverlay band); the DIM must follow or the
     -- art — the dim's region — stays at the stale level. Same rule as ring and edges.
@@ -2098,7 +2124,9 @@ local function StyleGameBorderSlot(btn, frame, db)
     -- layout-version bumps, so a resize catches up on the next dispel pass.
     ApplyDispelRingGeometry(ring, btn, db, frame:GetWidth(), frame:GetHeight())
     -- Opacity on the dim host; bound texture normalised (dim-host rule, StyleGameMainSlot).
-    if btn.dfDispelRingDim then btn.dfDispelRingDim:SetAlpha(db.dispelBorderAlpha or 0.8) end
+    if btn.dfDispelRingDim then
+        btn.dfDispelRingDim:SetAlpha(SlotBindConfirmed(btn) and (db.dispelBorderAlpha or 0.8) or 0)
+    end
     pcall(ring.SetAlpha, ring, 1)
     ring:SetBlendMode("BLEND")
     -- ☠ RE-LEVEL EVERY PASS — the init's value goes stale when the Frame Level slider
@@ -2159,7 +2187,7 @@ local function StyleGameEdgeSlot(btn, frame, db, edge)
     -- StyleGameMainSlot). ☠ tex:SetAlpha here LOOKED like it worked for the strip
     -- styles — that was the pre-bind default surviving, not the write landing.
     local dim = btn.dfDispelEdgeDim and btn.dfDispelEdgeDim[edge]
-    if dim then dim:SetAlpha(ResolveGradientAlpha(db)) end
+    if dim then dim:SetAlpha(SlotBindConfirmed(btn) and ResolveGradientAlpha(db) or 0) end
     pcall(tex.SetAlpha, tex, 1)
     -- ☠ RE-LEVEL EVERY PASS — the init's edgeLvl goes stale when the Frame Level
     -- slider moves the band. Holder AND dim: the strip is the dim's region, so the
