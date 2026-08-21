@@ -107,28 +107,12 @@ function Engine:ForceRefreshAllFrames()
     -- Refresh the test previews too when the editor is used with test mode open.
     if (DF.testMode or DF.raidTestMode) and DF.UpdateAllTestAuraDesigner then
         DF:UpdateAllTestAuraDesigner()
-
-        -- ☠ AND RE-MEASURE INDICATOR INFO, which the line above had just invalidated.
-        -- Test mode's Indicator Info caches a rect per element and only rebuilds from
-        -- DF:RefreshTestFrames / DF:UpdateRaidTestFrames -- neither of which is on any
-        -- Aura Designer path. So every editor action that reaches this function moved,
-        -- created or destroyed indicators behind a region list that nobody rebuilt:
-        -- switching the designer preset with test mode open left the new preset's
-        -- indicators unhoverable until Indicator Info was toggled off and on, and the
-        -- elements it had NOT touched kept their marks throughout, which is what made
-        -- it read as "only the defensive icon has info" (Krathe, 2026-08-21).
-        -- ★ HERE rather than at the ~20 call sites: this is the single chokepoint every
-        -- one of them already funnels through, and a fix per site is a fix for the
-        -- sites someone happened to look at.
-        -- Deferred one tick for the reason the test-mode refresh defers its own call:
-        -- the containers were rebuilt on THIS tick and an anchor-derived rect is 0
-        -- until the layout settles, so measuring now would find nothing. (The settle
-        -- retry would recover it, but starting from a measurable pass is cheaper and
-        -- keeps the marks from blinking.)
-        if DF.UpdateTestLabels and C_Timer and C_Timer.After then
-            C_Timer.After(0, function()
-                if DF.UpdateTestLabels then DF:UpdateTestLabels() end
-            end)
-        end
+        -- ⚠ NO Indicator Info rebuild here, deliberately. One was added at this line
+        -- and it fixed only the editor's own actions: the designer PRESET bar changes
+        -- every indicator on screen without going through this function at all, so the
+        -- marks stayed stale exactly where they were first reported. The rebuild now
+        -- hangs off Factory:SyncFrame / Factory:ClearFrame — the mutation itself, which
+        -- every path reaches by definition. Do not re-add a caller-side hook here; it
+        -- would double-fire the one below and still not cover anything new.
     end
 end

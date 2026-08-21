@@ -1108,5 +1108,41 @@ function TL:Clear()
     for k in pairs(regionOf) do regionOf[k] = nil end
 end
 
+-- ============================================================
+-- INVALIDATION — the Aura Designer moved underneath us
+-- ============================================================
+-- ☠ HOOKED TO THE MUTATION, NOT TO ITS CALLERS. The region list is rebuilt from
+-- DF:RefreshTestFrames / DF:UpdateRaidTestFrames. Every TEST PANEL control reaches
+-- those -- tick "Buffs" and the mark appears, which is why the feature looked fine --
+-- and nothing on a DESIGNER PRESET path reaches them at all. Switching the preset
+-- therefore rebuilt every indicator behind a list nobody rebuilt: the new ones were
+-- unhoverable until Indicator Info was toggled off and on, while the elements the
+-- switch had not touched kept their marks throughout, which is what made it read as
+-- "only the defensive icon has info" (Krathe, 2026-08-21).
+-- ⚠ Hooking Engine:ForceRefreshAllFrames was tried first and fixed the editor's own
+-- actions only — the preset bar does not go through it. Chasing callers was the error,
+-- not the choice of caller.
+-- ★ The one thing true of EVERY path, present and future: if an indicator appeared,
+-- moved or vanished on a test frame, Factory:SyncFrame or Factory:ClearFrame ran on
+-- that frame. That is where this is called from, and it is why no caller has to know
+-- this feature exists.
+-- Coalesced onto a single next-tick pass: a refresh calls SyncFrame once per test
+-- frame (10 by default, 40 at most) and they all want the same one rebuild. The tick
+-- of delay is needed regardless — a container built this tick has no rect until the
+-- layout settles — and TL:Update's settle retry covers a tick not being enough.
+local invalidatePending = false
+function TL:Invalidate()
+    if invalidatePending then return end
+    if not labelsWanted() then return end
+    invalidatePending = true
+    C_Timer.After(0, function()
+        invalidatePending = false
+        -- Re-asked on arrival: test mode can end, or the option be switched off,
+        -- between the request and the pass.
+        if labelsWanted() then TL:Update() end
+    end)
+end
+
 function DF:UpdateTestLabels() TL:Update() end
 function DF:ClearTestLabels()  TL:Clear()  end
+function DF:InvalidateTestLabels() TL:Invalidate() end

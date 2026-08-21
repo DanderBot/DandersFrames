@@ -5923,6 +5923,15 @@ function Factory:SyncFrame(frame)
     -- framealpha / nametext / healthtext: intentionally NOT synced. No read-free,
     -- combat-safe port exists (see file-foot notes) — their GUI controls get the
     -- "Blizzard limitation" overlay in P4.7.
+
+    -- Test mode's Indicator Info measures these placements and caches a rect per one,
+    -- so a sync that moved, created or destroyed any of them has just invalidated its
+    -- region list. Called HERE rather than from whatever asked for the sync: this is
+    -- the mutation itself, so no caller can forget it (TL:Invalidate carries the full
+    -- reasoning, and coalesces the per-frame calls into one pass).
+    -- ⚠ dfIsTestFrame FIRST: this function is per-UNIT_AURA hot on live frames, and
+    -- that field read is the whole cost there.
+    if frame.dfIsTestFrame and DF.InvalidateTestLabels then DF:InvalidateTestLabels() end
 end
 
 -- ============================================================
@@ -6112,6 +6121,11 @@ function Factory:ClearFrame(frame)
     -- Sound: reconcile to config with AD now off -> unregisters every applied-sound handle
     -- (combat-deferred to regen inside SyncSound). No leaked registrations.
     self:SyncSound(frame)
+
+    -- The teardown half of the pair in SyncFrame: everything Indicator Info had a rect
+    -- for is gone, and a mark left pointing at a destroyed placement is worse than no
+    -- mark. Same guard, same reasoning.
+    if frame.dfIsTestFrame and DF.InvalidateTestLabels then DF:InvalidateTestLabels() end
 end
 
 -- ============================================================
