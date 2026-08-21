@@ -1713,6 +1713,24 @@ function DF:LightweightUpdateHighlight(highlightType)
             if DF.InvalidateHighlightStyle then DF:InvalidateHighlightStyle(highlight) end
             highlight:SetAlpha(alpha)
 
+            -- ☠ SNAP THE SAME WAY THE REAL RENDERER DOES. Because this writes the
+            -- textures directly it also has to do the styler's pixel snapping, and it
+            -- did not -- so the drag/Enter preview drew an UNSNAPPED border and the
+            -- first real update after it (a mouseover, a target change) redrew the
+            -- snapped one. That is the whole of "pressing enter on the field that sets
+            -- the thickness visually fixes it, but it grows by 1 pixel again as soon as
+            -- you mouseover or target someone" (Renegade, 2026-08-22): the preview and
+            -- the render disagreed, and only the preview was wrong.
+            -- ★ Through the SHARED helpers, not a copy: a preview that snaps ALMOST
+            -- like the renderer is the same bug again, one rounding rule later. If the
+            -- helpers are missing (a partial load), fall through to the raw values --
+            -- an unsnapped preview beats no preview.
+            local hlScale = highlight.GetEffectiveScale and highlight:GetEffectiveScale()
+            if hlScale and DF.SnapHighlightThickness then
+                thickness = DF:SnapHighlightThickness(thickness, hlScale)
+                inset = DF:SnapHighlightInset(inset, hlScale)
+            end
+
             -- Update border textures - check both naming conventions
             local top = highlight.top or highlight.topLine
             local bottom = highlight.bottom or highlight.bottomLine

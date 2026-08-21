@@ -360,6 +360,42 @@ function DF:InvalidateHighlightStyle(ch)
     if ch then ch._hlSig = nil end
 end
 
+-- ☠☠ THE ONE PLACE HIGHLIGHT METRICS ARE SNAPPED. Exposed on DF because the
+-- drag-time preview (DF:LightweightUpdateHighlight in Core.lua) writes the four line
+-- textures directly, bypassing ApplyHighlightStyle, and was not snapping at all --
+-- so the preview drew an unsnapped border and the first real update after it
+-- (mouseover, target change) redrew the snapped one. "The border grows by 1 pixel as
+-- soon as you mouseover or target any frame. Pressing enter on the field that sets
+-- the thickness visually fixes it" (Renegade, 2026-08-22) is exactly that: two
+-- renderers of one number, one of them snapping.
+--
+-- ☠ SNAP AGAINST THE FRAME'S OWN EFFECTIVE SCALE -- ch:GetEffectiveScale() -- and
+-- NOT against DF:GetPixelScale(). They are different quantities and mixing them is
+-- what made the border a pixel too thick: GetPixelScale is (768/physicalHeight) /
+-- UIParent scale, i.e. UI-units-per-device-pixel, while these values have to be
+-- converted to device pixels through the scale the texture is actually drawn at.
+-- They coincide only when the user runs the "pixel perfect" UI scale exactly, which
+-- is why this hid for so long. See the pre-snap note in DF:UpdateHighlights.
+--
+-- Round UP (with an epsilon for exact integers) rather than to nearest: a thickness
+-- of 1 must never round to 0 device pixels and vanish, and every +1 step on the
+-- slider has to be visible.
+function DF:SnapHighlightThickness(thickness, scale)
+    if not scale or scale <= 0 then return thickness end
+    local px = (thickness or 0) * scale                -- desired thickness in device pixels
+    px = math.max(1, math.ceil(px - 0.01))
+    return px / scale
+end
+
+-- Inset lands on the physical grid too: a fractional inset makes a 1px edge straddle
+-- two rows and render as two half-lit ones. Nearest, not up -- an inset has no
+-- minimum and 0 must stay 0.
+function DF:SnapHighlightInset(inset, scale)
+    if not inset or inset == 0 then return inset end
+    if not scale or scale <= 0 then return inset end
+    return math.floor(inset * scale + 0.5) / scale
+end
+
 -- ☠ THE SIGNATURE MUST INCLUDE THE THREE IMPLICIT INPUTS, not just the arguments.
 -- This function is 22.4% of trash-fight allocation and target-switch driven, so it
 -- is worth skipping -- but "hide everything then re-apply" means a missed input
@@ -410,17 +446,11 @@ local function ApplyHighlightStyle(ch, mode, thickness, inset, r, g, b, alpha, d
     HideGlowLayers(ch)
     SelectionAnimator_Remove(ch)
 
-    -- Snap thickness to whole screen pixels so every +1 step is visible.
-    -- `scale` is the one read above for the signature -- deliberately the same
-    -- value, so what gets cached and what gets applied can never disagree.
-    local px = thickness * scale              -- desired thickness in pixels
-    px = math.max(1, math.ceil(px - 0.01))    -- round up (with tiny epsilon for exact integers)
-    thickness = px / scale
-    -- Snap the inset to whole screen pixels too, so the border edges land on the
-    -- physical grid (a fractional inset makes a 1px edge straddle two rows).
-    if inset and inset ~= 0 then
-        inset = math.floor(inset * scale + 0.5) / scale
-    end
+    -- Through the shared helpers, so the drag-time preview snaps identically.
+    -- `scale` is the one read above for the signature -- deliberately the same value,
+    -- so what gets cached and what gets applied can never disagree.
+    thickness = DF:SnapHighlightThickness(thickness, scale)
+    inset = DF:SnapHighlightInset(inset, scale)
     
     if mode == "NONE" then
         ch:Hide()
@@ -854,12 +884,21 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         local selThickness = db.selectionHighlightThickness or 2
         local selInset = db.selectionHighlightInset or 0
         
-        -- Apply pixel-perfect adjustments (use PixelPerfectThickness to ensure min 1px)
-        if db.pixelPerfect then
-            selThickness = DF:PixelPerfectThickness(selThickness)
-            selInset = DF:PixelPerfect(selInset)
-        end
-        
+        -- ☠☠ NO PRE-SNAP HERE. ApplyHighlightStyle snaps thickness and inset itself,
+        -- unconditionally and against the frame's own effective scale, so this block
+        -- was a SECOND snap against a DIFFERENT scale convention
+        -- (DF:GetPixelScale = UI-units-per-device-pixel) feeding the first. Snapping
+        -- twice does not converge -- it inflates. Measured across real setups:
+        --     1440p, UI scale 1.0 : set 1 -> drew 2px, set 2 -> 3px, set 3 -> 4px
+        --     1080p, UI scale 1.0 : set 2 -> drew 3px
+        --     1440p, UI scale 0.5333 (the pixel-perfect scale): no difference
+        -- i.e. exactly the report's title, "Solid Border is 1 pixel thicker than
+        -- selected" -- and invisible to anyone running the pixel-perfect UI scale,
+        -- where the two conventions coincide and the second snap is a no-op.
+        -- ⚠ Removing it does not lose snapping: ApplyHighlightStyle's snap is not
+        -- gated on db.pixelPerfect, so these still land on whole device pixels. It
+        -- only stops them being snapped twice.
+
         ApplyHighlightStyle(
             selectionHighlight,
             selectionMode,
@@ -891,12 +930,8 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         local hoverThickness = db.hoverHighlightThickness or 2
         local hoverInset = db.hoverHighlightInset or 0
         
-        -- Apply pixel-perfect adjustments
-        if db.pixelPerfect then
-            hoverThickness = DF:PixelPerfectThickness(hoverThickness)
-            hoverInset = DF:PixelPerfect(hoverInset)
-        end
-        
+        -- No pre-snap -- see the selection block above. ApplyHighlightStyle owns it.
+
         ApplyHighlightStyle(
             hoverHighlight,
             hoverMode,
@@ -979,12 +1014,8 @@ function DF:UpdateHighlights(frame, forceSelection, forceAggro)
         local aggroThickness = db.aggroHighlightThickness or 2
         local aggroInset = db.aggroHighlightInset or 0
         
-        -- Apply pixel-perfect adjustments (use PixelPerfectThickness to ensure min 1px)
-        if db.pixelPerfect then
-            aggroThickness = DF:PixelPerfectThickness(aggroThickness)
-            aggroInset = DF:PixelPerfect(aggroInset)
-        end
-        
+        -- No pre-snap -- see the selection block above. ApplyHighlightStyle owns it.
+
         ApplyHighlightStyle(
             aggroHighlight,
             aggroMode,
