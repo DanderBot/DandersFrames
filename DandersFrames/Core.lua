@@ -30,12 +30,23 @@ function DF:RegisterLocaleRefresh(fn)
     DF._localeRefreshers[#DF._localeRefreshers + 1] = fn
 end
 function DF:RunLocaleRefreshers()
+    -- ★ SCRIPT had no success path at all -- three ERROR calls across the addon and nothing
+    -- else -- so a session where every refresher worked and one where this never ran
+    -- produced the same empty category. Silence is only worth reading as "healthy" if
+    -- something says so. One line at the end with the failure count gives the category a
+    -- heartbeat without adding per-refresher chatter.
+    local failed = 0
     for i = 1, #DF._localeRefreshers do
         local ok, err = pcall(DF._localeRefreshers[i])
-        if not ok and DF.DebugError then
-            DF:DebugError("SCRIPT", "LocaleRefresh failed: %s", tostring(err))
+        if not ok then
+            failed = failed + 1
+            if DF.DebugError then
+                DF:DebugError("SCRIPT", "LocaleRefresh failed: %s", tostring(err))
+            end
         end
     end
+    DF:Debug("SCRIPT", "RunLocaleRefreshers: %d refresher(s), %d failed",
+        #DF._localeRefreshers, failed)
 end
 
 -- Locale warnings: silent by default (see Locales/enUS.lua for rationale).

@@ -869,6 +869,19 @@ function R:ResolveSelection(selection, showAll)
     local anySel = (selection.presets and next(selection.presets))
         or (selection.customs and next(selection.customs))
     if not anySel and not selection.uncategorised then
+        -- ☠ THE FAIL-OPEN, AND IT IS THIS CATEGORY'S MOST CONSEQUENTIAL BRANCH. "Nothing
+        -- selected" resolves to SHOW EVERYTHING -- the v4->v5 "all buffs until I toggle
+        -- something" signature -- and it logged nothing at its source. It was visible only
+        -- second-hand, as include=none in a container dump, and only for some rows. FILTER
+        -- meanwhile had one INFO in the whole addon (a one-shot migration replay), so the
+        -- category was effectively failure-only and this was the failure it was missing.
+        -- ⚠ Latched on the selection table: this sits on the render path, so an unlatched
+        -- line would fire per row per frame. The table is rebuilt when the selection
+        -- changes, so a genuine re-occurrence still reports.
+        if not selection._dfFailOpenLogged then
+            selection._dfFailOpenLogged = true
+            DF:DebugWarn("FILTER", "ResolveSelection: nothing selected - falling back to SHOW ALL")
+        end
         return { kind = "all" } -- nothing selected: safe fallback
     end
 

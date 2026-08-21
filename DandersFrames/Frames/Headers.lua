@@ -5015,13 +5015,22 @@ function DF:UpdateHeaderVisibility(skipRaidReposition)
 end
 
 function DF:UpdateRaidHeaderVisibility(skipReposition)
+    -- ★ THE THREE SILENT EXITS, AND THEY ARE THE THREE STATES USERS REPORT. The entry log
+    -- sat BELOW all of them, so "my raid frames didn't come back" produced no line at all
+    -- on every path that could actually cause it -- the log looked as though the function
+    -- had never been called. Each reason is now distinguishable from the others and from
+    -- a normal run.
     if InCombatLockdown() then
         DF.pendingRaidHeaderVisibility = true
+        DF:Debug("VISIBILITY", "UpdateRaidHeaderVisibility: in combat, deferred to regen")
         return
     end
 
     -- Guard against infinite recursion: SetEnabled(false) calls back here
-    if DF._updatingRaidHeaderVisibility then return end
+    if DF._updatingRaidHeaderVisibility then
+        DF:Debug("VISIBILITY", "UpdateRaidHeaderVisibility: re-entered while running, dropped")
+        return
+    end
     DF._updatingRaidHeaderVisibility = true
 
     DF:Debug("VISIBILITY", "UpdateRaidHeaderVisibility: skipReposition=%s", tostring(skipReposition))
@@ -5031,6 +5040,7 @@ function DF:UpdateRaidHeaderVisibility(skipReposition)
     -- calls to UpdateRaidHeaderVisibility are permanently blocked until ReloadUI.
     if DF.testMode or DF.raidTestMode then
         DF._updatingRaidHeaderVisibility = nil
+        DF:Debug("VISIBILITY", "UpdateRaidHeaderVisibility: test mode active, live frames left hidden")
         return
     end
 
