@@ -774,8 +774,40 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- category obviously misses things, so saying that adds nothing. What is
             -- surprising is that switching on every category still is not All
             -- Debuffs, because Blizzard tagged some debuffs with none of them.
-            filterGroup:AddWidget(GUI:CreateLabel(self.child,
-                "|cff888888" .. L["Only All Debuffs shows every debuff: all the categories combined still miss some debuffs."] .. "|r", 250), 45)
+            --
+            -- ☠ A CAUTION BANNER, CONDITIONAL — not a permanent grey caption. It was a
+            -- banner on the old shared Filters page (catCaution, gated on this same
+            -- switch) and became a static label when the debuff half moved here in
+            -- cf70ac00; that page still carries a "see catCaution" comment pointing at
+            -- the symbol the move deleted. Two things were lost with it:
+            --   * it was CONDITIONAL. All Debuffs is on by default and is the correct
+            --     setting, so a permanent caption warns the overwhelming majority of
+            --     users about a state they are not in -- and the reader who IS in it
+            --     gets no more emphasis than the reader who is not.
+            --   * it was a CAUTION TONE. The completeness gap is Blizzard's and cannot
+            --     be fixed from here: no combination of these tickboxes is complete.
+            --     That is a genuine "this will silently miss things", not a footnote,
+            --     and grey body text is the register this page uses for ordinary help.
+            -- ⚠ The page-banner slot is deliberately NOT where this goes. That was
+            -- tried and reverted on the old page: a warning about one switch, four
+            -- inches from it, displaced the tab's own explanation while it showed.
+            -- It belongs against the control that causes it.
+            --
+            -- ⚠ TEXT SET ONCE, AT CREATION, AND NEVER RE-SET. A banner whose
+            -- SetText/SetHTML is driven from a refresh can feed the refreshContent
+            -- loop that froze the GUI once before, so this one only ever gets hideOn.
+            -- Do not add a refreshContent to it.
+            local catCaution = GUI:CreateInfoBanner(self.child, {
+                tone = "caution",
+                text = L["Only All Debuffs shows every debuff: all the categories combined still miss some debuffs."],
+                minHeight = 30,
+            })
+            -- Shown only while All Debuffs is OFF — the state the warning is about, and
+            -- turning that switch back on is what it tells you to do. A hidden group
+            -- child collapses to nothing (LayoutChildren's entryVisible), so the rows
+            -- below close up rather than leaving a hole where it would have been.
+            catCaution.hideOn = function(d) return (d.directDebuffShowAll and true) or false end
+            filterGroup:AddWidget(catCaution, catCaution.layoutHeight or 45)
 
             -- Blizzard's fixed categories, in the order the old page listed them.
             local DEBUFF_CATEGORIES = {
