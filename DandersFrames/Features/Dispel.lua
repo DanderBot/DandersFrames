@@ -2220,7 +2220,26 @@ end
 -- Drop EVERY stash hanging off the button. The tainted painters (icon, and the widget
 -- itself via EnsureSlotWidget) rebuild lazily from nil; the bound carriers do not, which
 -- is why the caller re-runs DispelSlotSecureInit behind this.
+-- Darken every dim host of the generation being abandoned. The textures hanging off them
+-- cannot be destroyed, and a bound one keeps whatever the engine last painted on it; left
+-- at its revealed alpha it renders as a stale-colour ghost under the next generation's art.
+-- The dim hosts are plain DF frames and are never restricted, so this write is legal on
+-- a slot whose subtree the client has locked -- that is the whole point of their existing.
+-- pcall'd per host regardless: this is the recovery path and must not throw out of it.
+local function DarkenAbandonedDims(btn)
+    local w = btn.dfDispelWidget
+    if w and w.nativeGradientDim then pcall(w.nativeGradientDim.SetAlpha, w.nativeGradientDim, 0) end
+    if type(btn.dfDispelEdgeDim) == "table" then
+        for _, dim in pairs(btn.dfDispelEdgeDim) do
+            if dim then pcall(dim.SetAlpha, dim, 0) end
+        end
+    end
+    if btn.dfDispelRingDim then pcall(btn.dfDispelRingDim.SetAlpha, btn.dfDispelRingDim, 0) end
+    if btn.dfDispelBadgeDim then pcall(btn.dfDispelBadgeDim.SetAlpha, btn.dfDispelBadgeDim, 0) end
+end
+
 local function ResetSlotArt(btn)
+    DarkenAbandonedDims(btn)
     btn.dfDispelWidget = nil
     btn._dfDispelCarriers = nil
     -- The two diagnostic stamps go with the art they describe: a survivor would describe
@@ -2443,6 +2462,23 @@ local function dispelFilterRecords(slots, db, frame)
                             end
                         elseif btn then
                             btn._dfDispelInitErr = nil
+                        end
+                        -- ☠☠ BREAK THE DRIVE LATCH, OR THE RECOVERY NEVER RUNS. The rebuild
+                        -- for a half-built slot lives in StyleDispelSlots, and
+                        -- DriveDispelOverlayFactory only reaches it while
+                        -- dfDispelFactoryVersion / dfDispelStyledGen are NOT latched. Buttons
+                        -- are born lazily mid-combat WITHOUT bumping the handle generation, so
+                        -- a container styled before the pull keeps its latch through a refused
+                        -- birth and the fast path returns on every drive after it -- the slot
+                        -- stayed dead until an unrelated settings change or rebuild happened to
+                        -- break the latch. Clearing the version here (per frame, no global
+                        -- invalidation) makes the first out-of-combat drive re-run the pass.
+                        -- Two failures qualify: the init threw, or it returned but the bind
+                        -- inside it did not finish (a refused bind is caught INSIDE
+                        -- BindDispelCarriers, so okI is true for it). Icon slots bind nothing
+                        -- and never stamp a result, hence the roles test.
+                        if si.roles and frame and (not okI or not DispelCarriersBound(btn)) then
+                            frame.dfDispelFactoryVersion = nil
                         end
                     end }
     end

@@ -1477,6 +1477,15 @@ local function styleButton_regions(slot, config)
             -- was left at rung 1 against a +2 border. (Holder-hosted regions are
             -- registrar-legal — the duration text binds from a holder the same way.)
             slot.dfDispelHolder = makeHolder(host, dispelSpec.level or LEVELS.DISPEL_RING)
+            -- ☠ BORN DARK, revealed by bindNative only once the dispel bind has
+            -- succeeded. This is OUR texture with the ENGINE'S colour: between creation
+            -- and a completed AddDispelTypeTexture nothing colours it, so a shown holder
+            -- renders it at the default vertex colour -- a WHITE square ring on every
+            -- visible debuff icon. Same failure family as the overlay carriers in
+            -- Features/Dispel.lua, closed the same way: the alpha lives on the holder,
+            -- a DF-owned frame that is never restricted, so it stays ours to write on a
+            -- slot the client has locked.
+            slot.dfDispelHolder:SetAlpha(0)
             slot.dfAuraBorder = slot.dfDispelHolder:CreateTexture(nil, "OVERLAY")
             -- The native Color style only VERTEX-TINTS the region (SetAuraBorderColor →
             -- SetVertexColor; no file is ever assigned) — a blank texture renders
@@ -2086,9 +2095,17 @@ local function bindNative(slot, config)
             if ok then
                 slot._boundAuraBorder = true
                 slot._dfDispelCurveGen = DF.dispelCurveGen
-            elseif not warnedNativeDispel then
-                warnedNativeDispel = true
-                DF:DebugWarn(DBG, "SetAuraBorder failed (build still ok): %s", tostring(err))
+                -- ★ REVEAL ONLY NOW -- the holder was born at alpha 0 (styleButton_regions).
+                -- ClearDispelTypeTextures ran inside the pcall above, so on the FAILURE
+                -- branch the ring may be cleared-but-unbound: hide it again rather than
+                -- leave a white ring standing until the retry on the next restyle.
+                if slot.dfDispelHolder then slot.dfDispelHolder:SetAlpha(1) end
+            else
+                if slot.dfDispelHolder then slot.dfDispelHolder:SetAlpha(0) end
+                if not warnedNativeDispel then
+                    warnedNativeDispel = true
+                    DF:DebugWarn(DBG, "SetAuraBorder failed (build still ok): %s", tostring(err))
+                end
             end
         end
         if slot.dfSymbol and (slot.SetDispelTypeText or slot.SetAuraSymbol) and not slot._boundSymbol then
@@ -4276,6 +4293,11 @@ function Handle:_paintTestSlot(slot, index)
             end
         end
         slot.dfAuraBorder:SetShown(shown and true or false)
+        -- The holder is born at alpha 0 and normally revealed by the bind (bindNative);
+        -- the preview never binds, it paints the colour itself just above, so it is the
+        -- reveal here. Only when it actually coloured the ring -- an unpainted one is
+        -- exactly the white ring the dark birth exists to prevent.
+        if slot.dfDispelHolder then slot.dfDispelHolder:SetAlpha(shown and 1 or 0) end
     end
     -- Dispel symbol: no native SetAuraSymbol bind in test mode -> fake the colourblind
     -- letter ourselves (house rule: every native-driven region renders in test, or the

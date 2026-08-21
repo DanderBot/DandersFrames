@@ -901,7 +901,16 @@ function DF:GetDispelColorCurve()
     -- the same pattern as Colors.lua / HealthFade.lua. Exact-integer X hits
     -- land on their point, so Linear is safe for the discrete type IDs.
     local curve = C_CurveUtil.CreateColorCurve()
-    if not curve then return nil end
+    if not curve then
+        -- Without the curve every dispel tint falls back to the name-keyed map, which
+        -- no-ops on a secret dispel name. Say so once; this is the one residual route
+        -- back to an untinted carrier and it must not be silent.
+        if not DF._warnedNoDispelCurve then
+            DF._warnedNoDispelCurve = true
+            if DF.DebugWarn then DF:DebugWarn("DISPEL", "CreateColorCurve returned nil - dispel tint is falling back to the colour map") end
+        end
+        return nil
+    end
     if curve.SetType and Enum.LuaCurveType then curve:SetType(Enum.LuaCurveType.Linear) end
     for _, p in ipairs(points) do
         curve:AddPoint(p[1], p[2])
