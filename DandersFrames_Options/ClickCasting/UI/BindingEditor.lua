@@ -2019,53 +2019,52 @@ function CC:RefreshSpellGrid(skipScrollReset)
     local totalCells = 0
     local yOffset = 0  -- Track Y offset for list views
     
-    -- Add special actions first (Target and Menu) - only if not text filtering and showing all spell types
+    -- Add special actions first - only if not text filtering and showing all spell types
     local spellTypeFilter = self.selectedSpellType or "all"
     if (not searchFilter or searchFilter == "") and spellTypeFilter == "all" then
-        if viewLayout == "list" then
-            -- List-style view special actions
-            local targetRow = self:CreateSpellListRow(self.scrollContent, {name = L["Target Unit"], icon = "Interface\\CURSOR\\Crosshairs", spellId = nil}, 1, true, "target")
-            targetRow:SetPoint("TOPLEFT", 0, -yOffset)
-            table.insert(CC.spellCells, targetRow)
+        -- ☠ ONE LIST, TWO RENDERERS. The two view layouts each used to spell the special
+        -- actions out by hand, so they were two parallel lists that had to be kept in
+        -- step by hand -- and were not: Set Focus and Assist were added to the LIST
+        -- branch only, so the Grid view has been silently missing two bindable actions
+        -- ever since (Neosaro, 2026-08-18). Nothing failed and nothing logged; the grid
+        -- simply had two fewer cells than the list of the same thing.
+        -- The layouts now differ only in HOW a row is drawn and where it is placed,
+        -- which is the only thing a view layout is entitled to differ in. Adding a
+        -- fifth action means adding one line here and it appears in both.
+        -- ⚠ Names are localised at USE, not stored localised: this table is built once
+        -- at file scope-ish here and a cached L[] string would survive a locale change
+        -- (the same rule the debuff category tables follow).
+        -- ⚠ The icons are duplicated in two actionType dispatches in this file (the
+        -- binding-icon resolver and the picker's existing-binding branch). Those two are
+        -- complete -- all four actions -- and are keyed off a SAVED binding rather than
+        -- off this palette, so they are a different question from "what can be picked".
+        -- Kept separate deliberately; if a fifth action is added, they need it too.
+        local SPECIAL_ACTIONS = {
+            { key = "target", name = "Target Unit", icon = "Interface\\CURSOR\\Crosshairs" },
+            { key = "menu",   name = "Open Menu",   icon = "Interface\\Buttons\\UI-GuildButton-OfficerNote-Up" },
+            { key = "focus",  name = "Set Focus",   icon = "Interface\\Icons\\Ability_Hunter_MasterMarksman" },
+            { key = "assist", name = "Assist",      icon = "Interface\\Icons\\Ability_Hunter_SniperShot" },
+        }
+        for i, action in ipairs(SPECIAL_ACTIONS) do
+            local cell
+            if viewLayout == "list" then
+                -- The list row takes its index for the alternating row shade, so it gets
+                -- the loop counter -- which is what the hand-written 1/2/3/4 were.
+                cell = self:CreateSpellListRow(self.scrollContent,
+                    { name = L[action.name], icon = action.icon, spellId = nil },
+                    i, true, action.key)
+                cell:SetPoint("TOPLEFT", 0, -yOffset)
+                yOffset = yOffset + cellHeight + padding
+                row = row + 1
+            else
+                cell = self:CreateSpecialActionCell(self.scrollContent, action.key,
+                    L[action.name], action.icon)
+                cell:SetPoint("TOPLEFT", col * (cellWidth + padding), -row * (cellHeight + padding))
+                col = col + 1
+                if col >= cols then col = 0; row = row + 1 end
+            end
+            table.insert(CC.spellCells, cell)
             totalCells = totalCells + 1
-            yOffset = yOffset + cellHeight + padding
-            row = row + 1
-            
-            local menuRow = self:CreateSpellListRow(self.scrollContent, {name = L["Open Menu"], icon = "Interface\\Buttons\\UI-GuildButton-OfficerNote-Up", spellId = nil}, 2, true, "menu")
-            menuRow:SetPoint("TOPLEFT", 0, -yOffset)
-            table.insert(CC.spellCells, menuRow)
-            totalCells = totalCells + 1
-            yOffset = yOffset + cellHeight + padding
-            row = row + 1
-            
-            local focusRow = self:CreateSpellListRow(self.scrollContent, {name = L["Set Focus"], icon = "Interface\\Icons\\Ability_Hunter_MasterMarksman", spellId = nil}, 3, true, "focus")
-            focusRow:SetPoint("TOPLEFT", 0, -yOffset)
-            table.insert(CC.spellCells, focusRow)
-            totalCells = totalCells + 1
-            yOffset = yOffset + cellHeight + padding
-            row = row + 1
-            
-            local assistRow = self:CreateSpellListRow(self.scrollContent, {name = L["Assist"], icon = "Interface\\Icons\\Ability_Hunter_SniperShot", spellId = nil}, 4, true, "assist")
-            assistRow:SetPoint("TOPLEFT", 0, -yOffset)
-            table.insert(CC.spellCells, assistRow)
-            totalCells = totalCells + 1
-            yOffset = yOffset + cellHeight + padding
-            row = row + 1
-        else
-            -- Grid view special actions
-            local targetCell = self:CreateSpecialActionCell(self.scrollContent, "target", L["Target Unit"], "Interface\\CURSOR\\Crosshairs")
-            targetCell:SetPoint("TOPLEFT", col * (cellWidth + padding), -row * (cellHeight + padding))
-            table.insert(CC.spellCells, targetCell)
-            totalCells = totalCells + 1
-            col = col + 1
-            if col >= cols then col = 0; row = row + 1 end
-            
-            local menuCell = self:CreateSpecialActionCell(self.scrollContent, "menu", L["Open Menu"], "Interface\\Buttons\\UI-GuildButton-OfficerNote-Up")
-            menuCell:SetPoint("TOPLEFT", col * (cellWidth + padding), -row * (cellHeight + padding))
-            table.insert(CC.spellCells, menuCell)
-            totalCells = totalCells + 1
-            col = col + 1
-            if col >= cols then col = 0; row = row + 1 end
         end
     end
     
