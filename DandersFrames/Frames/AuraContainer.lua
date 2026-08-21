@@ -3611,14 +3611,20 @@ end
 -- next frame) = the immediate refresh, OOC only (Show re-arms the parse, same op class
 -- as enable). In combat: mark-only best-effort — combat aura events are frequent, so the
 -- flags get picked up on the next one.
+-- ★ RETURNS WHETHER A REAL RE-PARSE HAPPENED, and the distinction is the whole point.
+-- Only the Hide/Show bounce makes the engine re-read candidateFilters; UpdateAllAuras
+-- repaints from the candidate set it ALREADY has, which is exactly the set that is wrong
+-- when a pool has fallen open. Callers that only want "nudge the display" can keep
+-- ignoring the result; the identity gate's recovery must not (see _noteGateRecovery).
 function NativeBackend:refresh()
     local c = self.container
-    if not c then return end
+    if not c then return false end
     if not InCombatLockdown() then
-        pcall(function() c:Hide(); c:Show() end)
+        return pcall(function() c:Hide(); c:Show() end)
     elseif type(c.UpdateAllAuras) == "function" then
         pcall(function() c:UpdateAllAuras() end)
     end
+    return false
 end
 
 -- The container is OURS (per-consumer): teardown is disable, drop its buttons, hide, release
@@ -5239,19 +5245,58 @@ local function GateLog(fmt, ...)
     DF:Debug("IDGATE", fmt, ...)
 end
 
+-- ☠☠☠ THE RECOVERY EDGE IS THE ONLY THING THAT RE-PARSES A FAIL-OPEN POOL, AND IT FIRES
+-- EXACTLY ONCE. `_idGateAssist` used to be stamped BEFORE the re-parse was attempted and
+-- unconditionally, so a recovery that could not actually re-parse still burned the edge:
+-- `was == false` was never true again, and the pool stayed fail-open for the rest of the
+-- session. That is the "AD effects just stop working, reload fixes it" class -- five
+-- separate reports, 2026-08-19/21 (Ruben x2, Beans, Immozaan, hEaLtReEPhD, and Krathe's
+-- own "icons got stuck and AD effects stopped working").
+--
+-- ★ THE TRIGGER IS SUSTAINED COMBAT, NOT ANY PARTICULAR CONTENT. Only the Hide/Show
+-- bounce re-reads candidateFilters, and NativeBackend:refresh cannot bounce a container
+-- in combat -- it falls back to UpdateAllAuras, which repaints from the candidate set it
+-- already has, i.e. precisely the stale set. So the edge is lost whenever trust recovers
+-- BEFORE the pull ends, and every one of the triggers can do that: a death and a rez, a
+-- cinematic, a vehicle, phasing, a disconnect.
+-- ⚠ Do NOT narrow this to keys. Raid is at least as good a repro and arguably better --
+-- a battle rez is a false->true assist edge landing squarely mid-fight, boss cinematics
+-- and platform phases fire without dropping combat, and encounters run far longer than a
+-- dungeon pull, so there is more time for a flip to happen inside one. (First written as
+-- "an M+ bug"; corrected after Krathe reported it in raid, 2026-08-21. The mechanism
+-- never had a dungeon term in it -- only the example did.) What it is NOT is a
+-- world/overworld bug: out there you are usually out of combat when trust returns, the
+-- bounce runs, and nobody ever sees this.
+-- A backend that does not exist yet -- a container whose build was deferred to combat end
+-- -- burned the edge the same way, in any content.
+--
+-- ★ Now the edge is consumed only when a real re-parse lands. Otherwise the verdict stays
+-- false, so the NEXT gate pass sees the same false->true transition and tries again, and a
+-- combat-end retry is queued so it does not have to wait for one. Both halves matter: the
+-- retry guarantees the recovery, the un-consumed verdict makes it idempotent.
 function Handle:_noteGateRecovery(can)
     local was = self._idGateAssist
-    self._idGateAssist = can and true or false
-    if was == false and self._idGateAssist then
+    local now = can and true or false
+    if was == false and now then
         GateLog("recovered unit=%s - re-parsing (pool was fail-open)",
             tostring(self.config and self.config.unit))
-        self:Refresh()
+        if not self:Refresh() then
+            -- Deliberately NOT stamping _idGateAssist, and not clearing the cinematic
+            -- latch: neither may advance past a re-parse that did not happen.
+            self._pendingGateReparse = true
+            self:_registerRegen()
+            GateLog("recovery unit=%s could not re-parse (combat/no backend) - "
+                .. "edge held, retry queued for combat end",
+                tostring(self.config and self.config.unit))
+            return
+        end
         -- AFTER the bounce, deliberately: the whole point of the cinematic latch
         -- is that the frames reappear already re-parsed, not one frame before.
         -- skipReparse: the Refresh above IS that bounce; the latch clear would
         -- otherwise run a second one on the same edge.
         self:_setCineLatch(nil, true)
     end
+    self._idGateAssist = now
 end
 
 -- ★ THE BOARDING WINDOW. `UnitCanAssist` does not flip the instant you take control of
@@ -5812,13 +5857,19 @@ end
 -- dirty-mark (processed on the next OnUpdate while visible) — the real refresh. Use on
 -- a dynamic-unit consumer (target/focus/mouseover) when the underlying unit changes but
 -- the token does not. Falls back to an out-of-combat Hide/Show bounce if absent.
+-- Returns true only when the backend performed a genuine re-parse. A missing backend
+-- (build deferred to combat end) and the in-combat repaint both answer false.
 function Handle:Refresh()
-    if not self.backend then return end
-    local ok, err = pcall(function() self.backend:refresh() end)
-    if not ok and not warnedRefresh then
-        warnedRefresh = true
-        DF:DebugWarn(DBG, "Refresh bounce failed: %s", tostring(err))
+    if not self.backend then return false end
+    local ok, res = pcall(function() return self.backend:refresh() end)
+    if not ok then
+        if not warnedRefresh then
+            warnedRefresh = true
+            DF:DebugWarn(DBG, "Refresh bounce failed: %s", tostring(res))
+        end
+        return false
     end
+    return res and true or false
 end
 
 -- AUTO-REFRESH for dynamic-unit containers. Since there's no callable Refresh(), a
@@ -6126,6 +6177,25 @@ function Handle:_registerRegen()
                     pcall(function() h:_teardownContainer() end)
                     pcall(function() h:_releaseParked() end)
                 elseif not h._destroyed then
+                    -- ☠☠ DID A REBUILD ACTUALLY HAPPEN? The tune/restyle flushes below used
+                    -- to ask `op ~= "rebuild"`, i.e. whether one was REQUESTED. The two
+                    -- differ on exactly one path and that path dropped everything:
+                    --
+                    -- A parent-driven link skips its own rebuild (see the note below). Its
+                    -- flags were still consumed at the top of this loop, so `op == "rebuild"`
+                    -- suppressed the tuning and the restyle as well -- and since the rebuild
+                    -- was skipped, NOTHING re-declared the unit or the enabled state that the
+                    -- rebuild was standing in for either. Four deferred actions, all silently
+                    -- discarded, with nothing left to re-queue them.
+                    --
+                    -- ☠ AND "rebuild" IS NOT A RARE OP FOR A NESTED LINK. _queueOp upgrades
+                    -- ANY two different lesser ops to it, so an ordinary combat in which a
+                    -- link is both retargeted (roster churn) and re-enabled arrives here as
+                    -- "rebuild" -- the container then keeps driving the PREVIOUS unit for the
+                    -- rest of the session, which is what an effect stuck on the wrong people,
+                    -- frozen, with its duration no longer counting, looks like from the
+                    -- outside. A reload is the only thing that rebuilds it.
+                    local rebuilt = false
                     if op then
                         pcall(function()
                             if op == "rebuild" then
@@ -6139,7 +6209,19 @@ function Handle:_registerRegen()
                                 -- matches so no sync heals it. With no backend there is nothing
                                 -- a duplicate could be stranded FROM, so the escape cannot
                                 -- reintroduce the race — do not re-tighten it.
-                                if not skipNested(h) or not h.backend then h:_rebuild() end
+                                if not skipNested(h) or not h.backend then
+                                    h:_rebuild()
+                                    rebuilt = true
+                                elseif h.backend then
+                                    -- Skipped: the parent owns the recreate. Apply IN PLACE the
+                                    -- two things a rebuild would have re-declared from config,
+                                    -- because the upgrade folded them in and there is no longer
+                                    -- any record of which of them was queued. Both are
+                                    -- idempotent, so applying both is safe and cheaper than
+                                    -- tracking the pair through the upgrade.
+                                    h.backend:setUnit(h.config.unit)
+                                    h.backend:setEnabled(h.config.enabled ~= false)
+                                end
                             elseif op == "retarget" then
                                 if h.backend then h.backend:setUnit(h.config.unit) end
                             elseif op == "enable" then
@@ -6150,17 +6232,38 @@ function Handle:_registerRegen()
                     -- Combat-deferred in-place tuning (ApplyTuning hit in lockdown):
                     -- flush via the in-place mutate, NOT a recreate — the deferred
                     -- change costs no flicker/leak either. A rebuild redeclares the
-                    -- groups from the already-swapped config, so only non-rebuild
-                    -- paths need the explicit flush. Tuning runs BEFORE restyle
+                    -- groups from the already-swapped config, so only a rebuild that
+                    -- REALLY RAN makes this redundant. Tuning runs BEFORE restyle
                     -- (population first, cosmetics second).
-                    if tune and op ~= "rebuild" and h.backend and h.backend.applyGroupTuning then
+                    if tune and not rebuilt and h.backend and h.backend.applyGroupTuning then
                         pcall(function() h.backend:applyGroupTuning() end)
                     end
                     -- Combat-deferred cosmetic restyle (ApplyStyle hit in lockdown). A
-                    -- rebuild already styles fresh buttons from the updated config, so
-                    -- only non-rebuild paths need the explicit OOC re-apply.
-                    if restyle and op ~= "rebuild" then
+                    -- rebuild that ran already styles fresh buttons from the updated
+                    -- config; one that was skipped styled nothing.
+                    if restyle and not rebuilt then
                         pcall(function() h:ApplyStyle() end)
+                    end
+                    -- ☠ THE GATE RECOVERY THAT COULD NOT RUN IN COMBAT. Out of lockdown the
+                    -- bounce is available again, so this is the first moment the pool can
+                    -- actually be re-parsed. LAST, after any rebuild/tuning/restyle above:
+                    -- a rebuild parses fresh and clears the debt by itself, and re-parsing
+                    -- before a restyle would only be undone by it.
+                    -- The flag is cleared only on success, so a bounce that still fails
+                    -- leaves the verdict un-consumed and the next gate pass retries.
+                    if h._pendingGateReparse then
+                        if rebuilt then
+                            h._pendingGateReparse = nil
+                            h._idGateAssist = true
+                        else
+                            local done = false
+                            pcall(function() done = h:Refresh() end)
+                            if done then
+                                h._pendingGateReparse = nil
+                                h._idGateAssist = true
+                                pcall(function() h:_setCineLatch(nil, true) end)
+                            end
+                        end
                     end
                 end
             end
@@ -7248,7 +7351,19 @@ function SlotHandle:_noteGateRecovery(can)
         return
     end
     local c = self.owner and self.owner.container
-    if not c or self._lastCandidateFilters == nil then return end
+    -- ☠ NO CONTAINER = NO REPLAY QUEUED, so the edge must NOT be spent. Unlike the two
+    -- branches below, this one leaves nothing behind that will finish the job: the
+    -- verdict would read recovered while the candidate filters were never re-pushed, and
+    -- the false->true transition never comes again. Hold it and the next gate pass
+    -- retries. (The no-filters case below is safe to consume -- a slot that has never had
+    -- a gated selection pushed has nothing stale to re-parse.)
+    -- Same failure the Handle twin shipped; see Handle:_noteGateRecovery for the full
+    -- account of why one spent edge is permanent.
+    if not c then
+        self._idGateAssist = was
+        return
+    end
+    if self._lastCandidateFilters == nil then return end
     GateLog("slot recovered key=%s unit=%s - re-parsing (pool was fail-open)",
         tostring(self.key), tostring(self.owner and self.owner.unit))
     -- ☠ No native tuning setter runs in lockdown (see ApplyTuning). Queue the standard
