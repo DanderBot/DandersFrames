@@ -21,6 +21,7 @@
 * (Dispel Highlight) Fix changing the debuff border colour on the Indicators page not reaching your frames. (by Krathe)
 * (Auras) Fix the debuff row going empty after switching the debuff filter to All Debuffs during a dungeon. (by Krathe)
 * (Party Frames) Frame spacing now snaps to the pixel grid with pixel-perfect on, so elements like the resource bar no longer sit a pixel out on some frames and not others. Applies to party and arena frames. (by Krathe)
+* (Debug Console) "Minimum Log Level" now stops lower-level lines being recorded at all, instead of only hiding them, so raising it keeps a long capture from being pushed out by chatter. Several failure paths that used to log nothing now report. (by Krathe)
 * (Auras) Fix auras staying on screen after a cinematic showing effects that had already gone — including on your own frame, where the defensive and debuff rows could sit stale until a UI reload. (by Krathe)
 * (Aura Designer) Fix the Buff Bar still showing after answering "replace my buffs" when enabling the Aura Designer, and the Buff Bar banner's "Enable Buffs" link having the same problem in reverse. (by Krathe)
 * (Aura Designer) Fix indicators stuck under the health bar with the Frame Level slider doing nothing — a leftover setting from an old version was pinning them below the frame. It is cleared automatically. (by Krathe)
