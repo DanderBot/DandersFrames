@@ -207,6 +207,51 @@ function DF:GetModeAuraDesigner(mode)
     return lib[name] or lib[DF.DEFAULT_PRESET], (name or DF.DEFAULT_PRESET)
 end
 
+-- Which mode's settings a frame answers to. Exported because the enable below is a MODE
+-- property and the reader in AuraAdapter needs the same answer this file uses; restating
+-- the raid test over there would be two rules for one question.
+function DF:DesignerFrameMode(frame)
+    return FrameMode(frame)
+end
+
+-- ☠☠ THE AURA DESIGNER'S ENABLE IS A PROPERTY OF THE MODE, NOT OF THE TEMPLATE.
+-- It used to live on the preset table (`cfg.enabled`), and GetModeAuraDesigner hands that
+-- table back SHARED -- so two modes pointing at one template were reading and writing one
+-- boolean. Enabling the designer on the Party tab enabled it on Raid. The field report
+-- describes the same fault from the other side: "Aura designer enables itself by changing
+-- between Party & Raid tabs" (Neosaro, v5.1.3) -- the tab was not enabling anything, it was
+-- showing the value the other tab had already written. "Even if they are using the same
+-- template the enable should not be connected between modes" (Krathe, 2026-08-22) is the
+-- rule, and it is the right one: a template is a LOOK, and which modes use it is a separate
+-- question from whether a mode is using it at all.
+--
+-- ★ LAZY, PRESENCE-GATED, AND DELIBERATELY NOT IN THE DEFAULTS TABLE. Seeding
+-- `auraDesignerEnabled` in Config.lua would fill the key on every profile before this could
+-- read it, and a presence-gated migration that runs after the defaults backfill never fires
+-- -- this codebase has been caught by exactly that three times. Absent from defaults means
+-- nil here means "not migrated yet", so the first read adopts whatever the mode's CURRENT
+-- template says. Nobody's setup changes on upgrade: each mode keeps rendering exactly what
+-- it rendered before, including a value it only held because the other mode set it. The two
+-- simply stop being the same storage.
+function DF:IsAuraDesignerEnabledForMode(mode)
+    local modeDB = DF:GetDB(mode)
+    if not modeDB then return false end
+    if modeDB.auraDesignerEnabled == nil then
+        local cfg = DF:GetModeAuraDesigner(mode)
+        modeDB.auraDesignerEnabled = (cfg and cfg.enabled) and true or false
+    end
+    return modeDB.auraDesignerEnabled and true or false
+end
+
+-- ⚠ Writes the MODE only. The preset's own `enabled` is left where it is rather than
+-- cleaned up: an older build still reads it, and a profile carried between builds should
+-- not come back with the designer silently off. It is inert for mode resolution from here.
+function DF:SetAuraDesignerEnabledForMode(mode, on)
+    local modeDB = DF:GetDB(mode)
+    if not modeDB then return end
+    modeDB.auraDesignerEnabled = on and true or false
+end
+
 function DF:GetModeTextDesigner(mode)
     local lib = DF:GetTextDesignerPresets()
     if not lib then return nil end
