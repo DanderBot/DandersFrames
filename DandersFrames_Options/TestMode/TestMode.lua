@@ -3824,7 +3824,14 @@ function DF:CreateTestPanel()
     -- ============================================================
     -- THEMED CHECKBOX HELPER
     -- ============================================================
-    local function CreateThemedCheckbox(parent, text, dbKey, callback, pageId)
+    -- `setValue` (optional): overrides the plain `db[dbKey] = checked` write for a key
+    -- whose stored shape is not a boolean. Only the Defensives box uses it -- that key
+    -- is a COUNT, where 0 means off (see TEST_COUNT_KEYS), so writing `false` into it
+    -- would put a boolean where every reader expects a number.
+    -- ⚠ The box still owns exactly ONE db key either way. This is a different WRITE for
+    -- the same value, not a second value; the moment a checkbox gets its own storage
+    -- beside a slider, the two can disagree and the display starts lying.
+    local function CreateThemedCheckbox(parent, text, dbKey, callback, pageId, setValue)
         local container = CreateFrame("Frame", nil, parent)
         container:SetSize(CONTENT_WIDTH / 2 - 4, 22)
 
@@ -3983,7 +3990,11 @@ function DF:CreateTestPanel()
             container:SetChecked(not container.checked)
             local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
             local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
-            db[dbKey] = container.checked
+            if setValue then
+                setValue(db, container.checked)
+            else
+                db[dbKey] = container.checked
+            end
             if callback then callback(container.checked, isRaidMode) end
             if isRaidMode and DF.raidTestMode then
                 DF:UpdateRaidTestFrames()
@@ -4210,8 +4221,8 @@ function DF:CreateTestPanel()
         local gridCol = 0
         local COL_WIDTH = (CONTENT_WIDTH - 8) / 2
 
-        section.AddCheckbox = function(self, text, dbKey, callback, pageId)
-            local cb = CreateThemedCheckbox(content, text, dbKey, callback, pageId)
+        section.AddCheckbox = function(self, text, dbKey, callback, pageId, setValue)
+            local cb = CreateThemedCheckbox(content, text, dbKey, callback, pageId, setValue)
             cb.section = self
             local xOff = gridCol * COL_WIDTH + 4
             local yOff = -(gridRow * 24 + 4)
@@ -4607,6 +4618,12 @@ function DF:CreateTestPanel()
         if panel.defSlider and panel.defSlider.SetEnabled then
             panel.defSlider:SetEnabled(defOn)
         end
+        -- The box drives the same value, so it is inert in exactly the same state and
+        -- must grey with it -- a live-looking checkbox above a greyed slider would read
+        -- as the one control that still works.
+        if panel.showDefensivesCheck and panel.showDefensivesCheck.SetEnabled then
+            panel.showDefensivesCheck:SetEnabled(defOn)
+        end
         local dr, dg, dbl = C_TEXT.r, C_TEXT.g, C_TEXT.b
         if not defOn then dr, dg, dbl = C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b end
         if panel.defSliderLabel then panel.defSliderLabel:SetTextColor(dr, dg, dbl) end
@@ -4687,6 +4704,12 @@ function DF:CreateTestPanel()
         local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
         db.testDefensiveCount = value
         defValue:SetText(value)
+        -- The box above is this value's on/off, so it has to follow the slider the
+        -- same tick -- dragging to 0 must untick it, and off 0 must tick it, without
+        -- waiting for a panel refresh that a drag does not trigger.
+        if panel.showDefensivesCheck then
+            panel.showDefensivesCheck:SetChecked(value > 0)
+        end
         if DF.raidTestMode then DF:ThrottledUpdateRaidTestFrames()
         elseif DF.testMode then DF:ThrottledUpdateAll() end
     end)
@@ -4727,6 +4750,57 @@ function DF:CreateTestPanel()
     panel.showStatusIconsCheck = secIndicators:AddCheckbox(L["Icons"], "testShowStatusIcons", function()
         if DF.testMode or DF.raidTestMode then DF:RefreshTestFrames() end
     end, "indicators_icons")
+
+    -- ★ THE DEFENSIVES ON/OFF, BACK BY REQUEST (Krathe, 2026-08-22) -- and deliberately
+    -- NOT a second stored value. The block above records why the old checkbox was
+    -- removed: "a checkbox plus a slider whose 0 means the same thing is two controls
+    -- for one decision, and they can disagree -- checkbox off with the slider at 3 reads
+    -- as broken." That objection is about two SOURCES OF TRUTH, not about two controls,
+    -- so this box is a VIEW of testDefensiveCount rather than a key of its own:
+    --   checked  == (count > 0)
+    --   unticking -> remember the count, write 0
+    --   ticking   -> restore the remembered count (1 if there is nothing to restore)
+    -- They cannot disagree because there is only one value; move the slider to 0 and the
+    -- box unticks itself on the next refresh, tick the box and the slider follows.
+    -- Everything downstream is untouched: the preset system still sees one count key
+    -- (TEST_COUNT_KEYS translates `= true` to 1/0), and no new key reaches the profile,
+    -- the export categories or the sync map.
+    --
+    -- ⚠ LAST checkbox in the section ON PURPOSE. The grid fills two per row, so with the
+    -- four above it this lands alone on the final row -- directly above the slider it
+    -- governs, which is where it was asked for and the only place it reads as belonging
+    -- to that slider rather than to the pair of boxes beside it.
+    -- The click-through to the Defensive Icon page comes back with it; the slider row is
+    -- a plain frame and never had one, which the removal note listed as a loss.
+    local lastDefCount
+    panel.showDefensivesCheck = secIndicators:AddCheckbox(L["Defensives"], "testDefensiveCount",
+        function(checked)
+            -- Keep the slider showing the value the box just wrote. Set directly rather
+            -- than via RefreshStates: OnValueChanged writes the db too, and letting it
+            -- fire on a value we already stored is a harmless double-write only while
+            -- the two agree -- which they do here, because we hand it the same number.
+            local isRaidMode = DF.GUI and DF.GUI.SelectedMode == "raid"
+            local db = isRaidMode and DF:GetRaidDB() or DF:GetDB()
+            local n = db.testDefensiveCount or 0
+            if panel.defSlider then panel.defSlider:SetValue(n) end
+            if panel.defValueText then panel.defValueText:SetText(n) end
+            if DF.raidTestMode then DF:ThrottledUpdateRaidTestFrames()
+            elseif DF.testMode then DF:ThrottledUpdateAll() end
+        end,
+        "auras_defensiveicon",
+        function(db, checked)
+            if checked then
+                local restore = lastDefCount
+                if not restore or restore <= 0 then restore = 1 end
+                db.testDefensiveCount = restore
+            else
+                -- Remember what to come back to, but never remember 0 -- that would
+                -- make the next tick a no-op and the box look broken.
+                local cur = db.testDefensiveCount or 0
+                if cur > 0 then lastDefCount = cur end
+                db.testDefensiveCount = 0
+            end
+        end)
 
     -- ⚠ LAST in the section, after every AddCheckbox above — see the note where
     -- defSliderRow is built. AddWidget measures the checkbox grid as it stands right
@@ -4908,6 +4982,12 @@ function DF:CreateTestPanel()
             self.defSlider:SetValue(defCount)
             self.defValueText:SetText(defCount)
             if self.defSlider.UpdateTheme then self.defSlider:UpdateTheme() end
+        end
+        -- The Defensives box is a VIEW of the count beside it, so it is derived here
+        -- rather than read from a key of its own -- that is what makes "slider to 0"
+        -- untick it and keeps the two from ever contradicting each other.
+        if self.showDefensivesCheck then
+            self.showDefensivesCheck:SetChecked((db.testDefensiveCount or 0) > 0)
         end
 
         -- Grey the Buff/Debuff sliders when Show Auras is off (boolean-enable grey
