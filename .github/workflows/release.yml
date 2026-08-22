@@ -86,6 +86,15 @@ jobs:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Package DandersMover (standalone CurseForge project)
+        if: steps.guard.outputs.skip != 'true' && startsWith(github.ref, 'refs/tags/')
+        uses: BigWigsMods/packager@v2
+        with:
+          args: -m .pkgmeta-mover -r .release-mover
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
+          GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Validate locale files
         if: steps.guard.outputs.skip != 'true'
         run: |

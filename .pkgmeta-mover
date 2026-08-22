@@ -1,0 +1,27 @@
+package-as: DandersMover
+enable-nolib-creation: no
+
+# Second packager run (release.yml, `-m .pkgmeta-mover`): ships ONLY the
+# DandersMover folder to its own CurseForge project. Same move-folders shape
+# as .pkgmeta; everything else in the container is ignored.
+move-folders:
+  DandersMover/DandersMover: DandersMover
+
+ignore:
+  - DandersFrames
+  - DandersFrames_Options
+  - CHANGELOG.md
+  - CHANGELOG_ARCHIVE.md
+  - README.md
+  - TRANSLATING.md
+  - generate_changelog.sh
+  - Tools
+  - .github
+  - .gitignore
+  - .gitnexus
+  - .pkgmeta
+  - docs
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
