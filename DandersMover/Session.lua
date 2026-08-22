@@ -257,19 +257,26 @@ end
 function Sess:DragTo(el, cx, cy)
     local db = NS.db
     local w, h = sizeOf(el)
-    local snapped = false
-    if db.snapToGrid then cx, cy = Solver.SnapToGrid(cx, cy, db.gridSize); snapped = true end
-    if db.snapToScreen then
-        local sx, sy
-        cx, cy, sx, sy = Solver.SnapToScreen({ x = cx, y = cy, w = w, h = h }, UIParent:GetWidth(), UIParent:GetHeight(), SCREEN_SNAP)
-        snapped = snapped or sx or sy
-    end
+    -- Frame zones are tested on the RAW cursor position and win outright; grid
+    -- and screen snapping only apply when no zone is hit. Quantising first would
+    -- make zones on off-grid targets unreachable (a 20px grid vs a zone at y=150).
     local zone
     if db.snapToFrames and #Proxy.dragZones > 0 then
         zone = Solver.BestZone(cx, cy, w, h, Proxy.dragZones, 0.1)
-        if zone then cx, cy = zone.x, zone.y end
     end
-    if snapped and not zone then Grid:ShowPreview(cx, cy) else Grid:HidePreview() end
+    if zone then
+        cx, cy = zone.x, zone.y
+        Grid:HidePreview()
+    else
+        local snapped = false
+        if db.snapToGrid then cx, cy = Solver.SnapToGrid(cx, cy, db.gridSize); snapped = true end
+        if db.snapToScreen then
+            local sx, sy
+            cx, cy, sx, sy = Solver.SnapToScreen({ x = cx, y = cy, w = w, h = h }, UIParent:GetWidth(), UIParent:GetHeight(), SCREEN_SNAP)
+            snapped = snapped or sx or sy
+        end
+        if snapped then Grid:ShowPreview(cx, cy) else Grid:HidePreview() end
+    end
     local pos = Registry:GetPos(el)
     pos.anchor = nil
     pos.x, pos.y = Solver.DragDelta(self.dragStartPos, self.dragStartCx, self.dragStartCy, cx, cy)
