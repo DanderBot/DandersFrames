@@ -54,3 +54,9 @@ L["X"] = true
 L["Y"] = true
 L["(unavailable)"] = true
 L["You have unsaved mover changes."] = true
+
+-- `= true` marks a key as "same as the English text". Convert so lookups return
+-- the string itself; the metatable above only covers keys that are absent.
+for key, value in pairs(L) do
+    if value == true then rawset(L, key, key) end
+end
