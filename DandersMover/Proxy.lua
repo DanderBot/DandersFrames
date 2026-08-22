@@ -110,7 +110,7 @@ local function create(el)
     b.icon = b:CreateTexture(nil, "OVERLAY")
     b.icon:SetSize(14, 14); b.icon:SetPoint("TOPLEFT", 3, -3)
     local addon = Registry:GetAddon(el.addon)
-    if not b.icon:SetTexture(addon and addon.icon or DEFAULT_ICON) then b.icon:SetTexture(DEFAULT_ICON) end
+    if b.icon:SetTexture(addon and addon.icon or DEFAULT_ICON) == false then b.icon:SetTexture(DEFAULT_ICON) end
     -- Link icon (bottom-left) while anchored.
     b.link = b:CreateTexture(nil, "OVERLAY")
     b.link:SetTexture(LINK_ICON); b.link:SetSize(12, 12); b.link:SetPoint("BOTTOMLEFT", 3, 3)
