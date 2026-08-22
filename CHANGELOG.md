@@ -26,11 +26,9 @@
 * (Aura Designer) Fix indicators stuck under the health bar with the Frame Level slider doing nothing — a leftover setting from an old version was pinning them below the frame. It is cleared automatically. (by Krathe)
 * (Aura Designer) Fix the Aura Designer appearing to enable itself when switching between the Party and Raid tabs — the two modes could end up sharing one preset. (by Krathe)
 * (Aura Designer) Bar indicators now use the same section names and order as icons and squares: "Texture & Colors" is now "Appearance", and "Show When Missing" leads the square card the way it leads the icon card. (by Krathe)
-
 * (Dispel Highlight) Fix the overlay washing whole frames in flat white (or the wrong colour) in dungeons. (by Krathe)
 * (Dispel Highlight) Your own dispel colours now apply to the debuff icon border (they were meant to before, but the palette could never be built — if your border colours look different, that is the setting working for the first time), update straight away when you switch or import a profile, and apply correctly to debuffs with no dispel type. Changing the debuff border colour on the Indicators page now reaches your frames. (by Krathe)
 * (Dispel Highlight) "Show On Current Health Only" now applies from the moment the overlay first appears mid-fight instead of covering the whole frame until you next leave combat, and it now accounts for reduced maximum health in dungeons and raids. (by Krathe)
-
 * (Raid Frames) Group Display Order and My Group First now actually apply to grouped raid layouts — they were being ignored by the final positioning pass. (by Krathe)
 * (Raid Frames) Fix group headers occasionally sized a pixel off with pixel-perfect snapping on, and Center Mode "Fixed" being ignored when entering test mode until a setting was changed. (by Krathe)
 * (Party Frames) Fix "Center" in the position panel not actually centring the party frames. Frame spacing now snaps to the pixel grid with pixel-perfect on, so elements like the resource bar no longer sit a pixel out on some frames and not others (party and arena). (by Krathe)
@@ -40,7 +38,6 @@
 * (Pinned Frames) Fix pinned test frames staying on screen over the real UI when combat starts during Test Mode, and not following raid Test Mode settings changes or changes made while in combat. (by Krathe)
 * (Pinned Frames) Changing a pinned set's Direction now relabels its grow-from controls to match the new orientation. (by Krathe)
 * (Resource Bar) Fix the bar vanishing while dragging Offset X/Y with Match Health Bar on, the size sliders moving the wrong axis on a vertical bar mid-drag, and Border Thickness shortening the bar behind an opaque border. (by Krathe)
-
 * (Settings) Fix editing a colour in DandersFrames also changing the last colour edited in another addon when "Use DF Color Picker for All Addons" is on. (by Krathe)
 * (Test Mode) The defensive icon now previews by default (Defensive Icons count defaults to 1 instead of 0). (by Krathe)
 * (Text Designer) The Frame Preview now follows frame size and Preview Scale live and stays inside its panel. (by Krathe)
