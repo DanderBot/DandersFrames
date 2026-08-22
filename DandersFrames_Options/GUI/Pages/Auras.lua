@@ -1469,20 +1469,67 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local sizeGroup = GUI:CreateSettingsGroup(self.child, 280)
         sizeGroup:AddWidget(GUI:CreateHeader(self.child, L["Size"]), 40)
         sizeGroup.disableChildrenOn = function(d) return not d.resourceBarEnabled end
-        local rbMatch = sizeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Match Health Bar Width/Height"], db, "resourceBarMatchWidth", function() DF:UpdateAllFrames() end), 30)
+        -- ★ THE CONTROLS RENAME THEMSELVES BY ORIENTATION (Aphoex 5/5.1, redesigned as
+        -- UX by Krathe 2026-08-22: "it auto matches the health bar depending on the
+        -- orientation set but you still control how thick the bar looks").
+        --
+        -- ☠ THE MECHANICS WERE NEVER WRONG — ONLY THE NAMES LIED. resourceBarWidth and
+        -- resourceBarHeight are ORIENTATION-RELATIVE keys: Width is the bar's LENGTH
+        -- along its fill axis, Height its THICKNESS across it, and Bars.lua swaps them
+        -- onto screen axes for a vertical bar. Match always pins the LENGTH, so greying
+        -- the length slider in both orientations was correct behaviour wearing a label
+        -- ("Width / Length") that read as a bug on a vertical bar: match visibly fixes
+        -- the bar's on-screen HEIGHT there, yet "Height / Thickness" never greyed
+        -- (Aphoex 5.1). Renaming per orientation puts the same word on the checkbox and
+        -- the slider it greys — "Match Health Bar Height" greys "Height" — and the free
+        -- slider is always "Thickness", the one promise the design makes.
+        --
+        -- ⚠ The rename rides refreshContent (RefreshStates' dynamic-content hook), so it
+        -- follows the Orientation dropdown, a profile import and a copy-from-other-mode
+        -- alike — anything that ends in RefreshStates. The Orientation dropdown's own
+        -- callback gained the RefreshStates call for exactly that.
+        local rbMatch = sizeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Match Health Bar Width"], db, "resourceBarMatchWidth", function()
+            -- RefreshStates so the Adjust For Border row appears/disappears with the tick.
+            self:RefreshStates()
+            DF:UpdateAllFrames()
+        end), 30)
         -- ☠ THE SECOND SENTENCE IS THE ONE THAT WAS MISSING, AND IT COST A BUG REPORT.
         -- Matching pins the bar by its two ENDS, so the Anchor dropdown's left/right half
         -- stops applying: Top Left, Top and Top Right all render the same row, and the same
         -- for the bottom trio (Aphoex 3.2, "only 3 position anchors work"). The dropdown
         -- keeps all nine because they are all live the moment Match is off — the honest fix
         -- is to say so here rather than to silently drop six entries the user may be about
-        -- to need. Also drops the old claim that "the Width slider greys out", which is only
-        -- true for a horizontal bar; on a vertical one the matched dimension is the length,
-        -- and Width / Length is exactly the control that owns it.
-        rbMatch.tooltip = L["Keeps the resource bar the same length as the health bar it sits under, so it stays lined up when you resize the frame. The Width / Length slider greys out while this is on, and because the bar is pinned by its ends the Anchor only takes effect along the other axis."]
-        local widthSlider = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Width / Length"], 10, 200, 1, db, "resourceBarWidth", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)
+        -- to need. Worded around "the matched size slider" rather than a control name,
+        -- because the control names now change with the orientation.
+        rbMatch.tooltip = L["Keeps the resource bar exactly as long as the health bar, following the frame when it resizes. The matched size slider greys out while this is on; Thickness stays yours. Because the bar is pinned by its ends, the Anchor only takes effect along the other axis."]
+        rbMatch.refreshContent = function(w, d)
+            if w.label then
+                w.label:SetText((d.resourceBarOrientation == "VERTICAL")
+                    and L["Match Health Bar Height"] or L["Match Health Bar Width"])
+            end
+        end
+
+        -- Only meaningful while Match is on, so it sits directly under the switch it
+        -- modifies and hides with it. DETERMINISTIC: on (default — matches what
+        -- stable 5.2.0 renders; see the key's note in Config.lua) = tuck inside the
+        -- frame border band, off = full health-bar length. The first cut gated
+        -- an alpha-based auto rule instead and read as doing nothing with an opaque
+        -- border (Krathe, 2026-08-22) -- an option whose two states can render the
+        -- same pixels is broken as a control, whatever the tooltip says. "Frame
+        -- Border" in the name because the resource bar has a border of its OWN on
+        -- this page, and a bare "Border" could be either.
+        local rbAdjust = sizeGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Adjust For Frame Border"], db, "resourceBarMatchAdjustFrameBorder", function() DF:UpdateAllFrames() end), 30)
+        rbAdjust.tooltip = L["Shortens the bar so it sits inside the frame border instead of spanning its full length. Leave off to keep the bar exactly as long as the health bar, with the frame border overlapping its ends."]
+        rbAdjust.hideOn = function(d) return not d.resourceBarMatchWidth end
+
+        local widthSlider = sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Width"], 10, 200, 1, db, "resourceBarWidth", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)
         widthSlider.disableOn = function(d) return d.resourceBarMatchWidth end
-        sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Height / Thickness"], 1, 20, 1, db, "resourceBarHeight", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)
+        widthSlider.refreshContent = function(w, d)
+            if w.label then
+                w.label:SetText((d.resourceBarOrientation == "VERTICAL") and L["Height"] or L["Width"])
+            end
+        end
+        sizeGroup:AddWidget(GUI:CreateSlider(self.child, L["Thickness"], 1, 20, 1, db, "resourceBarHeight", nil, function() DF:LightweightUpdatePowerBarSize() end, true), 55)
         Add(sizeGroup, nil, 1)
         
         -- ===== POSITION GROUP (Column 1) =====
@@ -1510,7 +1557,12 @@ function DF._SetupGUIPagesPart3(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- controls — clearer than a combined "Fill Direction" dropdown, where an
         -- option like "Bottom to Top" silently changes the orientation too.
         local orientOptions = { HORIZONTAL = L["Horizontal"], VERTICAL = L["Vertical"] }
-        appearanceGroup:AddWidget(GUI:CreateDropdown(self.child, L["Orientation"], orientOptions, db, "resourceBarOrientation", function() DF:UpdateAllFrames() end), 55)
+        appearanceGroup:AddWidget(GUI:CreateDropdown(self.child, L["Orientation"], orientOptions, db, "resourceBarOrientation", function()
+            -- RefreshStates so the Size controls rename to the new orientation at once
+            -- (their refreshContent hooks — see the Size group).
+            self:RefreshStates()
+            DF:UpdateAllFrames()
+        end), 55)
         appearanceGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Reverse Fill Direction"], db, "resourceBarReverseFill", function() DF:UpdateAllFrames() end), 30)
 
         appearanceGroup:AddWidget(GUI:CreateCheckbox(self.child, L["Smooth Bar Animation"], db, "resourceBarSmooth", function() DF:UpdateAllFrames() end), 30)

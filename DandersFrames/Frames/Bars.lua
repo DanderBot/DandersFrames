@@ -209,25 +209,31 @@ function DF:LayoutResourceBar(frame, db)
     -- Flush against whichever boundary is innermost: the border band when it
     -- is thicker than the padding, the health bar's own inset otherwise.
     --
-    -- ☠☠ BUT ONLY WHILE THE BORDER CAN ACTUALLY HIDE THE BAR. The health bar this option
-    -- promises to match insets by `framePadding` ALONE (DF:AnchorHealthBarsToPadding), so
-    -- once Border Thickness exceeds the padding the resource bar lost 2px of length per
-    -- extra border pixel and stopped matching — Border Thickness read as padding on the
-    -- resource bar (Aphoex 5). The sliver the max() exists to prevent is only visible
-    -- through a TRANSLUCENT border; an opaque one covers whatever runs under it, which is
-    -- exactly the rule DF:GetAbsorbEdgeInset already applies a few hundred lines down
-    -- ("if alpha >= 1 then return 0"). Adopting it here makes the two bars agree and makes
-    -- the option's name true, without reopening the field-confirmed hairline.
-    -- ⚠ The old comment claimed this "matches other bar calculations". It did not — the
-    -- absorb bar has always had the alpha test and the health bar has never inset by the
-    -- border at all. That line is why the mismatch survived review.
-    local borderCanHide = true
-    if db.frameShowBorder ~= false then
-        local bc = db.frameBorderColor
-        local balpha = (bc and (bc.a or bc[4])) or 1
-        borderCanHide = balpha >= 1
+    -- ☠ WHETHER THE FRAME BORDER SHORTENS THE MATCHED BAR IS THE USER'S CALL, NOT AN
+    -- ALPHA TEST'S. Two designs preceded this one, and each earned a report:
+    --   * always inset by max(padding, border): Border Thickness read as padding on
+    --     the resource bar and the bar stopped matching the health bar, which insets
+    --     by framePadding alone (Aphoex 5);
+    --   * auto — inset only when the border is TRANSLUCENT (alpha < 1), borrowed from
+    --     DF:GetAbsorbEdgeInset's "if alpha >= 1 then return 0": correct-looking in
+    --     both states, but the toggle gating it then "does not seem to do anything"
+    --     (Krathe, 2026-08-22) with the opaque border nearly everyone runs, because
+    --     both positions produced identical geometry. An option whose two states can
+    --     render the same pixels reads as broken, whatever the tooltip says.
+    -- So it is DETERMINISTIC now: Adjust For Frame Border ON = the bar tucks inside
+    -- the border band (max(padding, bInset) — max, not sum, per the sliver note
+    -- above); OFF = full health-bar length, padding only, and the border
+    -- overlaps the bar's ends (the bar draws at frame level +20, above the border's
+    -- +13, so with a see-through border the overlap is visible art-on-art — which is
+    -- now a look the user chose rather than one an alpha test chose for them).
+    -- ⚠ Default ON (Krathe, 2026-08-22): it matches what stable 5.2.0 already renders,
+    -- so no upgrading profile changes look — see the key's note in Config.lua. Aphoex
+    -- 5's resolution is the OFF position being one click away, not the default:
+    -- continuity for every existing profile won over the new ideal.
+    local edgeInset = padding
+    if db.resourceBarMatchAdjustFrameBorder and db.frameShowBorder ~= false then
+        edgeInset = math.max(padding, bInset)
     end
-    local edgeInset = borderCanHide and padding or math.max(padding, bInset)
 
     if isVertical then
         -- SWAP: "Width" applies to Height (Length), "Height" applies to Width (Thickness)
