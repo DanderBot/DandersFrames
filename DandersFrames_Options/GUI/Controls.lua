@@ -1215,10 +1215,42 @@ function GUI:CreateTextureDropdown(parent, label, dbTable, dbKey, callback, cust
             searchBox:SetFocus()
         end
     end)
-    
+
     btn:SetScript("OnShow", UpdateText)
     UpdateText()
-    
+
+    -- ☠☠ ONE DEFERRED RE-APPLY, AND IT IS BUG #1071 AGAIN. ApplyTextureTiling's own note
+    -- records the mechanism: on a FRESH SESSION the file may not be resident when
+    -- SetTexture runs, and the region goes on rendering the PREVIOUS texture -- "the
+    -- texture preview can bug out and not faithfully represent the selected texture,
+    -- most noticeably after a /reload or start of session" (Renegade, 2026-08-22).
+    -- #1071 fixed the half that was ours, a second SetTexture racing the first. This is
+    -- the half that is the client's, and no care at call time avoids it: the file is
+    -- simply not there yet.
+    --
+    -- ★ WHY THE OnShow HOOK ABOVE DOES NOT ALREADY COVER IT -- and why it is section-
+    -- dependent, which is the part of the report that points at the cause. A dropdown
+    -- inside a COLLAPSED section is hidden at build and gets a real OnShow when the user
+    -- expands it, which re-runs this and repairs the swatch. One that is already visible
+    -- when the page is built gets the build-time call and NOTHING AFTER IT: OnShow never
+    -- fires for a frame that was never hidden. Hence "does not happen in the Heal Preview
+    -- section" while both Absorbs dropdowns are wrong, and hence closing and reopening
+    -- settings fixing all of them -- a rebuild gives every one a fresh pass.
+    --
+    -- ⚠ ONE-SHOT, at build only, not a ticker. The first SetTexture has kicked the load
+    -- off, so a single retry on the next frame is enough, and a swatch is not worth
+    -- polling for. Re-runs the whole of UpdateText rather than just the setter, so the
+    -- label, the (missing) tag and the tint stay derived in one place.
+    -- ⚠ TEXTURE DROPDOWNS ONLY. The font and sound dropdowns below carry the same
+    -- OnShow/UpdateText shape, deliberately untouched: neither previews a FILE-BACKED
+    -- TEXTURE, so neither can show a stale one.
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, function()
+            -- The panel can be torn down between build and this frame.
+            if btn and btn.Preview then UpdateText() end
+        end)
+    end
+
     -- Refresh override indicators on show
     container:SetScript("OnShow", function()
         UpdateText()
