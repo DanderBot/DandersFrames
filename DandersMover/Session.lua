@@ -156,6 +156,15 @@ local function visualCenter(el, pos)
     return Solver.PointToCenter(pos.point or "CENTER", pos.x or 0, pos.y or 0, w, h)
 end
 
+-- Free elements: after a record change, pull the visible rect back on screen.
+-- The consumer must have applied the record first (Notify), so the rect is current.
+local function clampFree(el, pos)
+    local rect = Registry:GetRect(el)
+    if not rect then return end
+    local cx, cy = Solver.ClampToScreen(rect.x, rect.y, rect.w, rect.h, UIParent:GetWidth(), UIParent:GetHeight())
+    pos.x, pos.y = (pos.x or 0) + (cx - rect.x), (pos.y or 0) + (cy - rect.y)
+end
+
 function Sess:Nudge(el, dx, dy)
     local pos = Registry:GetPos(el)
     local before = NS.CopyPos(pos)
@@ -165,6 +174,7 @@ function Sess:Nudge(el, dx, dy)
         NS:ResolveElement(el)
     else
         pos.x, pos.y = (pos.x or 0) + dx, (pos.y or 0) + dy
+        NS:Notify(el, "nudge"); clampFree(el, pos)
     end
     apply(el, "nudge")
     commit(el, before, L["Nudge %s"])
@@ -179,6 +189,7 @@ function Sess:SetXY(el, x, y)
         NS:ResolveElement(el)
     else
         pos.x, pos.y = x, y
+        NS:Notify(el, "nudge"); clampFree(el, pos)
     end
     apply(el, "nudge")
     commit(el, before, L["Move %s"])
@@ -277,6 +288,7 @@ function Sess:DragTo(el, cx, cy)
         end
         if snapped then Grid:ShowPreview(cx, cy) else Grid:HidePreview() end
     end
+    cx, cy = Solver.ClampToScreen(cx, cy, w, h, UIParent:GetWidth(), UIParent:GetHeight())
     local pos = Registry:GetPos(el)
     pos.anchor = nil
     pos.x, pos.y = Solver.DragDelta(self.dragStartPos, self.dragStartCx, self.dragStartCy, cx, cy)
@@ -290,14 +302,20 @@ function Sess:EndDrag(el, cx, cy, zone)
     local before = self.dragBefore or NS.CopyPos(Registry:GetPos(el))
     self.dragBefore, self.dragStartPos, self.dragStartCx, self.dragStartCy = nil, nil, nil, nil
     local pos = Registry:GetPos(el)
+    if zone and Registry:WouldCreateCycle(el.id, zone.target) then zone = nil end
     if zone then
-        if Registry:WouldCreateCycle(el.id, zone.target) then
-            zone = nil
-        else
-            pos.anchor = { target = zone.target, edge = zone.edge, align = zone.align, offsetX = 0, offsetY = 0 }
-            pos.point = "CENTER"
-            NS:ResolveElement(el)
-        end
+        pos.anchor = { target = zone.target, edge = zone.edge, align = zone.align, offsetX = 0, offsetY = 0 }
+        pos.point = "CENTER"
+        NS:ResolveElement(el)
+    elseif before.anchor then
+        -- Dragging can only re-anchor, never free (DandersCDM rule): dropped
+        -- outside every zone, an anchored element springs back. Detach is the
+        -- panel's job. Nothing changed, so no undo entry.
+        NS.CopyPos(before, pos)
+        NS:ResolveElement(el)
+        apply(el, "reapply")
+        self:Select(el.id)
+        return
     end
     apply(el, zone and "anchor" or "drag")
     commit(el, before, zone and L["Anchor %s"] or L["Move %s"])

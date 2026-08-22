@@ -78,3 +78,9 @@ is nothing to measure.
 `reason` values: `drag nudge anchor detach reset center undo redo discard reapply parent`.
 
 Slash: `/mover` toggle, `/mover config` settings, `/mover demo` built-in demo.
+
+## Behaviour rules worth knowing
+
+- Dragging an anchored element can only **re-anchor** it: dropped outside every snap zone it springs back. Use the panel's Detach to free it.
+- Hidden frames are never snap targets. If your element is normally hidden (combat-only, raid-only), listen for the `Unlocked` / `Locked` callbacks and show it for the session — the lib never touches your frame's visibility.
+- Drags, nudges and X/Y edits are clamped so the visible rect stays on screen.

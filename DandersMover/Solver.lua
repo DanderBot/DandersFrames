@@ -64,6 +64,17 @@ function S.SnapToScreen(rect, screenW, screenH, threshold)
     return cx, cy, sx, sy
 end
 
+-- Keeps the rect inside the screen (UIParent units). Elements larger than the
+-- screen are pinned so their top-left corner stays reachable.
+function S.ClampToScreen(cx, cy, w, h, screenW, screenH)
+    local hw, hh, halfW, halfH = w / 2, h / 2, screenW / 2, screenH / 2
+    if cx + hw > halfW then cx = halfW - hw end
+    if cx - hw < -halfW then cx = -halfW + hw end
+    if cy + hh > halfH then cy = halfH - hh end
+    if cy - hh < -halfH then cy = -halfH + hh end
+    return cx, cy
+end
+
 -- ============================================================
 -- ANCHOR RESOLUTION
 -- ============================================================

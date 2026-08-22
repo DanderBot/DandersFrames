@@ -108,3 +108,15 @@ do
     eq(S.ProximityFactor(100, 100), 0, "at max = 0")
     eq(S.ProximityFactor(150, 100), 0, "beyond max clamps")
 end
+
+-- screen clamp
+do
+    local cx, cy = S.ClampToScreen(1000, 0, 20, 10, 1920, 1080)
+    eq(cx, 950, "right edge clamped"); eq(cy, 0, "y untouched")
+    cx, cy = S.ClampToScreen(0, -600, 20, 10, 1920, 1080)
+    eq(cy, -535, "bottom edge clamped")
+    cx, cy = S.ClampToScreen(5, 5, 20, 10, 1920, 1080)
+    eq(cx, 5, "inside untouched x"); eq(cy, 5, "inside untouched y")
+    cx = S.ClampToScreen(0, 0, 3000, 10, 1920, 1080)
+    eq(cx, 540, "oversize keeps left edge reachable")
+end

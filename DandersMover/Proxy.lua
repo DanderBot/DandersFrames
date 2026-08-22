@@ -54,8 +54,9 @@ local function onDragStart(self)
     self.lastX, self.lastY, self.lastZone = self.startX, self.startY, nil
     self.axis = nil
     self.dragging = true
-    NS.Session:Select(el.id)
-    if NS.Panel then NS.Panel:Hide() end   -- re-docks on drop via Select; keeps targets visible
+    NS.Session.selected = el.id            -- select without docking the panel; EndDrag re-docks it
+    P:Highlight(el.id)
+    if NS.Panel then NS.Panel:Hide() end
     NS.Session:BeginDrag(el)
     P:ShowZones(el)
     self:SetScript("OnUpdate", function(s)
@@ -197,7 +198,9 @@ function P:ShowZones(el)
     local n = 0
     for _, target in ipairs(Registry:SortedTargets()) do
         local canon = Registry:CanonicalId(target.id)
+        local tf = Registry:GetFrame(target)
         local usable = canon ~= el.id and not descendants[canon]
+            and tf ~= nil and tf:IsShown()              -- hidden frames are not snap targets (CDM rule)
             and Registry:IsEnabled(target.addon, target.key)
             and not Registry:WouldCreateCycle(el.id, target.id)
         if usable then
@@ -233,9 +236,10 @@ function P:UpdateZones(cx, cy, hovered)
         if hovered and z == hovered then
             zf:SetBackdropColor(C_ZONE_HOVER[1], C_ZONE_HOVER[2], C_ZONE_HOVER[3], 0.35)
             zf:SetBackdropBorderColor(C_ZONE_HOVER[1], C_ZONE_HOVER[2], C_ZONE_HOVER[3], 0.6)
-        elseif closest and z.target == closest then
+        elseif closest and z.target == closest and sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2) < PROXIMITY then
             local d = sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2)
             local f = 0.2 + Solver.ProximityFactor(d, PROXIMITY) * 0.8
+            if z.occupied then f = f * 0.5 end   -- occupied zones read quieter (CDM rule)
             local c = z.occupied and C_ZONE_OCCUPIED or C_ZONE_NEAR
             zf:SetBackdropColor(c[1], c[2], c[3], 0.15 * f)
             zf:SetBackdropBorderColor(c[1], c[2], c[3], 0.3 * f)

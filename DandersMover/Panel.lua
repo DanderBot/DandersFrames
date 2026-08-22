@@ -24,6 +24,7 @@ local function step() return IsShiftKeyDown() and 10 or 1 end
 local function build()
     local f = CreateFrame("Frame", "DandersMoverPanel", Proxy:GetUnlockFrame(), "BackdropTemplate")
     f:SetFrameStrata("DIALOG")
+    f:SetClampedToScreen(true)
     f:SetWidth(W)
     T.Backdrop(f, T.C.panel, T.C.border)
     f:EnableMouse(true)
