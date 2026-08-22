@@ -78,6 +78,25 @@ do
     check(not R:IsOccupied("A:one", "left", "start"), "other zone free")
 end
 
+-- alias targets (getFrame pointing at a registered element's frame)
+do
+    local oneFrame = R:GetFrame(R:Get("A:one"))
+    R:RegisterAnchorTarget("A", "alias", { title = "alias", getFrame = function() return oneFrame end })
+    eq(R:CanonicalId("A:alias"), "A:one", "alias resolves to owning element")
+    eq(R:CanonicalId("A:one"), "A:one", "element id is its own canonical")
+    check(R:WouldCreateCycle("A:one", "A:alias"), "anchoring one to its own alias is a cycle")
+    check(R:WouldCreateCycle("A:b", "A:alias") == false, "b -> alias(one) is fine (one is b's parent already)")
+    check(R:WouldCreateCycle("A:one", "A:c"), "one -> c is a cycle through b")
+    eq(#R:Children("A:alias"), 1, "children of alias = children of one")
+    local posD = { point = "CENTER", x = 0, y = 0, anchor = { target = "A:alias", edge = "left", align = "end" } }
+    R:Register("A", "d", elDef(FakeFrame(0, 0, 10, 10), posD))
+    eq(R:ParentId("A:d"), "A:one", "parent through alias is canonical")
+    eq(#R:Children("A:one"), 2, "d counts as a child of one")
+    check(R:IsOccupied("A:one", "left", "end"), "occupancy sees through alias")
+    check(R:IsOccupied("A:alias", "right", "start"), "occupancy via alias sees direct children")
+    R:Unregister("A", "d"); R:Unregister("A", "alias")
+end
+
 -- enabled flags
 do
     check(R:IsEnabled("A", "one"), "enabled with no db")

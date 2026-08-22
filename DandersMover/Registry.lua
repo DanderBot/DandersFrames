@@ -179,19 +179,40 @@ end
 -- ============================================================
 -- GRAPH
 -- ============================================================
+-- A getFrame anchor target can resolve to a frame that belongs to a registered
+-- element (e.g. "first raid frame" while the roster is one frame). Graph logic
+-- must see through that alias or an element can be anchored to itself.
+function R:CanonicalId(targetId)
+    local target = self.targets[targetId]
+    if not target then return targetId end
+    if target.element then return target.element.id end
+    local f = self:GetFrame(target)
+    if not f then return targetId end
+    for id, el in pairs(self.elements) do
+        if self:GetFrame(el) == f then return id end
+    end
+    return targetId
+end
+
 function R:ParentId(elId)
     local el = self.elements[elId]
     if not el then return nil end
     local pos = self:GetPos(el)
-    return pos.anchor and pos.anchor.target or nil
+    return pos.anchor and self:CanonicalId(pos.anchor.target) or nil
 end
 
 function R:Children(targetId)
+    local canon = self:CanonicalId(targetId)
     local out = {}
     for _, el in pairs(self.elements) do
-        if self:ParentId(el.id) == targetId then tinsert(out, el) end
+        if self:ParentId(el.id) == canon then tinsert(out, el) end
     end
     return out
+end
+
+-- Would anchoring elId to targetId create a loop (including through aliases)?
+function R:WouldCreateCycle(elId, targetId)
+    return NS.Solver.WouldCreateCycle(function(id) return self:ParentId(id) end, elId, self:CanonicalId(targetId))
 end
 
 function R:Descendants(targetId)
@@ -213,10 +234,11 @@ function R:Descendants(targetId)
 end
 
 function R:IsOccupied(targetId, edge, align, excludeId)
+    local canon = self:CanonicalId(targetId)
     for _, el in pairs(self.elements) do
         if el.id ~= excludeId then
             local a = self:GetPos(el).anchor
-            if a and a.target == targetId and a.edge == edge and a.align == align then return true end
+            if a and a.edge == edge and a.align == align and self:CanonicalId(a.target) == canon then return true end
         end
     end
     return false

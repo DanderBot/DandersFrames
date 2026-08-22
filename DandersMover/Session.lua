@@ -197,7 +197,7 @@ function Sess:SetAnchorPoint(el, point)
 end
 
 function Sess:Anchor(el, targetId, edge, align)
-    if Solver.WouldCreateCycle(function(id) return NS:ParentOf(id) end, el.id, targetId) then
+    if Registry:WouldCreateCycle(el.id, targetId) then
         NS:Print(L["Anchoring would create a loop."])
         return false
     end
@@ -291,7 +291,7 @@ function Sess:EndDrag(el, cx, cy, zone)
     self.dragBefore, self.dragStartPos, self.dragStartCx, self.dragStartCy = nil, nil, nil, nil
     local pos = Registry:GetPos(el)
     if zone then
-        if Solver.WouldCreateCycle(function(id) return NS:ParentOf(id) end, el.id, zone.target) then
+        if Registry:WouldCreateCycle(el.id, zone.target) then
             zone = nil
         else
             pos.anchor = { target = zone.target, edge = zone.edge, align = zone.align, offsetX = 0, offsetY = 0 }

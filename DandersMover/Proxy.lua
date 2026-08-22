@@ -196,9 +196,10 @@ function P:ShowZones(el)
     for _, d in ipairs(Registry:Descendants(el.id)) do descendants[d.id] = true end
     local n = 0
     for _, target in ipairs(Registry:SortedTargets()) do
-        local usable = target.id ~= el.id and not descendants[target.id]
+        local canon = Registry:CanonicalId(target.id)
+        local usable = canon ~= el.id and not descendants[canon]
             and Registry:IsEnabled(target.addon, target.key)
-            and not Solver.WouldCreateCycle(function(id) return NS:ParentOf(id) end, el.id, target.id)
+            and not Registry:WouldCreateCycle(el.id, target.id)
         if usable then
             local rect = Registry:GetRect(target)
             local zones = Solver.SnapZones(target.id, rect, w, h, Solver.SPACING,
