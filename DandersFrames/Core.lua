@@ -5026,6 +5026,38 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
 
+        -- Defensive icon stack count restyle (Krathe, 2026-08-22): the shipped default
+        -- moved from scale 1 / no font to scale 0.7 / "DF Roboto SemiBold". The FONT
+        -- half needs no migration -- the key never had a Config default, so it is
+        -- absent on every untouched profile and the defaults backfill seeds the new
+        -- name; a user's chosen font is a present key the backfill leaves alone.
+        -- The SCALE half cannot ride the backfill, because this table itself seeded
+        -- `1` into every profile that ever loaded -- present keys are never
+        -- overwritten. Equality-gated instead: a profile still on the old default
+        -- (or, pre-backfill, on nil) moves to 0.7; any other value is a choice and
+        -- stays. One-time per mode (flag), so deliberately re-choosing scale 1
+        -- afterwards is not reverted on the next login -- the same contract as
+        -- recolorReducedMaxHealth above.
+        local function restyleDefensiveStack(modeDb)
+            if modeDb and not modeDb._defensiveStackRestyleV1 then
+                local s = modeDb.defensiveIconStackScale
+                if s == nil or s == 1 then
+                    modeDb.defensiveIconStackScale = 0.7
+                end
+                modeDb._defensiveStackRestyleV1 = true
+            end
+        end
+        for _, mode in ipairs({"party", "raid"}) do
+            restyleDefensiveStack(DF.db[mode])
+        end
+        if DandersFramesDB_v2 and DandersFramesDB_v2.profiles then
+            for _, profile in pairs(DandersFramesDB_v2.profiles) do
+                for _, mode in ipairs({"party", "raid"}) do
+                    restyleDefensiveStack(profile[mode])
+                end
+            end
+        end
+
         -- Migrate the legacy `groupLabelShadow` (duplicate-fontstring shadow) into
         -- the new composite outline encoding from PR #115. If the user previously
         -- had the legacy shadow on, prepend "SHADOW;" to groupLabelOutline so they
