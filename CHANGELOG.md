@@ -56,8 +56,7 @@
 
 ### Changes
 
-**If you use a centred Groups Anchor or a flat raid layout, some frames may move once after this update — on purpose.**
-
+* (Raid Frames) **Heads up: if you use a centred Groups Anchor or a flat raid layout, some frames may move once after this update — on purpose.** Drag them where you want them and they will stay. Details below.
 * (Raid Frames) Centred group layouts now sit exactly where the anchor says. An old hidden offset could drag them (and the unlock box) sideways by up to a few hundred pixels at some settings; it has been removed. If your raid frames appear somewhere new, drag them once and they will stay. (by Krathe)
 * (Raid Frames) Profiles using a centred anchor with Groups Before Wrap under 8 are switched to Center Mode "Fixed" automatically where that reproduces the old layout exactly — those frames don't move at all. Profiles the old layout couldn't hold steady are left on "Default" to choose for themselves. (by Krathe)
 * (Raid Frames) "Players Grow From" now reverses the fill order in flat (non-grouped) raid layouts as it always should have. If you had it set to End, players now fill in the opposite order to before. (by Krathe)
