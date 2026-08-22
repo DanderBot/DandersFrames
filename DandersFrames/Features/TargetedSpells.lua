@@ -2433,6 +2433,7 @@ local TL_UnitClassFromGUID = UnitClassFromGUID
 local TL_UnitInParty = UnitInParty
 local TL_UnitCanAttack = UnitCanAttack
 local TL_UnitExists = UnitExists
+local TL_UnitIsDead = UnitIsDead
 -- (Removed) TL_UnitName / TL_UnitClass upvalue caches — unused. The list resolves
 -- both through TL_UnitNameFromGUID / TL_UnitClassFromGUID, which is what made these
 -- two look used to a substring search.
@@ -2471,6 +2472,13 @@ local targetedListContainer = nil
 -- so OnCastStop's reference resolves to the eventual assignment
 -- rather than creating a stray global.
 local TargetedList_StartFadeTicker
+
+-- Forward declaration, same reason as the fade ticker above: the record-creation
+-- path arms the liveness backstop, but the ticker itself is assigned down beside
+-- TargetedList_ValidateTrackedBars (the predicate it drives) and TargetedList_Render.
+-- Hoisted so the reference up there resolves to the eventual assignment instead of
+-- silently becoming a global read that is always nil.
+local TargetedList_StartLivenessTicker
 
 -- ------------------------------------------------------------
 -- Runtime gate
@@ -2785,45 +2793,29 @@ local function TargetedList_DelayedPickup(casterUnit, isChannel, eventSpellId)
         -- (SetText, SetTexture, SetTextColor via C_ClassColor).
     }
 
-    -- Safety timer: if the cast stop event never fires (CC, LOS,
-    -- mob death, etc.), force-remove the record after a generous
-    -- timeout. TS3 uses OnCooldownDone for this but that requires a
-    -- Cooldown frame per bar — our simpler approach uses C_Timer.
-    -- 15 seconds covers the longest enemy casts in WoW.
-    -- Safety timer: force-remove the record if no stop event fires
-    -- within 15 seconds. Uses DF._TargetedListRender to trigger a
-    -- render pass which handles the cleanup (bar release + slot free)
-    -- through the normal expiry path by marking as fading with 0 dur.
-    -- Safety timer: periodically check if the unit is still casting.
-    -- If not, force-remove the record. This catches cases where the
-    -- cast stop event doesn't fire (CC, LOS, mob death, etc.).
-    -- Unlike the previous fixed-timeout approach, this reschedules
-    -- as long as the unit is still casting — so long channels (20s+)
-    -- aren't prematurely removed.
-    local SAFETY_CHECK_INTERVAL = 5
-    if TL_C_Timer_After then
-        local function safetyCheck()
-            local rec = activeTargetedListCasts[casterUnit]
-            if not rec or rec.fadingStartedAt or rec.isTestCast then
-                return  -- already handled or test record
-            end
-            -- Check if the unit is still actually casting/channeling
-            local stillCasting = TL_UnitExists(casterUnit)
-                and (TL_UnitCastingInfo(casterUnit) ~= nil
-                     or TL_UnitChannelInfo(casterUnit) ~= nil)
-            if stillCasting then
-                -- Still casting — reschedule another check
-                TL_C_Timer_After(SAFETY_CHECK_INTERVAL, safetyCheck)
-            else
-                -- Not casting anymore — force-remove
-                rec.fadingStartedAt = TL_GetTime()
-                rec.fadingDuration = 0
-                if DF._TargetedListRender then
-                    DF._TargetedListRender()
-                end
-            end
-        end
-        TL_C_Timer_After(SAFETY_CHECK_INTERVAL, safetyCheck)
+    -- ☠ THE BACKSTOP THAT CATCHES A CAST WHOSE STOP EVENT NEVER ARRIVES -- CC, LOS,
+    -- and above all the caster DYING mid-cast, where the stop may never fire for a
+    -- despawning unit and the nameplate removal can arrive late, not at all, or
+    -- against a token the engine has already recycled onto a different mob.
+    --
+    -- ⚠ THIS REPLACED A PER-RECORD SELF-RESCHEDULING TIMER, and the reason is latency,
+    -- not correctness: that one had the right predicate and named mob death in its own
+    -- comment, but ran every 5 SECONDS. So a mob killed mid-cast left its row on screen
+    -- for up to five seconds with every read behind it returning empty -- "if a mob dies
+    -- whilst casting the bar will stay on screen but go blank ... lots of blank bars"
+    -- (Krathe, 2026-08-22). The bug was never that nothing cleaned up; it was that
+    -- cleanup arrived long after the player had seen the hole.
+    --
+    -- ★ ONE SHARED TICKER, NOT ONE TIMER PER RECORD. Same predicate for every bar
+    -- (TargetedList_ValidateTrackedBars, which the zone-change path already used), one
+    -- timer no matter how many mobs are casting, and it stops itself when the list
+    -- empties. Adding a second parallel mechanism beside the old one was the obvious
+    -- move and the wrong one -- two cleanup paths for one record is how they drift.
+    -- Long channels are safe for the same reason they were before: the check removes a
+    -- record only when the unit has stopped casting, so a 20s channel simply keeps
+    -- passing it.
+    if TargetedList_StartLivenessTicker then
+        TargetedList_StartLivenessTicker()
     end
 
     -- Debug log: only clean values. spellId / spellName / texture are
@@ -3146,6 +3138,18 @@ local function TargetedList_ValidateTrackedBars()
             if not TL_UnitExists(unit) then
                 activeTargetedListCasts[unit] = nil
                 anyRemoved = true
+            -- ★ Check: is the caster DEAD? A mob killed mid-cast keeps its nameplate
+            -- for the death animation, so it still "exists" -- but it is not casting
+            -- any more and never will be, and the record was rendering a bar with no
+            -- spell behind it. That is the blank bar: the row survives because the
+            -- entry survives, and every read behind it comes back empty ("if a mob
+            -- dies whilst casting the bar will stay on screen but go blank", Krathe,
+            -- 2026-08-22). Tested BEFORE the casting-info check because it is the
+            -- specific, certain answer -- the cast is over because the caster is --
+            -- where a nil cast is merely the symptom shared with several other causes.
+            elseif TL_UnitIsDead(unit) then
+                activeTargetedListCasts[unit] = nil
+                anyRemoved = true
             -- Check: is the unit still casting/channeling?
             elseif TL_UnitCastingInfo(unit) == nil
                and TL_UnitChannelInfo(unit) == nil then
@@ -3159,10 +3163,62 @@ local function TargetedList_ValidateTrackedBars()
     end
 end
 
+-- ☠☠ AND IT HAS TO ACTUALLY RUN. The predicate above was already right; it was only
+-- ever called on zone transitions and loading screens, so a bar orphaned mid-fight
+-- sat there until the next zone change. Every routine cleanup path is EVENT-driven
+-- (UNIT_SPELLCAST_STOP and friends, NAME_PLATE_UNIT_REMOVED) and a mob dying mid-cast
+-- is exactly the case where those events are unreliable: the stop may never fire for
+-- a despawning unit, and the nameplate removal can arrive late, not at all, or against
+-- a token the engine has already recycled to a different mob.
+--
+-- ★ So this is a BACKSTOP, not the primary path. The events above stay the fast route
+-- -- they clear a bar in the same frame and give it its fade -- and this only bounds
+-- how long a bar the events missed can linger. Same shape as the identity gate's
+-- safety-net sweep, and for the same reason: the failures here have always been a
+-- missed EDGE rather than a wrong verdict.
+--
+-- ⚠ Cheap by construction and self-stopping. It runs ONLY while there is at least one
+-- live (non-test, non-fading) record, costs a handful of unit reads per record per
+-- tick, and cancels itself the moment the list empties -- so the steady state with no
+-- enemy casting is no timer at all. 0.25s rather than the fade ticker's 0.05s: this is
+-- a cleanup deadline, not an animation, and a blank bar surviving a quarter second is
+-- not what anyone reported.
+local targetedListLivenessTicker
+local function TargetedList_StopLivenessTicker()
+    if targetedListLivenessTicker then
+        targetedListLivenessTicker:Cancel()
+        targetedListLivenessTicker = nil
+    end
+end
+
+-- Assigns the forward-declared local above; a `local function` here would shadow it
+-- and leave the record-creation path calling nil.
+TargetedList_StartLivenessTicker = function()
+    if targetedListLivenessTicker then return end
+    if not C_Timer or not C_Timer.NewTicker then return end
+    targetedListLivenessTicker = C_Timer.NewTicker(0.25, function()
+        -- Stop as soon as nothing needs watching. Checked BEFORE validating so an
+        -- empty list costs one next() and cancels, rather than a full sweep.
+        local anyLive = false
+        for _, rec in pairs(activeTargetedListCasts) do
+            if not rec.isTestCast and not rec.fadingStartedAt then anyLive = true break end
+        end
+        if not anyLive then
+            TargetedList_StopLivenessTicker()
+            return
+        end
+        TargetedList_ValidateTrackedBars()
+    end)
+end
+
 -- Gotcha #11: nameplate removal events don't reliably fire on zone
 -- transitions. Also used on feature disable and on explicit cleanup.
 local function TargetedList_ReleaseAllBars()
     wipe(activeTargetedListCasts)
+    -- The liveness backstop self-cancels on its next tick once the list is empty, but
+    -- this path is the deliberate teardown (feature disabled, nameplates turned off,
+    -- zone change) -- leave nothing running behind it rather than one more tick.
+    if TargetedList_StopLivenessTicker then TargetedList_StopLivenessTicker() end
     -- Commit #5: release every pooled bar back to the framepool.
     if DF.Debug then
         DF:Debug("TARGETEDLIST", "release all bars")
