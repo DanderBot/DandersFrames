@@ -38,6 +38,8 @@ do
     local scaled = R:Register("A", "scaled", elDef(FakeFrame(1000, 500, 50, 20, 0.5), { point = "CENTER", x = 0, y = 0 }))
     local r2 = R:GetRect(scaled)
     eq(r2.x, 500 - 960, "scaled centre x converted"); eq(r2.w, 25, "scaled width converted")
+    local sw, sh = R:GetSize(scaled)
+    eq(sw, 25, "GetSize is scaled too"); eq(sh, 10, "GetSize height scaled")
     local sized = R:Register("A", "sized", elDef(FakeFrame(960, 540, 1, 1), { point = "CENTER", x = 0, y = 0 }, { getSize = function() return 200, 80 end }))
     local r3 = R:GetRect(sized)
     eq(r3.w, 200, "getSize overrides frame size")

@@ -55,6 +55,7 @@ local function onDragStart(self)
     self.axis = nil
     self.dragging = true
     NS.Session:Select(el.id)
+    if NS.Panel then NS.Panel:Hide() end   -- re-docks on drop via Select; keeps targets visible
     NS.Session:BeginDrag(el)
     P:ShowZones(el)
     self:SetScript("OnUpdate", function(s)

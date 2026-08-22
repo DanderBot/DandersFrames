@@ -141,10 +141,14 @@ function R:GetSize(entry)
         if not r then return nil end
         return r.w, r.h
     end
+    -- getSize is declared in UIParent units (the consumer reports what is visible).
     if entry.getSize then return entry.getSize() end
     local f = self:GetFrame(entry)
     if not f then return nil end
-    return f:GetSize()
+    local w, h = f:GetSize()
+    if not w then return nil end
+    local ratio = f:GetEffectiveScale() / UIParent:GetEffectiveScale()
+    return w * ratio, h * ratio
 end
 
 -- rect in UIParent units relative to UIParent centre.
@@ -161,9 +165,8 @@ function R:GetRect(entry)
     if not cx then return nil end
     local ratio = f:GetEffectiveScale() / UIParent:GetEffectiveScale()
     local ux, uy = UIParent:GetCenter()
-    local w, h = self:GetSize(entry)
+    local w, h = self:GetSize(entry)   -- already UIParent units
     if not w then return nil end
-    if not entry.getSize then w, h = w * ratio, h * ratio end
     return { x = cx * ratio - ux, y = cy * ratio - uy, w = w, h = h }
 end
 
