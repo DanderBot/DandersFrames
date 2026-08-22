@@ -28,5 +28,6 @@ L["Snap to frames"] = true
 L["Snap to grid"] = true
 L["Snap to screen"] = true
 L["Undo"] = true
+L["Usage: /mover [unlock|lock|config|demo]"] = true
 L["(unavailable)"] = true
 L["You have unsaved mover changes."] = true
