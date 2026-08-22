@@ -1028,7 +1028,21 @@ function DF:CreateGUI()
         UpdateLockButtonState()
     end
     GUI.UpdateThemeColors = UpdateThemeColors
-    
+
+    -- ☠ RE-THEME EVERY TIME THE WINDOW SHOWS, not only when a mode tab is clicked.
+    -- Field report (Neosaro, v5.1.3; still reported current 2026-08-22): the title
+    -- text keeps "the color of the tab it was first enabled at the start of the
+    -- session or after a reload". Every mode-tab handler and DF:ToggleGUI call
+    -- UpdateThemeColors, so the ordinary paths are covered -- but any path that
+    -- shows the frame WITHOUT going through them presents the chrome in whatever
+    -- colour the last pass painted (/df resetgui's direct GUIFrame:Show() is one
+    -- such path in-repo, and nothing stops another appearing). Hooking OnShow makes
+    -- the invariant structural: a visible window is a re-themed window, whoever
+    -- showed it. Idempotent and cheap (a handful of SetTextColor/SetActive calls),
+    -- and HookScript so an existing or future OnShow handler is composed with, not
+    -- replaced.
+    frame:HookScript("OnShow", function() UpdateThemeColors() end)
+
     -- Function to update test button state (called externally)
     UpdateTestButtonState = function()
         -- Both cues read the USER's claim -- the same thing the panel's toggle shows
