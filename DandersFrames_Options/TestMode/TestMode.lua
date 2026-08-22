@@ -88,7 +88,7 @@ DF.TestData = {
         -- game alike — no preview-only offset, which would have broken "previews differ in
         -- DATA, never RENDERING". This frame's centre still belongs to phasedIcon.
         -- ⚠ Nothing draws until the user opts in — bgCarrierIconEnabled defaults false.
-        {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.16, healAbsorb = 0.15, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, isBGCarrier = true, reducedMaxPct = 0.45},  -- Missing buffs, phased, in vehicle, BG carrier, has HoT
+        {name = "Xx", class = "ROGUE", role = "DAMAGER", specID = 260, health = 0.30, maxHealth = 70000, absorb = 0.16, healAbsorb = 0.15, healPrediction = 0.25, status = nil, outOfRange = false, raidTarget = nil, dispelType = "Poison", centerStatus = nil, isAFK = false, isPhased = true, inVehicle = true, isBGCarrier = true, reducedMaxPct = 0.45, showPing = true},  -- Missing buffs, phased, in vehicle, BG carrier, ping, has HoT
     },
     -- Test aura data - expanded for testing layouts. spellID (where a stable,
     -- still-live spell matches) lets the 12.1 container preview show the REAL
@@ -274,6 +274,8 @@ local RAID_ALLOC = {
     -- Centre-region — see rule 2. These five sets must stay mutually disjoint.
     AFK        = { [2] = true },
     READYCHECK = { [8] = true },
+    -- Ping icon: a centre-region element (rule 2). 5 carries only the defensive row.
+    PING       = { [5] = true },
     -- Three frames, because summon has THREE live states and each has its own
     -- user-editable text key. 12 was the documented free slot (it held DND until that
     -- state was dropped); 15 carries only the missing-buff STRIP, which is not a
@@ -549,6 +551,7 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
             showMissingBuff = inRaidSet("MISSINGBUF", i),
             showDefensive   = inRaidSet("DEFENSIVE", i),
             showReadyCheck  = inRaidSet("READYCHECK", i),
+            showPing        = inRaidSet("PING", i),
             showDebuffs     = nil,   -- every frame keeps its debuff row...
             -- ...but only two of twenty get the IMPORTANT treatment. Enlarged + badged on
             -- every frame read as the default state of a raid rather than as an alert
@@ -622,6 +625,7 @@ function DF:GetTestUnitData(index, isRaid, isBoss)
         showDefensive = data.showDefensive,
         showMissingBuff = data.showMissingBuff,
         showReadyCheck = data.showReadyCheck,
+        showPing = data.showPing,
         showDebuffs = data.showDebuffs,
         showImportantDebuff = data.showImportantDebuff,
     }
@@ -1370,6 +1374,21 @@ function DF:UpdateTestStatusIcons(frame, testData)
             frame.readyCheckIcon:Show()
         else
             frame.readyCheckIcon:Hide()
+        end
+    end
+
+    -- Ping Icon (Features/PingMirror.lua). Real atlas, live geometry applier.
+    if frame.pingIcon then
+        if not db.pingIconEnabled or db.testShowStatusIcons == false then
+            frame.pingIcon:Hide()
+        elseif testData.showPing then
+            if DF.SetPingIconKit then DF:SetPingIconKit(frame.pingIcon, "Warning") end
+            if DF.ApplyStatusIconSettings then
+                DF:ApplyStatusIconSettings(frame.pingIcon, db, "pingIcon")
+            end
+            frame.pingIcon:Show()
+        else
+            frame.pingIcon:Hide()
         end
     end
     

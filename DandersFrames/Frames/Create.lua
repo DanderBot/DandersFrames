@@ -813,6 +813,11 @@ function DF:CreateFrameElementsExtended(frame, db)
     frame.readyCheckIcon.texture = frame.readyCheckIcon:CreateTexture(nil, "OVERLAY")
     frame.readyCheckIcon.texture:SetAllPoints()
     frame.readyCheckIcon.texture:SetDrawLayer("OVERLAY", 7)
+
+    -- ========================================
+    -- PING ICON (Features/PingMirror.lua)
+    -- ========================================
+    if DF.CreatePingIcon then DF:CreatePingIcon(frame) end
     
     -- ========================================
     -- STATUS ICONS (Summon, Res, Phased, AFK, Vehicle, RaidRole)
@@ -1197,6 +1202,11 @@ function DF:CreateUnitFrame(unit, index, isRaid)
     frame.readyCheckIcon.texture = frame.readyCheckIcon:CreateTexture(nil, "OVERLAY")
     frame.readyCheckIcon.texture:SetAllPoints()
     frame.readyCheckIcon.texture:SetDrawLayer("OVERLAY", 7)
+
+    -- ========================================
+    -- PING ICON (Features/PingMirror.lua)
+    -- ========================================
+    if DF.CreatePingIcon then DF:CreatePingIcon(frame) end
     
     -- ========================================
     -- STATUS ICONS (Summon, Res, Phased, AFK, Vehicle, RaidRole)

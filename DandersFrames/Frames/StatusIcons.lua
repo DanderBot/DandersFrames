@@ -1198,6 +1198,7 @@ function DF:UpdateAllCombatGatedIcons()
         if DF.UpdateLeaderIcon then DF:UpdateLeaderIcon(frame) end
         if DF.UpdateRaidTargetIcon then DF:UpdateRaidTargetIcon(frame) end
         if DF.UpdateReadyCheckIcon then DF:UpdateReadyCheckIcon(frame) end
+        if DF.UpdatePingIcon then DF:UpdatePingIcon(frame) end
         -- Covers summon / resurrection / phased / AFK / vehicle / MT-MA / BG carrier / combat.
         if DF.UpdateAllStatusIcons then DF:UpdateAllStatusIcons(frame) end
     end

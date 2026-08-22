@@ -103,6 +103,7 @@ local CATEGORY_GROUPS = {
             { key = "API",          desc = "External API callback fires (OnFramesSorted, etc.)" },
             { key = "CLICK",        desc = "Click-casting binding apply, hover, PreClick state" },
             { key = "PET",          desc = "Pet frame lifecycle and visibility" },
+            { key = "PING",         desc = "Ping icon mirror: Blizzard icon hooks, pings received and cleared" },
             { key = "POPUP",        desc = "Popup and dialog config errors" },
             { key = "ROLE",         desc = "Role icon show/hide decisions and combat transitions" },
             { key = "SCRIPT",       desc = "Lua script errors and pcall failures" },

@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### New Features
+- (Icons) Pings now show on frames. When a group member pings a player, the ping icon appears on that player's frame, matching the default raid frames. Find it under Indicators > Icons > Ping Icon, with the usual scale, position and hide-in-combat options.
 
 ### Bug Fixes
 

@@ -1040,6 +1040,7 @@ function DF:InitializeHeaderChild(frame)
             if DF.UpdateLeaderIcon then DF:UpdateLeaderIcon(frame) end
             if DF.UpdateRaidTargetIcon then DF:UpdateRaidTargetIcon(frame) end
             if DF.UpdateReadyCheckIcon then DF:UpdateReadyCheckIcon(frame) end
+            if DF.UpdatePingIcon then DF:UpdatePingIcon(frame) end
         end
     end)
     
@@ -4154,6 +4155,7 @@ function DF:FullFrameRefresh(frame)
     if DF.UpdateLeaderIcon then DF:UpdateLeaderIcon(frame) end
     if DF.UpdateRaidTargetIcon then DF:UpdateRaidTargetIcon(frame) end
     if DF.UpdateReadyCheckIcon then DF:UpdateReadyCheckIcon(frame) end
+    if DF.UpdatePingIcon then DF:UpdatePingIcon(frame) end
     if DF.UpdateCenterStatusIcon then DF:UpdateCenterStatusIcon(frame) end
     
     -- Buff indicators

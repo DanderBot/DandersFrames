@@ -1520,6 +1520,12 @@ function DF:LightweightUpdateIconPosition(iconType)
             x = db.readyCheckIconX or 0
             y = db.readyCheckIconY or 0
             anchor = db.readyCheckIconAnchor or "CENTER"
+        elseif iconType == "ping" then
+            icon = frame.pingIcon
+            scale = db.pingIconScale or 1
+            x = db.pingIconX or 0
+            y = db.pingIconY or 0
+            anchor = db.pingIconAnchor or "CENTER"
         elseif iconType == "leader" then
             icon = frame.leaderIcon
             scale = db.leaderIconScale or 1
@@ -1594,6 +1600,9 @@ function DF:LightweightUpdateIconAlpha(iconType)
         elseif iconType == "readyCheck" then
             icon = frame.readyCheckIcon
             alpha = db.readyCheckIconAlpha or 1
+        elseif iconType == "ping" then
+            icon = frame.pingIcon
+            alpha = db.pingIconAlpha or 1
         elseif iconType == "leader" then
             icon = frame.leaderIcon
             alpha = db.leaderIconAlpha or 1
@@ -1926,6 +1935,7 @@ function DF:LightweightUpdateFrameLevel(elementType)
         -- Frame Level only ever applied in test mode. Wired here 2026-07-25.
         bgCarrier    = "bgCarrierIcon",
         combat       = "combatIcon",
+        ping         = "pingIcon",
     }
 
     local function UpdateLevel(frame)

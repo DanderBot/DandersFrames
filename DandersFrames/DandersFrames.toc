@@ -119,6 +119,7 @@ Features\Pandemic.lua
 Features\Highlights.lua
 Features\ElementAppearance.lua
 Features\Range.lua
+Features\PingMirror.lua
 Features\HealthFade.lua
 Features\Sort.lua
 Features\SecureSort.lua

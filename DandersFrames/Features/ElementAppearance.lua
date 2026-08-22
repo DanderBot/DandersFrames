@@ -288,6 +288,7 @@ local STATUS_ICON_NO_OOR_FADE = {
 local STATUS_ICON_PREFIXES = {
     "summonIcon", "resurrectionIcon", "phasedIcon", "afkIcon",
     "vehicleIcon", "raidRoleIcon", "bgCarrierIcon", "combatIcon",
+    "pingIcon",
 }
 
 function DF:GetStatusIconFadeAlpha(frame, prefix)
