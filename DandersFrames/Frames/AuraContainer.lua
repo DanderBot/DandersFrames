@@ -5387,16 +5387,26 @@ function Handle:_noteGateRecovery(can)
     local was = self._idGateAssist
     local now = can and true or false
     if was == false and now then
-        GateLog("recovered unit=%s - re-parsing (pool was fail-open)",
-            tostring(self.config and self.config.unit))
+        -- ⚠ BOTH LINES LATCH WHILE THE DEBT STANDS. Holding the edge means every gate
+        -- pass re-detects the same false->true transition until the re-parse lands, and
+        -- the sweep re-probes every handle on a 5s ticker plus every watched event -- so
+        -- an unrecoverable window logged this pair per handle per pass: 228 lines from
+        -- one dungeon pull (Krathe's capture, 2026-08-22). The RETRY must keep happening;
+        -- only the LOG needs to say it once. Cleared wherever _pendingGateReparse is.
+        if not self._pendingGateReparse then
+            GateLog("recovered unit=%s - re-parsing (pool was fail-open)",
+                tostring(self.config and self.config.unit))
+        end
         if not self:Refresh() then
             -- Deliberately NOT stamping _idGateAssist, and not clearing the cinematic
             -- latch: neither may advance past a re-parse that did not happen.
+            if not self._pendingGateReparse then
+                GateLog("recovery unit=%s could not re-parse (combat/no backend) - "
+                    .. "edge held, POOL STAYS PARKED, retry queued for combat end",
+                    tostring(self.config and self.config.unit))
+            end
             self._pendingGateReparse = true
             self:_registerRegen()
-            GateLog("recovery unit=%s could not re-parse (combat/no backend) - "
-                .. "edge held, retry queued for combat end",
-                tostring(self.config and self.config.unit))
             return
         end
         -- AFTER the bounce, deliberately: the whole point of the cinematic latch
@@ -5694,7 +5704,23 @@ function Handle:_applyIdentityGate()
     -- Collected across both blocks and emitted once at the end; see the note in the park
     -- block for why these were two lines and why one is better.
     local parkFlip, hideFlip
-    local newParked = (hide or self._idGateUntrusted) and true or nil
+    -- ☠☠ AN OWED RE-PARSE KEEPS THE POOL PARKED. Trust returning and the pool being
+    -- TRUSTWORTHY are not the same instant: when the recovery bounce cannot run (in
+    -- combat, or before the backend exists) the pool still holds the fail-open parse it
+    -- took while distrusted, and _idGateUntrusted clearing would un-park that stale
+    -- parse into view. Field-caught: a dungeon mechanic that entombs a player flipped
+    -- UnitCanAssist off and back inside one pull, and the log shows park=ON at 16:59:56
+    -- then park=OFF at 17:00:01 with three "could not re-parse" lines in between --
+    -- i.e. the row un-parked holding every buff, which is the defensive row failing
+    -- open (Krathe, 2026-08-22).
+    -- ⚠ PRE-EXISTING, not a regression of the held-edge change: before it, the edge was
+    -- consumed on the same failed bounce and the pool un-parked just the same. Holding
+    -- the edge is what made the mismatch VISIBLE in the log; this is what closes it.
+    -- The debt clears only where the re-parse actually lands (_noteGateRecovery's
+    -- success arm and the regen drain), and the drain re-runs this gate immediately
+    -- afterwards so the un-park does not wait for the 5s backstop.
+    local newParked = (hide or self._idGateUntrusted or self._pendingGateReparse)
+        and true or nil
     if self._idGateParked ~= newParked then
         local prevParked = self._idGateParked
         -- ☠ THE FLAG IS AN INPUT, NOT A RECORD. ApplyTuning READS _idGateParked to decide
@@ -6442,15 +6468,29 @@ function Handle:_registerRegen()
                     -- which re-asks the probes first, so a still-untrusted unit stays
                     -- parked instead of being declared recovered by a timer.
                     if h._pendingGateReparse then
+                        local cleared = false
                         if rebuilt then
                             h._pendingGateReparse = nil
+                            cleared = true
                         else
                             local done = false
                             pcall(function() done = h:Refresh() end)
                             if done then
                                 h._pendingGateReparse = nil
+                                cleared = true
                                 pcall(function() h:_setCineLatch(nil, true) end)
                             end
+                        end
+                        -- ☠ RE-RUN THE GATE THE MOMENT THE DEBT CLEARS. The park verdict
+                        -- now includes _pendingGateReparse (the pool stays parked while a
+                        -- re-parse is owed), so clearing the debt without re-asking would
+                        -- leave the row parked until the 5s backstop ticker happened by --
+                        -- a visible hole after every pull. This actuates it in the same
+                        -- frame the pool becomes trustworthy again, and it re-probes
+                        -- rather than assuming, so a unit that is STILL untrusted simply
+                        -- stays parked on its own merits.
+                        if cleared then
+                            pcall(function() h:_applyIdentityGate() end)
                         end
                     end
                 end
@@ -7330,6 +7370,13 @@ local function registerSlotRegen(handle)
                 if h._pendingTuning then
                     h._pendingTuning = nil
                     pcall(h._replayTuning, h)
+                    -- The replay re-pushes candidates, which IS the slot's re-parse,
+                    -- so the gate debt is settled -- drop it and re-assert the hide
+                    -- so the slot un-hides now rather than on the next sweep.
+                    if h._pendingGateReparse then
+                        h._pendingGateReparse = nil
+                        pcall(h._pushFilter, h)
+                    end
                 end
                 if h._pendingRestyle then
                     h._pendingRestyle = nil
@@ -7396,8 +7443,11 @@ function SlotHandle:_pushFilter()
     -- slot on this owner computes the same answer and the shared anchor is the right
     -- grain. `parked` is per-slot consumer state (one disabled indicator) and must NOT
     -- hide the owner -- it stays filter-only.
-    local unitHidden = (self._gateHidden or self._cineLatched or self._deathLatched)
-        and true or false
+    -- _pendingGateReparse: trust has returned but the candidate re-push that clears
+    -- the fail-open selection has not run yet (deferred to regen). Un-hiding before
+    -- it lands shows the stale parse -- see SlotHandle:_noteGateRecovery.
+    local unitHidden = (self._gateHidden or self._cineLatched or self._deathLatched
+        or self._pendingGateReparse) and true or false
     local anchor = self.owner.anchor
     if anchor then pcall(anchor.SetShown, anchor, not unitHidden) end
     local want = (self.parked or unitHidden)
@@ -7561,8 +7611,16 @@ function SlotHandle:_noteGateRecovery(can)
     -- moment combat dropped.
     if InCombatLockdown() then
         self._cineLatched = nil
+        -- ☠ THE SLOT STAYS HIDDEN UNTIL THE CANDIDATES ARE ACTUALLY RE-PUSHED.
+        -- Same fault as the Handle twin: clearing the gate's hide the instant trust
+        -- returns un-hides a selection that is still the fail-open one, because the
+        -- re-push is what re-parses and it cannot run in lockdown. _pushFilter reads
+        -- this flag (see unitHidden there), and the regen drain clears it only after
+        -- the replay has run.
+        self._pendingGateReparse = true
         self._pendingTuning = true
         registerSlotRegen(self)
+        self:_pushFilter()   -- re-assert the hide with the debt now counted
         return
     end
     pcall(c.SetAuraSlotCandidateFilters, c, self.key, self._lastCandidateFilters)
