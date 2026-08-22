@@ -650,8 +650,13 @@ function DF:GetADTrackedSpellIDs(frame, db)
     if not (DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)) then return nil end
     if not (DF.FactoryOwnsAD and DF:FactoryOwnsAD(db)) then return nil end
 
+    -- ⚠ `adDB.enabled` is NOT re-tested here any more. The enable moved off the preset
+    -- and onto the mode (DF:IsAuraDesignerEnabledForMode), so the preset's copy is stale
+    -- for mode-resolved frames -- it would veto a mode that is genuinely on. The
+    -- IsAuraDesignerEnabled gate on the line above already asked the authoritative
+    -- question; this was only ever a belt-and-braces repeat of it.
     local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
-    if not adDB or not adDB.enabled then return nil end
+    if not adDB then return nil end
 
     -- Active spec resolved exactly as Factory:SyncFrame does (auto -> player's live spec).
     local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
@@ -752,8 +757,13 @@ function DF:GetClaimedDebuffCategories(frame, db)
     if not (DF.IsAuraDesignerEnabled and DF:IsAuraDesignerEnabled(frame)) then return nil end
     if not (DF.FactoryOwnsAD and DF:FactoryOwnsAD(db)) then return nil end
 
+    -- ⚠ `adDB.enabled` is NOT re-tested here any more. The enable moved off the preset
+    -- and onto the mode (DF:IsAuraDesignerEnabledForMode), so the preset's copy is stale
+    -- for mode-resolved frames -- it would veto a mode that is genuinely on. The
+    -- IsAuraDesignerEnabled gate on the line above already asked the authoritative
+    -- question; this was only ever a belt-and-braces repeat of it.
     local adDB = DF.ResolveAuraDesigner and DF:ResolveAuraDesigner(frame)
-    if not adDB or not adDB.enabled then return nil end
+    if not adDB then return nil end
 
     local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
     local spec = Engine and Engine.ResolveSpec and Engine:ResolveSpec(adDB)
@@ -4102,7 +4112,9 @@ local function reconcileSoundNow(frame)
         --
         -- Tests ~= false, not truthiness: nil means ON (the shipped default is true, and a
         -- profile predating the key must keep its alerts).
-        if adDB and adDB.enabled and adDB.soundEnabled ~= false then
+        -- `enabled` is the frame gate computed above, not adDB.enabled: the preset's
+        -- copy no longer decides, because the enable is per-mode now.
+        if adDB and enabled and adDB.soundEnabled ~= false then
             local Engine = DF.AuraDesigner and DF.AuraDesigner.Engine
             local spec = Engine and Engine.ResolveSpec and Engine:ResolveSpec(adDB)
             -- Spec gate matches SyncFrame (spec nil = AD renders nothing, sounds included).

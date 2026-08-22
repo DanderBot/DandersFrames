@@ -48,8 +48,11 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
 
         -- Refresh banner content based on current state
         adBanner.refreshContent = function(b, d)
-            local _adCfg = DF.GetModeAuraDesigner and DF:GetModeAuraDesigner((d == DF.db.raid) and "raid" or "party")
-            local adEnabled = _adCfg and _adCfg.enabled
+            -- ☠ Per-MODE enable now, not the shared template's field (see
+            -- DF:IsAuraDesignerEnabledForMode). Reading the preset made this banner
+            -- follow whichever mode last toggled it.
+            local adEnabled = DF.IsAuraDesignerEnabledForMode
+                and DF:IsAuraDesignerEnabledForMode(((d == DF.db.raid) and "raid" or "party"))
             if adEnabled and d.showBuffs then
                 b:SetHTML(L["Aura Designer is active alongside Buffs."] .. " " ..
                     adLink("openAD", L["Open Aura Designer"]), adOnLink)
@@ -67,8 +70,8 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         end
 
         adBanner.hideOn = function(d)
-            local _adCfg = DF.GetModeAuraDesigner and DF:GetModeAuraDesigner((d == DF.db.raid) and "raid" or "party")
-            return not (_adCfg and _adCfg.enabled)
+            return not (DF.IsAuraDesignerEnabledForMode
+                and DF:IsAuraDesignerEnabledForMode(((d == DF.db.raid) and "raid" or "party")))
         end
 
         Add(adBanner, 32, "both")
@@ -91,8 +94,9 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 adLink("openAD", L["Open Aura Designer"]), adOnLink)
         end
         adPromoBanner.hideOn = function(d)
-            local _adCfg = DF.GetModeAuraDesigner and DF:GetModeAuraDesigner((d == DF.db.raid) and "raid" or "party")
-            return (_adCfg and _adCfg.enabled) and true or false   -- hide when AD IS active
+            -- hide when AD IS active
+            return (DF.IsAuraDesignerEnabledForMode
+                and DF:IsAuraDesignerEnabledForMode(((d == DF.db.raid) and "raid" or "party"))) and true or false
         end
         Add(adPromoBanner, 32, "both")
 

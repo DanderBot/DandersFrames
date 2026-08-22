@@ -431,15 +431,22 @@ local function CreateEnableBanner(parent)
     cb:SetPoint("LEFT", banner, "LEFT", 10, 16)
     DF.GUI:StyleCheckButton(cb)
 
+    -- ☠ THE ENABLE IS PER-MODE NOW, not a field on the shared template. Reading it off
+    -- the preset made this box show -- and set -- the OTHER mode's value whenever both
+    -- modes pointed at the same template. See DF:IsAuraDesignerEnabledForMode.
     local adDB = GetAuraDesignerDB()
-    cb:SetChecked(adDB and adDB.enabled)
+    cb:SetChecked(DF.IsAuraDesignerEnabledForMode and DF:IsAuraDesignerEnabledForMode(((GUI and GUI.SelectedMode) or "party")))
 
     cb:SetScript("OnClick", function(self)
         local checked = self:GetChecked()
-        -- ⚠ ONE resolve, nil-guarded. GetAuraDesignerDB can answer nil before the profile
-        -- DB exists, and both branches below read AND write through it; the build above
-        -- guards its own read (`adDB and adDB.enabled`) and this has to match. With no
-        -- config to toggle there is nothing this click can mean.
+        -- ⚠ STILL NIL-GUARDED, THOUGH IT NO LONGER CARRIES THE ENABLE. GetAuraDesignerDB
+        -- can answer nil before the profile DB exists, and a click with no config behind it
+        -- cannot mean anything: the toggle writes through the MODE db now, but the designer
+        -- being switched on still has to exist.
+        -- (This used to say the build above "guards its own read (`adDB and adDB.enabled`)
+        -- and this has to match". That stopped being true when the enable moved to the mode
+        -- -- the build reads DF:IsAuraDesignerEnabledForMode, and this guard is about the
+        -- CONFIG existing, not about its enable field.)
         local clickDB = GetAuraDesignerDB()
         if not clickDB then
             self:SetChecked(false)
@@ -453,20 +460,24 @@ local function CreateEnableBanner(parent)
             -- cascade", and as buffs being on with the Buff Bar option off (Aphoex,
             -- 2026-08-14). A checkbox that is already checked has nothing to ask and
             -- nothing to write; re-sync it and stop.
-            if clickDB.enabled then
+            if DF:IsAuraDesignerEnabledForMode(((GUI and GUI.SelectedMode) or "party")) then
                 self:SetChecked(true)
                 return
             end
-            -- ⚠ CAPTURE THE MODE DB NOW, at the click, not when the answer arrives. The
+            -- ⚠ CAPTURE THE MODE NOW, at the click, not when the answer arrives. The
             -- popup is modeless: the user can change the mode tab while it is open, and
             -- S.db is rebound by the page build — reading it in the callback would land
-            -- the Show Buffs write on whichever mode they happened to switch to.
+            -- BOTH writes (the enable and Show Buffs) on whichever mode they happened
+            -- to switch to. targetMode is the same capture the targetDB line has always
+            -- been; the first cut of the per-mode enable read GUI.SelectedMode inside
+            -- the callback, which was this comment's warning re-instantiated.
             local targetDB = S.db
+            local targetMode = (GUI and GUI.SelectedMode) or "party"
             -- Show popup asking about buff coexistence
             ShowBuffCoexistPopup(function(keepBuffs)
-                -- clickDB, captured with targetDB above and for the same reason: the
-                -- answer must land on the config the click was made against.
-                clickDB.enabled = true
+                -- targetMode/targetDB, captured above and for the same reason: the
+                -- answer must land on the mode the click was made against.
+                DF:SetAuraDesignerEnabledForMode(targetMode, true)
                 -- This is a real edit to another page's setting, so SAY so. It is the
                 -- whole point of the question, but the page that owns the key is two
                 -- clicks away and the user has no other way to know it moved.
@@ -503,11 +514,11 @@ local function CreateEnableBanner(parent)
         else
             -- Mirror of the guard above: an already-disabled designer has nothing to turn
             -- off, and the teardown below is not free (ForceRefreshAllFrames).
-            if not clickDB.enabled then
+            if not DF:IsAuraDesignerEnabledForMode(((GUI and GUI.SelectedMode) or "party")) then
                 self:SetChecked(false)
                 return
             end
-            clickDB.enabled = false
+            DF:SetAuraDesignerEnabledForMode(((GUI and GUI.SelectedMode) or "party"), false)
             DF:AuraDesigner_RefreshPage()
             DF:InvalidateAuraLayout()
             DF:UpdateAllFrames()
