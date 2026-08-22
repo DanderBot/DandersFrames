@@ -201,3 +201,6 @@ SlashCmdList.DANDERSMOVER = function(msg)
         NS:Print(L["Usage: /mover [unlock|lock|config|demo]"])
     end
 end
+
+-- Addon table exposed for /run diagnostics and the manual checklist.
+_G.DandersMover = NS
