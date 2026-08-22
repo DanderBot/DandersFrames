@@ -3,7 +3,7 @@
 ## Notes: Shared mover and anchor system for addons. Drag, snap, anchor and undo any registered UI element.
 ## Author: Danders
 ## Version: v5.4.0-alpha.1
-## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
+## IconTexture: Interface\AddOns\DandersMover\Media\DF_Icon
 ## SavedVariables: DandersMoverDB
 ## AllowAddOnTableAccess: 1
 ## X-Curse-Project-ID: 0

@@ -64,7 +64,7 @@ is nothing to measure.
 
 | Call | Purpose |
 |---|---|
-| `Mover:RegisterAddon(name, { title, icon })` | Group your elements in the UI |
+| `Mover:RegisterAddon(name, { title, icon })` | Group your elements in the UI. `icon` (texture path) is shown on your proxies; omitted → the bundled DandersFrames icon |
 | `Mover:Register(addon, key, def)` | Make a frame movable. `def`: `title`, `frame` or `getFrame`, `getPos`, `onChanged(pos, reason)`, optional `default`, `secure`, `getSize` (w, h in UIParent units), `getRect`, `anchorable`, `group` |
 | `Mover:RegisterAnchorTarget(addon, key, { title, frame or getFrame })` | Something others can anchor to but that is not itself movable. Also takes `getSize` / `getRect` |
 | `Mover:RefreshAnchorTarget(addon, key)` | Call when a `getFrame` target now resolves to a different frame |

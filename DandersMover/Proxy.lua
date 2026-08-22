@@ -10,9 +10,12 @@ local P = { proxies = {}, zones = {}, zoneCount = 0, dragZones = {} }
 NS.Proxy = P
 
 local Registry, Solver, T, L = NS.Registry, NS.Solver, NS.Theme, NS.L
-local CreateFrame, UIParent, GetCursorPosition = CreateFrame, UIParent, GetCursorPosition
+local CreateFrame, UIParent, GetCursorPosition, GameTooltip = CreateFrame, UIParent, GetCursorPosition, GameTooltip
 local pairs, ipairs, format, sqrt, abs = pairs, ipairs, string.format, math.sqrt, math.abs
 
+local MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
+local DEFAULT_ICON = MEDIA .. "DF_Icon"
+local LINK_ICON = MEDIA .. "link"
 local PROXIMITY = 100
 local MIN_PROXY = 24
 local C_ZONE_NEAR = { 0.3, 0.7, 1.0 }
@@ -54,6 +57,7 @@ local function onDragStart(self)
     self.lastX, self.lastY, self.lastZone = self.startX, self.startY, nil
     self.axis = nil
     self.dragging = true
+    GameTooltip:Hide()
     NS.Session.selected = el.id            -- select without docking the panel; EndDrag re-docks it
     P:Highlight(el.id)
     if NS.Panel then NS.Panel:Hide() end
@@ -102,11 +106,23 @@ local function create(el)
     b:SetClampedToScreen(false)
     b.title = T.Label(b, el.title, 11); b.title:SetPoint("CENTER", 0, 6)
     b.coords = T.Label(b, "", 9); b.coords:SetPoint("CENTER", 0, -7); b.coords:SetTextColor(T.Unpack(T.C.muted))
+    -- Owning addon's icon (top-left); falls back to the DF icon bundled with the lib.
+    b.icon = b:CreateTexture(nil, "OVERLAY")
+    b.icon:SetSize(14, 14); b.icon:SetPoint("TOPLEFT", 3, -3)
+    local addon = Registry:GetAddon(el.addon)
+    if not b.icon:SetTexture(addon and addon.icon or DEFAULT_ICON) then b.icon:SetTexture(DEFAULT_ICON) end
+    -- Link icon (bottom-left) while anchored.
+    b.link = b:CreateTexture(nil, "OVERLAY")
+    b.link:SetTexture(LINK_ICON); b.link:SetSize(12, 12); b.link:SetPoint("BOTTOMLEFT", 3, 3)
+    b.link:SetVertexColor(T.Unpack(T.C.anchored)); b.link:Hide()
+    -- Centre crosshair.
+    b.crossH = b:CreateTexture(nil, "OVERLAY"); b.crossH:SetColorTexture(1, 1, 1, 0.4); b.crossH:SetSize(16, 1); b.crossH:SetPoint("CENTER")
+    b.crossV = b:CreateTexture(nil, "OVERLAY"); b.crossV:SetColorTexture(1, 1, 1, 0.4); b.crossV:SetSize(1, 16); b.crossV:SetPoint("CENTER")
     b:SetScript("OnDragStart", onDragStart)
     b:SetScript("OnDragStop", onDragStop)
     b:SetScript("OnClick", onClick)
-    b:SetScript("OnEnter", function(s) s:SetBackdropBorderColor(1, 1, 1, 1) end)
-    b:SetScript("OnLeave", function(s) P:Highlight(NS.Session.selected) end)
+    b:SetScript("OnEnter", function(s) s:SetBackdropBorderColor(1, 1, 1, 1); P:ShowTooltip(s) end)
+    b:SetScript("OnLeave", function(s) P:Highlight(NS.Session.selected); GameTooltip:Hide() end)
     b.element = el
     return b
 end
@@ -154,6 +170,7 @@ function P:Highlight(selectedId)
     for id, b in pairs(self.proxies) do
         local pos = Registry:GetPos(b.element)
         local c = pos.anchor and T.C.anchored or T.C.accent
+        b.link:SetShown(pos.anchor ~= nil)
         if id == selectedId then b:SetBackdropBorderColor(1, 1, 1, 1) else b:SetBackdropBorderColor(T.Unpack(c)) end
         b:SetBackdropColor(c[1], c[2], c[3], 0.25)
     end
@@ -172,6 +189,31 @@ function P:DestroyAll()
     for id in pairs(self.proxies) do self:Remove(id) end
     if self.unlockFrame then self.unlockFrame:Hide() end
     self:HideZones()
+end
+
+-- ============================================================
+-- TOOLTIP
+-- ============================================================
+function P:ShowTooltip(b)
+    if b.dragging then return end
+    local el = b.element
+    local addon = Registry:GetAddon(el.addon)
+    GameTooltip:SetOwner(b, "ANCHOR_RIGHT")
+    GameTooltip:AddLine(el.title, 1, 1, 1)
+    GameTooltip:AddLine(addon and addon.title or el.addon, T.C.muted[1], T.C.muted[2], T.C.muted[3])
+    local a = Registry:GetPos(el).anchor
+    if a then
+        local target = Registry:GetTarget(a.target)
+        local name = target and target.title or L["(unavailable)"]
+        local how = a.mode == "point" and format("%s → %s", a.point, a.relPoint) or format("%s/%s", a.edge, a.align)
+        GameTooltip:AddLine(format(L["Anchored to %s"], format("%s (%s)", name, how)), T.C.anchored[1], T.C.anchored[2], T.C.anchored[3])
+    end
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddLine(L["Drag to move. Shift locks an axis."], 0.8, 0.8, 0.8)
+    GameTooltip:AddLine(L["Click to select, arrow keys to nudge."], 0.8, 0.8, 0.8)
+    if a then GameTooltip:AddLine(L["Drop into a zone to re-anchor; Detach frees it."], 0.8, 0.8, 0.8) end
+    GameTooltip:AddLine(L["Right-click to lock."], 0.8, 0.8, 0.8)
+    GameTooltip:Show()
 end
 
 -- ============================================================
