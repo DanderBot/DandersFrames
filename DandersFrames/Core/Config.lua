@@ -2432,6 +2432,16 @@ DF.PartyDefaults = {
     resourceBarFrameLevel = 20,
     resourceBarHeight = 4,
     resourceBarMatchWidth = true,
+    -- Only consulted while resourceBarMatchWidth is on: true = the matched bar tucks
+    -- inside the FRAME border band; false = full health-bar length, the border
+    -- overlaps its ends (see the edgeInset block in Frames/Bars.lua). Deterministic
+    -- on purpose -- an earlier alpha-gated auto version of this key
+    -- (resourceBarMatchAdjustBorder, never released) read as doing nothing.
+    -- ⚠ Default TRUE, and the defaults backfill seeds it into EXISTING profiles too
+    -- -- deliberately (Krathe, 2026-08-22): stable 5.2.0 ships the always-inset
+    -- behaviour, so true is what every upgrading profile already looks like. False
+    -- here would have silently lengthened every matched bar on upgrade.
+    resourceBarMatchAdjustFrameBorder = true,
     resourceBarOrientation = "HORIZONTAL",
     resourceBarReverseFill = false,
     resourceBarShowDPS = false,
