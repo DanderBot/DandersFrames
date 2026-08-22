@@ -50,11 +50,17 @@ function T.Button(parent, text, w, h, onClick)
     b.label = T.Label(b, text, 11)
     b.label:SetPoint("CENTER")
     b:SetScript("OnEnter", function(self) self:SetBackdropColor(unpackColor(T.C.hover)) end)
-    b:SetScript("OnLeave", function(self) self:SetBackdropColor(unpackColor(T.C.element)) end)
+    b:SetScript("OnLeave", function(self) self:SetBackdropColor(unpackColor(self.baseColor or T.C.element)) end)
     b:SetScript("OnClick", onClick)
     function b:SetEnabledState(on)
         self:SetEnabled(on)
         self.label:SetTextColor(unpackColor(on and T.C.text or T.C.muted))
+    end
+    -- Resting colour for selected/active state; survives hover, unlike a raw
+    -- SetBackdropColor which OnLeave would repaint to the default.
+    function b:SetBaseColor(c)
+        self.baseColor = c
+        self:SetBackdropColor(unpackColor(c or T.C.element))
     end
     return b
 end
