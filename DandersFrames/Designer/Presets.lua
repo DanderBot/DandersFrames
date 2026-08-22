@@ -362,9 +362,31 @@ local function MigrateDesigner(profile, libKey, refKey, inlineKey, factory)
             local modeDb = profile[mode]
             if modeDb then
                 if modeDb[inlineKey] then modeDb[inlineKey] = nil end
-                if not modeDb[refKey] then
-                    local presetName = DefaultPresetNameForMode(mode)
-                    modeDb[refKey] = lib[presetName] and presetName or DF.DEFAULT_PRESET
+                -- ☠☠ NEVER POINT BOTH MODES AT ONE PRESET TABLE. This used to fall back to
+                -- DF.DEFAULT_PRESET whenever the mode's own preset was missing from the
+                -- library — and it runs for party AND raid, so when both were missing it
+                -- WELDED the two modes to a single config, permanently, in saved data.
+                -- After that they are not "linked", they ARE one table: enable the Aura
+                -- Designer on Party and Raid reads back enabled, with nothing written on the
+                -- tab switch and nothing to find by grepping for a write. That is the
+                -- reported "Aura Designer enables itself when you change between Party and
+                -- Raid tabs" (Aphoex 2) — no write exists because none was needed.
+                -- ⇒ [[feedback_migration_before_defaults_backfill]]: a UI-time fallback that
+                -- WRITES saved data is a second migration, and this one wrote a data loss.
+                -- Materialise the mode's own preset from Default instead, so the two modes
+                -- stay independent. Also repairs a ref that NAMES a preset the library no
+                -- longer holds, which reaches the same shared-table state through
+                -- GetModeBaseAuraDesigner's `or lib[DF.DEFAULT_PRESET]`.
+                local presetName = DefaultPresetNameForMode(mode)
+                local ref = modeDb[refKey]
+                if not ref or not lib[ref] then
+                    if not lib[presetName] then
+                        -- Copy Default when it exists (it is what the old fallback pointed
+                        -- at); a pristine factory config otherwise, never an empty table.
+                        lib[presetName] = lib[DF.DEFAULT_PRESET]
+                            and DF:DeepCopy(lib[DF.DEFAULT_PRESET]) or factory()
+                    end
+                    modeDb[refKey] = presetName
                 end
             end
         end

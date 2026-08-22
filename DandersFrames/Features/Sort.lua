@@ -396,23 +396,15 @@ end
 
 function Sort:TriggerResort()
     self:ClearCache()
-    
-    -- SecureSort handles ALL party frame positioning
-    -- It queries roles FRESH each sort via roleFilter (works in combat!)
-    if DF.SecureSort and DF.SecureSort.initialized and DF.SecureSort.framesRegistered then
-        -- Push settings (only works out of combat, but that's fine for configuration)
-        if not InCombatLockdown() then
-            DF.SecureSort:PushSortSettings()
-            DF.SecureSort:UpdateLayoutParamsOnButtons()
-        end
-        
-        -- Trigger the secure sort (works in AND out of combat)
-        -- Roles are queried fresh each time, not pre-cached
-        DF.SecureSort:TriggerSecureSort()
-    end
-    
-    -- Note: We do NOT call UpdateAllFrames() here anymore.
-    -- SecureSort is now the only system that positions party frames.
+
+    -- ☠ A SecureSort push/trigger block used to sit here, gated on
+    -- `DF.SecureSort.initialized and .framesRegistered`. Neither flag is ever set:
+    -- SecureSort:Initialize() has no reachable caller (see Features/SecureSort.lua),
+    -- so the whole block was dead and its comment -- "SecureSort is now the only
+    -- system that positions party frames" -- had it exactly backwards. Party frames
+    -- are positioned by SecureGroupHeaderTemplate via Frames/Headers.lua.
+    --
+    -- Clearing the unit cache is the real work this function does, and it is live.
 end
 
 -- ============================================================

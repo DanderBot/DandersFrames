@@ -422,6 +422,24 @@ end
 -- PET FRAME EVENTS
 -- ============================================================
 
+-- Forward declaration: the recovery arms below need the update-AND-reposition pair,
+-- and RefreshPetFrame is defined near the bottom beside the other track entry points.
+-- Declared rather than duplicated -- showing a pet without repositioning it is the
+-- "right pet under the wrong teammate" bug that function's own header describes.
+local RefreshPetFrame
+
+-- ⚠ FILE SCOPE, not a closure inside the handler. OnPetFrameEvent runs for every pet
+-- and owner UNIT_HEALTH in the group; building a closure per call would allocate on
+-- the hottest path in this file for a helper that captures nothing.
+local function recoverIfHidden(frame)
+    if frame.dfPetHidden and UnitExists(frame.unit)
+        and not UnitIsDeadOrGhost(frame.ownerUnit) then
+        RefreshPetFrame(frame)
+        return true
+    end
+    return false
+end
+
 function DF:OnPetFrameEvent(frame, event, unit, ...)
     -- ☠ THE GATE. Every branch below can call SetPetFrameVisible(frame, true), and a
     -- frame belonging to a set that is NOT currently on screen doing that is exactly
@@ -450,6 +468,33 @@ function DF:OnPetFrameEvent(frame, event, unit, ...)
         return
     end
     
+    -- ☠☠ THE RECOVERY EDGE. Read this before touching either branch below.
+    --
+    -- UNIT_PET is a ONE-SHOT and it can arrive before the pet token is populated: the
+    -- branch above then takes its else-arm and HIDES, and no second UNIT_PET is coming
+    -- for that summon. Everything else here was hide-only -- the pet's own UNIT_FLAGS
+    -- could hide the frame and never show it, and its UNIT_HEALTH only repainted a
+    -- frame that was already visible -- so once the race was lost the ONLY route back
+    -- was an owner event, or the user toggling Pet Frames off and on. That is the
+    -- reported workaround, and the report is exactly this shape: "die, release,
+    -- resummon, pet frame missing; not 100% but more often than not" (moose,
+    -- 2026-08-20, delve). A race is precisely what "more often than not" looks like.
+    --
+    -- A gate needs a refresh on BOTH transitions and this one only had the hide half.
+    -- Every arm that can hide now has a matching show, so the pet's FIRST health or
+    -- flags event after it appears puts the frame back with no new registration and no
+    -- polling.
+    --
+    -- ⚠ EDGE-GATED ON dfPetHidden, so this costs one field read on the hot path. Pet
+    -- and owner UNIT_HEALTH fire constantly for every pet in the group; running a full
+    -- refresh on each would be a storm. The flag is set by SetPetFrameVisible itself,
+    -- so it is the frame's own record of which side of the gate it is on.
+    -- ★ Through RefreshPetFrame, not SetPetFrameVisible: a pet arriving outside a track
+    -- pass has to be REPOSITIONED as well as shown, or it appears under whichever
+    -- teammate it was last anchored to. Same reasoning as OnPetChanged's.
+    -- (recoverIfHidden is at file scope above -- a per-call closure here would allocate
+    -- on every UNIT_HEALTH.)
+
     -- Check for owner unit events (for death detection)
     if unit == frame.ownerUnit then
         if event == "UNIT_HEALTH" or event == "UNIT_FLAGS" then
@@ -457,8 +502,10 @@ function DF:OnPetFrameEvent(frame, event, unit, ...)
             if UnitIsDeadOrGhost(frame.ownerUnit) then
                 DF:SetPetFrameVisible(frame, false)
             else
-                -- Owner alive, check if pet exists
-                if UnitExists(frame.unit) then
+                -- Owner alive, check if pet exists. The hidden->shown crossing goes
+                -- through the full refresh (style, name, power, anchor); an
+                -- already-shown frame keeps the cheap health-only repaint it had.
+                if not recoverIfHidden(frame) and UnitExists(frame.unit) then
                     DF:SetPetFrameVisible(frame, true)
                     DF:UpdatePetHealth(frame)
                 end
@@ -466,20 +513,27 @@ function DF:OnPetFrameEvent(frame, event, unit, ...)
         end
         return
     end
-    
+
     -- Handle pet unit events
     if unit ~= frame.unit then return end
-    
+
     if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
-        DF:UpdatePetHealth(frame)
+        -- The pet's own first health tick after being summoned is what closes the
+        -- UNIT_PET race; before this it repainted a frame nobody had shown.
+        if not recoverIfHidden(frame) then
+            DF:UpdatePetHealth(frame)
+        end
     elseif event == "UNIT_POWER_UPDATE" or event == "UNIT_MAXPOWER" or event == "UNIT_DISPLAYPOWER" then
         DF:UpdatePetPower(frame)
     elseif event == "UNIT_NAME_UPDATE" then
         DF:UpdatePetName(frame)
     elseif event == "UNIT_FLAGS" then
-        -- Pet may have been dismissed or died
+        -- Pet may have been dismissed or died -- or may have just ARRIVED, which is
+        -- the half this branch was missing.
         if not UnitExists(frame.unit) then
             DF:SetPetFrameVisible(frame, false)
+        else
+            recoverIfHidden(frame)
         end
     end
 end
@@ -540,12 +594,34 @@ function DF:SetPetFrameVisible(frame, visible)
         if not InCombatLockdown() then
             local owner = frame.ownerFrame
             if owner then
-                pcall(frame.SetFrameStrata, frame, owner:GetFrameStrata())
-                pcall(frame.SetFrameLevel, frame, owner:GetFrameLevel() + 15)
+                -- ★ These pcalls were swallowing their result entirely. A refused strata or
+                -- level write is exactly the z-order fault this block exists to prevent --
+                -- the pet rendering under a neighbouring health bar -- and it degraded
+                -- silently and permanently, because nothing re-runs this on its own.
+                local okS = pcall(frame.SetFrameStrata, frame, owner:GetFrameStrata())
+                local okL = pcall(frame.SetFrameLevel, frame, owner:GetFrameLevel() + 15)
+                if not (okS and okL) and not frame._dfPetLayerWarned then
+                    frame._dfPetLayerWarned = true
+                    DF:DebugWarn("PET", "SetPetFrameVisible: %s layering refused (strata=%s level=%s) - pet may render under a neighbour",
+                        frame.unit or "?", tostring(okS), tostring(okL))
+                end
             end
             frame:Show()
+            -- Cleared on the successful out-of-combat show, so the next fight can report
+            -- again. A session-long latch would say "this happened once" when the useful
+            -- fact is "this happens every pull".
+            frame._dfPetLockdownWarned = nil
         else
-            DF:Debug("PET", "SetPetFrameVisible: %s wants SHOW but InCombatLockdown - using alpha only", frame.unit or "?")
+            -- ☠ LATCHED PER FRAME. This is the combat branch of a function called from every
+            -- owner UNIT_HEALTH and UNIT_FLAGS and from every pet UNIT_HEALTH, so ten pets
+            -- taking damage emitted dozens of identical lines per second -- into a category
+            -- that defaults ON, evicting whatever the console was opened to capture. The
+            -- frame write beside it was already guarded for exactly this reason and the log
+            -- line was not. The state is per frame and static for the fight, so one says it.
+            if not frame._dfPetLockdownWarned then
+                frame._dfPetLockdownWarned = true
+                DF:Debug("PET", "SetPetFrameVisible: %s wants SHOW but InCombatLockdown - using alpha only", frame.unit or "?")
+            end
         end
     else
         -- Mark as hidden and set alpha to 0
@@ -2148,7 +2224,9 @@ end
 -- case -- was SHOWN at whatever anchor it last held. That is the "right pet under the
 -- wrong teammate" symptom for anything that arrives here rather than through a track
 -- pass. Owner death and rez arrive as UNIT_HEALTH / UNIT_FLAGS and never reach here.
-local function RefreshPetFrame(frame)
+-- Assigns the forward-declared local above; a `local function` here would shadow it
+-- and leave the recovery arms in OnPetFrameEvent calling nil.
+function RefreshPetFrame(frame)
     if not frame then return end
     DF:UpdatePetFrame(frame)
     -- ⚠ NO combat early-return here, deliberately. PositionPetFrame owns the guard AND

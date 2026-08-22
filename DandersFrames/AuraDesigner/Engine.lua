@@ -90,16 +90,11 @@ function Engine:ForceRefreshAllFrames()
     if DF.IterateRaidFrames then
         DF:IterateRaidFrames(TryUpdate)
     end
-    if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
-        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
-            local header = DF.PinnedFrames.headers[setIndex]
-            if header and header:IsShown() then
-                for i = 1, 40 do
-                    local child = header:GetAttribute("child" .. i)
-                    if child then TryUpdate(child) end
-                end
-            end
-        end
+    -- ☠ THROUGH THE SHARED WALKER, NOT A HAND-ROLLED HEADER LOOP — this walked
+    -- PinnedFrames.headers only, so an Aura Designer edit never reached a pinned BOSS
+    -- frame, and neither did the AD-off teardown. (Audit 2026-08-17.)
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(TryUpdate)
     end
 
     -- The native factory buff row derives its Aura-Designer dedup set from the AD
@@ -112,5 +107,12 @@ function Engine:ForceRefreshAllFrames()
     -- Refresh the test previews too when the editor is used with test mode open.
     if (DF.testMode or DF.raidTestMode) and DF.UpdateAllTestAuraDesigner then
         DF:UpdateAllTestAuraDesigner()
+        -- ⚠ NO Indicator Info rebuild here, deliberately. One was added at this line
+        -- and it fixed only the editor's own actions: the designer PRESET bar changes
+        -- every indicator on screen without going through this function at all, so the
+        -- marks stayed stale exactly where they were first reported. The rebuild now
+        -- hangs off Factory:SyncFrame / Factory:ClearFrame — the mutation itself, which
+        -- every path reaches by definition. Do not re-add a caller-side hook here; it
+        -- would double-fire the one below and still not cover anything new.
     end
 end

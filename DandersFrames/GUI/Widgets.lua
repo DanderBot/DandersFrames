@@ -1975,6 +1975,239 @@ function GUI:CloseAllMenus()
     if self._state then self._state.currentOpenDropdown = nil end
 end
 
+-- One corner picker standing in for TWO Start/End dropdowns that were really two axes
+-- of a single question: which corner of the reserved area does the block sit in?
+--
+-- ☠ WHY THIS EXISTS, so it does not get "simplified" back into two dropdowns.
+-- The grouped raid box had "Groups Grow From" (Left/Center/Right) and "Row Order"
+-- (Top/Bottom) three controls apart, in two different vocabularies. Nobody read them as
+-- one thing, and Row Order in particular reads as a sequencing control while in the
+-- common configuration it only moves the block to the other end of the reserved space.
+-- Field-reported twice (Aphoex 2026-08-14, Krathe 2026-08-17).
+--
+-- keyH takes START/CENTER/END, keyV takes START/END -- hence 3x2, not 3x3. Giving the
+-- vertical axis a CENTER means teaching all three positioners a CENTER branch for the
+-- row index; until that exists, do not add a middle row here.
+--
+-- opts.verticalInertFn: return true when the vertical axis cannot do anything (a single
+-- row of groups). The bottom cells grey and the top row reads as selected.
+-- ⚠ It NEVER writes the key. A UI fallback that persists its own display value is a
+-- silent second migration -- the stored END must survive being temporarily meaningless,
+-- or lowering Groups Before Wrap would not restore what the user picked.
+function GUI:CreateAnchorGrid(parent, label, dbTable, keyH, keyV, callback, opts)
+    opts = opts or {}
+    local CELL_W, CELL_H, GUTTER = 34, 18, 2
+    -- ☠ THE TWO KEYS SWAP SCREEN AXES WITH THE GROWTH DIRECTION. Do not hard-code one
+    -- key to the columns. keyH (the ALIGN key, 3 values) moves things along the axis the
+    -- groups run down; keyV (the WRAP key, 2 values) moves them along the axis the grid
+    -- wraps on -- and which of those is left/right versus up/down flips:
+    --   Columns growth: groups run ACROSS, so align = Left/Center/Right, wrap = Top/Bottom
+    --   Rows growth:    groups run DOWN,   so align = Top/Center/Bottom, wrap = Left/Right
+    -- Verified in the positioners, not inferred: the vertical arm computes
+    -- `yOff = (totalHeight - rcH) + …` from groupAnchor and `rcX = xStart + rcIdx * …`
+    -- from the row-growth key, i.e. exactly the transpose of the horizontal arm. Shipping
+    -- this hard-coded made "Top right" drive bottom-right in Rows mode (Krathe,
+    -- 2026-08-17). opts.transposedFn returns true when the grid must be drawn 2 wide x 3
+    -- tall instead of 3 wide x 2 tall.
+    local ALIGN = { "START", "CENTER", "END" }
+    local WRAP  = { "START", "END" }
+    -- Caption words, indexed [vertical][horizontal]. CENTER on the vertical axis only
+    -- occurs transposed, and vice versa, but the table carries all nine so neither
+    -- orientation can fall through to an empty string.
+    local CAPTION = {
+        START  = { START = L["Top Left"],    CENTER = L["Top Center"],    END = L["Top Right"] },
+        CENTER = { START = L["Center Left"], CENTER = L["Center"],        END = L["Center Right"] },
+        END    = { START = L["Bottom Left"], CENTER = L["Bottom Center"], END = L["Bottom Right"] },
+    }
+    -- When the wrap axis is inert there is only one real choice being made, so the caption
+    -- names just that one. "Top center" at 8 groups before wrap described a corner that
+    -- does not exist -- it is simply Center.
+    local SOLO = {
+        [false] = { START = L["Left"], CENTER = L["Center"], END = L["Right"] },
+        [true]  = { START = L["Top"],  CENTER = L["Center"], END = L["Bottom"] },
+    }
+
+    local container = CreateFrame("Frame", nil, parent)
+    container:SetSize(260, GUI.RowHeight.anchorgrid)
+    container.rowKind = "anchorgrid"
+    container.fixedRowHeight = true
+
+    local lbl = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    lbl:SetPoint("TOPLEFT", 0, 0)
+    lbl:SetText(label)
+    lbl:SetTextColor(C_TEXT.r, C_TEXT.g, C_TEXT.b)
+    container.label = lbl
+
+    local transposed = opts.transposedFn and opts.transposedFn(dbTable) or false
+    local COLS = transposed and WRAP or ALIGN
+    local ROWS = transposed and ALIGN or WRAP
+
+    -- ⚠ The slot height follows the ROW COUNT, which the transpose changes (2 rows one way,
+    -- 3 the other). GUI.RowHeight.anchorgrid is the untransposed case; the factory still
+    -- owns the number, it just cannot be a single constant. The page rebuilds on a growth
+    -- direction change, so this is only ever evaluated at construction.
+    local gridH = #ROWS * CELL_H + (#ROWS + 1) * GUTTER
+    local rowH = 16 + gridH + GUI.RowGap
+    container:SetHeight(rowH)
+    container.preferredHeight = rowH
+
+    local grid = CreateFrame("Frame", nil, container, "BackdropTemplate")
+    grid:SetSize(#COLS * CELL_W + (#COLS + 1) * GUTTER, gridH)
+    grid:SetPoint("TOPLEFT", 0, SnapLen(grid, -16) or -16)
+    CreateElementBackdrop(grid)
+
+    local caption = container:CreateFontString(nil, "OVERLAY", "DFFontHighlightSmall")
+    caption:SetPoint("LEFT", grid, "RIGHT", 8, 0)
+    caption:SetTextColor(C_TEXT_DIM.r, C_TEXT_DIM.g, C_TEXT_DIM.b)
+
+    local cells = {}
+    for r, vy in ipairs(ROWS) do
+        for c, vx in ipairs(COLS) do
+            local btn = CreateFrame("Button", nil, grid, "BackdropTemplate")
+            GUI:StyleButton(btn, { width = CELL_W, height = CELL_H })
+            btn:SetPoint("TOPLEFT", grid, "TOPLEFT",
+                GUTTER + (c - 1) * (CELL_W + GUTTER), -(GUTTER + (r - 1) * (CELL_H + GUTTER)))
+            -- SCREEN position of the cell. The align half is also the key value; the wrap
+            -- half is not, because it can be mirrored -- see WrapKey below.
+            btn.vx, btn.vy = vx, vy
+            btn.align = transposed and vy or vx
+            btn.screenWrap = transposed and vx or vy
+            btn:SetScript("OnClick", function(self)
+                if container.wrapInert and self.screenWrap == "END" then return end
+                -- Two keys, each through the SAME plumbing CreateDropdown gives one key:
+                -- a raid-mode runtime override redirects the write to the baseline and
+                -- skips the live refresh; an editing session records the override; a
+                -- plain write lands in the db. Per key, because one of the pair may be
+                -- overridden while the other is not.
+                local liveWrite = container:WriteKey(keyH, self.align)
+                if not container.wrapInert then
+                    liveWrite = container:WriteKey(keyV, container:WrapKey(self.screenWrap)) or liveWrite
+                end
+                container:Refresh()
+                container:UpdateOverrideIndicatorsBoth()
+                if liveWrite and callback then callback() end
+            end)
+            cells[#cells + 1] = btn
+        end
+    end
+
+    -- ☠ THE WRAP AXIS CAN BE MIRRORED, AND THE FIX IS HERE, NOT IN THE POSITIONERS.
+    -- Players Grow From = End anchors each group to the FAR corner and measures the wrap
+    -- offset back from it (BOTTOMLEFT with +yOff horizontally, TOPRIGHT with -xOff
+    -- vertically), so the stored wrap value lands on the opposite side of the screen from
+    -- the one it names. The align axis is untouched -- both arms measure it from the same
+    -- edge whatever Players Grow From says.
+    -- The obvious fix, decoupling them in the positioners, MOVES EXISTING PEOPLE'S FRAMES
+    -- and is therefore off the table. So the grid speaks SCREEN POSITION and translates:
+    -- same geometry, same keys, same saved values, honest picker. This is an involution,
+    -- so one function converts in both directions.
+    function container:WrapKey(v)
+        if opts.wrapMirroredFn and opts.wrapMirroredFn(dbTable) then
+            return v == "START" and "END" or "START"
+        end
+        return v
+    end
+
+    function container:Refresh()
+        self.wrapInert = opts.verticalInertFn and opts.verticalInertFn(dbTable) or false
+        local curAlign = dbTable[keyH] or "START"
+        local curWrap  = dbTable[keyV] or "START"
+        -- Display-only collapse: a stored value stays stored, it just cannot be shown.
+        local shownWrap = self.wrapInert and "START" or self:WrapKey(curWrap)
+        -- ⚠ HIDDEN, not dimmed. These cells are empty rectangles, so a 0.35 alpha on a dark
+        -- panel is nearly indistinguishable from a live one -- the dead half read as
+        -- selectable and got clicked. Hiding is also the honest picture: at 8 groups before
+        -- wrap there IS only one row of slots, so the control should show one row.
+        -- ⚠ Mouse state folds in SetEnabled: RefreshChildStates calls SetEnabled and THEN
+        -- refreshContent, so a Refresh that re-armed every live cell undid the grey-out
+        -- and left a 0.4-alpha grid fully clickable.
+        local enabled = self.enabled ~= false
+        for _, b in ipairs(cells) do
+            local dead = self.wrapInert and b.screenWrap == "END"
+            b:SetShown(not dead)
+            b:SetActive(not dead and b.align == curAlign and b.screenWrap == shownWrap)
+            b:EnableMouse(enabled and not dead)
+        end
+        -- Shrink the recessed track to the cells that remain, or it frames a phantom row.
+        local liveCols = (self.wrapInert and transposed) and 1 or #COLS
+        local liveRows = (self.wrapInert and not transposed) and 1 or #ROWS
+        grid:SetSize(liveCols * CELL_W + (liveCols + 1) * GUTTER,
+                     liveRows * CELL_H + (liveRows + 1) * GUTTER)
+        -- The caption names the SCREEN position, so it reads off the row/column the live
+        -- cell actually sits in -- never off the keys, which swap axes when transposed.
+        if self.wrapInert then
+            caption:SetText(SOLO[transposed][curAlign] or "")
+        else
+            local vy = transposed and curAlign or shownWrap
+            local vx = transposed and shownWrap or curAlign
+            caption:SetText((CAPTION[vy] and CAPTION[vy][vx]) or "")
+        end
+    end
+    container.refreshContent = function(self) self:Refresh() end
+
+    container.SetEnabled = function(self, enabled)
+        self.enabled = enabled and true or false
+        self:SetAlpha(enabled and 1 or 0.4)
+        for _, b in ipairs(cells) do b:EnableMouse(self.enabled and not (self.wrapInert and b.screenWrap == "END")) end
+    end
+
+    -- One db write with the auto-profile plumbing every other helper has. Returns true
+    -- when the value reached the LIVE table (the caller then refreshes frames); false
+    -- when a raid-mode runtime override redirected it to the baseline, where a live
+    -- refresh would only repaint the unchanged overlay.
+    function container:WriteKey(key, value)
+        if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
+           and DF.AutoProfilesUI:HandleRuntimeWrite(key, value) then
+            return false
+        end
+        dbTable[key] = value
+        if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
+            DF.AutoProfilesUI:SetProfileSetting(key, value)
+        end
+        return true
+    end
+
+    -- Override indicators (star / reset / global value), one set PER KEY: the align key
+    -- on the container itself (reset at the container's top-right, global text after
+    -- the title), the wrap key on a small host just left of it (global text after the
+    -- corner caption). Both register with RefreshAllOverrideIndicators through
+    -- AddOverrideIndicators, so profile edits and runtime overlays light them like any
+    -- dropdown's.
+    local vHost = CreateFrame("Frame", nil, container)
+    vHost:SetSize(40, 16)
+    vHost:SetPoint("TOPRIGHT", container, "TOPRIGHT", -44, 0)
+    local function resetKey(host, key)
+        return function()
+            if not DF.AutoProfilesUI then return end
+            DF.AutoProfilesUI:ResetProfileSetting(key)
+            dbTable[key] = DF.AutoProfilesUI:GetGlobalValue(key)
+            container:Refresh()
+            if host.UpdateOverrideIndicators then host:UpdateOverrideIndicators(dbTable[key]) end
+            if callback then callback() end
+        end
+    end
+    local alignWords = { START = SOLO[transposed].START, CENTER = SOLO[transposed].CENTER, END = SOLO[transposed].END }
+    local wrapWords  = { START = L["Start"], END = L["End"] }
+    AddOverrideIndicators(container, lbl, keyH, resetKey(container, keyH), 6, alignWords, dbTable)
+    AddOverrideIndicators(vHost, caption, keyV, resetKey(vHost, keyV), 0, wrapWords, dbTable)
+    function container:UpdateOverrideIndicatorsBoth()
+        if self.UpdateOverrideIndicators then self:UpdateOverrideIndicators(dbTable[keyH]) end
+        if vHost.UpdateOverrideIndicators then vHost:UpdateOverrideIndicators(dbTable[keyV]) end
+    end
+
+    -- Tooltip: shared attach on the LABEL only (see GUI:AttachTooltip), matching every
+    -- other labelled factory. Hovering the cells themselves must stay quiet -- six of them
+    -- popping the same tooltip would fight the click target.
+    GUI:AttachTooltip(container, label, lbl)
+
+    container.UpdateTheme = function() container:Refresh() end
+    if not parent.ThemeListeners then parent.ThemeListeners = {} end
+    table.insert(parent.ThemeListeners, container)
+
+    container:Refresh()
+    return container
+end
+
 function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, customGet, customSet, opts)
     opts = opts or {}
     local accentColor = opts.accent
@@ -2276,12 +2509,23 @@ function GUI:CreateDropdown(parent, label, options, dbTable, dbKey, callback, cu
                 menuBtn:SetScript("OnClick", function(self)
                     local optKey = self.optKey
                     -- Runtime override protection: redirect to baseline, skip refresh
-                    if GUI.SelectedMode == "raid" and DF.AutoProfilesUI
-                       and DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, optKey) then
-                        UpdateText()
-                        menuFrame:Hide()
-                        if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(optKey) end
-                        return
+                    if GUI.SelectedMode == "raid" and DF.AutoProfilesUI then
+                        -- The baseline value BEFORE the redirect, for opts.onRuntimeWrite:
+                        -- a customSet that writes a second key in step with this one
+                        -- (e.g. the raid wrap-axis compensation) needs the baseline's own
+                        -- previous value to decide, since customSet itself is skipped on
+                        -- this path.
+                        local prevGlobal
+                        if opts.onRuntimeWrite and DF.AutoProfilesUI.GetRuntimeGlobalValue then
+                            prevGlobal = DF.AutoProfilesUI:GetRuntimeGlobalValue(dbKey)
+                        end
+                        if DF.AutoProfilesUI:HandleRuntimeWrite(dbKey, optKey) then
+                            if opts.onRuntimeWrite then opts.onRuntimeWrite(optKey, prevGlobal) end
+                            UpdateText()
+                            menuFrame:Hide()
+                            if container.UpdateOverrideIndicators then container:UpdateOverrideIndicators(optKey) end
+                            return
+                        end
                     end
 
                     if customSet then

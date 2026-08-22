@@ -158,12 +158,32 @@ end
 -- via secure attributes) so the unit-frame positioner agrees with the headers.
 function DF:GetEffectiveRaidGroupOrder(db)
     db = db or DF:GetRaidDB()
-    local displayOrder = db.raidGroupDisplayOrder
-    if type(displayOrder) ~= "table" or #displayOrder ~= 8 then
+    -- ☠ VALIDATE EVERY ENTRY, not just the count. Headers.lua carried a second copy of
+    -- this builder that did the full check; the two were merged here, and the length-only
+    -- test was the weaker of the pair. A table of the right length holding a duplicate,
+    -- a nil, an out-of-range number or a non-number produces a rank map with holes, and
+    -- every consumer then silently falls back to raw group number for the affected group.
+    local displayOrder = db and db.raidGroupDisplayOrder
+    local isValid = type(displayOrder) == "table"
+    if isValid then
+        local seen = {}
+        for i = 1, 8 do
+            local v = displayOrder[i]
+            if type(v) ~= "number" or v < 1 or v > 8 or seen[v] then
+                isValid = false
+                break
+            end
+            seen[v] = true
+        end
+    end
+    if not isValid then
+        if DF.DebugWarn then
+            DF:DebugWarn("ROSTER", "GetEffectiveRaidGroupOrder: raidGroupDisplayOrder is invalid or missing, using default order")
+        end
         displayOrder = {1, 2, 3, 4, 5, 6, 7, 8}
     end
     local effectiveOrder = {}
-    if db.raidPlayerGroupFirst and DF.cachedPlayerGroup then
+    if db and db.raidPlayerGroupFirst and DF.cachedPlayerGroup then
         effectiveOrder[1] = DF.cachedPlayerGroup
         for _, g in ipairs(displayOrder) do
             if g ~= DF.cachedPlayerGroup then effectiveOrder[#effectiveOrder + 1] = g end
@@ -222,67 +242,17 @@ function DF:UpdateRaidGroupedLayout()
         return
     end
     
-    -- LEGACY MODE: If sorting is enabled AND we're not in test mode, let secure code handle positioning
-    -- Test mode must use Lua positioning because there's no real raid roster for secure code to query
-    if db.sortEnabled and SecureSort.raidFramesRegistered and not DF.raidTestMode then
-        -- Just trigger secure sort which will handle everything
-        SecureSort:UpdateRaidGroupLayoutParams()
-        local lp = SecureSort.raidGroupLayoutParams
-        
-        -- Count active groups for container sizing
-        -- PERFORMANCE FIX: Reuse tables instead of creating new ones
-        wipe(reusableActiveGroupList)
-        wipe(reusableActiveGroups)
-        local activeGroupList = reusableActiveGroupList
-        local activeGroups = reusableActiveGroups
-        local isTestMode = DF.raidTestMode
-        local visibleCount = 0
-        
-        for i = 1, 40 do
-            local frame = DF.raidFrames[i]
-            if frame and frame:IsShown() then
-                visibleCount = visibleCount + 1
-                local groupNum
-                if isTestMode then
-                    groupNum = math.ceil(visibleCount / 5)
-                else
-                    local unit = frame:GetAttribute("unit") or frame.unit
-                    if unit and UnitExists(unit) then
-                        local name, rank, subgroup = GetRaidRosterInfo(UnitInRaid(unit) or 0)
-                        groupNum = subgroup or 1
-                    else
-                        groupNum = math.ceil(i / 5)
-                    end
-                end
-                if not activeGroups[groupNum] then
-                    activeGroups[groupNum] = true
-                    table.insert(activeGroupList, groupNum)
-                end
-            end
-        end
-        DF:SortActiveGroupListByDisplayOrder(activeGroupList, db)
+    -- ☠ A ~60-line "LEGACY MODE" block sat here, gated on
+    -- `SecureSort.raidFramesRegistered`. That flag is never set -- it is written only
+    -- by SecureSort:RegisterRaidFrames, which runs only after SecureSort:Initialize,
+    -- which has no reachable caller. The block counted active groups, sized the
+    -- container and handed positioning to a secure sort that was never armed.
+    --
+    -- Everything it did is done by the live path below and by PositionRaidHeaders.
+    -- Note the container sizing and group ordering it performed are NOT lost: the
+    -- surviving path calls the same CalculateRaidGroupContainerSize and
+    -- SortActiveGroupListByDisplayOrder a few lines down.
 
-        -- Set container size
-        local totalWidth, totalHeight = SecureSort:CalculateRaidGroupContainerSize(#activeGroupList, lp)
-        DF.raidContainer:SetSize(totalWidth, totalHeight)
-        DF:SyncRaidMoverToContainer()
-
-        -- Set frame sizes only (secure code handles positions)
-        for i = 1, 40 do
-            local frame = DF.raidFrames[i]
-            if frame and frame:IsShown() then
-                frame:SetSize(lp.frameWidth, lp.frameHeight)
-            end
-        end
-        
-        -- Trigger secure sort to handle actual positioning
-        SecureSort:TriggerSecureRaidSort("UpdateRaidGroupedLayout")
-        
-        -- Update group labels (not secure, can be done anytime)
-        DF:UpdateRaidGroupLabels()
-        return
-    end
-    
     -- DOOR-SHUT (live frames are never Lua-driven): in header mode the live unit
     -- frames are children of the secure group headers and are positioned ONLY by
     -- the secure header path. DF.raidFrames is a PROXY that resolves to those live
@@ -1903,68 +1873,18 @@ function DF:UpdateAllFrames()
         DF:UpdateAllPetFrames()
     end
     
-    -- Update SecureSort layout params when layout changes (Phase 2.5)
-    -- This ensures combat buttons use the correct layout settings
-    if DF.SecureSort and not InCombatLockdown() then
-        -- Try to initialize SecureSort if not done yet
-        if not DF.SecureSort.initialized and DF.initialized then
-            DF.SecureSort:Initialize()
-        end
-        
-        if DF.SecureSort.initialized then
-            DF.SecureSort:UpdateLayoutParams("party")
-            
-            -- Auto-register frames if not done yet (catches early initialization)
-            if not DF.SecureSort.framesRegistered and DF.playerFrame then
-                DF.SecureSort:RegisterPartyFrames()
-            end
-            
-            -- In test mode, use Sort module with test data for positioning
-            -- (SecureSort can't access test data, only real unit roles)
-            if DF.testMode and DF.Sort and DF.Sort.SortFrameList then
-                local lp = DF.SecureSort.layoutParams
-                
-                -- Build frame list with test data
-                local frameList = {}
-                if DF.playerFrame and testFrameCount >= 1 then
-                    local testData = DF:GetTestUnitData(0, false)
-                    table.insert(frameList, {
-                        frame = DF.playerFrame,
-                        index = 0,
-                        isPlayer = true,
-                        testData = testData
-                    })
-                end
-                if DF.partyFrames then
-                    for i = 1, 4 do
-                        local frame = DF.partyFrames[i]
-                        if frame and (i + 1) <= testFrameCount then
-                            local testData = DF:GetTestUnitData(i, false)
-                            table.insert(frameList, {
-                                frame = frame,
-                                index = i,
-                                isPlayer = false,
-                                testData = testData
-                            })
-                        end
-                    end
-                end
-                
-                -- Apply sorting if enabled
-                if db.sortEnabled then
-                    frameList = DF.Sort:SortFrameList(frameList, db, true)
-                end
-                
-                -- Position frames in sorted order
-                for slotIndex, entry in ipairs(frameList) do
-                    local slot = slotIndex - 1
-                    DF.SecureSort:PositionFrameToSlot(entry.frame, slot, #frameList, lp, DF.partyGroupContainer)
-                end
-            elseif DF.SecureSort.framesRegistered then
-                -- Not in test mode - use SecureSort for real unit positioning
-                DF.SecureSort:TriggerSecureSort("UpdateAllFrames")
-            end
-        end
-    end
+    -- ☠ The SecureSort init/positioning block that closed this function is gone, and
+    -- it is worth recording WHY it could never run, because the reasoning is not local.
+    --
+    -- It began `if not DF.SecureSort.initialized and DF.initialized then Initialize()`.
+    -- Reaching it at all requires falling past `if DF.headersCreated then ... return end`
+    -- above, i.e. headersCreated == false. But `DF.initialized = true` is written in
+    -- exactly one place -- DF:FinalizeHeaderInit in Frames/Headers.lua -- and that
+    -- function's second line is `if not DF.headersCreated then return end`.
+    --
+    -- So the two conditions are mutually exclusive: the only state that reaches this
+    -- code is the one state in which DF.initialized can never have been set. Everything
+    -- downstream of Initialize() -- RegisterPartyFrames, the test-mode frameList build,
+    -- PositionFrameToSlot, TriggerSecureSort -- was unreachable with it.
 end
 

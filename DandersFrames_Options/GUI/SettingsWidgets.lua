@@ -1684,15 +1684,16 @@ function GUI:CreateCheckbox(parent, label, dbTable, dbKey, callback, customGet, 
             container:UpdateOverrideIndicators(val)
         end
         
+        -- ☠ (Removed) three "calling X" entry traces, one immediately above each call.
+        -- Pure narration: the click itself is already logged above with its dbKey and
+        -- value, and the third restated DF:UpdateAll, which logs its own marker one line
+        -- later. Three log lines to say what the next statement says.
         if callback then 
-            DF:Debug("GUI", "checkbox OnClick: calling callback")
             callback() 
         end
         if parent.RefreshStates then 
-            DF:Debug("GUI", "checkbox OnClick: calling RefreshStates")
             parent:RefreshStates() 
         end
-        DF:Debug("GUI", "checkbox OnClick: calling DF:UpdateAll")
         DF:UpdateAll()
     end)
     

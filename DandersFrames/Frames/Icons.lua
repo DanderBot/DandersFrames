@@ -85,6 +85,11 @@ function DF:UpdateAllMissingBuffIcons()
     if DF.IterateRaidFrames then
         DF:IterateRaidFrames(updateFrame)
     end
+
+    -- ☠ AND PINNED — same gap as the defensive sweep below; see its note.
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(updateFrame)
+    end
 end
 
 -- ========================================
@@ -177,6 +182,15 @@ function DF:UpdateAllDefensiveBars()
     -- Raid frames via iterator
     if DF.IterateRaidFrames then
         DF:IterateRaidFrames(updateFrame)
+    end
+
+    -- ☠ AND PINNED. This is the fullUpdate for the whole Defensive Icon page (~20 call
+    -- sites in the Indicators page), so without it every setting there was inert on pinned
+    -- frames until some aura event happened by — which for a quiet unit is minutes, and
+    -- mid-fight never. DF:UpdateAllAuras a few lines down has always walked pinned; these
+    -- siblings were never given the same treatment. (Audit 2026-08-17.)
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(updateFrame)
     end
 end
 

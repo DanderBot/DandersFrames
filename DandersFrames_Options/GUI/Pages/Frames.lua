@@ -701,14 +701,22 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             tab:SetScript("OnClick", function()
                 local oldSet = GetCurrentSet()
                 local oldType = oldSet and oldSet.frameType
+                -- ☠ DIRECTION IS PART OF THE REBUILD KEY, NOT JUST FRAME TYPE. The arrange
+                -- controls bake orientation into their LABELS via pinVert, and a label is
+                -- fixed at build time -- RefreshControls only refreshes values. Gating on
+                -- frameType alone left two same-type sets of opposite direction showing
+                -- each other's edge names. Mirrors OnPinnedDirectionChanged, which already
+                -- rebuilds the whole page when this key changes on the current set.
+                local oldDir = oldSet and oldSet.growDirection
                 activeHighlightTab = i
                 pagePinnedFrames.persistedTab = i
                 local newSet = GetCurrentSet()
                 local newType = newSet and newSet.frameType
+                local newDir = newSet and newSet.growDirection
                 RefreshTabs()
-                if oldType ~= newType and GUI.RefreshCurrentPage then
-                    -- Frame type differs between tabs — invalidate cache so the page
-                    -- rebuilds with the correct set of widgets for the new frame type.
+                if (oldType ~= newType or oldDir ~= newDir) and GUI.RefreshCurrentPage then
+                    -- Frame type or direction differs between tabs — invalidate cache so the
+                    -- page rebuilds with the correct widgets and labels for the new set.
                     if GUI.InvalidatePage then GUI:InvalidatePage(GUI.CurrentPageName) end
                     GUI.RefreshCurrentPage()
                 else
@@ -1809,21 +1817,57 @@ function DF._SetupGUIPagesPart2(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local arrangeGroup = GUI:CreateSettingsGroup(self.child, 280)
         arrangeGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
 
-        -- Direction: how the pinned frames flow (pinned-only; NOT inherited — the
-        -- main frames' growDirection means group Rows/Columns, a different concept).
-        local directionOptions = { HORIZONTAL= L["Horizontal"], VERTICAL= L["Vertical"] }
-        arrangeGroup:AddWidget(CreateRefreshableDropdown(self.child, L["Direction"], directionOptions, "growDirection", UpdateHighlightLayout), 55)
+        -- ☠ SAME TWO PERPENDICULAR AXES AS THE RAID PAGE, read off THIS SET'S OWN
+        -- growDirection -- pinned direction is per-set and NOT inherited (the main frames'
+        -- growDirection means group Rows/Columns, a different concept).
+        --   MAIN  = frameAnchor,  the direction frames flow. HORIZONTAL -> Left/Right
+        --   CROSS = columnAnchor, where they wrap.           HORIZONTAL -> Top/Bottom
+        -- Verified against PinnedFrames.lua (the anchor-corner build and the slot offsets),
+        -- not against the control names: horizontal puts frameAnchor on X and columnAnchor
+        -- on Y, vertical swaps them.
+        local pinnedSet = GetCurrentSet()
+        local pinVert = (pinnedSet and pinnedSet.growDirection or "HORIZONTAL") == "VERTICAL"
+        local PIN_MAIN_START  = pinVert and L["Top"]  or L["Left"]
+        local PIN_MAIN_END    = pinVert and L["Bottom"] or L["Right"]
+        local PIN_CROSS_START = pinVert and L["Left"] or L["Top"]
+        local PIN_CROSS_END   = pinVert and L["Right"] or L["Bottom"]
+
+        -- ☠ THE DIRECTION DROPDOWN MUST REBUILD THE PAGE. Every label and value below is
+        -- baked from pinVert at build time, and UpdateHighlightLayout only re-lays the
+        -- frames -- the widgets' own .Refresh re-reads the set's VALUE, never its option
+        -- table. Without the rebuild, flipping Direction leaves two dropdowns offering the
+        -- previous orientation's edges and two labels naming the wrong axis until the page
+        -- is reopened. Safe to rebuild: activeHighlightTab round-trips through
+        -- pagePinnedFrames.persistedTab, so the edited set survives. Deferred so it runs
+        -- after the triggering dropdown's own click handler has unwound, matching the raid
+        -- page's OnGrowthDirectionChanged.
+        local function OnPinnedDirectionChanged()
+            UpdateHighlightLayout()
+            C_Timer.After(0, function()
+                if GUI.RefreshCurrentPage then GUI:RefreshCurrentPage() end
+            end)
+        end
+
+        -- ☠ _order, or CreateDropdown sorts on the DISPLAY TEXT -- see the note beside the
+        -- raid page's growOptions. A Top/Bottom pair without it lists as "Bottom, Top".
+        local directionOptions = { _order = { "HORIZONTAL", "VERTICAL" }, HORIZONTAL= L["Horizontal"], VERTICAL= L["Vertical"] }
+        arrangeGroup:AddWidget(CreateRefreshableDropdown(self.child, L["Direction"], directionOptions, "growDirection", OnPinnedDirectionChanged), 55)
 
         -- CENTER intentionally omitted: it isn't truly implemented for pinned
         -- frames (frames grow START-style; only the anchor/label shift). START/END
         -- only for now; a real centred layout can be added later.
-        local frameAnchorOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
+        local frameAnchorOptions = { _order = { "START", "END" }, START= PIN_MAIN_START, END= PIN_MAIN_END }
         arrangeGroup:AddWidget(CreateRefreshableDropdown(self.child, L["Frames Grow From"], frameAnchorOptions, "frameAnchor", UpdateHighlightLayout), 55)
 
-        local columnAnchorOptions = { START= L["Start (Left/Top)"], END= L["End (Right/Bottom)"] }
-        arrangeGroup:AddWidget(CreateRefreshableDropdown(self.child, L["Columns Grow From"], columnAnchorOptions, "columnAnchor", UpdateHighlightLayout), 55)
+        -- CROSS axis, so the label follows the orientation too: horizontal frames wrap into
+        -- new ROWS, vertical ones into new COLUMNS. This read "Columns Grow From" whatever
+        -- the direction was, which is right in only one of the two.
+        local columnAnchorLabel = pinVert and L["Columns Grow From"] or L["Rows Grow From"]
+        local columnAnchorOptions = { _order = { "START", "END" }, START= PIN_CROSS_START, END= PIN_CROSS_END }
+        arrangeGroup:AddWidget(CreateRefreshableDropdown(self.child, columnAnchorLabel, columnAnchorOptions, "columnAnchor", UpdateHighlightLayout), 55)
 
-        arrangeGroup:AddWidget(CreateRefreshableSlider(self.child, L["Units Per Row"], 1, 10, 1, "unitsPerRow", UpdateHighlightLayout), 55)
+        local unitsPerLabel = pinVert and L["Units Per Column"] or L["Units Per Row"]
+        arrangeGroup:AddWidget(CreateRefreshableSlider(self.child, unitsPerLabel, 1, 10, 1, "unitsPerRow", UpdateHighlightLayout), 55)
         -- Spacing inherits the Based-on mode's layout spacing (grouped -> frameSpacing,
         -- flat raid -> raidFlat*Spacing); a per-set value overrides it (gold star + reset).
         local function SpacingBaseline(flatKey)

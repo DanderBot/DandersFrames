@@ -507,13 +507,19 @@ end
 -- DF.debuffBorderCurve; DF:InvalidateDispelColorCurve() nils it on any change.
 -- ⚠ The Enum.AuraDispelType field set needs an in-game confirm (/df debug dispelids).
 -- Name-keyed colour map for SetAuraBorder's customDispelColorMap: Blizzard indexes
--- auraData.dispelName ("Magic"/"Curse"/... ; "" when the aura has no dispel type)
--- straight into this table private-side, with map[""] as the no-type fallback —
--- confirmed from Blizzard_CustomAuraButton.lua (ptr). NO enum IDs involved (unlike
--- the curve form, whose ID axis is documented nowhere) — this is the primary
--- custom-colour carrier for both the overlay and the debuff-icon ring. Values are
--- ColorMixin objects (their code calls color:GetRGBA()). Cached; invalidated with
--- the curve by DF:InvalidateDispelColorCurve().
+-- auraData.dispelName ("Magic"/"Curse"/... ; live 69382 keys `dispelName or "None"`,
+-- and map[""] is kept as a belt-and-braces alias of None) straight into this table
+-- private-side. NO enum IDs involved (unlike the curve form, whose X axis is the
+-- Enum.AuraDispelType values). Values are ColorMixin objects (their code calls
+-- color:GetRGBA()). Cached; invalidated with the curve by DF:InvalidateDispelColorCurve().
+-- ☠ FALLBACK, not primary — this comment used to call the map "the primary
+-- custom-colour carrier for both the overlay and the debuff-icon ring", and that framing
+-- hid a real bug: the private-side index is a RAW TABLE LOOKUP, so a SECRET dispelName
+-- matches no key and the colour apply no-ops, leaving the style step's white base coat
+-- (the "dispel overlay goes white in dungeons" field report, 2026-08-19). The
+-- SECRET-SAFE tint is the curve — resolved C-side by auraInstanceID — and both bind
+-- sites (the overlay in Features/Dispel.lua, the row ring in Frames/AuraContainer.lua)
+-- pass both, the curve winning when present.
 -- Blizzard's LIVE dispel-type border palette, queried from AuraUtil.GetAuraBorderColor
 -- (the exact colours the game paints), cached. Per-type fallback to DF.DispelDefaultColors
 -- (which mirror the classic DebuffTypeColor values) if the API is missing / returns nil.
@@ -807,6 +813,28 @@ function DF:FindDispelTypeEnum()
             end
         end
     end
+    -- ☠☠ NO Enum TABLE EXISTS — FALL BACK TO THE DB2 VALUES, or the curve can never be
+    -- built and every curve-based tint silently degrades to the name-keyed map.
+    --
+    -- The scan above has never found anything: probed nil on 68824, and confirmed again on
+    -- live 69382 by /df debug dispelids ("no Enum table with Magic/Curse/Disease/Poison
+    -- found", "curve built: no") while GetAuraDispelTypeColor reported PRESENT. So the
+    -- dispel overlay kept falling back to customDispelColorMap and kept rendering white on
+    -- secret dispel names — the fix in 81122cb1 was a no-op for exactly this reason
+    -- (Krathe, 2026-08-19).
+    --
+    -- These are the SpellDispelType DB2 ids, i.e. game data rather than anyone's
+    -- invention, and they are the same values another 12.1 unit-frame addon hardcodes for
+    -- its own dispel curve (citing the same DB2 table). The gaps are real: 5-8 and 10 are
+    -- unused by the dispel types we colour.
+    -- ⚠ The SCAN STILL WINS. If Blizzard ever ships a real enum, it is authoritative and
+    -- this table is dead weight; do not reorder that.
+    -- ⚠ Curve X values must be the dispel-type IDs, which is what makes exact-integer
+    -- lookups land on their own point (see GetDispelColorCurve's Linear note).
+    if not found then
+        found = { None = 0, Magic = 1, Curse = 2, Disease = 3, Poison = 4, Enrage = 9, Bleed = 11 }
+        foundName = "DB2 fallback (SpellDispelType)"
+    end
     DF._dispelTypeEnum = found or false
     DF._dispelTypeEnumName = foundName
     return found
@@ -817,21 +845,53 @@ function DF:GetDispelColorCurve()
     if not (C_CurveUtil and C_CurveUtil.CreateColorCurve) then return nil end
     local E = DF:FindDispelTypeEnum()
     if not E then return nil end
-    local colors = (DF.db and DF.db.dispelColors) or DF:GetGameDispelPalette()
+    -- ☠☠ PER-KEY FALLBACK, NOT A WHOLE-TABLE `or`. GetDispelColorMap has always done
+    -- this; the curve did not, and the difference was a live bug.
+    -- `db.dispelColors` has NO defaults entry, so it does not exist until the user edits
+    -- a dispel colour -- and the Colors page only ever writes the five DISPELLABLE types
+    -- (Magic/Curse/Disease/Poison/Bleed). The moment it exists it SHADOWED the complete
+    -- game palette wholesale, so `colors.None` was nil and the loop below skipped the
+    -- point at index 0 entirely. Verified against a live profile carrying exactly those
+    -- five keys (2026-08-20).
+    --
+    -- ☠☠ WHY A HOLE AT 0 MATTERS MORE THAN IT LOOKS: the engine lets the curve
+    -- UNCONDITIONALLY OVERRIDE the colour map --
+    -- `if options.customDispelColorCurve then color = GetAuraDispelTypeColor(...) end`,
+    -- Blizzard_CustomAuraButton.lua:410-412, no test on the map result. So a curve with a
+    -- hole is WORSE than no curve at all: it discards a perfectly good map lookup and
+    -- substitutes whatever the curve clamps to. An aura with no dispel type keys "None",
+    -- which the map resolves correctly and the holed curve did not.
+    local D = DF:GetGameDispelPalette()
+    local colors = (DF.db and DF.db.dispelColors) or D
+    local function pick(c, fb) return (type(c) == "table" and c.r) and c or fb end
     local candidates = {
-        { E.Magic,   colors.Magic },
-        { E.Curse,   colors.Curse },
-        { E.Disease, colors.Disease },
-        { E.Poison,  colors.Poison },
-        { E.Bleed,   colors.Bleed },
-        { E.Enrage,  colors.Enrage or colors.Bleed },
-        { E.None,    colors.None },
+        { E.Magic,   pick(colors.Magic,   D.Magic) },
+        { E.Curse,   pick(colors.Curse,   D.Curse) },
+        { E.Disease, pick(colors.Disease, D.Disease) },
+        { E.Poison,  pick(colors.Poison,  D.Poison) },
+        { E.Bleed,   pick(colors.Bleed,   D.Bleed) },
+        { E.Enrage,  pick(colors.Enrage or colors.Bleed, D.Enrage) },
+        { E.None,    pick(colors.None,    D.None) },
     }
     local points = {}
+    local haveZero = false
     for _, pair in ipairs(candidates) do
         local x, c = pair[1], pair[2]
         if type(x) == "number" and type(c) == "table" then
             points[#points + 1] = { x, CreateColor(c.r or 0, c.g or 0, c.b or 0, 1) }
+            if x == 0 then haveZero = true end
+        end
+    end
+    -- ★ ANCHOR INDEX 0 EVEN IF THE ENUM LOOKUP FOR "None" FAILED. Index 0 is the
+    -- no-dispel-type case, and on a debuff row it is the value the curve is evaluated at
+    -- most often -- so it must never be one the curve has to extrapolate towards. An
+    -- unanchored 0 does not read as missing either: the curve still returns a colour, just
+    -- the wrong one, which is why this was invisible until the palette was compared
+    -- against the point set.
+    if not haveZero then
+        local n = pick(colors.None, D.None)
+        if type(n) == "table" then
+            table.insert(points, 1, { 0, CreateColor(n.r or 0, n.g or 0, n.b or 0, 1) })
         end
     end
     if #points == 0 then return nil end
@@ -841,7 +901,16 @@ function DF:GetDispelColorCurve()
     -- the same pattern as Colors.lua / HealthFade.lua. Exact-integer X hits
     -- land on their point, so Linear is safe for the discrete type IDs.
     local curve = C_CurveUtil.CreateColorCurve()
-    if not curve then return nil end
+    if not curve then
+        -- Without the curve every dispel tint falls back to the name-keyed map, which
+        -- no-ops on a secret dispel name. Say so once; this is the one residual route
+        -- back to an untinted carrier and it must not be silent.
+        if not DF._warnedNoDispelCurve then
+            DF._warnedNoDispelCurve = true
+            if DF.DebugWarn then DF:DebugWarn("DISPEL", "CreateColorCurve returned nil - dispel tint is falling back to the colour map") end
+        end
+        return nil
+    end
     if curve.SetType and Enum.LuaCurveType then curve:SetType(Enum.LuaCurveType.Linear) end
     for _, p in ipairs(points) do
         curve:AddPoint(p[1], p[2])
@@ -1869,6 +1938,26 @@ end
 -- present; the driver Hide is a no-op when no driver exists.
 function Border:StopAnimation(border)
     if not border then return end
+    -- ☠ NEVER-ANIMATED BORDERS: leave without touching a single region.
+    -- Every write below (overlay Hides, resetEdgeAlphas' SetAlpha(1) on the four
+    -- edges) is undoing state that ONLY StartAnimation creates, so on a border
+    -- that never started an animation they are pure no-ops -- and on an aura
+    -- CONTAINER border they are no-ops on a Blizzard aura button's descendants.
+    -- Those buttons carry DenyTaintedAccessWhenAurasAreSecret; the 12.1.0.69382
+    -- client (2026-08-18) refuses tainted writes on their DESCENDANTS too, where
+    -- earlier builds refused only the button itself. Container borders have
+    -- animation stripped unconditionally (AuraContainer's ANIMATION FILTER), so
+    -- this reset was the one write _teardownContainer still made to a restricted
+    -- subtree -- and it threw on entering an instance, aborting the whole
+    -- FullFrameRefresh above it (bug #1079: 197x "calling 'SetAlpha' on bad self",
+    -- dispel borders/overlays gone). Skipping is not a guard around a needed
+    -- write; there is nothing to reset. Only borders that DID animate reach the
+    -- teardown below, and those are DF-owned frames off the button.
+    if not border._animEver then
+        border.activeAnimation = nil
+        border._animHash = nil
+        return
+    end
     unregisterAnimTick(border)
     -- Hide all overlay sets from prior animation passes. The cornerExtras
     -- field is from a previous-rev CORNERS_ONLY implementation; we keep
@@ -2007,6 +2096,9 @@ function Border:StartAnimation(border, spec)
     -- restarts the effect, making it flicker on every re-apply.
     self:StopAnimation(border)
     border._animHash = newHash
+    -- From here on this border owns animation state; StopAnimation must do its
+    -- full teardown on it from now on (see the never-animated early-out there).
+    border._animEver = true
 
     -- Custom OnUpdate effects — render their own overlay textures, so the
     -- effect's visibility doesn't depend on the border's own thickness.

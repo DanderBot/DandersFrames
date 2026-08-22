@@ -2785,6 +2785,13 @@ function CC:BuildUnifiedMacroMap()
                 }
                 
                 DF:Debug("CLICK", "Item: %s\n%s", tostring(keyString), tostring(macroText))
+            else
+                -- ★ "A binding that shows in the list and does nothing is worse than one
+                -- that says why" -- this file's own words, at a sibling failure elsewhere.
+                -- Both macro-build failures dropped the key from the map in silence, so it
+                -- looked configured in the UI and was simply dead in play.
+                DF:DebugWarn("CLICK", "Item %s dropped: BuildMacroTextForBinding returned nothing",
+                    tostring(keyString))
             end
         else
             -- Normal spell/macro binding - try to build combined macro
@@ -2799,6 +2806,12 @@ function CC:BuildUnifiedMacroMap()
                 }
                 
                 DF:Debug("CLICK", "Macro: %s\n%s", tostring(keyString), tostring(macroText))
+            else
+                -- Same silent drop as the item branch above. Named separately so the log
+                -- says which half failed: no macro text at all, or text with no template
+                -- binding to attach it to.
+                DF:DebugWarn("CLICK", "Macro %s dropped: macroText=%s templateBinding=%s",
+                    tostring(keyString), tostring(macroText ~= nil), tostring(templateBinding ~= nil))
             end
         end
     end

@@ -38,4 +38,7 @@ function DF.TextDesigner:EnsureDB(db)
     return db.textDesigner
 end
 
-DF:Debug("TD", "TextDesigner module loaded (channel=%s)", tostring(DF.RELEASE_CHANNEL))
+-- (Removed) a file-scope load line. Chunk-level Debug calls run before
+-- DebugConsole:Init binds debugDb from ADDON_LOADED, so they are guaranteed no-ops --
+-- this one still built its argument first. Use Core.lua's migration-trace buffer if
+-- something genuinely needs to report at load.

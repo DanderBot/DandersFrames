@@ -361,20 +361,26 @@ local function UpdateRangeSpell()
         if IsPlayerSpell(userSpellID) then
             currentFriendlySpell = userSpellID
             currentHostileSpell = userSpellID
+            DF:Debug("RANGE", "spell from user override: %d", userSpellID)
         else
             -- User spell not known (maybe changed spec/talents) - clear so auto-detect runs next call
             currentFriendlySpell = nil
             currentHostileSpell = nil
+            -- Worth a WARN: the user picked this deliberately and it is silently not being
+            -- used, which reads to them as the setting being ignored.
+            DF:DebugWarn("RANGE", "user range spell %d is not known to this character - auto-detect will run instead", userSpellID)
         end
         return
     end
-    
+
     -- Try spec-specific spells (validated with IsPlayerSpell)
     if specID and specSpells[specID] then
         local spells = specSpells[specID]
         currentFriendlySpell = spells.friendly and IsPlayerSpell(spells.friendly) and spells.friendly or nil
         currentHostileSpell = spells.hostile and IsPlayerSpell(spells.hostile) and spells.hostile or nil
         if currentFriendlySpell or currentHostileSpell then
+            DF:Debug("RANGE", "spell from spec %s: friendly=%s hostile=%s",
+                tostring(specID), tostring(currentFriendlySpell), tostring(currentHostileSpell))
             return
         end
     end
@@ -384,12 +390,23 @@ local function UpdateRangeSpell()
         local spells = classFallbacks[playerClass]
         currentFriendlySpell = spells.friendly and IsPlayerSpell(spells.friendly) and spells.friendly or nil
         currentHostileSpell = spells.hostile and IsPlayerSpell(spells.hostile) and spells.hostile or nil
+        DF:Debug("RANGE", "spell from class fallback: friendly=%s hostile=%s",
+            tostring(currentFriendlySpell), tostring(currentHostileSpell))
         return
     end
-    
-    -- Ultimate fallback
+
+    -- ☠ THE SILENT DEGRADE, AND IT WAS THE WHOLE CATEGORY'S BLIND SPOT. With no spell on
+    -- either side, range checking drops to CheckInteractDistance / always-in-range for the
+    -- rest of the session: fading either stops working or sticks on, which is the most
+    -- common real complaint about this module. It resolved to nil and said nothing, so the
+    -- log was indistinguishable from a healthy session that simply had no range
+    -- transitions -- RANGE only ever logged transitions, so empty meant both "fine" and
+    -- "dead". Every outcome above reports now, so the first line after enabling the
+    -- category answers "which spell did it pick", instead of leaving it to be inferred.
     currentFriendlySpell = nil
     currentHostileSpell = nil
+    DF:DebugWarn("RANGE", "no range spell for class %s (spec %s) - falling back to interact distance",
+        tostring(playerClass), tostring(specID))
 end
 
 -- ============================================================
@@ -658,10 +675,12 @@ function DF:UpdatePetRange(frame)
     --
     -- SetAlphaFromBoolean handles the secret boolean UnitInRange returns for non-healer
     -- specs on Midnight+; the plain branch is the pre-12.1 fallback.
+    -- Frame Fade base (ElementAppearance) multiplied in, so a pet recedes with its owner.
+    local base = DF.GetFrameBaseAlpha and DF:GetFrameBaseAlpha(db, frame) or 1
     if frame.SetAlphaFromBoolean then
-        frame:SetAlphaFromBoolean(inRange, 1.0, outOfRangeAlpha)
+        frame:SetAlphaFromBoolean(inRange, base, outOfRangeAlpha * base)
     else
-        frame:SetAlpha(inRange and 1.0 or outOfRangeAlpha)
+        frame:SetAlpha(inRange and base or outOfRangeAlpha * base)
     end
 end
 
@@ -923,6 +942,43 @@ function rangeSubscriber:OnUnitInRange(event, unit)
     UpdatePetForOwner(unit)
 end
 DF:RegisterRosterUnitEvent(rangeSubscriber, "UNIT_IN_RANGE_UPDATE", "OnUnitInRange")
+
+-- ★ RE-SEED ON THE EDGES UNIT_IN_RANGE_UPDATE DOES NOT COVER. Phasing and connection
+-- changes move a unit's range answer (CheckUnitRange reads UnitPhaseReason; an offline
+-- unit re-connecting comes back with whatever it last had) without firing the range
+-- event, and the appearance chain only re-runs when the cached answer CHANGES -- so
+-- until the poll happened to disagree with the cache, the frame kept the old alpha.
+-- Forget the unit's cache and the frame's stamp, then re-evaluate: UpdateRange sees a
+-- change no matter what the answer is and re-drives the whole element chain. Same
+-- shape as the roster re-assignment reset in Frames/Headers.lua, and the two events
+-- EllesmereUI re-seeds on for the same reason. Rare events, so the full sweep of a
+-- unit's frames (main + pinned) is affordable.
+function rangeSubscriber:OnUnitRangeReseed(event, unit)
+    if not unit or unit == "player" then return end
+    DF:ClearRangeCacheForUnit(unit)
+    if not unitFrameMap then
+        unitFrameMap = DF.unitFrameMap
+        if not unitFrameMap then return end
+    end
+    local frame = unitFrameMap[unit]
+    if frame and frame:IsShown() then
+        frame.dfInRange = nil
+        DF:UpdateRange(frame)
+    end
+    -- Pinned frames (both pools) through the shared walker: a pinned set may show the
+    -- same unit on a second frame, and a party-mode set can hold more than five.
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(function(child)
+            if child.unit == unit then
+                child.dfInRange = nil
+                DF:UpdateRange(child)
+            end
+        end)
+    end
+    UpdatePetForOwner(unit)
+end
+DF:RegisterRosterUnitEvent(rangeSubscriber, "UNIT_PHASE", "OnUnitRangeReseed")
+DF:RegisterRosterUnitEvent(rangeSubscriber, "UNIT_CONNECTION", "OnUnitRangeReseed")
 
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_SPECIALIZATION_CHANGED" or event == "PLAYER_TALENT_UPDATE" then

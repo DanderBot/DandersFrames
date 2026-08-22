@@ -460,17 +460,19 @@ end
 -- Renders a single elem on a frame. Called per-element from UpdateFrame.
 -- source is a DataSource (Live or Mock).
 local function updateOne(frame, elem, source, globalDefaults, enabledById)
-    -- ☠ GUARDED, and this is the most load-bearing guard in the file. This is the
-    -- per-ELEMENT entry point, and TD renders are driven from DF:UpdateHealthFast —
-    -- per unit per health tick in combat. Unguarded, the three tostring() calls
-    -- allocated on every element of every frame on every tick. DF:Debug drops the
-    -- line, but the CALLER builds the arguments before it can, and `TD` is a
-    -- `noisy` category so it ships DISABLED — i.e. this was pure waste for
-    -- essentially every user. Same idiom as the guard in UpdateTextDesigner below.
-    if DF:DebugActive("TD") then
-        DF:Debug("TD", "updateOne: id=%s type=%s enabled=%s",
-            tostring(elem.id), tostring(elem.contentType), tostring(elem.enabled))
-    end
+    -- ☠ (Removed) a per-ELEMENT entry trace logging id/type/enabled. It was the largest
+    -- single source of log volume in the addon and reported nothing the element's own
+    -- config does not already say -- an entry marker, never an outcome.
+    --
+    -- Measured before removal: renders are driven from DF:UpdateHealthFast, so per unit
+    -- per health tick, and one render emitted 2 + E lines for E elements. A 20-frame raid
+    -- at three elements each is 100 lines per render and thousands per second sustained --
+    -- the 10,000-line buffer overwrote itself in under two seconds, so enabling TD
+    -- destroyed the trace it was enabled to capture.
+    --
+    -- The guard was right and is not the lesson; the line was. Render:UpdateFrame already
+    -- reports the unit and element COUNT once per frame, and the outcome detail lives
+    -- further down this function where it earns its cost.
     if not elem.enabled then
         local existing = frame._tdFontStrings and frame._tdFontStrings[elem.id]
         if existing then existing:Hide() end
@@ -833,7 +835,11 @@ end
 -- same frame collapse into a single render carrying the UNION of their hints.
 function DF:UpdateTextDesigner(frame, hint)
     if not frame then
-        DF:Debug("TD", "UpdateTextDesigner: no frame")
+        -- ☠ Named for THIS function. Both this and RenderTextDesignerNow emitted the
+        -- identical string, so the log could not say which of the two was called with no
+        -- frame -- the coalescing wrapper or the render itself, which are reached from
+        -- different callers and mean different things.
+        DF:Debug("TD", "UpdateTextDesigner (coalescing entry): no frame")
         return
     end
     hint = hint or "all"

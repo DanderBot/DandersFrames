@@ -1233,7 +1233,12 @@ P.effectCardPool = effectCardPool
 -- the new Effects tab. Replaces the old per-aura view.
 -- ============================================================
 
-local FRAME_LEVEL_TYPE_KEYS = { "border", "healthbar", "background", "nametext", "healthtext", "sound" }
+-- ⚠ Captured from Options.lua rather than declared here. There were two copies of
+-- this list and one "does this record hold anything" test built on it; the cross-pool
+-- block asked a different, wrong question against the raw pool and shipped the "still
+-- In My Buffs after deleting it" bug. One list, one predicate.
+local FRAME_LEVEL_TYPE_KEYS = P.FRAME_LEVEL_TYPE_KEYS
+local AuraHoldsNoEffects = P.AuraHoldsNoEffects
 
 -- Remove an ad-hoc "#<id>" aura's config entry once it holds no effects at
 -- all (empty/absent indicators array AND no frame-level type keys). Ad-hoc
@@ -1252,10 +1257,7 @@ S.CleanupAdHocAura = function(auraName)
     local auras = CurrentAuraPool()
     local auraCfg = auras and auras[auraName]
     if type(auraCfg) ~= "table" then return end
-    if auraCfg.indicators and #auraCfg.indicators > 0 then return end
-    for _, typeKey in ipairs(FRAME_LEVEL_TYPE_KEYS) do
-        if auraCfg[typeKey] ~= nil then return end
-    end
+    if not AuraHoldsNoEffects(auraCfg) then return end
     auras[auraName] = nil
 end
 

@@ -30,12 +30,23 @@ function DF:RegisterLocaleRefresh(fn)
     DF._localeRefreshers[#DF._localeRefreshers + 1] = fn
 end
 function DF:RunLocaleRefreshers()
+    -- ★ SCRIPT had no success path at all -- three ERROR calls across the addon and nothing
+    -- else -- so a session where every refresher worked and one where this never ran
+    -- produced the same empty category. Silence is only worth reading as "healthy" if
+    -- something says so. One line at the end with the failure count gives the category a
+    -- heartbeat without adding per-refresher chatter.
+    local failed = 0
     for i = 1, #DF._localeRefreshers do
         local ok, err = pcall(DF._localeRefreshers[i])
-        if not ok and DF.DebugError then
-            DF:DebugError("SCRIPT", "LocaleRefresh failed: %s", tostring(err))
+        if not ok then
+            failed = failed + 1
+            if DF.DebugError then
+                DF:DebugError("SCRIPT", "LocaleRefresh failed: %s", tostring(err))
+            end
         end
     end
+    DF:Debug("SCRIPT", "RunLocaleRefreshers: %d refresher(s), %d failed",
+        #DF._localeRefreshers, failed)
 end
 
 -- Locale warnings: silent by default (see Locales/enUS.lua for rationale).
@@ -426,12 +437,8 @@ DF.COMMAND_SIBLINGS = {
     pinned    = { "info", "test", "reinit", "bosstest <1-8>", "bossspawn demo" },
     range     = { "stats", "spell", "dump", "clear" },
     sort      = { "refresh", "clear" },
-    -- Public half is read-only. The dev half must stay in step with
-    -- SECURE_MUTATORS in Features/SecureSort.lua, which is what refuses them.
-    -- "init" leads the dev list because every other one needs the handler.
-    secure    = { "help", "status", dev = { "init", "party", "raid", "all", "register",
-                  "test", "swap", "swapback", "debug", "ui", "show", "hide",
-                  "showbutton", "hidebutton" } },
+    -- /dfsecure was retired with the secure-sort half (its handler never armed); no
+    -- sibling entry, so nothing advertises a command that no longer registers.
     flatraid  = { "info", "reinit", "test" },
     -- (No "cc" entry.) /df debug cc's BARE form already prints its full subcommand
     -- table — that is its entire job — so a Siblings footer would repeat it.
@@ -525,7 +532,7 @@ DF.DEBUG_GROUP_OF = {
     ownpreview = "auras",
     admissing = "auras", cbt = "auras",
 
-    headers = "frames", flatraid = "frames", secure = "frames", sort = "frames",
+    headers = "frames", flatraid = "frames", sort = "frames",
     roster = "frames", pinned = "frames", range = "frames", arena = "frames",
     attached = "frames", zorder = "frames", mousefoci = "frames",
     flatdebug = "frames", flatoverlay = "frames", raidbg = "frames",
@@ -1035,7 +1042,11 @@ DF.IsTexturePresent = textureKnown
 local function warnMissingTexture(path)
     if not path or _df_warnedMissingTexture[path] then return end
     _df_warnedMissingTexture[path] = true
-    if DF.Debug then DF:Debug("TEXTURE", "Missing texture '%s' — using stock fallback", tostring(path)) end
+    -- ☠ WARN, not INFO. A missing texture is significant enough that the next lines print
+    -- it to chat, yet the log entry sat at INFO -- so anyone who raised the log level to
+    -- cut chatter lost the only line this category has. TEXTURE has exactly one call site;
+    -- filtering it out by severity left the category permanently empty.
+    if DF.DebugWarn then DF:DebugWarn("TEXTURE", "Missing texture '%s' — using stock fallback", tostring(path)) end
 
     local shown = tostring(path)
     -- Ours: show just the filename, and say plainly that it is not coming back.
@@ -1425,25 +1436,38 @@ function DF:LightweightUpdateFontShadows()
     end
 end
 
--- Update only power/resource bar height
-function DF:LightweightUpdatePowerBarSize()
+-- ☠☠ THE RESOURCE-BAR DRAG PREVIEW RUNS THE LIVE LAYOUT. Both of these were hand-rolled
+-- forks of DF:LayoutResourceBar, and both were wrong in ways only visible mid-drag —
+-- which is exactly where a "lightweight" copy is least likely to be checked.
+--
+--   * POSITION forked `ClearAllPoints()` + ONE `SetPoint`. With "Match Health Bar
+--     Width/Height" on — the DEFAULT — the real layout sizes the matched axis purely by
+--     TWO anchor points and never calls SetWidth, so the bar carries no explicit width for
+--     its whole life. Dropping to a single point collapsed it to width 0: the bar VANISHED
+--     for the duration of the drag and returned on release, when the full update
+--     re-applied both points. (Aphoex 3.1, party and raid alike.)
+--   * SIZE forked the axis mapping and never read `resourceBarOrientation`, while the real
+--     layout swaps the axes for a vertical bar — so on a vertical bar the two sliders drove
+--     the wrong dimensions mid-drag and snapped back on release.
+--
+-- Routing both at the live function retires the fork rather than patching each symptom,
+-- and it is the standing rule for every preview surface: differ in DATA, never in
+-- RENDERING.
+-- ⚠ It costs more per tick than the old copies. That is the point — they were cheap
+-- because they were not doing the job. The callbacks are already throttled, and the full
+-- update on release ran this very function anyway.
+local function RelayoutResourceBars()
     local mode = DF.GUI and DF.GUI.SelectedMode or "party"
     local db = DF.db[mode]
-    if not db then return end
-    
-    local height = db.resourceBarHeight or 4
-    local width = db.resourceBarWidth or 50
-    
-    local function UpdateBar(frame)
-        if frame and frame.dfPowerBar then
-            frame.dfPowerBar:SetHeight(height)
-            if not db.resourceBarMatchWidth then
-                frame.dfPowerBar:SetWidth(width)
-            end
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateBar)
+    if not db or not DF.LayoutResourceBar then return end
+    IterateFramesInMode(mode, function(frame)
+        if frame and frame.dfPowerBar then DF:LayoutResourceBar(frame, db) end
+    end)
+end
+
+-- Drag callback for Width / Length and Height / Thickness
+function DF:LightweightUpdatePowerBarSize()
+    RelayoutResourceBars()
 end
 
 -- Update only border thickness
@@ -1729,24 +1753,11 @@ function DF:LightweightUpdateHighlight(highlightType)
     IterateFramesInMode(mode, UpdateHighlight)
 end
 
--- Update power bar position
+-- Drag callback for Anchor / Offset X / Offset Y. See RelayoutResourceBars above for why
+-- this no longer places the bar itself — the single-SetPoint fork is what made the bar
+-- disappear for the whole drag.
 function DF:LightweightUpdatePowerBarPosition()
-    local mode = DF.GUI and DF.GUI.SelectedMode or "party"
-    local db = DF.db[mode]
-    if not db then return end
-    
-    local anchor = db.resourceBarAnchor or "BOTTOM"
-    local x = db.resourceBarX or 0
-    local y = db.resourceBarY or 0
-    
-    local function UpdateBar(frame)
-        if frame and frame.dfPowerBar then
-            frame.dfPowerBar:ClearAllPoints()
-            frame.dfPowerBar:SetPoint(anchor, frame, anchor, x, y)
-        end
-    end
-    
-    IterateFramesInMode(mode, UpdateBar)
+    RelayoutResourceBars()
 end
 
 -- Update absorb bar size/position
@@ -3974,6 +3985,63 @@ end
 -- payload actually carrying a non-zero inset -- see DF:ApplyImportedProfile.
 --
 -- Anything added here must state which of the two shapes it is.
+-- Step existing centred-and-wrapping raid layouts onto Center Mode = Fixed, so their
+-- frames stay where they have always been instead of picking up the corrected Default.
+--
+-- ☠ FLAG-GATED, NOT PRESENCE-GATED, and that is the whole point.
+-- raidGroupCenterMode HAS a defaults entry ("ALL"), so the backfill seeds it before this
+-- ever runs and `if raid.raidGroupCenterMode == nil` would be false on every profile,
+-- forever. That exact mistake has been made three times in this codebase. The flag lives
+-- on the profile and is deliberately NOT in the defaults, so it cannot be seeded.
+--
+-- WHO IS TOUCHED: grouped raid, Groups Anchor on CENTER, Groups Before Wrap below 8, AND
+-- Players Grow From opposite to Groups Grow From. At 8 the grid never wraps and the old
+-- compensation was always (0,0), so those profiles already match Default.
+--
+-- ☠ THE LAST CLAUSE IS THE ONE THAT IS EASY TO GET WRONG, AND I DID GET IT WRONG.
+-- The predicate is the PAIR, not Players Grow From on its own. It is the same XOR that
+-- ComputeRaidMainGroupAnchorOffset uses for its sign -- there as
+-- `mainAtNear = (playersEnd == wrapEnd)`, here as the two being different:
+--
+--   start/end and end/start  -> the old build genuinely pinned the main block.
+--                               Fixed reproduces it, so these frames do not move at all.
+--   start/start and end/end  -> the old build was broken in both directions: the block
+--                               drifted with the roster AND jumped at the wrap point.
+--                               No mode reproduces that, so there is nothing to preserve
+--                               and they are LEFT ON DEFAULT to choose for themselves.
+--
+-- An earlier version of this header claimed the rule was "exact only for Players Grow
+-- From = End", from a measurement that varied only that axis with Groups Grow From held
+-- at its default. It named the wrong variable and was outright wrong for end/end.
+-- Corrected against in-game PTR testing of all four pairs (Krathe, 2026-08-18).
+--
+-- VALUE-IDEMPOTENT: no. It writes a mode the user may later change on purpose, so the
+-- flag is stamped for every profile it inspects, changed or not, and this must NOT be
+-- re-armed on import the way step 1 of the inset fold is.
+function DF:MigrateRaidCenterMode()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        if type(profile) == "table" and not profile._raidCenterModeV1 then
+            local raid = profile.raid
+            if type(raid) == "table" then
+                -- raidUseGroups defaults to true, so nil means grouped, not flat.
+                local grouped = raid.raidUseGroups ~= false
+                local wrap = tonumber(raid.raidGroupsPerRow) or 8
+                -- Opposite grow directions == the old build pinned the main block, so
+                -- Fixed lands pixel-identical. Matching directions had no stable
+                -- position at all; see the header before touching this test.
+                local playersEnd = (raid.raidPlayerAnchor or "START") == "END"
+                local wrapEnd = (raid.raidGroupRowGrowth or "START") == "END"
+                if grouped and (raid.raidGroupAnchor or "START") == "CENTER"
+                    and wrap < 8 and playersEnd ~= wrapEnd then
+                    raid.raidGroupCenterMode = "MAIN"
+                end
+            end
+            profile._raidCenterModeV1 = true
+        end
+    end
+end
+
 function DF:MigrateBorderInsetFold()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
@@ -5889,6 +5957,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
         sub("dispelids",    "dispel type-enum and colour probe (also: /dfdispel ids)", nil, nil, true)
         sub("dispeldbg",    "dispel gradient render state (also: /dfdispel render)", nil, nil, true)
         sub("idgate",       "container identity-gate dump", true)
+        sub("adgate",       "Aura Designer placement gate dump", true)
         sub("ppdump",       "missing-buff layout-push dump", true)
         -- Not logging, despite the old wording: it window-parks the badge so the
         -- anchor stays live and the badge shows even when the buff is present.
@@ -6821,6 +6890,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 -- Identity-gate ground truth: per vulnerable handle, live UnitCanAssist
                 -- vs the stored gate verdict vs actual window visibility
                 if DF.AuraContainer and DF.AuraContainer.DebugDumpIdentityGate then DF.AuraContainer.DebugDumpIdentityGate() end
+            elseif msg == "adgate" then
+                -- The AD half of the same question: idgate sees a placement's handle but
+                -- not its chain, its parent-driven links or its badge — so an indicator
+                -- rendering against a hidden gate does not appear there at all.
+                if DF.AuraDesigner and DF.AuraDesigner.Factory
+                    and DF.AuraDesigner.Factory.DebugDumpADGate then
+                    DF.AuraDesigner.Factory:DebugDumpADGate()
+                end
             elseif msg == "dispelids" then
                 -- Custom dispel colours: the curve's X = the dispel type ID. The enum's
                 -- NAME is build-dependent, so FindDispelTypeEnum scans Enum for the
@@ -7061,8 +7138,32 @@ DF._MainEventDispatcher = function(self, event, arg1)
                     if type(v) == "number" then return string.format("%.1f", v) end
                     return tostring(v)
                 end
+                -- ☠ ONE GUARD PER READ, not one guard per BLOCK. While auras are secret even
+                -- READS on the slot widget hierarchy are forbidden to addon code, and the
+                -- slot section below used to wrap a dozen of them in a single
+                -- pcall(function() … end): the FIRST forbidden call aborted the closure and
+                -- took every later line with it, including the carrier anchor target — the
+                -- one field that says whether the style pass ever ran. So the dump reported
+                -- least when it was needed most, and testers reported it as "doesn't work in
+                -- combat" (field-reported 2026-08-19).
+                -- Returns nil on refusal, which num() renders as "nil" rather than killing
+                -- the line. Two return values because GetPoint's relativeTo is the second.
+                local function tryv(fn, ...)
+                    if type(fn) ~= "function" then return nil end
+                    local ok, a, b = pcall(fn, ...)
+                    if ok then return a, b end
+                    return nil
+                end
+                -- ☠ AN ABSENT OBJECT PRINTS "ABSENT". IT DOES NOT PRINT NOTHING.
+                -- Both helpers used to `return` on nil, so a missing region rendered as
+                -- SILENCE -- indistinguishable from a region this style never builds, and
+                -- from a line the reader skimmed past. That cost a diagnosis: five frames
+                -- whose gradient carrier did not exist produced a dump whose every printed
+                -- field looked healthy, because the one that mattered was not printed at
+                -- all (2026-08-20). This dump's whole subject is whether the art exists,
+                -- so absence is the most important thing it can report.
                 local function dumpBar(tag, bar, hostFrame)
-                    if not bar then return end
+                    if not bar then o:Line(("%s: ABSENT"):format(tag), "bad") return end
                     local mn, mx, val, w, h, pw, lvl, blend, alpha, shown, orient, rev
                     pcall(function() mn, mx = bar:GetMinMaxValues() end)
                     pcall(function() val = bar:GetValue() end)
@@ -7082,7 +7183,7 @@ DF._MainEventDispatcher = function(self, event, arg1)
                         num(orient), num(rev), num(blend), num(alpha), num(shown), num(lvl)))
                 end
                 local function dumpTex(tag, tex)
-                    if not tex then return end
+                    if not tex then o:Line(("%s: ABSENT"):format(tag), "bad") return end
                     local w, h, blend, alpha, shown, layer, sub
                     pcall(function() w, h = tex:GetSize() end)
                     pcall(function() blend = tex:GetBlendMode() end)
@@ -7142,56 +7243,125 @@ DF._MainEventDispatcher = function(self, event, arg1)
                             -- and every widget/texture method call rides one pcall that
                             -- degrades to a FORBIDDEN line instead of killing the dump at
                             -- the exact moment it is most needed.
+                            -- ☠ bind= READS THE BUTTON'S OWN STAMP, NOT THE GLOBAL.
+                            -- DF._dispelBindErr is keyed by slot key alone, so every
+                            -- frame's "main" overwrites every other frame's; printing it
+                            -- here reported one frame's success against another frame's
+                            -- button, and five carrier-less frames all read "ok x3".
+                            -- carriers= now separates "never stamped" from "stamped
+                            -- empty" -- BindDispelCarriers only stamps when it has one,
+                            -- so nil is the signal that the secure init did not finish.
+                            local nCar = btn._dfDispelCarriers and #btn._dfDispelCarriers
                             o:Line(("slot[%s] styleErr=%s bind=%s carriers=%s"):format(
                                 tostring(key), tostring(btn._dfDispelStyleErr),
-                                tostring(DF._dispelBindErr and DF._dispelBindErr[key]),
-                                tostring(btn._dfDispelCarriers and #btn._dfDispelCarriers)))
-                            local okSlot = pcall(function()
+                                tostring(btn._dfDispelBindRes or "never recorded"),
+                                nCar and tostring(nCar) or "NONE (init did not finish)"),
+                                nCar and "neutral" or "bad")
+                            -- Declared vs built, on one line. The roles table says what
+                            -- this slot is supposed to own; anything declared without a
+                            -- carrier behind it is the fault, stated rather than implied.
+                            -- ★ THE BIRTH-TIME REFUSAL, NAMED. Slot init runs inside the
+                            -- container's pcall, so its error never reaches the user;
+                            -- Dispel's onInit stamps it here. This prints even on a client
+                            -- that had the DISPEL log category switched off when it
+                            -- happened, which is exactly the case that cost a diagnosis.
+                            if btn._dfDispelInitErr then
+                                o:Line(("slot[%s] INIT REFUSED AT BIRTH: %s"):format(
+                                    tostring(key), tostring(btn._dfDispelInitErr)), "bad")
+                            end
+                            local dRoles = btn._dfDispelRoles
+                            if dRoles then
+                                local want = {}
+                                if dRoles.gradient then want[#want + 1] = "gradient=" .. tostring(dRoles.gradient) end
+                                if dRoles.border then want[#want + 1] = "border" end
+                                if dRoles.edges then want[#want + 1] = "edges" end
+                                if dRoles.badge then want[#want + 1] = "badge" end
+                                o:Line(("slot[%s] declares: %s"):format(tostring(key),
+                                    #want > 0 and table.concat(want, " ") or "(nothing)"))
+                            else
+                                o:Line(("slot[%s] declares: NOTHING RECORDED — secure init never reached its roles stamp"):format(
+                                    tostring(key)), "bad")
+                            end
+                            local okSlot = true
+                            do
                                 local wdg = btn.dfDispelWidget
                                 if wdg then
                                     -- num() on the widget reads too — IsShown on a
                                     -- descendant of a secret-shown button returns a
                                     -- SECRET, and tostring'ing it vanished this line.
-                                    local wShown; pcall(function() wShown = wdg:IsShown() end)
+                                    local wShown = tryv(wdg.IsShown, wdg)
+                                    local wLvl   = tryv(wdg.GetFrameLevel, wdg)
+                                    if wShown == nil and wLvl == nil then okSlot = false end
                                     o:Line(("slot[%s] widget shown=%s lvl=%s tracks=%s"):format(
-                                        tostring(key), num(wShown), num(wdg:GetFrameLevel()),
+                                        tostring(key), num(wShown), num(wLvl),
                                         tostring(wdg.gradientTracksHealth)))
                                     dumpBar("slot.gradient", wdg.gradient, frame)
                                     dumpTex("slot.nativeGradient", wdg.nativeGradient)
                                     local ng = wdg.nativeGradient
-                                    if ng then
-                                        local nPts = ng:GetNumPoints()
-                                        local _, relTo = ng:GetPoint(1)
+                                    -- ★ THE LINE THIS WHOLE DUMP EXISTS FOR, AND IT NOW
+                                    -- PRINTS EVEN WHEN THE CARRIER IS GONE. It used to sit
+                                    -- inside `if ng then`, so the one state it most needed
+                                    -- to report -- no carrier at all -- was the one state
+                                    -- that silently skipped it (2026-08-20). rel= says
+                                    -- whether the style pass ever re-anchored the carrier
+                                    -- ("btn" = still on the secure init's SetAllPoints, i.e.
+                                    -- it never ran). The DIM HOSTS are plain DF frames whose
+                                    -- alpha is always readable, and they are worth printing
+                                    -- whether or not the carrier survived -- a live dim host
+                                    -- with no carrier localises the failure to the texture
+                                    -- create, one line below the frame create. Every read is
+                                    -- individually guarded so a refusal costs one FIELD.
+                                    do
+                                        local nPts = ng and tryv(ng.GetNumPoints, ng)
+                                        local _, relTo
+                                        if ng then _, relTo = tryv(ng.GetPoint, ng, 1) end
+                                        local healthFill = frame.healthBar
+                                            and tryv(frame.healthBar.GetStatusBarTexture, frame.healthBar)
                                         local relName = "?"
-                                        if relTo == btn then relName = "btn"
+                                        if not ng then relName = "NO CARRIER"
+                                        elseif relTo == btn then relName = "btn"
                                         elseif relTo == wdg.gradient then relName = "gradRect"
-                                        elseif frame.healthBar and relTo == frame.healthBar:GetStatusBarTexture() then relName = "healthFill"
+                                        elseif healthFill and relTo == healthFill then relName = "healthFill"
                                         elseif relTo == wdg then relName = "widget"
-                                        elseif relTo == nil then relName = "nil" end
+                                        elseif relTo == nil then relName = "nil/refused" end
                                         -- The DIM HOSTS are plain DF frames — their alpha
                                         -- is the number that matters now, and it is
                                         -- always readable. See the dim-host rule in
                                         -- Features/Dispel.lua DispelSlotSecureInit.
-                                        local dimA = wdg.nativeGradientDim and wdg.nativeGradientDim:GetAlpha()
-                                        local ringA = btn.dfDispelRingDim and btn.dfDispelRingDim:GetAlpha()
-                                        local badgeA = btn.dfDispelBadgeDim and btn.dfDispelBadgeDim:GetAlpha()
+                                        local dimA = wdg.nativeGradientDim
+                                            and tryv(wdg.nativeGradientDim.GetAlpha, wdg.nativeGradientDim)
+                                        local ringA = btn.dfDispelRingDim
+                                            and tryv(btn.dfDispelRingDim.GetAlpha, btn.dfDispelRingDim)
+                                        local badgeA = btn.dfDispelBadgeDim
+                                            and tryv(btn.dfDispelBadgeDim.GetAlpha, btn.dfDispelBadgeDim)
                                         o:Line(("slot[%s] carrier points=%s rel=%s gradDim=%s ringDim=%s badgeDim=%s"):format(
                                             tostring(key), tostring(nPts), relName,
-                                            num(dimA), num(ringA), num(badgeA)))
+                                            num(dimA), num(ringA), num(badgeA)),
+                                            ng and "neutral" or "bad")
                                     end
                                 end
-                                if btn.dfDispelRing then dumpTex("slot[" .. tostring(key) .. "].ring", btn.dfDispelRing) end
+                                -- ⚠ Dumped only when the slot DECLARED them, but then
+                                -- dumped unconditionally so a declared-and-missing one
+                                -- prints ABSENT. Gating on the object itself (the old
+                                -- `if btn.dfDispelRing then`) hid exactly the case worth
+                                -- seeing; gating on the declaration keeps a style that
+                                -- legitimately builds no ring from printing a false alarm.
+                                local dR = btn._dfDispelRoles
+                                if not dR or dR.border then
+                                    dumpTex("slot[" .. tostring(key) .. "].ring", btn.dfDispelRing)
+                                end
                                 -- Edge strips are keyed BY SIDE now (all four ride the one
                                 -- overlay slot since the carriers were consolidated).
-                                if type(btn.dfDispelEdgeTex) == "table" then
+                                if not dR or dR.edges then
+                                    local et = btn.dfDispelEdgeTex
                                     for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
-                                        local et = btn.dfDispelEdgeTex[side]
-                                        if et then dumpTex("slot[" .. tostring(key) .. "].edge" .. side, et) end
+                                        dumpTex("slot[" .. tostring(key) .. "].edge" .. side,
+                                            type(et) == "table" and et[side] or nil)
                                     end
                                 end
-                            end)
+                            end
                             if not okSlot then
-                                o:Line(("slot[%s] widget state FORBIDDEN (in combat / auras secret) — run again out of combat for carrier alpha/anchors"):format(
+                                o:Line(("slot[%s] widget reads REFUSED (auras secret) — every DF-owned field above is still valid, including bind=, carriers=, declares= and rel=NO CARRIER; only values read OFF the slot widgets degrade, and those need an out-of-combat run"):format(
                                     tostring(key)), "neutral")
                             end
                         end
@@ -7348,6 +7518,14 @@ DF._MainEventDispatcher = function(self, event, arg1)
             -- Turn Important Debuffs ON once for profiles that predate the baseline
             -- flip. Writes unconditionally behind a per-profile flag, so it runs exactly
             -- once and a later user OFF is permanent. See DF:MigrateImportantDebuffOn.
+            -- Keep existing centred-and-wrapping raid layouts on the old geometry by
+            -- stepping them to Center Mode = Fixed. Same shape as the line below it:
+            -- writes behind a per-profile flag, so a later user switch to Default is
+            -- permanent. New profiles take the corrected Default.
+            if DF.MigrateRaidCenterMode then
+                DF:MigrateRaidCenterMode()
+            end
+
             if DF.MigrateImportantDebuffOn then
                 DF:MigrateImportantDebuffOn()
             end
@@ -7796,7 +7974,9 @@ DF._MainEventDispatcher = function(self, event, arg1)
             end
         end
         
-        DF:Debug("ROLE", "PLAYER_REGEN_DISABLED (entering combat)")
+        -- ☠ (Removed) a bare "entering combat" constant. UpdateAllRoleIcons on the next
+        -- line logs "inCombat=true" itself, with more information and from the code that
+        -- actually acts on it.
         -- Update role icons (in case hideInCombat is enabled)
         if DF.UpdateAllRoleIcons then
             DF:UpdateAllRoleIcons()

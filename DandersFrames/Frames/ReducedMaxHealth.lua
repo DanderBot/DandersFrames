@@ -134,52 +134,106 @@ function DF:UpdateReducedMaxHealth(frame)
     bar:SetValue(pct)
     bar:Show()
 
-    if db.reducedMaxHealthClipHealthBar and frame.healthBar and tex and not pctIsSecret then
+    if db.reducedMaxHealthClipHealthBar and frame.healthBar and tex then
         -- Clip the health bar to the portion NOT covered by the reduced-max
         -- overlay: pin the three frame-side edges and anchor the full-health
         -- edge to the reduced texture's inner edge. Mirrors the orientation above.
-        -- SKIPPED on the secret path: clipping re-anchors the health bar to the
-        -- reduced bar's fill-texture geometry, which is driven by the secret value.
-        -- The overlay itself renders fine from the secret (above), but we don't clip
-        -- against secret-derived geometry unless it's proven taint-safe in-game.
-        frame.healthBar:ClearAllPoints()
-        if orientation == "HORIZONTAL_INV" then          -- reduced on left
-            frame.healthBar:SetPoint("TOPRIGHT", -padding, -padding)
-            frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
-            frame.healthBar:SetPoint("TOPLEFT", tex, "TOPRIGHT")
-            frame.healthBar:SetPoint("BOTTOMLEFT", tex, "BOTTOMRIGHT")
-        elseif orientation == "VERTICAL" then            -- reduced on top
-            frame.healthBar:SetPoint("BOTTOMLEFT", padding, padding)
-            frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
-            frame.healthBar:SetPoint("TOPLEFT", tex, "BOTTOMLEFT")
-            frame.healthBar:SetPoint("TOPRIGHT", tex, "BOTTOMRIGHT")
-        elseif orientation == "VERTICAL_INV" then        -- reduced on bottom
-            frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
-            frame.healthBar:SetPoint("TOPRIGHT", -padding, -padding)
-            frame.healthBar:SetPoint("BOTTOMLEFT", tex, "TOPLEFT")
-            frame.healthBar:SetPoint("BOTTOMRIGHT", tex, "TOPRIGHT")
-        else                                             -- HORIZONTAL: reduced on right
-            frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
-            frame.healthBar:SetPoint("BOTTOMLEFT", padding, padding)
-            frame.healthBar:SetPoint("TOPRIGHT", tex, "TOPLEFT")
-            frame.healthBar:SetPoint("BOTTOMRIGHT", tex, "BOTTOMLEFT")
+        --
+        -- ☠☠ THIS USED TO BE SKIPPED ON THE SECRET PATH, WHICH IS THE ONLY PATH THAT
+        -- MATTERS. The note above says it plainly: in restricted content -- M+ and raid,
+        -- "exactly where max-HP reductions live" -- the percent comes back secret. So the
+        -- clip ran in test mode and nowhere else, and every consumer that reasons about
+        -- "the usable bar" was reasoning about a rect that is only correct in a preview:
+        --   * the dispel wash's "Show On Current Health Only" anchors to this bar
+        --     precisely so the reduced region is excluded (Features/Dispel.lua's
+        --     healthAnchor block, and the slot carrier's birth anchor). Unclipped, the
+        --     wash spans the taken-away max and reads as though the option were off --
+        --     "in game it looks like it does in test mode if you untick it" (Renegade,
+        --     2026-08-19).
+        --   * UpdateAbsorb's ATTACHED maths says "the bar physically ends there".
+        --     In a key it did not.
+        -- The original reason was caution, stated as caution: "we don't clip against
+        -- secret-derived geometry unless it's proven taint-safe in-game." It is the
+        -- established route -- ANCHORING derives geometry engine-side and reads nothing
+        -- in Lua, which is the same doctrine DispelSlotSecureInit relies on and the same
+        -- thing UpdateAbsorb already does to this very texture (Bars.lua's
+        -- healthFillTexture anchors, ungated and shipping). Anchoring is not a read.
+        -- ⚠ SELF-CORRECTING WHEN THE SECRET RESOLVES TO ZERO: an unmodified unit renders
+        -- an empty reverse-fill, so `tex` collapses onto the full-health edge and these
+        -- anchors give back the whole bar. That is why the numeric hide-test being
+        -- unavailable here does not strand a clipped bar.
+        -- ☠ GUARDED, AND THE FALLBACK RESTORES RATHER THAN LEAVES IT UNANCHORED. If the
+        -- client ever does refuse one of these, a half-applied ClearAllPoints would leave
+        -- the health bar with no points at all -- a worse outcome than the bug.
+        -- ☠☠ TRANSITION-GATED. This sits on UpdateHealthFast -- per UNIT_HEALTH, per frame --
+        -- and on the secret path it is reached for EVERY frame in restricted content.
+        -- Unconditional, it cost a closure, ClearAllPoints + four SetPoints, and a dropped
+        -- absorb layout cache (forcing UpdateAbsorb's full rebuild) on every health tick of
+        -- every raid frame. The anchors only need re-stating when what they point at
+        -- changes: orientation, padding, or the fill texture object itself (a texture swap
+        -- replaces it). RestoreHealthBarFromReducedMax clears the clipping flag, so a bar
+        -- that was un-clipped re-clips on the next pass through here.
+        local needClip = not (frame.dfReducedMaxHealthClipping
+            and frame.dfRMClipOrient == orientation
+            and frame.dfRMClipPad == padding
+            and frame.dfRMClipTex == tex)
+        if needClip then
+            local clipped = pcall(function()
+                frame.healthBar:ClearAllPoints()
+                if orientation == "HORIZONTAL_INV" then          -- reduced on left
+                    frame.healthBar:SetPoint("TOPRIGHT", -padding, -padding)
+                    frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+                    frame.healthBar:SetPoint("TOPLEFT", tex, "TOPRIGHT")
+                    frame.healthBar:SetPoint("BOTTOMLEFT", tex, "BOTTOMRIGHT")
+                elseif orientation == "VERTICAL" then            -- reduced on top
+                    frame.healthBar:SetPoint("BOTTOMLEFT", padding, padding)
+                    frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+                    frame.healthBar:SetPoint("TOPLEFT", tex, "BOTTOMLEFT")
+                    frame.healthBar:SetPoint("TOPRIGHT", tex, "BOTTOMRIGHT")
+                elseif orientation == "VERTICAL_INV" then        -- reduced on bottom
+                    frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
+                    frame.healthBar:SetPoint("TOPRIGHT", -padding, -padding)
+                    frame.healthBar:SetPoint("BOTTOMLEFT", tex, "TOPLEFT")
+                    frame.healthBar:SetPoint("BOTTOMRIGHT", tex, "TOPRIGHT")
+                else                                             -- HORIZONTAL: reduced on right
+                    frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
+                    frame.healthBar:SetPoint("BOTTOMLEFT", padding, padding)
+                    frame.healthBar:SetPoint("TOPRIGHT", tex, "TOPLEFT")
+                    frame.healthBar:SetPoint("BOTTOMRIGHT", tex, "BOTTOMLEFT")
+                end
+            end)
+            if not clipped then
+                -- Re-pin the plain rect directly. RestoreHealthBarFromReducedMax is not
+                -- usable here: it early-returns unless dfReducedMaxHealthClipping is already
+                -- set, and this failed before setting it.
+                DF:DebugWarn("HEALTH", "ReducedMaxHealth: health-bar clip refused on unit=%s; "
+                    .. "falling back to the unclipped rect", tostring(unit or "(test)"))
+                frame.healthBar:ClearAllPoints()
+                frame.healthBar:SetPoint("TOPLEFT", padding, -padding)
+                frame.healthBar:SetPoint("BOTTOMRIGHT", -padding, padding)
+                frame.dfReducedMaxHealthClipping = nil
+                frame.dfRMClipOrient, frame.dfRMClipPad, frame.dfRMClipTex = nil, nil, nil
+                frame.dfAbsorbState = nil
+                return
+            end
+            frame.dfReducedMaxHealthClipping = true
+            -- ☠ THE ABSORB CACHE DEPENDS ON THE RECT WE JUST MOVED. UpdateAbsorb keeps a
+            -- layout cache (frame.dfAbsorbState) and short-circuits when nothing changed; it
+            -- detects a resize by comparing frame.healthBar:GetWidth(). Those SetPoints above
+            -- do not change the measured width until the next draw, so an absorb pass in the
+            -- same tick reads the PRE-CLIP width, concludes nothing moved, and takes the fast
+            -- path -- leaving the absorb bar anchored to the unclipped edge, i.e. underneath
+            -- the reduced-max region. Field-caught on test-mode re-entry: absorb + reduced max
+            -- rendered side by side on the first entry, then the absorb vanished on a later
+            -- one, and turning reduced max off revealed it sitting under there all along.
+            -- Toggling absorbs off/on "fixed" it only because hiding the bar fails the fast
+            -- path's IsShown() gate and forces the full rebuild.
+            -- Invalidating here is causal: the thing that moved the anchor drops the cache
+            -- that depends on it, so the next pass re-derives instead of measuring a rect
+            -- that has not caught up.
+            frame.dfAbsorbState = nil
+            frame.dfRMClipOrient, frame.dfRMClipPad, frame.dfRMClipTex = orientation, padding, tex
         end
-        frame.dfReducedMaxHealthClipping = true
-        -- ☠ THE ABSORB CACHE DEPENDS ON THE RECT WE JUST MOVED. UpdateAbsorb keeps a
-        -- layout cache (frame.dfAbsorbState) and short-circuits when nothing changed; it
-        -- detects a resize by comparing frame.healthBar:GetWidth(). Those SetPoints above
-        -- do not change the measured width until the next draw, so an absorb pass in the
-        -- same tick reads the PRE-CLIP width, concludes nothing moved, and takes the fast
-        -- path -- leaving the absorb bar anchored to the unclipped edge, i.e. underneath
-        -- the reduced-max region. Field-caught on test-mode re-entry: absorb + reduced max
-        -- rendered side by side on the first entry, then the absorb vanished on a later
-        -- one, and turning reduced max off revealed it sitting under there all along.
-        -- Toggling absorbs off/on "fixed" it only because hiding the bar fails the fast
-        -- path's IsShown() gate and forces the full rebuild.
-        -- Invalidating here is causal: the thing that moved the anchor drops the cache
-        -- that depends on it, so the next pass re-derives instead of measuring a rect
-        -- that has not caught up.
-        frame.dfAbsorbState = nil
     else
         DF:RestoreHealthBarFromReducedMax(frame)
     end

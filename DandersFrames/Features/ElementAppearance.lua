@@ -32,6 +32,8 @@ local UnitIsPlayer = UnitIsPlayer
 local UnitExists = UnitExists
 local UnitIsUnit = UnitIsUnit
 local UnitClass = UnitClass
+local UnitAffectingCombat = UnitAffectingCombat
+local IsInInstance = IsInInstance
 local CreateColor = CreateColor
 local issecretvalue = issecretvalue  -- nil pre-Midnight, function in Midnight+
 
@@ -95,6 +97,106 @@ local function GetInRange(frame)
     
     -- Default to in-range if no cached value yet
     return true
+end
+
+-- ============================================================
+-- FRAME FADE (whole-frame base opacity)
+-- ============================================================
+-- ★ THE ONE PLACE A UNIT FRAME'S BASE OPACITY IS DECIDED. Every writer of a whole
+-- frame's alpha -- the range fade below (both modes), the health-fade curve
+-- (HealthFade.lua) and the pet fade (Range.lua) -- multiplies its own value by this,
+-- so "Global Frame Fade" composes with those fades instead of fighting them:
+-- base 0.5 x out-of-range 0.4 = 0.2. Per-element fades (dead, element-specific OOR)
+-- are untouched; the frame's alpha cascades over them.
+-- Split off = the global slider, one table read. Split on = the in-combat value
+-- while the PLAYER is fighting (UnitAffectingCombat, not InCombatLockdown -- lockdown
+-- lingers past the fight), the out-of-combat value otherwise. Hover borrows the
+-- in-combat value out of combat when asked, so a receded frame is readable while
+-- the mouse is on it. Combat edges: the REGEN sweep below; hover edges: the
+-- OnEnter/OnLeave hooks in Frames/Create.lua call DF:RefreshFrameFadeForHover.
+-- The frame the mouse is on right now (nil when none). One field, not a count: OnLeave
+-- can be skipped when a frame hides under the cursor, and a count would drift; a
+-- reference self-heals because we re-check its dfIsHovered before trusting it.
+DF._frameFadeHoveredFrame = nil
+
+local function AnyFrameHovered()
+    local f = DF._frameFadeHoveredFrame
+    return f ~= nil and f.dfIsHovered == true
+end
+
+function DF:GetFrameBaseAlpha(db, frame)
+    if not db then return 1 end
+    if db.frameFadeSplitCombat then
+        -- "In Instances" holds the in-combat value for the whole dungeon / raid /
+        -- arena / BG visit -- the M+ complaint: combat drops between every pack, so
+        -- the frames faded out and back on every single pull. IsInInstance is a
+        -- cheap C read; instance edges re-apply via the PEW sweep below.
+        if UnitAffectingCombat("player")
+            or (db.frameFadeInstanceUsesCombat and IsInInstance()) then
+            return db.frameFadeAlphaInCombat or 1
+        end
+        if db.frameFadeHoverUsesCombat then
+            -- Scope: "ALL" lifts every frame while any one is hovered, so the whole
+            -- group is readable and clickable; "FRAME" lifts only the hovered unit.
+            local hovered = (db.frameFadeHoverScope == "FRAME")
+                and (frame and frame.dfIsHovered)
+                or (db.frameFadeHoverScope ~= "FRAME" and AnyFrameHovered())
+            if hovered then return db.frameFadeAlphaInCombat or 1 end
+        end
+        return db.frameFadeAlphaOutOfCombat or 1
+    end
+    return db.frameFadeAlpha or 1
+end
+
+-- Every unit frame through UpdateFrameAppearance: the combat-edge sweep and the
+-- all-frames hover scope share it. Pets are left to the next range tick.
+local function SweepFrameFade()
+    if DF.IterateAllFrames then
+        DF:IterateAllFrames(function(f)
+            if f and f.dfIsDandersFrame then DF:UpdateFrameAppearance(f) end
+        end)
+    end
+    -- Pinned through the shared walker (player-set children AND boss sets), never a
+    -- hand-rolled header loop -- see IteratePinnedFrames in Frames/Headers.lua.
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(function(child)
+            if child and child.dfIsDandersFrame then DF:UpdateFrameAppearance(child) end
+        end)
+    end
+end
+
+-- Hover edge for the "Show In-Combat Fade When Hovering" option. Cheap gate first --
+-- OnEnter/OnLeave fire constantly across a raid grid -- and a no-op unless the split
+-- and the hover option are both on and the player is out of combat (in combat the
+-- frame already shows the in-combat value). Called AFTER the hook has written
+-- frame.dfIsHovered, so the flag is the truth here.
+-- Scope "ALL": track the hovered frame globally and sweep every frame on the
+-- none->some edge immediately; the some->none edge is settled one frame later, so
+-- crossing straight from one frame onto its neighbour (leave + enter in the same
+-- frame) costs one sweep and never flashes -- the deferred leave finds a new
+-- hovered frame and does nothing.
+local function SweepIfNothingHovered()
+    if DF._frameFadeHoveredFrame == nil and not UnitAffectingCombat("player") then
+        SweepFrameFade()
+    end
+end
+function DF:RefreshFrameFadeForHover(frame)
+    if not (frame and frame.dfIsDandersFrame) then return end
+    local db = DF:GetFrameDB(frame)
+    if not (db and db.frameFadeSplitCombat and db.frameFadeHoverUsesCombat) then return end
+    if db.frameFadeHoverScope == "FRAME" then
+        if UnitAffectingCombat("player") then return end
+        if DF.UpdateFrameAppearance then DF:UpdateFrameAppearance(frame) end
+        return
+    end
+    if frame.dfIsHovered then
+        local wasNone = DF._frameFadeHoveredFrame == nil
+        DF._frameFadeHoveredFrame = frame
+        if wasNone and not UnitAffectingCombat("player") then SweepFrameFade() end
+    elseif DF._frameFadeHoveredFrame == frame then
+        DF._frameFadeHoveredFrame = nil
+        C_Timer.After(0, SweepIfNothingHovered)
+    end
 end
 
 -- Apply OOR alpha to any UI element (Frame, Texture, or FontString)
@@ -1532,10 +1634,21 @@ function DF:UpdateAuraDesignerAppearance(frame, forceRetryDenied)
     local slotHost = DF.AuraContainer and DF.AuraContainer.GetSlotOwnerAlphaHost
         and DF.AuraContainer:GetSlotOwnerAlphaHost(frame)
     if slotHost then
+        -- ☠ PROTECTED, like every other write in this block. This was the ONE alpha
+        -- write in the AD pass outside a pcall; a refusal here (the anchor is ours,
+        -- but the engine's restriction surface has moved twice this year) threw out
+        -- of UpdateAllElementAppearances and stranded every element after it — the
+        -- buff and debuff rows included — at their pre-transition alpha. Refused ⇒
+        -- queue the frame for the restriction-lift retry, same as a denied host.
+        local okSlot
         if oorOn then
-            ApplyOORAlpha(slotHost, inRange, 1.0, oorAlpha)
+            okSlot = pcall(ApplyOORAlpha, slotHost, inRange, 1.0, oorAlpha)
         else
-            slotHost:SetAlpha(1.0)
+            okSlot = pcall(slotHost.SetAlpha, slotHost, 1.0)
+        end
+        if not okSlot then
+            DF._adDeniedHostFrames = DF._adDeniedHostFrames or {}
+            DF._adDeniedHostFrames[frame] = true
         end
     end
 end
@@ -1554,11 +1667,29 @@ end
 -- so a persistent restriction keeps costing one failed call per combat, not per tick.
 -- ⚠ A frame in test mode skips its retry (UpdateAuraDesignerAppearance's own guard);
 -- leaving test mode drives a full refresh anyway, so nothing is lost.
+--
+-- ★ EVERY LIFT EDGE, NOT JUST COMBAT END — and only when the restriction has actually
+-- lifted. Aura secrecy is instance-gated: it can hold through a regen inside an
+-- encounter and drop on ENCOUNTER_END or a zone change instead, so a queue drained
+-- on PLAYER_REGEN_ENABLED alone could retry while still restricted, fail, re-queue,
+-- and then wait for a combat that never comes (the unit is already in range, so no
+-- range edge arrives either). EllesmereUI's AuraKit converged on the same watcher
+-- shape from the same bug: regen + PEW + zone + encounter end, gated on
+-- C_Secrets.ShouldAurasBeSecret(). If the probe says still secret, keep the queue
+-- and wait for the next edge -- a retry now would only re-fail.
+local function AurasStillSecret()
+    return C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret() or false
+end
+
 local adRegenFrame = CreateFrame("Frame")
 adRegenFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+adRegenFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+adRegenFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+adRegenFrame:RegisterEvent("ENCOUNTER_END")
 adRegenFrame:SetScript("OnEvent", function()
     local queued = DF._adDeniedHostFrames
     if not queued or not next(queued) then return end
+    if AurasStillSecret() then return end
     DF._adDeniedHostFrames = nil
     for frame in pairs(queued) do
         if frame.dfIsDandersFrame then
@@ -1582,19 +1713,47 @@ function DF:UpdateFrameAppearance(frame)
     -- the colour stops and the mode branching are all shared.
     if (DF.testMode or DF.raidTestMode) and not frame.dfIsTestFrame then return end
     
+    -- The frame's base opacity (Frame Fade). Multiplied into every branch below;
+    -- the health-fade curve reads it itself (HealthFade.lua).
+    local base = DF:GetFrameBaseAlpha(db, frame)
     if db.oorEnabled then
-        ApplyOORAlpha(frame, true, 1.0, 1.0)
+        -- Element mode pins the frame so per-element fades own the look; the pin IS
+        -- the base now, not a hardcoded 1.0.
+        ApplyOORAlpha(frame, true, base, base)
     else
         local inRange = GetInRange(frame)
         -- Frame-level: health fade via curve (re-evaluate for range changes)
         if IsHealthFadeEnabled(db) and frame.dfHealthFadeActive and DF.ApplyHealthFadeAlpha and DF:ApplyHealthFadeAlpha(frame) then
-            -- Curve applied alpha directly, includes OOR state
+            -- Curve applied alpha directly, includes OOR state and the base
         else
             local outOfRangeAlpha = db.rangeFadeAlpha or 0.4
-            ApplyOORAlpha(frame, inRange, 1.0, outOfRangeAlpha)
+            ApplyOORAlpha(frame, inRange, base, outOfRangeAlpha * base)
         end
     end
 end
+
+-- ★ COMBAT EDGE SWEEP for the Frame Fade split. Range.lua flushes its cache on both
+-- REGEN events, so most frames re-apply on the next 0.5s tick anyway -- but the
+-- player's own frame never re-runs from the range path (always in range) and the
+-- pets only re-run when their cached range answer moves, and "the frames snap back
+-- when the pull starts" wants to be instant, not eventually. Every unit frame goes
+-- through UpdateFrameAppearance here; pets follow on the next range tick (their fade
+-- and health-fade writers both read the base). Skipped entirely unless a mode has
+-- the split on, so a stock profile pays one boolean per combat edge.
+local frameFadeCombatFrame = CreateFrame("Frame")
+frameFadeCombatFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+frameFadeCombatFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+-- Instance edges for "Use In-Combat Fade In Instances" -- entering or leaving the
+-- dungeon changes the resolver's answer without any combat event.
+frameFadeCombatFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+frameFadeCombatFrame:SetScript("OnEvent", function()
+    local partyDB = DF.GetDB and DF:GetDB()
+    local raidDB = DF.GetRaidDB and DF:GetRaidDB()
+    if not ((partyDB and partyDB.frameFadeSplitCombat) or (raidDB and raidDB.frameFadeSplitCombat)) then
+        return
+    end
+    SweepFrameFade()
+end)
 
 -- ============================================================
 -- RANGE-ONLY APPEARANCE UPDATE (Performance optimization)
@@ -1636,43 +1795,79 @@ end
 -- Master function to update all elements at once
 -- ============================================================
 
-function DF:UpdateAllElementAppearances(frame)
-    if not IsDandersFrame(frame) then return end
-    
-    -- Update frame-level appearance first
-    DF:UpdateFrameAppearance(frame)
-    
-    -- Update each element
-    -- AD appearance first: it writes healthbarEffectiveBlend (the OOR-aware bar
-    -- alpha) that UpdateHealthBarAppearance reads below. Running it afterwards left a
+-- ☠ EVERY STEP IS PROTECTED, AND A FAILED PASS RE-ARMS THE RANGE TICK.
+-- Range applies appearance ONCE PER TRANSITION (Range.lua's cache only re-drives this
+-- when dfInRange changes), so the chain below is the one shot each element gets. It
+-- ran unprotected in a fixed order, AD first and the buff/debuff rows near the end: a
+-- single throw anywhere ahead of a step (a secret comparison, a forbidden object, a
+-- nil during a rebuild) left every later element at its PRE-transition alpha until
+-- the next transition -- which for a unit that walked in and stayed is never. That is
+-- "auras faded on a member standing next to me, and touching any setting clears it",
+-- and it is invisible unless the user has Lua errors on.
+-- So: each step under pcall, the first failure per session named on the RANGE debug
+-- channel, and dfInRange cleared so the next range tick sees a change and re-drives
+-- the whole chain rather than treating the broken pass as applied.
+-- Method names, not closures: no allocation on a path that can run per tick while a
+-- range answer is secret.
+local ELEMENT_APPEARANCE_STEPS = {
+    -- Frame-level first, then AD: it writes healthbarEffectiveBlend (the OOR-aware bar
+    -- alpha) that UpdateHealthBarAppearance reads next. Running it later left a
     -- one-tick lag where, on first going out of range, the underlying replace-mode
     -- bar texture kept its in-range (full) alpha for a frame while the border had
     -- already faded — so the AD colour briefly bled through the border.
-    DF:UpdateAuraDesignerAppearance(frame)
-    DF:UpdateHealthBarAppearance(frame)
-    DF:UpdateMissingHealthBarAppearance(frame)
-    DF:UpdateBackgroundAppearance(frame)
-    DF:UpdateBorderAppearance(frame)
-    DF:UpdateNameTextAppearance(frame)
-    DF:UpdateHealthTextAppearance(frame)
-    DF:UpdateStatusTextAppearance(frame)
-    DF:UpdatePowerBarAppearance(frame)
-    DF:UpdateBuffIconsAppearance(frame)
-    DF:UpdateDebuffIconsAppearance(frame)
-    DF:UpdateRoleIconAppearance(frame)
-    DF:UpdateLeaderIconAppearance(frame)
-    DF:UpdateRaidTargetIconAppearance(frame)
-    DF:UpdateReadyCheckIconAppearance(frame)
-    DF:UpdateDispelOverlayAppearance(frame)
-    DF:UpdateMissingBuffAppearance(frame)
-    DF:UpdateAbsorbBarAppearance(frame)
-    DF:UpdateHealAbsorbBarAppearance(frame)
-    DF:UpdateHealPredictionBarAppearance(frame)
-    DF:UpdateDefensiveIconAppearance(frame)
+    "UpdateFrameAppearance",
+    "UpdateAuraDesignerAppearance",
+    "UpdateHealthBarAppearance",
+    "UpdateMissingHealthBarAppearance",
+    "UpdateBackgroundAppearance",
+    "UpdateBorderAppearance",
+    "UpdateNameTextAppearance",
+    "UpdateHealthTextAppearance",
+    "UpdateStatusTextAppearance",
+    "UpdatePowerBarAppearance",
+    "UpdateBuffIconsAppearance",
+    "UpdateDebuffIconsAppearance",
+    "UpdateRoleIconAppearance",
+    "UpdateLeaderIconAppearance",
+    "UpdateRaidTargetIconAppearance",
+    "UpdateReadyCheckIconAppearance",
+    "UpdateDispelOverlayAppearance",
+    "UpdateMissingBuffAppearance",
+    "UpdateAbsorbBarAppearance",
+    "UpdateHealAbsorbBarAppearance",
+    "UpdateHealPredictionBarAppearance",
+    "UpdateDefensiveIconAppearance",
     -- The eight status icons. They were absent from this list entirely, which is why
     -- their range/dead fade never fired on a range change -- see
     -- DF:UpdateStatusIconsAppearance for the full reasoning.
-    DF:UpdateStatusIconsAppearance(frame)
+    "UpdateStatusIconsAppearance",
+}
+
+function DF:UpdateAllElementAppearances(frame)
+    if not IsDandersFrame(frame) then return end
+
+    local failed = false
+    for i = 1, #ELEMENT_APPEARANCE_STEPS do
+        local name = ELEMENT_APPEARANCE_STEPS[i]
+        local fn = DF[name]
+        if fn then
+            local ok, err = pcall(fn, DF, frame)
+            if not ok then
+                failed = true
+                if not DF._warnedElementAppearance then
+                    DF._warnedElementAppearance = true
+                    if DF.DebugWarn then
+                        DF:DebugWarn("RANGE", "%s threw during the appearance pass on %s: %s",
+                            name, tostring(frame.unit), tostring(err))
+                    end
+                end
+            end
+        end
+    end
+    -- A broken pass must not be remembered as applied. Clearing the range stamp makes
+    -- the next UpdateRange see a change and re-run everything; until then GetInRange
+    -- reads "in range", which only matters to a pass that isn't going to run.
+    if failed then frame.dfInRange = nil end
 end
 
 -- ============================================================
@@ -1691,19 +1886,12 @@ function DF:UpdateAllFrameAppearances()
         DF:IterateAllFrames(updateFrame)
     end
     
-    -- Pinned frames
-    if DF.PinnedFrames and DF.PinnedFrames.initialized and DF.PinnedFrames.headers then
-        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
-            local header = DF.PinnedFrames.headers[setIndex]
-            if header then
-                for i = 1, 40 do
-                    local child = header:GetAttribute("child" .. i)
-                    if child then
-                        updateFrame(child)
-                    end
-                end
-            end
-        end
+    -- Pinned frames.
+    -- ☠ THROUGH THE SHARED WALKER, NOT A HAND-ROLLED HEADER LOOP — this one walked
+    -- PinnedFrames.headers only, so pinned BOSS frames got no colour or alpha refresh at
+    -- all, including from FullProfileRefresh on a profile switch. (Audit 2026-08-17.)
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(updateFrame)
     end
 end
 

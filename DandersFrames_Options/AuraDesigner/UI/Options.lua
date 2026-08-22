@@ -160,6 +160,7 @@ local function GetAuraDesignerDB()
     DF.MigrateAuraDesignerAbsoluteLevelsV2Lazy(adDB)
     DF.MigrateAuraDesignerDefaultRefreshLazy(adDB)
     DF.MigrateAuraDesignerOrphanAuraKeysLazy(adDB)
+    DF.MigrateAuraDesignerIndicatorStrataLazy(adDB)
     return adDB
 end
 P.GetAuraDesignerDB = GetAuraDesignerDB
@@ -714,6 +715,27 @@ P.OtherPoolDisplayName = OtherPoolDisplayName
 -- comment was the only mention of one anywhere in the repo, and the DF.* export it
 -- justified had no readers either. The local below is live and used by
 -- CrossPoolTrackedIDs; only the export is gone.
+-- ☠ AN EMPTIED AURA RECORD IS NOT AN ABSENT ONE. Deleting an aura's last effect
+-- leaves its config table behind on purpose: S.CleanupAdHocAura prunes only the
+-- SYNTHETIC records (ad-hoc "#id" and filter-owned "@preset:"/"@custom:"), and its
+-- own comment says curated spells keep the linger deliberately. So "the pool holds a
+-- key for this spell" and "this spell renders anything" are different questions, and
+-- every consumer that means the second one has to ask it.
+-- ⚠ ONE list, captured from here by Groups.lua rather than restated there — two lists
+-- that agree today is how the next effect type gets added to only one of them.
+local FRAME_LEVEL_TYPE_KEYS = { "border", "healthbar", "background", "nametext", "healthtext", "sound" }
+P.FRAME_LEVEL_TYPE_KEYS = FRAME_LEVEL_TYPE_KEYS
+
+local function AuraHoldsNoEffects(auraCfg)
+    if type(auraCfg) ~= "table" then return true end
+    if auraCfg.indicators and #auraCfg.indicators > 0 then return false end
+    for _, typeKey in ipairs(FRAME_LEVEL_TYPE_KEYS) do
+        if auraCfg[typeKey] ~= nil then return false end
+    end
+    return true
+end
+P.AuraHoldsNoEffects = AuraHoldsNoEffects
+
 local function PoolTrackedIDs(adDB, which)
     local out = {}
     if type(adDB) ~= "table" then return out end
@@ -727,12 +749,25 @@ local function PoolTrackedIDs(adDB, which)
             for id in pairs(map) do out[id] = true end
         end
     end
+    -- ☠ RECORDS THAT RENDER NOTHING DO NOT COUNT. This accepted every table in the
+    -- pool, so an aura whose effects had all been deleted still blocked the spell in
+    -- the opposite pool -- permanently, since the record it was reading is one nothing
+    -- prunes. Field: "I added effects for Feather and Apotheosis to My Buffs, deleted
+    -- them, and Any Buffs still says they are In My Buffs" (Vindagor, 2026-08-19), with
+    -- the My Buffs pane visibly empty beside it. The question here is whether adding
+    -- the spell to the other pool would DOUBLE-RENDER it; an aura with no effects left
+    -- cannot render at all, so the honest answer is no.
+    -- ★ Fixed at the read, not by pruning on delete: pruning would change what a
+    -- curated record's linger means (S.CleanupAdHocAura's comment keeps it on purpose,
+    -- and a user who deletes an icon still owns that aura's priority and its type
+    -- configs), and it would leave every profile already carrying an emptied record
+    -- blocked until it was deleted again. This heals those on read.
     if which == "my" then
         if type(adDB.auras) == "table" then
             for specKey, specAuras in pairs(adDB.auras) do
                 if type(specAuras) == "table" then
                     for auraName, cfg in pairs(specAuras) do
-                        if type(cfg) == "table" then addIDs(specKey, auraName) end
+                        if not AuraHoldsNoEffects(cfg) then addIDs(specKey, auraName) end
                     end
                 end
             end
@@ -740,7 +775,7 @@ local function PoolTrackedIDs(adDB, which)
     else -- "other"
         if type(adDB.otherAuras) == "table" then
             for auraName, cfg in pairs(adDB.otherAuras) do
-                if type(cfg) == "table" then addIDs(nil, auraName) end
+                if not AuraHoldsNoEffects(cfg) then addIDs(nil, auraName) end
             end
         end
     end

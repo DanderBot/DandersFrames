@@ -864,11 +864,32 @@ local function recordSelected(self, rec, selection)
     return false
 end
 
+-- See the fail-open branch inside ResolveSelection.
+local failOpenLogged = setmetatable({}, { __mode = "k" })
+
 function R:ResolveSelection(selection, showAll)
     if showAll or not selection then return { kind = "all" } end
     local anySel = (selection.presets and next(selection.presets))
         or (selection.customs and next(selection.customs))
     if not anySel and not selection.uncategorised then
+        -- ☠ THE FAIL-OPEN, AND IT IS THIS CATEGORY'S MOST CONSEQUENTIAL BRANCH. "Nothing
+        -- selected" resolves to SHOW EVERYTHING -- the v4->v5 "all buffs until I toggle
+        -- something" signature -- and it logged nothing at its source. It was visible only
+        -- second-hand, as include=none in a container dump, and only for some rows. FILTER
+        -- meanwhile had one INFO in the whole addon (a one-shot migration replay), so the
+        -- category was effectively failure-only and this was the failure it was missing.
+        -- ⚠ Latched on the selection table: this sits on the render path, so an unlatched
+        -- line would fire per row per frame. The table is rebuilt when the selection
+        -- changes, so a genuine re-occurrence still reports.
+        -- ☠ LATCHED IN A SIDE TABLE, NOT ON THE SELECTION. Every caller passes a PROFILE
+        -- table here (db.buffFilterSelection, db.defensiveFilterSelection, an Aura
+        -- Designer group's filterSelection), so a flag written onto it lands in
+        -- SavedVariables and in every profile export. Weak keys: the latch dies with
+        -- the table, which is the same lifetime the comment above relies on.
+        if not failOpenLogged[selection] then
+            failOpenLogged[selection] = true
+            DF:DebugWarn("FILTER", "ResolveSelection: nothing selected - falling back to SHOW ALL")
+        end
         return { kind = "all" } -- nothing selected: safe fallback
     end
 

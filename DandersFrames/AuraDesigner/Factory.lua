@@ -1936,7 +1936,22 @@ end
 -- is also what RESTORES inheritance when a user switches back (a frame always has a strata;
 -- there is no "unset" to write). Whitelisted rather than passed through: SetFrameStrata
 -- errors on an unknown string, and this value can arrive from an imported profile.
-local STRATA_VALID = { BACKGROUND = true, LOW = true, MEDIUM = true, HIGH = true }
+-- ☠ BACKGROUND AND LOW ARE DELIBERATELY NOT HERE. They used to be, and a stored
+-- "BACKGROUND" pinned an indicator below every MEDIUM frame on the unit button — the health
+-- bar included — where no frame level could ever lift it, because strata outranks level
+-- absolutely. The per-indicator picker that wrote them was removed from the editor, so the
+-- values became unreachable AND still honoured: users saw an indicator buried under the
+-- health bar with a Frame Level slider that did nothing (field-proven by a /df debug zorder
+-- dump, 2026-08-19 — strata=BACKGROUND at level 106 losing to a health bar at level 7).
+--
+-- Rejecting them here makes resolveStrata fall through to the global default (INHERIT), so
+-- the indicator takes the unit frame's own strata and FRAME LEVEL decides the ordering —
+-- which is the baseline the absolute-levels migrations were built for.
+-- ⚠ This covers what the migration cannot: an IMPORTED profile or a shared preset carrying
+-- a legacy BACKGROUND arrives after the one-time pass has already stamped its flag.
+-- ⚠ MEDIUM and HIGH stay valid: they are at or above the frame's own band, so they order
+-- against it rather than hiding beneath it.
+local STRATA_VALID = { MEDIUM = true, HIGH = true }
 -- defStrata = the resolved GLOBAL default (defs.strata). Fallback order matches the editor
 -- proxy exactly: instance -> global default -> nothing. An instance holding the literal
 -- "INHERIT" is an explicit CHOICE and stops the chain (the editor shows Inherit for it), so
@@ -3861,13 +3876,17 @@ end
 
 -- Style a FRAME-LEVEL missing badge as a flat TINT fill (healthbar / background colour-when-
 -- missing). The fill covers the whole window (== the region). Colour/blend from config.
-local function styleTintMissingBadge(h, r, g, b, blend)
+-- `clampTo` (optional): anchor the fill to THAT region instead of to the whole badge.
+-- The health-bar consumer passes the real bar's fill texture so a missing-mode tint
+-- covers current health only, exactly as the present-mode cover does; the background
+-- consumer passes nothing, because a background has no fill to track.
+local function styleTintMissingBadge(h, r, g, b, blend, clampTo)
     local badge = h.GetBadgeFrame and h:GetBadgeFrame()
     if not badge then return end
     if not badge.dfADFill then badge.dfADFill = badge:CreateTexture(nil, "ARTWORK") end
     badge.dfADFill:SetColorTexture(r, g, b, blend)
     badge.dfADFill:ClearAllPoints()
-    badge.dfADFill:SetAllPoints(badge)
+    badge.dfADFill:SetAllPoints(clampTo or badge)
     badge.dfADFill:Show()
 end
 
@@ -5071,20 +5090,39 @@ local function syncHealthbarTint(hb, frame, healthBar, spec, key, cfg, map, mine
         -- Missing stays single-winner: a non-winner SWM config renders nothing and its
         -- stale entry (if any) falls to the keep-set sweep.
         if not asMissing then return false, false end
-        -- SHOW-WHEN-MISSING: a flat tint over the health-bar region while the buff is ABSENT.
+        -- SHOW-WHEN-MISSING: a tint over the health-bar region while the buff is ABSENT.
         -- Window/badge sized read-free from the frame's CONFIGURED size (the live rect is
         -- secret on 12.1); single-anchored to the health bar's TOPLEFT so it covers the region
-        -- (config-size approximation — precise region + z-order are P4.7 polish). The filled
-        -- mirror is a present-only concept, so nil the feed ref while in missing mode.
+        -- (config-size approximation — precise region + z-order are P4.7 polish).
+        --
+        -- ☠ THIS BRANCH USED TO IGNORE "Tint Entire Bar" ENTIRELY. It always painted the
+        -- badge's full rect, so an effect configured as Tint + entire-bar UNTICKED covered
+        -- the missing-health region too, and the frame read as permanently full: "the
+        -- preview shows it correctly, but the actual frame will not" (Eef, 2026-08-19,
+        -- attonement-missing recolour). The preview was right because the preview renders
+        -- the PRESENT-mode shape — a divergence in RENDERING, which is the one thing a
+        -- preview may never do.
+        -- The old note said "the filled mirror is a present-only concept". True of the
+        -- MIRROR, which needed a feed; false of what replaced it. The cover is a plain
+        -- texture anchored to the real bar's fill region, so it needs no aura and no feed
+        -- and works exactly as well with nothing present — see buildHealthFillConfig.
+        -- Same `wholeBar` expression as the present path below, so the two modes cannot
+        -- disagree about what the checkbox means (replace mode always tracks the fill).
         local r, g, b, a = readADColor(colorCfg)
         local mode = slower(cfg.mode or "replace")
+        local wholeBar = (mode == "tint") and (cfg.tintWholeBar and true or false) or false
         local blend = (mode == "replace") and a or healthbarBlend(mode, cfg.blend, a)
         local fdb = (DF.GetFrameDB and DF:GetFrameDB(frame)) or {}
         local mw, mh = tonumber(fdb.frameWidth) or 100, tonumber(fdb.frameHeight) or 20
-        local coSig = tconcat({ "miss", tostring(r), tostring(g), tostring(b), tostring(blend), tostring(mw), tostring(mh) }, "|")
+        local clampTo = (not wholeBar) and healthBar.GetStatusBarTexture
+            and healthBar:GetStatusBarTexture() or nil
+        -- clampTo joins the signature: toggling the checkbox has to restyle, and a health
+        -- TEXTURE swap replaces the fill region and would strand a create-once anchor.
+        local coSig = tconcat({ "miss", tostring(r), tostring(g), tostring(b), tostring(blend),
+            tostring(mw), tostring(mh), tostring(wholeBar), tostring(clampTo) }, "|")
         local before = hb[key]
         syncFrameLevelMissing(hb, key, map, frame, healthBar, healthBar, mw, mh, 1, coSig,
-            function(handle) styleTintMissingBadge(handle, r, g, b, blend) end, filt)
+            function(handle) styleTintMissingBadge(handle, r, g, b, blend, clampTo) end, filt)
         -- syncFrameLevelMissing replaces the entry TABLE on create/recreate.
         return true, hb[key] ~= before
     end
@@ -5384,6 +5422,10 @@ function Factory:SyncFrame(frame)
     -- ever being opened — a player who never opens settings would otherwise keep the
     -- undeletable indicator forever.
     if DF.MigrateAuraDesignerOrphanAuraKeysLazy then DF.MigrateAuraDesignerOrphanAuraKeysLazy(adDB) end
+    -- Clears stranded per-indicator frameStrata (see the migration's header). Runs on the
+    -- render-resolved db as well as the editor's, because the stranded indicator renders
+    -- buried whether or not the settings panel is ever opened.
+    if DF.MigrateAuraDesignerIndicatorStrataLazy then DF.MigrateAuraDesignerIndicatorStrataLazy(adDB) end
 
     local store = frame.dfADFactory
     if not store then store = {}; frame.dfADFactory = store end
@@ -5904,6 +5946,174 @@ function Factory:SyncFrame(frame)
     -- framealpha / nametext / healthtext: intentionally NOT synced. No read-free,
     -- combat-safe port exists (see file-foot notes) — their GUI controls get the
     -- "Blizzard limitation" overlay in P4.7.
+
+    -- Test mode's Indicator Info measures these placements and caches a rect per one,
+    -- so a sync that moved, created or destroyed any of them has just invalidated its
+    -- region list. Called HERE rather than from whatever asked for the sync: this is
+    -- the mutation itself, so no caller can forget it (TL:Invalidate carries the full
+    -- reasoning, and coalesces the per-frame calls into one pass).
+    -- ⚠ dfIsTestFrame FIRST: this function is per-UNIT_AURA hot on live frames, and
+    -- that field read is the whole cost there.
+    if frame.dfIsTestFrame and DF.InvalidateTestLabels then DF:InvalidateTestLabels() end
+end
+
+-- ============================================================
+-- /df debug adgate — AURA DESIGNER gate ground truth
+-- ============================================================
+-- Companion to /df debug idgate, and it exists because that dump could not answer the
+-- question it kept being reached for. idgate walks AuraContainer._handles and
+-- _slotHandles, so it sees a placement's HANDLE but never the chain around it, never the
+-- DF-owned badge textures, and never that a link opted out of managing its own visibility.
+-- An AD indicator rendering while every handle in idgate reports hidden is invisible to
+-- it -- which is exactly the state that stalled this (Krathe, 2026-08-18).
+--
+-- Answers, per placement: chain length, which links are parent-driven (those NEVER hide
+-- themselves, see Handle:_applyVisibility), each link's gate verdict, and what each link's
+-- frame plus the badge is ACTUALLY showing. A row whose gate says hidden while the frame
+-- says shown is the fault, and the column it lands in names the layer to fix.
+--
+-- ☠ EVERY IsShown IS GUARDED. A container nested in another container's slot inherits a
+-- SECRET shown state, and tostring() on a secret makes the whole print VANISH rather than
+-- error -- an unguarded read would silently drop the very rows worth seeing.
+-- ☠ Keys are pipe-escaped, same as the idgate dump: AD keys use "|" as a field separator
+-- and raw pipes blank an EditBox on paste.
+local function adGateSafe(v)
+    local s = tostring(v)
+    return (s:gsub("|", "||"):gsub("[%z\1-\31]", "?"))
+end
+
+local function adGateShown(f)
+    if not f then return "-" end
+    local ok, s = pcall(f.IsShown, f)
+    if not ok then return "ERR" end
+    if issecretvalue and issecretvalue(s) then return "SECRET" end
+    return tostring(s)
+end
+
+-- Families in the per-frame store. ⚠ Keep in sync with ClearFrame below: a family added
+-- there and not here has its placements silently absent from this dump.
+local AD_GATE_FAMILIES = {
+    "placed", "fgroups", "dgroups", "border",
+    "healthbar", "background", "nametext", "healthtext",
+}
+
+function Factory:DebugDumpADGate()
+    local o = DF:Out("AD Gate")
+    local CAP = 80
+    local n, suspects = 0, 0
+
+    local function dumpFrame(frame)
+        local store = frame and frame.dfADFactory
+        if type(store) ~= "table" then return end
+        local unit = frame.unit
+        for _, fam in ipairs(AD_GATE_FAMILIES) do
+            local tbl = store[fam]
+            if type(tbl) == "table" then
+                for key, entry in pairs(tbl) do
+                    if type(entry) == "table" then
+                        n = n + 1
+                        if n <= CAP then
+                            local h = entry.handle
+                            local chain = entry.chain
+                            -- ☠ TWO HANDLE KINDS, DIFFERENT FIELDS. A slot-backed placement
+                            -- is a SlotHandle: no .frame, no GetBadgeFrame, and its verdict
+                            -- lives in _gateHidden -- NOT _idGateHidden, which is the
+                            -- Handle's. Reading the Handle fields on a slot printed
+                            -- gate=false shown=- badge=- for a slot that /df debug idgate
+                            -- simultaneously reported gateHidden=true. A dump that
+                            -- contradicts the other dump is worse than no dump.
+                            local isSlot = isSlotHandle and isSlotHandle(h) or false
+                            local hGate, hShown, bShown, extra
+                            local oShown = "-"
+                            if isSlot then
+                                hGate = (h and h._gateHidden) and true or false
+                                -- "shown" for a slot = is a LIVE filter pushed (vs the park
+                                -- string). ⚠ Compare against SLOT_PARK_FILTER, not "" --
+                                -- the empty-string park is retired, and deriving from ""
+                                -- made every correctly-parked slot read shown=true and trip
+                                -- the suspect counter while owner=false proved it dark.
+                                local pf = h and h._pushedFilter
+                                local park = DF.AuraContainer and DF.AuraContainer.SLOT_PARK_FILTER
+                                hShown = (pf == nil) and "-"
+                                    or ((pf == "" or pf == park) and "false" or "true")
+                                -- ★ THE BUTTON IS THE VISIBLE OBJECT. isSlotHandle is
+                                -- literally "has GetButton", so every slot can hand us the
+                                -- frame the player is looking at. An empty pushed filter
+                                -- means the engine binds no aura -- it does NOT by itself
+                                -- mean the button is down, and DF paints its own square
+                                -- fill / border / icon onto that button. A slot reading
+                                -- pushed=[] with btn=true is an indicator whose artwork
+                                -- outlived the aura that justified it.
+                                local btn = (h and h.GetButton) and h:GetButton() or nil
+                                bShown = btn and adGateShown(btn) or "-"
+                                -- ★ owner= is the ACTUATION for a gated slot. The engine
+                                -- fails open for a distrusted unit and never re-parses, so
+                                -- the filter push cannot clear a stale bound aura; the gate
+                                -- hides the DF-owned owner ANCHOR instead (see
+                                -- SlotHandle:_pushFilter). gate=true with owner=true is the
+                                -- fault; owner=false is the gate working.
+                                local oAnchor = h and h.owner and h.owner.anchor
+                                oShown = oAnchor and adGateShown(oAnchor) or "-"
+                                extra = ("SLOT pushed=[%s] pushOK=%s parked=%s btn=%s owner=%s"):format(
+                                    adGateSafe(h and h._pushedFilter),
+                                    tostring(h and h._pushOK),
+                                    tostring((h and h.parked) or false),
+                                    bShown, oShown)
+                            else
+                                hGate = (h and h._idGateHidden) and true or false
+                                hShown = adGateShown(h and h.frame)
+                                local badge = (h and h.GetBadgeFrame) and h:GetBadgeFrame() or nil
+                                bShown = badge and adGateShown(badge) or "-"
+                                extra = ("pdv=%s"):format(
+                                    tostring((h and h.config and h.config.parentDrivenVisibility) or false))
+                            end
+                            -- The fault signature: gate believes hidden, something is up.
+                            -- For a slot the decisive column is owner= -- btn is SECRET on
+                            -- a distrusted unit, but the owner anchor is DF-owned and
+                            -- always readable, so gate=true owner=true is a real fault.
+                            if hGate and (hShown == "true" or bShown == "true"
+                                or oShown == "true") then
+                                suspects = suspects + 1
+                            end
+                            print(("    " .. DF.OUT.SECTION .. "%d|r %s key=%s unit=%s chain=%s gate=%s shown=%s badge=%s %s"):format(
+                                n, adGateSafe(fam), adGateSafe(key), adGateSafe(unit),
+                                chain and tostring(#chain) or "-",
+                                tostring(hGate), hShown, bShown, extra))
+                            if type(chain) == "table" then
+                                for i = 1, #chain do
+                                    local L = chain[i]
+                                    if L then
+                                        print(("        L%d gate=%s parked=%s shown=%s pdv=%s mode=%s"):format(
+                                            i,
+                                            tostring((L._idGateHidden) and true or false),
+                                            tostring((L._idGateParked) and true or false),
+                                            adGateShown(L.frame),
+                                            tostring((L.config and L.config.parentDrivenVisibility) or false),
+                                            adGateSafe(L.config and L.config.mode or "?")))
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if DF.IterateAllFrames then pcall(function() DF:IterateAllFrames(dumpFrame) end) end
+    -- ☠ Pinned frames are NOT in IterateAllFrames -- it has no pinned arm. A pinned display
+    -- of the same unit carries its own placements and must be walked separately.
+    -- ⚠ DOT, NOT COLON. IteratePinnedFrames is a plain function (see Engine.lua's call);
+    -- DF:IteratePinnedFrames would pass DF as the callback and silently walk nothing.
+    if DF.IteratePinnedFrames then pcall(function() DF.IteratePinnedFrames(dumpFrame) end) end
+
+    o:Section("Summary")
+    o:Line(("placements: %d"):format(n), n > 0 and "GOOD" or "NEUTRAL")
+    o:Line(("gated but still shown: %d"):format(suspects), suspects > 0 and "BAD" or "GOOD")
+    if n > CAP then o:Line(("… capped at %d rows"):format(CAP), "NEUTRAL") end
+    if suspects == 0 then
+        o:Line("Nothing is rendering against its gate verdict. If an icon is still visible it is drawn outside the handle/chain/badge set this dump covers.", "NEUTRAL")
+    end
 end
 
 -- ============================================================
@@ -5934,6 +6144,11 @@ function Factory:ClearFrame(frame)
     -- Sound: reconcile to config with AD now off -> unregisters every applied-sound handle
     -- (combat-deferred to regen inside SyncSound). No leaked registrations.
     self:SyncSound(frame)
+
+    -- The teardown half of the pair in SyncFrame: everything Indicator Info had a rect
+    -- for is gone, and a mark left pointing at a destroyed placement is worse than no
+    -- mark. Same guard, same reasoning.
+    if frame.dfIsTestFrame and DF.InvalidateTestLabels then DF:InvalidateTestLabels() end
 end
 
 -- ============================================================
@@ -6090,4 +6305,9 @@ do
     end
 end
 
-DF:Debug(DBG, "Factory (native AD bridge) loaded")
+-- ☠ (Removed) a file-scope `DF:Debug(DBG, "Factory (native AD bridge) loaded")`. It could
+-- never print: DebugConsole:Init binds debugDb from ADDON_LOADED, long after every file
+-- has been parsed, so a log call at chunk level is a guaranteed no-op -- it allocated its
+-- argument and returned nothing, in every session this addon has ever run. The same trap
+-- is documented in Core.lua's migration trace, which buffers until the console exists.
+-- Anything that genuinely needs to report at load must use that buffer, not a bare call.

@@ -2,7 +2,7 @@
 ## Title: DandersFrames |cff9482c9Options|r
 ## Notes: Settings panel, editors and debug tools for DandersFrames. Loads on demand.
 ## Author: Danders
-## Version: v5.2.1
+## Version: v5.3.0-alpha.3
 ## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
 ## LoadOnDemand: 1
 ## RequiredDeps: DandersFrames
@@ -97,6 +97,8 @@ ClickCasting\UI\Dialogs.lua
 # the entry points; these overwrite the stubs when this addon loads.
 TestMode\TestFramePool.lua
 TestMode\TestMode.lua
+# After TestMode.lua: it reads the frame pools that file owns.
+TestMode\Labels.lua
 
 # Debug tools (DebugConsole and Profiler stay resident in the main addon)
 Debug\AuraExplorer.lua

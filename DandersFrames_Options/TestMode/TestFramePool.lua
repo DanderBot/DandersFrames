@@ -112,11 +112,13 @@ local function CreateTestFrame(index, isRaid)
     frame:SetScript("OnEnter", function(self)
         self.dfIsHovered = true
         if DF.UpdateHighlights then DF:UpdateHighlights(self) end
+        if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
         if DF.ShowBindingTooltip then DF:ShowBindingTooltip(self) end
     end)
     frame:SetScript("OnLeave", function(self)
         self.dfIsHovered = false
         if DF.UpdateHighlights then DF:UpdateHighlights(self) end
+        if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
         if DFBindingTooltip then DFBindingTooltip:Hide(); DFBindingTooltip.anchorFrame = nil end
     end)
 
@@ -165,14 +167,38 @@ function DF:PositionTestPartyContainer()
     DF.testPartyContainer:SetPoint("CENTER", UIParent, "CENTER", (db.anchorX or 0) / scale, (db.anchorY or 0) / scale)
 end
 
+-- ☠ DELEGATES TO THE LIVE POSITIONER -- do not re-derive the anchor here.
+--
+-- This used to anchor the test container at the raw raidAnchorX/Y, which is a SECOND
+-- accounting model. DF:UpdateRaidContainerPosition already positions DF.testRaidContainer
+-- itself, at the same cx/cy as the live container and the mover, and that cx/cy carries
+-- ComputeRaidMainGroupAnchorOffset. Entering test mode ran THIS function instead, so
+-- Center Mode = Fixed was ignored on entry and the preview sat where Default would put
+-- it. The tell was that changing any setting -- toggling the dropdown to Default and back
+-- -- appeared to "fix" it: those handlers call the live path, which corrected it.
+--
+-- Anything that shifts the container must therefore be added in UpdateRaidContainerPosition
+-- and nowhere else, or the preview forks from live again.
 function DF:PositionTestRaidContainer()
     if not DF.testRaidContainer then return end
 
+    if DF.raidContainer and DF.UpdateRaidContainerPosition then
+        DF:UpdateRaidContainerPosition()
+        return
+    end
+
+    -- Fallback for the case the live call above would no-op on: no live container yet.
+    -- Takes the shift from the SAME helper rather than restating the formula.
     local db = DF:GetRaidDB()
     local raidScale = db.frameScale or 1.0
+    local ax, ay = 0, 0
+    if DF.ComputeRaidMainGroupAnchorOffset then
+        ax, ay = DF:ComputeRaidMainGroupAnchorOffset()
+    end
     DF.testRaidContainer:SetScale(raidScale)
     DF.testRaidContainer:ClearAllPoints()
-    DF.testRaidContainer:SetPoint("CENTER", UIParent, "CENTER", (db.raidAnchorX or 0) / raidScale, (db.raidAnchorY or 0) / raidScale)
+    DF.testRaidContainer:SetPoint("CENTER", UIParent, "CENTER",
+        ((db.raidAnchorX or 0) + ax) / raidScale, ((db.raidAnchorY or 0) + ay) / raidScale)
 end
 
 -- ============================================================

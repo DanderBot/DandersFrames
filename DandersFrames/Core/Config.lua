@@ -2298,12 +2298,31 @@ DF.PartyDefaults = {
     raidEnabled = true,
     raidFlatColumnAnchor = "START",
     raidFlatFrameAnchor = "START",
-    raidFlatGrowthAnchor = "TOPLEFT",
+    -- ☠ "START", not the legacy anchor point "TOPLEFT". The dropdown's keys are
+    -- START/CENTER/END, so seeding a raw point here left it showing an unmapped value
+    -- and made the presence-gated migration in Options.lua dead on arrival -- the
+    -- default filled the key, so it was never nil. Same resolved anchor either way.
+    raidFlatGrowthAnchor = "START",
     raidFlatHorizontalSpacing = 2,
-    raidFlatPlayerAnchor = "CENTER",
+    -- ☠ raidFlatPlayerAnchor was here, seeded "CENTER". No control has ever written it;
+    -- it was a duplicate of raidFlatFrameAnchor ("Players Grow From"), and seeding it
+    -- pinned every reader in Headers.lua to a constant while the dropdown moved only the
+    -- geometry. Readers now use raidFlatFrameAnchor. The key is left out on purpose --
+    -- re-adding a default is what made the duplicate invisible for so long.
     raidFlatReverseFillOrder = false,
     raidFlatVerticalSpacing = 2,
     raidGroupAnchor = "CENTER",
+    -- "Center Mode" for the centred grouped layout, once the groups wrap.
+    --   "ALL"  (default) — the whole reserved frame area stays centred on the saved
+    --                      anchor, so the groups shift sideways as more fill in. This
+    --                      is the shipped behaviour.
+    --   "MAIN"           — the FIRST wrap unit's centreline is pinned to the anchor and
+    --                      the overflow extends one way without moving it.
+    -- ☠ Every quantity that implements MAIN is a constant of the SETTINGS, never of the
+    -- roster — that is the design line separating it from the retired, roster-dependent
+    -- compensation. ⚠ A STRING, not a boolean: it is written by a dropdown, and the
+    -- AutoProfiles override paths store whatever the control hands them.
+    raidGroupCenterMode = "ALL",
     raidGroupDisplayOrder = {1, 2, 3, 4, 5, 6, 7, 8},
     raidGroupOrder = "NORMAL",
     raidGroupRowGrowth = "START",
@@ -2340,6 +2359,18 @@ DF.PartyDefaults = {
     raidTargetIconY = 5,
     raidTestFrameCount = 40,
     raidUseGroups = true,
+
+    -- Frame Fade: a whole-frame base opacity every unit frame carries, multiplied
+    -- with the range / health fades. Global by default; the split swaps in an
+    -- out-of-combat and an in-combat value (hover can borrow the in-combat one so a
+    -- receded frame is still readable while you interact with it).
+    frameFadeAlpha = 1,
+    frameFadeSplitCombat = false,
+    frameFadeAlphaOutOfCombat = 1,
+    frameFadeAlphaInCombat = 1,
+    frameFadeHoverUsesCombat = false,
+    frameFadeHoverScope = "ALL",   -- "ALL" = every frame lifts while any is hovered; "FRAME" = just the hovered one
+    frameFadeInstanceUsesCombat = false,   -- inside a dungeon/raid/arena/BG, hold the in-combat value between pulls
 
     -- Range Check
     rangeAlpha = 0.5,
@@ -2663,13 +2694,22 @@ DF.PartyDefaults = {
     -- ☠ 0 = the defensive row does not preview, and that is DELIBERATE: this key
     -- replaced the `testShowExternalDef` checkbox, which shipped OFF, and these defaults
     -- must mirror TEST_PRESETS.DEFAULT (see the note further down) or a fresh profile
-    -- matches no preset and the panel highlights nothing. Default does not include the
-    -- defensive icon; HEALER and Full do.
-    -- Raise it and the row previews that many icons - 1 is the natural working value,
-    -- since the defensive icon is a single-slot cue in the common case and this row only
-    -- previews on TANK/HEALER frames. Before the key existed the preview borrowed
-    -- testBuffCount and drew 2 whatever the row's own Max Icons said.
-    testDefensiveCount = 0,
+    -- matches no preset and the panel highlights nothing.
+    -- The row previews this many icons - 1 is the natural working value, since the
+    -- defensive icon is a single-slot cue in the common case and this row only previews on
+    -- TANK/HEALER frames. Before the key existed the preview borrowed testBuffCount and
+    -- drew 2 whatever the row's own Max Icons said.
+    --
+    -- ☠ 1, NOT 0 — AND TEST_PRESETS.DEFAULT LISTS IT TO MATCH. It shipped at 0, inherited
+    -- from the `testShowExternalDef` checkbox it replaced, which also shipped off. A COUNT
+    -- reads differently from a checkbox though: 0 is indistinguishable from a broken
+    -- feature, and three of the five presets (Default, Auras, Combat) re-zero it on click
+    -- because the preset tables are exhaustive. Net effect was "Defensive Icons don't show
+    -- up in test mode frames — ever" (Aphoex 6), which is what a whole feature looks like
+    -- when its only control is off and nothing says so.
+    -- ⚠ This is a DEFAULT CHANGE, not a bug fix, and it is Krathe's to reverse: set this to
+    -- 0 and drop the key from TEST_PRESETS.DEFAULT to restore the old behaviour exactly.
+    testDefensiveCount = 1,
     testFrameCount = 5,
     testPreset = "DEFAULT",
     testShowAbsorbs = false,
@@ -2689,6 +2729,19 @@ DF.PartyDefaults = {
     testShowPersonalTargeted = true,
     testShowAuraDesigner = false,
     testShowTextDesigner = true,
+    -- Test-mode indicator identification: highlights whichever element the cursor is
+    -- over and names it, with the settings page that owns it.
+    -- ★ ON by default (Krathe, 2026-08-17). It shipped OFF on the reasoning that test mode
+    -- is also how people pixel-tune spacing — but the marks are HOVER-ONLY and mark ONE
+    -- element at a time, so an untouched cursor shows nothing and the tuning case is
+    -- unaffected. Off by default mostly meant nobody found the feature.
+    -- ⚠ NOT in TEST_TOGGLE_KEYS, deliberately: the quick presets force every key in that
+    -- list off unless they name it, and this is a working preference like the count
+    -- sliders, not part of a preset's visual identity. Pressing Auras must not silently
+    -- take the labels away. Adding it there would undo this default on the first preset click.
+    -- (A separate testShowLabelTips key existed for one build; the two were merged into this
+    -- one, since nobody wants half the answer.)
+    testShowLabels = true,
 
     -- Tooltip settings
     tooltipBuffAnchor = "FRAME",

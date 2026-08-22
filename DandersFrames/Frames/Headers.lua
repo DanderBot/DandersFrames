@@ -610,7 +610,9 @@ function DF:InitializeHeaderChild(frame)
     local db = isRaid and DF:GetRaidDB() or DF:GetDB()
     local frameWidth = db.frameWidth or (isRaid and 80 or 120)
     local frameHeight = db.frameHeight or (isRaid and 40 or 50)
-    frame:SetSize(frameWidth, frameHeight)
+    -- Snapped: this creation-time size is what SecureGroupHeaderTemplate reads to size
+    -- the header until the first ApplyFrameLayout pass re-sizes it (which also snaps).
+    DF:SetPixelPerfectSize(frame, frameWidth, frameHeight, db)
     
     -- Create all visual elements
     DF:CreateFrameElements(frame)
@@ -892,6 +894,8 @@ function DF:InitializeHeaderChild(frame)
         if DF.UpdateHighlights then
             DF:UpdateHighlights(self)
         end
+        -- Frame Fade: hover may borrow the in-combat opacity (no-op unless enabled).
+        if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
 
         -- Binding tooltip (independent of unit tooltip settings)
         if DF.ShowBindingTooltip then DF:ShowBindingTooltip(self) end
@@ -944,6 +948,7 @@ function DF:InitializeHeaderChild(frame)
         if DF.UpdateHighlights then
             DF:UpdateHighlights(self)
         end
+        if DF.RefreshFrameFadeForHover then DF:RefreshFrameFadeForHover(self) end
 
         -- Stop tooltip refresh ticker
         if DF.StopTooltipRefresh then DF:StopTooltipRefresh() end
@@ -1136,7 +1141,28 @@ function DF:CreatePartyHeader()
     -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
     -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
     local horizontal = (db.growDirection == "HORIZONTAL")
-    local spacing = db.frameSpacing or 2
+    -- ☠☠ SNAP THE STRIDE, or every frame after the first walks off the pixel grid.
+    -- Blizzard's header lays children out by REPEATED OFFSET, so a fractional spacing is
+    -- not a one-off rounding error — it ACCUMULATES down the party. Measured on a live
+    -- party at UIParent scale 0.64, where 1 UI unit = 1.2 physical px, so the default
+    -- spacing of 1 carries 0.2px of fraction: the five frames landed at -0.4, -0.2, 0.0,
+    -- +0.2 and +0.4 physical px, walking 0.8px across a pixel boundary. Anything anchored
+    -- to a frame inherits its host's sub-pixel offset and rounds differently per frame --
+    -- reported as the resource bar's Offset Y showing a gap on some frames and not others,
+    -- and as test mode disagreeing with live (Aphoex, 2026-08-19; /df debug ppdump showed
+    -- every live host frac at ±0.2/±0.4 against 0.000 for every test frame).
+    -- ⚠ Snap the LOCAL too, not just the stored attribute: the local feeds xOffset/yOffset,
+    -- which IS the stride the header repeats. Snapping only the "spacing" attribute below
+    -- would leave the actual layout fractional and look like a fix.
+    -- ★ The grouped raid handler has always done this (snapInit, ~:2101). Party and arena
+    -- were the two headers that never got it.
+    local function snapInit(value)
+        if db.pixelPerfect and DF.PixelPerfect then
+            return DF:PixelPerfect(value)
+        end
+        return value
+    end
+    local spacing = snapInit(db.frameSpacing or 2)
     DF.partyHeader:SetAttribute("point", horizontal and "LEFT" or "TOP")
     -- IMPORTANT: Don't use Lua ternary with 0! (0 is falsy)
     if horizontal then
@@ -1150,9 +1176,9 @@ function DF:CreatePartyHeader()
     DF.partyHeader:SetAttribute("unitsPerColumn", 5)
     
     -- Store layout values for secure positioning code
-    DF.partyHeader:SetAttribute("frameWidth", db.frameWidth or 120)
-    DF.partyHeader:SetAttribute("frameHeight", db.frameHeight or 50)
-    DF.partyHeader:SetAttribute("spacing", db.frameSpacing or 2)
+    DF.partyHeader:SetAttribute("frameWidth", snapInit(db.frameWidth or 120))
+    DF.partyHeader:SetAttribute("frameHeight", snapInit(db.frameHeight or 50))
+    DF.partyHeader:SetAttribute("spacing", spacing)
     DF.partyHeader:SetAttribute("horizontal", horizontal)
     -- (The `growFromCenter` attribute write that used to sit here was removed. It read a
     -- db key nothing defines or writes, and the ONLY snippet that consumed it was the
@@ -1237,7 +1263,17 @@ function DF:CreateArenaHeader()
     -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
     -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
     local horizontal = (db.growDirection == "HORIZONTAL")
-    local spacing = db.frameSpacing or 2
+    -- Same stride snap as the party header above, for the same reason — the arena header
+    -- is that code with a different frame set, so a fractional spacing accumulates here
+    -- identically. Fixed together deliberately: leaving one of a copied pair unsnapped is
+    -- how this survived in party while the grouped raid handler had it all along.
+    local function snapInit(value)
+        if db.pixelPerfect and DF.PixelPerfect then
+            return DF:PixelPerfect(value)
+        end
+        return value
+    end
+    local spacing = snapInit(db.frameSpacing or 2)
     DF.arenaHeader:SetAttribute("point", horizontal and "LEFT" or "TOP")
     if horizontal then
         DF.arenaHeader:SetAttribute("xOffset", spacing)
@@ -1250,9 +1286,9 @@ function DF:CreateArenaHeader()
     DF.arenaHeader:SetAttribute("unitsPerColumn", 5)  -- Max 5 for arena (2v2, 3v3, 5v5)
     
     -- Store layout values for secure positioning code
-    DF.arenaHeader:SetAttribute("frameWidth", db.frameWidth or 120)
-    DF.arenaHeader:SetAttribute("frameHeight", db.frameHeight or 50)
-    DF.arenaHeader:SetAttribute("spacing", db.frameSpacing or 2)
+    DF.arenaHeader:SetAttribute("frameWidth", snapInit(db.frameWidth or 120))
+    DF.arenaHeader:SetAttribute("frameHeight", snapInit(db.frameHeight or 50))
+    DF.arenaHeader:SetAttribute("spacing", spacing)
     DF.arenaHeader:SetAttribute("horizontal", horizontal)
 
     -- SetFrameRef for secure snippets
@@ -1553,7 +1589,7 @@ function DF:CreateFlatDebugOverlay()
     local horizontal = (db.growDirection == "HORIZONTAL")
     local playersPerUnit = db.raidPlayersPerRow or 5
     local reverseFill = db.raidFlatReverseFillOrder or false
-    local anchor = db.raidFlatPlayerAnchor or "START"
+    local anchor = db.raidFlatFrameAnchor or "START"
     local maxColumns = math.ceil(40 / playersPerUnit)
     
     -- Create overlay container if needed
@@ -1767,7 +1803,14 @@ function DF:CreateRaidSeparatedHeaders()
         -- Layout depends on growDirection
         -- Note: point=TOP/LEFT keeps player order consistent (first at top/left)
         -- The secure snippet handles where the GROUP is positioned (START/END)
+        -- ☠ SNAPPED, per the rule in UpdateRaidHeaderLayoutAttributes. This is the
+        -- INTRA-group player stride, and a group's own size is derived as
+        -- 5 * frameHeight + 4 * spacing from the SNAPPED spacing. Feeding the raw value
+        -- here put the players inside a group on a different stride from the box the
+        -- group occupies -- the same producer split the five-value rule exists for, just
+        -- one level down. pixelPerfect defaults to TRUE.
         local spacing = db.frameSpacing or 2
+        if db.pixelPerfect and DF.PixelPerfect then spacing = DF:PixelPerfect(spacing) end
         if horizontal then
             -- HORIZONTAL: Groups as columns, players stacked vertically (top to bottom)
             header:SetAttribute("point", "TOP")
@@ -1827,35 +1870,56 @@ end
 -- Lua only sets attributes, secure code does all positioning
 -- ============================================================
 
--- Compensation offset for the raid container's anchor when raidGroupAnchor == "CENTER".
+-- ☠ RETIRED. Returns (0, 0) UNCONDITIONALLY. See the block inside the function for why,
+-- and read that before changing anything here.
 --
--- The secure positioning snippet (below) centers the *visible* groups inside a
--- fixed full-grid-sized container by offsetting each group by
---     yStart = (totalHeight - populatedHeight) / 2
--- Where totalHeight is the full 8-group grid capacity and populatedHeight grows
--- with the number of populated rows. As popRows changes (player joins/leaves
--- shifts a group across the groupsPerRow threshold), every visible group snaps
--- by (deltaPopulatedDim / 2) inside the container. Container itself does not
--- move — only the visible content. Users perceive this as the frames "jumping
--- upward off the screen" (bug #867).
+-- This header used to describe the live mechanism: an inverse offset that shifted the
+-- container to hold CENTER content still as popRows grew, against #867. Every word of
+-- that is now false, including the list of cases it claimed to return (0,0) for -- there
+-- are no cases, it always does. It is replaced rather than kept as history because a
+-- reader who stops above the signature would take the retired story as current fact, and
+-- the description it gave was itself the reasoning that got reversed twice in 24h.
 --
--- This helper returns the inverse offset so callers can shift the container by
--- the same amount, keeping the visible content's screen position stable across
--- roster transitions. The reference state is popRows=1 (one row populated) so
--- existing user positions don't shift on first load: with one populated row,
--- compensation is (0, 0) and the container sits exactly at db.raidAnchorX/Y
--- — identical to current behaviour. As popRows grows beyond 1, compensation
--- shifts the container away from the anchor by enough to cancel the snippet's
--- upward visual snap.
---
--- Returns (dx, dy) to add to the container's anchor coordinates BEFORE the
--- frameScale division. (0, 0) for any case the bug doesn't apply to:
---   * raidGroupAnchor != "CENTER"
---   * raidUseGroups == false (flat raid mode has its own positioning path)
---   * No populated groups (nothing visible yet)
---   * Single populated row (no drift)
---   * Required handler / headers not yet created
+-- Two facts worth having here so nobody re-derives them:
+--   * CENTER has no drift to cancel. The container is always sized for all eight groups
+--     and the block is centred with (total - populated) / 2, so it grows SYMMETRICALLY
+--     about the container centre and the centroid is invariant under popRows. Verified
+--     numerically across 512 configurations, both positioners, both axes.
+--   * #867 was the compounding defect (a centred block also taking a row index flipped
+--     over the FULL grid), fixed at source in 50a3e7c5 -- not centring drift.
 function DF:ComputeRaidContainerCompensation()
+    -- ☠ RETIRED, ALWAYS ZERO. It was zeroed in b0e84ae3, restored in b0e58e79 on the
+    -- argument below, and re-zeroed the same day when the restore was tested in game.
+    -- Read the whole block before touching it -- the restore looked well reasoned and
+    -- was still wrong.
+    --
+    -- WHY THERE IS NOTHING TO COMPENSATE. CENTER grows the populated block SYMMETRICALLY
+    -- ABOUT THE CONTAINER CENTRE, because the container is always sized for all eight
+    -- groups and xStart is (totalWidth - populatedWidth) / 2. Two columns' worth of box,
+    -- one populated column: content sits [0.5col, 1.5col], centred at 1col. Two
+    -- populated columns: content sits [0, 2col], still centred at 1col. THE CENTROID IS
+    -- ALREADY INVARIANT UNDER popRows. The body below instead pins the block's LEADING
+    -- EDGE to the popRows==1 position, so it does not cancel a drift -- it INTRODUCES
+    -- one, of (populatedDim - groupDim) / 2. Observed in game as the whole container and
+    -- mover dragged half a group-column left, frames correctly placed inside it, at
+    -- Wrap 7 / Center Right / 8 groups (Krathe, 2026-08-18).
+    --
+    -- WHAT #867 ACTUALLY WAS. Not centring drift: the compounding. Born 2026-03-10 in
+    -- eb878888 with the wrap growth setting -- a block centred by yStart also took a row
+    -- index already flipped over the FULL grid, two reference frames summed, error
+    -- (fullGridRC - popRows) group rows. That changes as the roster changes, which is
+    -- the reported "frames shoot off the top of the screen when a player joins a group".
+    -- ☠ THE TELL IS IN #867's OWN CHANGELOG: recovery "required a Groups Grow From
+    -- toggle" -- Grow From is groupRowGrowth, the exact setting that triggers the
+    -- compounding. f3216d3c (2026-05-02, 4.3.7) compensated the CONTAINER instead of
+    -- fixing the maths, i.e. a workaround one layer below the bug. The bug itself is
+    -- fixed at source in 50a3e7c5, so this has nothing left to do.
+    --
+    -- ☠ IF #867-STYLE JUMPING EVER COMES BACK, IT IS THE POSITIONER, NOT THIS. Do not
+    -- reinstate a container nudge to hide it. The body stays only as the record of what
+    -- was tried; delete it outright in the next tidy-up.
+    do return 0, 0 end
+
     local db = DF:GetRaidDB()
     if not db then return 0, 0 end
     if not db.raidUseGroups then return 0, 0 end
@@ -1948,6 +2012,83 @@ function DF:ComputeRaidContainerCompensation()
     end
 end
 
+-- "Anchor To: Main Group" — the CONSTANT anchor-reference offset.
+--
+-- ☠ THIS IS NOT THE COMPENSATION ABOVE, AND MUST NEVER GROW A ROSTER TERM. The retired
+-- ComputeRaidContainerCompensation failed because it computed from popRows — a value
+-- that changes as people join — and then three surfaces (container, mover, test) each
+-- needed their own copy of the lie. This function reads SETTINGS ONLY. Same inputs,
+-- same output, whether the raid has 1 group or 8.
+--
+-- What it does: with Groups Anchor = CENTER and Anchor To = Main Group, the positioner
+-- places wrap units at FIXED slots (see anchorToMain in the snippet), so the first wrap
+-- unit always occupies the same slot of the reserved grid. This returns the constant
+-- shift that puts THAT unit's centreline on the saved anchor instead of the grid's
+-- centre. Which end the main unit sits at depends on the wrap key AND the players
+-- anchor (players = END mirrors the wrap axis in the snippet corners; the two flips
+-- cancel, hence the equality test below).
+--
+-- Returns (dx, dy) added to the container anchor BEFORE the frameScale division, for
+-- container, mover and test container alike — one number, three consumers, like every
+-- other piece of this geometry. (0, 0) unless the mode is on and the grid actually
+-- wraps.
+function DF:ComputeRaidMainGroupAnchorOffset()
+    local db = DF:GetRaidDB()
+    if not db then return 0, 0 end
+    if not db.raidUseGroups then return 0, 0 end
+    if (db.raidGroupAnchor or "START") ~= "CENTER" then return 0, 0 end
+    if (db.raidGroupCenterMode or "ALL") ~= "MAIN" then return 0, 0 end
+
+    local groupsPerRow = db.raidGroupsPerRow or 8
+    if groupsPerRow < 1 then groupsPerRow = 1 end
+    if groupsPerRow > 8 then groupsPerRow = 8 end
+    local rem8 = 8 % groupsPerRow
+    local fullGridRC = (8 - rem8) / groupsPerRow
+    if rem8 > 0 then fullGridRC = fullGridRC + 1 end
+    -- One wrap unit = nothing hangs off = the grid centre IS the unit centre.
+    if fullGridRC <= 1 then return 0, 0 end
+
+    -- Snapped like the handler's snapInit seeds, so this offset lives on the same
+    -- stride as the geometry it repositions.
+    local frameWidth = db.frameWidth or 80
+    local frameHeight = db.frameHeight or 40
+    local spacing = db.frameSpacing or 2
+    local rowColSpacing = db.raidRowColSpacing or 30
+    if db.pixelPerfect and DF.PixelPerfect then
+        frameWidth = DF:PixelPerfect(frameWidth)
+        frameHeight = DF:PixelPerfect(frameHeight)
+        spacing = DF:PixelPerfect(spacing)
+        rowColSpacing = DF:PixelPerfect(rowColSpacing)
+    end
+
+    local isHorizontal = (db.growDirection or "HORIZONTAL") == "HORIZONTAL"
+    local groupDim
+    if isHorizontal then
+        groupDim = 5 * frameHeight + 4 * spacing   -- wrap axis is Y
+    else
+        groupDim = 5 * frameWidth + 4 * spacing    -- wrap axis is X
+    end
+    local total = fullGridRC * groupDim + (fullGridRC - 1) * rowColSpacing
+    local m = (total - groupDim) / 2
+
+    -- Where does the main unit sit inside the grid? Players = END mirrors the wrap
+    -- axis (TOPRIGHT/BOTTOMLEFT corners with negated offsets); wrap = END flips the
+    -- slot index over the full grid. Both flips together cancel.
+    local playersEnd = (db.raidPlayerAnchor or "START") == "END"
+    local wrapEnd = (db.raidGroupRowGrowth or "START") == "END"
+    local mainAtNear = (playersEnd == wrapEnd)   -- near = TOP (horizontal) / LEFT (vertical)
+
+    if isHorizontal then
+        -- Main at the top of the grid means its centre sits m ABOVE the grid centre,
+        -- so the container moves DOWN (negative y) to land it on the anchor.
+        return 0, mainAtNear and -m or m
+    else
+        -- Main at the left means its centre sits m LEFT of the grid centre, so the
+        -- container moves RIGHT (positive x).
+        return mainAtNear and m or -m, 0
+    end
+end
+
 function DF:CreateRaidPositionHandler()
     if DF.raidPositionHandler then return end
     if not DF.raidContainer then return end
@@ -1975,20 +2116,41 @@ function DF:CreateRaidPositionHandler()
     end
     
     -- Initialize layout attributes (all lowercase)
-    handler:SetAttribute("framewidth", db.frameWidth or 80)
-    handler:SetAttribute("frameheight", db.frameHeight or 40)
-    handler:SetAttribute("spacing", db.frameSpacing or 2)
-    handler:SetAttribute("groupspacing", db.raidGroupSpacing or 10)
+    -- ☠ SNAPPED, SAME FIVE VALUES. This is the SIXTH producer of the same geometry and it
+    -- was seeding RAW db numbers while UpdateRaidHeaderLayoutAttributes and
+    -- UpdateRaidGroupLayoutParams both pushed snapped ones. The snippet fires on
+    -- triggerposition, which the per-header child hook bumps independently, so between
+    -- handler creation and the first attribute update the live layout ran on unsnapped
+    -- geometry while SecureSort's side was snapped -- the exact producer split the rule at
+    -- UpdateRaidHeaderLayoutAttributes exists to prevent. Transient and sub-pixel, but it
+    -- is a real fork and it would bite whoever adds a sixth value.
+    local function snapInit(value)
+        if db.pixelPerfect and DF.PixelPerfect then
+            return DF:PixelPerfect(value)
+        end
+        return value
+    end
+    handler:SetAttribute("framewidth", snapInit(db.frameWidth or 80))
+    handler:SetAttribute("frameheight", snapInit(db.frameHeight or 40))
+    handler:SetAttribute("spacing", snapInit(db.frameSpacing or 2))
+    handler:SetAttribute("groupspacing", snapInit(db.raidGroupSpacing or 10))
     handler:SetAttribute("playergrowfrom", db.raidPlayerAnchor or "START")
     handler:SetAttribute("groupsgrowfrom", db.raidGroupAnchor or "START")
     handler:SetAttribute("growdirection", db.growDirection or "HORIZONTAL")
     handler:SetAttribute("groupsperrow", db.raidGroupsPerRow or 8)
-    handler:SetAttribute("rowcolspacing", db.raidRowColSpacing or 30)
+    handler:SetAttribute("rowcolspacing", snapInit(db.raidRowColSpacing or 30))
     handler:SetAttribute("grouprowgrowth", db.raidGroupRowGrowth or "START")
+    -- Anchor To: Main Group. 1 = pin the first wrap unit at a fixed, centred slot
+    -- (constant placement); 0 = centre the whole populated block (default). Numeric,
+    -- like centerless flags elsewhere -- string compares in snippets are a needless risk.
+    handler:SetAttribute("anchortomain", ((db.raidGroupCenterMode or "ALL") == "MAIN") and 1 or 0)
     handler:SetAttribute("flatmodeactive", (not db.raidUseGroups) and 1 or 0)
 
-    -- Initialize display order attributes (default 1-8)
-    local displayOrder = db.raidGroupDisplayOrder or {1, 2, 3, 4, 5, 6, 7, 8}
+    -- Initialize display order attributes.
+    -- ☠ Through the shared producer, not raw db. This read raidGroupDisplayOrder directly,
+    -- which ignored My Group First and skipped the per-entry validation, so the seed order
+    -- disagreed with what UpdateRaidGroupOrderAttributes writes moments later.
+    local displayOrder = DF:GetEffectiveRaidGroupOrder(db)
     for i = 1, 8 do
         handler:SetAttribute("displayorder" .. i, displayOrder[i] or i)
     end
@@ -2031,6 +2193,7 @@ function DF:CreateRaidPositionHandler()
         local groupsPerRow = handler:GetAttribute("groupsperrow") or 8
         local rowColSpacing = handler:GetAttribute("rowcolspacing") or 30
         local groupRowGrowth = handler:GetAttribute("grouprowgrowth") or "START"
+        local anchorToMain = handler:GetAttribute("anchortomain") or 0
 
         if groupsPerRow < 1 then groupsPerRow = 1 end
         if groupsPerRow > 8 then groupsPerRow = 8 end
@@ -2287,7 +2450,21 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group1:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2319,7 +2496,13 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group1:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -2368,7 +2551,21 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group2:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2400,7 +2597,13 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group2:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -2449,7 +2652,21 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group3:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2481,7 +2698,13 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group3:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -2530,7 +2753,21 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group4:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2562,7 +2799,13 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group4:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -2611,7 +2854,21 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group5:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2643,7 +2900,13 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group5:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -2692,7 +2955,21 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group6:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2724,7 +3001,13 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group6:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -2773,7 +3056,21 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group7:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2805,7 +3102,13 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group7:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -2854,7 +3157,21 @@ function DF:CreateRaidPositionHandler()
                     local rcW = gInRC * groupWidth + (gInRC - 1) * groupSpacing
                     xOff = (totalWidth - rcW) / 2 + posInRC * (groupWidth + groupSpacing)
                     local yStart = (totalHeight - populatedHeight) / 2
-                    yOff = yStart + rcIdx * (groupHeight + rowColSpacing)
+                    -- ☠ CENTER CENTRES THE POPULATED BLOCK, SO THE ROW INDEX MUST BE
+                    -- RELATIVE TO THAT BLOCK, NOT TO THE FULL GRID. rcIdx was already
+                    -- flipped over fullGridRC above, and adding that on top of yStart
+                    -- compounds: with one populated row in a two-row grid it pushed the
+                    -- groups half a group plus half the wrap spacing BELOW the container.
+                    -- Recover the populated-row index from the flipped one --
+                    -- (popRows-1) - ((fullGridRC-1) - rcIdx) collapses to the line below.
+                    -- START needs no correction: rcIdx is already the raw index there.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: FIXED slots, no populated centring. Every term
+                    -- is a constant of the settings, so nothing moves with the roster; the
+                    -- full-grid flip is correct here, exactly as in the START and END arms.
+                    if anchorToMain == 1 then yStart = 0 rcCentered = rcIdx end
+                    yOff = yStart + rcCentered * (groupHeight + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group8:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", xOff, yOff)
                     else
@@ -2886,7 +3203,13 @@ function DF:CreateRaidPositionHandler()
                     local rcH = gInRC * groupHeight + (gInRC - 1) * groupSpacing
                     yOff = (totalHeight - rcH) / 2 + posInRC * (groupHeight + groupSpacing)
                     local xStart = (totalWidth - populatedWidth) / 2
-                    xOff = xStart + rcIdx * (groupWidth + rowColSpacing)
+                    -- Same correction as the horizontal arm above: the wrap axis is X in
+                    -- VERTICAL growth, so a centred block gets the same compounding.
+                    local rcCentered = rcIdx
+                    if groupRowGrowth == "END" then rcCentered = rcIdx + popRows - fullGridRC end
+                    -- Anchor To Main Group: fixed slots, as in the horizontal arm above.
+                    if anchorToMain == 1 then xStart = 0 rcCentered = rcIdx end
+                    xOff = xStart + rcCentered * (groupWidth + rowColSpacing)
                     if playerGrowFrom == "END" then
                         group8:SetPoint("TOPRIGHT", container, "TOPRIGHT", -xOff, -yOff)
                     else
@@ -3120,7 +3443,11 @@ function DF:UpdateRaidHeaderLayoutAttributes()
 
     local db = DF:GetRaidDB()
     local horizontal = (db.growDirection == "HORIZONTAL")  -- Groups as columns
+    -- ☠ SNAPPED before the cache compare, not after: the cache must key on the value
+    -- actually pushed, or toggling pixelPerfect at an unchanged frameSpacing would be
+    -- read as "nothing changed" and skip the update entirely.
     local spacing = db.frameSpacing or 2
+    if db.pixelPerfect and DF.PixelPerfect then spacing = DF:PixelPerfect(spacing) end
 
     -- Skip entirely if nothing changed — avoids the destructive ClearAllPoints
     if horizontal == lastLayoutHorizontal and spacing == lastLayoutSpacing then
@@ -3220,6 +3547,7 @@ function DF:UpdateRaidPositionAttributes()
         handler:SetAttribute("groupsperrow", db.raidGroupsPerRow or 8)
         handler:SetAttribute("rowcolspacing", snap(db.raidRowColSpacing or 30))
         handler:SetAttribute("grouprowgrowth", db.raidGroupRowGrowth or "START")
+        handler:SetAttribute("anchortomain", ((db.raidGroupCenterMode or "ALL") == "MAIN") and 1 or 0)
 
         -- Update custom group display order
         DF:UpdateRaidGroupOrderAttributes()
@@ -3290,6 +3618,12 @@ function DF:UpdatePlayerGroupTracking()
 end
 
 -- Update group display order attributes on the secure handler
+-- ☠ THE ORDER BUILDER LIVES IN Frames/Init.lua AS DF:GetEffectiveRaidGroupOrder, and
+-- this function used to carry a second copy of it. Do not reintroduce one here: a
+-- duplicate definition on DF silently wins or loses by file load order, and the two
+-- copies had already drifted on validation strictness. Init.lua's is now the single
+-- producer, shared with this attribute push, CreateRaidPositionHandler's seed and
+-- DF:SortActiveGroupListByDisplayOrder.
 function DF:UpdateRaidGroupOrderAttributes()
     if InCombatLockdown() then
         DF.pendingGroupOrderUpdate = true
@@ -3298,49 +3632,9 @@ function DF:UpdateRaidGroupOrderAttributes()
     
     if not DF.raidPositionHandler then return end
     
-    local db = DF:GetRaidDB()
     local handler = DF.raidPositionHandler
-    
-    -- Get the base display order from settings
-    local displayOrder = db.raidGroupDisplayOrder
-    -- Validate: must be a table with exactly 8 numeric entries covering groups 1-8
-    local isValid = type(displayOrder) == "table"
-    if isValid then
-        local seen = {}
-        for i = 1, 8 do
-            local v = displayOrder[i]
-            if type(v) ~= "number" or v < 1 or v > 8 or seen[v] then
-                isValid = false
-                break
-            end
-            seen[v] = true
-        end
-    end
-    if not isValid then
-        DF:DebugWarn("ROSTER", "UpdateRaidGroupOrderAttributes: raidGroupDisplayOrder is invalid or missing, using default order")
-        displayOrder = {1, 2, 3, 4, 5, 6, 7, 8}
-    end
-    
-    -- Build effective order (possibly with player's group first)
-    local effectiveOrder = {}
-    
-    if db.raidPlayerGroupFirst and DF.cachedPlayerGroup then
-        local playerGroup = DF.cachedPlayerGroup
-        -- Add player's group first
-        table.insert(effectiveOrder, playerGroup)
-        -- Add remaining groups in their display order
-        for _, groupNum in ipairs(displayOrder) do
-            if groupNum ~= playerGroup then
-                table.insert(effectiveOrder, groupNum)
-            end
-        end
-    else
-        -- Use display order as-is
-        for _, groupNum in ipairs(displayOrder) do
-            table.insert(effectiveOrder, groupNum)
-        end
-    end
-    
+    local effectiveOrder = DF:GetEffectiveRaidGroupOrder()
+
     -- Set attributes for each display position (1-8)
     -- displayorder1 = which group number should be in position 1, etc.
     for displayPos = 1, 8 do
@@ -3358,7 +3652,11 @@ function DF:UpdateRaidGroupOrderAttributes()
         handler:SetAttribute("groupdisplaypos" .. groupNum, displayPos)
     end
     
-    if DF:DebugActive("HEADERS") then
+    -- ☠ The guard must name the category the LINE uses. This asked DebugActive("HEADERS")
+    -- and then logged to ROSTER, so enabling ROSTER alone -- the obvious choice for a
+    -- group-order problem -- produced nothing, and the line appeared only for someone who
+    -- happened to have HEADERS switched on as well.
+    if DF:DebugActive("ROSTER") then
         local orderStr = table.concat(effectiveOrder, ",")
         DF:Debug("ROSTER", "UpdateRaidGroupOrderAttributes: group display order: %s", orderStr)
     end
@@ -3915,6 +4213,19 @@ function DF:RefreshLiveFrames()
     -- Refresh raid frames
     if DF.IterateRaidFrames then
         DF:IterateRaidFrames(function(frame)
+            if frame and frame.unit then
+                DF:FullFrameRefresh(frame)
+            end
+        end)
+    end
+
+    -- ☠ AND PINNED — a pinned frame IS a live frame. None of the three iterators above
+    -- reaches one, so every caller of this function silently skipped them: the combat-ENTRY
+    -- half of the HideInCombat gates (PLAYER_REGEN_DISABLED routes here through
+    -- RefreshAllVisibleFrames) plus every settings callback that refreshes data-driven
+    -- content. Boss sets included — they are unit frames for friendly, healable NPCs.
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(function(frame)
             if frame and frame.unit then
                 DF:FullFrameRefresh(frame)
             end
@@ -4735,13 +5046,22 @@ function DF:UpdateHeaderVisibility(skipRaidReposition)
 end
 
 function DF:UpdateRaidHeaderVisibility(skipReposition)
+    -- ★ THE THREE SILENT EXITS, AND THEY ARE THE THREE STATES USERS REPORT. The entry log
+    -- sat BELOW all of them, so "my raid frames didn't come back" produced no line at all
+    -- on every path that could actually cause it -- the log looked as though the function
+    -- had never been called. Each reason is now distinguishable from the others and from
+    -- a normal run.
     if InCombatLockdown() then
         DF.pendingRaidHeaderVisibility = true
+        DF:Debug("VISIBILITY", "UpdateRaidHeaderVisibility: in combat, deferred to regen")
         return
     end
 
     -- Guard against infinite recursion: SetEnabled(false) calls back here
-    if DF._updatingRaidHeaderVisibility then return end
+    if DF._updatingRaidHeaderVisibility then
+        DF:Debug("VISIBILITY", "UpdateRaidHeaderVisibility: re-entered while running, dropped")
+        return
+    end
     DF._updatingRaidHeaderVisibility = true
 
     DF:Debug("VISIBILITY", "UpdateRaidHeaderVisibility: skipReposition=%s", tostring(skipReposition))
@@ -4751,6 +5071,7 @@ function DF:UpdateRaidHeaderVisibility(skipReposition)
     -- calls to UpdateRaidHeaderVisibility are permanently blocked until ReloadUI.
     if DF.testMode or DF.raidTestMode then
         DF._updatingRaidHeaderVisibility = nil
+        DF:Debug("VISIBILITY", "UpdateRaidHeaderVisibility: test mode active, live frames left hidden")
         return
     end
 
@@ -4948,6 +5269,13 @@ function DF:UpdateRaidGroupFrameSizes()
     end
 
     -- Update separated headers child frame sizes
+    -- ☠ SNAPPED, via SetPixelPerfectSize — not a raw SetSize. SecureGroupHeaderTemplate
+    -- sizes the HEADER from child1:GetWidth()/GetHeight() (configureChildren, Blizzard's
+    -- SecureGroupHeaders.lua), and the position handler's framewidth/frameheight are
+    -- seeded snapped. A raw child here made the header's real extent disagree with the
+    -- reserved 5-slot extent by the rounding delta whenever this ran after
+    -- ApplyFrameLayout (which snaps). Same rule as the intra-group spacing at its
+    -- SetAttribute site: one stride, snapped everywhere.
     if DF.raidSeparatedHeaders then
         for g = 1, 8 do
             local header = DF.raidSeparatedHeaders[g]
@@ -4955,7 +5283,7 @@ function DF:UpdateRaidGroupFrameSizes()
                 for i = 1, 5 do
                     local child = header:GetAttribute("child" .. i)
                     if child then
-                        child:SetSize(frameWidth, frameHeight)
+                        DF:SetPixelPerfectSize(child, frameWidth, frameHeight, db)
                     end
                 end
             end
@@ -4980,7 +5308,9 @@ function DF:UpdateRaidFlatFrameSizes()
         for i = 1, 40 do
             local child = DF.FlatRaidFrames.header:GetAttribute("child" .. i)
             if child then
-                child:SetSize(frameWidth, frameHeight)
+                -- Snapped for the same reason as the grouped children above: the header
+                -- is sized from the child's live width, and the layout maths snap.
+                DF:SetPixelPerfectSize(child, frameWidth, frameHeight, db)
             end
         end
     end
@@ -5055,8 +5385,20 @@ function DF:UpdatePartyHeaderLayout()
     -- ★ LIVE-ONLY: the preview reads growDirection via SecureSort:UpdateLayoutParams, so
     -- the preview was right and live was wrong. (Test-vs-live audit, 2026-08-07.)
     local horizontal = (db.growDirection == "HORIZONTAL")
-    local spacing = db.frameSpacing or 2
-    
+    -- ☠ SNAP HERE TOO, or the create-time snap lasts until the first settings change.
+    -- CreatePartyHeader / CreateArenaHeader snap the stride; this updater rewrites the
+    -- same attributes on every layout edit, and an unsnapped write here put the
+    -- fractional stride straight back -- "born on the grid and walked off it on the
+    -- next settings change", the exact shape the separated-raid updater was fixed for.
+    local function snapUpd(value)
+        if db.pixelPerfect and DF.PixelPerfect then
+            return DF:PixelPerfect(value)
+        end
+        return value
+    end
+    local spacing = snapUpd(db.frameSpacing or 2)
+    local updW, updH = snapUpd(db.frameWidth or 120), snapUpd(db.frameHeight or 50)
+
     -- ============================================================
     -- UPDATE PARTY HEADER
     -- ============================================================
@@ -5076,8 +5418,8 @@ function DF:UpdatePartyHeaderLayout()
         end
         
         -- Update stored values for secure positioning
-        DF.partyHeader:SetAttribute("frameWidth", db.frameWidth or 120)
-        DF.partyHeader:SetAttribute("frameHeight", db.frameHeight or 50)
+        DF.partyHeader:SetAttribute("frameWidth", updW)
+        DF.partyHeader:SetAttribute("frameHeight", updH)
         DF.partyHeader:SetAttribute("spacing", spacing)
         DF.partyHeader:SetAttribute("horizontal", horizontal)
 
@@ -5112,8 +5454,8 @@ function DF:UpdatePartyHeaderLayout()
         end
         
         -- Update stored values for secure positioning
-        DF.arenaHeader:SetAttribute("frameWidth", db.frameWidth or 120)
-        DF.arenaHeader:SetAttribute("frameHeight", db.frameHeight or 50)
+        DF.arenaHeader:SetAttribute("frameWidth", updW)
+        DF.arenaHeader:SetAttribute("frameHeight", updH)
         DF.arenaHeader:SetAttribute("spacing", spacing)
         DF.arenaHeader:SetAttribute("horizontal", horizontal)
 
@@ -5165,10 +5507,18 @@ function DF:UpdateRaidHeaderLayout()
         for i = 1, 8 do
             local header = DF.raidSeparatedHeaders[i]
             if header then
-                header:SetAttribute("yOffset", -(db.frameSpacing or 2))
+                -- ☠ SNAP, matching CreateRaidSeparatedHeaders. The creator already snaps
+                -- this stride and this updater did not, so a separated-header layout was
+                -- born on the grid and walked off it on the next settings change -- the
+                -- worst version of this bug, because it looks correct until something
+                -- unrelated re-runs the layout. Same accumulation as the party header
+                -- above; see its note for the measurement.
+                local sp = db.frameSpacing or 2
+                if db.pixelPerfect and DF.PixelPerfect then sp = DF:PixelPerfect(sp) end
+                header:SetAttribute("yOffset", -sp)
                 header:SetAttribute("frameWidth", db.frameWidth or 80)
                 header:SetAttribute("frameHeight", db.frameHeight or 40)
-                header:SetAttribute("spacing", db.frameSpacing or 2)
+                header:SetAttribute("spacing", sp)
             end
         end
     end
@@ -5882,7 +6232,12 @@ function DF:SetRaidOrientation(horizontal, growFrom)
     local db = DF:GetRaidDB()
     
     -- Default growFrom for combined header (if not provided)
-    growFrom = growFrom or db.raidFlatPlayerAnchor or "START"
+    -- ☠ Reads raidFlatFrameAnchor, NOT raidFlatPlayerAnchor. The latter was a second
+    -- key for the same concept that no control has ever written in this repo's history
+    -- (only the defaults table seeded it, to "CENTER"), so every reader here was pinned
+    -- to a constant while "Players Grow From" wrote raidFlatFrameAnchor and moved only
+    -- the geometry. Setting End flipped the header's anchor corner but left sortDir ASC.
+    growFrom = growFrom or db.raidFlatFrameAnchor or "START"
     
     -- Combined header (flat layout) - just set sortDir, PositionRaidHeaders handles the rest
     if DF.FlatRaidFrames and DF.FlatRaidFrames.header then
@@ -6030,9 +6385,17 @@ function DF:SetGrowFromCenter(enabled, selfPosition)
     
     local db = DF:GetDB()
     local horizontal = (db.growDirection == "HORIZONTAL")
-    local spacing = db.frameSpacing or 2
-    local frameWidth = db.frameWidth or 120
-    local frameHeight = db.frameHeight or 50
+    -- Snapped like the create and update paths (see UpdatePartyHeaderLayout): these
+    -- feed the same header attributes, and one unsnapped producer undoes the others.
+    local function snapGC(value)
+        if db.pixelPerfect and DF.PixelPerfect then
+            return DF:PixelPerfect(value)
+        end
+        return value
+    end
+    local spacing = snapGC(db.frameSpacing or 2)
+    local frameWidth = snapGC(db.frameWidth or 120)
+    local frameHeight = snapGC(db.frameHeight or 50)
     selfPosition = selfPosition or "FIRST"
     
     -- Count party children (visible frames in partyHeader - now includes player)
@@ -6488,8 +6851,8 @@ function DF:ApplyHeaderSettings()
     local db = DF:GetDB()
     local raidDb = DF:GetRaidDB()
     
-    DF:Debug("FLATRAID", "ApplyHeaderSettings: raidUseGroups=%s growDirection=%s raidFlatPlayerAnchor=%s",
-        tostring(raidDb.raidUseGroups), tostring(raidDb.growDirection), tostring(raidDb.raidFlatPlayerAnchor))
+    DF:Debug("FLATRAID", "ApplyHeaderSettings: raidUseGroups=%s growDirection=%s raidFlatFrameAnchor=%s",
+        tostring(raidDb.raidUseGroups), tostring(raidDb.growDirection), tostring(raidDb.raidFlatFrameAnchor))
     
     -- Apply orientation from growDirection, growthAnchor, and selfPosition settings
     local horizontal = (db.growDirection == "HORIZONTAL")
@@ -6507,8 +6870,8 @@ function DF:ApplyHeaderSettings()
         local raidGrowFrom = raidDb.raidGroupAnchor or "START"
         DF:SetRaidOrientation(false, raidGrowFrom)
     else
-        -- Combined/flat mode: use raidFlatPlayerAnchor (different setting!)
-        local raidGrowFrom = raidDb.raidFlatPlayerAnchor or "START"
+        -- Combined/flat mode: use raidFlatFrameAnchor (different setting to the grouped one)
+        local raidGrowFrom = raidDb.raidFlatFrameAnchor or "START"
         DF:Debug("FLATRAID", "ApplyHeaderSettings:   FLAT MODE: SetRaidOrientation(%s, %s)",
             tostring(raidHorizontal), raidGrowFrom)
         DF:SetRaidOrientation(raidHorizontal, raidGrowFrom)
@@ -6544,50 +6907,18 @@ function DF:ApplyHeaderSettings()
         DF:Debug("FLATRAID", "ApplyHeaderSettings:   -> calling ApplyRaidFlatSorting")
         DF:ApplyRaidFlatSorting()
         
-        -- ============================================================
-        -- FINAL SIZE FORCING for flat layout
-        -- ApplyRaidFlatSorting sets attributes (nameList, sortMethod, etc.)
-        -- which trigger SecureGroupHeader_Update and resize the header.
-        -- We must force the size ONE MORE TIME after all attributes are set,
-        -- then trigger a re-layout so children are positioned for the new size.
-        -- ============================================================
-        if DF.FlatRaidFrames and DF.FlatRaidFrames.header then
-            local anchor = raidDb.raidFlatPlayerAnchor or "START"
-            if anchor ~= "CENTER" then
-                local horizontal = (raidDb.growDirection == "HORIZONTAL")
-                local playersPerUnit = raidDb.raidPlayersPerRow or 5
-                local hSpacing = raidDb.raidFlatHorizontalSpacing or 2
-                local vSpacing = raidDb.raidFlatVerticalSpacing or 2
-                local frameWidth = raidDb.frameWidth or 80
-                local frameHeight = raidDb.frameHeight or 40
-                local maxColumns = math.ceil(40 / playersPerUnit)
-                
-                local fullWidth, fullHeight
-                if horizontal then
-                    fullWidth = playersPerUnit * frameWidth + (playersPerUnit - 1) * hSpacing
-                    fullHeight = maxColumns * frameHeight + (maxColumns - 1) * vSpacing
-                else
-                    fullWidth = maxColumns * frameWidth + (maxColumns - 1) * hSpacing
-                    fullHeight = playersPerUnit * frameHeight + (playersPerUnit - 1) * vSpacing
-                end
-                
-                -- Force the size
-                DF.FlatRaidFrames.header:SetSize(fullWidth, fullHeight)
-                
-                DF:Debug("FLATRAID", "ApplyHeaderSettings:   FINAL size forcing: %s x %s",
-                    tostring(fullWidth), tostring(fullHeight))
-                
-                -- Trigger re-layout by toggling showRaid attribute
-                -- This causes SecureGroupHeader_Update to run again with the correct header size
-                DF.FlatRaidFrames.header:SetAttribute("showRaid", false)
-                DF.FlatRaidFrames.header:SetAttribute("showRaid", true)
-                
-                -- Force size again after re-layout (since SecureGroupHeader_Update resizes)
-                DF.FlatRaidFrames.header:SetSize(fullWidth, fullHeight)
-                
-                DF:Debug("FLATRAID", "ApplyHeaderSettings:   triggered re-layout and re-forced size")
-            end
-        end
+        -- ☠ A "FINAL SIZE FORCING" block used to sit here. It has never run for anyone.
+        -- Its gate was `raidFlatPlayerAnchor ~= "CENTER"` and that key is seeded "CENTER"
+        -- by the defaults table and written by no control anywhere in this repo's
+        -- history, so the condition was false on every profile, on every apply.
+        --
+        -- It is deleted rather than repointed at raidFlatFrameAnchor along with the
+        -- readers above. That key only offers START/END, so repointing would have turned
+        -- a block that has executed zero times into one that executes on every settings
+        -- apply -- force-sizing the flat header and toggling showRaid off/on to provoke
+        -- a re-layout. Untested code that moves live frames is not something to switch on
+        -- as a side effect of fixing a different bug. If flat mode ever does need the
+        -- size forcing, it should be added deliberately and confirmed in game.
     end
     
     -- Schedule private aura reanchor after ALL attribute changes settle.
@@ -6849,19 +7180,13 @@ function DF:RefreshAllHeaderChildFrames()
         end
     end
     
-    -- Refresh PinnedFrames if active
-    if DF.PinnedFrames and DF.PinnedFrames.headers then
-        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
-            local header = DF.PinnedFrames.headers[setIndex]
-            if header then
-                for i = 1, 40 do
-                    local child = header:GetAttribute("child" .. i)
-                    if child then
-                        RefreshFrame(child)
-                    end
-                end
-            end
-        end
+    -- Refresh PinnedFrames if active.
+    -- ☠ THROUGH THE SHARED WALKER, NOT A HAND-ROLLED HEADER LOOP — this walked
+    -- PinnedFrames.headers only, so the whole per-frame refresh block (role, absorb, raid
+    -- target, dispel, missing buff, highlights) never reached a pinned BOSS frame.
+    -- (Audit 2026-08-17.)
+    if DF.IteratePinnedFrames then
+        DF.IteratePinnedFrames(RefreshFrame)
     end
 end
 
@@ -7769,17 +8094,44 @@ headerChildEventFrame:RegisterEvent("READY_CHECK_FINISHED")
 headerChildEventFrame:RegisterEvent("PARTY_LEADER_CHANGED")
 
 -- Helper to iterate pinned frame children (forward-declared near file top)
+-- ☠ BOTH POOLS. This walked player-set header children ONLY, so every caller silently
+-- excluded pinned BOSS frames — which are real DF unit frames for friendly, healable
+-- NPCs, not a special case. The visible cost was raid-target markers: put a skull on a
+-- boss and the pinned frame kept the old icon until something else forced a
+-- FullFrameRefresh, because RAID_TARGET_UPDATE routes through here. Its own neighbour
+-- FindPinnedFrameForUnit has always walked bossFrames, so this was the odd one out.
+-- ⚠ The other callers (ready check, leader, AFK, summon, player flags, the roster
+-- name/leader safety net) are no-ops on an NPC rather than wrong — UnitIsPartyLeader and
+-- friends simply answer false — so widening costs them nothing.
+-- ★ PinnedFrames:ForEachActiveFrame is the same walk inside the pinned module; this one
+-- exists separately because it supports EARLY EXIT (a truthy callback stops the sweep)
+-- and that one does not. KEEP THEIR COVERAGE IDENTICAL.
 IteratePinnedFrames = function(callback)
-    if not DF.PinnedFrames or not DF.PinnedFrames.initialized or not DF.PinnedFrames.headers then
+    if not DF.PinnedFrames or not DF.PinnedFrames.initialized then
         return
     end
-    for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
-        local header = DF.PinnedFrames.headers[setIndex]
-        if header and header:IsShown() then
-            for i = 1, 40 do
-                local child = header:GetAttribute("child" .. i)
-                if child and child:IsVisible() then
-                    if callback(child) then return end
+    if DF.PinnedFrames.headers then
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
+            local header = DF.PinnedFrames.headers[setIndex]
+            if header and header:IsShown() then
+                for i = 1, 40 do
+                    local child = header:GetAttribute("child" .. i)
+                    if child and child:IsVisible() then
+                        if callback(child) then return end
+                    end
+                end
+            end
+        end
+    end
+    if DF.PinnedFrames.bossFrames then
+        for setIndex = 1, (DF.PinnedFrames.MAX_SETS or 4) do
+            local frames = DF.PinnedFrames.bossFrames[setIndex]
+            if frames then
+                for i = 1, 8 do
+                    local f = frames[i]
+                    if f and f:IsShown() and f.unit then
+                        if callback(f) then return end
+                    end
                 end
             end
         end
@@ -8450,7 +8802,7 @@ SlashCmdList["DFHEADERS"] = function(msg)
         local growFrom = db.growthAnchor or "START"
         local selfPos = db.sortSelfPosition or "FIRST"
         -- Use correct anchor based on raid layout mode
-        local raidGrowFrom = raidDb.raidUseGroups and (raidDb.raidGroupAnchor or "START") or (raidDb.raidFlatPlayerAnchor or "START")
+        local raidGrowFrom = raidDb.raidUseGroups and (raidDb.raidGroupAnchor or "START") or (raidDb.raidFlatFrameAnchor or "START")
         DF:SetPartyOrientation(true, growFrom, selfPos)
         DF:SetRaidOrientation(true, raidGrowFrom)
     
@@ -8460,7 +8812,7 @@ SlashCmdList["DFHEADERS"] = function(msg)
         local growFrom = db.growthAnchor or "START"
         local selfPos = db.sortSelfPosition or "FIRST"
         -- Use correct anchor based on raid layout mode
-        local raidGrowFrom = raidDb.raidUseGroups and (raidDb.raidGroupAnchor or "START") or (raidDb.raidFlatPlayerAnchor or "START")
+        local raidGrowFrom = raidDb.raidUseGroups and (raidDb.raidGroupAnchor or "START") or (raidDb.raidFlatFrameAnchor or "START")
         DF:SetPartyOrientation(false, growFrom, selfPos)
         DF:SetRaidOrientation(false, raidGrowFrom)
     

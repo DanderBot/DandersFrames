@@ -34,6 +34,13 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
                 self:RefreshStates()
                 DF:InvalidateAuraLayout()
                 DF:UpdateAllFrames()
+                -- Mirror of the Show Buffs checkbox below, for its reason: the show/hide
+                -- gate lives in the UNIT_AURA-driven UpdateAuras path, so a layout-only
+                -- pass leaves the row in its previous state until the next aura event on
+                -- that unit. EVERY writer of showBuffs needs this, not just the checkbox
+                -- -- the Aura Designer's replace-buffs popup was the third writer and had
+                -- the same gap (Krathe, 2026-08-19).
+                DF:RefreshAllVisibleFrames()
             elseif data == "openAD" then
                 if GUI.SelectTab then GUI.SelectTab("auras_auradesigner") end
             end
@@ -767,8 +774,40 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
             -- category obviously misses things, so saying that adds nothing. What is
             -- surprising is that switching on every category still is not All
             -- Debuffs, because Blizzard tagged some debuffs with none of them.
-            filterGroup:AddWidget(GUI:CreateLabel(self.child,
-                "|cff888888" .. L["Only All Debuffs shows every debuff: all the categories combined still miss some debuffs."] .. "|r", 250), 45)
+            --
+            -- ☠ A CAUTION BANNER, CONDITIONAL — not a permanent grey caption. It was a
+            -- banner on the old shared Filters page (catCaution, gated on this same
+            -- switch) and became a static label when the debuff half moved here in
+            -- cf70ac00; that page still carries a "see catCaution" comment pointing at
+            -- the symbol the move deleted. Two things were lost with it:
+            --   * it was CONDITIONAL. All Debuffs is on by default and is the correct
+            --     setting, so a permanent caption warns the overwhelming majority of
+            --     users about a state they are not in -- and the reader who IS in it
+            --     gets no more emphasis than the reader who is not.
+            --   * it was a CAUTION TONE. The completeness gap is Blizzard's and cannot
+            --     be fixed from here: no combination of these tickboxes is complete.
+            --     That is a genuine "this will silently miss things", not a footnote,
+            --     and grey body text is the register this page uses for ordinary help.
+            -- ⚠ The page-banner slot is deliberately NOT where this goes. That was
+            -- tried and reverted on the old page: a warning about one switch, four
+            -- inches from it, displaced the tab's own explanation while it showed.
+            -- It belongs against the control that causes it.
+            --
+            -- ⚠ TEXT SET ONCE, AT CREATION, AND NEVER RE-SET. A banner whose
+            -- SetText/SetHTML is driven from a refresh can feed the refreshContent
+            -- loop that froze the GUI once before, so this one only ever gets hideOn.
+            -- Do not add a refreshContent to it.
+            local catCaution = GUI:CreateInfoBanner(self.child, {
+                tone = "caution",
+                text = L["Only All Debuffs shows every debuff: all the categories combined still miss some debuffs."],
+                minHeight = 30,
+            })
+            -- Shown only while All Debuffs is OFF — the state the warning is about, and
+            -- turning that switch back on is what it tells you to do. A hidden group
+            -- child collapses to nothing (LayoutChildren's entryVisible), so the rows
+            -- below close up rather than leaving a hole where it would have been.
+            catCaution.hideOn = function(d) return (d.directDebuffShowAll and true) or false end
+            filterGroup:AddWidget(catCaution, catCaution.layoutHeight or 45)
 
             -- Blizzard's fixed categories, in the order the old page listed them.
             local DEBUFF_CATEGORIES = {
@@ -1115,7 +1154,21 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         local gridGroup = GUI:CreateSettingsGroup(self.child, 280)
         gridGroup:AddWidget(GUI:CreateHeader(self.child, L["Layout"]), 40)
         local debuffWrap = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Icons Per Row"], 1, 8, 1, db, "debuffWrap", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
-        debuffWrap.disableOn = function(d) return not d.showDebuffs end
+        -- ☠ THE SAME VERTICAL-GROWTH GUARD ITS TWO SIBLINGS CARRY. Both layout paths ignore
+        -- the wrap count outright under vertical-primary growth (the row renders a single
+        -- column), so without this the slider stayed live-looking and did nothing — in test
+        -- mode AND in game. The buff row has carried the guard since the factory rows landed
+        -- and the defensive row copies it; the debuff row never got one, which is what
+        -- "Icons Per Row doesn't preview" is once Growth Direction is vertical. (Aphoex 7.2.)
+        -- Kept term-for-term identical to the buff version rather than rephrased, so the
+        -- three read as one rule.
+        debuffWrap.disableOn = function(d)
+            if not d.showDebuffs then return true end
+            local g = d.debuffGrowth or ""
+            -- Vertical-primary AND vertical-centred growth both render a single column.
+            return DF:FactoryOwnsDebuffRow(d) and (g:sub(1, 2) == "UP" or g:sub(1, 4) == "DOWN"
+                or g == "CENTER_LEFT" or g == "CENTER_RIGHT")
+        end
         local debuffPaddingX = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing X"], -5, 10, 1, db, "debuffPaddingX", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
         debuffPaddingX.disableOn = function(d) return not d.showDebuffs end
         local debuffPaddingY = gridGroup:AddWidget(GUI:CreateSlider(self.child, L["Spacing Y"], -5, 10, 1, db, "debuffPaddingY", nil, function() DF:LightweightUpdateAuraPosition("debuff") end, true), 55)
@@ -1134,8 +1187,18 @@ function DF._SetupGUIPagesPart4(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         debuffOffsetY.disableOn = function(d) return not d.showDebuffs end
         Add(positionGroup, nil, 1)
 
+        -- ☠ A SECOND, DRIFTED COPY OF THE INVALIDATION CONTRACT. This nilled the curve by
+        -- hand and stopped there: it left DF.dispelColorMap cached and never bumped
+        -- DF.dispelCurveGen, so the curve was rebuilt while every live carrier kept a
+        -- reference to the OLD one and neither re-bind gate could fire -- colour changes
+        -- from this control did not reach the frames. Call the one owner instead: it nils
+        -- both caches, bumps the generation, and breaks the drive's fast-path latch.
         local function InvalidateAndUpdate()
-            DF.debuffBorderCurve = nil
+            if DF.InvalidateDispelColorCurve then
+                DF:InvalidateDispelColorCurve()
+            else
+                DF.debuffBorderCurve = nil
+            end
             DF:UpdateAllFrames()
         end
         
