@@ -12,6 +12,9 @@ local CreateFrame = CreateFrame
 local WHITE = "Interface\\Buttons\\WHITE8x8"
 local FONT = "Fonts\\FRIZQT__.TTF"
 
+T.MEDIA = "Interface\AddOns\DandersMover\Media\\"
+T.DEFAULT_ICON = T.MEDIA .. "DF_Icon"
+
 T.C = {
     bg       = { 0.08, 0.08, 0.08, 0.95 },
     panel    = { 0.12, 0.12, 0.12, 0.98 },

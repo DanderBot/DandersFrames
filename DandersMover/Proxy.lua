@@ -13,9 +13,8 @@ local Registry, Solver, T, L = NS.Registry, NS.Solver, NS.Theme, NS.L
 local CreateFrame, UIParent, GetCursorPosition, GameTooltip = CreateFrame, UIParent, GetCursorPosition, GameTooltip
 local pairs, ipairs, format, sqrt, abs = pairs, ipairs, string.format, math.sqrt, math.abs
 
-local MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
-local DEFAULT_ICON = MEDIA .. "DF_Icon"
-local LINK_ICON = MEDIA .. "link"
+local DEFAULT_ICON = T.DEFAULT_ICON
+local LINK_ICON = T.MEDIA .. "link"
 local PROXIMITY = 100
 local MIN_PROXY = 24
 local C_ZONE_NEAR = { 0.3, 0.7, 1.0 }

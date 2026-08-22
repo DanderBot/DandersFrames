@@ -32,7 +32,8 @@ local function build()
     local y = -8
     local function row(h) local cur = y; y = y - h; return cur end
 
-    f.title = T.Label(f, "", 12); f.title:SetPoint("TOPLEFT", 10, row(16))
+    f.icon = f:CreateTexture(nil, "OVERLAY"); f.icon:SetSize(16, 16); f.icon:SetPoint("TOPLEFT", 10, -8)
+    f.title = T.Label(f, "", 12); f.title:SetPoint("TOPLEFT", 30, row(16))
     f.addon = T.Label(f, "", 10); f.addon:SetTextColor(T.Unpack(T.C.muted)); f.addon:SetPoint("TOPLEFT", 10, row(14))
     f.anchorLine = T.Label(f, "", 10); f.anchorLine:SetTextColor(T.Unpack(T.C.anchored)); f.anchorLine:SetPoint("TOPLEFT", 10, row(16))
 
@@ -145,6 +146,7 @@ function Pn:Refresh()
     local pos = Registry:GetPos(el)
     f.title:SetText(el.title)
     local addon = Registry:GetAddon(el.addon)
+    if f.icon:SetTexture(addon and addon.icon or T.DEFAULT_ICON) == false then f.icon:SetTexture(T.DEFAULT_ICON) end
     f.addon:SetText(addon and addon.title or el.addon)
     if pos.anchor then
         local a = pos.anchor
