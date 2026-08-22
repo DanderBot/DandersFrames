@@ -19,6 +19,7 @@ enable-nolib-creation: no
 move-folders:
   DandersFrames/DandersFrames: DandersFrames
   DandersFrames/DandersFrames_Options: DandersFrames_Options
+  DandersFrames/DandersMover: DandersMover
 
 ignore:
   - CHANGELOG.md

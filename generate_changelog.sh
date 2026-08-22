@@ -170,7 +170,7 @@ echo "$CHANGELOG_CONTENT" > "$CHANGELOG_FILE"
 # through a dev junction. Syncing only the main TOC left the companion pinned
 # at whatever it was hand-written as, drifting one version further behind on
 # every release.
-for TOC_FILE in "DandersFrames/DandersFrames.toc" "DandersFrames_Options/DandersFrames_Options.toc"; do
+for TOC_FILE in "DandersFrames/DandersFrames.toc" "DandersFrames_Options/DandersFrames_Options.toc" "DandersMover/DandersMover.toc"; do
     if [ ! -f "$TOC_FILE" ]; then
         echo "Error: $TOC_FILE not found — the addon layout changed without this script." >&2
         exit 1
