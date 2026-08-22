@@ -1803,8 +1803,16 @@ DF.PartyDefaults = {
     -- as "DF default font" / "don't touch the colour" — which is what the old table did
     -- by omitting them. Adding either default here would restyle every existing profile.
     defensiveIconStackAnchor = "BOTTOMRIGHT",
+    -- ⚠ Seeded 2026-08-22 (Krathe): the pair had no font default and scale 1, which
+    -- rendered the stack count in the Blizzard fallback font (SafeSetFont resolves a
+    -- nil font to FRIZQT__, NOT to a DF font -- despite what a consumer comment
+    -- claimed) at a full 14pt. New profiles and untouched keys get the house font at
+    -- 0.7; the scale half of that for EXISTING profiles rides the one-shot
+    -- _defensiveStackRestyleV1 migration in Core.lua, because scale was previously
+    -- seeded 1 by this very table and the backfill will not overwrite it.
+    defensiveIconStackFont = "DF Roboto SemiBold",
     defensiveIconStackOutline = "OUTLINE",
-    defensiveIconStackScale = 1,
+    defensiveIconStackScale = 0.7,
     defensiveIconStackX = 2,
     defensiveIconStackY = -1,
     -- 26 (Krathe, 2026-08-08; was 30). ⚠ RAID keeps its own smaller value — see
