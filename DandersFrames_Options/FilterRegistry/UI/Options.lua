@@ -2780,8 +2780,15 @@ function DF.BuildFilterDesignerPage(guiRef, pageRef, dbRef)
         -- turned the top of the page gold AND displaced the tab's own explanation --
         -- a warning about one switch, four inches from that switch, evicting the copy
         -- that says what the whole tab is. That caution is now a banner of its own
-        -- directly under All Debuffs (see catCaution), beside the control it is about,
-        -- and nothing has to give up its slot for it.
+        -- directly under All Debuffs, beside the control it is about, and nothing has
+        -- to give up its slot for it.
+        -- ⚠ It lives on the DEBUFF BAR page, not here: GUI/Pages/Indicators.lua,
+        -- pageDebuffs, still named `catCaution`. This pointer used to say "see
+        -- catCaution" meaning the local a few hundred lines up, and cf70ac00 -- the
+        -- commit that moved the debuff half off this page -- deleted that local and
+        -- left the reference behind. The banner went with it: it came back as a
+        -- permanent grey caption on the new page, losing both its condition and its
+        -- tone, and stayed that way until 2026-08-21.
         --
         -- The rule that leaves behind: this banner says "here is how this tab works"
         -- and is always info; anything that says "this will silently miss things"
