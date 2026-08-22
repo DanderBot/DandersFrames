@@ -2380,6 +2380,16 @@ DF.PartyDefaults = {
     frameFadeHoverScope = "ALL",   -- "ALL" = every frame lifts while any is hovered; "FRAME" = just the hovered one
     frameFadeInstanceUsesCombat = false,   -- inside a dungeon/raid/arena/BG, hold the in-combat value between pulls
 
+    -- Ping Icon (mirror of Blizzard's 12.1 frame pings; see Features/PingMirror.lua)
+    pingIconAlpha = 1,
+    pingIconAnchor = "CENTER",
+    pingIconEnabled = true,
+    pingIconFrameLevel = 30,
+    pingIconHideInCombat = false,
+    pingIconScale = 1,
+    pingIconX = 0,
+    pingIconY = 0,
+
     -- Range Check
     rangeAlpha = 0.5,
     rangeCheckSpellID = 0,

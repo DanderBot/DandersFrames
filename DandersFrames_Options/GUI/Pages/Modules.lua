@@ -14,7 +14,7 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         -- Every icon on the page needs its own prefix; "combatIcon" was the one
         -- omission, so the Combat icon's seven settings were skipped by Copy, Sync
         -- and Reset while every other icon on the same page travelled.
-        Add(CreateCopyButton(self.child, {"roleIcon", "leaderIcon", "raidTargetIcon", "readyCheckIcon", "summonIcon", "resurrectionIcon", "phasedIcon", "afkIcon", "vehicleIcon", "raidRoleIcon", "bgCarrierIcon", "combatIcon", "statusIconFont", "statusIconFontSize", "statusIconFontOutline"}, L["Icons"], "indicators_icons"), 25, 2)
+        Add(CreateCopyButton(self.child, {"roleIcon", "leaderIcon", "raidTargetIcon", "readyCheckIcon", "pingIcon", "summonIcon", "resurrectionIcon", "phasedIcon", "afkIcon", "vehicleIcon", "raidRoleIcon", "bgCarrierIcon", "combatIcon", "statusIconFont", "statusIconFontSize", "statusIconFontOutline"}, L["Icons"], "indicators_icons"), 25, 2)
         
         local anchorOptions = {
             CENTER = L["Center"],
@@ -336,6 +336,47 @@ function DF._SetupGUIPagesPart5(GUI, CreateCategory, CreateSubTab, BuildPage, L,
         Add(rcPosition, nil, 1)
         readySection:RegisterChild(rcPosition)
         
+        -- ============================================
+        -- PING ICON (Collapsible)
+        -- Mirrors Blizzard's 12.1 frame pings; see Features/PingMirror.lua.
+        -- ============================================
+        local pingSection = Add(GUI:CreateCollapsibleSection(self.child, L["Ping Icon"], false, 280), 36, 1)
+        WireStatusPreview(pingSection, { enableKey = "pingIconEnabled", icons = { "Ping_Frame_Warning", "Ping_Frame_Attack", "Ping_Frame_Assist" } })
+
+        -- Settings
+        local pingSettings = GUI:CreateSettingsGroup(self.child, 280)
+        pingSettings:AddWidget(GUI:CreateHeader(self.child, L["Settings"]), GUI.RowHeight.sectionHeader)
+        pingSettings.disableChildrenOn = function(d) return not d.pingIconEnabled end
+        local pingIconEnableCb = pingSettings:AddWidget(GUI:CreateCheckbox(self.child, L["Enable Ping Icon"], db, "pingIconEnabled", function()
+            if DF.OnPingIconToggled then DF:OnPingIconToggled() end
+            DF:UpdateAllFrames()
+        end), 30)
+        pingIconEnableCb.keepEnabled = true
+        pingIconEnableCb.tooltip = L["Shows a group member's ping on the frame of the unit they pinged."]
+        Add(pingSettings, nil, 1)
+        pingSection:RegisterChild(pingSettings)
+
+        -- Appearance
+        local pingAppearance = GUI:CreateSettingsGroup(self.child, 280)
+        pingAppearance:AddWidget(GUI:CreateHeader(self.child, L["Appearance"]), GUI.RowHeight.sectionHeader)
+        pingAppearance.disableChildrenOn = function(d) return not d.pingIconEnabled end
+        pingAppearance:AddWidget(GUI:CreateSlider(self.child, L["Scale"], 0.5, 2.5, 0.1, db, "pingIconScale", nil, function() DF:LightweightUpdateIconPosition("ping") end, true), 55)
+        pingAppearance:AddWidget(GUI:CreateSlider(self.child, L["Alpha"], 0.1, 1.0, 0.05, db, "pingIconAlpha", nil, function() DF:LightweightUpdateIconAlpha("ping") end, true), 55)
+        pingAppearance:AddWidget(GUI:SetFrameLevelTooltip(GUI:CreateSlider(self.child, L["Frame Level"], 0, 100, 1, db, "pingIconFrameLevel", nil, function() DF:LightweightUpdateFrameLevel("ping") end, true)), 55)
+        pingAppearance:AddWidget(GUI:CreateCheckbox(self.child, L["Hide in Combat"], db, "pingIconHideInCombat", function() DF:UpdateAllFrames() end), 30)
+        Add(pingAppearance, nil, 1)
+        pingSection:RegisterChild(pingAppearance)
+
+        -- Position
+        local pingPosition = GUI:CreateSettingsGroup(self.child, 280)
+        pingPosition:AddWidget(GUI:CreateHeader(self.child, L["Position"]), GUI.RowHeight.sectionHeader)
+        pingPosition.disableChildrenOn = function(d) return not d.pingIconEnabled end
+        pingPosition:AddWidget(GUI:CreateDropdown(self.child, L["Anchor"], anchorOptions, db, "pingIconAnchor", function() DF:LightweightUpdateIconPosition("ping") end), 55)
+        pingPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset X"], -50, 50, 1, db, "pingIconX", nil, function() DF:LightweightUpdateIconPosition("ping") end, true), 55)
+        pingPosition:AddWidget(GUI:CreateSlider(self.child, L["Offset Y"], -50, 50, 1, db, "pingIconY", nil, function() DF:LightweightUpdateIconPosition("ping") end, true), 55)
+        Add(pingPosition, nil, 1)
+        pingSection:RegisterChild(pingPosition)
+
         -- ============================================
         -- SUMMON ICON (Collapsible)
         -- ============================================

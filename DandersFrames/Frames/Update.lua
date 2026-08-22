@@ -1126,6 +1126,7 @@ function DF:UpdateFrame(frame)
         -- Also call aura update and other party-specific updates
         DF:UpdateAuras(frame)
         DF:UpdateReadyCheckIcon(frame)
+        if DF.UpdatePingIcon then DF:UpdatePingIcon(frame) end
         DF:UpdateCenterStatusIcon(frame)
         -- Explicit power bar update (in case UpdateUnitFrame early-exited)
         if DF.UpdatePower then

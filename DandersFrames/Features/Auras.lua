@@ -4080,8 +4080,16 @@ function DF:HardDisableBlizzardFrames()
         end
 
         if hideRaid then
-            if CompactRaidFrameContainer then
+            -- The ping mirror (Features/PingMirror.lua) reads pings off Blizzard's
+            -- hidden compact frames, and in a raid those frames only get units while
+            -- CompactRaidFrameContainer still hears roster events. Its TryUpdate has
+            -- no visibility gate, so leaving the events on is enough, at the cost of
+            -- Blizzard laying out its hidden raid frames in the background.
+            local keepContainer = partyDb.pingIconEnabled or raidDb.pingIconEnabled
+            if CompactRaidFrameContainer and not keepContainer then
                 CompactRaidFrameContainer:UnregisterAllEvents()
+                -- Irreversible this session; enabling the ping icon later prompts a reload.
+                DF.blizzardContainerKilled = true
             end
             if CompactRaidFrameManager then
                 CompactRaidFrameManager:UnregisterAllEvents()

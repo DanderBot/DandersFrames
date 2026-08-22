@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### New Features
+- (Icons) Pings now show on frames. When a group member pings a player, the ping icon appears on that player's frame, matching the default raid frames. Find it under Indicators > Icons > Ping Icon, with the usual scale, position and hide-in-combat options.
 
 * (Tooltips) Every DF tooltip type now has its own **Show Out of Combat** and **Show In Combat** setting, each offering Show, Hold Shift, Hold Ctrl, Hold Alt or Hidden — so frame tooltips can, for example, appear only while holding Alt out of combat and never in combat. This replaces the Disable In Combat checkboxes for frame and binding tooltips; existing choices carry over. (by Krathe)
 

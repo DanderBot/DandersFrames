@@ -270,6 +270,7 @@ local function RefreshOverrideTabMap()
     {"leaderIcon",          "indicators_icons",     L["Icons"]},
     {"raidTargetIcon",      "indicators_icons",     L["Icons"]},
     {"readyCheckIcon",      "indicators_icons",     L["Icons"]},
+    {"pingIcon",            "indicators_icons",     L["Icons"]},
     {"summonIcon",          "indicators_icons",     L["Icons"]},
     {"resurrectionIcon",    "indicators_icons",     L["Icons"]},
     {"phasedIcon",          "indicators_icons",     L["Icons"]},
