@@ -28,6 +28,13 @@ function S.CenterToPoint(point, cx, cy, w, h)
     return cx + (H[point] or 0) * w / 2, cy + (V[point] or 0) * h / 2
 end
 
+-- Drag deltas. The record's point/x/y and the element's visible centre can be
+-- offset from each other; moving the visible centre by (dx, dy) moves the
+-- record by the same (dx, dy), whatever that offset is.
+function S.DragDelta(startPos, startCx, startCy, cx, cy)
+    return (startPos.x or 0) + (cx - startCx), (startPos.y or 0) + (cy - startCy)
+end
+
 -- ============================================================
 -- GRID / SCREEN SNAP
 -- ============================================================
@@ -62,6 +69,14 @@ end
 -- ============================================================
 function S.Resolve(anchor, childW, childH, parent, spacing)
     if not parent or not parent.w or not parent.h or parent.w <= 0 or parent.h <= 0 then return nil end
+    -- Point mode: child:SetPoint(point, target, relPoint, offsetX, offsetY).
+    if anchor.mode == "point" then
+        local pt, rel = anchor.point or "CENTER", anchor.relPoint or "CENTER"
+        local tx = parent.x + (H[rel] or 0) * parent.w / 2
+        local ty = parent.y + (V[rel] or 0) * parent.h / 2
+        return tx - (H[pt] or 0) * childW / 2 + (anchor.offsetX or 0),
+               ty - (V[pt] or 0) * childH / 2 + (anchor.offsetY or 0)
+    end
     spacing = spacing or S.SPACING
     local hpw, hph = parent.w / 2, parent.h / 2
     local hcw, hch = childW / 2, childH / 2

@@ -147,6 +147,15 @@ local function sizeOf(el)
     return w or 24, h or 24
 end
 
+-- Where the element actually is on screen. Falls back to the record's implied
+-- centre when the frame has no rect yet (hidden, or a getFrame that is nil).
+local function visualCenter(el, pos)
+    local rect = Registry:GetRect(el)
+    if rect then return rect.x, rect.y end
+    local w, h = sizeOf(el)
+    return Solver.PointToCenter(pos.point or "CENTER", pos.x or 0, pos.y or 0, w, h)
+end
+
 function Sess:Nudge(el, dx, dy)
     local pos = Registry:GetPos(el)
     local before = NS.CopyPos(pos)
@@ -214,9 +223,10 @@ end
 function Sess:Center(el)
     local pos = Registry:GetPos(el)
     local before = NS.CopyPos(pos)
-    local w, h = sizeOf(el)
+    -- Move the record by whatever it takes to put the visible rect on 0,0.
+    local cx, cy = visualCenter(el, pos)
     pos.anchor = nil
-    pos.x, pos.y = Solver.CenterToPoint(pos.point or "CENTER", 0, 0, w, h)
+    pos.x, pos.y = (pos.x or 0) - cx, (pos.y or 0) - cy
     apply(el, "center")
     commit(el, before, L["Center %s"])
 end
@@ -238,7 +248,10 @@ function Sess:Redo() if self.undo then self.undo:Redo() end end
 -- DRAG
 -- ============================================================
 function Sess:BeginDrag(el)
-    self.dragBefore = NS.CopyPos(Registry:GetPos(el))
+    local pos = Registry:GetPos(el)
+    self.dragBefore = NS.CopyPos(pos)
+    self.dragStartPos = NS.CopyPos(pos)
+    self.dragStartCx, self.dragStartCy = visualCenter(el, pos)
 end
 
 function Sess:DragTo(el, cx, cy)
@@ -259,7 +272,7 @@ function Sess:DragTo(el, cx, cy)
     if snapped and not zone then Grid:ShowPreview(cx, cy) else Grid:HidePreview() end
     local pos = Registry:GetPos(el)
     pos.anchor = nil
-    pos.x, pos.y = Solver.CenterToPoint(pos.point or "CENTER", cx, cy, w, h)
+    pos.x, pos.y = Solver.DragDelta(self.dragStartPos, self.dragStartCx, self.dragStartCy, cx, cy)
     NS:Notify(el, "drag")
     NS:ReapplyDescendants(el.id, "parent")
     Proxy:RefreshAll()
@@ -268,7 +281,7 @@ end
 
 function Sess:EndDrag(el, cx, cy, zone)
     local before = self.dragBefore or NS.CopyPos(Registry:GetPos(el))
-    self.dragBefore = nil
+    self.dragBefore, self.dragStartPos, self.dragStartCx, self.dragStartCy = nil, nil, nil, nil
     local pos = Registry:GetPos(el)
     if zone then
         if Solver.WouldCreateCycle(function(id) return NS:ParentOf(id) end, el.id, zone.target) then

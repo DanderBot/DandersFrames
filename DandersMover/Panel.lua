@@ -146,11 +146,15 @@ function Pn:Refresh()
     local addon = Registry:GetAddon(el.addon)
     f.addon:SetText(addon and addon.title or el.addon)
     if pos.anchor then
-        local target = Registry:GetTarget(pos.anchor.target)
+        local a = pos.anchor
+        local target = Registry:GetTarget(a.target)
         local name = target and target.title or L["(unavailable)"]
-        f.anchorLine:SetText(format(L["Anchored to %s"], format("%s (%s/%s)", name, pos.anchor.edge, pos.anchor.align)))
+        local detail
+        if a.mode == "point" then detail = format("%s (%s → %s)", name, a.point, a.relPoint)
+        else detail = format("%s (%s/%s)", name, a.edge, a.align) end
+        f.anchorLine:SetText(format(L["Anchored to %s"], detail))
         f.xLabel:SetText(L["Offset X"]); f.yLabel:SetText(L["Offset Y"])
-        f.xBox:SetText(tostring(pos.anchor.offsetX or 0)); f.yBox:SetText(tostring(pos.anchor.offsetY or 0))
+        f.xBox:SetText(tostring(a.offsetX or 0)); f.yBox:SetText(tostring(a.offsetY or 0))
         f.btnDetach:SetEnabledState(true)
         for _, b in ipairs(f.points) do b:Hide() end
     else

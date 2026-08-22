@@ -45,6 +45,23 @@ do
     check(R:GetRect(dyn) == nil, "nil frame -> nil rect")
 end
 
+-- getRect override: the visible rect wins over the frame's own geometry
+do
+    local visible = R:Register("A", "visible", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 },
+        { getRect = function() return { x = 10, y = 20, w = 300, h = 50 } end }))
+    local rect = R:GetRect(visible)
+    eq(rect.x, 10, "getRect x"); eq(rect.y, 20, "getRect y")
+    eq(rect.w, 300, "getRect w"); eq(rect.h, 50, "getRect h")
+    local w, h = R:GetSize(visible)
+    eq(w, 300, "GetSize from getRect w"); eq(h, 50, "GetSize from getRect h")
+    local blank = R:RegisterAnchorTarget("A", "blank", { title = "blank", frame = FakeFrame(0, 0, 10, 10),
+        getRect = function() return nil end })
+    check(R:GetRect(blank) == nil, "getRect nil -> nil rect")
+    local ok = pcall(R.Register, R, "A", "badrect", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 },
+        { getRect = "not a function" }))
+    check(not ok, "non-function getRect rejected")
+end
+
 -- graph
 do
     local posB = { point = "CENTER", x = 0, y = 0, anchor = { target = "A:one", edge = "right", align = "start" } }

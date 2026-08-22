@@ -20,6 +20,9 @@ local function validate(def, kind)
     if not def.frame and type(def.getFrame) ~= "function" then
         error("DandersMover: definition needs frame or getFrame", 3)
     end
+    if def.getRect ~= nil and type(def.getRect) ~= "function" then
+        error("DandersMover: getRect must be a function", 3)
+    end
     if kind == "element" then
         if type(def.getPos) ~= "function" then error("DandersMover: element needs getPos", 3) end
         if type(def.onChanged) ~= "function" then error("DandersMover: element needs onChanged", 3) end
@@ -39,7 +42,7 @@ local function insertTarget(self, addon, key, def, element)
     self.targets[id] = {
         addon = addon, key = key, id = id, title = def.title or key,
         frame = def.frame, getFrame = def.getFrame, getSize = def.getSize,
-        group = def.group, element = element,
+        getRect = def.getRect, group = def.group, element = element,
     }
     return self.targets[id]
 end
@@ -52,7 +55,7 @@ local function insertElement(self, addon, key, def)
         frame = def.frame, getFrame = def.getFrame,
         getPos = def.getPos, onChanged = def.onChanged, default = def.default,
         secure = def.secure and true or false, getSize = def.getSize,
-        anchorable = def.anchorable ~= false, group = def.group,
+        getRect = def.getRect, anchorable = def.anchorable ~= false, group = def.group,
     }
     self.elements[id] = el
     if el.anchorable then insertTarget(self, addon, key, def, el) else self.targets[id] = nil end
@@ -133,6 +136,11 @@ function R:GetFrame(entry)
 end
 
 function R:GetSize(entry)
+    if entry.getRect then
+        local r = entry.getRect()
+        if not r then return nil end
+        return r.w, r.h
+    end
     if entry.getSize then return entry.getSize() end
     local f = self:GetFrame(entry)
     if not f then return nil end
@@ -140,7 +148,13 @@ function R:GetSize(entry)
 end
 
 -- rect in UIParent units relative to UIParent centre.
+-- getRect, when given, is the visible rect and already in those units.
 function R:GetRect(entry)
+    if entry.getRect then
+        local r = entry.getRect()
+        if not r then return nil end
+        return { x = r.x, y = r.y, w = r.w, h = r.h }
+    end
     local f = self:GetFrame(entry)
     if not f then return nil end
     local cx, cy = f:GetCenter()

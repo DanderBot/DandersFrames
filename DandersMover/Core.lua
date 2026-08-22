@@ -47,7 +47,9 @@ function NS.CopyPos(src, dst)
     wipe(dst)
     dst.point, dst.x, dst.y = src.point, src.x, src.y
     if src.anchor then
-        dst.anchor = { target = src.anchor.target, edge = src.anchor.edge, align = src.anchor.align,
+        dst.anchor = { target = src.anchor.target, mode = src.anchor.mode,
+                       edge = src.anchor.edge, align = src.anchor.align,
+                       point = src.anchor.point, relPoint = src.anchor.relPoint,
                        offsetX = src.anchor.offsetX, offsetY = src.anchor.offsetY }
     end
     return dst

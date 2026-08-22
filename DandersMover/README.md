@@ -36,13 +36,37 @@ MyAddon.bar:SetPoint(pos.point or "CENTER", UIParent, "CENTER", pos.x or 0, pos.
 CENTER). When the lib is present it keeps them in sync with `anchor`; when it is
 absent you apply them and ignore `anchor`.
 
+### Anchor modes
+
+```lua
+-- outside (default when mode is nil): sit beside the target's edge
+anchor = { target = "OtherAddon:key", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 }
+
+-- point: SetPoint semantics
+anchor = { target = "OtherAddon:key", mode = "point", point = "TOPLEFT", relPoint = "BOTTOMLEFT", offsetX = 0, offsetY = 0 }
+```
+**Outside** places the whole element next to one of the target's four edges,
+aligned to its start / center / end, with a small gap. **Point** puts the
+element's `point` directly on the target's `relPoint` plus the offset, exactly
+like `child:SetPoint(point, target, relPoint, offsetX, offsetY)`.
+
+### `getRect`
+
+`getRect = function() return { x = cx, y = cy, w = w, h = h } end` reports the
+element's *visible* rect (UIParent units from UIParent CENTER) when it differs
+from the frame's own geometry — an oversized container, a frame with padding, a
+header whose extent is not its children's. Snap zones, proxies and the drag
+maths all use it, and dragging applies the movement as a delta to the record, so
+the offset between record and visible rect never drifts. Return nil while there
+is nothing to measure.
+
 ## API
 
 | Call | Purpose |
 |---|---|
 | `Mover:RegisterAddon(name, { title, icon })` | Group your elements in the UI |
-| `Mover:Register(addon, key, def)` | Make a frame movable. `def`: `title`, `frame` or `getFrame`, `getPos`, `onChanged(pos, reason)`, optional `default`, `secure`, `getSize`, `anchorable`, `group` |
-| `Mover:RegisterAnchorTarget(addon, key, { title, frame or getFrame })` | Something others can anchor to but that is not itself movable |
+| `Mover:Register(addon, key, def)` | Make a frame movable. `def`: `title`, `frame` or `getFrame`, `getPos`, `onChanged(pos, reason)`, optional `default`, `secure`, `getSize`, `getRect`, `anchorable`, `group` |
+| `Mover:RegisterAnchorTarget(addon, key, { title, frame or getFrame })` | Something others can anchor to but that is not itself movable. Also takes `getSize` / `getRect` |
 | `Mover:RefreshAnchorTarget(addon, key)` | Call when a `getFrame` target now resolves to a different frame |
 | `Mover:Apply(addon, key)` | Re-solve and re-fire `onChanged` (e.g. after you change the frame's scale) |
 | `Mover:Unregister(addon, key)`, `Mover:UnregisterAddon(addon)` | Cleanup |

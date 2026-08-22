@@ -41,6 +41,35 @@ do
     check(S.Resolve({ edge = "top", align = "center" }, 20, 10, { x = 0, y = 0, w = 0, h = 40 }, 2) == nil, "zero-size parent -> nil")
 end
 
+-- point mode
+do
+    local parent = { x = 0, y = 0, w = 100, h = 40 }
+    local function pt(point, relPoint, ox, oy)
+        return S.Resolve({ mode = "point", point = point, relPoint = relPoint, offsetX = ox, offsetY = oy }, 20, 10, parent, 2)
+    end
+    local cx, cy = pt("TOPLEFT", "TOPRIGHT")
+    eq(cx, 60, "TOPLEFT on TOPRIGHT x"); eq(cy, 15, "TOPLEFT on TOPRIGHT y")
+    cx, cy = pt("CENTER", "CENTER")
+    eq(cx, 0, "CENTER on CENTER x"); eq(cy, 0, "CENTER on CENTER y")
+    cx, cy = pt("BOTTOMRIGHT", "BOTTOMLEFT", 5, -3)
+    eq(cx, -55, "BOTTOMRIGHT on BOTTOMLEFT x + offset"); eq(cy, -18, "BOTTOMRIGHT on BOTTOMLEFT y + offset")
+    cx, cy = pt("TOP", "BOTTOM")
+    eq(cx, 0, "TOP on BOTTOM x"); eq(cy, -25, "TOP on BOTTOM y")
+    check(S.Resolve({ mode = "point", point = "CENTER", relPoint = "CENTER" }, 20, 10, { x = 0, y = 0, w = 0, h = 40 }, 2) == nil,
+        "zero-size parent -> nil in point mode")
+    -- nil mode is still the outside solve
+    local ox, oy = S.Resolve({ edge = "right", align = "start" }, 20, 10, parent, 2)
+    eq(ox, 62, "nil mode still outside x"); eq(oy, 15, "nil mode still outside y")
+end
+
+-- drag deltas
+do
+    local x, y = S.DragDelta({ x = 100, y = -50 }, 10, 20, 13, 18)
+    eq(x, 103, "delta x"); eq(y, -52, "delta y")
+    local x2, y2 = S.DragDelta({}, 10, 20, 13, 18)
+    eq(x2, 3, "nil start x treated as 0"); eq(y2, -2, "nil start y treated as 0")
+end
+
 -- snap zones + best zone
 do
     local parent = { x = 0, y = 0, w = 100, h = 40 }
