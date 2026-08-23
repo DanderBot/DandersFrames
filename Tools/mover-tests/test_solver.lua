@@ -213,3 +213,58 @@ do
     local _, _, lx5, ly5 = S.SnapRectToGrid(7, 0, 30, 10, 0)
     check(lx5 == nil and ly5 == nil, "grid 0 -> no lines")
 end
+
+-- rect overlap area
+do
+    eq(S.RectOverlapArea({ x = 0, y = 0, w = 20, h = 20 }, { x = 0, y = 0, w = 20, h = 20 }), 400, "full overlap")
+    eq(S.RectOverlapArea({ x = 0, y = 0, w = 20, h = 20 }, { x = 10, y = 10, w = 20, h = 20 }), 100, "quarter overlap")
+    eq(S.RectOverlapArea({ x = 0, y = 0, w = 20, h = 20 }, { x = 20, y = 0, w = 20, h = 20 }), 0, "touching edges = 0")
+    eq(S.RectOverlapArea({ x = 0, y = 0, w = 20, h = 20 }, { x = 100, y = 0, w = 20, h = 20 }), 0, "apart = 0")
+end
+
+-- panel docking: candidates and the least-covering side
+do
+    local proxy = { x = 0, y = 0, w = 100, h = 40 }
+    local cands = S.DockCandidates(proxy, 200, 300, 10)
+    eq(cands[1].side, "right", "priority 1 right")
+    eq(cands[2].side, "left",  "priority 2 left")
+    eq(cands[3].side, "below", "priority 3 below")
+    eq(cands[4].side, "above", "priority 4 above")
+    -- right: left edge sits gap beyond the proxy's right edge, top on the proxy's top
+    eq(cands[1].x, 50 + 10 + 100, "right cand cx")
+    eq(cands[1].y, 20 - 150, "right cand cy (hangs from the top edge)")
+    -- below/above centre on the proxy
+    eq(cands[3].x, 0, "below cand cx"); eq(cands[3].y, -20 - 10 - 150, "below cand cy")
+    eq(cands[4].x, 0, "above cand cx"); eq(cands[4].y, 20 + 10 + 150, "above cand cy")
+
+    -- no obstacles: the first on-screen candidate wins (right)
+    eq(S.BestDockSide(proxy, 200, 300, 10, {}, 1920, 1080), "right", "clear screen -> right")
+
+    -- an obstacle covering the right candidate pushes the panel left
+    local rightBlock = { x = 160, y = -130, w = 400, h = 400 }
+    eq(S.BestDockSide(proxy, 200, 300, 10, { rightBlock }, 1920, 1080), "left", "blocked right -> left")
+
+    -- sides blocked and a legend-like block over the above slot: below covers least.
+    -- (The side candidates hang from the proxy's top, so they still nick the
+    -- below slot a little -- below wins on TOTAL area, not on being untouched.)
+    local leftBlock = { x = -160, y = -130, w = 200, h = 300 }
+    local sideBlock = { x = 160, y = -130, w = 200, h = 300 }
+    local topBlock = { x = 0, y = 200, w = 600, h = 300 }
+    eq(S.BestDockSide(proxy, 200, 300, 10, { sideBlock, leftBlock, topBlock }, 1920, 1080), "below", "blocked sides + top -> below")
+
+    -- equal partial cover everywhere: priority order breaks the tie (right)
+    local everywhere = { x = 0, y = 0, w = 4000, h = 4000 }
+    eq(S.BestDockSide(proxy, 200, 300, 10, { everywhere }, 1920, 1080), "right", "uniform cover ties -> right")
+
+    -- smallest TOTAL overlap wins, not first-clear: right heavily covered,
+    -- left only nicked
+    local nick = { x = -160, y = -280, w = 40, h = 40 }
+    eq(S.BestDockSide(proxy, 200, 300, 10, { rightBlock, nick }, 1920, 1080), "left", "least overlap wins")
+
+    -- proxy at the right screen edge: right candidate off-screen, left wins
+    local edgeProxy = { x = 900, y = 0, w = 100, h = 40 }
+    eq(S.BestDockSide(edgeProxy, 200, 300, 10, {}, 1920, 1080), "left", "off-screen right skipped")
+
+    -- panel taller than the screen: no candidate fits -> nil (caller falls back)
+    check(S.BestDockSide(proxy, 200, 2000, 10, {}, 1920, 1080) == nil, "nothing fits -> nil")
+end
