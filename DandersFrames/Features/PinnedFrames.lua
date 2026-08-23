@@ -3167,6 +3167,11 @@ function PinnedFrames:Reinitialize()
         -- fix), and pruning is not that work: it walks MAX_SETS once, hides by name, and
         -- defers its protected writes to regen on its own.
         self:PruneOrphanedSets()
+        -- ☠ AND RECONCILE THE PREVIEW. This bail returns before the teardown loop
+        -- below, which is the only thing that hides the non-secure test pools -- so
+        -- deleting the LAST enabled set left its fake frames on screen. Prune walks
+        -- the real containers by name; it does not know about testContainers.
+        self:RefreshTestModeSets()
         DF:Debug("PINNED", "Reinitialize: skipped - no set enabled (mode now %s), pruned",
             tostring(self.currentMode))
         return
@@ -3287,7 +3292,12 @@ function PinnedFrames:AddSet(mode)
     pf.sets[newIndex] = MakeDefaultSet(newIndex)
     -- Only (re)build live frames when editing the ACTIVE mode; the inactive mode's
     -- frames are rebuilt by Reinitialize the next time you enter that mode.
-    if mode ~= GetActualMode() then return newIndex end
+    -- ⚠ "Inactive" is about the real group, not about what is on SCREEN: a test
+    -- preview can be showing this mode's sets right now (see RefreshTestModeSets).
+    if mode ~= GetActualMode() then
+        self:RefreshTestModeSets()
+        return newIndex
+    end
     if InCombatLockdown() then
         self.pendingReinitialize = true
         return newIndex
@@ -3296,6 +3306,10 @@ function PinnedFrames:AddSet(mode)
     self:ApplyLayoutSettings(newIndex)
     local set = GetSetDB(newIndex)
     self:SetEnabled(newIndex, set and set.enabled)
+    -- A new set is dormant by default so there is usually nothing to preview, but
+    -- an import can hand us an enabled one, and the preview should not wait for
+    -- the next test-mode toggle to show it.
+    self:RefreshTestModeSets()
     return newIndex
 end
 
@@ -3324,7 +3338,15 @@ function PinnedFrames:RemoveSet(setIndex, mode)
         end
     end
 
-    if mode ~= GetActualMode() then return true end  -- inactive mode: DB only
+    -- Inactive mode: DB only for the LIVE frames -- but the compaction above just
+    -- orphaned this mode's test preview if one is up. GetActualMode reads the real
+    -- group, and a mover session unlocking raid while solo previews the raid sets
+    -- with the actual mode still "party", so without this the deleted set's fake
+    -- frames sat on screen until test mode was toggled. See RefreshTestModeSets.
+    if mode ~= GetActualMode() then
+        self:RefreshTestModeSets()
+        return true
+    end
     if InCombatLockdown() then
         -- ☠ THE CONTAINER AND HEADER ARE PROTECTED -- this used to :Hide() them directly.
         -- hideContainerSafe exists precisely for this: the containers are implicitly
@@ -4473,6 +4495,44 @@ function PinnedFrames:RefreshTestMode(withLayout)
             end
         end
     end
+end
+
+-- Make the preview match the set list again after sets were added or removed
+-- WHILE test mode is up. The pools and their containers are keyed by SET INDEX
+-- (EnterTestMode / EnsureTestContainer / testFrames[setIndex]), and RemoveSet
+-- COMPACTS the array — so the tail index is orphaned: no set owns it any more,
+-- and nothing in the test path hides an index that has no set. RefreshTestMode
+-- only walks indices that still do.
+--
+-- Two ways that orphan escapes Reinitialize's own teardown, which is why the
+-- callers reach for this directly:
+--   * RemoveSet/AddSet return early for a mode that is not GetActualMode(), and
+--     GetActualMode() (:207) reads the REAL group only. A mover session that
+--     unlocks raid while the player is solo previews the raid sets with the
+--     actual mode still "party", so the raid branch never reaches Reinitialize.
+--   * Reinitialize's "nothing enabled" bail returns BEFORE its teardown loop, so
+--     removing the last enabled set leaves that set's preview standing.
+--
+-- Hide everything, then re-enter: the same shape as ExitTestMode's hide loop
+-- followed by EnterTestMode, and the pool's REUSE branch
+-- (EnsurePlayerTestFramePool) is built for exactly this "the set at this index
+-- changed under us" case. EnterTestMode rebuilds only indices that still have an
+-- enabled set, so whatever stays hidden is precisely the orphan. The legacy drag
+-- handles are not resurrected — AttachTestMover gates on PinnedFrames.moversShown,
+-- which a mover session set to false.
+function PinnedFrames:RefreshTestModeSets()
+    if not self.testModeActive then return end
+    -- ⚠ Bail whole, don't half-do it. Hiding non-secure test frames in combat is
+    -- legal, but EnterTestMode is combat-guarded, so clearing testModeActive here
+    -- would strand the preview: Reinitialize's regen-time re-entry is gated on
+    -- that very flag. RemoveSet's combat branch already sets pendingReinitialize,
+    -- which reconciles the lot at PLAYER_REGEN_ENABLED.
+    if InCombatLockdown() then return end
+    for i = 1, PinnedFrames.MAX_SETS do
+        self:HidePlayerTestFrames(i)
+    end
+    self.testModeActive = false   -- EnterTestMode sets it back
+    self:EnterTestMode()
 end
 
 -- Called when Test Mode is toggled OFF. Hide all pinned test frames and

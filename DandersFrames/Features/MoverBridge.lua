@@ -541,7 +541,14 @@ local function installHooks()
         refreshAllPinned()
         applyBoth()
     end))
-    -- Pinned sets come and go; RemoveSet compacts indices (PinnedFrames.lua:3005).
+    -- Pinned sets come and go; RemoveSet compacts indices (PinnedFrames:RemoveSet).
+    -- ⚠ ORDERING, load-bearing during an open mover session. These are POST-hooks, so
+    -- refreshAllPinned runs synchronously the moment the set list changes, and its
+    -- Unregister/Register calls each fire the lib's RegistryChanged. The lib's session
+    -- listener DEBOUNCES that to the end of the frame, so the whole burst lands first
+    -- and the proxies are rebuilt once, off the compacted list. Make either side
+    -- immediate and a proxy would be rebuilt against a half-updated registry, pointing
+    -- at an index that no longer means what it did.
     if DF.PinnedFrames then
         hooksecurefunc(DF.PinnedFrames, "AddSet",    guarded(refreshAllPinned))
         hooksecurefunc(DF.PinnedFrames, "RemoveSet", guarded(refreshAllPinned))
