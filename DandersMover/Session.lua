@@ -16,6 +16,8 @@ local InCombatLockdown, UIParent, IsShiftKeyDown, IsControlKeyDown = InCombatLoc
 local C_Timer = C_Timer
 
 local SCREEN_SNAP = 8
+-- Only reached when the SV predate the setting; NS.DEFAULTS.snapDistance is the value.
+local SNAP_DISTANCE = 100
 
 local function panel(method) if NS.Panel then NS.Panel[method](NS.Panel) end end
 
@@ -138,11 +140,30 @@ function Sess:Toggle() if self.active then self:Lock() else self:Unlock() end en
 -- addons' movers). Settings and the legend checkbox both come through here.
 function Sess:RebuildProxies()
     if not self.active or self.suspended then return end
+    -- A rebuild can follow an element being unregistered mid-session. Proxy:Build
+    -- will not make one for an id that no longer exists, but the selection would
+    -- keep pointing at it -- and the panel docks to the selected proxy.
+    if self.selected and not Registry:Get(self.selected) then self.selected = nil end
     Proxy:DestroyAll()
-    Proxy:Build(self.filter)
+    Proxy:Build(self.filter)          -- also re-draws the legend
     Grid:Refresh()
-    panel("Refresh")
+    panel("Refresh")                  -- hides itself when the selection is gone
 end
+
+-- Elements can come and go WHILE a session is open: DandersFrames re-registers
+-- its whole pinned list every time a set is added or removed, so without this a
+-- proxy sits over a container that is not there any more (and a new set gets no
+-- proxy until the next unlock). Debounced to the end of the frame because that
+-- re-registration is a burst of unregister/register calls, not one change.
+local rebuildPending = false
+Lib.RegisterCallback(Sess, "RegistryChanged", function()
+    if rebuildPending or not Sess.active or Sess.suspended then return end
+    rebuildPending = true
+    C_Timer.After(0, function()
+        rebuildPending = false
+        Sess:RebuildProxies()
+    end)
+end)
 
 function Sess:Suspend()
     if not self.active or self.suspended then return end
@@ -311,7 +332,7 @@ function Sess:DragTo(el, cx, cy)
     -- make zones on off-grid targets unreachable (a 20px grid vs a zone at y=150).
     local zone
     if db.snapToFrames and #Proxy.dragZones > 0 then
-        zone = Solver.BestZone(cx, cy, w, h, Proxy.dragZones, 0.1)
+        zone = Solver.NearestZone(cx, cy, w, h, Proxy.dragZones, db.snapDistance or SNAP_DISTANCE)
     end
     if zone then
         cx, cy = zone.x, zone.y

@@ -130,6 +130,43 @@ function R:SortedElements()
     return list
 end
 
+-- One addon's elements bucketed by their `group` label, for a list that wants
+-- subheadings. Pure: it reads the registry and returns plain tables.
+--   { { group = nil, elements = { ... } }, { group = "Party", elements = { ... } }, ... }
+-- Ungrouped elements are the FIRST bucket (rendered with no heading, so they must
+-- not sit under someone else's); grouped buckets follow in the order their first
+-- element is met, walking SortedElements so that order is id-stable. Elements are
+-- sorted by title within a bucket, ties broken by id.
+function R:GroupedElements(addon)
+    local out, buckets, ungrouped = {}, {}, nil
+    for _, el in ipairs(self:SortedElements()) do
+        if el.addon == addon then
+            if el.group == nil then
+                if not ungrouped then
+                    ungrouped = { group = nil, elements = {} }
+                    tinsert(out, 1, ungrouped)
+                end
+                tinsert(ungrouped.elements, el)
+            else
+                local bucket = buckets[el.group]
+                if not bucket then
+                    bucket = { group = el.group, elements = {} }
+                    buckets[el.group] = bucket
+                    tinsert(out, bucket)
+                end
+                tinsert(bucket.elements, el)
+            end
+        end
+    end
+    for _, bucket in ipairs(out) do
+        tsort(bucket.elements, function(a, b)
+            if a.title == b.title then return a.id < b.id end
+            return a.title < b.title
+        end)
+    end
+    return out
+end
+
 function R:SortedTargets()
     local list = {}
     for _, t in pairs(self.targets) do tinsert(list, t) end

@@ -27,6 +27,7 @@ local C_ROOT = UI.Colors.anchorRoot
 local C_MUTED = UI.Colors.textDim
 local PAD, GAP, TIGHT = UI.Space.section, UI.RowGap, UI.RowGapTight
 local SWATCH = 10
+-- Only reached when the SV predate the setting; NS.DEFAULTS.snapDistance is the value.
 local PROXIMITY = 100
 local MIN_PROXY = 24
 local C_ZONE_NEAR = { 0.3, 0.7, 1.0 }
@@ -370,7 +371,11 @@ function P:ShowZones(el)
 end
 
 function P:UpdateZones(cx, cy, hovered)
-    local closest, closestD = nil, PROXIMITY
+    -- The same radius the drag snaps on (Session:DragTo), so a zone that lights up
+    -- is a zone that will take the drop. Reading it per call, not per session: the
+    -- slider can move while the settings window is open mid-unlock.
+    local radius = (NS.db and NS.db.snapDistance) or PROXIMITY
+    local closest, closestD = nil, radius
     for i = 1, self.zoneCount do
         local z = self.zones[i].zone
         local d = sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2)
@@ -382,9 +387,9 @@ function P:UpdateZones(cx, cy, hovered)
         if hovered and z == hovered then
             zf:SetBackdropColor(C_ZONE_HOVER[1], C_ZONE_HOVER[2], C_ZONE_HOVER[3], 0.35)
             zf:SetBackdropBorderColor(C_ZONE_HOVER[1], C_ZONE_HOVER[2], C_ZONE_HOVER[3], 0.6)
-        elseif closest and z.target == closest and sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2) < PROXIMITY then
+        elseif closest and z.target == closest and sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2) < radius then
             local d = sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2)
-            local f = 0.2 + Solver.ProximityFactor(d, PROXIMITY) * 0.8
+            local f = 0.2 + Solver.ProximityFactor(d, radius) * 0.8
             if z.occupied then f = f * 0.5 end   -- occupied zones read quieter (CDM rule)
             local c = z.occupied and C_ZONE_OCCUPIED or C_ZONE_NEAR
             zf:SetBackdropColor(c[1], c[2], c[3], 0.15 * f)

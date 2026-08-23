@@ -9,7 +9,7 @@ local addonName, NS = ...
 local S = {}
 NS.Solver = S
 
-local floor, abs, max, min = math.floor, math.abs, math.max, math.min
+local floor, abs, max, min, sqrt, huge = math.floor, math.abs, math.max, math.min, math.sqrt, math.huge
 local ipairs, tinsert = ipairs, table.insert
 
 S.SPACING = 2
@@ -168,6 +168,9 @@ function S.SnapZones(targetId, target, dragW, dragH, spacing, isOccupied)
     return zones
 end
 
+-- Largest rectangle overlap with a minimum-fraction floor. No longer what the
+-- drag uses (see NearestZone) -- kept because it is public surface and its
+-- overlap maths is the tie-break NearestZone falls back to.
 function S.BestZone(cx, cy, w, h, zones, minFraction)
     local hw, hh = w / 2, h / 2
     local dl, dr, dt, db = cx - hw, cx + hw, cy + hh, cy - hh
@@ -184,6 +187,42 @@ function S.BestZone(cx, cy, w, h, zones, minFraction)
     end
     if best and bestArea >= w * h * (minFraction or 0.1) then return best, bestArea end
     return nil, 0
+end
+
+-- The hit test the drag actually uses: a FIXED radius in screen units, not a
+-- fraction of the dragged element. BestZone's overlap rule made the snap radius
+-- scale with the frame -- a 500px-wide raid container caught a zone from 250px
+-- away while a 60px icon had to be almost on top of it. Here the measure is the
+-- edge-to-edge gap between the dragged rect and the zone rect (0 while they
+-- overlap), and one setting means the same distance for every element.
+--
+-- Ties (every overlapping candidate has a gap of 0) fall back to the larger
+-- overlap area, which is BestZone's ordering, so a drop that sits over several
+-- zones still picks the one it covers most.
+local EPSILON = 1e-9
+
+function S.NearestZone(cx, cy, w, h, zones, snapDistance)
+    snapDistance = snapDistance or 0
+    local hw, hh = w / 2, h / 2
+    local dl, dr, dt, db = cx - hw, cx + hw, cy + hh, cy - hh
+    local best, bestGap, bestArea = nil, huge, -1
+    for _, z in ipairs(zones) do
+        if not z.occupied then
+            local ol, orr = max(dl, z.x - hw), min(dr, z.x + hw)
+            local ob, ot = max(db, z.y - hh), min(dt, z.y + hh)
+            -- Overlapping on an axis => that axis contributes no gap.
+            local gx, gy = max(0, ol - orr), max(0, ob - ot)
+            local gap = sqrt(gx * gx + gy * gy)
+            if gap <= snapDistance then
+                local area = (orr > ol and ot > ob) and (orr - ol) * (ot - ob) or 0
+                if gap < bestGap - EPSILON or (gap <= bestGap + EPSILON and area > bestArea) then
+                    best, bestGap, bestArea = z, gap, area
+                end
+            end
+        end
+    end
+    if best then return best, bestGap, bestArea end
+    return nil
 end
 
 -- ============================================================

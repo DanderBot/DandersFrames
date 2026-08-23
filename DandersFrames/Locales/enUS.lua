@@ -1383,6 +1383,7 @@ L["Party & Raid %s settings are synced.\nClick to stop syncing."] = true
 L["Party Frames"] = true
 L["Party frames are currently disabled. Changes here will apply after re-enabling Party in the General tab and reloading."] = true
 L["Party frames are disabled. Enable them in General settings to use party test mode."] = true
+L["Party Pinned %d"] = true
 L["Party to Raid"] = true
 L["Party-only feature"] = true
 L["Paste a filter string to import:"] = true
@@ -1461,6 +1462,7 @@ L["Raid frames are disabled. Enable them in General settings to use raid test mo
 L["Raid frames centered."] = true
 L["Raid Group Labels"] = true
 L["Raid Layout Mode"] = true
+L["Raid Pinned %d"] = true
 L["Raid position reset."] = true
 L["Raid Role Icon (MT/MA)"] = true
 L["Target Marker Icon"] = true

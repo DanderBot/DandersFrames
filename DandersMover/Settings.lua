@@ -15,7 +15,7 @@ local St = {}
 NS.Settings = St
 
 local Registry, Sess, Proxy, Grid, UI, L = NS.Registry, NS.Session, NS.Proxy, NS.Grid, NS.UI, NS.L
-local CreateFrame, UIParent = CreateFrame, UIParent
+local CreateFrame, UIParent, C_Timer = CreateFrame, UIParent, C_Timer
 local ipairs, pairs, tinsert, wipe, tsort, max = ipairs, pairs, table.insert, wipe, table.sort, math.max
 
 local W = 420
@@ -26,6 +26,7 @@ local TITLE_ICON, TITLE_H = 20, 24        -- window title bar
 local LIST_H = 200                        -- the scrollable addon list
 local SCROLLBAR_W = 16                    -- room for the styled scrollbar
 local LIST_ROW = 26                       -- one toggle row in the addon list
+local LIST_HEADING = 16                   -- a group subheading between element rows
 local CHECK_CONTENT_TOP, CHECK_CONTENT_H = 3, 18   -- where the check sits inside its 35px slot
 local SEG_GAP = 2                         -- between segmented buttons
 
@@ -148,12 +149,20 @@ local function build()
         set = function(v) NS.db.gridSize = v end,
         onChanged = function() Grid:Refresh() end,
     })
+    -- Fixed distance, so the pull is the same for a raid container and a lone icon.
+    -- 0 still snaps on a genuine overlap (gap 0), it just kills the reach.
+    f.snapDistSlider = UI:CreateSlider(snap.content, {
+        label = L["Snap distance"], min = 0, max = 400, step = 10,
+        get = function() return NS.db.snapDistance end,
+        set = function(v) NS.db.snapDistance = v end,
+    })
     stack(snap, {
         toggle(snap.content, L["Snap to grid"], "snapToGrid"),
         toggle(snap.content, L["Snap to frames"], "snapToFrames"),
         toggle(snap.content, L["Snap to screen"], "snapToScreen"),
         toggle(snap.content, L["Show grid"], "showGrid", function() Grid:Refresh() end),
         f.gridSlider,
+        f.snapDistSlider,
     })
     place(snap)
 
@@ -229,6 +238,18 @@ local function addRow(f, parent, y, indent, label, get, set, expandable, expande
     return r
 end
 
+-- A muted subheading naming the group the rows beneath it belong to. Not a
+-- toggle -- there is nothing to switch at group level, it only breaks the list up.
+local function addGroupHeading(f, parent, y, indent, text)
+    local r = CreateFrame("Frame", nil, parent)
+    r:SetSize(f.listWidth - indent, LIST_HEADING)
+    r:SetPoint("TOPLEFT", indent, -y)
+    r.txt = UI:CreateLabel(r, { text = text, size = 10, color = UI.Colors.textDim })
+    r.txt:SetPoint("LEFT", 0, 0)
+    tinsert(f.rows, r)
+    return r
+end
+
 -- One addon: its own element-backdrop box holding the addon row and, when
 -- expanded, the indented element rows.
 local function addAddonBox(f, y, name, info)
@@ -243,9 +264,18 @@ local function addAddonBox(f, y, name, info)
         true, name)
     inner = inner + LIST_ROW
     if f.expanded[name] then
-        for _, el in ipairs(Registry:SortedElements()) do
-            if el.addon == name then
-                addRow(f, box, inner, 6 + GAP, el.title,
+        -- Grouped so an addon that registers a dozen elements (DandersFrames does)
+        -- reads as Party / Raid / Targeted Spells rather than one flat run. Elements
+        -- the consumer left ungrouped come first, at the plain indent.
+        for _, bucket in ipairs(Registry:GroupedElements(name)) do
+            local indent = 6 + GAP
+            if bucket.group then
+                addGroupHeading(f, box, inner, indent, bucket.group)
+                inner = inner + LIST_HEADING
+                indent = indent + TIGHT
+            end
+            for _, el in ipairs(bucket.elements) do
+                addRow(f, box, inner, indent, el.title,
                     function() return addonDB(name).elements[el.key] ~= false end,
                     function(v) Registry:SetEnabled(name, el.key, v); rebuildProxies() end,
                     false)
@@ -263,6 +293,7 @@ function St:Refresh()
     if not f or not f:IsShown() then return end
     for _, cb in ipairs(f.cb) do cb:Refresh() end
     f.gridSlider:RefreshValue()
+    f.snapDistSlider:RefreshValue()
     f.sideRow:Refresh()
 
     clearRows(f)
@@ -282,6 +313,22 @@ function St:Refresh()
     end
     f.content:SetHeight(max(10, y))
 end
+
+-- The list is built from the registry, and the registry moves while the window is
+-- open (adding or removing a DandersFrames pinned set re-registers the lot). Without
+-- this the new row only appeared after collapsing and re-expanding the addon.
+-- Debounced to the end of the frame so one burst of registrations redraws once.
+-- Expand/collapse state lives on f.expanded, keyed by addon name, so a redraw keeps it.
+local refreshPending = false
+NS.Lib.RegisterCallback(St, "RegistryChanged", function()
+    if refreshPending then return end
+    if not (St.frame and St.frame:IsShown()) then return end
+    refreshPending = true
+    C_Timer.After(0, function()
+        refreshPending = false
+        St:Refresh()
+    end)
+end)
 
 function St:Show()
     if not self.frame then self.frame = build() end

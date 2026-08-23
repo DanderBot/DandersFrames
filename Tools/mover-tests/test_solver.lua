@@ -94,6 +94,40 @@ do
     eq(#S.SnapZones("z", { x = 0, y = 0, w = 0, h = 0 }, 20, 10, 2), 0, "zero-size target -> no zones")
 end
 
+-- nearest zone: fixed edge-to-edge distance, not a fraction of the dragged size
+do
+    local parent = { x = 0, y = 0, w = 100, h = 40 }
+    local zones = S.SnapZones("p", parent, 20, 10, 2, function(edge, align) return edge == "right" and align == "center" end)
+    -- 20x10 dragged to (110, 15): the right/start zone sits at (62, 15), so the
+    -- rects are level on y and 28 units apart on x.
+    local near, gap = S.NearestZone(110, 15, 20, 10, zones, 30)
+    check(near and near.edge == "right" and near.align == "start", "nearest zone within distance wins")
+    eq(gap, 28, "reports the edge-to-edge gap")
+    check(S.NearestZone(110, 15, 20, 10, zones, 20) == nil, "beyond snapDistance -> nil")
+
+    -- occupied zones are not candidates, however close
+    local onTop = S.NearestZone(62, 0, 20, 10, zones, 100)
+    check(onTop and not (onTop.edge == "right" and onTop.align == "center"), "occupied zone never returned")
+    check(S.NearestZone(0, 0, 20, 10, { { target = "a", x = 0, y = 0, occupied = true } }, 100) == nil,
+        "only-occupied candidates -> nil")
+
+    -- no candidates at all
+    check(S.NearestZone(0, 0, 20, 10, {}, 100) == nil, "no zones -> nil")
+    check(S.NearestZone(500, 500, 20, 10, zones, 100) == nil, "everything out of range -> nil")
+
+    -- two overlapping zones both have a gap of 0; the larger overlap breaks the tie,
+    -- whichever order they are listed in
+    local a = { target = "a", x = 6, y = 0 }     -- 14x10 of the dragged rect
+    local b = { target = "b", x = 18, y = 0 }    --  2x10 of it
+    check(S.NearestZone(0, 0, 20, 10, { a, b }, 50).target == "a", "gap tie broken by larger overlap")
+    check(S.NearestZone(0, 0, 20, 10, { b, a }, 50).target == "a", "tie-break is order-independent")
+
+    -- snapDistance 0 kills the reach but a genuine overlap is still a gap of 0
+    local touching = S.NearestZone(62, 12, 20, 10, zones, 0)
+    check(touching and touching.edge == "right" and touching.align == "start", "distance 0 still snaps on overlap")
+    check(S.NearestZone(62, 30, 20, 10, zones, 0) == nil, "distance 0 does not reach past the overlap")
+end
+
 -- cycles & order
 do
     local parents = { b = "a", c = "b" }
