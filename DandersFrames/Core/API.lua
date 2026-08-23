@@ -1015,25 +1015,37 @@ end
 -- Returns: table, or nil if the id is unknown. Fields:
 --   point     string  anchor point the offset is measured from (usually "CENTER")
 --   x, y      number  offset from that point on UIParent, in UI units
+--   anchor    table   PARTY/RAID ONLY, and only when the container is glued to another
+--                     addon's element through DandersMover:
+--                     { target = "Addon:key", mode, edge, align, point, relPoint,
+--                       offsetX, offsetY }. nil means free screen placement, and then
+--                     x/y are a screen position exactly as before. x/y are ALWAYS valid
+--                     absolute coordinates whether or not an anchor is set.
 --   anchorTo  string  PINNED ONLY, and only when the set is glued to the frames
 --                     container — then x/y are a fine offset from that corner rather
 --                     than a screen position. nil means free screen placement.
+--                     ⚠ DEPRECATED for one release: `anchor` is the general form and
+--                     covers every target kind. Read `anchor` first and fall back to
+--                     `anchorTo`; `anchorTo` will be removed in the following minor.
 -- ⚠ The returned table is a COPY. Mutating it changes nothing; call SetPosition.
 function DandersFrames_GetPosition(targetID)
     if not (DF and DF.ResolvePositionTarget) then return nil end
     local t = DF:ResolvePositionTarget(targetID)
     if not (t and t.read) then return nil end
     local x, y = t.read()
-    return { point = t.point, x = x, y = y, anchorTo = t.anchorTo }
+    return { point = t.point, x = x, y = y, anchor = t.anchor, anchorTo = t.anchorTo }
 end
 
 -- Move one frame.
 -- Parameters:
 --   targetID: an id from DandersFrames_GetPositionTargets
---   position: table with numeric x and y (the shape GetPosition returns). `point` and
---             `anchorTo` are IGNORED — changing a frame's anchor corner or gluing a
---             pinned set to the container are DF-side layout decisions, not something an
---             external editor should flip as a side effect of a drag.
+--   position: table with numeric x and y (the shape GetPosition returns). `point`,
+--             `anchor` and `anchorTo` are IGNORED — changing a frame's anchor corner,
+--             gluing a pinned set to the container, or re-anchoring a container to
+--             another addon's element are DF-side layout decisions, not something an
+--             external editor should flip as a side effect of a drag. An existing
+--             `anchor` is PRESERVED across a SetPosition; use DandersMover's own UI
+--             (/mover) to attach or detach one.
 -- Returns: boolean success, string reason on failure
 --   "BAD_ARGS"     targetID or position was not usable
 --   "UNKNOWN_ID"   no such target

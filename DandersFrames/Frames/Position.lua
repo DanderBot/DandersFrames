@@ -96,6 +96,9 @@ local POSITION_MODES = {
         getDB = function() return DF:GetDB() end,
         xField = "anchorX",
         yField = "anchorY",
+        -- Party/raid positions live in a RECORD (db.position) with the scalars above as
+        -- a mirror; WriteModePosition routes their writes through DF:SetPositionRecord.
+        record = "party",
         apply = function() if DF.UpdateContainerPosition then DF:UpdateContainerPosition() end end,
         useAccentColor = "accent",  -- main theme color
     },
@@ -104,6 +107,7 @@ local POSITION_MODES = {
         getDB = function() return DF:GetRaidDB() end,
         xField = "raidAnchorX",
         yField = "raidAnchorY",
+        record = "raid",
         apply = function() if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end end,
         logWrites = true,
         autoProfileX = "raidAnchorX",  -- matches xField; AutoProfilesUI key
@@ -195,6 +199,20 @@ local POSITION_MODES = {
 }
 
 -- Accessor helper. Defaults to party mode if something's off.
+-- The generic panel paths (X/Y edit boxes, arrow nudge) write whichever mode is showing.
+-- Party and raid keep their position in a RECORD (see POSITION RECORDS below), so for
+-- them the write MUST go through DF:SetPositionRecord -- the container reads the record,
+-- and a bare scalar write would move the mirror and leave the frames where they were.
+-- The funnel also emits the RAIDPOS log line for raid, so `reason` replaces the
+-- mode.logWrites call the scalar modes never had.
+local function WriteModePosition(mode, db, x, y, reason)
+    if mode.record and DF.SetPositionRecord then
+        DF:SetPositionRecord(mode.record, { point = "CENTER", x = x, y = y }, reason)
+    else
+        db[mode.xField], db[mode.yField] = x, y
+    end
+end
+
 local function GetPositionMode()
     return POSITION_MODES[DF.positionPanelMode] or POSITION_MODES.party
 end
@@ -1636,10 +1654,7 @@ function DF:CreatePositionPanel()
             local mode = GetPositionMode()
             local db = mode.getDB()
             if db then
-                if mode.logWrites then
-                    DF:LogRaidAnchorWrite("PositionPanel:xInput", val, db[mode.yField] or 0)
-                end
-                db[mode.xField] = val
+                WriteModePosition(mode, db, val, db[mode.yField] or 0, "PositionPanel:xInput")
                 if mode.autoProfileX and DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
                     DF.AutoProfilesUI:SetProfileSetting(mode.autoProfileX, val)
                     if DF.GUI and DF.GUI.UpdatePositionOverrideIndicator then
@@ -1689,10 +1704,7 @@ function DF:CreatePositionPanel()
             local mode = GetPositionMode()
             local db = mode.getDB()
             if db then
-                if mode.logWrites then
-                    DF:LogRaidAnchorWrite("PositionPanel:yInput", db[mode.xField] or 0, val)
-                end
-                db[mode.yField] = val
+                WriteModePosition(mode, db, db[mode.xField] or 0, val, "PositionPanel:yInput")
                 if mode.autoProfileY and DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
                     DF.AutoProfilesUI:SetProfileSetting(mode.autoProfileY, val)
                     if DF.GUI and DF.GUI.UpdatePositionOverrideIndicator then
@@ -2168,12 +2180,7 @@ function DF:NudgePosition(dx, dy)
     local newX = (db[mode.xField] or 0) + dx
     local newY = (db[mode.yField] or 0) + dy
 
-    if mode.logWrites then
-        DF:LogRaidAnchorWrite("NudgePosition", newX, newY)
-    end
-
-    db[mode.xField] = newX
-    db[mode.yField] = newY
+    WriteModePosition(mode, db, newX, newY, "NudgePosition")
 
     -- Auto-profile override tracking (currently only raid mode uses this)
     if mode.autoProfileX and DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
@@ -2930,31 +2937,38 @@ function DF:ResolvePositionTarget(id)
         if not mode then return nil end
         local db = mode.getDB and mode.getDB()
         if not db then return nil end
+        local rec = DF:GetPositionRecord(id)
         return {
             id      = id,
             kind    = id,
             label   = (id == "raid") and "Raid Frames" or "Party Frames",
             enabled = true,   -- DF always manages these two; there is no per-target toggle
-            point   = "CENTER",   -- both are stored as an offset from UIParent CENTER
+            point   = rec.point or "CENTER",   -- an offset from UIParent CENTER by default
+            -- The DandersMover anchor block, when the container is glued to another
+            -- addon's element. nil = free screen placement, and then x/y are a screen
+            -- position exactly as they always were. A COPY: callers must go through
+            -- SetPosition, and there is no public way to set an anchor yet.
+            anchor  = rec.anchor and {
+                target = rec.anchor.target, mode = rec.anchor.mode,
+                edge = rec.anchor.edge, align = rec.anchor.align,
+                point = rec.anchor.point, relPoint = rec.anchor.relPoint,
+                offsetX = rec.anchor.offsetX, offsetY = rec.anchor.offsetY,
+            } or nil,
             read    = function()
-                local d = mode.getDB()
-                return tonumber(d[mode.xField]) or 0, tonumber(d[mode.yField]) or 0
+                local r = DF:GetPositionRecord(id)
+                return tonumber(r.x) or 0, tonumber(r.y) or 0
             end,
             -- ☠ RAID MUST OFFER THE WRITE TO AutoProfilesUI FIRST, exactly as the drag
             -- handler does. While an auto layout drives the frames it OWNS the position,
             -- and writing raidAnchorX/Y straight to the db moves the BASE anchors
             -- underneath it — the frames do not move, and the user's base position is
-            -- quietly corrupted instead. Fall through to the base write only when the
-            -- routing declines (no active layout, or mid-edit where the preview path
-            -- captures it). This mirrors DragMover:OnDragStop — keep the two in step.
+            -- quietly corrupted instead. That routing now lives inside
+            -- DF:SetPositionRecord, which is also what DragMover:OnDragStop and the
+            -- DandersMover bridge call — one funnel, so the three cannot drift.
             write   = function(x, y)
-                if id == "raid" then
-                    local routed = DF.AutoProfilesUI and DF.AutoProfilesUI.SetActiveLayoutRaidPosition
-                        and DF.AutoProfilesUI:SetActiveLayoutRaidPosition(x, y)
-                    if routed then return end
-                end
-                local d = mode.getDB()
-                d[mode.xField], d[mode.yField] = x, y
+                local r = DF:GetPositionRecord(id)
+                DF:SetPositionRecord(id, { point = r.point or "CENTER", x = x, y = y,
+                                           anchor = r.anchor }, "API:SetPosition")
                 if mode.apply then mode.apply() end
             end,
         }
