@@ -6,7 +6,8 @@ local addonName, NS = ...
 -- The proxy is what the user drags; the real frame only ever moves through
 -- the consumer's onChanged. Also owns the snap-zone visual pool.
 -- ============================================================
-local P = { proxies = {}, zones = {}, zoneCount = 0, dragZones = {}, tethers = {}, tetherCount = 0 }
+local P = { proxies = {}, zones = {}, zoneCount = 0, dragZones = {},
+            tethers = {}, tetherGlows = {}, tetherCount = 0 }
 NS.Proxy = P
 
 local Registry, Solver, UI, L = NS.Registry, NS.Solver, NS.UI, NS.L
@@ -60,7 +61,7 @@ local TAG_PAD = 3                        -- padding of the floating title pill
 -- slabs in build order. Lock/save/discard fades the whole overlay out over
 -- FADE_OUT and only then tears it down (DismissAll). Combat suspend stays
 -- instant -- Session:Suspend hides the unlock frame directly.
-local FADE_IN, FADE_OUT, STAGGER = 0.12, 0.1, 0.02
+local FADE_IN, FADE_OUT, STAGGER = 0.25, 0.2, 0.035
 local ZONE_DASH_W = 2                    -- dashed-edge thickness
 local DASH_H, DASH_V = MEDIA .. "dash_h", MEDIA .. "dash_v"
 
@@ -467,7 +468,7 @@ end
 -- order. Rebuilds mid-session come through without it and stay instant.
 function P:Build(filter, animate)
     local f = self:GetUnlockFrame()
-    -- A lock's dismiss fade may still be running (lock -> unlock inside 0.1s):
+    -- A lock's dismiss fade may still be running (lock -> unlock inside FADE_OUT):
     -- invalidate its deferred teardown and restore the frame it was fading.
     self.dismissToken = (self.dismissToken or 0) + 1
     NS.Fx.Cancel(f)
@@ -602,16 +603,22 @@ end
 -- ============================================================
 local C_TETHER = UI.Colors.accent
 local C_TETHER_STRAIN = UI.Colors.danger
-local TETHER_W, TETHER_STRAIN_W = 2, 1
-local TETHER_ALPHA = 0.7
+local TETHER_W, TETHER_STRAIN_W = 3, 1
+local TETHER_ALPHA, TETHER_STRAIN_ALPHA = 0.55, 0.8
+-- A Line takes a flat colour (SetColorTexture) and the kit has no soft-edged
+-- line art to hand it instead, so the soft edge is DRAWN: a wider, nearly
+-- transparent line on a lower sublevel behind the tether. It reads as a glow
+-- at a glance and keeps the tether itself from being a hard 3px rule over the
+-- UI. Its own pool, index-parallel with P.tethers.
+local TETHER_GLOW_W, TETHER_GLOW_ALPHA = 5, 0.15
 
 -- Pooled line on the unlock frame (under the slabs, which are child frames).
 -- nil in a headless stub without CreateLine support.
-local function tetherLine(pool, i)
+local function tetherLine(pool, i, subLevel)
     local t = pool[i]
     if t == nil then
         local f = P:GetUnlockFrame()
-        t = f.CreateLine and f:CreateLine(nil, "ARTWORK") or false
+        t = f.CreateLine and f:CreateLine(nil, "ARTWORK", nil, subLevel) or false
         pool[i] = t
     end
     return t or nil
@@ -658,15 +665,23 @@ local function drawTether(n, el, b, drag)
     local cx, cy = proxyCenter(b)
     if not cx then return n end
     local tx, ty = nearestOnRect(rect, cx, cy)
-    local line = tetherLine(P.tethers, n + 1)
+    local line = tetherLine(P.tethers, n + 1, 0)
     if not line then return n end
+    local cr = lerp(C_TETHER.r, C_TETHER_STRAIN.r, strain)
+    local cg = lerp(C_TETHER.g, C_TETHER_STRAIN.g, strain)
+    local cb = lerp(C_TETHER.b, C_TETHER_STRAIN.b, strain)
+    local glow = tetherLine(P.tetherGlows, n + 1, -1)
+    if glow then
+        glow:SetStartPoint("CENTER", UIParent, cx, cy)
+        glow:SetEndPoint("CENTER", UIParent, tx, ty)
+        glow:SetThickness(TETHER_GLOW_W)
+        glow:SetColorTexture(cr, cg, cb, TETHER_GLOW_ALPHA)
+        glow:Show()
+    end
     line:SetStartPoint("CENTER", UIParent, cx, cy)
     line:SetEndPoint("CENTER", UIParent, tx, ty)
     line:SetThickness(strain > 0 and TETHER_STRAIN_W or TETHER_W)
-    line:SetColorTexture(lerp(C_TETHER.r, C_TETHER_STRAIN.r, strain),
-                         lerp(C_TETHER.g, C_TETHER_STRAIN.g, strain),
-                         lerp(C_TETHER.b, C_TETHER_STRAIN.b, strain),
-                         lerp(TETHER_ALPHA, 1, strain))
+    line:SetColorTexture(cr, cg, cb, lerp(TETHER_ALPHA, TETHER_STRAIN_ALPHA, strain))
     line:Show()
     return n + 1
 end
@@ -702,12 +717,20 @@ function P:UpdateTethers()
         local t = self.tethers[i]
         if t then t:Hide() end
     end
+    for i = n + 1, #self.tetherGlows do
+        local t = self.tetherGlows[i]
+        if t then t:Hide() end
+    end
     self.tetherCount = n
 end
 
 function P:HideTethers()
     for i = 1, #self.tethers do
         local t = self.tethers[i]
+        if t then t:Hide() end
+    end
+    for i = 1, #self.tetherGlows do
+        local t = self.tetherGlows[i]
         if t then t:Hide() end
     end
     self.tetherCount = 0

@@ -14,8 +14,8 @@ if not UI then return end
 -- call plain Hide() and, if a fade might be running, Fx.Cancel.
 --
 -- Library-level, not per host: the helpers keep their state on the TARGET
--- (fxIn/fxOut/fxPop/fxTo animation groups), so there is nothing host-specific
--- to shadow.
+-- (fxIn/fxOut/fxPop/fxPopOut/fxTo animation groups), so there is nothing
+-- host-specific to shadow.
 -- ============================================================
 local Fx = {}
 UI.Fx = Fx
@@ -29,6 +29,7 @@ UI.Fx = Fx
 function Fx.FadeIn(target, dur, ox, oy)
     if not target then return end
     if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
+    if target.fxPopOut and target.fxPopOut:IsPlaying() then target.fxPopOut:Stop() end
     target:Show()
     target:SetAlpha(1)
     local g = target.fxIn
@@ -56,6 +57,7 @@ end
 function Fx.PopIn(target, dur, ox, oy, fromScale, origin)
     if not target then return end
     if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
+    if target.fxPopOut and target.fxPopOut:IsPlaying() then target.fxPopOut:Stop() end
     if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
     target:Show()
     target:SetAlpha(1)
@@ -84,6 +86,60 @@ function Fx.PopIn(target, dur, ox, oy, fromScale, origin)
     g:Play(true)
 end
 
+-- The mirror of PopIn: fade out while the rendered position drifts by
+-- (ox, oy) and the target scales DOWN to `toScale` (default 0.92) about
+-- `origin`, then call onDone (which usually hides it). Pass PopIn's own
+-- offsets and origin and the exit retraces the entrance backwards.
+--
+-- Played FORWARD, unlike PopIn -- a shrink-and-fade is what the group already
+-- describes -- so the cancel semantics are FadeOut's, not PopIn's: a pop-out
+-- that is interrupted (a PopIn/FadeIn takes over, or the target is hidden
+-- mid-animation) restores alpha and SKIPS onDone, so a stale "hide it" cannot
+-- land after the target was re-shown.
+function Fx.PopOut(target, dur, ox, oy, toScale, origin, onDone)
+    if not target or not target:IsShown() then
+        if onDone then onDone() end
+        return
+    end
+    if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
+    if target.fxPop and target.fxPop:IsPlaying() then target.fxPop:Stop() end
+    if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
+    local g = target.fxPopOut
+    if not g then
+        g = target:CreateAnimationGroup()
+        if not g then if onDone then onDone() end return end   -- headless stub: done
+        g.alpha = g:CreateAnimation("Alpha")
+        g.move  = g:CreateAnimation("Translation")
+        g.scale = g:CreateAnimation("Scale")
+        g.owner = target
+        g:SetScript("OnFinished", function(s)
+            s.owner:SetAlpha(1)
+            local cb = s.onDone
+            s.onDone = nil
+            if cb then cb() end
+        end)
+        g:SetScript("OnStop", function(s)
+            s.onDone = nil
+            s.owner:SetAlpha(1)
+        end)
+        target.fxPopOut = g
+    end
+    if g:IsPlaying() then g:Stop() end
+    dur = dur or 0.18
+    g.onDone = onDone
+    g.alpha:SetFromAlpha(1); g.alpha:SetToAlpha(0); g.alpha:SetDuration(dur)
+    g.alpha:SetSmoothing("OUT")
+    g.move:SetOffset(ox or 0, oy or 0); g.move:SetDuration(dur)
+    g.move:SetSmoothing("OUT")
+    local s = toScale or 0.92
+    -- Guarded for clients/stubs without the modern Scale setters, as in PopIn.
+    if g.scale.SetScaleFrom then g.scale:SetScaleFrom(1, 1); g.scale:SetScaleTo(s, s) end
+    if g.scale.SetOrigin then g.scale:SetOrigin(origin or "CENTER", 0, 0) end
+    g.scale:SetDuration(dur)
+    g.scale:SetSmoothing("OUT")
+    g:Play()
+end
+
 -- Fade the target out, then call onDone (which usually hides it). A fade that
 -- is cancelled -- a FadeIn takes over, or the target is hidden mid-animation --
 -- restores alpha and SKIPS onDone, so a stale "hide it" cannot fire after the
@@ -95,6 +151,7 @@ function Fx.FadeOut(target, dur, onDone)
     end
     if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
     if target.fxPop and target.fxPop:IsPlaying() then target.fxPop:Stop() end
+    if target.fxPopOut and target.fxPopOut:IsPlaying() then target.fxPopOut:Stop() end
     local g = target.fxOut
     if not g then
         g = target:CreateAnimationGroup()
@@ -129,6 +186,7 @@ function Fx.FadeTo(target, alpha, dur)
     if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
     if target.fxPop and target.fxPop:IsPlaying() then target.fxPop:Stop() end
     if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
+    if target.fxPopOut and target.fxPopOut:IsPlaying() then target.fxPopOut:Stop() end
     local from = target:GetAlpha() or 1
     target:SetAlpha(alpha)
     local g = target.fxTo
@@ -150,6 +208,7 @@ function Fx.Cancel(target)
     if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
     if target.fxPop and target.fxPop:IsPlaying() then target.fxPop:Stop() end
     if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
+    if target.fxPopOut and target.fxPopOut:IsPlaying() then target.fxPopOut:Stop() end
     if target.fxTo and target.fxTo:IsPlaying() then target.fxTo:Stop() end
     target:SetAlpha(1)
 end

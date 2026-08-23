@@ -187,6 +187,13 @@ local function build()
         pairRow(snap.content,
             toggle(snap.content, L["Snap to screen"], "snapToScreen"),
             toggle(snap.content, L["Show grid"], "showGrid", function() Grid:Refresh() end)),
+        -- One per row, not paired: these two labels are half again as long as
+        -- the four above, and a translation of either would run into a
+        -- neighbour at half width. The `after` hooks clear whatever is on
+        -- screen the moment the toggle goes off, so it takes effect live
+        -- rather than at the next drag.
+        toggle(snap.content, L["Show distance measures"], "showMeasures", function() Grid:HideMeasure() end),
+        toggle(snap.content, L["Show grid snap lines"], "showSnapPreview", function() Grid:HidePreview() end),
         f.gridSlider,
         f.snapDistSlider,
         f.zoneShowSlider,
