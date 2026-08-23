@@ -296,3 +296,37 @@ do
     NS.Session = nil
     NS.db = nil
 end
+
+-- The coords slot's "hidden" comes from Registry:IsTargetAvailable, not the raw
+-- frame's IsShown: a consumer getRect owns visibility (DF's raid element measures
+-- its test-mode preview while the real container is hidden), while elements
+-- without getRect still read the frame's shown state.
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("V", { title = "V" })
+    -- Backing frame HIDDEN, but getRect says "this is what is visible" -- the
+    -- DF-raid-in-a-real-raid shape (test container up, real container hidden).
+    local hiddenFrame = FakeFrame(960, 540, 100, 40)
+    hiddenFrame._shown = false
+    R:Register("V", "preview", { title = "p", frame = hiddenFrame,
+        getRect = function() return { x = 50, y = 25, w = 100, h = 40 } end,
+        getPos = function() return { point = "CENTER", x = 0, y = 0 } end,
+        onChanged = function() end })
+    -- No getRect and a hidden frame: the demo's Combat Only shape out of combat.
+    local offscreen = FakeFrame(960, 540, 100, 40)
+    offscreen._shown = false
+    R:Register("V", "off", { title = "o", frame = offscreen,
+        getPos = function() return { point = "CENTER", x = 0, y = 0 } end,
+        onChanged = function() end })
+    P:Build()
+    eq(P.proxies["V:preview"].coords:GetText(), "50, 25", "getRect visible while frame hidden: coords, not 'hidden'")
+    eq(P.proxies["V:off"].coords:GetText(), NS.L["hidden"], "no getRect + hidden frame still reads 'hidden'")
+    P:DestroyAll()
+    R:UnregisterAddon("V")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end

@@ -334,10 +334,14 @@ function P:Refresh(id)
     else cx, cy = Solver.PointToCenter(pos.point or "CENTER", pos.x or 0, pos.y or 0, w, h) end
     b:SetSize(math.max(w, MIN_PROXY), math.max(h, MIN_PROXY))
     b:ClearAllPoints(); b:SetPoint("CENTER", UIParent, "CENTER", cx, cy)
-    -- A mover whose real frame is not on screen has no meaningful position to
+    -- A mover whose element is not on screen has no meaningful position to
     -- report, so the coords slot says so instead of quoting a stale number.
-    local frame = Registry:GetFrame(el)
-    local shown = (frame and frame:IsShown()) and true or false
+    -- Availability, not the raw frame's IsShown: a consumer getRect owns the
+    -- "is it visible" question (Registry:IsTargetAvailable), and DF's raid
+    -- container is hidden behind its test-mode preview during every mover
+    -- session -- the visible thing is the test container its getRect measures.
+    -- Elements without getRect still fall back to the frame's shown state.
+    local shown = Registry:IsTargetAvailable(el)
     -- Hidden frames keep a full-strength slab; the muted "hidden" word carries
     -- the state on its own.
     b.coords:SetText(shown and format("%d, %d", cx, cy) or L["hidden"])
