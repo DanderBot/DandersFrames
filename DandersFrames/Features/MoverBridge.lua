@@ -18,7 +18,7 @@ if not Mover then return end
 local L = DF.L
 local UIParent, hooksecurefunc = UIParent, hooksecurefunc
 local pcall, geterrorhandler, ipairs = pcall, geterrorhandler, ipairs
-local max, min = math.max, math.min
+local max, min, format = math.max, math.min, string.format
 local IsInRaid, CreateFrame, C_Timer = IsInRaid, CreateFrame, C_Timer
 
 local ADDON_KEY = "DandersFrames"
@@ -182,6 +182,25 @@ local function raidRect()
 end
 
 -- ============================================================
+-- RE-ENTRANCY GUARD
+-- ============================================================
+-- Post-hooks, so DF has already moved/resized before we tell the lib. Re-entrancy
+-- guarded: onChanged -> Update*ContainerPosition -> hook -> Apply -> onChanged would
+-- otherwise loop.
+
+local refreshing = false
+
+local function guarded(fn)
+    return function()
+        if refreshing then return end
+        refreshing = true
+        local ok, err = pcall(fn)
+        refreshing = false
+        if not ok then geterrorhandler()(err) end
+    end
+end
+
+-- ============================================================
 -- REGISTRATION
 -- ============================================================
 local function registerElements()
@@ -242,6 +261,140 @@ local function registerElements()
         getFrame = function() return IsInRaid() and DF.raidContainer or DF.container end,
         getRect  = function() return IsInRaid() and raidRect() or partyRect() end,
     })
+
+    -- The personal targeted-spells block and the targeted list: plain non-secure
+    -- frames (TargetedSpells.lua; the list's secure template was deliberately removed),
+    -- dynamic sizes, so getRect is required. Both containers are file-locals there, so
+    -- the rect/size accessors live in that file. The personal record lives in the db
+    -- that DRIVES the block (raid in a raid) -- RECORD_SPECS.personal resolves it.
+    Mover:Register(ADDON_KEY, "personalTargeted", {
+        title     = L["Personal Targeted"],
+        group     = L["Targeted Spells"],
+        getFrame  = function() return _G.DandersFramesPersonalTargetedSpells end,
+        getPos    = function() return DF:GetPositionRecord("personal") end,
+        onChanged = function(pos)
+            DF:SetPositionRecord("personal", pos, "DandersMover")
+            if DF.UpdatePersonalTargetedSpellsPosition then DF:UpdatePersonalTargetedSpellsPosition() end
+        end,
+        default   = { point = "CENTER", x = 0, y = -150 },
+        getSize   = function() if DF.GetPersonalTargetedSize then return DF:GetPersonalTargetedSize() end end,
+        getRect   = function() if DF.GetPersonalTargetedRect then return DF:GetPersonalTargetedRect() end end,
+        isRelevant = function()
+            local db = DF.GetPersonalTargetedDB and DF:GetPersonalTargetedDB() or DF:GetDB()
+            return db and db.personalTargetedSpellEnabled and true or false
+        end,
+    })
+
+    Mover:Register(ADDON_KEY, "targetedList", {
+        title     = L["Targeted List"],
+        group     = L["Targeted Spells"],
+        getFrame  = function() return _G.DandersFramesTargetedListContainer end,
+        getPos    = function() return DF:GetPositionRecord("targetedList") end,
+        onChanged = function(pos)
+            DF:SetPositionRecord("targetedList", pos, "DandersMover")
+            if DF.UpdateTargetedListLayout then DF:UpdateTargetedListLayout() end
+        end,
+        default   = { point = "CENTER", x = 0, y = -10 },
+        getSize   = function() if DF.GetTargetedListSize then return DF:GetTargetedListSize() end end,
+        getRect   = function() if DF.GetTargetedListRect then return DF:GetTargetedListRect() end end,
+        isRelevant = function()
+            local db = DF:GetDB("party")
+            return Bridge:IsScopeRelevant("party") and db and db.targetedListEnabled and true or false
+        end,
+    })
+end
+
+-- ============================================================
+-- PINNED SETS
+-- ============================================================
+-- One element per EXISTING set per mode: party.pinnedN / raid.pinnedN. MAX_SETS is 4
+-- but only 2 are defaulted and RemoveSet COMPACTS indices, so a fixed 1..4 list would
+-- show phantom sets and a stale one would point at the wrong set -- the list is
+-- rebuilt on add/remove and on a profile refresh (RefreshPinnedElements).
+-- ⚠ Known limitation (Phase C): compaction silently re-points a saved
+-- anchor.target = "DandersFrames:raid.pinned3" at a different set; a child whose key
+-- disappears simply holds.
+--
+-- Containers are plain frames hosting a SecureGroupHeaderTemplate (or secure boss
+-- buttons) -> secure = true. `point` is the growth corner, derived -> pointLocked.
+-- PinnedFrames.lua owns every accessor (the record, the on-screen container for a
+-- mode, its rect, the commit funnel) so nothing here reaches into its internals.
+
+local PINNED_KEY = { party = "party.pinned", raid = "raid.pinned" }
+
+local function pinnedDefault(mode, i)
+    local defaults = (mode == "raid") and DF.RaidDefaults or DF.PartyDefaults
+    local set = defaults and defaults.pinnedFrames and defaults.pinnedFrames.sets and defaults.pinnedFrames.sets[i]
+    if set and set.position then
+        return { point = set.position.point or "CENTER", x = set.position.x or 0, y = set.position.y or 0 }
+    end
+    -- PinnedFrames.MakeDefaultSet's stagger for sets beyond the defaulted two.
+    return { point = "CENTER", x = 0, y = 250 - (i - 1) * 130 }
+end
+
+local function pinnedDef(mode, i)
+    local isRaid = (mode == "raid")
+    return {
+        title     = format(L["Pinned %d"], i),
+        group     = isRaid and L["Raid Frames"] or L["Party Frames"],
+        getFrame  = function()
+            local pf = DF.PinnedFrames
+            return pf and pf.GetContainerForMode and pf:GetContainerForMode(i, isRaid) or nil
+        end,
+        getRect   = function()
+            local pf = DF.PinnedFrames
+            return pf and pf.GetContainerRect and pf:GetContainerRect(i, isRaid) or nil
+        end,
+        getPos    = function()
+            local pf = DF.PinnedFrames
+            local rec = pf and pf.GetPositionRecord and pf:GetPositionRecord(i, isRaid)
+            -- getPos must return a table; a set that vanished between RemoveSet and the
+            -- refresh gets a throwaway that is never persisted.
+            return rec or { point = "CENTER", x = 0, y = 0 }
+        end,
+        onChanged = function(pos)
+            local pf = DF.PinnedFrames
+            if pf and pf.CommitSetPosition then pf:CommitSetPosition(i, isRaid, pos) end
+        end,
+        default   = pinnedDefault(mode, i),
+        secure    = true,
+        pointLocked = true,
+        isRelevant = function()
+            if not Bridge:IsScopeRelevant(mode) then return false end
+            local pf = DF.PinnedFrames
+            local set = pf and pf.GetSetForMode and pf:GetSetForMode(i, isRaid)
+            return (set and set.enabled) and true or false
+        end,
+    }
+end
+
+-- Unregister every possible key for the mode, then register 1..#sets. Safe mid-session:
+-- Lib:Unregister drops the proxy; a new set gets its proxy on the next rebuild.
+function Bridge:RefreshPinnedElements(mode)
+    mode = (mode == "raid") and "raid" or "party"
+    local pf = DF.PinnedFrames
+    local maxSets = (pf and pf.MAX_SETS) or 4
+    for i = 1, maxSets do Mover:Unregister(ADDON_KEY, PINNED_KEY[mode] .. i) end
+    if not (pf and pf.GetSetForMode) then return end
+    for i = 1, maxSets do
+        if pf:GetSetForMode(i, mode == "raid") then
+            Mover:Register(ADDON_KEY, PINNED_KEY[mode] .. i, pinnedDef(mode, i))
+        end
+    end
+end
+
+local function refreshAllPinned()
+    Bridge:RefreshPinnedElements("party")
+    Bridge:RefreshPinnedElements("raid")
+end
+
+-- Re-solve the pinned anchors of a scope once its preview has a rect. A saved anchor
+-- was solved against last session's target; at login the party frames may not even be
+-- on screen (solo), so Init's Apply HELD. Without this, a Detach before the first
+-- resolve would drop the set at the stale x/y instead of in place.
+local function applyPinned(scope)
+    local pf = DF.PinnedFrames
+    for i = 1, (pf and pf.MAX_SETS) or 4 do Mover:Apply(ADDON_KEY, PINNED_KEY[scope] .. i) end
 end
 
 -- ============================================================
@@ -293,14 +446,25 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
     -- without going through DF:UnlockFrames, so load it here too or the proxies sit over
     -- an empty screen.
     if DF.EnsureOptionsLoaded then DF:EnsureOptionsLoaded() end
+    -- The legacy pinned drag handles must never sit under the proxies. The lib path
+    -- never shows them, but a legacy unlock may have left them up; the test movers
+    -- EnterTestMode attaches below read moversShown, so this goes first.
+    if DF.PinnedFrames and DF.PinnedFrames.SetMoversShown then DF.PinnedFrames:SetMoversShown(false) end
     -- ONE scope per session. `/mover` opens a session without going through either
     -- Unlock*Frames, so with no request outstanding pick the one the player is in.
     local scope = Bridge.requestedScope or (IsInRaid() and "raid" or "party")
     Bridge.requestedScope = nil
     if Mover:IsEnabled(ADDON_KEY, scope) then
+        -- claimScope -> SetTestModeOwner -> ReconcileTestMode -> Show*TestFrames ->
+        -- PinnedFrames:EnterTestMode (TestMode.lua:1962/2427): the pinned test
+        -- containers are on screen after this line.
         claimScope(scope)
     end
     syncLockButtons()
+    -- Same next-frame re-measure the lib does for its proxies (Session:Unlock).
+    C_Timer.After(0, function()
+        if Mover:IsUnlocked() then guarded(function() applyPinned(scope) end)() end
+    end)
 end)
 
 Mover.RegisterCallback(Bridge, "Locked", function()
@@ -312,22 +476,6 @@ end)
 -- ============================================================
 -- REFRESH HOOKS
 -- ============================================================
--- Post-hooks, so DF has already moved/resized before we tell the lib. Re-entrancy
--- guarded: onChanged -> Update*ContainerPosition -> hook -> Apply -> onChanged would
--- otherwise loop.
-
-local refreshing = false
-
-local function guarded(fn)
-    return function()
-        if refreshing then return end
-        refreshing = true
-        local ok, err = pcall(fn)
-        refreshing = false
-        if not ok then geterrorhandler()(err) end
-    end
-end
-
 local function refreshGroup() Mover:RefreshAnchorTarget(ADDON_KEY, "group") end
 -- "group" aliases whichever of the two is live, so anything that moves one moves it too.
 local function refreshParty() Mover:RefreshAnchorTarget(ADDON_KEY, "party"); refreshGroup() end
@@ -335,6 +483,8 @@ local function refreshRaid()  Mover:RefreshAnchorTarget(ADDON_KEY, "raid");  ref
 local function applyBoth()
     Mover:Apply(ADDON_KEY, "party")
     Mover:Apply(ADDON_KEY, "raid")
+    Mover:Apply(ADDON_KEY, "personalTargeted")
+    Mover:Apply(ADDON_KEY, "targetedList")
 end
 
 local function installHooks()
@@ -351,7 +501,26 @@ local function installHooks()
     end
     -- The RECORD itself may have changed wholesale (profile switch, import, auto layout),
     -- so re-solve and re-fire our own onChanged, not just the descendants.
-    hooksecurefunc(DF, "FullProfileRefresh", guarded(applyBoth))
+    hooksecurefunc(DF, "FullProfileRefresh", guarded(function()
+        -- The set COUNT can change with the profile; re-register before re-applying.
+        refreshAllPinned()
+        applyBoth()
+    end))
+    -- Pinned sets come and go; RemoveSet compacts indices (PinnedFrames.lua:3005).
+    if DF.PinnedFrames then
+        hooksecurefunc(DF.PinnedFrames, "AddSet",    guarded(refreshAllPinned))
+        hooksecurefunc(DF.PinnedFrames, "RemoveSet", guarded(refreshAllPinned))
+    end
+    -- The two targeted displays resize with their settings (max icons / max bars);
+    -- their own apply functions are the one place that knows. Descendants only.
+    if DF.UpdatePersonalTargetedSpellsPosition then
+        hooksecurefunc(DF, "UpdatePersonalTargetedSpellsPosition",
+            guarded(function() Mover:RefreshAnchorTarget(ADDON_KEY, "personalTargeted") end))
+    end
+    if DF.UpdateTargetedListLayout then
+        hooksecurefunc(DF, "UpdateTargetedListLayout",
+            guarded(function() Mover:RefreshAnchorTarget(ADDON_KEY, "targetedList") end))
+    end
     if DF.AutoProfilesUI then
         -- Redundant with FullProfileRefresh (ApplyRuntimeProfile calls it, and so does
         -- DeactivateRuntimeProfile) but harmless: Apply is idempotent and the re-entrancy
@@ -389,10 +558,11 @@ function Bridge:Init()
     if self.initialised then return end
     self.initialised = true
     registerElements()
+    refreshAllPinned()
     installHooks()
     -- Resolve saved anchors once at login. The record carries the anchor block, but its
     -- x/y were solved against last session's target rect. Safe when the target is not up
     -- yet: the lib holds the last position rather than snapping to a stale rect.
     guarded(applyBoth)()
-    DF:Debug("LAYOUT", "MoverBridge: registered party + raid with DandersMover")
+    DF:Debug("LAYOUT", "MoverBridge: registered party + raid + pinned + targeted with DandersMover")
 end
