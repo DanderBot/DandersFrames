@@ -26,6 +26,7 @@ local TITLE_ICON, TITLE_H = 20, 24        -- window title bar
 local LIST_H = 200                        -- the scrollable addon list
 local SCROLLBAR_W = 16                    -- room for the styled scrollbar
 local LIST_ROW = 26                       -- one toggle row in the addon list
+local LIST_HEADING = 16                   -- a group subheading between element rows
 local CHECK_CONTENT_TOP, CHECK_CONTENT_H = 3, 18   -- where the check sits inside its 35px slot
 local SEG_GAP = 2                         -- between segmented buttons
 
@@ -229,6 +230,18 @@ local function addRow(f, parent, y, indent, label, get, set, expandable, expande
     return r
 end
 
+-- A muted subheading naming the group the rows beneath it belong to. Not a
+-- toggle -- there is nothing to switch at group level, it only breaks the list up.
+local function addGroupHeading(f, parent, y, indent, text)
+    local r = CreateFrame("Frame", nil, parent)
+    r:SetSize(f.listWidth - indent, LIST_HEADING)
+    r:SetPoint("TOPLEFT", indent, -y)
+    r.txt = UI:CreateLabel(r, { text = text, size = 10, color = UI.Colors.textDim })
+    r.txt:SetPoint("LEFT", 0, 0)
+    tinsert(f.rows, r)
+    return r
+end
+
 -- One addon: its own element-backdrop box holding the addon row and, when
 -- expanded, the indented element rows.
 local function addAddonBox(f, y, name, info)
@@ -243,9 +256,18 @@ local function addAddonBox(f, y, name, info)
         true, name)
     inner = inner + LIST_ROW
     if f.expanded[name] then
-        for _, el in ipairs(Registry:SortedElements()) do
-            if el.addon == name then
-                addRow(f, box, inner, 6 + GAP, el.title,
+        -- Grouped so an addon that registers a dozen elements (DandersFrames does)
+        -- reads as Party / Raid / Targeted Spells rather than one flat run. Elements
+        -- the consumer left ungrouped come first, at the plain indent.
+        for _, bucket in ipairs(Registry:GroupedElements(name)) do
+            local indent = 6 + GAP
+            if bucket.group then
+                addGroupHeading(f, box, inner, indent, bucket.group)
+                inner = inner + LIST_HEADING
+                indent = indent + TIGHT
+            end
+            for _, el in ipairs(bucket.elements) do
+                addRow(f, box, inner, indent, el.title,
                     function() return addonDB(name).elements[el.key] ~= false end,
                     function(v) Registry:SetEnabled(name, el.key, v); rebuildProxies() end,
                     false)

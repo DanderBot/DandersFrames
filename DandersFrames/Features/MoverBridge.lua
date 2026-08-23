@@ -243,7 +243,7 @@ local function registerElements()
             return w * s, h * s
         end,
         getRect   = partyRect,
-        group     = "Frames",
+        group     = L["Party"],
         isRelevant = function() return Bridge:IsScopeRelevant("party") end,
     })
 
@@ -258,7 +258,7 @@ local function registerElements()
         default   = { point = "CENTER", x = -6.666610717773438, y = -25 },
         secure    = true,
         getRect   = raidRect,
-        group     = "Frames",
+        group     = L["Raid"],
         isRelevant = function() return Bridge:IsScopeRelevant("raid") end,
     })
 
@@ -268,6 +268,7 @@ local function registerElements()
     -- would be ambiguous.
     Mover:RegisterAnchorTarget(ADDON_KEY, "group", {
         title    = L["Group Frames"],
+        group    = L["Party"],
         getFrame = function() return IsInRaid() and DF.raidContainer or DF.container end,
         getRect  = function() return IsInRaid() and raidRect() or partyRect() end,
     })
@@ -342,11 +343,31 @@ local function pinnedDefault(mode, i)
     return { point = "CENTER", x = 0, y = 250 - (i - 1) * 130 }
 end
 
+-- "Party Pinned 1" / "Raid Pinned 1" -- the mode has to be in the TITLE, not only in
+-- the group heading: the same index exists in both modes and a bare "Pinned 1" is
+-- ambiguous everywhere the title travels alone (the anchor picker, the proxy tooltip).
+-- A set the user has RENAMED is tagged with its name; the auto-generated "Pinned N"
+-- placeholder (Config.lua's defaults / PinnedFrames.MakeDefaultSet) is not, since
+-- appending it would just repeat the index.
+-- ⚠ Baked at registration time, so a rename shows on the next RefreshPinnedElements
+-- (add/remove a set, or a profile refresh), not the instant it is typed.
+local function pinnedTitle(mode, i)
+    local isRaid = (mode == "raid")
+    local title = format(isRaid and L["Raid Pinned %d"] or L["Party Pinned %d"], i)
+    local pf = DF.PinnedFrames
+    local set = pf and pf.GetSetForMode and pf:GetSetForMode(i, isRaid)
+    local name = set and set.name
+    if name and name ~= "" and name ~= ("Pinned " .. i) and name ~= format(L["Pinned %d"], i) then
+        return title .. " — " .. name
+    end
+    return title
+end
+
 local function pinnedDef(mode, i)
     local isRaid = (mode == "raid")
     return {
-        title     = format(L["Pinned %d"], i),
-        group     = isRaid and L["Raid Frames"] or L["Party Frames"],
+        title     = pinnedTitle(mode, i),
+        group     = isRaid and L["Raid"] or L["Party"],
         getFrame  = function()
             local pf = DF.PinnedFrames
             return pf and pf.GetContainerForMode and pf:GetContainerForMode(i, isRaid) or nil

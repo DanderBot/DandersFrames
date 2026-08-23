@@ -213,3 +213,46 @@ do
     R:UnregisterAddon("V")
     R.ready = wasReady
 end
+
+-- grouped elements: ungrouped bucket first, groups in first-appearance order,
+-- titles sorted within a group
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = nil
+    R:RegisterAddon("GR", { title = "GR" })
+    local function reg(addon, key, title, group)
+        R:Register(addon, key, elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 },
+            { title = title, group = group }))
+    end
+    -- Registered out of order on purpose: SortedElements walks ids (a, b, c, ...),
+    -- so "Raid" is met before "Party" and must stay ahead of it.
+    reg("GR", "c", "Raid Frames", "Raid")
+    reg("GR", "a", "Loose Two")
+    reg("GR", "e", "Party Frames", "Party")
+    reg("GR", "d", "Raid Pinned 1", "Raid")
+    reg("GR", "b", "Loose One")
+    local groups = R:GroupedElements("GR")
+    eq(#groups, 3, "three buckets")
+    check(groups[1].group == nil, "ungrouped bucket first")
+    eq(#groups[1].elements, 2, "two ungrouped elements")
+    eq(groups[1].elements[1].title, "Loose One", "ungrouped sorted by title")
+    eq(groups[1].elements[2].title, "Loose Two", "ungrouped second")
+    eq(groups[2].group, "Raid", "first group met comes first")
+    eq(groups[3].group, "Party", "second group met comes second")
+    eq(#groups[2].elements, 2, "two raid elements")
+    eq(groups[2].elements[1].title, "Raid Frames", "raid sorted by title")
+    eq(groups[2].elements[2].title, "Raid Pinned 1", "raid second")
+    eq(groups[3].elements[1].title, "Party Frames", "party element")
+    eq(#R:GroupedElements("NoSuchAddon"), 0, "unknown addon -> no buckets")
+    -- another addon's elements never leak into this one's buckets
+    R:RegisterAddon("GR2", { title = "GR2" })
+    reg("GR2", "x", "Other", "Raid")
+    local only = R:GroupedElements("GR")
+    eq(#only, 3, "other addon does not add a bucket")
+    for _, bucket in ipairs(only) do
+        for _, el in ipairs(bucket.elements) do check(el.addon == "GR", "bucket holds only this addon's elements") end
+    end
+    R:UnregisterAddon("GR"); R:UnregisterAddon("GR2")
+    R.ready = wasReady
+end
