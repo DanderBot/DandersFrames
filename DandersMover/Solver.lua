@@ -43,6 +43,25 @@ function S.SnapToGrid(x, y, gridSize)
     return floor(x / gridSize + 0.5) * gridSize, floor(y / gridSize + 0.5) * gridSize
 end
 
+-- Grid snap that considers the rect's centre AND its edges per axis, and moves
+-- the rect by whichever lands on a grid line with the smallest shift. This is
+-- what lets a frame's left edge or top edge sit exactly on the grid, not only
+-- its centre. (Behaviour of the legacy DandersFrames mover.)
+function S.SnapRectToGrid(cx, cy, w, h, gridSize)
+    if not gridSize or gridSize <= 0 then return cx, cy end
+    local function best(center, half)
+        local candidates = { center, center - half, center + half }
+        local bestShift, bestAbs = 0, math.huge
+        for _, v in ipairs(candidates) do
+            local snapped = floor(v / gridSize + 0.5) * gridSize
+            local shift = snapped - v
+            if abs(shift) < bestAbs then bestAbs, bestShift = abs(shift), shift end
+        end
+        return center + bestShift
+    end
+    return best(cx, w / 2), best(cy, h / 2)
+end
+
 -- Snaps the rect's nearest edge or its centre to the screen edges / centre lines.
 function S.SnapToScreen(rect, screenW, screenH, threshold)
     local cx, cy = rect.x, rect.y

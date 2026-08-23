@@ -280,7 +280,7 @@ function Sess:DragTo(el, cx, cy)
         Grid:HidePreview()
     else
         local snapped = false
-        if db.snapToGrid then cx, cy = Solver.SnapToGrid(cx, cy, db.gridSize); snapped = true end
+        if db.snapToGrid then cx, cy = Solver.SnapRectToGrid(cx, cy, w, h, db.gridSize); snapped = true end
         if db.snapToScreen then
             local sx, sy
             cx, cy, sx, sy = Solver.SnapToScreen({ x = cx, y = cy, w = w, h = h }, UIParent:GetWidth(), UIParent:GetHeight(), SCREEN_SNAP)

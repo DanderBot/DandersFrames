@@ -120,3 +120,22 @@ do
     cx = S.ClampToScreen(0, 0, 3000, 10, 1920, 1080)
     eq(cx, 540, "oversize keeps left edge reachable")
 end
+
+-- rect-aware grid snap: centre or edge, whichever is closer
+do
+    -- 30 wide at cx=23: centre->20 (shift -3), left edge 8->0 (shift -8), right edge 38->40 (shift +2) => right edge wins
+    local cx, cy = S.SnapRectToGrid(23, 0, 30, 10, 20)
+    eq(cx, 25, "right edge snaps to 40 (cx 25)"); eq(cy, 0, "cy untouched when already on grid via centre")
+    -- 30 wide at cx=12: centre->20 (+8), left
+    -- edge -3->0 (+3), right 27->20 (-7) => left edge wins
+    cx = S.SnapRectToGrid(12, 0, 30, 10, 20)
+    eq(cx, 15, "left edge snaps to 0 (cx 15)")
+    -- exact centre on grid stays
+    cx, cy = S.SnapRectToGrid(40, 60, 30, 10, 20)
+    eq(cx, 40, "centre on grid x"); eq(cy, 60, "centre on grid y")
+    -- gridSize 0 / nil -> passthrough
+    cx = S.SnapRectToGrid(7, 0, 30, 10, 0); eq(cx, 7, "grid 0 passthrough")
+    -- y axis: 10 tall at cy=57: centre->60 (+3), top 62->60 (-2), bottom 52->60 (+8) => top wins
+    local _, y = S.SnapRectToGrid(0, 57, 30, 10, 20)
+    eq(y, 55, "top edge snaps to 60 (cy 55)")
+end
