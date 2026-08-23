@@ -154,3 +154,23 @@ do
     eq(w2, 40, "frame size used when getRect nil and no getSize")
     R:UnregisterAddon("G")
 end
+
+-- user toggles: SetEnabled writes what IsEnabled reads, both ways round
+do
+    NS.db = { addons = {} }
+    check(R:IsEnabled("T", "a"), "unknown addon defaults to enabled")
+    R:SetEnabled("T", "a", false)
+    check(not R:IsEnabled("T", "a"), "element off after SetEnabled(false)")
+    check(NS.db.addons.T.elements.a == false, "stored as explicit false")
+    check(R:IsEnabled("T", "b"), "sibling element unaffected")
+    check(R:IsEnabled("T"), "addon itself still enabled")
+    R:SetEnabled("T", "a", true)
+    check(R:IsEnabled("T", "a"), "element back on after SetEnabled(true)")
+    check(NS.db.addons.T.elements.a == nil, "on is stored as absent")
+    R:SetEnabled("T", nil, false)
+    check(not R:IsEnabled("T"), "addon off")
+    check(not R:IsEnabled("T", "b"), "addon off disables every element")
+    R:SetEnabled("T", nil, true)
+    check(R:IsEnabled("T", "b"), "addon back on")
+    NS.db = nil
+end

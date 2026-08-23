@@ -158,7 +158,7 @@ function St:Refresh()
         local info = Registry.addons[name]
         local r = addRow(f, 4, info.title,
             function() return addonDB(name).enabled ~= false end,
-            function(v) addonDB(name).enabled = v; rebuildProxies() end,
+            function(v) Registry:SetEnabled(name, nil, v); rebuildProxies() end,
             true, name)
         r:SetPoint("TOPLEFT", 0, y); y = y - 24
         if f.expanded[name] then
@@ -166,7 +166,7 @@ function St:Refresh()
                 if el.addon == name then
                     local er = addRow(f, 26, el.title,
                         function() return addonDB(name).elements[el.key] ~= false end,
-                        function(v) addonDB(name).elements[el.key] = (not v) and false or nil; rebuildProxies() end,
+                        function(v) Registry:SetEnabled(name, el.key, v); rebuildProxies() end,
                         false)
                     er:SetPoint("TOPLEFT", 0, y); y = y - 22
                 end

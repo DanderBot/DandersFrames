@@ -11,7 +11,8 @@ NS.Proxy = P
 
 local Registry, Solver, UI, L = NS.Registry, NS.Solver, NS.UI, NS.L
 local CreateFrame, UIParent, GetCursorPosition, GameTooltip = CreateFrame, UIParent, GetCursorPosition, GameTooltip
-local pairs, ipairs, format, sqrt, abs = pairs, ipairs, string.format, math.sqrt, math.abs
+local IsShiftKeyDown, IsControlKeyDown = IsShiftKeyDown, IsControlKeyDown
+local pairs, ipairs, format, sqrt = pairs, ipairs, string.format, math.sqrt
 
 local MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
 local DEFAULT_ICON = MEDIA .. "DF_Icon"
@@ -57,7 +58,6 @@ local function onDragStart(self)
     -- Seed the drop values so a drag that ends before its first OnUpdate
     -- commits the start position rather than nil or a previous drag's values.
     self.lastX, self.lastY, self.lastZone = self.startX, self.startY, nil
-    self.axis = nil
     self.dragging = true
     GameTooltip:Hide()
     NS.Session.selected = el.id            -- select without docking the panel; EndDrag re-docks it
@@ -68,15 +68,11 @@ local function onDragStart(self)
     self:SetScript("OnUpdate", function(s)
         local mx, my = P:CursorPos()
         local nx, ny = mx - s.grabX, my - s.grabY
-        if IsShiftKeyDown() then
-            if not s.axis then
-                local dx, dy = abs(nx - s.startX), abs(ny - s.startY)
-                if dx > 2 or dy > 2 then s.axis = dx >= dy and "x" or "y" end
-            end
-            if s.axis == "x" then ny = s.startY elseif s.axis == "y" then nx = s.startX end
-        else
-            s.axis = nil
-        end
+        -- Axis locks: Shift = horizontal only, Ctrl = vertical only. Both held
+        -- cancel out to a free drag. Read every frame, so the lock can be taken
+        -- and released mid-drag.
+        local shift, ctrl = IsShiftKeyDown(), IsControlKeyDown()
+        if shift and not ctrl then ny = s.startY elseif ctrl and not shift then nx = s.startX end
         local fx, fy, zone = NS.Session:DragTo(el, nx, ny)
         s:ClearAllPoints(); s:SetPoint("CENTER", UIParent, "CENTER", fx, fy)
         s.coords:SetText(format("%d, %d", fx, fy))
@@ -212,7 +208,7 @@ function P:ShowTooltip(b)
         GameTooltip:AddLine(format(L["Anchored to %s"], format("%s (%s)", name, how)), C_ANCHORED.r, C_ANCHORED.g, C_ANCHORED.b)
     end
     GameTooltip:AddLine(" ")
-    GameTooltip:AddLine(L["Drag to move. Shift locks an axis."], 0.8, 0.8, 0.8)
+    GameTooltip:AddLine(L["Drag to move. Shift locks to horizontal, Ctrl to vertical."], 0.8, 0.8, 0.8)
     GameTooltip:AddLine(L["Click to select, arrow keys to nudge."], 0.8, 0.8, 0.8)
     if a then GameTooltip:AddLine(L["Drop into a zone to re-anchor; Detach frees it."], 0.8, 0.8, 0.8) end
     GameTooltip:AddLine(L["Right-click to lock."], 0.8, 0.8, 0.8)

@@ -270,3 +270,22 @@ function R:IsEnabled(addon, key)
     if key and a.elements and a.elements[key] == false then return false end
     return true
 end
+
+-- Writes the toggle IsEnabled reads. Off is stored as an explicit false and on
+-- as nil (absent = enabled), so a fresh registration is on without a migration.
+-- ⚠ Explicit branches, not `cond and false or nil`: a false middle operand makes
+-- that idiom fall through to nil, which is how the element toggle used to write
+-- "enabled" whichever way it was clicked.
+function R:SetEnabled(addon, key, enabled)
+    local db = NS.db
+    if not db then return end
+    db.addons = db.addons or {}
+    local a = db.addons[addon]
+    if not a then a = { enabled = true, elements = {} }; db.addons[addon] = a end
+    a.elements = a.elements or {}
+    if key then
+        if enabled then a.elements[key] = nil else a.elements[key] = false end
+    else
+        a.enabled = enabled and true or false
+    end
+end
