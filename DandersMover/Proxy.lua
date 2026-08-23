@@ -44,8 +44,10 @@ local INSET, ITEM = 4, 4                -- slab padding, gap between inline item
 local BODY_ALPHA, HOVER_ALPHA = 0.95, 1
 local WEIGHT, SEL_WEIGHT = 1, 1         -- outline thickness; selection is colour, not weight
 -- Below these the slab cannot hold everything, so parts drop out in this order:
--- the coords first, then the addon icon, then all but a shortened title.
-local NO_COORDS_H, NO_COORDS_W, NO_ICON_W, TITLE_ONLY_W = 28, 120, 80, 60
+-- the coords first, then the role DOT -- the addon icon wins the space (the
+-- left edge already carries the role colour) -- then everything but the
+-- floating title. The icon itself never drops.
+local NO_COORDS_H, NO_COORDS_W, NO_DOT_W, TITLE_ONLY_W = 28, 120, 80, 60
 -- Snap zones. Same accent as the free-role dot, because a zone IS where a free
 -- drop would land; occupied ones go red. Hover is the only place a zone borrows
 -- the selection white, and the kit has no white token, so that one is a literal.
@@ -229,15 +231,15 @@ local function layout(b, anchored)
     local w = b:GetWidth() or 0
     local h = b:GetHeight() or 0
     local titleOnly = w < TITLE_ONLY_W
-    local showIcon = not titleOnly and w >= NO_ICON_W
+    local showDot = not titleOnly and w >= NO_DOT_W
     local showCoords = not titleOnly and w >= NO_COORDS_W and h >= NO_COORDS_H
     local showLink = anchored and not titleOnly
 
     -- The thresholds are only the fast path. A long title can fail to fit a slab
     -- wide enough to keep the normal layout, and its LEFT->RIGHT anchors would
     -- ellipsise it -- so MEASURE the text and fall back in the same order the
-    -- thresholds do: coords out, then the icon, then the centred overflow title.
-    -- The title itself never truncates.
+    -- thresholds do: coords out, then the dot, then the centred overflow title.
+    -- The title itself never truncates, and the icon never drops.
     if b.layoutTitle ~= b.element.title then b.title:SetText(b.element.title) end
     if not titleOnly then
         -- Unbounded = the full text's width even while the FontString is
@@ -246,41 +248,54 @@ local function layout(b, anchored)
         if b.title.GetUnboundedStringWidth then titleW = b.title:GetUnboundedStringWidth() end
         titleW = titleW or b.title:GetStringWidth() or 0
         local function avail()
-            local left = EDGE_W + INSET + DOT + ITEM
-            if showIcon then left = left + ICON_SZ + ITEM end
+            local left = EDGE_W + INSET + ICON_SZ + ITEM
+            if showDot then left = left + DOT + ITEM end
             local right = INSET
             if showCoords then right = right + (b.coords:GetStringWidth() or 0) + ITEM end
             if showLink then right = right + LINK_SZ + ITEM end
             return w - left - right
         end
         if titleW > avail() then showCoords = false end
-        if titleW > avail() then showIcon = false end
-        if titleW > avail() then titleOnly, showIcon, showCoords, showLink = true, false, false, false end
+        if titleW > avail() then showDot = false end
+        if titleW > avail() then titleOnly, showDot, showCoords, showLink = true, false, false, false end
     end
 
     -- Dragging re-runs this for EVERY proxy on every frame (RefreshAll ->
     -- Refresh -> Highlight), so the anchors and the SetText only get touched
     -- when the answer actually changed. Which parts are visible, plus the
     -- title, is the whole of the layout's input.
-    local key = (titleOnly and 1 or 0) + (showIcon and 2 or 0)
+    local key = (titleOnly and 1 or 0) + (showDot and 2 or 0)
               + (showCoords and 4 or 0) + (showLink and 8 or 0)
+    b.showDot = showDot           -- applyLook's ring placement reads this
     if b.layoutKey == key and b.layoutTitle == b.element.title then return end
     b.layoutKey, b.layoutTitle = key, b.element.title
 
-    b.icon:SetShown(showIcon)
+    b.icon:Show()                 -- explicit for pooled reuse and stubs
+    b.dot:SetShown(showDot)
     b.coords:SetShown(showCoords)
     b.link:SetShown(showLink)
 
     -- Anchored whether or not they are shown: a region with no points is a
     -- region nothing else can anchor OFF, and the title does exactly that.
+    -- With the dot dropped the icon takes its place flush left, and the root
+    -- ring re-homes onto whichever of the two is the leftmost marker.
     b.icon:ClearAllPoints()
-    b.icon:SetPoint("LEFT", b.dot, "RIGHT", ITEM, 0)
+    if showDot then b.icon:SetPoint("LEFT", b.dot, "RIGHT", ITEM, 0)
+    else            b.icon:SetPoint("LEFT", b, "LEFT", EDGE_W + INSET, 0) end
+    b.root:ClearAllPoints()
+    if showDot then
+        b.root:SetPoint("CENTER", b.dot, "CENTER")
+        b.root:SetSize(DOT_RING, DOT_RING)
+    else
+        b.root:SetPoint("CENTER", b.icon, "CENTER")
+        b.root:SetSize(ICON_SZ + 4, ICON_SZ + 4)
+    end
     b.link:ClearAllPoints()
     if showCoords then b.link:SetPoint("RIGHT", b.coords, "LEFT", -ITEM, 0)
     else               b.link:SetPoint("RIGHT", b, "RIGHT", -INSET, 0) end
 
     b.title:ClearAllPoints()
-    b.title:SetPoint("LEFT", showIcon and b.icon or b.dot, "RIGHT", ITEM, 0)
+    b.title:SetPoint("LEFT", b.icon, "RIGHT", ITEM, 0)
     if showLink then        b.title:SetPoint("RIGHT", b.link, "LEFT", -ITEM, 0)
     elseif showCoords then  b.title:SetPoint("RIGHT", b.coords, "LEFT", -ITEM, 0)
     else                    b.title:SetPoint("RIGHT", b, "RIGHT", -INSET, 0) end
@@ -319,10 +334,16 @@ local function applyLook(b, selected, hovered)
     local c = pos.anchor and C_ANCHORED or (isRoot and C_ROOT or C_FREE)
     b.edge:SetColorTexture(c.r, c.g, c.b, 1)
     b.dot:SetVertexColor(c.r, c.g, c.b)
-    -- The ring marks the one case the dot cannot: a root that is ITSELF anchored,
-    -- whose dot is already wearing the anchored purple.
-    b.root:SetShown(isRoot and pos.anchor ~= nil)
     layout(b, pos.anchor ~= nil)
+    -- With the dot on show, the ring marks the one case the dot cannot: a root
+    -- that is ITSELF anchored, whose dot is already wearing the anchored
+    -- purple. On a slab too narrow for the dot the ICON carries the ring for
+    -- EVERY root, or the root state would vanish with the dot (layout homes
+    -- the ring on whichever marker is showing).
+    local ringOn
+    if b.showDot then ringOn = isRoot and pos.anchor ~= nil
+    else ringOn = isRoot end
+    b.root:SetShown(ringOn and true or false)
 
     -- A floating title is on-demand chrome: shown only while this slab is the
     -- one being looked at or moved, so stacked anchors do not pile pills on
@@ -392,7 +413,9 @@ local function create(el)
     b.root:SetPoint("CENTER", b.dot, "CENTER")
 
     -- Owning addon's icon; falls back to the DF icon bundled with the lib.
-    b.icon = b:CreateTexture(nil, "OVERLAY")
+    -- Sublevel 2 (like the dot) so the root ring at sublevel 1 sits BEHIND it
+    -- when a narrow slab homes the ring on the icon instead of the dot.
+    b.icon = b:CreateTexture(nil, "OVERLAY", nil, 2)
     b.icon:SetSize(ICON_SZ, ICON_SZ)
     local addon = Registry:GetAddon(el.addon)
     if b.icon:SetTexture(addon and addon.icon or DEFAULT_ICON) == false then b.icon:SetTexture(DEFAULT_ICON) end

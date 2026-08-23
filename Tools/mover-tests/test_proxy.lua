@@ -280,6 +280,19 @@ do
     check(tinted(free.dot, { r = 0, g = 0, b = 1 }), "free: dot is the host accent")
     check(not free.root:IsShown() and not free.link:IsShown(), "free: neither")
     check(P.legend and P.legend:IsShown(), "legend shown for the session")
+
+    -- Narrow slab: the dot gives way to the icon, and a ROOT's ring re-homes
+    -- onto the icon so the root state stays visible without the dot.
+    R:Register("R", "tinyroot", { title = "t", frame = FakeFrame(960, 540, 50, 24),
+        getPos = function() return { point = "CENTER", x = 0, y = 0 } end,
+        onChanged = function() end })
+    R:Register("R", "tinychild", elDef({ point = "CENTER", x = 0, y = 0,
+        anchor = { target = "R:tinyroot", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 } }))
+    P:Build()
+    local tiny = P.proxies["R:tinyroot"]
+    check(not tiny.dot:IsShown() and tiny.icon:IsShown(), "narrow slab: icon shown instead of the dot")
+    check(tiny.root:IsShown(), "narrow root: ring re-homed onto the icon")
+
     P:DestroyAll()
     check(not P.legend:IsShown(), "legend hidden on DestroyAll")
     R:UnregisterAddon("R")
@@ -290,8 +303,8 @@ end
 
 -- Measured title fit. The size thresholds are only the fast path: a long title
 -- on a slab that KEEPS the normal layout must still never ellipsise -- parts
--- drop out (coords, then icon, then everything but a centred overflow title)
--- based on the measured text width. Stub metrics: 7px per character.
+-- drop out (coords, then the dot; the icon never drops) based on the measured
+-- text width. Stub metrics: 7px per character.
 do
     local wasReady = R.ready
     R.ready = true
@@ -310,10 +323,11 @@ do
     R:Register("T", "long",  def("Party Pinned 1 - NPC", 140))  -- 20 ch = 140px
     P:Build()
     local s, m, lg = P.proxies["T:short"], P.proxies["T:mid"], P.proxies["T:long"]
-    check(s.coords:IsShown() and s.icon:IsShown(), "short title keeps coords and icon")
-    check(m.icon:IsShown() and not m.coords:IsShown(), "long title on a mid slab drops coords first, keeps icon")
+    check(s.coords:IsShown() and s.icon:IsShown() and s.dot:IsShown(), "short title keeps coords, icon and dot")
+    check(m.icon:IsShown() and m.dot:IsShown() and not m.coords:IsShown(), "long title on a mid slab drops coords first, keeps icon and dot")
     eq(m.title:GetText(), "Party Pinned1", "dropped-coords title is the full text")
-    check(not lg.icon:IsShown() and not lg.coords:IsShown(), "very long title drops coords AND icon")
+    check(lg.icon:IsShown() and not lg.dot:IsShown() and not lg.coords:IsShown(),
+        "very long title drops coords AND the dot; the icon stays")
     eq(lg.title:GetText(), "Party Pinned 1 - NPC", "overflow title is the full text")
     local pt = lg.title._points[1]
     check(#lg.title._points == 1 and pt and pt[1] == "TOP" and pt[3] == "BOTTOM",
