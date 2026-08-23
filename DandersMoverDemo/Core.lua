@@ -39,7 +39,7 @@ local ELEMENTS = {
         -- getRect is deliberately 10px tighter than the frame on every side, so
         -- the visible rect and the frame geometry disagree. Snap zones, the
         -- proxy and the drag maths should all follow the inset rect.
-        key = "buffrow", title = "Buff Row", group = "Bars",
+        key = "buffrow", title = "Buff Row (rect inset 10px)", group = "Bars",
         w = 260, h = 40, scale = 0.9, inset = 10, color = { 0.30, 0.45, 0.85 },
         default = { point = "CENTER", x = 0, y = 220 },
     },
