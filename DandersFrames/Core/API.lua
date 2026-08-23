@@ -1015,12 +1015,14 @@ end
 -- Returns: table, or nil if the id is unknown. Fields:
 --   point     string  anchor point the offset is measured from (usually "CENTER")
 --   x, y      number  offset from that point on UIParent, in UI units
---   anchor    table   PARTY/RAID ONLY, and only when the container is glued to another
---                     addon's element through DandersMover:
---                     { target = "Addon:key", mode, edge, align, point, relPoint,
---                       offsetX, offsetY }. nil means free screen placement, and then
---                     x/y are a screen position exactly as before. x/y are ALWAYS valid
---                     absolute coordinates whether or not an anchor is set.
+--   anchor    table   Only when the frame is glued to another element through
+--                     DandersMover: { target = "Addon:key", mode, edge, align, point,
+--                     relPoint, offsetX, offsetY }. nil means free screen placement, and
+--                     then x/y are a screen position exactly as before. For party/raid
+--                     x/y are ALWAYS valid absolute coordinates. For a PINNED set glued to
+--                     the frames container (anchor.target = "DandersFrames:party"/"raid",
+--                     mode "point") x/y are the glue OFFSET from that corner -- the same
+--                     meaning `anchorTo` has always given them.
 --   anchorTo  string  PINNED ONLY, and only when the set is glued to the frames
 --                     container — then x/y are a fine offset from that corner rather
 --                     than a screen position. nil means free screen placement.

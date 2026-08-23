@@ -2976,11 +2976,13 @@ end
 -- because each needs its own enabled-state question answered, and a public API is a bad
 -- place to guess.
 --
--- ⚠ TWO STORAGE SHAPES behind one API. party/raid keep a flat CENTER offset in
--- db[xField]/db[yField]; a pinned set keeps {point, x, y} nested in set.position and may
--- ALSO be glued to the frames container (position.anchorTo), in which case x/y are a fine
--- offset from that corner rather than a screen position. GetPosition reports anchorTo so a
--- caller can tell the difference instead of assuming screen coordinates.
+-- ⚠ ONE RECORD SHAPE behind the API now: every target keeps a DandersMover record
+-- {point, x, y, anchor} (party/raid: db.position; pinned: set.position). A pinned set
+-- may be glued to the frames container (a point-mode `anchor` onto DandersFrames:party
+-- /raid, mirrored in the deprecated `anchorTo`), in which case x/y are a fine offset from
+-- that corner rather than a screen position. GetPosition reports both so a caller can
+-- tell the difference instead of assuming screen coordinates. Ids are frozen: pinnedN
+-- resolves against the CURRENT mode; personal / targetedList are not public.
 
 local API_PINNED_PREFIX = "pinned"
 
@@ -3040,23 +3042,37 @@ function DF:ResolvePositionTarget(id)
         if not setIndex or setIndex < 1 or setIndex > (pf.MAX_SETS or 0) then return nil end
         local set = pf:GetSetForPosition(setIndex)
         if not set then return nil end
-        set.position = set.position or { point = "CENTER", x = 0, y = 0 }
+        -- The CURRENT mode's set (GetSetForPosition -> IsInRaid / raid test) -- the
+        -- documented contract; do not change it. Read/write through the same helpers
+        -- DandersMover's onChanged and the legacy handles use, so an `anchor` survives
+        -- and x/y keep meaning "the glue offset while glued" (the anchorTo contract).
+        local raid = pf.IsPositionTargetRaid and pf:IsPositionTargetRaid() or false
+        local pos = pf.GetPositionRecord and pf:GetPositionRecord(setIndex, raid) or set.position
+        if not pos then return nil end
         local label = pf.GetPositionPanelLabel and pf:GetPositionPanelLabel(setIndex)
+        local a = pos.anchor
         return {
             id       = id,
             kind     = "pinned",
             setIndex = setIndex,
             label    = label or ("Pinned " .. setIndex),
             enabled  = set.enabled and true or false,
-            point    = set.position.point or "CENTER",
-            anchorTo = set.position.anchorTo,  -- nil = free screen placement
+            point    = pos.point or "CENTER",
+            anchorTo = pos.anchorTo,  -- nil = free screen placement (mirror of a frames `anchor`)
+            anchor   = a and {
+                target = a.target, mode = a.mode, edge = a.edge, align = a.align,
+                point = a.point, relPoint = a.relPoint, offsetX = a.offsetX, offsetY = a.offsetY,
+            } or nil,
             read     = function()
-                local p = set.position
-                return tonumber(p.x) or 0, tonumber(p.y) or 0
+                return pf.ReadXY(pos)
             end,
             write    = function(x, y)
-                set.position.x, set.position.y = x, y
-                if pf.ApplySetPosition then pf:ApplySetPosition(setIndex) end
+                if pf.CommitSetPosition then
+                    pf:CommitSetPosition(setIndex, raid, { point = pos.point, x = x, y = y })
+                else
+                    pf.WriteXY(set, pos.point, x, y)
+                    if pf.ApplySetPosition then pf:ApplySetPosition(setIndex) end
+                end
             end,
         }
     end

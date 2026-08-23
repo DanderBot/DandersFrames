@@ -697,6 +697,10 @@ DF.ExportCategories = {
         "personalTargetedSpellSpacing",
         "personalTargetedSpellX",
         "personalTargetedSpellY",
+        -- DandersMover record (the scalars above are its mirror). A pre-record string
+        -- carries only the scalars; MergeCategorySettings drops the profile's own
+        -- record then, so the import path re-seeds it from the merged scalars.
+        "personalTargetedPosition",
     },
     -- Targeted List page
     targetedList = {
@@ -779,6 +783,7 @@ DF.ExportCategories = {
         "targetedListX",
         "targetedListY",
         "targetedListZoomIcon",
+        "targetedListPosition",   -- DandersMover record; see personalTargetedPosition
     },
     -- Legacy name/status/health text & fonts
     text = {
@@ -1436,6 +1441,13 @@ function DF:MergeCategorySettings(profile, imported, categories, exportedCategor
     if not copied.position and (copied.anchorX or copied.anchorY
         or copied.raidAnchorX or copied.raidAnchorY) then
         profile.position = nil
+    end
+    -- Phase B records, same class.
+    if not copied.personalTargetedPosition and (copied.personalTargetedSpellX or copied.personalTargetedSpellY) then
+        profile.personalTargetedPosition = nil
+    end
+    if not copied.targetedListPosition and (copied.targetedListX or copied.targetedListY) then
+        profile.targetedListPosition = nil
     end
 end
 
