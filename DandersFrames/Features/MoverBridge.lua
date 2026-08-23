@@ -352,9 +352,9 @@ local function pinnedDef(mode, i)
             -- refresh gets a throwaway that is never persisted.
             return rec or { point = "CENTER", x = 0, y = 0 }
         end,
-        onChanged = function(pos)
+        onChanged = function(pos, reason)
             local pf = DF.PinnedFrames
-            if pf and pf.CommitSetPosition then pf:CommitSetPosition(i, isRaid, pos) end
+            if pf and pf.CommitSetPosition then pf:CommitSetPosition(i, isRaid, pos, reason) end
         end,
         default   = pinnedDefault(mode, i),
         secure    = true,

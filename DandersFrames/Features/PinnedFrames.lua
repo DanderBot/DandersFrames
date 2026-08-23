@@ -969,6 +969,13 @@ local FRAMES_ANCHOR_POINTS = {
 --   anchorTo   the pre-5.4 FRAMES_* key, kept as a MIRROR of a frames-glue anchor for
 --              one minor (a downgrade still glues; its offset is whatever x/y hold).
 --              Read only when `anchor` is absent.
+--   pendingRef TRANSIENT (login only). The legacy record's UIParent reference corner
+--              whose offset has not been folded into x/y yet: x/y are measured from
+--              UIParent's `pendingRef` corner, not its CENTER. Written by the
+--              ADDON_LOADED migration (UIParent's size is not trustworthy there -- see
+--              NormaliseLegacyRecord), consumed by the PLAYER_ENTERING_WORLD fold.
+--              PositionPinnedContainer honours it, so the set is on the right spot
+--              throughout; any x/y WRITE clears it (a write is CENTER-relative).
 local FRAMES_TARGET_MODE = {
     ["DandersFrames:party"] = "party",
     ["DandersFrames:raid"]  = "raid",
@@ -1012,6 +1019,7 @@ function PinnedFrames.WriteXY(set, point, x, y)
     else
         pos.point = point or pos.point
         pos.x, pos.y = x, y
+        pos.pendingRef = nil
     end
 end
 
@@ -1100,7 +1108,10 @@ local function PositionPinnedContainer(container, set, pos, frameW, frameH)
     local x = ((pos and pos.x) or 0) / s
     local y = ((pos and pos.y) or 0) / s
     container:ClearAllPoints()
-    container:SetPoint(point, UIParent, "CENTER", x, y)
+    -- pendingRef: the corner fold has not happened yet (login window), so x/y are
+    -- still offsets from that UIParent corner. Anchoring to the corner keeps the set
+    -- exactly where the legacy code put it, whatever UIParent's size reads right now.
+    container:SetPoint(point, UIParent, (pos and pos.pendingRef) or "CENTER", x, y)
 end
 
 -- ☠ LEGACY -> LIB SEMANTICS, pure. The old screen branch was
@@ -1111,13 +1122,42 @@ end
 -- later resolution change then behaves like the party/raid records already do.
 -- frameW/frameH are the per-frame size in container-local units, s the container
 -- scale, uiW/uiH UIParent's size. Mutates pos.
+--
+-- ☠ uiW/uiH MUST be the size the user's UI actually runs at. At ADDON_LOADED they are
+-- not (what UIParent reports there is not that size: every corner-referenced set
+-- landed short by half the missing width/height -- a TOPRIGHT set at (-2501, -860)
+-- from the corner ended up applied from CENTER and clamped into the bottom-left).
+-- So the corner term is folded ONLY when the caller hands over a trusted size; otherwise
+-- the half-frame term is folded now (it needs no UIParent size) and the corner is kept
+-- on the record as `pendingRef` for FoldPendingRef to finish once the size is known.
+-- A CENTER reference has no corner term and needs no deferral.
 function PinnedFrames.NormaliseLegacyRecord(pos, growth, frameW, frameH, s, uiW, uiH)
     local ref = pos.point or growth
     local gfx, gfy = AnchorFractions(growth)
     local rfx, rfy = AnchorFractions(ref)
     pos.point = growth
-    pos.x = (tonumber(pos.x) or 0) + (gfx - rfx) * (frameW or 0) * (s or 1) + rfx * (uiW or 0)
-    pos.y = (tonumber(pos.y) or 0) + (gfy - rfy) * (frameH or 0) * (s or 1) + rfy * (uiH or 0)
+    pos.x = (tonumber(pos.x) or 0) + (gfx - rfx) * (frameW or 0) * (s or 1)
+    pos.y = (tonumber(pos.y) or 0) + (gfy - rfy) * (frameH or 0) * (s or 1)
+    pos.pendingRef = nil
+    if rfx ~= 0 or rfy ~= 0 then
+        pos.pendingRef = ref
+        PinnedFrames.FoldPendingRef(pos, uiW, uiH)
+    end
+end
+
+-- Finish a deferred corner fold: x/y measured from UIParent's `pendingRef` corner ->
+-- from its CENTER. No-op without a pending ref or without a trusted size (the record
+-- stays self-describing, PositionPinnedContainer keeps anchoring to the corner).
+-- Returns true when the record changed.
+function PinnedFrames.FoldPendingRef(pos, uiW, uiH)
+    local ref = pos and pos.pendingRef
+    if not ref then return false end
+    if type(uiW) ~= "number" or type(uiH) ~= "number" or uiW <= 0 or uiH <= 0 then return false end
+    local rfx, rfy = AnchorFractions(ref)
+    pos.x = (tonumber(pos.x) or 0) + rfx * uiW
+    pos.y = (tonumber(pos.y) or 0) + rfy * uiH
+    pos.pendingRef = nil
+    return true
 end
 
 -- anchorTo -> a point-mode `anchor` onto that mode's container. The offsets are the
@@ -1135,9 +1175,11 @@ end
 -- Migrate one PROFILE's pinned records (both modes). Runs every login from
 -- DF:MigrateContainerPositionRecords and after an import; gated PER TABLE by
 -- pinnedFrames.positionsV2 (coordinate normalisation, once) and PER RECORD by shape
--- (anchorTo without anchor -> converted, idempotent). Baseline sizes come from THIS
--- profile's tables (set.matchMode or the set's own mode), the same rule
--- GetSetFrameSize / GetSetScale apply to the active profile.
+-- (anchorTo without anchor -> converted; pendingRef with a trusted uiW/uiH -> folded;
+-- both idempotent). Baseline sizes come from THIS profile's tables (set.matchMode or
+-- the set's own mode), the same rule GetSetFrameSize / GetSetScale apply to the
+-- active profile. uiW/uiH: nil when UIParent's size is not trustworthy yet (the
+-- ADDON_LOADED pass) -- the corner term is then deferred, see NormaliseLegacyRecord.
 function PinnedFrames.MigrateProfileRecords(profile, uiW, uiH)
     if type(profile) ~= "table" then return end
     for _, mode in ipairs({ "party", "raid" }) do
@@ -1150,6 +1192,8 @@ function PinnedFrames.MigrateProfileRecords(profile, uiW, uiH)
                     local growth = GetContainerAnchorPoint(set)
                     if pos.anchor == nil and pos.anchorTo and FRAMES_ANCHOR_POINTS[pos.anchorTo] then
                         PinnedFrames.ConvertLegacyAnchorTo(pos, growth, mode)
+                    elseif pos.pendingRef then
+                        PinnedFrames.FoldPendingRef(pos, uiW, uiH)
                     elseif pos.anchor == nil and not pf.positionsV2 then
                         local base = profile[set.matchMode or mode]
                         if type(base) ~= "table" then base = modeDB end
@@ -2744,6 +2788,7 @@ function PinnedFrames:ApplySetPosition(setIndex)
             realSet.position.y = pos.y
             realSet.position.anchorTo = pos.anchorTo
             realSet.position.anchor = CopyAnchor(pos.anchor)
+            realSet.position.pendingRef = pos.pendingRef
         end
     end
 end
@@ -2809,7 +2854,7 @@ end
 -- anchor it did not mention). Then: re-derive `point` as the growth corner when the
 -- lib left it elsewhere (Reset writes CENTER; a resolve writes CENTER) so the set
 -- stays size-invariant; keep the anchorTo mirror in step; apply.
-function PinnedFrames:CommitSetPosition(setIndex, isRaid, pos)
+function PinnedFrames:CommitSetPosition(setIndex, isRaid, pos, reason)
     isRaid = isRaid and true or false
     local set = GetSetDBForMode(setIndex, isRaid)
     if not set then return end
@@ -2817,6 +2862,10 @@ function PinnedFrames:CommitSetPosition(setIndex, isRaid, pos)
     if type(pos) == "table" and pos ~= rec then
         if pos.anchor ~= nil then rec.anchor = CopyAnchor(pos.anchor) end
         PinnedFrames.WriteXY(set, pos.point, tonumber(pos.x) or 0, tonumber(pos.y) or 0)
+    elseif reason and reason ~= "reapply" and reason ~= "parent" then
+        -- The lib mutated the record in place (drag / nudge / reset / detach ...): its
+        -- x/y are CENTER-relative by contract, so a still-pending corner fold is void.
+        rec.pendingRef = nil
     end
     local growth = GetContainerAnchorPoint(set)
     if rec.anchor == nil and rec.point ~= growth then
