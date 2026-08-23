@@ -30,6 +30,10 @@ local C_WARNING    = {r = 0.95, g = 0.35, b = 0.35, a = 1}     -- Soft red: beha
 -- them added in one round — and the first even carried the comment "the editor's warning
 -- amber", naming a shared colour that did not exist. Theme against this, never the numbers.
 local C_NOTICE     = {r = 0.91, g = 0.66, b = 0.25, a = 1}
+-- Green: a mover that OTHER movers are anchored to (an anchor root). Sits
+-- between the accent (free) and the anchored purple so the three roles read
+-- apart at a glance on the unlock overlay.
+local C_ANCHOR_ROOT = {r = 0.35, g = 0.78, b = 0.45, a = 1}
 
 -- Exported palette: other files should theme against these shared tables instead
 -- of re-declaring private copies or hardcoding the raw numbers. These are the
@@ -47,6 +51,7 @@ UI.Colors = {
     textDim    = C_TEXT_DIM,
     warning    = C_WARNING,  -- soft red for behaviour-change / caution notes
     notice     = C_NOTICE,   -- amber for "configured but will not render" notes
+    anchorRoot = C_ANCHOR_ROOT, -- green for a mover other movers are anchored to
 }
 
 -- Dialog chrome. The popup is a standalone dialog rather than a settings page and
@@ -196,6 +201,11 @@ UI.RowHeight = {
     -- so ResolveRowHeight IGNORES the literal a call site passes and every header
     -- lands here. That is the same rule the other factory rows already follow.
     sectionHeader = 11.1 + 11.9 + UI.RowGap,   -- top inset + text + the gap
+    -- A group box's title line (CreateGroupBox): the same 11.9 of DFFontNormal
+    -- text as a section header plus the gap to the first row, but WITHOUT the
+    -- header's 11.1 top inset -- the box's own padding already provides the
+    -- air above it.
+    groupTitle  = 11.9 + UI.RowGap,
 }
 
 -- Resolve the layout slot height for a widget being added to a group/page. Fixed-height widgets

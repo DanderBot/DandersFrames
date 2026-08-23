@@ -21,11 +21,17 @@ end
 
 -- screen snap: edges and centre lines
 do
-    local cx, cy, sx, sy = S.SnapToScreen({ x = -946, y = 3, w = 20, h = 10 }, 1920, 1080, 8)
+    local cx, cy, sx, sy, lx, ly = S.SnapToScreen({ x = -946, y = 3, w = 20, h = 10 }, 1920, 1080, 8)
     eq(cx, -950, "left edge snapped"); check(sx, "x snapped")
     eq(cy, 0, "centre line snapped"); check(sy, "y snapped")
-    local cx2, _, sx2 = S.SnapToScreen({ x = 300, y = 300, w = 20, h = 10 }, 1920, 1080, 8)
+    eq(lx, -960, "x line is the left screen edge"); eq(ly, 0, "y line is the screen centre")
+    local cx2, _, sx2, sy2, lx2, ly2 = S.SnapToScreen({ x = 300, y = 300, w = 20, h = 10 }, 1920, 1080, 8)
     eq(cx2, 300, "far from edges untouched"); check(not sx2, "x not snapped")
+    check(lx2 == nil and ly2 == nil and not sy2, "no lines when nothing snapped")
+    -- right edge to the right screen edge, y untouched: only lineX reported
+    local cx3, cy3, sx3, sy3, lx3, ly3 = S.SnapToScreen({ x = 947, y = 300, w = 20, h = 10 }, 1920, 1080, 8)
+    eq(cx3, 950, "right edge snapped"); check(sx3 and not sy3, "only x snapped")
+    eq(lx3, 960, "x line is the right screen edge"); check(ly3 == nil, "no y line")
 end
 
 -- resolve
@@ -138,4 +144,33 @@ do
     -- y axis: 10 tall at cy=57: centre->60 (+3), top 62->60 (-2), bottom 52->60 (+8) => top wins
     local _, y = S.SnapRectToGrid(0, 57, 30, 10, 20)
     eq(y, 55, "top edge snaps to 60 (cy 55)")
+end
+
+-- nudge step: Shift x10, Ctrl x100, Ctrl wins when both are held
+do
+    eq(S.NudgeStep(false, false), 1, "plain nudge = 1")
+    eq(S.NudgeStep(true, false), 10, "shift = 10")
+    eq(S.NudgeStep(false, true), 100, "ctrl = 100")
+    eq(S.NudgeStep(true, true), 100, "shift+ctrl = 100")
+    eq(S.NudgeStep(nil, nil), 1, "nil modifiers = 1")
+end
+
+-- rect-aware grid snap reports the LINE the winning candidate landed on
+do
+    -- right edge wins (38 -> 40): the preview belongs on x=40, not the centre
+    local cx, cy, lx, ly = S.SnapRectToGrid(23, 0, 30, 10, 20)
+    eq(cx, 25, "cx"); eq(lx, 40, "x line = right edge's grid line")
+    eq(ly, 0, "y line = centre's grid line (already on it)")
+    -- left edge wins (-3 -> 0)
+    local _, _, lx2 = S.SnapRectToGrid(12, 0, 30, 10, 20)
+    eq(lx2, 0, "x line = left edge's grid line")
+    -- top edge wins on y (62 -> 60)
+    local _, _, _, ly3 = S.SnapRectToGrid(0, 57, 30, 10, 20)
+    eq(ly3, 60, "y line = top edge's grid line")
+    -- exactly on a line: zero shift still reports the line
+    local _, _, lx4, ly4 = S.SnapRectToGrid(40, 60, 30, 10, 20)
+    eq(lx4, 40, "on-grid centre reports its line x"); eq(ly4, 60, "on-grid centre reports its line y")
+    -- no grid: no lines
+    local _, _, lx5, ly5 = S.SnapRectToGrid(7, 0, 30, 10, 0)
+    check(lx5 == nil and ly5 == nil, "grid 0 -> no lines")
 end

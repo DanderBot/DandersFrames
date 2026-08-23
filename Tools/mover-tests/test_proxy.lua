@@ -7,10 +7,14 @@ local R = NS.Registry
 -- other call; a __index fallback hands out no-op methods for the rest.
 -- ============================================================
 local function stubFrame()
-    local f = { _shown = false, _scripts = {} }
+    -- dragging is read as a plain boolean by Proxy:Refresh; without a real
+    -- value the __index fallback would hand back a (truthy) function and
+    -- Refresh would bail before Highlight ran.
+    local f = { _shown = false, _scripts = {}, dragging = false }
     function f:Show() self._shown = true end
     function f:Hide() self._shown = false end
     function f:IsShown() return self._shown end
+    function f:SetShown(v) self._shown = v and true or false end
     function f:GetCenter() return 0, 0 end
     function f:GetSize() return 10, 10 end
     function f:CreateTexture() return stubFrame() end
@@ -26,7 +30,9 @@ local shiftDown, ctrlDown = false, false
 IsShiftKeyDown = function() return shiftDown end
 IsControlKeyDown = function() return ctrlDown end
 NS.UI = {
-    Colors = { textDim = { r = 0.5, g = 0.5, b = 0.5 } },
+    MEDIA = "",
+    Colors = { textDim = { r = 0.5, g = 0.5, b = 0.5 }, anchorRoot = { r = 0, g = 1, b = 0 }, background = { r = 0, g = 0, b = 0 } },
+    Space = { section = 10 }, RowGap = 14, RowGapTight = 8,
     GetAccent = function() return { r = 0, g = 0, b = 1 } end,
     CreateElementBackdrop = function() end,
     CreateLabel = function() return stubFrame() end,
@@ -129,6 +135,34 @@ do
     b:SetScript("OnUpdate", nil)
     P:DestroyAll()
     R:UnregisterAddon("D")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- Role markers: an element something is anchored to shows the root marker,
+-- an anchored element shows the link icon, a free element shows neither.
+-- (Colours go through stubbed SetBackdrop* calls, so only the markers are
+-- observable here.)
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("R", { title = "R" })
+    R:Register("R", "root",  elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Register("R", "child", elDef({ point = "CENTER", x = 0, y = 0,
+        anchor = { target = "R:root", edge = "bottom", align = "start", offsetX = 0, offsetY = 0 } }))
+    R:Register("R", "free",  elDef({ point = "CENTER", x = 0, y = 0 }))
+    P:Build()
+    local root, child, free = P.proxies["R:root"], P.proxies["R:child"], P.proxies["R:free"]
+    check(root.root:IsShown() and not root.link:IsShown(), "root: marker on, link off")
+    check(child.link:IsShown() and not child.root:IsShown(), "child: link on, marker off")
+    check(not free.root:IsShown() and not free.link:IsShown(), "free: neither")
+    check(P.legend and P.legend:IsShown(), "legend shown for the session")
+    P:DestroyAll()
+    check(not P.legend:IsShown(), "legend hidden on DestroyAll")
+    R:UnregisterAddon("R")
     R.ready = wasReady
     NS.Session = nil
     NS.db = nil

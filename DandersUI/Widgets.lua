@@ -847,6 +847,63 @@ function UI:CreateElementBackdrop(frame, opts)
     return CreateElementBackdrop(frame, opts)
 end
 
+-- A titled group box: the LOOK of a DandersFrames settings group (faint white
+-- fill, 8% white outline, accent title, padded content) without the layout
+-- engine behind it. The options addon's CreateSettingsGroup owns row stacking,
+-- collapse state and grey-gating for DF's pages; this is the plain container
+-- for a consumer that lays its own rows out -- it gives back a `content` frame
+-- to anchor into and sizes the box around it.
+--
+-- opts:
+--   title     header text (accent-coloured DFFontNormal; re-tints on SetAccent)
+--   width     box width (280)
+--   padding   inset on all four sides (UI.Space.section)
+--
+-- Returns the box with:
+--   .title              the header FontString
+--   .content            the padded inner frame; anchor rows to its TOPLEFT,
+--                       width follows the box
+--   :SetContentHeight(h)  size the content frame and the box around it
+function UI:CreateGroupBox(parent, opts)
+    local host = self
+    opts = opts or {}
+    local pad = opts.padding or UI.Space.section
+    local titleH = UI.RowHeight.groupTitle
+    local box = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    box:SetSize(opts.width or 280, pad * 2 + titleH)
+    box.padding = pad
+    -- Same fill/outline as the options addon's settings group.
+    CreateElementBackdrop(box, {
+        bgColor     = { 1, 1, 1, 0.03 },
+        borderColor = { 1, 1, 1, 0.08 },
+    })
+
+    local title = box:CreateFontString(nil, "OVERLAY", "DFFontNormal")
+    title:SetPoint("TOPLEFT", box, "TOPLEFT", pad, -pad)
+    title:SetPoint("TOPRIGHT", box, "TOPRIGHT", -pad, -pad)
+    title:SetJustifyH("LEFT")
+    title:SetText(opts.title or "")
+    local a = host:GetAccent()
+    title:SetTextColor(a.r, a.g, a.b)
+    -- Accent is per host and can change for the session (DF flips it on the
+    -- party/raid switch), so the title follows it like a section header does.
+    host:RegisterAccentListener(function(c) title:SetTextColor(c.r, c.g, c.b) end)
+    box.title = title
+
+    local content = CreateFrame("Frame", nil, box)
+    content:SetPoint("TOPLEFT", box, "TOPLEFT", pad, -(pad + titleH))
+    content:SetPoint("TOPRIGHT", box, "TOPRIGHT", -pad, -(pad + titleH))
+    content:SetHeight(1)
+    box.content = content
+
+    function box:SetContentHeight(h)
+        h = math.max(h or 0, 1)
+        content:SetHeight(h)
+        self:SetHeight(pad + titleH + h + pad)
+    end
+    return box
+end
+
 
 -- The addon's ONE name prompt. This was hand-rolled twice against Blizzard's
 -- StaticPopup edit box — here and in the Filter Designer — each copy carrying

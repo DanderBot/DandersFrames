@@ -13,18 +13,47 @@ local addonName, NS = ...
 local Pn = {}
 NS.Panel = Pn
 
-local Registry, Sess, Proxy, UI, L = NS.Registry, NS.Session, NS.Proxy, NS.UI, NS.L
-local CreateFrame, UIParent, IsShiftKeyDown = CreateFrame, UIParent, IsShiftKeyDown
-local format, tonumber, ipairs, floor = string.format, tonumber, ipairs, math.floor
+local Registry, Sess, Proxy, Solver, UI, L = NS.Registry, NS.Session, NS.Proxy, NS.Solver, NS.UI, NS.L
+local CreateFrame, UIParent, IsShiftKeyDown, IsControlKeyDown = CreateFrame, UIParent, IsShiftKeyDown, IsControlKeyDown
+local format, tonumber, ipairs, floor, max, min = string.format, tonumber, ipairs, math.floor, math.max, math.min
 
-local W, GAP, PAD = 236, 12, 10
+-- Spacing comes from the theme so this panel keeps the rhythm of every other
+-- DandersUI surface: PAD is the outer padding, GAP the gap between rows of
+-- different kinds, TIGHT the gap inside a run of like things (buttons in a
+-- row, the two X/Y pairs).
+local W = 236
+local PAD, GAP, TIGHT = UI.Space.section, UI.RowGap, UI.RowGapTight
+local CW = W - PAD * 2            -- content width
+local DOCK_GAP = 12               -- panel <-> proxy distance
+local ICON = 24                   -- header icon, drawn from the full 64px source
+local HEADER_H = 26               -- title line + addon line
+local BOX_W = 62                  -- X / Y edit boxes
+local NUDGE_CELL, NUDGE_ICON = 22, 14
+local DOT, DOT_GAP = 16, 4        -- 9-point picker cells
+local BTN_H, CTA_H = 20, 22
 local POINTS = { "TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" }
 
 local function selectedElement()
     return Sess.selected and Registry:Get(Sess.selected) or nil
 end
 
-local function step() return IsShiftKeyDown() and 10 or 1 end
+local function step() return Solver.NudgeStep(IsShiftKeyDown(), IsControlKeyDown()) end
+
+-- A row of equal-width buttons spanning the content width.
+local function buttonRow(f, y, height, defs)
+    local n = #defs
+    local bw = floor((CW - TIGHT * (n - 1)) / n)
+    local out = {}
+    for i, d in ipairs(defs) do
+        local b = UI:CreateButton(f, {
+            text = d.text, width = bw, height = height, onClick = d.onClick,
+            style = d.style, tone = d.tone, fitText = false,
+        })
+        b:SetPoint("TOPLEFT", PAD + (i - 1) * (bw + TIGHT), y)
+        out[i] = b
+    end
+    return out
+end
 
 local function build()
     local f = CreateFrame("Frame", "DandersMoverPanel", Proxy:GetUnlockFrame(), "BackdropTemplate")
@@ -35,33 +64,47 @@ local function build()
     f:EnableMouse(true)
 
     local y = -PAD
-    local function row(h) local cur = y; y = y - h; return cur end
+    -- Reserve a row of height h and return its top; gap is the space to leave below it.
+    local function row(h, gap) local cur = y; y = y - h - (gap or GAP); return cur end
 
-    -- ---- header: icon + title + addon ----------------------------
+    -- ---- header: icon | title / addon ...... settings -------------
+    local hy = row(HEADER_H, TIGHT)
     f.icon = f:CreateTexture(nil, "OVERLAY")
-    f.icon:SetSize(16, 16)
-    f.icon:SetPoint("TOPLEFT", PAD, -PAD)
-
-    f.title = UI:CreateLabel(f, { size = 12, color = UI.Colors.text })
-    f.title:SetPoint("TOPLEFT", PAD + 22, row(17))
-    f.addon = UI:CreateLabel(f, { size = 10, color = UI.Colors.textDim })
-    f.addon:SetPoint("TOPLEFT", PAD, row(15))
-    f.anchorLine = UI:CreateLabel(f, { size = 10, color = UI.Colors.accent, width = W - PAD * 2 })
-    f.anchorLine:SetPoint("TOPLEFT", PAD, row(16))
+    f.icon:SetSize(ICON, ICON)
+    f.icon:SetPoint("LEFT", f, "TOPLEFT", PAD, hy - HEADER_H / 2)   -- centred on the header block
 
     f.btnSettings = UI:CreateButton(f, {
         text = L["Settings"], width = 62, height = 18, style = "ghost",
         tooltip = { title = L["Settings"], lines = { L["Snapping, grid and per-addon mover toggles."] } },
         onClick = function() if NS.Settings then NS.Settings:Toggle() end end,
     })
-    f.btnSettings:SetPoint("TOPRIGHT", -PAD, -PAD)
+    f.btnSettings:SetPoint("TOPRIGHT", -PAD, hy)
 
-    -- ---- X / Y ---------------------------------------------------
-    local ry = row(26)
-    f.xLabel = UI:CreateLabel(f, { text = L["X"], size = 11 })
-    f.xLabel:SetPoint("TOPLEFT", PAD, ry - 4)
-    f.xBox = UI:CreateEditBox(f, {
-        width = 62, numeric = true,
+    f.title = UI:CreateLabel(f, { size = 12, color = UI.Colors.text })
+    f.title:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ICON + TIGHT - 2, hy)
+    f.title:SetPoint("TOPRIGHT", f.btnSettings, "TOPLEFT", -TIGHT, 0)
+    f.title:SetWordWrap(false)
+    f.addon = UI:CreateLabel(f, { size = 10, color = UI.Colors.textDim })
+    f.addon:SetPoint("TOPLEFT", f.title, "BOTTOMLEFT", 0, -1)
+    f.addon:SetPoint("TOPRIGHT", f.title, "BOTTOMRIGHT", 0, -1)
+    f.addon:SetWordWrap(false)
+
+    -- ---- anchored-to line ----------------------------------------
+    f.anchorLine = UI:CreateLabel(f, { size = 10, color = UI.Colors.accent, width = CW })
+    f.anchorLine:SetPoint("TOPLEFT", PAD, row(14))
+
+    -- ---- X / Y: two label+box pairs centred as one group ------------
+    -- The pairs live in a container whose width is recomputed on Refresh
+    -- (the labels change between "X" and "Offset X"), and the container is
+    -- centred in the panel, so the group stays centred whatever the labels say.
+    local ry = row(20)
+    f.xyRow = CreateFrame("Frame", nil, f)
+    f.xyRow:SetSize(CW, 20)
+    f.xyRow:SetPoint("TOP", f, "TOP", 0, ry)
+    f.xLabel = UI:CreateLabel(f.xyRow, { text = L["X"], size = 11, justify = "RIGHT" })
+    f.xLabel:SetPoint("LEFT", 0, 0)
+    f.xBox = UI:CreateEditBox(f.xyRow, {
+        width = BOX_W, numeric = true,
         get = function()
             local el = selectedElement(); if not el then return 0 end
             local pos = Registry:GetPos(el)
@@ -72,12 +115,11 @@ local function build()
             if el then Sess:SetXY(el, v, tonumber(f.yBox:GetText()) or 0) end
         end,
     })
-    f.xBox:SetPoint("TOPLEFT", PAD + 22, ry)
-
-    f.yLabel = UI:CreateLabel(f, { text = L["Y"], size = 11 })
-    f.yLabel:SetPoint("TOPLEFT", PAD + 100, ry - 4)
-    f.yBox = UI:CreateEditBox(f, {
-        width = 62, numeric = true,
+    f.xBox:SetPoint("LEFT", f.xLabel, "RIGHT", TIGHT - 2, 0)
+    f.yLabel = UI:CreateLabel(f.xyRow, { text = L["Y"], size = 11, justify = "RIGHT" })
+    f.yLabel:SetPoint("LEFT", f.xBox, "RIGHT", GAP, 0)
+    f.yBox = UI:CreateEditBox(f.xyRow, {
+        width = BOX_W, numeric = true,
         get = function()
             local el = selectedElement(); if not el then return 0 end
             local pos = Registry:GetPos(el)
@@ -88,71 +130,91 @@ local function build()
             if el then Sess:SetXY(el, tonumber(f.xBox:GetText()) or 0, v) end
         end,
     })
-    f.yBox:SetPoint("TOPLEFT", PAD + 122, ry)
+    f.yBox:SetPoint("LEFT", f.yLabel, "RIGHT", TIGHT - 2, 0)
 
-    -- ---- nudge arrows (Shift = x10) + 9-point picker -------------
-    local ny = row(66)
-    local ARROWS = {
-        { "expand_less",  0,  1, 24,   0 },
-        { "chevron_left", -1, 0,  0, -21 },
-        { "chevron_right", 1, 0, 48, -21 },
-        { "expand_more",  0, -1, 24, -42 },
+    -- ---- nudge cluster | 9-point picker: two equal halves ------------
+    -- Each cluster sits in its own container, centred in its half of the
+    -- content width and on the same vertical centre.
+    local clusterH = max(NUDGE_CELL * 3, DOT * 3 + DOT_GAP * 2)
+    local ny = row(clusterH)
+    local half = CW / 2
+
+    f.nudge = CreateFrame("Frame", nil, f)
+    f.nudge:SetSize(NUDGE_CELL * 3, NUDGE_CELL * 3)
+    f.nudge:SetPoint("CENTER", f, "TOPLEFT", PAD + half / 2, ny - clusterH / 2)
+    local ARROWS = {   -- icon, dx, dy, column, row (0-based in the 3x3 cluster)
+        { "expand_less",   0,  1, 1, 0 },
+        { "chevron_left", -1,  0, 0, 1 },
+        { "chevron_right", 1,  0, 2, 1 },
+        { "expand_more",   0, -1, 1, 2 },
     }
     for _, a in ipairs(ARROWS) do
-        local icon, dx, dy, ax, ay = a[1], a[2], a[3], a[4], a[5]
-        local b = UI:CreateGlyphButton(f, {
-            texture = UI.MEDIA .. "Icons\\" .. icon, size = 20, iconSize = 14,
+        local icon, dx, dy, col, rowi = a[1], a[2], a[3], a[4], a[5]
+        local b = UI:CreateGlyphButton(f.nudge, {
+            texture = UI.MEDIA .. "Icons\\" .. icon, size = NUDGE_CELL, iconSize = NUDGE_ICON,
             onClick = function()
                 local el = selectedElement()
                 if el then Sess:Nudge(el, dx * step(), dy * step()) end
             end,
-            tooltip = { title = L["Nudge"], lines = { L["Hold Shift for 10 units."] } },
+            tooltip = { title = L["Nudge"], lines = { L["Hold Shift for 10 units, Ctrl for 100."] } },
         })
-        b:SetPoint("TOPLEFT", PAD + ax, ny + ay)
+        b:SetPoint("TOPLEFT", col * NUDGE_CELL, -rowi * NUDGE_CELL)
     end
 
+    f.picker = CreateFrame("Frame", nil, f)
+    f.picker:SetSize(DOT * 3 + DOT_GAP * 2, DOT * 3 + DOT_GAP * 2)
+    f.picker:SetPoint("CENTER", f, "TOPLEFT", PAD + half + half / 2, ny - clusterH / 2)
     f.points = {}
     for i, point in ipairs(POINTS) do
         local col, rowi = (i - 1) % 3, floor((i - 1) / 3)
-        local b = UI:CreateButton(f, {
-            width = 16, height = 16,
+        local b = UI:CreateButton(f.picker, {
+            width = DOT, height = DOT,
             onClick = function()
                 local el = selectedElement()
                 if el then Sess:SetAnchorPoint(el, point) end
             end,
             tooltip = point,
         })
-        b:SetPoint("TOPLEFT", PAD + 118 + col * 20, ny - rowi * 20)
+        b:SetPoint("TOPLEFT", col * (DOT + DOT_GAP), -rowi * (DOT + DOT_GAP))
         b.point = point
         f.points[i] = b
     end
 
     -- ---- actions -------------------------------------------------
-    local by = row(28)
-    local function action(text, x, w, fn, tone)
-        local b = UI:CreateButton(f, { text = text, width = w, height = 20, onClick = fn, tone = tone })
-        b:SetPoint("TOPLEFT", x, by)
-        return b
-    end
-    f.btnCenter = action(L["Center"], PAD,      68, function() local el = selectedElement(); if el then Sess:Center(el) end end)
-    f.btnReset  = action(L["Reset"],  PAD + 72, 68, function() local el = selectedElement(); if el then Sess:Reset(el) end end)
-    f.btnDetach = action(L["Detach"], PAD + 144, 68, function() local el = selectedElement(); if el then Sess:Detach(el) end end)
+    local acts = buttonRow(f, row(BTN_H, TIGHT), BTN_H, {
+        { text = L["Center"], onClick = function() local el = selectedElement(); if el then Sess:Center(el) end end },
+        { text = L["Reset"],  onClick = function() local el = selectedElement(); if el then Sess:Reset(el) end end },
+        { text = L["Detach"], onClick = function() local el = selectedElement(); if el then Sess:Detach(el) end end },
+    })
+    f.btnCenter, f.btnReset, f.btnDetach = acts[1], acts[2], acts[3]
 
-    local uy = row(28)
-    f.btnUndo = UI:CreateButton(f, { text = L["Undo"], width = 104, height = 20, onClick = function() Sess:Undo() end })
-    f.btnUndo:SetPoint("TOPLEFT", PAD, uy)
-    f.btnRedo = UI:CreateButton(f, { text = L["Redo"], width = 104, height = 20, onClick = function() Sess:Redo() end })
-    f.btnRedo:SetPoint("TOPLEFT", PAD + 108, uy)
+    local hist = buttonRow(f, row(BTN_H), BTN_H, {
+        { text = L["Undo"], onClick = function() Sess:Undo() end },
+        { text = L["Redo"], onClick = function() Sess:Redo() end },
+    })
+    f.btnUndo, f.btnRedo = hist[1], hist[2]
 
-    local fy = row(32)
-    f.btnSave = UI:CreateButton(f, { text = L["Save & Exit"], width = 104, height = 22, style = "primary", onClick = function() Sess:Finish("save") end })
-    f.btnSave:SetPoint("TOPLEFT", PAD, fy)
-    f.btnDiscard = UI:CreateButton(f, { text = L["Discard"], width = 104, height = 22, tone = "danger", onClick = function() Sess:Finish("discard") end })
-    f.btnDiscard:SetPoint("TOPLEFT", PAD + 108, fy)
+    local fin = buttonRow(f, row(CTA_H, 0), CTA_H, {
+        { text = L["Save & Exit"], style = "primary", onClick = function() Sess:Finish("save") end },
+        { text = L["Discard"], tone = "danger", onClick = function() Sess:Finish("discard") end },
+    })
+    f.btnSave, f.btnDiscard = fin[1], fin[2]
 
     f:SetHeight(-y + PAD)
     f:Hide()
     return f
+end
+
+-- Size the X/Y group to its current labels so it stays centred. Both labels
+-- take the wider of the two, so the pairs mirror each other; the boxes give up
+-- width when the labels are long ("Offset X") so the group never overflows.
+local function layoutXY(f)
+    local lw = max(f.xLabel:GetStringWidth() or 0, f.yLabel:GetStringWidth() or 0)
+    f.xLabel:SetWidth(lw); f.yLabel:SetWidth(lw)
+    local pair = lw + TIGHT - 2
+    local bw = max(40, floor(min(BOX_W, (CW - GAP) / 2 - pair)))
+    f.xBox:SetWidth(bw); f.yBox:SetWidth(bw)
+    f.xyRow:SetWidth((pair + bw) * 2 + GAP)
 end
 
 function Pn:Ensure()
@@ -169,11 +231,11 @@ function Pn:Dock()
     local side = NS.db.panelSide
     if side == "auto" then
         local right = proxy:GetRight() or 0
-        side = (right + GAP + W > (UIParent:GetRight() or 0)) and "left" or "right"
+        side = (right + DOCK_GAP + W > (UIParent:GetRight() or 0)) and "left" or "right"
     end
     f:ClearAllPoints()
-    if side == "left" then f:SetPoint("TOPRIGHT", proxy, "TOPLEFT", -GAP, 0)
-    else f:SetPoint("TOPLEFT", proxy, "TOPRIGHT", GAP, 0) end
+    if side == "left" then f:SetPoint("TOPRIGHT", proxy, "TOPLEFT", -DOCK_GAP, 0)
+    else f:SetPoint("TOPLEFT", proxy, "TOPRIGHT", DOCK_GAP, 0) end
     f:Show()
 end
 
@@ -211,6 +273,7 @@ function Pn:Refresh()
             b:SetActive(b.point == cur)
         end
     end
+    layoutXY(f)
     f.xBox:Refresh(); f.yBox:Refresh()
 
     f.btnUndo:SetEnabled(Sess.undo and Sess.undo:CanUndo() or false)
