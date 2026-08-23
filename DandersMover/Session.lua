@@ -16,6 +16,8 @@ local InCombatLockdown, UIParent, IsShiftKeyDown, IsControlKeyDown = InCombatLoc
 local C_Timer = C_Timer
 
 local SCREEN_SNAP = 8
+-- Only reached when the SV predate the setting; NS.DEFAULTS.snapDistance is the value.
+local SNAP_DISTANCE = 100
 
 local function panel(method) if NS.Panel then NS.Panel[method](NS.Panel) end end
 
@@ -311,7 +313,7 @@ function Sess:DragTo(el, cx, cy)
     -- make zones on off-grid targets unreachable (a 20px grid vs a zone at y=150).
     local zone
     if db.snapToFrames and #Proxy.dragZones > 0 then
-        zone = Solver.BestZone(cx, cy, w, h, Proxy.dragZones, 0.1)
+        zone = Solver.NearestZone(cx, cy, w, h, Proxy.dragZones, db.snapDistance or SNAP_DISTANCE)
     end
     if zone then
         cx, cy = zone.x, zone.y

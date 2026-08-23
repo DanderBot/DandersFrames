@@ -149,12 +149,20 @@ local function build()
         set = function(v) NS.db.gridSize = v end,
         onChanged = function() Grid:Refresh() end,
     })
+    -- Fixed distance, so the pull is the same for a raid container and a lone icon.
+    -- 0 still snaps on a genuine overlap (gap 0), it just kills the reach.
+    f.snapDistSlider = UI:CreateSlider(snap.content, {
+        label = L["Snap distance"], min = 0, max = 400, step = 10,
+        get = function() return NS.db.snapDistance end,
+        set = function(v) NS.db.snapDistance = v end,
+    })
     stack(snap, {
         toggle(snap.content, L["Snap to grid"], "snapToGrid"),
         toggle(snap.content, L["Snap to frames"], "snapToFrames"),
         toggle(snap.content, L["Snap to screen"], "snapToScreen"),
         toggle(snap.content, L["Show grid"], "showGrid", function() Grid:Refresh() end),
         f.gridSlider,
+        f.snapDistSlider,
     })
     place(snap)
 
@@ -285,6 +293,7 @@ function St:Refresh()
     if not f or not f:IsShown() then return end
     for _, cb in ipairs(f.cb) do cb:Refresh() end
     f.gridSlider:RefreshValue()
+    f.snapDistSlider:RefreshValue()
     f.sideRow:Refresh()
 
     clearRows(f)

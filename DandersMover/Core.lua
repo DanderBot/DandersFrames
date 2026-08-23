@@ -36,6 +36,10 @@ function NS:Debug(msg) if NS.db and NS.db.debug then print("|cff888888DandersMov
 -- ============================================================
 NS.DEFAULTS = {
     gridSize = 20, snapToGrid = true, snapToFrames = true, snapToScreen = true, showGrid = true,
+    -- How close (screen units, edge to edge) a dragged element has to get before a
+    -- snap zone claims it. Fixed, not a fraction of the element: the same distance
+    -- for a raid container and for a single icon. Also the zone-highlight radius.
+    snapDistance = 100,
     keyboardNudge = true, panelSide = "auto", showHiddenMovers = true, showOtherAddons = false, debug = false,
     addons = {}, demo = {},
 }
