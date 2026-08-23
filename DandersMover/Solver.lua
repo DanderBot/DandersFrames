@@ -320,7 +320,7 @@ end
 -- mid-drag. Multiples of the one reach setting the user already tunes, so a
 -- bigger snap radius also means a longer tether.
 -- ============================================================
-S.TETHER_HOLD = 3
+S.TETHER_HOLD = 2   -- strain begins here: half the reach is warning band
 S.TETHER_SNAP = 4
 
 -- "held" | "strained" | "snapped" for a drag `dist` px out from the resolved

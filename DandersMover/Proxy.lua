@@ -756,7 +756,9 @@ function P:SnapTether(el)
     if not line then return end
     local tx, ty = nearestOnRect(rect, cx, cy)
     NS.Fx.Cancel(line)
-    line:SetStartPoint("CENTER", UIParent, cx, cy)
+    -- The start point rides the PROXY, not a frozen coordinate: a fast drag
+    -- keeps pulling the breaking tether along while it fades out.
+    line:SetStartPoint("CENTER", b, 0, 0)
     line:SetEndPoint("CENTER", UIParent, tx, ty)
     line:SetThickness(TETHER_W)
     line:SetColorTexture(C_TETHER_STRAIN.r, C_TETHER_STRAIN.g, C_TETHER_STRAIN.b, 1)
@@ -1165,14 +1167,14 @@ function P:UpdateZones(cx, cy, hovered)
         if hovered and z == hovered then
             -- The zone that WILL take the drop: accent fill, white outline, the
             -- same 2px the selected proxy wears.
-            paintZone(zf, C_ZONE, 0.55, C_ZONE_HOVER, 1, ZONE_HOVER_WEIGHT)
+            paintZone(zf, C_ZONE, 0.7, C_ZONE_HOVER, 1, ZONE_HOVER_WEIGHT)
         elseif closest and z.target == closest and sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2) < radius then
             local d = sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2)
             local f = 0.2 + Solver.ProximityFactor(d, radius) * 0.8
             -- Occupied zones read quieter (CDM rule) -- here that is the lower
             -- pair of alphas rather than an extra factor on top of the accent's.
             if z.occupied then paintZone(zf, C_ZONE_OCCUPIED, 0.10 * f, C_ZONE_OCCUPIED, 0.6 * f, ZONE_WEIGHT)
-            else               paintZone(zf, C_ZONE, 0.28 * f, C_ZONE, f, ZONE_WEIGHT) end
+            else               paintZone(zf, C_ZONE, 0.38 * f, C_ZONE, f, ZONE_WEIGHT) end
         else
             clearZone(zf)
         end

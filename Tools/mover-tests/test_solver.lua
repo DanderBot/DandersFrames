@@ -271,11 +271,11 @@ end
 
 -- anchor tether: held within HOLD x snapDistance, strained to SNAP x, snapped past
 do
-    eq(S.TETHER_HOLD, 3, "hold multiple")
+    eq(S.TETHER_HOLD, 2, "hold multiple")
     eq(S.TETHER_SNAP, 4, "snap multiple")
     -- snapDistance 25: held to 75, strained to 100, snapped past
     eq(S.TetherState(0, 25), "held", "at home: held")
-    eq(S.TetherState(75, 25), "held", "exactly hold threshold: held")
+    eq(S.TetherState(50, 25), "held", "exactly hold threshold: held")
     eq(S.TetherState(75.1, 25), "strained", "just past hold: strained")
     eq(S.TetherState(100, 25), "strained", "exactly snap threshold: strained")
     eq(S.TetherState(100.1, 25), "snapped", "past snap: snapped")
@@ -285,8 +285,8 @@ do
     eq(S.TetherState(500, nil), "held", "nil snapDistance: never snaps")
     -- strain factor: 0 up to the hold threshold, 1 at the snap point
     eq(S.TetherStrain(0, 25), 0, "no strain at home")
-    eq(S.TetherStrain(75, 25), 0, "no strain at hold threshold")
-    eq(S.TetherStrain(87.5, 25), 0.5, "half strain midway")
+    eq(S.TetherStrain(50, 25), 0, "no strain at hold threshold")
+    eq(S.TetherStrain(75, 25), 0.5, "half strain midway")
     eq(S.TetherStrain(100, 25), 1, "full strain at snap threshold")
     eq(S.TetherStrain(200, 25), 1, "clamped past snap")
     eq(S.TetherStrain(500, 0), 0, "snapDistance 0: no strain")
