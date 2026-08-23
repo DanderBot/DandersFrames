@@ -3,6 +3,7 @@
 ## Notes: Settings panel, editors and debug tools for DandersFrames. Loads on demand.
 ## Author: Danders
 ## Version: v5.4.0-alpha.1
+## Category: Danders
 ## IconTexture: Interface\AddOns\DandersFrames\Media\DF_Icon
 ## LoadOnDemand: 1
 ## RequiredDeps: DandersFrames

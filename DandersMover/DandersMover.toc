@@ -4,6 +4,7 @@
 ## Author: Danders
 ## RequiredDeps: DandersUI
 ## Version: v5.4.0-alpha.1
+## Category: Danders
 ## IconTexture: Interface\AddOns\DandersMover\Media\DF_Icon
 ## SavedVariables: DandersMoverDB
 ## AllowAddOnTableAccess: 1
