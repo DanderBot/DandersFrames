@@ -541,6 +541,7 @@ function P:DestroyAll()
     self:HideZones()
     self:HideTethers()
     self:HideLegend()
+    if self.toast then NS.Fx.Cancel(self.toast); self.toast:Hide() end
 end
 
 -- Lock/save/discard: fade the whole overlay (slabs, legend, panel) out, then
@@ -946,6 +947,49 @@ function P:ResetLegendDodge()
     f:SetScript("OnUpdate", nil)
     f.dodgeUp, f.dodgeT = false, 0
     legendApply(f, 0)
+end
+
+-- ============================================================
+-- UNDO TOAST
+-- A small transient readout under the top strip naming what an Undo/Redo just
+-- did. Re-showing replaces the text and restarts the hold clock (token), so a
+-- run of Ctrl+Z presses reads as one toast that keeps up.
+-- ============================================================
+local TOAST_HOLD = 1.5
+
+local function buildToast()
+    local t = CreateFrame("Frame", "DandersMoverToast", P:GetUnlockFrame(), "BackdropTemplate")
+    t:SetFrameStrata("DIALOG")
+    UI:CreateElementBackdrop(t, {
+        bgColor     = { C_BODY.r, C_BODY.g, C_BODY.b, BODY_ALPHA },
+        borderColor = { C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1 },
+    })
+    t.text = UI:CreateLabel(t, { size = 11, color = UI.Colors.text })
+    t.text:SetPoint("CENTER")
+    t:Hide()
+    return t
+end
+
+function P:ShowToast(text)
+    if not self.toast then self.toast = buildToast() end
+    local t = self.toast
+    t.text:SetText(text)
+    t:SetSize(max(80, (t.text:GetStringWidth() or 0) + PAD * 2), 22)
+    t:ClearAllPoints()
+    -- Near the strip: under it when expanded, under the slim tab otherwise.
+    local anchor = (self.legend and self.legend:IsShown()) and self.legend or self.stripTab
+    if anchor and anchor:IsShown() then t:SetPoint("TOP", anchor, "BOTTOM", 0, -TIGHT)
+    else t:SetPoint("TOP", UIParent, "TOP", 0, -PAD) end
+    NS.Fx.FadeIn(t, 0.1)
+    local token = (self.toastToken or 0) + 1
+    self.toastToken = token
+    if C_Timer then
+        C_Timer.After(TOAST_HOLD, function()
+            if self.toastToken == token and t:IsShown() then
+                NS.Fx.FadeOut(t, 0.2, function() t:Hide() end)
+            end
+        end)
+    end
 end
 
 -- ============================================================

@@ -332,8 +332,23 @@ function Sess:CopyToTwin(el)
     commit(twin, before, L["Copy to %s"])
 end
 
-function Sess:Undo() if self.undo then self.undo:Undo() end end
-function Sess:Redo() if self.undo then self.undo:Redo() end end
+-- The toast needs the entry's label, and Undo/Redo POP the entry -- so Peek
+-- before popping, and only toast when something was actually undone/redone.
+function Sess:Undo()
+    if not self.undo then return end
+    local label = self.undo:Peek()
+    if self.undo:Undo() and label then
+        Proxy:ShowToast(format(L["Undid: %s"], label))
+    end
+end
+
+function Sess:Redo()
+    if not self.undo then return end
+    local label = self.undo:PeekRedo()
+    if self.undo:Redo() and label then
+        Proxy:ShowToast(format(L["Redid: %s"], label))
+    end
+end
 
 -- ============================================================
 -- DRAG
