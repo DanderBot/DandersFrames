@@ -140,16 +140,42 @@ end
 -- ============================================================
 -- PUBLIC API
 -- ============================================================
-function Lib:RegisterAddon(name, info) Registry:RegisterAddon(name, info) end
-function Lib:Register(addon, key, def) return Registry:Register(addon, key, def) end
-function Lib:RegisterAnchorTarget(addon, key, def) return Registry:RegisterAnchorTarget(addon, key, def) end
+-- Every registry mutation announces itself, so the settings list and a live
+-- session can re-render instead of showing whatever the registry looked like
+-- when they were last opened. (addon, key) name what changed; BOTH nil means
+-- "assume everything" -- that is the post-Flush case, where a whole login's
+-- worth of queued registrations landed at once.
+-- Consumers churn these in bursts (DandersFrames re-registers its entire pinned
+-- list on every add/remove), so listeners debounce rather than the fire site:
+-- a listener that wants to act once per burst can, one that wants each change
+-- still sees each one.
+local function registryChanged(addon, key)
+    Lib.callbacks:Fire("RegistryChanged", addon, key)
+end
+
+function Lib:RegisterAddon(name, info)
+    Registry:RegisterAddon(name, info)
+    registryChanged(name)
+end
+function Lib:Register(addon, key, def)
+    local el = Registry:Register(addon, key, def)
+    registryChanged(addon, key)
+    return el
+end
+function Lib:RegisterAnchorTarget(addon, key, def)
+    local target = Registry:RegisterAnchorTarget(addon, key, def)
+    registryChanged(addon, key)
+    return target
+end
 function Lib:Unregister(addon, key)
     Registry:Unregister(addon, key)
     if NS.Proxy then NS.Proxy:Remove(Registry.Id(addon, key)) end
+    registryChanged(addon, key)
 end
 function Lib:UnregisterAddon(addon)
     Registry:UnregisterAddon(addon)
     if NS.Proxy then NS.Proxy:RemoveAddon(addon) end
+    registryChanged(addon)
 end
 
 function Lib:RefreshAnchorTarget(addon, key)
@@ -197,6 +223,8 @@ events:SetScript("OnEvent", function(_, event, arg1)
         applyDefaults(DandersMoverDB, NS.DEFAULTS)
         NS.db = DandersMoverDB
         Registry:Flush()
+        -- One fire for the whole drained queue, not one per queued item.
+        registryChanged()
         events:UnregisterEvent("ADDON_LOADED")
     elseif event == "PLAYER_REGEN_DISABLED" then
         if NS.Session and NS.Session:IsActive() then NS.Session:Suspend() end

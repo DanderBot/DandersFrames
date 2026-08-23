@@ -73,7 +73,9 @@ is nothing to measure.
 | `Mover:Unlock([filter])`, `Lock()`, `Toggle()`, `IsUnlocked()` | Drive the editor from your own UI. `filter` = nil, `"Addon"`, or `{ addon = "Addon", keys = { "k", ... } }`. Your addon is the initiator: only its listed keys get proxies (forced relevant for the session). Other addons' enabled+relevant elements stay anchor targets (snap zones, resolution) and get proxies only when the user turns on "Show other addons' movers" (Settings › Editor, or the legend) |
 | `Mover:IsEnabled(addon[, key])` | Respect the user's mover toggles |
 | `Mover.ApplyPosition(frame, pos)` | SetPoint + scale maths helper |
-| `Mover.RegisterCallback(obj, event, fn)` | Events: `Unlocked`, `Locked`, `Saved`, `Discarded`, `PositionChanged(addon, key, pos, reason)` |
+| `Mover.RegisterCallback(obj, event, fn)` | Events: `Unlocked`, `Locked`, `Saved`, `Discarded`, `PositionChanged(addon, key, pos, reason)`, `RegistryChanged(addon, key)` |
+
+`RegistryChanged` fires after every registration or unregistration — element, anchor target or addon. `addon`/`key` name what changed; **both nil** means a wholesale change (the login queue draining through `Registry:Flush`). Consumers churn these in bursts, so debounce (`C_Timer.After(0, ...)`) if you only want to redraw once. The settings list and an open unlock session both listen, so an element that appears or disappears mid-session is reflected straight away.
 
 `reason` values: `drag nudge anchor detach reset center undo redo discard reapply parent`.
 

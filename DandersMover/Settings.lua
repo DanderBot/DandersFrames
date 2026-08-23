@@ -15,7 +15,7 @@ local St = {}
 NS.Settings = St
 
 local Registry, Sess, Proxy, Grid, UI, L = NS.Registry, NS.Session, NS.Proxy, NS.Grid, NS.UI, NS.L
-local CreateFrame, UIParent = CreateFrame, UIParent
+local CreateFrame, UIParent, C_Timer = CreateFrame, UIParent, C_Timer
 local ipairs, pairs, tinsert, wipe, tsort, max = ipairs, pairs, table.insert, wipe, table.sort, math.max
 
 local W = 420
@@ -313,6 +313,22 @@ function St:Refresh()
     end
     f.content:SetHeight(max(10, y))
 end
+
+-- The list is built from the registry, and the registry moves while the window is
+-- open (adding or removing a DandersFrames pinned set re-registers the lot). Without
+-- this the new row only appeared after collapsing and re-expanding the addon.
+-- Debounced to the end of the frame so one burst of registrations redraws once.
+-- Expand/collapse state lives on f.expanded, keyed by addon name, so a redraw keeps it.
+local refreshPending = false
+NS.Lib.RegisterCallback(St, "RegistryChanged", function()
+    if refreshPending then return end
+    if not (St.frame and St.frame:IsShown()) then return end
+    refreshPending = true
+    C_Timer.After(0, function()
+        refreshPending = false
+        St:Refresh()
+    end)
+end)
 
 function St:Show()
     if not self.frame then self.frame = build() end
