@@ -2,7 +2,7 @@ local addonName, NS = ...
 
 -- ============================================================
 -- GRID OVERLAY
--- Full-screen grid on BACKGROUND strata plus red snap-preview crosshairs.
+-- Full-screen grid on BACKGROUND strata plus the snap-preview crosshairs.
 -- Line textures are pooled: textures cannot be freed, so a fresh set per
 -- refresh would leak. (Pattern from DandersCDM UI/Position.lua.)
 -- ============================================================
@@ -10,6 +10,15 @@ local G = {}
 NS.Grid = G
 
 local CreateFrame, UIParent = CreateFrame, UIParent
+
+-- Lavender, not white. A white grid over a dark UI is the loudest thing on
+-- screen while the one thing that should be loud is the frame being dragged, so
+-- the grid takes the same accent as everything else in the session and sits
+-- back: barely-there minor lines, the two centre lines a step up, and the snap
+-- preview -- which IS a statement -- at full strength.
+local C_GRID = NS.UI.Colors.accent
+local A_LINE, A_CENTER, A_PREVIEW = 0.10, 0.30, 0.9
+local W_LINE, W_CENTER, W_PREVIEW = 1, 2, 2
 
 local function buildLines(grid)
     local pool, used = grid.lines, 0
@@ -23,19 +32,19 @@ local function buildLines(grid)
     local w, h = UIParent:GetWidth(), UIParent:GetHeight()
     local function vline(x, alpha, thick)
         local l = acquire()
-        l:SetColorTexture(1, 1, 1, alpha); l:SetSize(thick, h)
+        l:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, alpha); l:SetSize(thick, h)
         l:ClearAllPoints(); l:SetPoint("CENTER", grid, "CENTER", x, 0); l:Show()
     end
     local function hline(y, alpha, thick)
         local l = acquire()
-        l:SetColorTexture(1, 1, 1, alpha); l:SetSize(w, thick)
+        l:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, alpha); l:SetSize(w, thick)
         l:ClearAllPoints(); l:SetPoint("CENTER", grid, "CENTER", 0, y); l:Show()
     end
-    vline(0, 0.5, 2); hline(0, 0.5, 2)
+    vline(0, A_CENTER, W_CENTER); hline(0, A_CENTER, W_CENTER)
     local x = size
-    while x <= w / 2 do vline(x, 0.15, 1); vline(-x, 0.15, 1); x = x + size end
+    while x <= w / 2 do vline(x, A_LINE, W_LINE); vline(-x, A_LINE, W_LINE); x = x + size end
     local y = size
-    while y <= h / 2 do hline(y, 0.15, 1); hline(-y, 0.15, 1); y = y + size end
+    while y <= h / 2 do hline(y, A_LINE, W_LINE); hline(-y, A_LINE, W_LINE); y = y + size end
     for i = used + 1, #pool do pool[i]:Hide() end
 end
 
@@ -47,9 +56,11 @@ local function ensure()
     grid:Hide()
     grid.lines = {}
     grid.previewV = grid:CreateTexture(nil, "OVERLAY")
-    grid.previewV:SetColorTexture(1, 0.2, 0.2, 0.8); grid.previewV:SetSize(2, UIParent:GetHeight()); grid.previewV:Hide()
+    grid.previewV:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, A_PREVIEW)
+    grid.previewV:SetSize(W_PREVIEW, UIParent:GetHeight()); grid.previewV:Hide()
     grid.previewH = grid:CreateTexture(nil, "OVERLAY")
-    grid.previewH:SetColorTexture(1, 0.2, 0.2, 0.8); grid.previewH:SetSize(UIParent:GetWidth(), 2); grid.previewH:Hide()
+    grid.previewH:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, A_PREVIEW)
+    grid.previewH:SetSize(UIParent:GetWidth(), W_PREVIEW); grid.previewH:Hide()
     grid:SetScript("OnShow", function(self) buildLines(self) end)
     G.frame = grid
     return grid
