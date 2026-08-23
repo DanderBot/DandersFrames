@@ -34,6 +34,11 @@ local C_NOTICE     = {r = 0.91, g = 0.66, b = 0.25, a = 1}
 -- between the accent (free) and the anchored purple so the three roles read
 -- apart at a glance on the unlock overlay.
 local C_ANCHOR_ROOT = {r = 0.35, g = 0.78, b = 0.45, a = 1}
+-- Purple: a mover that is anchored to ANOTHER mover (a child). The third pole of
+-- the same three-role set as C_ACCENT (free) and C_ANCHOR_ROOT (root). Lifted
+-- verbatim out of DandersMover/Proxy.lua, which had been carrying it as a
+-- private literal -- the same drift C_NOTICE above was added to stop.
+local C_ANCHORED   = {r = 0.55, g = 0.40, b = 0.85, a = 1}
 
 -- Exported palette: other files should theme against these shared tables instead
 -- of re-declaring private copies or hardcoding the raw numbers. These are the
@@ -52,6 +57,7 @@ UI.Colors = {
     warning    = C_WARNING,  -- soft red for behaviour-change / caution notes
     notice     = C_NOTICE,   -- amber for "configured but will not render" notes
     anchorRoot = C_ANCHOR_ROOT, -- green for a mover other movers are anchored to
+    anchored   = C_ANCHORED,    -- purple for a mover anchored to another mover
 }
 
 -- Dialog chrome. The popup is a standalone dialog rather than a settings page and

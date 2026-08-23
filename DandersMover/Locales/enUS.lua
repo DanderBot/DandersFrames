@@ -35,6 +35,7 @@ L["Discard"] = true
 L["Free"] = true
 L["Editor"] = true
 L["Grid Size"] = true
+L["hidden"] = true
 L["Hold Shift for 10 units, Ctrl for 100."] = true
 L["Keyboard nudge"] = true
 L["Left"] = true
