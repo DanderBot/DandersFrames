@@ -42,12 +42,10 @@ local EDGE_W = 3                        -- role-coloured left edge
 local ICON_SZ, LINK_SZ = 16, 12
 local INSET, ITEM = 4, 4                -- slab padding, gap between inline items
 local BODY_ALPHA, HOVER_ALPHA = 0.95, 1
-local HIDDEN_ALPHA = 0.55               -- the real frame is not on screen
-local WEIGHT, SEL_WEIGHT = 1, 2         -- outline thickness, unselected / selected
+local WEIGHT, SEL_WEIGHT = 1, 1         -- outline thickness; selection is colour, not weight
 -- Below these the slab cannot hold everything, so parts drop out in this order:
 -- the coords first, then the addon icon, then all but a shortened title.
 local NO_COORDS_H, NO_COORDS_W, NO_ICON_W, TITLE_ONLY_W = 28, 120, 80, 60
-local TITLE_MAX = 8                     -- characters, once the slab is title-only
 -- Snap zones. Same accent as the free-role dot, because a zone IS where a free
 -- drop would land; occupied ones go red. Hover is the only place a zone borrows
 -- the selection white, and the kit has no white token, so that one is a literal.
@@ -128,17 +126,6 @@ local function onClick(self, button)
     NS.Session:Select(self.element.id)
 end
 
--- Trim to n CHARACTERS. strsub counts bytes, so a naive cut through a
--- multi-byte title renders as a black box.
-local function shorten(text, n)
-    local out, count = "", 0
-    for ch in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
-        count = count + 1
-        if count > n then return out .. "\226\128\166" end   -- ellipsis
-        out = out .. ch
-    end
-    return out
-end
 
 -- Lay the slab's contents out for its CURRENT size. A proxy is exactly as big as
 -- the frame it stands in for, so one 24px icon mover and one full raid container
@@ -177,7 +164,13 @@ local function layout(b, anchored)
     if showLink then        b.title:SetPoint("RIGHT", b.link, "LEFT", -ITEM, 0)
     elseif showCoords then  b.title:SetPoint("RIGHT", b.coords, "LEFT", -ITEM, 0)
     else                    b.title:SetPoint("RIGHT", b, "RIGHT", -INSET, 0) end
-    b.title:SetText(titleOnly and shorten(b.element.title, TITLE_MAX) or b.element.title)
+    -- Small slabs: the full title, centred and allowed to overflow the slab --
+    -- never truncated (an outlined font stays readable over the world).
+    b.title:SetText(b.element.title)
+    if titleOnly then
+        b.title:ClearAllPoints()
+        b.title:SetPoint("CENTER", b, "CENTER", 0, 0)
+    end
 end
 
 -- Everything about how one slab READS: role colour, markers, selection and hover
@@ -321,8 +314,9 @@ function P:Refresh(id)
     -- report, so the coords slot says so instead of quoting a stale number.
     local frame = Registry:GetFrame(el)
     local shown = (frame and frame:IsShown()) and true or false
+    -- Hidden frames keep a full-strength slab; the muted "hidden" word carries
+    -- the state on its own.
     b.coords:SetText(shown and format("%d, %d", cx, cy) or L["hidden"])
-    b:SetAlpha(shown and 1 or HIDDEN_ALPHA)
     self:Highlight(NS.Session and NS.Session.selected)
 end
 
