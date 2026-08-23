@@ -21,6 +21,7 @@ L["Click to select, arrow keys to nudge (Shift ×10, Ctrl ×100)."] = true
 L["Close"] = true
 L["Collapse"] = true
 L["Configure"] = true
+L["Copy to %s"] = true
 L["Open this element's own settings."] = true
 L["Fold the strip away to a small tab at the top of the screen."] = true
 L["Drag to move. Shift locks to horizontal, Ctrl to vertical."] = true

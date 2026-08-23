@@ -34,6 +34,9 @@ local function validate(def, kind)
         if def.openSettings ~= nil and type(def.openSettings) ~= "function" then
             error("DandersMover: openSettings must be a function", 3)
         end
+        if def.twin ~= nil and type(def.twin) ~= "string" then
+            error("DandersMover: twin must be an \"addon:key\" string", 3)
+        end
     end
 end
 
@@ -69,6 +72,9 @@ local function insertElement(self, addon, key, def)
         -- Consumer-side settings entry: the panel offers a Configure button
         -- that calls this (e.g. DF opens its options window on the page).
         openSettings = def.openSettings,
+        -- "addon:key" of this element's counterpart (party <-> raid); the
+        -- panel offers Copy to <twin> while the twin is registered.
+        twin = def.twin,
         -- The record's `point` is derived by the consumer (e.g. a growth corner), not
         -- chosen: the panel hides its 9-point picker and SetAnchorPoint is a no-op.
         pointLocked = def.pointLocked and true or false,

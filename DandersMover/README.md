@@ -65,7 +65,7 @@ is nothing to measure.
 | Call | Purpose |
 |---|---|
 | `Mover:RegisterAddon(name, { title, icon })` | Group your elements in the UI. `icon` (texture path) is shown on your proxies; omitted → the bundled DandersFrames icon |
-| `Mover:Register(addon, key, def)` | Make a frame movable. `def`: `title`, `frame` or `getFrame`, `getPos`, `onChanged(pos, reason)`, optional `default`, `secure`, `getSize` (w, h in UIParent units), `getRect`, `anchorable`, `group`, `openSettings` (function — the panel shows a **Configure** button for the element that calls it; open your own settings UI for the element there) |
+| `Mover:Register(addon, key, def)` | Make a frame movable. `def`: `title`, `frame` or `getFrame`, `getPos`, `onChanged(pos, reason)`, optional `default`, `secure`, `getSize` (w, h in UIParent units), `getRect`, `anchorable`, `group`, `openSettings` (function — the panel shows a **Configure** button for the element that calls it; open your own settings UI for the element there), `twin` (`"addon:key"` of the element's counterpart, e.g. the raid container for the party container — the panel shows a **Copy to <twin>** button that copies the whole record onto the twin, re-solves it and pushes one undo entry; the anchor is dropped if carrying it over would create a loop) |
 | `Mover:RegisterAnchorTarget(addon, key, { title, frame or getFrame })` | Something others can anchor to but that is not itself movable. Also takes `getSize` / `getRect` |
 | `Mover:RefreshAnchorTarget(addon, key)` | Call when a `getFrame` target now resolves to a different frame |
 | `Mover:Apply(addon, key)` | Re-solve and re-fire `onChanged` (e.g. after you change the frame's scale) |
@@ -77,7 +77,7 @@ is nothing to measure.
 
 `RegistryChanged` fires after every registration or unregistration — element, anchor target or addon. `addon`/`key` name what changed; **both nil** means a wholesale change (the login queue draining through `Registry:Flush`). Consumers churn these in bursts, so debounce (`C_Timer.After(0, ...)`) if you only want to redraw once. The settings list and an open unlock session both listen, so an element that appears or disappears mid-session is reflected straight away.
 
-`reason` values: `drag nudge anchor detach reset center undo redo discard reapply parent`.
+`reason` values: `drag nudge anchor detach reset center copy undo redo discard reapply parent`.
 
 Slash: `/mover` toggle, `/mover config` settings, `/mover demo` built-in demo.
 

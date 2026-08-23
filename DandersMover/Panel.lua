@@ -212,13 +212,24 @@ local function build()
     })
     f.btnUndo, f.btnRedo = hist[1], hist[2]
 
-    local fin = buttonRow(f, row(CTA_H, 0), CTA_H, {
+    local fin = buttonRow(f, row(CTA_H), CTA_H, {
         { text = L["Save & Exit"], style = "primary", onClick = function() Sess:Finish("save") end },
         { text = L["Discard"], tone = "danger", onClick = function() Sess:Finish("discard") end },
     })
     f.btnSave, f.btnDiscard = fin[1], fin[2]
 
-    f:SetHeight(-y + PAD)
+    -- Copy-to-twin: full-width bottom row, only for elements whose def names a
+    -- twin (Refresh shows it and grows the panel by the row).
+    f.btnCopy = UI:CreateButton(f, {
+        width = CW, height = BTN_H, fitText = false,
+        onClick = function() local el = selectedElement(); if el then Sess:CopyToTwin(el) end end,
+    })
+    f.btnCopy:SetPoint("TOPLEFT", PAD, row(BTN_H, 0))
+    f.btnCopy:Hide()
+
+    f.fullH = -y + PAD
+    f.baseH = f.fullH - BTN_H - GAP
+    f:SetHeight(f.baseH)
     f:Hide()
     return f
 end
@@ -409,5 +420,17 @@ function Pn:Refresh()
 
     f.btnUndo:SetEnabled(Sess.undo and Sess.undo:CanUndo() or false)
     f.btnRedo:SetEnabled(Sess.undo and Sess.undo:CanRedo() or false)
+
+    -- Copy-to-twin row: shown only while the twin is actually registered (a
+    -- pinned set's opposite-mode twin can be missing).
+    local twin = el.twin and Registry:Get(el.twin) or nil
+    if twin then
+        f.btnCopy:SetText(format(L["Copy to %s"], twin.title))
+        f.btnCopy:Show()
+        f:SetHeight(f.fullH)
+    else
+        f.btnCopy:Hide()
+        f:SetHeight(f.baseH)
+    end
     self:Dock()
 end

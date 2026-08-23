@@ -274,6 +274,7 @@ local function registerElements()
         group     = L["Party"],
         isRelevant = function() return Bridge:IsScopeRelevant("party") end,
         openSettings = function() openOptionsPage("party", "general_frame") end,
+        twin      = ADDON_KEY .. ":raid",
     })
 
     Mover:Register(ADDON_KEY, "raid", {
@@ -290,6 +291,7 @@ local function registerElements()
         group     = L["Raid"],
         isRelevant = function() return Bridge:IsScopeRelevant("raid") end,
         openSettings = function() openOptionsPage("raid", "general_frame") end,
+        twin      = ADDON_KEY .. ":party",
     })
 
     -- "Whichever group frames are up right now." Saves every other addon from having to
@@ -429,6 +431,9 @@ local function pinnedDef(mode, i)
             return (set and set.enabled) and true or false
         end,
         openSettings = function() openOptionsPage(mode, "general_pinnedframes") end,
+        -- The same index in the other mode. The panel only offers the copy
+        -- while that twin is registered, so a missing opposite set is fine.
+        twin      = ADDON_KEY .. ":" .. PINNED_KEY[isRaid and "party" or "raid"] .. i,
     }
 end
 

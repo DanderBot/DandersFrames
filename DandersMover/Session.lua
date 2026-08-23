@@ -315,6 +315,23 @@ function Sess:Reset(el)
     commit(el, before, L["Reset %s"])
 end
 
+-- Copy this element's record onto its declared twin (def.twin = "addon:key"):
+-- party container onto raid container, pinned N onto the other mode's N. The
+-- twin takes the whole record -- anchor included, unless carrying it over
+-- would create a cycle, in which case the twin lands free at the same
+-- coordinates. One undo entry, named for the twin.
+function Sess:CopyToTwin(el)
+    local twin = el.twin and Registry:Get(el.twin)
+    if not twin then return end
+    local dst = Registry:GetPos(twin)
+    local before = NS.CopyPos(dst)
+    NS.CopyPos(Registry:GetPos(el), dst)
+    if dst.anchor and Registry:WouldCreateCycle(twin.id, dst.anchor.target) then dst.anchor = nil end
+    if dst.anchor then NS:ResolveElement(twin) end
+    apply(twin, "copy")
+    commit(twin, before, L["Copy to %s"])
+end
+
 function Sess:Undo() if self.undo then self.undo:Undo() end end
 function Sess:Redo() if self.undo then self.undo:Redo() end end
 
