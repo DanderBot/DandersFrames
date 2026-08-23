@@ -87,6 +87,7 @@ All take `(parent, opts)` and return the widget frame.
 | `CreateCloseButton` | `size, tone, tooltip, tooltipDesc, onClick` |
 | `CreateGlyphButton` | `size, width, height, texture, iconSize, color, hoverColor, rotation, tooltip, onClick` |
 | `CreateElementBackdrop` | `bgColor, borderColor, fill, outline, edgeSize, inset` |
+| `CreateGroupBox` | `title, width, padding` — a titled settings-group box; returns a frame with `.title`, `.content` (the padded inner frame to anchor rows into) and `:SetContentHeight(h)`, which sizes the box around its content. Look only: it does no row layout |
 | `CreatePanelBackdrop` | `bgColor, bgAlpha, border, borderColor` |
 | `CreateMoverBackdrop` | `color, fill, fillAlpha, borderAlpha, edgeSize, isRaid` |
 | `PromptName` | `title, message, default, acceptLabel, maxLetters, onAccept` — takes `(opts)` only, no parent |

@@ -196,6 +196,11 @@ UI.RowHeight = {
     -- so ResolveRowHeight IGNORES the literal a call site passes and every header
     -- lands here. That is the same rule the other factory rows already follow.
     sectionHeader = 11.1 + 11.9 + UI.RowGap,   -- top inset + text + the gap
+    -- A group box's title line (CreateGroupBox): the same 11.9 of DFFontNormal
+    -- text as a section header plus the gap to the first row, but WITHOUT the
+    -- header's 11.1 top inset -- the box's own padding already provides the
+    -- air above it.
+    groupTitle  = 11.9 + UI.RowGap,
 }
 
 -- Resolve the layout slot height for a widget being added to a group/page. Fixed-height widgets
