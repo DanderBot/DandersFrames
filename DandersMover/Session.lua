@@ -87,7 +87,7 @@ function Sess:Unlock(filter)
     -- up showing, not what was on screen a moment earlier. Snapshots are taken
     -- above so the record is captured before any consumer-side mutation.
     Lib.callbacks:Fire("Unlocked")
-    Proxy:Build(filter)
+    Proxy:Build(filter, true)     -- animate: slabs fade in with a stagger
     Grid:Refresh()
     self:EnableKeyboard(true)
     -- Anything the consumer only shows on the next frame (secure headers, test
@@ -119,7 +119,7 @@ function Sess:Finish(mode)
         end
     end
     self:EnableKeyboard(false)
-    Proxy:DestroyAll()
+    Proxy:DismissAll()            -- fade out, then destroy (combat suspend stays instant)
     Grid:Hide()
     panel("Hide")
     wipe(self.snapshots)

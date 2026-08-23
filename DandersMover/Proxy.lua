@@ -54,6 +54,11 @@ local C_ZONE_OCCUPIED = UI.Colors.danger
 local C_ZONE_HOVER = { r = 1, g = 1, b = 1 }
 local ZONE_WEIGHT, ZONE_HOVER_WEIGHT = 1, 2
 local TAG_PAD = 3                        -- padding of the floating title pill
+-- Session-open entrance: each slab fades in over FADE_IN with STAGGER between
+-- slabs in build order. Lock/save/discard fades the whole overlay out over
+-- FADE_OUT and only then tears it down (DismissAll). Combat suspend stays
+-- instant -- Session:Suspend hides the unlock frame directly.
+local FADE_IN, FADE_OUT, STAGGER = 0.12, 0.1, 0.02
 local ZONE_DASH_W = 2                    -- dashed-edge thickness
 local DASH_H, DASH_V = MEDIA .. "dash_h", MEDIA .. "dash_v"
 
@@ -356,8 +361,16 @@ end
 -- { addon = <string|nil>, keySet = <set|nil> }. The initiator's keys outside keySet
 -- get NO proxy at all, not a dimmed one (a party unlock must not put raid proxies on
 -- screen); other addons' elements get one only with showOtherAddons (Registry:WantsProxy).
-function P:Build(filter)
+-- animate: session open only -- slabs fade in with a small stagger in build
+-- order. Rebuilds mid-session come through without it and stay instant.
+function P:Build(filter, animate)
     local f = self:GetUnlockFrame()
+    -- A lock's dismiss fade may still be running (lock -> unlock inside 0.1s):
+    -- invalidate its deferred teardown and restore the frame it was fading.
+    self.dismissToken = (self.dismissToken or 0) + 1
+    NS.Fx.Cancel(f)
+    f:EnableMouse(true)
+    local n = 0
     for _, el in ipairs(Registry:SortedElements()) do
         if Registry:WantsProxy(filter, el) then
             local frame = Registry:GetFrame(el)
@@ -367,6 +380,23 @@ function P:Build(filter)
                 self.proxies[el.id] = b
                 self:Refresh(el.id)
                 b:Show()
+                if animate and C_Timer then
+                    n = n + 1
+                    b:SetAlpha(0)
+                    local id = el.id
+                    C_Timer.After((n - 1) * STAGGER, function()
+                        -- The pool can be torn down and rebuilt while this
+                        -- timer is pending; only fade the exact button that is
+                        -- still the live proxy for the id.
+                        if self.proxies[id] == b and b:IsShown() then
+                            NS.Fx.FadeIn(b, FADE_IN)
+                        end
+                    end)
+                else
+                    -- A rebuild can reuse a slab whose entrance was interrupted
+                    -- mid-fade; make sure it rests at full alpha.
+                    NS.Fx.Cancel(b)
+                end
             end
         end
     end
@@ -423,6 +453,24 @@ function P:DestroyAll()
     if self.unlockFrame then self.unlockFrame:Hide() end
     self:HideZones()
     self:HideLegend()
+end
+
+-- Lock/save/discard: fade the whole overlay (slabs, legend, panel) out, then
+-- destroy. The token guards the deferred teardown -- a new session can open
+-- before the fade lands, and its freshly built proxies must not be destroyed
+-- by the previous session's callback (Build bumps the token and cancels the
+-- fade). Mouse goes off immediately so the screen is usable during the fade.
+function P:DismissAll()
+    local f = self.unlockFrame
+    if not f or not f:IsShown() then self:DestroyAll() return end
+    local token = (self.dismissToken or 0) + 1
+    self.dismissToken = token
+    f:EnableMouse(false)
+    NS.Fx.FadeOut(f, FADE_OUT, function()
+        if self.dismissToken == token and not (NS.Session and NS.Session:IsActive()) then
+            self:DestroyAll()
+        end
+    end)
 end
 
 -- ============================================================
