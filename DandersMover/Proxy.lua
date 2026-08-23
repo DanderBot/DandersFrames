@@ -132,6 +132,7 @@ local function onDragStop(self)
     P:HideZones()
     P:ClearLegendDodge()
     NS.Grid:HidePreview()
+    NS.Grid:HideMeasure()
     NS.Session:EndDrag(self.element, self.lastX, self.lastY, self.lastZone)
 end
 

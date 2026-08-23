@@ -100,7 +100,7 @@ NS.UI = {
     end,
     CreateCheckbox = function() return stubFrame() end,
 }
-NS.Grid = { HidePreview = function() end }
+NS.Grid = { HidePreview = function() end, HideMeasure = function() end }
 load_addon_file("Proxy.lua")
 local P = NS.Proxy
 

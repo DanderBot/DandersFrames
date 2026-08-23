@@ -100,3 +100,65 @@ function G:HidePreview()
     self.frame.previewV:Hide(); self.frame.previewH:Hide()
     if not NS.db.showGrid then self.frame:Hide() end
 end
+
+-- ============================================================
+-- MEASURE LINES (drag only)
+-- Thin lines from the dragged slab to the nearest screen edge on each axis,
+-- with a px readout at the midpoint (idea from EllesmereUI's unlock mode).
+-- Same lavender as the rest of the session, on the grid frame's OVERLAY layer
+-- like the snap preview, and shown even while the grid itself is off.
+-- ============================================================
+local A_MEASURE = 0.8
+
+local function ensureMeasure(f)
+    if f.measureH then return end
+    f.measureH = f:CreateTexture(nil, "OVERLAY")
+    f.measureH:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, A_MEASURE)
+    f.measureH:SetHeight(1)
+    f.measureV = f:CreateTexture(nil, "OVERLAY")
+    f.measureV:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, A_MEASURE)
+    f.measureV:SetWidth(1)
+    f.measureHText = NS.UI:CreateLabel(f, { size = 10, color = C_GRID })
+    f.measureVText = NS.UI:CreateLabel(f, { size = 10, color = C_GRID })
+end
+
+-- One axis: place the line between fromCoord and toCoord (screen units along
+-- the axis) at cross on the other axis, with the readout at the midpoint.
+local function measureAxis(line, label, horizontal, a, b, cross)
+    local len = b - a
+    if len <= 1 then line:Hide(); label:Hide(); return end
+    line:ClearAllPoints()
+    label:ClearAllPoints()
+    if horizontal then
+        line:SetPoint("LEFT", line:GetParent(), "CENTER", a, cross)
+        line:SetWidth(len)
+        label:SetPoint("BOTTOM", line:GetParent(), "CENTER", (a + b) / 2, cross + 3)
+    else
+        line:SetPoint("BOTTOM", line:GetParent(), "CENTER", cross, a)
+        line:SetHeight(len)
+        label:SetPoint("LEFT", line:GetParent(), "CENTER", cross + 4, (a + b) / 2)
+    end
+    label:SetText(string.format("%d px", len + 0.5))
+    line:Show(); label:Show()
+end
+
+function G:ShowMeasure(cx, cy, w, h)
+    local f = ensure()
+    ensureMeasure(f)
+    if not f:IsShown() then f:Show(); if not NS.db.showGrid then for _, l in ipairs(f.lines) do l:Hide() end end end
+    local halfW, halfH = UIParent:GetWidth() / 2, UIParent:GetHeight() / 2
+    -- Slab edge to the NEARER screen edge on each axis, judged by the centre.
+    if cx < 0 then measureAxis(f.measureH, f.measureHText, true, -halfW, cx - w / 2, cy)
+    else           measureAxis(f.measureH, f.measureHText, true, cx + w / 2, halfW, cy) end
+    if cy < 0 then measureAxis(f.measureV, f.measureVText, false, -halfH, cy - h / 2, cx)
+    else           measureAxis(f.measureV, f.measureVText, false, cy + h / 2, halfH, cx) end
+end
+
+function G:HideMeasure()
+    local f = self.frame
+    if not f or not f.measureH then return end
+    f.measureH:Hide(); f.measureV:Hide()
+    f.measureHText:Hide(); f.measureVText:Hide()
+    -- Mirror HidePreview's rule: the frame only stays up for the grid.
+    if not NS.db.showGrid and not f.previewV:IsShown() and not f.previewH:IsShown() then f:Hide() end
+end

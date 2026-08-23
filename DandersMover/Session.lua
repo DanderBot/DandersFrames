@@ -356,6 +356,7 @@ function Sess:DragTo(el, cx, cy)
         if lineX or lineY then Grid:ShowPreview(lineX, lineY) else Grid:HidePreview() end
     end
     cx, cy = Solver.ClampToScreen(cx, cy, w, h, UIParent:GetWidth(), UIParent:GetHeight())
+    Grid:ShowMeasure(cx, cy, w, h)
     local pos = Registry:GetPos(el)
     pos.anchor = nil
     pos.x, pos.y = Solver.DragDelta(self.dragStartPos, self.dragStartCx, self.dragStartCy, cx, cy)
