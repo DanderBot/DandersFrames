@@ -464,6 +464,73 @@ function AuraContainer._queueTestBounce()
     end)
 end
 
+-- ★★ THE EXIT KICK — live rows must be TOLD to re-read, not left to hear the reset.
+--
+-- Test mode fakes the DATA, not the container: it puts the whole client on the sample
+-- provider (see _queueTestBounce). That switch is GLOBAL and every container hears it,
+-- live ones included — the note in SetTestMode spells this out and is worth re-reading
+-- before touching anything here. Live rows are HIDDEN for the session, so following the
+-- provider is normally invisible; what made it visible is that they were still on the
+-- sample parse when they came back.
+--
+-- ☠ THE RESET IS NOT A RE-PARSE. ResetAuraDataProvider swings the source back, but a
+-- container only re-reads when something ARMS its processor — UpdateAllAuras from addon
+-- context sets the dirty flags and then waits for the next UNIT_AURA (see
+-- NativeBackend:refresh for the partition mechanics). A live row with no aura traffic on
+-- its unit therefore kept rendering the sample parse: random spellbook icons on real
+-- raid frames, and nothing to clear them short of a reload. rebuildAll covers the TEST
+-- handles only, and slot owners are in neither registry — so on exit nobody kicked the
+-- live side at all.
+--
+-- ⚠ EXIT ONLY, and deliberately not the mirror of the entry loop. _queueTestBounce
+-- issues setEnabled+refresh because test containers are BORN DISABLED; live ones never
+-- are, so enabling here would only risk forcing on a row the consumer turned off. The
+-- re-parse is the whole job.
+--
+-- ☠ BOTH REGISTRIES. _handles is Handle-shaped; every Aura Designer PLACED indicator
+-- is a SlotHandle whose container belongs to a per-frame SlotOwner (frame.dfSlotOwner)
+-- that appears in NEITHER _handles nor anywhere rebuildAll can see. Walking handles alone
+-- is the same omission that once left the collapsed AD path with no identity gate at all.
+-- Slots share one container per frame, hence the dedupe.
+local function reparseContainer(c)
+    if not c then return end
+    -- Same combat contract as NativeBackend:refresh: the Hide/Show bounce crosses the
+    -- partition and re-arms a real parse, but it is an OOC-only op class. In lockdown
+    -- mark-only and let the next combat aura event pick the flags up — combat is exactly
+    -- when that traffic is dense.
+    if not InCombatLockdown() then
+        pcall(function() c:Hide(); c:Show() end)
+    elseif type(c.UpdateAllAuras) == "function" then
+        pcall(function() c:UpdateAllAuras() end)
+    end
+end
+
+function AuraContainer._kickLiveParse()
+    local nh = 0
+    for h in pairs(AuraContainer._handles or {}) do
+        if not h._destroyed and not h._testFrame and h.backend and h.backend.refresh then
+            pcall(function() h.backend:refresh() end)
+            nh = nh + 1
+        end
+    end
+    -- ⚠ Test-frame owners are skipped, not because a bounce would hurt but because those
+    -- frames are hidden for the rest of the session — there is nothing on screen to fix.
+    local seen, ns = nil, 0
+    for s in pairs(AuraContainer._slotHandles or {}) do
+        local owner = s.owner
+        local c = owner and owner.container
+        if c and not (owner.frame and owner.frame.dfIsTestFrame) then
+            seen = seen or {}
+            if not seen[c] then
+                seen[c] = true
+                ns = ns + 1
+                reparseContainer(c)
+            end
+        end
+    end
+    DF:Debug(DBG, "test exit: re-parsed %d live handles, %d slot owners", nh, ns)
+end
+
 -- ☠ Parent-driven handles are rebuilt BY THEIR PARENT, never directly. A gate link's
 -- rebuild makes a fresh slot host and re-fires onHost, which recreates everything below
 -- it; driving the inner link here as well would race that and strand a duplicate.
@@ -560,6 +627,10 @@ function AuraContainer.SetTestMode(on)
             else C_UnitAuras.SwitchAuraDataProvider(true) end
         end)
         AuraContainer._ownsProviderSwitch = false
+        -- ★ The live side is re-armed BEFORE the test rebuild, matching the reset-first
+        -- ordering above: every live row parses real data on this frame's tick rather
+        -- than queueing behind a pass that does not touch them.
+        AuraContainer._kickLiveParse()
         rebuildAll()
     end
 end
