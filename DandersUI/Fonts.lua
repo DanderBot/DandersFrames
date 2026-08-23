@@ -1,6 +1,6 @@
-local addonName, DF = ...
-
-DF.GUI = DF.GUI or {}
+local addonName, NS = ...
+local UI = NS.UI
+if not UI then return end
 
 -- ============================================================
 -- DF FONT OBJECT SYSTEM
@@ -8,8 +8,8 @@ DF.GUI = DF.GUI or {}
 -- Creates a DF-prefixed font object for every Blizzard GameFont*
 -- template the addon's settings UI relies on. At load these are
 -- exact copies of their Blizzard equivalents so the panel looks
--- identical. GUI:ApplySettingsFont() rewrites them using the
--- multi-alphabet family system in Config.lua, so a single user
+-- identical. host:ApplySettingsFont() rewrites them from the host font
+-- hooks, so a single consumer
 -- setting re-skins the entire settings panel AND every FontString
 -- inheriting from a DFFont automatically gains the roman/korean/
 -- chinese/russian fallback family — fixing Cyrillic squares for
@@ -19,8 +19,10 @@ DF.GUI = DF.GUI or {}
 -- Cache globals
 local CreateFont = CreateFont
 local _G = _G
+local type, pcall, ipairs = type, pcall, ipairs
 
 local DEFAULT_FONT_SIZE = 10
+local DEFAULT_FONT_PATH = "Fonts\\FRIZQT__.TTF"
 
 -- The Blizzard templates the settings UI uses (see the font audit).
 -- Order does not matter; this is just the source-of-truth list.
@@ -36,31 +38,52 @@ local TEMPLATES = {
     "GameFontDisable",               -- greyed-out normal hint text
 }
 
+-- ============================================================
+-- SAFE SET
+-- The one place that actually writes a font onto an object. A consumer with a
+-- multi-alphabet family builder supplies hooks.safeSetFont and gets the CJK /
+-- Cyrillic fallbacks it built; everyone else gets a plain SetFont against the
+-- resolved path, wrapped so a bad path is a no-op rather than an error.
+-- EditBoxes are the reason for the pcall: they are FontInstances without
+-- SetTextScale, so a family-based setter can legitimately refuse them.
+-- ============================================================
+local function SafeSet(host, obj, fontName, size, flags)
+    local viaHook = host:Hook("safeSetFont")
+    if viaHook then
+        local ok, handled = pcall(viaHook, obj, fontName, size, flags)
+        if ok and handled ~= false then return true end
+    end
+    local resolve = host:Hook("resolveFontPath")
+    local path = (resolve and resolve(fontName)) or fontName
+    if type(path) ~= "string" or path == "" then path = DEFAULT_FONT_PATH end
+    return (pcall(obj.SetFont, obj, path, size, flags)) and true or false
+end
+
 -- Registry of DFFont objects (DFFont<suffix> = font object)
-DF.DFFontObjects = DF.DFFontObjects or {}
+UI.FontObjects = UI.FontObjects or {}
 
 -- Create one DFFont<Suffix> object per template, copying the
 -- Blizzard template as-is. The per-template colour/size/outline
 -- is preserved; only the font file can be swapped later.
-local function CreateDFFontObjects()
+local function CreateFontObjects()
     for _, templateName in ipairs(TEMPLATES) do
         local suffix = templateName:gsub("^Game", "")   -- "FontHighlightSmall" etc.
-        local dfName = "DF" .. suffix                   -- "DFFontHighlightSmall"
+        local objName = "DF" .. suffix                 -- "DFFontHighlightSmall"
 
-        if not _G[dfName] then
+        if not _G[objName] then
             local blizzFont = _G[templateName]
             if blizzFont then
-                local dfFont = CreateFont(dfName)
-                dfFont:CopyFontObject(blizzFont)
-                DF.DFFontObjects[dfName] = dfFont
+                local font = CreateFont(objName)
+                font:CopyFontObject(blizzFont)
+                UI.FontObjects[objName] = font
             end
         else
-            DF.DFFontObjects[dfName] = _G[dfName]
+            UI.FontObjects[objName] = _G[objName]
         end
     end
 end
 
-CreateDFFontObjects()
+CreateFontObjects()
 
 -- ============================================================
 -- APPLY / REFRESH
@@ -93,47 +116,49 @@ CreateDFFontObjects()
 -- own colours (yellow headers, grey disabled). Falls back to the old direct
 -- SetFont if the family cannot be built or the inherit is refused, so this
 -- can only ever be an improvement over what shipped.
-function DF.GUI:ApplySettingsFont()
-    if not DF.db then return end
-
-    local fontName = DF.db.settingsFont or "DF Roboto SemiBold"
-    local outline  = DF.db.settingsFontOutline or ""
+function UI:ApplySettingsFont()
+    local getSetting = self:Hook("getFontSetting")
+    local fontName, outline
+    if getSetting then fontName, outline = getSetting() end
+    outline = outline or ""
     if outline == "NONE" then outline = "" end
 
-    local fontPath = DF:GetFontPath(fontName)
-    -- Fallback to Blizzard's locale-aware font if LSM lookup fails
-    if not fontPath then
-        fontPath = "Fonts\\FRIZQT__.TTF"
-    end
+    local resolve = self:Hook("resolveFontPath")
+    local fontPath = fontName and resolve and resolve(fontName) or nil
+    -- Fall back to the client locale-aware font when the consumer has no font
+    -- setting at all, or its media library cannot resolve the name.
+    if type(fontPath) ~= "string" or fontPath == "" then fontPath = DEFAULT_FONT_PATH end
 
     for _, templateName in ipairs(TEMPLATES) do
         local suffix = templateName:gsub("^Game", "")
-        local dfName = "DF" .. suffix
-        local dfFont = DF.DFFontObjects[dfName]
-        if dfFont then
+        local objName = "DF" .. suffix
+        local font = UI.FontObjects[objName]
+        if font then
             -- Preserve the template's existing size (different templates
             -- have different sizes — Small vs Normal vs Large).
-            local _, size = dfFont:GetFont()
+            local _, size = font:GetFont()
             size = size or DEFAULT_FONT_SIZE
             -- The user's outline choice is absolute: "None" means no outline
             -- on every DFFont, including templates that originally had an
             -- outline (e.g. GameFontHighlightSmallOutline). Users expect
             -- the dropdown to directly control the outline state.
-            local r, g, b, a = dfFont:GetTextColor()
+            local r, g, b, a = font:GetTextColor()
             local applied = false
-            local familyName = DF.GetSettingsFontFamilyName
-                and DF:GetSettingsFontFamilyName(fontPath, outline, size)
-            local family = familyName and _G[familyName]
+            -- The family arm is the consumer job: only it knows how to build a
+            -- multi-alphabet family for its own font setting. hooks.fontFamily
+            -- returns the family OBJECT (or its global name); absent, the plain
+            -- path below applies and CJK inheritors fall back to the client font.
+            local familyHook = self:Hook("fontFamily")
+            local family = familyHook and familyHook(fontPath, outline, size)
+            if type(family) == "string" then family = _G[family] end
             if family then
-                applied = pcall(dfFont.SetFontObject, dfFont, family)
+                applied = pcall(font.SetFontObject, font, family)
                 if applied then
-                    pcall(dfFont.SetTextColor, dfFont, r or 1, g or 1, b or 1, a or 1)
+                    pcall(font.SetTextColor, font, r or 1, g or 1, b or 1, a or 1)
                 end
             end
             if not applied then
-                pcall(function()
-                    dfFont:SetFont(fontPath, size, outline)
-                end)
+                pcall(font.SetFont, font, fontPath, size, outline)
             end
         end
     end
@@ -162,7 +187,7 @@ end
 --
 -- Keying by the fontstring also retires the linear scan that used to run on every
 -- SetSettingsFont call to find an existing entry.
-DF.GUI._settingsFontStrings = DF.GUI._settingsFontStrings or setmetatable({}, { __mode = "k" })
+UI._settingsFontStrings = UI._settingsFontStrings or setmetatable({}, { __mode = "k" })
 
 -- Apply the user's settings font to a FontString with the given
 -- size and outline, then register it for future refreshes.
@@ -172,30 +197,32 @@ DF.GUI._settingsFontStrings = DF.GUI._settingsFontStrings or setmetatable({}, { 
 -- If explicit (e.g. "OUTLINE"), it is respected as the minimum
 -- outline — useful for widgets like drag-hint text that need an
 -- outline regardless of user preference.
-function DF.GUI:SetSettingsFont(fontString, size, outline)
+function UI:SetSettingsFont(fontString, size, outline)
     if not fontString then return end
 
     size = size or DEFAULT_FONT_SIZE
     local explicitOutline = outline  -- nil means "follow user"
 
-    local fontName = (DF.db and DF.db.settingsFont) or "DF Roboto SemiBold"
-    local userOutline = (DF.db and DF.db.settingsFontOutline) or ""
+    local getSetting = self:Hook("getFontSetting")
+    local fontName, userOutline
+    if getSetting then fontName, userOutline = getSetting() end
+    userOutline = userOutline or ""
     if userOutline == "NONE" then userOutline = "" end
 
     local flagsToUse = explicitOutline or userOutline
 
-    -- SafeSetFont uses CreateFontFamily + SetTextScale which is only
-    -- available on FontString objects. EditBoxes inherit from FontInstance
-    -- (GetFont/SetFont work) but lack SetTextScale, so for them we use a
-    -- direct SetFont via the resolved path — no multi-alphabet family, but
-    -- also no crash. EditBox text is almost always user-typed ASCII anyway.
+    -- A family-aware setter uses CreateFontFamily + SetTextScale, which only
+    -- FontStrings have. EditBoxes inherit from FontInstance (GetFont/SetFont
+    -- work) but lack SetTextScale, so they take the plain path -- no
+    -- multi-alphabet family, but also no crash. EditBox text is almost always
+    -- user-typed ASCII anyway.
     local isFontString = fontString.GetObjectType and fontString:GetObjectType() == "FontString"
-
-    if isFontString and DF.SafeSetFont then
-        DF:SafeSetFont(fontString, fontName, size, flagsToUse)
+    if isFontString then
+        SafeSet(self, fontString, fontName, size, flagsToUse)
     else
-        local fontPath = DF.GetFontPath and DF:GetFontPath(fontName) or "Fonts\\FRIZQT__.TTF"
-        pcall(function() fontString:SetFont(fontPath, size, flagsToUse) end)
+        local resolve = self:Hook("resolveFontPath")
+        local fontPath = (fontName and resolve and resolve(fontName)) or DEFAULT_FONT_PATH
+        pcall(fontString.SetFont, fontString, fontPath, size, flagsToUse)
     end
 
     -- Register for future refreshes (only once per fontString)
@@ -210,7 +237,7 @@ end
 -- inline-SetFont widgets) and nudges every FontString across every
 -- settings page so template-inherited widgets re-render immediately.
 -- ============================================================
-function DF.GUI:RefreshSettingsFont()
+function UI:RefreshSettingsFont()
     self:ApplySettingsFont()
 
     -- Re-apply settings font to every registered inline-SetFont FontString
