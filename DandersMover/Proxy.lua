@@ -664,7 +664,18 @@ local function drawTether(n, el, b, drag)
     if not rect then return n end
     local cx, cy = proxyCenter(b)
     if not cx then return n end
-    local tx, ty = nearestOnRect(rect, cx, cy)
+    -- The tether's far end is the ANCHOR POINT -- where the element sits when
+    -- snapped -- not the nearest point on the target, so it stays put instead
+    -- of sliding along the target's edge as the slab moves.
+    local tx, ty
+    if b.dragging and drag then
+        tx, ty = drag.homeX, drag.homeY
+    else
+        local a = Registry:GetPos(el).anchor
+        local w, h = Registry:GetSize(el)
+        if a and w then tx, ty = Solver.Resolve(a, w, h, rect, Solver.SPACING) end
+    end
+    if not tx then tx, ty = nearestOnRect(rect, cx, cy) end
     local line = tetherLine(P.tethers, n + 1, 0)
     if not line then return n end
     local cr = lerp(C_TETHER.r, C_TETHER_STRAIN.r, strain)
@@ -754,7 +765,7 @@ function P:SnapTether(el)
     end
     local line = self.tetherFlash
     if not line then return end
-    local tx, ty = nearestOnRect(rect, cx, cy)
+    local tx, ty = drag.homeX or cx, drag.homeY or cy
     NS.Fx.Cancel(line)
     -- The start point rides the PROXY, not a frozen coordinate: a fast drag
     -- keeps pulling the breaking tether along while it fades out.
