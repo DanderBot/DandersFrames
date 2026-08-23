@@ -6,6 +6,7 @@ enable-nolib-creation: no
 # as .pkgmeta; everything else in the container is ignored.
 move-folders:
   DandersMover/DandersMover: DandersMover
+  DandersMover/DandersUI: DandersUI
 
 ignore:
   - DandersFrames
