@@ -10,9 +10,9 @@ local P = { proxies = {}, zones = {}, zoneCount = 0, dragZones = {}, tethers = {
 NS.Proxy = P
 
 local Registry, Solver, UI, L = NS.Registry, NS.Solver, NS.UI, NS.L
-local CreateFrame, UIParent, GetCursorPosition, GameTooltip, C_Timer = CreateFrame, UIParent, GetCursorPosition, GameTooltip, C_Timer
+local CreateFrame, UIParent, GetCursorPosition, GameTooltip, C_Timer, GetTime = CreateFrame, UIParent, GetCursorPosition, GameTooltip, C_Timer, GetTime
 local IsShiftKeyDown, IsControlKeyDown = IsShiftKeyDown, IsControlKeyDown
-local pairs, ipairs, format, sqrt, max = pairs, ipairs, string.format, math.sqrt, math.max
+local pairs, ipairs, format, sqrt, max, abs, tsort = pairs, ipairs, string.format, math.sqrt, math.max, math.abs, table.sort
 
 local MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
 local DEFAULT_ICON = MEDIA .. "DF_Icon"
@@ -77,7 +77,7 @@ function P:GetUnlockFrame()
     -- in the README; locking (Esc, the strip, /mover) gives the screen back.
     f:EnableMouse(true)
     f:SetScript("OnMouseDown", function(_, button)
-        if button == "LeftButton" then NS.Session:Select(nil) end
+        if button == "LeftButton" then P:ClickSelect() end
     end)
     f:Hide()
     self.unlockFrame = f
@@ -145,8 +145,59 @@ local function onDragStop(self)
     NS.Session:EndDrag(self.element, self.lastX, self.lastY, self.lastZone)
 end
 
+-- Both the proxies' own clicks and the overlay's empty-space clicks route
+-- through ClickSelect, so a click on a stack of overlapping proxies can cycle
+-- through them even though the top proxy is the one that took the click.
 local function onClick(self)
-    NS.Session:Select(self.element.id)
+    P:ClickSelect()
+end
+
+-- ============================================================
+-- OVERLAP CYCLING
+-- The first click on a point selects the topmost proxy under it; clicking
+-- again at (about) the same point cycles to the next one down, wrapping
+-- around. The cycle resets when the click lands more than CYCLE_MOVE from the
+-- last one or after CYCLE_TIMEOUT seconds. A click over nothing deselects.
+-- ============================================================
+local CYCLE_MOVE, CYCLE_TIMEOUT = 10, 2
+local cycle = { x = nil, y = nil, at = 0, index = 0 }
+
+-- Every shown proxy whose rect covers (x, y), topmost first: higher frame
+-- level wins, ties go to the later-created button (which renders on top).
+local function hitsAt(x, y)
+    local out = {}
+    local ux, uy = UIParent:GetCenter()
+    for _, b in pairs(P.proxies) do
+        if b:IsShown() then
+            local cx, cy = b:GetCenter()
+            if cx then
+                cx, cy = cx - ux, cy - uy
+                local hw, hh = (b:GetWidth() or 0) / 2, (b:GetHeight() or 0) / 2
+                if x >= cx - hw and x <= cx + hw and y >= cy - hh and y <= cy + hh then
+                    out[#out + 1] = b
+                end
+            end
+        end
+    end
+    tsort(out, function(a, b)
+        local la, lb = a:GetFrameLevel() or 0, b:GetFrameLevel() or 0
+        if la ~= lb then return la > lb end
+        return (a.createIndex or 0) > (b.createIndex or 0)
+    end)
+    return out
+end
+
+function P:ClickSelect()
+    local x, y = self:CursorPos()
+    local hits = hitsAt(x, y)
+    if #hits == 0 then NS.Session:Select(nil) return end
+    local now = GetTime and GetTime() or 0
+    local same = cycle.x ~= nil
+        and abs(x - cycle.x) <= CYCLE_MOVE and abs(y - cycle.y) <= CYCLE_MOVE
+        and (now - cycle.at) <= CYCLE_TIMEOUT
+    if same then cycle.index = cycle.index % #hits + 1 else cycle.index = 1 end
+    cycle.x, cycle.y, cycle.at = x, y, now
+    NS.Session:Select(hits[cycle.index].element.id)
 end
 
 
@@ -357,6 +408,10 @@ local function create(el)
         GameTooltip:Hide()
     end)
     b.element = el
+    -- Creation order breaks z-ties in the overlap cycle: at equal frame level
+    -- the later-created button renders on top.
+    P.createCounter = (P.createCounter or 0) + 1
+    b.createIndex = P.createCounter
     return b
 end
 
@@ -691,7 +746,15 @@ local function buildLegend()
             f.btnGrid:SetActive(NS.db.showGrid)
             if NS.Settings then NS.Settings:Refresh() end
         end })
-    f.btnGrid:SetPoint("RIGHT", f, "TOPRIGHT", -PAD, -PAD - LEGEND_ROW / 2)
+    -- Collapse chevron at the strip's right end: the strip folds away to a
+    -- slim tab at the top screen edge (state remembered in DandersMoverDB).
+    f.btnCollapse = UI:CreateGlyphButton(f, {
+        texture = UI.MEDIA .. "Icons\\expand_less", size = LEGEND_ROW, iconSize = 12,
+        tooltip = { title = L["Collapse"], lines = { L["Fold the strip away to a small tab at the top of the screen."] } },
+        onClick = function() P:SetStripCollapsed(true) end,
+    })
+    f.btnCollapse:SetPoint("RIGHT", f, "TOPRIGHT", -PAD, -PAD - LEGEND_ROW / 2)
+    f.btnGrid:SetPoint("RIGHT", f.btnCollapse, "LEFT", -TIGHT, 0)
     f.btnSettings:SetPoint("RIGHT", f.btnGrid, "LEFT", -TIGHT, 0)
     f.btnDiscard:SetPoint("RIGHT", f.btnSettings, "LEFT", -TIGHT, 0)
     f.btnSave:SetPoint("RIGHT", f.btnDiscard, "LEFT", -TIGHT, 0)
@@ -720,7 +783,7 @@ local function buildLegend()
         -- Dots left, buttons right, a double gap between the halves so the
         -- strip reads as key | verbs and not one run.
         row = row + GAP * 2
-        for _, b in ipairs({ self.btnSave, self.btnDiscard, self.btnSettings, self.btnGrid }) do
+        for _, b in ipairs({ self.btnSave, self.btnDiscard, self.btnSettings, self.btnGrid, self.btnCollapse }) do
             row = row + (b:GetWidth() or 0) + TIGHT
         end
         row = row - TIGHT + PAD
@@ -742,8 +805,42 @@ local function buildLegend()
     return f
 end
 
+-- The collapsed strip: a slim tab hugging the top screen edge. Clicking it
+-- brings the full strip back.
+local function buildStripTab()
+    local t = CreateFrame("Button", "DandersMoverLegendTab", P:GetUnlockFrame(), "BackdropTemplate")
+    t:SetFrameStrata("DIALOG")
+    t:SetSize(44, 14)
+    t:SetPoint("TOP", UIParent, "TOP", 0, 0)
+    UI:CreateElementBackdrop(t, {
+        bgColor     = { C_BODY.r, C_BODY.g, C_BODY.b, BODY_ALPHA },
+        borderColor = { C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1 },
+    })
+    t.icon = t:CreateTexture(nil, "OVERLAY")
+    t.icon:SetTexture(UI.MEDIA .. "Icons\\expand_more")
+    t.icon:SetSize(12, 12)
+    t.icon:SetPoint("CENTER")
+    t.icon:SetVertexColor(C_MUTED.r, C_MUTED.g, C_MUTED.b)
+    t:SetScript("OnEnter", function(s) s.icon:SetVertexColor(1, 1, 1) end)
+    t:SetScript("OnLeave", function(s) s.icon:SetVertexColor(C_MUTED.r, C_MUTED.g, C_MUTED.b) end)
+    t:SetScript("OnClick", function() P:SetStripCollapsed(false) end)
+    return t
+end
+
+function P:SetStripCollapsed(collapsed)
+    NS.db.stripCollapsed = collapsed and true or false
+    self:ShowLegend()
+end
+
 function P:ShowLegend()
     if not self.legend then self.legend = buildLegend() end
+    if not self.stripTab then self.stripTab = buildStripTab() end
+    if NS.db.stripCollapsed then
+        self.legend:Hide()
+        self.stripTab:Show()
+        return
+    end
+    self.stripTab:Hide()
     local f = self.legend
     f:Layout()
     if C_Timer then C_Timer.After(0, function() if f:IsShown() then f:Layout() end end) end
@@ -753,6 +850,7 @@ end
 
 function P:HideLegend()
     if self.legend then self.legend:Hide() end
+    if self.stripTab then self.stripTab:Hide() end
 end
 
 -- ------------------------------------------------------------

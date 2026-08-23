@@ -105,6 +105,11 @@ NS.UI = {
         if opts and opts.width then b._w = opts.width end
         return b
     end,
+    CreateGlyphButton = function(_, _, opts)
+        local b = stubFrame()
+        if opts and opts.size then b._w, b._h = opts.size, opts.size end
+        return b
+    end,
 }
 NS.Grid = { HidePreview = function() end, HideMeasure = function() end, SetAxisLock = function() end }
 load_addon_file("Proxy.lua")
