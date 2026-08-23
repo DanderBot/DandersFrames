@@ -231,8 +231,15 @@ local function build()
 
     -- Copy-to-twin: full-width bottom row, only for elements whose def names a
     -- twin (Refresh shows it and grows the panel by the row).
+    -- ☠ `text = ""`, not omitted. The label is only knowable in Refresh (it
+    -- names the twin), but UI:StyleButton creates the button's FontString --
+    -- and registers it via SetFontString, which is what makes the NATIVE
+    -- Button:SetText work -- ONLY when `text` is passed. Omit it and the
+    -- button has no font string at all, so Refresh's SetText below silently
+    -- no-ops and the row renders blank. An empty string is enough to get the
+    -- font string built; `fitText = false` keeps it from resizing off it.
     f.btnCopy = UI:CreateButton(body, {
-        width = CW, height = BTN_H, fitText = false,
+        text = "", width = CW, height = BTN_H, fitText = false,
         onClick = function() local el = selectedElement(); if el then Sess:CopyToTwin(el) end end,
     })
     f.btnCopy:SetPoint("TOPLEFT", PAD, row(BTN_H, 0))
