@@ -10,15 +10,23 @@ local P = { proxies = {}, zones = {}, zoneCount = 0, dragZones = {} }
 NS.Proxy = P
 
 local Registry, Solver, UI, L = NS.Registry, NS.Solver, NS.UI, NS.L
-local CreateFrame, UIParent, GetCursorPosition, GameTooltip = CreateFrame, UIParent, GetCursorPosition, GameTooltip
+local CreateFrame, UIParent, GetCursorPosition, GameTooltip, C_Timer = CreateFrame, UIParent, GetCursorPosition, GameTooltip, C_Timer
 local IsShiftKeyDown, IsControlKeyDown = IsShiftKeyDown, IsControlKeyDown
-local pairs, ipairs, format, sqrt = pairs, ipairs, string.format, math.sqrt
+local pairs, ipairs, format, sqrt, max = pairs, ipairs, string.format, math.sqrt, math.max
 
 local MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
 local DEFAULT_ICON = MEDIA .. "DF_Icon"
 local LINK_ICON = MEDIA .. "link"
+local ROOT_ICON = UI.MEDIA .. "Icons\\dot"
+-- Role colours. FREE (no anchor, nothing anchored to it) = the host accent;
+-- CHILD (anchored to something) = C_ANCHORED; ROOT (free, with children) =
+-- the theme's anchorRoot green. A root that is itself a child keeps the
+-- anchored colour and shows the root marker.
 local C_ANCHORED = { r = 0.55, g = 0.40, b = 0.85, a = 1 }
+local C_ROOT = UI.Colors.anchorRoot
 local C_MUTED = UI.Colors.textDim
+local PAD, GAP, TIGHT = UI.Space.section, UI.RowGap, UI.RowGapTight
+local SWATCH = 10
 local PROXIMITY = 100
 local MIN_PROXY = 24
 local C_ZONE_NEAR = { 0.3, 0.7, 1.0 }
@@ -114,6 +122,10 @@ local function create(el)
     b.link = b:CreateTexture(nil, "OVERLAY")
     b.link:SetTexture(LINK_ICON); b.link:SetSize(12, 12); b.link:SetPoint("BOTTOMLEFT", 3, 3)
     b.link:SetVertexColor(C_ANCHORED.r, C_ANCHORED.g, C_ANCHORED.b); b.link:Hide()
+    -- Root marker (top-right) while something is anchored to this element.
+    b.root = b:CreateTexture(nil, "OVERLAY")
+    b.root:SetTexture(ROOT_ICON); b.root:SetSize(12, 12); b.root:SetPoint("TOPRIGHT", -3, -3)
+    b.root:SetVertexColor(C_ROOT.r, C_ROOT.g, C_ROOT.b); b.root:Hide()
     -- Centre crosshair.
     b.crossH = b:CreateTexture(nil, "OVERLAY"); b.crossH:SetColorTexture(1, 1, 1, 0.4); b.crossH:SetSize(16, 1); b.crossH:SetPoint("CENTER")
     b.crossV = b:CreateTexture(nil, "OVERLAY"); b.crossV:SetColorTexture(1, 1, 1, 0.4); b.crossV:SetSize(1, 16); b.crossV:SetPoint("CENTER")
@@ -142,6 +154,7 @@ function P:Build(addonFilter)
         end
     end
     f:Show()
+    self:ShowLegend()
 end
 
 function P:Refresh(id)
@@ -165,11 +178,22 @@ end
 
 function P:RefreshAll() for id in pairs(self.proxies) do self:Refresh(id) end end
 
+-- The colour an element's proxy wears for its role, and whether it is a root.
+-- Children() is alias-aware, so a target that resolves to this element's
+-- frame counts too.
+local function roleColor(el, pos)
+    local isRoot = #Registry:Children(el.id) > 0
+    if pos.anchor then return C_ANCHORED, isRoot end
+    if isRoot then return C_ROOT, true end
+    return UI:GetAccent(), false
+end
+
 function P:Highlight(selectedId)
     for id, b in pairs(self.proxies) do
         local pos = Registry:GetPos(b.element)
-        local c = pos.anchor and C_ANCHORED or UI:GetAccent()
+        local c, isRoot = roleColor(b.element, pos)
         b.link:SetShown(pos.anchor ~= nil)
+        b.root:SetShown(isRoot)
         if id == selectedId then b:SetBackdropBorderColor(1, 1, 1, 1) else b:SetBackdropBorderColor(c.r, c.g, c.b, 1) end
         b:SetBackdropColor(c.r, c.g, c.b, 0.25)
     end
@@ -188,6 +212,64 @@ function P:DestroyAll()
     for id in pairs(self.proxies) do self:Remove(id) end
     if self.unlockFrame then self.unlockFrame:Hide() end
     self:HideZones()
+    self:HideLegend()
+end
+
+-- ============================================================
+-- LEGEND
+-- Docked top-centre for the session: what the three proxy colours mean plus
+-- the modifier hints. Parented to the unlock frame, so suspend and lock hide
+-- it with everything else.
+-- ============================================================
+local function buildLegend()
+    local f = CreateFrame("Frame", "DandersMoverLegend", P:GetUnlockFrame(), "BackdropTemplate")
+    f:SetFrameStrata("DIALOG")
+    UI:CreateElementBackdrop(f, { bgColor = UI.Colors.background })
+    f:SetPoint("TOP", UIParent, "TOP", 0, -PAD)
+
+    local function entry(prev, color, text)
+        local swatch = f:CreateTexture(nil, "OVERLAY")
+        swatch:SetSize(SWATCH, SWATCH)
+        swatch:SetColorTexture(color.r, color.g, color.b, 1)
+        local label = UI:CreateLabel(f, { text = text, size = 11 })
+        if prev then swatch:SetPoint("LEFT", prev, "RIGHT", GAP, 0)
+        else         swatch:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -PAD - 1) end
+        label:SetPoint("LEFT", swatch, "RIGHT", TIGHT - 2, 0)
+        return label
+    end
+    f.entries = {}
+    f.entries[1] = entry(nil,          UI:GetAccent(), L["Free"])
+    f.entries[2] = entry(f.entries[1], C_ANCHORED,     L["Anchored"])
+    f.entries[3] = entry(f.entries[2], C_ROOT,         L["Anchor root"])
+
+    f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Right-click: lock"], size = 10, color = C_MUTED })
+    f.hint:SetPoint("TOP", f, "TOP", 0, -PAD - 12 - TIGHT)
+
+    -- Width from the measured text. Fonts resolve a frame late, so this runs
+    -- again on the next frame (same converge-next-frame shape as the kit's
+    -- own labels).
+    function f:Layout()
+        local row = PAD
+        for i, label in ipairs(self.entries) do
+            row = row + SWATCH + TIGHT - 2 + (label:GetStringWidth() or 0) + (i < #self.entries and GAP or 0)
+        end
+        row = row + PAD
+        local hintW = (self.hint:GetStringWidth() or 0) + PAD * 2
+        self:SetSize(max(row, hintW), PAD + 12 + TIGHT + 12 + PAD)
+    end
+    return f
+end
+
+function P:ShowLegend()
+    if not self.legend then self.legend = buildLegend() end
+    local f = self.legend
+    f:Layout()
+    if C_Timer then C_Timer.After(0, function() if f:IsShown() then f:Layout() end end) end
+    f:Show()
+end
+
+function P:HideLegend()
+    if self.legend then self.legend:Hide() end
 end
 
 -- ============================================================

@@ -112,7 +112,7 @@ tooltip to their label, and read the spec off the returned widget. Set
 | `UI:RefreshAllOverrideIndicators()` | A method, not a bare function. The widget registry it sweeps is pack-wide, not per host; `onIndicatorsRefreshed` fires on whichever host you call it on |
 | `UI:RegisterMenu(frame)`, `UI:CloseAllMenus()` | The open-menu registry. Call `CloseAllMenus` on any context switch |
 | `UI:ApplyPixelBorder(frame, color, weight)`, `UI:HidePixelBorder(frame)`, `UI.StyleScrollBar(scrollFrame)` | Chrome |
-| `UI.Colors`, `UI.DialogColors`, `UI.RowGap`, `UI.RowHeight`, `UI.Space`, `UI.MEDIA` | Palette and metrics. Never hardcode a colour |
+| `UI.Colors`, `UI.DialogColors`, `UI.RowGap`, `UI.RowHeight`, `UI.Space`, `UI.MEDIA` | Palette and metrics. Never hardcode a colour. `UI.Colors` carries the neutrals (`background`, `panel`, `element`, `border`, `hover`, `text`, `textDim`), the two accent poles (`accent`, `raid`), the note tones (`warning`, `notice`) and `anchorRoot` (green: a mover that other movers are anchored to) |
 | `UI.SnapLen(frame, v)`, `UI.SnapLenUp(frame, v)`, `UI.SnapHeightEven(frame, v)`, `UI:CursorPos(frame)` | Pixel-grid maths |
 
 Scroll frames must use `ScrollFrameTemplate` (not `UIPanelScrollFrameTemplate`) for
