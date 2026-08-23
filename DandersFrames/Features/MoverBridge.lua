@@ -511,6 +511,18 @@ local function syncLockButtons()
 end
 
 Mover.RegisterCallback(Bridge, "Unlocked", function()
+    -- An open DF options window would sit over the session. Remember which
+    -- page/mode it showed and close it -- the window is DF.GUIFrame (built in
+    -- DandersFrames_Options/GUI/Panel.lua CreateGUI), closed with the same
+    -- plain :Hide() its own close button uses (Panel.lua:155). Deliberately
+    -- NOT reopened on Locked: the user chose to end the session, not to get
+    -- the window back. The mover panel's Configure button (openOptionsPage
+    -- above) is the way back in, on the selected element's own page.
+    if DF.GUIFrame and DF.GUIFrame:IsShown() then
+        Bridge.closedGUIPage = DF.GUI and DF.GUI.CurrentPageName or nil
+        Bridge.closedGUIMode = DF.GUI and DF.GUI.SelectedMode or nil
+        DF.GUIFrame:Hide()
+    end
     -- Test frames live in the load-on-demand companion. `/mover` can open a session
     -- without going through DF:UnlockFrames, so load it here too or the proxies sit over
     -- an empty screen.
