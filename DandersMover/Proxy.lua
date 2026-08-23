@@ -109,6 +109,7 @@ local function onDragStart(self)
         s:ClearAllPoints(); s:SetPoint("CENTER", UIParent, "CENTER", fx, fy)
         s.coords:SetText(format("%d, %d", fx, fy))
         P:UpdateZones(fx, fy, zone)
+        P:UpdateLegendDodge(fx, fy, s:GetWidth() or 0, s:GetHeight() or 0)
         s.lastX, s.lastY, s.lastZone = fx, fy, zone
     end)
 end
@@ -118,6 +119,7 @@ local function onDragStop(self)
     self.dragging = false
     self:SetScript("OnUpdate", nil)
     P:HideZones()
+    P:ClearLegendDodge()
     NS.Grid:HidePreview()
     NS.Session:EndDrag(self.element, self.lastX, self.lastY, self.lastZone)
 end
@@ -472,11 +474,78 @@ function P:ShowLegend()
     local f = self.legend
     f:Layout()
     if C_Timer then C_Timer.After(0, function() if f:IsShown() then f:Layout() end end) end
+    self:ResetLegendDodge()
     f:Show()
 end
 
 function P:HideLegend()
     if self.legend then self.legend:Hide() end
+end
+
+-- ------------------------------------------------------------
+-- The legend dodges the drag: when the dragged slab or the cursor comes within
+-- DODGE_MARGIN of it, it slides off the top edge, and slides back once clear.
+-- An OnUpdate lerp rather than a Translation: the strip must keep its REAL
+-- position while visible (it holds a live checkbox), and a Translation only
+-- displaces the rendering.
+-- ------------------------------------------------------------
+local DODGE_MARGIN = 60
+local DODGE_TIME = 0.15
+
+-- t: 0 = home (top-centre), 1 = fully off the top edge.
+local function legendApply(f, t)
+    local h = f:GetHeight() or 0
+    f:ClearAllPoints()
+    f:SetPoint("TOP", UIParent, "TOP", 0, -PAD + t * (h + PAD + 4))
+end
+
+local function legendSlide(f, up)
+    up = up and true or false
+    if f.dodgeUp == up then return end
+    f.dodgeUp = up
+    f:SetScript("OnUpdate", function(s, elapsed)
+        local target = s.dodgeUp and 1 or 0
+        local t = s.dodgeT or 0
+        local step = (elapsed or 0) / DODGE_TIME
+        if target > t then t = math.min(target, t + step) else t = math.max(target, t - step) end
+        s.dodgeT = t
+        legendApply(s, t)
+        if t == target then s:SetScript("OnUpdate", nil) end
+    end)
+end
+
+-- Called every drag frame with the dragged slab's centre rect.
+function P:UpdateLegendDodge(cx, cy, w, h)
+    local f = self.legend
+    if not f or not f:IsShown() then return end
+    -- Proximity is measured against the legend's HOME rect (t = 0), not where
+    -- the slide has taken it -- measuring the dodged position would read
+    -- "clear" at once and bounce the strip straight back onto the drag.
+    local lh = f:GetHeight() or 0
+    local home = {
+        x = 0,
+        y = (UIParent:GetHeight() or 0) / 2 - PAD - lh / 2,
+        w = (f:GetWidth() or 0) + DODGE_MARGIN * 2,
+        h = lh + DODGE_MARGIN * 2,
+    }
+    local mx, my = self:CursorPos()
+    local near = Solver.RectOverlapArea(home, { x = cx, y = cy, w = w, h = h }) > 0
+        or (mx > home.x - home.w / 2 and mx < home.x + home.w / 2
+            and my > home.y - home.h / 2 and my < home.y + home.h / 2)
+    legendSlide(f, near)
+end
+
+function P:ClearLegendDodge()
+    if self.legend then legendSlide(self.legend, false) end
+end
+
+-- Snap the legend back to its home instantly (fresh session / re-show).
+function P:ResetLegendDodge()
+    local f = self.legend
+    if not f then return end
+    f:SetScript("OnUpdate", nil)
+    f.dodgeUp, f.dodgeT = false, 0
+    legendApply(f, 0)
 end
 
 -- ============================================================
