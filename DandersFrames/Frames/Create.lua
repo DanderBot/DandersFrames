@@ -166,7 +166,13 @@ function DF:ShowBindingTooltip(anchorFrame)
     if not db.tooltipBindingEnabled then return end
 
     local inCombat = InCombatLockdown()
-    if db.tooltipBindingDisableInCombat and inCombat then
+    -- ★ This box's OWN visibility pair (tooltipBindingOutOfCombat / ...Combat) -- the
+    -- frame tooltip beside it has its own, so you can require a key for the binding
+    -- list while the unit tooltip stays on plain hover, or suppress one in combat
+    -- and not the other. Hidden rather than merely skipped: this is DF's own tooltip
+    -- frame, so releasing the key mid-hover has to take it down, and unlike
+    -- GameTooltip there is no ownership question.
+    if not DF:TooltipAllowed(db, "Binding", "binding") then
         bindingTooltip:Hide()
         bindingTooltip.anchorFrame = nil
         return
@@ -312,6 +318,221 @@ local function GetModifierState()
     return s
 end
 
+-- ============================================================
+-- HOLD-TO-SHOW GATE  (db.tooltip<Kind>Modifier)
+-- ============================================================
+-- One predicate, PER TOOLTIP TYPE. `kind` is the same infix every other tooltip
+-- key on this page uses ("Frame", "Binding"), so the key resolves the same way
+-- the anchor/offset/combat keys do -- tooltip<Kind>Modifier.
+-- Returns true when that box's modifier is satisfied; always true on "NONE",
+-- which is the default and must stay a perfect no-op for existing profiles.
+--
+-- ⚠ Reads the FRAME db, like every other tooltip* key, so party and raid can
+-- differ and the Tooltips page's copy button carries them across.
+-- ⚠ Absent/unknown value reads as NONE. A tooltip setting must fail towards
+-- SHOWING: a typo or a half-migrated profile that silently hid every tooltip
+-- would look like the feature was broken rather than misconfigured.
+local TOOLTIP_MOD_CHECK = {
+    CTRL  = IsControlKeyDown,
+    ALT   = IsAltKeyDown,
+    SHIFT = IsShiftKeyDown,
+}
+
+-- ☠ ONE PREDICATE, ONE VOCABULARY, RESOLVED AGAINST COMBAT STATE.
+-- `kind` is the usual infix ("Frame" / "Binding"); the key picked is
+-- tooltip<Kind>Combat in combat and tooltip<Kind>OutOfCombat otherwise, each
+-- holding SHOW | SHIFT | CTRL | ALT | HIDE.
+--
+-- This replaced a boolean DisableInCombat checked separately from a hold-to-show
+-- modifier, and the reason is not tidiness. Those two could disagree -- "never in
+-- combat" and "show while Alt is held" are contradictory instructions, and which
+-- one won depended on the order the two checks happened to sit in, at three
+-- separate call sites plus a refresh ticker that consulted neither. Krathe hit
+-- exactly that: Disable In Combat set, and holding the modifier still produced a
+-- tooltip mid-fight. One value per combat state cannot contradict itself.
+--
+-- ⚠ Unknown / absent reads as SHOW. A tooltip setting must fail towards showing:
+-- a half-migrated profile that silently hid everything looks like a broken
+-- feature rather than a misconfigured one.
+function DF:TooltipVisibilityMode(db, kind)
+    if not db or not kind then return "SHOW" end
+    local key = InCombatLockdown() and "Combat" or "OutOfCombat"
+    return db["tooltip" .. kind .. key] or "SHOW"
+end
+
+-- ☠ SUPPRESSION IS OWNERSHIP-BOUND, AND THAT IS WHERE THE REMAINING ANSWER HIDES.
+-- Every refusal path hides GameTooltip only if WE own it, which is correct -- we
+-- must never close another addon's tooltip. But it means a refusal can be a total
+-- no-op while a tooltip sits on screen, and the log would still say "suppress".
+-- Krathe's dummy test showed exactly that: `mode=HIDE combat=y -> suppress` on
+-- every pass with the tooltip visible anyway. So the question is no longer our
+-- verdict, it is WHO ELSE owns the thing -- which is what this names.
+local function TooltipOwnerName(owner)
+    if not owner then return "nil" end
+    return (owner.GetDebugName and owner:GetDebugName())
+        or (owner.GetName and owner:GetName()) or "anonymous"
+end
+
+local function HideOwnedTooltipNow(frame, path)
+    if not GameTooltip:IsShown() then return end
+    local owner = GameTooltip:GetOwner()
+    if owner == frame then
+        GameTooltip:Hide()
+        return
+    end
+    if DF.DebugActive and DF:DebugActive("TOOLTIP") then
+        DF:Debug("TOOLTIP", "%s: suppressed, but a tooltip is up owned by %s - not ours, left alone",
+            tostring(path or "?"), TooltipOwnerName(owner))
+    end
+end
+
+-- ☠☠ SUPPRESSING ONCE IS NOT ENOUGH WHEN THE TRIGGER IS AN EVENT EVERYONE HEARS.
+-- Krathe's repro is exact: hold Alt THEN hover = correctly nothing; hover THEN
+-- press Alt = tooltip, 100% of the time, with our own log reading `suppress` on
+-- that very press. The difference between the two cases is not our code at all --
+-- it is that the second one fires MODIFIER_STATE_CHANGED, which other addons also
+-- listen to. We refuse during that dispatch, find nothing on screen (hence no
+-- owner line), and something further down the handler list puts a tooltip up
+-- afterwards. Suppressing only at our own instant loses every race by definition.
+--
+-- ★ So a refusal also re-checks on the NEXT frame, after the dispatch has drained.
+-- Still ownership-bound -- a tooltip belonging to someone else is still left alone
+-- -- but if it is anchored to OUR frame it goes, whoever raised it. The deferred
+-- pass logs the owner either way, which finally names what is doing this.
+-- ⚠ One pending re-check at a time, keyed on the frame: holding a key down can
+-- repeat MODIFIER_STATE_CHANGED, and one timer per event would be a storm.
+local tooltipDeferredCheck = nil
+function DF:HideOwnedTooltip(frame, path)
+    HideOwnedTooltipNow(frame, path)
+    if tooltipDeferredCheck then return end
+    tooltipDeferredCheck = true
+    C_Timer.After(0, function()
+        tooltipDeferredCheck = nil
+        -- Only still relevant while the cursor is on that frame; a tooltip raised
+        -- after the cursor left is not ours to reason about.
+        if not frame or not frame.dfIsHovered then return end
+        HideOwnedTooltipNow(frame, (path or "?") .. "+deferred")
+    end)
+end
+
+-- `path` is purely for the log: it names WHICH of the four hover paths asked.
+-- Every caller passes one, because "which path decided" is the question three
+-- separate rounds of this bug turned on and the log could not answer.
+function DF:TooltipAllowed(db, kind, path)
+    local mode = DF:TooltipVisibilityMode(db, kind)
+    local allowed
+    if mode == "HIDE" then
+        allowed = false
+    else
+        local check = TOOLTIP_MOD_CHECK[mode]
+        allowed = (not check) or (check() and true or false)  -- SHOW / unrecognised = true
+    end
+    if DF.DebugActive and DF:DebugActive("TOOLTIP") then
+        DF:Debug("TOOLTIP", "%s %s: mode=%s combat=%s -> %s",
+            tostring(path or "?"), tostring(kind), tostring(mode),
+            InCombatLockdown() and "y" or "n", allowed and "SHOW" or "suppress")
+    end
+    return allowed
+end
+
+-- True when ANY tooltip type on this db is modifier-gated in the CURRENT combat
+-- state. Used only to skip the watcher's work on a setup where no keypress could
+-- change anything -- never to decide whether a particular tooltip shows.
+local TOOLTIP_KINDS = { "Frame", "Binding" }
+local function AnyTooltipModifierConfigured(db)
+    if not db then return false end
+    for i = 1, #TOOLTIP_KINDS do
+        if TOOLTIP_MOD_CHECK[DF:TooltipVisibilityMode(db, TOOLTIP_KINDS[i])] then
+            return true
+        end
+    end
+    return false
+end
+
+-- The frame currently under the cursor, tracked so a modifier press can act on
+-- it. ☠ Set/cleared in the OnEnter/OnLeave hooks below, NOT derived from
+-- GetMouseFoci at keypress time -- the cursor can sit over a child region (an
+-- aura icon, the private-aura block) while the unit frame is the thing whose
+-- tooltip we own, and the focus probe would answer with the child.
+local tooltipHoverFrame = nil
+local tooltipHoverHandler = nil
+
+-- ☠ TWO HOVER PATHS EXIST AND BOTH MUST REGISTER. Header children (every party and
+-- raid frame that comes from a secure header) run their OWN OnEnter in
+-- Frames/Headers.lua, not the one below -- there are two separate `dfIsHovered = true`
+-- sites for exactly that reason. Tracking the hovered frame only in this file would
+-- have left the watcher blind on the frames most people actually hover, so each path
+-- registers itself along with the handler that can re-decide it.
+function DF:NoteTooltipHover(frame, handler)
+    tooltipHoverFrame, tooltipHoverHandler = frame, handler
+end
+function DF:ClearTooltipHover(frame)
+    if tooltipHoverFrame == frame then
+        tooltipHoverFrame, tooltipHoverHandler = nil, nil
+    end
+end
+
+-- Press or release the modifier WITHOUT moving the mouse and the tooltip must still
+-- appear or vanish -- that is the whole point of hold-to-show, and the existing
+-- refresh ticker cannot cover it: it only runs once a tooltip is already up, so the
+-- press-to-reveal direction had nothing watching at all.
+-- ⚠ MODIFIER_STATE_CHANGED fires for every modifier including ones we do not care
+-- about, so the handler re-runs the ordinary enter path and lets it re-decide rather
+-- than trying to interpret the event's own key argument.
+-- ⚠ Cheap by construction: it does nothing at all unless a DF unit frame is under the
+-- cursor, which is the rare case while keys are being pressed.
+-- ☠☠ THE ONLY PLACE THAT CAN STOP THE FLASH: refuse AT SHOW TIME.
+-- The deferred re-check below works -- Krathe's log proves it, the tooltip is
+-- hidden and the owner check stays silent because the owner turned out to be OUR
+-- frame -- but "shown, then hidden one frame later" is a visible blink, and it is
+-- the wrong shape regardless. Something outside DF anchors a tooltip to our frame
+-- on MODIFIER_STATE_CHANGED (DF's own two handlers of that event raise no unit
+-- tooltip), so we cannot stop it being raised; we can decline it in the same frame
+-- it appears, before it draws.
+--
+-- ⚠ Scoped as tightly as it can be: only the frame currently under the cursor,
+-- only when that frame OWNS the tooltip, and only when the settings actually say
+-- no. Anything else -- another addon's tooltip, a different owner, an allowed
+-- tooltip -- passes straight through untouched.
+-- ⚠ A HookScript, never SetScript: GameTooltip is shared, and replacing its OnShow
+-- would break every other consumer.
+GameTooltip:HookScript("OnShow", function(tt)
+    local f = tooltipHoverFrame
+    if not f or not f.dfIsHovered then return end
+    if tt:GetOwner() ~= f then return end
+    local db = DF.GetFrameDB and DF:GetFrameDB(f)
+    if DF:TooltipAllowed(db, "Frame", "onshow") then return end
+    tt:Hide()
+end)
+
+local tooltipModWatcher = CreateFrame("Frame")
+tooltipModWatcher:RegisterEvent("MODIFIER_STATE_CHANGED")
+-- ★ ENTERING COMBAT RE-DECIDES TOO. Disable In Combat used to mean "do not START a
+-- tooltip once you are in combat" -- a tooltip already on screen when the pull began
+-- simply stayed there, because nothing re-ran the checks until the cursor moved. That
+-- reads as the setting not working, and it is the half of "disable fully" the enter
+-- path alone cannot cover (Krathe, 2026-08-23). The enter path now HIDES on the combat
+-- branch rather than merely returning, so re-running it here takes the tooltip down.
+tooltipModWatcher:RegisterEvent("PLAYER_REGEN_DISABLED")
+tooltipModWatcher:SetScript("OnEvent", function(_, event)
+    local f = tooltipHoverFrame
+    if not f or not f.dfIsHovered then return end
+    -- ⚠ The modifier early-out applies to MODIFIER_STATE_CHANGED ONLY. Combat entry is
+    -- independent of any modifier setting, so gating it on one would leave the default
+    -- profile -- every type "NONE" -- as the one setup where entering combat does not
+    -- take the tooltip down.
+    if event == "MODIFIER_STATE_CHANGED" then
+        -- Ignore while NO type has a gate: on the all-"NONE" default every press would
+        -- otherwise re-render an already-correct tooltip on each shift/ctrl/alt tap.
+        -- Checked across types rather than per type because one re-run re-decides both.
+        local db = DF.GetFrameDB and DF:GetFrameDB(f)
+        if not AnyTooltipModifierConfigured(db) then return end
+    end
+    -- The handler the hovered frame registered -- this file's for standalone frames,
+    -- the header child's own for everything under a secure header.
+    if tooltipHoverHandler then tooltipHoverHandler(f) end
+end)
+
 local function StartTooltipRefresh(frame)
     tooltipRefreshFrame = frame
     -- Tooltip was just freshly set by the caller, so the current modifier
@@ -321,6 +542,22 @@ local function StartTooltipRefresh(frame)
     tooltipRefreshTicker = C_Timer.NewTicker(0.25, function()
         local f = tooltipRefreshFrame
         if not f or not f.dfIsHovered or not GameTooltip:IsShown() then
+            tooltipRefreshTicker:Cancel()
+            tooltipRefreshTicker = nil
+            tooltipRefreshFrame = nil
+            return
+        end
+        -- ☠☠ THE GATE HAS TO BE RE-ASKED HERE TOO, AND FOR MONTHS IT WAS NOT.
+        -- This ticker exists to re-fire SetUnit when a modifier changes, so addons
+        -- like RaiderIO can react. SetUnit RE-SHOWS the tooltip -- so with no
+        -- visibility check of its own it happily re-asserted a tooltip that the
+        -- current settings say must not exist. That is how "Disable In Combat is on
+        -- and holding the key still shows it in combat" survived: the enter path
+        -- refused correctly, and 250ms later this put it back (Krathe, 2026-08-23).
+        -- The check is the same one the enter path uses, so the two cannot drift.
+        local db = DF.GetFrameDB and DF:GetFrameDB(f)
+        if not DF:TooltipAllowed(db, "Frame", "ticker") then
+            DF:HideOwnedTooltip(f, "ticker")
             tooltipRefreshTicker:Cancel()
             tooltipRefreshTicker = nil
             tooltipRefreshFrame = nil
@@ -1611,10 +1848,16 @@ function DF:CreateUnitFrame(unit, index, isRaid)
         return nil
     end
 
-    -- Use HookScript (not SetScript) to preserve SecureHandlerEnterLeaveTemplate's _onenter/_onleave
-    -- SetScript would override the template's handler and break click-casting keyboard bindings
-    frame:HookScript("OnEnter", function(self)
+    -- ★ NAMED, not inline, so the modifier watcher below can re-run it for the frame
+    -- already under the cursor. HookScript hooks are not retrievable via GetScript, so
+    -- an inline closure would have left "press Ctrl while hovering" with no way to
+    -- produce the tooltip until the cursor moved.
+    -- ⚠ Re-entrant by construction: every step is idempotent (hover flag, highlight
+    -- refresh, SetOwner+SetUnit+Show), so a second call with the cursor unmoved just
+    -- re-renders the same tooltip.
+    local function OnUnitFrameEnter(self)
         local db = DF:GetFrameDB(self)
+        DF:NoteTooltipHover(self, OnUnitFrameEnter)
 
         -- Always: set hover state and update highlights
         self.dfIsHovered = true
@@ -1635,7 +1878,19 @@ function DF:CreateUnitFrame(unit, index, isRaid)
 
         -- Unit frame itself → show unit tooltip
         if not db.tooltipFrameEnabled then return end
-        if db.tooltipFrameDisableInCombat and InCombatLockdown() then return end
+
+        -- ★ ONE VISIBILITY QUESTION. Placed AFTER the hover/highlight work above, so
+        -- the frame still reacts to the cursor normally -- this gates the tooltip,
+        -- not the hover.
+        -- ⚠ HIDES rather than merely returning. Skipping is enough on a fresh hover
+        -- and wrong on a re-decide: this runs again on combat entry and on modifier
+        -- changes, and a plain `return` would leave a tooltip opened a moment earlier
+        -- sitting on screen -- "disable in combat should still disable fully"
+        -- (Krathe, 2026-08-23). Ownership-checked, so another addon's tip is safe.
+        if not DF:TooltipAllowed(db, "Frame", "frame") then
+            DF:HideOwnedTooltip(self, "frame")
+            return
+        end
 
         -- Check for test mode (party or raid)
         local inTestMode = (self.isRaidFrame and DF.raidTestMode) or (not self.isRaidFrame and DF.testMode)
@@ -1664,9 +1919,17 @@ function DF:CreateUnitFrame(unit, index, isRaid)
             StartTooltipRefresh(self)
         end
         DF:ShowBindingTooltip(self)
-    end)
-    
+    end
+
+    -- Use HookScript (not SetScript) to preserve SecureHandlerEnterLeaveTemplate's _onenter/_onleave
+    -- SetScript would override the template's handler and break click-casting keyboard bindings
+    frame:HookScript("OnEnter", OnUnitFrameEnter)
+    -- (Removed) DF._OnUnitFrameEnter. The watcher used to reach for one published
+    -- handler, which only ever worked for frames built here; it now dispatches to
+    -- whatever DF:NoteTooltipHover recorded, so each hover path supplies its own.
+
     frame:HookScript("OnLeave", function(self)
+        DF:ClearTooltipHover(self)
         -- Always: clear hover state and update highlights
         self.dfIsHovered = false
         if DF.UpdateHighlights then
