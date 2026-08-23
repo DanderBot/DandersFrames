@@ -116,6 +116,8 @@ local function onDragStart(self)
         -- and released mid-drag.
         local shift, ctrl = IsShiftKeyDown(), IsControlKeyDown()
         if shift and not ctrl then ny = s.startY elseif ctrl and not shift then nx = s.startX end
+        -- Brighten the centre line of the axis the drag is locked TO.
+        NS.Grid:SetAxisLock(shift and not ctrl, ctrl and not shift)
         local fx, fy, zone = NS.Session:DragTo(el, nx, ny)
         s:ClearAllPoints(); s:SetPoint("CENTER", UIParent, "CENTER", fx, fy)
         s.coords:SetText(format("%d, %d", fx, fy))
@@ -133,6 +135,7 @@ local function onDragStop(self)
     P:ClearLegendDodge()
     NS.Grid:HidePreview()
     NS.Grid:HideMeasure()
+    NS.Grid:SetAxisLock(false, false)
     NS.Session:EndDrag(self.element, self.lastX, self.lastY, self.lastZone)
 end
 

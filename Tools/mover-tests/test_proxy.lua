@@ -105,7 +105,7 @@ NS.UI = {
         return b
     end,
 }
-NS.Grid = { HidePreview = function() end, HideMeasure = function() end }
+NS.Grid = { HidePreview = function() end, HideMeasure = function() end, SetAxisLock = function() end }
 load_addon_file("Proxy.lua")
 local P = NS.Proxy
 

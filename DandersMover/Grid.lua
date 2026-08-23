@@ -19,6 +19,7 @@ local CreateFrame, UIParent = CreateFrame, UIParent
 local C_GRID = NS.UI.Colors.accent
 local A_LINE, A_CENTER, A_PREVIEW = 0.10, 0.30, 0.9
 local W_LINE, W_CENTER, W_PREVIEW = 1, 2, 2
+local A_LOCK = 0.8                       -- centre line while its axis is the locked one
 
 local function buildLines(grid)
     local pool, used = grid.lines, 0
@@ -34,13 +35,18 @@ local function buildLines(grid)
         local l = acquire()
         l:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, alpha); l:SetSize(thick, h)
         l:ClearAllPoints(); l:SetPoint("CENTER", grid, "CENTER", x, 0); l:Show()
+        return l
     end
     local function hline(y, alpha, thick)
         local l = acquire()
         l:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, alpha); l:SetSize(w, thick)
         l:ClearAllPoints(); l:SetPoint("CENTER", grid, "CENTER", 0, y); l:Show()
+        return l
     end
-    vline(0, A_CENTER, W_CENTER); hline(0, A_CENTER, W_CENTER)
+    -- Kept by name for the axis-lock tint; every rebuild resets them to the
+    -- resting alpha, which is exactly the wanted baseline.
+    grid.centerV = vline(0, A_CENTER, W_CENTER)
+    grid.centerH = hline(0, A_CENTER, W_CENTER)
     local x = size
     while x <= w / 2 do vline(x, A_LINE, W_LINE); vline(-x, A_LINE, W_LINE); x = x + size end
     local y = size
@@ -99,6 +105,20 @@ function G:HidePreview()
     if not self.frame then return end
     self.frame.previewV:Hide(); self.frame.previewH:Hide()
     if not NS.db.showGrid then self.frame:Hide() end
+end
+
+-- ============================================================
+-- AXIS LOCK TINT
+-- While Shift (horizontal-only drag) or Ctrl (vertical-only) is held
+-- mid-drag, the centre line of the axis the drag still moves along brightens:
+-- Shift lights the horizontal line, Ctrl the vertical. Only visible while the
+-- grid is up; (false, false) restores the resting alpha.
+-- ============================================================
+function G:SetAxisLock(lockH, lockV)
+    local f = self.frame
+    if not f or not f.centerH then return end
+    f.centerH:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, lockH and A_LOCK or A_CENTER)
+    f.centerV:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, lockV and A_LOCK or A_CENTER)
 end
 
 -- ============================================================
