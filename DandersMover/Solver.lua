@@ -201,27 +201,30 @@ end
 -- zones still picks the one it covers most.
 local EPSILON = 1e-9
 
+-- The zone whose landing position is nearest to where the element is now,
+-- measured centre to centre (= how far the element would jump on drop), and
+-- only within snapDistance. Size-independent: a 400-wide container and a
+-- 20-wide icon both snap from the same distance. Ties go to the larger overlap.
 function S.NearestZone(cx, cy, w, h, zones, snapDistance)
     snapDistance = snapDistance or 0
     local hw, hh = w / 2, h / 2
     local dl, dr, dt, db = cx - hw, cx + hw, cy + hh, cy - hh
-    local best, bestGap, bestArea = nil, huge, -1
+    local best, bestDist, bestArea = nil, huge, -1
     for _, z in ipairs(zones) do
         if not z.occupied then
-            local ol, orr = max(dl, z.x - hw), min(dr, z.x + hw)
-            local ob, ot = max(db, z.y - hh), min(dt, z.y + hh)
-            -- Overlapping on an axis => that axis contributes no gap.
-            local gx, gy = max(0, ol - orr), max(0, ob - ot)
-            local gap = sqrt(gx * gx + gy * gy)
-            if gap <= snapDistance then
+            local dx, dy = cx - z.x, cy - z.y
+            local dist = sqrt(dx * dx + dy * dy)
+            if dist <= snapDistance + EPSILON then
+                local ol, orr = max(dl, z.x - hw), min(dr, z.x + hw)
+                local ob, ot = max(db, z.y - hh), min(dt, z.y + hh)
                 local area = (orr > ol and ot > ob) and (orr - ol) * (ot - ob) or 0
-                if gap < bestGap - EPSILON or (gap <= bestGap + EPSILON and area > bestArea) then
-                    best, bestGap, bestArea = z, gap, area
+                if dist < bestDist - EPSILON or (dist <= bestDist + EPSILON and area > bestArea) then
+                    best, bestDist, bestArea = z, dist, area
                 end
             end
         end
     end
-    if best then return best, bestGap, bestArea end
+    if best then return best, bestDist, bestArea end
     return nil
 end
 

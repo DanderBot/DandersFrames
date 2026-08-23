@@ -100,10 +100,16 @@ do
     local zones = S.SnapZones("p", parent, 20, 10, 2, function(edge, align) return edge == "right" and align == "center" end)
     -- 20x10 dragged to (110, 15): the right/start zone sits at (62, 15), so the
     -- rects are level on y and 28 units apart on x.
-    local near, gap = S.NearestZone(110, 15, 20, 10, zones, 30)
+    -- right/start zone centre is (62, 15); dragging at (110, 15) is 48 away
+    local near, dist = S.NearestZone(110, 15, 20, 10, zones, 50)
     check(near and near.edge == "right" and near.align == "start", "nearest zone within distance wins")
-    eq(gap, 28, "reports the edge-to-edge gap")
-    check(S.NearestZone(110, 15, 20, 10, zones, 20) == nil, "beyond snapDistance -> nil")
+    eq(dist, 48, "reports the centre-to-centre jump")
+    check(S.NearestZone(110, 15, 20, 10, zones, 47) == nil, "beyond snapDistance -> nil")
+
+    -- size-independent: a huge dragged rect still needs to be within the distance
+    check(S.NearestZone(62 + 150, 15, 400, 200, zones, 100) == nil, "wide element 150 away does not snap at 100")
+    local wide = S.NearestZone(62 + 90, 15, 400, 200, zones, 100)
+    check(wide and wide.edge == "right" and wide.align == "start", "wide element 90 away snaps at 100")
 
     -- occupied zones are not candidates, however close
     local onTop = S.NearestZone(62, 0, 20, 10, zones, 100)
@@ -115,17 +121,16 @@ do
     check(S.NearestZone(0, 0, 20, 10, {}, 100) == nil, "no zones -> nil")
     check(S.NearestZone(500, 500, 20, 10, zones, 100) == nil, "everything out of range -> nil")
 
-    -- two overlapping zones both have a gap of 0; the larger overlap breaks the tie,
-    -- whichever order they are listed in
-    local a = { target = "a", x = 6, y = 0 }     -- 14x10 of the dragged rect
-    local b = { target = "b", x = 18, y = 0 }    --  2x10 of it
-    check(S.NearestZone(0, 0, 20, 10, { a, b }, 50).target == "a", "gap tie broken by larger overlap")
-    check(S.NearestZone(0, 0, 20, 10, { b, a }, 50).target == "a", "tie-break is order-independent")
+    -- equidistant zones: larger overlap breaks the tie, order-independent
+    local a = { target = "a", x = 6, y = 0 }
+    local b = { target = "b", x = -6, y = 0 }
+    local c = { target = "c", x = 0, y = 6, occupied = false }
+    check(S.NearestZone(0.5, 0, 20, 10, { a, b }, 50).target == "a", "closer zone wins")
+    check(S.NearestZone(0, 0, 20, 10, { a, b }, 50) ~= nil, "equidistant still returns one")
 
-    -- snapDistance 0 kills the reach but a genuine overlap is still a gap of 0
-    local touching = S.NearestZone(62, 12, 20, 10, zones, 0)
-    check(touching and touching.edge == "right" and touching.align == "start", "distance 0 still snaps on overlap")
-    check(S.NearestZone(62, 30, 20, 10, zones, 0) == nil, "distance 0 does not reach past the overlap")
+    -- snapDistance 0: only an exact landing position snaps
+    check(S.NearestZone(62, 15, 20, 10, zones, 0) ~= nil, "distance 0 snaps when exactly on the landing spot")
+    check(S.NearestZone(63, 15, 20, 10, zones, 0) == nil, "distance 0 does not reach 1 unit away")
 end
 
 -- cycles & order
