@@ -67,11 +67,21 @@ function G:Refresh()
 end
 
 -- Preview lines live on the grid frame but are shown even when the grid is off.
-function G:ShowPreview(cx, cy)
+-- lineX / lineY are the grid or screen lines the drag snapped to; nil on an
+-- axis that did not snap hides that line.
+function G:ShowPreview(lineX, lineY)
     local f = ensure()
     if not f:IsShown() then f:Show(); if not NS.db.showGrid then for _, l in ipairs(f.lines) do l:Hide() end end end
-    f.previewV:ClearAllPoints(); f.previewV:SetPoint("CENTER", f, "CENTER", cx, 0); f.previewV:Show()
-    f.previewH:ClearAllPoints(); f.previewH:SetPoint("CENTER", f, "CENTER", 0, cy); f.previewH:Show()
+    if lineX then
+        f.previewV:ClearAllPoints(); f.previewV:SetPoint("CENTER", f, "CENTER", lineX, 0); f.previewV:Show()
+    else
+        f.previewV:Hide()
+    end
+    if lineY then
+        f.previewH:ClearAllPoints(); f.previewH:SetPoint("CENTER", f, "CENTER", 0, lineY); f.previewH:Show()
+    else
+        f.previewH:Hide()
+    end
 end
 
 function G:HidePreview()

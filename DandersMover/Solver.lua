@@ -55,40 +55,52 @@ end
 -- the rect by whichever lands on a grid line with the smallest shift. This is
 -- what lets a frame's left edge or top edge sit exactly on the grid, not only
 -- its centre. (Behaviour of the legacy DandersFrames mover.)
+--
+-- Returns cx, cy, lineX, lineY: the snapped centre plus, per axis, the grid
+-- line the winning candidate (centre or edge) now sits on -- the line a snap
+-- preview should draw, which is NOT the centre when an edge is what snapped.
+-- A candidate already on a line wins with a zero shift and still reports its
+-- line. Both lines are nil when there is no grid to snap to.
 function S.SnapRectToGrid(cx, cy, w, h, gridSize)
-    if not gridSize or gridSize <= 0 then return cx, cy end
+    if not gridSize or gridSize <= 0 then return cx, cy, nil, nil end
     local function best(center, half)
         local candidates = { center, center - half, center + half }
-        local bestShift, bestAbs = 0, math.huge
+        local bestShift, bestAbs, bestLine = 0, math.huge, nil
         for _, v in ipairs(candidates) do
             local snapped = floor(v / gridSize + 0.5) * gridSize
             local shift = snapped - v
-            if abs(shift) < bestAbs then bestAbs, bestShift = abs(shift), shift end
+            if abs(shift) < bestAbs then bestAbs, bestShift, bestLine = abs(shift), shift, snapped end
         end
-        return center + bestShift
+        return center + bestShift, bestLine
     end
-    return best(cx, w / 2), best(cy, h / 2)
+    local nx, lineX = best(cx, w / 2)
+    local ny, lineY = best(cy, h / 2)
+    return nx, ny, lineX, lineY
 end
 
 -- Snaps the rect's nearest edge or its centre to the screen edges / centre lines.
+-- Returns cx, cy, sx, sy, lineX, lineY: the snapped centre, whether each axis
+-- snapped, and the screen line (0 or +-half the screen) it snapped to -- nil on
+-- an axis that did not snap.
 function S.SnapToScreen(rect, screenW, screenH, threshold)
     local cx, cy = rect.x, rect.y
     local hw, hh = rect.w / 2, rect.h / 2
     local halfW, halfH = screenW / 2, screenH / 2
     local sx, sy = false, false
+    local lineX, lineY
     local candX = { { cx, 0 }, { cx - hw, -halfW }, { cx + hw, halfW } }
     local candY = { { cy, 0 }, { cy - hh, -halfH }, { cy + hh, halfH } }
     local bestD = threshold
     for _, c in ipairs(candX) do
         local d = abs(c[1] - c[2])
-        if d <= bestD then bestD = d; cx = rect.x + (c[2] - c[1]); sx = true end
+        if d <= bestD then bestD = d; cx = rect.x + (c[2] - c[1]); sx = true; lineX = c[2] end
     end
     bestD = threshold
     for _, c in ipairs(candY) do
         local d = abs(c[1] - c[2])
-        if d <= bestD then bestD = d; cy = rect.y + (c[2] - c[1]); sy = true end
+        if d <= bestD then bestD = d; cy = rect.y + (c[2] - c[1]); sy = true; lineY = c[2] end
     end
-    return cx, cy, sx, sy
+    return cx, cy, sx, sy, lineX, lineY
 end
 
 -- Keeps the rect inside the screen (UIParent units). Elements larger than the

@@ -293,14 +293,18 @@ function Sess:DragTo(el, cx, cy)
         cx, cy = zone.x, zone.y
         Grid:HidePreview()
     else
-        local snapped = false
-        if db.snapToGrid then cx, cy = Solver.SnapRectToGrid(cx, cy, w, h, db.gridSize); snapped = true end
+        -- The preview lines sit on the grid / screen line each axis actually
+        -- snapped to (an edge or the centre), not on the element's centre.
+        -- Screen snap runs last, so its line wins on an axis it moved.
+        local lineX, lineY
+        if db.snapToGrid then cx, cy, lineX, lineY = Solver.SnapRectToGrid(cx, cy, w, h, db.gridSize) end
         if db.snapToScreen then
-            local sx, sy
-            cx, cy, sx, sy = Solver.SnapToScreen({ x = cx, y = cy, w = w, h = h }, UIParent:GetWidth(), UIParent:GetHeight(), SCREEN_SNAP)
-            snapped = snapped or sx or sy
+            local sx, sy, lx, ly
+            cx, cy, sx, sy, lx, ly = Solver.SnapToScreen({ x = cx, y = cy, w = w, h = h }, UIParent:GetWidth(), UIParent:GetHeight(), SCREEN_SNAP)
+            if sx then lineX = lx end
+            if sy then lineY = ly end
         end
-        if snapped then Grid:ShowPreview(cx, cy) else Grid:HidePreview() end
+        if lineX or lineY then Grid:ShowPreview(lineX, lineY) else Grid:HidePreview() end
     end
     cx, cy = Solver.ClampToScreen(cx, cy, w, h, UIParent:GetWidth(), UIParent:GetHeight())
     local pos = Registry:GetPos(el)
