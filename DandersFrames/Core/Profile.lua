@@ -1929,10 +1929,19 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
     -- put them. The flag rode across from the source profile (or is simply this
     -- profile's own), so clear it when either mode arrived without a record and let the
     -- login migration's presence gate do the seeding.
-    if DF.MigrateContainerPositionRecords and type(DF.db) == "table"
-        and ((type(DF.db.party) == "table" and DF.db.party.position == nil)
-          or (type(DF.db.raid) == "table" and DF.db.raid.position == nil)) then
-        DF.db._moverPositionRecordsV1 = nil
+    if DF.MigrateContainerPositionRecords and type(DF.db) == "table" then
+        local p, r = DF.db.party, DF.db.raid
+        if (type(p) == "table" and p.position == nil) or (type(r) == "table" and r.position == nil) then
+            DF.db._moverPositionRecordsV1 = nil
+        end
+        -- Phase B records, same reason: a pre-record payload carries only the scalars.
+        if (type(p) == "table" and (p.personalTargetedPosition == nil or p.targetedListPosition == nil))
+            or (type(r) == "table" and r.personalTargetedPosition == nil) then
+            DF.db._moverPositionRecordsV2 = nil
+        end
+        -- Always run: the two blocks above are flag-gated per profile and the pinned
+        -- walk is self-gated (an imported pinnedFrames table lacks its positionsV2
+        -- marker), so an import that changed nothing costs one idle pass.
         DF:MigrateContainerPositionRecords()
     end
 

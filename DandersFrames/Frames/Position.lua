@@ -116,9 +116,13 @@ local POSITION_MODES = {
     },
     personal = {
         title = "Personal Targeted",
-        getDB = function() return DF:GetDB() end,
+        -- The DRIVING db (raid in a raid / raid test), not the party db: the record
+        -- funnel writes there, so the panel must read from the same table or a nudge
+        -- would add dx to the party value and write the raid record.
+        getDB = function() return DF.GetPersonalTargetedDB and DF:GetPersonalTargetedDB() or DF:GetDB() end,
         xField = "personalTargetedSpellX",
         yField = "personalTargetedSpellY",
+        record = "personal",
         apply = function()
             if DF.UpdatePersonalTargetedSpellsPosition then
                 DF:UpdatePersonalTargetedSpellsPosition()
@@ -138,6 +142,7 @@ local POSITION_MODES = {
         getDB = function() return DF:GetDB() end,
         xField = "targetedListX",
         yField = "targetedListY",
+        record = "targetedList",
         apply = function()
             if DF.UpdateTargetedListLayout then DF:UpdateTargetedListLayout() end
             -- Also reposition the mover to match
@@ -169,17 +174,26 @@ local POSITION_MODES = {
             local partyDB = DF:GetDB()
             if not set then return partyDB end
             set.position = set.position or { point = "CENTER", x = 0, y = 0 }
-            local pos = set.position
+            local pf = DF.PinnedFrames
+            -- x/y mean the glue OFFSET while the set is anchored to the frames and the
+            -- screen position otherwise (PinnedFrames.ReadXY / WriteXY -- the one rule
+            -- the legacy drag handles and the Wago API share).
             return setmetatable({}, {
                 __index = function(_, k)
-                    if k == "x" then return pos.x
-                    elseif k == "y" then return pos.y
-                    else return partyDB[k] end
+                    if k == "x" or k == "y" then
+                        local x, y = pf.ReadXY(set.position)
+                        return (k == "x") and x or y
+                    end
+                    return partyDB[k]
                 end,
                 __newindex = function(_, k, v)
-                    if k == "x" then pos.x = v
-                    elseif k == "y" then pos.y = v
-                    else partyDB[k] = v end
+                    if k == "x" or k == "y" then
+                        local x, y = pf.ReadXY(set.position)
+                        if k == "x" then x = v else y = v end
+                        pf.WriteXY(set, set.position.point, x, y)
+                    else
+                        partyDB[k] = v
+                    end
                 end,
             })
         end,
@@ -2013,19 +2027,13 @@ function DF:CreatePositionPanel()
         function(v)  -- customSet: store on the targeted set (nil for SCREEN default)
             local set = ResolvePinnedSet()
             if not set then return end
-            set.position = set.position or { point = "CENTER", x = 0, y = 0 }
             local newAnchor = (v ~= "SCREEN") and v or nil
-            -- X/Y mean different things per mode: a screen offset from UIParent vs a
-            -- fine offset from the frames-container corner. Carrying a large screen
-            -- offset into frames-anchor mode (or vice versa) would fling the set far
-            -- off the chosen reference — off-screen. So whenever the anchor mode
-            -- changes, reset the offset to 0 so the set lands exactly AT the new
-            -- reference (the chosen corner / screen point); the user nudges from there.
-            if set.position.anchorTo ~= newAnchor then
-                set.position.x = 0
-                set.position.y = 0
-            end
-            set.position.anchorTo = newAnchor
+            -- Writes BOTH shapes -- the DandersMover `anchor` DF glues from and the
+            -- `anchorTo` mirror -- and zeroes the offset so the set lands AT the new
+            -- reference (PinnedFrames:SetFramesAnchor owns that rule).
+            local pf = DF.PinnedFrames
+            local raid = pf.IsPositionTargetRaid and pf:IsPositionTargetRaid()
+            pf:SetFramesAnchor(set, raid and "raid" or "party", newAnchor)
         end
     )
     anchorDropdown:ClearAllPoints()
@@ -2172,8 +2180,7 @@ function DF:ResetPosition()
         local mode = GetPositionMode()
         local db = mode.getDB()
         if db then
-            db[mode.xField] = 0
-            db[mode.yField] = 0
+            WriteModePosition(mode, db, 0, 0, "ResetPosition")
             mode.apply()
             DF:UpdatePositionPanel()
         end
@@ -2211,8 +2218,7 @@ function DF:CenterFrames()
         local mode = GetPositionMode()
         local db = mode.getDB()
         if db then
-            db[mode.xField] = 0
-            db[mode.yField] = 0
+            WriteModePosition(mode, db, 0, 0, "CenterFrames")
             mode.apply()
             DF:UpdatePositionPanel()
         end
@@ -2282,13 +2288,30 @@ end
 --     v` would reach neither -- a table-valued override reads stale and loses writes.
 -- DF:SetPositionRecord is the ONLY funnel that writes either shape, so they cannot drift.
 
+-- key   = the db key holding the record; db = the table that DRIVES the display;
+-- fold  = the scalars can move behind the record's back (a raid auto layout overrides
+--         them, or a legacy reader still owns them), so a read folds the effective
+--         scalar in when IT moved rather than the record (see lastNoted below);
+-- route = while the RAID db drives the record, a write is offered to the active auto
+--         layout first (the scalars are layout-overridable).
+-- Phase B added "personal" (personalTargetedPosition, raid-layout routed) and
+-- "targetedList" (targetedListPosition, party-only) on the Phase A pattern.
 local RECORD_SPECS = {
-    party = { xKey = "anchorX",     yKey = "anchorY",     x = 0,                  y = -325 },
-    raid  = { xKey = "raidAnchorX", yKey = "raidAnchorY", x = -6.666610717773438, y = -25  },
+    party = { key = "position", xKey = "anchorX", yKey = "anchorY", x = 0, y = -325,
+              db = function() return DF:GetDB() end },
+    raid  = { key = "position", xKey = "raidAnchorX", yKey = "raidAnchorY", x = -6.666610717773438, y = -25,
+              db = function() return DF:GetRaidDB() end, fold = true, route = true },
+    -- The personal block is per-mode and driven by the RAID db in a raid / raid test
+    -- (TargetedSpells.lua GetPersonalDB), so the record is read from that same table.
+    personal = { key = "personalTargetedPosition", xKey = "personalTargetedSpellX", yKey = "personalTargetedSpellY",
+                 x = 0, y = -150, fold = true, route = true,
+                 db = function() return DF.GetPersonalTargetedDB and DF:GetPersonalTargetedDB() or DF:GetDB() end },
+    targetedList = { key = "targetedListPosition", xKey = "targetedListX", yKey = "targetedListY", x = 0, y = -10,
+                     fold = true, db = function() return DF:GetDB("party") end },
 }
 
-local function recordDB(mode)
-    return (mode == "raid") and DF:GetRaidDB() or DF:GetDB()
+local function recordSpec(mode)
+    return RECORD_SPECS[mode] or RECORD_SPECS.party
 end
 
 -- ☠ WHAT THE RECORD HELD THE LAST TIME DF AND THE SCALAR AGREED, per record table (weak
@@ -2328,27 +2351,26 @@ end
 -- that dodged DF:MigrateContainerPositionRecords -- an import, or a downgrade/upgrade
 -- round trip).
 function DF:GetPositionRecord(mode)
-    mode = (mode == "raid") and "raid" or "party"
-    local spec = RECORD_SPECS[mode]
-    local db = recordDB(mode)
+    local spec = recordSpec(mode)
+    local db = spec.db()
     -- Pre-init (DF.db nil) GetDB hands back the shared DEFAULTS table; hand out a
     -- throwaway instead so a stray write cannot rewrite the shipped defaults.
     if not db or db == DF.PartyDefaults or db == DF.RaidDefaults then
         return { point = "CENTER", x = spec.x, y = spec.y }
     end
 
-    local rec = db.position
+    local rec = db[spec.key]
     if type(rec) ~= "table" then
         rec = {
             point = "CENTER",
             x = tonumber(db[spec.xKey]) or spec.x,
             y = tonumber(db[spec.yKey]) or spec.y,
         }
-        db.position = rec
+        db[spec.key] = rec
     end
     rec.point = rec.point or "CENTER"
 
-    if mode == "raid" then
+    if spec.fold then
         -- ☠ FOLD THE EFFECTIVE SCALAR IN WHEN IT IS THE ONE THAT MOVED. An active auto
         -- layout overrides raidAnchorX/raidAnchorY (never `position` -- see the header
         -- note), and DF:GetRaidDB() returns the overlay view, so this is what makes a
@@ -2383,17 +2405,18 @@ end
 -- `reason` is the DF:LogRaidAnchorWrite label -- pass the call site's name so the RAIDPOS
 -- debug channel keeps reading the way it does today.
 function DF:SetPositionRecord(mode, pos, reason)
-    mode = (mode == "raid") and "raid" or "party"
     if type(pos) ~= "table" then return end
-    local spec = RECORD_SPECS[mode]
-    local db = recordDB(mode)
+    local spec = recordSpec(mode)
+    local db = spec.db()
     if not db or db == DF.PartyDefaults or db == DF.RaidDefaults then return end
 
     local x = tonumber(pos.x) or 0
     local y = tonumber(pos.y) or 0
 
-    if mode == "raid" then
-        if DF.LogRaidAnchorWrite then
+    -- Routing applies while the RAID db drives the record: always for raid, and for
+    -- personal only in a raid / raid test (its db() then IS the raid overlay).
+    if spec.route and db == DF:GetRaidDB() then
+        if spec == RECORD_SPECS.raid and DF.LogRaidAnchorWrite then
             DF:LogRaidAnchorWrite(reason or "SetPositionRecord", x, y)
         end
         -- ☠ THE ACTIVE LAYOUT GETS FIRST REFUSAL, exactly as DragMover:OnDragStop and
@@ -2402,14 +2425,23 @@ function DF:SetPositionRecord(mode, pos, reason)
         -- quietly corrupts the user's base position instead. Falls through when the
         -- routing declines (no active layout, or mid-edit where the preview path
         -- captures it). Keep all three call sites in step.
-        local routed = DF.AutoProfilesUI and DF.AutoProfilesUI.SetActiveLayoutRaidPosition
-            and DF.AutoProfilesUI:SetActiveLayoutRaidPosition(x, y)
+        local apu = DF.AutoProfilesUI
+        local routed = false
+        if apu then
+            if spec == RECORD_SPECS.raid then
+                -- Refreshes the raid container itself (unchanged Phase A behaviour).
+                routed = apu.SetActiveLayoutRaidPosition and apu:SetActiveLayoutRaidPosition(x, y)
+            else
+                -- The caller applies afterwards (mode.apply / onChanged).
+                routed = apu.SetActiveLayoutRaidPair and apu:SetActiveLayoutRaidPair(spec.xKey, spec.yKey, x, y)
+            end
+        end
         if routed then
-            -- The layout took it (override + live overlay; it refreshes the container
-            -- itself). Keep the record on the same value and note it, so the next read
-            -- sees record and effective scalar agree rather than a phantom mutation.
-            -- The base scalars are NOT written -- that is the whole point of routing.
-            local live = db.position
+            -- The layout took it (override + live overlay). Keep the record on the same
+            -- value and note it, so the next read sees record and effective scalar agree
+            -- rather than a phantom mutation. The base scalars are NOT written -- that is
+            -- the whole point of routing.
+            local live = db[spec.key]
             if type(live) == "table" then
                 live.x, live.y = x, y
                 noteRecord(live, x, y)
@@ -2418,10 +2450,10 @@ function DF:SetPositionRecord(mode, pos, reason)
         end
     end
 
-    local rec = db.position
+    local rec = db[spec.key]
     if type(rec) ~= "table" then
         rec = {}
-        db.position = rec
+        db[spec.key] = rec
     end
 
     if rec == pos then

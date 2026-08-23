@@ -954,6 +954,67 @@ local FRAMES_ANCHOR_POINTS = {
     FRAMES_BOTTOMRIGHT = "BOTTOMRIGHT",
 }
 
+-- ============================================================
+-- DANDERSMOVER RECORD
+-- ============================================================
+-- set.position is the lib's record: { point, x, y, anchor, anchorTo }.
+--   point/x/y  lib semantics -- `point` of the container sits at (x, y) from UIParent
+--              CENTER, UIParent units. `point` is DERIVED (the growth corner) so the
+--              first frame stays put as the set grows; CommitSetPosition re-derives it.
+--   anchor     the lib's anchor block. A POINT-MODE anchor onto DandersFrames:party /
+--              :raid / :group is "frames glue": DF applies it NATIVELY below
+--              (SetPoint onto the container -- combat-safe, works with the lib
+--              absent), and then x/y are an offset, not a position. Any other anchor
+--              is solved by the lib, which writes the result into point/x/y.
+--   anchorTo   the pre-5.4 FRAMES_* key, kept as a MIRROR of a frames-glue anchor for
+--              one minor (a downgrade still glues; its offset is whatever x/y hold).
+--              Read only when `anchor` is absent.
+local FRAMES_TARGET_MODE = {
+    ["DandersFrames:party"] = "party",
+    ["DandersFrames:raid"]  = "raid",
+    ["DandersFrames:group"] = "group",
+}
+
+-- Is this anchor one DF glues natively?
+local function FramesGlue(a)
+    return type(a) == "table" and a.mode == "point" and FRAMES_TARGET_MODE[a.target] ~= nil
+end
+
+-- The anchorTo mirror a frames-glue anchor implies; nil for any other anchor.
+local function MirrorAnchorTo(a)
+    if not FramesGlue(a) then return nil end
+    local key = "FRAMES_" .. tostring(a.relPoint or "CENTER")
+    return FRAMES_ANCHOR_POINTS[key] and key or nil
+end
+
+local function CopyAnchor(a)
+    if type(a) ~= "table" then return nil end
+    return { target = a.target, mode = a.mode, edge = a.edge, align = a.align,
+             point = a.point, relPoint = a.relPoint, offsetX = a.offsetX, offsetY = a.offsetY }
+end
+
+-- What the legacy drag handles, the position panel and the Wago API call "x/y": the
+-- glue OFFSET while frames-glued (the old anchorTo contract), the screen position
+-- otherwise. ReadXY returns numbers; WriteXY writes IN PLACE (never a fresh table --
+-- the lib holds the record by identity) and keeps anchor + anchorTo.
+function PinnedFrames.ReadXY(pos)
+    local a = pos and pos.anchor
+    if FramesGlue(a) then return a.offsetX or 0, a.offsetY or 0 end
+    return (pos and pos.x) or 0, (pos and pos.y) or 0
+end
+
+function PinnedFrames.WriteXY(set, point, x, y)
+    if not set then return end
+    local pos = set.position
+    if type(pos) ~= "table" then pos = {}; set.position = pos end
+    if FramesGlue(pos.anchor) then
+        pos.anchor.offsetX, pos.anchor.offsetY = x, y
+    else
+        pos.point = point or pos.point
+        pos.x, pos.y = x, y
+    end
+end
+
 -- The main frames container a pinned set should anchor to: the raid or party
 -- container, test variant while test mode is active (the live containers are
 -- hidden then). Raid-vs-party is resolved the SAME way GetSetForPosition picks
@@ -969,52 +1030,139 @@ local function ResolveFramesAnchorTarget()
     return IsInRaid() and DF.raidContainer or DF.container
 end
 
--- Position a pinned container so its FIRST FRAME lands at a screen spot that is
--- INDEPENDENT of the container's size (frame count). Frames grow from the
--- container's GROWTH corner (GetContainerAnchorPoint), so we anchor THAT corner
--- to the screen — not the container's saved-point corner. The saved `point`
--- stays the screen reference (so coords keep their meaning; nothing jumps), and a
--- half-frame offset reproduces where a point-anchored single frame sits — so a
--- default set doesn't move, yet test (sized to testCount) and live (sized to the
--- visible count) now place the first frame identically. Dragged sets, whose point
--- already equals the growth corner, get a zero offset and render unchanged.
--- frameW/frameH are the set's per-frame size in container-local units.
+-- The frames container a glue anchor names. Test variants while test mode previews
+-- (the live containers are hidden then). "group" = whichever mode is on screen.
+local function ResolveGlueTarget(target)
+    local m = FRAMES_TARGET_MODE[target]
+    if not m then return nil end
+    if m == "group" then return ResolveFramesAnchorTarget() end
+    if PinnedFrames.testModeActive then
+        return (m == "raid") and DF.testRaidContainer or DF.testPartyContainer
+    end
+    return (m == "raid") and DF.raidContainer or DF.container
+end
+
+-- Post-migration (PinnedFrames.MigrateProfileRecords), pos is in DandersMover
+-- semantics: `point` of the container sits at (x, y) from UIParent CENTER, so the
+-- screen branch is one SetPoint. The ÷scale stays: record coordinates are UIParent
+-- units and `s` is exactly the container's effective-scale ratio (parented to
+-- UIParent) -- identical to DandersMover's Lib.ApplyPosition. The size-invariant
+-- growth corner survives because `point` IS the growth corner (derived, see
+-- CommitSetPosition); the old half-frame correction was folded into x/y once.
 --
--- When pos.anchorTo is a FRAMES_* value the set is glued to the raid/party
--- container instead of the screen: its growth corner anchors to the chosen
--- container corner with x/y as a fine offset, so the set tracks the frames as
--- they move/resize (incl. in combat — it's a static anchor, no reposition) and
--- pinned/raid alignment stays locked. Falls back to screen if the target
--- container doesn't exist yet.
+-- A frames-glue `anchor` (point mode onto DandersFrames:party/raid/group) is applied
+-- NATIVELY: SetPoint(anchor.point, container, anchor.relPoint, offset/s) -- static, so
+-- it tracks the frames in combat and needs no lib. The legacy `anchorTo` is read only
+-- when no `anchor` exists (a record the lib-absent legacy dropdown wrote pre-upgrade).
+-- Any other anchor was solved by the lib into point/x/y: the screen branch applies it.
+-- frameW/frameH are kept in the signature for the callers; the screen branch no longer
+-- needs them.
 local function PositionPinnedContainer(container, set, pos, frameW, frameH)
     if not container then return end
     local growth = GetContainerAnchorPoint(set)
     local s = container:GetScale() or 1
 
-    local relPoint = FRAMES_ANCHOR_POINTS[pos and pos.anchorTo or ""]
-    if relPoint then
-        local target = ResolveFramesAnchorTarget()
+    local a = pos and pos.anchor
+    local gluePoint, glueRel, glueX, glueY
+    if FramesGlue(a) then
+        gluePoint, glueRel = a.point or growth, a.relPoint or "CENTER"
+        glueX, glueY = a.offsetX or 0, a.offsetY or 0
+    elseif a == nil then
+        local relPoint = FRAMES_ANCHOR_POINTS[pos and pos.anchorTo or ""]
+        if relPoint then
+            gluePoint, glueRel = growth, relPoint
+            glueX, glueY = (pos and pos.x) or 0, (pos and pos.y) or 0
+        end
+    end
+    if gluePoint then
+        local target = FramesGlue(a) and ResolveGlueTarget(a.target) or ResolveFramesAnchorTarget()
         if target and target ~= container then
-            -- x/y are screen-space → container units. No half-frame offset: the
-            -- growth corner is already size-invariant, and the chosen container
-            -- corner is the reference the user picked.
-            local x = ((pos and pos.x) or 0) / s
-            local y = ((pos and pos.y) or 0) / s
+            -- Offsets are UIParent units -> container units. No half-frame term: the
+            -- glued corner is the reference the user picked.
             container:ClearAllPoints()
-            container:SetPoint(growth, target, relPoint, x, y)
+            container:SetPoint(gluePoint, target, glueRel, glueX / s, glueY / s)
+            if FramesGlue(a) then
+                -- Keep the lib-facing point/x/y a faithful mirror of where the glue
+                -- put the container, so Detach frees it IN PLACE (the lib's own solve
+                -- uses the frames' VISIBLE rect, which is not always the container).
+                local cx, cy = container:GetCenter()
+                local ux, uy = UIParent:GetCenter()
+                if cx and ux then
+                    local ratio = container:GetEffectiveScale() / UIParent:GetEffectiveScale()
+                    pos.point, pos.x, pos.y = "CENTER", cx * ratio - ux, cy * ratio - uy
+                end
+            end
             return
         end
     end
 
-    local ref = (pos and pos.point) or growth
+    local point = (pos and pos.point) or growth
+    local x = ((pos and pos.x) or 0) / s
+    local y = ((pos and pos.y) or 0) / s
+    container:ClearAllPoints()
+    container:SetPoint(point, UIParent, "CENTER", x, y)
+end
+
+-- ☠ LEGACY -> LIB SEMANTICS, pure. The old screen branch was
+--   SetPoint(G, UIParent, ref, x/s + (gfx-rfx)*frameW, y/s + (gfy-rfy)*frameH)
+-- i.e. G sits at UIParent's `ref` corner + x + (gfx-rfx)*frameW*s (UIParent units).
+-- UIParent's `ref` corner is (rfx*uiW, rfy*uiH) from its CENTER, so the same spot as
+-- an offset from CENTER is the formula below. Identical on the migrating screen; a
+-- later resolution change then behaves like the party/raid records already do.
+-- frameW/frameH are the per-frame size in container-local units, s the container
+-- scale, uiW/uiH UIParent's size. Mutates pos.
+function PinnedFrames.NormaliseLegacyRecord(pos, growth, frameW, frameH, s, uiW, uiH)
+    local ref = pos.point or growth
     local gfx, gfy = AnchorFractions(growth)
     local rfx, rfy = AnchorFractions(ref)
-    -- pos.x/y are screen-space (÷scale → container units); the frame offset is
-    -- already in container-local units, so it is NOT divided by scale.
-    local x = ((pos and pos.x) or 0) / s + (gfx - rfx) * (frameW or 0)
-    local y = ((pos and pos.y) or 0) / s + (gfy - rfy) * (frameH or 0)
-    container:ClearAllPoints()
-    container:SetPoint(growth, UIParent, ref, x, y)
+    pos.point = growth
+    pos.x = (tonumber(pos.x) or 0) + (gfx - rfx) * (frameW or 0) * (s or 1) + rfx * (uiW or 0)
+    pos.y = (tonumber(pos.y) or 0) + (gfy - rfy) * (frameH or 0) * (s or 1) + rfy * (uiH or 0)
+end
+
+-- anchorTo -> a point-mode `anchor` onto that mode's container. The offsets are the
+-- old x/y VERBATIM (the anchored branch divided raw x/y by s; so does the glue).
+-- Pure; mutates pos. Returns false for an unknown anchorTo (left as a screen record).
+function PinnedFrames.ConvertLegacyAnchorTo(pos, growth, mode)
+    local relPoint = FRAMES_ANCHOR_POINTS[pos.anchorTo or ""]
+    if not relPoint then return false end
+    pos.anchor = { target = "DandersFrames:" .. mode, mode = "point", point = growth, relPoint = relPoint,
+                   offsetX = tonumber(pos.x) or 0, offsetY = tonumber(pos.y) or 0 }
+    pos.point = growth
+    return true
+end
+
+-- Migrate one PROFILE's pinned records (both modes). Runs every login from
+-- DF:MigrateContainerPositionRecords and after an import; gated PER TABLE by
+-- pinnedFrames.positionsV2 (coordinate normalisation, once) and PER RECORD by shape
+-- (anchorTo without anchor -> converted, idempotent). Baseline sizes come from THIS
+-- profile's tables (set.matchMode or the set's own mode), the same rule
+-- GetSetFrameSize / GetSetScale apply to the active profile.
+function PinnedFrames.MigrateProfileRecords(profile, uiW, uiH)
+    if type(profile) ~= "table" then return end
+    for _, mode in ipairs({ "party", "raid" }) do
+        local modeDB = profile[mode]
+        local pf = type(modeDB) == "table" and modeDB.pinnedFrames
+        if type(pf) == "table" and type(pf.sets) == "table" then
+            for _, set in pairs(pf.sets) do
+                local pos = type(set) == "table" and set.position
+                if type(pos) == "table" then
+                    local growth = GetContainerAnchorPoint(set)
+                    if pos.anchor == nil and pos.anchorTo and FRAMES_ANCHOR_POINTS[pos.anchorTo] then
+                        PinnedFrames.ConvertLegacyAnchorTo(pos, growth, mode)
+                    elseif pos.anchor == nil and not pf.positionsV2 then
+                        local base = profile[set.matchMode or mode]
+                        if type(base) ~= "table" then base = modeDB end
+                        local frameW = set.customWidth or base.frameWidth or 120
+                        local frameH = set.customHeight or base.frameHeight or 50
+                        local s = set.scale or base.frameScale or 1
+                        PinnedFrames.NormaliseLegacyRecord(pos, growth, frameW, frameH, s, uiW, uiH)
+                    end
+                end
+            end
+            pf.positionsV2 = true
+        end
+    end
 end
 
 -- ============================================================
@@ -1519,7 +1667,7 @@ function PinnedFrames:CreateSetFrames(setIndex)
 
     -- Track starting mouse and container position (+ the drag's anchor reference
     -- and frame size, captured once so OnUpdate/OnDragStop stay consistent).
-    local startMouseX, startMouseY, startPosX, startPosY, dragRef, dragW, dragH, dragAnchorTo
+    local startMouseX, startMouseY, startPosX, startPosY, dragRef, dragW, dragH
 
     mover:SetScript("OnDragStart", function(self)
         -- Re-resolve the set EVERY drag: the closure's `set` upvalue is bound at
@@ -1540,8 +1688,6 @@ function PinnedFrames:CreateSetFrames(setIndex)
         -- Keep the set's existing anchor reference (pos.point) so coords stay in
         -- the same space; PositionPinnedContainer pins the growth corner from it.
         dragRef = (liveSet.position and liveSet.position.point) or GetContainerAnchorPoint(liveSet)
-        -- Preserve the frames-anchor mode across the drag (rebuilt fresh below).
-        dragAnchorTo = liveSet.position and liveSet.position.anchorTo
         dragW, dragH = GetSetFrameSize(liveSet, GetPinnedModeDB())
 
         -- Get starting mouse position in screen coordinates
@@ -1550,10 +1696,8 @@ function PinnedFrames:CreateSetFrames(setIndex)
         startMouseX = startMouseX / uiScale
         startMouseY = startMouseY / uiScale
 
-        -- Get current container position
-        local pos = liveSet.position or { x = 0, y = 0 }
-        startPosX = pos.x or 0
-        startPosY = pos.y or 0
+        -- Get current container position (the glue offset while frames-glued).
+        startPosX, startPosY = PinnedFrames.ReadXY(liveSet.position)
 
         self:SetScript("OnUpdate", function()
             local mx, my = GetCursorPosition()
@@ -1573,8 +1717,9 @@ function PinnedFrames:CreateSetFrames(setIndex)
                 newX, newY = DF:SnapToGrid(newX, newY)
             end
 
-            -- Track the live drag in the DB + panel so the X/Y readouts update.
-            liveSet.position = { point = dragRef, x = newX, y = newY, anchorTo = dragAnchorTo }
+            -- Track the live drag in the DB + panel so the X/Y readouts update. In
+            -- place: the record keeps its anchor/anchorTo and its identity.
+            PinnedFrames.WriteXY(liveSet, dragRef, newX, newY)
             PositionPinnedContainer(container, liveSet, liveSet.position, dragW, dragH)
             if DF.UpdatePositionPanel then DF:UpdatePositionPanel() end
         end)
@@ -1608,8 +1753,8 @@ function PinnedFrames:CreateSetFrames(setIndex)
             finalX, finalY = DF:SnapToGrid(finalX, finalY)
         end
 
-        -- Save logical position (unscaled)
-        liveSet.position = { point = anchor, x = finalX, y = finalY, anchorTo = dragAnchorTo }
+        -- Save logical position (unscaled), in place.
+        PinnedFrames.WriteXY(liveSet, anchor, finalX, finalY)
 
         -- RAID ONLY: when an auto layout is active, GetSetDB() returns a deep copy
         -- of _realRaidDB.pinnedFrames, so the write above goes to that throwaway copy
@@ -1621,8 +1766,8 @@ function PinnedFrames:CreateSetFrames(setIndex)
                 and DF._realRaidDB.pinnedFrames
                 and DF._realRaidDB.pinnedFrames.sets
                 and DF._realRaidDB.pinnedFrames.sets[setIndex]
-            if realSet then
-                realSet.position = { point = anchor, x = finalX, y = finalY, anchorTo = dragAnchorTo }
+            if realSet and realSet.position ~= liveSet.position then
+                PinnedFrames.WriteXY(realSet, anchor, finalX, finalY)
             end
         end
 
@@ -2586,17 +2731,131 @@ function PinnedFrames:ApplySetPosition(setIndex)
     PositionPinnedContainer(container, set, pos, w, h)
 
     -- Mirror RAID-set positions to _realRaidDB so they survive auto-layout overlay
-    -- rebuilds. Party sets have no overlays (GetSetDB returns the real table).
+    -- rebuilds. Party sets have no overlays (GetSetDB returns the real table). The
+    -- overlay's pinned view reads `position` through to the real set, so this is
+    -- normally the SAME table (identity check) and nothing to do.
     if raid then
         local realSet = DF._realRaidDB and DF._realRaidDB.pinnedFrames
             and DF._realRaidDB.pinnedFrames.sets and DF._realRaidDB.pinnedFrames.sets[setIndex]
-        if realSet then
+        if realSet and realSet.position ~= pos then
             realSet.position = realSet.position or {}
             realSet.position.point = pos.point or GetContainerAnchorPoint(set)
             realSet.position.x = pos.x
             realSet.position.y = pos.y
             realSet.position.anchorTo = pos.anchorTo
+            realSet.position.anchor = CopyAnchor(pos.anchor)
         end
+    end
+end
+
+-- ============================================================
+-- DANDERSMOVER ACCESSORS (mode-explicit)
+-- ============================================================
+-- The lib registers one element per set per MODE (party.pinnedN / raid.pinnedN), so
+-- every accessor here names its mode instead of asking "what is on screen". What is on
+-- screen for a mode: its test container while that mode is being previewed, its live
+-- container while that mode is the live group, nil otherwise.
+
+function PinnedFrames:GetSetForMode(setIndex, isRaid)
+    return GetSetDBForMode(setIndex, isRaid and true or false)
+end
+
+function PinnedFrames:GetContainerForMode(setIndex, isRaid)
+    if PositionTargetIsRaid(self) ~= (isRaid and true or false) then return nil end
+    return self.testModeActive and self.testContainers[setIndex] or self.containers[setIndex]
+end
+
+-- The container's rect in UIParent units from UIParent CENTER, nil when it is not
+-- meaningfully on screen (mode not live, hidden, unsized).
+function PinnedFrames:GetContainerRect(setIndex, isRaid)
+    local c = self:GetContainerForMode(setIndex, isRaid)
+    if not c or not c:IsShown() then return nil end
+    local cx, cy = c:GetCenter()
+    if not cx then return nil end
+    local w, h = c:GetSize()
+    if not w or w <= 0 or h <= 0 then return nil end
+    local ratio = c:GetEffectiveScale() / UIParent:GetEffectiveScale()
+    local ux, uy = UIParent:GetCenter()
+    return { x = cx * ratio - ux, y = cy * ratio - uy, w = w * ratio, h = h * ratio }
+end
+
+-- The LIVE record table (the lib mutates it in place). Converts a legacy anchorTo-only
+-- record on read (belt for a set written by the legacy dropdown after migration).
+-- Returns nil when the set does not exist.
+function PinnedFrames:GetPositionRecord(setIndex, isRaid)
+    local set = GetSetDBForMode(setIndex, isRaid and true or false)
+    if not set then return nil end
+    local pos = set.position
+    if type(pos) ~= "table" then
+        pos = { point = GetContainerAnchorPoint(set), x = 0, y = 0 }
+        set.position = pos
+    end
+    if pos.anchor == nil and pos.anchorTo and FRAMES_ANCHOR_POINTS[pos.anchorTo] then
+        PinnedFrames.ConvertLegacyAnchorTo(pos, GetContainerAnchorPoint(set), isRaid and "raid" or "party")
+    end
+    return pos
+end
+
+-- Apply for ONE mode: a no-op when that mode is not what is on screen (nothing to
+-- move; the record is already saved and CreateSetFrames reads it on the next entry).
+function PinnedFrames:ApplySetPositionForMode(setIndex, isRaid)
+    if PositionTargetIsRaid(self) ~= (isRaid and true or false) then return end
+    self:ApplySetPosition(setIndex)
+end
+
+-- THE lib-facing funnel (DandersMover onChanged, and the Wago API's write). `pos` is
+-- either the live record itself (in-place mutation) or an x/y table (API write -- goes
+-- through WriteXY so it moves the glue offset while frames-glued, and keeps the
+-- anchor it did not mention). Then: re-derive `point` as the growth corner when the
+-- lib left it elsewhere (Reset writes CENTER; a resolve writes CENTER) so the set
+-- stays size-invariant; keep the anchorTo mirror in step; apply.
+function PinnedFrames:CommitSetPosition(setIndex, isRaid, pos)
+    isRaid = isRaid and true or false
+    local set = GetSetDBForMode(setIndex, isRaid)
+    if not set then return end
+    local rec = self:GetPositionRecord(setIndex, isRaid)
+    if type(pos) == "table" and pos ~= rec then
+        if pos.anchor ~= nil then rec.anchor = CopyAnchor(pos.anchor) end
+        PinnedFrames.WriteXY(set, pos.point, tonumber(pos.x) or 0, tonumber(pos.y) or 0)
+    end
+    local growth = GetContainerAnchorPoint(set)
+    if rec.anchor == nil and rec.point ~= growth then
+        local c = self:GetContainerForMode(setIndex, isRaid)
+        local w, h
+        if c then w, h = c:GetSize() end
+        if w and w > 0 and h and h > 0 then
+            local ratio = c:GetEffectiveScale() / UIParent:GetEffectiveScale()
+            w, h = w * ratio, h * ratio
+            local gfx, gfy = AnchorFractions(growth)
+            local rfx, rfy = AnchorFractions(rec.point or "CENTER")
+            rec.x = (rec.x or 0) + (gfx - rfx) * w
+            rec.y = (rec.y or 0) + (gfy - rfy) * h
+            rec.point = growth
+        end
+    end
+    rec.anchorTo = MirrorAnchorTo(rec.anchor)
+    self:ApplySetPositionForMode(setIndex, isRaid)
+end
+
+-- The legacy position panel's "Anchor To" dropdown. Writes BOTH shapes (the `anchor`
+-- DF glues from and the `anchorTo` mirror) and zeroes the offset so the set lands AT
+-- the chosen corner (or, for SCREEN, at screen centre) -- the rule the dropdown has
+-- always applied. nil anchorTo = SCREEN.
+function PinnedFrames:SetFramesAnchor(set, mode, anchorTo)
+    if not set then return end
+    local pos = set.position
+    if type(pos) ~= "table" then pos = {}; set.position = pos end
+    local growth = GetContainerAnchorPoint(set)
+    local current = MirrorAnchorTo(pos.anchor) or (pos.anchor == nil and pos.anchorTo) or nil
+    if anchorTo and FRAMES_ANCHOR_POINTS[anchorTo] then
+        if current ~= anchorTo or not FramesGlue(pos.anchor) then
+            pos.anchor = { target = "DandersFrames:" .. ((mode == "raid") and "raid" or "party"), mode = "point",
+                           point = growth, relPoint = FRAMES_ANCHOR_POINTS[anchorTo], offsetX = 0, offsetY = 0 }
+        end
+        pos.anchorTo = anchorTo
+    else
+        if current ~= nil then pos.point, pos.x, pos.y = growth, 0, 0 end
+        pos.anchor, pos.anchorTo = nil, nil
     end
 end
 
@@ -3734,7 +3993,7 @@ local function AttachTestMover(container, set, isRaidMode, setIndex)
         end
     end)
 
-    local startMouseX, startMouseY, startPosX, startPosY, dragRef, dragW, dragH, dragAnchorTo
+    local startMouseX, startMouseY, startPosX, startPosY, dragRef, dragW, dragH
 
     mover:SetScript("OnDragStart", function(self)
         local currentSet = self.dfSet
@@ -3747,16 +4006,13 @@ local function AttachTestMover(container, set, isRaidMode, setIndex)
         -- Keep the set's existing anchor reference + capture frame size, so the
         -- helper pins the growth corner consistently (matches the live mover).
         dragRef = (currentSet.position and currentSet.position.point) or GetContainerAnchorPoint(currentSet)
-        dragAnchorTo = currentSet.position and currentSet.position.anchorTo
         local ddb = self.dfIsRaidMode and DF:GetRaidDB() or DF:GetDB()
         dragW, dragH = GetSetFrameSize(currentSet, ddb)
         local uiScale = UIParent:GetEffectiveScale()
         startMouseX, startMouseY = GetCursorPosition()
         startMouseX = startMouseX / uiScale
         startMouseY = startMouseY / uiScale
-        local p = currentSet.position or { x = 0, y = 0 }
-        startPosX = p.x or 0
-        startPosY = p.y or 0
+        startPosX, startPosY = PinnedFrames.ReadXY(currentSet.position)
         self:SetScript("OnUpdate", function()
             local mx, my = GetCursorPosition()
             local ps = UIParent:GetEffectiveScale()
@@ -3769,8 +4025,8 @@ local function AttachTestMover(container, set, isRaidMode, setIndex)
             if sdb and sdb.pinnedSnapToGrid and DF.SnapToGrid then
                 newX, newY = DF:SnapToGrid(newX, newY)
             end
-            -- Track the live drag in the DB + panel so the X/Y readouts update.
-            currentSet.position = { point = dragRef, x = newX, y = newY, anchorTo = dragAnchorTo }
+            -- Track the live drag in the DB + panel so the X/Y readouts update (in place).
+            PinnedFrames.WriteXY(currentSet, dragRef, newX, newY)
             PositionPinnedContainer(container, currentSet, currentSet.position, dragW, dragH)
             if DF.UpdatePositionPanel then DF:UpdatePositionPanel() end
         end)
@@ -3793,7 +4049,7 @@ local function AttachTestMover(container, set, isRaidMode, setIndex)
         if sdb and sdb.pinnedSnapToGrid and DF.SnapToGrid then
             finalX, finalY = DF:SnapToGrid(finalX, finalY)
         end
-        currentSet.position = { point = anchor, x = finalX, y = finalY, anchorTo = dragAnchorTo }
+        PinnedFrames.WriteXY(currentSet, anchor, finalX, finalY)
         PositionPinnedContainer(container, currentSet, currentSet.position, dragW, dragH)
 
         -- Persist raid-set drags through to _realRaidDB (survives overlay rebuilds;
@@ -3801,8 +4057,8 @@ local function AttachTestMover(container, set, isRaidMode, setIndex)
         if self.dfIsRaidMode then
             local realSet = DF._realRaidDB and DF._realRaidDB.pinnedFrames
                 and DF._realRaidDB.pinnedFrames.sets and DF._realRaidDB.pinnedFrames.sets[self.dfSetIndex]
-            if realSet then
-                realSet.position = { point = anchor, x = finalX, y = finalY, anchorTo = dragAnchorTo }
+            if realSet and realSet.position ~= currentSet.position then
+                PinnedFrames.WriteXY(realSet, anchor, finalX, finalY)
             end
         end
 
