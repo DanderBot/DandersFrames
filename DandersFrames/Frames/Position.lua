@@ -207,7 +207,15 @@ local POSITION_MODES = {
 -- mode.logWrites call the scalar modes never had.
 local function WriteModePosition(mode, db, x, y, reason)
     if mode.record and DF.SetPositionRecord then
-        DF:SetPositionRecord(mode.record, { point = "CENTER", x = x, y = y }, reason)
+        -- ☠ CARRY THE ANCHOR. An X/Y edit or an arrow nudge MOVES an anchored frame, it
+        -- does not detach it -- and a record built fresh here with no `anchor` field is a
+        -- silent detach, because SetPositionRecord treats a missing anchor as "clear it".
+        -- Only DandersMover's own in-place mutation (its Detach) may drop an anchor.
+        local existing = DF:GetPositionRecord(mode.record)
+        DF:SetPositionRecord(mode.record, {
+            point = "CENTER", x = x, y = y,
+            anchor = existing and existing.anchor,
+        }, reason)
     else
         db[mode.xField], db[mode.yField] = x, y
     end
@@ -2421,6 +2429,10 @@ function DF:SetPositionRecord(mode, pos, reason)
         rec.point = rec.point or "CENTER"
         rec.x, rec.y = x, y
     else
+        -- An incoming table with NO anchor is an x/y move, not a detach: keep whatever
+        -- anchor the record already holds. Only the lib's in-place mutation (the
+        -- `rec == pos` branch above, which is where its Detach lands) may clear one.
+        local prev = rec.anchor
         rec.point = pos.point or "CENTER"
         rec.x, rec.y = x, y
         rec.anchor = nil
@@ -2431,6 +2443,8 @@ function DF:SetPositionRecord(mode, pos, reason)
                 point = a.point, relPoint = a.relPoint,
                 offsetX = a.offsetX, offsetY = a.offsetY,
             }
+        else
+            rec.anchor = prev
         end
     end
 

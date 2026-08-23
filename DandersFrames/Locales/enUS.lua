@@ -1033,6 +1033,7 @@ L["Group"] = true
 L["Groups of debuffs picked by category — boss, crowd control, dispellable and so on — rather than one spell at a time."] = true
 L["Group 1"] = true
 L["Group Display Order"] = true
+L["Group Frames"] = true
 L["Group Labels"] = true
 L["Group Number"] = true
 L["Group labels are not available in Flat Grid layout.\n\nEnable 'Use Group-Based Layout' in Frame settings\nto use group labels."] = true
