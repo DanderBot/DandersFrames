@@ -3169,9 +3169,14 @@ function NativeBackend:build()
                     -- ☠ PARK KEYS AT BIRTH, mirroring the group branch. The tuning path
                     -- rebuilds this set, but tuning only runs after something changes — a
                     -- slot-backed handle built while trusted would meet its FIRST trust
-                    -- loss with no gated keys, and the hide fallback (gated on
-                    -- _hasGatedGroups()==false) would blank the whole handle on exactly
-                    -- the transition the park exists to narrow.
+                    -- loss with no gated keys registered.
+                    -- ⚠ The rest of this note used to say that produced an unwanted
+                    -- whole-handle blank via the hide fallback. That fallback is gone: a
+                    -- vulnerable handle on a distrusted unit now ALWAYS hides, because the
+                    -- park is engine-routed and unread under fail-open (see the long note
+                    -- in Handle:_applyIdentityGate). Registering keys here still matters —
+                    -- it is what the park narrows with once trust returns — but a missing
+                    -- key set no longer changes what the gate does.
                     if filterVulnerableToIdentityGate(f, cf) then
                         self.gatedGroupKeys = self.gatedGroupKeys or {}
                         self.gatedGroupKeys[key] = true
@@ -5615,23 +5620,45 @@ function Handle:_applyIdentityGate()
                     if not can and not why then why = "cannot-assist" end
                     -- Trust verdict for the PARK path (see the park block below).
                     self._idGateUntrusted = (can == false) or nil
-                    self:_noteGateRecovery(can)
+                    -- ☠ THE RECOVERY EDGE IS NOT NOTED HERE ANY MORE. It used to be
+                    -- driven by the ASSIST result alone, which meant a unit hidden for
+                    -- not-visible or phased recovered with NOTHING re-parsing the pool.
+                    -- Moved below the visibility and phase probes so it reads the whole
+                    -- trust verdict -- see the call site for the portal case that
+                    -- exposed it.
                     -- ☠ NOT `and not isOwn` — see the block above. Cinematics are the
                     -- latch's job; this branch is what covers a vehicle.
                     --
-                    -- ★★ HIDE IS NOW THE FALLBACK, NOT THE RESPONSE. The park below empties
-                    -- exactly the records the engine can skip and leaves their siblings
-                    -- rendering; hiding empties the handle. Since ONE vulnerable record
-                    -- marks the whole handle (see the build loop), the old behaviour blanked
-                    -- a buff row's token groups because an unrelated spell-ID group sat
-                    -- beside them — over-hiding, and the opposite of what the gate is for.
-                    -- So hide only when the park cannot express it: no gated keys were
-                    -- registered at all, which means a build shape the park does not cover.
-                    -- ⚠ Deliberately NOT removed outright. If AddAuraGroup failed, or a
-                    -- consumer produced a handle with no keys, the vulnerable pool would
-                    -- otherwise render fully open with nothing suppressing it — the leak
-                    -- this whole mechanism exists to stop. Fallback, not dead code.
-                    if not can and self._idGateVulnerable and not self:_hasGatedGroups() then
+                    -- ☠☠ HIDE IS THE RESPONSE AGAIN, AND THE PARK IS THE OPTIMISATION.
+                    -- This block used to read "hide only when the park cannot express it:
+                    -- no gated keys were registered at all", gated on
+                    -- `not self:_hasGatedGroups()`. The premise was that the park EXPRESSES
+                    -- the suppression for a handle that does have gated keys. It does not,
+                    -- and that is the whole bug: the park is maxFrameCount = 0, applied
+                    -- through ApplyTuning, and an engine-routed lever is only consulted
+                    -- WHEN THE ENGINE RE-PARSES. Under fail-open -- which is precisely the
+                    -- regime `not can` detects -- nothing re-parses, so the park lands and
+                    -- sits there unread while every already-bound button keeps rendering.
+                    -- The SLOT side learned this on 2026-08-18 and answered it by hiding a
+                    -- DF-owned frame (the owner anchor, fc136007). The handle side kept
+                    -- trusting the park and so kept leaking.
+                    --
+                    -- ★ Field shape: a party member entombed by a boss mechanic. Verdict
+                    -- logged perfectly -- `park=ON hide=-`, three handles, edge correctly
+                    -- held for 34s -- and the DEFENSIVE ROW carried on showing the stale
+                    -- bind the whole time, because park=ON actuated nothing
+                    -- (Krathe, 2026-08-23; two separate pulls, party1 / party3 / party4).
+                    --
+                    -- ⚠ THE OVER-HIDING WORRY THE OLD COMMENT RAISED IS REAL BUT MISJUDGED.
+                    -- Yes, one vulnerable record marks the whole handle, so hiding blanks
+                    -- sibling token groups too. But under fail-open those siblings are
+                    -- displaying an un-re-parsed pool as well -- staleness is a property of
+                    -- the PARSE, not of the filter kind -- so they are not the trustworthy
+                    -- bystanders that reasoning assumed. Blanking a row for a unit we
+                    -- cannot identify beats showing it stale data about that unit.
+                    -- ★ The park stays: in the TRUSTED regime it is the cheaper, narrower
+                    -- lever, and it is what restores maxFrameCount cleanly on recovery.
+                    if not can and self._idGateVulnerable then
                         hide = true
                     end
                 end
@@ -5681,6 +5708,29 @@ function Handle:_applyIdentityGate()
                     end
                 end
             end
+
+            -- ☠☠ THE RECOVERY EDGE, DRIVEN BY THE WHOLE VERDICT -- not by the assist
+            -- probe, which is where it used to live. Every probe above can distrust
+            -- this unit, but only ONE of them was noting the transition, so a unit
+            -- hidden for `not-visible` or `phased` un-hid on recovery with NOTHING
+            -- re-parsing the pool. The container still held whatever it parsed while
+            -- the unit was in another instance, and that stale bind is what came back
+            -- on screen.
+            --
+            -- ★ Field shape: take a portal. Party member is left behind, gate hides
+            -- the row correctly (`why=not-visible park=ON hide=ON`), then you arrive,
+            -- they become visible, and every handle logs `park=OFF hide=OFF` in the
+            -- same tick with no re-parse anywhere -- the row comes back showing what
+            -- it had before the zone change (Krathe, 2026-08-23, log 15:44:32).
+            --
+            -- ⚠ Positioned AFTER all probes and BEFORE the park/hide verdicts below,
+            -- because _noteGateRecovery can set _pendingGateReparse and those verdicts
+            -- read it -- a debt raised here must be visible to them on this same pass.
+            -- ⚠ Runs for every handle that reached the probes, including ones only
+            -- gated via _hasGatedGroups: the edge is a false->true transition and
+            -- _idGateAssist starts nil, so a handle that never distrusted anything
+            -- takes no action on its first trusted pass.
+            self:_noteGateRecovery(not hide)
         end
     end
     -- Stash for /df debug idgate: the reason column answers "why is this row
@@ -5765,7 +5815,17 @@ function Handle:_applyIdentityGate()
         end
     end
 
-    local newHidden = hide or nil
+    -- ☠ THE SAME THREE TERMS AS THE PARK VERDICT, and for the same reason. Hiding on
+    -- `hide` alone un-hid the frame the instant trust returned -- while the pool still
+    -- held the fail-open parse, because the re-parse cannot run in lockdown. That is the
+    -- 34-second window in Krathe's 00:16:50 log wearing a different hat: the park stayed
+    -- on (it reads _pendingGateReparse) and the hide came straight off.
+    -- ⚠ park and hide are now deliberately the SAME predicate for identity distrust.
+    -- The joint log line still prints them separately because they actuate through
+    -- different machinery -- maxFrameCount vs the DF-owned frame -- and seeing one
+    -- succeed while the other fails is exactly the diagnosis that was missing here.
+    local newHidden = (hide or self._idGateUntrusted or self._pendingGateReparse)
+        and true or nil
     if self._idGateHidden ~= newHidden then
         hideFlip = newHidden and "ON" or "OFF"
         self._idGateHidden = newHidden
@@ -7667,7 +7727,9 @@ function SlotHandle:_applyIdentityGate()
                         if unavail then can = false; why = unavail end
                     end
                     if not can and not why then why = "cannot-assist" end
-                    self:_noteGateRecovery(can)
+                    -- ☠ Edge NOT noted here — moved below the visibility and phase
+                    -- probes so it reads the whole verdict. Same fault and same fix as
+                    -- the Handle twin; the account is at that call site.
                     if not can then hide = true end
                 end
             end
@@ -7711,11 +7773,26 @@ function SlotHandle:_applyIdentityGate()
                     end
                 end
             end
+
+            -- ☠☠ RECOVERY EDGE FROM THE WHOLE VERDICT, mirroring the Handle twin --
+            -- see that call site for the portal case. An AD indicator hidden for
+            -- not-visible used to come back bound to whatever it held before the
+            -- zone change, because only the assist probe noted the transition.
+            -- ⚠ Before the hide verdict below: _noteGateRecovery can set
+            -- _pendingGateReparse, and _pushFilter's unitHidden reads it.
+            self:_noteGateRecovery(not hide)
         end
     end
     -- Stash for /df debug idgate, mirroring the Handle.
     self._idGateWhy = hide and why or nil
-    local newHidden = hide or nil
+    -- ☠ THE DEBT BELONGS IN THE VERDICT, NOT ONLY IN THE PUSH. _pushFilter already
+    -- ORs _pendingGateReparse into its unitHidden, so the slot DID stay hidden -- but
+    -- _gateHidden went false the moment trust returned, and that is what the log
+    -- prints and what /df debug idgate dumps. It cost real diagnosis time: a log
+    -- reading `slot hide OFF` beside a pool that was still correctly parked looked
+    -- like the slot had un-hidden early, and it had not. Folding the debt in here
+    -- makes the recorded state and the pushed state the same answer.
+    local newHidden = (hide or self._pendingGateReparse) and true or nil
     if self._gateHidden ~= newHidden then
         self._gateHidden = newHidden
         GateLog("slot %s key=%s unit=%s why=%s",
