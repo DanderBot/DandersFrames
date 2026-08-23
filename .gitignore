@@ -53,3 +53,8 @@ docs/*
 
 # luac -l artifact
 luac.out
+
+# Embedded copies of the canonical DandersUI/ lib -- junctions locally,
+# copied by Tools/sync-libs.sh in CI.
+DandersFrames/Libs/DandersUI/
+DandersMover/Libs/DandersUI/

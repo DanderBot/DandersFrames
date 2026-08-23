@@ -8,20 +8,32 @@ local addonName, NS = ...
 -- consumer and reads what differs -- locale, accent, fonts, settings hooks --
 -- off `self.hooks` / `self.accent`.
 --
--- Nothing in this addon may name a consumer. State that must be SINGULAR
+-- Nothing in this library may name a consumer. State that must be SINGULAR
 -- (open menus, the popup frame, the font objects) lives here on the library,
 -- never on a host.
+--
+-- Embedded library. Hosts include Libs\DandersUI\DandersUI.xml after LibStub.
+-- Canonical source lives at <repo>/DandersUI; never edit the copies under
+-- */Libs/.
 -- ============================================================
-local MAJOR, MINOR = "DandersUI-1.0", 1
+local MAJOR, MINOR = "DandersUI-1.0", 2
 local UI = LibStub:NewLibrary(MAJOR, MINOR)
 if not UI then return end
-NS.UI = UI
+-- The handshake the other four files read. `NS` is the HOST addon's private
+-- table when embedded, so the key is namespaced to avoid colliding with the
+-- host's own fields.
+NS.__DandersUI = UI
 
 local setmetatable, rawget, type, error, ipairs, print = setmetatable, rawget, type, error, ipairs, print
 local tinsert, xpcall, geterrorhandler, tostring = table.insert, xpcall, geterrorhandler, tostring
 
-UI.MEDIA = "Interface\\AddOns\\" .. addonName .. "\\Media\\"
-UI.VERSION = (C_AddOns and C_AddOns.GetAddOnMetadata and C_AddOns.GetAddOnMetadata(addonName, "Version")) or "dev"
+-- Media resolves inside the EMBEDDING addon: `addonName` here is the host's
+-- name, not "DandersUI", because the copy lives at <Host>\Libs\DandersUI\.
+UI.MEDIA = "Interface\\AddOns\\" .. addonName .. "\\Libs\\DandersUI\\Media\\"
+-- Library revision, not an addon version -- an embedded copy has no TOC of its
+-- own to read a version from.
+UI.MAJOR, UI.MINOR = MAJOR, MINOR
+UI.VERSION = MINOR
 
 -- ============================================================
 -- SHARED STATE

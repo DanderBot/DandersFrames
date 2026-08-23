@@ -3,7 +3,6 @@
 ## Notes: Custom party/raid frames for WoW Midnight 12.0
 ## X-Credits: Some optimization patterns informed by studying Grid2 and other community addons. Secret aura tracking techniques from Harrek's Advanced Raid Frames (used with permission).
 ## Author: Danders
-## RequiredDeps: DandersUI
 ## Version: v5.4.0-alpha.1
 ## X-Curse-Project-ID: 1389690
 ## X-Wago-ID: RNL9B46o
@@ -16,6 +15,7 @@
 
 # Libraries
 Libs\LibStub\LibStub.lua
+Libs\DandersUI\DandersUI.xml
 Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
 Libs\AceLocale-3.0\AceLocale-3.0.lua
 Libs\AceSerializer-3.0\AceSerializer-3.0.lua
@@ -65,9 +65,10 @@ Debug\Profiler.lua
 # Foreign-attachment scan (/df attached) — diagnoses other addons anchored to our frames
 
 # GUI System
-# The widget toolkit lives in the DandersUI addon (RequiredDeps above). GUI.lua
-# creates DandersFrames' host on it; Compat.lua defines the positional factory
-# signatures the options pages still call. Order is load-bearing.
+# The widget toolkit is an embedded library under Libs\DandersUI, loaded with
+# the other libraries above. GUI.lua creates DandersFrames' host on it;
+# Compat.lua defines the positional factory signatures the options pages
+# still call. Order is load-bearing.
 GUI\GUI.lua
 GUI\Compat.lua
 # Loads DandersFrames_Options on demand and owns the DF:ToggleGUI stub. The

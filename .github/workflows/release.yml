@@ -79,6 +79,13 @@ jobs:
             git tag "$VERSION"
           fi
 
+      # DandersUI is a library, not an addon: the canonical source is <repo>/DandersUI
+      # and each host loads its own copy from <host>/Libs/DandersUI. Those copies are
+      # git-ignored (junctions locally), so CI has to materialise them before packaging.
+      - name: Sync embedded libs
+        if: steps.guard.outputs.skip != 'true'
+        run: bash Tools/sync-libs.sh
+
       - name: Package and Release
         if: steps.guard.outputs.skip != 'true'
         uses: BigWigsMods/packager@v2

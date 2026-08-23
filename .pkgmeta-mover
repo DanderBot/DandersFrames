@@ -6,7 +6,6 @@ enable-nolib-creation: no
 # as .pkgmeta; everything else in the container is ignored.
 move-folders:
   DandersMover/DandersMover: DandersMover
-  DandersMover/DandersUI: DandersUI
 
 ignore:
   - DandersFrames
@@ -22,6 +21,9 @@ ignore:
   - .gitnexus
   - .pkgmeta
   - docs
+  # Canonical source of the shared UI library -- shipped only as the embedded
+  # copy at DandersMover/Libs/DandersUI (Tools/sync-libs.sh).
+  - DandersUI
 
 manual-changelog:
   filename: CHANGELOG.md

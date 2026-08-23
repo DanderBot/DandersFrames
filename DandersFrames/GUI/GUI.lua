@@ -3,10 +3,11 @@ local addonName, DF = ...
 -- ============================================================
 -- THE DANDERSFRAMES GUI HOST
 -- ------------------------------------------------------------
--- The widget toolkit lives in DandersUI (a hard dependency -- see the TOC).
--- This file creates DandersFrames' HOST on it and supplies the hooks the
--- shared factories call back into: locale, fonts, the auto-profile override
--- semantics, the settings search index, and the live-refresh throttle.
+-- The widget toolkit lives in DandersUI, an embedded library loaded from
+-- Libs\DandersUI by the TOC. This file creates DandersFrames' HOST on it and
+-- supplies the hooks the shared factories call back into: locale, fonts, the
+-- auto-profile override semantics, the settings search index, and the
+-- live-refresh throttle.
 --
 -- Everything below the host block is DandersFrames-only chrome that never
 -- belonged in a shared kit: the party/raid mode flag, the New badges, the

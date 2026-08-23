@@ -1,5 +1,5 @@
 local addonName, NS = ...
-local UI = NS.UI
+local UI = NS.__DandersUI
 if not UI then return end
 
 -- ============================================================

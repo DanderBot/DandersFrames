@@ -2,7 +2,29 @@
 
 The shared settings-UI toolkit behind DandersFrames and DandersMover: one palette,
 one set of widget factories, one popup dialog, one pixel-border implementation.
-Bundled with those addons — **do not install it separately**.
+
+It is a LibStub **library, not an addon** — it is embedded in each addon that uses
+it rather than installed on its own.
+
+## Embedding
+
+1. Copy this folder into your addon as `YourAddon/Libs/DandersUI/`.
+2. Load it from your TOC, after LibStub:
+
+```
+Libs\LibStub\LibStub.lua
+Libs\DandersUI\DandersUI.xml
+```
+
+3. Take a host off it (see below) and build your panel from that.
+
+Standard LibStub rules apply: every addon may ship its own copy, and the one with
+the highest MINOR wins for the whole session — so keep your copy up to date and
+bump MINOR in `Core.lua` whenever you change the library.
+
+Media paths resolve inside the **embedding** addon
+(`Interface\AddOns\<YourAddon>\Libs\DandersUI\Media\`), so the `Media` folder has
+to travel with the copy.
 
 ## Getting a host
 
@@ -20,8 +42,7 @@ local UI = LibStub("DandersUI-1.0"):NewHost("MyAddon", {
 Calling it twice with the same name returns the existing host. A host without `L`
 errors immediately.
 
-Declare `## RequiredDeps: DandersUI` in your TOC. The pack has no SavedVariables and
-depends on nothing itself.
+The library has no SavedVariables and depends on nothing but LibStub.
 
 ## Hooks
 
