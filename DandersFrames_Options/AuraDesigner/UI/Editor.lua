@@ -1273,17 +1273,28 @@ S.BuildDebuffGroupsTab = function()
                     if def.key == "dispellable" then
                         -- Mode dropdown, indented under Dispellable Debuffs
                         -- (the Aura Filters column's control, group-scoped;
-                        -- was a two-state toggle until the PTR-5 DISPELLABLE
-                        -- token added the third "Any Dispel Type" mode).
+                        -- back to TWO entries 2026-08-22 -- the PTR-5-era
+                        -- third mode "Any Dispel Type" was collapsed into All
+                        -- Dispellable once both rode the DISPELLABLE token
+                        -- and became one query wearing two rows).
+                        --
+                        -- ★ Self-heal for a stored "ANY": AD groups have no
+                        -- startup migration walk, and a shared template can
+                        -- re-introduce the value at any time. This is the one
+                        -- surface where it would show (as a blank dropdown);
+                        -- the engine already treats ANY as ALL, so this write
+                        -- changes presentation only, never behaviour.
+                        if sel.dispellableMode == "ANY" then
+                            sel.dispellableMode = "ALL"
+                        end
                         local modeDrop = GUI:CreateDropdown(body, L["Mode"], {
                             PLAYER = L["Dispellable By Me"],
                             ALL = L["All Dispellable"],
-                            ANY = L["Any Dispel Type"],
-                            _order = { "PLAYER", "ALL", "ANY" },
+                            _order = { "PLAYER", "ALL" },
                         }, sel, "dispellableMode", StructuralDebuffGroupRefresh)
                         modeDrop:SetPoint("TOPLEFT", 24, by)
                         if modeDrop.SetWidth then modeDrop:SetWidth(bodyWidth - 30) end
-                        modeDrop.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled. Any Dispel Type: every debuff with a dispel type, even ones that cannot be dispelled."]
+                        modeDrop.tooltip = L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled."]
                         modeDrop:SetEnabled(not not sel.dispellable)
                         by = by - 54
                     end
