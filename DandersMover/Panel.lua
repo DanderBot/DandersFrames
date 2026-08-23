@@ -325,16 +325,19 @@ function Pn:Dock()
     elseif side == "above" then f:SetPoint("BOTTOM", proxy, "TOP", 0, DOCK_GAP)
     else f:SetPoint("TOPLEFT", proxy, "TOPRIGHT", DOCK_GAP, 0) end
 
-    -- Entrance: fade + slide in from the dock side (the panel emerges from the
-    -- proxy's edge onto its anchor). Target changed while the panel was
-    -- already up: a quick fade-swap, no slide. Same target: nothing -- Dock
-    -- runs on every Refresh and must not flicker the panel.
+    -- Entrance: pop from behind the proxy -- scale up from 0.92 with the scale
+    -- originating at the docked edge, sliding from the proxy's side onto the
+    -- anchor, ease-out (Fx.PopIn). Target changed while the panel was already
+    -- up: a quick fade-swap, no pop. Same target: nothing -- Dock runs on
+    -- every Refresh and must not flicker the panel.
     local wasShown = f:IsShown()
     if not wasShown then
-        local ox, oy = 0, 0
-        if side == "right" then ox = -8 elseif side == "left" then ox = 8
-        elseif side == "below" then oy = 8 elseif side == "above" then oy = -8 end
-        NS.Fx.FadeIn(f, 0.12, ox, oy)
+        local ox, oy, origin = 0, 0, "CENTER"
+        if side == "right" then ox, origin = -8, "LEFT"
+        elseif side == "left" then ox, origin = 8, "RIGHT"
+        elseif side == "below" then oy, origin = 8, "TOP"
+        elseif side == "above" then oy, origin = -8, "BOTTOM" end
+        NS.Fx.PopIn(f, 0.12, ox, oy, 0.92, origin)
     elseif self.dockedTo ~= Sess.selected then
         NS.Fx.FadeIn(f, 0.08)
     end

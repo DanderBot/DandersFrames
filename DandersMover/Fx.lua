@@ -38,6 +38,45 @@ function Fx.FadeIn(target, dur, ox, oy)
     g:Play(true)
 end
 
+-- Pop the target in from behind: alpha 0 -> 1 while the rendered position
+-- slides from (ox, oy) onto its anchor AND the target scales up from
+-- `fromScale` (default 0.92), the scale originating at `origin` -- the edge it
+-- pops out from. Same reversed-group trick as FadeIn (the group below is a
+-- fade-out that drifts and shrinks; played in REVERSE it is the entrance), so
+-- the animation state reverts on finish and the target rests at its true
+-- geometry. The forward smoothing is IN, which played in reverse is the
+-- wanted ease-out.
+function Fx.PopIn(target, dur, ox, oy, fromScale, origin)
+    if not target then return end
+    if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
+    if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
+    target:Show()
+    target:SetAlpha(1)
+    local g = target.fxPop
+    if not g then
+        g = target:CreateAnimationGroup()
+        if not g then return end                    -- headless stub: shown, done
+        g.alpha = g:CreateAnimation("Alpha")
+        g.move  = g:CreateAnimation("Translation")
+        g.scale = g:CreateAnimation("Scale")
+        target.fxPop = g
+    end
+    if g:IsPlaying() then g:Stop() end
+    dur = dur or 0.12
+    g.alpha:SetFromAlpha(1); g.alpha:SetToAlpha(0); g.alpha:SetDuration(dur)
+    g.alpha:SetSmoothing("IN")
+    g.move:SetOffset(ox or 0, oy or 0); g.move:SetDuration(dur)
+    g.move:SetSmoothing("IN")
+    local s = fromScale or 0.92
+    -- Forward the group shrinks 1 -> s at the origin edge; reversed it grows
+    -- s -> 1. Guarded for clients/stubs without the modern Scale setters.
+    if g.scale.SetScaleFrom then g.scale:SetScaleFrom(1, 1); g.scale:SetScaleTo(s, s) end
+    if g.scale.SetOrigin then g.scale:SetOrigin(origin or "CENTER", 0, 0) end
+    g.scale:SetDuration(dur)
+    g.scale:SetSmoothing("IN")
+    g:Play(true)
+end
+
 -- Fade the target out, then call onDone (which usually hides it). A fade that
 -- is cancelled -- a FadeIn takes over, or the target is hidden mid-animation --
 -- restores alpha and SKIPS onDone, so a stale "hide it" cannot fire after the
@@ -48,6 +87,7 @@ function Fx.FadeOut(target, dur, onDone)
         return
     end
     if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
+    if target.fxPop and target.fxPop:IsPlaying() then target.fxPop:Stop() end
     local g = target.fxOut
     if not g then
         g = target:CreateAnimationGroup()
@@ -77,6 +117,7 @@ end
 function Fx.Cancel(target)
     if not target then return end
     if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
+    if target.fxPop and target.fxPop:IsPlaying() then target.fxPop:Stop() end
     if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
     target:SetAlpha(1)
 end

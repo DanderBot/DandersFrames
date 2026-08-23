@@ -25,7 +25,7 @@ local function stubFrame()
     -- Refresh would bail before Highlight ran. fxIn/fxOut/tagShown are plain
     -- values read by Fx and applyLook for the same reason.
     local f = { _shown = false, _scripts = {}, dragging = false, _w = 10, _h = 10,
-                fxIn = false, fxOut = false, tagShown = false }
+                fxIn = false, fxOut = false, fxPop = false, tagShown = false }
     function f:CreateAnimationGroup() return stubAnimationGroup() end
     function f:Show() self._shown = true end
     function f:Hide() self._shown = false end
