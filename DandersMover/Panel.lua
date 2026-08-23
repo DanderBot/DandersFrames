@@ -16,6 +16,7 @@ NS.Panel = Pn
 
 local Registry, Sess, Proxy, Solver, UI, L = NS.Registry, NS.Session, NS.Proxy, NS.Solver, NS.UI, NS.L
 local CreateFrame, UIParent, IsShiftKeyDown, IsControlKeyDown = CreateFrame, UIParent, IsShiftKeyDown, IsControlKeyDown
+local GetTime, C_Timer = GetTime, C_Timer
 local format, tonumber, ipairs, pairs, floor, max, min = string.format, tonumber, ipairs, pairs, math.floor, math.max, math.min
 
 -- Spacing comes from the theme so this panel keeps the rhythm of every other
@@ -223,7 +224,39 @@ function Pn:Ensure()
     return self.frame
 end
 
-function Pn:Hide() if self.frame then self.frame:Hide() end end
+function Pn:Hide()
+    self.holdUntil = nil          -- a hidden panel has nothing to hold in place
+    if self.frame then self.frame:Hide() end
+end
+
+-- ============================================================
+-- NUDGE HOLD
+-- Re-docking on every keypress makes the panel chase the frame around, so a
+-- nudge parks it: each nudge pushes the deadline out, and one C_Timer chain
+-- re-docks once after the LAST nudge's hold expires. Session:Select clears the
+-- hold, so an explicit selection always docks immediately.
+-- ============================================================
+local HOLD = 2
+
+function Pn:HoldDock()
+    self.holdUntil = GetTime() + HOLD
+    if self.holdTimerArmed then return end
+    self.holdTimerArmed = true
+    local function tick()
+        if not self.holdUntil then self.holdTimerArmed = false return end
+        local left = self.holdUntil - GetTime()
+        if left > 0 then
+            C_Timer.After(left, tick)
+        else
+            self.holdTimerArmed = false
+            self.holdUntil = nil
+            if Sess:IsActive() and not Sess:IsSuspended() then self:Dock() end
+        end
+    end
+    C_Timer.After(HOLD, tick)
+end
+
+function Pn:ClearHold() self.holdUntil = nil end
 
 -- Rect of a frame in UIParent-centre units; nil while it has no geometry yet.
 local function rectOf(fr)
@@ -258,6 +291,11 @@ function Pn:Dock()
     local f = self.frame
     local proxy = Sess.selected and Proxy.proxies[Sess.selected]
     if not f or not proxy or not proxy:IsShown() then self:Hide() return end
+    -- Parked by a nudge: keep the panel where it is until the hold expires.
+    if self.holdUntil then
+        if GetTime() < self.holdUntil then return end
+        self.holdUntil = nil
+    end
     local side = NS.db.panelSide
     if side == "auto" then
         -- Least-covering side; when nothing fits on screen, the old edge flip.

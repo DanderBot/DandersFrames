@@ -185,6 +185,8 @@ end
 
 function Sess:Select(id)
     self.selected = id
+    -- An explicit selection always docks immediately, nudge hold or not.
+    if NS.Panel then NS.Panel:ClearHold() end
     Proxy:Highlight(id)
     panel("Refresh")
 end
@@ -224,6 +226,8 @@ local function clampFree(el, pos)
 end
 
 function Sess:Nudge(el, dx, dy)
+    -- Park the panel: a run of nudges must not re-dock it under the cursor.
+    if NS.Panel then NS.Panel:HoldDock() end
     local pos = Registry:GetPos(el)
     local before = NS.CopyPos(pos)
     if pos.anchor then
