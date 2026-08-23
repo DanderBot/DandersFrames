@@ -9,6 +9,7 @@
 - (Frames) Pinned sets, the personal targeted-spells block and the targeted list can now be moved with DandersMover too, including anchoring a pinned set to any other element. Unlocking party frames shows only party movers, unlocking raid frames only raid movers (other addons' movers can be shown from the legend or DandersMover's settings), and a pinned set you had anchored to the frames through the Anchor To dropdown stays anchored.
 
 ### Bug Fixes
+- (Test Mode) Fix preview auras being left behind on your real party and raid frames after leaving test mode or locking frames, showing icons nobody actually has until a reload.
 
 ### Changes
 - The settings-panel toolkit is now a shared library built into each Danders addon, so they all share one look and get fixes at the same time.
