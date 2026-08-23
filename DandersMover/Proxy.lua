@@ -426,12 +426,16 @@ function P:DestroyAll()
 end
 
 -- ============================================================
--- LEGEND
--- Docked top-centre for the session: what the three proxy DOTS mean plus the
--- modifier hints. Same dot art and same slab as the proxies themselves, so the
--- key and the thing it is a key to cannot drift apart. Parented to the unlock
--- frame, so suspend and lock hide it with everything else.
+-- LEGEND / ACTION STRIP
+-- Docked top-centre for the session: one compact strip with the dot key on
+-- the left and the session verbs (Save & Exit, Discard, Settings, Grid) on
+-- the right, plus the modifier hints below -- so the session can be saved or
+-- discarded with nothing selected. Same dot art and same slab as the proxies
+-- themselves, so the key and the thing it is a key to cannot drift apart.
+-- Parented to the unlock frame, so suspend and lock hide it with everything
+-- else.
 -- ============================================================
+local LEGEND_ROW = 18                    -- first row: dots left, buttons right
 local function buildLegend()
     local f = CreateFrame("Frame", "DandersMoverLegend", P:GetUnlockFrame(), "BackdropTemplate")
     f:SetFrameStrata("DIALOG")
@@ -451,7 +455,7 @@ local function buildLegend()
         swatch:SetVertexColor(color.r, color.g, color.b)
         local label = UI:CreateLabel(f, { text = text, size = 11 })
         if prev then swatch:SetPoint("LEFT", prev, "RIGHT", GAP, 0)
-        else         swatch:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -PAD - 1) end
+        else         swatch:SetPoint("LEFT", f, "TOPLEFT", PAD, -PAD - LEGEND_ROW / 2) end
         label:SetPoint("LEFT", swatch, "RIGHT", TIGHT - 2, 0)
         return label
     end
@@ -460,8 +464,32 @@ local function buildLegend()
     f.entries[2] = entry(f.entries[1], C_ANCHORED, L["Anchored"])
     f.entries[3] = entry(f.entries[2], C_ROOT,     L["Anchor root"])
 
+    -- Session verbs on the same row, right-aligned: the strip doubles as the
+    -- action bar (EUI has a separate one; ours merges into the legend so there
+    -- is a single top element). Declared widths are floors -- fitText grows
+    -- them for longer localisations, and Layout re-measures.
+    f.btnSave = UI:CreateButton(f, { text = L["Save & Exit"], width = 76, height = LEGEND_ROW, style = "primary",
+        onClick = function() NS.Session:Finish("save") end })
+    f.btnDiscard = UI:CreateButton(f, { text = L["Discard"], width = 56, height = LEGEND_ROW, tone = "danger",
+        onClick = function() NS.Session:Finish("discard") end })
+    f.btnSettings = UI:CreateButton(f, { text = L["Settings"], width = 56, height = LEGEND_ROW, style = "ghost",
+        tooltip = { title = L["Settings"], lines = { L["Snapping, grid and per-addon mover toggles."] } },
+        onClick = function() if NS.Settings then NS.Settings:Toggle() end end })
+    f.btnGrid = UI:CreateButton(f, { text = L["Grid"], width = 40, height = LEGEND_ROW, style = "ghost",
+        tooltip = { title = L["Show grid"] },
+        onClick = function()
+            NS.db.showGrid = not NS.db.showGrid
+            NS.Grid:Refresh()
+            f.btnGrid:SetActive(NS.db.showGrid)
+            if NS.Settings then NS.Settings:Refresh() end
+        end })
+    f.btnGrid:SetPoint("RIGHT", f, "TOPRIGHT", -PAD, -PAD - LEGEND_ROW / 2)
+    f.btnSettings:SetPoint("RIGHT", f.btnGrid, "LEFT", -TIGHT, 0)
+    f.btnDiscard:SetPoint("RIGHT", f.btnSettings, "LEFT", -TIGHT, 0)
+    f.btnSave:SetPoint("RIGHT", f.btnDiscard, "LEFT", -TIGHT, 0)
+
     f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Right-click: lock"], size = 10, color = C_MUTED })
-    f.hint:SetPoint("TOP", f, "TOP", 0, -PAD - 12 - TIGHT)
+    f.hint:SetPoint("TOP", f, "TOP", 0, -PAD - LEGEND_ROW - TIGHT)
 
     -- Third row, consumer-initiated sessions only: other addons' enabled+relevant
     -- elements are anchor targets already; this also gives them proxies. Same
@@ -471,7 +499,7 @@ local function buildLegend()
         get = function() return NS.db.showOtherAddons end,
         set = function(v) NS.db.showOtherAddons = v and true or false; NS.Session:RebuildProxies() end,
     })
-    f.other:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -PAD - 12 - TIGHT - 12 - TIGHT)
+    f.other:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -PAD - LEGEND_ROW - TIGHT - 12 - TIGHT)
 
     -- Width from the measured text. Fonts resolve a frame late, so this runs
     -- again on the next frame (same converge-next-frame shape as the kit's
@@ -481,7 +509,14 @@ local function buildLegend()
         for i, label in ipairs(self.entries) do
             row = row + DOT + TIGHT - 2 + (label:GetStringWidth() or 0) + (i < #self.entries and GAP or 0)
         end
-        row = row + PAD
+        -- Dots left, buttons right, a double gap between the halves so the
+        -- strip reads as key | verbs and not one run.
+        row = row + GAP * 2
+        for _, b in ipairs({ self.btnSave, self.btnDiscard, self.btnSettings, self.btnGrid }) do
+            row = row + (b:GetWidth() or 0) + TIGHT
+        end
+        row = row - TIGHT + PAD
+        self.btnGrid:SetActive(NS.db.showGrid and true or false)
         local hintW = (self.hint:GetStringWidth() or 0) + PAD * 2
         -- The checkbox row only exists for a consumer-initiated session (a filter
         -- with an addon); /mover has no "other" addons.
@@ -489,7 +524,7 @@ local function buildLegend()
         local showOther = (filter and filter.addon) and true or false
         self.other:SetShown(showOther)
         self.other:Refresh()
-        local h = PAD + 12 + TIGHT + 12 + PAD
+        local h = PAD + LEGEND_ROW + TIGHT + 12 + PAD
         if showOther then
             self.other:SetWidth(max(row, hintW) - PAD * 2)
             h = h + TIGHT + UI.RowHeight.checkbox - GAP

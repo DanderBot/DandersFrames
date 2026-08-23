@@ -99,6 +99,11 @@ NS.UI = {
         return f
     end,
     CreateCheckbox = function() return stubFrame() end,
+    CreateButton = function(_, _, opts)
+        local b = stubFrame()
+        if opts and opts.width then b._w = opts.width end
+        return b
+    end,
 }
 NS.Grid = { HidePreview = function() end, HideMeasure = function() end }
 load_addon_file("Proxy.lua")

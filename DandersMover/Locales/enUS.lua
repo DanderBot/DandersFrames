@@ -34,6 +34,7 @@ L["Detach %s"] = true
 L["Discard"] = true
 L["Free"] = true
 L["Editor"] = true
+L["Grid"] = true
 L["Grid Size"] = true
 L["hidden"] = true
 L["Hold Shift for 10 units, Ctrl for 100."] = true
