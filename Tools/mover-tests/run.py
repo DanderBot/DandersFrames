@@ -29,6 +29,10 @@ for name in ("Locales/enUS.lua", "Undo.lua", "Solver.lua", "Registry.lua"):
     if p.exists():
         run(p, "DandersMover", ns)
 
+# Tests that need a UI-facing module (Proxy.lua) load it themselves, after
+# stubbing the frame API it touches: load_addon_file("Proxy.lua").
+lua.globals().load_addon_file = lambda name: run(ADDON / name, "DandersMover", ns)
+
 flt = sys.argv[1] if len(sys.argv) > 1 else ""
 for test in sorted(HERE.glob("test_*.lua")):
     if flt and flt not in test.name:
