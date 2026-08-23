@@ -16,6 +16,7 @@ local InCombatLockdown = InCombatLockdown
 local IsInRaid = IsInRaid
 local GetRaidRosterInfo = GetRaidRosterInfo
 local UnitExists = UnitExists
+local L = DF.L
 
 -- PERFORMANCE FIX: Reusable tables for layout calculations (avoid GC during roster updates)
 local reusableGroupPlayerCounts = {}
@@ -857,8 +858,15 @@ function DF:UnlockRaidFrames(legacy)
         return
     end
 
-    if Mover and not legacy and Mover:IsEnabled("DandersFrames", "raid") then
-        Mover:Unlock("DandersFrames")
+    -- See DF:UnlockFrames: disabled in the lib does not fall back to the legacy overlay,
+    -- it reports and stops. Legacy is reachable only via the explicit `legacy` argument.
+    if Mover and not legacy then
+        if Mover:IsEnabled("DandersFrames", "raid") then
+            if DF.MoverBridge then DF.MoverBridge:RequestScope("raid") end
+            Mover:Unlock("DandersFrames")
+        else
+            DF:Say(string.format(L["%s are disabled in DandersMover settings (/mover config)."], L["Raid Frames"]))
+        end
         return
     end
 

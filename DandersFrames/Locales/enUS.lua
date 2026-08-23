@@ -453,6 +453,7 @@ L["%d-%ds"] = true
 L["%d%% and above"] = true
 L["%ds and above"] = true
 L["%s (Copy)"] = true
+L["%s are disabled in DandersMover settings (/mover config)."] = true
 L["%s or %s"] = true
 L["%s settings reset to defaults."] = true
 L["(offline)"] = true

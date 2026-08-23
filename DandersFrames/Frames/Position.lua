@@ -2563,11 +2563,17 @@ function DF:UnlockFrames(legacy)
         return
     end
 
-    -- Hand off to DandersMover. IsEnabled is checked too: with DF switched off in the
-    -- lib's settings, Mover:Unlock would build no proxies for us and the user would have
-    -- no way to move the frames at all -- fall back to the old overlay instead.
-    if Mover and not legacy and Mover:IsEnabled("DandersFrames", "party") then
-        Mover:Unlock("DandersFrames")
+    -- Hand off to DandersMover. Disabled in the lib's settings is NOT a reason to fall
+    -- back to the legacy overlay: two movers for one frame is how a user ends up dragging
+    -- the overlay while the lib holds the record. Say so and stop. The legacy overlay is
+    -- reachable only through the explicit `legacy` argument.
+    if Mover and not legacy then
+        if Mover:IsEnabled("DandersFrames", "party") then
+            if DF.MoverBridge then DF.MoverBridge:RequestScope("party") end
+            Mover:Unlock("DandersFrames")
+        else
+            DF:Say(format(L["%s are disabled in DandersMover settings (/mover config)."], L["Party Frames"]))
+        end
         return
     end
 

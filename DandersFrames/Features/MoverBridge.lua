@@ -19,11 +19,21 @@ local L = DF.L
 local UIParent, hooksecurefunc = UIParent, hooksecurefunc
 local pcall, geterrorhandler, ipairs = pcall, geterrorhandler, ipairs
 local max, min = math.max, math.min
+local IsInRaid = IsInRaid
 
 local ADDON_KEY = "DandersFrames"
 
 local Bridge = { claimed = {} }
 DF.MoverBridge = Bridge
+
+-- Which scope the pending unlock is editing. DF:UnlockFrames / DF:UnlockRaidFrames set
+-- this immediately before Mover:Unlock; the Unlocked callback reads it once and clears it.
+-- Without it a party unlock also threw the raid test frames on screen (and vice versa).
+Bridge.requestedScope = nil
+
+function Bridge:RequestScope(scope)
+    self.requestedScope = (scope == "raid") and "raid" or "party"
+end
 
 function Bridge:IsAvailable()
     return Mover:IsEnabled(ADDON_KEY) and true or false
@@ -171,7 +181,8 @@ end
 -- ============================================================
 -- SESSION -> TEST MODE
 -- ============================================================
--- One lib session shows BOTH proxies, so it claims both scopes. Owner claims are
+-- One lib session shows both proxies but only ever CLAIMS the scope being edited --
+-- claiming both put the other scope's test frames on screen unasked. Owner claims are
 -- idempotent (DF._testOwners[scope][owner], TestMode/Shim.lua:117-121) and the claim uses
 -- the SAME owner string the legacy path uses ("unlock", Position.lua:2504/2580,
 -- Init.lua:992/1084), so a double claim cannot double-count.
@@ -216,8 +227,13 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
     -- without going through DF:UnlockFrames, so load it here too or the proxies sit over
     -- an empty screen.
     if DF.EnsureOptionsLoaded then DF:EnsureOptionsLoaded() end
-    claimScope("party")
-    claimScope("raid")
+    -- ONE scope per session. `/mover` opens a session without going through either
+    -- Unlock*Frames, so with no request outstanding pick the one the player is in.
+    local scope = Bridge.requestedScope or (IsInRaid() and "raid" or "party")
+    Bridge.requestedScope = nil
+    if Mover:IsEnabled(ADDON_KEY, scope) then
+        claimScope(scope)
+    end
     syncLockButtons()
 end)
 
