@@ -5962,6 +5962,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF:InitializeFrames()
         end
 
+        -- Hand the party and raid containers to DandersMover, if it is installed.
+        -- DF.MoverBridge only exists when LibStub("DandersMover-1.0", true) resolved, so
+        -- this is the whole optional-dependency gate. After InitializeFrames because the
+        -- hooks it installs target functions that must already have been called at least
+        -- once for the containers to exist.
+        if DF.MoverBridge then
+            DF.MoverBridge:Init()
+        end
+
     elseif event == "PLAYER_LOGIN" then
         -- (Removed) a disabled third-party compatibility popup that ran here. It had been
         -- gated off behind a literal `false` once the issue it existed for was resolved, and
