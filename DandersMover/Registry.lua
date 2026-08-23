@@ -31,6 +31,9 @@ local function validate(def, kind)
     if kind == "element" then
         if type(def.getPos) ~= "function" then error("DandersMover: element needs getPos", 3) end
         if type(def.onChanged) ~= "function" then error("DandersMover: element needs onChanged", 3) end
+        if def.openSettings ~= nil and type(def.openSettings) ~= "function" then
+            error("DandersMover: openSettings must be a function", 3)
+        end
     end
 end
 
@@ -63,6 +66,9 @@ local function insertElement(self, addon, key, def)
         secure = def.secure and true or false, getSize = def.getSize,
         getRect = def.getRect, anchorable = def.anchorable ~= false, group = def.group,
         isRelevant = def.isRelevant,
+        -- Consumer-side settings entry: the panel offers a Configure button
+        -- that calls this (e.g. DF opens its options window on the page).
+        openSettings = def.openSettings,
         -- The record's `point` is derived by the consumer (e.g. a growth corner), not
         -- chosen: the panel hides its 9-point picker and SetAnchorPoint is a no-op.
         pointLocked = def.pointLocked and true or false,

@@ -16,6 +16,7 @@ NS.Panel = Pn
 
 local Registry, Sess, Proxy, Solver, UI, L = NS.Registry, NS.Session, NS.Proxy, NS.Solver, NS.UI, NS.L
 local CreateFrame, UIParent, IsShiftKeyDown, IsControlKeyDown = CreateFrame, UIParent, IsShiftKeyDown, IsControlKeyDown
+local xpcall, geterrorhandler = xpcall, geterrorhandler
 local GetTime, C_Timer = GetTime, C_Timer
 local format, tonumber, ipairs, pairs, floor, max, min = string.format, tonumber, ipairs, pairs, math.floor, math.max, math.min
 
@@ -82,6 +83,21 @@ local function build()
     })
     f.btnSettings:SetPoint("TOPRIGHT", -PAD, hy)
 
+    -- Consumer settings entry: only shown when the selected element's def has
+    -- openSettings (Refresh). Distinct from the Settings button beside it,
+    -- which opens the LIB's own settings window.
+    f.btnConfigure = UI:CreateButton(f, {
+        text = L["Configure"], width = 62, height = 18, style = "ghost",
+        tooltip = { title = L["Configure"], lines = { L["Open this element's own settings."] } },
+        onClick = function()
+            local el = selectedElement()
+            if el and el.openSettings then xpcall(el.openSettings, geterrorhandler()) end
+        end,
+    })
+    f.btnConfigure:SetPoint("RIGHT", f.btnSettings, "LEFT", -TIGHT, 0)
+    f.btnConfigure:Hide()
+
+    f.headerY = hy
     f.title = UI:CreateLabel(f, { size = 12, color = UI.Colors.text })
     f.title:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ICON + TIGHT - 2, hy)
     f.title:SetPoint("TOPRIGHT", f.btnSettings, "TOPLEFT", -TIGHT, 0)
@@ -353,6 +369,13 @@ function Pn:Refresh()
     local pos = Registry:GetPos(el)
 
     f.title:SetText(el.title)
+    -- Configure only exists for elements whose def offers openSettings; the
+    -- title gives up the room while the extra button is up.
+    local canConfigure = el.openSettings ~= nil
+    f.btnConfigure:SetShown(canConfigure)
+    f.title:ClearAllPoints()
+    f.title:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ICON + TIGHT - 2, f.headerY)
+    f.title:SetPoint("TOPRIGHT", canConfigure and f.btnConfigure or f.btnSettings, "TOPLEFT", -TIGHT, 0)
     local addon = Registry:GetAddon(el.addon)
     local icon = addon and addon.icon or (UI.MEDIA .. "DF_Icon")
     if f.icon:SetTexture(icon) == false then f.icon:SetTexture(UI.MEDIA .. "DF_Icon") end
