@@ -37,8 +37,19 @@ flt = sys.argv[1] if len(sys.argv) > 1 else ""
 for test in sorted(HERE.glob("test_*.lua")):
     if flt and flt not in test.name:
         continue
-    print(f"== {test.name}")
+    print(f"== {test.name}", flush=True)
     run(test, ns)
 T = lua.globals().T
 print(f"\n{T['pass']} passed, {T['fail']} failed")
-sys.exit(1 if T["fail"] else 0)
+
+# DandersFrames-side headless tests (real helpers extracted from the addon files)
+# live beside these as test_*.py and run as their own processes.
+import subprocess
+py_failed = 0
+for test in sorted(HERE.glob("test_*.py")):
+    if flt and flt not in test.name:
+        continue
+    print(f"== {test.name}", flush=True)
+    if subprocess.run([sys.executable, str(test)]).returncode != 0:
+        py_failed += 1
+sys.exit(1 if (T["fail"] or py_failed) else 0)

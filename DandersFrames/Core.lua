@@ -3970,8 +3970,13 @@ function DF:MigrateContainerPositionRecords()
         }
     end
 
-    local uiW = UIParent and UIParent:GetWidth() or 0
-    local uiH = UIParent and UIParent:GetHeight() or 0
+    -- ☠ UIParent's size is NOT trustworthy at ADDON_LOADED -- what it reads there is
+    -- not the size the UI runs at, and the pinned corner fold baked it into every
+    -- corner-referenced set (a TOPRIGHT set landed ~1280 short and was clamped into
+    -- the bottom-left corner). Hand the pinned walk a size only once PLAYER_ENTERING_WORLD
+    -- has passed (DF.uiGeometryTrusted); before that it defers the corner term on the
+    -- record (pendingRef) and this function is simply run again from there.
+    local uiW, uiH = DF:GetTrustedUIParentSize()
 
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
         -- Per PROFILE, not per run: an inactive profile is reached by the login
@@ -4022,6 +4027,17 @@ function DF:MigrateContainerPositionRecords()
             DF.PinnedFrames.MigrateProfileRecords(profile, uiW, uiH)
         end
     end
+end
+
+-- UIParent's size in its own units, or nil until the UI has been through its first
+-- frame after PLAYER_ENTERING_WORLD (every login handler, including any addon that
+-- sets a pixel-perfect scale, has run by then). Read by the pinned record migration;
+-- nil makes it defer the UIParent-corner fold rather than bake in a wrong size.
+function DF:GetTrustedUIParentSize()
+    if not DF.uiGeometryTrusted or not UIParent then return nil end
+    local w, h = UIParent:GetWidth(), UIParent:GetHeight()
+    if type(w) ~= "number" or type(h) ~= "number" or w <= 0 or h <= 0 then return nil end
+    return w, h
 end
 
 function DF:MigrateOORTextAlpha()
@@ -7825,6 +7841,26 @@ DF._MainEventDispatcher = function(self, event, arg1)
         -- left it nil until that fight ended — and every "Hide in Combat" icon reads
         -- it, so they would all sit visible for the rest of the pull.
         DF.playerInCombat = UnitAffectingCombat("player") and true or false
+
+        -- ☠ FINISH THE PINNED CORNER FOLD HERE, NOT AT ADDON_LOADED. UIParent's size
+        -- is only trustworthy once the UI has rendered a frame after this event (see
+        -- DF:GetTrustedUIParentSize). Pure data: the containers already sit on the
+        -- right spot through pendingRef, so nothing is re-anchored and combat is
+        -- irrelevant. Retries on the next tick while UIParent still reads unsized.
+        if not DF.uiGeometryTrusted then
+            local function FoldPinnedRecords()
+                DF.uiGeometryTrusted = true
+                local w, h = DF:GetTrustedUIParentSize()
+                if not w then
+                    DF.uiGeometryTrusted = nil
+                    C_Timer.After(0.1, FoldPinnedRecords)
+                    return
+                end
+                DF:Debug("LAYOUT", "Pinned record fold: UIParent %.1fx%.1f", w, h)
+                if DF.MigrateContainerPositionRecords then DF:MigrateContainerPositionRecords() end
+            end
+            C_Timer.After(0, FoldPinnedRecords)
+        end
 
         -- ☠ ARENA PET ENTRY POINT. See the RegisterEvent comment: ProcessRosterUpdate
         -- returns in its arena branch long before the pet dispatch, so without this
