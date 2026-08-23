@@ -42,6 +42,7 @@ local function stubFrame()
     -- Vertex colour is how the role now reads (the dot), so it is recorded.
     function f:SetVertexColor(r, g, b, a) self._vertex = { r, g, b, a } end
     function f:CreateTexture() return stubFrame() end
+    function f:CreateLine() return stubFrame() end
     function f:SetScript(name, fn) self._scripts[name] = fn end
     function f:GetScript(name) return self._scripts[name] end
     return setmetatable(f, { __index = function() return function() end end })

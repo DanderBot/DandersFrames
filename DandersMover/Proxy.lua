@@ -6,7 +6,7 @@ local addonName, NS = ...
 -- The proxy is what the user drags; the real frame only ever moves through
 -- the consumer's onChanged. Also owns the snap-zone visual pool.
 -- ============================================================
-local P = { proxies = {}, zones = {}, zoneCount = 0, dragZones = {} }
+local P = { proxies = {}, zones = {}, zoneCount = 0, dragZones = {}, tethers = {}, tetherCount = 0 }
 NS.Proxy = P
 
 local Registry, Solver, UI, L = NS.Registry, NS.Solver, NS.UI, NS.L
@@ -126,6 +126,9 @@ local function onDragStart(self)
         s.coords:SetText(format("%d, %d", fx, fy))
         P:UpdateZones(fx, fy, zone)
         P:UpdateLegendDodge(fx, fy, s:GetWidth() or 0, s:GetHeight() or 0)
+        -- After the SetPoint above, so the tether's slab endpoint has no
+        -- one-frame lag behind the cursor.
+        P:UpdateTethers()
         s.lastX, s.lastY, s.lastZone = fx, fy, zone
     end)
 end
@@ -437,6 +440,7 @@ function P:Highlight(selectedId)
     for id, b in pairs(self.proxies) do
         applyLook(b, id == selectedId, b.hovered)
     end
+    self:UpdateTethers()
 end
 
 function P:Remove(id)
@@ -452,6 +456,7 @@ function P:DestroyAll()
     for id in pairs(self.proxies) do self:Remove(id) end
     if self.unlockFrame then self.unlockFrame:Hide() end
     self:HideZones()
+    self:HideTethers()
     self:HideLegend()
 end
 
@@ -471,6 +476,161 @@ function P:DismissAll()
             self:DestroyAll()
         end
     end)
+end
+
+-- ============================================================
+-- ANCHOR TETHER
+-- A thin line from an anchored slab's centre to the nearest point on its
+-- anchor target's rect (the centre when the slab sits inside it). Shown while
+-- the slab is selected, hovered or being dragged; hovering also lights the
+-- whole chain -- the hovered slab's parent link AND every child's link
+-- (alias-aware via Registry:Children). Subtle lavender at rest; the dragged
+-- slab's tether lerps to the danger red and thins as it strains
+-- (Session.tether), and flashes once when it snaps.
+--
+-- Drawn with Line objects (frame:CreateLine), not a rotated texture:
+-- TextureBase:SetRotation rotates the texture inside its axis-aligned quad,
+-- so a long thin quad cannot draw a diagonal.
+-- ============================================================
+local C_TETHER = UI.Colors.accent
+local C_TETHER_STRAIN = UI.Colors.danger
+local TETHER_W, TETHER_STRAIN_W = 2, 1
+local TETHER_ALPHA = 0.7
+
+-- Pooled line on the unlock frame (under the slabs, which are child frames).
+-- nil in a headless stub without CreateLine support.
+local function tetherLine(pool, i)
+    local t = pool[i]
+    if t == nil then
+        local f = P:GetUnlockFrame()
+        t = f.CreateLine and f:CreateLine(nil, "ARTWORK") or false
+        pool[i] = t
+    end
+    return t or nil
+end
+
+-- Proxy centre in UIParent-centre units.
+local function proxyCenter(b)
+    local cx, cy = b:GetCenter()
+    if not cx then return nil end
+    local ux, uy = UIParent:GetCenter()
+    return cx - ux, cy - uy
+end
+
+-- Nearest point on a centre-based rect from (cx, cy); the rect's centre when
+-- the point lies inside it.
+local function nearestOnRect(rect, cx, cy)
+    local l, r = rect.x - rect.w / 2, rect.x + rect.w / 2
+    local b, t = rect.y - rect.h / 2, rect.y + rect.h / 2
+    local px = cx < l and l or (cx > r and r or cx)
+    local py = cy < b and b or (cy > t and t or cy)
+    if px == cx and py == cy then return rect.x, rect.y end
+    return px, py
+end
+
+local function lerp(a, b, f) return a + (b - a) * f end
+
+-- Lay one tether for element el / slab b. Returns the new pool watermark.
+-- drag is Session.tether: only the slab actually being dragged reads it (the
+-- working record's anchor is nil'd during a drag, so the target comes from
+-- there), everyone else reads their own record.
+local function drawTether(n, el, b, drag)
+    local targetId, strain
+    if b.dragging then
+        if not drag or drag.snapped then return n end   -- snapped: tether gone
+        targetId, strain = drag.target, drag.strain or 0
+    else
+        local a = Registry:GetPos(el).anchor
+        if not a then return n end
+        targetId, strain = a.target, 0
+    end
+    local target = Registry:GetTarget(targetId)
+    local rect = target and Registry:GetRect(target)
+    if not rect then return n end
+    local cx, cy = proxyCenter(b)
+    if not cx then return n end
+    local tx, ty = nearestOnRect(rect, cx, cy)
+    local line = tetherLine(P.tethers, n + 1)
+    if not line then return n end
+    line:SetStartPoint("CENTER", UIParent, cx, cy)
+    line:SetEndPoint("CENTER", UIParent, tx, ty)
+    line:SetThickness(strain > 0 and TETHER_STRAIN_W or TETHER_W)
+    line:SetColorTexture(lerp(C_TETHER.r, C_TETHER_STRAIN.r, strain),
+                         lerp(C_TETHER.g, C_TETHER_STRAIN.g, strain),
+                         lerp(C_TETHER.b, C_TETHER_STRAIN.b, strain),
+                         lerp(TETHER_ALPHA, 1, strain))
+    line:Show()
+    return n + 1
+end
+
+-- Which slabs show their parent tether: the selected one, any hovered one
+-- (plus all of the hovered one's children -- the chain highlight), and the
+-- one being dragged. Called from Highlight, so every selection/hover change
+-- and every drag frame comes through here.
+function P:UpdateTethers()
+    local sess = NS.Session
+    local drag = sess and sess.tether
+    local want = {}
+    local selected = sess and sess.selected
+    if selected and self.proxies[selected] then want[selected] = true end
+    for id, b in pairs(self.proxies) do
+        if b:IsShown() then
+            if b.hovered then
+                want[id] = true
+                for _, child in ipairs(Registry:Children(id)) do
+                    if self.proxies[child.id] then want[child.id] = true end
+                end
+            end
+            if b.dragging then want[id] = true end
+        end
+    end
+    local n = 0
+    for id in pairs(want) do
+        local el = Registry:Get(id)
+        local b = self.proxies[id]
+        if el and b and b:IsShown() then n = drawTether(n, el, b, drag) end
+    end
+    for i = n + 1, #self.tethers do
+        local t = self.tethers[i]
+        if t then t:Hide() end
+    end
+    self.tetherCount = n
+end
+
+function P:HideTethers()
+    for i = 1, #self.tethers do
+        local t = self.tethers[i]
+        if t then t:Hide() end
+    end
+    self.tetherCount = 0
+    if self.tetherFlash then self.tetherFlash:Hide() end
+end
+
+-- The snap moment: paint a dedicated line (the pool relays every frame) full
+-- danger red along the breaking tether and let it fade out. UpdateTethers
+-- stops drawing the live one from now on (Session.tether.snapped).
+function P:SnapTether(el)
+    local b = self.proxies[el.id]
+    local drag = NS.Session and NS.Session.tether
+    if not b or not drag then return end
+    local target = Registry:GetTarget(drag.target)
+    local rect = target and Registry:GetRect(target)
+    local cx, cy = proxyCenter(b)
+    if not rect or not cx then return end
+    if self.tetherFlash == nil then
+        local f = self:GetUnlockFrame()
+        self.tetherFlash = f.CreateLine and f:CreateLine(nil, "ARTWORK") or false
+    end
+    local line = self.tetherFlash
+    if not line then return end
+    local tx, ty = nearestOnRect(rect, cx, cy)
+    NS.Fx.Cancel(line)
+    line:SetStartPoint("CENTER", UIParent, cx, cy)
+    line:SetEndPoint("CENTER", UIParent, tx, ty)
+    line:SetThickness(TETHER_W)
+    line:SetColorTexture(C_TETHER_STRAIN.r, C_TETHER_STRAIN.g, C_TETHER_STRAIN.b, 1)
+    line:Show()
+    NS.Fx.FadeOut(line, 0.25, function() line:Hide() end)
 end
 
 -- ============================================================
@@ -681,7 +841,7 @@ function P:ShowTooltip(b)
     GameTooltip:AddLine(" ")
     GameTooltip:AddLine(L["Drag to move. Shift locks to horizontal, Ctrl to vertical."], 0.8, 0.8, 0.8)
     GameTooltip:AddLine(L["Click to select, arrow keys to nudge (Shift ×10, Ctrl ×100)."], 0.8, 0.8, 0.8)
-    if a then GameTooltip:AddLine(L["Drop into a zone to re-anchor; Detach frees it."], 0.8, 0.8, 0.8) end
+    if a then GameTooltip:AddLine(L["Drop into a zone to re-anchor; pull far away or Detach to free it."], 0.8, 0.8, 0.8) end
     GameTooltip:AddLine(L["Press Esc or use the top strip to lock."], 0.8, 0.8, 0.8)
     GameTooltip:Show()
 end

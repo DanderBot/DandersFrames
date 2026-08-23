@@ -268,3 +268,26 @@ do
     -- panel taller than the screen: no candidate fits -> nil (caller falls back)
     check(S.BestDockSide(proxy, 200, 2000, 10, {}, 1920, 1080) == nil, "nothing fits -> nil")
 end
+
+-- anchor tether: held within HOLD x snapDistance, strained to SNAP x, snapped past
+do
+    eq(S.TETHER_HOLD, 3, "hold multiple")
+    eq(S.TETHER_SNAP, 4, "snap multiple")
+    -- snapDistance 25: held to 75, strained to 100, snapped past
+    eq(S.TetherState(0, 25), "held", "at home: held")
+    eq(S.TetherState(75, 25), "held", "exactly hold threshold: held")
+    eq(S.TetherState(75.1, 25), "strained", "just past hold: strained")
+    eq(S.TetherState(100, 25), "strained", "exactly snap threshold: strained")
+    eq(S.TetherState(100.1, 25), "snapped", "past snap: snapped")
+    eq(S.TetherState(10000, 25), "snapped", "far out: snapped")
+    -- snapDistance 0 turns frame-snap reach off; the tether is unbreakable there
+    eq(S.TetherState(500, 0), "held", "snapDistance 0: never snaps")
+    eq(S.TetherState(500, nil), "held", "nil snapDistance: never snaps")
+    -- strain factor: 0 up to the hold threshold, 1 at the snap point
+    eq(S.TetherStrain(0, 25), 0, "no strain at home")
+    eq(S.TetherStrain(75, 25), 0, "no strain at hold threshold")
+    eq(S.TetherStrain(87.5, 25), 0.5, "half strain midway")
+    eq(S.TetherStrain(100, 25), 1, "full strain at snap threshold")
+    eq(S.TetherStrain(200, 25), 1, "clamped past snap")
+    eq(S.TetherStrain(500, 0), 0, "snapDistance 0: no strain")
+end
