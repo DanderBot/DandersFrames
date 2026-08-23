@@ -2583,8 +2583,14 @@ function DF:UnlockFrames(legacy)
     -- reachable only through the explicit `legacy` argument.
     if Mover and not legacy then
         if Mover:IsEnabled("DandersFrames", "party") then
-            if DF.MoverBridge then DF.MoverBridge:RequestScope("party") end
-            Mover:Unlock("DandersFrames")
+            -- Only the party scope's keys get proxies (no raid proxy, dimmed or
+            -- otherwise), and they are forced relevant so this works inside a raid.
+            local filter = "DandersFrames"
+            if DF.MoverBridge then
+                DF.MoverBridge:RequestScope("party")
+                filter = DF.MoverBridge:SessionFilter("party")
+            end
+            Mover:Unlock(filter)
         else
             DF:Say(format(L["%s are disabled in DandersMover settings (/mover config)."], L["Party Frames"]))
         end

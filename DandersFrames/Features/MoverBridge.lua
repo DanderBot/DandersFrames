@@ -40,6 +40,47 @@ function Bridge:IsAvailable()
 end
 
 -- ============================================================
+-- RELEVANCE
+-- ============================================================
+-- Is a scope's frames "the thing on screen" right now? Group type, overridden by the
+-- scope DF asked the lib to open (RequestScope, cleared by Unlocked) and then by the
+-- scope this session claimed (claimScope, below) -- which is what carries the answer
+-- for the rest of the session. Test mode covers the preview case.
+function Bridge:IsScopeRelevant(scope)
+    scope = (scope == "raid") and "raid" or "party"
+    if self.requestedScope == scope then return true end
+    if self.claimed[scope] then return true end
+    if DF.IsTestModeActive and DF:IsTestModeActive(scope) then return true end
+    return (scope == "raid") == (IsInRaid() and true or false)
+end
+
+-- The Unlock filter for DF:UnlockFrames ("party") / DF:UnlockRaidFrames ("raid"): only
+-- these keys get proxies, and they are forced relevant so raid frames can be edited
+-- solo. The list is what the LEGACY unlock showed handles for: the container plus
+-- every EXISTING, ENABLED pinned set of that mode (Position.lua / Init.lua
+-- SetMoversShown(true) -> mover:SetShown(set.enabled ...)), and for party the two
+-- targeted displays when their feature is on. A disabled set or feature has nothing
+-- on screen to frame, so it is not listed.
+function Bridge:SessionFilter(scope)
+    scope = (scope == "raid") and "raid" or "party"
+    local keys = { scope }
+    local pf = DF.PinnedFrames
+    if pf and pf.GetSetForMode then
+        for i = 1, (pf.MAX_SETS or 0) do
+            local set = pf:GetSetForMode(i, scope == "raid")
+            if set and set.enabled then keys[#keys + 1] = scope .. ".pinned" .. i end
+        end
+    end
+    if scope == "party" then
+        local db = DF.GetPersonalTargetedDB and DF:GetPersonalTargetedDB() or DF:GetDB()
+        if db and db.personalTargetedSpellEnabled then keys[#keys + 1] = "personalTargeted" end
+        local pdb = DF:GetDB("party")
+        if pdb and pdb.targetedListEnabled then keys[#keys + 1] = "targetedList" end
+    end
+    return { addon = ADDON_KEY, keys = keys }
+end
+
+-- ============================================================
 -- PARTY VISIBLE RECT
 -- ============================================================
 -- DF.container is created 500x200 (Frames/Init.lua:76) and then RESIZED from four
@@ -174,6 +215,7 @@ local function registerElements()
         end,
         getRect   = partyRect,
         group     = "Frames",
+        isRelevant = function() return Bridge:IsScopeRelevant("party") end,
     })
 
     Mover:Register(ADDON_KEY, "raid", {
@@ -188,6 +230,7 @@ local function registerElements()
         secure    = true,
         getRect   = raidRect,
         group     = "Frames",
+        isRelevant = function() return Bridge:IsScopeRelevant("raid") end,
     })
 
     -- "Whichever group frames are up right now." Saves every other addon from having to
