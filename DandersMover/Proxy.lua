@@ -11,7 +11,7 @@ NS.Proxy = P
 
 local Registry, Solver, UI, L = NS.Registry, NS.Solver, NS.UI, NS.L
 local CreateFrame, UIParent, GetCursorPosition, GameTooltip, C_Timer, GetTime = CreateFrame, UIParent, GetCursorPosition, GameTooltip, C_Timer, GetTime
-local IsShiftKeyDown, IsControlKeyDown = IsShiftKeyDown, IsControlKeyDown
+local IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown = IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown
 local pairs, ipairs, format, sqrt, max, abs, tsort = pairs, ipairs, string.format, math.sqrt, math.max, math.abs, table.sort
 
 local MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
@@ -79,9 +79,30 @@ function P:GetUnlockFrame()
     f:SetScript("OnMouseDown", function(_, button)
         if button == "LeftButton" then P:ClickSelect() end
     end)
+    -- Alt-peek. The event is only registered while a session is up (Build /
+    -- DestroyAll), so this cannot fire outside one.
+    f:SetScript("OnEvent", function(_, _, key)
+        if key == "LALT" or key == "RALT" then P:SetPeek(IsAltKeyDown()) end
+    end)
     f:Hide()
     self.unlockFrame = f
     return f
+end
+
+-- Hold Alt to peek at the UI underneath: everything the session put on screen
+-- (slabs, strip and panel are all children of the unlock frame) drops to
+-- PEEK_ALPHA while Alt is held; release restores. Ignored while a drag is in
+-- flight -- the drag is the one thing that must stay fully visible.
+local PEEK_ALPHA = 0.1
+
+function P:SetPeek(on)
+    on = on and true or false
+    if on then
+        for _, b in pairs(self.proxies) do if b.dragging then return end end
+    end
+    if self.peeking == on then return end
+    self.peeking = on
+    NS.Fx.FadeTo(self:GetUnlockFrame(), on and PEEK_ALPHA or 1, 0.1)
 end
 
 function P:CursorPos()
@@ -428,6 +449,8 @@ function P:Build(filter, animate)
     self.dismissToken = (self.dismissToken or 0) + 1
     NS.Fx.Cancel(f)
     f:EnableMouse(true)
+    self.peeking = false          -- Cancel above restored alpha 1
+    if f.RegisterEvent then f:RegisterEvent("MODIFIER_STATE_CHANGED") end
     local n = 0
     for _, el in ipairs(Registry:SortedElements()) do
         if Registry:WantsProxy(filter, el) then
@@ -509,7 +532,12 @@ end
 
 function P:DestroyAll()
     for id in pairs(self.proxies) do self:Remove(id) end
-    if self.unlockFrame then self.unlockFrame:Hide() end
+    if self.unlockFrame then
+        if self.unlockFrame.UnregisterEvent then self.unlockFrame:UnregisterEvent("MODIFIER_STATE_CHANGED") end
+        self.peeking = false
+        self.unlockFrame:SetAlpha(1)
+        self.unlockFrame:Hide()
+    end
     self:HideZones()
     self:HideTethers()
     self:HideLegend()
@@ -526,6 +554,7 @@ function P:DismissAll()
     local token = (self.dismissToken or 0) + 1
     self.dismissToken = token
     f:EnableMouse(false)
+    self.peeking = false          -- the fade below plays from full alpha
     NS.Fx.FadeOut(f, FADE_OUT, function()
         if self.dismissToken == token and not (NS.Session and NS.Session:IsActive()) then
             self:DestroyAll()

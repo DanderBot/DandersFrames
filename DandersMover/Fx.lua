@@ -112,6 +112,30 @@ function Fx.FadeOut(target, dur, onDone)
     g:Play()
 end
 
+-- Fade the target to a RESTING alpha and leave it there (unlike FadeIn/
+-- FadeOut, which always rest at 1 / hidden). The rest value is set at once --
+-- the animation only decorates the transition, so a stub without animation
+-- groups still lands on the right alpha. Callers pair it with a later
+-- FadeTo(target, 1) to restore; used by the mover's Alt-peek.
+function Fx.FadeTo(target, alpha, dur)
+    if not target then return end
+    if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
+    if target.fxPop and target.fxPop:IsPlaying() then target.fxPop:Stop() end
+    if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
+    local from = target:GetAlpha() or 1
+    target:SetAlpha(alpha)
+    local g = target.fxTo
+    if not g then
+        g = target:CreateAnimationGroup()
+        if not g then return end
+        g.alpha = g:CreateAnimation("Alpha")
+        target.fxTo = g
+    end
+    if g:IsPlaying() then g:Stop() end
+    g.alpha:SetFromAlpha(from); g.alpha:SetToAlpha(alpha); g.alpha:SetDuration(dur or 0.1)
+    g:Play()
+end
+
 -- Stop any running fade and restore the resting alpha. For paths that must be
 -- instant (combat suspend, teardown).
 function Fx.Cancel(target)
@@ -119,5 +143,6 @@ function Fx.Cancel(target)
     if target.fxIn and target.fxIn:IsPlaying() then target.fxIn:Stop() end
     if target.fxPop and target.fxPop:IsPlaying() then target.fxPop:Stop() end
     if target.fxOut and target.fxOut:IsPlaying() then target.fxOut:Stop() end
+    if target.fxTo and target.fxTo:IsPlaying() then target.fxTo:Stop() end
     target:SetAlpha(1)
 end
