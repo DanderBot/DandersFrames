@@ -20,6 +20,7 @@ local UIParent, hooksecurefunc = UIParent, hooksecurefunc
 local pcall, geterrorhandler, ipairs = pcall, geterrorhandler, ipairs
 local max, min, format = math.max, math.min, string.format
 local IsInRaid, CreateFrame, C_Timer = IsInRaid, CreateFrame, C_Timer
+local InCombatLockdown = InCombatLockdown
 
 local ADDON_KEY = "DandersFrames"
 
@@ -514,10 +515,11 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
     -- An open DF options window would sit over the session. Remember which
     -- page/mode it showed and close it -- the window is DF.GUIFrame (built in
     -- DandersFrames_Options/GUI/Panel.lua CreateGUI), closed with the same
-    -- plain :Hide() its own close button uses (Panel.lua:155). Deliberately
-    -- NOT reopened on Locked: the user chose to end the session, not to get
-    -- the window back. The mover panel's Configure button (openOptionsPage
-    -- above) is the way back in, on the selected element's own page.
+    -- plain :Hide() its own close button uses (Panel.lua:155). Locked puts it
+    -- back on the same page in the same mode, so unlocking from the settings
+    -- and locking again returns the user where they were rather than to an
+    -- empty screen. The mover panel's Configure button (openOptionsPage above)
+    -- is the other way back in, on the selected element's own page.
     if DF.GUIFrame and DF.GUIFrame:IsShown() then
         Bridge.closedGUIPage = DF.GUI and DF.GUI.CurrentPageName or nil
         Bridge.closedGUIMode = DF.GUI and DF.GUI.SelectedMode or nil
@@ -556,6 +558,24 @@ Mover.RegisterCallback(Bridge, "Locked", function()
     releaseScope("party")
     releaseScope("raid")
     syncLockButtons()
+    -- Put the options window back the way the session found it -- same page,
+    -- same mode -- on EVERY finish, save or discard alike. Unlocked stores the
+    -- pair only when the window was actually open, so nothing stored means the
+    -- user was not in the settings when they unlocked and nothing should
+    -- appear now. Cleared before the reopen either way, so a later lock cannot
+    -- resurrect a window from a session two ago.
+    local page, mode = Bridge.closedGUIPage, Bridge.closedGUIMode
+    Bridge.closedGUIPage, Bridge.closedGUIMode = nil, nil
+    if not page then return end
+    -- openOptionsPage switches mode by clicking the mode button, and that
+    -- handler runs the departing mode's lock/test cleanup -- secure work. The
+    -- window itself is insecure, but the cleanup is not, so a lock that lands
+    -- in combat defers a frame rather than doing it inline.
+    if InCombatLockdown() then
+        C_Timer.After(0, function() openOptionsPage(mode, page) end)
+    else
+        openOptionsPage(mode, page)
+    end
 end)
 
 -- ============================================================
