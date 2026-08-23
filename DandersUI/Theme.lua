@@ -39,6 +39,11 @@ local C_ANCHOR_ROOT = {r = 0.35, g = 0.78, b = 0.45, a = 1}
 -- verbatim out of DandersMover/Proxy.lua, which had been carrying it as a
 -- private literal -- the same drift C_NOTICE above was added to stop.
 local C_ANCHORED   = {r = 0.55, g = 0.40, b = 0.85, a = 1}
+-- Red: a surface that is BLOCKED -- today the mover's snap zones that already
+-- have something in them. Deliberately not C_WARNING (a softer red for caution
+-- text) and not the button `tone = "danger"` reds in Widgets.lua, which are
+-- lightened for label text on a dark button and would wash out as a fill.
+local C_DANGER     = {r = 0.8,  g = 0.2,  b = 0.2,  a = 1}
 
 -- Exported palette: other files should theme against these shared tables instead
 -- of re-declaring private copies or hardcoding the raw numbers. These are the
@@ -58,6 +63,7 @@ UI.Colors = {
     notice     = C_NOTICE,   -- amber for "configured but will not render" notes
     anchorRoot = C_ANCHOR_ROOT, -- green for a mover other movers are anchored to
     anchored   = C_ANCHORED,    -- purple for a mover anchored to another mover
+    danger     = C_DANGER,      -- red for a blocked/occupied surface
 }
 
 -- Dialog chrome. The popup is a standalone dialog rather than a settings page and

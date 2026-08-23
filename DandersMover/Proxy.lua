@@ -47,9 +47,15 @@ local WEIGHT, SEL_WEIGHT = 1, 2         -- outline thickness, unselected / selec
 -- the coords first, then the addon icon, then all but a shortened title.
 local NO_COORDS_H, NO_COORDS_W, NO_ICON_W, TITLE_ONLY_W = 28, 120, 80, 60
 local TITLE_MAX = 8                     -- characters, once the slab is title-only
-local C_ZONE_NEAR = { 0.3, 0.7, 1.0 }
-local C_ZONE_HOVER = { 0.3, 0.8, 1.0 }
-local C_ZONE_OCCUPIED = { 0.8, 0.2, 0.2 }
+-- Snap zones. Same accent as the free-role dot, because a zone IS where a free
+-- drop would land; occupied ones go red. Hover is the only place a zone borrows
+-- the selection white, and the kit has no white token, so that one is a literal.
+local C_ZONE = UI.Colors.accent
+local C_ZONE_OCCUPIED = UI.Colors.danger
+local C_ZONE_HOVER = { r = 1, g = 1, b = 1 }
+local ZONE_WEIGHT, ZONE_HOVER_WEIGHT = 1, 2
+local ZONE_TICK_LEN, ZONE_TICK_W = 7, 2
+local ZONE_CORNERS = { "TOPLEFT", "TOPRIGHT", "BOTTOMLEFT", "BOTTOMRIGHT" }
 
 -- ============================================================
 -- UNLOCK FRAME + CURSOR
@@ -455,10 +461,42 @@ local function zoneFrame(i)
         z = CreateFrame("Frame", nil, P:GetUnlockFrame(), "BackdropTemplate")
         z:SetFrameLevel(1)
         UI:CreateElementBackdrop(z, { bgColor = { 0, 0, 0, 0 }, borderColor = { 0, 0, 0, 0 } })
-        UI:ApplyPixelBorder(z, { 0, 0, 0, 0 }, 2)
+        z.weight = ZONE_WEIGHT
+        -- Corner ticks: an L at each corner, over a plain outline. There is no
+        -- dashed-line primitive to draw the "empty slot" read the design asked
+        -- for -- tiling a solid texture repeats a solid, and the tooltip border
+        -- art is a frame, not a dash -- so the corners do that job instead.
+        z.ticks = {}
+        for _, corner in ipairs(ZONE_CORNERS) do
+            local arm = z:CreateTexture(nil, "OVERLAY")
+            arm:SetSize(ZONE_TICK_LEN, ZONE_TICK_W); arm:SetPoint(corner)
+            z.ticks[#z.ticks + 1] = arm
+            arm = z:CreateTexture(nil, "OVERLAY")
+            arm:SetSize(ZONE_TICK_W, ZONE_TICK_LEN); arm:SetPoint(corner)
+            z.ticks[#z.ticks + 1] = arm
+        end
         P.zones[i] = z
     end
     return z
+end
+
+-- One zone's whole look: fill, outline (colour AND thickness) and the corner
+-- ticks, which always match the outline. Called for every live zone on every
+-- frame of a drag, so the weight is only re-laid out when it actually changes;
+-- a recolour goes through the pixel border's cheap shim.
+local function paintZone(z, fill, fillAlpha, line, lineAlpha, weight)
+    z:SetBackdropColor(fill.r, fill.g, fill.b, fillAlpha)
+    if z.weight ~= weight then
+        UI:ApplyPixelBorder(z, { line.r, line.g, line.b, lineAlpha }, weight)
+        z.weight = weight
+    else
+        z:SetBackdropBorderColor(line.r, line.g, line.b, lineAlpha)
+    end
+    for _, arm in ipairs(z.ticks) do arm:SetColorTexture(line.r, line.g, line.b, lineAlpha) end
+end
+
+local function clearZone(z)
+    paintZone(z, C_ZONE, 0, C_ZONE, 0, ZONE_WEIGHT)
 end
 
 function P:ShowZones(el)
@@ -486,7 +524,7 @@ function P:ShowZones(el)
                 zf:SetSize(w, h)
                 zf:ClearAllPoints(); zf:SetPoint("CENTER", UIParent, "CENTER", zone.x, zone.y)
                 zf.zone = zone
-                zf:SetBackdropColor(0, 0, 0, 0); zf:SetBackdropBorderColor(0, 0, 0, 0)
+                clearZone(zf)
                 zf:Show()
             end
         end
@@ -513,17 +551,18 @@ function P:UpdateZones(cx, cy, hovered)
         local zf = self.zones[i]
         local z = zf.zone
         if hovered and z == hovered then
-            zf:SetBackdropColor(C_ZONE_HOVER[1], C_ZONE_HOVER[2], C_ZONE_HOVER[3], 0.45)
-            zf:SetBackdropBorderColor(C_ZONE_HOVER[1], C_ZONE_HOVER[2], C_ZONE_HOVER[3], 1)
+            -- The zone that WILL take the drop: accent fill, white outline, the
+            -- same 2px the selected proxy wears.
+            paintZone(zf, C_ZONE, 0.35, C_ZONE_HOVER, 1, ZONE_HOVER_WEIGHT)
         elseif closest and z.target == closest and sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2) < radius then
             local d = sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2)
             local f = 0.2 + Solver.ProximityFactor(d, radius) * 0.8
-            if z.occupied then f = f * 0.5 end   -- occupied zones read quieter (CDM rule)
-            local c = z.occupied and C_ZONE_OCCUPIED or C_ZONE_NEAR
-            zf:SetBackdropColor(c[1], c[2], c[3], 0.22 * f)
-            zf:SetBackdropBorderColor(c[1], c[2], c[3], 0.85 * f)
+            -- Occupied zones read quieter (CDM rule) -- here that is the lower
+            -- pair of alphas rather than an extra factor on top of the accent's.
+            if z.occupied then paintZone(zf, C_ZONE_OCCUPIED, 0.10 * f, C_ZONE_OCCUPIED, 0.6 * f, ZONE_WEIGHT)
+            else               paintZone(zf, C_ZONE, 0.18 * f, C_ZONE, 0.9 * f, ZONE_WEIGHT) end
         else
-            zf:SetBackdropColor(0, 0, 0, 0); zf:SetBackdropBorderColor(0, 0, 0, 0)
+            clearZone(zf)
         end
     end
 end

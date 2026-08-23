@@ -52,6 +52,7 @@ local COLORS = {
     background = { r = 0,    g = 0,    b = 0 },
     panel      = { r = 0.12, g = 0.12, b = 0.12 },
     border     = { r = 0.25, g = 0.25, b = 0.25 },
+    danger     = { r = 0.8,  g = 0.2,  b = 0.2 },
 }
 NS.UI = {
     MEDIA = "",
