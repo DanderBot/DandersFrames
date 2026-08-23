@@ -201,9 +201,11 @@ local function layout(b, anchored)
         b.tagBg:ClearAllPoints()
         b.tagBg:SetPoint("TOPLEFT", b.title, "TOPLEFT", -TAG_PAD, TAG_PAD)
         b.tagBg:SetPoint("BOTTOMRIGHT", b.title, "BOTTOMRIGHT", TAG_PAD, -TAG_PAD)
-        b.tagBg:Show()
+        b.titleFloating = true
     else
+        b.titleFloating = false
         b.tagBg:Hide()
+        b.title:Show()
     end
 end
 
@@ -223,6 +225,14 @@ local function applyLook(b, selected, hovered)
     b.root:SetShown(isRoot and pos.anchor ~= nil)
     layout(b, pos.anchor ~= nil)
 
+    -- A floating title is on-demand chrome: shown only while this slab is the
+    -- one being looked at or moved, so stacked anchors do not pile pills on
+    -- top of each other. The tooltip still names an idle slab on hover.
+    if b.titleFloating then
+        local showTag = selected or hovered or b.dragging
+        b.title:SetShown(showTag)
+        b.tagBg:SetShown(showTag)
+    end
     b:SetBackdropColor(C_BODY.r, C_BODY.g, C_BODY.b, hovered and HOVER_ALPHA or BODY_ALPHA)
     -- Selection is the OUTLINE, never the fill or the role colour: white and
     -- twice as thick. Hover is a softer white at the same weight, and it stands
