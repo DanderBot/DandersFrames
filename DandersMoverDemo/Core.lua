@@ -210,9 +210,8 @@ local function registerAll()
             reg.getRect = function() return insetRect(f, def.inset) end
         end
         if def.combatOnly then
-            -- Declares "only meaningful while in combat". DandersMover 1.0 does
-            -- not read isRelevant, so today this is documentation of intent
-            -- rather than behaviour; it is harmless if the field stays ignored.
+            -- Only meaningful while in combat: the lib reads isRelevant for
+            -- session relevance and anchor-target availability (since Phase B).
             reg.isRelevant = function() return UnitAffectingCombat("player") end
         end
         Mover:Register("DandersMoverDemo", def.key, reg)
