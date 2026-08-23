@@ -31,6 +31,22 @@ local function stubFrame()
     return setmetatable(f, { __index = function() return function() end end })
 end
 
+-- FontString stub with deterministic metrics: 7px per character, and an
+-- unbounded width so the layout's measured-fit fallback is exercised for real.
+-- Records its anchor points so tests can see WHERE the title ended up.
+local function stubFontString()
+    local f = stubFrame()
+    f._text = ""
+    f._points = {}
+    function f:SetText(t) self._text = t or "" end
+    function f:GetText() return self._text end
+    function f:GetStringWidth() return 7 * #self._text end
+    function f:GetUnboundedStringWidth() return 7 * #self._text end
+    function f:ClearAllPoints() wipe(self._points) end
+    function f:SetPoint(...) self._points[#self._points + 1] = { ... } end
+    return f
+end
+
 -- The dot's tint against a palette entry.
 local function tinted(tex, color)
     local v = tex._vertex
@@ -61,7 +77,11 @@ NS.UI = {
     GetAccent = function() return { r = 0, g = 0, b = 1 } end,
     CreateElementBackdrop = function() end,
     ApplyPixelBorder = function() end,
-    CreateLabel = function() return stubFrame() end,
+    CreateLabel = function(_, _, opts)
+        local f = stubFontString()
+        if opts and opts.text then f:SetText(opts.text) end
+        return f
+    end,
     CreateCheckbox = function() return stubFrame() end,
 }
 NS.Grid = { HidePreview = function() end }
@@ -236,6 +256,76 @@ do
     P:DestroyAll()
     check(not P.legend:IsShown(), "legend hidden on DestroyAll")
     R:UnregisterAddon("R")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- Measured title fit. The size thresholds are only the fast path: a long title
+-- on a slab that KEEPS the normal layout must still never ellipsise -- parts
+-- drop out (coords, then icon, then everything but a centred overflow title)
+-- based on the measured text width. Stub metrics: 7px per character.
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("T", { title = "T" })
+    local function def(title, w)
+        return { title = title, frame = FakeFrame(960, 540, w, 40),
+                 getPos = function() return { point = "CENTER", x = 0, y = 0 } end,
+                 onChanged = function() end }
+    end
+    -- 200px slab: coords ("0, 0" = 28px) + icon leave 124px for the title.
+    R:Register("T", "short", def("short", 200))                 --  5 ch =  35px: fits
+    -- 140px slab: 64px with coords, 96px without, 116px title-only.
+    R:Register("T", "mid",   def("Party Pinned1", 140))         -- 13 ch =  91px
+    R:Register("T", "long",  def("Party Pinned 1 - NPC", 140))  -- 20 ch = 140px
+    P:Build()
+    local s, m, lg = P.proxies["T:short"], P.proxies["T:mid"], P.proxies["T:long"]
+    check(s.coords:IsShown() and s.icon:IsShown(), "short title keeps coords and icon")
+    check(m.icon:IsShown() and not m.coords:IsShown(), "long title on a mid slab drops coords first, keeps icon")
+    eq(m.title:GetText(), "Party Pinned1", "dropped-coords title is the full text")
+    check(not lg.icon:IsShown() and not lg.coords:IsShown(), "very long title drops coords AND icon")
+    eq(lg.title:GetText(), "Party Pinned 1 - NPC", "overflow title is the full text")
+    local pt = lg.title._points[1]
+    check(#lg.title._points == 1 and pt and pt[1] == "CENTER", "very long title goes centred overflow, never truncated")
+    P:DestroyAll()
+    R:UnregisterAddon("T")
+    R.ready = wasReady
+    NS.Session = nil
+    NS.db = nil
+end
+
+-- The coords slot's "hidden" comes from Registry:IsTargetAvailable, not the raw
+-- frame's IsShown: a consumer getRect owns visibility (DF's raid element measures
+-- its test-mode preview while the real container is hidden), while elements
+-- without getRect still read the frame's shown state.
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = { showHiddenMovers = true, addons = {} }
+    NS.Session = { selected = nil }
+    R:RegisterAddon("V", { title = "V" })
+    -- Backing frame HIDDEN, but getRect says "this is what is visible" -- the
+    -- DF-raid-in-a-real-raid shape (test container up, real container hidden).
+    local hiddenFrame = FakeFrame(960, 540, 100, 40)
+    hiddenFrame._shown = false
+    R:Register("V", "preview", { title = "p", frame = hiddenFrame,
+        getRect = function() return { x = 50, y = 25, w = 100, h = 40 } end,
+        getPos = function() return { point = "CENTER", x = 0, y = 0 } end,
+        onChanged = function() end })
+    -- No getRect and a hidden frame: the demo's Combat Only shape out of combat.
+    local offscreen = FakeFrame(960, 540, 100, 40)
+    offscreen._shown = false
+    R:Register("V", "off", { title = "o", frame = offscreen,
+        getPos = function() return { point = "CENTER", x = 0, y = 0 } end,
+        onChanged = function() end })
+    P:Build()
+    eq(P.proxies["V:preview"].coords:GetText(), "50, 25", "getRect visible while frame hidden: coords, not 'hidden'")
+    eq(P.proxies["V:off"].coords:GetText(), NS.L["hidden"], "no getRect + hidden frame still reads 'hidden'")
+    P:DestroyAll()
+    R:UnregisterAddon("V")
     R.ready = wasReady
     NS.Session = nil
     NS.db = nil
