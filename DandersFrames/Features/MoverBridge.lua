@@ -568,11 +568,17 @@ Mover.RegisterCallback(Bridge, "Locked", function()
     Bridge.closedGUIPage, Bridge.closedGUIMode = nil, nil
     if not page then return end
     -- openOptionsPage switches mode by clicking the mode button, and that
-    -- handler runs the departing mode's lock/test cleanup -- secure work. The
-    -- window itself is insecure, but the cleanup is not, so a lock that lands
-    -- in combat defers a frame rather than doing it inline.
+    -- handler runs the departing mode's lock/test cleanup -- secure work. A
+    -- lock that lands in combat must wait for the lockdown to END: After(0)
+    -- fires next frame, still in combat, so the deferral is a real
+    -- PLAYER_REGEN_ENABLED wait.
     if InCombatLockdown() then
-        C_Timer.After(0, function() openOptionsPage(mode, page) end)
+        local waiter = CreateFrame("Frame")
+        waiter:RegisterEvent("PLAYER_REGEN_ENABLED")
+        waiter:SetScript("OnEvent", function(self)
+            self:UnregisterAllEvents()
+            openOptionsPage(mode, page)
+        end)
     else
         openOptionsPage(mode, page)
     end
