@@ -118,6 +118,23 @@ tooltip to their label, and read the spec off the returned widget. Set
 Scroll frames must use `ScrollFrameTemplate` (not `UIPanelScrollFrameTemplate`) for
 `StyleScrollBar` to find their parts.
 
+## Fx
+
+`UI.Fx` (reachable from any host via `__index`) is a small set of fade helpers for
+chrome that animates in and out. Nothing in it is load-bearing: every entry point
+shows/hides the target immediately and only decorates that with an animation, so a
+target without `CreateAnimationGroup` (headless tests) still lands in the right
+state, and a target hidden mid-animation ends up hidden. Works on frames and
+regions alike; per-target animation groups are cached on the target itself.
+
+| Call | Purpose |
+|---|---|
+| `Fx.FadeIn(target, dur, ox, oy)` | Show + fade in, optionally sliding onto its anchor from `(ox, oy)` |
+| `Fx.PopIn(target, dur, ox, oy, fromScale, origin)` | Fade + slide + scale up from `fromScale` (default 0.92) with the scale originating at `origin`; ease-out |
+| `Fx.FadeOut(target, dur, onDone)` | Fade out, then call `onDone` (which usually hides). A cancelled fade skips `onDone` |
+| `Fx.FadeTo(target, alpha, dur)` | Fade to a resting alpha and stay there (restore with `FadeTo(target, 1)`) |
+| `Fx.Cancel(target)` | Stop any running fade and restore alpha 1 — for paths that must be instant |
+
 ## Conventions
 
 - Colours come from `UI.Colors` / the host accent. No literals.
