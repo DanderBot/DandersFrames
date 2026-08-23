@@ -22,6 +22,9 @@ local reusableGroupPlayerCounts = {}
 local reusableActiveGroups = {}
 local reusableActiveGroupList = {}
 local reusableFrameToGroup = {}
+-- Optional: nil means the raid unlock/lock paths below behave exactly as they always have.
+local Mover = LibStub and LibStub("DandersMover-1.0", true)
+
 local reusableGroupCurrentPos = {}
 
 -- ============================================================
@@ -801,10 +804,9 @@ function DF:CreateRaidMoverFrame()
             x, y = DF:SnapToGrid(x, y)
         end
 
-        -- Save position
-        if DF.LogRaidAnchorWrite then DF:LogRaidAnchorWrite("RaidMover:OnDragStop", x, y) end
-        db.raidAnchorX = x
-        db.raidAnchorY = y
+        -- Save position through the ONE funnel (record + anchorX/anchorY mirror, plus
+        -- the active-layout routing and the RAIDPOS log line).
+        DF:SetPositionRecord("raid", { point = "CENTER", x = x, y = y }, "RaidMover:OnDragStop")
 
         -- If editing an auto profile, also save as override
         if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
@@ -839,7 +841,9 @@ function DF:CreateRaidMoverFrame()
     DF.raidMoverFrame = mover
 end
 
-function DF:UnlockRaidFrames()
+-- `legacy` forces the old in-house overlay even when DandersMover is installed
+-- (/df raidunlock legacy). See DF:UnlockFrames for why the routing lives here.
+function DF:UnlockRaidFrames(legacy)
     if InCombatLockdown() then
         DF:Err("Cannot unlock raid frames during combat.")
         return
@@ -850,6 +854,11 @@ function DF:UnlockRaidFrames()
     -- load it -- without this, ShowRaidTestFrames was a nil call and the
     -- unlock aborted halfway: grid shown, movers never set up.
     if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then
+        return
+    end
+
+    if Mover and not legacy and Mover:IsEnabled("DandersFrames", "raid") then
+        Mover:Unlock("DandersFrames")
         return
     end
 
@@ -1028,6 +1037,13 @@ function DF:UnlockRaidFrames()
 end
 
 function DF:LockRaidFrames()
+    -- End the DandersMover session instead; its Locked callback restores raidLocked and
+    -- releases the test claim for both scopes.
+    if Mover and Mover:IsUnlocked() then
+        Mover:Lock()
+        return
+    end
+
     if not DF.raidContainer then return end
 
     -- ☠ COMBAT GUARD, mirroring UnlockRaidFrames. DF.raidContainer is created from

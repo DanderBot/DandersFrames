@@ -10,7 +10,7 @@
 ## SavedVariables: DandersFramesDB_v2, DandersFramesClickCastingDB, DandersFramesDebugDB
 ## SavedVariablesPerCharacter: DandersFramesCharDB
 ## AllowAddOnTableAccess: 1
-## OptionalDeps: LibSharedMedia-3.0, SharedMedia, SharedMedia_MyMedia, SharedMediaAdditionalFonts, FrameSort
+## OptionalDeps: LibSharedMedia-3.0, SharedMedia, SharedMedia_MyMedia, SharedMediaAdditionalFonts, FrameSort, DandersMover
 ## Category: Danders
 
 # Libraries
@@ -94,6 +94,10 @@ Frames\Icons.lua
 Frames\StatusIcons.lua
 Frames\Init.lua
 Frames\Position.lua
+# Listed here rather than in the Features block below because it is the consumer side of
+# Frames\Position.lua's position records. It only reads DF at Init() time (called from
+# Core.lua's ADDON_LOADED), so nothing here depends on load order.
+Features\MoverBridge.lua
 Frames\Pets.lua
 
 # Test Mode

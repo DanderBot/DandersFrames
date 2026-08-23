@@ -3944,6 +3944,58 @@ function DF:MigrateHealPredictionBelowAbsorb()
     end
 end
 
+-- ☠ SEEDS A KEY THAT HAS A SHIPPED DEFAULT, so this MUST run before the defaults
+-- backfill -- see the wiring note at the call site. `position` is in PartyDefaults
+-- (and therefore in the generated RaidDefaults), so if the backfill runs first it
+-- stamps {CENTER, 0, -325} into every profile and the "position == nil" presence gate
+-- can never pass again: every existing user's saved anchor would be silently replaced
+-- by the default. This is the same failure MigrateHealthColorStops documents.
+--
+-- Seeds db.party.position from anchorX/anchorY and db.raid.position from
+-- raidAnchorX/raidAnchorY. The scalars STAY as a write-through mirror for this minor
+-- (DF:SetPositionRecord is the funnel); this migration only gives the record its
+-- initial value so nothing moves on the upgrade login.
+function DF:MigrateContainerPositionRecords()
+    if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
+
+    local function seed(modeDb, xKey, yKey, defX, defY)
+        if type(modeDb) ~= "table" then return end
+        -- Presence gate, not a value gate: a record that already exists is the user's.
+        if type(modeDb.position) == "table" then return end
+        modeDb.position = {
+            point = "CENTER",
+            x = tonumber(modeDb[xKey]) or defX,
+            y = tonumber(modeDb[yKey]) or defY,
+        }
+    end
+
+    for _, profile in pairs(DandersFramesDB_v2.profiles) do
+        -- Per PROFILE, not per run: an inactive profile is reached by the login
+        -- battery's whole-table walk, but an imported one arrives later, and a per-run
+        -- guard would skip it forever. (Same reasoning as MigrateHealPredictionBelowAbsorb.)
+        if type(profile) == "table" and not profile._moverPositionRecordsV1 then
+            seed(profile.party, "anchorX", "anchorY", 0, -325)
+            seed(profile.raid, "raidAnchorX", "raidAnchorY", -6.666610717773438, -25)
+
+            -- ⚠ DEFENSIVE ONLY -- this walk deletes, it does not migrate. `position` is
+            -- deliberately NOT an auto-layout override key: ApplyRuntimeProfile deep-copies
+            -- a whole-table override into a frozen overlay, and the overlay proxy's
+            -- __newindex only fires for TOP-LEVEL key writes, so `db.position.x = v` would
+            -- reach neither -- a table-valued override reads stale and loses writes. Raid
+            -- layouts keep overriding the SCALARS (raidAnchorX/raidAnchorY). Strip a
+            -- `position` override that leaked in from a future build rather than letting it
+            -- activate and freeze the raid container.
+            if DF.ForEachRaidLayoutOverride then
+                DF.ForEachRaidLayoutOverride(profile, function(layout)
+                    layout.overrides.position = nil
+                end)
+            end
+
+            profile._moverPositionRecordsV1 = true
+        end
+    end
+end
+
 function DF:MigrateOORTextAlpha()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
@@ -4335,6 +4387,11 @@ local FRESH_PROFILE_MIGRATION_FLAGS = {
     -- the same reason as the rest: a fresh profile must never be re-migrated, and here
     -- that matters because 12 is a value the slider can reach deliberately.
     _healPredBelowAbsorbV1  = true,
+    -- Born with `position` already in the defaults, so there is nothing to seed. Stamped
+    -- for the standard reason: a fresh profile must never be re-migrated, and here that
+    -- matters because the migration would otherwise re-derive the record from the scalars
+    -- on a profile whose record the user may already have moved.
+    _moverPositionRecordsV1 = true,
     -- ☠ _staleTexturePathV1 DELIBERATELY REMOVED. The texture repair is HEALING, not a
     -- migration: it must re-check on every login, because a file can go missing at any
     -- future update, not just once in a profile's life. Stamping a flag here would have
@@ -4726,6 +4783,17 @@ DF._MainEventDispatcher = function(self, event, arg1)
             for _, profile in pairs(DandersFramesDB_v2.profiles) do
                 RunLegacyKeyAdoption(profile)
             end
+        end
+
+        -- ☠ HERE, WITH THE OTHER PRESENCE-GATED MIGRATIONS, AND FOR THE SAME REASON.
+        -- `position` is a new key WITH A SHIPPED DEFAULT (PartyDefaults, and therefore the
+        -- generated RaidDefaults). The defaults backfill further down walks EVERY profile
+        -- and seeds missing keys -- so run after it, this migration's "position == nil"
+        -- gate is already closed and every user's saved anchor is quietly replaced by the
+        -- shipped default. Exactly the failure MigrateHealthColorStops above describes.
+        -- Runs for every profile itself, so it is not inside RunLegacyKeyAdoption.
+        if DF.MigrateContainerPositionRecords then
+            DF:MigrateContainerPositionRecords()
         end
 
         -- ☠ MUST RUN HERE, BEFORE FRAMES ARE BUILT. This used to sit in the
@@ -5894,6 +5962,15 @@ DF._MainEventDispatcher = function(self, event, arg1)
             DF:InitializeFrames()
         end
 
+        -- Hand the party and raid containers to DandersMover, if it is installed.
+        -- DF.MoverBridge only exists when LibStub("DandersMover-1.0", true) resolved, so
+        -- this is the whole optional-dependency gate. After InitializeFrames because the
+        -- hooks it installs target functions that must already have been called at least
+        -- once for the containers to exist.
+        if DF.MoverBridge then
+            DF.MoverBridge:Init()
+        end
+
     elseif event == "PLAYER_LOGIN" then
         -- (Removed) a disabled third-party compatibility popup that ran here. It had been
         -- gated off behind a literal `false` once the issue it existed for was resolved, and
@@ -6637,19 +6714,23 @@ DF._MainEventDispatcher = function(self, event, arg1)
                 end
                 return
             end
-            if msg == "unlock" then
-                if DF.UnlockFrames then DF:UnlockFrames() end
+            if msg == "unlock" or msg == "unlock legacy" then
+                -- "legacy" forces the old in-house overlay while DandersMover is
+                -- installed. Plain "unlock" routes to the lib when it is present.
+                if DF.UnlockFrames then DF:UnlockFrames(msg == "unlock legacy") end
             elseif msg == "lock" then
                 if DF.LockFrames then DF:LockFrames() end
-            elseif msg == "raidunlock" then
+            elseif msg == "raidunlock" or msg == "raidunlock legacy" then
                 -- While an auto layout is active, base-position unlock is blocked
                 -- (matches the disabled toolbar button) — point users to the active
                 -- layout's own Unlock button so they don't move the base by accident.
+                -- ⚠ The guard stays IN FRONT of the routing: the block is about which
+                -- position is being edited, not about which overlay draws it.
                 if DF.AutoProfilesUI and DF.AutoProfilesUI.IsLayoutActive and DF.AutoProfilesUI:IsLayoutActive() then
                     local name = DF.AutoProfilesUI.GetActiveLayoutName and DF.AutoProfilesUI:GetActiveLayoutName()
                     DF:Say(string.format(L["Auto layout \"%s\" is active. Unlock it from the Auto Layouts page to move its frames."], name or "?"))
                 elseif DF.UnlockRaidFrames then
-                    DF:UnlockRaidFrames()
+                    DF:UnlockRaidFrames(msg == "raidunlock legacy")
                 end
             elseif msg == "raidlock" then
                 if DF.LockRaidFrames then DF:LockRaidFrames() end

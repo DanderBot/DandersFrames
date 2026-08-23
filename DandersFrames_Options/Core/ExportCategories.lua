@@ -38,6 +38,11 @@ DF.ExportCategories = {
         "permanentMoverPullTimerDuration",
         "permanentMoverShowOnHover",
         "permanentMoverWidth",
+        -- The DandersMover record. Exported alongside the anchorX/anchorY +
+        -- raidAnchorX/raidAnchorY mirror so a round-trip carries both shapes; if a
+        -- string predates this key, DF:GetPositionRecord re-seeds the record from the
+        -- imported scalars on first read.
+        "position",
         "raidAnchorX",
         "raidAnchorY",
         "raidEnabled",
@@ -1419,6 +1424,18 @@ function DF:MergeCategorySettings(profile, imported, categories, exportedCategor
                 if pts then profile[prefix .. "Stops"] = pts end
             end
         end
+    end
+
+    -- ☠ SAME CLASS AS THE STOPS ABOVE: a pre-record payload carries anchorX/anchorY and
+    -- raidAnchorX/raidAnchorY but no `position`, and the profile's own record survives
+    -- the merge and shadows them -- the container reads the record, so the import
+    -- "works" and the frames never move to the imported spot. Drop the record when the
+    -- scalars came in without one; DF:ApplyImportedProfile re-seeds it from the merged
+    -- scalars before its defaults backfill (and DF:GetPositionRecord does the same on
+    -- first read as a belt). Gated on `copied` for the reason the stops block gives.
+    if not copied.position and (copied.anchorX or copied.anchorY
+        or copied.raidAnchorX or copied.raidAnchorY) then
+        profile.position = nil
     end
 end
 
