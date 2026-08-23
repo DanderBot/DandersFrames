@@ -68,7 +68,7 @@ local function build()
     toggle(L["Snap to screen"], "snapToScreen")
     toggle(L["Show grid"], "showGrid", function() Grid:Refresh() end)
     toggle(L["Keyboard nudge"], "keyboardNudge", nil,
-        { title = L["Keyboard nudge"], lines = { L["Arrow keys move the selected element. Hold Shift for 10 units."] } })
+        { title = L["Keyboard nudge"], lines = { L["Arrow keys move the selected element. Shift ×10, Ctrl ×100."] } })
     toggle(L["Show movers for hidden frames"], "showHiddenMovers", rebuildProxies)
 
     f.gridSlider = UI:CreateSlider(f, {

@@ -139,3 +139,12 @@ do
     local _, y = S.SnapRectToGrid(0, 57, 30, 10, 20)
     eq(y, 55, "top edge snaps to 60 (cy 55)")
 end
+
+-- nudge step: Shift x10, Ctrl x100, Ctrl wins when both are held
+do
+    eq(S.NudgeStep(false, false), 1, "plain nudge = 1")
+    eq(S.NudgeStep(true, false), 10, "shift = 10")
+    eq(S.NudgeStep(false, true), 100, "ctrl = 100")
+    eq(S.NudgeStep(true, true), 100, "shift+ctrl = 100")
+    eq(S.NudgeStep(nil, nil), 1, "nil modifiers = 1")
+end

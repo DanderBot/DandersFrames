@@ -35,6 +35,14 @@ function S.DragDelta(startPos, startCx, startCy, cx, cy)
     return (startPos.x or 0) + (cx - startCx), (startPos.y or 0) + (cy - startCy)
 end
 
+-- Nudge distance for one arrow press / click. Ctrl wins over Shift so
+-- Shift+Ctrl is still x100, not an undefined mix.
+function S.NudgeStep(shift, ctrl)
+    if ctrl then return 100 end
+    if shift then return 10 end
+    return 1
+end
+
 -- ============================================================
 -- GRID / SCREEN SNAP
 -- ============================================================

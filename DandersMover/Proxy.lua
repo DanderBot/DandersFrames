@@ -209,7 +209,7 @@ function P:ShowTooltip(b)
     end
     GameTooltip:AddLine(" ")
     GameTooltip:AddLine(L["Drag to move. Shift locks to horizontal, Ctrl to vertical."], 0.8, 0.8, 0.8)
-    GameTooltip:AddLine(L["Click to select, arrow keys to nudge."], 0.8, 0.8, 0.8)
+    GameTooltip:AddLine(L["Click to select, arrow keys to nudge (Shift ×10, Ctrl ×100)."], 0.8, 0.8, 0.8)
     if a then GameTooltip:AddLine(L["Drop into a zone to re-anchor; Detach frees it."], 0.8, 0.8, 0.8) end
     GameTooltip:AddLine(L["Right-click to lock."], 0.8, 0.8, 0.8)
     GameTooltip:Show()

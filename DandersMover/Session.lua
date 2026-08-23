@@ -338,7 +338,7 @@ end
 
 -- ============================================================
 -- KEYBOARD
--- Esc = lock, arrows = nudge (Shift x10), Ctrl+Z / Ctrl+Y = undo/redo.
+-- Esc = lock, arrows = nudge (Shift x10, Ctrl x100), Ctrl+Z / Ctrl+Y = undo/redo.
 -- Only ever enabled while the unlock frame is shown, which never happens in combat.
 -- ============================================================
 local ARROWS = { UP = { 0, 1 }, DOWN = { 0, -1 }, LEFT = { -1, 0 }, RIGHT = { 1, 0 } }
@@ -354,7 +354,7 @@ function Sess:EnableKeyboard(on)
         elseif ARROWS[key] and NS.db.keyboardNudge and Sess.selected then
             local el = Registry:Get(Sess.selected)
             if el then
-                local step = IsShiftKeyDown() and 10 or 1
+                local step = Solver.NudgeStep(IsShiftKeyDown(), IsControlKeyDown())
                 Sess:Nudge(el, ARROWS[key][1] * step, ARROWS[key][2] * step)
                 handled = true
             end
