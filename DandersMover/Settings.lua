@@ -30,12 +30,7 @@ local CHECK_CONTENT_TOP, CHECK_CONTENT_H = 3, 18   -- where the check sits insid
 local SEG_GAP = 2                         -- between segmented buttons
 
 local function rebuildProxies()
-    if Sess:IsActive() and not Sess:IsSuspended() then
-        Proxy:DestroyAll()
-        Proxy:Build(Sess.filter)
-        Grid:Refresh()
-        if NS.Panel then NS.Panel:Refresh() end
-    end
+    Sess:RebuildProxies()
 end
 
 local function addonDB(name)
@@ -172,6 +167,9 @@ local function build()
         toggle(editor.content, L["Keyboard nudge"], "keyboardNudge", nil,
             { title = L["Keyboard nudge"], lines = { L["Arrow keys move the selected element. Shift ×10, Ctrl ×100."] } }),
         toggle(editor.content, L["Show movers for hidden frames"], "showHiddenMovers", rebuildProxies),
+        -- In a session another addon opened (e.g. /df unlock), other addons' movers are
+        -- anchor targets but not draggable unless this is on. Mirrored on the legend.
+        toggle(editor.content, L["Show other addons' movers"], "showOtherAddons", rebuildProxies),
         f.sideRow,
     })
     place(editor)

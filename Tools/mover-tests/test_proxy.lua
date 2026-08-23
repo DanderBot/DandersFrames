@@ -32,10 +32,11 @@ IsControlKeyDown = function() return ctrlDown end
 NS.UI = {
     MEDIA = "",
     Colors = { textDim = { r = 0.5, g = 0.5, b = 0.5 }, anchorRoot = { r = 0, g = 1, b = 0 }, background = { r = 0, g = 0, b = 0 } },
-    Space = { section = 10 }, RowGap = 14, RowGapTight = 8,
+    Space = { section = 10 }, RowGap = 14, RowGapTight = 8, RowHeight = { checkbox = 35 },
     GetAccent = function() return { r = 0, g = 0, b = 1 } end,
     CreateElementBackdrop = function() end,
     CreateLabel = function() return stubFrame() end,
+    CreateCheckbox = function() return stubFrame() end,
 }
 NS.Grid = { HidePreview = function() end }
 load_addon_file("Proxy.lua")
@@ -70,8 +71,47 @@ do
 
     -- addon filter composes with the toggle
     P:DestroyAll()
-    P:Build("X")
+    P:Build(R:NormalizeFilter("X"))
     check(P.proxies["X:party"] == nil, "filter does not bypass the toggle")
+
+    -- table filter: listed keys only, none for unlisted or irrelevant elements
+    R:SetEnabled("X", "party", true)
+    R:Register("X", "off", elDef({ point = "CENTER", x = 0, y = 0 }))
+    R:Get("X:off").isRelevant = function() return false end
+    P:DestroyAll()
+    P:Build(R:NormalizeFilter({ addon = "X", keys = { "party" } }))
+    check(P.proxies["X:party"] ~= nil, "listed key gets a proxy")
+    check(P.proxies["X:raid"] == nil, "unlisted key gets NO proxy (not a dimmed one)")
+    check(P.proxies["X:off"] == nil, "irrelevant unlisted element gets no proxy")
+    P:DestroyAll()
+    P:Build(R:NormalizeFilter("X"))
+    check(P.proxies["X:off"] == nil and P.proxies["X:raid"] ~= nil, "addon filter: relevance decides")
+    P:DestroyAll()
+    P:Build(R:NormalizeFilter({ addon = "X", keys = { "off" } }))
+    check(P.proxies["X:off"] ~= nil, "listed irrelevant key IS proxied (key filter beats isRelevant)")
+    R:Unregister("X", "off")
+
+    -- other addons in a filtered session: zones yes, proxies only with showOtherAddons
+    R:RegisterAddon("Y", { title = "Y" })
+    R:Register("Y", "thing", elDef({ point = "CENTER", x = 300, y = 0 }))
+    NS.db.snapToFrames = true
+    NS.Session = { selected = nil, filter = R:NormalizeFilter({ addon = "X", keys = { "party" } }) }
+    P:DestroyAll()
+    P:Build(NS.Session.filter)
+    check(P.proxies["X:party"] ~= nil and P.proxies["Y:thing"] == nil, "other addon: no proxy by default")
+    P:ShowZones(R:Get("X:party"))
+    local sawY = false
+    for _, z in ipairs(P.dragZones) do if z.target == "Y:thing" then sawY = true end end
+    check(sawY, "other addon's element still offers snap zones")
+    P:HideZones()
+    NS.db.showOtherAddons = true
+    P:DestroyAll()
+    P:Build(NS.Session.filter)
+    check(P.proxies["Y:thing"] ~= nil, "other addon proxied with showOtherAddons")
+    NS.db.showOtherAddons = false
+    NS.Session = nil
+    P:DestroyAll()
+    R:UnregisterAddon("Y")
 
     -- addon-level toggle removes everything
     R:SetEnabled("X", nil, false)

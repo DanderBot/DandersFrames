@@ -138,11 +138,14 @@ local function create(el)
     return b
 end
 
-function P:Build(addonFilter)
+-- filter is the NORMALISED session filter (Session.filter): nil, or
+-- { addon = <string|nil>, keySet = <set|nil> }. The initiator's keys outside keySet
+-- get NO proxy at all, not a dimmed one (a party unlock must not put raid proxies on
+-- screen); other addons' elements get one only with showOtherAddons (Registry:WantsProxy).
+function P:Build(filter)
     local f = self:GetUnlockFrame()
     for _, el in ipairs(Registry:SortedElements()) do
-        local wanted = (not addonFilter or el.addon == addonFilter) and Registry:IsEnabled(el.addon, el.key)
-        if wanted then
+        if Registry:WantsProxy(filter, el) then
             local frame = Registry:GetFrame(el)
             if NS.db.showHiddenMovers or (frame and frame:IsShown()) then
                 local b = self.proxies[el.id] or create(el)
@@ -245,6 +248,16 @@ local function buildLegend()
     f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Right-click: lock"], size = 10, color = C_MUTED })
     f.hint:SetPoint("TOP", f, "TOP", 0, -PAD - 12 - TIGHT)
 
+    -- Third row, consumer-initiated sessions only: other addons' enabled+relevant
+    -- elements are anchor targets already; this also gives them proxies. Same
+    -- persisted toggle as Settings > Editor; both rebuild the proxies live.
+    f.other = UI:CreateCheckbox(f, {
+        label = L["Show other addons' movers"],
+        get = function() return NS.db.showOtherAddons end,
+        set = function(v) NS.db.showOtherAddons = v and true or false; NS.Session:RebuildProxies() end,
+    })
+    f.other:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -PAD - 12 - TIGHT - 12 - TIGHT)
+
     -- Width from the measured text. Fonts resolve a frame late, so this runs
     -- again on the next frame (same converge-next-frame shape as the kit's
     -- own labels).
@@ -255,7 +268,18 @@ local function buildLegend()
         end
         row = row + PAD
         local hintW = (self.hint:GetStringWidth() or 0) + PAD * 2
-        self:SetSize(max(row, hintW), PAD + 12 + TIGHT + 12 + PAD)
+        -- The checkbox row only exists for a consumer-initiated session (a filter
+        -- with an addon); /mover has no "other" addons.
+        local filter = NS.Session and NS.Session.filter
+        local showOther = (filter and filter.addon) and true or false
+        self.other:SetShown(showOther)
+        self.other:Refresh()
+        local h = PAD + 12 + TIGHT + 12 + PAD
+        if showOther then
+            self.other:SetWidth(max(row, hintW) - PAD * 2)
+            h = h + TIGHT + UI.RowHeight.checkbox - GAP
+        end
+        self:SetSize(max(row, hintW), h)
     end
     return f
 end

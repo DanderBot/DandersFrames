@@ -57,10 +57,20 @@ end
 function Sess:Unlock(filter)
     if self.active then return end
     if InCombatLockdown() then NS:Print(L["Movers cannot be unlocked in combat."]) return end
+    filter = Registry:NormalizeFilter(filter)
     self.filter = filter
+    -- Keys named in the filter take part even when their isRelevant() says no, and
+    -- are forced relevant for the whole session (snap + be snapped to). Set BEFORE the
+    -- snapshot walk and before Unlocked fires, so both see the same answer.
+    wipe(NS.forcedRelevant)
+    if filter and filter.keySet then
+        for key in pairs(filter.keySet) do NS.forcedRelevant[Registry.Id(filter.addon, key)] = true end
+    end
+    -- Snapshot everything IN the session, proxied or not: other addons' elements can
+    -- gain a proxy mid-session (showOtherAddons) and Discard must restore them too.
     wipe(self.snapshots)
     for _, el in ipairs(Registry:SortedElements()) do
-        if (not filter or el.addon == filter) and Registry:IsEnabled(el.addon, el.key) then
+        if Registry:IsInSession(filter, el) then
             self.snapshots[el.id] = NS.CopyPos(Registry:GetPos(el))
         end
     end
@@ -111,6 +121,8 @@ function Sess:Finish(mode)
     Grid:Hide()
     panel("Hide")
     wipe(self.snapshots)
+    wipe(NS.forcedRelevant)
+    self.filter = nil
     self.active, self.suspended, self.dirty, self.selected = false, false, false, nil
     -- Clear after the state reset: Clear fires "Changed" -> panel Refresh,
     -- which must see the session as inactive so it cannot re-show the panel.
@@ -120,6 +132,17 @@ function Sess:Finish(mode)
 end
 
 function Sess:Toggle() if self.active then self:Lock() else self:Unlock() end end
+
+-- Tear the proxies down and build them again against the current filter: a toggle
+-- changed what should be on screen (an addon/element switch, hidden movers, other
+-- addons' movers). Settings and the legend checkbox both come through here.
+function Sess:RebuildProxies()
+    if not self.active or self.suspended then return end
+    Proxy:DestroyAll()
+    Proxy:Build(self.filter)
+    Grid:Refresh()
+    panel("Refresh")
+end
 
 function Sess:Suspend()
     if not self.active or self.suspended then return end
@@ -210,6 +233,7 @@ function Sess:SetXY(el, x, y)
 end
 
 function Sess:SetAnchorPoint(el, point)
+    if el.pointLocked then return end
     local pos = Registry:GetPos(el)
     if pos.anchor or pos.point == point then return end
     local before = NS.CopyPos(pos)

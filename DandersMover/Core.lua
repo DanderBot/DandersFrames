@@ -36,7 +36,7 @@ function NS:Debug(msg) if NS.db and NS.db.debug then print("|cff888888DandersMov
 -- ============================================================
 NS.DEFAULTS = {
     gridSize = 20, snapToGrid = true, snapToFrames = true, snapToScreen = true, showGrid = true,
-    keyboardNudge = true, panelSide = "auto", showHiddenMovers = true, debug = false,
+    keyboardNudge = true, panelSide = "auto", showHiddenMovers = true, showOtherAddons = false, debug = false,
     addons = {}, demo = {},
 }
 
@@ -161,7 +161,11 @@ function Lib:Apply(addon, key)
     if NS.Proxy then NS.Proxy:Refresh(el.id) end
 end
 
-function Lib:Unlock(addonFilter) if NS.Session then NS.Session:Unlock(addonFilter) end end
+-- filter: nil (everything), "Addon" (that addon initiated the session), or
+-- { addon = "Addon", keys = {...} } (only those keys of the initiator take part, forced
+-- relevant). Other addons' enabled+relevant elements stay anchor targets in a filtered
+-- session and get proxies with DandersMoverDB.showOtherAddons. See Registry:NormalizeFilter.
+function Lib:Unlock(filter) if NS.Session then NS.Session:Unlock(filter) end end
 function Lib:Lock() if NS.Session then NS.Session:Lock() end end
 function Lib:Toggle() if NS.Session then NS.Session:Toggle() end end
 function Lib:IsUnlocked() return NS.Session and NS.Session:IsActive() or false end

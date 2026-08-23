@@ -70,7 +70,7 @@ is nothing to measure.
 | `Mover:RefreshAnchorTarget(addon, key)` | Call when a `getFrame` target now resolves to a different frame |
 | `Mover:Apply(addon, key)` | Re-solve and re-fire `onChanged` (e.g. after you change the frame's scale) |
 | `Mover:Unregister(addon, key)`, `Mover:UnregisterAddon(addon)` | Cleanup |
-| `Mover:Unlock([addon])`, `Lock()`, `Toggle()`, `IsUnlocked()` | Drive the editor from your own UI |
+| `Mover:Unlock([filter])`, `Lock()`, `Toggle()`, `IsUnlocked()` | Drive the editor from your own UI. `filter` = nil, `"Addon"`, or `{ addon = "Addon", keys = { "k", ... } }`. Your addon is the initiator: only its listed keys get proxies (forced relevant for the session). Other addons' enabled+relevant elements stay anchor targets (snap zones, resolution) and get proxies only when the user turns on "Show other addons' movers" (Settings › Editor, or the legend) |
 | `Mover:IsEnabled(addon[, key])` | Respect the user's mover toggles |
 | `Mover.ApplyPosition(frame, pos)` | SetPoint + scale maths helper |
 | `Mover.RegisterCallback(obj, event, fn)` | Events: `Unlocked`, `Locked`, `Saved`, `Discarded`, `PositionChanged(addon, key, pos, reason)` |
@@ -83,6 +83,7 @@ Slash: `/mover` toggle, `/mover config` settings, `/mover demo` built-in demo.
 
 - Dragging an anchored element can only **re-anchor** it: dropped outside every snap zone it springs back. Use the panel's Detach to free it.
 - Hidden frames are never snap targets. If your element is normally hidden (combat-only, raid-only), listen for the `Unlocked` / `Locked` callbacks and show it for the session — the lib never touches your frame's visibility.
+- `isRelevant = function() -> bool` on `Register` / `RegisterAnchorTarget`: absent = relevant. Irrelevant elements get no proxy in an unfiltered session and are never snap targets (children anchored to them hold). A key named in an `Unlock` filter is forced relevant. Erroring callbacks count as relevant. `pointLocked = true` on `Register` hides the panel's 9-point picker (the consumer derives `point`).
 - A target counts as *available* when it has a `getRect` and that `getRect` returns a rect, or when it has no `getRect` and its frame exists and is shown. A `getRect` that returns `nil` is how you say "not meaningfully on screen right now", and it wins even if the backing frame is technically shown. Unavailable targets are never offered as snap targets, and anything anchored to one holds its last position instead of jumping — it re-solves the next time you call `RefreshAnchorTarget` or `Apply` while the target is available again.
 - Drags, nudges and X/Y edits are clamped so the visible rect stays on screen.
 - Proxies are colour-coded by role: the accent for a free element, purple for one anchored to something, green for one that other elements are anchored to (a root that is itself anchored stays purple and shows the green root marker). A legend at the top of the screen spells this out while unlocked.

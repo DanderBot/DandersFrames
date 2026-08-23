@@ -174,3 +174,42 @@ do
     check(R:IsEnabled("T", "b"), "addon back on")
     NS.db = nil
 end
+
+-- relevance: absent = relevant; false beats a rect; errors fail open; forced wins;
+-- non-function rejected
+do
+    local wasReady = R.ready
+    R.ready = true
+    NS.db = nil
+    R:RegisterAddon("V", { title = "V" })
+    local rect = function() return { x = 0, y = 0, w = 10, h = 10 } end
+    local plain = R:RegisterAnchorTarget("V", "plain", { title = "t", frame = FakeFrame(0, 0, 10, 10), getRect = rect })
+    local no = R:RegisterAnchorTarget("V", "no", { title = "t", frame = FakeFrame(0, 0, 10, 10), getRect = rect,
+        isRelevant = function() return false end })
+    local boom = R:RegisterAnchorTarget("V", "boom", { title = "t", frame = FakeFrame(0, 0, 10, 10), getRect = rect,
+        isRelevant = function() error("relevance boom") end })
+    check(R:IsRelevant(plain), "absent isRelevant = relevant")
+    check(R:IsTargetAvailable(plain), "relevant target with a rect is available")
+    check(not R:IsRelevant(no), "isRelevant false")
+    check(not R:IsTargetAvailable(no), "irrelevant target is unavailable even with a rect")
+    check(R:GetRect(no) ~= nil, "GetRect is untouched by relevance")
+    local handled = 0
+    local old = geterrorhandler
+    geterrorhandler = function() return function() handled = handled + 1 end end
+    check(R:IsRelevant(boom), "erroring isRelevant fails open")
+    geterrorhandler = old
+    eq(handled, 1, "error handler called once")
+    NS.forcedRelevant[no.id] = true
+    check(R:IsRelevant(no) and R:IsTargetAvailable(no), "forcedRelevant overrides false")
+    NS.forcedRelevant[no.id] = nil
+    check(not R:IsRelevant(no), "cleared forcing restores false")
+    local ok = pcall(R.RegisterAnchorTarget, R, "V", "bad", { title = "t", frame = FakeFrame(0, 0, 10, 10), isRelevant = "nope" })
+    check(not ok, "non-function isRelevant rejected")
+    local el = R:Register("V", "el", elDef(FakeFrame(0, 0, 10, 10), { point = "CENTER", x = 0, y = 0 },
+        { isRelevant = function() return false end, pointLocked = true }))
+    check(el.pointLocked == true, "pointLocked stored")
+    check(R:GetTarget("V:el").isRelevant == el.isRelevant, "element's target entry carries isRelevant")
+    check(not R:IsTargetAvailable(R:GetTarget("V:el")), "irrelevant element is not an available target")
+    R:UnregisterAddon("V")
+    R.ready = wasReady
+end
