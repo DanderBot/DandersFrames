@@ -1922,6 +1922,20 @@ function DF:ApplyImportedProfile(importData, selectedCategories, selectedFrameTy
             end
         end
     end
+    -- ☠ ALSO BEFORE THE BACKFILL, for the same reason as _raidCenterModeV1 above.
+    -- `position` has a shipped default, so once the backfill stamps it a pre-record
+    -- payload's anchorX/anchorY (the only position it carries) can never be folded into
+    -- the record again -- the frames would land on the default, not where the export
+    -- put them. The flag rode across from the source profile (or is simply this
+    -- profile's own), so clear it when either mode arrived without a record and let the
+    -- login migration's presence gate do the seeding.
+    if DF.MigrateContainerPositionRecords and type(DF.db) == "table"
+        and ((type(DF.db.party) == "table" and DF.db.party.position == nil)
+          or (type(DF.db.raid) == "table" and DF.db.raid.position == nil)) then
+        DF.db._moverPositionRecordsV1 = nil
+        DF:MigrateContainerPositionRecords()
+    end
+
     backfillDefaults(DF.db and DF.db.party, DF.PartyDefaults)
     backfillDefaults(DF.db and DF.db.raid, DF.RaidDefaults)
 
