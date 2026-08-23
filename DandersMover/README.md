@@ -91,4 +91,4 @@ Slash: `/mover` toggle, `/mover config` settings, `/mover demo` built-in demo.
 - Drags, nudges and X/Y edits are clamped so the visible rect stays on screen.
 - Proxies are dark slabs; the coloured dot and left edge give the role — host accent = free, purple = anchored, green ring = anchor root. Selection is a white outline; a faded slab means the real frame is hidden.
 - Hold Shift while dragging to move horizontally only, Ctrl to move vertically only (both held = free drag). A nudge (arrow keys or the panel arrows) steps by 1; Shift makes it 10, Ctrl 100.
-- While a session is open the unlock overlay captures the mouse across the whole screen: left-click on empty space deselects, right-click anywhere locks, and the world/camera behind it is not interactable — lock to interact with the world.
+- While a session is open the unlock overlay captures the mouse across the whole screen: left-click on empty space deselects, and the world/camera behind it is not interactable. Lock the session to get the screen back: press Esc, use the top strip's Save & Exit / Discard, or type `/mover`.

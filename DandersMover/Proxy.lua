@@ -65,16 +65,14 @@ function P:GetUnlockFrame()
     local f = CreateFrame("Frame", "DandersMoverUnlockFrame", UIParent)
     f:SetAllPoints(UIParent)
     f:SetFrameStrata("HIGH")
-    -- The overlay owns clicks on empty space: left deselects, right locks (the
-    -- proxies' own right-click, extended to the whole screen). Proxies, panel
+    -- The overlay owns clicks on empty space: left deselects. Proxies, panel
     -- and legend are children at higher frame levels, so they keep taking
     -- their own clicks first. While a session is open the overlay therefore
     -- captures the mouse and the world behind it is unreachable -- documented
-    -- in the README; locking gives the screen back.
+    -- in the README; locking (Esc, the strip, /mover) gives the screen back.
     f:EnableMouse(true)
     f:SetScript("OnMouseDown", function(_, button)
-        if button == "RightButton" then NS.Session:Lock()
-        else NS.Session:Select(nil) end
+        if button == "LeftButton" then NS.Session:Select(nil) end
     end)
     f:Hide()
     self.unlockFrame = f
@@ -139,8 +137,7 @@ local function onDragStop(self)
     NS.Session:EndDrag(self.element, self.lastX, self.lastY, self.lastZone)
 end
 
-local function onClick(self, button)
-    if button == "RightButton" then NS.Session:Lock() return end
+local function onClick(self)
     NS.Session:Select(self.element.id)
 end
 
@@ -293,7 +290,7 @@ local function create(el)
         borderColor = { C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1 },
     })
     b.outlineWeight = WEIGHT
-    b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    b:RegisterForClicks("LeftButtonUp")
     b:RegisterForDrag("LeftButton")
     b:SetMovable(false)
     b:SetClampedToScreen(false)
@@ -491,7 +488,7 @@ local function buildLegend()
     f.btnDiscard:SetPoint("RIGHT", f.btnSettings, "LEFT", -TIGHT, 0)
     f.btnSave:SetPoint("RIGHT", f.btnDiscard, "LEFT", -TIGHT, 0)
 
-    f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Right-click: lock"], size = 10, color = C_MUTED })
+    f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Esc: lock"], size = 10, color = C_MUTED })
     f.hint:SetPoint("TOP", f, "TOP", 0, -PAD - LEGEND_ROW - TIGHT)
 
     -- Third row, consumer-initiated sessions only: other addons' enabled+relevant
@@ -637,7 +634,7 @@ function P:ShowTooltip(b)
     GameTooltip:AddLine(L["Drag to move. Shift locks to horizontal, Ctrl to vertical."], 0.8, 0.8, 0.8)
     GameTooltip:AddLine(L["Click to select, arrow keys to nudge (Shift ×10, Ctrl ×100)."], 0.8, 0.8, 0.8)
     if a then GameTooltip:AddLine(L["Drop into a zone to re-anchor; Detach frees it."], 0.8, 0.8, 0.8) end
-    GameTooltip:AddLine(L["Right-click to lock."], 0.8, 0.8, 0.8)
+    GameTooltip:AddLine(L["Press Esc or use the top strip to lock."], 0.8, 0.8, 0.8)
     GameTooltip:Show()
 end
 
