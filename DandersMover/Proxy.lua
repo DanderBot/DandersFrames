@@ -243,9 +243,8 @@ function P:ShowZones(el)
     local n = 0
     for _, target in ipairs(Registry:SortedTargets()) do
         local canon = Registry:CanonicalId(target.id)
-        local tf = Registry:GetFrame(target)
         local usable = canon ~= el.id and not descendants[canon]
-            and tf ~= nil and tf:IsShown()              -- hidden frames are not snap targets (CDM rule)
+            and Registry:IsTargetAvailable(target)      -- hidden/unavailable frames are not snap targets (CDM rule)
             and Registry:IsEnabled(target.addon, target.key)
             and not Registry:WouldCreateCycle(el.id, target.id)
         if usable then

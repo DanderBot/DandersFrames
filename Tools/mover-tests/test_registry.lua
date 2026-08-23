@@ -64,6 +64,28 @@ do
     check(not ok, "non-function getRect rejected")
 end
 
+-- target availability: getRect owns the question when it is supplied
+do
+    local shown = FakeFrame(0, 0, 10, 10)
+    local hidden = FakeFrame(0, 0, 10, 10); hidden._shown = false
+    local t1 = R:RegisterAnchorTarget("A", "av_shown", { title = "t", frame = shown })
+    local t2 = R:RegisterAnchorTarget("A", "av_hidden", { title = "t", frame = hidden })
+    local t3 = R:RegisterAnchorTarget("A", "av_noframe", { title = "t", getFrame = function() return nil end })
+    local t4 = R:RegisterAnchorTarget("A", "av_rect", { title = "t", frame = hidden,
+        getRect = function() return { x = 0, y = 0, w = 10, h = 10 } end })
+    local t5 = R:RegisterAnchorTarget("A", "av_norect", { title = "t", frame = shown,
+        getRect = function() return nil end })
+    check(R:IsTargetAvailable(t1), "shown frame is available")
+    check(not R:IsTargetAvailable(t2), "hidden frame is not available")
+    check(not R:IsTargetAvailable(t3), "nil frame is not available")
+    check(R:IsTargetAvailable(t4), "getRect returning a rect wins over a hidden frame")
+    check(not R:IsTargetAvailable(t5), "getRect returning nil wins over a shown frame")
+    check(not R:IsTargetAvailable(nil), "nil entry is not available")
+    for _, key in ipairs({ "av_shown", "av_hidden", "av_noframe", "av_rect", "av_norect" }) do
+        R:Unregister("A", key)
+    end
+end
+
 -- graph
 do
     local posB = { point = "CENTER", x = 0, y = 0, anchor = { target = "A:one", edge = "right", align = "start" } }
@@ -115,4 +137,20 @@ do
     R:UnregisterAddon("A")
     check(R:Get("A:one") == nil and R:GetAddon("A") == nil, "addon fully removed")
     eq(#R:SortedElements(), 0, "no elements left")
+end
+
+-- getRect nil falls through to getSize / frame size
+do
+    R:RegisterAddon("G", { title = "G" })
+    local hidden = R:Register("G", "h1", elDef(FakeFrame(0, 0, 40, 20), { point = "CENTER", x = 0, y = 0 },
+        { getRect = function() return nil end, getSize = function() return 77, 33 end }))
+    local w, h = R:GetSize(hidden)
+    eq(w, 77, "getSize used when getRect is nil"); eq(h, 33, "getSize height")
+    check(R:GetRect(hidden) == nil, "rect still nil (not visible)")
+    check(not R:IsTargetAvailable(hidden), "not available as a target")
+    local hidden2 = R:Register("G", "h2", elDef(FakeFrame(0, 0, 40, 20), { point = "CENTER", x = 0, y = 0 },
+        { getRect = function() return nil end }))
+    local w2 = R:GetSize(hidden2)
+    eq(w2, 40, "frame size used when getRect nil and no getSize")
+    R:UnregisterAddon("G")
 end

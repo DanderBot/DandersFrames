@@ -83,4 +83,5 @@ Slash: `/mover` toggle, `/mover config` settings, `/mover demo` built-in demo.
 
 - Dragging an anchored element can only **re-anchor** it: dropped outside every snap zone it springs back. Use the panel's Detach to free it.
 - Hidden frames are never snap targets. If your element is normally hidden (combat-only, raid-only), listen for the `Unlocked` / `Locked` callbacks and show it for the session — the lib never touches your frame's visibility.
+- A target counts as *available* when it has a `getRect` and that `getRect` returns a rect, or when it has no `getRect` and its frame exists and is shown. A `getRect` that returns `nil` is how you say "not meaningfully on screen right now", and it wins even if the backing frame is technically shown. Unavailable targets are never offered as snap targets, and anything anchored to one holds its last position instead of jumping — it re-solves the next time you call `RefreshAnchorTarget` or `Apply` while the target is available again.
 - Drags, nudges and X/Y edits are clamped so the visible rect stays on screen.

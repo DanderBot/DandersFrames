@@ -135,11 +135,12 @@ function R:GetFrame(entry)
     return entry.frame
 end
 
+-- getRect returning nil means "not visible right now", not "no size": fall through
+-- to getSize / the frame so hidden elements still have a measurable proxy.
 function R:GetSize(entry)
     if entry.getRect then
         local r = entry.getRect()
-        if not r then return nil end
-        return r.w, r.h
+        if r then return r.w, r.h end
     end
     -- getSize is declared in UIParent units (the consumer reports what is visible).
     if entry.getSize then return entry.getSize() end
@@ -168,6 +169,19 @@ function R:GetRect(entry)
     local w, h = self:GetSize(entry)   -- already UIParent units
     if not w then return nil end
     return { x = cx * ratio - ux, y = cy * ratio - uy, w = w, h = h }
+end
+
+-- Is this entry currently a usable anchor target / resolvable parent?
+-- A consumer that supplies getRect owns the "is it visible" question outright:
+-- returning nil is how it says "not meaningfully on screen right now", and that
+-- must win even when the backing frame happens to be shown (e.g. a container
+-- that is always shown but holds nothing). Without getRect, fall back to the
+-- frame's own shown state.
+function R:IsTargetAvailable(entry)
+    if not entry then return false end
+    if entry.getRect then return entry.getRect() ~= nil end
+    local f = self:GetFrame(entry)
+    return f ~= nil and f:IsShown() and true or false
 end
 
 function R:GetPos(el)
