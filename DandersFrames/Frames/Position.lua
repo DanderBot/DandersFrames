@@ -18,6 +18,11 @@ local headerDebug = DF:MakeDebugPrinter("HEADERS")
 -- Console. Logging cost is one boolean check when disabled.
 -- ============================================================
 
+-- DandersMover is OPTIONAL: nil here means every routing check below falls through to the
+-- legacy movers unchanged. Resolved once at load; the lib is an OptionalDep so it has
+-- already registered with LibStub by now.
+local Mover = LibStub and LibStub("DandersMover-1.0", true)
+
 local function ShortCaller(level)
     -- Returns "filename:line" of the caller `level` frames up.
     -- level=2 -> direct caller of the function that calls ShortCaller.
@@ -2533,7 +2538,11 @@ function DF:UpdateRaidContainerPosition()
     end
 end
 
-function DF:UnlockFrames()
+-- `legacy` forces the old in-house overlay even when DandersMover is installed
+-- (/df unlock legacy). Every other caller -- the options Lock/Unlock button
+-- (Panel.lua:865), /df unlock -- passes nothing and gets the lib when it is present,
+-- which is why no GUI file changes for this.
+function DF:UnlockFrames(legacy)
     if InCombatLockdown() then
         DF:Err(L["Cannot unlock frames during combat."])
         return
@@ -2544,6 +2553,14 @@ function DF:UnlockFrames()
     -- so load the companion rather than let the shim no-op leave the movers up
     -- with no frames in them. Failure already reported by Ensure.
     if DF.EnsureOptionsLoaded and not DF:EnsureOptionsLoaded() then
+        return
+    end
+
+    -- Hand off to DandersMover. IsEnabled is checked too: with DF switched off in the
+    -- lib's settings, Mover:Unlock would build no proxies for us and the user would have
+    -- no way to move the frames at all -- fall back to the old overlay instead.
+    if Mover and not legacy and Mover:IsEnabled("DandersFrames", "party") then
+        Mover:Unlock("DandersFrames")
         return
     end
 
@@ -2691,11 +2708,24 @@ function DF:UnlockFrames()
 end
 
 function DF:LockFrames()
+    -- A DandersMover session owns the unlock: end it there and let the Locked callback
+    -- restore db.locked + release the test claim. Returning is not optional -- the legacy
+    -- teardown below indexes DF.moverFrame, which never gets created on the lib path.
+    if Mover and Mover:IsUnlocked() then
+        Mover:Lock()
+        return
+    end
+
     local db = DF:GetDB()
     db.locked = true
     DF.positionPanelMode = nil  -- Clear mode
-    
-    DF.moverFrame:Hide()
+
+    -- ⚠ Nil-guarded like every other DF.moverFrame touch in LockRaidFrames:
+    -- db.locked can now be false without the legacy overlay ever having been built
+    -- (a mover session set it), so this can be reached with no mover frame.
+    if DF.moverFrame then
+        DF.moverFrame:Hide()
+    end
 
     -- Restore permanent mover visibility (keeps container movable if enabled)
     DF:UpdatePermanentMoverVisibility()
@@ -2720,7 +2750,9 @@ function DF:LockFrames()
     end
 
     -- Stop any OnUpdate for snap preview
-    DF.moverFrame:SetScript("OnUpdate", nil)
+    if DF.moverFrame then
+        DF.moverFrame:SetScript("OnUpdate", nil)
+    end
     
     -- Hide snap preview lines
     DF:HideSnapPreview()
@@ -2821,6 +2853,14 @@ end
 -- has just finished rearranging their UI is worse than making them click Unlock.
 local function standDownForEditMode()
     if InCombatLockdown() then return end   -- Edit Mode is unreachable in combat; belt anyway
+
+    -- ☠ THE MOVER SESSION GOES FIRST. Its Locked callback restores db.locked /
+    -- db.raidLocked, so by the time the two blocks below run they correctly see the
+    -- frames as locked and skip LockFrames/LockRaidFrames -- which is what we want,
+    -- because those two would otherwise tear down a legacy overlay that was never built.
+    if Mover and Mover:IsUnlocked() then
+        Mover:Lock()
+    end
 
     local partyDb = DF.GetDB and DF:GetDB()
     if partyDb and not partyDb.locked then
