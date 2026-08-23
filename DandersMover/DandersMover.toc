@@ -2,6 +2,7 @@
 ## Title: DandersMover
 ## Notes: Shared mover and anchor system for addons. Drag, snap, anchor and undo any registered UI element.
 ## Author: Danders
+## RequiredDeps: DandersUI
 ## Version: v5.4.0-alpha.1
 ## IconTexture: Interface\AddOns\DandersMover\Media\DF_Icon
 ## SavedVariables: DandersMoverDB
@@ -16,7 +17,6 @@ Undo.lua
 Solver.lua
 Registry.lua
 Core.lua
-Theme.lua
 Grid.lua
 Proxy.lua
 Session.lua

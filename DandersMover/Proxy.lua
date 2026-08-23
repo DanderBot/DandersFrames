@@ -9,12 +9,15 @@ local addonName, NS = ...
 local P = { proxies = {}, zones = {}, zoneCount = 0, dragZones = {} }
 NS.Proxy = P
 
-local Registry, Solver, T, L = NS.Registry, NS.Solver, NS.Theme, NS.L
+local Registry, Solver, UI, L = NS.Registry, NS.Solver, NS.UI, NS.L
 local CreateFrame, UIParent, GetCursorPosition, GameTooltip = CreateFrame, UIParent, GetCursorPosition, GameTooltip
 local pairs, ipairs, format, sqrt, abs = pairs, ipairs, string.format, math.sqrt, math.abs
 
-local DEFAULT_ICON = T.DEFAULT_ICON
-local LINK_ICON = T.MEDIA .. "link"
+local MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
+local DEFAULT_ICON = MEDIA .. "DF_Icon"
+local LINK_ICON = MEDIA .. "link"
+local C_ANCHORED = { r = 0.55, g = 0.40, b = 0.85, a = 1 }
+local C_MUTED = UI.Colors.textDim
 local PROXIMITY = 100
 local MIN_PROXY = 24
 local C_ZONE_NEAR = { 0.3, 0.7, 1.0 }
@@ -98,13 +101,14 @@ end
 
 local function create(el)
     local b = CreateFrame("Button", nil, P:GetUnlockFrame(), "BackdropTemplate")
-    T.Backdrop(b, { 0.18, 0.612, 0.792, 0.25 }, T.C.accent)
+    local ac = UI:GetAccent()
+    UI:CreateElementBackdrop(b, { bgColor = { ac.r, ac.g, ac.b, 0.25 }, borderColor = { ac.r, ac.g, ac.b, 1 } })
     b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     b:RegisterForDrag("LeftButton")
     b:SetMovable(false)
     b:SetClampedToScreen(false)
-    b.title = T.Label(b, el.title, 11); b.title:SetPoint("CENTER", 0, 6)
-    b.coords = T.Label(b, "", 9); b.coords:SetPoint("CENTER", 0, -7); b.coords:SetTextColor(T.Unpack(T.C.muted))
+    b.title = UI:CreateLabel(b, { text = el.title, size = 11 }); b.title:SetPoint("CENTER", 0, 6)
+    b.coords = UI:CreateLabel(b, { size = 9, color = C_MUTED }); b.coords:SetPoint("CENTER", 0, -7)
     -- Owning addon's icon (top-left); falls back to the DF icon bundled with the lib.
     b.icon = b:CreateTexture(nil, "OVERLAY")
     b.icon:SetSize(14, 14); b.icon:SetPoint("TOPLEFT", 3, -3)
@@ -113,7 +117,7 @@ local function create(el)
     -- Link icon (bottom-left) while anchored.
     b.link = b:CreateTexture(nil, "OVERLAY")
     b.link:SetTexture(LINK_ICON); b.link:SetSize(12, 12); b.link:SetPoint("BOTTOMLEFT", 3, 3)
-    b.link:SetVertexColor(T.Unpack(T.C.anchored)); b.link:Hide()
+    b.link:SetVertexColor(C_ANCHORED.r, C_ANCHORED.g, C_ANCHORED.b); b.link:Hide()
     -- Centre crosshair.
     b.crossH = b:CreateTexture(nil, "OVERLAY"); b.crossH:SetColorTexture(1, 1, 1, 0.4); b.crossH:SetSize(16, 1); b.crossH:SetPoint("CENTER")
     b.crossV = b:CreateTexture(nil, "OVERLAY"); b.crossV:SetColorTexture(1, 1, 1, 0.4); b.crossV:SetSize(1, 16); b.crossV:SetPoint("CENTER")
@@ -168,10 +172,10 @@ function P:RefreshAll() for id in pairs(self.proxies) do self:Refresh(id) end en
 function P:Highlight(selectedId)
     for id, b in pairs(self.proxies) do
         local pos = Registry:GetPos(b.element)
-        local c = pos.anchor and T.C.anchored or T.C.accent
+        local c = pos.anchor and C_ANCHORED or UI:GetAccent()
         b.link:SetShown(pos.anchor ~= nil)
-        if id == selectedId then b:SetBackdropBorderColor(1, 1, 1, 1) else b:SetBackdropBorderColor(T.Unpack(c)) end
-        b:SetBackdropColor(c[1], c[2], c[3], 0.25)
+        if id == selectedId then b:SetBackdropBorderColor(1, 1, 1, 1) else b:SetBackdropBorderColor(c.r, c.g, c.b, 1) end
+        b:SetBackdropColor(c.r, c.g, c.b, 0.25)
     end
 end
 
@@ -199,13 +203,13 @@ function P:ShowTooltip(b)
     local addon = Registry:GetAddon(el.addon)
     GameTooltip:SetOwner(b, "ANCHOR_RIGHT")
     GameTooltip:AddLine(el.title, 1, 1, 1)
-    GameTooltip:AddLine(addon and addon.title or el.addon, T.C.muted[1], T.C.muted[2], T.C.muted[3])
+    GameTooltip:AddLine(addon and addon.title or el.addon, C_MUTED.r, C_MUTED.g, C_MUTED.b)
     local a = Registry:GetPos(el).anchor
     if a then
         local target = Registry:GetTarget(a.target)
         local name = target and target.title or L["(unavailable)"]
         local how = a.mode == "point" and format("%s → %s", a.point, a.relPoint) or format("%s/%s", a.edge, a.align)
-        GameTooltip:AddLine(format(L["Anchored to %s"], format("%s (%s)", name, how)), T.C.anchored[1], T.C.anchored[2], T.C.anchored[3])
+        GameTooltip:AddLine(format(L["Anchored to %s"], format("%s (%s)", name, how)), C_ANCHORED.r, C_ANCHORED.g, C_ANCHORED.b)
     end
     GameTooltip:AddLine(" ")
     GameTooltip:AddLine(L["Drag to move. Shift locks an axis."], 0.8, 0.8, 0.8)
@@ -223,7 +227,7 @@ local function zoneFrame(i)
     if not z then
         z = CreateFrame("Frame", nil, P:GetUnlockFrame(), "BackdropTemplate")
         z:SetFrameLevel(1)
-        T.Backdrop(z, { 0, 0, 0, 0 }, { 0, 0, 0, 0 })
+        UI:CreateElementBackdrop(z, { bgColor = { 0, 0, 0, 0 }, borderColor = { 0, 0, 0, 0 } })
         P.zones[i] = z
     end
     return z

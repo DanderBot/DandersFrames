@@ -12,6 +12,15 @@ Lib.callbacks = Lib.callbacks or LibStub("CallbackHandler-1.0"):New(Lib)
 NS.VERSION = (C_AddOns and C_AddOns.GetAddOnMetadata(addonName, "Version")) or "dev"
 
 local L = NS.L
+
+-- The shared UI toolkit. A hard dependency (RequiredDeps in the TOC), so this
+-- cannot be nil: LibStub itself would have failed to load first.
+NS.UI = LibStub("DandersUI-1.0"):NewHost("DandersMover", {
+    L     = L,
+    print = function(msg) NS:Print(msg) end,
+})
+NS.UI:SetAccent(0.18, 0.612, 0.792)   -- the mover's own blue, from the old Theme.C.accent
+
 local Registry, Solver = NS.Registry, NS.Solver
 local pairs, ipairs, type, xpcall, geterrorhandler = pairs, ipairs, type, xpcall, geterrorhandler
 local InCombatLockdown, CreateFrame, UIParent = InCombatLockdown, CreateFrame, UIParent
