@@ -30,7 +30,6 @@ local C_BODY = UI.Colors.panel          -- the slab itself
 local C_OUTLINE = UI.Colors.border      -- neutral hairline; the ROLE never colours it
 local PAD, GAP, TIGHT = UI.Space.section, UI.RowGap, UI.RowGapTight
 local DOT, DOT_RING = 9, 11             -- role dot, and the root ring behind it
-local SWATCH = 10                       -- legend colour swatch
 -- Only reached when the SV predate the setting; NS.DEFAULTS.snapDistance is the value.
 local PROXIMITY = 100
 local MIN_PROXY = 24
@@ -351,20 +350,25 @@ end
 
 -- ============================================================
 -- LEGEND
--- Docked top-centre for the session: what the three proxy colours mean plus
--- the modifier hints. Parented to the unlock frame, so suspend and lock hide
--- it with everything else.
+-- Docked top-centre for the session: what the three proxy DOTS mean plus the
+-- modifier hints. Same dot art and same slab as the proxies themselves, so the
+-- key and the thing it is a key to cannot drift apart. Parented to the unlock
+-- frame, so suspend and lock hide it with everything else.
 -- ============================================================
 local function buildLegend()
     local f = CreateFrame("Frame", "DandersMoverLegend", P:GetUnlockFrame(), "BackdropTemplate")
     f:SetFrameStrata("DIALOG")
-    UI:CreateElementBackdrop(f, { bgColor = UI.Colors.background })
+    UI:CreateElementBackdrop(f, {
+        bgColor     = { C_BODY.r, C_BODY.g, C_BODY.b, BODY_ALPHA },
+        borderColor = { C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1 },
+    })
     f:SetPoint("TOP", UIParent, "TOP", 0, -PAD)
 
     local function entry(prev, color, text)
         local swatch = f:CreateTexture(nil, "OVERLAY")
-        swatch:SetSize(SWATCH, SWATCH)
-        swatch:SetColorTexture(color.r, color.g, color.b, 1)
+        swatch:SetSize(DOT, DOT)
+        swatch:SetTexture(DOT_ICON)
+        swatch:SetVertexColor(color.r, color.g, color.b)
         local label = UI:CreateLabel(f, { text = text, size = 11 })
         if prev then swatch:SetPoint("LEFT", prev, "RIGHT", GAP, 0)
         else         swatch:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -PAD - 1) end
@@ -372,9 +376,9 @@ local function buildLegend()
         return label
     end
     f.entries = {}
-    f.entries[1] = entry(nil,          UI:GetAccent(), L["Free"])
-    f.entries[2] = entry(f.entries[1], C_ANCHORED,     L["Anchored"])
-    f.entries[3] = entry(f.entries[2], C_ROOT,         L["Anchor root"])
+    f.entries[1] = entry(nil,          C_FREE,     L["Free"])
+    f.entries[2] = entry(f.entries[1], C_ANCHORED, L["Anchored"])
+    f.entries[3] = entry(f.entries[2], C_ROOT,     L["Anchor root"])
 
     f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Right-click: lock"], size = 10, color = C_MUTED })
     f.hint:SetPoint("TOP", f, "TOP", 0, -PAD - 12 - TIGHT)
@@ -395,7 +399,7 @@ local function buildLegend()
     function f:Layout()
         local row = PAD
         for i, label in ipairs(self.entries) do
-            row = row + SWATCH + TIGHT - 2 + (label:GetStringWidth() or 0) + (i < #self.entries and GAP or 0)
+            row = row + DOT + TIGHT - 2 + (label:GetStringWidth() or 0) + (i < #self.entries and GAP or 0)
         end
         row = row + PAD
         local hintW = (self.hint:GetStringWidth() or 0) + PAD * 2
