@@ -11,7 +11,7 @@ NS.Session = Sess
 local Registry, Solver, Proxy, Grid, L = NS.Registry, NS.Solver, NS.Proxy, NS.Grid, NS.L
 local Undo = LibStub("DandersUndo-1.0")
 local Lib = NS.Lib
-local pairs, ipairs, format, wipe = pairs, ipairs, string.format, wipe
+local pairs, ipairs, format, wipe, sqrt = pairs, ipairs, string.format, wipe, math.sqrt
 local InCombatLockdown, UIParent, IsShiftKeyDown, IsControlKeyDown = InCombatLockdown, UIParent, IsShiftKeyDown, IsControlKeyDown
 local C_Timer = C_Timer
 
@@ -87,7 +87,7 @@ function Sess:Unlock(filter)
     -- up showing, not what was on screen a moment earlier. Snapshots are taken
     -- above so the record is captured before any consumer-side mutation.
     Lib.callbacks:Fire("Unlocked")
-    Proxy:Build(filter)
+    Proxy:Build(filter, true)     -- animate: slabs fade in with a stagger
     Grid:Refresh()
     self:EnableKeyboard(true)
     -- Anything the consumer only shows on the next frame (secure headers, test
@@ -119,7 +119,7 @@ function Sess:Finish(mode)
         end
     end
     self:EnableKeyboard(false)
-    Proxy:DestroyAll()
+    Proxy:DismissAll()            -- fade out, then destroy (combat suspend stays instant)
     Grid:Hide()
     panel("Hide")
     wipe(self.snapshots)
@@ -315,8 +315,40 @@ function Sess:Reset(el)
     commit(el, before, L["Reset %s"])
 end
 
-function Sess:Undo() if self.undo then self.undo:Undo() end end
-function Sess:Redo() if self.undo then self.undo:Redo() end end
+-- Copy this element's record onto its declared twin (def.twin = "addon:key"):
+-- party container onto raid container, pinned N onto the other mode's N. The
+-- twin takes the whole record -- anchor included, unless carrying it over
+-- would create a cycle, in which case the twin lands free at the same
+-- coordinates. One undo entry, named for the twin.
+function Sess:CopyToTwin(el)
+    local twin = el.twin and Registry:Get(el.twin)
+    if not twin then return end
+    local dst = Registry:GetPos(twin)
+    local before = NS.CopyPos(dst)
+    NS.CopyPos(Registry:GetPos(el), dst)
+    if dst.anchor and Registry:WouldCreateCycle(twin.id, dst.anchor.target) then dst.anchor = nil end
+    if dst.anchor then NS:ResolveElement(twin) end
+    apply(twin, "copy")
+    commit(twin, before, L["Copy to %s"])
+end
+
+-- The toast needs the entry's label, and Undo/Redo POP the entry -- so Peek
+-- before popping, and only toast when something was actually undone/redone.
+function Sess:Undo()
+    if not self.undo then return end
+    local label = self.undo:Peek()
+    if self.undo:Undo() and label then
+        Proxy:ShowToast(format(L["Undid: %s"], label))
+    end
+end
+
+function Sess:Redo()
+    if not self.undo then return end
+    local label = self.undo:PeekRedo()
+    if self.undo:Redo() and label then
+        Proxy:ShowToast(format(L["Redid: %s"], label))
+    end
+end
 
 -- ============================================================
 -- DRAG
@@ -326,6 +358,16 @@ function Sess:BeginDrag(el)
     self.dragBefore = NS.CopyPos(pos)
     self.dragStartPos = NS.CopyPos(pos)
     self.dragStartCx, self.dragStartCy = visualCenter(el, pos)
+    -- Anchored: arm the tether. Pull is measured from the RESOLVED anchor
+    -- position, which is exactly where the element sits at drag start (the
+    -- record was solved). Proxy reads this table to draw the strain.
+    if pos.anchor then
+        self.tether = { target = pos.anchor.target,
+                        homeX = self.dragStartCx, homeY = self.dragStartCy,
+                        state = "held", strain = 0, snapped = false }
+    else
+        self.tether = nil
+    end
 end
 
 function Sess:DragTo(el, cx, cy)
@@ -357,6 +399,21 @@ function Sess:DragTo(el, cx, cy)
     end
     cx, cy = Solver.ClampToScreen(cx, cy, w, h, UIParent:GetWidth(), UIParent:GetHeight())
     Grid:ShowMeasure(cx, cy, w, h)
+    -- Tether strain-and-snap: pulling an anchored element past the thresholds
+    -- (Solver.TETHER_HOLD/SNAP x snapDistance, measured from the resolved
+    -- anchor position) first strains the tether, then snaps it -- the element
+    -- is free from that moment and EndDrag's spring-back no longer applies.
+    local t = self.tether
+    if t and not t.snapped then
+        local dist = sqrt((cx - t.homeX) ^ 2 + (cy - t.homeY) ^ 2)
+        local snapR = db.snapDistance or SNAP_DISTANCE
+        t.state = Solver.TetherState(dist, snapR)
+        t.strain = Solver.TetherStrain(dist, snapR)
+        if t.state == "snapped" then
+            t.snapped = true
+            Proxy:SnapTether(el)
+        end
+    end
     local pos = Registry:GetPos(el)
     pos.anchor = nil
     pos.x, pos.y = Solver.DragDelta(self.dragStartPos, self.dragStartCx, self.dragStartCy, cx, cy)
@@ -368,17 +425,20 @@ end
 
 function Sess:EndDrag(el, cx, cy, zone)
     local before = self.dragBefore or NS.CopyPos(Registry:GetPos(el))
+    local tether = self.tether
     self.dragBefore, self.dragStartPos, self.dragStartCx, self.dragStartCy = nil, nil, nil, nil
+    self.tether = nil
     local pos = Registry:GetPos(el)
     if zone and Registry:WouldCreateCycle(el.id, zone.target) then zone = nil end
     if zone then
         pos.anchor = { target = zone.target, edge = zone.edge, align = zone.align, offsetX = 0, offsetY = 0 }
         pos.point = "CENTER"
         NS:ResolveElement(el)
-    elseif before.anchor then
-        -- Dragging can only re-anchor, never free (DandersCDM rule): dropped
-        -- outside every zone, an anchored element springs back. Detach is the
-        -- panel's job. Nothing changed, so no undo entry.
+    elseif before.anchor and not (tether and tether.snapped) then
+        -- The anchor SURVIVED the drag (never pulled past the snap threshold):
+        -- dropped outside every zone, it springs back and re-solves. Nothing
+        -- changed, so no undo entry. A snapped tether skips this branch -- the
+        -- element detached mid-drag and the drop commits it as free.
         NS.CopyPos(before, pos)
         NS:ResolveElement(el)
         apply(el, "reapply")
@@ -386,7 +446,8 @@ function Sess:EndDrag(el, cx, cy, zone)
         return
     end
     apply(el, zone and "anchor" or "drag")
-    commit(el, before, zone and L["Anchor %s"] or L["Move %s"])
+    local label = zone and L["Anchor %s"] or (before.anchor and L["Detach %s"] or L["Move %s"])
+    commit(el, before, label)
     self:Select(el.id)
 end
 

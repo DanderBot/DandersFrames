@@ -211,6 +211,34 @@ local function guarded(fn)
 end
 
 -- ============================================================
+-- OPEN SETTINGS (the mover panel's Configure button)
+-- ============================================================
+-- Each element's def gets an openSettings that lands the user on that
+-- element's own options page, in that element's mode:
+--  * DF:EnsureOptionsLoaded() pulls in the LoD companion (GUI/LoadOptions.lua:38).
+--  * DF:ToggleGUI() (DandersFrames_Options/GUI/Controls.lua:3616) builds and
+--    shows the window when it is not already up.
+--  * GUI.PartyButton / GUI.RaidButton :Click() is how the codebase itself
+--    switches GUI.SelectedMode programmatically (buttons published at
+--    DandersFrames_Options/GUI/Panel.lua:689/694; precedent at Panel.lua:315).
+--    Safe during an open mover session: the departing mode's lock/test
+--    cleanup in those handlers only touches the mode being LEFT, which is
+--    never the one the session claimed.
+--  * GUI.SelectTab(pageId) (DandersFrames_Options/GUI/Panel.lua:1710) opens
+--    the page.
+local function openOptionsPage(mode, pageId)
+    if not (DF.EnsureOptionsLoaded and DF:EnsureOptionsLoaded()) then return end
+    if not (DF.GUIFrame and DF.GUIFrame:IsShown()) then DF:ToggleGUI() end
+    local GUI = DF.GUI
+    if not (GUI and DF.GUIFrame and DF.GUIFrame:IsShown()) then return end
+    if mode and GUI.SelectedMode ~= mode then
+        local btn = (mode == "raid") and GUI.RaidButton or GUI.PartyButton
+        if btn and btn.Click then btn:Click() end
+    end
+    if GUI.SelectTab then GUI.SelectTab(pageId) end
+end
+
+-- ============================================================
 -- REGISTRATION
 -- ============================================================
 local function registerElements()
@@ -245,6 +273,8 @@ local function registerElements()
         getRect   = partyRect,
         group     = L["Party"],
         isRelevant = function() return Bridge:IsScopeRelevant("party") end,
+        openSettings = function() openOptionsPage("party", "general_frame") end,
+        twin      = ADDON_KEY .. ":raid",
     })
 
     Mover:Register(ADDON_KEY, "raid", {
@@ -260,6 +290,8 @@ local function registerElements()
         getRect   = raidRect,
         group     = L["Raid"],
         isRelevant = function() return Bridge:IsScopeRelevant("raid") end,
+        openSettings = function() openOptionsPage("raid", "general_frame") end,
+        twin      = ADDON_KEY .. ":party",
     })
 
     -- "Whichever group frames are up right now." Saves every other addon from having to
@@ -294,6 +326,7 @@ local function registerElements()
             local db = DF.GetPersonalTargetedDB and DF:GetPersonalTargetedDB() or DF:GetDB()
             return db and db.personalTargetedSpellEnabled and true or false
         end,
+        openSettings = function() openOptionsPage("party", "indicators_personal_targeted") end,
     })
 
     Mover:Register(ADDON_KEY, "targetedList", {
@@ -312,6 +345,7 @@ local function registerElements()
             local db = DF:GetDB("party")
             return Bridge:IsScopeRelevant("party") and db and db.targetedListEnabled and true or false
         end,
+        openSettings = function() openOptionsPage("party", "indicators_targetedlist") end,
     })
 end
 
@@ -396,6 +430,10 @@ local function pinnedDef(mode, i)
             local set = pf and pf.GetSetForMode and pf:GetSetForMode(i, isRaid)
             return (set and set.enabled) and true or false
         end,
+        openSettings = function() openOptionsPage(mode, "general_pinnedframes") end,
+        -- The same index in the other mode. The panel only offers the copy
+        -- while that twin is registered, so a missing opposite set is fine.
+        twin      = ADDON_KEY .. ":" .. PINNED_KEY[isRaid and "party" or "raid"] .. i,
     }
 end
 
@@ -473,6 +511,18 @@ local function syncLockButtons()
 end
 
 Mover.RegisterCallback(Bridge, "Unlocked", function()
+    -- An open DF options window would sit over the session. Remember which
+    -- page/mode it showed and close it -- the window is DF.GUIFrame (built in
+    -- DandersFrames_Options/GUI/Panel.lua CreateGUI), closed with the same
+    -- plain :Hide() its own close button uses (Panel.lua:155). Deliberately
+    -- NOT reopened on Locked: the user chose to end the session, not to get
+    -- the window back. The mover panel's Configure button (openOptionsPage
+    -- above) is the way back in, on the selected element's own page.
+    if DF.GUIFrame and DF.GUIFrame:IsShown() then
+        Bridge.closedGUIPage = DF.GUI and DF.GUI.CurrentPageName or nil
+        Bridge.closedGUIMode = DF.GUI and DF.GUI.SelectedMode or nil
+        DF.GUIFrame:Hide()
+    end
     -- Test frames live in the load-on-demand companion. `/mover` can open a session
     -- without going through DF:UnlockFrames, so load it here too or the proxies sit over
     -- an empty screen.

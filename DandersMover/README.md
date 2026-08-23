@@ -65,7 +65,7 @@ is nothing to measure.
 | Call | Purpose |
 |---|---|
 | `Mover:RegisterAddon(name, { title, icon })` | Group your elements in the UI. `icon` (texture path) is shown on your proxies; omitted → the bundled DandersFrames icon |
-| `Mover:Register(addon, key, def)` | Make a frame movable. `def`: `title`, `frame` or `getFrame`, `getPos`, `onChanged(pos, reason)`, optional `default`, `secure`, `getSize` (w, h in UIParent units), `getRect`, `anchorable`, `group` |
+| `Mover:Register(addon, key, def)` | Make a frame movable. `def`: `title`, `frame` or `getFrame`, `getPos`, `onChanged(pos, reason)`, optional `default`, `secure`, `getSize` (w, h in UIParent units), `getRect`, `anchorable`, `group`, `openSettings` (function — the panel shows a **Configure** button for the element that calls it; open your own settings UI for the element there), `twin` (`"addon:key"` of the element's counterpart, e.g. the raid container for the party container — the panel shows a **Copy to <twin>** button that copies the whole record onto the twin, re-solves it and pushes one undo entry; the anchor is dropped if carrying it over would create a loop) |
 | `Mover:RegisterAnchorTarget(addon, key, { title, frame or getFrame })` | Something others can anchor to but that is not itself movable. Also takes `getSize` / `getRect` |
 | `Mover:RefreshAnchorTarget(addon, key)` | Call when a `getFrame` target now resolves to a different frame |
 | `Mover:Apply(addon, key)` | Re-solve and re-fire `onChanged` (e.g. after you change the frame's scale) |
@@ -77,18 +77,19 @@ is nothing to measure.
 
 `RegistryChanged` fires after every registration or unregistration — element, anchor target or addon. `addon`/`key` name what changed; **both nil** means a wholesale change (the login queue draining through `Registry:Flush`). Consumers churn these in bursts, so debounce (`C_Timer.After(0, ...)`) if you only want to redraw once. The settings list and an open unlock session both listen, so an element that appears or disappears mid-session is reflected straight away.
 
-`reason` values: `drag nudge anchor detach reset center undo redo discard reapply parent`.
+`reason` values: `drag nudge anchor detach reset center copy undo redo discard reapply parent`.
 
 Slash: `/mover` toggle, `/mover config` settings, `/mover demo` built-in demo.
 
 ## Behaviour rules worth knowing
 
-- Dragging an anchored element can only **re-anchor** it: dropped outside every snap zone it springs back. Use the panel's Detach to free it.
+- Dragging an anchored element shows a **tether** to its target. Within 3× the snap distance of its resolved anchor position the anchor holds: dropped outside every snap zone it springs back (dropping into a zone re-anchors). Pull further and the tether strains (reddens and thins); past 4× the snap distance it **snaps** — the element is free from that moment and the drop commits one "Detach" undo entry. The panel's Detach still frees it without the drag. Selecting or hovering a slab also shows its tether; hovering shows the whole chain (its parent's and all of its children's).
 - Hidden frames are never snap targets. If your element is normally hidden (combat-only, raid-only), listen for the `Unlocked` / `Locked` callbacks and show it for the session — the lib never touches your frame's visibility.
 - `isRelevant = function() -> bool` on `Register` / `RegisterAnchorTarget`: absent = relevant. Irrelevant elements get no proxy in an unfiltered session and are never snap targets (children anchored to them hold). A key named in an `Unlock` filter is forced relevant. Erroring callbacks count as relevant. `pointLocked = true` on `Register` hides the panel's 9-point picker (the consumer derives `point`).
 - A target counts as *available* when it has a `getRect` and that `getRect` returns a rect, or when it has no `getRect` and its frame exists and is shown. A `getRect` that returns `nil` is how you say "not meaningfully on screen right now", and it wins even if the backing frame is technically shown. Unavailable targets are never offered as snap targets, and anything anchored to one holds its last position instead of jumping — it re-solves the next time you call `RefreshAnchorTarget` or `Apply` while the target is available again.
 - A drag snaps to the **nearest** free zone whose landing position is within the **Snap distance** setting (Settings › Snapping, default 25, 0–400) of where the element is now — measured centre to centre, i.e. how far it would jump on drop. The distance is independent of the element's size, so a wide raid container and a single icon snap from the same distance. The zone highlight uses the same radius, so a zone that lights up is a zone that will take the drop.
 - Drags, nudges and X/Y edits are clamped so the visible rect stays on screen.
-- Proxies are dark slabs; the coloured dot and left edge give the role — host accent = free, purple = anchored, green ring = anchor root. Selection is a white outline; a faded slab means the real frame is hidden.
+- Proxies are dark slabs; the coloured dot and left edge give the role — host accent = free, purple = anchored, green ring = anchor root. On slabs too narrow for both, the addon icon wins and the dot drops (the left edge still carries the role, and a root's green ring moves onto the icon). Selection is a white outline; a faded slab means the real frame is hidden.
 - Hold Shift while dragging to move horizontally only, Ctrl to move vertically only (both held = free drag). A nudge (arrow keys or the panel arrows) steps by 1; Shift makes it 10, Ctrl 100.
-- While a session is open the unlock overlay captures the mouse across the whole screen: left-click on empty space deselects, right-click anywhere locks, and the world/camera behind it is not interactable — lock to interact with the world.
+- Hold Alt (while not dragging) to peek: the slabs, strip and panel fade almost out so you can see the UI underneath; release restores them.
+- While a session is open the unlock overlay captures the mouse across the whole screen: left-click on empty space deselects, and the world/camera behind it is not interactable. Lock the session to get the screen back: press Esc, use the top strip's Save & Exit / Discard, or type `/mover`.

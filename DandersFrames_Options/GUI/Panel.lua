@@ -106,6 +106,14 @@ function DF:CreateGUI()
     CreatePanelBackdrop(frame)
     frame:Hide()
     DF.GUIFrame = frame
+
+    -- Entrance fade (DandersUI UI.Fx, reached through the GUI host). OnShow
+    -- covers EVERY path that shows the window -- DF:ToggleGUI, the test-mode
+    -- reopen (TestMode.lua) and Core.lua's debug path. The matching fade-OUT
+    -- lives on the close button below and on the DF:ToggleGUI wrapper at the
+    -- foot of this file; Esc (UISpecialFrames) hides directly and stays
+    -- instant, as does the mover bridge's close-on-unlock.
+    frame:HookScript("OnShow", function(f) GUI.Fx.FadeIn(f, 0.12) end)
     
     -- Allow closing with Escape key
     tinsert(UISpecialFrames, "DandersFramesGUI")
@@ -152,7 +160,11 @@ function DF:CreateGUI()
     end
     
     -- Close button with icon
-    local closeBtn = GUI:CreateCloseButton(frame, { size = 20, onClick = function() frame:Hide() end })
+    local closeBtn = GUI:CreateCloseButton(frame, { size = 20, onClick = function()
+        -- Fade, then hide. FadeOut's cancel semantics make this safe against a
+        -- re-Show mid-fade (the deferred Hide is skipped).
+        GUI.Fx.FadeOut(frame, 0.1, function() frame:Hide() end)
+    end })
     closeBtn:SetPoint("TOPRIGHT", -8, -5)
     closeBtn:SetFrameStrata("FULLSCREEN_DIALOG")
     closeBtn:SetFrameLevel(210)
@@ -2549,4 +2561,33 @@ function DF:CreateGUI()
             SelectTab(firstCat.children[1].tabName)
         end
     end
+end
+
+-- ============================================================
+-- FADED CLOSE FOR /df
+-- DF:ToggleGUI (GUI/Controls.lua:3616) hides an open window instantly on the
+-- close half of its toggle. Wrap it here -- this file loads after Controls.lua
+-- (companion TOC order) -- so `/df` on an open window fades it out (0.1s,
+-- DandersUI UI.Fx) before hiding, matching the close button above.
+-- Guards:
+--  * `/df` again while the fade-out runs REOPENS (cancels the fade and fades
+--    back in) instead of stacking a second close -- a double-toggle can never
+--    strand the window mid-fade.
+--  * Esc (UISpecialFrames) and any direct :Hide() stay instant; hiding
+--    mid-fade stops the animation and FadeOut skips its deferred Hide.
+--  * The open half is untouched -- it delegates to the original, so mode
+--    detection, accent, changelog-on-update all behave exactly as before.
+-- ============================================================
+local origToggleGUI = DF.ToggleGUI
+function DF:ToggleGUI(...)
+    local f = DF.GUIFrame
+    if f and f:IsShown() then
+        if f.fxOut and f.fxOut:IsPlaying() then
+            GUI.Fx.FadeIn(f, 0.12)
+            return
+        end
+        GUI.Fx.FadeOut(f, 0.1, function() f:Hide() end)
+        return
+    end
+    return origToggleGUI(self, ...)
 end

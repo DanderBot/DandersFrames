@@ -16,6 +16,7 @@ NS.Panel = Pn
 
 local Registry, Sess, Proxy, Solver, UI, L = NS.Registry, NS.Session, NS.Proxy, NS.Solver, NS.UI, NS.L
 local CreateFrame, UIParent, IsShiftKeyDown, IsControlKeyDown = CreateFrame, UIParent, IsShiftKeyDown, IsControlKeyDown
+local xpcall, geterrorhandler = xpcall, geterrorhandler
 local GetTime, C_Timer = GetTime, C_Timer
 local format, tonumber, ipairs, pairs, floor, max, min = string.format, tonumber, ipairs, pairs, math.floor, math.max, math.min
 
@@ -82,6 +83,21 @@ local function build()
     })
     f.btnSettings:SetPoint("TOPRIGHT", -PAD, hy)
 
+    -- Consumer settings entry: only shown when the selected element's def has
+    -- openSettings (Refresh). Distinct from the Settings button beside it,
+    -- which opens the LIB's own settings window.
+    f.btnConfigure = UI:CreateButton(f, {
+        text = L["Configure"], width = 62, height = 18, style = "ghost",
+        tooltip = { title = L["Configure"], lines = { L["Open this element's own settings."] } },
+        onClick = function()
+            local el = selectedElement()
+            if el and el.openSettings then xpcall(el.openSettings, geterrorhandler()) end
+        end,
+    })
+    f.btnConfigure:SetPoint("RIGHT", f.btnSettings, "LEFT", -TIGHT, 0)
+    f.btnConfigure:Hide()
+
+    f.headerY = hy
     f.title = UI:CreateLabel(f, { size = 12, color = UI.Colors.text })
     f.title:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ICON + TIGHT - 2, hy)
     f.title:SetPoint("TOPRIGHT", f.btnSettings, "TOPLEFT", -TIGHT, 0)
@@ -196,13 +212,24 @@ local function build()
     })
     f.btnUndo, f.btnRedo = hist[1], hist[2]
 
-    local fin = buttonRow(f, row(CTA_H, 0), CTA_H, {
+    local fin = buttonRow(f, row(CTA_H), CTA_H, {
         { text = L["Save & Exit"], style = "primary", onClick = function() Sess:Finish("save") end },
         { text = L["Discard"], tone = "danger", onClick = function() Sess:Finish("discard") end },
     })
     f.btnSave, f.btnDiscard = fin[1], fin[2]
 
-    f:SetHeight(-y + PAD)
+    -- Copy-to-twin: full-width bottom row, only for elements whose def names a
+    -- twin (Refresh shows it and grows the panel by the row).
+    f.btnCopy = UI:CreateButton(f, {
+        width = CW, height = BTN_H, fitText = false,
+        onClick = function() local el = selectedElement(); if el then Sess:CopyToTwin(el) end end,
+    })
+    f.btnCopy:SetPoint("TOPLEFT", PAD, row(BTN_H, 0))
+    f.btnCopy:Hide()
+
+    f.fullH = -y + PAD
+    f.baseH = f.fullH - BTN_H - GAP
+    f:SetHeight(f.baseH)
     f:Hide()
     return f
 end
@@ -325,16 +352,19 @@ function Pn:Dock()
     elseif side == "above" then f:SetPoint("BOTTOM", proxy, "TOP", 0, DOCK_GAP)
     else f:SetPoint("TOPLEFT", proxy, "TOPRIGHT", DOCK_GAP, 0) end
 
-    -- Entrance: fade + slide in from the dock side (the panel emerges from the
-    -- proxy's edge onto its anchor). Target changed while the panel was
-    -- already up: a quick fade-swap, no slide. Same target: nothing -- Dock
-    -- runs on every Refresh and must not flicker the panel.
+    -- Entrance: pop from behind the proxy -- scale up from 0.92 with the scale
+    -- originating at the docked edge, sliding from the proxy's side onto the
+    -- anchor, ease-out (Fx.PopIn). Target changed while the panel was already
+    -- up: a quick fade-swap, no pop. Same target: nothing -- Dock runs on
+    -- every Refresh and must not flicker the panel.
     local wasShown = f:IsShown()
     if not wasShown then
-        local ox, oy = 0, 0
-        if side == "right" then ox = -8 elseif side == "left" then ox = 8
-        elseif side == "below" then oy = 8 elseif side == "above" then oy = -8 end
-        NS.Fx.FadeIn(f, 0.12, ox, oy)
+        local ox, oy, origin = 0, 0, "CENTER"
+        if side == "right" then ox, origin = -8, "LEFT"
+        elseif side == "left" then ox, origin = 8, "RIGHT"
+        elseif side == "below" then oy, origin = 8, "TOP"
+        elseif side == "above" then oy, origin = -8, "BOTTOM" end
+        NS.Fx.PopIn(f, 0.12, ox, oy, 0.92, origin)
     elseif self.dockedTo ~= Sess.selected then
         NS.Fx.FadeIn(f, 0.08)
     end
@@ -350,6 +380,13 @@ function Pn:Refresh()
     local pos = Registry:GetPos(el)
 
     f.title:SetText(el.title)
+    -- Configure only exists for elements whose def offers openSettings; the
+    -- title gives up the room while the extra button is up.
+    local canConfigure = el.openSettings ~= nil
+    f.btnConfigure:SetShown(canConfigure)
+    f.title:ClearAllPoints()
+    f.title:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ICON + TIGHT - 2, f.headerY)
+    f.title:SetPoint("TOPRIGHT", canConfigure and f.btnConfigure or f.btnSettings, "TOPLEFT", -TIGHT, 0)
     local addon = Registry:GetAddon(el.addon)
     local icon = addon and addon.icon or (UI.MEDIA .. "DF_Icon")
     if f.icon:SetTexture(icon) == false then f.icon:SetTexture(UI.MEDIA .. "DF_Icon") end
@@ -383,5 +420,17 @@ function Pn:Refresh()
 
     f.btnUndo:SetEnabled(Sess.undo and Sess.undo:CanUndo() or false)
     f.btnRedo:SetEnabled(Sess.undo and Sess.undo:CanRedo() or false)
+
+    -- Copy-to-twin row: shown only while the twin is actually registered (a
+    -- pinned set's opposite-mode twin can be missing).
+    local twin = el.twin and Registry:Get(el.twin) or nil
+    if twin then
+        f.btnCopy:SetText(format(L["Copy to %s"], twin.title))
+        f.btnCopy:Show()
+        f:SetHeight(f.fullH)
+    else
+        f.btnCopy:Hide()
+        f:SetHeight(f.baseH)
+    end
     self:Dock()
 end

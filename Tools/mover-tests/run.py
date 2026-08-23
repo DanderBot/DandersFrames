@@ -24,6 +24,11 @@ run(HERE / "shim.lua")
 run(LIBS / "LibStub" / "LibStub.lua")
 run(LIBS / "CallbackHandler-1.0" / "CallbackHandler-1.0.lua")
 ns = lua.table()
+# Fx lives in DandersUI (UI.Fx). Load the canonical copy the way the embedded
+# lib would land it -- onto NS.__DandersUI -- so the mover's Fx.lua alias
+# below finds it (headless runs never load DandersUI/Core.lua or a host).
+ns["__DandersUI"] = lua.table()
+run(HERE.parents[1] / "DandersUI" / "Fx.lua", "DandersMover", ns)
 for name in ("Locales/enUS.lua", "Undo.lua", "Solver.lua", "Fx.lua", "Registry.lua"):
     p = ADDON / name
     if p.exists():

@@ -310,3 +310,35 @@ function S.ProximityFactor(dist, maxDist)
     if dist >= maxDist then return 0 end
     return 1 - dist / maxDist
 end
+
+-- ============================================================
+-- ANCHOR TETHER
+-- Pull-out thresholds for dragging an anchored element, as multiples of the
+-- snapDistance setting: within HOLD x snapDistance of the RESOLVED anchor
+-- position the anchor is kept (the drop springs back), between HOLD x and
+-- SNAP x the tether strains, and past SNAP x it snaps -- the element detaches
+-- mid-drag. Multiples of the one reach setting the user already tunes, so a
+-- bigger snap radius also means a longer tether.
+-- ============================================================
+S.TETHER_HOLD = 3
+S.TETHER_SNAP = 4
+
+-- "held" | "strained" | "snapped" for a drag `dist` px out from the resolved
+-- anchor position. snapDistance 0 turns frame snapping's reach off entirely,
+-- so the tether is unbreakable there rather than hair-triggered.
+function S.TetherState(dist, snapDistance)
+    if not snapDistance or snapDistance <= 0 then return "held" end
+    if dist <= snapDistance * S.TETHER_HOLD then return "held" end
+    if dist <= snapDistance * S.TETHER_SNAP then return "strained" end
+    return "snapped"
+end
+
+-- How hard the tether is being pulled: 0 up to the strain threshold, rising to
+-- 1 at the snap point. Drives the strain colour lerp.
+function S.TetherStrain(dist, snapDistance)
+    if not snapDistance or snapDistance <= 0 then return 0 end
+    local a, b = snapDistance * S.TETHER_HOLD, snapDistance * S.TETHER_SNAP
+    if dist <= a then return 0 end
+    if dist >= b then return 1 end
+    return (dist - a) / (b - a)
+end

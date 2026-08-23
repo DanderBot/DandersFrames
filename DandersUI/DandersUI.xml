@@ -2,6 +2,7 @@
 ..\FrameXML\UI.xsd">
 	<Script file="Core.lua"/>
 	<Script file="Theme.lua"/>
+	<Script file="Fx.lua"/>
 	<Script file="Fonts.lua"/>
 	<Script file="Widgets.lua"/>
 	<Script file="Popup.lua"/>

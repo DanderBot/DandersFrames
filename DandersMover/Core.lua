@@ -41,6 +41,7 @@ NS.DEFAULTS = {
     -- for a raid container and for a single icon. Also the zone-highlight radius.
     snapDistance = 25, zoneShowDistance = 50,
     keyboardNudge = true, panelSide = "auto", showHiddenMovers = true, showOtherAddons = false, debug = false,
+    stripCollapsed = false,               -- top strip folded to its slim tab
     addons = {}, demo = {},
 }
 

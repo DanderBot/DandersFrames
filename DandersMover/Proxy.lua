@@ -6,13 +6,13 @@ local addonName, NS = ...
 -- The proxy is what the user drags; the real frame only ever moves through
 -- the consumer's onChanged. Also owns the snap-zone visual pool.
 -- ============================================================
-local P = { proxies = {}, zones = {}, zoneCount = 0, dragZones = {} }
+local P = { proxies = {}, zones = {}, zoneCount = 0, dragZones = {}, tethers = {}, tetherCount = 0 }
 NS.Proxy = P
 
 local Registry, Solver, UI, L = NS.Registry, NS.Solver, NS.UI, NS.L
-local CreateFrame, UIParent, GetCursorPosition, GameTooltip, C_Timer = CreateFrame, UIParent, GetCursorPosition, GameTooltip, C_Timer
-local IsShiftKeyDown, IsControlKeyDown = IsShiftKeyDown, IsControlKeyDown
-local pairs, ipairs, format, sqrt, max = pairs, ipairs, string.format, math.sqrt, math.max
+local CreateFrame, UIParent, GetCursorPosition, GameTooltip, C_Timer, GetTime = CreateFrame, UIParent, GetCursorPosition, GameTooltip, C_Timer, GetTime
+local IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown = IsShiftKeyDown, IsControlKeyDown, IsAltKeyDown
+local pairs, ipairs, format, sqrt, max, abs, tsort = pairs, ipairs, string.format, math.sqrt, math.max, math.abs, table.sort
 
 local MEDIA = "Interface\\AddOns\\DandersMover\\Media\\"
 local DEFAULT_ICON = MEDIA .. "DF_Icon"
@@ -44,8 +44,10 @@ local INSET, ITEM = 4, 4                -- slab padding, gap between inline item
 local BODY_ALPHA, HOVER_ALPHA = 0.95, 1
 local WEIGHT, SEL_WEIGHT = 1, 1         -- outline thickness; selection is colour, not weight
 -- Below these the slab cannot hold everything, so parts drop out in this order:
--- the coords first, then the addon icon, then all but a shortened title.
-local NO_COORDS_H, NO_COORDS_W, NO_ICON_W, TITLE_ONLY_W = 28, 120, 80, 60
+-- the coords first, then the role DOT -- the addon icon wins the space (the
+-- left edge already carries the role colour) -- then everything but the
+-- floating title. The icon itself never drops.
+local NO_COORDS_H, NO_COORDS_W, NO_DOT_W, TITLE_ONLY_W = 28, 120, 80, 60
 -- Snap zones. Same accent as the free-role dot, because a zone IS where a free
 -- drop would land; occupied ones go red. Hover is the only place a zone borrows
 -- the selection white, and the kit has no white token, so that one is a literal.
@@ -54,6 +56,11 @@ local C_ZONE_OCCUPIED = UI.Colors.danger
 local C_ZONE_HOVER = { r = 1, g = 1, b = 1 }
 local ZONE_WEIGHT, ZONE_HOVER_WEIGHT = 1, 2
 local TAG_PAD = 3                        -- padding of the floating title pill
+-- Session-open entrance: each slab fades in over FADE_IN with STAGGER between
+-- slabs in build order. Lock/save/discard fades the whole overlay out over
+-- FADE_OUT and only then tears it down (DismissAll). Combat suspend stays
+-- instant -- Session:Suspend hides the unlock frame directly.
+local FADE_IN, FADE_OUT, STAGGER = 0.12, 0.1, 0.02
 local ZONE_DASH_W = 2                    -- dashed-edge thickness
 local DASH_H, DASH_V = MEDIA .. "dash_h", MEDIA .. "dash_v"
 
@@ -65,20 +72,39 @@ function P:GetUnlockFrame()
     local f = CreateFrame("Frame", "DandersMoverUnlockFrame", UIParent)
     f:SetAllPoints(UIParent)
     f:SetFrameStrata("HIGH")
-    -- The overlay owns clicks on empty space: left deselects, right locks (the
-    -- proxies' own right-click, extended to the whole screen). Proxies, panel
+    -- The overlay owns clicks on empty space: left deselects. Proxies, panel
     -- and legend are children at higher frame levels, so they keep taking
     -- their own clicks first. While a session is open the overlay therefore
     -- captures the mouse and the world behind it is unreachable -- documented
-    -- in the README; locking gives the screen back.
+    -- in the README; locking (Esc, the strip, /mover) gives the screen back.
     f:EnableMouse(true)
     f:SetScript("OnMouseDown", function(_, button)
-        if button == "RightButton" then NS.Session:Lock()
-        else NS.Session:Select(nil) end
+        if button == "LeftButton" then P:ClickSelect() end
+    end)
+    -- Alt-peek. The event is only registered while a session is up (Build /
+    -- DestroyAll), so this cannot fire outside one.
+    f:SetScript("OnEvent", function(_, _, key)
+        if key == "LALT" or key == "RALT" then P:SetPeek(IsAltKeyDown()) end
     end)
     f:Hide()
     self.unlockFrame = f
     return f
+end
+
+-- Hold Alt to peek at the UI underneath: everything the session put on screen
+-- (slabs, strip and panel are all children of the unlock frame) drops to
+-- PEEK_ALPHA while Alt is held; release restores. Ignored while a drag is in
+-- flight -- the drag is the one thing that must stay fully visible.
+local PEEK_ALPHA = 0.1
+
+function P:SetPeek(on)
+    on = on and true or false
+    if on then
+        for _, b in pairs(self.proxies) do if b.dragging then return end end
+    end
+    if self.peeking == on then return end
+    self.peeking = on
+    NS.Fx.FadeTo(self:GetUnlockFrame(), on and PEEK_ALPHA or 1, 0.1)
 end
 
 function P:CursorPos()
@@ -123,6 +149,9 @@ local function onDragStart(self)
         s.coords:SetText(format("%d, %d", fx, fy))
         P:UpdateZones(fx, fy, zone)
         P:UpdateLegendDodge(fx, fy, s:GetWidth() or 0, s:GetHeight() or 0)
+        -- After the SetPoint above, so the tether's slab endpoint has no
+        -- one-frame lag behind the cursor.
+        P:UpdateTethers()
         s.lastX, s.lastY, s.lastZone = fx, fy, zone
     end)
 end
@@ -139,9 +168,59 @@ local function onDragStop(self)
     NS.Session:EndDrag(self.element, self.lastX, self.lastY, self.lastZone)
 end
 
-local function onClick(self, button)
-    if button == "RightButton" then NS.Session:Lock() return end
-    NS.Session:Select(self.element.id)
+-- Both the proxies' own clicks and the overlay's empty-space clicks route
+-- through ClickSelect, so a click on a stack of overlapping proxies can cycle
+-- through them even though the top proxy is the one that took the click.
+local function onClick(self)
+    P:ClickSelect()
+end
+
+-- ============================================================
+-- OVERLAP CYCLING
+-- The first click on a point selects the topmost proxy under it; clicking
+-- again at (about) the same point cycles to the next one down, wrapping
+-- around. The cycle resets when the click lands more than CYCLE_MOVE from the
+-- last one or after CYCLE_TIMEOUT seconds. A click over nothing deselects.
+-- ============================================================
+local CYCLE_MOVE, CYCLE_TIMEOUT = 10, 2
+local cycle = { x = nil, y = nil, at = 0, index = 0 }
+
+-- Every shown proxy whose rect covers (x, y), topmost first: higher frame
+-- level wins, ties go to the later-created button (which renders on top).
+local function hitsAt(x, y)
+    local out = {}
+    local ux, uy = UIParent:GetCenter()
+    for _, b in pairs(P.proxies) do
+        if b:IsShown() then
+            local cx, cy = b:GetCenter()
+            if cx then
+                cx, cy = cx - ux, cy - uy
+                local hw, hh = (b:GetWidth() or 0) / 2, (b:GetHeight() or 0) / 2
+                if x >= cx - hw and x <= cx + hw and y >= cy - hh and y <= cy + hh then
+                    out[#out + 1] = b
+                end
+            end
+        end
+    end
+    tsort(out, function(a, b)
+        local la, lb = a:GetFrameLevel() or 0, b:GetFrameLevel() or 0
+        if la ~= lb then return la > lb end
+        return (a.createIndex or 0) > (b.createIndex or 0)
+    end)
+    return out
+end
+
+function P:ClickSelect()
+    local x, y = self:CursorPos()
+    local hits = hitsAt(x, y)
+    if #hits == 0 then NS.Session:Select(nil) return end
+    local now = GetTime and GetTime() or 0
+    local same = cycle.x ~= nil
+        and abs(x - cycle.x) <= CYCLE_MOVE and abs(y - cycle.y) <= CYCLE_MOVE
+        and (now - cycle.at) <= CYCLE_TIMEOUT
+    if same then cycle.index = cycle.index % #hits + 1 else cycle.index = 1 end
+    cycle.x, cycle.y, cycle.at = x, y, now
+    NS.Session:Select(hits[cycle.index].element.id)
 end
 
 
@@ -152,15 +231,15 @@ local function layout(b, anchored)
     local w = b:GetWidth() or 0
     local h = b:GetHeight() or 0
     local titleOnly = w < TITLE_ONLY_W
-    local showIcon = not titleOnly and w >= NO_ICON_W
+    local showDot = not titleOnly and w >= NO_DOT_W
     local showCoords = not titleOnly and w >= NO_COORDS_W and h >= NO_COORDS_H
     local showLink = anchored and not titleOnly
 
     -- The thresholds are only the fast path. A long title can fail to fit a slab
     -- wide enough to keep the normal layout, and its LEFT->RIGHT anchors would
     -- ellipsise it -- so MEASURE the text and fall back in the same order the
-    -- thresholds do: coords out, then the icon, then the centred overflow title.
-    -- The title itself never truncates.
+    -- thresholds do: coords out, then the dot, then the centred overflow title.
+    -- The title itself never truncates, and the icon never drops.
     if b.layoutTitle ~= b.element.title then b.title:SetText(b.element.title) end
     if not titleOnly then
         -- Unbounded = the full text's width even while the FontString is
@@ -169,41 +248,54 @@ local function layout(b, anchored)
         if b.title.GetUnboundedStringWidth then titleW = b.title:GetUnboundedStringWidth() end
         titleW = titleW or b.title:GetStringWidth() or 0
         local function avail()
-            local left = EDGE_W + INSET + DOT + ITEM
-            if showIcon then left = left + ICON_SZ + ITEM end
+            local left = EDGE_W + INSET + ICON_SZ + ITEM
+            if showDot then left = left + DOT + ITEM end
             local right = INSET
             if showCoords then right = right + (b.coords:GetStringWidth() or 0) + ITEM end
             if showLink then right = right + LINK_SZ + ITEM end
             return w - left - right
         end
         if titleW > avail() then showCoords = false end
-        if titleW > avail() then showIcon = false end
-        if titleW > avail() then titleOnly, showIcon, showCoords, showLink = true, false, false, false end
+        if titleW > avail() then showDot = false end
+        if titleW > avail() then titleOnly, showDot, showCoords, showLink = true, false, false, false end
     end
 
     -- Dragging re-runs this for EVERY proxy on every frame (RefreshAll ->
     -- Refresh -> Highlight), so the anchors and the SetText only get touched
     -- when the answer actually changed. Which parts are visible, plus the
     -- title, is the whole of the layout's input.
-    local key = (titleOnly and 1 or 0) + (showIcon and 2 or 0)
+    local key = (titleOnly and 1 or 0) + (showDot and 2 or 0)
               + (showCoords and 4 or 0) + (showLink and 8 or 0)
+    b.showDot = showDot           -- applyLook's ring placement reads this
     if b.layoutKey == key and b.layoutTitle == b.element.title then return end
     b.layoutKey, b.layoutTitle = key, b.element.title
 
-    b.icon:SetShown(showIcon)
+    b.icon:Show()                 -- explicit for pooled reuse and stubs
+    b.dot:SetShown(showDot)
     b.coords:SetShown(showCoords)
     b.link:SetShown(showLink)
 
     -- Anchored whether or not they are shown: a region with no points is a
     -- region nothing else can anchor OFF, and the title does exactly that.
+    -- With the dot dropped the icon takes its place flush left, and the root
+    -- ring re-homes onto whichever of the two is the leftmost marker.
     b.icon:ClearAllPoints()
-    b.icon:SetPoint("LEFT", b.dot, "RIGHT", ITEM, 0)
+    if showDot then b.icon:SetPoint("LEFT", b.dot, "RIGHT", ITEM, 0)
+    else            b.icon:SetPoint("LEFT", b, "LEFT", EDGE_W + INSET, 0) end
+    b.root:ClearAllPoints()
+    if showDot then
+        b.root:SetPoint("CENTER", b.dot, "CENTER")
+        b.root:SetSize(DOT_RING, DOT_RING)
+    else
+        b.root:SetPoint("CENTER", b.icon, "CENTER")
+        b.root:SetSize(ICON_SZ + 4, ICON_SZ + 4)
+    end
     b.link:ClearAllPoints()
     if showCoords then b.link:SetPoint("RIGHT", b.coords, "LEFT", -ITEM, 0)
     else               b.link:SetPoint("RIGHT", b, "RIGHT", -INSET, 0) end
 
     b.title:ClearAllPoints()
-    b.title:SetPoint("LEFT", showIcon and b.icon or b.dot, "RIGHT", ITEM, 0)
+    b.title:SetPoint("LEFT", b.icon, "RIGHT", ITEM, 0)
     if showLink then        b.title:SetPoint("RIGHT", b.link, "LEFT", -ITEM, 0)
     elseif showCoords then  b.title:SetPoint("RIGHT", b.coords, "LEFT", -ITEM, 0)
     else                    b.title:SetPoint("RIGHT", b, "RIGHT", -INSET, 0) end
@@ -242,10 +334,16 @@ local function applyLook(b, selected, hovered)
     local c = pos.anchor and C_ANCHORED or (isRoot and C_ROOT or C_FREE)
     b.edge:SetColorTexture(c.r, c.g, c.b, 1)
     b.dot:SetVertexColor(c.r, c.g, c.b)
-    -- The ring marks the one case the dot cannot: a root that is ITSELF anchored,
-    -- whose dot is already wearing the anchored purple.
-    b.root:SetShown(isRoot and pos.anchor ~= nil)
     layout(b, pos.anchor ~= nil)
+    -- With the dot on show, the ring marks the one case the dot cannot: a root
+    -- that is ITSELF anchored, whose dot is already wearing the anchored
+    -- purple. On a slab too narrow for the dot the ICON carries the ring for
+    -- EVERY root, or the root state would vanish with the dot (layout homes
+    -- the ring on whichever marker is showing).
+    local ringOn
+    if b.showDot then ringOn = isRoot and pos.anchor ~= nil
+    else ringOn = isRoot end
+    b.root:SetShown(ringOn and true or false)
 
     -- A floating title is on-demand chrome: shown only while this slab is the
     -- one being looked at or moved, so stacked anchors do not pile pills on
@@ -293,7 +391,7 @@ local function create(el)
         borderColor = { C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1 },
     })
     b.outlineWeight = WEIGHT
-    b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    b:RegisterForClicks("LeftButtonUp")
     b:RegisterForDrag("LeftButton")
     b:SetMovable(false)
     b:SetClampedToScreen(false)
@@ -315,7 +413,9 @@ local function create(el)
     b.root:SetPoint("CENTER", b.dot, "CENTER")
 
     -- Owning addon's icon; falls back to the DF icon bundled with the lib.
-    b.icon = b:CreateTexture(nil, "OVERLAY")
+    -- Sublevel 2 (like the dot) so the root ring at sublevel 1 sits BEHIND it
+    -- when a narrow slab homes the ring on the icon instead of the dot.
+    b.icon = b:CreateTexture(nil, "OVERLAY", nil, 2)
     b.icon:SetSize(ICON_SZ, ICON_SZ)
     local addon = Registry:GetAddon(el.addon)
     if b.icon:SetTexture(addon and addon.icon or DEFAULT_ICON) == false then b.icon:SetTexture(DEFAULT_ICON) end
@@ -352,6 +452,10 @@ local function create(el)
         GameTooltip:Hide()
     end)
     b.element = el
+    -- Creation order breaks z-ties in the overlap cycle: at equal frame level
+    -- the later-created button renders on top.
+    P.createCounter = (P.createCounter or 0) + 1
+    b.createIndex = P.createCounter
     return b
 end
 
@@ -359,8 +463,18 @@ end
 -- { addon = <string|nil>, keySet = <set|nil> }. The initiator's keys outside keySet
 -- get NO proxy at all, not a dimmed one (a party unlock must not put raid proxies on
 -- screen); other addons' elements get one only with showOtherAddons (Registry:WantsProxy).
-function P:Build(filter)
+-- animate: session open only -- slabs fade in with a small stagger in build
+-- order. Rebuilds mid-session come through without it and stay instant.
+function P:Build(filter, animate)
     local f = self:GetUnlockFrame()
+    -- A lock's dismiss fade may still be running (lock -> unlock inside 0.1s):
+    -- invalidate its deferred teardown and restore the frame it was fading.
+    self.dismissToken = (self.dismissToken or 0) + 1
+    NS.Fx.Cancel(f)
+    f:EnableMouse(true)
+    self.peeking = false          -- Cancel above restored alpha 1
+    if f.RegisterEvent then f:RegisterEvent("MODIFIER_STATE_CHANGED") end
+    local n = 0
     for _, el in ipairs(Registry:SortedElements()) do
         if Registry:WantsProxy(filter, el) then
             local frame = Registry:GetFrame(el)
@@ -370,6 +484,23 @@ function P:Build(filter)
                 self.proxies[el.id] = b
                 self:Refresh(el.id)
                 b:Show()
+                if animate and C_Timer then
+                    n = n + 1
+                    b:SetAlpha(0)
+                    local id = el.id
+                    C_Timer.After((n - 1) * STAGGER, function()
+                        -- The pool can be torn down and rebuilt while this
+                        -- timer is pending; only fade the exact button that is
+                        -- still the live proxy for the id.
+                        if self.proxies[id] == b and b:IsShown() then
+                            NS.Fx.FadeIn(b, FADE_IN)
+                        end
+                    end)
+                else
+                    -- A rebuild can reuse a slab whose entrance was interrupted
+                    -- mid-fade; make sure it rests at full alpha.
+                    NS.Fx.Cancel(b)
+                end
             end
         end
     end
@@ -410,6 +541,7 @@ function P:Highlight(selectedId)
     for id, b in pairs(self.proxies) do
         applyLook(b, id == selectedId, b.hovered)
     end
+    self:UpdateTethers()
 end
 
 function P:Remove(id)
@@ -423,9 +555,190 @@ end
 
 function P:DestroyAll()
     for id in pairs(self.proxies) do self:Remove(id) end
-    if self.unlockFrame then self.unlockFrame:Hide() end
+    if self.unlockFrame then
+        if self.unlockFrame.UnregisterEvent then self.unlockFrame:UnregisterEvent("MODIFIER_STATE_CHANGED") end
+        self.peeking = false
+        self.unlockFrame:SetAlpha(1)
+        self.unlockFrame:Hide()
+    end
     self:HideZones()
+    self:HideTethers()
     self:HideLegend()
+    if self.toast then NS.Fx.Cancel(self.toast); self.toast:Hide() end
+end
+
+-- Lock/save/discard: fade the whole overlay (slabs, legend, panel) out, then
+-- destroy. The token guards the deferred teardown -- a new session can open
+-- before the fade lands, and its freshly built proxies must not be destroyed
+-- by the previous session's callback (Build bumps the token and cancels the
+-- fade). Mouse goes off immediately so the screen is usable during the fade.
+function P:DismissAll()
+    local f = self.unlockFrame
+    if not f or not f:IsShown() then self:DestroyAll() return end
+    local token = (self.dismissToken or 0) + 1
+    self.dismissToken = token
+    f:EnableMouse(false)
+    self.peeking = false          -- the fade below plays from full alpha
+    NS.Fx.FadeOut(f, FADE_OUT, function()
+        if self.dismissToken == token and not (NS.Session and NS.Session:IsActive()) then
+            self:DestroyAll()
+        end
+    end)
+end
+
+-- ============================================================
+-- ANCHOR TETHER
+-- A thin line from an anchored slab's centre to the nearest point on its
+-- anchor target's rect (the centre when the slab sits inside it). Shown while
+-- the slab is selected, hovered or being dragged; hovering also lights the
+-- whole chain -- the hovered slab's parent link AND every child's link
+-- (alias-aware via Registry:Children). Subtle lavender at rest; the dragged
+-- slab's tether lerps to the danger red and thins as it strains
+-- (Session.tether), and flashes once when it snaps.
+--
+-- Drawn with Line objects (frame:CreateLine), not a rotated texture:
+-- TextureBase:SetRotation rotates the texture inside its axis-aligned quad,
+-- so a long thin quad cannot draw a diagonal.
+-- ============================================================
+local C_TETHER = UI.Colors.accent
+local C_TETHER_STRAIN = UI.Colors.danger
+local TETHER_W, TETHER_STRAIN_W = 2, 1
+local TETHER_ALPHA = 0.7
+
+-- Pooled line on the unlock frame (under the slabs, which are child frames).
+-- nil in a headless stub without CreateLine support.
+local function tetherLine(pool, i)
+    local t = pool[i]
+    if t == nil then
+        local f = P:GetUnlockFrame()
+        t = f.CreateLine and f:CreateLine(nil, "ARTWORK") or false
+        pool[i] = t
+    end
+    return t or nil
+end
+
+-- Proxy centre in UIParent-centre units.
+local function proxyCenter(b)
+    local cx, cy = b:GetCenter()
+    if not cx then return nil end
+    local ux, uy = UIParent:GetCenter()
+    return cx - ux, cy - uy
+end
+
+-- Nearest point on a centre-based rect from (cx, cy); the rect's centre when
+-- the point lies inside it.
+local function nearestOnRect(rect, cx, cy)
+    local l, r = rect.x - rect.w / 2, rect.x + rect.w / 2
+    local b, t = rect.y - rect.h / 2, rect.y + rect.h / 2
+    local px = cx < l and l or (cx > r and r or cx)
+    local py = cy < b and b or (cy > t and t or cy)
+    if px == cx and py == cy then return rect.x, rect.y end
+    return px, py
+end
+
+local function lerp(a, b, f) return a + (b - a) * f end
+
+-- Lay one tether for element el / slab b. Returns the new pool watermark.
+-- drag is Session.tether: only the slab actually being dragged reads it (the
+-- working record's anchor is nil'd during a drag, so the target comes from
+-- there), everyone else reads their own record.
+local function drawTether(n, el, b, drag)
+    local targetId, strain
+    if b.dragging then
+        if not drag or drag.snapped then return n end   -- snapped: tether gone
+        targetId, strain = drag.target, drag.strain or 0
+    else
+        local a = Registry:GetPos(el).anchor
+        if not a then return n end
+        targetId, strain = a.target, 0
+    end
+    local target = Registry:GetTarget(targetId)
+    local rect = target and Registry:GetRect(target)
+    if not rect then return n end
+    local cx, cy = proxyCenter(b)
+    if not cx then return n end
+    local tx, ty = nearestOnRect(rect, cx, cy)
+    local line = tetherLine(P.tethers, n + 1)
+    if not line then return n end
+    line:SetStartPoint("CENTER", UIParent, cx, cy)
+    line:SetEndPoint("CENTER", UIParent, tx, ty)
+    line:SetThickness(strain > 0 and TETHER_STRAIN_W or TETHER_W)
+    line:SetColorTexture(lerp(C_TETHER.r, C_TETHER_STRAIN.r, strain),
+                         lerp(C_TETHER.g, C_TETHER_STRAIN.g, strain),
+                         lerp(C_TETHER.b, C_TETHER_STRAIN.b, strain),
+                         lerp(TETHER_ALPHA, 1, strain))
+    line:Show()
+    return n + 1
+end
+
+-- Which slabs show their parent tether: the selected one, any hovered one
+-- (plus all of the hovered one's children -- the chain highlight), and the
+-- one being dragged. Called from Highlight, so every selection/hover change
+-- and every drag frame comes through here.
+function P:UpdateTethers()
+    local sess = NS.Session
+    local drag = sess and sess.tether
+    local want = {}
+    local selected = sess and sess.selected
+    if selected and self.proxies[selected] then want[selected] = true end
+    for id, b in pairs(self.proxies) do
+        if b:IsShown() then
+            if b.hovered then
+                want[id] = true
+                for _, child in ipairs(Registry:Children(id)) do
+                    if self.proxies[child.id] then want[child.id] = true end
+                end
+            end
+            if b.dragging then want[id] = true end
+        end
+    end
+    local n = 0
+    for id in pairs(want) do
+        local el = Registry:Get(id)
+        local b = self.proxies[id]
+        if el and b and b:IsShown() then n = drawTether(n, el, b, drag) end
+    end
+    for i = n + 1, #self.tethers do
+        local t = self.tethers[i]
+        if t then t:Hide() end
+    end
+    self.tetherCount = n
+end
+
+function P:HideTethers()
+    for i = 1, #self.tethers do
+        local t = self.tethers[i]
+        if t then t:Hide() end
+    end
+    self.tetherCount = 0
+    if self.tetherFlash then self.tetherFlash:Hide() end
+end
+
+-- The snap moment: paint a dedicated line (the pool relays every frame) full
+-- danger red along the breaking tether and let it fade out. UpdateTethers
+-- stops drawing the live one from now on (Session.tether.snapped).
+function P:SnapTether(el)
+    local b = self.proxies[el.id]
+    local drag = NS.Session and NS.Session.tether
+    if not b or not drag then return end
+    local target = Registry:GetTarget(drag.target)
+    local rect = target and Registry:GetRect(target)
+    local cx, cy = proxyCenter(b)
+    if not rect or not cx then return end
+    if self.tetherFlash == nil then
+        local f = self:GetUnlockFrame()
+        self.tetherFlash = f.CreateLine and f:CreateLine(nil, "ARTWORK") or false
+    end
+    local line = self.tetherFlash
+    if not line then return end
+    local tx, ty = nearestOnRect(rect, cx, cy)
+    NS.Fx.Cancel(line)
+    line:SetStartPoint("CENTER", UIParent, cx, cy)
+    line:SetEndPoint("CENTER", UIParent, tx, ty)
+    line:SetThickness(TETHER_W)
+    line:SetColorTexture(C_TETHER_STRAIN.r, C_TETHER_STRAIN.g, C_TETHER_STRAIN.b, 1)
+    line:Show()
+    NS.Fx.FadeOut(line, 0.25, function() line:Hide() end)
 end
 
 -- ============================================================
@@ -486,12 +799,20 @@ local function buildLegend()
             f.btnGrid:SetActive(NS.db.showGrid)
             if NS.Settings then NS.Settings:Refresh() end
         end })
-    f.btnGrid:SetPoint("RIGHT", f, "TOPRIGHT", -PAD, -PAD - LEGEND_ROW / 2)
+    -- Collapse chevron at the strip's right end: the strip folds away to a
+    -- slim tab at the top screen edge (state remembered in DandersMoverDB).
+    f.btnCollapse = UI:CreateGlyphButton(f, {
+        texture = UI.MEDIA .. "Icons\\expand_less", size = LEGEND_ROW, iconSize = 12,
+        tooltip = { title = L["Collapse"], lines = { L["Fold the strip away to a small tab at the top of the screen."] } },
+        onClick = function() P:SetStripCollapsed(true) end,
+    })
+    f.btnCollapse:SetPoint("RIGHT", f, "TOPRIGHT", -PAD, -PAD - LEGEND_ROW / 2)
+    f.btnGrid:SetPoint("RIGHT", f.btnCollapse, "LEFT", -TIGHT, 0)
     f.btnSettings:SetPoint("RIGHT", f.btnGrid, "LEFT", -TIGHT, 0)
     f.btnDiscard:SetPoint("RIGHT", f.btnSettings, "LEFT", -TIGHT, 0)
     f.btnSave:SetPoint("RIGHT", f.btnDiscard, "LEFT", -TIGHT, 0)
 
-    f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Right-click: lock"], size = 10, color = C_MUTED })
+    f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Esc: lock"], size = 10, color = C_MUTED })
     f.hint:SetPoint("TOP", f, "TOP", 0, -PAD - LEGEND_ROW - TIGHT)
 
     -- Third row, consumer-initiated sessions only: other addons' enabled+relevant
@@ -515,7 +836,7 @@ local function buildLegend()
         -- Dots left, buttons right, a double gap between the halves so the
         -- strip reads as key | verbs and not one run.
         row = row + GAP * 2
-        for _, b in ipairs({ self.btnSave, self.btnDiscard, self.btnSettings, self.btnGrid }) do
+        for _, b in ipairs({ self.btnSave, self.btnDiscard, self.btnSettings, self.btnGrid, self.btnCollapse }) do
             row = row + (b:GetWidth() or 0) + TIGHT
         end
         row = row - TIGHT + PAD
@@ -537,8 +858,42 @@ local function buildLegend()
     return f
 end
 
+-- The collapsed strip: a slim tab hugging the top screen edge. Clicking it
+-- brings the full strip back.
+local function buildStripTab()
+    local t = CreateFrame("Button", "DandersMoverLegendTab", P:GetUnlockFrame(), "BackdropTemplate")
+    t:SetFrameStrata("DIALOG")
+    t:SetSize(44, 14)
+    t:SetPoint("TOP", UIParent, "TOP", 0, 0)
+    UI:CreateElementBackdrop(t, {
+        bgColor     = { C_BODY.r, C_BODY.g, C_BODY.b, BODY_ALPHA },
+        borderColor = { C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1 },
+    })
+    t.icon = t:CreateTexture(nil, "OVERLAY")
+    t.icon:SetTexture(UI.MEDIA .. "Icons\\expand_more")
+    t.icon:SetSize(12, 12)
+    t.icon:SetPoint("CENTER")
+    t.icon:SetVertexColor(C_MUTED.r, C_MUTED.g, C_MUTED.b)
+    t:SetScript("OnEnter", function(s) s.icon:SetVertexColor(1, 1, 1) end)
+    t:SetScript("OnLeave", function(s) s.icon:SetVertexColor(C_MUTED.r, C_MUTED.g, C_MUTED.b) end)
+    t:SetScript("OnClick", function() P:SetStripCollapsed(false) end)
+    return t
+end
+
+function P:SetStripCollapsed(collapsed)
+    NS.db.stripCollapsed = collapsed and true or false
+    self:ShowLegend()
+end
+
 function P:ShowLegend()
     if not self.legend then self.legend = buildLegend() end
+    if not self.stripTab then self.stripTab = buildStripTab() end
+    if NS.db.stripCollapsed then
+        self.legend:Hide()
+        self.stripTab:Show()
+        return
+    end
+    self.stripTab:Hide()
     local f = self.legend
     f:Layout()
     if C_Timer then C_Timer.After(0, function() if f:IsShown() then f:Layout() end end) end
@@ -548,6 +903,7 @@ end
 
 function P:HideLegend()
     if self.legend then self.legend:Hide() end
+    if self.stripTab then self.stripTab:Hide() end
 end
 
 -- ------------------------------------------------------------
@@ -617,6 +973,49 @@ function P:ResetLegendDodge()
 end
 
 -- ============================================================
+-- UNDO TOAST
+-- A small transient readout under the top strip naming what an Undo/Redo just
+-- did. Re-showing replaces the text and restarts the hold clock (token), so a
+-- run of Ctrl+Z presses reads as one toast that keeps up.
+-- ============================================================
+local TOAST_HOLD = 1.5
+
+local function buildToast()
+    local t = CreateFrame("Frame", "DandersMoverToast", P:GetUnlockFrame(), "BackdropTemplate")
+    t:SetFrameStrata("DIALOG")
+    UI:CreateElementBackdrop(t, {
+        bgColor     = { C_BODY.r, C_BODY.g, C_BODY.b, BODY_ALPHA },
+        borderColor = { C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1 },
+    })
+    t.text = UI:CreateLabel(t, { size = 11, color = UI.Colors.text })
+    t.text:SetPoint("CENTER")
+    t:Hide()
+    return t
+end
+
+function P:ShowToast(text)
+    if not self.toast then self.toast = buildToast() end
+    local t = self.toast
+    t.text:SetText(text)
+    t:SetSize(max(80, (t.text:GetStringWidth() or 0) + PAD * 2), 22)
+    t:ClearAllPoints()
+    -- Near the strip: under it when expanded, under the slim tab otherwise.
+    local anchor = (self.legend and self.legend:IsShown()) and self.legend or self.stripTab
+    if anchor and anchor:IsShown() then t:SetPoint("TOP", anchor, "BOTTOM", 0, -TIGHT)
+    else t:SetPoint("TOP", UIParent, "TOP", 0, -PAD) end
+    NS.Fx.FadeIn(t, 0.1)
+    local token = (self.toastToken or 0) + 1
+    self.toastToken = token
+    if C_Timer then
+        C_Timer.After(TOAST_HOLD, function()
+            if self.toastToken == token and t:IsShown() then
+                NS.Fx.FadeOut(t, 0.2, function() t:Hide() end)
+            end
+        end)
+    end
+end
+
+-- ============================================================
 -- TOOLTIP
 -- ============================================================
 function P:ShowTooltip(b)
@@ -636,8 +1035,8 @@ function P:ShowTooltip(b)
     GameTooltip:AddLine(" ")
     GameTooltip:AddLine(L["Drag to move. Shift locks to horizontal, Ctrl to vertical."], 0.8, 0.8, 0.8)
     GameTooltip:AddLine(L["Click to select, arrow keys to nudge (Shift ×10, Ctrl ×100)."], 0.8, 0.8, 0.8)
-    if a then GameTooltip:AddLine(L["Drop into a zone to re-anchor; Detach frees it."], 0.8, 0.8, 0.8) end
-    GameTooltip:AddLine(L["Right-click to lock."], 0.8, 0.8, 0.8)
+    if a then GameTooltip:AddLine(L["Drop into a zone to re-anchor; pull far away or Detach to free it."], 0.8, 0.8, 0.8) end
+    GameTooltip:AddLine(L["Press Esc or use the top strip to lock."], 0.8, 0.8, 0.8)
     GameTooltip:Show()
 end
 
