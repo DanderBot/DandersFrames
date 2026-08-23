@@ -9,6 +9,7 @@
 ### Bug Fixes
 
 ### Changes
+- The settings-panel toolkit now lives in a bundled companion addon, so every Danders addon shares one look and gets fixes at the same time.
 
 ## [5.3.0]
 
