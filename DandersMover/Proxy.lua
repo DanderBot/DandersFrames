@@ -376,7 +376,10 @@ function P:UpdateZones(cx, cy, hovered)
     -- The same radius the drag snaps on (Session:DragTo), so a zone that lights up
     -- is a zone that will take the drop. Reading it per call, not per session: the
     -- slider can move while the settings window is open mid-unlock.
-    local radius = (NS.db and NS.db.snapDistance) or PROXIMITY
+    -- Zones appear within zoneShowDistance (never less than the snap distance),
+    -- so the user sees where a drop would land before it actually grabs.
+    local snapR = (NS.db and NS.db.snapDistance) or PROXIMITY
+    local radius = math.max(snapR, (NS.db and NS.db.zoneShowDistance) or snapR)
     local closest, closestD = nil, radius
     for i = 1, self.zoneCount do
         local z = self.zones[i].zone

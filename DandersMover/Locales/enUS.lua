@@ -59,6 +59,7 @@ L["Shift: horizontal · Ctrl: vertical · Right-click: lock"] = true
 L["Show grid"] = true
 L["Show movers for hidden frames"] = true
 L["Show other addons' movers"] = true
+L["Show snap zones within"] = true
 L["Snap distance"] = true
 L["Snap to frames"] = true
 L["Snap to grid"] = true

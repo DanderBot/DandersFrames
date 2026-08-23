@@ -156,6 +156,14 @@ local function build()
         get = function() return NS.db.snapDistance end,
         set = function(v) NS.db.snapDistance = v end,
     })
+    -- Zones light up before they grab: this radius is how far out they appear.
+    -- Clamped to at least the snap distance so a zone that will take the drop is
+    -- always visible.
+    f.zoneShowSlider = UI:CreateSlider(snap.content, {
+        label = L["Show snap zones within"], min = 0, max = 600, step = 10,
+        get = function() return NS.db.zoneShowDistance end,
+        set = function(v) NS.db.zoneShowDistance = v end,
+    })
     stack(snap, {
         toggle(snap.content, L["Snap to grid"], "snapToGrid"),
         toggle(snap.content, L["Snap to frames"], "snapToFrames"),
@@ -163,6 +171,7 @@ local function build()
         toggle(snap.content, L["Show grid"], "showGrid", function() Grid:Refresh() end),
         f.gridSlider,
         f.snapDistSlider,
+        f.zoneShowSlider,
     })
     place(snap)
 
@@ -294,6 +303,7 @@ function St:Refresh()
     for _, cb in ipairs(f.cb) do cb:Refresh() end
     f.gridSlider:RefreshValue()
     f.snapDistSlider:RefreshValue()
+    f.zoneShowSlider:RefreshValue()
     f.sideRow:Refresh()
 
     clearRows(f)
