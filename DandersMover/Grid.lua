@@ -86,7 +86,13 @@ end
 -- Preview lines live on the grid frame but are shown even when the grid is off.
 -- lineX / lineY are the grid or screen lines the drag snapped to; nil on an
 -- axis that did not snap hides that line.
+--
+-- Off by default (NS.db.showSnapPreview): a full-height crosshair on every
+-- snapped drag frame is louder than the frame being dragged. Gated here rather
+-- than at the call site so every caller gets the setting for free; HidePreview
+-- stays ungated so turning it off mid-session clears whatever is up.
 function G:ShowPreview(lineX, lineY)
+    if not NS.db.showSnapPreview then return end
     local f = ensure()
     if not f:IsShown() then f:Show(); if not NS.db.showGrid then for _, l in ipairs(f.lines) do l:Hide() end end end
     if lineX then
@@ -162,7 +168,9 @@ local function measureAxis(line, label, horizontal, a, b, cross)
     line:Show(); label:Show()
 end
 
+-- Off by default (NS.db.showMeasures); same gating rule as ShowPreview.
 function G:ShowMeasure(cx, cy, w, h)
+    if not NS.db.showMeasures then return end
     local f = ensure()
     ensureMeasure(f)
     if not f:IsShown() then f:Show(); if not NS.db.showGrid then for _, l in ipairs(f.lines) do l:Hide() end end end

@@ -40,6 +40,11 @@ NS.DEFAULTS = {
     -- snap zone claims it. Fixed, not a fraction of the element: the same distance
     -- for a raid container and for a single icon. Also the zone-highlight radius.
     snapDistance = 25, zoneShowDistance = 50,
+    -- Both OFF by default: the measure lines and the snap-preview crosshairs
+    -- are diagnostics for someone lining a frame up to the pixel, and having
+    -- them fire on every drag frame made the screen busier than the thing
+    -- being dragged.
+    showMeasures = false, showSnapPreview = false,
     keyboardNudge = true, panelSide = "auto", showHiddenMovers = true, showOtherAddons = false, debug = false,
     stripCollapsed = false,               -- top strip folded to its slim tab
     addons = {}, demo = {},
