@@ -801,10 +801,9 @@ function DF:CreateRaidMoverFrame()
             x, y = DF:SnapToGrid(x, y)
         end
 
-        -- Save position
-        if DF.LogRaidAnchorWrite then DF:LogRaidAnchorWrite("RaidMover:OnDragStop", x, y) end
-        db.raidAnchorX = x
-        db.raidAnchorY = y
+        -- Save position through the ONE funnel (record + anchorX/anchorY mirror, plus
+        -- the active-layout routing and the RAIDPOS log line).
+        DF:SetPositionRecord("raid", { point = "CENTER", x = x, y = y }, "RaidMover:OnDragStop")
 
         -- If editing an auto profile, also save as override
         if DF.AutoProfilesUI and DF.AutoProfilesUI:IsEditing() then
