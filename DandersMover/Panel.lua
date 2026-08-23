@@ -29,7 +29,9 @@ local PAD, GAP, TIGHT = UI.Space.section, UI.RowGap, UI.RowGapTight
 local CW = W - PAD * 2            -- content width
 local DOCK_GAP = 12               -- panel <-> proxy distance
 local ICON = 24                   -- header icon, drawn from the full 64px source
-local HEADER_H = 26               -- title line + addon line
+local TITLE_W = CW - (ICON + TIGHT - 2)   -- the title column, right of the icon
+local HEADER_LINE = 14            -- fallback line height before the font resolves
+local HEADER_BTN_H = 18           -- the Configure / Settings row under the header
 local BOX_W = 62                  -- X / Y edit boxes
 local NUDGE_CELL, NUDGE_ICON = 22, 14
 local DOT, DOT_GAP = 16, 4        -- 9-point picker cells
@@ -43,12 +45,12 @@ end
 local function step() return Solver.NudgeStep(IsShiftKeyDown(), IsControlKeyDown()) end
 
 -- A row of equal-width buttons spanning the content width.
-local function buttonRow(f, y, height, defs)
+local function buttonRow(parent, y, height, defs)
     local n = #defs
     local bw = floor((CW - TIGHT * (n - 1)) / n)
     local out = {}
     for i, d in ipairs(defs) do
-        local b = UI:CreateButton(f, {
+        local b = UI:CreateButton(parent, {
             text = d.text, width = bw, height = height, onClick = d.onClick,
             style = d.style, tone = d.tone, fitText = false,
         })
@@ -66,49 +68,58 @@ local function build()
     UI:CreatePanelBackdrop(f)
     f:EnableMouse(true)
 
-    local y = -PAD
-    -- Reserve a row of height h and return its top; gap is the space to leave below it.
-    local function row(h, gap) local cur = y; y = y - h - (gap or GAP); return cur end
-
-    -- ---- header: icon | title / addon ...... settings -------------
-    local hy = row(HEADER_H, TIGHT)
+    -- ---- header row 1: icon | full title over the addon name --------
+    -- The title owns the whole content width and may run to two lines, so the
+    -- header's height is not known until Refresh has put a title in it.
+    -- Everything below lives on f.body, which layoutHeader slides down to
+    -- whatever the header measured -- that single anchor is the only thing
+    -- that moves, so the body keeps its build-time offsets.
     f.icon = f:CreateTexture(nil, "OVERLAY")
     f.icon:SetSize(ICON, ICON)
-    f.icon:SetPoint("LEFT", f, "TOPLEFT", PAD, hy - HEADER_H / 2)   -- centred on the header block
+    f.icon:SetPoint("TOPLEFT", PAD, -PAD)
+    f.title = UI:CreateLabel(f, { size = 12, color = UI.Colors.text, width = TITLE_W })
+    -- Two lines is the budget: a title long enough to need a third does not
+    -- belong in a 236px panel.
+    if f.title.SetMaxLines then f.title:SetMaxLines(2) end
+    f.title:SetPoint("TOPLEFT", PAD + ICON + TIGHT - 2, -PAD)
+    f.addon = UI:CreateLabel(f, { size = 10, color = UI.Colors.textDim })
+    f.addon:SetWidth(TITLE_W)
+    f.addon:SetWordWrap(false)
+    f.addon:SetPoint("TOPLEFT", f.title, "BOTTOMLEFT", 0, -1)
 
-    f.btnSettings = UI:CreateButton(f, {
-        text = L["Settings"], width = 62, height = 18, style = "ghost",
-        tooltip = { title = L["Settings"], lines = { L["Snapping, grid and per-addon mover toggles."] } },
-        onClick = function() if NS.Settings then NS.Settings:Toggle() end end,
-    })
-    f.btnSettings:SetPoint("TOPRIGHT", -PAD, hy)
-
-    -- Consumer settings entry: only shown when the selected element's def has
-    -- openSettings (Refresh). Distinct from the Settings button beside it,
-    -- which opens the LIB's own settings window.
+    -- ---- header row 2: Configure | Settings -------------------------
+    -- Their own row across the content width, so the title above never has to
+    -- give up room to them. Configure is the CONSUMER entry point (the
+    -- selected element's own options page) and exists only for defs that offer
+    -- openSettings; Settings opens the LIB's window, is always there, and
+    -- takes the whole row when Configure is hidden (layoutHeader).
     f.btnConfigure = UI:CreateButton(f, {
-        text = L["Configure"], width = 62, height = 18, style = "ghost",
+        text = L["Configure"], height = HEADER_BTN_H, style = "ghost", fitText = false,
         tooltip = { title = L["Configure"], lines = { L["Open this element's own settings."] } },
         onClick = function()
             local el = selectedElement()
             if el and el.openSettings then xpcall(el.openSettings, geterrorhandler()) end
         end,
     })
-    f.btnConfigure:SetPoint("RIGHT", f.btnSettings, "LEFT", -TIGHT, 0)
     f.btnConfigure:Hide()
+    f.btnSettings = UI:CreateButton(f, {
+        text = L["Settings"], height = HEADER_BTN_H, style = "ghost", fitText = false,
+        tooltip = { title = L["Settings"], lines = { L["Snapping, grid and per-addon mover toggles."] } },
+        onClick = function() if NS.Settings then NS.Settings:Toggle() end end,
+    })
 
-    f.headerY = hy
-    f.title = UI:CreateLabel(f, { size = 12, color = UI.Colors.text })
-    f.title:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ICON + TIGHT - 2, hy)
-    f.title:SetPoint("TOPRIGHT", f.btnSettings, "TOPLEFT", -TIGHT, 0)
-    f.title:SetWordWrap(false)
-    f.addon = UI:CreateLabel(f, { size = 10, color = UI.Colors.textDim })
-    f.addon:SetPoint("TOPLEFT", f.title, "BOTTOMLEFT", 0, -1)
-    f.addon:SetPoint("TOPRIGHT", f.title, "BOTTOMRIGHT", 0, -1)
-    f.addon:SetWordWrap(false)
+    -- ---- body -------------------------------------------------------
+    local body = CreateFrame("Frame", nil, f)
+    body:SetWidth(W)
+    body:SetPoint("TOPLEFT", 0, 0)          -- layoutHeader re-anchors it
+    f.body = body
+
+    local y = 0
+    -- Reserve a row of height h and return its top; gap is the space to leave below it.
+    local function row(h, gap) local cur = y; y = y - h - (gap or GAP); return cur end
 
     -- ---- anchored-to line ----------------------------------------
-    f.anchorLine = UI:CreateLabel(f, { size = 10, color = UI.Colors.accent, width = CW })
+    f.anchorLine = UI:CreateLabel(body, { size = 10, color = UI.Colors.accent, width = CW })
     f.anchorLine:SetPoint("TOPLEFT", PAD, row(14))
 
     -- ---- X / Y: two label+box pairs centred as one group ------------
@@ -116,9 +127,9 @@ local function build()
     -- (the labels change between "X" and "Offset X"), and the container is
     -- centred in the panel, so the group stays centred whatever the labels say.
     local ry = row(20)
-    f.xyRow = CreateFrame("Frame", nil, f)
+    f.xyRow = CreateFrame("Frame", nil, body)
     f.xyRow:SetSize(CW, 20)
-    f.xyRow:SetPoint("TOP", f, "TOP", 0, ry)
+    f.xyRow:SetPoint("TOP", body, "TOP", 0, ry)
     f.xLabel = UI:CreateLabel(f.xyRow, { text = L["X"], size = 11, justify = "RIGHT" })
     f.xLabel:SetPoint("LEFT", 0, 0)
     f.xBox = UI:CreateEditBox(f.xyRow, {
@@ -157,9 +168,9 @@ local function build()
     local ny = row(clusterH)
     local half = CW / 2
 
-    f.nudge = CreateFrame("Frame", nil, f)
+    f.nudge = CreateFrame("Frame", nil, body)
     f.nudge:SetSize(NUDGE_CELL * 3, NUDGE_CELL * 3)
-    f.nudge:SetPoint("CENTER", f, "TOPLEFT", PAD + half / 2, ny - clusterH / 2)
+    f.nudge:SetPoint("CENTER", body, "TOPLEFT", PAD + half / 2, ny - clusterH / 2)
     local ARROWS = {   -- icon, dx, dy, column, row (0-based in the 3x3 cluster)
         { "expand_less",   0,  1, 1, 0 },
         { "chevron_left", -1,  0, 0, 1 },
@@ -179,9 +190,9 @@ local function build()
         b:SetPoint("TOPLEFT", col * NUDGE_CELL, -rowi * NUDGE_CELL)
     end
 
-    f.picker = CreateFrame("Frame", nil, f)
+    f.picker = CreateFrame("Frame", nil, body)
     f.picker:SetSize(DOT * 3 + DOT_GAP * 2, DOT * 3 + DOT_GAP * 2)
-    f.picker:SetPoint("CENTER", f, "TOPLEFT", PAD + half + half / 2, ny - clusterH / 2)
+    f.picker:SetPoint("CENTER", body, "TOPLEFT", PAD + half + half / 2, ny - clusterH / 2)
     f.points = {}
     for i, point in ipairs(POINTS) do
         local col, rowi = (i - 1) % 3, floor((i - 1) / 3)
@@ -199,20 +210,20 @@ local function build()
     end
 
     -- ---- actions -------------------------------------------------
-    local acts = buttonRow(f, row(BTN_H, TIGHT), BTN_H, {
+    local acts = buttonRow(body, row(BTN_H, TIGHT), BTN_H, {
         { text = L["Center"], onClick = function() local el = selectedElement(); if el then Sess:Center(el) end end },
         { text = L["Reset"],  onClick = function() local el = selectedElement(); if el then Sess:Reset(el) end end },
         { text = L["Detach"], onClick = function() local el = selectedElement(); if el then Sess:Detach(el) end end },
     })
     f.btnCenter, f.btnReset, f.btnDetach = acts[1], acts[2], acts[3]
 
-    local hist = buttonRow(f, row(BTN_H), BTN_H, {
+    local hist = buttonRow(body, row(BTN_H), BTN_H, {
         { text = L["Undo"], onClick = function() Sess:Undo() end },
         { text = L["Redo"], onClick = function() Sess:Redo() end },
     })
     f.btnUndo, f.btnRedo = hist[1], hist[2]
 
-    local fin = buttonRow(f, row(CTA_H), CTA_H, {
+    local fin = buttonRow(body, row(CTA_H), CTA_H, {
         { text = L["Save & Exit"], style = "primary", onClick = function() Sess:Finish("save") end },
         { text = L["Discard"], tone = "danger", onClick = function() Sess:Finish("discard") end },
     })
@@ -220,18 +231,61 @@ local function build()
 
     -- Copy-to-twin: full-width bottom row, only for elements whose def names a
     -- twin (Refresh shows it and grows the panel by the row).
-    f.btnCopy = UI:CreateButton(f, {
+    f.btnCopy = UI:CreateButton(body, {
         width = CW, height = BTN_H, fitText = false,
         onClick = function() local el = selectedElement(); if el then Sess:CopyToTwin(el) end end,
     })
     f.btnCopy:SetPoint("TOPLEFT", PAD, row(BTN_H, 0))
     f.btnCopy:Hide()
 
-    f.fullH = -y + PAD
-    f.baseH = f.fullH - BTN_H - GAP
-    f:SetHeight(f.baseH)
+    -- Body heights with and without the copy row; the header adds its own on
+    -- top (layoutHeader), so the panel's total height is settled in Refresh.
+    f.bodyFullH = -y
+    f.bodyBaseH = f.bodyFullH - BTN_H - GAP
+    body:SetHeight(f.bodyFullH)
+    f:SetHeight(PAD + ICON + TIGHT + HEADER_BTN_H + GAP + f.bodyBaseH + PAD)
     f:Hide()
     return f
+end
+
+-- ============================================================
+-- HEADER LAYOUT
+-- The title wraps, so the header's height -- and therefore the body's top and
+-- the panel's own height -- is only knowable once the title is in. Returns the
+-- height consumed above the body, and whether the font had resolved (a
+-- FontString measures 0 until it has, and Refresh retries once if so).
+-- ============================================================
+local function layoutHeader(f, canConfigure)
+    local th, ah = f.title:GetStringHeight() or 0, f.addon:GetStringHeight() or 0
+    local resolved = th > 0
+    if th <= 0 then th = HEADER_LINE end
+    if ah <= 0 then ah = HEADER_LINE - 2 end
+    local textH = th + 1 + ah
+    local hh = max(ICON, textH)
+    -- Whichever of the icon and the text block is shorter centres against the
+    -- other, so a one-line title still sits level with the icon and a two-line
+    -- one does not push the icon off the top.
+    f.icon:ClearAllPoints()
+    f.icon:SetPoint("TOPLEFT", PAD, -PAD - (hh - ICON) / 2)
+    f.title:ClearAllPoints()
+    f.title:SetPoint("TOPLEFT", PAD + ICON + TIGHT - 2, -PAD - (hh - textH) / 2)
+
+    local by = -PAD - hh - TIGHT
+    f.btnConfigure:ClearAllPoints()
+    f.btnSettings:ClearAllPoints()
+    if canConfigure then
+        local bw = floor((CW - TIGHT) / 2)
+        f.btnConfigure:SetWidth(bw)
+        f.btnSettings:SetWidth(bw)
+        f.btnConfigure:SetPoint("TOPLEFT", PAD, by)
+        f.btnSettings:SetPoint("TOPLEFT", PAD + bw + TIGHT, by)
+    else
+        f.btnSettings:SetWidth(CW)
+        f.btnSettings:SetPoint("TOPLEFT", PAD, by)
+    end
+    f.body:ClearAllPoints()
+    f.body:SetPoint("TOPLEFT", 0, by - HEADER_BTN_H - GAP)
+    return PAD + hh + TIGHT + HEADER_BTN_H + GAP, resolved
 end
 
 -- Size the X/Y group to its current labels so it stays centred. Both labels
@@ -380,17 +434,22 @@ function Pn:Refresh()
     local pos = Registry:GetPos(el)
 
     f.title:SetText(el.title)
-    -- Configure only exists for elements whose def offers openSettings; the
-    -- title gives up the room while the extra button is up.
-    local canConfigure = el.openSettings ~= nil
-    f.btnConfigure:SetShown(canConfigure)
-    f.title:ClearAllPoints()
-    f.title:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + ICON + TIGHT - 2, f.headerY)
-    f.title:SetPoint("TOPRIGHT", canConfigure and f.btnConfigure or f.btnSettings, "TOPLEFT", -TIGHT, 0)
     local addon = Registry:GetAddon(el.addon)
     local icon = addon and addon.icon or (UI.MEDIA .. "DF_Icon")
     if f.icon:SetTexture(icon) == false then f.icon:SetTexture(UI.MEDIA .. "DF_Icon") end
     f.addon:SetText(addon and addon.title or el.addon)
+    -- Configure only exists for elements whose def offers openSettings; without
+    -- it Settings takes the whole button row.
+    local canConfigure = el.openSettings ~= nil
+    f.btnConfigure:SetShown(canConfigure)
+    local headerH, resolved = layoutHeader(f, canConfigure)
+    -- A FontString measures 0 until its font object resolves, which on the very
+    -- first Refresh would size a wrapped two-line title as one. One deferred
+    -- retry, flagged so repeated Refreshes cannot stack timers.
+    if not resolved and not f.headerRetry and C_Timer then
+        f.headerRetry = true
+        C_Timer.After(0, function() f.headerRetry = nil; Pn:Refresh() end)
+    end
 
     if pos.anchor then
         local a = pos.anchor
@@ -427,10 +486,10 @@ function Pn:Refresh()
     if twin then
         f.btnCopy:SetText(format(L["Copy to %s"], twin.title))
         f.btnCopy:Show()
-        f:SetHeight(f.fullH)
+        f:SetHeight(headerH + f.bodyFullH + PAD)
     else
         f.btnCopy:Hide()
-        f:SetHeight(f.baseH)
+        f:SetHeight(headerH + f.bodyBaseH + PAD)
     end
     self:Dock()
 end
