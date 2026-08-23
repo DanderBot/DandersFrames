@@ -13,6 +13,7 @@ local Undo = LibStub("DandersUndo-1.0")
 local Lib = NS.Lib
 local pairs, ipairs, format, wipe = pairs, ipairs, string.format, wipe
 local InCombatLockdown, UIParent, IsShiftKeyDown, IsControlKeyDown = InCombatLockdown, UIParent, IsShiftKeyDown, IsControlKeyDown
+local C_Timer = C_Timer
 
 local SCREEN_SNAP = 8
 
@@ -69,10 +70,23 @@ function Sess:Unlock(filter)
     self.selected = nil
     self.active = true
     self.suspended = false
+    -- Fire before Build: consumers commonly show preview/test frames from this
+    -- callback, and the proxies must be measured against what the consumer ends
+    -- up showing, not what was on screen a moment earlier. Snapshots are taken
+    -- above so the record is captured before any consumer-side mutation.
+    Lib.callbacks:Fire("Unlocked")
     Proxy:Build(filter)
     Grid:Refresh()
     self:EnableKeyboard(true)
-    Lib.callbacks:Fire("Unlocked")
+    -- Anything the consumer only shows on the next frame (secure headers, test
+    -- containers) has no rect yet at Build time; re-measure once it does.
+    C_Timer.After(0, function()
+        if Sess.active and not Sess.suspended then
+            Proxy:RefreshAll()
+            Grid:Refresh()
+            if NS.Panel then NS.Panel:Refresh() end
+        end
+    end)
 end
 
 function Sess:Lock()
