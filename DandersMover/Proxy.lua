@@ -22,7 +22,9 @@ local DOT_ICON = UI.MEDIA .. "Icons\\dot"
 -- to it) = the party accent; CHILD (anchored to something) = the anchored
 -- purple; ROOT (free, with children) = the anchorRoot green. A root that is
 -- itself a child keeps the anchored colour and wears the root ring on its dot.
-local C_FREE = UI.Colors.accent
+-- Free elements use the HOST accent (the mover sets a blue), not the shared
+-- lavender: at 9px the lavender is indistinguishable from the anchored purple.
+local C_FREE = UI:GetAccent() or UI.Colors.accent
 local C_ANCHORED = UI.Colors.anchored
 local C_ROOT = UI.Colors.anchorRoot
 local C_MUTED = UI.Colors.textDim

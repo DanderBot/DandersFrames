@@ -230,7 +230,7 @@ do
     check(child.link:IsShown() and child.root:IsShown(), "child+root: link on, ring on")
     check(tinted(grand.dot, COLORS.anchored), "child: dot is the anchored purple")
     check(grand.link:IsShown() and not grand.root:IsShown(), "child: link on, ring off")
-    check(tinted(free.dot, COLORS.accent), "free: dot is the accent")
+    check(tinted(free.dot, { r = 0, g = 0, b = 1 }), "free: dot is the host accent")
     check(not free.root:IsShown() and not free.link:IsShown(), "free: neither")
     check(P.legend and P.legend:IsShown(), "legend shown for the session")
     P:DestroyAll()
