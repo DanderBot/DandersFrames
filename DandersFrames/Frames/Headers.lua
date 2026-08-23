@@ -886,8 +886,15 @@ function DF:InitializeHeaderChild(frame)
     -- HOVER HANDLING (OnEnter/OnLeave)
     -- Sets dfIsHovered flag and updates highlights
     -- ========================================
-    frame:HookScript("OnEnter", function(self)
+    -- ★ NAMED so the tooltip modifier / combat watcher can re-run it for the frame
+    -- already under the cursor. Header children are the frames people actually hover,
+    -- so leaving this inline would have made hold-to-show and the combat-entry hide
+    -- work only on standalone frames. Mirrors OnUnitFrameEnter in Frames/Create.lua;
+    -- both register through DF:NoteTooltipHover so the watcher can dispatch to
+    -- whichever path owns the hovered frame.
+    local function OnHeaderChildEnter(self)
         local frameDb = DF:GetFrameDB(self)
+        if DF.NoteTooltipHover then DF:NoteTooltipHover(self, OnHeaderChildEnter) end
 
         -- Set hover state and update highlights
         self.dfIsHovered = true
@@ -909,8 +916,18 @@ function DF:InitializeHeaderChild(frame)
         -- Check if tooltips are enabled
         if not frameDb.tooltipFrameEnabled then return end
 
-        -- Check if tooltips disabled in combat
-        if frameDb.tooltipFrameDisableInCombat and InCombatLockdown() then return end
+        -- ★ ONE VISIBILITY QUESTION (tooltipFrameOutOfCombat / tooltipFrameCombat).
+        -- Header children run their OWN OnEnter rather than the one in
+        -- Frames/Create.lua, so the gate is repeated here -- the enable check above
+        -- is duplicated for the same reason. The predicate is shared and resolved at
+        -- call time, so file load order does not matter.
+        -- ⚠ HIDES rather than skipping: this re-runs on combat entry and on modifier
+        -- changes, and a plain return would leave a tooltip opened a moment earlier
+        -- sitting on screen. Ownership-checked, so another addon's tip is safe.
+        if DF.TooltipAllowed and not DF:TooltipAllowed(frameDb, "Frame", "header") then
+            if DF.HideOwnedTooltip then DF:HideOwnedTooltip(self, "header") end
+            return
+        end
 
         -- Show tooltip
         if self.unit and UnitExists(self.unit) then
@@ -940,9 +957,12 @@ function DF:InitializeHeaderChild(frame)
             -- to modifier key changes while hovering
             if DF.StartTooltipRefresh then DF:StartTooltipRefresh(self) end
         end
-    end)
+    end
+
+    frame:HookScript("OnEnter", OnHeaderChildEnter)
 
     frame:HookScript("OnLeave", function(self)
+        if DF.ClearTooltipHover then DF:ClearTooltipHover(self) end
         -- Clear hover state and update highlights
         self.dfIsHovered = false
         if DF.UpdateHighlights then

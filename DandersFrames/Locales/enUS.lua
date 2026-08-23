@@ -165,6 +165,8 @@ L["(%d found)"] = true
 -- Breadcrumb button on a search result. Two-part, like every other DF tooltip: the
 -- button's own label already names the destination, so the title is the ACTION.
 -- ("Go to %s" retired with it -- it had exactly one consumer, this tooltip.)
+L["Show In Combat"] = true
+L["Show Out of Combat"] = true
 L["Show me"] = true
 L["Open this setting's own page and highlight it."] = true
 -- Misc GUI fallback strings (banner / confirm)
@@ -197,6 +199,9 @@ L["Pick an Aura Designer template below for this layout. 'Inherit (Global)' foll
 L["Pick a Text Designer template below for this layout. 'Inherit (Global)' follows your global one."] = true
 -- ClickCasting UI strings
 L["Higher priority wins"] = true
+L["Hold Alt"] = true
+L["Hold Ctrl"] = true
+L["Hold Shift"] = true
 L["A newer version is available (%s). Get it on CurseForge."] = true
 L["A-Z"] = true
 L["Active Bindings"] = true
@@ -340,6 +345,8 @@ L["Quick Bind"] = true
 L["Quick Bind Mode"] = true
 L["Quick Macro"] = true
 L["Remove all bindings from the current profile."] = true
+L["When this tooltip appears while you are out of combat. Always shows it on hover; a Hold option requires that key; Never suppresses it."] = true
+L["When this tooltip appears while you are in combat, independently of the out-of-combat setting. Set this to Never and no key will reveal it mid-fight. Press or release a Hold key while already hovering and the tooltip follows immediately."] = true
 L["Reset to Defaults"] = true
 L["Res + Mass"] = true
 L["Res + Mass + Combat"] = true
@@ -523,7 +530,6 @@ L["Anchor To Frames"] = true
 L["Anchor To Party Frames"] = true
 L["Anchor To Raid Frames"] = true
 L["Animated Border"] = true
-L["Any Dispel Type"] = true
 L["Any buff in the spell database, from any caster — including your own."] = true
 L["Auto layout \"%s\" is active. Unlock it from the Auto Layouts page to move its frames."] = true
 L["Appearance"] = true
@@ -838,7 +844,7 @@ L["Dispel Overlay Alpha"] = true
 L["Dispel Text"] = true
 L["Dispel Type Colors"] = true
 L["Dispellable By Me"] = true
-L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled. Any Dispel Type: every debuff with a dispel type, even ones that cannot be dispelled."] = true
+L["Dispellable By Me: only debuffs you can dispel. All Dispellable: any debuff that can be dispelled."] = true
 L["Dispellable Debuffs"] = true
 L["Discovered"] = true
 L["Display"] = true
@@ -2134,6 +2140,7 @@ L["My added"] = true
 L["Name Precedence"] = true
 L["Names on frames decided by"] = true
 L["Needs re-link"] = true
+L["Never"] = true
 L["Nickname"] = true
 L["Nickname Settings"] = true
 L["Nicknames"] = true
