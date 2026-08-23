@@ -50,11 +50,11 @@ local function stack(box, widgets)
     local y = 0
     for i, w in ipairs(widgets) do
         local h = w.preferredHeight or UI.RowHeight.checkbox
-        local nxt = widgets[i + 1]
-        if nxt then
-            if w.rowKind and UI.RowCompact[w.rowKind] and nxt.rowKind == w.rowKind then
-                h = h - (GAP - TIGHT)
-            end
+        if widgets[i + 1] then
+            -- Tight metrics throughout: this window is a compact tool palette,
+            -- not an options page, so EVERY row closes up to RowGapTight, not
+            -- just runs of the same compact kind.
+            h = h - (GAP - TIGHT)
         else
             h = h - GAP
         end
@@ -66,6 +66,20 @@ local function stack(box, widgets)
     end
     box:SetContentHeight(y)
     return y
+end
+
+-- Two checkboxes side by side in one checkbox-height row. Only used where both
+-- labels are short (the Snapping toggles): the Editor's long labels stay one
+-- per row so a translation cannot collide with its neighbour.
+local function pairRow(parent, a, b)
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetSize(CONTENT, UI.RowHeight.checkbox)
+    row.preferredHeight = UI.RowHeight.checkbox
+    row.rowKind = "checkbox"
+    local half = (CONTENT - GAP) / 2
+    a:SetParent(row); a:ClearAllPoints(); a:SetPoint("TOPLEFT", 0, 0); a:SetWidth(half)
+    b:SetParent(row); b:ClearAllPoints(); b:SetPoint("TOPLEFT", half + GAP, 0); b:SetWidth(half)
+    return row
 end
 
 -- Label above three equal buttons, one of which is active: the panel-side
@@ -103,7 +117,9 @@ end
 local function build()
     local f = CreateFrame("Frame", "DandersMoverSettings", UIParent, "BackdropTemplate")
     f:SetWidth(W)
-    f:SetPoint("CENTER")
+    -- Centre-right by default: the window is a side palette, and dead centre
+    -- is exactly where the frames being moved usually live.
+    f:SetPoint("RIGHT", UIParent, "RIGHT", -40, 0)
     f:SetFrameStrata("DIALOG")
     UI:CreatePanelBackdrop(f, { bgColor = UI.Colors.background })
     f:EnableMouse(true); f:SetMovable(true); f:SetClampedToScreen(true)
@@ -165,10 +181,12 @@ local function build()
         set = function(v) NS.db.zoneShowDistance = v end,
     })
     stack(snap, {
-        toggle(snap.content, L["Snap to grid"], "snapToGrid"),
-        toggle(snap.content, L["Snap to frames"], "snapToFrames"),
-        toggle(snap.content, L["Snap to screen"], "snapToScreen"),
-        toggle(snap.content, L["Show grid"], "showGrid", function() Grid:Refresh() end),
+        pairRow(snap.content,
+            toggle(snap.content, L["Snap to grid"], "snapToGrid"),
+            toggle(snap.content, L["Snap to frames"], "snapToFrames")),
+        pairRow(snap.content,
+            toggle(snap.content, L["Snap to screen"], "snapToScreen"),
+            toggle(snap.content, L["Show grid"], "showGrid", function() Grid:Refresh() end)),
         f.gridSlider,
         f.snapDistSlider,
         f.zoneShowSlider,

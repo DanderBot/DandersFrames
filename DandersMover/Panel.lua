@@ -2,8 +2,9 @@ local addonName, NS = ...
 
 -- ============================================================
 -- MINI-PANEL
--- Docks beside the selected proxy, flips side at the screen edge. Parented to
--- the unlock frame so combat suspension hides it for free.
+-- Docks beside the selected proxy on whichever side covers the least (auto),
+-- or on the side the user pinned. Parented to the unlock frame so combat
+-- suspension hides it for free.
 --
 -- Deliberately NOT a settings window: it holds only what acts on the SELECTED
 -- element plus the session verbs. Editor preferences (snapping, grid size)
@@ -15,7 +16,8 @@ NS.Panel = Pn
 
 local Registry, Sess, Proxy, Solver, UI, L = NS.Registry, NS.Session, NS.Proxy, NS.Solver, NS.UI, NS.L
 local CreateFrame, UIParent, IsShiftKeyDown, IsControlKeyDown = CreateFrame, UIParent, IsShiftKeyDown, IsControlKeyDown
-local format, tonumber, ipairs, floor, max, min = string.format, tonumber, ipairs, math.floor, math.max, math.min
+local GetTime, C_Timer = GetTime, C_Timer
+local format, tonumber, ipairs, pairs, floor, max, min = string.format, tonumber, ipairs, pairs, math.floor, math.max, math.min
 
 -- Spacing comes from the theme so this panel keeps the rhythm of every other
 -- DandersUI surface: PAD is the outer padding, GAP the gap between rows of
@@ -222,27 +224,128 @@ function Pn:Ensure()
     return self.frame
 end
 
-function Pn:Hide() if self.frame then self.frame:Hide() end end
+-- Instant hide: combat suspend, session teardown, selection loss mid-refresh.
+-- Cancels any running fade so a stale "hide when done" cannot land later.
+function Pn:Hide()
+    self.holdUntil = nil          -- a hidden panel has nothing to hold in place
+    self.dockedTo = nil
+    if self.frame then
+        NS.Fx.Cancel(self.frame)
+        self.frame:Hide()
+    end
+end
+
+-- Deselection: fade out (0.1s), then hide. Suspend never comes through here.
+function Pn:FadeOut()
+    self.holdUntil = nil
+    self.dockedTo = nil
+    local f = self.frame
+    if not f or not f:IsShown() then return end
+    NS.Fx.FadeOut(f, 0.1, function() f:Hide() end)
+end
+
+-- ============================================================
+-- NUDGE HOLD
+-- Re-docking on every keypress makes the panel chase the frame around, so a
+-- nudge parks it: each nudge pushes the deadline out, and one C_Timer chain
+-- re-docks once after the LAST nudge's hold expires. Session:Select clears the
+-- hold, so an explicit selection always docks immediately.
+-- ============================================================
+local HOLD = 2
+
+function Pn:HoldDock()
+    self.holdUntil = GetTime() + HOLD
+    if self.holdTimerArmed then return end
+    self.holdTimerArmed = true
+    local function tick()
+        if not self.holdUntil then self.holdTimerArmed = false return end
+        local left = self.holdUntil - GetTime()
+        if left > 0 then
+            C_Timer.After(left, tick)
+        else
+            self.holdTimerArmed = false
+            self.holdUntil = nil
+            if Sess:IsActive() and not Sess:IsSuspended() then self:Dock() end
+        end
+    end
+    C_Timer.After(HOLD, tick)
+end
+
+function Pn:ClearHold() self.holdUntil = nil end
+
+-- Rect of a frame in UIParent-centre units; nil while it has no geometry yet.
+local function rectOf(fr)
+    local cx, cy = fr:GetCenter()
+    if not cx then return nil end
+    local ux, uy = UIParent:GetCenter()
+    return { x = cx - ux, y = cy - uy, w = fr:GetWidth() or 0, h = fr:GetHeight() or 0 }
+end
+
+-- "auto": the candidate beside the proxy that covers the least, scored against
+-- every OTHER visible proxy and the legend (Solver.BestDockSide). nil when no
+-- candidate fits fully on screen.
+local function autoSide(f, proxy)
+    local pr = rectOf(proxy)
+    if not pr then return nil end
+    local obstacles = {}
+    for _, b in pairs(Proxy.proxies) do
+        if b ~= proxy and b:IsShown() then
+            local r = rectOf(b)
+            if r then obstacles[#obstacles + 1] = r end
+        end
+    end
+    if Proxy.legend and Proxy.legend:IsShown() then
+        local r = rectOf(Proxy.legend)
+        if r then obstacles[#obstacles + 1] = r end
+    end
+    return Solver.BestDockSide(pr, W, f:GetHeight() or 0, DOCK_GAP, obstacles,
+        UIParent:GetWidth(), UIParent:GetHeight())
+end
 
 function Pn:Dock()
     local f = self.frame
     local proxy = Sess.selected and Proxy.proxies[Sess.selected]
     if not f or not proxy or not proxy:IsShown() then self:Hide() return end
+    -- Parked by a nudge: keep the panel where it is until the hold expires.
+    if self.holdUntil then
+        if GetTime() < self.holdUntil then return end
+        self.holdUntil = nil
+    end
     local side = NS.db.panelSide
     if side == "auto" then
-        local right = proxy:GetRight() or 0
-        side = (right + DOCK_GAP + W > (UIParent:GetRight() or 0)) and "left" or "right"
+        -- Least-covering side; when nothing fits on screen, the old edge flip.
+        side = autoSide(f, proxy)
+        if not side then
+            side = ((proxy:GetRight() or 0) + DOCK_GAP + W > (UIParent:GetRight() or 0)) and "left" or "right"
+        end
     end
     f:ClearAllPoints()
     if side == "left" then f:SetPoint("TOPRIGHT", proxy, "TOPLEFT", -DOCK_GAP, 0)
+    elseif side == "below" then f:SetPoint("TOP", proxy, "BOTTOM", 0, -DOCK_GAP)
+    elseif side == "above" then f:SetPoint("BOTTOM", proxy, "TOP", 0, DOCK_GAP)
     else f:SetPoint("TOPLEFT", proxy, "TOPRIGHT", DOCK_GAP, 0) end
+
+    -- Entrance: fade + slide in from the dock side (the panel emerges from the
+    -- proxy's edge onto its anchor). Target changed while the panel was
+    -- already up: a quick fade-swap, no slide. Same target: nothing -- Dock
+    -- runs on every Refresh and must not flicker the panel.
+    local wasShown = f:IsShown()
+    if not wasShown then
+        local ox, oy = 0, 0
+        if side == "right" then ox = -8 elseif side == "left" then ox = 8
+        elseif side == "below" then oy = 8 elseif side == "above" then oy = -8 end
+        NS.Fx.FadeIn(f, 0.12, ox, oy)
+    elseif self.dockedTo ~= Sess.selected then
+        NS.Fx.FadeIn(f, 0.08)
+    end
+    self.dockedTo = Sess.selected
     f:Show()
 end
 
 function Pn:Refresh()
     if not Sess:IsActive() or Sess:IsSuspended() then self:Hide() return end
     local el = selectedElement()
-    if not el then self:Hide() return end
+    if not el then self:FadeOut() return end
     local f = self:Ensure()
     local pos = Registry:GetPos(el)
 

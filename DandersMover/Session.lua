@@ -185,6 +185,8 @@ end
 
 function Sess:Select(id)
     self.selected = id
+    -- An explicit selection always docks immediately, nudge hold or not.
+    if NS.Panel then NS.Panel:ClearHold() end
     Proxy:Highlight(id)
     panel("Refresh")
 end
@@ -224,6 +226,8 @@ local function clampFree(el, pos)
 end
 
 function Sess:Nudge(el, dx, dy)
+    -- Park the panel: a run of nudges must not re-dock it under the cursor.
+    if NS.Panel then NS.Panel:HoldDock() end
     local pos = Registry:GetPos(el)
     local before = NS.CopyPos(pos)
     if pos.anchor then
@@ -352,6 +356,7 @@ function Sess:DragTo(el, cx, cy)
         if lineX or lineY then Grid:ShowPreview(lineX, lineY) else Grid:HidePreview() end
     end
     cx, cy = Solver.ClampToScreen(cx, cy, w, h, UIParent:GetWidth(), UIParent:GetHeight())
+    Grid:ShowMeasure(cx, cy, w, h)
     local pos = Registry:GetPos(el)
     pos.anchor = nil
     pos.x, pos.y = Solver.DragDelta(self.dragStartPos, self.dragStartCx, self.dragStartCy, cx, cy)

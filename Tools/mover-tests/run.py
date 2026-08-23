@@ -24,7 +24,7 @@ run(HERE / "shim.lua")
 run(LIBS / "LibStub" / "LibStub.lua")
 run(LIBS / "CallbackHandler-1.0" / "CallbackHandler-1.0.lua")
 ns = lua.table()
-for name in ("Locales/enUS.lua", "Undo.lua", "Solver.lua", "Registry.lua"):
+for name in ("Locales/enUS.lua", "Undo.lua", "Solver.lua", "Fx.lua", "Registry.lua"):
     p = ADDON / name
     if p.exists():
         run(p, "DandersMover", ns)

@@ -65,6 +65,17 @@ function P:GetUnlockFrame()
     local f = CreateFrame("Frame", "DandersMoverUnlockFrame", UIParent)
     f:SetAllPoints(UIParent)
     f:SetFrameStrata("HIGH")
+    -- The overlay owns clicks on empty space: left deselects, right locks (the
+    -- proxies' own right-click, extended to the whole screen). Proxies, panel
+    -- and legend are children at higher frame levels, so they keep taking
+    -- their own clicks first. While a session is open the overlay therefore
+    -- captures the mouse and the world behind it is unreachable -- documented
+    -- in the README; locking gives the screen back.
+    f:EnableMouse(true)
+    f:SetScript("OnMouseDown", function(_, button)
+        if button == "RightButton" then NS.Session:Lock()
+        else NS.Session:Select(nil) end
+    end)
     f:Hide()
     self.unlockFrame = f
     return f
@@ -105,10 +116,13 @@ local function onDragStart(self)
         -- and released mid-drag.
         local shift, ctrl = IsShiftKeyDown(), IsControlKeyDown()
         if shift and not ctrl then ny = s.startY elseif ctrl and not shift then nx = s.startX end
+        -- Brighten the centre line of the axis the drag is locked TO.
+        NS.Grid:SetAxisLock(shift and not ctrl, ctrl and not shift)
         local fx, fy, zone = NS.Session:DragTo(el, nx, ny)
         s:ClearAllPoints(); s:SetPoint("CENTER", UIParent, "CENTER", fx, fy)
         s.coords:SetText(format("%d, %d", fx, fy))
         P:UpdateZones(fx, fy, zone)
+        P:UpdateLegendDodge(fx, fy, s:GetWidth() or 0, s:GetHeight() or 0)
         s.lastX, s.lastY, s.lastZone = fx, fy, zone
     end)
 end
@@ -118,7 +132,10 @@ local function onDragStop(self)
     self.dragging = false
     self:SetScript("OnUpdate", nil)
     P:HideZones()
+    P:ClearLegendDodge()
     NS.Grid:HidePreview()
+    NS.Grid:HideMeasure()
+    NS.Grid:SetAxisLock(false, false)
     NS.Session:EndDrag(self.element, self.lastX, self.lastY, self.lastZone)
 end
 
@@ -204,6 +221,11 @@ local function layout(b, anchored)
         b.titleFloating = true
     else
         b.titleFloating = false
+        b.tagShown = nil
+        -- A pill fade may still be running from the floating state; cancel it
+        -- so its "hide when done" cannot swallow the in-slab title.
+        NS.Fx.Cancel(b.title)
+        NS.Fx.Cancel(b.tagBg)
         b.tagBg:Hide()
         b.title:Show()
     end
@@ -229,9 +251,19 @@ local function applyLook(b, selected, hovered)
     -- one being looked at or moved, so stacked anchors do not pile pills on
     -- top of each other. The tooltip still names an idle slab on hover.
     if b.titleFloating then
-        local showTag = selected or hovered or b.dragging
-        b.title:SetShown(showTag)
-        b.tagBg:SetShown(showTag)
+        local showTag = (selected or hovered or b.dragging) and true or false
+        -- Fade rather than pop, but only on the transition: applyLook runs
+        -- every frame of a drag and must not restart the animation.
+        if b.tagShown ~= showTag then
+            b.tagShown = showTag
+            if showTag then
+                NS.Fx.FadeIn(b.title, 0.1)
+                NS.Fx.FadeIn(b.tagBg, 0.1)
+            else
+                NS.Fx.FadeOut(b.title, 0.1, function() b.title:Hide() end)
+                NS.Fx.FadeOut(b.tagBg, 0.1, function() b.tagBg:Hide() end)
+            end
+        end
     end
     b:SetBackdropColor(C_BODY.r, C_BODY.g, C_BODY.b, hovered and HOVER_ALPHA or BODY_ALPHA)
     -- Selection is the OUTLINE, never the fill or the role colour: white and
@@ -397,15 +429,22 @@ function P:DestroyAll()
 end
 
 -- ============================================================
--- LEGEND
--- Docked top-centre for the session: what the three proxy DOTS mean plus the
--- modifier hints. Same dot art and same slab as the proxies themselves, so the
--- key and the thing it is a key to cannot drift apart. Parented to the unlock
--- frame, so suspend and lock hide it with everything else.
+-- LEGEND / ACTION STRIP
+-- Docked top-centre for the session: one compact strip with the dot key on
+-- the left and the session verbs (Save & Exit, Discard, Settings, Grid) on
+-- the right, plus the modifier hints below -- so the session can be saved or
+-- discarded with nothing selected. Same dot art and same slab as the proxies
+-- themselves, so the key and the thing it is a key to cannot drift apart.
+-- Parented to the unlock frame, so suspend and lock hide it with everything
+-- else.
 -- ============================================================
+local LEGEND_ROW = 18                    -- first row: dots left, buttons right
 local function buildLegend()
     local f = CreateFrame("Frame", "DandersMoverLegend", P:GetUnlockFrame(), "BackdropTemplate")
     f:SetFrameStrata("DIALOG")
+    -- Swallow clicks: the strip is chrome, not empty space -- clicking beside
+    -- its checkbox must not fall through to the overlay's deselect.
+    f:EnableMouse(true)
     UI:CreateElementBackdrop(f, {
         bgColor     = { C_BODY.r, C_BODY.g, C_BODY.b, BODY_ALPHA },
         borderColor = { C_OUTLINE.r, C_OUTLINE.g, C_OUTLINE.b, 1 },
@@ -419,7 +458,7 @@ local function buildLegend()
         swatch:SetVertexColor(color.r, color.g, color.b)
         local label = UI:CreateLabel(f, { text = text, size = 11 })
         if prev then swatch:SetPoint("LEFT", prev, "RIGHT", GAP, 0)
-        else         swatch:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -PAD - 1) end
+        else         swatch:SetPoint("LEFT", f, "TOPLEFT", PAD, -PAD - LEGEND_ROW / 2) end
         label:SetPoint("LEFT", swatch, "RIGHT", TIGHT - 2, 0)
         return label
     end
@@ -428,8 +467,32 @@ local function buildLegend()
     f.entries[2] = entry(f.entries[1], C_ANCHORED, L["Anchored"])
     f.entries[3] = entry(f.entries[2], C_ROOT,     L["Anchor root"])
 
+    -- Session verbs on the same row, right-aligned: the strip doubles as the
+    -- action bar (EUI has a separate one; ours merges into the legend so there
+    -- is a single top element). Declared widths are floors -- fitText grows
+    -- them for longer localisations, and Layout re-measures.
+    f.btnSave = UI:CreateButton(f, { text = L["Save & Exit"], width = 76, height = LEGEND_ROW, style = "primary",
+        onClick = function() NS.Session:Finish("save") end })
+    f.btnDiscard = UI:CreateButton(f, { text = L["Discard"], width = 56, height = LEGEND_ROW, tone = "danger",
+        onClick = function() NS.Session:Finish("discard") end })
+    f.btnSettings = UI:CreateButton(f, { text = L["Settings"], width = 56, height = LEGEND_ROW, style = "ghost",
+        tooltip = { title = L["Settings"], lines = { L["Snapping, grid and per-addon mover toggles."] } },
+        onClick = function() if NS.Settings then NS.Settings:Toggle() end end })
+    f.btnGrid = UI:CreateButton(f, { text = L["Grid"], width = 40, height = LEGEND_ROW, style = "ghost",
+        tooltip = { title = L["Show grid"] },
+        onClick = function()
+            NS.db.showGrid = not NS.db.showGrid
+            NS.Grid:Refresh()
+            f.btnGrid:SetActive(NS.db.showGrid)
+            if NS.Settings then NS.Settings:Refresh() end
+        end })
+    f.btnGrid:SetPoint("RIGHT", f, "TOPRIGHT", -PAD, -PAD - LEGEND_ROW / 2)
+    f.btnSettings:SetPoint("RIGHT", f.btnGrid, "LEFT", -TIGHT, 0)
+    f.btnDiscard:SetPoint("RIGHT", f.btnSettings, "LEFT", -TIGHT, 0)
+    f.btnSave:SetPoint("RIGHT", f.btnDiscard, "LEFT", -TIGHT, 0)
+
     f.hint = UI:CreateLabel(f, { text = L["Shift: horizontal · Ctrl: vertical · Right-click: lock"], size = 10, color = C_MUTED })
-    f.hint:SetPoint("TOP", f, "TOP", 0, -PAD - 12 - TIGHT)
+    f.hint:SetPoint("TOP", f, "TOP", 0, -PAD - LEGEND_ROW - TIGHT)
 
     -- Third row, consumer-initiated sessions only: other addons' enabled+relevant
     -- elements are anchor targets already; this also gives them proxies. Same
@@ -439,7 +502,7 @@ local function buildLegend()
         get = function() return NS.db.showOtherAddons end,
         set = function(v) NS.db.showOtherAddons = v and true or false; NS.Session:RebuildProxies() end,
     })
-    f.other:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -PAD - 12 - TIGHT - 12 - TIGHT)
+    f.other:SetPoint("TOPLEFT", f, "TOPLEFT", PAD, -PAD - LEGEND_ROW - TIGHT - 12 - TIGHT)
 
     -- Width from the measured text. Fonts resolve a frame late, so this runs
     -- again on the next frame (same converge-next-frame shape as the kit's
@@ -449,7 +512,14 @@ local function buildLegend()
         for i, label in ipairs(self.entries) do
             row = row + DOT + TIGHT - 2 + (label:GetStringWidth() or 0) + (i < #self.entries and GAP or 0)
         end
-        row = row + PAD
+        -- Dots left, buttons right, a double gap between the halves so the
+        -- strip reads as key | verbs and not one run.
+        row = row + GAP * 2
+        for _, b in ipairs({ self.btnSave, self.btnDiscard, self.btnSettings, self.btnGrid }) do
+            row = row + (b:GetWidth() or 0) + TIGHT
+        end
+        row = row - TIGHT + PAD
+        self.btnGrid:SetActive(NS.db.showGrid and true or false)
         local hintW = (self.hint:GetStringWidth() or 0) + PAD * 2
         -- The checkbox row only exists for a consumer-initiated session (a filter
         -- with an addon); /mover has no "other" addons.
@@ -457,7 +527,7 @@ local function buildLegend()
         local showOther = (filter and filter.addon) and true or false
         self.other:SetShown(showOther)
         self.other:Refresh()
-        local h = PAD + 12 + TIGHT + 12 + PAD
+        local h = PAD + LEGEND_ROW + TIGHT + 12 + PAD
         if showOther then
             self.other:SetWidth(max(row, hintW) - PAD * 2)
             h = h + TIGHT + UI.RowHeight.checkbox - GAP
@@ -472,11 +542,78 @@ function P:ShowLegend()
     local f = self.legend
     f:Layout()
     if C_Timer then C_Timer.After(0, function() if f:IsShown() then f:Layout() end end) end
+    self:ResetLegendDodge()
     f:Show()
 end
 
 function P:HideLegend()
     if self.legend then self.legend:Hide() end
+end
+
+-- ------------------------------------------------------------
+-- The legend dodges the drag: when the dragged slab or the cursor comes within
+-- DODGE_MARGIN of it, it slides off the top edge, and slides back once clear.
+-- An OnUpdate lerp rather than a Translation: the strip must keep its REAL
+-- position while visible (it holds a live checkbox), and a Translation only
+-- displaces the rendering.
+-- ------------------------------------------------------------
+local DODGE_MARGIN = 60
+local DODGE_TIME = 0.15
+
+-- t: 0 = home (top-centre), 1 = fully off the top edge.
+local function legendApply(f, t)
+    local h = f:GetHeight() or 0
+    f:ClearAllPoints()
+    f:SetPoint("TOP", UIParent, "TOP", 0, -PAD + t * (h + PAD + 4))
+end
+
+local function legendSlide(f, up)
+    up = up and true or false
+    if f.dodgeUp == up then return end
+    f.dodgeUp = up
+    f:SetScript("OnUpdate", function(s, elapsed)
+        local target = s.dodgeUp and 1 or 0
+        local t = s.dodgeT or 0
+        local step = (elapsed or 0) / DODGE_TIME
+        if target > t then t = math.min(target, t + step) else t = math.max(target, t - step) end
+        s.dodgeT = t
+        legendApply(s, t)
+        if t == target then s:SetScript("OnUpdate", nil) end
+    end)
+end
+
+-- Called every drag frame with the dragged slab's centre rect.
+function P:UpdateLegendDodge(cx, cy, w, h)
+    local f = self.legend
+    if not f or not f:IsShown() then return end
+    -- Proximity is measured against the legend's HOME rect (t = 0), not where
+    -- the slide has taken it -- measuring the dodged position would read
+    -- "clear" at once and bounce the strip straight back onto the drag.
+    local lh = f:GetHeight() or 0
+    local home = {
+        x = 0,
+        y = (UIParent:GetHeight() or 0) / 2 - PAD - lh / 2,
+        w = (f:GetWidth() or 0) + DODGE_MARGIN * 2,
+        h = lh + DODGE_MARGIN * 2,
+    }
+    local mx, my = self:CursorPos()
+    local near = Solver.RectOverlapArea(home, { x = cx, y = cy, w = w, h = h }) > 0
+        or (mx > home.x - home.w / 2 and mx < home.x + home.w / 2
+            and my > home.y - home.h / 2 and my < home.y + home.h / 2)
+    legendSlide(f, near)
+end
+
+function P:ClearLegendDodge()
+    if self.legend then legendSlide(self.legend, false) end
+end
+
+-- Snap the legend back to its home instantly (fresh session / re-show).
+function P:ResetLegendDodge()
+    local f = self.legend
+    if not f then return end
+    f:SetScript("OnUpdate", nil)
+    f.dodgeUp, f.dodgeT = false, 0
+    legendApply(f, 0)
 end
 
 -- ============================================================

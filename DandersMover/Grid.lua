@@ -19,6 +19,7 @@ local CreateFrame, UIParent = CreateFrame, UIParent
 local C_GRID = NS.UI.Colors.accent
 local A_LINE, A_CENTER, A_PREVIEW = 0.10, 0.30, 0.9
 local W_LINE, W_CENTER, W_PREVIEW = 1, 2, 2
+local A_LOCK = 0.8                       -- centre line while its axis is the locked one
 
 local function buildLines(grid)
     local pool, used = grid.lines, 0
@@ -34,13 +35,18 @@ local function buildLines(grid)
         local l = acquire()
         l:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, alpha); l:SetSize(thick, h)
         l:ClearAllPoints(); l:SetPoint("CENTER", grid, "CENTER", x, 0); l:Show()
+        return l
     end
     local function hline(y, alpha, thick)
         local l = acquire()
         l:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, alpha); l:SetSize(w, thick)
         l:ClearAllPoints(); l:SetPoint("CENTER", grid, "CENTER", 0, y); l:Show()
+        return l
     end
-    vline(0, A_CENTER, W_CENTER); hline(0, A_CENTER, W_CENTER)
+    -- Kept by name for the axis-lock tint; every rebuild resets them to the
+    -- resting alpha, which is exactly the wanted baseline.
+    grid.centerV = vline(0, A_CENTER, W_CENTER)
+    grid.centerH = hline(0, A_CENTER, W_CENTER)
     local x = size
     while x <= w / 2 do vline(x, A_LINE, W_LINE); vline(-x, A_LINE, W_LINE); x = x + size end
     local y = size
@@ -99,4 +105,80 @@ function G:HidePreview()
     if not self.frame then return end
     self.frame.previewV:Hide(); self.frame.previewH:Hide()
     if not NS.db.showGrid then self.frame:Hide() end
+end
+
+-- ============================================================
+-- AXIS LOCK TINT
+-- While Shift (horizontal-only drag) or Ctrl (vertical-only) is held
+-- mid-drag, the centre line of the axis the drag still moves along brightens:
+-- Shift lights the horizontal line, Ctrl the vertical. Only visible while the
+-- grid is up; (false, false) restores the resting alpha.
+-- ============================================================
+function G:SetAxisLock(lockH, lockV)
+    local f = self.frame
+    if not f or not f.centerH then return end
+    f.centerH:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, lockH and A_LOCK or A_CENTER)
+    f.centerV:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, lockV and A_LOCK or A_CENTER)
+end
+
+-- ============================================================
+-- MEASURE LINES (drag only)
+-- Thin lines from the dragged slab to the nearest screen edge on each axis,
+-- with a px readout at the midpoint (idea from EllesmereUI's unlock mode).
+-- Same lavender as the rest of the session, on the grid frame's OVERLAY layer
+-- like the snap preview, and shown even while the grid itself is off.
+-- ============================================================
+local A_MEASURE = 0.8
+
+local function ensureMeasure(f)
+    if f.measureH then return end
+    f.measureH = f:CreateTexture(nil, "OVERLAY")
+    f.measureH:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, A_MEASURE)
+    f.measureH:SetHeight(1)
+    f.measureV = f:CreateTexture(nil, "OVERLAY")
+    f.measureV:SetColorTexture(C_GRID.r, C_GRID.g, C_GRID.b, A_MEASURE)
+    f.measureV:SetWidth(1)
+    f.measureHText = NS.UI:CreateLabel(f, { size = 10, color = C_GRID })
+    f.measureVText = NS.UI:CreateLabel(f, { size = 10, color = C_GRID })
+end
+
+-- One axis: place the line between fromCoord and toCoord (screen units along
+-- the axis) at cross on the other axis, with the readout at the midpoint.
+local function measureAxis(line, label, horizontal, a, b, cross)
+    local len = b - a
+    if len <= 1 then line:Hide(); label:Hide(); return end
+    line:ClearAllPoints()
+    label:ClearAllPoints()
+    if horizontal then
+        line:SetPoint("LEFT", line:GetParent(), "CENTER", a, cross)
+        line:SetWidth(len)
+        label:SetPoint("BOTTOM", line:GetParent(), "CENTER", (a + b) / 2, cross + 3)
+    else
+        line:SetPoint("BOTTOM", line:GetParent(), "CENTER", cross, a)
+        line:SetHeight(len)
+        label:SetPoint("LEFT", line:GetParent(), "CENTER", cross + 4, (a + b) / 2)
+    end
+    label:SetText(string.format("%d px", len + 0.5))
+    line:Show(); label:Show()
+end
+
+function G:ShowMeasure(cx, cy, w, h)
+    local f = ensure()
+    ensureMeasure(f)
+    if not f:IsShown() then f:Show(); if not NS.db.showGrid then for _, l in ipairs(f.lines) do l:Hide() end end end
+    local halfW, halfH = UIParent:GetWidth() / 2, UIParent:GetHeight() / 2
+    -- Slab edge to the NEARER screen edge on each axis, judged by the centre.
+    if cx < 0 then measureAxis(f.measureH, f.measureHText, true, -halfW, cx - w / 2, cy)
+    else           measureAxis(f.measureH, f.measureHText, true, cx + w / 2, halfW, cy) end
+    if cy < 0 then measureAxis(f.measureV, f.measureVText, false, -halfH, cy - h / 2, cx)
+    else           measureAxis(f.measureV, f.measureVText, false, cy + h / 2, halfH, cx) end
+end
+
+function G:HideMeasure()
+    local f = self.frame
+    if not f or not f.measureH then return end
+    f.measureH:Hide(); f.measureV:Hide()
+    f.measureHText:Hide(); f.measureVText:Hide()
+    -- Mirror HidePreview's rule: the frame only stays up for the grid.
+    if not NS.db.showGrid and not f.previewV:IsShown() and not f.previewH:IsShown() then f:Hide() end
 end

@@ -114,6 +114,51 @@ function S.ClampToScreen(cx, cy, w, h, screenW, screenH)
     return cx, cy
 end
 
+-- Area of the intersection of two centre-based rects; 0 when they only touch
+-- or are apart.
+function S.RectOverlapArea(a, b)
+    local w = min(a.x + a.w / 2, b.x + b.w / 2) - max(a.x - a.w / 2, b.x - b.w / 2)
+    local h = min(a.y + a.h / 2, b.y + b.h / 2) - max(a.y - a.h / 2, b.y - b.h / 2)
+    if w > 0 and h > 0 then return w * h end
+    return 0
+end
+
+-- ============================================================
+-- PANEL DOCKING
+-- ============================================================
+-- Candidate panel positions beside a proxy rect, in tie-break priority order
+-- (right > left > below > above). right/left hang from the proxy's TOP edge --
+-- the panel's historical dock -- while above/below centre on it.
+function S.DockCandidates(proxy, panelW, panelH, gap)
+    local top = proxy.y + proxy.h / 2
+    return {
+        { side = "right", x = proxy.x + proxy.w / 2 + gap + panelW / 2, y = top - panelH / 2 },
+        { side = "left",  x = proxy.x - proxy.w / 2 - gap - panelW / 2, y = top - panelH / 2 },
+        { side = "below", x = proxy.x, y = proxy.y - proxy.h / 2 - gap - panelH / 2 },
+        { side = "above", x = proxy.x, y = proxy.y + proxy.h / 2 + gap + panelH / 2 },
+    }
+end
+
+-- The dock side that covers the least: each fully-on-screen candidate is scored
+-- by its total overlap area against the obstacle rects, smallest wins. Ties
+-- keep the earlier candidate, so DockCandidates' order IS the tie-break.
+-- nil when no candidate fits on screen (the caller falls back to an edge flip).
+function S.BestDockSide(proxy, panelW, panelH, gap, obstacles, screenW, screenH)
+    local halfW, halfH = screenW / 2, screenH / 2
+    local best, bestOverlap
+    for _, c in ipairs(S.DockCandidates(proxy, panelW, panelH, gap)) do
+        if c.x - panelW / 2 >= -halfW and c.x + panelW / 2 <= halfW
+        and c.y - panelH / 2 >= -halfH and c.y + panelH / 2 <= halfH then
+            local rect = { x = c.x, y = c.y, w = panelW, h = panelH }
+            local overlap = 0
+            for _, o in ipairs(obstacles) do overlap = overlap + S.RectOverlapArea(rect, o) end
+            if overlap == 0 then return c.side end     -- nothing beats zero at this priority
+            if not bestOverlap or overlap < bestOverlap then best, bestOverlap = c.side, overlap end
+        end
+    end
+    return best
+end
+
 -- ============================================================
 -- ANCHOR RESOLUTION
 -- ============================================================
