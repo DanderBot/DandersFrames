@@ -862,8 +862,13 @@ function DF:UnlockRaidFrames(legacy)
     -- it reports and stops. Legacy is reachable only via the explicit `legacy` argument.
     if Mover and not legacy then
         if Mover:IsEnabled("DandersFrames", "raid") then
-            if DF.MoverBridge then DF.MoverBridge:RequestScope("raid") end
-            Mover:Unlock("DandersFrames")
+            -- See DF:UnlockFrames: the raid scope's keys only, forced relevant (solo editing).
+            local filter = "DandersFrames"
+            if DF.MoverBridge then
+                DF.MoverBridge:RequestScope("raid")
+                filter = DF.MoverBridge:SessionFilter("raid")
+            end
+            Mover:Unlock(filter)
         else
             DF:Say(string.format(L["%s are disabled in DandersMover settings (/mover config)."], L["Raid Frames"]))
         end

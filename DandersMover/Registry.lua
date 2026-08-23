@@ -8,7 +8,7 @@ local addonName, NS = ...
 local R = { addons = {}, elements = {}, targets = {}, queue = {}, ready = false }
 NS.Registry = R
 
-local pairs, ipairs, type, error, tinsert, tsort = pairs, ipairs, type, error, table.insert, table.sort
+local pairs, ipairs, type, error, tinsert, tsort, pcall = pairs, ipairs, type, error, table.insert, table.sort, pcall
 
 function R.Id(addon, key) return addon .. ":" .. key end
 
@@ -22,6 +22,11 @@ local function validate(def, kind)
     end
     if def.getRect ~= nil and type(def.getRect) ~= "function" then
         error("DandersMover: getRect must be a function", 3)
+    end
+    -- isRelevant: "does this element/target take part right now?" (group type, a
+    -- feature toggle, a mode that is not on screen). Absent = always relevant.
+    if def.isRelevant ~= nil and type(def.isRelevant) ~= "function" then
+        error("DandersMover: isRelevant must be a function", 3)
     end
     if kind == "element" then
         if type(def.getPos) ~= "function" then error("DandersMover: element needs getPos", 3) end
@@ -43,6 +48,7 @@ local function insertTarget(self, addon, key, def, element)
         addon = addon, key = key, id = id, title = def.title or key,
         frame = def.frame, getFrame = def.getFrame, getSize = def.getSize,
         getRect = def.getRect, group = def.group, element = element,
+        isRelevant = def.isRelevant,
     }
     return self.targets[id]
 end
@@ -56,6 +62,10 @@ local function insertElement(self, addon, key, def)
         getPos = def.getPos, onChanged = def.onChanged, default = def.default,
         secure = def.secure and true or false, getSize = def.getSize,
         getRect = def.getRect, anchorable = def.anchorable ~= false, group = def.group,
+        isRelevant = def.isRelevant,
+        -- The record's `point` is derived by the consumer (e.g. a growth corner), not
+        -- chosen: the panel hides its 9-point picker and SetAnchorPoint is a no-op.
+        pointLocked = def.pointLocked and true or false,
     }
     self.elements[id] = el
     if el.anchorable then insertTarget(self, addon, key, def, el) else self.targets[id] = nil end
@@ -179,6 +189,10 @@ end
 -- frame's own shown state.
 function R:IsTargetAvailable(entry)
     if not entry then return false end
+    -- Irrelevant right now (wrong group type, feature off): not a snap target, and a
+    -- child anchored to it HOLDS its last solved position (NS:ResolveElement) rather
+    -- than jumping to a rect that is not meaningfully on screen.
+    if not self:IsRelevant(entry) then return false end
     if entry.getRect then return entry.getRect() ~= nil end
     local f = self:GetFrame(entry)
     return f ~= nil and f:IsShown() and true or false
@@ -256,6 +270,66 @@ function R:IsOccupied(targetId, edge, align, excludeId)
         end
     end
     return false
+end
+
+-- ============================================================
+-- RELEVANCE + SESSION FILTER
+-- ============================================================
+-- Keys named in an Unlock filter are FORCED relevant for the session (that is how a
+-- solo player edits raid frames): they snap and are snapped to even though their
+-- isRelevant() says no. Session owns the writes; Finish wipes it.
+NS.forcedRelevant = {}
+
+function R:IsRelevant(entry)
+    if not entry then return false end
+    if NS.forcedRelevant[entry.id] then return true end
+    if entry.isRelevant == nil then return true end
+    local ok, res = pcall(entry.isRelevant)
+    if not ok then geterrorhandler()(res); return true end   -- fail OPEN
+    return res and true or false
+end
+
+-- Unlock(filter): nil = everything; "Addon" = that addon initiated the session;
+-- { addon = "Addon", keys = { "k", ... } } = it initiated it and only those keys of
+-- its own take part. Normalised once into { addon = <string|nil>, keySet = <set|nil> }.
+-- keys without addon is a hard error: keys are unique per addon only.
+function R:NormalizeFilter(filter)
+    if filter == nil then return nil end
+    if type(filter) == "string" then return { addon = filter } end
+    if type(filter) ~= "table" then error("DandersMover: Unlock filter must be nil, a string or a table", 3) end
+    local out = { addon = filter.addon }
+    if filter.keys ~= nil then
+        if type(filter.keys) ~= "table" then error("DandersMover: Unlock filter.keys must be a table", 3) end
+        if type(out.addon) ~= "string" then error("DandersMover: Unlock filter.keys needs filter.addon", 3) end
+        out.keySet = {}
+        for _, key in ipairs(filter.keys) do out.keySet[key] = true end
+    end
+    return out
+end
+
+-- Does this element take part in the session at all (snapshot, resolve, snap)?
+-- The filter names the INITIATING addon: its elements follow the key filter; every
+-- OTHER addon's elements are in on their own terms (enabled + relevant) so they stay
+-- anchor targets -- the whole point of a consumer-initiated session is often to glue a
+-- third-party element to the initiator's frames.
+-- Precedence: user toggle > key filter > isRelevant.
+function R:IsInSession(filter, el)
+    if not self:IsEnabled(el.addon, el.key) then return false end   -- toggle wins
+    if filter and filter.addon == el.addon and filter.keySet then
+        return filter.keySet[el.key] == true                        -- key filter wins
+    end
+    return self:IsRelevant(el)
+end
+
+-- Does it get a PROXY? The initiator's in-session elements always; other addons'
+-- only when the user asked to see them (showOtherAddons). An unfiltered session has
+-- no "other" addons.
+function R:WantsProxy(filter, el)
+    if not self:IsInSession(filter, el) then return false end
+    if filter and filter.addon and el.addon ~= filter.addon then
+        return (NS.db and NS.db.showOtherAddons) and true or false
+    end
+    return true
 end
 
 -- ============================================================

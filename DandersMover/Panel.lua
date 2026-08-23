@@ -269,7 +269,9 @@ function Pn:Refresh()
         f.btnDetach:SetEnabled(false)
         local cur = pos.point or "CENTER"
         for _, b in ipairs(f.points) do
-            b:Show()
+            -- pointLocked: the consumer derives `point` (e.g. a growth corner); a
+            -- picker would be silently overwritten, so it is not offered.
+            b:SetShown(not el.pointLocked)
             b:SetActive(b.point == cur)
         end
     end

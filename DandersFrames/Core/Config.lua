@@ -2225,6 +2225,12 @@ DF.PartyDefaults = {
     personalTargetedSpellSpacing = 6,
     personalTargetedSpellX = 0,
     personalTargetedSpellY = -150,
+    -- DandersMover position RECORD for the personal block ({ point, x, y, anchor });
+    -- the X/Y scalars above stay as a write-through mirror for this minor, written by
+    -- DF:SetPositionRecord only. Raid inherits this key (RaidDefaults is generated) and
+    -- the raid copy is what drives the block in a raid (GetPersonalDB). It is on
+    -- AutoProfiles' NON_OVERRIDABLE_KEYS: the scalars are what a raid layout overrides.
+    personalTargetedPosition = { point = "CENTER", x = 0, y = -150 },
 
     -- Pet Frames
     petAnchor = "BOTTOM",
@@ -2669,6 +2675,9 @@ DF.PartyDefaults = {
     targetedListWidth = 240,
     targetedListX = 0,
     targetedListY = -10,
+    -- DandersMover position RECORD (see personalTargetedPosition). Party-only for free:
+    -- PARTY_ONLY_PREFIX strips every targetedList* key from the generated RaidDefaults.
+    targetedListPosition = { point = "CENTER", x = 0, y = -10 },
     targetedListZoomIcon = true,
     -- Per-text-element anchor + offset. Anchor is a point name
     -- (LEFT / CENTER / RIGHT) applied within the bar's progress
@@ -2834,6 +2843,13 @@ DF.PartyDefaults = {
         -- defaults. Default true: pinned is a party/raid feature and the PvP event
         -- storm could exhaust the per-frame budget ("script ran too long").
         disableInPvP = true,
+        -- Pinned position records are in DandersMover semantics (point = growth corner,
+        -- x/y = offsets from UIParent CENTER, frames glue in `anchor`). A profile whose
+        -- pinnedFrames table lacks this marker is normalised ONCE by
+        -- PinnedFrames.MigrateProfileRecords. It lives INSIDE the table, not as a
+        -- profile flag, so it travels with the table through export/import and a
+        -- pinnedFrames-category import of an old string is converted exactly once too.
+        positionsV2 = true,
         sets = {
             [1] = {
                 enabled = false,

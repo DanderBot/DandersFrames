@@ -250,6 +250,13 @@ local function GetPersonalDB()
     return (IsInRaid() or DF.raidTestMode) and DF:GetRaidDB() or DF:GetDB()
 end
 
+-- The db that drives the personal block right now -- exported so the position record
+-- (Frames/Position.lua RECORD_SPECS.personal) and the DandersMover bridge resolve the
+-- SAME table this file reads, raid included.
+function DF:GetPersonalTargetedDB()
+    return GetPersonalDB()
+end
+
 -- Check if a unit is valid for targeted spell tracking.
 -- We ONLY track nameplate units: the same caster also fires on target/softenemy/
 -- boss/arena, and dedup is keyed on the unit-token STRING, so accepting those
@@ -1516,6 +1523,26 @@ local function UpdateMoverSize()
     DF.personalTargetedSpellsMover:SetSize(w, h)
 end
 
+-- DandersMover accessors. The container is a file-local, so the bridge cannot measure
+-- it; and the container's CENTER is deliberately NOT the block's centre
+-- (GetPersonalContainerPoint shifts it by half the block opposite the growth
+-- direction) -- what the user sees, and what the legacy mover framed, is the icon
+-- BLOCK centred on the saved x/y with the mover's size. Report that. UIParent units
+-- (the container is parented to UIParent at scale 1).
+function DF:GetPersonalTargetedSize()
+    return GetPersonalMoverSize()
+end
+
+-- nil while the block is not on screen (no active spells, feature off): the lib then
+-- treats it as an unavailable anchor target and sizes the proxy from GetPersonalTargetedSize.
+function DF:GetPersonalTargetedRect()
+    if not personalContainer or not personalContainer:IsShown() then return nil end
+    local rec = DF.GetPositionRecord and DF:GetPositionRecord("personal")
+    if not rec then return nil end
+    local w, h = GetPersonalMoverSize()
+    return { x = rec.x or 0, y = rec.y or 0, w = w, h = h }
+end
+
 -- Create mover for personal targeted spells
 function DF:CreatePersonalTargetedSpellsMover()
     if DF.personalTargetedSpellsMover then return end
@@ -1596,9 +1623,10 @@ function DF:CreatePersonalTargetedSpellsMover()
         self:ClearAllPoints()
         self:SetPoint("CENTER", UIParent, "CENTER", x, y)
         
-        -- Save to DB
-        db.personalTargetedSpellX = x
-        db.personalTargetedSpellY = y
+        -- Save through the record funnel (record + scalar mirror; routes to an active
+        -- raid layout's override like the raid container does). An x/y move keeps any
+        -- DandersMover anchor -- the lib re-solves it, exactly as the party drag does.
+        DF:SetPositionRecord("personal", { point = "CENTER", x = x, y = y }, "PersonalMover:drag")
         
         -- Update actual container
         DF:UpdatePersonalTargetedSpellsPosition()
@@ -3259,6 +3287,25 @@ local function TargetedList_EnsureContainer()
     return c
 end
 
+-- DandersMover accessors (the container is a file-local). The container IS centred
+-- on the saved x/y (TargetedList_LayoutBars) and sized to the full bar stack, so the
+-- rect is the record point with the computed footprint. Party-only feature.
+function DF:GetTargetedListSize()
+    local db = DF.db and DF.db.party
+    if not db then return nil end
+    return TargetedList_ComputeContainerSize(db)
+end
+
+function DF:GetTargetedListRect()
+    if not targetedListContainer or not targetedListContainer:IsShown() then return nil end
+    local db = DF.db and DF.db.party
+    if not db then return nil end
+    local rec = DF.GetPositionRecord and DF:GetPositionRecord("targetedList")
+    if not rec then return nil end
+    local w, h = TargetedList_ComputeContainerSize(db)
+    return { x = rec.x or 0, y = rec.y or 0, w = w, h = h }
+end
+
 -- Build a single bar frame from scratch. Called by the pool's
 -- acquire path on a cold fetch.
 --
@@ -4447,10 +4494,8 @@ local function TargetedList_CreateMover()
 
         self:ClearAllPoints()
         self:SetPoint("CENTER", UIParent, "CENTER", x, y)
-        if DF.db and DF.db.party then
-            DF.db.party.targetedListX = x
-            DF.db.party.targetedListY = y
-        end
+        -- Through the record funnel (record + scalar mirror). Party-only feature.
+        DF:SetPositionRecord("targetedList", { point = "CENTER", x = x, y = y }, "TargetedListMover:drag")
         DF:UpdateTargetedListLayout()
     end)
 

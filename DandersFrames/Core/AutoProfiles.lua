@@ -171,6 +171,11 @@ local PINNED_OVERRIDABLE = {
 local NON_OVERRIDABLE_KEYS = {
     raidLocked = true,
     locked = true,
+    -- A table-valued record cannot be a layout override (the overlay proxy's __newindex
+    -- only fires for top-level scalar writes, so it would read stale and lose writes).
+    -- personalTargetedSpellX/Y -- the scalars -- are what a layout overrides; the record
+    -- folds the effective scalar in on read (DF:GetPositionRecord).
+    personalTargetedPosition = true,
 }
 
 -- True unless `key` is non-overridable: a pinned key (pinned.N.setting) whose
@@ -1780,18 +1785,26 @@ end
 -- Mirrors what the toolbar Unlock flow persists, minus the snapshot/diff machinery
 -- (a single scalar position key needs none — ApplyRuntimeProfile rebuilds the
 -- overlay from profile.overrides on the next layout re-eval).
-function AutoProfilesUI:SetActiveLayoutRaidPosition(x, y)
+-- The primitive: write any x/y scalar PAIR into the active layout's override + live
+-- overlay. No refresh -- the caller applies. Used for raidAnchorX/Y (below) and for
+-- personalTargetedSpellX/Y (DF:SetPositionRecord("personal") in a raid).
+function AutoProfilesUI:SetActiveLayoutRaidPair(xKey, yKey, x, y)
     if self:IsEditing() then return false end
     local p = self.activeRuntimeProfile
     if not p then return false end
     p.overrides = p.overrides or {}
-    p.overrides.raidAnchorX = x
-    p.overrides.raidAnchorY = y
+    p.overrides[xKey] = x
+    p.overrides[yKey] = y
     -- Reflect immediately so GetRaidDB() (overlay view) returns the new value.
     if DF.raidOverrides then
-        DF.raidOverrides.raidAnchorX = x
-        DF.raidOverrides.raidAnchorY = y
+        DF.raidOverrides[xKey] = x
+        DF.raidOverrides[yKey] = y
     end
+    return true
+end
+
+function AutoProfilesUI:SetActiveLayoutRaidPosition(x, y)
+    if not self:SetActiveLayoutRaidPair("raidAnchorX", "raidAnchorY", x, y) then return false end
     if DF.UpdateRaidContainerPosition then DF:UpdateRaidContainerPosition() end
     return true
 end

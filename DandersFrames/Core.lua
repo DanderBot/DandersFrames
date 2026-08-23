@@ -3955,27 +3955,31 @@ end
 -- raidAnchorX/raidAnchorY. The scalars STAY as a write-through mirror for this minor
 -- (DF:SetPositionRecord is the funnel); this migration only gives the record its
 -- initial value so nothing moves on the upgrade login.
+-- Phase B: also seeds personalTargetedPosition (both modes) and targetedListPosition (party), and runs the pinned record migration.
 function DF:MigrateContainerPositionRecords()
     if not DandersFramesDB_v2 or not DandersFramesDB_v2.profiles then return end
 
-    local function seed(modeDb, xKey, yKey, defX, defY)
+    local function seed(modeDb, key, xKey, yKey, defX, defY)
         if type(modeDb) ~= "table" then return end
         -- Presence gate, not a value gate: a record that already exists is the user's.
-        if type(modeDb.position) == "table" then return end
-        modeDb.position = {
+        if type(modeDb[key]) == "table" then return end
+        modeDb[key] = {
             point = "CENTER",
             x = tonumber(modeDb[xKey]) or defX,
             y = tonumber(modeDb[yKey]) or defY,
         }
     end
 
+    local uiW = UIParent and UIParent:GetWidth() or 0
+    local uiH = UIParent and UIParent:GetHeight() or 0
+
     for _, profile in pairs(DandersFramesDB_v2.profiles) do
         -- Per PROFILE, not per run: an inactive profile is reached by the login
         -- battery's whole-table walk, but an imported one arrives later, and a per-run
         -- guard would skip it forever. (Same reasoning as MigrateHealPredictionBelowAbsorb.)
         if type(profile) == "table" and not profile._moverPositionRecordsV1 then
-            seed(profile.party, "anchorX", "anchorY", 0, -325)
-            seed(profile.raid, "raidAnchorX", "raidAnchorY", -6.666610717773438, -25)
+            seed(profile.party, "position", "anchorX", "anchorY", 0, -325)
+            seed(profile.raid, "position", "raidAnchorX", "raidAnchorY", -6.666610717773438, -25)
 
             -- ⚠ DEFENSIVE ONLY -- this walk deletes, it does not migrate. `position` is
             -- deliberately NOT an auto-layout override key: ApplyRuntimeProfile deep-copies
@@ -3992,6 +3996,30 @@ function DF:MigrateContainerPositionRecords()
             end
 
             profile._moverPositionRecordsV1 = true
+        end
+
+        -- V2 (Phase B): the personal targeted block (both modes -- the raid copy drives
+        -- it in a raid) and the targeted list (party only). Same presence gate, same
+        -- override strip (personalTargetedPosition is on NON_OVERRIDABLE_KEYS; the
+        -- scalars stay the layout's lever).
+        if type(profile) == "table" and not profile._moverPositionRecordsV2 then
+            seed(profile.party, "personalTargetedPosition", "personalTargetedSpellX", "personalTargetedSpellY", 0, -150)
+            seed(profile.raid,  "personalTargetedPosition", "personalTargetedSpellX", "personalTargetedSpellY", 0, -150)
+            seed(profile.party, "targetedListPosition", "targetedListX", "targetedListY", 0, -10)
+            if DF.ForEachRaidLayoutOverride then
+                DF.ForEachRaidLayoutOverride(profile, function(layout)
+                    layout.overrides.personalTargetedPosition = nil
+                    layout.overrides.targetedListPosition = nil
+                end)
+            end
+            profile._moverPositionRecordsV2 = true
+        end
+
+        -- Pinned records: self-gated (per pinnedFrames table / per record shape), so
+        -- it runs every time -- an imported pinnedFrames table is caught on the next
+        -- pass without a flag to clear. See PinnedFrames.MigrateProfileRecords.
+        if type(profile) == "table" and DF.PinnedFrames and DF.PinnedFrames.MigrateProfileRecords then
+            DF.PinnedFrames.MigrateProfileRecords(profile, uiW, uiH)
         end
     end
 end
@@ -4392,6 +4420,8 @@ local FRESH_PROFILE_MIGRATION_FLAGS = {
     -- matters because the migration would otherwise re-derive the record from the scalars
     -- on a profile whose record the user may already have moved.
     _moverPositionRecordsV1 = true,
+    -- Phase B: born with personalTargetedPosition / targetedListPosition in the defaults.
+    _moverPositionRecordsV2 = true,
     -- ☠ _staleTexturePathV1 DELIBERATELY REMOVED. The texture repair is HEALING, not a
     -- migration: it must re-check on every login, because a file can go missing at any
     -- future update, not just once in a profile's life. Stamping a flag here would have
