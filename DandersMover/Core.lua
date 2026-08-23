@@ -39,7 +39,7 @@ NS.DEFAULTS = {
     -- How close (screen units, edge to edge) a dragged element has to get before a
     -- snap zone claims it. Fixed, not a fraction of the element: the same distance
     -- for a raid container and for a single icon. Also the zone-highlight radius.
-    snapDistance = 100,
+    snapDistance = 25,
     keyboardNudge = true, panelSide = "auto", showHiddenMovers = true, showOtherAddons = false, debug = false,
     addons = {}, demo = {},
 }

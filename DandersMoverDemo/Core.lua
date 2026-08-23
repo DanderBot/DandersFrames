@@ -105,6 +105,15 @@ local function build(def, secure)
     fill:SetPoint("BOTTOMRIGHT", -1, 1)
     fill:SetColorTexture(def.color[1], def.color[2], def.color[3], 0.65)
 
+    if def.inset then
+        -- The registered getRect is this inner rectangle, so draw it: the proxy
+        -- should frame the light box, not the dark outer edge.
+        local inner = f:CreateTexture(nil, "ARTWORK")
+        inner:SetPoint("TOPLEFT", def.inset, -def.inset)
+        inner:SetPoint("BOTTOMRIGHT", -def.inset, def.inset)
+        inner:SetColorTexture(1, 1, 1, 0.25)
+    end
+
     local logoSize = math.min(16, def.w - 4, def.h - 4)
     if logoSize > 0 then
         local logo = f:CreateTexture(nil, "ARTWORK")

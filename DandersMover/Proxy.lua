@@ -108,6 +108,7 @@ local function create(el)
     local b = CreateFrame("Button", nil, P:GetUnlockFrame(), "BackdropTemplate")
     local ac = UI:GetAccent()
     UI:CreateElementBackdrop(b, { bgColor = { ac.r, ac.g, ac.b, 0.25 }, borderColor = { ac.r, ac.g, ac.b, 1 } })
+    UI:ApplyPixelBorder(b, { ac.r, ac.g, ac.b, 1 }, 2)   -- 2px solid so the role colour reads at a glance
     b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     b:RegisterForDrag("LeftButton")
     b:SetMovable(false)
@@ -331,6 +332,7 @@ local function zoneFrame(i)
         z = CreateFrame("Frame", nil, P:GetUnlockFrame(), "BackdropTemplate")
         z:SetFrameLevel(1)
         UI:CreateElementBackdrop(z, { bgColor = { 0, 0, 0, 0 }, borderColor = { 0, 0, 0, 0 } })
+        UI:ApplyPixelBorder(z, { 0, 0, 0, 0 }, 2)
         P.zones[i] = z
     end
     return z
@@ -385,15 +387,15 @@ function P:UpdateZones(cx, cy, hovered)
         local zf = self.zones[i]
         local z = zf.zone
         if hovered and z == hovered then
-            zf:SetBackdropColor(C_ZONE_HOVER[1], C_ZONE_HOVER[2], C_ZONE_HOVER[3], 0.35)
-            zf:SetBackdropBorderColor(C_ZONE_HOVER[1], C_ZONE_HOVER[2], C_ZONE_HOVER[3], 0.6)
+            zf:SetBackdropColor(C_ZONE_HOVER[1], C_ZONE_HOVER[2], C_ZONE_HOVER[3], 0.45)
+            zf:SetBackdropBorderColor(C_ZONE_HOVER[1], C_ZONE_HOVER[2], C_ZONE_HOVER[3], 1)
         elseif closest and z.target == closest and sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2) < radius then
             local d = sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2)
             local f = 0.2 + Solver.ProximityFactor(d, radius) * 0.8
             if z.occupied then f = f * 0.5 end   -- occupied zones read quieter (CDM rule)
             local c = z.occupied and C_ZONE_OCCUPIED or C_ZONE_NEAR
-            zf:SetBackdropColor(c[1], c[2], c[3], 0.15 * f)
-            zf:SetBackdropBorderColor(c[1], c[2], c[3], 0.3 * f)
+            zf:SetBackdropColor(c[1], c[2], c[3], 0.22 * f)
+            zf:SetBackdropBorderColor(c[1], c[2], c[3], 0.85 * f)
         else
             zf:SetBackdropColor(0, 0, 0, 0); zf:SetBackdropBorderColor(0, 0, 0, 0)
         end

@@ -35,6 +35,7 @@ NS.UI = {
     Space = { section = 10 }, RowGap = 14, RowGapTight = 8, RowHeight = { checkbox = 35 },
     GetAccent = function() return { r = 0, g = 0, b = 1 } end,
     CreateElementBackdrop = function() end,
+    ApplyPixelBorder = function() end,
     CreateLabel = function() return stubFrame() end,
     CreateCheckbox = function() return stubFrame() end,
 }

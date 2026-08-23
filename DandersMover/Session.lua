@@ -17,7 +17,7 @@ local C_Timer = C_Timer
 
 local SCREEN_SNAP = 8
 -- Only reached when the SV predate the setting; NS.DEFAULTS.snapDistance is the value.
-local SNAP_DISTANCE = 100
+local SNAP_DISTANCE = 25
 
 local function panel(method) if NS.Panel then NS.Panel[method](NS.Panel) end end
 
