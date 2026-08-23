@@ -53,8 +53,8 @@ local C_ZONE = UI.Colors.accent
 local C_ZONE_OCCUPIED = UI.Colors.danger
 local C_ZONE_HOVER = { r = 1, g = 1, b = 1 }
 local ZONE_WEIGHT, ZONE_HOVER_WEIGHT = 1, 2
-local ZONE_TICK_LEN, ZONE_TICK_W = 7, 2
-local ZONE_CORNERS = { "TOPLEFT", "TOPRIGHT", "BOTTOMLEFT", "BOTTOMRIGHT" }
+local ZONE_DASH_W = 2                    -- dashed-edge thickness
+local DASH_H, DASH_V = MEDIA .. "dash_h", MEDIA .. "dash_v"
 
 -- ============================================================
 -- UNLOCK FRAME + CURSOR
@@ -490,19 +490,22 @@ local function zoneFrame(i)
         z:SetFrameLevel(1)
         UI:CreateElementBackdrop(z, { bgColor = { 0, 0, 0, 0 }, borderColor = { 0, 0, 0, 0 } })
         z.weight = ZONE_WEIGHT
-        -- Corner ticks: an L at each corner, over a plain outline. There is no
-        -- dashed-line primitive to draw the "empty slot" read the design asked
-        -- for -- tiling a solid texture repeats a solid, and the tooltip border
-        -- art is a frame, not a dash -- so the corners do that job instead.
-        z.ticks = {}
-        for _, corner in ipairs(ZONE_CORNERS) do
-            local arm = z:CreateTexture(nil, "OVERLAY")
-            arm:SetSize(ZONE_TICK_LEN, ZONE_TICK_W); arm:SetPoint(corner)
-            z.ticks[#z.ticks + 1] = arm
-            arm = z:CreateTexture(nil, "OVERLAY")
-            arm:SetSize(ZONE_TICK_W, ZONE_TICK_LEN); arm:SetPoint(corner)
-            z.ticks[#z.ticks + 1] = arm
+        -- Dashed edges: 8x8 tiles (5-on/3-off dash in a 2px strip) tiled along
+        -- each edge with REPEAT wrap. Two pre-rotated tiles rather than
+        -- SetTexCoord rotation, which tiled textures do not honour reliably.
+        z.dashes = {}
+        local function edge(p1, p2, horizontal)
+            local t = z:CreateTexture(nil, "OVERLAY")
+            t:SetTexture(horizontal and DASH_H or DASH_V, "REPEAT", "REPEAT")
+            if horizontal then t:SetHeight(ZONE_DASH_W); t:SetHorizTile(true)
+            else               t:SetWidth(ZONE_DASH_W);  t:SetVertTile(true) end
+            t:SetPoint(p1); t:SetPoint(p2)
+            z.dashes[#z.dashes + 1] = t
         end
+        edge("TOPLEFT", "TOPRIGHT", true)
+        edge("BOTTOMLEFT", "BOTTOMRIGHT", true)
+        edge("TOPLEFT", "BOTTOMLEFT", false)
+        edge("TOPRIGHT", "BOTTOMRIGHT", false)
         P.zones[i] = z
     end
     return z
@@ -513,14 +516,12 @@ end
 -- frame of a drag, so the weight is only re-laid out when it actually changes;
 -- a recolour goes through the pixel border's cheap shim.
 local function paintZone(z, fill, fillAlpha, line, lineAlpha, weight)
+    -- The dashes ARE the outline; the backdrop border stays off so the slot
+    -- reads dashed, exactly like the approved mock. `weight` is kept in the
+    -- signature for call-site stability but no longer drawn.
     z:SetBackdropColor(fill.r, fill.g, fill.b, fillAlpha)
-    if z.weight ~= weight then
-        UI:ApplyPixelBorder(z, { line.r, line.g, line.b, lineAlpha }, weight)
-        z.weight = weight
-    else
-        z:SetBackdropBorderColor(line.r, line.g, line.b, lineAlpha)
-    end
-    for _, arm in ipairs(z.ticks) do arm:SetColorTexture(line.r, line.g, line.b, lineAlpha) end
+    z:SetBackdropBorderColor(0, 0, 0, 0)
+    for _, d in ipairs(z.dashes) do d:SetVertexColor(line.r, line.g, line.b, lineAlpha) end
 end
 
 local function clearZone(z)
