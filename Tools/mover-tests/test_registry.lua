@@ -138,3 +138,19 @@ do
     check(R:Get("A:one") == nil and R:GetAddon("A") == nil, "addon fully removed")
     eq(#R:SortedElements(), 0, "no elements left")
 end
+
+-- getRect nil falls through to getSize / frame size
+do
+    R:RegisterAddon("G", { title = "G" })
+    local hidden = R:Register("G", "h1", elDef(FakeFrame(0, 0, 40, 20), { point = "CENTER", x = 0, y = 0 },
+        { getRect = function() return nil end, getSize = function() return 77, 33 end }))
+    local w, h = R:GetSize(hidden)
+    eq(w, 77, "getSize used when getRect is nil"); eq(h, 33, "getSize height")
+    check(R:GetRect(hidden) == nil, "rect still nil (not visible)")
+    check(not R:IsTargetAvailable(hidden), "not available as a target")
+    local hidden2 = R:Register("G", "h2", elDef(FakeFrame(0, 0, 40, 20), { point = "CENTER", x = 0, y = 0 },
+        { getRect = function() return nil end }))
+    local w2 = R:GetSize(hidden2)
+    eq(w2, 40, "frame size used when getRect nil and no getSize")
+    R:UnregisterAddon("G")
+end

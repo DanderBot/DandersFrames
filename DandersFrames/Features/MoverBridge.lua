@@ -76,13 +76,9 @@ local function union(acc, f)
 end
 
 -- The visible extent of the party frames in UIParent units from UIParent CENTER.
--- Falls back to DF.container's own rect when nothing is shown; nil only when there is no
--- container at all (pre-init).
---
--- ☠ MUST NOT RETURN NIL WHILE THE CONTAINER EXISTS. Registry:GetSize short-circuits on
--- getRect (Registry.lua:139-143): when getRect returns nil, GetSize returns nil too and
--- the element has no measurable size at all -- the def's getSize is never consulted. The
--- container fallback therefore lives HERE, not in getSize.
+-- nil when no party frame is on screen (neither test frames nor live header children):
+-- the lib then treats the party frames as an unavailable anchor target and holds any
+-- children anchored to them, and falls through to the def's getSize for the proxy.
 function DF:GetPartyVisibleRect()
     local acc
     if DF.IsTestModeActive and DF:IsTestModeActive("party") and DF.testPartyFrames then
@@ -91,24 +87,9 @@ function DF:GetPartyVisibleRect()
     if not acc and DF.partyHeader then
         for i = 1, 5 do acc = union(acc, DF.partyHeader:GetAttribute("child" .. i)) end
     end
-    if acc then
-        return { x = (acc.l + acc.r) / 2, y = (acc.b + acc.t) / 2,
-                 w = acc.r - acc.l,       h = acc.t - acc.b }
-    end
-
-    -- Nothing shown: fall back to the container itself.
-    local c = DF.container
-    if not c then return nil end
-    local cx, cy, w, h = frameRect(c)
-    if not cx then
-        -- Hidden container: derive the rect from the record + the container's size.
-        local rec = DF:GetPositionRecord("party")
-        local s = (DF:GetDB().frameScale or 1)
-        local cw, ch = c:GetSize()
-        if not cw or cw <= 0 then return nil end
-        return { x = rec.x or 0, y = rec.y or 0, w = cw * s, h = ch * s }
-    end
-    return { x = cx, y = cy, w = w, h = h }
+    if not acc then return nil end
+    return { x = (acc.l + acc.r) / 2, y = (acc.b + acc.t) / 2,
+             w = acc.r - acc.l,       h = acc.t - acc.b }
 end
 
 -- ============================================================
@@ -184,6 +165,8 @@ local function registerElements()
         -- ⚠ Dead while getRect is present: Registry:GetSize returns getRect's w/h and
         -- never reaches getSize. Kept as the spec wrote it so the def stays correct if
         -- getRect is ever dropped.
+
+        -- Used when getRect reports no visible frames: the proxy keeps the container's size.
         getSize   = function()
             local w, h = DF.container:GetSize()
             local s = (DF:GetDB().frameScale or 1)

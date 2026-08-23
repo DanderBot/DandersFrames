@@ -135,11 +135,12 @@ function R:GetFrame(entry)
     return entry.frame
 end
 
+-- getRect returning nil means "not visible right now", not "no size": fall through
+-- to getSize / the frame so hidden elements still have a measurable proxy.
 function R:GetSize(entry)
     if entry.getRect then
         local r = entry.getRect()
-        if not r then return nil end
-        return r.w, r.h
+        if r then return r.w, r.h end
     end
     -- getSize is declared in UIParent units (the consumer reports what is visible).
     if entry.getSize then return entry.getSize() end
