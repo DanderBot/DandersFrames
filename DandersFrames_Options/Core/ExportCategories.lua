@@ -38,6 +38,11 @@ DF.ExportCategories = {
         "permanentMoverPullTimerDuration",
         "permanentMoverShowOnHover",
         "permanentMoverWidth",
+        -- The DandersMover record. Exported alongside the anchorX/anchorY +
+        -- raidAnchorX/raidAnchorY mirror so a round-trip carries both shapes; if a
+        -- string predates this key, DF:GetPositionRecord re-seeds the record from the
+        -- imported scalars on first read.
+        "position",
         "raidAnchorX",
         "raidAnchorY",
         "raidEnabled",

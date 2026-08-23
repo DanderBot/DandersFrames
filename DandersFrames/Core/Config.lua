@@ -1321,6 +1321,16 @@ DF.PartyDefaults = {
     -- read and stay.
     anchorX = 0,
     anchorY = -325,
+    -- The DandersMover position RECORD. { point, x, y, anchor } — the shape the lib
+    -- reads and mutates in place, and what DF:GetPositionRecord / UpdateContainerPosition
+    -- read. anchorX/anchorY above are kept as a WRITE-THROUGH MIRROR for this minor:
+    -- 30+ resident readers still take the scalars, and the auto-layout override system
+    -- can only override top-level SCALAR keys (a table-valued override is invisible to
+    -- the raid overlay proxy's __newindex, so it would read stale and lose writes).
+    -- DF:SetPositionRecord is the single funnel that keeps the two in step.
+    -- ⚠ The raid value differs; it is supplied by RAID_DEFAULT_OVERRIDES at the bottom
+    -- of this file, NOT by a second copy here (DF.RaidDefaults is generated).
+    position = { point = "CENTER", x = 0, y = -325 },
 
     -- Background
     backgroundClassAlpha = 1,
@@ -2940,6 +2950,10 @@ local RAID_DEFAULT_OVERRIDES = {
     -- missingBuffIconScale). missingBuffIconSize has no raid override, so 24 is its value
     -- in both modes — change that and this stops matching silently.
     defensiveIconSize = 24,   -- party: 26; matches missingBuffIconSize (24)
+    -- Raid's container sits in a different place than party's. Mirrors the legacy
+    -- raidAnchorX/raidAnchorY defaults above (-6.666610717773438 / -25) exactly, so a
+    -- fresh profile's record and its scalar mirror agree from the first frame.
+    position = { point = "CENTER", x = -6.666610717773438, y = -25 },
 }
 
 local PARTY_ONLY_PREFIX = "targetedList"
@@ -2969,7 +2983,13 @@ DF.RaidDefaults = (function()
         end
     end
     for _, k in ipairs(remove) do t[k] = nil end
-    for k, v in pairs(RAID_DEFAULT_OVERRIDES) do t[k] = v end
+    -- Deep-copy here too, not just for the inherited keys above: `position` is the first
+    -- TABLE-valued override, and a raw assignment would make DF.RaidDefaults.position and
+    -- RAID_DEFAULT_OVERRIDES.position the same table -- one stray mutation of the "default"
+    -- would then rewrite the shipped default for the rest of the session.
+    for k, v in pairs(RAID_DEFAULT_OVERRIDES) do
+        t[k] = (type(v) == "table") and CopyDefaultsDeep(v) or v
+    end
     return t
 end)()
 
