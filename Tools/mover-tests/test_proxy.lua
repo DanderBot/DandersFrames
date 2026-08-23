@@ -289,7 +289,10 @@ do
     check(not lg.icon:IsShown() and not lg.coords:IsShown(), "very long title drops coords AND icon")
     eq(lg.title:GetText(), "Party Pinned 1 - NPC", "overflow title is the full text")
     local pt = lg.title._points[1]
-    check(#lg.title._points == 1 and pt and pt[1] == "CENTER", "very long title goes centred overflow, never truncated")
+    check(#lg.title._points == 1 and pt and pt[1] == "TOP" and pt[3] == "BOTTOM",
+        "very long title floats below the slab, never truncated")
+    check(lg.tagBg and lg.tagBg:IsShown(), "floating title carries its pill background")
+    check(s.tagBg and not s.tagBg:IsShown(), "in-slab title has no pill")
     P:DestroyAll()
     R:UnregisterAddon("T")
     R.ready = wasReady

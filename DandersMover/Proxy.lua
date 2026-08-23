@@ -53,6 +53,7 @@ local C_ZONE = UI.Colors.accent
 local C_ZONE_OCCUPIED = UI.Colors.danger
 local C_ZONE_HOVER = { r = 1, g = 1, b = 1 }
 local ZONE_WEIGHT, ZONE_HOVER_WEIGHT = 1, 2
+local TAG_PAD = 3                        -- padding of the floating title pill
 local ZONE_DASH_W = 2                    -- dashed-edge thickness
 local DASH_H, DASH_V = MEDIA .. "dash_h", MEDIA .. "dash_v"
 
@@ -192,8 +193,17 @@ local function layout(b, anchored)
     -- Small slabs: the full title, centred and allowed to overflow the slab --
     -- never truncated (an outlined font stays readable over the world).
     if titleOnly then
+        -- Too narrow for an in-slab title: float it in a pill BELOW the slab so
+        -- the dot, edge and logo stay visible and the text sits on its own dark
+        -- background instead of over the world or the frame's contents.
         b.title:ClearAllPoints()
-        b.title:SetPoint("CENTER", b, "CENTER", 0, 0)
+        b.title:SetPoint("TOP", b, "BOTTOM", 0, -(TAG_PAD + 2))
+        b.tagBg:ClearAllPoints()
+        b.tagBg:SetPoint("TOPLEFT", b.title, "TOPLEFT", -TAG_PAD, TAG_PAD)
+        b.tagBg:SetPoint("BOTTOMRIGHT", b.title, "BOTTOMRIGHT", TAG_PAD, -TAG_PAD)
+        b.tagBg:Show()
+    else
+        b.tagBg:Hide()
     end
 end
 
@@ -269,6 +279,10 @@ local function create(el)
     if b.icon:SetTexture(addon and addon.icon or DEFAULT_ICON) == false then b.icon:SetTexture(DEFAULT_ICON) end
 
     b.title = UI:CreateLabel(b, { text = el.title, font = "DFFontNormal", color = UI.Colors.text })
+    -- Pill behind the title when it floats below a too-narrow slab.
+    b.tagBg = b:CreateTexture(nil, "BACKGROUND")
+    b.tagBg:SetColorTexture(C_BODY.r, C_BODY.g, C_BODY.b, 0.92)
+    b.tagBg:Hide()
     b.title:SetWordWrap(false)
     b.coords = UI:CreateLabel(b, { size = 9, color = C_MUTED, justify = "RIGHT" })
     b.coords:SetPoint("RIGHT", b, "RIGHT", -INSET, 0)
@@ -582,14 +596,14 @@ function P:UpdateZones(cx, cy, hovered)
         if hovered and z == hovered then
             -- The zone that WILL take the drop: accent fill, white outline, the
             -- same 2px the selected proxy wears.
-            paintZone(zf, C_ZONE, 0.35, C_ZONE_HOVER, 1, ZONE_HOVER_WEIGHT)
+            paintZone(zf, C_ZONE, 0.55, C_ZONE_HOVER, 1, ZONE_HOVER_WEIGHT)
         elseif closest and z.target == closest and sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2) < radius then
             local d = sqrt((cx - z.x) ^ 2 + (cy - z.y) ^ 2)
             local f = 0.2 + Solver.ProximityFactor(d, radius) * 0.8
             -- Occupied zones read quieter (CDM rule) -- here that is the lower
             -- pair of alphas rather than an extra factor on top of the accent's.
             if z.occupied then paintZone(zf, C_ZONE_OCCUPIED, 0.10 * f, C_ZONE_OCCUPIED, 0.6 * f, ZONE_WEIGHT)
-            else               paintZone(zf, C_ZONE, 0.18 * f, C_ZONE, 0.9 * f, ZONE_WEIGHT) end
+            else               paintZone(zf, C_ZONE, 0.28 * f, C_ZONE, f, ZONE_WEIGHT) end
         else
             clearZone(zf)
         end
