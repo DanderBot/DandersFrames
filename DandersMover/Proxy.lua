@@ -60,7 +60,7 @@ local TAG_PAD = 3                        -- padding of the floating title pill
 -- slabs in build order. Lock/save/discard fades the whole overlay out over
 -- FADE_OUT and only then tears it down (DismissAll). Combat suspend stays
 -- instant -- Session:Suspend hides the unlock frame directly.
-local FADE_IN, FADE_OUT, STAGGER = 0.12, 0.1, 0.02
+local FADE_IN, FADE_OUT, STAGGER = 0.25, 0.2, 0.035
 local ZONE_DASH_W = 2                    -- dashed-edge thickness
 local DASH_H, DASH_V = MEDIA .. "dash_h", MEDIA .. "dash_v"
 
@@ -467,7 +467,7 @@ end
 -- order. Rebuilds mid-session come through without it and stay instant.
 function P:Build(filter, animate)
     local f = self:GetUnlockFrame()
-    -- A lock's dismiss fade may still be running (lock -> unlock inside 0.1s):
+    -- A lock's dismiss fade may still be running (lock -> unlock inside FADE_OUT):
     -- invalidate its deferred teardown and restore the frame it was fading.
     self.dismissToken = (self.dismissToken or 0) + 1
     NS.Fx.Cancel(f)

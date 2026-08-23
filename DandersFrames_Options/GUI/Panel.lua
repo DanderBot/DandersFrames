@@ -113,7 +113,7 @@ function DF:CreateGUI()
     -- lives on the close button below and on the DF:ToggleGUI wrapper at the
     -- foot of this file; Esc (UISpecialFrames) hides directly and stays
     -- instant, as does the mover bridge's close-on-unlock.
-    frame:HookScript("OnShow", function(f) GUI.Fx.FadeIn(f, 0.12) end)
+    frame:HookScript("OnShow", function(f) GUI.Fx.FadeIn(f, 0.3) end)
     
     -- Allow closing with Escape key
     tinsert(UISpecialFrames, "DandersFramesGUI")
@@ -163,7 +163,7 @@ function DF:CreateGUI()
     local closeBtn = GUI:CreateCloseButton(frame, { size = 20, onClick = function()
         -- Fade, then hide. FadeOut's cancel semantics make this safe against a
         -- re-Show mid-fade (the deferred Hide is skipped).
-        GUI.Fx.FadeOut(frame, 0.1, function() frame:Hide() end)
+        GUI.Fx.FadeOut(frame, 0.25, function() frame:Hide() end)
     end })
     closeBtn:SetPoint("TOPRIGHT", -8, -5)
     closeBtn:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -2567,7 +2567,7 @@ end
 -- FADED CLOSE FOR /df
 -- DF:ToggleGUI (GUI/Controls.lua:3616) hides an open window instantly on the
 -- close half of its toggle. Wrap it here -- this file loads after Controls.lua
--- (companion TOC order) -- so `/df` on an open window fades it out (0.1s,
+-- (companion TOC order) -- so `/df` on an open window fades it out (0.25s,
 -- DandersUI UI.Fx) before hiding, matching the close button above.
 -- Guards:
 --  * `/df` again while the fade-out runs REOPENS (cancels the fade and fades
@@ -2583,10 +2583,10 @@ function DF:ToggleGUI(...)
     local f = DF.GUIFrame
     if f and f:IsShown() then
         if f.fxOut and f.fxOut:IsPlaying() then
-            GUI.Fx.FadeIn(f, 0.12)
+            GUI.Fx.FadeIn(f, 0.3)
             return
         end
-        GUI.Fx.FadeOut(f, 0.1, function() f:Hide() end)
+        GUI.Fx.FadeOut(f, 0.25, function() f:Hide() end)
         return
     end
     return origToggleGUI(self, ...)

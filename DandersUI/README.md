@@ -131,6 +131,7 @@ regions alike; per-target animation groups are cached on the target itself.
 |---|---|
 | `Fx.FadeIn(target, dur, ox, oy)` | Show + fade in, optionally sliding onto its anchor from `(ox, oy)` |
 | `Fx.PopIn(target, dur, ox, oy, fromScale, origin)` | Fade + slide + scale up from `fromScale` (default 0.92) with the scale originating at `origin`; ease-out |
+| `Fx.PopOut(target, dur, ox, oy, toScale, origin, onDone)` | The mirror of `PopIn`: fade + slide + scale down to `toScale` about `origin`, then `onDone`. Pass `PopIn`'s own offsets and origin and the exit retraces the entrance. A cancelled pop-out skips `onDone` |
 | `Fx.FadeOut(target, dur, onDone)` | Fade out, then call `onDone` (which usually hides). A cancelled fade skips `onDone` |
 | `Fx.FadeTo(target, alpha, dur)` | Fade to a resting alpha and stay there (restore with `FadeTo(target, 1)`) |
 | `Fx.Cancel(target)` | Stop any running fade and restore alpha 1 — for paths that must be instant |

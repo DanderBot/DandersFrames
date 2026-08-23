@@ -317,19 +317,36 @@ end
 function Pn:Hide()
     self.holdUntil = nil          -- a hidden panel has nothing to hold in place
     self.dockedTo = nil
+    self.dockSide = nil
     if self.frame then
         NS.Fx.Cancel(self.frame)
         self.frame:Hide()
     end
 end
 
--- Deselection: fade out (0.1s), then hide. Suspend never comes through here.
+-- The entrance drift and scale origin for a dock side: the panel pops out of
+-- (and back into) the proxy edge it is docked against. Shared by Dock and
+-- FadeOut so the exit is the entrance run backwards.
+local function dockFx(side)
+    if side == "right" then return -8, 0, "LEFT"
+    elseif side == "left" then return 8, 0, "RIGHT"
+    elseif side == "below" then return 0, 8, "TOP"
+    elseif side == "above" then return 0, -8, "BOTTOM" end
+    return 0, 0, "CENTER"
+end
+
+-- Deselection: the entrance in reverse -- shrink back toward the docked proxy
+-- edge while fading (PopOut, 0.18s), then hide. Suspend never comes through
+-- here; it takes the instant Hide above.
 function Pn:FadeOut()
     self.holdUntil = nil
     self.dockedTo = nil
+    local side = self.dockSide
+    self.dockSide = nil
     local f = self.frame
     if not f or not f:IsShown() then return end
-    NS.Fx.FadeOut(f, 0.1, function() f:Hide() end)
+    local ox, oy, origin = dockFx(side)
+    NS.Fx.PopOut(f, 0.18, ox, oy, 0.92, origin, function() f:Hide() end)
 end
 
 -- ============================================================
@@ -420,16 +437,13 @@ function Pn:Dock()
     -- every Refresh and must not flicker the panel.
     local wasShown = f:IsShown()
     if not wasShown then
-        local ox, oy, origin = 0, 0, "CENTER"
-        if side == "right" then ox, origin = -8, "LEFT"
-        elseif side == "left" then ox, origin = 8, "RIGHT"
-        elseif side == "below" then oy, origin = 8, "TOP"
-        elseif side == "above" then oy, origin = -8, "BOTTOM" end
-        NS.Fx.PopIn(f, 0.12, ox, oy, 0.92, origin)
+        local ox, oy, origin = dockFx(side)
+        NS.Fx.PopIn(f, 0.22, ox, oy, 0.92, origin)
     elseif self.dockedTo ~= Sess.selected then
         NS.Fx.FadeIn(f, 0.08)
     end
     self.dockedTo = Sess.selected
+    self.dockSide = side          -- FadeOut retraces this edge on deselect
     f:Show()
 end
 
