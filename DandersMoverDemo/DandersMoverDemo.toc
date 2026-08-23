@@ -1,0 +1,14 @@
+## Interface: 120100
+## Title: DandersMover Demo
+## Notes: Dev-only test consumer for DandersMover
+## Author: Danders
+## Version: 1.0.0
+## Category: Danders
+## OptionalDeps: DandersMover
+## SavedVariables: DandersMoverDemoDB
+## IconTexture: Interface\AddOns\DandersMoverDemo\Media\Logo
+## AllowAddOnTableAccess: 1
+
+# No Libs folder on purpose. LibStub arrives with DandersMover, and Core.lua
+# bails out of the registration path when it is absent.
+Core.lua
