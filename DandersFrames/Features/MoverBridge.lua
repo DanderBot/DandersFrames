@@ -61,21 +61,31 @@ end
 -- SetMoversShown(true) -> mover:SetShown(set.enabled ...)), and for party the two
 -- targeted displays when their feature is on. A disabled set or feature has nothing
 -- on screen to frame, so it is not listed.
+--
+-- The user's per-element toggles in /mover config then PRUNE that list -- including the
+-- container key, which is just one element among the rest. The lib prunes disabled keys
+-- itself (Registry:IsInSession, "toggle wins"), so this is not what keeps them off
+-- screen; it is what lets the callers see when NOTHING is left to edit, which is the
+-- only case an unlock should refuse.
 function Bridge:SessionFilter(scope)
     scope = (scope == "raid") and "raid" or "party"
-    local keys = { scope }
+    local candidates = { scope }
     local pf = DF.PinnedFrames
     if pf and pf.GetSetForMode then
         for i = 1, (pf.MAX_SETS or 0) do
             local set = pf:GetSetForMode(i, scope == "raid")
-            if set and set.enabled then keys[#keys + 1] = scope .. ".pinned" .. i end
+            if set and set.enabled then candidates[#candidates + 1] = scope .. ".pinned" .. i end
         end
     end
     if scope == "party" then
         local db = DF.GetPersonalTargetedDB and DF:GetPersonalTargetedDB() or DF:GetDB()
-        if db and db.personalTargetedSpellEnabled then keys[#keys + 1] = "personalTargeted" end
+        if db and db.personalTargetedSpellEnabled then candidates[#candidates + 1] = "personalTargeted" end
         local pdb = DF:GetDB("party")
-        if pdb and pdb.targetedListEnabled then keys[#keys + 1] = "targetedList" end
+        if pdb and pdb.targetedListEnabled then candidates[#candidates + 1] = "targetedList" end
+    end
+    local keys = {}
+    for _, key in ipairs(candidates) do
+        if Mover:IsEnabled(ADDON_KEY, key) then keys[#keys + 1] = key end
     end
     return { addon = ADDON_KEY, keys = keys }
 end
@@ -454,7 +464,11 @@ Mover.RegisterCallback(Bridge, "Unlocked", function()
     -- Unlock*Frames, so with no request outstanding pick the one the player is in.
     local scope = Bridge.requestedScope or (IsInRaid() and "raid" or "party")
     Bridge.requestedScope = nil
-    if Mover:IsEnabled(ADDON_KEY, scope) then
+    -- Claim on the scope's whole key list, not on the CONTAINER element's toggle: a
+    -- session that is only editing pinned sets still needs the test frames those sets
+    -- attach to, and the container being switched off in /mover config says nothing
+    -- about them. Nothing left in the list means nothing to preview.
+    if #Bridge:SessionFilter(scope).keys > 0 then
         -- claimScope -> SetTestModeOwner -> ReconcileTestMode -> Show*TestFrames ->
         -- PinnedFrames:EnterTestMode (TestMode.lua:1962/2427): the pinned test
         -- containers are on screen after this line.

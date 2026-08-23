@@ -2614,18 +2614,17 @@ function DF:UnlockFrames(legacy)
     -- the overlay while the lib holds the record. Say so and stop. The legacy overlay is
     -- reachable only through the explicit `legacy` argument.
     if Mover and not legacy then
-        if Mover:IsEnabled("DandersFrames", "party") then
-            -- Only the party scope's keys get proxies (no raid proxy, dimmed or
-            -- otherwise), and they are forced relevant so this works inside a raid.
-            local filter = "DandersFrames"
-            if DF.MoverBridge then
-                DF.MoverBridge:RequestScope("party")
-                filter = DF.MoverBridge:SessionFilter("party")
-            end
-            Mover:Unlock(filter)
-        else
-            DF:Say(format(L["%s are disabled in DandersMover settings (/mover config)."], L["Party Frames"]))
+        -- Only the party scope's keys get proxies (no raid proxy, dimmed or
+        -- otherwise), and they are forced relevant so this works inside a raid.
+        -- The user's per-element toggles prune that list; the container being one of the
+        -- pruned ones is not a reason to refuse, an EMPTY list is.
+        local filter = DF.MoverBridge and DF.MoverBridge:SessionFilter("party") or "DandersFrames"
+        if type(filter) == "table" and #filter.keys == 0 then
+            DF:Say(format(L["All %s movers are turned off under DandersFrames in /mover config."], L["Party Frames"]))
+            return
         end
+        if DF.MoverBridge then DF.MoverBridge:RequestScope("party") end
+        Mover:Unlock(filter)
         return
     end
 

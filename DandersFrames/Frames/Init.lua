@@ -861,17 +861,15 @@ function DF:UnlockRaidFrames(legacy)
     -- See DF:UnlockFrames: disabled in the lib does not fall back to the legacy overlay,
     -- it reports and stops. Legacy is reachable only via the explicit `legacy` argument.
     if Mover and not legacy then
-        if Mover:IsEnabled("DandersFrames", "raid") then
-            -- See DF:UnlockFrames: the raid scope's keys only, forced relevant (solo editing).
-            local filter = "DandersFrames"
-            if DF.MoverBridge then
-                DF.MoverBridge:RequestScope("raid")
-                filter = DF.MoverBridge:SessionFilter("raid")
-            end
-            Mover:Unlock(filter)
-        else
-            DF:Say(string.format(L["%s are disabled in DandersMover settings (/mover config)."], L["Raid Frames"]))
+        -- See DF:UnlockFrames: the raid scope's keys only, forced relevant (solo editing).
+        -- The container's own toggle does not gate the session -- only an empty list does.
+        local filter = DF.MoverBridge and DF.MoverBridge:SessionFilter("raid") or "DandersFrames"
+        if type(filter) == "table" and #filter.keys == 0 then
+            DF:Say(string.format(L["All %s movers are turned off under DandersFrames in /mover config."], L["Raid Frames"]))
+            return
         end
+        if DF.MoverBridge then DF.MoverBridge:RequestScope("raid") end
+        Mover:Unlock(filter)
         return
     end
 
